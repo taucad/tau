@@ -13,6 +13,12 @@ import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { CommunityBuildGrid } from '#components/project-grid.js';
 import { sampleBuilds } from '#constants/build-examples.js';
+import { HeroViewer } from '#routes/_index/hero-viewer.js';
+import { HeroImage } from '#routes/_index/hero-image.js';
+import { KernelsSection } from '#routes/_index/kernels-section.js';
+import { IntegrationSection } from '#routes/_index/integration-section.js';
+import { ComingSoonSection } from '#routes/_index/coming-soon-section.js';
+import { CtaSection } from '#routes/_index/cta-section.js';
 import { defaultBuildName } from '#constants/build-names.js';
 import { ChatProvider } from '#hooks/use-chat.js';
 import { Separator } from '#components/ui/separator.js';
@@ -89,6 +95,7 @@ export default function ChatStart(): React.JSX.Element {
 
   return (
     <>
+      {/* Chat Input Section */}
       <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 pb-12 md:space-y-8 md:px-6 md:pt-32">
         <div className="mb-12 text-center">
           <h1 className="mx-auto max-w-[16ch] text-3xl font-semibold tracking-tight text-balance md:max-w-[20ch] md:text-5xl">
@@ -124,6 +131,8 @@ export default function ChatStart(): React.JSX.Element {
           </div>
         </ChatProvider>
       </div>
+
+      {/* Community Builds */}
       <div className="container mx-auto px-4 py-8">
         <div className="mb-2 flex flex-row items-center justify-between">
           <h1 className="text-lg font-medium tracking-tight">From the Community</h1>
@@ -131,8 +140,28 @@ export default function ChatStart(): React.JSX.Element {
             <Link to="/builds/community">View All</Link>
           </Button>
         </div>
-        <CommunityBuildGrid builds={sampleBuilds} />
+        <CommunityBuildGrid builds={sampleBuilds} limit={10} />
       </div>
+
+      {/* Hero Image with Features */}
+      <HeroImage />
+
+      {/* Kernels Section */}
+      <KernelsSection />
+
+      {/* Interactive Demo */}
+      <div className="container mx-auto px-4 py-16">
+        <HeroViewer />
+      </div>
+
+      {/* Integration Section */}
+      <IntegrationSection />
+
+      {/* Coming Soon Section */}
+      <ComingSoonSection />
+
+      {/* Final CTA Section */}
+      <CtaSection />
     </>
   );
 }

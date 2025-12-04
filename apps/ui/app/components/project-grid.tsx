@@ -25,13 +25,22 @@ export type CommunityBuildGridProperties = {
   readonly builds: BuildWithFiles[];
   readonly hasMore?: boolean;
   readonly onLoadMore?: () => void;
+  /** Maximum number of builds to display. If not provided, all builds are shown. */
+  readonly limit?: number;
 };
 
-export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBuildGridProperties): React.JSX.Element {
+export function CommunityBuildGrid({
+  builds,
+  hasMore,
+  onLoadMore,
+  limit,
+}: CommunityBuildGridProperties): React.JSX.Element {
+  const displayedBuilds = limit ? builds.slice(0, limit) : builds;
+
   return (
     <>
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-        {builds.map((build) => (
+        {displayedBuilds.map((build) => (
           <BuildProvider
             key={build.id}
             buildId={build.id}

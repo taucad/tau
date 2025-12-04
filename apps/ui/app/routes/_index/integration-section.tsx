@@ -2,7 +2,7 @@ import { Link } from 'react-router';
 import { ArrowRight, Package } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { formatKernelList } from './kernel.utils.js';
+import { formatKernelList } from '#utils/kernel.utils.js';
 
 export function IntegrationSection(): React.JSX.Element {
   const kernelList = formatKernelList('or');

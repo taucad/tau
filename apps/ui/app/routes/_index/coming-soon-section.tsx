@@ -1,6 +1,6 @@
 import { Package, Cpu, Sparkles } from 'lucide-react';
 import { metaConfig } from '#constants/meta.constants.js';
-import { formatKernelList } from './kernel.utils.js';
+import { formatKernelList } from '#utils/kernel.utils.js';
 
 export function ComingSoonSection(): React.JSX.Element {
   const kernelList = formatKernelList();

@@ -10,7 +10,7 @@ Tau is dual-licensed:
 - **GPL-2.0-or-later** — When using the OpenSCAD kernel (due to `openscad-wasm-prebuilt`)
 
 If you use Tau **without** the OpenSCAD kernel, the entire codebase is available under
-the permissive [MIT License](./LICENSE). If you use Tau **with** the OpenSCAD kernel,
+the permissive [MIT License](./license). If you use Tau **with** the OpenSCAD kernel,
 the combined work is subject to GPL-2.0-or-later terms.
 
 By using Tau, you agree to comply with the license terms of all included dependencies.

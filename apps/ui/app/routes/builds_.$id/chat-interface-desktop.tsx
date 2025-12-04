@@ -11,7 +11,6 @@ import { ChatStackTrace } from '#routes/builds_.$id/chat-stack-trace.js';
 import { ChatExplorerTree, ChatExplorerTrigger } from '#routes/builds_.$id/chat-explorer.js';
 import { ChatDetails, ChatDetailsTrigger } from '#routes/builds_.$id/chat-details.js';
 import { ChatConverter, ChatConverterTrigger } from '#routes/builds_.$id/chat-converter.js';
-import { ChatGit, ChatGitTrigger } from '#routes/builds_.$id/chat-git.js';
 import { cn } from '#utils/ui.utils.js';
 import {
   useChatInterfaceState,
@@ -38,7 +37,6 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
     isConverterOpen,
     setIsConverterOpen,
     isGitOpen,
-    setIsGitOpen,
     isDetailsOpen,
     setIsDetailsOpen,
     chatResize,
@@ -175,12 +173,6 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
                 setIsConverterOpen((previous) => !previous);
               }}
             />
-            <ChatGitTrigger
-              isOpen={isGitOpen}
-              onToggle={() => {
-                setIsGitOpen((previous) => !previous);
-              }}
-            />
             <ChatDetailsTrigger
               isOpen={isDetailsOpen}
               onToggle={() => {
@@ -224,10 +216,6 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
 
         <Allotment.Pane className="rs-right" minSize={panelMinSizeStandard} visible={isConverterOpen}>
           <ChatConverter isExpanded={isConverterOpen} setIsExpanded={setIsConverterOpen} />
-        </Allotment.Pane>
-
-        <Allotment.Pane className="rs-right" minSize={panelMinSizeStandard} visible={isGitOpen}>
-          <ChatGit isExpanded={isGitOpen} setIsExpanded={setIsGitOpen} />
         </Allotment.Pane>
 
         <Allotment.Pane className="rs-right" minSize={panelMinSizeStandard} visible={isDetailsOpen}>

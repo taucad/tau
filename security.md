@@ -1,6 +1,6 @@
 # Security
 
-**Contact:** security@tau.new
+**Contact:** [security@tau.new](mailto:security@tau.new)
 
 Safeguarding our Tau systems is a top concern for us. Nevertheless, despite our best efforts to fortify them, vulnerabilities may still be present.
 
@@ -34,7 +34,7 @@ If you come across a vulnerability, please inform us promptly so we can promptly
 
 **Reporting Instructions:**
 
-1. Email your findings to **security@tau.new**.
+1. Email your findings to **[security@tau.new](mailto:security@tau.new)**.
 
 2. Automated scanning tools should not be used on our infrastructure or dashboard. If you have a need for this, please reach out to us, and we'll assist you in setting up a secure sandbox environment.
 

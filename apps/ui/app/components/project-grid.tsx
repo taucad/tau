@@ -1,5 +1,5 @@
 import { Star, Eye, ArrowRight } from 'lucide-react';
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { useSelector } from '@xstate/react';
 import type { Build } from '@taucad/types';
@@ -16,6 +16,7 @@ import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
 import { useBuildManager } from '#hooks/use-build-manager.js';
 import { useChatManager } from '#hooks/use-chat-manager.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
 import type { BuildWithFiles } from '#constants/build-examples.js';
 
 type CommunityBuildCardProperties = BuildWithFiles;
@@ -74,6 +75,7 @@ function ProjectCard({
   const [showPreview, setShowPreview] = useState(false);
   const [isForking, setIsForking] = useState(false);
   const [hasLoadedModel, setHasLoadedModel] = useState(false);
+  const hasWrittenFilesRef = useRef(false);
 
   // Get actors from BuildProvider context
   const { cadRef, buildRef } = useBuild();
@@ -81,6 +83,7 @@ function ProjectCard({
   const status = useSelector(cadRef, (state) => state.value);
   const buildManager = useBuildManager();
   const chatManager = useChatManager();
+  const { writeFiles } = useFileManager();
 
   const navigate = useNavigate();
 
@@ -152,11 +155,23 @@ function ProjectCard({
   );
 
   const handlePreviewToggle = useCallback(
-    (event: React.MouseEvent) => {
+    async (event: React.MouseEvent) => {
       event.stopPropagation();
+
+      // Write files to filesystem on first preview toggle (temporary until in-memory fs)
+      if (!showPreview && !hasWrittenFilesRef.current) {
+        const buildFiles: Record<string, { content: Uint8Array }> = {};
+        for (const [path, file] of Object.entries(files)) {
+          buildFiles[`/builds/${id}/${path}`] = file;
+        }
+
+        await writeFiles(buildFiles);
+        hasWrittenFilesRef.current = true;
+      }
+
       setShowPreview(!showPreview);
     },
-    [showPreview],
+    [showPreview, files, id, writeFiles],
   );
 
   const handleCardClick = useCallback(() => {

@@ -120,10 +120,7 @@ export function ChatEditorTabs(): React.JSX.Element {
                 <div
                   className={cn(
                     'group/editor-tab flex h-full min-w-0 cursor-pointer items-center gap-0 border-y border-y-transparent pr-1 pl-3 text-sm transition-colors',
-                    'hover:bg-accent/40',
-                    isActive
-                      ? 'border-b-[1.5px] border-b-primary bg-accent/50 text-foreground'
-                      : 'text-muted-foreground',
+                    isActive ? 'bg-background text-foreground' : 'text-muted-foreground',
                   )}
                   role="tab"
                   tabIndex={0}

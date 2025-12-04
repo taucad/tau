@@ -1,5 +1,6 @@
 import { Package, Cpu, Sparkles } from 'lucide-react';
 import { kernelConfigurations } from '@taucad/types/constants';
+import { metaConfig } from '#constants/meta.constants.js';
 
 // Format kernel names as a readable list (e.g., "OpenSCAD, Replicad, Zoo, and JSCAD")
 function formatKernelListAnd(): string {
@@ -62,7 +63,7 @@ export function ComingSoonSection(): React.JSX.Element {
           <div className="mt-8 text-center">
             <p className="text-sm text-muted-foreground">
               Want early access?{' '}
-              <a href="mailto:sales@taucad.com" className="text-primary underline-offset-4 hover:underline">
+              <a href={`mailto:${metaConfig.salesEmail}`} className="text-primary underline-offset-4 hover:underline">
                 Get in touch
               </a>
             </p>

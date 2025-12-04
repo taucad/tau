@@ -46,4 +46,8 @@ export const metaConfig = {
    * The user agent of the app.
    */
   userAgent: `TauCAD/${version}`,
+  /**
+   * The sales email address.
+   */
+  salesEmail: 'sales@tau.new',
 } as const;

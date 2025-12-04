@@ -1,10 +1,11 @@
 import { Link } from 'react-router';
 import { Tau } from '#components/icons/tau.js';
+import { metaConfig } from '#constants/meta.constants.js';
 
 const navigationLinks = [
   { label: 'Home', href: '/' },
   { label: 'Docs', href: '/docs' },
-  { label: 'Contact', href: 'mailto:sales@tau.new' },
+  { label: 'Contact', href: `mailto:${metaConfig.salesEmail}` },
 ];
 
 export function PageFooter(): React.JSX.Element {

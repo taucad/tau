@@ -86,7 +86,7 @@ This project uses ESLint for linting. The linting configuration is intentionally
 Here are some specific rules to be aware of, and why they are important:
 - `tsconfig.json`
   - `strict`: required by libraries such as `zod`, enforcing TypeScript best practices.
-  - `erasableSyntaxOnly`: ensures that all Typescript code can be run on Node.js directly via type-stripping. The exception is NestJS apps, which require non-erasble syntax for dependency injection.
+  - `erasableSyntaxOnly`: ensures that all Typescript code can be run on Node.js directly via type-stripping. The exception is NestJS apps, which require non-erasable syntax for dependency injection.
 - `eslint.config.ts`
   - `@typescript-eslint/consistent-type-imports`: enforces separate type imports, supporting the Dependency Inversion Principle by making abstractions (types) explicit and separate from implementations.
   - `@typescript-eslint/explicit-member-accessibility`: requires explicit accessibility modifiers for class members, enforcing the Single Responsibility Principle by making class member responsibilities and boundaries explicit.

@@ -174,8 +174,15 @@ function ProjectCard({
           buildFiles[`/builds/${id}/${path}`] = file;
         }
 
-        await writeFiles(buildFiles);
+        // Set flag before await to prevent concurrent writes
         hasWrittenFilesRef.current = true;
+        try {
+          await writeFiles(buildFiles);
+        } catch (error) {
+          // Reset flag on failure to allow retry
+          hasWrittenFilesRef.current = false;
+          throw error;
+        }
       }
 
       setShowPreview(!showPreview);

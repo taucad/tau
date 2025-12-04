@@ -308,6 +308,7 @@ function HeroViewerContent({ files }: HeroViewerContentProperties): React.JSX.El
                 </div>
                 <div className="h-[280px] overflow-hidden md:h-auto md:flex-1">
                   <Parameters
+                    isInitialExpanded={false}
                     parameters={parameters}
                     defaultParameters={defaultParameters}
                     jsonSchema={jsonSchema}

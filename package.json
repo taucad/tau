@@ -26,7 +26,8 @@
     "db:migrate": "nx run api:db-migrate",
     "db:studio": "nx run api:db-studio",
     "db:push": "nx run api:db-push",
-    "db:drop": "nx run api:db-drop"
+    "db:drop": "nx run api:db-drop",
+    "update-license-deps": "node --import tsx scripts/update-license-deps.mts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.74",

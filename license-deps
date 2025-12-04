@@ -1,0 +1,331 @@
+# Third-Party Licenses
+
+This file lists all third-party dependencies used by Tau and their respective licenses.
+
+## Licensing Overview
+
+Tau is dual-licensed:
+
+- **MIT License** — For all components except the OpenSCAD kernel
+- **GPL-2.0-or-later** — When using the OpenSCAD kernel (due to `openscad-wasm-prebuilt`)
+
+If you use Tau **without** the OpenSCAD kernel, the entire codebase is available under
+the permissive [MIT License](license). If you use Tau **with** the OpenSCAD kernel,
+the combined work is subject to GPL-2.0-or-later terms.
+
+By using Tau, you agree to comply with the license terms of all included dependencies.
+
+*Generated on 2025-12-04*
+
+## Summary
+
+| License | Count |
+|---------|-------|
+| (MIT OR GPL-3.0-or-later) | 1 |
+| GPL-2.0-or-later | 1 |
+| Apache-2.0 | 18 |
+| (MIT OR CC0-1.0) | 1 |
+| 0BSD | 1 |
+| BlueOak-1.0.0 | 1 |
+| ISC | 3 |
+| SIL OPEN FONT LICENSE | 1 |
+| UNKNOWN | 1 |
+| Unlicense | 2 |
+| MIT | 198 |
+
+## (MIT OR GPL-3.0-or-later)
+
+> This package is dual-licensed. Tau uses it under the **MIT License** terms.
+
+- **jszip** v3.10.1 — [Repository](https://github.com/Stuk/jszip)
+
+## GPL-2.0-or-later
+
+> **GPL-2.0 License Notice**
+>
+> This component is licensed under the GNU General Public License v2.0 or later.
+> When you use Tau with this component, you have the following rights:
+>
+> - **Freedom to use** the software for any purpose
+> - **Freedom to study** how the program works (source code available)
+> - **Freedom to redistribute** copies
+> - **Freedom to modify** and distribute modified versions
+>
+> The complete source code is available at: https://github.com/taucad/tau
+>
+> Full license text: https://www.gnu.org/licenses/gpl-2.0.html
+
+- **openscad-wasm-prebuilt** v1.2.0 — [Repository](https://github.com/lorenzowritescode/openscad-wasm)
+
+## Apache-2.0
+
+> Apache-2.0 licensed packages require preservation of copyright notices and disclaimers.
+
+- **@ai-sdk/openai** v2.0.75 — [Repository](https://github.com/vercel/ai)
+- **@ai-sdk/react** v2.0.105 — [Repository](https://github.com/vercel/ai)
+- **@ai-sdk/ui-utils** v1.2.11 — [Repository](https://github.com/vercel/ai)
+- **@playwright/test** v1.54.1 — [Repository](https://github.com/microsoft/playwright)
+- **@rjsf/core** v5.24.12 — [Repository](https://github.com/rjsf-team/react-jsonschema-form)
+- **@rjsf/utils** v5.24.12 — [Repository](https://github.com/rjsf-team/react-jsonschema-form)
+- **@rjsf/validator-ajv8** v5.24.12 — [Repository](https://github.com/rjsf-team/react-jsonschema-form)
+- **@swc/core** v1.10.15 — [Repository](https://github.com/swc-project/swc)
+- **@swc/helpers** v0.5.17 — [Repository](https://github.com/swc-project/swc)
+- **ai** v5.0.105 — [Repository](https://github.com/vercel/ai)
+- **bson** v6.10.4 — [Repository](mongodb/js-bson)
+- **class-variance-authority** v0.7.1 — [Repository](https://github.com/joe-bell/cva)
+- **comlink** v4.4.2 — [Repository](https://github.com/GoogleChromeLabs/comlink)
+- **drizzle-orm** v0.44.3 — [Repository](https://github.com/drizzle-team/drizzle-orm)
+- **openai** v4.96.2 — [Repository](github:openai/openai-node)
+- **reflect-metadata** v0.2.2 — [Repository](https://github.com/rbuckton/reflect-metadata)
+- **rxjs** v7.8.2 — [Repository](https://github.com/reactivex/rxjs)
+- **typescript** v5.8.3 — [Repository](https://github.com/microsoft/TypeScript)
+
+## (MIT OR CC0-1.0)
+
+> This package is dual-licensed. Tau uses it under the **MIT License** terms.
+
+- **type-fest** v4.39.1 — [Repository](sindresorhus/type-fest)
+
+## 0BSD
+
+- **tslib** v2.8.1 — [Repository](https://github.com/Microsoft/tslib)
+
+## BlueOak-1.0.0
+
+- **minimatch** v10.1.1 — [Repository](git@github.com:isaacs/minimatch)
+
+## ISC
+
+- **@msgpack/msgpack** v3.1.2 — [Repository](https://github.com/msgpack/msgpack-javascript)
+- **eslint-plugin-no-barrel-files** v1.2.2 — [Repository](https://github.com/art0rz/eslint-plugin-no-barrel-files)
+- **lucide-react** v0.552.0 — [Repository](https://github.com/lucide-icons/lucide)
+
+## SIL OPEN FONT LICENSE
+
+- **geist** v1.5.1 — [Repository](https://github.com/vercel/geist-font)
+
+## UNKNOWN
+
+- **@taucad/kcl-wasm-lib** v0.1.111 — [Repository](https://github.com/taucad/modeling-app)
+
+## Unlicense
+
+- **isbot** v5.1.29 — [Repository](https://github.com/omrilotan/isbot)
+- **postgres** v3.4.7 — [Repository](porsager/postgres)
+
+## MIT
+
+- **@daveyplate/better-auth-ui** v3.2.6
+- **@fastify/cors** v11.0.1 — [Repository](https://github.com/fastify/fastify-cors)
+- **@fastify/helmet** v13.0.1 — [Repository](https://github.com/fastify/fastify-helmet)
+- **@gltf-transform/core** v4.2.0 — [Repository](github:donmccurdy/glTF-Transform)
+- **@gltf-transform/extensions** v4.2.0 — [Repository](github:donmccurdy/glTF-Transform)
+- **@headless-tree/core** v1.5.1 — [Repository](git@github.com:lukasbach/headless-tree)
+- **@headless-tree/react** v1.5.1 — [Repository](git@github.com:lukasbach/headless-tree)
+- **@hookform/resolvers** v5.1.1 — [Repository](https://github.com/react-hook-form/resolvers)
+- **@isomorphic-git/lightning-fs** v4.6.2 — [Repository](https://github.com/isomorphic-git/lightning-fs)
+- **@jscad/modeling** v2.12.6 — [Repository](https://github.com/jscad/OpenJSCAD.org)
+- **@kittycad/lib** v2.0.46 — [Repository](https://github.com/KittyCAD/kittycad.ts)
+- **@langchain/anthropic** v0.3.33 — [Repository](git@github.com:langchain-ai/langchainjs)
+- **@langchain/cerebras** v0.0.2 — [Repository](git@github.com:langchain-ai/langchainjs)
+- **@langchain/community** v0.3.49 — [Repository](git@github.com:langchain-ai/langchainjs)
+- **@langchain/core** v0.3.66 — [Repository](git@github.com:langchain-ai/langchainjs)
+- **@langchain/google-vertexai** v0.2.15 — [Repository](git@github.com:langchain-ai/langchainjs)
+- **@langchain/langgraph** v0.3.10 — [Repository](git@github.com:langchain-ai/langgraphjs)
+- **@langchain/langgraph-checkpoint-postgres** v0.0.5 — [Repository](git@github.com:langchain-ai/langgraphjs)
+- **@langchain/langgraph-supervisor** v0.0.15 — [Repository](git@github.com:langchain-ai/langgraphjs)
+- **@langchain/ollama** v0.2.3 — [Repository](git@github.com:langchain-ai/langchainjs)
+- **@langchain/openai** v0.5.18 — [Repository](git@github.com:langchain-ai/langchainjs)
+- **@langchain/tavily** v0.1.4 — [Repository](git@github.com:langchain-ai/langchainjs)
+- **@monaco-editor/react** v4.7.0 — [Repository](https://github.com/suren-atoyan/monaco-react)
+- **@morphllm/morphsdk** v0.2.55
+- **@nestjs/common** v11.1.5 — [Repository](https://github.com/nestjs/nest)
+- **@nestjs/config** v4.0.2 — [Repository](https://github.com/nestjs/config)
+- **@nestjs/core** v11.1.5 — [Repository](https://github.com/nestjs/nest)
+- **@nestjs/platform-fastify** v11.1.5 — [Repository](https://github.com/nestjs/nest)
+- **@nestjs/schematics** v11.0.5 — [Repository](https://github.com/nestjs/schematics)
+- **@nestjs/testing** v11.1.5 — [Repository](https://github.com/nestjs/nest)
+- **@netlify/vite-plugin-react-router** v2.1.2 — [Repository](https://github.com/netlify/remix-compute)
+- **@nx/devkit** v21.3.10 — [Repository](https://github.com/nrwl/nx)
+- **@nx/eslint** v21.3.10 — [Repository](https://github.com/nrwl/nx)
+- **@nx/eslint-plugin** v21.3.10 — [Repository](https://github.com/nrwl/nx)
+- **@nx/js** v21.3.10 — [Repository](https://github.com/nrwl/nx)
+- **@nx/nest** v21.3.10 — [Repository](https://github.com/nrwl/nx)
+- **@nx/node** v21.3.10 — [Repository](https://github.com/nrwl/nx)
+- **@nx/playwright** v21.3.10 — [Repository](https://github.com/nrwl/nx)
+- **@nx/react** v21.3.10 — [Repository](https://github.com/nrwl/nx)
+- **@nx/vite** v21.3.10 — [Repository](https://github.com/nrwl/nx)
+- **@nx/web** v21.3.10 — [Repository](https://github.com/nrwl/nx)
+- **@nx/webpack** v21.3.10 — [Repository](https://github.com/nrwl/nx)
+- **@octokit/rest** v22.0.1 — [Repository](github:octokit/rest.js)
+- **@panzoom/panzoom** v4.6.0 — [Repository](timmywil/panzoom)
+- **@radix-ui/react-accordion** v1.2.11 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-alert-dialog** v1.1.14 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-avatar** v1.1.10 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-checkbox** v1.3.2 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-collapsible** v1.1.11 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-context-menu** v2.2.16 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-dialog** v1.1.14 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-dropdown-menu** v2.1.15 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-hover-card** v1.1.14 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-label** v2.1.7 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-navigation-menu** v1.2.13 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-popover** v1.1.14 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-progress** v1.1.7 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-radio-group** v1.3.7 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-scroll-area** v1.2.9 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-select** v2.1.6 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-separator** v1.1.7 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-slider** v1.2.3 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-slot** v1.2.3 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-switch** v1.1.3 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-tabs** v1.1.12 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-toggle** v1.1.10 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-toggle-group** v1.1.11 — [Repository](https://github.com/radix-ui/primitives)
+- **@radix-ui/react-tooltip** v1.2.7 — [Repository](https://github.com/radix-ui/primitives)
+- **@react-router/dev** v7.9.6 — [Repository](https://github.com/remix-run/react-router)
+- **@react-router/fs-routes** v7.9.6 — [Repository](https://github.com/remix-run/react-router)
+- **@react-router/node** v7.9.6 — [Repository](https://github.com/remix-run/react-router)
+- **@react-router/serve** v7.9.6 — [Repository](https://github.com/remix-run/react-router)
+- **@react-three/drei** v10.6.1 — [Repository](https://github.com/pmndrs/drei)
+- **@react-three/fiber** v9.3.0 — [Repository](https://github.com/pmndrs/react-three-fiber)
+- **@remix-pwa/client** v3.0.7 — [Repository](https://github.com/remix-pwa/monorepo)
+- **@remix-pwa/dev** v3.1.0 — [Repository](https://github.com/remix-pwa/monorepo)
+- **@remix-pwa/sw** v3.0.10 — [Repository](https://github.com/remix-pwa/monorepo)
+- **@remix-pwa/worker-runtime** v2.1.4
+- **@shikijs/langs-precompiled** v3.8.1 — [Repository](https://github.com/shikijs/shiki)
+- **@shikijs/monaco** v3.8.1 — [Repository](https://github.com/shikijs/shiki)
+- **@shikijs/themes** v3.8.1 — [Repository](https://github.com/shikijs/shiki)
+- **@statelyai/inspect** v0.4.0 — [Repository](https://github.com/statelyai/inspect)
+- **@swc-node/register** v1.10.9 — [Repository](https://github.com/swc-project/swc-node)
+- **@tailwindcss/typography** v0.5.16 — [Repository](https://github.com/tailwindlabs/tailwindcss-typography)
+- **@tailwindcss/vite** v4.0.6 — [Repository](https://github.com/tailwindlabs/tailwindcss)
+- **@tanstack/react-query** v4.36.1 — [Repository](https://github.com/TanStack/query)
+- **@tanstack/react-table** v8.21.3 — [Repository](https://github.com/TanStack/table)
+- **@testing-library/jest-dom** v6.6.3 — [Repository](https://github.com/testing-library/jest-dom)
+- **@testing-library/react** v16.2.0 — [Repository](https://github.com/testing-library/react-testing-library)
+- **@testing-library/user-event** v14.6.1 — [Repository](https://github.com/testing-library/user-event)
+- **@types/culori** v4.0.0 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@types/draco3dgltf** v1.4.3 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@types/emscripten** v1.40.1 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@types/jsdom** v21.1.7 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@types/json-schema** v7.0.15 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@types/mdx** v2.0.13 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@types/node** v24.0.15 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@types/pg** v8.15.4 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@types/pluralize** v0.0.33 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@types/react** v19.0.12 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@types/react-dom** v19.0.4 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@types/three** v0.178.1 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@types/uzip** v0.20201231.2 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@types/ws** v8.18.1 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@vitest/coverage-v8** v3.2.4 — [Repository](https://github.com/vitest-dev/vitest)
+- **@vitest/ui** v3.2.4 — [Repository](https://github.com/vitest-dev/vitest)
+- **@xstate/react** v5.0.4 — [Repository](https://github.com/statelyai/xstate)
+- **allotment** v1.20.4 — [Repository](https://github.com/johnwalley/allotment)
+- **autoprefixer** v10.4.21 — [Repository](postcss/autoprefixer)
+- **better-auth** v1.3.27 — [Repository](https://github.com/better-auth/better-auth)
+- **canvas** v3.1.2 — [Repository](https://github.com/Automattic/node-canvas)
+- **cheerio** v1.0.0 — [Repository](https://github.com/cheeriojs/cheerio)
+- **clsx** v2.1.1 — [Repository](lukeed/clsx)
+- **cmdk** v1.0.4 — [Repository](https://github.com/pacocoursey/cmdk)
+- **copy-files-from-to** v3.12.1 — [Repository](https://github.com/webextensions/copy-files-from-to)
+- **culori** v4.0.2 — [Repository](git@github.com:Evercoder/culori)
+- **deepmerge** v4.3.1 — [Repository](https://github.com/TehShrike/deepmerge)
+- **drizzle-kit** v0.31.4 — [Repository](https://github.com/drizzle-team/drizzle-orm)
+- **error-stack-parser** v2.1.4 — [Repository](https://github.com/stacktracejs/error-stack-parser)
+- **es-cookie** v1.5.0 — [Repository](https://github.com/theodorejb/es-cookie)
+- **es-module-lexer** v1.7.0 — [Repository](https://github.com/guybedford/es-module-lexer)
+- **eslint** v9.32.0 — [Repository](eslint/eslint)
+- **eslint-config-prettier** v10.1.8 — [Repository](prettier/eslint-config-prettier)
+- **eslint-plugin-prettier** v5.5.3 — [Repository](https://github.com/prettier/eslint-plugin-prettier)
+- **fastify** v5.4.0 — [Repository](https://github.com/fastify/fastify)
+- **fumadocs-core** v16.0.14 — [Repository](github:fuma-nama/fumadocs)
+- **fumadocs-mdx** v14.0.2 — [Repository](github:fuma-nama/fumadocs)
+- **fumadocs-typescript** v4.0.13 — [Repository](github:fuma-nama/fumadocs)
+- **fumadocs-ui** v16.0.14 — [Repository](github:fuma-nama/fumadocs)
+- **happy-dom** v16.8.1 — [Repository](https://github.com/capricorn86/happy-dom)
+- **immer** v10.2.0 — [Repository](https://github.com/immerjs/immer)
+- **isomorphic-git** v1.34.2 — [Repository](https://github.com/isomorphic-git/isomorphic-git)
+- **jsdom** v26.0.0 — [Repository](https://github.com/jsdom/jsdom)
+- **json-schema-default** v1.0.2 — [Repository](https://github.com/mdornseif/json-schema-default)
+- **katex** v0.16.21 — [Repository](https://github.com/KaTeX/KaTeX)
+- **ky** v1.8.2 — [Repository](sindresorhus/ky)
+- **langchain** v0.3.30 — [Repository](git@github.com:langchain-ai/langchainjs)
+- **monaco-editor** v0.54.0 — [Repository](https://github.com/microsoft/monaco-editor)
+- **monacopilot** v1.1.23 — [Repository](https://github.com/arshad-yaseen/monacopilot)
+- **motion** v12.11.3 — [Repository](https://github.com/motiondivision/motion)
+- **nanoid** v5.1.6 — [Repository](ai/nanoid)
+- **nestjs-pino** v4.4.0 — [Repository](https://github.com/iamolegga/nestjs-pino)
+- **nestjs-zod** v5.0.1 — [Repository](git@github.com:BenLorantfy/nestjs-zod)
+- **nx** v21.3.10 — [Repository](https://github.com/nrwl/nx)
+- **ollama** v0.5.16 — [Repository](https://github.com/ollama/ollama-js)
+- **pgvector** v0.2.1 — [Repository](https://github.com/pgvector/pgvector-node)
+- **pino-http** v10.5.0 — [Repository](https://github.com/pinojs/pino-http)
+- **pino-pretty** v13.0.0 — [Repository](https://github.com/pinojs/pino-pretty)
+- **pluralize** v8.0.0 — [Repository](https://github.com/blakeembrey/pluralize)
+- **prettier** v3.4.2 — [Repository](prettier/prettier)
+- **prettier-plugin-tailwindcss** v0.6.14 — [Repository](https://github.com/tailwindlabs/prettier-plugin-tailwindcss)
+- **react** v19.2.0 — [Repository](https://github.com/facebook/react)
+- **react-colorful** v5.6.1 — [Repository](omgovich/react-colorful)
+- **react-dom** v19.2.0 — [Repository](https://github.com/facebook/react)
+- **react-dropzone** v14.3.8 — [Repository](https://github.com/react-dropzone/react-dropzone)
+- **react-hook-form** v7.60.0 — [Repository](https://github.com/react-hook-form/react-hook-form)
+- **react-icons** v5.4.0 — [Repository](https://github.com:react-icons/react-icons)
+- **react-markdown** v10.1.0 — [Repository](remarkjs/react-markdown)
+- **react-resizable-panels** v2.1.7 — [Repository](https://github.com/bvaughn/react-resizable-panels)
+- **react-router** v7.9.6 — [Repository](https://github.com/remix-run/react-router)
+- **react-shiki** v0.7.2 — [Repository](https://github.com/avgvstvs96/react-shiki)
+- **react-virtuoso** v4.13.0 — [Repository](https://github.com/petyosi/react-virtuoso)
+- **rehype-katex** v7.0.1 — [Repository](https://github.com/remarkjs/remark-math/tree/main/packages/rehype-katex)
+- **remark-gfm** v4.0.1 — [Repository](remarkjs/remark-gfm)
+- **remark-math** v6.0.0 — [Repository](https://github.com/remarkjs/remark-math/tree/main/packages/remark-math)
+- **remix-themes** v2.0.4 — [Repository](https://github.com/abereghici/remix-themes)
+- **replicad** v0.19.1
+- **replicad-opencascadejs** v0.19.0
+- **rollup-plugin-visualizer** v6.0.3 — [Repository](git@github.com:btd/rollup-plugin-visualizer)
+- **shiki** v3.8.1 — [Repository](https://github.com/shikijs/shiki)
+- **socket.io** v4.8.1 — [Repository](https://github.com/socketio/socket.io)
+- **sonner** v2.0.6 — [Repository](https://github.com/emilkowalski/sonner)
+- **tailwind-merge** v3.4.0 — [Repository](https://github.com/dcastil/tailwind-merge)
+- **tailwind-scrollbar** v4.0.2 — [Repository](https://github.com/adoxography/tailwind-scrollbar)
+- **tailwindcss** v4.1.17 — [Repository](https://github.com/tailwindlabs/tailwindcss)
+- **three** v0.179.0 — [Repository](https://github.com/mrdoob/three.js)
+- **three-viewport-gizmo** v2.2.0 — [Repository](https://github.com/Fennec-hub/three-viewport-gizmo)
+- **ts-node** v10.9.2 — [Repository](https://github.com/TypeStrong/ts-node)
+- **tsdown** v0.15.7 — [Repository](https://github.com/rolldown/tsdown)
+- **tsx** v4.20.3 — [Repository](privatenumber/tsx)
+- **tw-animate-css** v1.2.4 — [Repository](Wombosvideo/tw-animate-css)
+- **uint8array-extras** v1.4.0 — [Repository](sindresorhus/uint8array-extras)
+- **unplugin-swc** v1.5.5 — [Repository](https://github.com/unplugin/unplugin-swc)
+- **uzip** v0.20201231.0
+- **vaul** v1.1.2 — [Repository](https://github.com/emilkowalski/vaul)
+- **vite** v7.0.6 — [Repository](https://github.com/vitejs/vite)
+- **vite-plugin-devtools-json** v0.2.1 — [Repository](https://github.com/ChromeDevTools/vite-plugin-devtools-json)
+- **vite-plugin-dts** v4.5.4 — [Repository](https://github.com/qmhc/vite-plugin-dts)
+- **vite-plugin-node** v7.0.0 — [Repository](https://github.com/axe-me/vite-plugin-node)
+- **vite-plugin-static-copy** v3.1.1 — [Repository](https://github.com/sapphi-red/vite-plugin-static-copy)
+- **vite-svg-sprite-wrapper** v1.4.1 — [Repository](https://github.com/vshepel/vite-svg-sprite-wrapper)
+- **vite-tsconfig-paths** v5.1.4 — [Repository](aleclarson/vite-tsconfig-paths)
+- **vitest** v3.2.4 — [Repository](https://github.com/vitest-dev/vitest)
+- **webpack-cli** v6.0.1 — [Repository](https://github.com/webpack/webpack-cli)
+- **ws** v8.18.3 — [Repository](https://github.com/websockets/ws)
+- **xo** v0.61.0-2 — [Repository](xojs/xo)
+- **xstate** v5.19.3 — [Repository](https://github.com/statelyai/xstate)
+- **zod** v4.1.13 — [Repository](https://github.com/colinhacks/zod)
+
+---
+
+## Source Code Availability
+
+The complete source code for Tau, including all modifications to third-party components,
+is available at: https://github.com/taucad/tau
+
+For GPL-licensed components, you may obtain the corresponding source code by:
+1. Cloning the repository: `git clone https://github.com/taucad/tau.git`
+2. Downloading from: https://github.com/taucad/tau/archive/refs/heads/main.zip
+
+---
+
+Please [file an issue](https://github.com/taucad/tau/issues/new) if you think a license
+or credits are missing or misrepresented!

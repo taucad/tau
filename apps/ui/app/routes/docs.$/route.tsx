@@ -97,6 +97,7 @@ export const handle: Handle = {
   },
   enableFloatingSidebar: true,
   enableOverflowY: true,
+  enablePageFooter: true,
 };
 
 const clientLoader = browserCollections.docs.createClientLoader({

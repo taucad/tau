@@ -145,8 +145,10 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                 'mt-[var(--header-height)] h-[calc(100dvh-var(--header-height)-1px)] transition-[margin] duration-200 ease-linear md:ml-(--sidebar-width-current)',
             )}
           >
-            {error === undefined ? <Outlet /> : error}
-            {enablePageFooter ? <PageFooter /> : null}
+            <div className="flex min-h-full flex-col">
+              <div className="flex-1">{error === undefined ? <Outlet /> : error}</div>
+              {enablePageFooter ? <PageFooter /> : null}
+            </div>
           </section>
         </SidebarInset>
       </SidebarProvider>

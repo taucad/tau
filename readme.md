@@ -9,7 +9,11 @@ Your AI-powered workshop companion — a free, open-source CAD platform that wor
 
 **[Try it now at tau.new](https://tau.new)**
 
-![Tau Desktop View](docs/assets/tau-desktop.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tau-desktop-dark.jpg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/tau-desktop-light.jpg">
+  <img alt="Tau Desktop View" src="docs/assets/tau-desktop-light.jpg">
+</picture>
 
 ## Features
 

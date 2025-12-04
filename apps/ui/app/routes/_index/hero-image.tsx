@@ -1,6 +1,7 @@
 import { MessageSquare, Code2, Lock, SlidersHorizontal, Ruler } from 'lucide-react';
 import { BorderBeam } from '#components/magicui/border-beam.js';
-import tauDesktopImage from '#routes/_index/tau-desktop.jpg';
+import tauDesktopDark from '#routes/_index/tau-desktop-dark.jpg';
+import tauDesktopLight from '#routes/_index/tau-desktop-light.jpg';
 
 const features = [
   {
@@ -57,9 +58,20 @@ export function HeroImage(): React.JSX.Element {
         </div>
 
         {/* Hero Image with BorderBeam */}
-        <div className="shadow-2xl relative overflow-hidden rounded-2xl border bg-background">
+        <div className="shadow-2xl relative overflow-hidden rounded-xl border bg-background">
           <BorderBeam size={200} duration={12} colorFrom="hsl(var(--primary))" colorTo="hsl(var(--accent))" />
-          <img src={tauDesktopImage} alt="Tau CAD - AI-powered parametric design" className="w-full" loading="lazy" />
+          <img
+            src={tauDesktopLight}
+            alt="Tau CAD - AI-powered parametric design"
+            className="block w-full dark:hidden"
+            loading="lazy"
+          />
+          <img
+            src={tauDesktopDark}
+            alt="Tau CAD - AI-powered parametric design"
+            className="hidden w-full dark:block"
+            loading="lazy"
+          />
         </div>
       </div>
     </div>

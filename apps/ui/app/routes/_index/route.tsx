@@ -1,7 +1,6 @@
 import { Link, NavLink, useNavigate } from 'react-router';
 import { useCallback } from 'react';
 import { messageRole, messageStatus } from '@taucad/chat/constants';
-import type { KernelProvider } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { createInitialBuild } from '#constants/build.constants.js';
@@ -25,6 +24,7 @@ import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 import type { Handle } from '#types/matches.types.js';
 import { useBuildManager } from '#hooks/use-build-manager.js';
 import { useChatManager } from '#hooks/use-chat-manager.js';
+import { useKernel } from '#hooks/use-kernel.js';
 
 export const handle: Handle = {
   enableOverflowY: true,
@@ -32,7 +32,7 @@ export const handle: Handle = {
 
 export default function ChatStart(): React.JSX.Element {
   const navigate = useNavigate();
-  const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
+  const { kernel, setKernel } = useKernel();
   const [, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
   const buildManager = useBuildManager();
   const chatManager = useChatManager();
@@ -40,14 +40,14 @@ export default function ChatStart(): React.JSX.Element {
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
     async ({ content, model, metadata, imageUrls }) => {
       try {
-        const mainFileName = getMainFile(selectedKernel);
-        const emptyCode = getEmptyCode(selectedKernel);
+        const mainFileName = getMainFile(kernel);
+        const emptyCode = getEmptyCode(kernel);
 
         // Create the initial message as pending
         const userMessage = createMessage({
           content,
           role: messageRole.user,
-          metadata: { ...metadata, kernel: selectedKernel, model, status: messageStatus.pending },
+          metadata: { ...metadata, kernel, model, status: messageStatus.pending },
           imageUrls,
         });
 
@@ -83,7 +83,7 @@ export default function ChatStart(): React.JSX.Element {
         toast.error('Failed to create build');
       }
     },
-    [selectedKernel, buildManager, chatManager, setIsChatOpen, navigate],
+    [kernel, buildManager, chatManager, setIsChatOpen, navigate],
   );
 
   return (
@@ -98,7 +98,7 @@ export default function ChatStart(): React.JSX.Element {
         <ChatProvider value={{}}>
           <div className="space-y-4">
             <div className="flex justify-center">
-              <KernelSelector selectedKernel={selectedKernel} onKernelChange={setSelectedKernel} />
+              <KernelSelector selectedKernel={kernel} onKernelChange={setKernel} />
             </div>
             <ChatTextarea
               enableContextActions={false}

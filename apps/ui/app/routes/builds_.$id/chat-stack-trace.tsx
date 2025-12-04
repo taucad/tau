@@ -1,7 +1,7 @@
 import { useSelector } from '@xstate/react';
 import { useCallback } from 'react';
 import { Sparkles } from 'lucide-react';
-import type { KernelProvider, KernelStackFrame } from '@taucad/types';
+import type { KernelStackFrame } from '@taucad/types';
 import { languageFromKernel } from '@taucad/types/constants';
 import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { Button } from '#components/ui/button.js';
@@ -15,6 +15,7 @@ import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { useModels } from '#hooks/use-models.js';
 import { defaultChatModel } from '#constants/chat.constants.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
+import { useKernel } from '#hooks/use-kernel.js';
 
 function StackFrame({ frame, index }: { readonly frame: KernelStackFrame; readonly index: number }): React.JSX.Element {
   const fileName = frame.fileName ?? '<unknown>';
@@ -104,7 +105,7 @@ export function ChatStackTrace({ className, ...props }: React.HTMLAttributes<HTM
   const { sendMessage } = useChatActions();
   const { selectedModel } = useModels();
   const [, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
-  const [kernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
+  const { kernel } = useKernel();
 
   const handleFixWithAi = useCallback(async () => {
     if (!error) {

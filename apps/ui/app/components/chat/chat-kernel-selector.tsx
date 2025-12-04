@@ -5,8 +5,7 @@ import type { KernelProvider } from '@taucad/types';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { useKernel } from '#hooks/use-kernel.js';
 
 type ChatKernelSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'onSelect'> & {
   readonly onSelect?: (kernelId: KernelProvider) => void;
@@ -21,26 +20,25 @@ export const ChatKernelSelector = memo(function ({
   children,
   ...properties
 }: ChatKernelSelectorProps): React.JSX.Element {
-  const [selectedKernelId, setSelectedKernelId] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
+  const { kernel, setKernel } = useKernel();
 
-  const selectedKernel = kernelConfigurations.find((k) => k.id === selectedKernelId);
+  const selectedKernel = kernelConfigurations.find((k) => k.id === kernel);
 
   const handleSelectKernel = useCallback(
     (item: string) => {
       const kernel = kernelConfigurations.find((k) => k.id === item);
 
       if (kernel) {
-        setSelectedKernelId(kernel.id);
+        setKernel(kernel.id);
         onSelect?.(kernel.id);
       }
     },
-    [onSelect, setSelectedKernelId],
+    [onSelect, setKernel],
   );
 
   return (
     <ComboBoxResponsive
       {...properties}
-      className="[&[data-slot='popover-content']]:w-[300px]"
       popoverProperties={properties.popoverProperties}
       emptyListMessage="No kernels found."
       title="Select a kernel"

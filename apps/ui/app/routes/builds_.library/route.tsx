@@ -93,6 +93,7 @@ import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { defaultBuildName } from '#constants/build-names.js';
 import { useBuildManager } from '#hooks/use-build-manager.js';
 import { useChatManager } from '#hooks/use-chat-manager.js';
+import { useKernel } from '#hooks/use-kernel.js';
 
 const categoryIconsFromEngineeringDiscipline = {
   mechanical: Wrench,
@@ -125,7 +126,7 @@ export default function PersonalCadProjects(): React.JSX.Element {
   const [showDeleted, setShowDeleted] = useState(false);
   const { builds, deleteBuild, duplicateBuild, restoreBuild, updateName } = useBuilds({ includeDeleted: showDeleted });
   const navigate = useNavigate();
-  const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
+  const { kernel, setKernel } = useKernel();
   const [, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
   const buildManager = useBuildManager();
   const chatManager = useChatManager();
@@ -186,14 +187,14 @@ export default function PersonalCadProjects(): React.JSX.Element {
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
     async ({ content, model, metadata, imageUrls }) => {
       try {
-        const mainFileName = getMainFile(selectedKernel);
-        const emptyCode = getEmptyCode(selectedKernel);
+        const mainFileName = getMainFile(kernel);
+        const emptyCode = getEmptyCode(kernel);
 
         // Create the initial message as pending
         const userMessage = createMessage({
           content,
           role: messageRole.user,
-          metadata: { ...metadata, kernel: selectedKernel, model, status: messageStatus.pending },
+          metadata: { ...metadata, kernel, model, status: messageStatus.pending },
           imageUrls,
         });
 
@@ -228,7 +229,7 @@ export default function PersonalCadProjects(): React.JSX.Element {
         toast.error('Failed to create build');
       }
     },
-    [selectedKernel, buildManager, chatManager, setIsChatOpen, navigate],
+    [kernel, buildManager, chatManager, setIsChatOpen, navigate],
   );
 
   const actions: BuildActions = {
@@ -346,8 +347,8 @@ export default function PersonalCadProjects(): React.JSX.Element {
             projects={filteredBuilds}
             viewMode={viewMode}
             actions={actions}
-            selectedKernel={selectedKernel}
-            onKernelChange={setSelectedKernel}
+            selectedKernel={kernel}
+            onKernelChange={setKernel}
             onSubmit={onSubmit}
           />
         </TabsContent>
@@ -356,8 +357,8 @@ export default function PersonalCadProjects(): React.JSX.Element {
             projects={filteredBuilds.filter((p) => Object.keys(p.assets).includes('mechanical'))}
             viewMode={viewMode}
             actions={actions}
-            selectedKernel={selectedKernel}
-            onKernelChange={setSelectedKernel}
+            selectedKernel={kernel}
+            onKernelChange={setKernel}
             onSubmit={onSubmit}
           />
         </TabsContent>
@@ -366,8 +367,8 @@ export default function PersonalCadProjects(): React.JSX.Element {
             projects={filteredBuilds.filter((p) => Object.keys(p.assets).includes('electrical'))}
             viewMode={viewMode}
             actions={actions}
-            selectedKernel={selectedKernel}
-            onKernelChange={setSelectedKernel}
+            selectedKernel={kernel}
+            onKernelChange={setKernel}
             onSubmit={onSubmit}
           />
         </TabsContent>
@@ -376,8 +377,8 @@ export default function PersonalCadProjects(): React.JSX.Element {
             projects={filteredBuilds.filter((p) => Object.keys(p.assets).includes('firmware'))}
             viewMode={viewMode}
             actions={actions}
-            selectedKernel={selectedKernel}
-            onKernelChange={setSelectedKernel}
+            selectedKernel={kernel}
+            onKernelChange={setKernel}
             onSubmit={onSubmit}
           />
         </TabsContent>

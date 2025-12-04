@@ -22,6 +22,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useBuildManager } from '#hooks/use-build-manager.js';
 import { useChatManager } from '#hooks/use-chat-manager.js';
+import { useKernel } from '#hooks/use-kernel.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -148,7 +149,7 @@ export default function BuildsNew(): React.JSX.Element {
   const navigate = useNavigate();
   const { createBuild, isCreating } = useBuildCreation();
 
-  const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
+  const { kernel, setKernel: setSelectedKernel } = useKernel();
   const [buildName, setBuildName] = useState('');
   const [buildDescription, setBuildDescription] = useState('');
 
@@ -157,12 +158,12 @@ export default function BuildsNew(): React.JSX.Element {
       await createBuild({
         name: buildName,
         description: buildDescription,
-        kernel: selectedKernel,
+        kernel,
       });
     } catch {
       toast.error('Failed to create build. Please try again.');
     }
-  }, [buildName, buildDescription, selectedKernel, createBuild]);
+  }, [buildName, buildDescription, kernel, createBuild]);
 
   const handleCancel = useCallback(() => {
     void navigate('/');
@@ -234,14 +235,14 @@ export default function BuildsNew(): React.JSX.Element {
             {/* Mobile Accordion Layout */}
             <div className="block md:hidden">
               <RadioGroup
-                value={selectedKernel}
+                value={kernel}
                 onValueChange={(value) => {
                   setSelectedKernel(value as KernelProvider);
                 }}
               >
                 <Accordion
                   type="single"
-                  value={selectedKernel}
+                  value={kernel}
                   className="space-y-2"
                   onValueChange={(value) => {
                     if (value) {
@@ -255,7 +256,7 @@ export default function BuildsNew(): React.JSX.Element {
                       value={option.id}
                       className={cn(
                         'rounded-lg border transition-all',
-                        selectedKernel === option.id && 'border-ring bg-primary/5 ring-3 ring-ring/50',
+                        kernel === option.id && 'border-ring bg-primary/5 ring-3 ring-ring/50',
                       )}
                     >
                       <div className="flex items-start gap-3 p-4">
@@ -298,7 +299,7 @@ export default function BuildsNew(): React.JSX.Element {
               {/* Left side - Radio Group */}
               <div className="flex flex-col gap-2 md:min-w-80">
                 <RadioGroup
-                  value={selectedKernel}
+                  value={kernel}
                   className="space-y-2"
                   onValueChange={(value) => {
                     setSelectedKernel(value as KernelProvider);
@@ -310,7 +311,7 @@ export default function BuildsNew(): React.JSX.Element {
                       htmlFor={option.id}
                       className={cn(
                         'flex h-auto cursor-pointer items-start justify-start gap-3 rounded-lg border p-4 text-left transition-all hover:border-primary/50 hover:bg-primary/5',
-                        selectedKernel === option.id &&
+                        kernel === option.id &&
                           'border-ring bg-primary/5 ring-3 ring-ring/50 hover:border-ring hover:bg-primary/10',
                       )}
                     >
@@ -330,7 +331,7 @@ export default function BuildsNew(): React.JSX.Element {
 
               {/* Right side - Content panel */}
               <div className="flex-1 rounded-lg border border-border bg-card p-6">
-                <KernelDetailsContent kernelId={selectedKernel} />
+                <KernelDetailsContent kernelId={kernel} />
               </div>
             </div>
           </CardContent>

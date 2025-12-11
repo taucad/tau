@@ -33,6 +33,7 @@ const environmentSchema = z.preprocess(
     NODE_ENV: z.enum(['development', 'production', 'test']),
     ZOO_API_KEY: z.string().optional().describe('To be removed in favor of integrations.'),
     GITHUB_API_TOKEN: z.string().optional().describe('GitHub API token for the GitHub API client.'),
+    ELEVENLABS_AGENT_ID: z.string().optional().describe('Eleven Labs agent ID for voice conversations.'),
     /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
   }),
 );

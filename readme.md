@@ -135,3 +135,159 @@ Tau is dual-licensed:
 If you use Tau **without** the OpenSCAD kernel (e.g., only Replicad, Zoo, or JSCAD), the entire codebase is available under the permissive MIT License. If you use Tau **with** the OpenSCAD kernel, the combined work is subject to [GPL-2.0-or-later](https://www.gnu.org/licenses/gpl-2.0.html) terms due to the `openscad-wasm-prebuilt` dependency.
 
 Third-party license information is available in [license-deps](license-deps).
+
+## Setup Guide & Requirements
+
+**Prerequisites**
+
+- **Node.js**: >= 24 (project and Dockerfiles target `24.3.0`). Use a Node version manager (nvm, nvm-windows, or Volta) or Docker.
+- **pnpm**: workspace uses `pnpm`. Enable Corepack or install pnpm globally.
+- **Docker** (recommended): used for production images and to avoid native-build issues on Windows.
+- **WSL2 (recommended for Windows)**: run the project inside WSL2/Ubuntu to avoid PowerShell/Windows native-build friction.
+
+**Quick WSL Setup**
+
+1. Open WSL shell (Ubuntu).
+2. Enable Corepack and install pnpm:
+
+```bash
+corepack enable
+corepack prepare pnpm@latest --activate
+pnpm install
+```
+
+3. Start development servers:
+
+```bash
+pnpm dev
+```
+
+**Install (non-WSL)**
+
+```bash
+# enable corepack and install dependencies
+corepack enable
+corepack prepare pnpm@latest --activate
+pnpm install
+```
+
+If you're on Windows and must build native modules (sharp, canvas, swc, etc.), use WSL2 or install Visual Studio Build Tools.
+
+**Development**
+
+- Start all apps (workspace): `pnpm dev` (delegates to Nx).
+- Start individual project:
+  - UI: `pnpm nx dev ui` or `pnpm nx run ui:dev`
+  - API: `pnpm nx dev api` or `pnpm nx run api:dev`
+
+**Build**
+
+- Build workspace: `pnpm build`
+- Build Docker images (examples):
+
+```bash
+# API
+docker build -t tau-api -f apps/api/Dockerfile --build-arg NODE_VERSION=24.3.0 .
+# UI
+docker build -t tau-ui -f apps/ui/Dockerfile --build-arg NODE_VERSION=24.3.0 .
+```
+
+**Tests & Linting**
+
+- Run tests (workspace): `pnpm test` or `pnpm nx test <project>`
+- Lint: `pnpm lint` or `pnpm nx lint <project>`
+- Vitest configurations are present for UI (jsdom) and API (node).
+
+**Deploy**
+
+- Fly.io: `flyctl deploy --config apps/api/fly.prod.toml` (requires `flyctl`).
+- Netlify: UI contains `netlify.toml`; build via `pnpm nx build ui` and publish output.
+
+**Troubleshooting**
+
+- If scripts use POSIX env vars (e.g., `CI=true ...`), run them inside WSL or use `cross-env`.
+- If native modules fail to build, use WSL or Docker-based builds.
+- If `pnpm` commands fail, run `corepack enable` or install pnpm globally.
+
+**Recommended VS Code extensions**
+
+- `Nx Console`, `ESLint`, `Prettier`, `Dev Containers`, `GitLens`.
+
+
+## Setup Guide & Requirements
+
+**Prerequisites**
+
+- **Node.js**: >= 24 (project and Dockerfiles target `24.3.0`). Use a Node version manager (nvm, nvm-windows, or Volta) or Docker.
+- **pnpm**: workspace uses `pnpm`. Enable Corepack or install pnpm globally.
+- **Docker** (recommended): used for production images and to avoid native-build issues on Windows.
+- **WSL2 (recommended for Windows)**: run the project inside WSL2/Ubuntu to avoid PowerShell/Windows native-build friction.
+
+**Quick WSL Setup**
+
+1. Open WSL shell (Ubuntu).
+2. Enable Corepack and install pnpm:
+
+```bash
+corepack enable
+corepack prepare pnpm@latest --activate
+pnpm install
+```
+
+3. Start development servers:
+
+```bash
+pnpm dev
+```
+
+**Install (non-WSL)**
+
+```bash
+# enable corepack and install dependencies
+corepack enable
+corepack prepare pnpm@latest --activate
+pnpm install
+```
+
+If you're on Windows and must build native modules (sharp, canvas, swc, etc.), use WSL2 or install Visual Studio Build Tools.
+
+**Development**
+
+- Start all apps (workspace): `pnpm dev` (delegates to Nx).
+- Start individual project:
+  - UI: `pnpm nx dev ui` or `pnpm nx run ui:dev`
+  - API: `pnpm nx dev api` or `pnpm nx run api:dev`
+
+**Build**
+
+- Build workspace: `pnpm build`
+- Build Docker images (examples):
+
+```bash
+# API
+docker build -t tau-api -f apps/api/Dockerfile --build-arg NODE_VERSION=24.3.0 .
+# UI
+docker build -t tau-ui -f apps/ui/Dockerfile --build-arg NODE_VERSION=24.3.0 .
+```
+
+**Tests & Linting**
+
+- Run tests (workspace): `pnpm test` or `pnpm nx test <project>`
+- Lint: `pnpm lint` or `pnpm nx lint <project>`
+- Vitest configurations are present for UI (jsdom) and API (node).
+
+**Deploy**
+
+- Fly.io: `flyctl deploy --config apps/api/fly.prod.toml` (requires `flyctl`).
+- Netlify: UI contains `netlify.toml`; build via `pnpm nx build ui` and publish output.
+
+**Troubleshooting**
+
+- If scripts use POSIX env vars (e.g., `CI=true ...`), run them inside WSL or use `cross-env`.
+- If native modules fail to build, use WSL or Docker-based builds.
+- If `pnpm` commands fail, run `corepack enable` or install pnpm globally.
+
+**Recommended VS Code extensions**
+
+- `Nx Console`, `ESLint`, `Prettier`, `Dev Containers`, `GitLens`.
+

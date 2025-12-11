@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ComponentProps } from 'react';
 import { useLoaderData } from 'react-router';
 import { useConversation } from '@elevenlabs/react';
 import { AudioLinesIcon, CheckIcon, CopyIcon, PhoneOffIcon, SendIcon } from 'lucide-react';
 import type { Route } from './+types/route.js';
-import { ENV } from '#config.js';
 import { cn } from '#utils/ui.utils.js';
 import { Button } from '#components/ui/button.js';
 import { Card, CardContent, CardFooter, CardHeader } from '#components/ui/card.js';
@@ -83,21 +82,8 @@ function ChatAction({
   return button;
 }
 
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- loaders are inferred types by design.
-export function loader(_args: Route.LoaderArgs) {
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- ENV is typed as process.env which is loose
-  const rawAgentId = ENV.ELEVENLABS_AGENT_ID;
-  const agentId: string | undefined = typeof rawAgentId === 'string' && rawAgentId.length > 0 ? rawAgentId : undefined;
-
-  return {
-    agentId,
-    name: 'Customer Support',
-    description: 'AI Voice Assistant',
-  };
-}
-
 export default function ElevenLabsPage(): React.JSX.Element {
-  const loaderData = useLoaderData<typeof loader>();
+  const loaderData = useLoaderData<Route.ComponentProps['loaderData']>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [agentState, setAgentState] = useState<
     'disconnected' | 'connecting' | 'connected' | 'disconnecting' | undefined
@@ -333,7 +319,7 @@ export default function ElevenLabsPage(): React.JSX.Element {
                 ) : agentState === 'disconnected' || agentState === undefined ? (
                   <p className="xs text-muted-foreground">Tap to start voice chat</p>
                 ) : agentState === 'connected' ? (
-                  <p className="text-green-600 text-xs">Connected</p>
+                  <p className="text-xs text-success">Connected</p>
                 ) : isTransitioning ? (
                   <ShimmeringText text={agentState} className="text-xs capitalize" />
                 ) : null}

@@ -1,7 +1,8 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { fromPromise, waitFor } from 'xstate';
-import { Bug, Loader2, Send } from 'lucide-react';
+import { useConversation } from '@elevenlabs/react';
+import { AudioLinesIcon, Bug, Loader2, PhoneOffIcon, Send } from 'lucide-react';
 import { messageRole, messageStatus } from '@taucad/chat/constants';
 import type { Build, CodeError, KernelError } from '@taucad/types';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
@@ -24,6 +25,10 @@ import { ChatProvider, useChatActions, useChatSelector } from '#hooks/use-chat.j
 import { useChatTools } from '#hooks/use-chat-tools.js';
 import { useChatConstants, createMessage } from '#utils/chat.utils.js';
 import { useKernel } from '#hooks/use-kernel.js';
+import { ENV } from '#config.js';
+import { Input } from '#components/ui/input.js';
+import { Orb } from '#components/elevenlabs/ui/orb.js';
+import { ShimmeringText } from '#components/elevenlabs/ui/shimmering-text.js';
 
 export type RenderResult = {
   status: 'ready' | 'error';
@@ -80,59 +85,312 @@ function ViewerStatus({ className, ...properties }: React.HTMLAttributes<HTMLDiv
   ) : null;
 }
 
-// Simple chat panel with message display and sample button
+// Voice chat panel with ElevenLabs integration
 function ChatPanel(): React.JSX.Element {
   const messages = useChatSelector((state) => state.messages);
   const status = useChatSelector((state) => state.status);
-  const isLoading = useChatSelector((state) => state.isLoading);
   const { sendMessage } = useChatActions();
   const { kernel } = useKernel();
+  const { cadRef } = useBuild();
 
-  // Debug logging
+  const [textInput, setTextInput] = useState('');
+  const [agentState, setAgentState] = useState<
+    'disconnected' | 'connecting' | 'connected' | 'disconnecting' | undefined
+  >('disconnected');
+  const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
+  const mediaStreamRef = useRef<MediaStream | undefined>(undefined);
+  const isTextOnlyModeRef = useRef<boolean>(true);
+
+  // Refs so we can use them in the conversation callback
+  const sendMessageRef = useRef(sendMessage);
+  sendMessageRef.current = sendMessage;
+  const kernelRef = useRef(kernel);
+  kernelRef.current = kernel;
+  const cadRefRef = useRef(cadRef);
+  cadRefRef.current = cadRef;
+
+  const conversation = useConversation({
+    onConnect() {
+      console.log('[ChatPanel] ElevenLabs connected');
+    },
+    onDisconnect() {
+      console.log('[ChatPanel] ElevenLabs disconnected');
+    },
+    onMessage(message) {
+      console.log('[ChatPanel] ElevenLabs message:', message);
+    },
+    onError(error: unknown) {
+      console.error('[ChatPanel] ElevenLabs error:', error);
+      setAgentState('disconnected');
+    },
+  });
+
+  const getMicStream = useCallback(async (): Promise<MediaStream> => {
+    if (mediaStreamRef.current) {
+      return mediaStreamRef.current;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      setErrorMessage(undefined);
+      return stream;
+    } catch (error: unknown) {
+      if (error instanceof DOMException && error.name === 'NotAllowedError') {
+        setErrorMessage('Please enable microphone permissions.');
+      }
+
+      throw error;
+    }
+  }, []);
+
+  const startConversation = useCallback(
+    async (textOnly = true): Promise<void> => {
+      try {
+        isTextOnlyModeRef.current = textOnly;
+
+        if (!textOnly) {
+          await getMicStream();
+        }
+
+        const rawAgentId = ENV.ELEVENLABS_AGENT_ID;
+        const agentId: string | undefined =
+          typeof rawAgentId === 'string' && rawAgentId.length > 0 ? rawAgentId : undefined;
+
+        if (!agentId) {
+          throw new Error('Eleven Labs agent ID is not configured');
+        }
+
+        await conversation.startSession({
+          agentId,
+          connectionType: textOnly ? 'websocket' : 'webrtc',
+          clientTools: {
+            async logMessage({ message }) {
+              // Send the message to the CAD chat system
+              const userMessage = createMessage({
+                content: message as string,
+                role: messageRole.user,
+                metadata: {
+                  kernel: kernelRef.current,
+                  model: 'anthropic-claude-opus-4.5',
+                  status: messageStatus.pending,
+                },
+              });
+              console.log('[ChatPanel] logMessage sending to CAD:', userMessage);
+              sendMessageRef.current(userMessage);
+
+              // Wait for the CAD machine to finish processing (reach 'ready' or 'error' state)
+              const cadSnapshot = await waitFor(
+                cadRefRef.current,
+                (state) => state.value === 'ready' || state.value === 'error',
+              );
+
+              console.log('[ChatPanel] CAD state after processing:', cadSnapshot.value);
+
+              // Check for errors
+              const hasKernelErrors = cadSnapshot.context.kernelErrors.size > 0;
+              const hasCodeErrors = cadSnapshot.context.codeErrors.length > 0;
+
+              if (hasKernelErrors || hasCodeErrors) {
+                // Collect error messages
+                const kernelErrorMessages: string[] = [];
+                for (const [, errors] of cadSnapshot.context.kernelErrors) {
+                  for (const error of errors) {
+                    kernelErrorMessages.push(error.message);
+                  }
+                }
+
+                const codeErrorMessages = cadSnapshot.context.codeErrors.map((error) => error.message);
+                const allErrors = [...kernelErrorMessages, ...codeErrorMessages];
+
+                console.error('[ChatPanel] CAD errors:', allErrors);
+                throw new Error(`CAD processing failed: ${allErrors.join('; ')}`);
+              }
+
+              console.log('[ChatPanel] CAD processing completed successfully');
+              return 'success';
+            },
+          },
+          overrides: {
+            conversation: {
+              textOnly,
+            },
+            agent: {
+              firstMessage: textOnly ? '' : undefined,
+            },
+          },
+          onStatusChange(statusChange) {
+            setAgentState(statusChange.status);
+          },
+        });
+      } catch (error: unknown) {
+        console.error('[ChatPanel] startConversation error:', error);
+        setAgentState('disconnected');
+      }
+    },
+    [conversation, getMicStream],
+  );
+
+  const handleCall = useCallback(async (): Promise<void> => {
+    if (agentState === 'disconnected' || agentState === undefined) {
+      setAgentState('connecting');
+      try {
+        await startConversation(false);
+      } catch {
+        setAgentState('disconnected');
+      }
+    } else if (agentState === 'connected') {
+      void conversation.endSession();
+      setAgentState('disconnected');
+
+      if (mediaStreamRef.current) {
+        for (const track of mediaStreamRef.current.getTracks()) {
+          track.stop();
+        }
+
+        mediaStreamRef.current = undefined;
+      }
+    }
+  }, [agentState, conversation, startConversation]);
+
+  const handleTextInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>): void => {
+    setTextInput(event.target.value);
+  }, []);
+
+  const handleSendText = useCallback(async (): Promise<void> => {
+    if (!textInput.trim()) {
+      return;
+    }
+
+    const messageToSend = textInput;
+    setTextInput('');
+
+    if (agentState === 'disconnected' || agentState === undefined) {
+      setAgentState('connecting');
+      try {
+        await startConversation(true);
+        conversation.sendUserMessage(messageToSend);
+      } catch (error: unknown) {
+        console.error('[ChatPanel] Failed to start conversation:', error);
+      }
+    } else if (agentState === 'connected') {
+      conversation.sendUserMessage(messageToSend);
+    }
+  }, [textInput, agentState, conversation, startConversation]);
+
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>): void => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        void handleSendText();
+      }
+    },
+    [handleSendText],
+  );
+
+  // Cleanup mic stream on unmount
   useEffect(() => {
-    console.log('[ChatPanel] messages:', messages.length, 'status:', status, 'isLoading:', isLoading);
-  }, [messages, status, isLoading]);
+    return () => {
+      if (mediaStreamRef.current) {
+        for (const track of mediaStreamRef.current.getTracks()) {
+          track.stop();
+        }
+      }
+    };
+  }, []);
 
-  const handleSampleMessage = useCallback(() => {
-    const userMessage = createMessage({
-      content: 'Create a dollhouse',
-      role: messageRole.user,
-      metadata: { kernel, model: 'anthropic-claude-opus-4.5', status: messageStatus.pending },
-    });
-    console.log('[ChatPanel] sending message:', userMessage);
-    sendMessage(userMessage);
-  }, [sendMessage, kernel]);
+  const isCallActive = agentState === 'connected';
+  const isTransitioning = agentState === 'connecting' || agentState === 'disconnecting';
+
+  const getInputVolume = useCallback((): number => {
+    if (typeof conversation.getInputVolume !== 'function') {
+      return 0;
+    }
+
+    const rawValue = conversation.getInputVolume();
+    return Math.min(1, rawValue ** 0.5 * 2.5);
+  }, [conversation]);
+
+  const getOutputVolume = useCallback((): number => {
+    if (typeof conversation.getOutputVolume !== 'function') {
+      return 0;
+    }
+
+    const rawValue = conversation.getOutputVolume();
+    return Math.min(1, rawValue ** 0.5 * 2.5);
+  }, [conversation]);
+
+  // Get the latest text part from a message
+  const getLatestTextPart = (message: (typeof messages)[number]): string | undefined => {
+    // Find the last text part
+    for (let index = message.parts.length - 1; index >= 0; index--) {
+      const part = message.parts[index];
+      if (part?.type === 'text') {
+        return part.text;
+      }
+    }
+
+    return undefined;
+  };
 
   return (
     <div className="flex w-80 flex-col border-r bg-background">
-      <div className="border-b p-3">
-        <h3 className="text-sm font-semibold">Voice Chat</h3>
-        <p className="text-xs text-muted-foreground">Talk to build your model</p>
+      {/* Header with orb and status */}
+      <div className="flex items-center gap-3 border-b p-3">
+        <div className="relative size-8 overflow-hidden rounded-full ring-1 ring-border">
+          <Orb
+            className="h-full w-full"
+            volumeMode="manual"
+            getInputVolume={getInputVolume}
+            getOutputVolume={getOutputVolume}
+          />
+        </div>
+        <div className="flex flex-1 flex-col gap-0.5">
+          <h3 className="text-sm leading-none font-semibold">Voice Chat</h3>
+          <div className="flex items-center gap-2">
+            {errorMessage ? (
+              <p className="text-xs text-destructive">{errorMessage}</p>
+            ) : agentState === 'disconnected' || agentState === undefined ? (
+              <p className="text-xs text-muted-foreground">Type or speak to build</p>
+            ) : agentState === 'connected' ? (
+              <p className="text-xs text-success">Connected</p>
+            ) : isTransitioning ? (
+              <ShimmeringText text={agentState} className="text-xs capitalize" />
+            ) : null}
+          </div>
+        </div>
+        <div
+          className={cn(
+            'flex size-2 rounded-full transition-all duration-300',
+            agentState === 'connected' && 'bg-success shadow-[0_0_8px_rgba(34,197,94,0.5)]',
+            isTransitioning && 'animate-pulse bg-white/40',
+          )}
+        />
       </div>
 
-      {/* Messages display */}
+      {/* Messages display - show only latest text part */}
       <div className="flex-1 overflow-auto p-2">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
-            <p className="mb-4 text-sm text-muted-foreground">No messages yet</p>
-            <Button disabled={status === 'streaming'} onClick={handleSampleMessage}>
-              <Send className="mr-2 size-4" />
-              Create Dollhouse
-            </Button>
+            <Orb className="mb-4 size-12" />
+            <p className="text-sm text-muted-foreground">No messages yet</p>
+            <p className="text-xs text-muted-foreground">Start talking or type a message</p>
           </div>
         ) : (
           <div className="space-y-2">
-            {messages.map((message) => (
-              <div key={message.id} className="rounded-md border bg-muted/50 p-2">
-                <div className="mb-1 text-xs font-semibold text-muted-foreground">{message.role}</div>
-                {message.parts.map((part, partIndex) => (
-                  // eslint-disable-next-line react/no-array-index-key -- parts don't have unique IDs
-                  <pre key={`${message.id}-part-${partIndex}`} className="overflow-auto text-xs whitespace-pre-wrap">
-                    {JSON.stringify(part, null, 2)}
-                  </pre>
-                ))}
-              </div>
-            ))}
+            {messages.map((message) => {
+              const latestText = getLatestTextPart(message);
+              return (
+                <div key={message.id} className="rounded-md border bg-muted/50 p-2">
+                  <div className="mb-1 text-xs font-semibold text-muted-foreground">{message.role}</div>
+                  {latestText ? (
+                    <p className="text-sm whitespace-pre-wrap">{latestText}</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">Processing...</p>
+                  )}
+                </div>
+              );
+            })}
             {status === 'streaming' ? (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Loader2 className="size-3 animate-spin" />
@@ -143,15 +401,50 @@ function ChatPanel(): React.JSX.Element {
         )}
       </div>
 
-      {/* Sample button at bottom when there are messages */}
-      {messages.length > 0 ? (
-        <div className="border-t p-2">
-          <Button disabled={status === 'streaming'} className="w-full" size="sm" onClick={handleSampleMessage}>
-            <Send className="mr-2 size-4" />
-            Create Dollhouse
+      {/* Input and voice controls */}
+      <div className="flex items-center gap-2 border-t p-2">
+        <Input
+          className="h-9 flex-1 focus-visible:ring-0 focus-visible:ring-offset-0"
+          disabled={isTransitioning}
+          placeholder="Type a message..."
+          value={textInput}
+          onChange={handleTextInputChange}
+          onKeyDown={handleKeyDown}
+        />
+        <Button
+          className="shrink-0 rounded-full"
+          disabled={!textInput.trim() || isTransitioning}
+          size="icon"
+          variant="ghost"
+          onClick={handleSendText}
+        >
+          <Send className="size-4" />
+          <span className="sr-only">Send message</span>
+        </Button>
+        {isCallActive ? (
+          <Button
+            className="shrink-0 rounded-full"
+            disabled={isTransitioning}
+            size="icon"
+            variant="secondary"
+            onClick={handleCall}
+          >
+            <PhoneOffIcon className="size-4" />
+            <span className="sr-only">End call</span>
           </Button>
-        </div>
-      ) : null}
+        ) : (
+          <Button
+            className="shrink-0 rounded-full"
+            disabled={isTransitioning}
+            size="icon"
+            variant="ghost"
+            onClick={handleCall}
+          >
+            <AudioLinesIcon className="size-4" />
+            <span className="sr-only">Start voice call</span>
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

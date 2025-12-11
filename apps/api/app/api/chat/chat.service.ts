@@ -4,7 +4,6 @@ import { createReactAgent } from '@langchain/langgraph/prebuilt';
 import { createSupervisor } from '@langchain/langgraph-supervisor';
 import { streamText } from 'ai';
 import type { ModelMessage } from 'ai';
-import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
 import { ConfigService } from '@nestjs/config';
 import type { KernelProvider } from '@taucad/types';
 import type { ToolSelection } from '@taucad/chat';
@@ -46,12 +45,6 @@ export class ChatService {
   // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- This is a complex generic that can be left inferred.
   public async createGraph(modelId: string, selectedToolChoice: ToolSelection, selectedKernel: KernelProvider) {
     const { tools } = this.toolService.getTools(selectedToolChoice);
-
-    const databaseUrl = this.configService.get('DATABASE_URL', { infer: true });
-    const checkpointer = PostgresSaver.fromConnString(databaseUrl, {
-      schema: 'langgraph',
-    });
-    await checkpointer.setup();
 
     const researchTools = [tools.web_search, tools.web_browser].filter((tool) => tool !== undefined);
     const { model: supervisorModel } = this.modelService.buildModel(modelId);
@@ -115,7 +108,7 @@ When receiving responses back from your team members, maintain efficiency by bei
 
 Your goal is to ensure users receive expert-level assistance by connecting them with the right specialist for their specific needs, while maintaining a smooth and efficient workflow that automatically handles technical errors through iterative refinement.`,
       outputMode: 'full_history', // Include full agent message history
-    }).compile({ checkpointer });
+    }).compile();
 
     return supervisor;
   }

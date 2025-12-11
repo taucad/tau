@@ -1,12 +1,9 @@
 import { Body, Controller, Logger, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { convertToModelMessages, JsonToSseTransformStream } from 'ai';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { Command } from '@langchain/langgraph';
-import type { StateSnapshot } from '@langchain/langgraph';
 import type { IterableReadableStream } from '@langchain/core/utils/stream';
 import type { StreamEvent } from '@langchain/core/tracers/log_stream';
 import type { ToolSelection } from '@taucad/chat';
-import { tryExtractLastToolResult } from '#api/chat/utils/extract-tool-result.js';
 import { ToolService, toolChoiceFromToolName } from '#api/tools/tool.service.js';
 import { ChatService } from '#api/chat/chat.service.js';
 import { LangGraphAdapter } from '#api/chat/utils/langgraph-adapter.js';
@@ -97,20 +94,7 @@ export class ChatController {
     const config = {
       streamMode: 'values',
       version: 'v2',
-      configurable: {
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangGraph API requires snake_case
-        thread_id: body.id, // Enable persistence using conversation ID as thread ID
-      },
     } as const;
-
-    // Check if this thread is in an interrupted state
-    let currentState: StateSnapshot | undefined;
-    try {
-      currentState = await graph.getState(config);
-    } catch {
-      // If we can't get state, assume it's a new conversation
-      // and no-op
-    }
 
     // Abort the request if the client disconnects
     const abortController = new AbortController();
@@ -120,36 +104,15 @@ export class ChatController {
       }
     });
 
-    let eventStream: IterableReadableStream<StreamEvent>;
-
-    // Check if we're resuming from an interrupt
-    if (currentState?.next && currentState.next.length > 0) {
-      // Thread is interrupted, resume with the provided input
-      this.logger.debug(`Resuming interrupted thread: ${body.id}`);
-
-      // Extract the result from the last tool call to use as resume value
-      const toolResult = tryExtractLastToolResult(langchainMessages);
-
-      this.logger.debug(`Resuming with tool result: ${JSON.stringify(toolResult, null, 2)}`);
-
-      // Resume the graph execution with the tool result
-      eventStream = graph.streamEvents(new Command({ resume: toolResult }), {
+    const eventStream: IterableReadableStream<StreamEvent> = graph.streamEvents(
+      {
+        messages: langchainMessages,
+      },
+      {
         ...config,
         signal: abortController.signal,
-      });
-    } else {
-      // Normal execution - start new conversation or continue existing one
-      this.logger.debug(`Starting normal execution for thread: ${body.id}`);
-      eventStream = graph.streamEvents(
-        {
-          messages: langchainMessages,
-        },
-        {
-          ...config,
-          signal: abortController.signal,
-        },
-      );
-    }
+      },
+    );
 
     // Use the LangGraphAdapter to handle the response
     const result = LangGraphAdapter.toDataStream(eventStream, {

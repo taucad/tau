@@ -73,6 +73,11 @@ export function useChatTools(): UseChatToolsReturn {
           // Clearing ensures we don't waste LLM tokens on non-existent issues.
           cadActor.send({ type: 'setCodeErrors', errors: [] });
 
+          // Clear stale kernel errors for the file being edited.
+          // Old kernel errors from a previous file state would cause false positives
+          // if they remain while new CAD processing is running.
+          cadActor.send({ type: 'clearKernelErrors', filename: resolvedPath });
+
           // Wait for CAD processing to complete
           const cadSnapshot = await waitFor(cadActor, (state) => state.value === 'ready' || state.value === 'error');
 

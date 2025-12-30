@@ -39,6 +39,7 @@ type CadEvent =
   | { type: 'setFile'; file: GeometryFile }
   | { type: 'setParameters'; parameters: Record<string, unknown> }
   | { type: 'setCodeErrors'; errors: CadContext['codeErrors'] }
+  | { type: 'clearKernelErrors'; filename: string }
   | { type: 'exportGeometry'; format: ExportFormat }
   | KernelEventExternal;
 
@@ -186,6 +187,14 @@ export const cadMachine = setup({
       codeErrors({ event }) {
         assertEvent(event, 'setCodeErrors');
         return event.errors;
+      },
+    }),
+    clearKernelErrors: assign({
+      kernelErrors({ context, event }) {
+        assertEvent(event, 'clearKernelErrors');
+        const newErrorsMap = new Map(context.kernelErrors);
+        newErrorsMap.delete(event.filename);
+        return newErrorsMap;
       },
     }),
     setDefaultParameters: assign({
@@ -403,6 +412,9 @@ export const cadMachine = setup({
         setCodeErrors: {
           actions: 'setCodeErrors',
         },
+        clearKernelErrors: {
+          actions: 'clearKernelErrors',
+        },
         exportGeometry: {
           actions: 'exportGeometry',
         },
@@ -534,6 +546,9 @@ export const cadMachine = setup({
         setCodeErrors: {
           actions: 'setCodeErrors',
         },
+        clearKernelErrors: {
+          actions: 'clearKernelErrors',
+        },
         exportGeometry: {
           actions: 'exportGeometry',
         },
@@ -570,6 +585,9 @@ export const cadMachine = setup({
         },
         setCodeErrors: {
           actions: 'setCodeErrors',
+        },
+        clearKernelErrors: {
+          actions: 'clearKernelErrors',
         },
         exportGeometry: {
           actions: 'exportGeometry',

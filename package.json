@@ -217,7 +217,7 @@
     "@nx/vite": "21.3.10",
     "@nx/web": "21.3.10",
     "@nx/webpack": "21.3.10",
-    "@playwright/test": "^1.54.1",
+    "@playwright/test": "^1.58.1",
     "@protontech/eslint-plugin-enforce-uint8array-arraybuffer": "^2.0.0",
     "@react-router/dev": "^7.9.6",
     "@react-router/fs-routes": "^7.9.6",

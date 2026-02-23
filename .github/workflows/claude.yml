@@ -25,7 +25,7 @@ jobs:
       issues: write
     steps:
       - name: Post approval needed comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const requester = context.payload.comment.user.login;

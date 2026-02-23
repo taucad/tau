@@ -22,18 +22,18 @@ catalog:
   '@nx/vite': 21.3.10
   '@nx/web': 21.3.10
   '@nx/webpack': 21.3.10
-  '@react-router/dev': ^7.9.6
-  '@react-router/fs-routes': ^7.9.6
-  '@react-router/node': ^7.9.6
-  '@react-router/serve': ^7.9.6
+  '@react-router/dev': ^7.13.0
+  '@react-router/fs-routes': ^7.13.0
+  '@react-router/node': ^7.13.0
+  '@react-router/serve': ^7.13.0
   '@taucad/kcl-wasm-lib': 0.1.111
   '@testing-library/jest-dom': 6.6.3
-  '@testing-library/react': 16.2.0
+  '@testing-library/react': 16.3.2
   '@types/json-schema': ^7.0.15
   '@types/madge': ^5.0.3
   '@types/node': ~24.0.15
-  '@types/react': 19.0.12
-  '@types/react-dom': 19.0.4
+  '@types/react': 19.2.14
+  '@types/react-dom': 19.2.3
   '@vitest/coverage-v8': 3.2.4
   '@vitest/ui': 3.2.4
   '@zenfs/core': ^2.4.4
@@ -53,8 +53,8 @@ catalog:
   openscad-wasm-prebuilt: ^1.2.0
   prettier: 3.4.2
   publint: ^0.3.17
-  react: ^19.0.0
-  react-dom: ^19.0.0
+  react: ^19.2.4
+  react-dom: ^19.2.4
   react-router: ^7.9.6
   replicad: ^0.19.1
   replicad-opencascadejs: ^0.19.0

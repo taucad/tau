@@ -53,7 +53,7 @@ function toFsMapPath(absolutePath: string, basePath: string): string {
 }
 
 function toStrictUint8Array(data: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
-  const arrayBufferSlice = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+  const arrayBufferSlice = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
   return new Uint8Array(arrayBufferSlice);
 }
 
@@ -71,11 +71,11 @@ function toBytes(data: unknown): Uint8Array<ArrayBuffer> {
   }
 
   if (typeof data === 'string') {
-    return toStrictUint8Array(new TextEncoder().encode(data) as Uint8Array<ArrayBuffer>);
+    return toStrictUint8Array(new TextEncoder().encode(data));
   }
 
   if (typeof data === 'object' && data !== null) {
-    return toStrictUint8Array(new TextEncoder().encode(JSON.stringify(data)) as Uint8Array<ArrayBuffer>);
+    return toStrictUint8Array(new TextEncoder().encode(JSON.stringify(data)));
   }
 
   throw new Error(`Unsupported GLTF conversion output type: ${typeof data}`);

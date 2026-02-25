@@ -313,7 +313,7 @@ describe('TscircuitKernel', () => {
 
       expect(exportResult.success).toBe(false);
       if (!exportResult.success) {
-        expect(exportResult.issues[0]?.message).toContain("supported by tscircuit");
+        expect(exportResult.issues[0]?.message).toContain('supported by tscircuit');
       }
     });
   });

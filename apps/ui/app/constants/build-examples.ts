@@ -74,10 +74,10 @@ const jscadBuilds: BuildWithFiles[] = jscadExamples.map((model) => {
   return createBuild(model, mainFile, language);
 });
 
-const manifoldModels: Model[] = [
+const tscircuitModels: Model[] = [
   {
-    id: 'manifold_basic_board',
-    name: 'Manifold Basic Board',
+    id: 'tscircuit_basic_board',
+    name: 'TSCircuit Basic Board',
     code: `circuit.add(
   <board width="48mm" height="30mm">
     <hole name="H1" diameter="2.4mm" pcbX={-18} pcbY={10} />
@@ -85,14 +85,14 @@ const manifoldModels: Model[] = [
   </board>
 );`,
     thumbnail: '/placeholder.svg',
-    language: 'manifold',
+    language: 'tscircuit',
   },
 ] as const;
 
-const manifoldBuilds: BuildWithFiles[] = manifoldModels.map((model) => {
+const tscircuitBuilds: BuildWithFiles[] = tscircuitModels.map((model) => {
   const mainFile = 'main.tsx';
-  const language: KernelProvider = 'manifold';
+  const language: KernelProvider = 'tscircuit';
   return createBuild(model, mainFile, language);
 });
 
-export const sampleBuilds: BuildWithFiles[] = [...replicadBuilds, ...openscadBuilds, ...jscadBuilds, ...manifoldBuilds];
+export const sampleBuilds: BuildWithFiles[] = [...replicadBuilds, ...openscadBuilds, ...jscadBuilds, ...tscircuitBuilds];

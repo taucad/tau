@@ -1,4 +1,4 @@
-import { replicad, zoo, openscad, jscad, manifold, tau } from '@taucad/kernels/kernels';
+import { replicad, zoo, openscad, jscad, tscircuit, tau } from '@taucad/kernels/kernels';
 import { parameterCache, geometryCache, gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/kernels/middleware';
 import { esbuild } from '@taucad/kernels/bundler';
 import type { KernelClientOptions } from '@taucad/kernels';
@@ -19,7 +19,7 @@ export const defaultKernelOptions: KernelClientOptions = {
     zoo({ baseUrl: `${ENV.TAU_WEBSOCKET_URL}/v1/kernels/zoo` }),
     replicad({ withExceptions: false }),
     jscad(),
-    manifold(),
+    tscircuit(),
     tau(),
   ],
   middleware: [parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()],

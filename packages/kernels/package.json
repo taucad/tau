@@ -22,7 +22,6 @@
     "zoo",
     "openscad",
     "jscad",
-    "manifold",
     "tscircuit",
     "electronics",
     "kernel",
@@ -43,7 +42,7 @@
     "./worker": "./src/framework/kernel-runtime-worker.ts",
     "./kernels/replicad": "./src/kernels/replicad/replicad.kernel.ts",
     "./kernels/jscad": "./src/kernels/jscad/jscad.kernel.ts",
-    "./kernels/manifold": "./src/kernels/manifold/manifold.kernel.ts",
+    "./kernels/tscircuit": "./src/kernels/tscircuit/tscircuit.kernel.ts",
     "./kernels/openscad": "./src/kernels/openscad/openscad.kernel.ts",
     "./kernels/zoo": "./src/kernels/zoo/zoo.kernel.ts",
     "./kernels/zoo/engine-connection": "./src/kernels/zoo/engine-connection.ts",
@@ -158,14 +157,14 @@
           "default": "./dist/esm/kernels/jscad/jscad.kernel.js"
         }
       },
-      "./kernels/manifold": {
+      "./kernels/tscircuit": {
         "require": {
-          "types": "./dist/cjs/kernels/manifold/manifold.kernel.d.cts",
-          "default": "./dist/cjs/kernels/manifold/manifold.kernel.cjs"
+          "types": "./dist/cjs/kernels/tscircuit/tscircuit.kernel.d.cts",
+          "default": "./dist/cjs/kernels/tscircuit/tscircuit.kernel.cjs"
         },
         "import": {
-          "types": "./dist/esm/kernels/manifold/manifold.kernel.d.ts",
-          "default": "./dist/esm/kernels/manifold/manifold.kernel.js"
+          "types": "./dist/esm/kernels/tscircuit/tscircuit.kernel.d.ts",
+          "default": "./dist/esm/kernels/tscircuit/tscircuit.kernel.js"
         }
       },
       "./kernels/openscad": {

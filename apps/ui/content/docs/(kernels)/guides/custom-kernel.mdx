@@ -181,7 +181,7 @@ async getParameters({ filePath }, { filesystem }, _context) {
 - **optionsSchema**: Add a Zod schema to validate kernel options. The inferred type flows to `initialize(options)`.
 - **cleanup**: Implement `cleanup(context)` to tear down WASM instances or temp files when the worker is disposed.
 - **detectImport / builtinModuleNames**: For JS/TS kernels, add `detectImport` (RegExp) or `builtinModuleNames` so the framework can select your kernel based on imports.
-- **Bundler integration**: JS/TS kernels use `runtime.bundler` and `runtime.execute`. See the Replicad, JSCAD, or Manifold kernel source for examples.
+- **Bundler integration**: JS/TS kernels use `runtime.bundler` and `runtime.execute`. See the Replicad, JSCAD, or TSCircuit kernel source for examples.
 
 ## Related
 

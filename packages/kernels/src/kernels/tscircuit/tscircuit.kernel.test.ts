@@ -69,17 +69,17 @@ vi.mock('circuit-json-to-gltf', () => ({
   convertCircuitJsonToGltf: hoisted.convertCircuitJsonToGltf,
 }));
 
-import manifoldKernel from '#kernels/manifold/manifold.kernel.js';
+import tscircuitKernel from '#kernels/tscircuit/tscircuit.kernel.js';
 import { createGeometryFile, createTestGeometry, createTestWorker } from '#testing/kernel-testing.utils.js';
 
-const manifoldExtensions = ['tsx', 'jsx', 'ts', 'js'];
+const tscircuitExtensions = ['tsx', 'jsx', 'ts', 'js'];
 
 const createWorker = async (
   files: Record<string, string>,
   options?: { includeModels?: boolean; partsEngineDisabled?: boolean },
 ): ReturnType<typeof createTestWorker> =>
-  createTestWorker(manifoldKernel, files, {
-    extensions: manifoldExtensions,
+  createTestWorker(tscircuitKernel, files, {
+    extensions: tscircuitExtensions,
     workerOptions: {
       includeModels: options?.includeModels ?? false,
       partsEngineDisabled: options?.partsEngineDisabled ?? true,
@@ -102,11 +102,11 @@ const getParameters = async (
 
 const createGeometry = async (files: Record<string, string>, mainFile: string): ReturnType<typeof createTestGeometry> =>
   createTestGeometry({
-    definition: manifoldKernel,
+    definition: tscircuitKernel,
     files,
     mainFile,
     options: {
-      extensions: manifoldExtensions,
+      extensions: tscircuitExtensions,
       workerOptions: {
         includeModels: false,
         partsEngineDisabled: true,
@@ -120,7 +120,7 @@ beforeEach(() => {
   hoisted.convertCircuitJsonToGltf.mockClear();
 });
 
-describe('ManifoldKernel', () => {
+describe('TscircuitKernel', () => {
   describe('initialize', () => {
     it('creates a CircuitWebWorker with configured runtime options', async () => {
       const worker = await createWorker(
@@ -313,7 +313,7 @@ describe('ManifoldKernel', () => {
 
       expect(exportResult.success).toBe(false);
       if (!exportResult.success) {
-        expect(exportResult.issues[0]?.message).toContain("Use 'glb' or 'gltf'");
+        expect(exportResult.issues[0]?.message).toContain("supported by tscircuit");
       }
     });
   });

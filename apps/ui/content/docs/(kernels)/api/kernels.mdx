@@ -1,6 +1,6 @@
 ---
 title: Kernel Factories
-description: Factory functions for Replicad, OpenSCAD, JSCAD, Manifold, Zoo, and Tau kernel plugins.
+description: Factory functions for Replicad, OpenSCAD, JSCAD, TSCircuit, Zoo, and Tau kernel plugins.
 icon: lucide:cog
 ---
 
@@ -16,7 +16,7 @@ Use kernel factories when registering CAD engines with `createKernelClient`. Eac
 
 <auto-type-table path="./props/kernels.ts" name="ZooOptions" />
 
-<auto-type-table path="./props/kernels.ts" name="ManifoldOptions" />
+<auto-type-table path="./props/kernels.ts" name="TscircuitOptions" />
 
 ## Factories
 
@@ -25,7 +25,7 @@ Use kernel factories when registering CAD engines with `createKernelClient`. Eac
 | `replicad(options?)` | `ts`, `js` | OpenCASCADE-based parametric BRep |
 | `openscad()` | `scad` | CSG modeling |
 | `jscad()` | `ts`, `js` | @jscad/modeling parametric CSG |
-| `manifold(options?)` | `tsx`, `jsx`, `ts`, `js` | Experimental TSCircuit/electronics CAD kernel |
+| `tscircuit(options?)` | `tsx`, `jsx`, `ts`, `js` | Experimental TSCircuit/electronics CAD kernel |
 | `zoo(options)` | `kcl` | KCL via Zoo API |
 | `tau()` | `*` | Catch-all for STEP, STL, 3MF |
 
@@ -33,14 +33,14 @@ Use kernel factories when registering CAD engines with `createKernelClient`. Eac
 
 ```typescript
 import { createKernelClient, fromMemoryFS } from '@taucad/kernels';
-import { replicad, openscad, jscad, manifold, zoo, tau } from '@taucad/kernels/kernels';
+import { replicad, openscad, jscad, tscircuit, zoo, tau } from '@taucad/kernels/kernels';
 
 const client = createKernelClient({
   kernels: [
     replicad({ withExceptions: true }),
     openscad(),
     jscad(),
-    manifold({ includeModels: false }),
+    tscircuit({ includeModels: false }),
     zoo({ baseUrl: 'wss://example.com/v1/kernels/zoo' }),
     tau(),
   ],

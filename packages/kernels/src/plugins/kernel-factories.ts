@@ -26,9 +26,9 @@ export type ZooOptions = {
 };
 
 /**
- * Manifold (TSCircuit) kernel options.
+ * TSCircuit kernel options.
  */
-export type ManifoldOptions = {
+export type TscircuitOptions = {
   /** Include external 3D component models during Circuit JSON to GLTF conversion. */
   includeModels?: boolean;
   /** Disable parts-engine network fetches for deterministic/offline-friendly rendering. */
@@ -98,16 +98,16 @@ export const jscad = createKernelPlugin({
 });
 
 /**
- * Create a Manifold (TSCircuit) kernel plugin registration.
+ * Create a TSCircuit kernel plugin registration.
  *
  * @example
  * ```typescript
- * manifold({ includeModels: false, partsEngineDisabled: true })
+ * tscircuit({ includeModels: false, partsEngineDisabled: true })
  * ```
  */
-export const manifold = createKernelPlugin<ManifoldOptions>({
-  id: 'manifold',
-  moduleUrl: new URL('../kernels/manifold/manifold.kernel.js', import.meta.url).href,
+export const tscircuit = createKernelPlugin<TscircuitOptions>({
+  id: 'tscircuit',
+  moduleUrl: new URL('../kernels/tscircuit/tscircuit.kernel.js', import.meta.url).href,
   extensions: ['tsx', 'jsx', 'ts', 'js'],
   detectImport:
     /(?:import|export)\s+.*from\s+['"](?:@tscircuit\/core|tscircuit|@tsci\/[^'"]+)['"]|require\s*\(\s*['"](?:@tscircuit\/core|tscircuit|@tsci\/[^'"]+)['"]\s*\)|\bcircuit\.add\s*\(/s,

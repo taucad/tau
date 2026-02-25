@@ -1,5 +1,5 @@
 /**
- * Manifold Kernel Module (experimental)
+ * TSCircuit Kernel Module (experimental)
  *
  * Executes TSCircuit/TSX projects with @tscircuit/eval and converts the
  * resulting Circuit JSON into GLB/GLTF geometry for Tau viewers.
@@ -14,12 +14,12 @@ import { defineKernel } from '#types/kernel-worker.types.js';
 import type { KernelRuntime } from '#types/kernel-worker.types.js';
 import { createKernelError, createKernelSuccess } from '#framework/kernel-helpers.js';
 
-type ManifoldNativeHandle = {
+type TscircuitNativeHandle = {
   circuitJson: unknown[];
   cachedGlb: Uint8Array<ArrayBuffer>;
 };
 
-const manifoldOptionsSchema = z.object({
+const tscircuitOptionsSchema = z.object({
   includeModels: z.boolean().optional().default(false),
   partsEngineDisabled: z.boolean().optional().default(true),
 });
@@ -112,7 +112,7 @@ async function buildFsMap(input: {
           content: await runtime.filesystem.readFile(absolutePath, 'utf8'),
         };
       } catch (error) {
-        runtime.logger.debug('Skipping unreadable dependency in manifold fsMap', {
+        runtime.logger.debug('Skipping unreadable dependency in tscircuit fsMap', {
           data: { absolutePath, error },
         });
         return undefined;
@@ -149,9 +149,9 @@ async function convertCircuitJson(input: {
 }
 
 export default defineKernel({
-  name: 'ManifoldKernel',
+  name: 'TscircuitKernel',
   version: '1.0.0',
-  optionsSchema: manifoldOptionsSchema,
+  optionsSchema: tscircuitOptionsSchema,
 
   async initialize(options) {
     const workerModuleSpecifier = '@tscircuit/eval/worker';
@@ -220,12 +220,12 @@ export default defineKernel({
         nativeHandle: {
           circuitJson,
           cachedGlb: glbBytes,
-        } satisfies ManifoldNativeHandle,
+        } satisfies TscircuitNativeHandle,
       };
     } catch (error) {
       runtime.logger.error('Failed to render TSCircuit geometry', { data: error });
       const message = error instanceof Error ? error.message : 'Failed to render TSCircuit project';
-      throw new ManifoldBuildError([
+      throw new TscircuitBuildError([
         {
           message,
           location: { fileName: relativeFilePath, startLineNumber: 1, startColumn: 1 },
@@ -240,7 +240,7 @@ export default defineKernel({
     if (fileType !== 'glb' && fileType !== 'gltf') {
       return createKernelError([
         {
-          message: `Export format '${fileType}' is not supported by manifold. Use 'glb' or 'gltf'.`,
+          message: `Export format '${fileType}' is not supported by tscircuit. Use 'glb' or 'gltf'.`,
           type: 'runtime',
           severity: 'error',
         },
@@ -263,7 +263,7 @@ export default defineKernel({
     } catch (error) {
       return createKernelError([
         {
-          message: error instanceof Error ? error.message : 'Failed to export manifold geometry',
+          message: error instanceof Error ? error.message : 'Failed to export tscircuit geometry',
           type: 'runtime',
           severity: 'error',
         },
@@ -276,7 +276,7 @@ export default defineKernel({
   },
 });
 
-class ManifoldBuildError extends Error {
+class TscircuitBuildError extends Error {
   public readonly issues: KernelIssue[];
 
   public constructor(issues: KernelIssue[]) {

@@ -1,9 +1,9 @@
 import type { KernelConfig } from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.types.js';
-import canonicalExample from '#api/chat/prompts/kernel-prompt-configs/manifold.prompt.example.tsx?raw';
+import canonicalExample from '#api/chat/prompts/kernel-prompt-configs/tscircuit.prompt.example.tsx?raw';
 
-export const manifoldConfig: KernelConfig = {
+export const tscircuitConfig: KernelConfig = {
   fileExtension: '.tsx',
-  languageName: 'Manifold (TSCircuit)',
+  languageName: 'TSCircuit',
 
   codeStandards: `Output TSX using TSCircuit intrinsic elements (for example: <board>, <resistor>, <capacitor>, <trace>). Keep units explicit (for example "10mm"). Prefer top-level \`circuit.add(...)\` with a single board root for stable rendering.`,
 

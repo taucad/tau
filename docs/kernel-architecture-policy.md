@@ -73,7 +73,7 @@ All non-generic capabilities are provided by injectable plugins, not hardcoded i
 
 | Plugin Type | Author API | Consumer API | Purpose | Example |
 |-------------|-----------|-------------|---------|---------|
-| Kernel | `defineKernel` → `KernelDefinition` | `replicad()` → `KernelPlugin` | Geometry computation, parameter extraction, export | replicad, jscad, manifold, openscad, zoo, tau |
+| Kernel | `defineKernel` → `KernelDefinition` | `replicad()` → `KernelPlugin` | Geometry computation, parameter extraction, export | replicad, jscad, tscircuit, openscad, zoo, tau |
 | Bundler | `defineBundler` → `BundlerDefinition` | `esbuild()` → `BundlerPlugin` | File bundling, code execution, module registry, import detection | esbuild bundler |
 | Middleware | `defineMiddleware` → `KernelMiddleware` | `parameterCache()` → `MiddlewarePlugin` | Operation wrapping (caching, transforms, edge detection) | geometry-cache, parameter-cache |
 
@@ -266,7 +266,7 @@ BuildMachine.stopStatefulActors()
 ### Detection Priority
 
 ```
-Priority: openscad → zoo → replicad → jscad → manifold → tau
+Priority: openscad → zoo → replicad → jscad → tscircuit → tau
 ```
 
 | Kernel | Detection Method | Scope |
@@ -275,7 +275,7 @@ Priority: openscad → zoo → replicad → jscad → manifold → tau
 | Zoo | Extension: `.kcl` | Immediate |
 | Replicad | Regex + bundler detectImports | Entry file + transitive |
 | Jscad | Regex + bundler detectImports | Entry file + transitive |
-| Manifold | Regex + bundler detectImports | Entry file + transitive |
+| TSCircuit | Regex + bundler detectImports | Entry file + transitive |
 | Tau | Extension: `*` (catch-all) | Fallback |
 
 ### Multi-Module Registration
@@ -351,7 +351,7 @@ During detection, bare specifiers appear as external imports in `metafile.output
 
 ```
 @taucad/kernels          → createKernelClient, types, presets, fromNodeFS, fromMemoryFS
-@taucad/kernels/kernels  → replicad(), zoo(), openscad(), jscad(), manifold(), tau()
+@taucad/kernels/kernels  → replicad(), zoo(), openscad(), jscad(), tscircuit(), tau()
 @taucad/kernels/middleware → parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()
 @taucad/kernels/bundler  → esbuild()
 @taucad/kernels/transport → KernelTransport, createWorkerTransport()

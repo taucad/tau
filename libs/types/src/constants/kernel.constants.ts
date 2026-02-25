@@ -3,7 +3,7 @@ import type { CodeLanguage } from '#types/code.types.js';
 /** The number of dimensions the kernel supports. */
 export type KernelDimensions = 2 | 3;
 
-export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad';
+export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad' | 'tscircuit';
 
 export type KernelConfiguration = {
   id: string;
@@ -104,13 +104,13 @@ export default function main(p = defaultParams) {
     ],
   },
   {
-    id: 'manifold',
-    name: 'Manifold (TSCircuit)',
+    id: 'tscircuit',
+    name: 'TSCircuit',
     dimensions: [2, 3],
     language: 'tsx',
     description: 'Electronics CAD with TypeScript + JSX',
     mainFile: 'main.tsx',
-    backendProvider: 'manifold',
+    backendProvider: 'tscircuit',
     longDescription:
       'Experimental electronics modeling kernel powered by TSCircuit. Author PCB-centric assemblies in TSX/JSX, render Circuit JSON through web/wasm tooling, and preview generated 3D geometry in Tau.',
     emptyCode: `circuit.add(

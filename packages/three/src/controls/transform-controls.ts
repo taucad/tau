@@ -32,8 +32,7 @@ import {
   MeshMatcapMaterial,
   LineDashedMaterial,
 } from 'three';
-import translationArrowSvg from '#icons/translation-arrow.svg?raw';
-import rotationArrowSvg from '#icons/rotation-arrow.svg?raw';
+import { translationArrowSvg, rotationArrowSvg } from '#icons/svg-data.js';
 import { SvgGeometry } from '#geometries/svg-geometry.js';
 import { matcapMaterial } from '#materials/matcap-material.js';
 import { FontGeometry } from '#geometries/font-geometry.js';

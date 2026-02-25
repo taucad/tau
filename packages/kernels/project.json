@@ -9,6 +9,9 @@
       "dependsOn": ["copy-assets"],
       "outputs": ["{projectRoot}/src/assets/**"]
     },
+    "test": {
+      "dependsOn": ["copy-assets"]
+    },
     "benchmark": {
       "command": "tsx --require ./scripts/cjs-compat.cjs scripts/benchmark-kernels.mts",
       "options": {

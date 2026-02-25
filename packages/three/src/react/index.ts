@@ -23,6 +23,8 @@ export { useSectionView, type SectionViewResult } from './hooks/use-section-view
 export { PostProcessing } from './post-processing.js';
 export { Grid } from './grid.js';
 export { ViewportGizmoCube } from './viewport-gizmo.js';
+export { MeasureTool } from './measure-tool.js';
+export { Controls } from './controls.js';
 
 // Zustand stores
 export {

@@ -74,6 +74,7 @@ describe('ModuleManager', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    mockFetch.mockReset();
     vi.stubGlobal('fetch', mockFetch);
     filesystem = createMockFilesystem();
     manager = new ModuleManager(filesystem as unknown as KernelFileSystem);

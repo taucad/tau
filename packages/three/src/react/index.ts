@@ -14,6 +14,9 @@ export {
   type UpDirection,
 } from './section-view-controls.js';
 export { TransformControls, type TransformControlsProps } from './transform-controls-drei.js';
+export { PostProcessing } from './post-processing.js';
+export { Grid } from './grid.js';
+export { ViewportGizmoCube } from './viewport-gizmo.js';
 
 // Zustand stores
 export {

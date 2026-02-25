@@ -62,7 +62,7 @@ export const CadPreviewViewer = memo(function ({
   if (status === 'error') {
     return (
       <div className={cn('flex size-full items-center justify-center', className)}>
-        <div className="flex flex-col items-center gap-3 text-destructive">
+        <div className="text-destructive flex flex-col items-center gap-3">
           <AlertTriangle className="size-10 opacity-60" strokeWidth={1.5} />
           <span className="max-w-sm text-center text-sm">{error?.message ?? 'Failed to render preview'}</span>
         </div>
@@ -119,11 +119,11 @@ export function CadPreviewStatus({ className }: CadPreviewStatusProps): React.Re
   return (
     <div
       className={cn(
-        'absolute top-4 right-4 z-10 flex items-center gap-2 rounded-md border bg-background/70 px-2 py-1 backdrop-blur-sm',
+        'bg-background/70 absolute right-4 top-4 z-10 flex items-center gap-2 rounded-md border px-2 py-1 backdrop-blur-sm',
         className,
       )}
     >
-      <span className="font-mono text-sm text-muted-foreground capitalize">{status}...</span>
+      <span className="text-muted-foreground font-mono text-sm capitalize">{status}...</span>
       <Loader className="size-4" />
     </div>
   );

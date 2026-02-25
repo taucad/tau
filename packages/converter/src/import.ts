@@ -7,6 +7,7 @@
 
 /* eslint-disable @typescript-eslint/naming-convention -- formats can be valid identifiers */
 import type { FileExtension, FileInput } from '@taucad/types';
+import type { FileResolver } from '#file-resolver.js';
 import type { BaseLoader } from '#loaders/base.loader.js';
 import { DracoLoader } from '#loaders/draco.loader.js';
 import { GltfLoader } from '#loaders/gltf.loader.js';
@@ -87,12 +88,13 @@ export const supportedImportFormats = Object.keys(loaderFromInputFormat) as Supp
 export const importFiles = async (
   files: FileInput[],
   format: SupportedImportFormat,
+  resolver?: FileResolver,
 ): Promise<Uint8Array<ArrayBuffer>> => {
   const loader = loaderFromInputFormat[format];
 
   loader.initialize({ format });
 
-  const result = await loader.loadAsync(files);
+  const result = await loader.loadAsync(files, resolver ? { resolver } : undefined);
 
   return result;
 };

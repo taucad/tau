@@ -25,6 +25,13 @@ declare module 'assimpjs' {
   export type AssimpJS = {
     FileList: new () => FileList;
     ConvertFileList(fileList: FileList, format: string): AssimpResult;
+    ConvertFile(
+      name: string,
+      format: string,
+      content: Uint8Array<ArrayBuffer>,
+      existsFunc: (filename: string) => boolean,
+      loadFunc: (filename: string) => Uint8Array<ArrayBuffer>,
+    ): AssimpResult;
   };
 
   function assimpjs(config?: EmscriptenModuleConfig): Promise<AssimpJS>;

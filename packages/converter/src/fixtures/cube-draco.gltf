@@ -1,113 +1,89 @@
 {
-  "extensionsUsed": [
-    "KHR_draco_mesh_compression",
-    "KHR_materials_transmission",
-    "KHR_materials_clearcoat",
-    "KHR_materials_ior",
-    "KHR_materials_specular",
-    "KHR_materials_emissive_strength",
-    "KHR_texture_transform"
-  ],
-  "extensionsRequired": [
-    "KHR_draco_mesh_compression"
-  ],
-  "accessors": [
-    {
-      "componentType": 5126,
-      "count": 36,
-      "type": "VEC3",
-      "max": [
-        0.001,
-        0.002,
-        0.001
-      ],
-      "min": [
-        -0.001,
-        0.0,
-        -0.001
-      ]
-    },
-    {
-      "componentType": 5125,
-      "count": 12,
-      "type": "SCALAR",
-      "max": [
-        35.0
-      ],
-      "min": [
-        0.0
-      ]
-    },
-    {
-      "componentType": 5126,
-      "count": 36,
-      "type": "VEC3",
-      "max": [
-        1.0,
-        0.0,
-        0.0
-      ],
-      "min": [
-        -1.0,
-        0.0,
-        0.0
-      ]
-    }
-  ],
   "asset": {
+    "generator": "glTF-Transform v4.3.0",
     "version": "2.0"
   },
-  "buffers": [
+  "accessors": [
     {
-      "uri": "data:application/octet-stream;base64,RFJBQ08CAgEBAAAAJAwBDAAABf////8P/wLMQAEBAAL/AAEAAAABAAkDAAACAQEJAwABAwEBAQEEAzEhARDRDhbYV638sxWgDGKMoTPqzdGIVE2QiNStAAAAAP8HAABvEoO6AAAAAG8Sg7pvEgM7CwYDAQEDAQFAAQD/AAAAfwAAAP8CgEII",
-      "byteLength": 135
+      "type": "SCALAR",
+      "componentType": 5123,
+      "count": 36
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 24,
+      "max": [
+        1,
+        1,
+        1
+      ],
+      "min": [
+        -1,
+        -1,
+        -1
+      ]
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 24
+    },
+    {
+      "type": "VEC2",
+      "componentType": 5126,
+      "count": 24
     }
   ],
   "bufferViews": [
     {
       "buffer": 0,
-      "byteLength": 135
+      "byteOffset": 0,
+      "byteLength": 214
+    }
+  ],
+  "buffers": [
+    {
+      "uri": "data:application/octet-stream;base64,RFJBQ08CAgEBAAAACAwCCwAAA1+rCgEBEFUEQ0W8R5wEKDurWQP/AAAAAQABAQABAAkDAAACAQEJAwABAwEDCQIAAgIBAQEAAwMBKAEYAwDIsKhgABwAAAAAAP8/AAAAAIC/AACAvwAAgL8AAABADgADAQALAwEwGwEIAQgGAAjLlW+AAAIA/AcAAAAg4D+AAID/wP//AP8DAAD/AQAACgEBAQANA7UtlQQflQQlCQU2vF++gADw/wD4f/8HAAAhCAAAAAD/DwAAAAAAPgAAAAAAAIA/DA==",
+      "byteLength": 214
     }
   ],
   "materials": [
     {
-      "name": "DefaultMaterial",
-      "extensions": {
-        "KHR_materials_transmission": {},
-        "KHR_materials_clearcoat": {},
-        "KHR_materials_ior": {
-          "ior": 1.0
-        },
-        "KHR_materials_specular": {
-          "specularFactor": 0.5,
-          "specularColorFactor": [
-            1.0,
-            1.0,
-            1.0
-          ]
-        }
-      },
+      "name": "Material",
+      "doubleSided": true,
       "pbrMetallicRoughness": {
-        "metallicFactor": 0.0
+        "baseColorFactor": [
+          0.800000011920929,
+          0.800000011920929,
+          0.800000011920929,
+          1
+        ],
+        "roughnessFactor": 0.5,
+        "metallicFactor": 0
       }
     }
   ],
   "meshes": [
     {
+      "name": "Cube",
       "primitives": [
         {
           "attributes": {
-            "POSITION": 0,
-            "NORMAL": 2
+            "POSITION": 1,
+            "NORMAL": 2,
+            "TEXCOORD_0": 3
           },
-          "indices": 1,
+          "mode": 4,
           "material": 0,
+          "indices": 0,
           "extensions": {
             "KHR_draco_mesh_compression": {
               "bufferView": 0,
               "attributes": {
                 "POSITION": 0,
-                "NORMAL": 1
+                "NORMAL": 1,
+                "TEXCOORD_0": 2
               }
             }
           }
@@ -117,24 +93,28 @@
   ],
   "nodes": [
     {
-      "mesh": 0,
-      "name": "node"
+      "name": "Cube",
+      "translation": [
+        0,
+        1,
+        0
+      ],
+      "mesh": 0
     }
   ],
-  "samplers": [
+  "scenes": [
     {
-      "magFilter": 9729,
-      "minFilter": 9729
+      "name": "Scene",
+      "nodes": [
+        0
+      ]
     }
   ],
   "scene": 0,
-  "scenes": [
-    {
-      "nodes": [
-        0
-      ],
-      "extensions": {}
-    }
+  "extensionsUsed": [
+    "KHR_draco_mesh_compression"
   ],
-  "extensions": {}
+  "extensionsRequired": [
+    "KHR_draco_mesh_compression"
+  ]
 }

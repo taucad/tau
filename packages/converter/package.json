@@ -54,7 +54,7 @@
     "@gltf-transform/extensions": "catalog:",
     "@gltf-transform/functions": "catalog:",
     "@taucad/types": "workspace:*",
-    "assimpjs": "catalog:",
+    "assimpjs": "file:../../repos/assimpjs/assimpjs-0.0.12.tgz",
     "draco3dgltf": "^1.5.7",
     "occt-import-js": "^0.0.23",
     "rhino3dm": "^8.17.0"

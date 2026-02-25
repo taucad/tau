@@ -6,11 +6,11 @@ icon: lucide:git-branch
 
 # Kernel Selection
 
-When you call `render({ file })`, the runtime must choose which kernel handles the file. Extension alone is insufficient: `.ts` files might use Replicad or JSCAD depending on imports. The selection cascade uses four strategies in order, with caching to avoid repeated work.
+When you call `render({ file })`, the runtime must choose which kernel handles the file. Extension alone is insufficient: `.ts` files might use Replicad, JSCAD, or Manifold depending on imports and code shape. The selection cascade uses four strategies in order, with caching to avoid repeated work.
 
 ## Context and Motivation
 
-Different CAD kernels handle different file types: OpenSCAD for `.scad`, Zoo for `.kcl`, Replicad and JSCAD for `.ts`/`.js`. For JS/TS, the same extension can map to multiple kernels; the decision depends on which library the file imports (e.g., `replicad` vs `@jscad/modeling`). The selection logic must be fast for common cases (extension match) and accurate for ambiguous cases (bundler-assisted import analysis). Caching ensures that repeated renders of the same file skip detection.
+Different CAD kernels handle different file types: OpenSCAD for `.scad`, Zoo for `.kcl`, and Replicad/JSCAD/Manifold for JS-family files. For JS/TS/TSX, the same extension can map to multiple kernels; the decision depends on imports and entry code patterns (for example, `replicad`, `@jscad/modeling`, or `circuit.add(...)`). The selection logic must be fast for common cases (extension match) and accurate for ambiguous cases (bundler-assisted import analysis). Caching ensures that repeated renders of the same file skip detection.
 
 ## How It Works
 
@@ -44,7 +44,7 @@ For each kernel config in registration order:
 1. Check if the file extension is in `config.extensions` (or config has `extensions: ['*']`).
 2. If `extensions: ['*']`, store as catch-all and continue (defer to pass 3 if nothing else matches).
 3. If no `detectImport`, select this kernel immediately. Examples: `.scad` → OpenSCAD, `.kcl` → Zoo.
-4. If `detectImport` exists, read the file and run the regex. On match, select this kernel. Example: `.ts` with `import ... from 'replicad'` → Replicad.
+4. If `detectImport` exists, read the file and run the regex. On match, select this kernel. Example: `.ts` with `import ... from 'replicad'` → Replicad, or `.tsx` with `circuit.add(...)` → Manifold.
 
 This pass is fast: at most one file read when regex detection is needed. No bundling.
 
@@ -86,7 +86,7 @@ The selection method (`extension`, `regex`, `bundler`, `catchall`) is also store
 
 ## Implications
 
-- **Order matters** — Register kernels in priority order. Put Replicad before JSCAD if both match `.ts` and you prefer Replicad for ambiguous cases.
+- **Order matters** — Register kernels in priority order. Put Replicad before JSCAD/Manifold if both can match `.ts` and you prefer Replicad for ambiguous cases.
 - **Catch-all last** — The Tau kernel (`extensions: ['*']`) should typically be last so specific kernels get first chance.
 - **File changes** — Call `client.notifyFileChanged(changedPaths)` when files change so the selection cache is invalidated.
 

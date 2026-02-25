@@ -115,7 +115,7 @@ export type KnownKernelProvider = KernelProvider | 'tau';
 /**
  * Kernel provider identifier.
  * Provides intellisense for first-party kernels while accepting arbitrary
- * third-party IDs (e.g. `'manifold'`, `'cadquery'`) without type errors.
+ * third-party IDs (e.g. `'cadquery'`, `'cadquery-wasm'`) without type errors.
  */
 export type KernelProviderId = KnownKernelProvider | (string & {});
 
@@ -161,7 +161,7 @@ export type KernelRegistration = {
  * ```ts
  * const modules: KernelModules = [
  *   ...defaultKernelModules,
- *   { id: 'manifold', extensions: ['*'], kernelModuleUrl: manifoldKernelModuleUrl },
+ *   { id: 'cadquery-wasm', extensions: ['py'], kernelModuleUrl: cadqueryKernelModuleUrl },
  * ];
  * ```
  */

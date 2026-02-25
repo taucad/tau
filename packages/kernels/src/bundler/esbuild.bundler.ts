@@ -20,6 +20,7 @@ import { defineBundler } from '#types/kernel-bundler.types.js';
 import type { BuiltinModule } from '#bundler/module-manager.js';
 import {
   EsbuildBundler,
+  createJsxBuildOptions,
   initializeEsbuild,
   executeCode,
   createDetectionPlugin,
@@ -59,6 +60,7 @@ export default defineBundler({
       plugins: [createDetectionPlugin({ filesystem: ctx.filesystem, projectPath: ctx.projectPath })],
       external: [],
       logLevel: 'silent',
+      ...createJsxBuildOptions(entryPath),
     };
 
     try {

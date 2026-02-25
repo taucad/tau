@@ -103,6 +103,26 @@ export default function main(p = defaultParams) {
       'ES module architecture',
     ],
   },
+  {
+    id: 'manifold',
+    name: 'Manifold (TSCircuit)',
+    dimensions: [2, 3],
+    language: 'tsx',
+    description: 'Electronics CAD with TypeScript + JSX',
+    mainFile: 'main.tsx',
+    backendProvider: 'manifold',
+    longDescription:
+      'Experimental electronics modeling kernel powered by TSCircuit. Author PCB-centric assemblies in TSX/JSX, render Circuit JSON through web/wasm tooling, and preview generated 3D geometry in Tau.',
+    emptyCode: `circuit.add(
+  <board width="40mm" height="30mm">
+    <resistor name="R1" resistance="1k" />
+  </board>
+);
+`,
+    recommended: 'Electronics & PCB Prototyping',
+    tags: ['Electronics CAD', 'PCB', 'TypeScript', 'JSX', 'Experimental'],
+    features: ['TSX/JSX authoring', 'Circuit JSON pipeline', 'PCB-first modeling', '3D board preview'],
+  },
 ] as const satisfies KernelConfiguration[];
 
 export type KernelId = (typeof kernelConfigurations)[number]['id'];

@@ -139,6 +139,24 @@ const zenfsPrefix = 'zenfs:';
 const defaultAutoExportNames = ['main', 'defaultParams'];
 
 /**
+ * JSX transform settings used only when the entrypoint requires JSX parsing.
+ * This keeps non-JSX bundles unchanged while enabling TSX/JSX kernels on demand.
+ */
+export function createJsxBuildOptions(
+  entryPath: string,
+): Pick<BuildOptions, 'jsx' | 'jsxFactory' | 'jsxFragment'> | Record<string, never> {
+  if (!/\.(tsx|jsx)$/i.test(entryPath)) {
+    return {};
+  }
+
+  return {
+    jsx: 'transform',
+    jsxFactory: 'React.createElement',
+    jsxFragment: 'React.Fragment',
+  };
+}
+
+/**
  * Resolve file extension for imports without extension.
  * Needs filesystem access, so it lives inside the plugin scope.
  */
@@ -657,6 +675,7 @@ const module = { exports };
         external: [],
         logLevel: 'silent',
         banner: { js: commonjsBanner },
+        ...createJsxBuildOptions(entryPath),
       };
 
       const result = await esbuild.build(buildOptions);

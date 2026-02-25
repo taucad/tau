@@ -74,4 +74,25 @@ const jscadBuilds: BuildWithFiles[] = jscadExamples.map((model) => {
   return createBuild(model, mainFile, language);
 });
 
-export const sampleBuilds: BuildWithFiles[] = [...replicadBuilds, ...openscadBuilds, ...jscadBuilds];
+const manifoldModels: Model[] = [
+  {
+    id: 'manifold_basic_board',
+    name: 'Manifold Basic Board',
+    code: `circuit.add(
+  <board width="48mm" height="30mm">
+    <hole name="H1" diameter="2.4mm" pcbX={-18} pcbY={10} />
+    <hole name="H2" diameter="2.4mm" pcbX={18} pcbY={10} />
+  </board>
+);`,
+    thumbnail: '/placeholder.svg',
+    language: 'manifold',
+  },
+] as const;
+
+const manifoldBuilds: BuildWithFiles[] = manifoldModels.map((model) => {
+  const mainFile = 'main.tsx';
+  const language: KernelProvider = 'manifold';
+  return createBuild(model, mainFile, language);
+});
+
+export const sampleBuilds: BuildWithFiles[] = [...replicadBuilds, ...openscadBuilds, ...jscadBuilds, ...manifoldBuilds];

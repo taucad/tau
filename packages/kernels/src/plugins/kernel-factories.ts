@@ -26,6 +26,16 @@ export type ZooOptions = {
 };
 
 /**
+ * Manifold (TSCircuit) kernel options.
+ */
+export type ManifoldOptions = {
+  /** Include external 3D component models during Circuit JSON to GLTF conversion. */
+  includeModels?: boolean;
+  /** Disable parts-engine network fetches for deterministic/offline-friendly rendering. */
+  partsEngineDisabled?: boolean;
+};
+
+/**
  * Create a Replicad kernel plugin registration.
  * Replicad is an OpenCASCADE-based parametric CAD kernel.
  *
@@ -85,6 +95,23 @@ export const jscad = createKernelPlugin({
   extensions: ['ts', 'js'],
   detectImport: /import\s+.*from\s+['"]@jscad\/modeling(\/[^'"]*)?['"]/,
   builtinModuleNames: ['@jscad/modeling'],
+});
+
+/**
+ * Create a Manifold (TSCircuit) kernel plugin registration.
+ *
+ * @example
+ * ```typescript
+ * manifold({ includeModels: false, partsEngineDisabled: true })
+ * ```
+ */
+export const manifold = createKernelPlugin<ManifoldOptions>({
+  id: 'manifold',
+  moduleUrl: new URL('../kernels/manifold/manifold.kernel.js', import.meta.url).href,
+  extensions: ['tsx', 'jsx', 'ts', 'js'],
+  detectImport:
+    /(?:import|export)\s+.*from\s+['"](?:@tscircuit\/core|tscircuit|@tsci\/[^'"]+)['"]|require\s*\(\s*['"](?:@tscircuit\/core|tscircuit|@tsci\/[^'"]+)['"]\s*\)|\bcircuit\.add\s*\(/s,
+  builtinModuleNames: ['@tscircuit/core', 'tscircuit', '@tsci'],
 });
 
 /**

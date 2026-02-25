@@ -73,7 +73,7 @@ All non-generic capabilities are provided by injectable plugins, not hardcoded i
 
 | Plugin Type | Author API | Consumer API | Purpose | Example |
 |-------------|-----------|-------------|---------|---------|
-| Kernel | `defineKernel` → `KernelDefinition` | `replicad()` → `KernelPlugin` | Geometry computation, parameter extraction, export | replicad, jscad, openscad, zoo, tau |
+| Kernel | `defineKernel` → `KernelDefinition` | `replicad()` → `KernelPlugin` | Geometry computation, parameter extraction, export | replicad, manifold, jscad, openscad, zoo, tau |
 | Bundler | `defineBundler` → `BundlerDefinition` | `esbuild()` → `BundlerPlugin` | File bundling, code execution, module registry, import detection | esbuild bundler |
 | Middleware | `defineMiddleware` → `KernelMiddleware` | `parameterCache()` → `MiddlewarePlugin` | Operation wrapping (caching, transforms, edge detection) | geometry-cache, parameter-cache |
 
@@ -103,6 +103,7 @@ Multiple bundlers can be registered simultaneously. Each bundler declares the fi
 With the single-worker-per-CU architecture, only the WASM runtime for the selected kernel is loaded:
 
 - replicad file: ~55-66 MB (OpenCASCADE WASM)
+- manifold file: ~14 MB (Manifold WASM)
 - openscad file: ~14 MB (Manifold WASM)
 - jscad file: ~5 MB
 - kcl file: ~3 MB (KCL WASM)
@@ -248,7 +249,7 @@ BuildMachine.stopStatefulActors()
 2. Pass 1: Extension + regex fast path
    - Try each kernel config's detectImport regex against the entry file
    - Extension-only kernels (openscad, zoo) match immediately
-   - Regex kernels (replicad, jscad) test entry file content
+   - Regex kernels (replicad, manifold, jscad) test entry file content
 
 3. Pass 2: Bundler-assisted detection (transitive)
    - If no kernel matched AND a bundler handles this file's extension:
@@ -266,7 +267,7 @@ BuildMachine.stopStatefulActors()
 ### Detection Priority
 
 ```
-Priority: openscad → zoo → replicad → jscad → tau
+Priority: openscad → zoo → replicad → manifold → jscad → tau
 ```
 
 | Kernel | Detection Method | Scope |
@@ -274,6 +275,7 @@ Priority: openscad → zoo → replicad → jscad → tau
 | OpenScad | Extension: `.scad` | Immediate |
 | Zoo | Extension: `.kcl` | Immediate |
 | Replicad | Regex + bundler detectImports | Entry file + transitive |
+| Manifold | Regex + bundler detectImports | Entry file + transitive |
 | Jscad | Regex + bundler detectImports | Entry file + transitive |
 | Tau | Extension: `*` (catch-all) | Fallback |
 
@@ -350,7 +352,7 @@ During detection, bare specifiers appear as external imports in `metafile.output
 
 ```
 @taucad/kernels          → createKernelClient, types, presets, fromNodeFS, fromMemoryFS
-@taucad/kernels/kernels  → replicad(), zoo(), openscad(), jscad(), tau()
+@taucad/kernels/kernels  → replicad(), manifold(), zoo(), openscad(), jscad(), tau()
 @taucad/kernels/middleware → parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()
 @taucad/kernels/bundler  → esbuild()
 @taucad/kernels/transport → KernelTransport, createWorkerTransport()
@@ -408,6 +410,7 @@ If no tessellation is specified at any level, each kernel applies its own intern
 | Kernel | Preview Default | Export Default | Mechanism |
 |--------|----------------|----------------|-----------|
 | **Replicad** | `0.1 / 30°` | `0.01 / 30°` | Passed to `.mesh()` and `.meshEdges()` |
+| **Manifold** | ignored | ignored | Uses Manifold's own tessellation; fixed by model/API output |
 | **OpenSCAD** | none | n/a | Injected as `$fs` (linear) and `$fa` (angular) CLI arguments at render time. Export reuses baked geometry — override logged as warning |
 | **Zoo/KCL** | ignored | ignored | Tessellation is server-side; future integration point |
 | **JSCAD** | ignored | ignored | Uses fixed internal tessellation |

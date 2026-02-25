@@ -1,12 +1,12 @@
 ---
 title: Choosing a Kernel
-description: Compare Replicad, OpenSCAD, JSCAD, and Zoo kernels to find the right one for your project.
+description: Compare Replicad, Manifold, OpenSCAD, JSCAD, and Zoo kernels to find the right one for your project.
 icon: lucide:git-compare
 ---
 
 # Choosing a Kernel
 
-Compare the four built-in kernels and select the right one for your CAD workflow. This guide helps you decide based on language, export formats, and use cases.
+Compare the built-in kernels and select the right one for your CAD workflow. This guide helps you decide based on language, export formats, and use cases.
 
 ## Prerequisites
 
@@ -18,6 +18,7 @@ Compare the four built-in kernels and select the right one for your CAD workflow
 | Kernel | Language | Strengths | Export Formats | Use Cases |
 |--------|----------|-----------|----------------|-----------|
 | **Replicad** | TypeScript/JS | Parametric BRep via OpenCASCADE. STEP export. Strong typing. | glTF, GLB, STEP, STL, STL-binary | Professional CAD, mechanical parts, STEP interchange |
+| **Manifold** | TypeScript/JS | Mesh-first modeling with robust booleans and fast WASM execution. | glTF, GLB | Browser-native CAD, procedural booleans, mesh workflows |
 | **OpenSCAD** | OpenSCAD | CSG modeling. Familiar `.scad` syntax. Mature ecosystem. | glTF, GLB, STL, STL-binary | 3D printing, functional parts, CSG workflows |
 | **JSCAD** | TypeScript/JS | Parametric CSG with `@jscad/modeling`. Browser-native. | glTF, GLB | Web-based CAD, parametric designs, lightweight models |
 | **Zoo (KCL)** | KCL | Cloud-native CAD. AI integration via Zoo API. | glTF, GLB, STEP, STL, STL-binary | Cloud workflows, AI-assisted modeling, remote execution |
@@ -26,19 +27,20 @@ Compare the four built-in kernels and select the right one for your CAD workflow
 
 ### 1. Language and Ecosystem
 
-- **TypeScript/JS**: Choose Replicad or JSCAD if you want to write CAD code in TypeScript. Replicad uses BRep (boundary representation); JSCAD uses CSG (constructive solid geometry).
+- **TypeScript/JS**: Choose Replicad, Manifold, or JSCAD for TypeScript-based CAD. Replicad is BRep/exact geometry, Manifold is mesh-first and boolean-focused, and JSCAD is CSG-focused.
 - **OpenSCAD**: Choose OpenSCAD if you have existing `.scad` files or prefer the OpenSCAD language.
 - **KCL**: Choose Zoo if you need cloud execution or AI integration via the Zoo API.
 
 ### 2. Export Requirements
 
 - **STEP**: Required for professional CAD interchange. Use Replicad or Zoo.
-- **STL for 3D printing**: All kernels except JSCAD support STL. Replicad, OpenSCAD, and Zoo support both ASCII and binary STL.
-- **glTF/GLB for web viewers**: All kernels produce glTF. Use any kernel for web display.
+- **STL for 3D printing**: Replicad, OpenSCAD, and Zoo support STL (ASCII/binary).
+- **glTF/GLB for web viewers**: All kernels produce glTF/GLB, including Manifold.
 
 ### 3. Modeling Paradigm
 
 - **BRep (Replicad)**: Best for precise mechanical parts, fillets, chamfers, and STEP export.
+- **Mesh-first booleans (Manifold)**: Best for robust boolean-heavy modeling and fast browser-native mesh generation.
 - **CSG (OpenSCAD, JSCAD)**: Best for boolean operations, 3D printing, and procedural designs.
 
 ## When to Use Each Kernel
@@ -78,6 +80,26 @@ import { openscad } from '@taucad/kernels/kernels';
 
 const client = createKernelClient({
   kernels: [openscad()],
+  fileSystem: fromMemoryFS(),
+});
+```
+
+### Manifold
+
+Use Manifold when you need:
+
+- High-performance boolean operations in TypeScript
+- Mesh-first modeling pipelines
+- Browser-friendly WASM performance with robust topology
+
+```typescript
+import { createKernelClient, fromMemoryFS } from '@taucad/kernels';
+import { manifold } from '@taucad/kernels/kernels';
+import { esbuild } from '@taucad/kernels/bundler';
+
+const client = createKernelClient({
+  kernels: [manifold()],
+  bundlers: [esbuild()],
   fileSystem: fromMemoryFS(),
 });
 ```
@@ -126,16 +148,16 @@ You can register multiple kernels in a single client. The framework selects the 
 
 ```typescript
 import { createKernelClient, fromMemoryFS } from '@taucad/kernels';
-import { replicad, openscad, jscad } from '@taucad/kernels/kernels';
+import { replicad, manifold, openscad, jscad } from '@taucad/kernels/kernels';
 import { esbuild } from '@taucad/kernels/bundler';
 
 const client = createKernelClient({
-  kernels: [replicad(), openscad(), jscad()],
+  kernels: [replicad(), manifold(), openscad(), jscad()],
   bundlers: [esbuild()],
   fileSystem: fromMemoryFS(),
 });
 
-// .ts/.js files -> Replicad or JSCAD (based on imports)
+// .ts/.js files -> Replicad, Manifold, or JSCAD (based on imports)
 // .scad files -> OpenSCAD
 const result = await client.render({ code: { 'model.ts': '...' } });
 ```
@@ -146,6 +168,7 @@ Kernel selection order follows the order in the `kernels` array. The first kerne
 
 - **Tau kernel**: Use the `tau()` kernel for importing CAD files (STEP, STL, OBJ, etc.) to glTF without writing code. It handles format conversion only.
 - **Replicad options**: Pass `{ withExceptions: true }` to `replicad()` for detailed OpenCASCADE error messages during development.
+- **Manifold options**: `manifold()` currently has no runtime options; behavior is controlled by your model code.
 - **Zoo options**: Zoo requires `baseUrl` for the WebSocket connection to the Zoo engine.
 
 ## Related

@@ -1,6 +1,6 @@
 ---
 title: Kernels
-description: A multi-kernel CAD runtime for browser and Node.js. Run Replicad, OpenSCAD, JSCAD, and Zoo from a unified API.
+description: A multi-kernel CAD runtime for browser and Node.js. Run Replicad, Manifold, OpenSCAD, JSCAD, and Zoo from a unified API.
 icon: lucide:blocks
 ---
 
@@ -35,6 +35,7 @@ const result = await client.export('step', {
 | Kernel | Language | Strengths |
 |---|---|---|
 | **Replicad** | TypeScript/JS | Parametric BRep modeling via OpenCASCADE. STEP export. |
+| **Manifold** | TypeScript/JS | Robust mesh booleans with `manifold-3d`. Fast WASM workflows. |
 | **OpenSCAD** | OpenSCAD | CSG modeling for 3D printing. Familiar `.scad` syntax. |
 | **JSCAD** | TypeScript/JS | Parametric CSG with `@jscad/modeling`. |
 | **Zoo (KCL)** | KCL | Cloud-native CAD with AI integration via Zoo API. |

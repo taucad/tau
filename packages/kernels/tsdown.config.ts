@@ -8,6 +8,7 @@ const baseConfig: Options = {
     'src/middleware/kernel-middleware.ts',
     'src/kernels/replicad/replicad.kernel.ts',
     'src/kernels/jscad/jscad.kernel.ts',
+    'src/kernels/manifold/manifold.kernel.ts',
     'src/kernels/openscad/openscad.kernel.ts',
     'src/kernels/zoo/zoo.kernel.ts',
     'src/kernels/zoo/engine-connection.ts',

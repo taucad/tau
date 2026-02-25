@@ -26,6 +26,12 @@ export type ZooOptions = {
 };
 
 /**
+ * Manifold kernel options.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- Manifold currently exposes no runtime options
+export type ManifoldOptions = {};
+
+/**
  * Create a Replicad kernel plugin registration.
  * Replicad is an OpenCASCADE-based parametric CAD kernel.
  *
@@ -85,6 +91,22 @@ export const jscad = createKernelPlugin({
   extensions: ['ts', 'js'],
   detectImport: /import\s+.*from\s+['"]@jscad\/modeling(\/[^'"]*)?['"]/,
   builtinModuleNames: ['@jscad/modeling'],
+});
+
+/**
+ * Create a Manifold kernel plugin registration.
+ *
+ * @example
+ * ```typescript
+ * manifold()
+ * ```
+ */
+export const manifold = createKernelPlugin<ManifoldOptions>({
+  id: 'manifold',
+  moduleUrl: new URL('../kernels/manifold/manifold.kernel.js', import.meta.url).href,
+  extensions: ['ts', 'js'],
+  detectImport: /import\s+.*from\s+['"]manifold-3d(\/[^'"]*)?['"]/,
+  builtinModuleNames: ['manifold-3d', 'manifold-3d/manifoldCAD'],
 });
 
 /**

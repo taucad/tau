@@ -17,6 +17,14 @@ import { defineMiddleware } from '#middleware/kernel-middleware.js';
 import { MockKernelWorker } from '#testing/kernel-testing.utils.js';
 
 describe('kernel-worker middleware onion chain', () => {
+  type CreateGeometrySpyTarget = {
+    onCreateGeometry: (...arguments_: unknown[]) => Promise<CreateGeometryResult>;
+  };
+
+  function spyOnCreateGeometry(worker: MockKernelWorker) {
+    return vi.spyOn(worker as unknown as CreateGeometrySpyTarget, 'onCreateGeometry');
+  }
+
   const mockGltfContent = new Uint8Array([1, 2, 3, 4]);
   const successResult: CreateGeometryResult = {
     success: true,
@@ -61,7 +69,7 @@ describe('kernel-worker middleware onion chain', () => {
       });
 
       // Spy on the internal createGeometry to track when main is called
-      const createGeometrySpy = vi.spyOn(worker as never, 'onCreateGeometry').mockImplementation(async () => {
+      const createGeometrySpy = spyOnCreateGeometry(worker).mockImplementation(async () => {
         executionOrder.push('main');
         return successResult;
       });
@@ -102,7 +110,7 @@ describe('kernel-worker middleware onion chain', () => {
         onLog: onLog as OnWorkerLog,
       });
 
-      const createGeometrySpy = vi.spyOn(worker as never, 'onCreateGeometry').mockImplementation(async () => {
+      const createGeometrySpy = spyOnCreateGeometry(worker).mockImplementation(async () => {
         executionOrder.push('main');
         return successResult;
       });
@@ -142,7 +150,7 @@ describe('kernel-worker middleware onion chain', () => {
         onLog: onLog as OnWorkerLog,
       });
 
-      const createGeometrySpy = vi.spyOn(worker as never, 'onCreateGeometry').mockImplementation(async () => {
+      const createGeometrySpy = spyOnCreateGeometry(worker).mockImplementation(async () => {
         executionOrder.push('main');
         return successResult;
       });
@@ -217,7 +225,7 @@ describe('kernel-worker middleware onion chain', () => {
         onLog: onLog as OnWorkerLog,
       });
 
-      const createGeometrySpy = vi.spyOn(worker as never, 'onCreateGeometry').mockImplementation(async () => {
+      const createGeometrySpy = spyOnCreateGeometry(worker).mockImplementation(async () => {
         executionOrder.push('main');
         return successResult;
       });
@@ -408,7 +416,7 @@ describe('kernel-worker middleware onion chain', () => {
         onLog: onLog as OnWorkerLog,
       });
 
-      const createGeometrySpy = vi.spyOn(worker as never, 'onCreateGeometry').mockImplementation(async () => {
+      const createGeometrySpy = spyOnCreateGeometry(worker).mockImplementation(async () => {
         executionOrder.push('main');
         return successResult;
       });
@@ -447,7 +455,7 @@ describe('kernel-worker middleware onion chain', () => {
         onLog: onLog as OnWorkerLog,
       });
 
-      const createGeometrySpy = vi.spyOn(worker as never, 'onCreateGeometry').mockImplementation(async () => {
+      const createGeometrySpy = spyOnCreateGeometry(worker).mockImplementation(async () => {
         executionOrder.push('main');
         return successResult;
       });
@@ -480,7 +488,7 @@ describe('kernel-worker middleware onion chain', () => {
         onLog: onLog as OnWorkerLog,
       });
 
-      const createGeometrySpy = vi.spyOn(worker as never, 'onCreateGeometry').mockImplementation(async () => {
+      const createGeometrySpy = spyOnCreateGeometry(worker).mockImplementation(async () => {
         executionOrder.push('main');
         return successResult;
       });
@@ -508,7 +516,7 @@ describe('kernel-worker middleware onion chain', () => {
         onLog: onLog as OnWorkerLog,
       });
 
-      vi.spyOn(worker as never, 'onCreateGeometry').mockRejectedValue(new Error('Main operation failed'));
+      spyOnCreateGeometry(worker).mockRejectedValue(new Error('Main operation failed'));
 
       const result = await worker.runCreateGeometry();
       expect(result.success).toBe(false);

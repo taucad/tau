@@ -10,7 +10,7 @@ The @taucad/kernels runtime is extensible through a plugin system. Instead of in
 
 ## Context and Motivation
 
-CAD runtimes must support multiple engines (Replicad, OpenSCAD, JSCAD, Zoo), multiple preprocessing steps (caching, coordinate transforms), and multiple bundling strategies (esbuild for JS/TS, none for OpenSCAD). Inheritance would force a rigid class hierarchy; configuration files would push logic into strings. Plugins offer a middle path: typed, composable extensions that the framework discovers at runtime through explicit registration.
+CAD runtimes must support multiple engines (Replicad, Manifold, OpenSCAD, JSCAD, Zoo), multiple preprocessing steps (caching, coordinate transforms), and multiple bundling strategies (esbuild for JS/TS, none for OpenSCAD). Inheritance would force a rigid class hierarchy; configuration files would push logic into strings. Plugins offer a middle path: typed, composable extensions that the framework discovers at runtime through explicit registration.
 
 ## How It Works
 
@@ -44,7 +44,7 @@ flowchart LR
 
 ### KernelPlugin
 
-A [KernelPlugin](/docs/api/kernels) describes a CAD engine. Factory functions like `replicad()`, `openscad()`, and `zoo()` return a registration object:
+A [KernelPlugin](/docs/api/kernels) describes a CAD engine. Factory functions like `replicad()`, `manifold()`, `openscad()`, and `zoo()` return a registration object:
 
 - `id` — Unique identifier (e.g., `'replicad'`)
 - `moduleUrl` — URL of the `defineKernel` module (resolved via `import.meta.url`)

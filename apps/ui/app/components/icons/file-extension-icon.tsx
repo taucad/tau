@@ -131,6 +131,7 @@ function getIconConfig(extension: string): IconConfig | undefined {
       openscad: 'openscad',
       zoo: 'zoo',
       replicad: 'typescript',
+      manifold: 'typescript',
       jscad: 'typescript',
     };
 

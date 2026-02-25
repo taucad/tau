@@ -18,6 +18,14 @@ import { defineMiddleware } from '#middleware/kernel-middleware.js';
 import { MockKernelWorker } from '#testing/kernel-testing.utils.js';
 
 describe('kernel-worker wrapExportGeometry middleware', () => {
+  type ExportGeometrySpyTarget = {
+    onExportGeometry: (...arguments_: unknown[]) => Promise<ExportGeometryResult>;
+  };
+
+  function spyOnExportGeometry(worker: MockKernelWorker) {
+    return vi.spyOn(worker as unknown as ExportGeometrySpyTarget, 'onExportGeometry');
+  }
+
   const defaultExportResult: ExportGeometryResult = {
     success: true,
     data: [{ bytes: new TextEncoder().encode('test-content'), name: 'export.gltf', mimeType: 'model/gltf+json' }],
@@ -151,7 +159,7 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    const exportSpy = vi.spyOn(worker as never, 'onExportGeometry').mockImplementation(async () => {
+    const exportSpy = spyOnExportGeometry(worker).mockImplementation(async () => {
       executionOrder.push('main');
       return defaultExportResult;
     });
@@ -183,7 +191,7 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    const exportSpy = vi.spyOn(worker as never, 'onExportGeometry');
+    const exportSpy = spyOnExportGeometry(worker);
 
     const result = await worker.runExportGeometry();
 

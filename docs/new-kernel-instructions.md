@@ -1,125 +1,238 @@
-JSCAD kernel integration (initial wiring)
-========================================
+# New Kernel Integration Instructions (Agent-Optimized)
 
-This document explains how to add a new CAD kernel to the Tau UI. It documents the steps taken to integrate the JSCAD kernel and can be used as a template for future kernels.
+Canonical playbook for adding a **new first-party CAD kernel** to Tau.
 
-What we added
--------------
-- New worker: `apps/ui/app/components/geometry/kernel/jscad/jscad.worker.ts`
-- Type re-export to prevent double bundling: `apps/ui/app/components/geometry/kernel/jscad/jscad.worker.types.ts`
-- Kernel registry update: `libs/types/src/constants/kernel.constants.ts` (added `jscad` entry)
-- Kernel machine wiring: `apps/ui/app/machines/kernel.machine.ts` (spawning/teardown/priority)
-- Examples:
-  - Library: `libs/tau-examples/src/build.examples.ts` → exported `jscadExamples`
-  - Index export: `libs/tau-examples/src/index.ts`
-  - UI sample builds: `apps/ui/app/constants/build-examples.ts` → added `jscad` builds
+This replaces older worker-specific guidance. The active architecture uses:
 
-How to add a new kernel (repeatable recipe)
-------------------------------------------
-1) Create a worker
-   - Location: `apps/ui/app/components/geometry/kernel/<kernel>/<kernel>.worker.ts`
-   - Extend `KernelWorker` and implement:
-     - `canHandle(file)` → quick gate to detect supported files
-     - `async getParameters({ filePath, basePath }, { filesystem, logger })` → return `Promise<KernelResult<{ defaultParameters, jsonSchema }>>`
-       - `basePath` is required for multi-file projects to resolve relative imports
-       - Second parameter is `KernelRuntime` which provides `filesystem` and `logger` for implementations
-     - `async createGeometry({ filePath, basePath, parameters }, { filesystem, logger })` → return `Promise<KernelResult<GeometryResponse[]>>`
-       - `basePath` is required for multi-file projects to resolve relative imports
-       - Second parameter is `KernelRuntime` which provides `filesystem` and `logger` for implementations
-     - `exportGeometry(format, geometryId?)` → return blobs for requested format(s)
-   - Expose the worker via `comlink`:
-     ```
-     const service = new MyWorker();
-     expose(service);
-     export type MyWorkerInterface = typeof service;
-     ```
-   - Add a `.types.ts` sibling that re-exports the worker interface type to avoid Vite bundling the worker twice:
-     ```
-     // eslint-disable-next-line no-barrel-files/no-barrel-files
-     export type { MyWorkerInterface } from '#components/geometry/kernel/<kernel>/<kernel>.worker.js';
-     ```
+- `@taucad/kernels` plugin system (`defineKernel`, `createKernelPlugin`, presets)
+- `KernelRuntimeWorker` (single worker, per-file kernel selection)
+- Nx monorepo validation commands (`pnpm nx ...`)
 
-2) Register in the kernel machine
-   - File: `apps/ui/app/machines/kernel.machine.ts`
-   - Extend the local `KernelProvider` union with your id (e.g. `'jscad'`).
-   - Import the worker:
-     ```
-     import type { MyWorkerInterface as MyWorker } from '#components/geometry/kernel/<kernel>/<kernel>.worker.types.js';
-     import MyBuilderWorker from '#components/geometry/kernel/<kernel>/<kernel>.worker.js?worker';
-     ```
-   - Add to `workers` map and `workerPriority`.
-   - Create, wrap, and initialize the worker in `createWorkersActor`.
-   - Store references in `context.workers` and `context.wrappedWorkers`.
-   - Add cleanup in `destroyWorkers` action.
+---
 
-3) Add a kernel entry to the catalog
-   - File: `libs/types/src/constants/kernel.constants.ts`
-   - Append a `KernelConfiguration` record with:
-     - `id`, `name`, `language`, `dimensions`, `mainFile`, `backendProvider`
-     - `emptyCode` starter (what gets created when the user starts a new build)
-   - All UI selectors and helpers (`getMainFile`, `getEmptyCode`) use this registry.
+## 0) Scope and Definition of Done
 
-4) Provide examples (optional but recommended)
-   - Library: `libs/tau-examples/src/build.examples.ts`
-     - Export a list of `{ id, name, code, thumbnail }` models.
-   - Re-export from `libs/tau-examples/src/index.ts`.
-   - UI: `apps/ui/app/constants/build-examples.ts`
-     - Map examples to `Build` objects and add to `sampleBuilds`.
+A kernel integration is complete only when **all** of the following are done:
 
-5) Verify Nx tasks
-   - Typecheck UI: `pnpm nx typecheck ui`
-   - Lint UI: `pnpm nx lint ui`
-   - Test UI: `pnpm nx test ui --watch=false`
+1. Kernel implementation exists in `packages/kernels/src/kernels/<id>/<id>.kernel.ts`
+2. Comprehensive tests exist and pass
+3. Kernel is wired into plugin factories + presets + exports + build entries
+4. UI default/debug kernel options include the kernel where applicable
+5. Type/catalog metadata includes the kernel (`libs/types/src/constants/kernel.constants.ts`)
+6. Docs and prompt configuration mention and support the kernel
+7. Required Nx lint/typecheck/test commands pass
 
-About the JSCAD worker (fully implemented)
--------------------------------------------
-- `canHandle` detects TS/JS code importing or requiring `@jscad/modeling`.
-- `getParameters` supports both:
-  - **ES Modules**: `export const defaultParams = { ... }` → Converts to JSON Schema
-  - **CommonJS**: `getParameterDefinitions()` → Converts parameter definitions to JSON Schema with proper type mapping
-- `createGeometry` executes user code in a sandboxed VM and converts JSCAD geometry to GLTF for rendering.
-- `exportGeometry` supports STL export format.
+---
 
-Key implementation details:
-- Uses the shared VM (`replicad/vm.ts`) with `@jscad/modeling` injected into `globalThis.jscadModeling`.
-- Parameter schema generation handled by `jscad.schema.ts` with comprehensive type mapping:
-  - `caption` → `description`
-  - `initial`/`default` → `default`
-  - `min` → `minimum`
-  - `max` → `maximum`
-  - `step` → `multipleOf`
-  - JSCAD types (`int`, `float`, `text`, `checkbox`, `choice`, `slider`) → JSON Schema types
-- GLTF conversion uses `gltf-transform` library for robust scene construction with proper normals.
-- Supports both ES module (`export default function main`) and CommonJS (`module.exports = { main }`) patterns.
+## 1) Implementation Blueprint
 
-6) Add AI chat prompt configuration (for AI-assisted modeling)
-   - File: `apps/api/app/api/chat/prompts/chat-prompt-cad.ts`
-   - Import examples if available: `import { yourKernelExamples } from '@taucad/tau-examples';`
-   - Create examples string: `const yourExamplesString = yourKernelExamples.map(...).join('\\n\\n');`
-   - Add a `KernelConfig` entry to `cadKernelConfigs` with:
-     - `fileExtension`: File extension for this kernel (e.g., `.js`, `.scad`, `.ts`)
-     - `languageName`: Human-readable name (e.g., "JSCAD (JavaScript)")
-     - `roleDescription`: Brief description of the kernel's purpose
-     - `technicalContext`: Detailed explanation of the kernel's strengths and use cases
-     - `codeStandards`: Code output requirements, syntax examples, and formatting rules
-     - `modelingStrategy`: Design philosophy and modeling approach
-     - `technicalResources`: Available APIs, modules, and example code
-     - `codeIssueDescription`: Description of compilation/syntax errors
-     - `kernelIssueDescription`: Description of runtime/geometric errors
-     - `commonErrorPatterns`: List of common issues and solutions
-     - `parameterNamingConvention`: Naming style (camelCase, snake_case, etc.)
-     - `parameterNamingExample`: Example of good parameter naming
-     - `implementationApproach`: Guidance for planning model implementation
-     - `mainFunctionDescription`: Description of how the main function should work
+### 1.1 Create kernel module
 
-Gotchas and conventions
------------------------
-- Always return result-pattern objects (`createKernelSuccess` / `createKernelError`).
-- Add supported export formats via the `supportedExportFormats` static property.
-- Keep worker initialization lightweight; `canHandle` must be fast and not initialize heavy runtimes.
-- Follow eslint/type rules (explicit return types, `import type`, etc.).
-- For parameter extraction, prefer creating dedicated schema utilities (e.g., `jscad.schema.ts`) for complex transformations.
-- When converting geometry to GLTF, use `gltf-transform` for robust scene construction with proper normals.
-- Test both ES module and CommonJS patterns if your kernel supports JavaScript/TypeScript.
+**File:** `packages/kernels/src/kernels/<id>/<id>.kernel.ts`
 
+Implement via `defineKernel({...})`:
 
+- `initialize(options, runtime)`  
+  Load heavy runtimes (WASM, SDK clients), register built-in modules with `runtime.bundler.registerModule(...)`.
+- `canHandle({ filePath, extension }, runtime, context)`  
+  Must be fast. For JS/TS kernels, detect imports/require patterns.
+- `getDependencies({ filePath }, runtime, context)`  
+  Usually `runtime.bundler.resolveDependencies(filePath)` for JS/TS kernels.
+- `getParameters(...)`  
+  Parse `defaultParams` / `defaultParameters` and return JSON schema (commonly via `jsonSchemaFromJson`).
+- `createGeometry(...)`  
+  Bundle + execute user code; return `{ geometry: GeometryResponse[], nativeHandle }`.
+- `exportGeometry(...)`  
+  Export from `nativeHandle`; return `createKernelSuccess([...])` / `createKernelError([...])`.
+- `cleanup(context)` (optional but recommended)  
+  Release WASM/manual resources.
+
+**Error model:**
+
+- Use `createKernelError` / `createKernelSuccess` in non-throw paths.
+- For fatal geometry failures, throw `Error` with `.issues` array (custom `*BuildError`) so framework returns structured issues.
+- Prefer stack enrichment utilities in `#framework/error-enrichment.js` for JS/TS kernels.
+
+### 1.2 Add tests
+
+**File:** `packages/kernels/src/kernels/<id>/<id>.kernel.test.ts`
+
+Use helpers from `#testing/kernel-testing.utils.js` and `#testing/kernel-geometry-testing.utils.js`.
+
+Minimum coverage:
+
+- `canHandle`: positive and negative cases
+- `getParameters`: defaults extraction + empty fallback
+- `createGeometry`: happy path + parameterized path + runtime/compile errors
+- `exportGeometry`: supported and unsupported formats + no-geometry failure
+
+Reference quality bar:
+
+- `jscad.kernel.test.ts`
+- `replicad.kernel.test.ts`
+
+---
+
+## 2) Wiring Checklist (Required Files)
+
+### 2.1 Kernel plugin factory
+
+**File:** `packages/kernels/src/plugins/kernel-factories.ts`
+
+- Add `<kernel>()` factory
+- Add `<KernelOptions>` type (even if empty)
+- Configure:
+  - `id`
+  - `moduleUrl`
+  - `extensions`
+  - `detectImport` (if JS/TS)
+  - `builtinModuleNames` (if JS/TS library imports should trigger transitive detection)
+
+### 2.2 Export factory to consumers
+
+**File:** `packages/kernels/src/plugins/kernels-entry.ts`
+
+- Export new factory + options type.
+
+### 2.3 Include in defaults
+
+**File:** `packages/kernels/src/plugins/presets.ts`
+
+- Add `<kernel>()` to `presets.all().kernels` in intended priority order.
+
+### 2.4 Package subpath exports
+
+**File:** `packages/kernels/package.json`
+
+- Add source export:
+  - `"./kernels/<id>": "./src/kernels/<id>/<id>.kernel.ts"`
+- Add publishConfig export entries for CJS + ESM outputs.
+
+### 2.5 Build entrypoints
+
+**File:** `packages/kernels/tsdown.config.ts`
+
+- Add `src/kernels/<id>/<id>.kernel.ts` to `entry`.
+
+### 2.6 Smoke imports
+
+**File:** `packages/kernels/src/testing/smoke-esm.test.ts`
+
+- Add import assertion for `#kernels/<id>/<id>.kernel.js`.
+
+### 2.7 UI kernel defaults
+
+**File:** `apps/ui/app/constants/kernel-worker.constants.ts`
+
+- Add kernel factory import and include in `defaultKernelOptions`.
+- Ensure `debugKernelOptions` logic still works.
+
+### 2.8 Kernel catalog/type metadata
+
+**File:** `libs/types/src/constants/kernel.constants.ts`
+
+- Add `kernelConfigurations` entry with:
+  - `id`, `name`, `language`, `mainFile`, `backendProvider`
+  - `description`, `longDescription`
+  - `emptyCode`, `recommended`, `tags`, `features`
+
+---
+
+## 3) Prompt System Integration (AI CAD Agent)
+
+Add kernel prompt config files under:
+
+`apps/api/app/api/chat/prompts/kernel-prompt-configs/`
+
+Required:
+
+- `<id>.prompt.config.ts`
+- `<id>.prompt.example.<ext>`
+- Register in `kernel.prompt.config.ts` map
+
+Use existing configs (replicad/jscad/zoo/openscad) as templates.
+
+---
+
+## 4) Documentation Updates (Required)
+
+At minimum update:
+
+- `docs/kernel-architecture-policy.md`
+- `docs/new-kernel-instructions.md` (this file, when improving process)
+- Kernel docs site pages under `apps/ui/content/docs/(kernels)/...`:
+  - index
+  - choosing-a-kernel
+  - installation
+  - api/kernels
+  - concepts/plugin-system
+  - guides/bundler-configuration
+
+Update all kernel lists/comparison tables, examples, and selection priority references.
+
+---
+
+## 5) Verification Commands (Nx)
+
+Run scoped checks first, then broaden if needed:
+
+```bash
+pnpm nx typecheck kernels
+pnpm nx test kernels --watch=false
+pnpm nx lint kernels
+```
+
+If files in `apps/ui` or `apps/api` changed:
+
+```bash
+pnpm nx typecheck ui
+pnpm nx lint ui
+pnpm nx test ui --watch=false
+
+pnpm nx typecheck api
+pnpm nx lint api
+pnpm nx test api --watch=false
+```
+
+When touching multiple projects, run affected checks or a targeted matrix.
+
+---
+
+## 6) Agent Execution Protocol (Recommended)
+
+1. Implement kernel + tests first
+2. Wire factories/exports/build/smoke
+3. Wire UI + type catalog + prompts
+4. Update docs
+5. Run Nx checks and fix all regressions
+6. Commit with descriptive message
+
+Keep commits logically grouped (implementation, docs, etc.) if practical.
+
+---
+
+## 7) Common Failure Modes
+
+- Added kernel file but forgot `tsdown` entry (build output missing)
+- Added factory but forgot `kernels-entry.ts` export (consumer import fails)
+- Added kernel to code but not to docs comparisons (docs drift)
+- `canHandle` too broad/slow (kernel mis-selection)
+- Missing `builtinModuleNames` for JS/TS kernels (transitive import detection fails)
+- Export path missing in `package.json` publishConfig (package consumers break)
+
+---
+
+## 8) Quick File Checklist
+
+- [ ] `packages/kernels/src/kernels/<id>/<id>.kernel.ts`
+- [ ] `packages/kernels/src/kernels/<id>/<id>.kernel.test.ts`
+- [ ] `packages/kernels/src/plugins/kernel-factories.ts`
+- [ ] `packages/kernels/src/plugins/kernels-entry.ts`
+- [ ] `packages/kernels/src/plugins/presets.ts`
+- [ ] `packages/kernels/package.json`
+- [ ] `packages/kernels/tsdown.config.ts`
+- [ ] `packages/kernels/src/testing/smoke-esm.test.ts`
+- [ ] `apps/ui/app/constants/kernel-worker.constants.ts`
+- [ ] `libs/types/src/constants/kernel.constants.ts`
+- [ ] `apps/api/app/api/chat/prompts/kernel-prompt-configs/*`
+- [ ] Kernel docs pages + architecture policy updates

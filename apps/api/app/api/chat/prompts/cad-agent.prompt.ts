@@ -17,7 +17,7 @@ function getFileOrganizationStrategy(config: KernelConfig): string {
  * Generates the CAD system prompt for the specified kernel.
  * Optimized per context-engineering.mdc guidelines.
  *
- * @param kernel - The CAD kernel provider (openscad, replicad, zoo, jscad)
+ * @param kernel - The CAD kernel provider (openscad, replicad, manifold, zoo, jscad)
  * @returns The complete system prompt tailored to the kernel
  */
 export async function getCadSystemPrompt(kernel: KernelProvider): Promise<string> {

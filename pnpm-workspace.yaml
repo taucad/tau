@@ -68,6 +68,7 @@ catalog:
   json-schema-default: ^1.0.2
   langchain: ^1.2.27
   madge: ^8.0.0
+  manifold-3d: ^3.3.2
   mermaid: ^11.12.3
   nx: 22.5.2
   openscad-wasm-prebuilt: ^1.2.0

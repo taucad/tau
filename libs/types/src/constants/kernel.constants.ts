@@ -57,6 +57,28 @@ export default function main(p = defaultParams) {}
     features: ['Exact geometry', 'TypeScript API', 'CAD operations', 'STEP export'],
   },
   {
+    id: 'manifold',
+    name: 'Manifold',
+    dimensions: [2, 3],
+    language: 'typescript',
+    description: 'Fast mesh-focused CAD with robust booleans',
+    mainFile: 'main.ts',
+    backendProvider: 'manifold',
+    longDescription:
+      'Manifold is a high-performance geometry kernel focused on topological robustness and mesh-first workflows. It is ideal for boolean-heavy modeling, procedural generation, and browser-native CAD experiences.',
+    emptyCode: `import { Manifold } from 'manifold-3d/manifoldCAD';
+
+export const defaultParams = { size: 20 };
+
+export default function main(p = defaultParams) {
+  return Manifold.cube([p.size, p.size, p.size], true);
+}
+`,
+    recommended: 'Procedural & Mesh-First CAD',
+    tags: ['TypeScript', 'Robust Booleans', 'Mesh Kernel', 'WASM', 'Browser-Native'],
+    features: ['Fast booleans', 'Robust topology', 'WASM runtime', 'GLTF-native scene output'],
+  },
+  {
     id: 'zoo',
     name: 'Zoo (KCL)',
     dimensions: [3],

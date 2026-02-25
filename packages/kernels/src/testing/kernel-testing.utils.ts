@@ -9,6 +9,7 @@ import deepmerge from 'deepmerge';
 import type { PartialDeep } from 'type-fest';
 import type { ExportFormat, GeometryResponse, GeometryFile, OnWorkerLog } from '@taucad/types';
 import { dirname } from '@zenfs/core/path';
+import type { Mock } from 'vitest';
 import { vi } from 'vitest';
 import { configure, fs } from '@zenfs/core';
 import { InMemory } from '@zenfs/core/backends/memory.js';
@@ -148,22 +149,21 @@ export async function initializeWorkerForTesting<T extends KernelWorker>(
  * Create a mock logger for kernel and middleware testing.
  * Returns a logger with vitest mock functions.
  */
-export function createMockLogger(): KernelLogger & {
-  log: ReturnType<typeof vi.fn>;
-  debug: ReturnType<typeof vi.fn>;
-  trace: ReturnType<typeof vi.fn>;
-  warn: ReturnType<typeof vi.fn>;
-  error: ReturnType<typeof vi.fn>;
-  custom: ReturnType<typeof vi.fn>;
-} {
-  return {
-    log: vi.fn(),
-    debug: vi.fn(),
-    trace: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    custom: vi.fn(),
+type MockKernelLogger = {
+  [Key in keyof KernelLogger]: Mock<KernelLogger[Key]>;
+};
+
+export function createMockLogger(): KernelLogger & MockKernelLogger {
+  const logger: MockKernelLogger = {
+    log: vi.fn<KernelLogger['log']>(),
+    debug: vi.fn<KernelLogger['debug']>(),
+    trace: vi.fn<KernelLogger['trace']>(),
+    warn: vi.fn<KernelLogger['warn']>(),
+    error: vi.fn<KernelLogger['error']>(),
+    custom: vi.fn<KernelLogger['custom']>(),
   };
+
+  return logger;
 }
 
 /**
@@ -429,7 +429,7 @@ export type CreateTestWorkerOptions = {
 function inferExtensions(definition: KernelDefinition): string[] {
   const name = definition.name.toLowerCase();
 
-  if (name.includes('replicad') || name.includes('jscad')) {
+  if (name.includes('replicad') || name.includes('manifold') || name.includes('jscad')) {
     return ['ts', 'js'];
   }
 

@@ -18,9 +18,7 @@ export type KernelWorkerLike = {
  * 2. Calls worker.createGeometry() with the file
  * 3. Returns kernel issues (the geometry result can be validated separately)
  */
-export function createHeadlessKernelClient(
-  worker: KernelWorkerLike,
-): RpcKernelClient {
+export function createHeadlessKernelClient(worker: KernelWorkerLike): RpcKernelClient {
   return {
     async getKernelResult(targetFile: string): Promise<GetKernelResultRpcResult> {
       try {

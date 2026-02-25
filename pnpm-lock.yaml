@@ -263,8 +263,8 @@ catalogs:
       version: 4.3.6
 
 overrides:
-  '@langchain/google-common': file:langchain-google-common-2.1.31.tgz
-  '@langchain/google-vertexai': file:langchain-google-vertexai-2.1.27.tgz
+  '@langchain/google-common': https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-common-2.1.31.tgz
+  '@langchain/google-vertexai': https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-vertexai-2.1.27.tgz
 
 patchedDependencies:
   '@kittycad/lib':
@@ -348,8 +348,8 @@ importers:
         specifier: 'catalog:'
         version: 1.1.28(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.2.0(@opentelemetry/api@1.9.0))(openai@4.104.0(encoding@0.1.13)(ws@8.19.0)(zod@4.3.6))
       '@langchain/google-vertexai':
-        specifier: file:langchain-google-vertexai-2.1.27.tgz
-        version: file:langchain-google-vertexai-2.1.27.tgz(@langchain/core@1.1.28(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.2.0(@opentelemetry/api@1.9.0))(openai@4.104.0(encoding@0.1.13)(ws@8.19.0)(zod@4.3.6)))
+        specifier: https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-vertexai-2.1.27.tgz
+        version: https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-vertexai-2.1.27.tgz(@langchain/core@1.1.28(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.2.0(@opentelemetry/api@1.9.0))(openai@4.104.0(encoding@0.1.13)(ws@8.19.0)(zod@4.3.6)))
       '@langchain/langgraph':
         specifier: 'catalog:'
         version: 1.1.5(@langchain/core@1.1.28(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.2.0(@opentelemetry/api@1.9.0))(openai@4.104.0(encoding@0.1.13)(ws@8.19.0)(zod@4.3.6)))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(zod-to-json-schema@3.25.1(zod@4.3.6))(zod@4.3.6)
@@ -1130,8 +1130,8 @@ importers:
         specifier: workspace:*
         version: link:../../libs/types
       assimpjs:
-        specifier: file:../../repos/assimpjs/assimpjs-0.0.12.tgz
-        version: file:repos/assimpjs/assimpjs-0.0.12.tgz
+        specifier: https://codeload.github.com/taucad/assimpjs/tar.gz/ff29d0419ebcb90fbebec06fd1931d7207435363
+        version: https://codeload.github.com/taucad/assimpjs/tar.gz/ff29d0419ebcb90fbebec06fd1931d7207435363
       draco3dgltf:
         specifier: ^1.5.7
         version: 1.5.7
@@ -3924,8 +3924,8 @@ packages:
     resolution: {integrity: sha512-6FAGdezEp8zHY92LtnsAiv54KaG41nBdsuukk+R+1484edV20cVOyIc36ANuGKPx0pmYFCBWhCUdO0jxB/zn2Q==}
     engines: {node: '>=20'}
 
-  '@langchain/google-common@file:langchain-google-common-2.1.31.tgz':
-    resolution: {integrity: sha512-fLXM/kNsvtYgLbcOo3uUDORLQDqtsmDZYfpZFPENY2LXGXfcVn2SEF2NJlZ8t+fXxafrEp9E89vAVL254Q+uog==, tarball: file:langchain-google-common-2.1.31.tgz}
+  '@langchain/google-common@https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-common-2.1.31.tgz':
+    resolution: {tarball: https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-common-2.1.31.tgz}
     version: 2.1.31
     engines: {node: '>=20'}
     peerDependencies:
@@ -3935,8 +3935,8 @@ packages:
     resolution: {integrity: sha512-q3+C9M9oH0tpDL/UIIMWAvt6s6lfk82+ohDgVOT/UMToIw+p9N1U3LHCfy65nh6IXVVfgB0TK7uqPWqQjNz4oQ==}
     engines: {node: '>=20'}
 
-  '@langchain/google-vertexai@file:langchain-google-vertexai-2.1.27.tgz':
-    resolution: {integrity: sha512-y3b0PuIUaffTmEs5d7STvy2TBEtNsxgz4kGd6hYR/kAnOGBXn633fE0vui1iK4lYY36pvc6LpVsv6G0YVucnqw==, tarball: file:langchain-google-vertexai-2.1.27.tgz}
+  '@langchain/google-vertexai@https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-vertexai-2.1.27.tgz':
+    resolution: {tarball: https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-vertexai-2.1.27.tgz}
     version: 2.1.27
     engines: {node: '>=20'}
 
@@ -8271,8 +8271,8 @@ packages:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
     engines: {node: '>=12'}
 
-  assimpjs@file:repos/assimpjs/assimpjs-0.0.12.tgz:
-    resolution: {integrity: sha512-p9JCZChUKMxFBZgWiHVFib0R3OQVDy4lXAZZ7WbGMLWy+xJsvDaJRLA4I9zirM+F2ISfFrQJzi3GrSeIFtj3Ng==, tarball: file:repos/assimpjs/assimpjs-0.0.12.tgz}
+  assimpjs@https://codeload.github.com/taucad/assimpjs/tar.gz/ff29d0419ebcb90fbebec06fd1931d7207435363:
+    resolution: {tarball: https://codeload.github.com/taucad/assimpjs/tar.gz/ff29d0419ebcb90fbebec06fd1931d7207435363}
     version: 0.0.12
 
   ast-kit@2.2.0:
@@ -19762,20 +19762,20 @@ snapshots:
       - '@opentelemetry/sdk-trace-base'
       - openai
 
-  '@langchain/google-common@file:langchain-google-common-2.1.31.tgz(@langchain/core@1.1.28(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.2.0(@opentelemetry/api@1.9.0))(openai@4.104.0(encoding@0.1.13)(ws@8.19.0)(zod@4.3.6)))':
+  '@langchain/google-common@https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-common-2.1.31.tgz(@langchain/core@1.1.28(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.2.0(@opentelemetry/api@1.9.0))(openai@4.104.0(encoding@0.1.13)(ws@8.19.0)(zod@4.3.6)))':
     dependencies:
       '@langchain/core': 1.1.28(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.2.0(@opentelemetry/api@1.9.0))(openai@4.104.0(encoding@0.1.13)(ws@8.19.0)(zod@4.3.6))
       uuid: 10.0.0
 
   '@langchain/google-gauth@2.1.20(@langchain/core@1.1.28(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.2.0(@opentelemetry/api@1.9.0))(openai@4.104.0(encoding@0.1.13)(ws@8.19.0)(zod@4.3.6)))':
     dependencies:
-      '@langchain/google-common': file:langchain-google-common-2.1.31.tgz(@langchain/core@1.1.28(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.2.0(@opentelemetry/api@1.9.0))(openai@4.104.0(encoding@0.1.13)(ws@8.19.0)(zod@4.3.6)))
+      '@langchain/google-common': https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-common-2.1.31.tgz(@langchain/core@1.1.28(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.2.0(@opentelemetry/api@1.9.0))(openai@4.104.0(encoding@0.1.13)(ws@8.19.0)(zod@4.3.6)))
       google-auth-library: 10.6.1
     transitivePeerDependencies:
       - '@langchain/core'
       - supports-color
 
-  '@langchain/google-vertexai@file:langchain-google-vertexai-2.1.27.tgz(@langchain/core@1.1.28(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.2.0(@opentelemetry/api@1.9.0))(openai@4.104.0(encoding@0.1.13)(ws@8.19.0)(zod@4.3.6)))':
+  '@langchain/google-vertexai@https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-vertexai-2.1.27.tgz(@langchain/core@1.1.28(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.2.0(@opentelemetry/api@1.9.0))(openai@4.104.0(encoding@0.1.13)(ws@8.19.0)(zod@4.3.6)))':
     dependencies:
       '@langchain/google-gauth': 2.1.20(@langchain/core@1.1.28(@opentelemetry/api@1.9.0)(@opentelemetry/sdk-trace-base@2.2.0(@opentelemetry/api@1.9.0))(openai@4.104.0(encoding@0.1.13)(ws@8.19.0)(zod@4.3.6)))
     transitivePeerDependencies:
@@ -24928,7 +24928,7 @@ snapshots:
 
   assertion-error@2.0.1: {}
 
-  assimpjs@file:repos/assimpjs/assimpjs-0.0.12.tgz: {}
+  assimpjs@https://codeload.github.com/taucad/assimpjs/tar.gz/ff29d0419ebcb90fbebec06fd1931d7207435363: {}
 
   ast-kit@2.2.0:
     dependencies:

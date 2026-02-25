@@ -94,7 +94,7 @@ function applyRotationToDocument(document: Document, matrix: mat4, quaternion: Q
     const t = node.getTranslation();
     node.setTranslation(rotateVec3ByQuat(t, quaternion));
 
-    const r = node.getRotation() as Quat;
+    const r = node.getRotation();
     node.setRotation(conjugateQuaternionBy(r, quaternion));
   }
 }

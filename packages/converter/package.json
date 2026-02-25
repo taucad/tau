@@ -54,7 +54,7 @@
     "@gltf-transform/extensions": "catalog:",
     "@gltf-transform/functions": "catalog:",
     "@taucad/types": "workspace:*",
-    "assimpjs": "file:../../repos/assimpjs/assimpjs-0.0.12.tgz",
+    "assimpjs": "https://codeload.github.com/taucad/assimpjs/tar.gz/ff29d0419ebcb90fbebec06fd1931d7207435363",
     "draco3dgltf": "^1.5.7",
     "occt-import-js": "^0.0.23",
     "rhino3dm": "^8.17.0"

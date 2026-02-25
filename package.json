@@ -55,7 +55,7 @@
     "@langchain/classic": "catalog:",
     "@langchain/community": "catalog:",
     "@langchain/core": "catalog:",
-    "@langchain/google-vertexai": "file:langchain-google-vertexai-2.1.27.tgz",
+    "@langchain/google-vertexai": "https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-vertexai-2.1.27.tgz",
     "@langchain/langgraph": "catalog:",
     "@langchain/langgraph-checkpoint": "catalog:",
     "@langchain/langgraph-checkpoint-postgres": "catalog:",
@@ -294,8 +294,8 @@
       "@zenfs/core": "patches/@zenfs__core.patch"
     },
     "overrides": {
-      "@langchain/google-common": "file:langchain-google-common-2.1.31.tgz",
-      "@langchain/google-vertexai": "file:langchain-google-vertexai-2.1.27.tgz"
+      "@langchain/google-common": "https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-common-2.1.31.tgz",
+      "@langchain/google-vertexai": "https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-vertexai-2.1.27.tgz"
     },
     "onlyBuiltDependencies": [
       "@nestjs/core",

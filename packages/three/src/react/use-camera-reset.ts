@@ -34,9 +34,9 @@ type ResetCameraParameters = {
  * Consumers can pass an optional `onResetCamera` callback to register the
  * reset function externally (e.g. with a capability actor in the host app).
  */
-export function useCameraReset(parameters: ResetCameraParameters): (options?: {
-  enableConfiguredAngles?: boolean;
-}) => void {
+export function useCameraReset(
+  parameters: ResetCameraParameters,
+): (options?: { enableConfiguredAngles?: boolean }) => void {
   const { camera, controls, invalidate, size } = useThree();
   const viewportAspect = size.width > 0 && size.height > 0 ? size.width / size.height : 1;
 

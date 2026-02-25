@@ -58,7 +58,7 @@ export const defaultStageOptions = {
 
 type StageProperties = {
   readonly children: ReactNode;
-  readonly enableCentering?: boolean;
+  readonly isCenteringEnabled?: boolean;
   readonly stageOptions?: StageOptions;
   readonly geometryKey?: string;
   readonly onSceneRadiusChange?: (radius: number) => void;
@@ -66,7 +66,7 @@ type StageProperties = {
 
 export function Stage({
   children,
-  enableCentering = false,
+  isCenteringEnabled = false,
   stageOptions = defaultStageOptions,
   geometryKey,
   onSceneRadiusChange,
@@ -82,7 +82,7 @@ export function Stage({
   const sectionView = useSectionView();
 
   const { geometryRadius, geometryCenter } = useGeometryBounds(inner, outer, {
-    enableCentering,
+    enableCentering: isCenteringEnabled,
     geometryKey,
     onSceneRadiusChange,
   });

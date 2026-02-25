@@ -25,6 +25,10 @@ export { Grid } from './grid.js';
 export { ViewportGizmoCube } from './viewport-gizmo.js';
 export { MeasureTool } from './measure-tool.js';
 export { Controls } from './controls.js';
+export { Scene } from './scene.js';
+export { CadCanvas } from './cad-canvas.js';
+export { CadViewer } from './cad-viewer.js';
+export { presets, type CadViewerPreset } from './presets.js';
 
 // Zustand stores
 export {

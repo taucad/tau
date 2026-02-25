@@ -276,15 +276,8 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
       },
       configuration: {
         streaming: true,
-        // Thinking requires temperature: 1 for Gemini 3 models
         temperature: 1,
-        // Gemini 3 Pro thinking config - HIGH is default, supports: LOW, HIGH
-        // Thinking cannot be turned off for Gemini 3 Pro
-        // @ts-expect-error: thinkingConfig not in typed schema yet
-        thinkingConfig: {
-          thinkingLevel: 'HIGH',
-          includeThoughts: true,
-        },
+        thinkingLevel: 'HIGH',
       },
     },
     'gemini-3-flash': {
@@ -303,22 +296,16 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
         contextWindow: 1_048_576,
         maxTokens: 65_536,
         cost: {
-          inputTokens: 0.5, // $0.5 / 1M input tokens (Vertex AI pricing)
-          outputTokens: 3, // $3 / 1M output tokens (Vertex AI pricing)
-          cacheReadTokens: 0.05, // $0.05 / 1M cached input tokens
+          inputTokens: 0.5,
+          outputTokens: 3,
+          cacheReadTokens: 0.05,
           cacheWriteTokens: 0,
         },
       },
       configuration: {
         streaming: true,
-        // Thinking requires temperature: 1 for Gemini 3 models
         temperature: 1,
-        // Gemini 3 Flash thinking config - HIGH is default, supports: MINIMAL, LOW, MEDIUM, HIGH
-        // @ts-expect-error: thinkingConfig not in typed schema yet
-        thinkingConfig: {
-          thinkingLevel: 'HIGH',
-          includeThoughts: true,
-        },
+        thinkingLevel: 'HIGH',
       },
     },
   },

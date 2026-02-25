@@ -1,8 +1,8 @@
 diff --git a/dist/backends/store/fs.js b/dist/backends/store/fs.js
-index 569be1bf064fec217da8a51873bb0b1257482afc..b745dd8840e5e3a398387694761cc53ac11ad1cd 100644
+index b418cfe79836c1948518eff13e83fc6020437191..5b2db8d93e8a8db2e2191aff177e641dcf0c1abb 100644
 --- a/dist/backends/store/fs.js
 +++ b/dist/backends/store/fs.js
-@@ -822,9 +822,11 @@ export class StoreFS extends FileSystem {
+@@ -896,9 +896,11 @@ export class StoreFS extends FileSystem {
          if (this.attributes.has('no_id_tables'))
              return await this._findInode(tx, path);
          const ino = this._ids.get(path);
@@ -17,7 +17,7 @@ index 569be1bf064fec217da8a51873bb0b1257482afc..b745dd8840e5e3a398387694761cc53a
      }
      /**
       * Finds the Inode of `path`.
-@@ -836,9 +838,11 @@ export class StoreFS extends FileSystem {
+@@ -910,9 +912,11 @@ export class StoreFS extends FileSystem {
          if (this.attributes.has('no_id_tables'))
              return this._findInodeSync(tx, path);
          const ino = this._ids.get(path);

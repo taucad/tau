@@ -4,6 +4,7 @@ import occtimportjs from 'occt-import-js';
 import type { ImportResult as OcctImportResult } from 'occt-import-js';
 import { cadMaterialDefaults } from '@taucad/types/constants';
 import type { FileExtension, FileInput } from '@taucad/types';
+import { createReverseCoordinateTransform } from '#gltf.transforms.js';
 import { BaseLoader } from '#loaders/base.loader.js';
 
 type OcctOptions = {
@@ -130,6 +131,8 @@ export class OcctLoader extends BaseLoader<OcctImportResult, OcctOptions> {
 
       scene.addChild(node);
     }
+
+    await document.transform(createReverseCoordinateTransform());
 
     const glb = await this.io.writeBinary(document);
     return glb;

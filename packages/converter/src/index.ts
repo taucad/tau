@@ -21,6 +21,21 @@ export { exportFiles, supportedExportFormats } from '#export.js';
 // Format metadata (re-exported from @taucad/types)
 export { formatConfigurations } from '@taucad/types/constants';
 
+// Transform utilities for downstream consumers (e.g. kernels middleware)
+export {
+  createCoordinateTransform,
+  createScalingTransform,
+  createReverseCoordinateTransform,
+  createReverseScalingTransform,
+} from '#gltf.transforms.js';
+
+// gltf-transform I/O utilities for downstream consumers (e.g. kernels middleware)
+export { createNodeIo } from '#gltf.utils.js';
+export { allExtensions } from '#gltf.extensions.js';
+
+// File resolver for on-demand sidecar asset loading
+export type { FileResolver } from '#file-resolver.js';
+
 // Types
 export type { SupportedImportFormat } from '#import.js';
 export type { SupportedExportFormat } from '#export.js';

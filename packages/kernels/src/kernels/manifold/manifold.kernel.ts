@@ -5,7 +5,6 @@
  * resulting Circuit JSON into GLB/GLTF geometry for Tau viewers.
  */
 
-import { CircuitRunner } from '@tscircuit/eval/runner';
 import { convertCircuitJsonToGltf } from 'circuit-json-to-gltf';
 import { z } from 'zod';
 import { asBuffer } from '@taucad/utils/file';
@@ -14,11 +13,6 @@ import type { KernelIssue } from '#types/kernel.types.js';
 import { defineKernel } from '#types/kernel-worker.types.js';
 import type { KernelRuntime } from '#types/kernel-worker.types.js';
 import { createKernelError, createKernelSuccess } from '#framework/kernel-helpers.js';
-
-type ManifoldContext = {
-  runner: CircuitRunner;
-  includeModels: boolean;
-};
 
 type ManifoldNativeHandle = {
   circuitJson: unknown[];
@@ -29,6 +23,21 @@ const manifoldOptionsSchema = z.object({
   includeModels: z.boolean().optional().default(false),
   partsEngineDisabled: z.boolean().optional().default(true),
 });
+
+type CircuitWorkerRuntime = {
+  executeWithFsMap: (options: {
+    entrypoint?: string;
+    mainComponentPath?: string;
+    fsMap: Record<string, string>;
+  }) => Promise<void>;
+  renderUntilSettled: () => Promise<void>;
+  getCircuitJson: () => Promise<unknown[]>;
+  kill: () => Promise<void>;
+};
+
+type EvalWorkerModule = {
+  createCircuitWebWorker: (configuration: Record<string, unknown>) => Promise<CircuitWorkerRuntime>;
+};
 
 function resolveToRelative(absolutePath: string, basePath: string): string {
   const normalizedBase = basePath.endsWith('/') ? basePath.slice(0, -1) : basePath;
@@ -43,9 +52,14 @@ function toFsMapPath(absolutePath: string, basePath: string): string {
   return resolveToRelative(absolutePath, basePath).replace(/^\/+/, '');
 }
 
+function toStrictUint8Array(data: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+  const arrayBufferSlice = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+  return new Uint8Array(arrayBufferSlice);
+}
+
 function toBytes(data: unknown): Uint8Array<ArrayBuffer> {
   if (data instanceof Uint8Array) {
-    return data;
+    return toStrictUint8Array(data as Uint8Array<ArrayBuffer>);
   }
 
   if (data instanceof ArrayBuffer) {
@@ -53,16 +67,15 @@ function toBytes(data: unknown): Uint8Array<ArrayBuffer> {
   }
 
   if (ArrayBuffer.isView(data)) {
-    const view = data;
-    return new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength));
+    return toStrictUint8Array(new Uint8Array(data.buffer, data.byteOffset, data.byteLength) as Uint8Array<ArrayBuffer>);
   }
 
   if (typeof data === 'string') {
-    return new TextEncoder().encode(data);
+    return toStrictUint8Array(new TextEncoder().encode(data) as Uint8Array<ArrayBuffer>);
   }
 
-  if (typeof data === 'object' && data !== undefined && data !== null) {
-    return new TextEncoder().encode(JSON.stringify(data));
+  if (typeof data === 'object' && data !== null) {
+    return toStrictUint8Array(new TextEncoder().encode(JSON.stringify(data)) as Uint8Array<ArrayBuffer>);
   }
 
   throw new Error(`Unsupported GLTF conversion output type: ${typeof data}`);
@@ -91,21 +104,32 @@ async function buildFsMap(input: {
   }
 
   const fsMap: Record<string, string> = {};
-  for (const absolutePath of dependencyPaths) {
-    try {
-      const relativePath = toFsMapPath(absolutePath, basePath);
-      fsMap[relativePath] = await runtime.filesystem.readFile(absolutePath, 'utf8');
-    } catch (error) {
-      runtime.logger.debug('Skipping unreadable dependency in manifold fsMap', {
-        data: { absolutePath, error },
-      });
+  const resolvedDependencies = await Promise.all(
+    [...dependencyPaths].map(async (absolutePath) => {
+      try {
+        return {
+          relativePath: toFsMapPath(absolutePath, basePath),
+          content: await runtime.filesystem.readFile(absolutePath, 'utf8'),
+        };
+      } catch (error) {
+        runtime.logger.debug('Skipping unreadable dependency in manifold fsMap', {
+          data: { absolutePath, error },
+        });
+        return undefined;
+      }
+    }),
+  );
+
+  for (const dependency of resolvedDependencies) {
+    if (!dependency) {
+      continue;
     }
+
+    fsMap[dependency.relativePath] = dependency.content;
   }
 
   const entrypoint = toFsMapPath(entryPath, basePath);
-  if (!fsMap[entrypoint]) {
-    fsMap[entrypoint] = await runtime.filesystem.readFile(entryPath, 'utf8');
-  }
+  fsMap[entrypoint] ??= await runtime.filesystem.readFile(entryPath, 'utf8');
 
   return fsMap;
 }
@@ -130,14 +154,18 @@ export default defineKernel({
   optionsSchema: manifoldOptionsSchema,
 
   async initialize(options) {
-    const runner = new CircuitRunner({ verbose: false });
-
-    if (options.partsEngineDisabled) {
-      await runner.setPlatformConfigProperty('partsEngineDisabled', true);
-    }
+    const workerModuleSpecifier = '@tscircuit/eval/worker';
+    const workerModule = (await import(workerModuleSpecifier)) as EvalWorkerModule;
+    const circuitWorker = await workerModule.createCircuitWebWorker({
+      verbose: false,
+      enableFetchProxy: true,
+      projectConfig: {
+        partsEngineDisabled: options.partsEngineDisabled,
+      },
+    });
 
     return {
-      runner,
+      circuitWorker,
       includeModels: options.includeModels,
     };
   },
@@ -174,14 +202,13 @@ export default defineKernel({
       const fsMap = await buildFsMap({ entryPath: filePath, basePath, runtime });
       const entrypoint = toFsMapPath(filePath, basePath);
 
-      await context.runner.executeWithFsMap({
+      await context.circuitWorker.executeWithFsMap({
         fsMap,
         entrypoint,
-        name: relativeFilePath,
       });
-      await context.runner.renderUntilSettled();
+      await context.circuitWorker.renderUntilSettled();
 
-      const circuitJson = (await context.runner.getCircuitJson()) as unknown[];
+      const circuitJson = await context.circuitWorker.getCircuitJson();
       const glbBytes = await convertCircuitJson({
         circuitJson,
         fileType: 'glb',
@@ -245,7 +272,7 @@ export default defineKernel({
   },
 
   async cleanup(context) {
-    await context.runner.kill();
+    await context.circuitWorker.kill();
   },
 });
 

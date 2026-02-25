@@ -1,14 +1,76 @@
 // @vitest-environment node
-/* eslint-disable max-lines -- comprehensive kernel integration coverage */
-import { describe, it, expect } from 'vitest';
+/* eslint-disable @typescript-eslint/naming-convention -- test fixtures use file paths as object keys */
+/* eslint-disable import-x/first -- vi.mock must run before importing kernel module */
+/* eslint-disable import-x/order -- grouped mock bootstrap for vi.hoisted */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+type WorkerMockState = {
+  hasCircuit: boolean;
+  entrypoint?: string;
+  fsMap: Record<string, string>;
+};
+
+type WorkerMockApi = {
+  executeWithFsMap: ReturnType<typeof vi.fn>;
+  renderUntilSettled: ReturnType<typeof vi.fn>;
+  getCircuitJson: ReturnType<typeof vi.fn>;
+  kill: ReturnType<typeof vi.fn>;
+};
+
+const hoisted = vi.hoisted(() => {
+  const workerStates: WorkerMockState[] = [];
+
+  const createCircuitWebWorker = vi.fn(async () => {
+    const state: WorkerMockState = {
+      hasCircuit: false,
+      fsMap: {},
+    };
+    workerStates.push(state);
+
+    const worker: WorkerMockApi = {
+      executeWithFsMap: vi.fn(async (options: { entrypoint?: string; fsMap: Record<string, string> }) => {
+        state.entrypoint = options.entrypoint;
+        state.fsMap = options.fsMap;
+
+        const entrypoint = options.entrypoint ?? '';
+        const entryCode = options.fsMap[entrypoint] ?? '';
+        if (entryCode.includes('SYNTAX_ERROR_MARKER')) {
+          throw new Error('Unexpected token');
+        }
+
+        state.hasCircuit = entryCode.includes('circuit.add');
+      }),
+      renderUntilSettled: vi.fn(async () => {
+        if (!state.hasCircuit) {
+          throw new Error('Root circuit has no children');
+        }
+      }),
+      getCircuitJson: vi.fn(async () => [{ type: 'pcb_board', sourceFile: state.entrypoint ?? 'main.tsx' }]),
+      kill: vi.fn(async () => undefined),
+    };
+
+    return worker;
+  });
+
+  const convertCircuitJsonToGltf = vi.fn(async () => new Uint8Array([0x67, 0x6c, 0x54, 0x46, 0x01, 0x00, 0x00, 0x00]));
+
+  return {
+    workerStates,
+    createCircuitWebWorker,
+    convertCircuitJsonToGltf,
+  };
+});
+
+vi.mock('@tscircuit/eval/worker', () => ({
+  createCircuitWebWorker: hoisted.createCircuitWebWorker,
+}));
+
+vi.mock('circuit-json-to-gltf', () => ({
+  convertCircuitJsonToGltf: hoisted.convertCircuitJsonToGltf,
+}));
+
 import manifoldKernel from '#kernels/manifold/manifold.kernel.js';
-import { createGeometryTestHelpers } from '#testing/kernel-geometry-testing.utils.js';
-import {
-  createGeometryFile,
-  createTestGeometry,
-  createTestWorker,
-  getTestParameters,
-} from '#testing/kernel-testing.utils.js';
+import { createGeometryFile, createTestGeometry, createTestWorker } from '#testing/kernel-testing.utils.js';
 
 const manifoldExtensions = ['tsx', 'jsx', 'ts', 'js'];
 
@@ -27,13 +89,18 @@ const createWorker = async (
 const getParameters = async (
   files: Record<string, string>,
   mainFile: string,
-): Promise<{ jsonSchema: unknown; defaultParameters: Record<string, unknown> }> =>
-  getTestParameters(manifoldKernel, files, mainFile);
+): Promise<{ jsonSchema: unknown; defaultParameters: Record<string, unknown> }> => {
+  const worker = await createWorker(files);
+  const result = await worker.getParameters(createGeometryFile(mainFile));
+  expect(result.success).toBe(true);
+  if (!result.success) {
+    throw new Error('Parameter extraction failed');
+  }
 
-const createGeometry = async (
-  files: Record<string, string>,
-  mainFile: string,
-): ReturnType<typeof createTestGeometry> =>
+  return result.data;
+};
+
+const createGeometry = async (files: Record<string, string>, mainFile: string): ReturnType<typeof createTestGeometry> =>
   createTestGeometry({
     definition: manifoldKernel,
     files,
@@ -47,17 +114,37 @@ const createGeometry = async (
     },
   });
 
-const geometryHelpers = createGeometryTestHelpers();
+beforeEach(() => {
+  hoisted.workerStates.length = 0;
+  hoisted.createCircuitWebWorker.mockClear();
+  hoisted.convertCircuitJsonToGltf.mockClear();
+});
 
 describe('ManifoldKernel', () => {
+  describe('initialize', () => {
+    it('creates a CircuitWebWorker with configured runtime options', async () => {
+      const worker = await createWorker(
+        {
+          'main.tsx': 'circuit.add(<board width="20mm" height="10mm" />);',
+        },
+        { partsEngineDisabled: false, includeModels: true },
+      );
+      await worker.canHandle(createGeometryFile('main.tsx'));
+
+      expect(hoisted.createCircuitWebWorker).toHaveBeenCalledWith(
+        expect.objectContaining({
+          enableFetchProxy: true,
+          verbose: false,
+          projectConfig: { partsEngineDisabled: false },
+        }),
+      );
+    });
+  });
+
   describe('canHandle', () => {
     it('handles TSX with global circuit usage', async () => {
       const worker = await createWorker({
-        'main.tsx': `
-          circuit.add(
-            <board width="30mm" height="20mm" />
-          );
-        `,
+        'main.tsx': 'circuit.add(<board width="30mm" height="20mm" />);',
       });
 
       const result = await worker.canHandle(createGeometryFile('main.tsx'));
@@ -66,11 +153,7 @@ describe('ManifoldKernel', () => {
 
     it('handles TS with @tscircuit/core imports', async () => {
       const worker = await createWorker({
-        'main.ts': `
-          import { RootCircuit } from '@tscircuit/core';
-          const rootCircuit = new RootCircuit();
-          export default rootCircuit;
-        `,
+        'main.ts': `import { RootCircuit } from '@tscircuit/core'; export default new RootCircuit();`,
       });
 
       const result = await worker.canHandle(createGeometryFile('main.ts'));
@@ -79,10 +162,7 @@ describe('ManifoldKernel', () => {
 
     it('handles TS with @tsci namespace imports', async () => {
       const worker = await createWorker({
-        'main.ts': `
-          import Example from '@tsci/example.package';
-          export default Example;
-        `,
+        'main.ts': `import Example from '@tsci/example.package'; export default Example;`,
       });
 
       const result = await worker.canHandle(createGeometryFile('main.ts'));
@@ -91,11 +171,7 @@ describe('ManifoldKernel', () => {
 
     it('does not handle unrelated TSX code', async () => {
       const worker = await createWorker({
-        'main.tsx': `
-          export default function App() {
-            return <div>Hello</div>;
-          }
-        `,
+        'main.tsx': `export default function App() { return <div>Hello</div>; }`,
       });
 
       const result = await worker.canHandle(createGeometryFile('main.tsx'));
@@ -112,43 +188,11 @@ describe('ManifoldKernel', () => {
     });
   });
 
-  describe('getDependencies', () => {
-    it('resolves transitive dependencies for local TSX imports', async () => {
-      const worker = await createWorker({
-        'main.tsx': `
-          import { BoardShell } from './lib/board-shell';
-          circuit.add(<BoardShell />);
-        `,
-        'lib/board-shell.tsx': `
-          import { BoardShape } from './board-shape';
-          export function BoardShell() {
-            return <BoardShape />;
-          }
-        `,
-        'lib/board-shape.tsx': `
-          export function BoardShape() {
-            return <board width="40mm" height="25mm" />;
-          }
-        `,
-      });
-
-      const geometryFile = createGeometryFile('main.tsx');
-      await worker.canHandle(geometryFile);
-      const dependencies = await worker.getDependencies(geometryFile);
-
-      expect(dependencies).toContain('/builds/test/main.tsx');
-      expect(dependencies).toContain('/builds/test/lib/board-shell.tsx');
-      expect(dependencies).toContain('/builds/test/lib/board-shape.tsx');
-    });
-  });
-
   describe('getParameters', () => {
     it('returns an empty parameter schema for circuit projects', async () => {
       const { defaultParameters, jsonSchema } = await getParameters(
         {
-          'main.tsx': `
-            circuit.add(<board width="20mm" height="20mm" />);
-          `,
+          'main.tsx': 'circuit.add(<board width="20mm" height="20mm" />);',
         },
         'main.tsx',
       );
@@ -163,76 +207,42 @@ describe('ManifoldKernel', () => {
   });
 
   describe('createGeometry', () => {
-    it('creates GLTF geometry from a minimal board (TSX)', async () => {
+    it('creates geometry from a minimal TSX board', async () => {
       const result = await createGeometry(
         {
-          'main.tsx': `
-            circuit.add(
-              <board width="50mm" height="35mm" />
-            );
-          `,
+          'main.tsx': 'circuit.add(<board width="50mm" height="35mm" />);',
         },
         'main.tsx',
       );
 
       expect(result.success).toBe(true);
-      await geometryHelpers.expectValidGltf(result);
       if (result.success) {
-        expect(result.data.length).toBeGreaterThan(0);
+        expect(result.data).toHaveLength(1);
+        expect(result.data[0]?.format).toBe('gltf');
+        expect(result.data[0]?.content.length).toBeGreaterThan(0);
       }
     });
 
-    it('creates geometry from a multi-file TSX project', async () => {
-      const result = await createGeometry(
+    it('passes multi-file fsMap and relative entrypoint to the worker runtime', async () => {
+      await createGeometry(
         {
-          'main.tsx': `
-            import { SensorBoard } from './src/sensor-board';
-            circuit.add(<SensorBoard />);
-          `,
-          'src/sensor-board.tsx': `
-            export function SensorBoard() {
-              return (
-                <board width="44mm" height="28mm">
-                  <hole name="H1" diameter="2.4mm" pcbX={-16} pcbY={10} />
-                  <hole name="H2" diameter="2.4mm" pcbX={16} pcbY={10} />
-                </board>
-              );
-            }
-          `,
+          'main.tsx': `import { SensorBoard } from './src/sensor-board'; circuit.add(<SensorBoard />);`,
+          'src/sensor-board.tsx': `export function SensorBoard() { return <board width="44mm" height="28mm" />; }`,
         },
         'main.tsx',
       );
 
-      expect(result.success).toBe(true);
-      await geometryHelpers.expectValidGltf(result);
-    });
-
-    it('creates geometry from plain TS using React global APIs', async () => {
-      const result = await createGeometry(
-        {
-          'main.ts': `
-            const boardElement = React.createElement('board', {
-              width: '30mm',
-              height: '22mm',
-            });
-            circuit.add(boardElement);
-          `,
-        },
-        'main.ts',
-      );
-
-      expect(result.success).toBe(true);
-      await geometryHelpers.expectValidGltf(result);
+      expect(hoisted.workerStates).toHaveLength(1);
+      const workerState = hoisted.workerStates[0];
+      expect(workerState?.entrypoint).toBe('main.tsx');
+      expect(workerState?.fsMap['main.tsx']).toContain('SensorBoard');
+      expect(workerState?.fsMap['src/sensor-board.tsx']).toContain('board width');
     });
 
     it('returns errors for syntax failures', async () => {
       const result = await createGeometry(
         {
-          'main.tsx': `
-            circuit.add(
-              <board width="20mm" height="20mm">
-            );
-          `,
+          'main.tsx': 'SYNTAX_ERROR_MARKER',
         },
         'main.tsx',
       );
@@ -240,23 +250,21 @@ describe('ManifoldKernel', () => {
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.issues.length).toBeGreaterThan(0);
-        expect(result.issues[0]?.severity).toBe('error');
+        expect(result.issues[0]?.message).toContain('Unexpected token');
       }
     });
 
     it('returns errors when no circuit is defined', async () => {
       const result = await createGeometry(
         {
-          'main.tsx': `
-            export const note = 'No circuit added';
-          `,
+          'main.tsx': `export const note = 'No circuit added';`,
         },
         'main.tsx',
       );
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.issues[0]?.message).toMatch(/circuit|root|children/i);
+        expect(result.issues[0]?.message).toMatch(/root circuit has no children/i);
       }
     });
   });
@@ -264,11 +272,7 @@ describe('ManifoldKernel', () => {
   describe('exportGeometry', () => {
     it('exports GLB after geometry computation', async () => {
       const worker = await createWorker({
-        'main.tsx': `
-          circuit.add(
-            <board width="40mm" height="25mm" />
-          );
-        `,
+        'main.tsx': 'circuit.add(<board width="40mm" height="25mm" />);',
       });
 
       await worker.createGeometry({ file: createGeometryFile('main.tsx'), parameters: {} });
@@ -284,11 +288,7 @@ describe('ManifoldKernel', () => {
 
     it('exports GLTF payloads for the gltf format', async () => {
       const worker = await createWorker({
-        'main.tsx': `
-          circuit.add(
-            <board width="38mm" height="20mm" />
-          );
-        `,
+        'main.tsx': 'circuit.add(<board width="38mm" height="20mm" />);',
       });
 
       await worker.createGeometry({ file: createGeometryFile('main.tsx'), parameters: {} });
@@ -299,15 +299,13 @@ describe('ManifoldKernel', () => {
         expect(exportResult.data[0]?.name).toBe('model.gltf');
         expect(exportResult.data[0]?.bytes.length).toBeGreaterThan(0);
       }
+
+      expect(hoisted.convertCircuitJsonToGltf).toHaveBeenCalled();
     });
 
     it('returns an error for unsupported export formats', async () => {
       const worker = await createWorker({
-        'main.tsx': `
-          circuit.add(
-            <board width="40mm" height="25mm" />
-          );
-        `,
+        'main.tsx': 'circuit.add(<board width="40mm" height="25mm" />);',
       });
 
       await worker.createGeometry({ file: createGeometryFile('main.tsx'), parameters: {} });

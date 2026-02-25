@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Manifold } from 'manifold-3d/manifoldCAD';
 
 export const defaultParams = {

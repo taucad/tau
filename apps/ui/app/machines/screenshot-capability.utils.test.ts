@@ -4,10 +4,10 @@ import { calculateOptimalGrid } from '#machines/screenshot-capability.machine.js
 import {
   applyMatcapToClonedScene,
   disposeClonedSceneMaterials,
-} from '#components/geometry/graphics/three/materials/gltf-matcap.js';
-import { calculateFovDistanceCompensation } from '#components/geometry/graphics/three/utils/math.utils.js';
-import { computeViewFittingZoom } from '#components/geometry/graphics/three/utils/camera.utils.js';
-import { defaultStageOptions } from '#components/geometry/graphics/three/stage.js';
+  calculateFovDistanceCompensation,
+  computeViewFittingZoom,
+} from '@taucad/three';
+import { defaultStageOptions } from '@taucad/three/react';
 
 describe('calculateOptimalGrid', () => {
   describe('edge cases', () => {

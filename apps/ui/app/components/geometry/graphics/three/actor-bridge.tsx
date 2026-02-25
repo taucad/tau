@@ -3,24 +3,39 @@ import type { ReactNode } from 'react';
 import { useThree } from '@react-three/fiber';
 import { useActorRef } from '@xstate/react';
 import type { OrbitControls } from 'three/addons';
+import { updateCameraFov } from '@taucad/three';
+import { useViewerStore } from '@taucad/three/react';
 import { controlsListenerMachine } from '#machines/controls-listener.machine.js';
-import { updateCameraFov } from '#components/geometry/graphics/three/utils/camera.utils.js';
 import { useGraphics, useGraphicsSelector, useScreenshotCapability } from '#hooks/use-graphics.js';
 
 /**
- * Component that bridges Three.js context with XState actors
- * Sets up screenshot capability, controls listeners, and FOV updates
- * Acts as the integration layer between Three.js and the graphics state machine
+ * Bridges Three.js context with XState actors and syncs graphics machine
+ * state to zustand viewer stores. Sets up screenshot capability, controls
+ * listeners, and FOV updates.
  */
 export function ActorBridge(): ReactNode {
   const { gl, scene, camera, controls, invalidate } = useThree();
   const screenshotCapabilityActor = useScreenshotCapability();
   const graphicsActor = useGraphics();
 
-  // Subscribe to camera FOV angle from graphics actor
   const cameraFovAngle = useGraphicsSelector((state) => state.context.cameraFovAngle);
+  const enableGrid = useGraphicsSelector((state) => state.context.enableGrid);
+  const enableAxes = useGraphicsSelector((state) => state.context.enableAxes);
+  const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
+  const enableSurfaces = useGraphicsSelector((state) => state.context.enableSurfaces);
+  const enableLines = useGraphicsSelector((state) => state.context.enableLines);
+  const enableGizmo = useGraphicsSelector((state) => state.context.enableGizmo);
+  const enablePostProcessing = useGraphicsSelector((state) => state.context.enablePostProcessing);
 
-  // Setup screenshot capability
+  const setFieldOfView = useViewerStore((s) => s.setFieldOfView);
+  const setEnableGrid = useViewerStore((s) => s.setEnableGrid);
+  const setEnableAxes = useViewerStore((s) => s.setEnableAxes);
+  const setEnableMatcap = useViewerStore((s) => s.setEnableMatcap);
+  const setEnableSurfaces = useViewerStore((s) => s.setEnableSurfaces);
+  const setEnableLines = useViewerStore((s) => s.setEnableLines);
+  const setEnableGizmo = useViewerStore((s) => s.setEnableGizmo);
+  const setEnablePostProcessing = useViewerStore((s) => s.setEnablePostProcessing);
+
   useEffect(() => {
     screenshotCapabilityActor.send({
       type: 'registerCapture',
@@ -34,13 +49,20 @@ export function ActorBridge(): ReactNode {
     };
   }, [gl, scene, camera, screenshotCapabilityActor]);
 
-  // Update camera FOV when angle changes, without resetting position
-  // This preserves user's zoom and viewing angle while updating the FOV
   useEffect(() => {
     updateCameraFov({ camera, cameraFovAngle, invalidate });
   }, [cameraFovAngle, camera, invalidate]);
 
-  // Setup controls listener
+  // Sync xstate graphics machine state → zustand viewer store
+  useEffect(() => { setFieldOfView(cameraFovAngle); }, [cameraFovAngle, setFieldOfView]);
+  useEffect(() => { setEnableGrid(enableGrid); }, [enableGrid, setEnableGrid]);
+  useEffect(() => { setEnableAxes(enableAxes); }, [enableAxes, setEnableAxes]);
+  useEffect(() => { setEnableMatcap(enableMatcap); }, [enableMatcap, setEnableMatcap]);
+  useEffect(() => { setEnableSurfaces(enableSurfaces); }, [enableSurfaces, setEnableSurfaces]);
+  useEffect(() => { setEnableLines(enableLines); }, [enableLines, setEnableLines]);
+  useEffect(() => { setEnableGizmo(enableGizmo); }, [enableGizmo, setEnableGizmo]);
+  useEffect(() => { setEnablePostProcessing(enablePostProcessing); }, [enablePostProcessing, setEnablePostProcessing]);
+
   useActorRef(controlsListenerMachine, {
     input: {
       graphicsActorRef: graphicsActor,

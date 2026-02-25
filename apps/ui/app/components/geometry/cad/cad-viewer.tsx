@@ -1,17 +1,29 @@
 import { memo } from 'react';
 import type { Geometry } from '@taucad/types';
-import { GltfMesh } from '#components/geometry/graphics/three/react/gltf-mesh.js';
-import { ThreeProvider } from '#components/geometry/graphics/three/three-context.js';
-import type { ThreeViewerProperties } from '#components/geometry/graphics/three/three-context.js';
+import { GltfMesh, CadCanvas } from '@taucad/three/react';
+import type { StageOptions } from '@taucad/three/react';
 import { SvgViewer } from '#components/geometry/graphics/svg/svg-viewer.js';
 import { WebglErrorBoundary } from '#components/geometry/cad/webgl-error-boundary.js';
 import { WebglErrorFallback } from '#components/geometry/cad/webgl-fallback.js';
 
-type CadViewerProperties = ThreeViewerProperties & {
+type CadViewerProperties = {
   readonly geometries: Geometry[];
   readonly enableSurfaces?: boolean;
   readonly enableLines?: boolean;
   readonly enableMatcap?: boolean;
+  readonly enableGizmo?: boolean;
+  readonly enableGrid?: boolean;
+  readonly enableAxes?: boolean;
+  readonly enableZoom?: boolean;
+  readonly enablePan?: boolean;
+  readonly enableDamping?: boolean;
+  readonly upDirection?: 'x' | 'y' | 'z';
+  readonly className?: string;
+  readonly enableCentering?: boolean;
+  readonly stageOptions?: StageOptions;
+  readonly zoomSpeed?: number;
+  readonly gizmoContainer?: HTMLElement | string;
+  readonly enablePostProcessing?: boolean;
 };
 
 export const CadViewer = memo(
@@ -33,7 +45,7 @@ export const CadViewer = memo(
 
     return (
       <WebglErrorBoundary fallback={(errorProps) => <WebglErrorFallback {...errorProps} />}>
-        <ThreeProvider {...properties}>
+        <CadCanvas {...properties}>
           {geometries.map((geometry) => {
             switch (geometry.format) {
               case 'gltf': {
@@ -62,7 +74,7 @@ export const CadViewer = memo(
               }
             }
           })}
-        </ThreeProvider>
+        </CadCanvas>
       </WebglErrorBoundary>
     );
   },

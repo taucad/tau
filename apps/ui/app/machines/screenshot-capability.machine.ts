@@ -5,11 +5,11 @@ import type { ScreenshotOptions, CameraAngle, CompositeScreenshotOptions } from 
 import {
   applyMatcapToClonedScene,
   disposeClonedSceneMaterials,
-} from '#components/geometry/graphics/three/materials/gltf-matcap.js';
-import { ensureMatcapTextureLoaded } from '#components/geometry/graphics/three/materials/matcap-material.js';
-import { calculateFovDistanceCompensation } from '#components/geometry/graphics/three/utils/math.utils.js';
-import { computeViewFittingZoom } from '#components/geometry/graphics/three/utils/camera.utils.js';
-import { defaultStageOptions } from '#components/geometry/graphics/three/stage.js';
+  ensureMatcapTextureLoaded,
+  calculateFovDistanceCompensation,
+  computeViewFittingZoom,
+} from '@taucad/three';
+import { defaultStageOptions } from '@taucad/three/react';
 
 // Capture mode discriminator
 type CaptureMode = 'threejs' | 'svg';

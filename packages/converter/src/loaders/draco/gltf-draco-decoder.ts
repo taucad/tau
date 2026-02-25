@@ -76,7 +76,9 @@ export class GltfDracoDecoder {
   };
 
   public async initialize(): Promise<void> {
-    this.decoderModule = await draco3d.createDecoderModule();
+    this.decoderModule = await draco3d.createDecoderModule({
+      locateFile: () => new URL('../../assets/draco3d/gltf/draco_decoder_gltf.wasm', import.meta.url).href,
+    });
   }
 
   public setVerbosity(level: number): this {

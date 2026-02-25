@@ -371,10 +371,16 @@ const exportTestCases: ExportTestCase[] = [
     expectedFiles: {
       expectedNames: ['model.gltf', 'buffer.bin'],
     },
+    expectations: {
+      geometry: { ...standardGeometryExpectations, boundingBoxTolerance: 0.005 as number },
+    },
   }),
   createExportTestCase('glb', {
     expectedFiles: {
       expectedNames: ['model.glb'],
+    },
+    expectations: {
+      geometry: { ...standardGeometryExpectations, boundingBoxTolerance: 0.005 as number },
     },
   }),
 

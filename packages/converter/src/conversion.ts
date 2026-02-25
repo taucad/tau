@@ -1,5 +1,6 @@
 import type { ExportFile, FileInput } from '@taucad/types';
 import { mimeTypes } from '@taucad/types/constants';
+import type { FileResolver } from '#file-resolver.js';
 import { importFiles, supportedImportFormats } from '#import.js';
 import type { SupportedImportFormat } from '#import.js';
 import { exportFiles, supportedExportFormats } from '#export.js';
@@ -42,6 +43,7 @@ export const convertFile = async (
 export const importToGlb = async (
   inputFiles: FileInput[],
   inputFormat: SupportedImportFormat,
+  resolver?: FileResolver,
 ): Promise<Uint8Array<ArrayBuffer>> => {
   // GLB pass-through optimization
   if (inputFormat === 'glb') {
@@ -54,7 +56,7 @@ export const importToGlb = async (
   }
 
   // Standard import pipeline
-  const glb = await importFiles(inputFiles, inputFormat);
+  const glb = await importFiles(inputFiles, inputFormat, resolver);
   return glb;
 };
 

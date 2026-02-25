@@ -28,6 +28,10 @@ export const modelConfigurationSchema = z.object({
       effort: z.enum(['low', 'medium', 'high', 'max']).describe('The effort level for adaptive thinking').optional(),
     })
     .optional(),
+  thinkingLevel: z
+    .enum(['LOW', 'MEDIUM', 'HIGH', 'THINKING_LEVEL_UNSPECIFIED'])
+    .describe('Gemini thinking level (Google-specific)')
+    .optional(),
 });
 
 export const modelDetailsSchema = z.object({

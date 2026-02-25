@@ -25,9 +25,8 @@ import rhino3dm from 'rhino3dm';
 import { cadMaterialDefaults } from '@taucad/types/constants';
 import type { FileInput } from '@taucad/types';
 import { BaseLoader } from '#loaders/base.loader.js';
-import type { BaseLoaderOptions } from '#loaders/base.loader.js';
 import { createNodeIo } from '#gltf.utils.js';
-import { createCoordinateTransform, createScalingTransform } from '#gltf.transforms.js';
+import { createReverseCoordinateTransform } from '#gltf.transforms.js';
 
 // Type for rhino3dm geometry JSON structure
 type RhinoGeometryJson = {
@@ -47,20 +46,15 @@ type RhinoConversionContext = {
   buffer: GltfBuffer;
 };
 
-type ThreeDmLoaderOptions = {
-  transformYtoZup?: boolean;
-  scaleMetersToMillimeters?: boolean;
-} & BaseLoaderOptions;
-
 /**
  * Loader for 3dm files using gltf-transform directly (no Three.js dependency).
  */
-export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
+export class ThreeDmLoader extends BaseLoader<Document> {
   private rhino!: RhinoModule;
   private readonly instanceIdToDefinition = new Map<string, InstanceDefinition>();
   private readonly instanceIdToObject = new Map<string, File3dmObject>();
 
-  protected async parseAsync(files: FileInput[], _options: ThreeDmLoaderOptions): Promise<Document> {
+  protected async parseAsync(files: FileInput[]): Promise<Document> {
     await this.initializeRhino();
 
     const { bytes: data } = this.findPrimaryFile(files);
@@ -87,16 +81,11 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
     return document;
   }
 
-  protected async mapToGlb(document: Document, options: ThreeDmLoaderOptions): Promise<Uint8Array<ArrayBuffer>> {
+  protected async mapToGlb(document: Document): Promise<Uint8Array<ArrayBuffer>> {
     const io = await createNodeIo();
 
-    // Apply transformations
-    await document.transform(
-      createCoordinateTransform(options.transformYtoZup ?? false),
-      createScalingTransform(options.scaleMetersToMillimeters ?? false),
-    );
+    await document.transform(createReverseCoordinateTransform());
 
-    // Export to GLB
     const glb = await io.writeBinary(document);
     return glb;
   }

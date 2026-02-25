@@ -8,8 +8,9 @@
  */
 
 import { importToGlb, exportFromGlb, supportedImportFormats } from '@taucad/converter';
-import type { SupportedImportFormat, SupportedExportFormat } from '@taucad/converter';
+import type { SupportedImportFormat, SupportedExportFormat, FileResolver } from '@taucad/converter';
 import { defineKernel } from '#types/kernel-worker.types.js';
+import type { KernelFileSystem } from '#types/kernel-worker.types.js';
 import type { KernelIssue } from '#types/kernel.types.js';
 import { createKernelError, createKernelSuccess } from '#framework/kernel-helpers.js';
 
@@ -27,6 +28,11 @@ function getBasename(filename: string): string {
   return lastSlashIndex === -1 ? filename : filename.slice(lastSlashIndex + 1);
 }
 
+function getDirname(filepath: string): string {
+  const lastSlashIndex = filepath.lastIndexOf('/');
+  return lastSlashIndex === -1 ? '' : filepath.slice(0, lastSlashIndex);
+}
+
 function resolveToRelative(absolutePath: string, basePath: string): string {
   const normalizedBase = basePath.endsWith('/') ? basePath.slice(0, -1) : basePath;
   if (absolutePath.startsWith(`${normalizedBase}/`)) {
@@ -34,6 +40,47 @@ function resolveToRelative(absolutePath: string, basePath: string): string {
   }
 
   return absolutePath;
+}
+
+/**
+ * Pre-load directory contents into a synchronous FileResolver.
+ * The resolver is backed by a Map for instant lookups, satisfying
+ * assimpjs's synchronous callback requirement.
+ */
+async function createDirectoryResolver(filesystem: KernelFileSystem, directory: string): Promise<FileResolver> {
+  const fileCache = new Map<string, Uint8Array<ArrayBuffer>>();
+
+  try {
+    const entries = await filesystem.readdir(directory);
+    await Promise.all(
+      entries.map(async (entry) => {
+        const fullPath = directory ? `${directory}/${entry}` : entry;
+        try {
+          const stat = await filesystem.stat(fullPath);
+          if (stat.type === 'file') {
+            const bytes = await filesystem.readFile(fullPath);
+            fileCache.set(entry, bytes);
+          }
+        } catch {
+          // Skip entries that can't be read (permissions, broken symlinks)
+        }
+      }),
+    );
+  } catch {
+    // Directory listing failed — resolver will have no cached files
+  }
+
+  return {
+    exists: (filename: string) => fileCache.has(filename),
+    readFile(filename: string) {
+      const bytes = fileCache.get(filename);
+      if (!bytes) {
+        throw new Error(`File not found: ${filename}`);
+      }
+
+      return bytes;
+    },
+  };
 }
 
 export default defineKernel({
@@ -62,13 +109,19 @@ export default defineKernel({
   async createGeometry({ filePath, basePath }, { filesystem, logger }) {
     const relativeFilePath = resolveToRelative(filePath, basePath);
     const filename = getBasename(filePath);
+    const directory = getDirname(filePath);
     try {
       const data = await filesystem.readFile(filePath);
       const format = getFileExtension(filename);
       const formattedFormat = String(format).toUpperCase();
       logger.log(`Converting ${formattedFormat} to GLB`);
 
-      const glbData = await importToGlb([{ name: filename, bytes: data }], format as SupportedImportFormat);
+      // Pre-load sibling files from the directory into a synchronous resolver.
+      // Both assimpjs (sync callbacks) and gltf-transform (async readURI)
+      // can use this resolver for on-demand sidecar file resolution.
+      const resolver = await createDirectoryResolver(filesystem, directory);
+
+      const glbData = await importToGlb([{ name: filename, bytes: data }], format as SupportedImportFormat, resolver);
 
       logger.log(`Successfully converted ${formattedFormat} to GLB`);
 

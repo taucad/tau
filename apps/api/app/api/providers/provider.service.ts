@@ -121,10 +121,9 @@ export class ProviderService {
           return new ChatVertexAI({
             ...options,
             location: 'global',
-            // Stream for best UX with instant feedback.
             streaming: true,
-            // Stream usage data for Langchain to consume.
             streamUsage: true,
+            streamFunctionCallArguments: true,
             authOptions: {
               credentials,
               projectId: credentials.project_id,

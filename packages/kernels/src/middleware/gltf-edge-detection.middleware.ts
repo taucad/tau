@@ -1,6 +1,6 @@
 import type { Document, Primitive } from '@gltf-transform/core';
-import { NodeIO } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
+import { createNodeIo } from '@taucad/converter';
 import type { GeometryGltf } from '@taucad/types';
 import { z } from 'zod';
 import { detectEdges } from '#utils/edge-detection.js';
@@ -141,7 +141,7 @@ function addEdgePrimitivesToDocument(document: Document, thresholdDegrees: numbe
  * @returns The geometry with edge primitives added, or the original if no edges were needed
  */
 async function addEdgePrimitivesToGltf(geometry: GeometryGltf, thresholdDegrees: number): Promise<GeometryGltf> {
-  const io = new NodeIO().registerExtensions([KHRMaterialsUnlit]);
+  const io = (await createNodeIo()).registerExtensions([KHRMaterialsUnlit]);
 
   // Read the GLTF document from the binary data
   const document = await io.readBinary(geometry.content);

@@ -77,6 +77,13 @@
         "command": "drizzle-kit push",
         "cwd": "{projectRoot}"
       }
+    },
+    "test:models": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run --config vitest.integration.config.ts",
+        "cwd": "{projectRoot}"
+      }
     }
   }
 }

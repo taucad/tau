@@ -17,6 +17,10 @@ vi.mock('@react-three/fiber', () => ({
   useThree: () => ({ size: mockSize }),
 }));
 
+vi.mock('#react/stores/store-context.js', () => ({
+  useViewerStore: (selector: (state: { fieldOfView: number }) => unknown) => selector({ fieldOfView: 50 }),
+}));
+
 /**
  * Spy returned by the mocked `useCameraReset`. When invoked, simulates the
  * real behaviour by committing the current geometry radius via `setSceneRadius`.

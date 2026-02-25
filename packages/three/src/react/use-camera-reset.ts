@@ -3,9 +3,7 @@ import { useThree } from '@react-three/fiber';
 import type { RefObject } from 'react';
 import type * as THREE from 'three';
 import { resetCamera as resetCameraFn } from '#utils/camera.utils.js';
-import { useCameraCapability } from '#hooks/use-graphics.js';
 
-// Define the specific types needed for camera reset
 type ResetRotation = {
   side: number;
   vertical: number;
@@ -27,29 +25,21 @@ type ResetCameraParameters = {
   setSceneRadius: (radius: number) => void;
   originalDistanceReference?: RefObject<number | undefined>;
   cameraFovAngle: number;
+  onResetCamera?: (reset: () => void) => void;
 };
 
 /**
- * Hook that provides camera reset functionality and registers it with the graphics context
+ * Hook that provides camera reset functionality.
  *
- * @param parameters - The parameters for the camera reset.
- * @returns The reset function.
+ * Consumers can pass an optional `onResetCamera` callback to register the
+ * reset function externally (e.g. with a capability actor in the host app).
  */
 export function useCameraReset(parameters: ResetCameraParameters): (options?: {
-  /**
-   * Whether to enable configured angles.
-   * @default true
-   */
   enableConfiguredAngles?: boolean;
 }) => void {
   const { camera, controls, invalidate, size } = useThree();
   const viewportAspect = size.width > 0 && size.height > 0 ? size.width / size.height : 1;
-  const cameraCapabilityActor = useCameraCapability();
-  const isRegistered = useRef(false);
 
-  // Store viewportAspect in a ref so the resetCamera callback remains stable
-  // during resize. The aspect is read lazily when reset is actually called,
-  // preventing callback recreation on every resize pixel.
   const viewportAspectRef = useRef(viewportAspect);
   viewportAspectRef.current = viewportAspect;
 
@@ -61,11 +51,11 @@ export function useCameraReset(parameters: ResetCameraParameters): (options?: {
     setSceneRadius,
     originalDistanceReference,
     cameraFovAngle,
+    onResetCamera,
   } = parameters;
 
   const resetCamera = useCallback(
     (options?: { enableConfiguredAngles?: boolean }) => {
-      // Reset original distance reference if available
       if (originalDistanceReference?.current !== undefined) {
         originalDistanceReference.current = undefined;
       }
@@ -98,14 +88,9 @@ export function useCameraReset(parameters: ResetCameraParameters): (options?: {
     ],
   );
 
-  // Register the reset function with the camera capability actor only once
   useEffect(() => {
-    if (!isRegistered.current) {
-      cameraCapabilityActor.send({ type: 'registerReset', reset: resetCamera });
-      isRegistered.current = true;
-    }
-  }, [resetCamera, cameraCapabilityActor]);
+    onResetCamera?.(resetCamera);
+  }, [resetCamera, onResetCamera]);
 
-  // Return the reset function for direct use if needed
   return resetCamera;
 }

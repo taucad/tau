@@ -14,6 +14,12 @@ export {
   type UpDirection,
 } from './section-view-controls.js';
 export { TransformControls, type TransformControlsProps } from './transform-controls-drei.js';
+export { Stage, defaultStageOptions, type StageOptions } from './stage.js';
+export { UpDirectionHandler } from './up-direction-handler.js';
+export { useCameraFraming } from './hooks/use-camera-framing.js';
+export { useCameraReset } from './use-camera-reset.js';
+export { useGeometryBounds } from './hooks/use-geometry-bounds.js';
+export { useSectionView, type SectionViewResult } from './hooks/use-section-view.js';
 export { PostProcessing } from './post-processing.js';
 export { Grid } from './grid.js';
 export { ViewportGizmoCube } from './viewport-gizmo.js';

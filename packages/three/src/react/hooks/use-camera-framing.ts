@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useThree } from '@react-three/fiber';
 import type * as THREE from 'three';
 import { useCameraReset } from '#react/use-camera-reset.js';
-import { useGraphicsSelector } from '#hooks/use-graphics.js';
+import { useViewerStore } from '#react/stores/store-context.js';
 import type { StageOptions } from '#react/stage.js';
 import { defaultStageOptions } from '#react/stage.js';
 
@@ -25,7 +25,7 @@ export function useCameraFraming(
   geometryCenter: THREE.Vector3,
   stageOptions: StageOptions = defaultStageOptions,
 ): (options?: { enableConfiguredAngles?: boolean }) => void {
-  const cameraFovAngle = useGraphicsSelector((state) => state.context.cameraFovAngle);
+  const cameraFovAngle = useViewerStore((state) => state.fieldOfView);
 
   // Merge caller options with defaults
   const { offsetRatio, nearPlane, minimumFarPlane, farPlaneRadiusMultiplier, zoomLevel, rotation } = useMemo(

@@ -95,4 +95,9 @@ const tscircuitBuilds: BuildWithFiles[] = tscircuitModels.map((model) => {
   return createBuild(model, mainFile, language);
 });
 
-export const sampleBuilds: BuildWithFiles[] = [...replicadBuilds, ...openscadBuilds, ...jscadBuilds, ...tscircuitBuilds];
+export const sampleBuilds: BuildWithFiles[] = [
+  ...replicadBuilds,
+  ...openscadBuilds,
+  ...jscadBuilds,
+  ...tscircuitBuilds,
+];

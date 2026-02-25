@@ -16,11 +16,11 @@ export const createNodeIo = async (): Promise<NodeIO> => {
   return new NodeIO().registerExtensions(allExtensions).registerDependencies({
     // eslint-disable-next-line @typescript-eslint/naming-convention -- draco3d uses this format
     'draco3d.decoder': await draco3d.createDecoderModule({
-      locateFile: () => new URL('./assets/draco3d/gltf/draco_decoder_gltf.wasm', import.meta.url).href,
+      locateFile: () => new URL('assets/draco3d/gltf/draco_decoder_gltf.wasm', import.meta.url).href,
     }),
     // eslint-disable-next-line @typescript-eslint/naming-convention -- draco3d uses this format
     'draco3d.encoder': await draco3d.createEncoderModule({
-      locateFile: () => new URL('./assets/draco3d/gltf/draco_encoder.wasm', import.meta.url).href,
+      locateFile: () => new URL('assets/draco3d/gltf/draco_encoder.wasm', import.meta.url).href,
     }),
   });
 };

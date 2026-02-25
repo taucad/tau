@@ -67,12 +67,13 @@ export function expectChunkTypesInclude(chunks: UIMessageChunk[], type: string):
  * Assert that the specified chunk types appear in order (not necessarily contiguous).
  */
 export function expectChunkOrder(chunks: UIMessageChunk[], ...types: string[]): void {
-  let searchFrom = 0;
+  let position = 0;
 
   for (const type of types) {
-    const index = chunks.findIndex((c, i) => i >= searchFrom && c.type === type);
-    expect(index, `Expected chunk type '${type}' after position ${searchFrom}`).toBeGreaterThanOrEqual(searchFrom);
-    searchFrom = index + 1;
+    const startAt = position;
+    const index = chunks.findIndex((c, i) => i >= startAt && c.type === type);
+    expect(index, `Expected chunk type '${type}' after position ${startAt}`).toBeGreaterThanOrEqual(startAt);
+    position = index + 1;
   }
 }
 

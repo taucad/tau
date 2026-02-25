@@ -29,7 +29,7 @@ export {
   createReverseScalingTransform,
 } from '#gltf.transforms.js';
 
-// gltf-transform I/O utilities for downstream consumers (e.g. kernels middleware)
+// Gltf-transform I/O utilities for downstream consumers (e.g. kernels middleware)
 export { createNodeIo } from '#gltf.utils.js';
 export { allExtensions } from '#gltf.extensions.js';
 

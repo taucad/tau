@@ -119,15 +119,11 @@ export async function createTestApp(): Promise<TestApp> {
   logger.log(`Test app listening on ${baseUrl}`);
 
   const memFs = fromMemoryFS();
-  const headlessRpc = moduleRef.get(ChatRpcService) as HeadlessChatRpcService;
+  const headlessRpc: HeadlessChatRpcService = moduleRef.get(ChatRpcService);
 
   const dispatcher = createRpcDispatcher({
     fileSystem: createHeadlessRpcFileSystem(memFs),
-    kernelClient: createHeadlessKernelClient(
-      // Kernel worker will be created per-test via the test helper
-      // For now, provide a stub that returns success with no issues
-      { createGeometry: async () => ({ success: true, issues: [] }) },
-    ),
+    kernelClient: createHeadlessKernelClient({ createGeometry: async () => ({ success: true, issues: [] }) }),
   });
   headlessRpc.setDispatcher(dispatcher);
 

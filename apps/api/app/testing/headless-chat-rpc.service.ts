@@ -1,7 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import type { RpcSchemasRegistry, RpcInput, RpcResult, RpcCall, RpcExecutionError, RpcValidationError } from '@taucad/chat';
-import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
+import type {
+  RpcSchemasRegistry,
+  RpcInput,
+  RpcResult,
+  RpcCall,
+  RpcExecutionError,
+  RpcValidationError,
+} from '@taucad/chat';
 import type { RpcDispatcher } from '@taucad/chat/rpc';
+import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 
 /**
  * Headless ChatRpcService that bypasses Socket.IO entirely.
@@ -47,7 +54,15 @@ export class HeadlessChatRpcService extends ChatRpcService {
   }
 
   // No-ops for connection management (no Socket.IO in headless mode)
-  public override registerConnection(): void {}
-  public override unregisterConnection(): void {}
-  public override registerAbortSignal(): void {}
+  public override registerConnection(): void {
+    // No-op
+  }
+
+  public override unregisterConnection(): void {
+    // No-op
+  }
+
+  public override registerAbortSignal(): void {
+    // No-op
+  }
 }

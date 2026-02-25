@@ -14,14 +14,14 @@ import type { UIMessage, UIMessageChunk } from 'ai';
  * Useful for asserting on streaming behavior (event ordering, partial deltas).
  */
 export async function collectStreamChunks(response: Response): Promise<UIMessageChunk[]> {
-  const body = response.body;
+  const { body } = response;
   if (!body) {
     throw new Error('Response body is null');
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- AI SDK schema type mismatch between LazySchema versions
   const chunkStream = parseJsonEventStream({
     stream: body,
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any -- AI SDK schema type mismatch between LazySchema versions
     schema: uiMessageChunkSchema as any,
   }).pipeThrough(
     new TransformStream({
@@ -30,7 +30,7 @@ export async function collectStreamChunks(response: Response): Promise<UIMessage
           throw chunk.error;
         }
 
-        controller.enqueue(chunk.value);
+        controller.enqueue(chunk.value as UIMessageChunk);
       },
     }),
   );
@@ -41,12 +41,12 @@ export async function collectStreamChunks(response: Response): Promise<UIMessage
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- read loop
   while (true) {
     // eslint-disable-next-line no-await-in-loop -- sequential stream read
-    const { done, value } = await reader.read();
-    if (done) {
+    const result = await reader.read();
+    if (result.done) {
       break;
     }
 
-    chunks.push(value);
+    chunks.push(result.value as UIMessageChunk);
   }
 
   return chunks;
@@ -57,9 +57,7 @@ export async function collectStreamChunks(response: Response): Promise<UIMessage
  * Uses readUIMessageStream, the same processor that builds UIMessage objects
  * from chunks in the browser.
  */
-export async function collectFinalMessage(
-  chunks: UIMessageChunk[],
-): Promise<UIMessage> {
+export async function collectFinalMessage(chunks: UIMessageChunk[]): Promise<UIMessage> {
   const stream = new ReadableStream<UIMessageChunk>({
     start(controller) {
       for (const chunk of chunks) {

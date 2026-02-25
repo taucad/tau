@@ -132,11 +132,7 @@ describe(`Model Integration: ${modelId}`, () => {
     expect(response.ok, `HTTP ${response.status}: ${response.statusText}`).toBe(true);
 
     const chunks = await collectStreamChunks(response);
-    const chunkTypes = chunks.map((c) => c.type);
-    console.log('Tool call chunk types:', JSON.stringify(chunkTypes));
-    console.log('Tool call chunks detail:', JSON.stringify(chunks.filter(c => c.type.includes('tool')), null, 2));
     const message = await collectFinalMessage(chunks);
-    console.log('Final message parts:', JSON.stringify(message.parts, null, 2));
 
     expectHasToolCall(message, 'create_file');
     expectToolCallSucceeded(message, 'create_file');

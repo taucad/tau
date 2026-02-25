@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- External library uses PascalCase method names */
 import { PlatformIO } from '@gltf-transform/core';
 import draco3d from 'draco3dgltf';
 import { allExtensions } from '#gltf.extensions.js';
@@ -50,11 +51,9 @@ export class FileResolverIO extends PlatformIO {
 export async function createFileResolverIo(resolver: FileResolver): Promise<FileResolverIO> {
   const io = new FileResolverIO(resolver);
   io.registerExtensions(allExtensions).registerDependencies({
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- draco3d uses this format
     'draco3d.decoder': await draco3d.createDecoderModule({
       locateFile: () => new URL('../assets/draco3d/gltf/draco_decoder_gltf.wasm', import.meta.url).href,
     }),
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- draco3d uses this format
     'draco3d.encoder': await draco3d.createEncoderModule({
       locateFile: () => new URL('../assets/draco3d/gltf/draco_encoder.wasm', import.meta.url).href,
     }),

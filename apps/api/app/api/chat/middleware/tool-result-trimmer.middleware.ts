@@ -160,6 +160,26 @@ function isGlobSearchShape(content: unknown): boolean {
 }
 
 /**
+ * Checks if content has the shape of ScreenshotOutput.
+ * Unique: has images array with objects containing dataUrl/view fields.
+ */
+function isScreenshotShape(content: unknown): boolean {
+  if (!isObject(content)) {
+    return false;
+  }
+
+  const images = content['images'];
+  if (!Array.isArray(images)) {
+    return false;
+  }
+
+  // Consider it a screenshot if elements look like { view?, dataUrl? }
+  return images.some(
+    (img) => isObject(img) && (typeof img['dataUrl'] === 'string' || typeof img['view'] === 'string'),
+  );
+}
+
+/**
  * Registry of content shape detectors.
  * Maps tool names to functions that detect if content matches that tool's output shape.
  * Used as a fallback when message.name is undefined.
@@ -176,6 +196,7 @@ const contentShapeDetectors: Record<string, ContentShapeDetector> = {
   [toolName.listDirectory]: isListDirectoryShape,
   [toolName.grep]: isGrepShape,
   [toolName.globSearch]: isGlobSearchShape,
+  [toolName.screenshot]: isScreenshotShape,
 };
 
 /**
@@ -294,6 +315,25 @@ const toolResultTrimmers: Record<string, (result: unknown) => unknown> = {
             })),
           }
         : {}),
+    };
+  }),
+  /**
+   * Trims screenshot results by removing base64 image data.
+   * Keeps only lightweight metadata so older screenshots don't bloat context.
+   */
+  [toolName.screenshot]: createTrimmer(toolName.screenshot, (result) => {
+    // Guard: return unchanged if images is missing or malformed
+    if (!Array.isArray(result.images)) {
+      return result;
+    }
+
+    return {
+      images: result.images
+        .filter((img) => isObject(img))
+        .map((img) => ({
+          ...(typeof img.view === 'string' ? { view: img.view } : {}),
+          // REMOVED: dataUrl - large base64 content not needed for old messages
+        })),
     };
   }),
 };

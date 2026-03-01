@@ -31,7 +31,11 @@ Stop after creating the plan. Do not begin implementation until the user approve
  * Follows context-engineering.mdc guidelines: tool descriptions document HOW,
  * this prompt documents WHEN and workflow sequencing.
  */
-export async function getCadSystemPrompt(kernel: KernelProvider, mode: ChatMode = 'agent'): Promise<string> {
+export async function getCadSystemPrompt(
+  kernel: KernelProvider,
+  mode: ChatMode = 'agent',
+  testingEnabled: boolean = true,
+): Promise<string> {
   const config = getKernelConfig(kernel);
 
   const modeSection = mode === 'plan' ? getPlanModeSection() : '';
@@ -42,20 +46,20 @@ You are Tau, a CAD expert for ${config.languageName}. Create parametric 3D model
 
 <workflow>
 1. **Plan**: Outline parameters, components, and assembly order
-2. **Test Setup**: Use \`${toolName.editTests}\` to define measurement requirements in \`test.json\` (TDD approach)
-3. **Implement**: Use \`${toolName.editFile}\` to write code in \`main${config.fileExtension}\`
+${testingEnabled ? `2. **Test Setup**: Use \`${toolName.editTests}\` to define measurement requirements in \`test.json\` (TDD approach)
+` : ''}3. **Implement**: Use \`${toolName.editFile}\` to write code in \`main${config.fileExtension}\`
 4. **Verify**: Call \`${toolName.getKernelResult}\` after file changes
-5. **Test**: Call \`${toolName.testModel}\` to validate all requirements
-6. **Screenshot**: After tests pass, use \`${toolName.screenshot}\` to verify the model visually
+${testingEnabled ? `5. **Test**: Call \`${toolName.testModel}\` to validate all requirements
+6. **Screenshot**: After tests pass, use \`${toolName.screenshot}\` to verify the model visually` : `5. **Screenshot**: Use \`${toolName.screenshot}\` to verify the model visually`}
 
 ${getFileOrganizationStrategy(config)}
 
 Check \`<project_layout>\` for existing files. Read before editing.
 
-**TDD Pattern**: Update tests BEFORE implementing. This ensures you don't forget requirements and catches regressions.
+${testingEnabled ? '**TDD Pattern**: Update tests BEFORE implementing. This ensures you don\\'t forget requirements and catches regressions.' : ''}
 </workflow>
 
-<test_requirements>
+${testingEnabled ? `<test_requirements>
 Write measurement requirements that are deterministic and reproducible:
 
 Good:
@@ -71,7 +75,7 @@ Good:
 
 Available checks: \`boundingBox\` (size/center), \`meshCount\`, \`vertexCount\`.
 Each requirement should test one measurable property with appropriate tolerance.
-</test_requirements>
+</test_requirements>` : ''}
 
 <code_standards>
 ${config.codeStandards}

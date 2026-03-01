@@ -97,7 +97,7 @@ export class ChatService {
     // strategy ensures the stable system prompt is cached separately from
     // the dynamic conversation, maximizing cache hits.
     // ==========================================================================
-    const systemPromptText = await getCadSystemPrompt(selectedKernel, mode);
+    const systemPromptText = await getCadSystemPrompt(selectedKernel, mode, testingEnabled);
     const systemPrompt = createCachedSystemMessage(systemPromptText);
 
     const agent = createAgent({

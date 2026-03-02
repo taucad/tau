@@ -5,7 +5,7 @@ import { Loader } from '#components/ui/loader.js';
 import { GraphicsProvider } from '#hooks/use-graphics.js';
 import { useCadPreview } from '#hooks/use-cad-preview.js';
 import { cn } from '#utils/ui.utils.js';
-import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
+import type { StageOptions } from '@taucad/three/react';
 
 /**
  * Visual rendering settings for the CAD preview viewer.

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OCCT Benchmark Comparison: v7.6 vs v8-rc4</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; padding: 32px; }
+  h1 { font-size: 28px; margin-bottom: 8px; color: #f0f6fc; }
+  h2 { font-size: 20px; margin: 32px 0 16px; color: #f0f6fc; }
+  .subtitle { color: #8b949e; margin-bottom: 32px; font-size: 14px; }
+  .chart-container { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 24px; margin-bottom: 32px; }
+  canvas { max-height: 500px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 32px; }
+  th, td { padding: 10px 14px; text-align: right; border-bottom: 1px solid #30363d; font-size: 13px; }
+  th { color: #8b949e; font-weight: 500; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
+  td:first-child, th:first-child { text-align: left; }
+  tr:hover td { background: #1c2128; }
+  .faster { color: #3fb950; }
+  .slower { color: #f85149; }
+  .neutral { color: #8b949e; }
+  .size-table { max-width: 700px; }
+  .size-table td, .size-table th { font-family: 'SF Mono', 'Fira Code', monospace; }
+</style>
+</head>
+<body>
+<h1>OCCT Benchmark Comparison</h1>
+<p class="subtitle">OpenCASCADE v7.6.2 vs v8.0.0-rc4 (single-threaded) vs v8.0.0-rc4 (multi-threaded) &mdash; Median times, 5 iterations</p>
+
+<div class="chart-container">
+  <canvas id="chart"></canvas>
+</div>
+
+<h2>Performance Table (median ms)</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Operation</th>
+      <th>v7.6</th>
+      <th>v8-single</th>
+      <th>&Delta; vs v7.6</th>
+      <th>v8-multi</th>
+      <th>&Delta; vs v7.6</th>
+      <th>&Delta; multi vs single</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>box</td><td>14.4</td><td>43.0</td><td class="slower">+198.4%</td><td>38.7</td><td class="slower">+168.5%</td><td class="faster">-10.0%</td></tr>
+    <tr><td>cylinder</td><td>12.5</td><td>22.3</td><td class="slower">+78.7%</td><td>21.5</td><td class="slower">+72.2%</td><td class="faster">-3.6%</td></tr>
+    <tr><td>sphere</td><td>29.2</td><td>40.4</td><td class="slower">+38.2%</td><td>42.3</td><td class="slower">+44.8%</td><td class="slower">+4.8%</td></tr>
+    <tr><td>fuse-two-boxes</td><td>26.6</td><td>56.4</td><td class="slower">+111.6%</td><td>57.8</td><td class="slower">+117.0%</td><td class="slower">+2.5%</td></tr>
+    <tr><td>cut-cylinder-from-box</td><td>20.0</td><td>36.8</td><td class="slower">+83.9%</td><td>38.3</td><td class="slower">+91.1%</td><td class="slower">+3.9%</td></tr>
+    <tr><td>n-body-fuse</td><td>65.1</td><td>157.2</td><td class="slower">+141.6%</td><td>167.9</td><td class="slower">+158.1%</td><td class="slower">+6.8%</td></tr>
+    <tr><td>box-fillet-all</td><td>43.0</td><td>114.5</td><td class="slower">+166.0%</td><td>127.2</td><td class="slower">+195.4%</td><td class="slower">+11.0%</td></tr>
+    <tr><td>box-chamfer-all</td><td>39.6</td><td>110.3</td><td class="slower">+178.6%</td><td>122.4</td><td class="slower">+209.1%</td><td class="slower">+11.0%</td></tr>
+    <tr><td>sketch-extrude</td><td>12.8</td><td>21.3</td><td class="slower">+66.7%</td><td>22.9</td><td class="slower">+79.3%</td><td class="slower">+7.6%</td></tr>
+    <tr><td>sketch-revolve</td><td>15.4</td><td>24.9</td><td class="slower">+61.7%</td><td>25.6</td><td class="slower">+66.0%</td><td class="slower">+2.6%</td></tr>
+    <tr><td>bracket</td><td>63.8</td><td>149.0</td><td class="slower">+133.7%</td><td>159.5</td><td class="slower">+150.1%</td><td class="slower">+7.0%</td></tr>
+    <tr><td>enclosure</td><td>26.1</td><td>70.4</td><td class="slower">+169.5%</td><td>72.2</td><td class="slower">+176.3%</td><td class="slower">+2.5%</td></tr>
+    <tr><td>multi-hole-plate</td><td>242.2</td><td>518.2</td><td class="slower">+114.0%</td><td>549.6</td><td class="slower">+127.0%</td><td class="slower">+6.1%</td></tr>
+    <tr><td>tray</td><td>34.0</td><td>62.1</td><td class="slower">+82.7%</td><td>64.9</td><td class="slower">+91.1%</td><td class="slower">+4.6%</td></tr>
+    <tr><td>birdhouse</td><td>271.1</td><td>471.2</td><td class="slower">+73.8%</td><td>476.8</td><td class="slower">+75.9%</td><td class="neutral">+1.2%</td></tr>
+    <tr><td>bottle</td><td>342.3</td><td>539.6</td><td class="slower">+57.6%</td><td>550.0</td><td class="slower">+60.7%</td><td class="neutral">+1.9%</td></tr>
+    <tr><td>gridfinity-box</td><td>249.7</td><td>500.9</td><td class="slower">+100.6%</td><td>541.5</td><td class="slower">+116.9%</td><td class="slower">+8.1%</td></tr>
+    <tr><td>vase</td><td>226.4</td><td>236.5</td><td class="slower">+4.4%</td><td>249.8</td><td class="slower">+10.3%</td><td class="slower">+5.6%</td></tr>
+    <tr><td>deep-boolean-chain</td><td>132.1</td><td>348.3</td><td class="slower">+163.5%</td><td>356.8</td><td class="slower">+170.0%</td><td class="slower">+2.5%</td></tr>
+  </tbody>
+</table>
+
+<h2>WASM Build Sizes</h2>
+<table class="size-table">
+  <thead>
+    <tr><th>Build</th><th>JS (kB)</th><th>WASM (MB)</th><th>.d.ts (kB)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>v7.6 single</td><td>136</td><td>10.8</td><td>407</td></tr>
+    <tr><td>v7.6 exceptions</td><td>263</td><td>19.2</td><td>409</td></tr>
+    <tr><td>v8-rc4 single</td><td>231</td><td>32.0</td><td>367</td></tr>
+    <tr><td>v8-rc4 exceptions</td><td>232</td><td>32.0</td><td>369</td></tr>
+    <tr><td>v8-rc4 multi</td><td>249</td><td>30.0</td><td>367</td></tr>
+  </tbody>
+</table>
+
+<script>
+const ctx = document.getElementById('chart').getContext('2d');
+new Chart(ctx, {
+  type: 'bar',
+  data: {
+    labels: ["box","cylinder","sphere","fuse-two-boxes","cut-cylinder-from-box","n-body-fuse","box-fillet-all","box-chamfer-all","sketch-extrude","sketch-revolve","bracket","enclosure","multi-hole-plate","tray","birdhouse","bottle","gridfinity-box","vase","deep-boolean-chain"],
+    datasets: [
+      {
+        label: 'v7.6 (single)',
+        data: [14.42,12.46,29.19,26.64,20.03,65.06,43.05,39.58,12.79,15.41,63.76,26.12,242.15,33.97,271.1,342.29,249.66,226.45,132.15],
+        backgroundColor: 'rgba(88, 166, 255, 0.8)',
+        borderColor: 'rgba(88, 166, 255, 1)',
+        borderWidth: 1,
+      },
+      {
+        label: 'v8-rc4 (single)',
+        data: [43.02,22.27,40.35,56.36,36.85,157.2,114.52,110.25,21.32,24.92,148.99,70.41,518.17,62.06,471.17,539.6,500.86,236.5,348.25],
+        backgroundColor: 'rgba(63, 185, 80, 0.8)',
+        borderColor: 'rgba(63, 185, 80, 1)',
+        borderWidth: 1,
+      },
+      {
+        label: 'v8-rc4 (multi)',
+        data: [38.72,21.46,42.27,57.8,38.29,167.91,127.16,122.36,22.93,25.57,159.46,72.17,549.62,64.9,476.8,549.97,541.48,249.77,356.8],
+        backgroundColor: 'rgba(210, 153, 34, 0.8)',
+        borderColor: 'rgba(210, 153, 34, 1)',
+        borderWidth: 1,
+      },
+    ],
+  },
+  options: {
+    responsive: true,
+    plugins: {
+      title: { display: true, text: 'Median Execution Time (ms) - Lower is Better', color: '#c9d1d9', font: { size: 16 } },
+      legend: { labels: { color: '#c9d1d9' } },
+    },
+    scales: {
+      x: { ticks: { color: '#8b949e', maxRotation: 45 }, grid: { color: '#21262d' } },
+      y: { title: { display: true, text: 'Time (ms)', color: '#8b949e' }, ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
+    },
+  },
+});
+</script>
+</body>
+</html>

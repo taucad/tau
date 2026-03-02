@@ -8,7 +8,7 @@
  *
  * @example
  * ```typescript
- * const plugin: KernelPlugin = replicad({ withExceptions: true });
+ * const plugin: KernelPlugin = replicad({ withBrepEdges: true });
  * ```
  */
 export type KernelPlugin = {

@@ -1,0 +1,16 @@
+name: "O2-LTO-single"
+description: "LTO-enabled build: -O2 compile with LTO, aggressive dead-code elimination"
+
+compilation:
+  optimization: "-O2"
+  lto: true
+  exceptions: "none"
+  threading: "single-threaded"
+
+linking:
+  yaml: "custom_build_single_v8.yml"
+  wasmOptLevel: "-O3"
+
+benchmark:
+  iterations: 10
+  filter: ["primitives", "booleans", "fillets", "extrusions", "complex", "examples", "stress"]

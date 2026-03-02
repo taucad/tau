@@ -9,6 +9,7 @@ export const usageDataSchema = z.object({
   model: z.string(),
   inputTokens: z.number(),
   outputTokens: z.number(),
+  reasoningTokens: z.number(),
   cacheReadTokens: z.number(),
   cacheWriteTokens: z.number(),
   inputTokensCost: z.number(),
@@ -22,15 +23,7 @@ export type UsageData = z.infer<typeof usageDataSchema>;
 
 /**
  * Schema for custom data parts in UI messages.
- *
- * IMPORTANT: The explicit type annotation is required to ensure proper type resolution
- * during `tsc --build` with project references. Without it, `z.infer` in declaration
- * files may not fully resolve, causing `DataUIPart<MyDataPart>` to widen from
- * `{ type: 'data-test'; ... }` to `{ type: 'data-${string}'; ... }`, breaking
- * exhaustive switch statements in components like `chat-message.tsx`.
  */
-export const dataPartSchema: z.ZodType<{
-  usage: UsageData;
-}> = z.object({
+export const dataPartSchema = z.object({
   usage: usageDataSchema,
 });

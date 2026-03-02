@@ -1,5 +1,8 @@
 import type { FileExtension, FileInput } from '@taucad/types';
 
+/**
+ *
+ */
 export type BaseLoaderOptions = {
   format: FileExtension;
 };

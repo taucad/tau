@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const chatUsageTokensSchema = z.object({
   inputTokens: z.number().describe('The number of input tokens consumed'),
   outputTokens: z.number().describe('The number of output tokens consumed'),
+  reasoningTokens: z.number().describe('The number of reasoning/thinking tokens consumed'),
   cacheReadTokens: z.number().describe('The number of cached input tokens read'),
   cacheWriteTokens: z.number().describe('The number of cached output tokens written'),
 });

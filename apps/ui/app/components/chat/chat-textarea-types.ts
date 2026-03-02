@@ -54,7 +54,7 @@ export type ChatTextareaProperties = {
   }: {
     content: string;
     model: string;
-    metadata?: { toolChoice?: ToolSelection };
+    metadata?: { toolChoice?: ToolSelection; mode?: 'agent' | 'plan' };
     imageUrls?: string[];
   }) => Promise<void>;
   readonly onEscapePressed?: () => void;
@@ -150,6 +150,9 @@ export function useChatTextareaLogic({
   const selectedToolChoice = useChatSelector((state) =>
     mode === 'main' ? (state.draftToolChoice as ToolSelection) : 'auto',
   );
+  const selectedMode = useChatSelector((state) =>
+    mode === 'main' ? (state.draftMode as 'agent' | 'plan') : ('agent' as const),
+  );
 
   const {
     stop,
@@ -210,6 +213,7 @@ export function useChatTextareaLogic({
         model: selectedModel?.id ?? '',
         metadata: {
           toolChoice: selectedToolChoice,
+          mode: selectedMode,
         },
         imageUrls: images,
       });

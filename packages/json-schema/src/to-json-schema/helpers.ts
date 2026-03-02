@@ -15,6 +15,9 @@ export const typeNames = [
   'date',
 ] as const;
 
+/**
+ *
+ */
 export function getType(value: unknown): string | undefined {
   return typeNames.find((typeName) => types[typeName]!(value));
 }
@@ -43,6 +46,9 @@ function getCommonTypeFromArrayOfTypes(arrayOfTypes: string[]): string | undefin
   return lastValue;
 }
 
+/**
+ *
+ */
 export function getCommonArrayItemsType(array: unknown[]): string | undefined {
   return getCommonTypeFromArrayOfTypes(array.map((item) => getType(item) ?? ''));
 }

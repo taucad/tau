@@ -70,7 +70,7 @@ function createSuccessResponse(body: string, headers?: Record<string, string>): 
 // Plugin Handler Capture Utility
 // =============================================================================
 
-type OnLoadArgs = {
+type HandlerArgs = {
   path: string;
   namespace: string;
   suffix: string;
@@ -78,17 +78,38 @@ type OnLoadArgs = {
   with: Record<string, string>;
 };
 
+type OnLoadArgs = HandlerArgs;
+
+type OnResolveArgs = HandlerArgs & {
+  importer: string;
+  resolveDir: string;
+  kind: string;
+};
+
 type CapturedHandler = (args: OnLoadArgs) => Promise<unknown>;
+type CapturedResolveHandler = (args: OnResolveArgs) => Promise<unknown>;
+
+type CapturedHandlers = {
+  httpUrlOnLoad: CapturedHandler;
+  mainOnResolve: CapturedResolveHandler;
+};
 
 /**
- * Create the ZenFS plugin with mocks and capture the `http-url` onLoad handler
- * so it can be invoked directly in tests without requiring esbuild-wasm.
+ * Create the ZenFS plugin with mocks and capture key handlers
+ * so they can be invoked directly in tests without requiring esbuild-wasm.
  */
-function captureHttpUrlOnLoadHandler(filesystem: MockFilesystem): CapturedHandler {
+function capturePluginHandlers(filesystem: MockFilesystem): CapturedHandlers {
   let httpUrlOnLoad: CapturedHandler | undefined;
+  let mainOnResolve: CapturedResolveHandler | undefined;
 
   const mockBuild = {
-    onResolve: vi.fn(),
+    onResolve: vi
+      .fn()
+      .mockImplementation((options: { filter?: RegExp; namespace?: string }, callback: CapturedResolveHandler) => {
+        if (!options.namespace && options.filter?.source === '.*') {
+          mainOnResolve = callback;
+        }
+      }),
     onLoad: vi.fn().mockImplementation((options: { namespace?: string }, callback: CapturedHandler) => {
       if (options.namespace === 'http-url') {
         httpUrlOnLoad = callback;
@@ -117,7 +138,11 @@ function captureHttpUrlOnLoadHandler(filesystem: MockFilesystem): CapturedHandle
     throw new Error('http-url onLoad handler was not registered');
   }
 
-  return httpUrlOnLoad;
+  if (!mainOnResolve) {
+    throw new Error('main onResolve handler was not registered');
+  }
+
+  return { httpUrlOnLoad, mainOnResolve };
 }
 
 // =============================================================================
@@ -131,7 +156,7 @@ describe('ESBuild Bundler – http-url onLoad handler', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', mockFetch);
     filesystem = createMockFilesystem();
-    handler = captureHttpUrlOnLoadHandler(filesystem);
+    handler = capturePluginHandlers(filesystem).httpUrlOnLoad;
   });
 
   afterEach(() => {
@@ -235,5 +260,92 @@ describe('ESBuild Bundler – http-url onLoad handler', () => {
       expect(result.contents).toBe('export default 42;');
       expect(result.loader).toBe('js');
     });
+  });
+});
+
+// =============================================================================
+// CDN Absolute-Path Resolution
+// =============================================================================
+
+describe('ESBuild Bundler – CDN absolute-path resolution', () => {
+  let filesystem: MockFilesystem;
+  let mainOnResolve: CapturedResolveHandler;
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', mockFetch);
+    filesystem = createMockFilesystem();
+    const handlers = capturePluginHandlers(filesystem);
+    mainOnResolve = handlers.mainOnResolve;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should resolve absolute-path imports from CDN-cached modules to esm.sh URLs', async () => {
+    const result = (await mainOnResolve({
+      path: '/@thi.ng/vectors@^8.6.20/defopvn?target=es2022',
+      importer: '/node_modules/@thi.ng/geom-voronoi/index.js',
+      namespace: 'zenfs',
+      kind: 'import-statement',
+      resolveDir: '/node_modules/@thi.ng/geom-voronoi',
+      suffix: '',
+      pluginData: undefined,
+      with: {},
+    })) as { path: string; namespace: string };
+
+    expect(result.path).toBe('https://esm.sh/@thi.ng/vectors@^8.6.20/defopvn?target=es2022');
+    expect(result.namespace).toBe('http-url');
+  });
+
+  it('should resolve Node.js polyfill paths from CDN-cached modules to esm.sh URLs', async () => {
+    const result = (await mainOnResolve({
+      path: '/node/process.mjs',
+      importer: '/node_modules/some-package/index.js',
+      namespace: 'zenfs',
+      kind: 'import-statement',
+      resolveDir: '/node_modules/some-package',
+      suffix: '',
+      pluginData: undefined,
+      with: {},
+    })) as { path: string; namespace: string };
+
+    expect(result.path).toBe('https://esm.sh/node/process.mjs');
+    expect(result.namespace).toBe('http-url');
+  });
+
+  it('should resolve CDN bundle entry paths from CDN-cached modules', async () => {
+    const result = (await mainOnResolve({
+      path: '/poisson-disk-sampling@2.3.1/es2022/poisson-disk-sampling.bundle.mjs',
+      importer: '/node_modules/poisson-disk-sampling/index.js',
+      namespace: 'zenfs',
+      kind: 'import-statement',
+      resolveDir: '/node_modules/poisson-disk-sampling',
+      suffix: '',
+      pluginData: undefined,
+      with: {},
+    })) as { path: string; namespace: string };
+
+    expect(result.path).toBe('https://esm.sh/poisson-disk-sampling@2.3.1/es2022/poisson-disk-sampling.bundle.mjs');
+    expect(result.namespace).toBe('http-url');
+  });
+
+  it('should NOT redirect absolute-path imports from project files', async () => {
+    filesystem.exists.mockResolvedValue(true);
+    filesystem.readFile.mockResolvedValue('export default 42;');
+
+    const result = (await mainOnResolve({
+      path: '/utils/helpers.ts',
+      importer: 'main.ts',
+      namespace: 'zenfs',
+      kind: 'import-statement',
+      resolveDir: '/project',
+      suffix: '',
+      pluginData: undefined,
+      with: {},
+    })) as { path: string; namespace: string };
+
+    expect(result.namespace).toBe('zenfs');
+    expect(result.path).not.toContain('esm.sh');
   });
 });

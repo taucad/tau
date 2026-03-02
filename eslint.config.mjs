@@ -398,6 +398,21 @@ const config = [
       'no-barrel-files/no-barrel-files': 'off',
     },
   },
+  {
+    // Example fixture source files are user-facing CAD code, not library code.
+    files: ['libs/tau-examples/src/kernels/**/*.ts'],
+    rules: {
+      'unicorn/prevent-abbreviations': 'warn',
+      'unicorn/no-array-callback-reference': 'warn',
+      '@typescript-eslint/explicit-module-boundary-types': 'warn',
+      '@typescript-eslint/naming-convention': 'warn',
+      '@typescript-eslint/no-unsafe-assignment': 'warn',
+      '@typescript-eslint/no-unsafe-call': 'warn',
+      '@typescript-eslint/no-restricted-types': 'warn',
+      '@typescript-eslint/no-unsafe-return': 'warn',
+      'max-params': 'warn',
+    },
+  },
 ];
 
 export default config;

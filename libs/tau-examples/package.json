@@ -5,7 +5,9 @@
   "type": "module",
   "private": true,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./fixtures": "./src/fixture-loader.ts",
+    "./manifest": "./src/manifest.ts"
   },
   "imports": {
     "#*": "./src/*"

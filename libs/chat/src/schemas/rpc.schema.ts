@@ -180,6 +180,28 @@ const captureObservationsRpc = defineRpc({
   }),
 });
 
+const fetchGeometryRpc = defineRpc({
+  input: zod.object({
+    artifactId: zod.string().optional(),
+  }),
+  success: zod.object({
+    glb: zod.instanceof(Uint8Array),
+    artifactPath: zod.string().optional(),
+  }),
+});
+
+const captureScreenshotRpc = defineRpc({
+  input: zod.object({}),
+  success: zod.object({
+    images: zod.array(
+      zod.object({
+        view: zod.string(),
+        dataUrl: zod.string(),
+      }),
+    ),
+  }),
+});
+
 // =============================================================================
 // RPC Schemas Registry
 // =============================================================================
@@ -202,6 +224,8 @@ export type RpcSchemasRegistry = {
   [rpcName.globSearch]: RpcSchemaEntry<GlobSearchRpcInput, GlobSearchRpcResult>;
   [rpcName.getKernelResult]: RpcSchemaEntry<GetKernelResultRpcInput, GetKernelResultRpcResult>;
   [rpcName.captureObservations]: RpcSchemaEntry<CaptureObservationsRpcInput, CaptureObservationsRpcResult>;
+  [rpcName.fetchGeometry]: RpcSchemaEntry<FetchGeometryRpcInput, FetchGeometryRpcResult>;
+  [rpcName.captureScreenshot]: RpcSchemaEntry<CaptureScreenshotRpcInput, CaptureScreenshotRpcResult>;
 };
 
 /**
@@ -240,6 +264,14 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
   [rpcName.captureObservations]: {
     inputSchema: captureObservationsRpc.inputSchema,
     resultSchema: captureObservationsRpc.resultSchema,
+  },
+  [rpcName.fetchGeometry]: {
+    inputSchema: fetchGeometryRpc.inputSchema,
+    resultSchema: fetchGeometryRpc.resultSchema,
+  },
+  [rpcName.captureScreenshot]: {
+    inputSchema: captureScreenshotRpc.inputSchema,
+    resultSchema: captureScreenshotRpc.resultSchema,
   },
 };
 
@@ -319,3 +351,11 @@ export type GetKernelResultRpcResult = z.infer<typeof getKernelResultRpc.resultS
 export type CaptureObservationsRpcInput = z.infer<typeof captureObservationsRpc.inputSchema>;
 export type CaptureObservationsRpcSuccess = z.infer<typeof captureObservationsRpc.successSchema>;
 export type CaptureObservationsRpcResult = z.infer<typeof captureObservationsRpc.resultSchema>;
+
+export type FetchGeometryRpcInput = z.infer<typeof fetchGeometryRpc.inputSchema>;
+export type FetchGeometryRpcSuccess = z.infer<typeof fetchGeometryRpc.successSchema>;
+export type FetchGeometryRpcResult = z.infer<typeof fetchGeometryRpc.resultSchema>;
+
+export type CaptureScreenshotRpcInput = z.infer<typeof captureScreenshotRpc.inputSchema>;
+export type CaptureScreenshotRpcSuccess = z.infer<typeof captureScreenshotRpc.successSchema>;
+export type CaptureScreenshotRpcResult = z.infer<typeof captureScreenshotRpc.resultSchema>;

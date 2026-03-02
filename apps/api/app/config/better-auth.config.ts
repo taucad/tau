@@ -1,4 +1,4 @@
-import type { BetterAuthOptions, Models, LogLevel as BetterAuthLogLevel } from 'better-auth';
+import type { BetterAuthOptions, LogLevel as BetterAuthLogLevel, ModelNames } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { apiKey, magicLink } from 'better-auth/plugins';
 import type { ConfigService } from '@nestjs/config';
@@ -15,7 +15,7 @@ import { staticAuthConfig } from '#config/auth.js';
 /**
  * Mapping between BetterAuth models and ID prefixes.
  */
-const prefixFromModel: Record<Models, IdPrefix> = {
+const prefixFromModel: Record<Exclude<ModelNames, ''>, IdPrefix> = {
   account: idPrefix.account,
   organization: idPrefix.organization,
   user: idPrefix.user,
@@ -27,7 +27,6 @@ const prefixFromModel: Record<Models, IdPrefix> = {
   invitation: idPrefix.invitation,
   jwks: idPrefix.jwks,
   passkey: idPrefix.passkey,
-  // @ts-expect-error - apikey is a valid model
   apikey: idPrefix.secretKey,
 };
 
@@ -153,9 +152,8 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
       },
       database: {
         generateId(options) {
-          const prefix = prefixFromModel[options.model as Models];
+          const prefix = prefixFromModel[options.model];
 
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- exhaustive check
           if (!prefix) {
             throw new Error(`Model ID not supported: ${options.model}`);
           }

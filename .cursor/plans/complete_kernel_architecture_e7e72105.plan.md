@@ -622,7 +622,7 @@ And remove the blanket `this.bundleResultCache.clear()` from `renderEntry()`.
 
 ### 8A. Update architecture policy
 
-Rewrite [docs/kernel-architecture-policy.md](docs/kernel-architecture-policy.md) to reflect:
+Rewrite [docs/policy/kernel-architecture-policy.md](docs/policy/kernel-architecture-policy.md) to reflect:
 
 - Single worker per CU with `defineKernel` API
 - `defineBundler` plugin model (no hardcoded esbuild)

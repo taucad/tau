@@ -9,6 +9,18 @@ import { mimeTypes } from '#constants/mime-types.constants.js';
 export const tauFileDragMime = 'application/x-tau-file';
 
 /**
+ * MIME type set on editor panel tab drags for cross-dockview identification.
+ * Payload: JSON-encoded `{ filePath: string }`.
+ */
+export const tauEditorPanelDragMime = 'application/x-tau-editor-panel';
+
+/**
+ * MIME type set on viewer panel tab drags for cross-dockview identification.
+ * Payload: JSON-encoded `{ entryFile: string }`.
+ */
+export const tauViewerPanelDragMime = 'application/x-tau-viewer-panel';
+
+/**
  * The export formats.
  */
 export const exportFormats = [

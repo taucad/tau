@@ -1282,7 +1282,7 @@ export const ChatEditorFileTree = memo(function ({
                               onCopyPath={handleCopyPath}
                             />
                             {/* Pending folder inside this folder */}
-                            {pendingFolder && pendingFolder.parentPath === itemId && item.isFolder() ? (
+                            {pendingFolder?.parentPath === itemId && item.isFolder() ? (
                               <PendingFolderInput
                                 parentPath={pendingFolder.parentPath}
                                 error={pendingFolder.error}
@@ -1304,7 +1304,7 @@ export const ChatEditorFileTree = memo(function ({
                               />
                             ) : null}
                             {/* Pending file inside this folder */}
-                            {pendingFile && pendingFile.parentPath === itemId && item.isFolder() ? (
+                            {pendingFile?.parentPath === itemId && item.isFolder() ? (
                               <PendingFileInput
                                 inputRef={pendingFileInputRef}
                                 parentPath={pendingFile.parentPath}

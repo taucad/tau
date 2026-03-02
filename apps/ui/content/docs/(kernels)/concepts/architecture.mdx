@@ -10,7 +10,7 @@ The @taucad/kernels runtime is built as a layered architecture. Each layer has a
 
 ## Context and Motivation
 
-CAD kernels (Replicad, OpenSCAD, JSCAD, Zoo) have different execution models: some run in WASM, some call external processes, some connect to remote APIs. A unified API must abstract these differences while preserving isolation (heavy computation must not block the main thread) and extensibility (new kernels and features must plug in without modifying core code). The layered design achieves both.
+CAD kernels (Replicad, Manifold, OpenSCAD, JSCAD, Zoo) have different execution models: some run in WASM, some call external processes, some connect to remote APIs. A unified API must abstract these differences while preserving isolation (heavy computation must not block the main thread) and extensibility (new kernels and features must plug in without modifying core code). The layered design achieves both.
 
 ## How It Works
 

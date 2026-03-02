@@ -26,7 +26,7 @@ import {
   getKernelResultInputSchema,
   getKernelResultOutputSchema,
 } from '#schemas/tools/get-kernel-result.tool.schema.js';
-import { reasoningInputSchema, reasoningOutputSchema } from '#schemas/tools/reasoning.tool.schema.js';
+import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/screenshot.tool.schema.js';
 import { toolName } from '#constants/tool.constants.js';
 import type { ToolName } from '#types/tool.types.js';
 
@@ -170,9 +170,10 @@ const toolPartSchemas = [
   ...createToolSchemas(toolName.deleteFile, deleteFileInputSchema, deleteFileOutputSchema),
   ...createToolSchemas(toolName.grep, grepInputSchema, grepOutputSchema),
   ...createToolSchemas(toolName.globSearch, globSearchInputSchema, globSearchOutputSchema),
-  // Kernel and reasoning tools
+  // Kernel tools
   ...createToolSchemas(toolName.getKernelResult, getKernelResultInputSchema, getKernelResultOutputSchema),
-  ...createToolSchemas(toolName.reasoning, reasoningInputSchema, reasoningOutputSchema),
+  // Screenshot tool
+  ...createToolSchemas(toolName.screenshot, screenshotInputSchema, screenshotOutputSchema),
   // Transfer tools use empty input schemas with string output
   ...createEmptyInputToolSchemas(toolName.transferToCadExpert, z.string()),
   ...createEmptyInputToolSchemas(toolName.transferToResearchExpert, z.string()),

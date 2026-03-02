@@ -1,5 +1,10 @@
-/* eslint-disable no-barrel-files/no-barrel-files -- package entry point for ./rpc */
-export type { RpcFileSystem, RpcKernelClient, RpcGraphicsClient, RpcDependencies, RpcHandlerError } from '#rpc/rpc-dependencies.js';
+export type {
+  RpcFileSystem,
+  RpcKernelClient,
+  RpcGraphicsClient,
+  RpcDependencies,
+  RpcHandlerError,
+} from '#rpc/rpc-dependencies.js';
 export { createRpcDispatcher, type RpcDispatcher } from '#rpc/rpc-dispatcher.js';
 export { toRpcError, getErrorCode, getErrorMessage } from '#rpc/rpc-error.js';
 export { handleReadFile } from '#rpc/handlers/handle-read-file.js';

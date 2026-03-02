@@ -1,0 +1,300 @@
+version: 1
+repos_dir: repos
+owner: taucad
+groups:
+  cad:
+    description: Core CAD/geometry libraries and tools
+    repos:
+      - replicad
+      - replicad-cli
+      - opencascade.js
+      - manifold
+      - OCCT
+      - lib3mf
+      - spec_core
+      - openscad-playground
+      - jscadui
+      - phyz
+      - bitbybit
+      - bitbybit-occt
+  slicers:
+    description: 3D printer slicer applications
+    repos:
+      - BambuStudio
+      - OrcaSlicer
+      - PrusaSlicer
+  ai:
+    description: AI/LLM framework libraries
+    repos:
+      - langchainjs
+      - langgraphjs
+      - ai
+  3d:
+    description: 3D rendering and visualization
+    repos:
+      - three.js
+      - react-three-fiber
+      - model-viewer
+      - three-gltf-viewer
+      - Online3DViewer
+      - glTF-Transform
+      - assimpjs
+  dev-tools:
+    description: Development tools and frameworks
+    repos:
+      - nx
+      - pnpm
+      - vscode
+      - typescript-go
+      - xstate
+      - dockview
+      - headless-tree
+      - fumadocs
+      - zod
+      - v8
+  tscircuit:
+    description: tscircuit EDA ecosystem
+    repos:
+      - tscircuit/core
+      - tscircuit/runframe
+      - tscircuit/circuit-json
+      - tscircuit/tscircuit.com
+  zenfs:
+    description: ZenFS filesystem abstractions
+    repos:
+      - zenfs/core
+      - zenfs/dom
+      - zenfs/emscripten
+  reference:
+    description: Reference and documentation repos
+    repos:
+      - documentation
+      - claude-code-system-prompts
+      - step-file-syntax
+      - zoo-modeling-app
+      - ui
+      - javascript
+      - gemm
+      - emscripten
+repos:
+  langchainjs:
+    upstream: langchain-ai/langchainjs
+    fork: taucad/langchainjs
+    branch: feat/gemini-streaming-reasoning-parallel-tools
+    description: LangChain.js - LLM application framework
+  langgraphjs:
+    upstream: langchain-ai/langgraphjs
+    fork: taucad/langgraphjs
+    branch: main
+    description: LangGraph.js - agent orchestration framework
+  assimpjs:
+    upstream: kovacsv/assimpjs
+    fork: taucad/assimpjs
+    branch: main
+    description: Assimp.js - 3D model importer compiled to WASM
+  opencascade.js:
+    upstream: donalffons/opencascade.js
+    fork: taucad/opencascade.js
+    branch: master
+    description: OpenCASCADE compiled to WASM via Emscripten
+  zoo-modeling-app:
+    upstream: KittyCAD/modeling-app
+    fork: taucad/modeling-app
+    path: zoo-modeling-app
+    branch: main
+    description: Zoo CAD modeling application
+  Online3DViewer:
+    upstream: kovacsv/Online3DViewer
+    fork: rifont/Online3DViewer
+    branch: master
+    description: Online 3D model viewer and converter
+  replicad:
+    upstream: sgenoud/replicad
+    branch: main
+    description: Replicad - CAD library built on OpenCASCADE
+  replicad-cli:
+    upstream: sgenoud/replicad-cli
+    branch: main
+    description: CLI tool for Replicad CAD library
+  manifold:
+    upstream: elalish/manifold
+    branch: master
+    description: Manifold - fast CSG geometry library
+  OCCT:
+    upstream: Open-Cascade-SAS/OCCT
+    branch: master
+    description: Open CASCADE Technology - 3D modeling kernel
+    shallow: true
+  lib3mf:
+    upstream: 3MFConsortium/lib3mf
+    branch: master
+    description: lib3mf - 3MF file format reference implementation
+  spec_core:
+    upstream: 3MFConsortium/spec_core
+    branch: master
+    description: 3MF core specification
+  openscad-playground:
+    upstream: openscad/openscad-playground
+    branch: main
+    description: OpenSCAD browser-based playground
+  jscadui:
+    upstream: hrgdavor/jscadui
+    branch: main
+    description: JSCAD UI - browser interface for JSCAD
+  phyz:
+    upstream: ecto/phyz
+    branch: main
+    description: Physics engine library
+  three.js:
+    upstream: mrdoob/three.js
+    branch: dev
+    description: Three.js - JavaScript 3D library
+    shallow: true
+  react-three-fiber:
+    upstream: pmndrs/react-three-fiber
+    branch: master
+    description: React renderer for Three.js
+  model-viewer:
+    upstream: google/model-viewer
+    branch: master
+    description: Google model-viewer web component
+  three-gltf-viewer:
+    upstream: donmccurdy/three-gltf-viewer
+    branch: main
+    description: Three.js glTF model viewer
+  glTF-Transform:
+    upstream: donmccurdy/glTF-Transform
+    branch: main
+    description: glTF 2.0 SDK for JavaScript
+  ai:
+    upstream: vercel/ai
+    branch: main
+    description: Vercel AI SDK
+  BambuStudio:
+    upstream: bambulab/BambuStudio
+    branch: master
+    description: Bambu Lab slicer (PrusaSlicer fork)
+    shallow: true
+  OrcaSlicer:
+    upstream: OrcaSlicer/OrcaSlicer
+    branch: main
+    description: Orca Slicer (BambuStudio/PrusaSlicer fork)
+    shallow: true
+  PrusaSlicer:
+    upstream: prusa3d/PrusaSlicer
+    branch: master
+    description: Original PrusaSlicer
+    shallow: true
+  nx:
+    upstream: nrwl/nx
+    branch: master
+    description: Nx - monorepo build system
+    shallow: true
+  pnpm:
+    upstream: pnpm/pnpm
+    branch: main
+    description: pnpm - fast, disk space efficient package manager
+    shallow: true
+  vscode:
+    upstream: microsoft/vscode
+    branch: main
+    description: Visual Studio Code editor
+    shallow: true
+  typescript-go:
+    upstream: microsoft/typescript-go
+    branch: main
+    description: TypeScript compiler rewritten in Go
+  xstate:
+    upstream: statelyai/xstate
+    branch: main
+    description: XState - state machines and statecharts
+  dockview:
+    upstream: mathuo/dockview
+    branch: master
+    description: Dockview - docking layout manager for web
+  headless-tree:
+    upstream: lukasbach/headless-tree
+    branch: main
+    description: Headless tree view component
+  fumadocs:
+    upstream: fuma-nama/fumadocs
+    branch: dev
+    description: Fumadocs - documentation framework for Next.js
+  tscircuit/core:
+    upstream: tscircuit/core
+    path: tscircuit/core
+    branch: main
+    description: tscircuit core EDA library
+    fork: taucad/core
+  tscircuit/runframe:
+    upstream: tscircuit/runframe
+    path: tscircuit/runframe
+    branch: main
+    description: tscircuit runframe - execution environment
+  tscircuit/circuit-json:
+    upstream: tscircuit/circuit-json
+    path: tscircuit/circuit-json
+    branch: main
+    description: tscircuit circuit JSON schema
+  tscircuit/tscircuit.com:
+    upstream: tscircuit/tscircuit.com
+    path: tscircuit/tscircuit.com
+    branch: main
+    description: tscircuit.com website
+    fork: taucad/tscircuit.com
+  zenfs/core:
+    upstream: zen-fs/core
+    path: zenfs/core
+    branch: main
+    description: ZenFS core filesystem abstraction
+  zenfs/dom:
+    upstream: zen-fs/dom
+    path: zenfs/dom
+    branch: main
+    description: ZenFS DOM storage backend
+  zenfs/emscripten:
+    upstream: zen-fs/emscripten
+    path: zenfs/emscripten
+    branch: main
+    description: ZenFS Emscripten filesystem backend
+  documentation:
+    upstream: KittyCAD/documentation
+    branch: main
+    description: KittyCAD/Zoo API documentation
+  claude-code-system-prompts:
+    upstream: Piebald-AI/claude-code-system-prompts
+    branch: main
+    description: Claude Code system prompt collection
+  step-file-syntax:
+    upstream: mjecke/step-file-syntax
+    branch: main
+    description: STEP file syntax highlighting
+  ui:
+    upstream: shadcn-ui/ui
+    branch: main
+    description: shadcn/ui component library
+  javascript:
+    upstream: clerk/javascript
+    branch: main
+    description: Clerk JavaScript SDK
+  gemm:
+    upstream: lighttransport/gemm
+    branch: main
+    description: GEMM - matrix multiplication library
+  emscripten:
+    upstream: emscripten-core/emscripten
+    branch: main
+    description: Emscripten LLVM-to-WASM compiler
+    shallow: true
+  bitbybit:
+    upstream: bitbybit-dev/bitbybit
+    description: Monorepo for 3D algorithms of Bitbybit platform, which helps programming geometry on the browser. Use with ThreeJS, BabylonJS, build your own core integration or execute algorithms in NodeJS.
+  bitbybit-occt:
+    upstream: bitbybit-dev/bitbybit-occt
+    description: CAD algorithms that use OpenCascade Technology (OCCT) Kernel
+  zod:
+    upstream: colinhacks/zod
+    description: TypeScript-first schema validation with static type inference
+  v8:
+    upstream: v8/v8
+    description: The official mirror of the V8 Git repository

@@ -57,6 +57,9 @@ type DecodedDracoData = {
   isPointCloud: boolean;
 };
 
+/**
+ *
+ */
 export class GltfDracoDecoder {
   public verbosity = 0;
   private decoderModule!: DecoderModule;
@@ -75,17 +78,26 @@ export class GltfDracoDecoder {
     uv: Float32Array,
   };
 
+  /**
+   *
+   */
   public async initialize(): Promise<void> {
     this.decoderModule = await draco3d.createDecoderModule({
       locateFile: () => new URL('../../assets/draco3d/gltf/draco_decoder_gltf.wasm', import.meta.url).href,
     });
   }
 
+  /**
+   *
+   */
   public setVerbosity(level: number): this {
     this.verbosity = level;
     return this;
   }
 
+  /**
+   *
+   */
   public async createGltfDocument(decodedData: DecodedDracoData): Promise<Document> {
     const document = new Document();
     const root = document.getRoot();
@@ -192,6 +204,9 @@ export class GltfDracoDecoder {
     return document;
   }
 
+  /**
+   *
+   */
   public async decodeDracoFile(
     rawBuffer: ArrayBuffer,
     attributeUniqueIdMap?: Record<string, number>,

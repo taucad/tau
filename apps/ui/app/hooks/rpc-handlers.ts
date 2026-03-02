@@ -13,6 +13,8 @@ import type {
   RpcCall,
   GetKernelResultRpcResult,
   CaptureObservationsRpcResult,
+  CaptureScreenshotRpcResult,
+  FetchGeometryRpcResult,
   Observation,
   ViewSide,
 } from '@taucad/chat';
@@ -62,6 +64,9 @@ function createBrowserRpcFileSystem(
     },
     async writeFile(path: string, content: string): Promise<void> {
       await fileManager.writeFile(path, encodeTextFile(content), { source: 'machine' });
+    },
+    async writeBinaryFile(path: string, data: Uint8Array): Promise<void> {
+      await fileManager.writeFile(path, new Uint8Array(data.buffer) as Uint8Array<ArrayBuffer>, { source: 'machine' });
     },
     async deleteFile(path: string): Promise<void> {
       await fileManager.deleteFile(path, { source: 'machine' });
@@ -130,9 +135,87 @@ function createBrowserKernelClient(buildRef: ActorRefFrom<typeof buildMachine>):
 
 function createBrowserGraphicsClient(
   graphicsRef: ActorRefFrom<typeof graphicsMachine>,
+  buildRef: ActorRefFrom<typeof buildMachine>,
   screenshotQuality: number,
 ): RpcGraphicsClient {
   return {
+    async fetchGeometry(): Promise<FetchGeometryRpcResult> {
+      try {
+        const buildSnapshot = buildRef.getSnapshot();
+        const { compilationUnits, mainEntryFile } = buildSnapshot.context;
+        const mainUnit = compilationUnits.get(mainEntryFile);
+
+        if (!mainUnit) {
+          return { success: false, errorCode: 'UNKNOWN', message: 'No compilation unit found for main entry file' };
+        }
+
+        const cadSnapshot = mainUnit.getSnapshot();
+        const geometry = cadSnapshot.context.geometries.find((g) => g.format === 'gltf');
+
+        if (!geometry || geometry.format !== 'gltf') {
+          return { success: false, errorCode: 'UNKNOWN', message: 'No GLTF geometry available' };
+        }
+
+        return { success: true, glb: geometry.content };
+      } catch (error) {
+        return {
+          success: false,
+          errorCode: 'UNKNOWN',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        };
+      }
+    },
+
+    async captureScreenshot(): Promise<CaptureScreenshotRpcResult> {
+      try {
+        const src = await new Promise<string>((resolve, reject) => {
+          const screenshotActor = createActor(screenshotRequestMachine, {
+            input: { graphicsRef },
+          }).start();
+
+          screenshotActor.send({
+            type: 'requestScreenshot',
+            options: {
+              output: {
+                format: 'image/webp',
+                quality: screenshotQuality,
+                isPreview: true,
+              },
+              cameraAngles: [orthographicViews[0]!],
+              aspectRatio: 1,
+              maxResolution: 800,
+              zoomLevel: 1.2,
+            },
+            onSuccess(dataUrls) {
+              screenshotActor.stop();
+              const capturedScreenshot = dataUrls[0];
+              if (!capturedScreenshot) {
+                reject(new Error('No screenshot data received'));
+                return;
+              }
+
+              resolve(capturedScreenshot);
+            },
+            onError(errorMessage) {
+              screenshotActor.stop();
+              reject(new Error(errorMessage));
+            },
+          });
+        });
+
+        return {
+          success: true,
+          images: [{ view: 'current', dataUrl: src }],
+        };
+      } catch (error) {
+        return {
+          success: false,
+          errorCode: error instanceof Error ? 'IO_ERROR' : 'UNKNOWN',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        };
+      }
+    },
+
     async captureObservations(): Promise<CaptureObservationsRpcResult> {
       try {
         const viewSides: ViewSide[] = ['front', 'back', 'right', 'left', 'top', 'bottom'];
@@ -226,7 +309,7 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
   const rpcDeps: RpcDependencies = {
     fileSystem: createBrowserRpcFileSystem(fileManager, fileTree),
     kernelClient: createBrowserKernelClient(buildRef),
-    graphics: graphicsRef ? createBrowserGraphicsClient(graphicsRef, screenshotQuality) : undefined,
+    graphics: graphicsRef ? createBrowserGraphicsClient(graphicsRef, buildRef, screenshotQuality) : undefined,
   };
 
   const dispatcher = createRpcDispatcher(rpcDeps);

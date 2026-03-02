@@ -45,10 +45,11 @@ export function parseStackTrace(
 
     const match = chromeMatch ?? firefoxMatch;
     if (match) {
-      const [, functionName, fileName, lineNumber, columnNumber] = match;
+      const [, rawFunctionName, fileName, lineNumber, columnNumber] = match;
+      const functionName = rawFunctionName?.replace(/^Proxy\./, '') ?? '<anonymous>';
 
       frames.push({
-        functionName: functionName ?? '<anonymous>',
+        functionName,
         fileName: fileName ?? '',
         lineNumber: Number.parseInt(lineNumber ?? '0', 10),
         columnNumber: Number.parseInt(columnNumber ?? '0', 10),

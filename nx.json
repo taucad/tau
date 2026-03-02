@@ -110,5 +110,43 @@
   "namedInputs": {
     "sharedGlobals": ["{workspaceRoot}/.github/workflows/ci.yml"],
     "default": ["{projectRoot}/**/*", "sharedGlobals"]
+  },
+  "release": {
+    "projects": ["packages/*"],
+    "versionPlans": {
+      "ignorePatternsForPlanCheck": [
+        "**/*.spec.ts",
+        "**/*.test.ts",
+        "**/*.md"
+      ]
+    },
+    "version": {
+      "preVersionCommand": "pnpm nx run-many -t build --projects=packages/*",
+      "conventionalCommits": true
+    },
+    "changelog": {
+      "workspaceChangelog": {
+        "file": "CHANGELOG.md",
+        "renderOptions": {
+          "authors": true,
+          "commitReferences": true,
+          "versionTitleDate": true
+        }
+      },
+      "projectChangelogs": {
+        "file": "CHANGELOG.md",
+        "renderOptions": {
+          "authors": false,
+          "commitReferences": true,
+          "versionTitleDate": true
+        }
+      }
+    },
+    "releaseTag": {
+      "pattern": "v{version}"
+    },
+    "git": {
+      "commitMessage": "chore(release): v{version}"
+    }
   }
 }

@@ -9,6 +9,8 @@ import { handleGrep } from '#rpc/handlers/handle-grep.js';
 import { handleGlobSearch } from '#rpc/handlers/handle-glob-search.js';
 import { handleGetKernelResult } from '#rpc/handlers/handle-get-kernel-result.js';
 import { handleCaptureObservations } from '#rpc/handlers/handle-capture-observations.js';
+import { handleFetchGeometry } from '#rpc/handlers/handle-fetch-geometry.js';
+import { handleCaptureScreenshot } from '#rpc/handlers/handle-capture-screenshot.js';
 
 export type RpcDispatcher = {
   dispatch(rpcCall: RpcCall): Promise<unknown>;
@@ -58,6 +60,14 @@ export function createRpcDispatcher(deps: RpcDependencies): RpcDispatcher {
 
         case rpcName.captureObservations: {
           return handleCaptureObservations(rpcCall.args, deps.graphics);
+        }
+
+        case rpcName.fetchGeometry: {
+          return handleFetchGeometry(rpcCall.args, deps.graphics, deps.fileSystem);
+        }
+
+        case rpcName.captureScreenshot: {
+          return handleCaptureScreenshot(rpcCall.args, deps.graphics);
         }
       }
     },

@@ -6,6 +6,7 @@ import { streamText } from 'ai';
 import type { ModelMessage } from 'ai';
 import type { KernelProvider } from '@taucad/kernels';
 import type { ToolSelection } from '@taucad/chat';
+import type { ChatMode } from '@taucad/chat/constants';
 import { ModelService } from '#api/models/model.service.js';
 import { usageTrackingMiddleware } from '#api/chat/middleware/usage-tracking.middleware.js';
 import { messageLoggingMiddleware } from '#api/chat/middleware/message-logging.middleware.js';
@@ -44,12 +45,18 @@ export class ChatService {
     });
   }
 
-  public async createAgent(
-    modelId: string,
-    selectedToolChoice: ToolSelection,
-    selectedKernel: KernelProvider,
-  ): Promise<ReactAgent> {
-    const { tools } = this.toolService.getTools(selectedToolChoice);
+  public async createAgent(options: {
+    modelId: string;
+    kernel: KernelProvider;
+    mode?: ChatMode;
+    tools: {
+      choice: ToolSelection;
+      testingEnabled?: boolean;
+    };
+  }): Promise<ReactAgent> {
+    const { modelId, kernel, mode = 'agent' } = options;
+    const { choice, testingEnabled = true } = options.tools;
+    const { tools } = this.toolService.getTools(choice);
 
     const checkpointer = this.checkpointerService.getCheckpointer();
 
@@ -57,11 +64,10 @@ export class ChatService {
 
     // Combine all tools into a single array for the unified agent
     const allTools = [
-      // CAD tools
-      tools.reasoning,
-      tools.test_model,
-      tools.edit_tests,
+      // CAD tools (testing tools conditionally included)
+      ...(testingEnabled ? [tools.test_model, tools.edit_tests] : []),
       tools.get_kernel_result,
+      tools.screenshot,
       // Filesystem tools
       tools.edit_file,
       tools.read_file,
@@ -95,7 +101,7 @@ export class ChatService {
     // strategy ensures the stable system prompt is cached separately from
     // the dynamic conversation, maximizing cache hits.
     // ==========================================================================
-    const systemPromptText = await getCadSystemPrompt(selectedKernel);
+    const systemPromptText = await getCadSystemPrompt(kernel, mode);
     const systemPrompt = createCachedSystemMessage(systemPromptText);
 
     const agent = createAgent({

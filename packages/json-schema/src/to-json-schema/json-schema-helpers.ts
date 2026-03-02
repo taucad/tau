@@ -93,6 +93,9 @@ formatRegexps['regexp'] = formatRegexps['regex']!;
 formatRegexps['pattern'] = formatRegexps['regex']!;
 formatRegexps['ipv4'] = formatRegexps['ip-address']!;
 
+/**
+ *
+ */
 export function isFormat(input: unknown, format: string): boolean {
   if (typeof input === 'string' && formatRegexps[format] !== undefined) {
     const formatChecker = formatRegexps[format];

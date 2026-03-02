@@ -1,0 +1,29 @@
+name: Publish Packages
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Build packages
+        run: pnpm nx run-many -t build --projects=packages/*
+
+      - name: Publish to npm
+        run: pnpm nx release publish
+        env:
+          NPM_CONFIG_PROVENANCE: true

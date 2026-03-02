@@ -1,4 +1,4 @@
-import { FlaskConical, X, Lightbulb, Check } from 'lucide-react';
+import { FlaskConical, X, Lightbulb, Check, Box } from 'lucide-react';
 import type { ToolInvocation, TestFailure, TestPass } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import { useChatSelector } from '#hooks/use-chat.js';
@@ -12,6 +12,7 @@ import {
 import { ChatToolAction, ChatToolDescription } from '#components/chat/chat-tool-text.js';
 import { RequirementIndicator } from '#components/chat/requirement-indicator.js';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
+import { FileLink } from '#components/files/file-link.js';
 
 /**
  * Renders a single test pass (just the requirement description)
@@ -60,6 +61,17 @@ function TestFailureItem({
   );
 }
 
+function GeometryArtifactBadge({ artifactPath }: { readonly artifactPath: string }): React.JSX.Element {
+  return (
+    <FileLink asChild path={artifactPath}>
+      <div className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border/50 bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:border-border hover:bg-muted/50 hover:text-foreground">
+        <Box className="size-3 shrink-0" />
+        <span className="truncate">{artifactPath}</span>
+      </div>
+    </FileLink>
+  );
+}
+
 export function ChatMessageToolTestModel({
   part,
 }: {
@@ -85,7 +97,7 @@ export function ChatMessageToolTestModel({
 
     case 'output-available': {
       const { output: result } = part;
-      const { failures = [], passes = [] } = result;
+      const { failures = [], passes = [], geometryArtifactPath } = result;
       const passedCount = passes.length;
       const failedCount = failures.length;
 
@@ -108,6 +120,7 @@ export function ChatMessageToolTestModel({
                   return <TestPassItem key={key} pass={pass} index={index} />;
                 })}
               </div>
+              {geometryArtifactPath ? <GeometryArtifactBadge artifactPath={geometryArtifactPath} /> : undefined}
             </ChatToolCardContent>
           </ChatToolCard>
         );
@@ -137,6 +150,7 @@ export function ChatMessageToolTestModel({
                   })}
                 </div>
               )}
+              {geometryArtifactPath ? <GeometryArtifactBadge artifactPath={geometryArtifactPath} /> : undefined}
             </div>
           </ChatToolCardContent>
         </ChatToolCard>

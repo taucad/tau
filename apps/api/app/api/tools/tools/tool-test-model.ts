@@ -2,7 +2,7 @@ import type { ToolRuntime } from '@langchain/core/tools';
 import { tool } from '@langchain/core/tools';
 import { testModelInputSchema, testFileSchema, isRpcClientError } from '@taucad/chat';
 import { assertRpcExecution, assertRpcSuccess } from '@taucad/chat/utils';
-import type { ChatTool, TestModelInput, TestModelOutput, VisualTestRequirement } from '@taucad/chat';
+import type { ChatTool, TestModelInput, TestModelOutput } from '@taucad/chat';
 import { rpcName, toolName } from '@taucad/chat/constants';
 import type { ChatRpcConfigurable } from '#api/tools/tool.types.js';
 
@@ -10,10 +10,11 @@ export const testModelToolDefinition = {
   name: toolName.testModel,
   description: `Run all tests from test.json against the current 3D model.
 
-Captures all 6 orthographic views and evaluates visual requirements across all views in a single analysis pass.
+Fetches the model geometry and evaluates measurement requirements (bounding box, mesh count, vertex count) deterministically.
 
 Returns:
 - failures: Array of failed tests with actionable feedback (reason + suggestion)
+- passes: Array of passed tests
 - passed: Number of tests that passed
 - total: Total number of tests run
 
@@ -29,7 +30,7 @@ export const testModelTool: ChatTool<
   TestModelOutput,
   typeof toolName.testModel
 > = tool(async (_input, runtime: ToolRuntime) => {
-  const { chatRpcService, analysisService, thread_id: chatId } = runtime.configurable as ChatRpcConfigurable;
+  const { chatRpcService, geometryAnalysisService, thread_id: chatId } = runtime.configurable as ChatRpcConfigurable;
   const { toolCallId } = runtime;
 
   // Step 1: Read test.json to get requirements
@@ -40,10 +41,8 @@ export const testModelTool: ChatTool<
     args: { targetFile: 'test.json' },
   });
 
-  // Assert infrastructure success - throws ToolError for timeout, disconnect, validation
   assertRpcExecution(testFileContent, toolName.testModel, toolCallId);
 
-  // Handle client errors (file not found) gracefully - return as test failure, not tool error
   if (isRpcClientError(testFileContent)) {
     const result: TestModelOutput = {
       failures: [
@@ -62,7 +61,6 @@ export const testModelTool: ChatTool<
     return result;
   }
 
-  // Check if test.json is empty
   if (testFileContent.content === '') {
     const result: TestModelOutput = {
       failures: [
@@ -81,7 +79,6 @@ export const testModelTool: ChatTool<
     return result;
   }
 
-  // Parse test.json
   let testFile;
   try {
     const parsed = JSON.parse(testFileContent.content) as unknown;
@@ -104,41 +101,16 @@ export const testModelTool: ChatTool<
     return result;
   }
 
-  // Filter to visual requirements only (measurement tests not yet implemented)
-  const visualRequirements = testFile.requirements.filter(
-    (request): request is VisualTestRequirement => request.type === 'visual',
-  );
+  const { requirements } = testFile;
 
-  // Count non-visual requirements that are not yet supported
-  const nonVisualRequirements = testFile.requirements.filter((request) => request.type !== 'visual');
-
-  if (visualRequirements.length === 0) {
-    // If there are non-visual requirements, report them as unsupported errors
-    if (nonVisualRequirements.length > 0) {
-      const result: TestModelOutput = {
-        failures: nonVisualRequirements.map((request) => ({
-          id: request.id,
-          requirement: request.description,
-          reason: `Requirement type '${request.type}' is not yet supported`,
-          suggestion:
-            'Currently only visual requirements are supported. Consider converting this to a visual requirement or wait for measurement test support.',
-        })),
-        passes: [],
-        passed: 0,
-        total: nonVisualRequirements.length,
-      };
-
-      return result;
-    }
-
-    // No requirements at all
+  if (requirements.length === 0) {
     const result: TestModelOutput = {
       failures: [
         {
           id: 'no_requirements',
           requirement: 'test.json must contain at least one requirement',
           reason: 'No requirements found in test.json',
-          suggestion: 'Use edit_tests to add visual requirements to test.json',
+          suggestion: 'Use edit_tests to add measurement requirements to test.json',
         },
       ],
       passes: [],
@@ -149,25 +121,28 @@ export const testModelTool: ChatTool<
     return result;
   }
 
-  // Step 2: Capture observations from the frontend via RPC
-  const captureResult = await chatRpcService.sendRpcRequest({
+  // Step 2: Fetch geometry from the client via RPC
+  const geometryResult = await chatRpcService.sendRpcRequest({
     chatId,
     toolCallId,
-    rpcName: rpcName.captureObservations,
-    args: {},
+    rpcName: rpcName.fetchGeometry,
+    args: { artifactId: toolCallId },
   });
 
-  // Assert RPC success - throws ToolError for any infrastructure or client error
-  assertRpcSuccess(captureResult, {
+  assertRpcSuccess(geometryResult, {
     toolName: toolName.testModel,
     toolCallId,
-    clientErrorMessage: 'Failed to capture observations',
+    clientErrorMessage: 'Failed to fetch geometry for testing',
   });
 
-  const { observations } = captureResult;
+  // Step 3: Run measurement tests via GeometryAnalysisService
+  const result = await geometryAnalysisService.runMeasurementTests(geometryResult.glb, requirements);
 
-  // Step 3: Run visual tests using AnalysisService (single multi-view LLM call)
-  const result = await analysisService.runVisualTests(observations, visualRequirements);
-
-  return result;
+  return {
+    failures: result.failures,
+    passes: result.passes,
+    passed: result.passes.length,
+    total: result.failures.length + result.passes.length,
+    geometryArtifactPath: geometryResult.artifactPath,
+  };
 }, testModelToolDefinition);

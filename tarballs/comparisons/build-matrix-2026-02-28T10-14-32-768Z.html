@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WASM Build Matrix Report</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1F2937; background: #F9FAFB; padding: 2rem; max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+  h2 { font-size: 1.25rem; margin: 2rem 0 1rem; border-bottom: 1px solid #E5E7EB; padding-bottom: 0.5rem; }
+  .meta { color: #6B7280; font-size: 0.875rem; margin-bottom: 1.5rem; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; font-size: 0.8rem; }
+  th, td { padding: 0.4rem 0.6rem; text-align: left; border-bottom: 1px solid #E5E7EB; }
+  th { background: #F3F4F6; font-weight: 600; color: #374151; position: sticky; top: 0; }
+  tr:hover { background: #F9FAFB; }
+  .chart-container { margin: 1.5rem 0; overflow-x: auto; }
+  code { background: #F3F4F6; padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; }
+  .section { margin: 2rem 0; }
+  .legend { display: flex; gap: 1rem; margin: 0.5rem 0; font-size: 0.75rem; color: #6B7280; }
+  .legend-item { display: flex; align-items: center; gap: 4px; }
+  .legend-swatch { width: 12px; height: 12px; border-radius: 2px; }
+  .footer { margin-top: 3rem; color: #9CA3AF; font-size: 0.75rem; border-top: 1px solid #E5E7EB; padding-top: 1rem; }
+  .explanation { color: #6B7280; font-size: 0.8rem; margin: 0.5rem 0 1rem; line-height: 1.5; max-width: 80ch; }
+  th[data-sort] { cursor: pointer; user-select: none; }
+  th[data-sort]:hover { background: #E5E7EB; }
+  th .sort-arrow { font-size: 0.65rem; margin-left: 3px; opacity: 0.4; }
+  th.sort-active .sort-arrow { opacity: 1; }
+  th.sort-asc .sort-arrow::after { content: ' ▲'; }
+  th.sort-desc .sort-arrow::after { content: ' ▼'; }
+  .filter-bar { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.75rem 0 1rem; }
+  .filter-btn { padding: 0.3rem 0.7rem; border: 1px solid #D1D5DB; border-radius: 6px; background: white; font-size: 0.75rem; cursor: pointer; transition: all 0.15s; }
+  .filter-btn:hover { border-color: #9CA3AF; }
+  .filter-btn.active { background: #3B82F6; color: white; border-color: #3B82F6; }
+  .compile-flags { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.7rem; }
+  .compile-flags:hover { white-space: normal; overflow: visible; }
+  .pareto-star { fill: #F59E0B; stroke: #D97706; stroke-width: 1; }
+</style>
+</head>
+<body>
+  <h1>WASM Build Matrix Report</h1>
+  <p class="meta">Generated 2026-02-28T10:14:32.769Z &bull; 9 experiments</p>
+
+  <div class="section">
+    <h2>Size vs Speed</h2>
+    <p class="explanation">Each point represents a build experiment. The ideal position is the <strong>lower-left corner</strong> (smaller binary AND faster execution). Experiments marked with a ★ star lie on the <strong>Pareto frontier</strong> &mdash; no other experiment is both smaller AND faster. The dashed gold line connects these optimal points. Any experiment above or to the right of the frontier is &ldquo;dominated&rdquo; by at least one frontier experiment.</p>
+    <div class="chart-container">
+      <svg xmlns="http://www.w3.org/2000/svg" width="700" height="400" viewBox="0 0 700 400">
+    <rect width="700" height="400" fill="white" rx="8"/>
+    <line x1="70" y1="20" x2="70" y2="350" stroke="#F3F4F6" stroke-width="1"/>
+<text x="70" y="368" text-anchor="middle" font-size="10" fill="#9CA3AF">9.8</text>
+<line x1="192.00000000000006" y1="20" x2="192.00000000000006" y2="350" stroke="#F3F4F6" stroke-width="1"/>
+<text x="192.00000000000006" y="368" text-anchor="middle" font-size="10" fill="#9CA3AF">16.2</text>
+<line x1="314" y1="20" x2="314" y2="350" stroke="#F3F4F6" stroke-width="1"/>
+<text x="314" y="368" text-anchor="middle" font-size="10" fill="#9CA3AF">22.6</text>
+<line x1="436" y1="20" x2="436" y2="350" stroke="#F3F4F6" stroke-width="1"/>
+<text x="436" y="368" text-anchor="middle" font-size="10" fill="#9CA3AF">29.1</text>
+<line x1="558" y1="20" x2="558" y2="350" stroke="#F3F4F6" stroke-width="1"/>
+<text x="558" y="368" text-anchor="middle" font-size="10" fill="#9CA3AF">35.5</text>
+<line x1="680" y1="20" x2="680" y2="350" stroke="#F3F4F6" stroke-width="1"/>
+<text x="680" y="368" text-anchor="middle" font-size="10" fill="#9CA3AF">41.9</text>
+<line x1="70" y1="350" x2="680" y2="350" stroke="#F3F4F6" stroke-width="1"/>
+<text x="62" y="354" text-anchor="end" font-size="10" fill="#9CA3AF">46.3</text>
+<line x1="70" y1="284.00000000000006" x2="680" y2="284.00000000000006" stroke="#F3F4F6" stroke-width="1"/>
+<text x="62" y="288.00000000000006" text-anchor="end" font-size="10" fill="#9CA3AF">50.8</text>
+<line x1="70" y1="217.99999999999997" x2="680" y2="217.99999999999997" stroke="#F3F4F6" stroke-width="1"/>
+<text x="62" y="221.99999999999997" text-anchor="end" font-size="10" fill="#9CA3AF">55.3</text>
+<line x1="70" y1="152" x2="680" y2="152" stroke="#F3F4F6" stroke-width="1"/>
+<text x="62" y="156" text-anchor="end" font-size="10" fill="#9CA3AF">59.8</text>
+<line x1="70" y1="85.99999999999994" x2="680" y2="85.99999999999994" stroke="#F3F4F6" stroke-width="1"/>
+<text x="62" y="89.99999999999994" text-anchor="end" font-size="10" fill="#9CA3AF">64.4</text>
+<line x1="70" y1="20" x2="680" y2="20" stroke="#F3F4F6" stroke-width="1"/>
+<text x="62" y="24" text-anchor="end" font-size="10" fill="#9CA3AF">68.9</text>
+    
+    <line x1="70" y1="20" x2="70" y2="350" stroke="#D1D5DB" stroke-width="1"/>
+    <line x1="70" y1="350" x2="680" y2="350" stroke="#D1D5DB" stroke-width="1"/>
+    <text x="375" y="395" text-anchor="middle" font-size="12" fill="#6B7280">WASM Size (MB)</text>
+    <text x="15" y="185" text-anchor="middle" font-size="12" fill="#6B7280" transform="rotate(-90, 15, 185)">Geo-Mean Median (ms)</text>
+  
+    <path d="M 79.7828278646477 251.31095852241805 L 631.5401179471207 251.31095852241805 L 631.5401179471207 253.50379081859745 L 631.5513678804169 253.50379081859745 L 631.5513678804169 257.33536122701724 L 631.6096465203751 257.33536122701724 L 631.6096465203751 275.03694955285164" fill="none" stroke="#F59E0B" stroke-width="2" stroke-dasharray="6 3" opacity="0.6"/>
+    <circle cx="642.0315412480039" cy="111.33340491130329" r="6" fill="#3B82F6" stroke="white" stroke-width="2"/><text x="652.0315412480039" y="115.33340491130329" font-size="10" fill="#374151">O2-noLTO-single</text><circle cx="631.5401179471207" cy="253.50379081859745" r="6" fill="#10B981" stroke="white" stroke-width="2"/><polygon points="631.5401179471207,243.50379081859745 625.5401179471207,251.50379081859745 627.5401179471207,261.50379081859745 635.5401179471207,261.50379081859745 637.5401179471207,251.50379081859745" class="pareto-star"/><text x="641.5401179471207" y="257.50379081859745" font-size="10" fill="#374151">O2-noLTO-Oz-link ★</text><circle cx="642.0428274129694" cy="246.12565163679525" r="6" fill="#F59E0B" stroke="white" stroke-width="2"/><text x="652.0428274129694" y="250.12565163679525" font-size="10" fill="#374151">O3-noLTO-single</text><circle cx="631.5513678804169" cy="257.33536122701724" r="6" fill="#EF4444" stroke="white" stroke-width="2"/><polygon points="631.5513678804169,247.33536122701724 625.5513678804169,255.33536122701724 627.5513678804169,265.33536122701724 635.5513678804169,265.33536122701724 637.5513678804169,255.33536122701724" class="pareto-star"/><text x="641.5513678804169" y="261.33536122701724" font-size="10" fill="#374151">O3-noLTO-Oz-link ★</text><circle cx="631.525733974436" cy="246.26212204507374" r="6" fill="#8B5CF6" stroke="white" stroke-width="2"/><text x="641.525733974436" y="250.26212204507374" font-size="10" fill="#374151">Os-noLTO-single</text><circle cx="642.0868126594158" cy="223.87126132447787" r="6" fill="#EC4899" stroke="white" stroke-width="2"/><text x="652.0868126594158" y="227.87126132447787" font-size="10" fill="#374151">O2-LTO-single</text><circle cx="642.1012509796044" cy="269.69306607923914" r="6" fill="#06B6D4" stroke="white" stroke-width="2"/><text x="652.1012509796044" y="273.69306607923914" font-size="10" fill="#374151">O3-LTO-single</text><circle cx="631.6096465203751" cy="275.03694955285164" r="6" fill="#84CC16" stroke="white" stroke-width="2"/><polygon points="631.6096465203751,265.03694955285164 625.6096465203751,273.03694955285164 627.6096465203751,283.03694955285164 635.6096465203751,283.03694955285164 637.6096465203751,273.03694955285164" class="pareto-star"/><text x="641.6096465203751" y="279.03694955285164" font-size="10" fill="#374151">O3-LTO-Oz-link ★</text><circle cx="79.7828278646477" cy="251.31095852241805" r="6" fill="#3B82F6" stroke="white" stroke-width="2"/><polygon points="79.7828278646477,241.31095852241805 73.7828278646477,249.31095852241805 75.7828278646477,259.31095852241805 83.7828278646477,259.31095852241805 85.7828278646477,249.31095852241805" class="pareto-star"/><text x="89.7828278646477" y="255.31095852241805" font-size="10" fill="#374151">baseline_v762-O0-noLTO-single ★</text>
+  </svg>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Configuration Matrix</h2>
+    <p class="explanation">Click any column header to sort. <strong>WASM Size</strong> is the post-optimization binary size. <strong>Geo-Mean</strong> is the geometric mean of all benchmark median times &mdash; it is used instead of the arithmetic mean because benchmark times span different orders of magnitude (microseconds to milliseconds). The geometric mean gives equal weight to proportional changes: a 2&times; speedup on a 10ms test counts the same as a 2&times; speedup on a 100ms test. Use the category filter below to recalculate the Geo-Mean for a subset of benchmarks.</p>
+    <div class="filter-bar" id="category-filter"><button class="filter-btn active" data-filter="all">All</button><button class="filter-btn" data-filter="booleans">booleans</button><button class="filter-btn" data-filter="complex">complex</button><button class="filter-btn" data-filter="examples">examples</button><button class="filter-btn" data-filter="extrusions">extrusions</button><button class="filter-btn" data-filter="fillets">fillets</button><button class="filter-btn" data-filter="primitives">primitives</button><button class="filter-btn" data-filter="stress">stress</button></div>
+    <table id="config-matrix">
+    <thead>
+      <tr>
+        <th data-sort="string">Experiment <span class="sort-arrow">▲▼</span></th>
+        <th data-sort="string">Compile <span class="sort-arrow">▲▼</span></th>
+        <th data-sort="string">LTO <span class="sort-arrow">▲▼</span></th>
+        <th data-sort="string">Exceptions <span class="sort-arrow">▲▼</span></th>
+        <th data-sort="string">Threading <span class="sort-arrow">▲▼</span></th>
+        <th data-sort="string">wasm-opt <span class="sort-arrow">▲▼</span></th>
+        <th data-sort="string">Compile Flags <span class="sort-arrow">▲▼</span></th>
+        <th data-sort="number">Symbols <span class="sort-arrow">▲▼</span></th>
+        <th data-sort="string">Emscripten <span class="sort-arrow">▲▼</span></th>
+        <th data-sort="number">WASM Size <span class="sort-arrow">▲▼</span></th>
+        <th data-sort="number">Geo-Mean <span class="sort-arrow">▲▼</span></th>
+        <th data-sort="percent">vs Baseline (Size) <span class="sort-arrow">▲▼</span></th>
+        <th data-sort="percent">vs Baseline (Speed) <span class="sort-arrow">▲▼</span></th>
+      </tr>
+    </thead>
+    <tbody><tr>
+    <td><strong>O2-noLTO-single</strong></td>
+    <td><code>-O2</code></td>
+    <td>No</td>
+    <td>none</td>
+    <td>single-threaded</td>
+    <td><code>-O3</code></td>
+    <td>—</td>
+    <td>237</td>
+    <td>5.0.1</td>
+    <td data-value="41836619">39.90 MB</td>
+    <td class="geo-mean-cell" data-value="62.61418180957664">62.61ms</td>
+    <td>—</td><td>—</td>
+  </tr><tr>
+    <td><strong>O2-noLTO-Oz-link</strong></td>
+    <td><code>-O2</code></td>
+    <td>No</td>
+    <td>none</td>
+    <td>single-threaded</td>
+    <td><code>-Oz</code></td>
+    <td>—</td>
+    <td>237</td>
+    <td>5.0.1</td>
+    <td data-value="41257489">39.35 MB</td>
+    <td class="geo-mean-cell" data-value="52.867602888335405">52.87ms</td>
+    <td>—</td><td>—</td>
+  </tr><tr>
+    <td><strong>O3-noLTO-single</strong></td>
+    <td><code>-O3</code></td>
+    <td>No</td>
+    <td>none</td>
+    <td>single-threaded</td>
+    <td><code>-O3</code></td>
+    <td>—</td>
+    <td>237</td>
+    <td>5.0.1</td>
+    <td data-value="41837242">39.90 MB</td>
+    <td class="geo-mean-cell" data-value="53.37341579281911">53.37ms</td>
+    <td>—</td><td>—</td>
+  </tr><tr>
+    <td><strong>O3-noLTO-Oz-link</strong></td>
+    <td><code>-O3</code></td>
+    <td>No</td>
+    <td>none</td>
+    <td>single-threaded</td>
+    <td><code>-Oz</code></td>
+    <td>—</td>
+    <td>237</td>
+    <td>5.0.1</td>
+    <td data-value="41258110">39.35 MB</td>
+    <td class="geo-mean-cell" data-value="52.604927204228396">52.60ms</td>
+    <td>—</td><td>—</td>
+  </tr><tr>
+    <td><strong>Os-noLTO-single</strong></td>
+    <td><code>-Os</code></td>
+    <td>No</td>
+    <td>none</td>
+    <td>single-threaded</td>
+    <td><code>-Oz</code></td>
+    <td>—</td>
+    <td>237</td>
+    <td>5.0.1</td>
+    <td data-value="41256695">39.35 MB</td>
+    <td class="geo-mean-cell" data-value="53.364059979396984">53.36ms</td>
+    <td>—</td><td>—</td>
+  </tr><tr>
+    <td><strong>O2-LTO-single</strong></td>
+    <td><code>-O2</code></td>
+    <td>Yes</td>
+    <td>none</td>
+    <td>single-threaded</td>
+    <td><code>-O3</code></td>
+    <td>—</td>
+    <td>237</td>
+    <td>5.0.1</td>
+    <td data-value="41839670">39.90 MB</td>
+    <td class="geo-mean-cell" data-value="54.89907931366336">54.90ms</td>
+    <td>—</td><td>—</td>
+  </tr><tr>
+    <td><strong>O3-LTO-single</strong></td>
+    <td><code>-O3</code></td>
+    <td>Yes</td>
+    <td>none</td>
+    <td>single-threaded</td>
+    <td><code>-O3</code></td>
+    <td>—</td>
+    <td>237</td>
+    <td>5.0.1</td>
+    <td data-value="41840467">39.90 MB</td>
+    <td class="geo-mean-cell" data-value="51.75773708893866">51.76ms</td>
+    <td>—</td><td>—</td>
+  </tr><tr>
+    <td><strong>O3-LTO-Oz-link</strong></td>
+    <td><code>-O3</code></td>
+    <td>Yes</td>
+    <td>none</td>
+    <td>single-threaded</td>
+    <td><code>-Oz</code></td>
+    <td>—</td>
+    <td>237</td>
+    <td>5.0.1</td>
+    <td data-value="41261327">39.35 MB</td>
+    <td class="geo-mean-cell" data-value="51.391383845335284">51.39ms</td>
+    <td>—</td><td>—</td>
+  </tr><tr>
+    <td><strong>baseline_v762-O0-noLTO-single</strong></td>
+    <td><code>-O0</code></td>
+    <td>No</td>
+    <td>none</td>
+    <td>single-threaded</td>
+    <td><code>-O3</code></td>
+    <td><span class="compile-flags" title="-O0 -sDISABLE_EXCEPTION_CATCHING=1">-O0 -sDISABLE_EXCEPTION_CATCHING=1</span></td>
+    <td>262</td>
+    <td>3.1.14</td>
+    <td data-value="10800306">10.30 MB</td>
+    <td class="geo-mean-cell" data-value="53.017933865489084">53.02ms</td>
+    <td>—</td><td>—</td>
+  </tr></tbody>
+  </table>
+    <p class="explanation"><strong>Delta columns:</strong> Size delta compares WASM binary size against the baseline. Speed delta compares geometric mean of median benchmark times. <span style="color:#10B981">Green = improvement</span>, <span style="color:#EF4444">red = regression</span>. Deltas within &plusmn;2% are shown in gray.</p>
+  </div>
+
+  <div class="section">
+    <h2>Per-Benchmark Heatmap</h2>
+    <p class="explanation">Each cell shows the percentage change in median time relative to the first experiment (leftmost column). <span style="color:#10B981">Green = faster</span>, <span style="color:#EF4444">red = slower</span>. The reference column is always 0%. Click column headers to sort. Use the category filter above to show only specific benchmark groups.</p>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-swatch" style="background:#D1FAE5"></span> &gt;10% faster</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#ECFDF5"></span> 2-10% faster</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#F9FAFB"></span> Within 2%</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#FEF2F2"></span> 2-10% slower</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#FEE2E2"></span> &gt;10% slower</span>
+    </div>
+    <div style="overflow-x:auto"><table id="heatmap-table">
+    <thead><tr><th data-sort="string">Benchmark <span class="sort-arrow">▲▼</span></th><th data-sort="percent">O2-noLTO-single <span class="sort-arrow">▲▼</span></th><th data-sort="percent">O2-noLTO-Oz-link <span class="sort-arrow">▲▼</span></th><th data-sort="percent">O3-noLTO-single <span class="sort-arrow">▲▼</span></th><th data-sort="percent">O3-noLTO-Oz-link <span class="sort-arrow">▲▼</span></th><th data-sort="percent">Os-noLTO-single <span class="sort-arrow">▲▼</span></th><th data-sort="percent">O2-LTO-single <span class="sort-arrow">▲▼</span></th><th data-sort="percent">O3-LTO-single <span class="sort-arrow">▲▼</span></th><th data-sort="percent">O3-LTO-Oz-link <span class="sort-arrow">▲▼</span></th><th data-sort="percent">baseline_v762-O0-noLTO-single <span class="sort-arrow">▲▼</span></th></tr></thead>
+    <tbody><tr data-category="examples" data-bench="birdhouse"><td><strong>birdhouse</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.8%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-2.4%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-4.9%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+3.1%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-0.7%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-1.2%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-4.6%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+18.8%</td></tr><tr data-category="examples" data-bench="bottle"><td><strong>bottle</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-2.1%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-4.0%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+7.5%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-3.8%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-2.3%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-3.3%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+20.8%</td></tr><tr data-category="primitives" data-bench="box"><td><strong>box</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-64.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-63.3%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-60.8%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-60.3%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-63.4%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-62.8%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-63.6%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-77.5%</td></tr><tr data-category="fillets" data-bench="box-chamfer-all"><td><strong>box-chamfer-all</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-16.3%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-17.6%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-19.3%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-22.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-16.6%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-21.9%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-23.3%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-13.5%</td></tr><tr data-category="fillets" data-bench="box-fillet-all"><td><strong>box-fillet-all</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-23.6%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-23.6%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-23.5%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-25.8%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-23.4%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-23.2%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-25.7%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-20.6%</td></tr><tr data-category="complex" data-bench="bracket"><td><strong>bracket</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-30.5%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-32.5%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-32.3%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-32.3%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-31.5%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-31.4%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-34.9%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-20.1%</td></tr><tr data-category="booleans" data-bench="cut-cylinder-from-box"><td><strong>cut-cylinder-from-box</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-11.1%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-9.4%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-7.5%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-8.1%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-10.9%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-19.8%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-18.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-18.7%</td></tr><tr data-category="primitives" data-bench="cylinder"><td><strong>cylinder</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-9.8%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-18.7%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-13.8%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+0.1%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-6.6%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-17.6%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-17.7%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-37.8%</td></tr><tr data-category="stress" data-bench="deep-boolean-chain"><td><strong>deep-boolean-chain</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-4.7%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-2.3%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-3.4%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-6.3%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.2%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-0.6%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-4.6%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+27.7%</td></tr><tr data-category="complex" data-bench="enclosure"><td><strong>enclosure</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.8%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+10.6%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+0.4%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+3.0%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+4.0%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-0.4%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-1.4%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+1.2%</td></tr><tr data-category="booleans" data-bench="fuse-two-boxes"><td><strong>fuse-two-boxes</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-20.3%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-22.8%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-27.4%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-19.7%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-19.8%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-26.7%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-22.9%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-26.4%</td></tr><tr data-category="examples" data-bench="gridfinity-box"><td><strong>gridfinity-box</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-21.3%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-19.8%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-21.1%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-22.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-21.3%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-16.7%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-20.1%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-3.9%</td></tr><tr data-category="complex" data-bench="multi-hole-plate"><td><strong>multi-hole-plate</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-10.7%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-6.4%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-11.4%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-11.9%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-8.6%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-11.6%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-11.6%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+8.1%</td></tr><tr data-category="booleans" data-bench="n-body-fuse"><td><strong>n-body-fuse</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-1.1%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-6.7%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-3.2%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+1.7%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-7.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-7.2%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-10.5%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+13.5%</td></tr><tr data-category="extrusions" data-bench="sketch-extrude"><td><strong>sketch-extrude</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-17.7%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-20.5%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-21.4%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-21.8%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-17.2%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-24.5%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-25.5%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-43.8%</td></tr><tr data-category="extrusions" data-bench="sketch-revolve"><td><strong>sketch-revolve</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+5.6%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+19.2%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+6.8%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-9.6%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+76.7%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-7.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-11.5%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-18.8%</td></tr><tr data-category="primitives" data-bench="sphere"><td><strong>sphere</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-7.9%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-12.5%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-12.3%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-10.9%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-10.7%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-11.3%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-13.6%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-13.4%</td></tr><tr data-category="examples" data-bench="tray"><td><strong>tray</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-6.9%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.9%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-8.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-6.2%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-1.8%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-6.8%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+10.7%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-14.6%</td></tr><tr data-category="examples" data-bench="vase"><td><strong>vase</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.5%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-3.8%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.2%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.5%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-4.2%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-3.4%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+24.8%</td></tr></tbody>
+  </table></div>
+  </div>
+
+  <div class="section">
+    <h2>Size Breakdown</h2>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-swatch" style="background:#3B82F6"></span> Post wasm-opt</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#E5E7EB"></span> Pre wasm-opt</span>
+    </div>
+    <div class="chart-container">
+      <svg xmlns="http://www.w3.org/2000/svg" width="800" height="400" viewBox="0 0 800 400">
+    <rect width="800" height="400" fill="white" rx="8"/>
+    <line x1="60" y1="320" x2="780" y2="320" stroke="#F3F4F6"/><text x="52" y="324" text-anchor="end" font-size="9" fill="#9CA3AF">0.00 MB</text><line x1="60" y1="260" x2="780" y2="260" stroke="#F3F4F6"/><text x="52" y="264" text-anchor="end" font-size="9" fill="#9CA3AF">7.98 MB</text><line x1="60" y1="200" x2="780" y2="200" stroke="#F3F4F6"/><text x="52" y="204" text-anchor="end" font-size="9" fill="#9CA3AF">15.96 MB</text><line x1="60" y1="140" x2="780" y2="140" stroke="#F3F4F6"/><text x="52" y="144" text-anchor="end" font-size="9" fill="#9CA3AF">23.94 MB</text><line x1="60" y1="80" x2="780" y2="80" stroke="#F3F4F6"/><text x="52" y="84" text-anchor="end" font-size="9" fill="#9CA3AF">31.92 MB</text><line x1="60" y1="20" x2="780" y2="20" stroke="#F3F4F6"/><text x="52" y="24" text-anchor="end" font-size="9" fill="#9CA3AF">39.90 MB</text>
+    <line x1="60" y1="20" x2="60" y2="320" stroke="#D1D5DB"/>
+    <rect x="60" y="187.0887779526935" width="60" height="132.9112220473065" fill="#E5E7EB" rx="4"/><rect x="60" y="20.027590514226347" width="60" height="299.97240948577365" fill="#3B82F6" rx="4"/><text x="90" y="14.027590514226347" text-anchor="middle" font-size="10" fill="#374151">39.90 MB</text><text x="90" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 90, 336)">O2-noLTO-single</text><text x="90" y="2.027590514226347" text-anchor="middle" font-size="8" fill="#10B981">-0.0%</text><rect x="140" y="187.0887779526935" width="60" height="132.9112220473065" fill="#E5E7EB" rx="4"/><rect x="140" y="24.180005925842067" width="60" height="295.81999407415793" fill="#3B82F6" rx="4"/><text x="170" y="18.180005925842067" text-anchor="middle" font-size="10" fill="#374151">39.35 MB</text><text x="170" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 170, 336)">O2-noLTO-Oz-link</text><text x="170" y="6.180005925842067" text-anchor="middle" font-size="8" fill="#10B981">-3.2%</text><rect x="220" y="187.08431098534345" width="60" height="132.91568901465655" fill="#E5E7EB" rx="4"/><rect x="220" y="20.023123546876263" width="60" height="299.97687645312374" fill="#3B82F6" rx="4"/><text x="250" y="14.023123546876263" text-anchor="middle" font-size="10" fill="#374151">39.90 MB</text><text x="250" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 250, 336)">O3-noLTO-single</text><text x="250" y="2.0231235468762634" text-anchor="middle" font-size="8" fill="#10B981">-0.0%</text><rect x="300" y="187.08431098534345" width="60" height="132.91568901465655" fill="#E5E7EB" rx="4"/><rect x="300" y="24.175553298676164" width="60" height="295.82444670132384" fill="#3B82F6" rx="4"/><text x="330" y="18.175553298676164" text-anchor="middle" font-size="10" fill="#374151">39.35 MB</text><text x="330" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 330, 336)">O3-noLTO-Oz-link</text><text x="330" y="6.175553298676164" text-anchor="middle" font-size="8" fill="#10B981">-3.2%</text><rect x="380" y="187.0944566656008" width="60" height="132.9055433343992" fill="#E5E7EB" rx="4"/><rect x="380" y="24.185698978933488" width="60" height="295.8143010210665" fill="#3B82F6" rx="4"/><text x="410" y="18.185698978933488" text-anchor="middle" font-size="10" fill="#374151">39.35 MB</text><text x="410" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 410, 336)">Os-noLTO-single</text><text x="410" y="6.1856989789334875" text-anchor="middle" font-size="8" fill="#10B981">-3.2%</text><rect x="460" y="187.06690200183473" width="60" height="132.93309799816527" fill="#E5E7EB" rx="4"/><rect x="460" y="20.005714563367576" width="60" height="299.9942854366324" fill="#3B82F6" rx="4"/><text x="490" y="14.005714563367576" text-anchor="middle" font-size="10" fill="#374151">39.90 MB</text><text x="490" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 490, 336)">O2-LTO-single</text><text x="490" y="2.005714563367576" text-anchor="middle" font-size="8" fill="#10B981">-0.0%</text><rect x="540" y="187.0611874384672" width="60" height="132.9388125615328" fill="#E5E7EB" rx="4"/><rect x="540" y="20" width="60" height="300" fill="#3B82F6" rx="4"/><text x="570" y="14" text-anchor="middle" font-size="10" fill="#374151">39.90 MB</text><text x="570" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 570, 336)">O3-LTO-single</text><text x="570" y="2" text-anchor="middle" font-size="8" fill="#10B981">-0.0%</text><rect x="620" y="187.0611874384672" width="60" height="132.9388125615328" fill="#E5E7EB" rx="4"/><rect x="620" y="24.152487112536278" width="60" height="295.8475128874637" fill="#3B82F6" rx="4"/><text x="650" y="18.152487112536278" text-anchor="middle" font-size="10" fill="#374151">39.35 MB</text><text x="650" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 650, 336)">O3-LTO-Oz-link</text><text x="650" y="6.152487112536278" text-anchor="middle" font-size="8" fill="#10B981">-3.2%</text><rect x="700" y="242.56081176149397" width="60" height="77.43918823850603" fill="#3B82F6" rx="4"/><text x="730" y="236.56081176149397" text-anchor="middle" font-size="10" fill="#374151">10.30 MB</text><text x="730" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 730, 336)">baseline_v762-O0-noLTO-single</text>
+  </svg>
+    </div>
+  </div>
+
+  <div class="footer">
+    Generated by Tau WASM Build Matrix Reporter &bull; 9 experiments &bull; 2026-02-28T10:14:32.769Z
+  </div>
+  <script>window.__BENCH_DATA__=[{"name":"20260228T062629_O2-noLTO-single","wasmSizeBytes":41836619,"medians":{"box":64.08377100000007,"cylinder":20.029978999999912,"sphere":33.70095800000013,"fuse-two-boxes":36.18745899999999,"cut-cylinder-from-box":24.644395999999915,"n-body-fuse":57.30049999999983,"box-fillet-all":54.20179150000013,"box-chamfer-all":45.76527099999976,"sketch-extrude":22.74587500000007,"sketch-revolve":18.971499499999936,"bracket":79.81183350000038,"enclosure":25.812958500000605,"multi-hole-plate":224.08858299999974,"tray":39.75633300000118,"birdhouse":228.13456249999945,"bottle":283.2686664999992,"gridfinity-box":259.9126460000007,"vase":181.50470850000056,"deep-boolean-chain":103.4870415000023},"categories":{"box":"primitives","cylinder":"primitives","sphere":"primitives","fuse-two-boxes":"booleans","cut-cylinder-from-box":"booleans","n-body-fuse":"booleans","box-fillet-all":"fillets","box-chamfer-all":"fillets","sketch-extrude":"extrusions","sketch-revolve":"extrusions","bracket":"complex","enclosure":"complex","multi-hole-plate":"complex","tray":"examples","birdhouse":"examples","bottle":"examples","gridfinity-box":"examples","vase":"examples","deep-boolean-chain":"stress"}},{"name":"20260228T063136_O2-noLTO-Oz-link","wasmSizeBytes":41257489,"medians":{"box":23.053229499999986,"cylinder":18.065958000000023,"sphere":31.043374999999855,"fuse-two-boxes":28.830729500000075,"cut-cylinder-from-box":21.916625500000237,"n-body-fuse":56.69704200000001,"box-fillet-all":41.4228334999998,"box-chamfer-all":38.284999999999854,"sketch-extrude":18.72983350000004,"sketch-revolve":20.033833500000128,"bracket":55.43287550000014,"enclosure":24.3192710000003,"multi-hole-plate":200.18545849999964,"tray":37.02087500000016,"birdhouse":214.90375050000057,"bottle":269.10597899999993,"gridfinity-box":204.4454585000003,"vase":171.44464550000157,"deep-boolean-chain":98.58685449999757},"categories":{"box":"primitives","cylinder":"primitives","sphere":"primitives","fuse-two-boxes":"booleans","cut-cylinder-from-box":"booleans","n-body-fuse":"booleans","box-fillet-all":"fillets","box-chamfer-all":"fillets","sketch-extrude":"extrusions","sketch-revolve":"extrusions","bracket":"complex","enclosure":"complex","multi-hole-plate":"complex","tray":"examples","birdhouse":"examples","bottle":"examples","gridfinity-box":"examples","vase":"examples","deep-boolean-chain":"stress"}},{"name":"20260228T063720_O3-noLTO-single","wasmSizeBytes":41837242,"medians":{"box":23.537854499999924,"cylinder":16.28004150000004,"sphere":29.48841649999997,"fuse-two-boxes":27.94852149999997,"cut-cylinder-from-box":22.332145500000024,"n-body-fuse":53.43333350000012,"box-fillet-all":41.412479000000076,"box-chamfer-all":37.70420800000011,"sketch-extrude":18.081166500000563,"sketch-revolve":22.618729500000427,"bracket":53.90345800000023,"enclosure":28.537250000000313,"multi-hole-plate":209.79335450000008,"tray":37.419770999999855,"birdhouse":222.62170850000075,"bottle":277.2077710000003,"gridfinity-box":208.46777100000145,"vase":174.52516699999978,"deep-boolean-chain":101.06304200000159},"categories":{"box":"primitives","cylinder":"primitives","sphere":"primitives","fuse-two-boxes":"booleans","cut-cylinder-from-box":"booleans","n-body-fuse":"booleans","box-fillet-all":"fillets","box-chamfer-all":"fillets","sketch-extrude":"extrusions","sketch-revolve":"extrusions","bracket":"complex","enclosure":"complex","multi-hole-plate":"complex","tray":"examples","birdhouse":"examples","bottle":"examples","gridfinity-box":"examples","vase":"examples","deep-boolean-chain":"stress"}},{"name":"20260228T064207_O3-noLTO-Oz-link","wasmSizeBytes":41258110,"medians":{"box":25.132499999999993,"cylinder":17.260624500000063,"sphere":29.56570799999986,"fuse-two-boxes":26.27210450000007,"cut-cylinder-from-box":22.80450000000019,"n-body-fuse":55.44737549999991,"box-fillet-all":41.47872900000016,"box-chamfer-all":36.92929200000003,"sketch-extrude":17.88483350000024,"sketch-revolve":20.253791999999976,"bracket":54.062978999999814,"enclosure":25.928500500000155,"multi-hole-plate":198.5211045000001,"tray":36.577000000000226,"birdhouse":216.9741670000003,"bottle":271.92277099999956,"gridfinity-box":204.96677100000034,"vase":172.06987449999906,"deep-boolean-chain":99.9777705000015},"categories":{"box":"primitives","cylinder":"primitives","sphere":"primitives","fuse-two-boxes":"booleans","cut-cylinder-from-box":"booleans","n-body-fuse":"booleans","box-fillet-all":"fillets","box-chamfer-all":"fillets","sketch-extrude":"extrusions","sketch-revolve":"extrusions","bracket":"complex","enclosure":"complex","multi-hole-plate":"complex","tray":"examples","birdhouse":"examples","bottle":"examples","gridfinity-box":"examples","vase":"examples","deep-boolean-chain":"stress"}},{"name":"20260228T064647_Os-noLTO-single","wasmSizeBytes":41256695,"medians":{"box":25.442895499999963,"cylinder":20.046520999999984,"sphere":30.01604150000003,"fuse-two-boxes":29.074666500000035,"cut-cylinder-from-box":22.6388750000001,"n-body-fuse":58.289354,"box-fillet-all":40.223603999999796,"box-chamfer-all":35.675228999999945,"sketch-extrude":17.78235399999994,"sketch-revolve":17.144917000000078,"bracket":54.010979000000134,"enclosure":26.594583500000226,"multi-hole-plate":197.52993700000025,"tray":37.289270499999475,"birdhouse":235.13887550000072,"bottle":304.5355619999991,"gridfinity-box":202.8071875000005,"vase":171.57747899999958,"deep-boolean-chain":97.01527050000004},"categories":{"box":"primitives","cylinder":"primitives","sphere":"primitives","fuse-two-boxes":"booleans","cut-cylinder-from-box":"booleans","n-body-fuse":"booleans","box-fillet-all":"fillets","box-chamfer-all":"fillets","sketch-extrude":"extrusions","sketch-revolve":"extrusions","bracket":"complex","enclosure":"complex","multi-hole-plate":"complex","tray":"examples","birdhouse":"examples","bottle":"examples","gridfinity-box":"examples","vase":"examples","deep-boolean-chain":"stress"}},{"name":"20260228T065333_O2-LTO-single","wasmSizeBytes":41839670,"medians":{"box":23.4634585,"cylinder":18.703062500000044,"sphere":30.107062499999984,"fuse-two-boxes":29.012916999999902,"cut-cylinder-from-box":21.966479000000163,"n-body-fuse":53.29893700000002,"box-fillet-all":41.54412500000012,"box-chamfer-all":38.183937500000184,"sketch-extrude":18.824978999999985,"sketch-revolve":33.52183349999996,"bracket":54.707729499999914,"enclosure":26.852750000000015,"multi-hole-plate":204.75806250000005,"tray":39.02158299999974,"birdhouse":226.65066650000063,"bottle":272.45610399999896,"gridfinity-box":204.48547899999994,"vase":172.35822949999965,"deep-boolean-chain":98.1541455000006},"categories":{"box":"primitives","cylinder":"primitives","sphere":"primitives","fuse-two-boxes":"booleans","cut-cylinder-from-box":"booleans","n-body-fuse":"booleans","box-fillet-all":"fillets","box-chamfer-all":"fillets","sketch-extrude":"extrusions","sketch-revolve":"extrusions","bracket":"complex","enclosure":"complex","multi-hole-plate":"complex","tray":"examples","birdhouse":"examples","bottle":"examples","gridfinity-box":"examples","vase":"examples","deep-boolean-chain":"stress"}},{"name":"20260228T065824_O3-LTO-single","wasmSizeBytes":41840467,"medians":{"box":23.838416999999993,"cylinder":16.49737550000009,"sphere":29.886437499999943,"fuse-two-boxes":26.521082999999862,"cut-cylinder-from-box":19.753958499999953,"n-body-fuse":53.17210400000022,"box-fillet-all":41.60333300000025,"box-chamfer-all":35.72270849999995,"sketch-extrude":17.163374499999918,"sketch-revolve":17.63860399999976,"bracket":54.78072949999978,"enclosure":25.705249999999523,"multi-hole-plate":198.1338539999997,"tray":37.05158300000039,"birdhouse":225.34345799999937,"bottle":276.7598755000008,"gridfinity-box":216.45081200000095,"vase":173.92879150000226,"deep-boolean-chain":102.84931250000045},"categories":{"box":"primitives","cylinder":"primitives","sphere":"primitives","fuse-two-boxes":"booleans","cut-cylinder-from-box":"booleans","n-body-fuse":"booleans","box-fillet-all":"fillets","box-chamfer-all":"fillets","sketch-extrude":"extrusions","sketch-revolve":"extrusions","bracket":"complex","enclosure":"complex","multi-hole-plate":"complex","tray":"examples","birdhouse":"examples","bottle":"examples","gridfinity-box":"examples","vase":"examples","deep-boolean-chain":"stress"}},{"name":"20260228T070319_O3-LTO-Oz-link","wasmSizeBytes":41261327,"medians":{"box":23.29585400000002,"cylinder":16.48208299999999,"sphere":29.125083000000018,"fuse-two-boxes":27.89420849999999,"cut-cylinder-from-box":20.203041499999927,"n-body-fuse":51.290645999999924,"box-fillet-all":40.25274999999988,"box-chamfer-all":35.09733349999988,"sketch-extrude":16.95297900000014,"sketch-revolve":16.799000499999693,"bracket":51.972291999999925,"enclosure":25.461500500000056,"multi-hole-plate":197.98681199999965,"tray":44.01695849999987,"birdhouse":217.74204200000077,"bottle":273.93677099999877,"gridfinity-box":207.62258349999956,"vase":175.2695619999995,"deep-boolean-chain":98.69702099999995},"categories":{"box":"primitives","cylinder":"primitives","sphere":"primitives","fuse-two-boxes":"booleans","cut-cylinder-from-box":"booleans","n-body-fuse":"booleans","box-fillet-all":"fillets","box-chamfer-all":"fillets","sketch-extrude":"extrusions","sketch-revolve":"extrusions","bracket":"complex","enclosure":"complex","multi-hole-plate":"complex","tray":"examples","birdhouse":"examples","bottle":"examples","gridfinity-box":"examples","vase":"examples","deep-boolean-chain":"stress"}},{"name":"baseline_v762-O0-noLTO-single","wasmSizeBytes":10800306,"medians":{"box":14.417791999999963,"cylinder":12.464062499999955,"sphere":29.19393749999972,"fuse-two-boxes":26.635041499998806,"cut-cylinder-from-box":20.031958000000486,"n-body-fuse":65.05895799999962,"box-fillet-all":43.04552100000183,"box-chamfer-all":39.579562499999156,"sketch-extrude":12.788896000000022,"sketch-revolve":15.41020799999933,"bracket":63.76379200000156,"enclosure":26.122937500000262,"multi-hole-plate":242.15081250000003,"tray":33.966811999998754,"birdhouse":271.10075000000506,"bottle":342.29460449999897,"gridfinity-box":249.66425000000163,"vase":226.44950000000244,"deep-boolean-chain":132.1485415000061},"categories":{"box":"primitives","cylinder":"primitives","sphere":"primitives","fuse-two-boxes":"booleans","cut-cylinder-from-box":"booleans","n-body-fuse":"booleans","box-fillet-all":"fillets","box-chamfer-all":"fillets","sketch-extrude":"extrusions","sketch-revolve":"extrusions","bracket":"complex","enclosure":"complex","multi-hole-plate":"complex","tray":"examples","birdhouse":"examples","bottle":"examples","gridfinity-box":"examples","vase":"examples","deep-boolean-chain":"stress"}}];</script>
+  <script>
+(function() {
+  // Sortable table columns
+  document.querySelectorAll('th[data-sort]').forEach(function(th) {
+    th.addEventListener('click', function() {
+      var table = th.closest('table');
+      var tbody = table.querySelector('tbody');
+      var rows = Array.from(tbody.querySelectorAll('tr'));
+      var colIdx = Array.from(th.parentNode.children).indexOf(th);
+      var sortType = th.dataset.sort;
+      var isAsc = th.classList.contains('sort-asc');
+
+      table.querySelectorAll('th').forEach(function(h) {
+        h.classList.remove('sort-active', 'sort-asc', 'sort-desc');
+      });
+      th.classList.add('sort-active', isAsc ? 'sort-desc' : 'sort-asc');
+
+      rows.sort(function(a, b) {
+        var aCell = a.children[colIdx];
+        var bCell = b.children[colIdx];
+        var aVal = aCell.dataset.value || aCell.textContent.trim();
+        var bVal = bCell.dataset.value || bCell.textContent.trim();
+
+        if (sortType === 'number') {
+          aVal = parseFloat(aVal) || 0;
+          bVal = parseFloat(bVal) || 0;
+        } else if (sortType === 'percent') {
+          aVal = parseFloat(aVal.replace(/[^\d.+-]/g, '')) || 0;
+          bVal = parseFloat(bVal.replace(/[^\d.+-]/g, '')) || 0;
+        }
+
+        var cmp = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+        return isAsc ? -cmp : cmp;
+      });
+
+      rows.forEach(function(row) { tbody.appendChild(row); });
+    });
+  });
+
+  // Category filter
+  var filterBar = document.getElementById('category-filter');
+  if (filterBar) {
+    var benchData = window.__BENCH_DATA__ || [];
+    filterBar.addEventListener('click', function(e) {
+      if (!e.target.classList.contains('filter-btn')) return;
+      var filter = e.target.dataset.filter;
+
+      filterBar.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
+      e.target.classList.add('active');
+
+      // Filter heatmap rows
+      var heatmap = document.getElementById('heatmap-table');
+      if (heatmap) {
+        heatmap.querySelectorAll('tbody tr').forEach(function(row) {
+          var cat = row.dataset.category;
+          row.style.display = (filter === 'all' || cat === filter) ? '' : 'none';
+        });
+      }
+
+      // Recalculate geo-mean in config matrix
+      var matrix = document.getElementById('config-matrix');
+      if (matrix) {
+        var geoMeanCells = matrix.querySelectorAll('.geo-mean-cell');
+        benchData.forEach(function(exp, idx) {
+          var values = [];
+          Object.keys(exp.medians).forEach(function(benchName) {
+            var cat = exp.categories[benchName];
+            if (filter === 'all' || cat === filter) {
+              values.push(exp.medians[benchName]);
+            }
+          });
+          if (values.length > 0 && geoMeanCells[idx]) {
+            var product = values.reduce(function(a, b) { return a * b; }, 1);
+            var gm = Math.pow(product, 1 / values.length);
+            var formatted = gm < 1 ? (gm * 1000).toFixed(0) + 'us' : gm.toFixed(2) + 'ms';
+            geoMeanCells[idx].textContent = formatted;
+            geoMeanCells[idx].dataset.value = gm;
+          }
+        });
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>

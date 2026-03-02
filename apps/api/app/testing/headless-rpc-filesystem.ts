@@ -12,6 +12,9 @@ export function createHeadlessRpcFileSystem(fs: KernelFileSystem): RpcFileSystem
     async writeFile(path: string, content: string): Promise<void> {
       await fs.writeFile(path, content);
     },
+    async writeBinaryFile(path: string, data: Uint8Array<ArrayBuffer>): Promise<void> {
+      await fs.writeFile(path, new Uint8Array(data.buffer));
+    },
     async deleteFile(path: string): Promise<void> {
       await fs.unlink(path);
     },

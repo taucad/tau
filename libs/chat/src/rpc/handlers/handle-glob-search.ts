@@ -2,10 +2,7 @@ import type { GlobSearchRpcInput, GlobSearchRpcResult } from '#schemas/rpc.schem
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
 
-async function collectFilePaths(
-  fileSystem: RpcFileSystem,
-  basePath: string,
-): Promise<string[]> {
+async function collectFilePaths(fileSystem: RpcFileSystem, basePath: string): Promise<string[]> {
   const paths: string[] = [];
   const entries = await fileSystem.readdir(basePath);
 
@@ -13,7 +10,7 @@ async function collectFilePaths(
     const fullPath = basePath ? `${basePath}/${entry.name}` : entry.name;
     if (entry.type === 'file') {
       paths.push(fullPath);
-    } else if (entry.type === 'directory') {
+    } else {
       // eslint-disable-next-line no-await-in-loop -- recursive traversal
       const subPaths = await collectFilePaths(fileSystem, fullPath);
       paths.push(...subPaths);

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WASM Build Matrix Report</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1F2937; background: #F9FAFB; padding: 2rem; max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+  h2 { font-size: 1.25rem; margin: 2rem 0 1rem; border-bottom: 1px solid #E5E7EB; padding-bottom: 0.5rem; }
+  .meta { color: #6B7280; font-size: 0.875rem; margin-bottom: 1.5rem; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; font-size: 0.8rem; }
+  th, td { padding: 0.4rem 0.6rem; text-align: left; border-bottom: 1px solid #E5E7EB; }
+  th { background: #F3F4F6; font-weight: 600; color: #374151; position: sticky; top: 0; }
+  tr:hover { background: #F9FAFB; }
+  .chart-container { margin: 1.5rem 0; overflow-x: auto; }
+  code { background: #F3F4F6; padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; }
+  .section { margin: 2rem 0; }
+  .legend { display: flex; gap: 1rem; margin: 0.5rem 0; font-size: 0.75rem; color: #6B7280; }
+  .legend-item { display: flex; align-items: center; gap: 4px; }
+  .legend-swatch { width: 12px; height: 12px; border-radius: 2px; }
+  .footer { margin-top: 3rem; color: #9CA3AF; font-size: 0.75rem; border-top: 1px solid #E5E7EB; padding-top: 1rem; }
+</style>
+</head>
+<body>
+  <h1>WASM Build Matrix Report</h1>
+  <p class="meta">Generated 2026-02-28T07:08:43.967Z &bull; 8 experiments &bull; Baseline: 20260228T062629_O2-noLTO-single</p>
+
+  <div class="section">
+    <h2>Size vs Speed</h2>
+    <p class="meta">Each point represents an experiment. Lower-left is the Pareto-optimal zone (smaller AND faster).</p>
+    <div class="chart-container">
+      <svg xmlns="http://www.w3.org/2000/svg" width="700" height="400" viewBox="0 0 700 400">
+    <rect width="700" height="400" fill="white" rx="8"/>
+    <line x1="70" y1="20" x2="70" y2="350" stroke="#F3F4F6" stroke-width="1"/>
+<text x="70" y="368" text-anchor="middle" font-size="10" fill="#9CA3AF">37.4</text>
+<line x1="192.0000000000004" y1="20" x2="192.0000000000004" y2="350" stroke="#F3F4F6" stroke-width="1"/>
+<text x="192.0000000000004" y="368" text-anchor="middle" font-size="10" fill="#9CA3AF">38.3</text>
+<line x1="313.9999999999998" y1="20" x2="313.9999999999998" y2="350" stroke="#F3F4F6" stroke-width="1"/>
+<text x="313.9999999999998" y="368" text-anchor="middle" font-size="10" fill="#9CA3AF">39.2</text>
+<line x1="436.00000000000017" y1="20" x2="436.00000000000017" y2="350" stroke="#F3F4F6" stroke-width="1"/>
+<text x="436.00000000000017" y="368" text-anchor="middle" font-size="10" fill="#9CA3AF">40.1</text>
+<line x1="557.9999999999995" y1="20" x2="557.9999999999995" y2="350" stroke="#F3F4F6" stroke-width="1"/>
+<text x="557.9999999999995" y="368" text-anchor="middle" font-size="10" fill="#9CA3AF">41.0</text>
+<line x1="680" y1="20" x2="680" y2="350" stroke="#F3F4F6" stroke-width="1"/>
+<text x="680" y="368" text-anchor="middle" font-size="10" fill="#9CA3AF">41.9</text>
+<line x1="70" y1="350" x2="680" y2="350" stroke="#F3F4F6" stroke-width="1"/>
+<text x="62" y="354" text-anchor="end" font-size="10" fill="#9CA3AF">60.6</text>
+<line x1="70" y1="283.99999999999994" x2="680" y2="283.99999999999994" stroke="#F3F4F6" stroke-width="1"/>
+<text x="62" y="287.99999999999994" text-anchor="end" font-size="10" fill="#9CA3AF">65.5</text>
+<line x1="70" y1="217.99999999999991" x2="680" y2="217.99999999999991" stroke="#F3F4F6" stroke-width="1"/>
+<text x="62" y="221.99999999999991" text-anchor="end" font-size="10" fill="#9CA3AF">70.4</text>
+<line x1="70" y1="152.00000000000009" x2="680" y2="152.00000000000009" stroke="#F3F4F6" stroke-width="1"/>
+<text x="62" y="156.00000000000009" text-anchor="end" font-size="10" fill="#9CA3AF">75.3</text>
+<line x1="70" y1="86" x2="680" y2="86" stroke="#F3F4F6" stroke-width="1"/>
+<text x="62" y="90" text-anchor="end" font-size="10" fill="#9CA3AF">80.2</text>
+<line x1="70" y1="20" x2="680" y2="20" stroke="#F3F4F6" stroke-width="1"/>
+<text x="62" y="24" text-anchor="end" font-size="10" fill="#9CA3AF">85.1</text>
+    
+    <line x1="70" y1="20" x2="70" y2="350" stroke="#D1D5DB" stroke-width="1"/>
+    <line x1="70" y1="350" x2="680" y2="350" stroke="#D1D5DB" stroke-width="1"/>
+    <text x="375" y="395" text-anchor="middle" font-size="12" fill="#6B7280">WASM Size (MB)</text>
+    <text x="15" y="185" text-anchor="middle" font-size="12" fill="#6B7280" transform="rotate(-90, 15, 185)">Geo-Mean Median (ms)</text>
+  
+    <circle cx="410.20018517588016" cy="179.83763405482455" r="6" fill="#3B82F6" stroke="white" stroke-width="2"/><text x="420.20018517588016" y="183.83763405482455" font-size="10" fill="#374151">O2-noLTO-single</text><circle cx="335.6492511411683" cy="204.03437635030147" r="6" fill="#10B981" stroke="white" stroke-width="2"/><text x="345.6492511411683" y="208.03437635030147" font-size="10" fill="#374151">O2-noLTO-Oz-link</text><circle cx="410.28038345934607" cy="124.27770189299852" r="6" fill="#F59E0B" stroke="white" stroke-width="2"/><text x="420.28038345934607" y="128.27770189299852" font-size="10" fill="#374151">O3-noLTO-single</text><circle cx="335.7291919662604" cy="183.38813874797444" r="6" fill="#EF4444" stroke="white" stroke-width="2"/><text x="345.7291919662604" y="187.38813874797444" font-size="10" fill="#374151">O3-noLTO-Oz-link</text><circle cx="335.54704016673503" cy="233.59436580824735" r="6" fill="#8B5CF6" stroke="white" stroke-width="2"/><text x="345.54704016673503" y="237.59436580824735" font-size="10" fill="#374151">Os-noLTO-single</text><circle cx="410.5929379252454" cy="134.54790101208525" r="6" fill="#EC4899" stroke="white" stroke-width="2"/><text x="420.5929379252454" y="138.54790101208525" font-size="10" fill="#374151">O2-LTO-single</text><circle cx="410.69553508723953" cy="259.2161421307796" r="6" fill="#06B6D4" stroke="white" stroke-width="2"/><text x="420.69553508723953" y="263.2161421307796" font-size="10" fill="#374151">O3-LTO-single</text><circle cx="336.14331376065826" cy="129.80693142641488" r="6" fill="#84CC16" stroke="white" stroke-width="2"/><text x="346.14331376065826" y="133.80693142641488" font-size="10" fill="#374151">O3-LTO-Oz-link</text>
+  </svg>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Configuration Matrix</h2>
+    <table>
+    <thead>
+      <tr>
+        <th>Experiment</th>
+        <th>Compile</th>
+        <th>LTO</th>
+        <th>Exceptions</th>
+        <th>Threading</th>
+        <th>WASM Size</th>
+        <th>Geo-Mean</th>
+        <th>vs Baseline (Size)</th>
+        <th>vs Baseline (Speed)</th>
+      </tr>
+    </thead>
+    <tbody><tr>
+      <td><strong>O2-noLTO-single</strong></td>
+      <td><code>-O2</code></td>
+      <td>No</td>
+      <td>none</td>
+      <td>single-threaded</td>
+      <td>39.90 MB</td>
+      <td>73.21ms</td>
+      <td style="color:#6B7280">0.0% size</td>
+    <td style="color:#6B7280">0.0% speed</td>
+    </tr><tr>
+      <td><strong>O2-noLTO-Oz-link</strong></td>
+      <td><code>-O2</code></td>
+      <td>No</td>
+      <td>none</td>
+      <td>single-threaded</td>
+      <td>39.35 MB</td>
+      <td>71.42ms</td>
+      <td style="color:#6B7280">-1.4% size</td>
+    <td style="color:#10B981">-2.5% speed</td>
+    </tr><tr>
+      <td><strong>O3-noLTO-single</strong></td>
+      <td><code>-O3</code></td>
+      <td>No</td>
+      <td>none</td>
+      <td>single-threaded</td>
+      <td>39.90 MB</td>
+      <td>77.33ms</td>
+      <td style="color:#6B7280">+0.0% size</td>
+    <td style="color:#EF4444">+5.6% speed</td>
+    </tr><tr>
+      <td><strong>O3-noLTO-Oz-link</strong></td>
+      <td><code>-O3</code></td>
+      <td>No</td>
+      <td>none</td>
+      <td>single-threaded</td>
+      <td>39.35 MB</td>
+      <td>72.95ms</td>
+      <td style="color:#6B7280">-1.4% size</td>
+    <td style="color:#6B7280">-0.4% speed</td>
+    </tr><tr>
+      <td><strong>Os-noLTO-single</strong></td>
+      <td><code>-Os</code></td>
+      <td>No</td>
+      <td>none</td>
+      <td>single-threaded</td>
+      <td>39.35 MB</td>
+      <td>69.22ms</td>
+      <td style="color:#6B7280">-1.4% size</td>
+    <td style="color:#10B981">-5.4% speed</td>
+    </tr><tr>
+      <td><strong>O2-LTO-single</strong></td>
+      <td><code>-O2</code></td>
+      <td>Yes</td>
+      <td>none</td>
+      <td>single-threaded</td>
+      <td>39.90 MB</td>
+      <td>76.57ms</td>
+      <td style="color:#6B7280">+0.0% size</td>
+    <td style="color:#EF4444">+4.6% speed</td>
+    </tr><tr>
+      <td><strong>O3-LTO-single</strong></td>
+      <td><code>-O3</code></td>
+      <td>Yes</td>
+      <td>none</td>
+      <td>single-threaded</td>
+      <td>39.90 MB</td>
+      <td>67.32ms</td>
+      <td style="color:#6B7280">+0.0% size</td>
+    <td style="color:#10B981">-8.0% speed</td>
+    </tr><tr>
+      <td><strong>O3-LTO-Oz-link</strong></td>
+      <td><code>-O3</code></td>
+      <td>Yes</td>
+      <td>none</td>
+      <td>single-threaded</td>
+      <td>39.35 MB</td>
+      <td>76.92ms</td>
+      <td style="color:#6B7280">-1.4% size</td>
+    <td style="color:#EF4444">+5.1% speed</td>
+    </tr></tbody>
+  </table>
+  </div>
+
+  <div class="section">
+    <h2>Per-Benchmark Heatmap</h2>
+    <p class="meta">Median time delta relative to baseline. Green = faster, red = slower.</p>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-swatch" style="background:#D1FAE5"></span> &gt;10% faster</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#ECFDF5"></span> 2-10% faster</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#F9FAFB"></span> Within 2%</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#FEF2F2"></span> 2-10% slower</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#FEE2E2"></span> &gt;10% slower</span>
+    </div>
+    <div style="overflow-x:auto"><table>
+    <thead><tr><th>Benchmark</th><th>O2-noLTO-single</th><th>O2-noLTO-Oz-link</th><th>O3-noLTO-single</th><th>O3-noLTO-Oz-link</th><th>Os-noLTO-single</th><th>O2-LTO-single</th><th>O3-LTO-single</th><th>O3-LTO-Oz-link</th></tr></thead>
+    <tbody><tr><td><strong>birdhouse</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+1.5%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+1.0%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+0.1%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-3.8%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-0.1%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-2.0%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+5.7%</td></tr><tr><td><strong>bottle</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+2.0%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+2.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-4.4%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-3.0%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+3.7%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-0.1%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+6.1%</td></tr><tr><td><strong>box</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-22.7%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-16.5%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-30.8%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-29.4%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-16.4%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-49.4%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-40.6%</td></tr><tr><td><strong>box-chamfer-all</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+3.5%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+9.5%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+8.4%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-9.2%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+2.4%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-9.5%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+4.8%</td></tr><tr><td><strong>box-fillet-all</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-0.2%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+9.0%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+23.8%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+0.2%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+39.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-4.0%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+1.7%</td></tr><tr><td><strong>bracket</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+2.1%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+5.3%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+2.2%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-4.0%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-1.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-4.7%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+1.4%</td></tr><tr><td><strong>cut-cylinder-from-box</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+10.9%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+39.6%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+31.1%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+19.5%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+37.8%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+14.2%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+62.7%</td></tr><tr><td><strong>cylinder</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+7.5%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+17.8%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-2.0%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+12.4%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-2.3%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-15.7%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+20.7%</td></tr><tr><td><strong>deep-boolean-chain</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+1.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-2.9%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-3.2%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-9.2%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.8%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-9.1%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-4.1%</td></tr><tr><td><strong>enclosure</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-1.9%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+5.2%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.1%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.9%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-0.1%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-8.3%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+4.1%</td></tr><tr><td><strong>fuse-two-boxes</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-14.0%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+33.1%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+26.6%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+10.5%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-12.1%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+12.6%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+54.1%</td></tr><tr><td><strong>gridfinity-box</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-14.2%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-14.7%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-20.3%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-18.5%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-10.1%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-6.8%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-10.7%</td></tr><tr><td><strong>multi-hole-plate</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-0.7%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+2.4%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-2.5%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.3%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-1.4%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-7.1%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-1.8%</td></tr><tr><td><strong>n-body-fuse</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+1.0%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+6.6%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+34.6%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+7.1%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+63.1%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+2.9%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+7.8%</td></tr><tr><td><strong>sketch-extrude</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+0.2%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+6.8%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-4.8%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-7.1%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">+1.4%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-24.9%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+8.0%</td></tr><tr><td><strong>sketch-revolve</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+9.0%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+22.8%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+2.7%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-9.7%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+13.4%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-7.5%</td><td style="text-align:center;background:#FEF2F2;font-size:0.8rem">+10.0%</td></tr><tr><td><strong>sphere</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-7.6%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+20.6%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-2.5%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-7.1%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+26.0%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+10.3%</td><td style="text-align:center;background:#FEE2E2;font-size:0.8rem">+35.6%</td></tr><tr><td><strong>stress-test</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-2.3%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.7%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-11.6%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-10.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-11.4%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.4%</td></tr><tr><td><strong>tray</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-5.4%</td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">-0.3%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-6.8%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-9.6%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-3.1%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-13.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-6.5%</td></tr><tr><td><strong>vase</strong></td><td style="text-align:center;background:#F9FAFB;font-size:0.8rem">0.0%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-11.5%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-10.8%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-16.5%</td><td style="text-align:center;background:#D1FAE5;font-size:0.8rem">-14.8%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-6.5%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-4.0%</td><td style="text-align:center;background:#ECFDF5;font-size:0.8rem">-8.4%</td></tr></tbody>
+  </table></div>
+  </div>
+
+  <div class="section">
+    <h2>Size Breakdown</h2>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-swatch" style="background:#3B82F6"></span> Post wasm-opt</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#E5E7EB"></span> Pre wasm-opt</span>
+    </div>
+    <div class="chart-container">
+      <svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400">
+    <rect width="720" height="400" fill="white" rx="8"/>
+    <line x1="60" y1="320" x2="700" y2="320" stroke="#F3F4F6"/><text x="52" y="324" text-anchor="end" font-size="9" fill="#9CA3AF">0.00 MB</text><line x1="60" y1="260" x2="700" y2="260" stroke="#F3F4F6"/><text x="52" y="264" text-anchor="end" font-size="9" fill="#9CA3AF">7.98 MB</text><line x1="60" y1="200" x2="700" y2="200" stroke="#F3F4F6"/><text x="52" y="204" text-anchor="end" font-size="9" fill="#9CA3AF">15.96 MB</text><line x1="60" y1="140" x2="700" y2="140" stroke="#F3F4F6"/><text x="52" y="144" text-anchor="end" font-size="9" fill="#9CA3AF">23.94 MB</text><line x1="60" y1="80" x2="700" y2="80" stroke="#F3F4F6"/><text x="52" y="84" text-anchor="end" font-size="9" fill="#9CA3AF">31.92 MB</text><line x1="60" y1="20" x2="700" y2="20" stroke="#F3F4F6"/><text x="52" y="24" text-anchor="end" font-size="9" fill="#9CA3AF">39.90 MB</text>
+    <line x1="60" y1="20" x2="60" y2="320" stroke="#D1D5DB"/>
+    <rect x="60" y="187.0887779526935" width="60" height="132.9112220473065" fill="#E5E7EB" rx="4"/><rect x="60" y="20.027590514226347" width="60" height="299.97240948577365" fill="#3B82F6" rx="4"/><text x="90" y="14.027590514226347" text-anchor="middle" font-size="10" fill="#374151">39.90 MB</text><text x="90" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 90, 336)">O2-noLTO-single</text><text x="90" y="2.027590514226347" text-anchor="middle" font-size="8" fill="#10B981">-0.0%</text><rect x="140" y="187.0887779526935" width="60" height="132.9112220473065" fill="#E5E7EB" rx="4"/><rect x="140" y="24.180005925842067" width="60" height="295.81999407415793" fill="#3B82F6" rx="4"/><text x="170" y="18.180005925842067" text-anchor="middle" font-size="10" fill="#374151">39.35 MB</text><text x="170" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 170, 336)">O2-noLTO-Oz-link</text><text x="170" y="6.180005925842067" text-anchor="middle" font-size="8" fill="#10B981">-3.2%</text><rect x="220" y="187.08431098534345" width="60" height="132.91568901465655" fill="#E5E7EB" rx="4"/><rect x="220" y="20.023123546876263" width="60" height="299.97687645312374" fill="#3B82F6" rx="4"/><text x="250" y="14.023123546876263" text-anchor="middle" font-size="10" fill="#374151">39.90 MB</text><text x="250" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 250, 336)">O3-noLTO-single</text><text x="250" y="2.0231235468762634" text-anchor="middle" font-size="8" fill="#10B981">-0.0%</text><rect x="300" y="187.08431098534345" width="60" height="132.91568901465655" fill="#E5E7EB" rx="4"/><rect x="300" y="24.175553298676164" width="60" height="295.82444670132384" fill="#3B82F6" rx="4"/><text x="330" y="18.175553298676164" text-anchor="middle" font-size="10" fill="#374151">39.35 MB</text><text x="330" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 330, 336)">O3-noLTO-Oz-link</text><text x="330" y="6.175553298676164" text-anchor="middle" font-size="8" fill="#10B981">-3.2%</text><rect x="380" y="187.0944566656008" width="60" height="132.9055433343992" fill="#E5E7EB" rx="4"/><rect x="380" y="24.185698978933488" width="60" height="295.8143010210665" fill="#3B82F6" rx="4"/><text x="410" y="18.185698978933488" text-anchor="middle" font-size="10" fill="#374151">39.35 MB</text><text x="410" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 410, 336)">Os-noLTO-single</text><text x="410" y="6.1856989789334875" text-anchor="middle" font-size="8" fill="#10B981">-3.2%</text><rect x="460" y="187.06690200183473" width="60" height="132.93309799816527" fill="#E5E7EB" rx="4"/><rect x="460" y="20.005714563367576" width="60" height="299.9942854366324" fill="#3B82F6" rx="4"/><text x="490" y="14.005714563367576" text-anchor="middle" font-size="10" fill="#374151">39.90 MB</text><text x="490" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 490, 336)">O2-LTO-single</text><text x="490" y="2.005714563367576" text-anchor="middle" font-size="8" fill="#10B981">-0.0%</text><rect x="540" y="187.0611874384672" width="60" height="132.9388125615328" fill="#E5E7EB" rx="4"/><rect x="540" y="20" width="60" height="300" fill="#3B82F6" rx="4"/><text x="570" y="14" text-anchor="middle" font-size="10" fill="#374151">39.90 MB</text><text x="570" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 570, 336)">O3-LTO-single</text><text x="570" y="2" text-anchor="middle" font-size="8" fill="#10B981">-0.0%</text><rect x="620" y="187.0611874384672" width="60" height="132.9388125615328" fill="#E5E7EB" rx="4"/><rect x="620" y="24.152487112536278" width="60" height="295.8475128874637" fill="#3B82F6" rx="4"/><text x="650" y="18.152487112536278" text-anchor="middle" font-size="10" fill="#374151">39.35 MB</text><text x="650" y="336" text-anchor="middle" font-size="9" fill="#6B7280" transform="rotate(30, 650, 336)">O3-LTO-Oz-link</text><text x="650" y="6.152487112536278" text-anchor="middle" font-size="8" fill="#10B981">-3.2%</text>
+  </svg>
+    </div>
+  </div>
+
+  <div class="footer">
+    Generated by Tau WASM Build Matrix Reporter &bull; 8 experiments &bull; 2026-02-28T07:08:43.967Z
+  </div>
+</body>
+</html>

@@ -1,5 +1,6 @@
 import { asBuffer } from '@taucad/utils/file';
 import type { KernelSpanTracer } from '#types/kernel-tracer.types.js';
+import { isNode, resolveFileUrl } from '#framework/environment.js';
 
 /**
  * Compile a WASM module from a URL using streaming compilation when possible.
@@ -18,22 +19,21 @@ export async function compileWasmStreaming(url: string, tracer?: KernelSpanTrace
   const span = tracer?.startSpan('wasm.compile', { url });
   try {
     const module = await WebAssembly.compileStreaming(fetch(url));
-    span?.end();
     return module;
   } catch (streamingError) {
     try {
       const wasmBinary = await loadWasmBinary(url);
       const module = await WebAssembly.compile(wasmBinary);
-      span?.end();
       return module;
     } catch (compileError) {
-      span?.end();
       const streamingMessage = streamingError instanceof Error ? streamingError.message : String(streamingError);
       const compileMessage = compileError instanceof Error ? compileError.message : String(compileError);
       throw new Error(
         `Failed to compile WASM module from ${url}. Streaming error: ${streamingMessage}. Fallback error: ${compileMessage}`,
       );
     }
+  } finally {
+    span?.end();
   }
 }
 
@@ -60,17 +60,12 @@ export async function loadWasmBinary(url: string): Promise<ArrayBuffer> {
 
     return await response.arrayBuffer();
   } catch (error) {
-    // Only attempt Node.js fs fallback for file:// URLs
-    if (!url.startsWith('file:')) {
+    if (!isNode() || !url.startsWith('file:')) {
       throw error;
     }
 
-    // Fallback: use Node.js fs for file:// URLs
-    // Dynamic imports avoid bundler issues in browser builds
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js API
-    const { fileURLToPath } = await import('node:url');
+    const filePath = await resolveFileUrl(url);
     const { readFile } = await import('node:fs/promises');
-    const filePath = fileURLToPath(url);
     const buffer = await readFile(filePath);
     return asBuffer(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
   }

@@ -155,8 +155,7 @@ function MotionHighlight<T extends string>({ ref, ...props }: MotionHighlightPro
 
       setBoundsState((previous) => {
         if (
-          previous &&
-          previous.top === newBounds.top &&
+          previous?.top === newBounds.top &&
           previous.left === newBounds.left &&
           previous.width === newBounds.width &&
           previous.height === newBounds.height
@@ -413,8 +412,7 @@ function MotionHighlightItem({
 
       if (shouldUpdateBounds) {
         if (
-          previousBounds &&
-          previousBounds.top === bounds.top &&
+          previousBounds?.top === bounds.top &&
           previousBounds.left === bounds.left &&
           previousBounds.width === bounds.width &&
           previousBounds.height === bounds.height

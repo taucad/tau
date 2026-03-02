@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -11,100 +10,20 @@ import { visualizer } from 'rollup-plugin-visualizer';
 import mdx from 'fumadocs-mdx/vite';
 import svgSpriteWrapper from 'vite-svg-sprite-wrapper';
 import { defineConfig } from 'vite';
-import type { Plugin } from 'vite';
 // eslint-disable-next-line no-restricted-imports -- allowed for Fumadocs.
 import * as MdxConfig from './app/lib/fumadocs/source.config';
+// eslint-disable-next-line no-restricted-imports -- Vite plugins live outside app/.
+import { crossOriginIsolation } from './vite-plugins/cross-origin-isolation.js';
+// eslint-disable-next-line no-restricted-imports -- Vite plugins live outside app/.
+import { tsModuleUrlPlugin } from './vite-plugins/ts-module-url.js';
+// eslint-disable-next-line no-restricted-imports -- Vite plugins live outside app/.
+import { base64Loader } from './vite-plugins/base64-loader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Sprite generation can slow down the build time, so we disable it by default.
 // Enable it when adding a new icon to regenerate the sprite.
 const enableSpriteGeneration = false;
-
-/**
- * Emit TypeScript files referenced via `new URL('./path.js', import.meta.url)`
- * as fully-bundled Rollup chunks instead of raw asset copies.
- *
- * In dev mode Vite transpiles TypeScript on-the-fly so .ts assets work fine.
- * In production builds, however, .ts files emitted as assets are copied
- * verbatim — the server serves them with `video/mp2t` MIME type and the
- * browser rejects them ("non-JavaScript MIME type").
- *
- * This plugin fixes the production path: for every `new URL()` reference
- * whose .js path resolves to a .ts source file, it tells Rollup to emit
- * the file as a chunk (full pipeline: transpile → resolve → bundle) and
- * swaps the expression with `import.meta.ROLLUP_FILE_URL_<ref>`.
- *
- * When the .js file actually exists (pre-built package consumed by 3rd
- * parties), the fs check fails and the plugin is a no-op — Vite's default
- * asset handling takes over unchanged.
- */
-function tsModuleUrlPlugin(): Plugin {
-  return {
-    name: 'vite-plugin-ts-module-urls',
-    enforce: 'pre',
-    apply: 'build',
-
-    transform(code, id) {
-      if (!code.includes('import.meta.url')) {
-        return;
-      }
-
-      const urlPattern = /new\s+URL\(\s*['"]([^'"]+\.js)['"]\s*,\s*import\.meta\.url\s*\)(\.href)?/g;
-      const dir = path.dirname(id);
-
-      type UrlMatch = { full: string; relPath: string; hasHref: boolean; idx: number };
-
-      const matches: UrlMatch[] = [...code.matchAll(urlPattern)]
-        .map((m) => ({
-          full: m[0],
-          relPath: m[1]!,
-          hasHref: Boolean(m[2]),
-          idx: m.index,
-        }))
-        .filter(({ relPath }) => fs.existsSync(path.resolve(dir, relPath.replace(/\.js$/, '.ts'))));
-
-      if (matches.length === 0) {
-        return;
-      }
-
-      let result = code;
-
-      for (const match of [...matches].reverse()) {
-        const tsPath = path.resolve(dir, match.relPath.replace(/\.js$/, '.ts'));
-        const refId = this.emitFile({ type: 'chunk', id: tsPath });
-
-        const replacement = match.hasHref
-          ? `import.meta.ROLLUP_FILE_URL_${refId}`
-          : `new URL(import.meta.ROLLUP_FILE_URL_${refId})`;
-
-        result = result.slice(0, match.idx) + replacement + result.slice(match.idx + match.full.length);
-      }
-
-      return { code: result, map: null };
-    },
-  };
-}
-
-/**
- * A simple plugin to load files as base64 strings.
- *
- * The data encoding for url() imports is not supplied.
- */
-const base64Loader: Plugin = {
-  name: 'base64-loader',
-  transform(_, id) {
-    const [path, query] = id.split('?');
-    if (query !== 'base64' || !path) {
-      return;
-    }
-
-    const data = fs.readFileSync(path);
-    const base64 = data.toString('base64');
-
-    return `export default '${base64}';`;
-  },
-};
 
 export default defineConfig(({ mode }) => {
   const isTest = mode === 'test';
@@ -114,6 +33,9 @@ export default defineConfig(({ mode }) => {
     root: __dirname,
     cacheDir: '../../node_modules/.vite/apps/ui',
     plugins: [
+      // Cross-origin isolation headers for SharedArrayBuffer (multi-threaded WASM)
+      crossOriginIsolation(),
+
       // Emit .ts files referenced via new URL() as bundled chunks (production only)
       tsModuleUrlPlugin(),
 
@@ -178,8 +100,19 @@ export default defineConfig(({ mode }) => {
     build: {
       sourcemap: true,
       assetsInlineLimit(file) {
-        // Don't inline SVGs
-        return !file.endsWith('.svg');
+        if (file.endsWith('.svg')) {
+          return false;
+        }
+
+        if (file.endsWith('.wasm')) {
+          // WASM must not be inlined to ensure workers can cache the WASM files via Node V8 bytecode cache,
+          // thus enabling WASM compilation caching to ensure fast worker startup times.
+          // @see docs/research/dynamic-es-modules.md#42-the-assetsinlinelimit-callback-trap
+          return false;
+        }
+
+        // Returning `undefined` sets the default 4KB threshold
+        return undefined;
       },
       target: 'es2022',
     },

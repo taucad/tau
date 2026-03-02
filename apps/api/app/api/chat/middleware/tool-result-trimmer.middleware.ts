@@ -365,6 +365,32 @@ function trimToolMessage(message: ToolMessage): BaseMessage {
     tool_call_id: string;
   };
 
+  // Handle multi-modal content (arrays with image blocks from screenshot tool)
+  if (Array.isArray(content)) {
+    const hasImages = content.some(
+      (block: unknown) => isObject(block) && (block['type'] === 'image_url' || block['type'] === 'image'),
+    );
+
+    if (hasImages) {
+      const trimmedBlocks = (content as Array<Record<string, unknown>>).map((block) => {
+        if (block['type'] === 'image_url' || block['type'] === 'image') {
+          return { type: 'text', text: '[screenshot image - previously captured]' };
+        }
+
+        return block;
+      });
+
+      return new ToolMessage({
+        content: trimmedBlocks as ToolMessage['content'],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_call_id: toolCallId,
+        name,
+      });
+    }
+
+    return message;
+  }
+
   // Only handle string content (JSON)
   if (typeof content !== 'string') {
     return message;
@@ -398,6 +424,77 @@ function trimToolMessage(message: ToolMessage): BaseMessage {
 }
 
 /**
+ * Converts a screenshot tool ToolMessage from schema output format
+ * `{"images":[{view,dataUrl},...]}` into multi-modal content blocks
+ * so the LLM can visually process the captured images.
+ */
+function injectScreenshotImages(message: ToolMessage): ToolMessage {
+  const messageRecord = message as unknown as Record<string, unknown>;
+  const { content, name, tool_call_id: toolCallId } = messageRecord as {
+    content: unknown;
+    name: string | undefined;
+    tool_call_id: string;
+  };
+
+  if (typeof content !== 'string') {
+    return message;
+  }
+
+  const parsed = parseToolContent(content);
+  if (!isObject(parsed) || !Array.isArray(parsed['images'])) {
+    return message;
+  }
+
+  const images = parsed['images'] as Array<Record<string, unknown>>;
+  const imageBlocks = images
+    .filter((img) => typeof img['dataUrl'] === 'string')
+    .map((img) => ({
+      type: 'image_url' as const,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain multimodal content block format
+      image_url: { url: img['dataUrl'] as string },
+    }));
+
+  if (imageBlocks.length === 0) {
+    return message;
+  }
+
+  return new ToolMessage({
+    content: [{ type: 'text', text: `Captured ${imageBlocks.length} screenshot(s)` }, ...imageBlocks],
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+    tool_call_id: toolCallId,
+    name,
+  });
+}
+
+/**
+ * Finds the index of the last screenshot tool ToolMessage in the messages array.
+ */
+function findLastScreenshotIndex(messages: BaseMessage[]): number {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]!;
+    if (!isToolMessage(message)) {
+      continue;
+    }
+
+    const record = message as unknown as Record<string, unknown>;
+    const name = record['name'] as string | undefined;
+
+    if (name === toolName.screenshot) {
+      return index;
+    }
+
+    if (typeof record['content'] === 'string') {
+      const parsed = parseToolContent(record['content'] as string);
+      if (isObject(parsed) && Array.isArray(parsed['images'])) {
+        return index;
+      }
+    }
+  }
+
+  return -1;
+}
+
+/**
  * Middleware that trims tool call results before sending to the LLM.
  *
  * Uses the `wrapModelCall` hook to intercept model requests and trim
@@ -405,6 +502,10 @@ function trimToolMessage(message: ToolMessage): BaseMessage {
  *
  * This helps reduce token usage by removing unnecessary data
  * from the message history that the LLM doesn't need to see again.
+ *
+ * For screenshot tool results: the latest screenshot is converted to
+ * multi-modal image content blocks so the LLM can see the images.
+ * Older screenshot results are trimmed to text placeholders.
  *
  * Trimming is applied uniformly to all messages to ensure stable content
  * for Anthropic prompt caching. Consistent content enables cache hits
@@ -416,16 +517,21 @@ export const toolResultTrimmerMiddleware = createMiddleware({
   async wrapModelCall(request, handler) {
     const { messages } = request;
 
-    // Trim tool messages to reduce token usage
-    const trimmedMessages = messages.map((message) => {
-      if (isToolMessage(message)) {
-        return trimToolMessage(message);
+    const lastScreenshotIndex = findLastScreenshotIndex(messages);
+
+    const trimmedMessages = messages.map((message, index) => {
+      if (!isToolMessage(message)) {
+        return message;
       }
 
-      return message;
+      // Inject images for the latest screenshot tool result so LLM can see them
+      if (index === lastScreenshotIndex) {
+        return injectScreenshotImages(message);
+      }
+
+      return trimToolMessage(message);
     });
 
-    // Call the handler with trimmed messages
     return handler({
       ...request,
       messages: trimmedMessages,

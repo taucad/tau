@@ -52,10 +52,13 @@ export const usageTrackingMiddleware = createMiddleware({
         cacheWriteTokens = Math.round(cacheWriteTokens / 2);
       }
 
+      const reasoningTokens = usage.output_token_details?.reasoning ?? 0;
+
       // Extract raw usage tokens from the message metadata
       const rawUsage = {
         inputTokens: usage.input_tokens,
         outputTokens: usage.output_tokens,
+        reasoningTokens,
         cacheReadTokens,
         cacheWriteTokens,
       };

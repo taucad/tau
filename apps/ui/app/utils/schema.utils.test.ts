@@ -1,3 +1,4 @@
+import { describe, it, expect } from 'vitest';
 import type { JSONSchema7 } from 'json-schema';
 import { hasJsonSchemaObjectProperties, jsonSchemaFromJson } from '@taucad/utils/schema';
 

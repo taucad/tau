@@ -11,7 +11,7 @@ import type {
 import { positionToDirection } from 'dockview-react';
 import { Box, ChevronDown } from 'lucide-react';
 import type { FileEntry } from '@taucad/types';
-import { tauFileDragMime } from '@taucad/types/constants';
+import { tauFileDragMime, tauEditorPanelDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { FileSelector } from '#components/files/file-selector.js';
 import { Button } from '#components/ui/button.js';
@@ -143,7 +143,6 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
   const { buildRef, editorRef, mainEntryFile } = useBuild();
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
-
   // Track the active (focused) viewer panel for settings inheritance
   const [activeViewerPanelId, setActiveViewerPanelId] = useState<string | undefined>();
 
@@ -241,14 +240,40 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
     };
   }, [api, buildRef, editorRef, viewSettings]);
 
-  // Accept external file drags
+  // Tag outgoing tab drags with the viewer MIME so the editor can identify them
+  useEffect(() => {
+    if (!api) {
+      return;
+    }
+
+    const disposable = api.onWillDragPanel((event) => {
+      const entryFile = (event.panel.params as ViewerPanelParameters | undefined)?.entryFile;
+      if (entryFile) {
+        event.nativeEvent.dataTransfer?.setData(tauViewerPanelDragMime, JSON.stringify({ entryFile }));
+      }
+    });
+
+    return () => {
+      disposable.dispose();
+    };
+  }, [api]);
+
+  // Accept external file drags and cross-dockview panel drags
   useEffect(() => {
     if (!api) {
       return;
     }
 
     const disposable = api.onUnhandledDragOverEvent((event) => {
-      if (event.nativeEvent.dataTransfer?.types.includes(tauFileDragMime)) {
+      const types = event.nativeEvent.dataTransfer?.types;
+
+      if (types?.includes(tauFileDragMime)) {
+        event.accept();
+        return;
+      }
+
+      const panelData = typeof event.getData === 'function' ? event.getData() : undefined;
+      if (panelData ?? types?.includes(tauEditorPanelDragMime)) {
         event.accept();
       }
     });
@@ -419,9 +444,48 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
     [viewerLayout, mainEntryFile, editorRef],
   );
 
-  // Handle external file drops
+  // Handle external file drops and cross-dockview editor panel drops
   const onDidDrop = useCallback(
     (event: DockviewDidDropEvent) => {
+      // Handle editor panel drag → create a viewer for that file
+      const editorData = event.nativeEvent.dataTransfer?.getData(tauEditorPanelDragMime);
+      if (editorData) {
+        try {
+          const { filePath: droppedFile } = JSON.parse(editorData) as { filePath?: string };
+          if (droppedFile) {
+            const viewId = generatePrefixedId('view');
+            const fileName = droppedFile.split('/').pop() ?? droppedFile;
+
+            event.api.addPanel({
+              id: viewId,
+              component: 'viewer',
+              title: fileName,
+              params: { viewId, entryFile: droppedFile },
+              position: {
+                direction: positionToDirection(event.position),
+                referenceGroup: event.group ?? undefined,
+              },
+            });
+
+            editorRef.send({
+              type: 'setViewSettings',
+              viewId,
+              viewState: {
+                entryFile: droppedFile,
+                graphicsSettings: getInheritedSettings(),
+              },
+            });
+
+            buildRef.send({ type: 'createCompilationUnit', entryFile: droppedFile });
+          }
+        } catch {
+          // Ignore corrupt data
+        }
+
+        return;
+      }
+
+      // Handle file tree drags
       const data = event.nativeEvent.dataTransfer?.getData(tauFileDragMime);
       if (!data) {
         return;
@@ -465,7 +529,6 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
         },
       });
 
-      // Persist view settings (inherit from active panel)
       editorRef.send({
         type: 'setViewSettings',
         viewId,
@@ -475,7 +538,6 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
         },
       });
 
-      // Ensure compilation unit exists
       buildRef.send({ type: 'createCompilationUnit', entryFile: filePath });
     },
     [buildRef, editorRef, getInheritedSettings],
@@ -516,15 +578,17 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
   return (
     <WebglContextTrackerProvider>
       <DockviewFileActionProvider value={handleOpenFile}>
-        <Dockview
-          components={components}
-          noPanelsOverlay="emptyGroup"
-          defaultTabComponent={ViewerDockviewTab}
-          watermarkComponent={ViewerWatermark}
-          leftHeaderActionsComponent={DockviewOpenFileAction}
-          onReady={onReady}
-          onDidDrop={onDidDrop}
-        />
+        <div className="relative size-full">
+          <Dockview
+            components={components}
+            noPanelsOverlay="emptyGroup"
+            defaultTabComponent={ViewerDockviewTab}
+            watermarkComponent={ViewerWatermark}
+            leftHeaderActionsComponent={DockviewOpenFileAction}
+            onReady={onReady}
+            onDidDrop={onDidDrop}
+          />
+        </div>
       </DockviewFileActionProvider>
     </WebglContextTrackerProvider>
   );

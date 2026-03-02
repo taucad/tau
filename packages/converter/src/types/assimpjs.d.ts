@@ -6,6 +6,9 @@ declare module 'assimpjs' {
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- Required to keep module as ambient type definition
   type EmscriptenModuleConfig = import('#types/emscripten.d.ts').EmscriptenModuleConfig;
 
+  /**
+   *
+   */
   export type AssimpResult = {
     IsSuccess(): boolean;
     FileCount(): number;
@@ -13,15 +16,24 @@ declare module 'assimpjs' {
     GetErrorCode(): string;
   };
 
+  /**
+   *
+   */
   export type AssimpFile = {
     GetContent(): Uint8Array<ArrayBuffer>;
     GetPath(): string;
   };
 
+  /**
+   *
+   */
   export type FileList = {
     AddFile(name: string, content: Uint8Array<ArrayBuffer>): void;
   };
 
+  /**
+   *
+   */
   export type AssimpJS = {
     FileList: new () => FileList;
     ConvertFileList(fileList: FileList, format: string): AssimpResult;

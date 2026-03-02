@@ -1,44 +1,132 @@
 /**
  * OpenCASCADE Exception Handling Utilities
  *
- * Provides OC exception proxy wrapping, numeric exception decoding,
- * and human-readable message formatting for OpenCASCADE errors.
+ * Provides exception decoding and human-readable message formatting for
+ * OpenCASCADE errors thrown as native WASM exceptions (-fwasm-exceptions).
  *
- * Used by replicad.kernel.ts when withExceptions mode is enabled.
+ * With native WASM exceptions, C++ exceptions propagate as WebAssembly.Exception
+ * objects with proper stack traces — no proxy wrapping needed.
  */
 
-import type { OpenCascadeInstance as OpenCascadeInstanceWithExceptions } from 'replicad-opencascadejs/src/replicad_with_exceptions.js';
+import type { OpenCascadeInstance } from 'replicad-opencascadejs/src/replicad_single.js';
+import type { OpenCascadeInstance as OpenCascadeWithExceptions } from 'replicad-opencascadejs/src/replicad_with_exceptions.js';
 import type { KernelIssue, KernelStackFrame, ErrorLocation } from '#types/kernel.types.js';
+import { OcKernelError } from '#kernels/replicad/oc-tracing.js';
 
 // =============================================================================
-// OC Exception Error Class
+// Reusable WASM Type Guards
 // =============================================================================
+
+/** Emscripten wrapper object with WASM memory management via `delete()`. */
+export type EmscriptenObject = Record<string, unknown> & { delete(): void };
 
 /**
- * Error wrapping a numeric OpenCASCADE exception pointer.
- * Preserves the JS stack trace at the WASM call boundary so source maps
- * can map it back to user code.
+ * Emscripten 5.x CppException — Error subclass with an `excPtr` property
+ * pointing to the C++ exception in WASM memory.
  */
-export class OcExceptionError extends Error {
-  public readonly ocExceptionPointer: number;
+export type CppException = Error & { excPtr: number };
 
-  public constructor(pointer: number) {
-    super(`OpenCASCADE exception (ptr: ${pointer})`);
-    this.name = 'OcExceptionError';
-    this.ocExceptionPointer = pointer;
+/**
+ * Extracted WASM exception info: the numeric pointer and, when available,
+ * the original Error that preserves the JS call-site stack trace.
+ */
+export type WasmExceptionInfo = {
+  pointer: number;
+  sourceError: Error | undefined;
+};
+
+/**
+ * Type guard for Emscripten wrapper objects (any WASM-allocated C++ object).
+ * These always expose a `delete()` method for freeing WASM memory.
+ */
+export function isEmscriptenObject(value: unknown): value is EmscriptenObject {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    'delete' in value &&
+    typeof (value as Record<string, unknown>)['delete'] === 'function'
+  );
+}
+
+/**
+ * Type guard for Emscripten 5.x CppException.
+ */
+export function isCppException(error: unknown): error is CppException {
+  return (
+    error instanceof Error && 'excPtr' in error && typeof (error as Record<string, unknown>)['excPtr'] === 'number'
+  );
+}
+
+/**
+ * Execute a callback with a WASM object, ensuring `delete()` is called
+ * to free WASM memory even if the callback throws.
+ */
+export function withWasmObject<T extends { delete(): void }, R>(object: T, callback: (object: T) => R): R {
+  try {
+    return callback(object);
+  } finally {
+    object.delete();
   }
 }
 
 /**
- * Rethrow a numeric exception as an OcExceptionError.
- * This preserves the JS call stack at the point of the WASM call.
+ * Emscripten module with native WASM exception helpers (exported via
+ * -sEXPORT_EXCEPTION_HANDLING_HELPERS). These aren't in the generated
+ * .d.ts but exist at runtime.
  */
-function rethrowIfNumeric(error: unknown): never {
+type EmscriptenExceptionHelpers = {
+  getExceptionMessage(ex: WebAssembly.Exception): [string, string];
+};
+
+/**
+ * Extract a WASM exception pointer from any Emscripten throw form:
+ * - bare number (legacy Emscripten — JS stack is unwound)
+ * - CppException (Emscripten 5.x Error with excPtr)
+ *
+ * Returns the pointer and the source Error for stack traces,
+ * or undefined if the value is not a WASM exception.
+ */
+export function extractWasmException(error: unknown): WasmExceptionInfo | undefined {
   if (typeof error === 'number') {
-    throw new OcExceptionError(error);
+    return { pointer: error, sourceError: undefined };
   }
 
-  throw error;
+  if (isCppException(error)) {
+    return { pointer: error.excPtr, sourceError: error };
+  }
+
+  return undefined;
+}
+
+/**
+ * Check if an error is a native WebAssembly.Exception (from -fwasm-exceptions).
+ */
+function isWebAssemblyException(error: unknown): error is WebAssembly.Exception {
+  return (
+    typeof WebAssembly !== 'undefined' &&
+    typeof WebAssembly.Exception === 'function' &&
+    error instanceof WebAssembly.Exception
+  );
+}
+
+/**
+ * Decode a WebAssembly.Exception using the Emscripten helper `getExceptionMessage`.
+ * Returns the formatted message, or undefined if decoding fails.
+ */
+function decodeWebAssemblyException(
+  error: WebAssembly.Exception,
+  ocInstance: Partial<EmscriptenExceptionHelpers>,
+): { message: string } | undefined {
+  if (typeof ocInstance.getExceptionMessage !== 'function') {
+    return undefined;
+  }
+
+  try {
+    const [typeName, rawMessage] = ocInstance.getExceptionMessage(error);
+    return { message: formatOcExceptionMessage(typeName, rawMessage) };
+  } catch {
+    return undefined;
+  }
 }
 
 // =============================================================================
@@ -83,11 +171,13 @@ const ocExceptionDescriptions: ReadonlyMap<string, string> = new Map([
  * Format an OpenCASCADE exception into a human-readable KernelError message.
  */
 export function formatOcExceptionMessage(typeName: string, rawMessage: string): string {
-  const candidates = [typeName, rawMessage].filter(Boolean);
+  // Check rawMessage first — it's typically the more specific identifier
+  // (e.g., "BRepSweep_Translation::Constructor" vs "Standard_ConstructionError")
+  const candidates = [rawMessage, typeName].filter(Boolean);
   for (const candidate of candidates) {
     for (const [prefix, description] of ocExceptionDescriptions) {
       if (candidate.startsWith(prefix)) {
-        const identifier = typeName || rawMessage;
+        const identifier = candidate;
         return `KernelError: ${description} (${identifier})`;
       }
     }
@@ -105,90 +195,6 @@ export function formatOcExceptionMessage(typeName: string, rawMessage: string): 
 }
 
 // =============================================================================
-// OC Instance Proxy Wrapping
-// =============================================================================
-
-/**
- * Check whether an object looks like an Emscripten-generated C++ wrapper instance.
- * These objects always have a `delete()` method for freeing WASM memory.
- */
-function isEmscriptenObject(value: unknown): value is Record<string, unknown> {
-  return (
-    value !== null &&
-    typeof value === 'object' &&
-    'delete' in value &&
-    typeof (value as Record<string, unknown>)['delete'] === 'function'
-  );
-}
-
-/**
- * Wrap an OpenCASCADE WASM instance with a deep Proxy that intercepts all
- * function/constructor calls. When a call throws a numeric exception (Emscripten's
- * representation of a C++ exception), the Proxy catches it and re-throws an
- * OcExceptionError with the JS stack trace preserved from the call site.
- *
- * Uses a WeakMap cache to avoid re-wrapping the same object multiple times.
- */
-export function wrapOcInstance<T extends Record<string, unknown>>(instance: T): T {
-  const proxyCache = new WeakMap<Record<string, unknown>, Record<string, unknown>>();
-
-  function wrapObject(target: Record<string, unknown>): Record<string, unknown> {
-    const cached = proxyCache.get(target);
-    if (cached) {
-      return cached;
-    }
-
-    const proxy: Record<string, unknown> = new Proxy(target, {
-      get(proxyTarget, property, receiver) {
-        if (property === 'delete' || property === Symbol.toPrimitive || property === Symbol.toStringTag) {
-          return Reflect.get(proxyTarget, property, receiver) as unknown;
-        }
-
-        const value: unknown = Reflect.get(proxyTarget, property, receiver);
-        if (typeof value === 'function') {
-          return wrapFunction(value as (...arguments_: unknown[]) => unknown);
-        }
-
-        return value;
-      },
-    });
-    proxyCache.set(target, proxy);
-    return proxy;
-  }
-
-  function maybeWrapResult(result: unknown): unknown {
-    if (isEmscriptenObject(result)) {
-      return wrapObject(result);
-    }
-
-    return result;
-  }
-
-  function wrapFunction(function_: (...arguments_: unknown[]) => unknown): (...arguments_: unknown[]) => unknown {
-    return new Proxy(function_, {
-      construct(target, arguments_: unknown[], newTarget: (...arguments_: unknown[]) => unknown) {
-        try {
-          const result: unknown = Reflect.construct(target, arguments_, newTarget);
-          return maybeWrapResult(result) as Record<string, unknown>;
-        } catch (error) {
-          rethrowIfNumeric(error);
-        }
-      },
-      apply(target, thisArgument: unknown, arguments_: unknown[]) {
-        try {
-          const result: unknown = Reflect.apply(target, thisArgument, arguments_);
-          return maybeWrapResult(result);
-        } catch (error) {
-          rethrowIfNumeric(error);
-        }
-      },
-    });
-  }
-
-  return wrapObject(instance) as T;
-}
-
-// =============================================================================
 // OC Exception Decoding
 // =============================================================================
 
@@ -196,17 +202,13 @@ export function wrapOcInstance<T extends Record<string, unknown>>(instance: T): 
  * Extract the exception type name from an OpenCASCADE Standard_Failure object.
  */
 function extractExceptionTypeName(
-  errorData: ReturnType<OpenCascadeInstanceWithExceptions['OCJS']['getStandard_FailureData']>,
+  errorData: ReturnType<OpenCascadeWithExceptions['OCJS']['getStandard_FailureData']>,
 ): string {
   try {
     // eslint-disable-next-line new-cap, @typescript-eslint/naming-convention -- C++ method with PascalCase convention
-    const dynType = errorData.DynamicType() as unknown as { Name(): string; delete(): void };
-    try {
-      // eslint-disable-next-line new-cap -- C++ method Name() is PascalCase in OpenCASCADE
-      return dynType.Name();
-    } finally {
-      dynType.delete();
-    }
+    const dynType = errorData.ExceptionType() as unknown as { Name(): string; delete(): void };
+    // eslint-disable-next-line new-cap -- C++ method Name() is PascalCase in OpenCASCADE
+    return withWasmObject(dynType, (dt) => dt.Name());
   } catch {
     return '';
   }
@@ -217,20 +219,18 @@ function extractExceptionTypeName(
  * Frees WASM memory for the error data when done.
  */
 function extractStandardFailureData(
-  ocInstance: OpenCascadeInstanceWithExceptions,
+  ocInstance: OpenCascadeInstance,
   errorPointer: number,
 ): { message: string; typeName: string; cppStack: string } {
-  const errorData = ocInstance.OCJS.getStandard_FailureData(errorPointer);
-  try {
+  const oc = ocInstance as OpenCascadeWithExceptions;
+  return withWasmObject(oc.OCJS.getStandard_FailureData(errorPointer), (errorData) => {
     // eslint-disable-next-line new-cap -- C++ method
     const errorMessage = errorData.GetMessageString();
     // eslint-disable-next-line new-cap -- C++ method
     const cppStack = errorData.GetStackString();
     const typeName = extractExceptionTypeName(errorData);
     return { message: errorMessage, typeName, cppStack };
-  } finally {
-    errorData.delete();
-  }
+  });
 }
 
 /**
@@ -239,14 +239,10 @@ function extractStandardFailureData(
  */
 export function decodeOcException(
   pointer: number,
-  ocInstance: OpenCascadeInstanceWithExceptions | undefined,
+  ocInstance: OpenCascadeInstance,
 ): { message: string; cppStack?: string } {
   let message = `KernelError: Unknown kernel error (code ${pointer})`;
   let cppStack: string | undefined;
-
-  if (!ocInstance) {
-    return { message, cppStack };
-  }
 
   try {
     const failureData = extractStandardFailureData(ocInstance, pointer);
@@ -264,11 +260,12 @@ export function decodeOcException(
 // =============================================================================
 
 /**
- * Format a runtime error into a KernelIssue, with OC exception decoding when available.
+ * Format a runtime error into a KernelIssue, with OC exception decoding.
  *
- * Handles:
- * - OcExceptionError: thrown by the OC proxy wrapper (has pointer + JS stack)
- * - bare number: direct Emscripten throw (JS stack is unwound)
+ * Handles (in priority order):
+ * - WebAssembly.Exception: native wasm-exceptions via getExceptionMessage()
+ * - bare number: legacy Emscripten throw (JS stack is unwound)
+ * - CppException: Emscripten 5.x Error with excPtr
  * - Error instances: standard JS errors with stack traces
  */
 export function formatRuntimeErrorWithOc({
@@ -281,8 +278,8 @@ export function formatRuntimeErrorWithOc({
 }: {
   /** The error thrown during execution */
   error: unknown;
-  /** The OC instance with exceptions support (undefined when not in withExceptions mode) */
-  ocInstance: OpenCascadeInstanceWithExceptions | undefined;
+  /** The OC instance (may or may not have exception support depending on WASM build) */
+  ocInstance: OpenCascadeInstance;
   /** Function to parse error stack traces into structured frames */
   parseStackTrace: (error: unknown) => KernelStackFrame[];
   /** Function to apply source map resolution to stack frames */
@@ -292,17 +289,26 @@ export function formatRuntimeErrorWithOc({
   /** Optional source map JSON string */
   sourceMap?: string;
 }): KernelIssue {
-  if (error instanceof OcExceptionError) {
-    const { message, cppStack } = decodeOcException(error.ocExceptionPointer, ocInstance);
+  if (error instanceof OcKernelError) {
     const stackFrames = applySourceMaps(parseStackTrace(error));
     const location = deriveLocation(stackFrames, sourceMap);
-    return { message, location, type: 'kernel', severity: 'error', stack: cppStack, stackFrames };
+    return { message: error.message, location, type: 'kernel', severity: 'error', stackFrames };
   }
 
-  if (typeof error === 'number') {
-    const { message, cppStack } = decodeOcException(error, ocInstance);
-    const syntheticError = new Error(message);
-    const stackFrames = applySourceMaps(parseStackTrace(syntheticError));
+  if (isWebAssemblyException(error)) {
+    const decoded = decodeWebAssemblyException(error, ocInstance as Partial<EmscriptenExceptionHelpers>);
+    if (decoded) {
+      const stackFrames = applySourceMaps(parseStackTrace(new Error(decoded.message)));
+      const location = deriveLocation(stackFrames, sourceMap);
+      return { message: decoded.message, location, type: 'kernel', severity: 'error', stackFrames };
+    }
+  }
+
+  const wasmException = extractWasmException(error);
+  if (wasmException) {
+    const { message, cppStack } = decodeOcException(wasmException.pointer, ocInstance);
+    const errorForStack = wasmException.sourceError ?? new Error(message);
+    const stackFrames = applySourceMaps(parseStackTrace(errorForStack));
     const location = deriveLocation(stackFrames, sourceMap);
     return { message, location, type: 'kernel', severity: 'error', stack: cppStack, stackFrames };
   }

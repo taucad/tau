@@ -319,6 +319,9 @@ class ToJsonSchema {
   }
 }
 
+/**
+ *
+ */
 export function toJsonSchema(value: unknown, options?: Options): JSONSchema7 {
   const tjs = new ToJsonSchema(options);
   return tjs.getSchema(value);

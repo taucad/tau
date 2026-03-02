@@ -9,6 +9,8 @@
  */
 import type {
   CaptureObservationsRpcResult,
+  CaptureScreenshotRpcResult,
+  FetchGeometryRpcResult,
   GetKernelResultRpcResult,
   RpcClientErrorCode,
 } from '#schemas/rpc.schema.js';
@@ -20,6 +22,7 @@ import type {
 export type RpcFileSystem = {
   readFile(path: string): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
+  writeBinaryFile(path: string, data: Uint8Array): Promise<void>;
   deleteFile(path: string): Promise<void>;
   readdir(path: string): Promise<Array<{ name: string; type: 'file' | 'directory'; size: number }>>;
   exists(path: string): Promise<boolean>;
@@ -39,6 +42,8 @@ export type RpcKernelClient = {
  */
 export type RpcGraphicsClient = {
   captureObservations(): Promise<CaptureObservationsRpcResult>;
+  fetchGeometry(): Promise<FetchGeometryRpcResult>;
+  captureScreenshot(): Promise<CaptureScreenshotRpcResult>;
 };
 
 /**

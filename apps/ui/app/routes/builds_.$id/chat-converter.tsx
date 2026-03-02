@@ -86,7 +86,10 @@ export const ChatConverter = memo(function (properties: {
   );
 
   // Converter state
-  const [selectedFormats, setSelectedFormats] = useCookie<SupportedExportFormat[]>(cookieName.converterOutputFormats, []);
+  const [selectedFormats, setSelectedFormats] = useCookie<SupportedExportFormat[]>(
+    cookieName.converterOutputFormats,
+    [],
+  );
   const [useZipForMultiple, setUseZipForMultiple] = useCookie<boolean>(cookieName.converterMultifileZip, true);
 
   // Lazy GLB provider sourced from CAD geometries

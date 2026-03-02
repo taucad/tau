@@ -3,6 +3,10 @@
  *
  * Routes KernelCommand messages to the appropriate KernelWorker methods
  * and sends KernelResponse messages back via the kernel worker MessagePort.
+ *
+ * Includes an unhandled-rejection trap around every awaited operation so
+ * that errors thrown in fire-and-forget promises (e.g. Emscripten pthread
+ * init) surface as structured error responses instead of silent hangs.
  */
 
 import type { OnWorkerLog, LogLevel, LogOrigin } from '@taucad/types';
@@ -10,6 +14,7 @@ import type { HashedGeometryResult } from '#types/kernel.types.js';
 import type { KernelCommand, KernelResponse, PerformanceEntryData } from '#types/kernel-protocol.types.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import type { KernelMessagePort } from '#framework/kernel-message-adapter.js';
+import { createErrorTrap } from '#framework/worker-error-trap.js';
 
 function extractGltfTransferables(result: HashedGeometryResult): Transferable[] {
   if (!result.success) {
@@ -62,6 +67,9 @@ export function createWorkerDispatcher(worker: KernelWorker, port: KernelMessage
   port.onMessage(async (command: KernelCommand | KernelResponse) => {
     const message = command as KernelCommand;
     const requestId = 'requestId' in message ? message.requestId : '';
+
+    const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
+
     try {
       switch (message.type) {
         case 'initialize': {
@@ -70,17 +78,20 @@ export function createWorkerDispatcher(worker: KernelWorker, port: KernelMessage
             fileSystemPort = message.fileSystemPort;
           }
 
-          await worker.initialize({
-            callbacks: { onLog },
-            transferables: { fileSystemPort },
-            options: message.options,
-            middlewareEntries: message.middlewareEntries,
-          });
+          await Promise.race([
+            worker.initialize({
+              callbacks: { onLog },
+              transferables: { fileSystemPort },
+              options: message.options,
+              middlewareEntries: message.middlewareEntries,
+            }),
+            trapPromise,
+          ]);
 
           if (message.bundlerEntries) {
             for (const entry of message.bundlerEntries) {
               // eslint-disable-next-line no-await-in-loop -- Sequential: bundlers must be loaded before use
-              await worker.ensureLoadedBundler(entry);
+              await Promise.race([worker.ensureLoadedBundler(entry), trapPromise]);
             }
           }
 
@@ -89,17 +100,20 @@ export function createWorkerDispatcher(worker: KernelWorker, port: KernelMessage
         }
 
         case 'render': {
-          const result = await worker.render({
-            file: message.file,
-            parameters: message.params,
-            onParametersResolved(parametersResult) {
-              respond({ type: 'parametersResolved', requestId, result: parametersResult });
-            },
-            onProgress(phase) {
-              respond({ type: 'progress', requestId, phase });
-            },
-            tessellation: message.tessellation,
-          });
+          const result = await Promise.race([
+            worker.render({
+              file: message.file,
+              parameters: message.params,
+              onParametersResolved(parametersResult) {
+                respond({ type: 'parametersResolved', requestId, result: parametersResult });
+              },
+              onProgress(phase) {
+                respond({ type: 'progress', requestId, phase });
+              },
+              tessellation: message.tessellation,
+            }),
+            trapPromise,
+          ]);
           const transferables = extractGltfTransferables(result);
 
           flushLogs();
@@ -109,17 +123,20 @@ export function createWorkerDispatcher(worker: KernelWorker, port: KernelMessage
         }
 
         case 'fileChanged': {
-          await worker.notifyFileChanged(message.paths);
+          await Promise.race([worker.notifyFileChanged(message.paths), trapPromise]);
           break;
         }
 
         case 'configureMiddleware': {
-          await worker.configureMiddleware(message.entries);
+          await Promise.race([worker.configureMiddleware(message.entries), trapPromise]);
           break;
         }
 
         case 'export': {
-          const exportResult = await worker.exportGeometry(message.format, message.tessellation);
+          const exportResult = await Promise.race([
+            worker.exportGeometry(message.format, message.tessellation),
+            trapPromise,
+          ]);
           respond({ type: 'exported', requestId, result: exportResult });
           break;
         }
@@ -135,7 +152,7 @@ export function createWorkerDispatcher(worker: KernelWorker, port: KernelMessage
           }
 
           flushLogs();
-          await worker.cleanup();
+          await Promise.race([worker.cleanup(), trapPromise]);
           break;
         }
       }
@@ -146,6 +163,8 @@ export function createWorkerDispatcher(worker: KernelWorker, port: KernelMessage
         requestId,
         issues: [{ message: errorMessage, type: 'runtime', severity: 'error' }],
       });
+    } finally {
+      cleanupTrap();
     }
   });
 }

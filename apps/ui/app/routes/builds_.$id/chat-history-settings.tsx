@@ -11,6 +11,7 @@ import {
   SlidersHorizontal,
   ScanEye,
   Image,
+  FlaskConical,
 } from 'lucide-react';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
 import { FloatingPanelMenuButton } from '#components/ui/floating-panel.js';
@@ -48,6 +49,7 @@ export function ChatHistorySettings(): React.ReactNode {
   const [includeFilesystem, setIncludeFilesystem] = useCookie(cookieName.chatCtxFs, true);
   const [includeActiveFile, setIncludeActiveFile] = useCookie(cookieName.chatCtxActive, true);
   const [includeOpenFiles, setIncludeOpenFiles] = useCookie(cookieName.chatCtxOpen, true);
+  const [testingEnabled, setTestingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
   const { quality: screenshotQuality, setQuality: setScreenshotQuality } = useImageQuality();
   const [isOpen, setIsOpen] = useState(false);
 
@@ -91,6 +93,13 @@ export function ChatHistorySettings(): React.ReactNode {
       setIncludeOpenFiles(checked);
     },
     [setIncludeOpenFiles],
+  );
+
+  const handleTestingEnabledToggle = useCallback(
+    (checked: boolean) => {
+      setTestingEnabled(checked);
+    },
+    [setTestingEnabled],
   );
 
   const handleScreenshotQualityChange = useCallback(
@@ -216,6 +225,12 @@ export function ChatHistorySettings(): React.ReactNode {
             </DropdownMenuSliderItem>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
+
+        {/* Testing toggle */}
+        <DropdownMenuSwitchItem isChecked={testingEnabled} onIsCheckedChange={handleTestingEnabledToggle}>
+          <FlaskConical />
+          Testing
+        </DropdownMenuSwitchItem>
 
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Export</DropdownMenuLabel>

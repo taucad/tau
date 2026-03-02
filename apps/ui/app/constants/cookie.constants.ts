@@ -53,6 +53,8 @@ export const cookieName = {
   chatToolAnalysisImages: 'chat-tool-analysis-images',
   // The quality of the screenshots in the chat.
   chatScreenshotQuality: 'chat-screenshot-quality',
+  // Whether testing tools (test_model, edit_tests) are enabled.
+  chatTestingEnabled: 'chat-testing-enabled',
 
   /* Builds */
   // The last selected build view mode.

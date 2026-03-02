@@ -28,6 +28,8 @@ import { cn } from '#utils/ui.utils.js';
 import { ChatHistoryEmpty } from '#routes/builds_.$id/chat-history-empty.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { useChatSnapshot } from '#hooks/use-chat-snapshot.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 const toggleChatHistoryKeyCombination = {
   key: 'c',
@@ -77,6 +79,7 @@ export const ChatHistory = memo(function (props: {
   const { sendMessage } = useChatActions();
   const { kernel } = useKernel();
   const snapshot = useChatSnapshot();
+  const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatTextareaRef = useRef<ChatTextareaHandle>(null);
   const toggleChatHistory = useCallback(() => {
@@ -113,12 +116,13 @@ export const ChatHistory = memo(function (props: {
           model,
           status: messageStatus.pending,
           snapshot,
+          testingEnabled,
         },
         imageUrls,
       });
       sendMessage(userMessage);
     },
-    [sendMessage, kernel, snapshot],
+    [sendMessage, kernel, snapshot, testingEnabled],
   );
 
   // Memoize the item renderer for Virtuoso with stable references

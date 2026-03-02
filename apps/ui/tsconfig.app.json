@@ -5,6 +5,7 @@
     "app/**/*.tsx",
     "app/**/*.js",
     "app/**/*.jsx",
+    "vite-plugins/**/*.ts",
     "vite-environment.d.ts",
     ".react-router/types/**/*",
     ".source/**/*", // Fumadocs collections

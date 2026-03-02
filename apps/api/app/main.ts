@@ -23,7 +23,7 @@ import { RedisIoAdapter } from '#api/websocket/redis-io.adapter.js';
 import { isTrackedAbortError } from '#api/chat/utils/chat-abort.js';
 
 // ---------------------------------------------------------------------------
-// Chat Abort Error Handling (see docs/api-error-policy.md)
+// Chat Abort Error Handling (see docs/policy/api-error-policy.md)
 // ---------------------------------------------------------------------------
 
 // Layer 2: Suppress unhandled AbortError rejections from chat cancellations.
@@ -43,7 +43,6 @@ process.on('unhandledRejection', (reason: unknown) => {
 
   throw new Error(typeof reason === 'string' ? reason : 'Unhandled promise rejection');
 });
-
 
 async function bootstrap() {
   const fastifyAdapter = new FastifyAdapter({

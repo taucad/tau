@@ -30,7 +30,11 @@
     "db:push": "nx run api:db-push",
     "db:drop": "nx run api:db-drop",
     "update-license-deps": "node --import tsx scripts/update-license-deps.mts",
-    "pkgcheck": "nx run-many -t pkgcheck"
+    "pkgcheck": "nx run-many -t pkgcheck",
+    "repos": "node scripts/repos.ts",
+    "repos:clone": "node scripts/repos.ts clone --all",
+    "repos:sync": "node scripts/repos.ts sync --all",
+    "repos:status": "node scripts/repos.ts status --all"
   },
   "dependencies": {
     "@ai-sdk/cerebras": "^2.0.34",
@@ -48,6 +52,7 @@
     "@headless-tree/core": "^1.6.3",
     "@headless-tree/react": "^1.6.3",
     "@hookform/resolvers": "^5.2.2",
+    "@inkjs/ui": "catalog:",
     "@jscad/modeling": "catalog:",
     "@kittycad/lib": "catalog:",
     "@langchain/anthropic": "catalog:",
@@ -55,7 +60,7 @@
     "@langchain/classic": "catalog:",
     "@langchain/community": "catalog:",
     "@langchain/core": "catalog:",
-    "@langchain/google-vertexai": "https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-vertexai-2.1.27.tgz",
+    "@langchain/google-vertexai": "https://github.com/taucad/langchainjs/raw/0f065cb8c363ff95a2fdddfbe28bbac1970068cd/langchain-google-vertexai-2.1.27.tgz",
     "@langchain/langgraph": "catalog:",
     "@langchain/langgraph-checkpoint": "catalog:",
     "@langchain/langgraph-checkpoint-postgres": "catalog:",
@@ -98,6 +103,7 @@
     "@tanstack/react-virtual": "^3.13.19",
     "@taucad/json-schema": "workspace:*",
     "@taucad/kcl-wasm-lib": "catalog:",
+    "@types/js-yaml": "catalog:",
     "@types/madge": "catalog:",
     "@types/pg": "^8.16.0",
     "@types/pluralize": "^0.0.33",
@@ -135,14 +141,17 @@
     "fumadocs-ui": "^16.6.5",
     "geist": "catalog:",
     "immer": "^10.2.0",
+    "ink": "catalog:",
     "ioredis": "^5.9.3",
     "isbot": "catalog:",
     "isomorphic-git": "^1.37.2",
+    "js-yaml": "catalog:",
     "json-rpc-2.0": "^1.7.1",
     "json-schema-default": "catalog:",
     "jszip": "^3.10.1",
     "langchain": "catalog:",
     "lucide-react": "^0.552.0",
+    "manifold-3d": "catalog:",
     "mermaid": "catalog:",
     "minimatch": "^10.2.3",
     "monaco-editor": "^0.55.1",
@@ -290,12 +299,12 @@
   "pnpm": {
     "patchedDependencies": {
       "@kittycad/lib": "patches/@kittycad__lib.patch",
-      "replicad": "patches/replicad.patch",
+      "replicad@0.20.5": "patches/replicad@0.20.5.patch",
       "@zenfs/core": "patches/@zenfs__core.patch"
     },
     "overrides": {
-      "@langchain/google-common": "https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-common-2.1.31.tgz",
-      "@langchain/google-vertexai": "https://github.com/taucad/langchainjs/raw/5b0d49a0cf8233f38b362308f1e4c11cea9e298b/langchain-google-vertexai-2.1.27.tgz"
+      "@langchain/google-common": "https://github.com/taucad/langchainjs/raw/0f065cb8c363ff95a2fdddfbe28bbac1970068cd/langchain-google-common-2.1.32.tgz",
+      "@langchain/google-vertexai": "https://github.com/taucad/langchainjs/raw/0f065cb8c363ff95a2fdddfbe28bbac1970068cd/langchain-google-vertexai-2.1.27.tgz"
     },
     "onlyBuiltDependencies": [
       "@nestjs/core",

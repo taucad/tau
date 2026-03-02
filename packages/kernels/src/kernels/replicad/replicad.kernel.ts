@@ -5,27 +5,32 @@
  * Uses runtime.bundler for JS/TS bundling and runtime.execute for evaluation.
  * Registers replicad as a built-in module and loads OpenCASCADE WASM for geometry.
  *
- * Supports withExceptions mode: wraps the OC instance with a deep Proxy
- * that converts numeric C++ exceptions into OcExceptionError with proper
- * JS stack traces, enabling source-map resolution back to user code.
+ * Uses ES Module Asset Injection (two-tier dynamic import) to code-split WASM
+ * variants. Only the selected variant's JS glue (~112KB) is loaded on-demand,
+ * shrinking the worker bundle by ~225KB vs. static imports of both variants.
+ *
+ * @see docs/policy/es-module-policy.md
  */
 
 import * as replicad from 'replicad';
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
-import type { OpenCascadeInstance as OpenCascadeInstanceWithExceptions } from 'replicad-opencascadejs/src/replicad_with_exceptions.js';
 import type { GeometryGltf, GeometrySvg } from '@taucad/types';
 import { z } from 'zod';
-import type { SourceMapConsumer } from 'source-map-js';
+import { SourceMapConsumer } from 'source-map-js';
 import { asBuffer } from '@taucad/utils/file';
 import { jsonSchemaFromJson } from '@taucad/utils/schema';
 import { createExportFile } from '@taucad/types/constants';
 import { defineKernel } from '#types/kernel-worker.types.js';
 import type { KernelRuntime } from '#types/kernel-worker.types.js';
+import type { KernelSpanTracer } from '#types/kernel-tracer.types.js';
 import type { KernelIssue, KernelStackFrame, ErrorLocation } from '#types/kernel.types.js';
 import { createKernelError, createKernelSuccess } from '#framework/kernel-helpers.js';
-import { initOpenCascade, initOpenCascadeWithExceptions } from '#kernels/replicad/init-open-cascade.js';
-import { wrapOcInstance, formatRuntimeErrorWithOc } from '#kernels/replicad/oc-exceptions.js';
-import { wrapOcWithTracing } from '#kernels/replicad/oc-tracing.js';
+import { isNode, resolveFileUrl } from '#framework/environment.js';
+import { initOpenCascade } from '#kernels/replicad/init-open-cascade.js';
+import type { OpenCascadeModuleFactory } from '#kernels/replicad/init-open-cascade.js';
+import { resolveCjsDefault } from '#kernels/replicad/utils/resolve-cjs-default.js';
+import { formatRuntimeErrorWithOc } from '#kernels/replicad/oc-exceptions.js';
+import { wrapOcWithTracing, wrapOcForExceptions } from '#kernels/replicad/oc-tracing.js';
 import type { OcTracingSummary } from '#kernels/replicad/oc-tracing.js';
 import {
   parseStackTrace,
@@ -40,6 +45,68 @@ import type { InputShape, MainResultShapes } from '#kernels/replicad/utils/rende
 import type { GeometryReplicad } from '#kernels/replicad/replicad.types.js';
 
 const geistRegularUrl = new URL('fonts/Geist-Regular.ttf', import.meta.url).href;
+const replicadSourceMapUrl = new URL('sourcemaps/replicad.js.map', import.meta.url).href;
+
+// WASM URLs using universal pattern for browsers and bundlers.
+// Static string literals so bundlers detect and copy the assets at build time.
+// @see https://web.dev/articles/bundling-non-js-resources#universal_pattern_for_browsers_and_bundlers
+const singleWasmUrl = new URL('wasm/replicad_single.wasm', import.meta.url).href;
+const exceptionsWasmUrl = new URL('wasm/replicad_with_exceptions.wasm', import.meta.url).href;
+
+// =============================================================================
+// WASM resolution (two-tier dynamic import pattern)
+// =============================================================================
+
+type ResolvedWasm = {
+  wasmUrl: string;
+  bindingsFactory: OpenCascadeModuleFactory;
+};
+
+type WasmOption = string | { wasmUrl: string; wasmBindingsUrl: string };
+
+/**
+ * Resolve the WASM variant into a concrete URL and loaded bindings factory.
+ *
+ * - **Presets** (`'single'` / `'single-exceptions'`): Uses static-string `import()` so the
+ *   bundler creates a code-split chunk loaded on-demand. Only the selected ~112KB chunk
+ *   is loaded at runtime, shrinking the worker bundle by ~225KB.
+ *
+ * - **Custom config** (`{ wasmUrl, wasmBindingsUrl }`): Uses variable `import()` with
+ *   `@vite-ignore` to bypass bundler analysis. Works in Node.js for any module format.
+ */
+async function resolveWasm(wasm: WasmOption, tracer?: KernelSpanTracer): Promise<ResolvedWasm> {
+  const span = tracer?.startSpan('replicad.resolve-bindings', {
+    variant: typeof wasm === 'string' ? wasm : 'custom',
+  });
+
+  try {
+    if (typeof wasm === 'string') {
+      if (wasm === 'single-exceptions') {
+        const mod = await import('replicad-opencascadejs/src/replicad_with_exceptions.js');
+        return {
+          wasmUrl: exceptionsWasmUrl,
+          bindingsFactory: resolveCjsDefault(mod.default) as OpenCascadeModuleFactory,
+        };
+      }
+
+      const mod = await import('replicad-opencascadejs/src/replicad_single.js');
+      return {
+        wasmUrl: singleWasmUrl,
+        bindingsFactory: resolveCjsDefault(mod.default) as OpenCascadeModuleFactory,
+      };
+    }
+
+    // Custom WASM config -- runtime import bypasses bundler
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- dynamic import() with variable URL returns any
+    const mod: Record<string, unknown> = await import(/* @vite-ignore */ wasm.wasmBindingsUrl);
+    return {
+      wasmUrl: wasm.wasmUrl,
+      bindingsFactory: resolveCjsDefault(mod['default'] ?? mod) as OpenCascadeModuleFactory,
+    };
+  } finally {
+    span?.end();
+  }
+}
 
 // =============================================================================
 // Types
@@ -47,8 +114,6 @@ const geistRegularUrl = new URL('fonts/Geist-Regular.ttf', import.meta.url).href
 
 type ReplicadContext = {
   openCascade: OpenCascadeInstance;
-  ocWithExceptions: OpenCascadeInstanceWithExceptions | undefined;
-  withExceptions: boolean;
   withBrepEdges: boolean;
   replicadInitialised: boolean;
   librarySourceMapCache: Map<string, SourceMapConsumer | undefined>;
@@ -97,14 +162,46 @@ function parseError(error: unknown, sourceMapJson?: string, projectPath?: string
 
 function resolveLibraryFrames(frames: KernelStackFrame[], context: ReplicadContext): KernelStackFrame[] {
   return applyLibrarySourceMaps(frames, LIBRARY_PATTERNS, (moduleName) => {
-    if (context.librarySourceMapCache.has(moduleName)) {
-      return context.librarySourceMapCache.get(moduleName);
+    return context.librarySourceMapCache.get(moduleName);
+  });
+}
+
+async function loadReplicadSourceMap(): Promise<SourceMapConsumer | undefined> {
+  try {
+    const json = await loadTextFile(replicadSourceMapUrl);
+    if (!json) {
+      return undefined;
     }
 
-    // Library source maps are loaded lazily on first error
-    // For now, return undefined — the cache is populated synchronously if available
+    const rawMap: unknown = JSON.parse(json);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any -- source-map-js accepts parsed JSON
+    return new SourceMapConsumer(rawMap as any);
+  } catch {
     return undefined;
-  });
+  }
+}
+
+async function loadTextFile(url: string): Promise<string | undefined> {
+  try {
+    const response = await fetch(url);
+    if (response.ok) {
+      return await response.text();
+    }
+  } catch {
+    // Fetch failed — fall through to Node.js fs fallback
+  }
+
+  if (!isNode() || !url.startsWith('file:')) {
+    return undefined;
+  }
+
+  try {
+    const filePath = await resolveFileUrl(url);
+    const { readFile } = await import('node:fs/promises');
+    return await readFile(filePath, 'utf8');
+  } catch {
+    return undefined;
+  }
 }
 
 function deriveLocation(
@@ -207,7 +304,7 @@ async function runMain<T>(input: {
   } catch (error) {
     const issue = formatRuntimeErrorWithOc({
       error,
-      ocInstance: input.context.ocWithExceptions,
+      ocInstance: input.context.openCascade,
       parseStackTrace: (errorToFormat) => parseError(errorToFormat, input.sourceMapJson, input.projectPath),
       applySourceMaps: (frames) => resolveLibraryFrames(frames, input.context),
       deriveLocation: (frames) => deriveLocation(frames, input.sourceMapJson, input.projectPath),
@@ -238,11 +335,53 @@ function enrichIssueLocation(
 // Options schema
 // =============================================================================
 
+/**
+ * Custom WASM configuration for injecting non-standard builds at runtime.
+ * Primarily used for Node.js tooling (benchmarks, CI) via `file://` URLs.
+ */
+export type ReplicadWasmConfig = {
+  /** Absolute URL to the `.wasm` binary (typically `file://` in Node.js). */
+  wasmUrl: string;
+  /** Absolute URL to the Emscripten JS glue module (typically `file://` in Node.js). */
+  wasmBindingsUrl: string;
+};
+
+/**
+ * Replicad kernel options.
+ */
+export type ReplicadOptions = {
+  /**
+   * WASM build variant or custom build configuration.
+   *
+   * - `'single'` (default) -- compact build (~17 MB), OC errors abort rather than throw
+   * - `'single-exceptions'` -- exceptions-enabled build (~20 MB) with human-readable OC error messages
+   * - `ReplicadWasmConfig` -- custom WASM/JS URLs for runtime injection (Node.js tooling)
+   *
+   * @default 'single'
+   */
+  wasm?: 'single' | 'single-exceptions' | ReplicadWasmConfig;
+  /** OC API call tracing mode. 'summary' (default) emits aggregated stats, 'per-call' emits individual spans. */
+  ocTracing?: 'off' | 'summary' | 'per-call';
+  /** Include Boundary Representation (BRep) edge lines in the generated GLTF geometry. Defaults to `false`. */
+  withBrepEdges?: boolean;
+  /** Load library source maps for enriched error stack traces. Adds ~50ms to init. Defaults to `false`. */
+  withSourceMapping?: boolean;
+};
+
+const wasmConfigSchema = z.object({
+  wasmUrl: z.string(),
+  wasmBindingsUrl: z.string(),
+}) satisfies z.ZodType<ReplicadWasmConfig>;
+
 const replicadOptionsSchema = z.object({
-  withExceptions: z.boolean().optional().default(false),
+  wasm: z
+    .union([z.enum(['single', 'single-exceptions']), wasmConfigSchema])
+    .optional()
+    .default('single'),
   ocTracing: z.enum(['off', 'summary', 'per-call']).optional().default('summary'),
   withBrepEdges: z.boolean().optional().default(false),
-});
+  withSourceMapping: z.boolean().optional().default(false),
+}) satisfies z.ZodType<Required<ReplicadOptions>>;
 
 // =============================================================================
 // Kernel module definition
@@ -255,40 +394,25 @@ export default defineKernel({
 
   async initialize(options, runtime) {
     const { logger, tracer } = runtime;
-    const { withExceptions, ocTracing, withBrepEdges } = options;
+    const { ocTracing, withBrepEdges, withSourceMapping, wasm } = options;
 
-    logger.debug(`Initializing OpenCASCADE WASM (withExceptions: ${withExceptions}, ocTracing: ${ocTracing})`);
+    const wasmLabel = typeof wasm === 'string' ? wasm : 'custom';
+    logger.debug(`Initializing OpenCASCADE WASM (ocTracing: ${ocTracing}, wasm: ${wasmLabel})`);
 
-    let openCascade: OpenCascadeInstance;
-    let ocWithExceptions: OpenCascadeInstanceWithExceptions | undefined;
+    const wasmSpan = tracer.startSpan('replicad.wasm-init');
+    const resolved = await resolveWasm(wasm, tracer);
+    let openCascade = await initOpenCascade(resolved.wasmUrl, resolved.bindingsFactory, { tracer });
     let tracingSummary: OcTracingSummary | undefined;
 
-    const wasmSpan = tracer.startSpan('replicad.wasm-init', { withExceptions });
-    if (withExceptions) {
-      ocWithExceptions = await initOpenCascadeWithExceptions({ tracer });
-      openCascade = ocWithExceptions;
-      let ocToSet: OpenCascadeInstance = wrapOcInstance(ocWithExceptions);
-
-      if (ocTracing !== 'off') {
-        const traced = wrapOcWithTracing(ocToSet, tracer, { mode: ocTracing });
-        ocToSet = traced.tracedInstance;
-        tracingSummary = traced.summary;
-      }
-
-      replicad.setOC(ocToSet);
-    } else {
-      openCascade = await initOpenCascade({ tracer });
-      let ocToSet: OpenCascadeInstance = openCascade;
-
-      if (ocTracing !== 'off') {
-        const traced = wrapOcWithTracing(ocToSet, tracer, { mode: ocTracing });
-        ocToSet = traced.tracedInstance;
-        tracingSummary = traced.summary;
-      }
-
-      replicad.setOC(ocToSet);
+    if (ocTracing !== 'off') {
+      const traced = wrapOcWithTracing(openCascade, tracer, { mode: ocTracing });
+      openCascade = traced.tracedInstance;
+      tracingSummary = traced.summary;
+    } else if (wasm !== 'single') {
+      openCascade = wrapOcForExceptions(openCascade);
     }
 
+    replicad.setOC(openCascade);
     wasmSpan.end();
 
     try {
@@ -301,15 +425,30 @@ export default defineKernel({
     }
 
     registerReplicadModule(runtime);
+
+    const librarySourceMapCache = new Map<string, SourceMapConsumer | undefined>();
+    if (withSourceMapping) {
+      try {
+        const sourceMapSpan = tracer.startSpan('replicad.source-map-load');
+        const consumer = await loadReplicadSourceMap();
+        if (consumer) {
+          librarySourceMapCache.set('replicad', consumer);
+          logger.debug('Loaded replicad library source map for error diagnostics');
+        }
+
+        sourceMapSpan.end();
+      } catch {
+        // Source map loading is best-effort — errors are still enriched without it
+      }
+    }
+
     logger.debug('Replicad kernel initialized');
 
     return {
       openCascade,
-      ocWithExceptions,
-      withExceptions,
       withBrepEdges,
       replicadInitialised: true,
-      librarySourceMapCache: new Map<string, SourceMapConsumer | undefined>(),
+      librarySourceMapCache,
       tracingSummary,
     };
   },
@@ -354,7 +493,7 @@ export default defineKernel({
     } catch (error) {
       const issue = formatRuntimeErrorWithOc({
         error,
-        ocInstance: context.ocWithExceptions,
+        ocInstance: context.openCascade,
         parseStackTrace: (errorToFormat) => parseError(errorToFormat, undefined, basePath),
         applySourceMaps: (frames) => resolveLibraryFrames(frames, context),
         deriveLocation: (frames) => deriveLocation(frames, undefined, basePath),

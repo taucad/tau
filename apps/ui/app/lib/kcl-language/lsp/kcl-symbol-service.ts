@@ -240,7 +240,7 @@ export class KclSymbolService {
     const documentsToReparse: Array<{ uri: string; content: string; version: number }> = [];
     for (const uri of uris) {
       const cached = this.cache.get(uri);
-      if (cached && cached.symbols.length === 0) {
+      if (cached?.symbols.length === 0) {
         documentsToReparse.push({ uri, content: cached.content, version: cached.version });
       }
     }

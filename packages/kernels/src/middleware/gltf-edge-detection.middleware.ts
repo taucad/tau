@@ -141,7 +141,8 @@ function addEdgePrimitivesToDocument(document: Document, thresholdDegrees: numbe
  * @returns The geometry with edge primitives added, or the original if no edges were needed
  */
 async function addEdgePrimitivesToGltf(geometry: GeometryGltf, thresholdDegrees: number): Promise<GeometryGltf> {
-  const io = (await createNodeIo()).registerExtensions([KHRMaterialsUnlit]);
+  const io = await createNodeIo();
+  io.registerExtensions([KHRMaterialsUnlit]);
 
   // Read the GLTF document from the binary data
   const document = await io.readBinary(geometry.content);

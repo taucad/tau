@@ -190,7 +190,7 @@ export class EngineConnection {
 
       const response = (await this.sendCommand(modelingCommand)) as WebSocketResponse;
 
-      return msgpackEncode(response) as Uint8Array<ArrayBuffer>;
+      return msgpackEncode(response);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -571,7 +571,7 @@ export class EngineConnection {
 
   private send(message: WebSocketRequest): void {
     log.req(JSON.stringify(message, null, 2));
-    if (this.websocket && this.websocket.readyState === 1) {
+    if (this.websocket?.readyState === 1) {
       this.websocket.send(JSON.stringify(message));
     } else {
       throw KclError.simple({ kind: 'io', message: 'WebSocket not connected' });

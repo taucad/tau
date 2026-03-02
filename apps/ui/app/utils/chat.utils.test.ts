@@ -97,6 +97,7 @@ describe('serializeMessage', () => {
             model: 'gpt-4',
             inputTokens: 10,
             outputTokens: 20,
+            reasoningTokens: 0,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
             inputTokensCost: 0,
@@ -120,6 +121,7 @@ describe('serializeMessage', () => {
             model: 'claude-3',
             inputTokens: 5,
             outputTokens: 15,
+            reasoningTokens: 0,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
             inputTokensCost: 0,
@@ -143,6 +145,7 @@ describe('serializeMessage', () => {
             model: 'gpt-4',
             inputTokens: 10,
             outputTokens: 20,
+            reasoningTokens: 0,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
             inputTokensCost: 0,
@@ -160,6 +163,7 @@ describe('serializeMessage', () => {
             model: 'claude-3',
             inputTokens: 5,
             outputTokens: 15,
+            reasoningTokens: 0,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
             inputTokensCost: 0,
@@ -365,21 +369,6 @@ describe('serializeMessage', () => {
       ]);
       expect(serializeMessage(message)).toBe(
         '<tool_call name="get_kernel_result">\ntargetFile: main.kcl\n</tool_call>\n<tool_result>\nStatus: error\nIssues:\n  - Syntax error\n</tool_result>',
-      );
-    });
-
-    it('serializes tool-reasoning output-available', () => {
-      const message = baseMessage([
-        {
-          type: 'tool-reasoning',
-          toolCallId: 'c1',
-          state: 'output-available',
-          input: { thinking: 'Step by step...' },
-          output: 'OK',
-        },
-      ]);
-      expect(serializeMessage(message)).toBe(
-        '<tool_call name="reasoning">\nthinking: <15 chars>\n</tool_call>\n<tool_result>\nOK\n</tool_result>',
       );
     });
 

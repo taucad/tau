@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useState } from 'react';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Listed in package.json dependencies
 import { exportFromGlb } from '@taucad/converter';
 import type { Geometry } from '@taucad/types';
 import { toast } from '#components/ui/sonner.js';

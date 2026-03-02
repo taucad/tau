@@ -1,5 +1,5 @@
 diff --git a/package.json b/package.json
-index fd8e6b2ac89db4af85d305d365b139e794d4476e..590f8e5116b32a41ffcf4611bb339b6b5ee5bc32 100644
+index 5122154..226408b 100644
 --- a/package.json
 +++ b/package.json
 @@ -20,10 +20,16 @@
@@ -7,6 +7,9 @@ index fd8e6b2ac89db4af85d305d365b139e794d4476e..590f8e5116b32a41ffcf4611bb339b6b
    },
    "exports": {
 -    ".": "./dist/mjs/index.js",
+-    "./types": "./dist/types/src/index.d.ts",
+-    "./import": "./dist/mjs/index.js",
+-    "./require": "./dist/cjs/index.cjs"
 +    ".": {
 +      "require": {
 +        "types": "./dist/types/src/index.d.ts",
@@ -17,9 +20,6 @@ index fd8e6b2ac89db4af85d305d365b139e794d4476e..590f8e5116b32a41ffcf4611bb339b6b
 +        "default": "./dist/mjs/index.js"
 +      }
 +    }
--    "./types": "./dist/types/src/index.d.ts",
--    "./import": "./dist/mjs/index.js",
--    "./require": "./dist/cjs/index.cjs"
    },
    "main": "./dist/cjs/index.cjs",
    "module": "./dist/mjs/index.js",

@@ -22,140 +22,65 @@ import type { GeometryResponse } from '@taucad/types';
 import { z } from 'zod';
 import { joinPath } from '@taucad/utils/path';
 import type { KernelFileSystem } from '#types/kernel-worker.types.js';
+import type { KernelSuccessResult } from '#types/kernel.types.js';
 import { defineMiddleware } from '#middleware/kernel-middleware.js';
-import { createKernelSuccess } from '#framework/kernel-helpers.js';
 import { getDirectoryStat, ensureDirectoryExists } from '#framework/filesystem-helpers.js';
 
 /**
- * Serialized geometry format for cache storage.
- * GLTF content is stored as binary Uint8Array (MessagePack handles natively).
- * Hash is NOT stored - it's the cache key (filename), not the content.
- */
-type SerializedGeometry =
-  | { format: 'gltf'; content: Uint8Array<ArrayBuffer> } // Binary data stored directly by MessagePack
-  | {
-      format: 'svg';
-      color?: string;
-      paths: string[];
-      viewbox: string;
-      opacity?: number;
-      strokeType?: string;
-      name: string;
-    }
-  | { format: 'webrtc' }; // Cannot cache streams, just store format marker
-
-/**
  * Cache entry structure for MessagePack serialization.
+ * Stores the full KernelSuccessResult so that all fields (geometries, issues,
+ * and any future additions) are persisted implicitly.
  */
 type CacheEntry = {
-  version: 1;
-  geometries: SerializedGeometry[];
+  version: 2;
+  result: KernelSuccessResult<GeometryResponse[]>;
 };
 
 /**
- * Serialize geometries for cache storage using MessagePack.
- * Binary data (GLTF Uint8Array) is stored directly without base64 encoding.
- * Hash is NOT stored - it's derived from the cache key.
+ * Serialize a successful geometry result for cache storage using MessagePack.
+ * The entire result (geometries + issues) is stored directly; MessagePack
+ * handles Uint8Array natively so no base64 conversion is needed.
  *
- * @param geometries - The geometries to serialize
+ * @param result - The successful geometry result to serialize
  * @returns Binary MessagePack-encoded data
  */
-function serializeGeometries(geometries: readonly GeometryResponse[]): Uint8Array<ArrayBuffer> {
-  const serialized: SerializedGeometry[] = geometries.map((geometry): SerializedGeometry => {
-    switch (geometry.format) {
-      case 'gltf': {
-        // MessagePack handles Uint8Array natively - no base64 conversion needed
-        return { format: 'gltf', content: geometry.content };
-      }
-
-      case 'svg': {
-        // SVG data is stored as-is
-        const { format, color, paths, viewbox, opacity, strokeType, name } = geometry;
-
-        return { format, color, paths, viewbox, opacity, strokeType, name };
-      }
-
-      case 'webrtc': {
-        // Cannot cache streams - store marker only
-        return { format: 'webrtc' };
-      }
-
-      default: {
-        // Exhaustive check - this should never happen
-        const _exhaustiveCheck: never = geometry;
-
-        throw new Error(`Unexpected geometry format: ${String(_exhaustiveCheck)}`);
-      }
-    }
-  });
-
-  const entry: CacheEntry = {
-    version: 1,
-    geometries: serialized,
-  };
-
-  return msgpackEncode(entry) as Uint8Array<ArrayBuffer>;
+function serializeResult(result: KernelSuccessResult<GeometryResponse[]>): Uint8Array<ArrayBuffer> {
+  const entry: CacheEntry = { version: 2, result };
+  return msgpackEncode(entry);
 }
 
 /**
- * Deserialize geometries from cache storage using MessagePack.
- * Binary data (GLTF Uint8Array) is restored directly without base64 decoding.
- * Returns GeometryBase (without hash) - hash is added by kernel-worker.ts.
+ * Deserialize a geometry result from cache storage using MessagePack.
+ * Returns the full KernelSuccessResult including issues.
  *
  * @param data - Binary MessagePack-encoded data
- * @returns The deserialized geometries (excluding webrtc which can't be cached)
+ * @returns The deserialized result with geometries and issues
  * @throws Error if cache format is invalid or incompatible version
  */
-function deserializeGeometries(data: Uint8Array<ArrayBuffer>): GeometryResponse[] {
-  // Decode MessagePack data - result is unknown at runtime
+function deserializeResult(data: Uint8Array<ArrayBuffer>): KernelSuccessResult<GeometryResponse[]> {
   const decoded: unknown = msgpackDecode(data);
 
-  // Validate cache format version (runtime check for corrupted or old format caches)
   if (
     typeof decoded !== 'object' ||
     decoded === null ||
     !('version' in decoded) ||
-    decoded.version !== 1 ||
-    !('geometries' in decoded) ||
-    !Array.isArray(decoded.geometries)
+    decoded.version !== 2 ||
+    !('result' in decoded)
   ) {
     throw new Error('Invalid or incompatible cache format');
   }
 
   const entry = decoded as CacheEntry;
-  const geometries: GeometryResponse[] = [];
 
-  for (const item of entry.geometries) {
-    switch (item.format) {
-      case 'gltf': {
-        // MessagePack returns Uint8Array directly - no base64 decoding needed
-        // Copy to ensure we have a proper Uint8Array with its own ArrayBuffer
-        // (MessagePack may return a view into a shared buffer)
-        geometries.push({ format: 'gltf', content: new Uint8Array(item.content) });
-        break;
-      }
-
-      case 'svg': {
-        geometries.push({
-          format: 'svg',
-          color: item.color,
-          paths: item.paths,
-          viewbox: item.viewbox,
-          opacity: item.opacity,
-          strokeType: item.strokeType,
-          name: item.name,
-        });
-        break;
-      }
-
-      case 'webrtc': {
-        // Cannot restore streams from cache - skip
-        break;
-      }
+  // Copy GLTF Uint8Arrays to ensure we have proper ArrayBuffers
+  // (MessagePack may return views into a shared buffer)
+  for (const geometry of entry.result.data) {
+    if (geometry.format === 'gltf') {
+      geometry.content = new Uint8Array(geometry.content);
     }
   }
 
-  return geometries;
+  return entry.result;
 }
 
 /**
@@ -290,8 +215,7 @@ export const geometryCacheMiddleware = defineMiddleware({
       const cachedData = await filesystem.readFile(cachePath);
       logger.debug(`Cache hit for ${cacheKey}`);
 
-      const geometries = deserializeGeometries(cachedData);
-      return createKernelSuccess(geometries);
+      return deserializeResult(cachedData);
     } catch (error) {
       // Cache miss or read error - proceed to compute
       logger.debug(`Cache miss for ${cacheKey}: ${String(error)}`);
@@ -313,8 +237,7 @@ export const geometryCacheMiddleware = defineMiddleware({
           const cacheDir = getCacheDir(basePath);
           await ensureDirectoryExists(filesystem, cacheDir);
 
-          // Serialize all geometries to MessagePack binary (handles GLTF, SVG)
-          const serialized = serializeGeometries(result.data);
+          const serialized = serializeResult(result);
           await filesystem.writeFile(cachePath, serialized);
           logger.debug(`Cached ${result.data.length} geometries at ${cacheKey}`);
 

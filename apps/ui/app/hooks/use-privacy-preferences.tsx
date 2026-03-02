@@ -15,6 +15,7 @@ const getPrivacyPreferences = async (): Promise<PrivacyPreferences> => {
     headers: {
       'Content-Type': 'application/json',
     },
+    signal: AbortSignal.timeout(5000),
   });
 
   if (!response.ok) {
@@ -63,6 +64,8 @@ export function usePrivacyPreferences(): UsePrivacyPreferencesReturn {
   } = useQuery({
     queryKey,
     queryFn: getPrivacyPreferences,
+    retry: 1,
+    retryDelay: 1000,
   });
 
   const mutation = useMutation({
@@ -77,6 +80,6 @@ export function usePrivacyPreferences(): UsePrivacyPreferencesReturn {
     isLoading,
     error,
     updatePreferences: mutation.mutate,
-    isUpdating: mutation.isLoading,
+    isUpdating: mutation.isPending,
   };
 }

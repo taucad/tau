@@ -39,7 +39,7 @@ const toolMetadata: Partial<Record<ToolName, ToolMetadata>> = {
   },
   [toolName.testModel]: {
     label: 'Test Model',
-    description: 'Run visual tests on the 3D model',
+    description: 'Run measurement tests on the 3D model',
     icon: Image,
   },
   [toolName.editTests]: {
@@ -149,7 +149,7 @@ export const ChatToolSelector = memo(function ({
     (itemId: string) => {
       // Check if it's a mode selection
       const modeItem = modeItems.find((item) => item.type === 'mode' && item.mode === itemId);
-      if (modeItem && modeItem.type === 'mode') {
+      if (modeItem?.type === 'mode') {
         switch (modeItem.mode) {
           case 'auto': {
             onValueChange?.(toolMode.auto);
@@ -178,7 +178,7 @@ export const ChatToolSelector = memo(function ({
 
       // It's a tool selection - toggle the tool
       const toolItem = toolItems.find((item) => item.type === 'tool' && item.tool === itemId);
-      if (toolItem && toolItem.type === 'tool') {
+      if (toolItem?.type === 'tool') {
         const currentTools = Array.isArray(value) ? value : [];
         const isCurrentlySelected = currentTools.includes(toolItem.tool);
 

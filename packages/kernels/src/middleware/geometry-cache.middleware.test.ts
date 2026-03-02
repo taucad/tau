@@ -5,7 +5,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { encode as msgpackEncode } from '@msgpack/msgpack';
-import type { CreateGeometryResult } from '#types/kernel.types.js';
+import type { CreateGeometryResult, KernelIssue } from '#types/kernel.types.js';
 import type { CreateGeometryHandler, KernelMiddlewareRuntime } from '#types/kernel-middleware.types.js';
 import type { Dependency } from '#types/kernel-dependency.types.js';
 import type { CreateGeometryInput } from '#types/kernel-worker.types.js';
@@ -35,14 +35,21 @@ function createMockDependencies(overrides?: Array<Partial<Dependency>>): readonl
 }
 
 /**
- * Create serialized cache content (MessagePack binary format).
+ * Create serialized cache content (MessagePack binary format, v2).
+ * Mirrors the CacheEntry structure: stores the full KernelSuccessResult.
  */
-function createSerializedCacheContent(content: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
-  // Serialize using MessagePack (same as the middleware does)
+function createSerializedCacheContent(
+  content: Uint8Array<ArrayBuffer>,
+  issues: KernelIssue[] = [],
+): Uint8Array<ArrayBuffer> {
   return msgpackEncode({
-    version: 1,
-    geometries: [{ format: 'gltf', content }],
-  }) as Uint8Array<ArrayBuffer>;
+    version: 2,
+    result: {
+      success: true,
+      data: [{ format: 'gltf', content }],
+      issues,
+    },
+  });
 }
 
 /**
@@ -142,6 +149,36 @@ describe('geometryCacheMiddleware', () => {
 
         expect(runtime.logger.debug).toHaveBeenCalledWith(expect.stringContaining('Cache hit'));
       });
+
+      it('should preserve issues on cache hit', async () => {
+        const gltfContent = new Uint8Array([1, 2, 3]);
+        const cachedIssues: KernelIssue[] = [
+          { message: 'ignoring unknown variable "size"', severity: 'warning', type: 'compilation' },
+          { message: 'undefined operation', severity: 'warning', type: 'compilation' },
+        ];
+
+        const serializedContent = createSerializedCacheContent(gltfContent, cachedIssues);
+        const runtime = createMockRuntime<Record<string, never>, GeometryCacheOptions>({
+          filesystemOverrides: { existsResult: true, readFileResult: serializedContent },
+          dependencies: createMockDependencies(),
+          dependencyHash: 'a'.repeat(64),
+          options: { maxEntries: 100, maxAgeMs: 7 * 24 * 60 * 60 * 1000 },
+        });
+
+        const input = createMockInput();
+        const handler = createMockHandler();
+
+        const { wrapCreateGeometry } = geometryCacheMiddleware;
+        const result = await wrapCreateGeometry!(input, handler, runtime);
+
+        expect(handler).not.toHaveBeenCalled();
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.issues).toHaveLength(2);
+          expect(result.issues[0]?.message).toBe('ignoring unknown variable "size"');
+          expect(result.issues[1]?.message).toBe('undefined operation');
+        }
+      });
     });
 
     describe('cache miss', () => {
@@ -205,6 +242,29 @@ describe('geometryCacheMiddleware', () => {
         await wrapCreateGeometry!(input, handler, runtime);
 
         expect(runtime.logger.debug).toHaveBeenCalledWith(expect.stringContaining('Cached 1 geometries'));
+      });
+
+      it('should persist issues when writing to cache', async () => {
+        const issues: KernelIssue[] = [
+          { message: 'ignoring unknown variable "size"', severity: 'warning', type: 'compilation' },
+        ];
+        const handlerResult: CreateGeometryResult = {
+          success: true,
+          data: [{ format: 'gltf', content: new Uint8Array([1, 2, 3]) }],
+          issues,
+        };
+        const { input, runtime } = createCacheTestContext({ cacheExists: false });
+        const handler = createMockHandler(handlerResult);
+
+        const { wrapCreateGeometry } = geometryCacheMiddleware;
+        const result = await wrapCreateGeometry!(input, handler, runtime);
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.issues).toEqual(issues);
+        }
+
+        expect(runtime.filesystem.mocks.writeFile).toHaveBeenCalled();
       });
 
       it('should not cache failed results', async () => {

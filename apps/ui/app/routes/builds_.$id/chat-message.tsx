@@ -35,7 +35,7 @@ import { ChatMessageToolDeleteFile } from '#routes/builds_.$id/chat-message-tool
 import { ChatMessageToolGrep } from '#routes/builds_.$id/chat-message-tool-grep.js';
 import { ChatMessageToolGlobSearch } from '#routes/builds_.$id/chat-message-tool-glob-search.js';
 import { ChatMessageToolGetKernelResult } from '#routes/builds_.$id/chat-message-tool-get-kernel-result.js';
-import { ChatMessageToolReasoning } from '#routes/builds_.$id/chat-message-tool-reasoning.js';
+import { ChatMessageToolScreenshot } from '#routes/builds_.$id/chat-message-tool-screenshot.js';
 import { ChatMessagePartUnknown } from '#routes/builds_.$id/chat-message-tool-unknown.js';
 import { ChatMessageToolTransfer } from '#routes/builds_.$id/chat-message-tool-transfer.js';
 import { ChatMessageFile } from '#routes/builds_.$id/chat-message-file.js';
@@ -248,8 +248,8 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                   return <ChatMessageToolGetKernelResult key={part.toolCallId} part={part} />;
                 }
 
-                case 'tool-reasoning': {
-                  return <ChatMessageToolReasoning key={part.toolCallId} part={part} />;
+                case 'tool-screenshot': {
+                  return <ChatMessageToolScreenshot key={part.toolCallId} part={part} />;
                 }
 
                 case 'data-usage': {

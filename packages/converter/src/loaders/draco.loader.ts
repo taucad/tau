@@ -4,6 +4,9 @@ import { BaseLoader } from '#loaders/base.loader.js';
 import { GltfDracoDecoder } from '#loaders/draco/gltf-draco-decoder.js';
 import { createNodeIo } from '#gltf.utils.js';
 
+/**
+ *
+ */
 export class DracoLoader extends BaseLoader<Document> {
   private readonly decoder = new GltfDracoDecoder();
 

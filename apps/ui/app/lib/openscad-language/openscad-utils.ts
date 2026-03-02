@@ -45,7 +45,7 @@ export function findCurrentModuleFunctionScope(
     if (moduleMatch) {
       const moduleName = moduleMatch[1];
       const moduleInfo = findModuleDeclaration(model, moduleName);
-      if (moduleInfo && moduleInfo.lineNumber === i + 1) {
+      if (moduleInfo?.lineNumber === i + 1) {
         return { type: 'module', info: moduleInfo };
       }
     }
@@ -55,7 +55,7 @@ export function findCurrentModuleFunctionScope(
     if (functionMatch) {
       const functionName = functionMatch[1];
       const functionInfo = findFunctionDeclaration(model, functionName);
-      if (functionInfo && functionInfo.lineNumber === i + 1) {
+      if (functionInfo?.lineNumber === i + 1) {
         return { type: 'function', info: functionInfo };
       }
     }

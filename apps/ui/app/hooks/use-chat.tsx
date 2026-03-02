@@ -314,6 +314,7 @@ type CombinedChatState = {
   draftText: string;
   draftImages: string[];
   draftToolChoice: string | string[];
+  draftMode: string;
   messageEdits: Record<string, MyUIMessage>;
   activeEditMessageId: string | undefined;
   editDraftText: string;
@@ -365,6 +366,7 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T): T
       draftText: draftContext.draftText,
       draftImages: draftContext.draftImages,
       draftToolChoice: draftContext.draftToolChoice,
+      draftMode: draftContext.draftMode,
       messageEdits: draftContext.messageEdits,
       activeEditMessageId: draftContext.activeEditMessageId,
       editDraftText: draftContext.editDraftText,
@@ -386,6 +388,7 @@ export function useChatActions(): {
   addDraftImage: (image: string) => void;
   removeDraftImage: (index: number) => void;
   setDraftToolChoice: (toolChoice: string | string[]) => void;
+  setDraftMode: (mode: string) => void;
   clearDraft: () => void;
   startEditingMessage: (messageId: string) => void;
   exitEditMode: () => void;
@@ -446,6 +449,9 @@ export function useChatActions(): {
       },
       setDraftToolChoice(toolChoice: string | string[]) {
         draftActorRef.send({ type: 'setDraftToolChoice', toolChoice });
+      },
+      setDraftMode(mode: string) {
+        draftActorRef.send({ type: 'setDraftMode', mode: mode as 'agent' | 'plan' });
       },
       clearDraft() {
         draftActorRef.send({ type: 'clearDraft' });

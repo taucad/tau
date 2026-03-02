@@ -1,0 +1,1851 @@
+{
+  "timestamp": "2026-02-26T14:10:16.127Z",
+  "results": [
+    {
+      "name": "box",
+      "category": "primitives",
+      "iterations": 5,
+      "timings": [
+        70.48895800000014,
+        45.11979100000008,
+        38.71675000000005,
+        31.915959000000157,
+        25.45291700000007
+      ],
+      "mean": 42.3388750000001,
+      "median": 38.71675000000005,
+      "p95": 65.41512460000013,
+      "p99": 69.47419132000013,
+      "stddev": 15.53739496661131,
+      "ocSummary": {
+        "gp_Vec_4": {
+          "calls": 8,
+          "totalMs": 0.39
+        },
+        "gp_Vec_3": {
+          "calls": 39,
+          "totalMs": 0.14
+        },
+        "gp_Ax3_1": {
+          "calls": 3,
+          "totalMs": 0.06
+        },
+        "gp_Pnt_2": {
+          "calls": 20,
+          "totalMs": 0.08
+        },
+        "gp_Dir_4": {
+          "calls": 6,
+          "totalMs": 0.06
+        },
+        "gp_Ax3_3": {
+          "calls": 3,
+          "totalMs": 0.08
+        },
+        "gp_Trsf_1": {
+          "calls": 3,
+          "totalMs": 0.02
+        },
+        "BRepBuilderAPI_MakeEdge_3": {
+          "calls": 4,
+          "totalMs": 1.71
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 1,
+          "totalMs": 0.06
+        },
+        "Message_ProgressRange_1": {
+          "calls": 1,
+          "totalMs": 0.04
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 1,
+          "totalMs": 11.08
+        },
+        "BRepPrimAPI_MakePrism_1": {
+          "calls": 1,
+          "totalMs": 3.42
+        }
+      }
+    },
+    {
+      "name": "cylinder",
+      "category": "primitives",
+      "iterations": 5,
+      "timings": [
+        23.617791000000125,
+        23.578457999999955,
+        21.464333000000124,
+        21.38870799999995,
+        20.47379100000012
+      ],
+      "mean": 22.104616200000056,
+      "median": 21.464333000000124,
+      "p95": 23.60992440000009,
+      "p99": 23.61621768000012,
+      "stddev": 1.2683836633106378,
+      "ocSummary": {
+        "gp_Vec_4": {
+          "calls": 2,
+          "totalMs": 0.15
+        },
+        "gp_Pnt_2": {
+          "calls": 1,
+          "totalMs": 0.03
+        },
+        "gp_Dir_4": {
+          "calls": 1,
+          "totalMs": 0.02
+        },
+        "gp_Ax2_4": {
+          "calls": 1,
+          "totalMs": 0.38
+        },
+        "BRepPrimAPI_MakeCylinder_3": {
+          "calls": 1,
+          "totalMs": 0.2
+        }
+      }
+    },
+    {
+      "name": "sphere",
+      "category": "primitives",
+      "iterations": 5,
+      "timings": [
+        44.74541599999998,
+        38.83912499999997,
+        43.080000000000155,
+        42.27241700000013,
+        37.689458999999715
+      ],
+      "mean": 41.32528339999999,
+      "median": 42.27241700000013,
+      "p95": 44.412332800000016,
+      "p99": 44.678799359999985,
+      "stddev": 2.648531746522064,
+      "ocSummary": {
+        "BRepPrimAPI_MakeSphere_1": {
+          "calls": 1,
+          "totalMs": 0.38
+        }
+      }
+    },
+    {
+      "name": "fuse-two-boxes",
+      "category": "booleans",
+      "iterations": 5,
+      "timings": [
+        57.79595900000004,
+        62.656124999999975,
+        59.9965000000002,
+        55.72141699999975,
+        54.157708000000184
+      ],
+      "mean": 58.06554180000003,
+      "median": 57.79595900000004,
+      "p95": 62.124200000000016,
+      "p99": 62.549739999999986,
+      "stddev": 3.0212849802268913,
+      "ocSummary": {
+        "gp_Vec_4": {
+          "calls": 17,
+          "totalMs": 0.06
+        },
+        "gp_Vec_3": {
+          "calls": 78,
+          "totalMs": 0.09
+        },
+        "gp_Ax3_1": {
+          "calls": 6,
+          "totalMs": 0.02
+        },
+        "gp_Pnt_2": {
+          "calls": 40,
+          "totalMs": 0.04
+        },
+        "gp_Dir_4": {
+          "calls": 12,
+          "totalMs": 0.02
+        },
+        "gp_Ax3_3": {
+          "calls": 6,
+          "totalMs": 0.02
+        },
+        "gp_Trsf_1": {
+          "calls": 7,
+          "totalMs": 0.02
+        },
+        "BRepBuilderAPI_MakeEdge_3": {
+          "calls": 8,
+          "totalMs": 0.19
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 2,
+          "totalMs": 0.02
+        },
+        "Message_ProgressRange_1": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 2,
+          "totalMs": 1.33
+        },
+        "BRepPrimAPI_MakePrism_1": {
+          "calls": 2,
+          "totalMs": 0.54
+        },
+        "BRepBuilderAPI_Transform_2": {
+          "calls": 1,
+          "totalMs": 2.41
+        },
+        "BRepAlgoAPI_Fuse_3": {
+          "calls": 1,
+          "totalMs": 60.78
+        }
+      }
+    },
+    {
+      "name": "cut-cylinder-from-box",
+      "category": "booleans",
+      "iterations": 5,
+      "timings": [
+        38.29033300000037,
+        35.85291699999971,
+        40.48158300000023,
+        38.3967090000001,
+        37.425874999999905
+      ],
+      "mean": 38.08948340000006,
+      "median": 38.29033300000037,
+      "p95": 40.0646082000002,
+      "p99": 40.39818804000022,
+      "stddev": 1.5032946482707867,
+      "ocSummary": {
+        "gp_Vec_4": {
+          "calls": 10,
+          "totalMs": 0.08
+        },
+        "gp_Vec_3": {
+          "calls": 39,
+          "totalMs": 0.04
+        },
+        "gp_Ax3_1": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "gp_Pnt_2": {
+          "calls": 21,
+          "totalMs": 0.03
+        },
+        "gp_Dir_4": {
+          "calls": 7,
+          "totalMs": 0.02
+        },
+        "gp_Ax3_3": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "gp_Trsf_1": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "BRepBuilderAPI_MakeEdge_3": {
+          "calls": 4,
+          "totalMs": 0.14
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "Message_ProgressRange_1": {
+          "calls": 2,
+          "totalMs": 0.01
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 1,
+          "totalMs": 0.82
+        },
+        "BRepPrimAPI_MakePrism_1": {
+          "calls": 1,
+          "totalMs": 0.32
+        },
+        "gp_Ax2_4": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "BRepPrimAPI_MakeCylinder_3": {
+          "calls": 1,
+          "totalMs": 0.02
+        },
+        "BRepAlgoAPI_Cut_3": {
+          "calls": 1,
+          "totalMs": 21.68
+        }
+      }
+    },
+    {
+      "name": "n-body-fuse",
+      "category": "booleans",
+      "iterations": 5,
+      "timings": [
+        171.78795900000023,
+        177.93262499999992,
+        167.91079100000024,
+        166.08470900000066,
+        166.54908299999988
+      ],
+      "mean": 170.05303340000017,
+      "median": 167.91079100000024,
+      "p95": 176.70369179999997,
+      "p99": 177.68683835999994,
+      "stddev": 4.420687730884715,
+      "ocSummary": {
+        "gp_Vec_4": {
+          "calls": 53,
+          "totalMs": 0.13
+        },
+        "gp_Vec_3": {
+          "calls": 234,
+          "totalMs": 0.24
+        },
+        "gp_Ax3_1": {
+          "calls": 18,
+          "totalMs": 0.04
+        },
+        "gp_Pnt_2": {
+          "calls": 120,
+          "totalMs": 0.12
+        },
+        "gp_Dir_4": {
+          "calls": 36,
+          "totalMs": 0.05
+        },
+        "gp_Ax3_3": {
+          "calls": 18,
+          "totalMs": 0.05
+        },
+        "gp_Trsf_1": {
+          "calls": 23,
+          "totalMs": 0.04
+        },
+        "BRepBuilderAPI_MakeEdge_3": {
+          "calls": 24,
+          "totalMs": 0.34
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 6,
+          "totalMs": 0.03
+        },
+        "Message_ProgressRange_1": {
+          "calls": 11,
+          "totalMs": 0.03
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 6,
+          "totalMs": 2.83
+        },
+        "BRepPrimAPI_MakePrism_1": {
+          "calls": 6,
+          "totalMs": 1.37
+        },
+        "BRepBuilderAPI_Transform_2": {
+          "calls": 5,
+          "totalMs": 1.34
+        },
+        "BRepAlgoAPI_Fuse_3": {
+          "calls": 5,
+          "totalMs": 66.01
+        }
+      }
+    },
+    {
+      "name": "box-fillet-all",
+      "category": "fillets",
+      "iterations": 5,
+      "timings": [
+        124.71562499999982,
+        128.09579200000007,
+        130.14258300000074,
+        127.15729099999953,
+        124.20049999999992
+      ],
+      "mean": 126.86235820000002,
+      "median": 127.15729099999953,
+      "p95": 129.7332248000006,
+      "p99": 130.0607113600007,
+      "stddev": 2.193726124334064,
+      "ocSummary": {
+        "gp_Vec_4": {
+          "calls": 8,
+          "totalMs": 0.05
+        },
+        "gp_Vec_3": {
+          "calls": 39,
+          "totalMs": 0.05
+        },
+        "gp_Ax3_1": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "gp_Pnt_2": {
+          "calls": 20,
+          "totalMs": 0.03
+        },
+        "gp_Dir_4": {
+          "calls": 6,
+          "totalMs": 0.01
+        },
+        "gp_Ax3_3": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "gp_Trsf_1": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "BRepBuilderAPI_MakeEdge_3": {
+          "calls": 4,
+          "totalMs": 0.14
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "Message_ProgressRange_1": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 1,
+          "totalMs": 0.77
+        },
+        "BRepPrimAPI_MakePrism_1": {
+          "calls": 1,
+          "totalMs": 0.33
+        },
+        "BRepFilletAPI_MakeFillet": {
+          "calls": 1,
+          "totalMs": 0.67
+        },
+        "TopExp_Explorer_2": {
+          "calls": 1,
+          "totalMs": 0.01
+        }
+      }
+    },
+    {
+      "name": "box-chamfer-all",
+      "category": "fillets",
+      "iterations": 5,
+      "timings": [
+        120.67108299999927,
+        124.30766600000061,
+        121.52870900000016,
+        122.35558300000048,
+        126.21308299999964
+      ],
+      "mean": 123.01522480000003,
+      "median": 122.35558300000048,
+      "p95": 125.83199959999983,
+      "p99": 126.13686631999968,
+      "stddev": 2.001827096890757,
+      "ocSummary": {
+        "gp_Vec_4": {
+          "calls": 8,
+          "totalMs": 0.05
+        },
+        "gp_Vec_3": {
+          "calls": 39,
+          "totalMs": 0.04
+        },
+        "gp_Ax3_1": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "gp_Pnt_2": {
+          "calls": 20,
+          "totalMs": 0.03
+        },
+        "gp_Dir_4": {
+          "calls": 6,
+          "totalMs": 0.01
+        },
+        "gp_Ax3_3": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "gp_Trsf_1": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "BRepBuilderAPI_MakeEdge_3": {
+          "calls": 4,
+          "totalMs": 0.15
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 1,
+          "totalMs": 0.02
+        },
+        "Message_ProgressRange_1": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 1,
+          "totalMs": 0.79
+        },
+        "BRepPrimAPI_MakePrism_1": {
+          "calls": 1,
+          "totalMs": 0.4
+        },
+        "BRepFilletAPI_MakeChamfer": {
+          "calls": 1,
+          "totalMs": 0.2
+        },
+        "TopExp_Explorer_2": {
+          "calls": 1,
+          "totalMs": 0.01
+        }
+      }
+    },
+    {
+      "name": "sketch-extrude",
+      "category": "extrusions",
+      "iterations": 5,
+      "timings": [
+        23.99187499999971,
+        19.95508299999983,
+        22.933124999999563,
+        23.966333000000304,
+        20.5395410000001
+      ],
+      "mean": 22.2771913999999,
+      "median": 22.933124999999563,
+      "p95": 23.98676659999983,
+      "p99": 23.990853319999733,
+      "stddev": 1.7108596911809628,
+      "ocSummary": {
+        "gp_Pnt2d_3": {
+          "calls": 12,
+          "totalMs": 0.09
+        },
+        "GCE2d_MakeSegment_1": {
+          "calls": 6,
+          "totalMs": 0.17
+        },
+        "Handle_Geom2d_Curve_2": {
+          "calls": 6,
+          "totalMs": 0.04
+        },
+        "gp_Vec_4": {
+          "calls": 3,
+          "totalMs": 0.02
+        },
+        "gp_Vec_3": {
+          "calls": 18,
+          "totalMs": 0.04
+        },
+        "gp_Ax3_1": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "gp_Pnt_2": {
+          "calls": 4,
+          "totalMs": 0.01
+        },
+        "gp_Dir_4": {
+          "calls": 8,
+          "totalMs": 0.01
+        },
+        "gp_Ax3_3": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "gp_Trsf_1": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "gp_Ax2_2": {
+          "calls": 1,
+          "totalMs": 0.03
+        },
+        "BRepBuilderAPI_MakeEdge_24": {
+          "calls": 6,
+          "totalMs": 0.17
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "Message_ProgressRange_1": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 1,
+          "totalMs": 0.89
+        },
+        "BRepPrimAPI_MakePrism_1": {
+          "calls": 1,
+          "totalMs": 0.4
+        }
+      }
+    },
+    {
+      "name": "sketch-revolve",
+      "category": "extrusions",
+      "iterations": 5,
+      "timings": [
+        28.551582999999482,
+        23.67804099999921,
+        28.153792000000067,
+        23.795791000000463,
+        25.57495800000015
+      ],
+      "mean": 25.950832999999875,
+      "median": 25.57495800000015,
+      "p95": 28.4720247999996,
+      "p99": 28.535671359999505,
+      "stddev": 2.0769208184633845,
+      "ocSummary": {
+        "gp_Pnt2d_3": {
+          "calls": 8,
+          "totalMs": 0.05
+        },
+        "GCE2d_MakeSegment_1": {
+          "calls": 4,
+          "totalMs": 0.05
+        },
+        "Handle_Geom2d_Curve_2": {
+          "calls": 4,
+          "totalMs": 0.01
+        },
+        "gp_Vec_4": {
+          "calls": 4,
+          "totalMs": 0.02
+        },
+        "gp_Vec_3": {
+          "calls": 16,
+          "totalMs": 0.04
+        },
+        "gp_Ax3_1": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "gp_Pnt_2": {
+          "calls": 5,
+          "totalMs": 0.01
+        },
+        "gp_Dir_4": {
+          "calls": 9,
+          "totalMs": 0.02
+        },
+        "gp_Ax3_3": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "gp_Trsf_1": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "gp_Ax2_2": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "BRepBuilderAPI_MakeEdge_24": {
+          "calls": 4,
+          "totalMs": 0.1
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "Message_ProgressRange_1": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 1,
+          "totalMs": 0.69
+        },
+        "gp_Ax1_2": {
+          "calls": 1,
+          "totalMs": 0.05
+        },
+        "BRepPrimAPI_MakeRevol_1": {
+          "calls": 1,
+          "totalMs": 4.35
+        }
+      }
+    },
+    {
+      "name": "bracket",
+      "category": "complex",
+      "iterations": 5,
+      "timings": [
+        159.45845800000006,
+        161.09158299999945,
+        157.731084,
+        158.77274999999918,
+        159.53799999999865
+      ],
+      "mean": 159.31837499999946,
+      "median": 159.45845800000006,
+      "p95": 160.7808663999993,
+      "p99": 161.02943967999943,
+      "stddev": 1.098118787571028,
+      "ocSummary": {
+        "gp_Vec_4": {
+          "calls": 32,
+          "totalMs": 0.11
+        },
+        "gp_Vec_3": {
+          "calls": 117,
+          "totalMs": 0.11
+        },
+        "gp_Ax3_1": {
+          "calls": 9,
+          "totalMs": 0.02
+        },
+        "gp_Pnt_2": {
+          "calls": 62,
+          "totalMs": 0.06
+        },
+        "gp_Dir_4": {
+          "calls": 20,
+          "totalMs": 0.03
+        },
+        "gp_Ax3_3": {
+          "calls": 9,
+          "totalMs": 0.02
+        },
+        "gp_Trsf_1": {
+          "calls": 13,
+          "totalMs": 0.03
+        },
+        "BRepBuilderAPI_MakeEdge_3": {
+          "calls": 12,
+          "totalMs": 0.25
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 3,
+          "totalMs": 0.02
+        },
+        "Message_ProgressRange_1": {
+          "calls": 7,
+          "totalMs": 0.02
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 3,
+          "totalMs": 1.66
+        },
+        "BRepPrimAPI_MakePrism_1": {
+          "calls": 3,
+          "totalMs": 0.73
+        },
+        "BRepBuilderAPI_Transform_2": {
+          "calls": 4,
+          "totalMs": 0.85
+        },
+        "BRepAlgoAPI_Fuse_3": {
+          "calls": 2,
+          "totalMs": 8.78
+        },
+        "gp_Ax2_4": {
+          "calls": 2,
+          "totalMs": 0.02
+        },
+        "BRepPrimAPI_MakeCylinder_3": {
+          "calls": 2,
+          "totalMs": 0.03
+        },
+        "BRepAlgoAPI_Cut_3": {
+          "calls": 2,
+          "totalMs": 15.7
+        },
+        "BRepFilletAPI_MakeFillet": {
+          "calls": 1,
+          "totalMs": 0.29
+        },
+        "TopExp_Explorer_2": {
+          "calls": 1,
+          "totalMs": 0.01
+        }
+      }
+    },
+    {
+      "name": "enclosure",
+      "category": "complex",
+      "iterations": 5,
+      "timings": [
+        72.79608399999961,
+        70.90737499999886,
+        72.16520800000035,
+        73.1801660000001,
+        70.88504099999955
+      ],
+      "mean": 71.9867747999997,
+      "median": 72.16520800000035,
+      "p95": 73.1033496,
+      "p99": 73.16480272000008,
+      "stddev": 0.9476205610485644,
+      "ocSummary": {
+        "gp_Vec_4": {
+          "calls": 17,
+          "totalMs": 0.06
+        },
+        "gp_Vec_3": {
+          "calls": 78,
+          "totalMs": 0.08
+        },
+        "gp_Ax3_1": {
+          "calls": 6,
+          "totalMs": 0.02
+        },
+        "gp_Pnt_2": {
+          "calls": 40,
+          "totalMs": 0.04
+        },
+        "gp_Dir_4": {
+          "calls": 12,
+          "totalMs": 0.02
+        },
+        "gp_Ax3_3": {
+          "calls": 6,
+          "totalMs": 0.02
+        },
+        "gp_Trsf_1": {
+          "calls": 7,
+          "totalMs": 0.02
+        },
+        "BRepBuilderAPI_MakeEdge_3": {
+          "calls": 8,
+          "totalMs": 0.18
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 2,
+          "totalMs": 0.01
+        },
+        "Message_ProgressRange_1": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 2,
+          "totalMs": 1.1
+        },
+        "BRepPrimAPI_MakePrism_1": {
+          "calls": 2,
+          "totalMs": 0.5
+        },
+        "BRepBuilderAPI_Transform_2": {
+          "calls": 1,
+          "totalMs": 0.31
+        },
+        "BRepAlgoAPI_Cut_3": {
+          "calls": 1,
+          "totalMs": 8.85
+        },
+        "BRepFilletAPI_MakeFillet": {
+          "calls": 1,
+          "totalMs": 0.19
+        },
+        "TopExp_Explorer_2": {
+          "calls": 1,
+          "totalMs": 0.01
+        }
+      }
+    },
+    {
+      "name": "multi-hole-plate",
+      "category": "complex",
+      "iterations": 5,
+      "timings": [
+        554.2922920000001,
+        549.6184580000008,
+        544.61175,
+        549.7194999999992,
+        544.6362909999989
+      ],
+      "mean": 548.5756581999998,
+      "median": 549.6184580000008,
+      "p95": 553.3777335999999,
+      "p99": 554.10938032,
+      "stddev": 3.64161748798751,
+      "ocSummary": {
+        "gp_Vec_4": {
+          "calls": 53,
+          "totalMs": 0.17
+        },
+        "gp_Vec_3": {
+          "calls": 39,
+          "totalMs": 0.05
+        },
+        "gp_Ax3_1": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "gp_Pnt_2": {
+          "calls": 35,
+          "totalMs": 0.06
+        },
+        "gp_Dir_4": {
+          "calls": 21,
+          "totalMs": 0.05
+        },
+        "gp_Ax3_3": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "gp_Trsf_1": {
+          "calls": 18,
+          "totalMs": 0.05
+        },
+        "BRepBuilderAPI_MakeEdge_3": {
+          "calls": 4,
+          "totalMs": 0.15
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 1,
+          "totalMs": 0.02
+        },
+        "Message_ProgressRange_1": {
+          "calls": 16,
+          "totalMs": 0.04
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 1,
+          "totalMs": 0.83
+        },
+        "BRepPrimAPI_MakePrism_1": {
+          "calls": 1,
+          "totalMs": 0.33
+        },
+        "gp_Ax2_4": {
+          "calls": 15,
+          "totalMs": 0.07
+        },
+        "BRepPrimAPI_MakeCylinder_3": {
+          "calls": 15,
+          "totalMs": 0.11
+        },
+        "BRepBuilderAPI_Transform_2": {
+          "calls": 15,
+          "totalMs": 1.86
+        },
+        "BRepAlgoAPI_Cut_3": {
+          "calls": 15,
+          "totalMs": 135.08
+        },
+        "BRepFilletAPI_MakeFillet": {
+          "calls": 1,
+          "totalMs": 0.35
+        },
+        "TopExp_Explorer_2": {
+          "calls": 1,
+          "totalMs": 0.01
+        }
+      }
+    },
+    {
+      "name": "tray",
+      "category": "examples",
+      "iterations": 5,
+      "timings": [
+        64.90483299999869,
+        65.63949999999932,
+        80.83658300000025,
+        64.25458299999991,
+        61.165624999999636
+      ],
+      "mean": 67.36022479999956,
+      "median": 64.90483299999869,
+      "p95": 77.79716640000005,
+      "p99": 80.2286996800002,
+      "stddev": 6.9082581123701114,
+      "ocSummary": {
+        "gp_Pnt2d_3": {
+          "calls": 27,
+          "totalMs": 0.08
+        },
+        "GCE2d_MakeSegment_1": {
+          "calls": 8,
+          "totalMs": 0.09
+        },
+        "Handle_Geom2d_Curve_2": {
+          "calls": 18,
+          "totalMs": 0.03
+        },
+        "gp_Pnt2d_1": {
+          "calls": 4,
+          "totalMs": 0.04
+        },
+        "gp_Vec2d_1": {
+          "calls": 4,
+          "totalMs": 0.02
+        },
+        "gp_Vec2d_4": {
+          "calls": 5,
+          "totalMs": 0.02
+        },
+        "GCE2d_MakeArcOfCircle_5": {
+          "calls": 4,
+          "totalMs": 0.18
+        },
+        "GCE2d_MakeArcOfCircle_4": {
+          "calls": 1,
+          "totalMs": 0.13
+        },
+        "gp_Trsf2d_1": {
+          "calls": 1,
+          "totalMs": 0.02
+        },
+        "gp_GTrsf2d_2": {
+          "calls": 1,
+          "totalMs": 0.02
+        },
+        "gp_Vec_4": {
+          "calls": 6,
+          "totalMs": 0.02
+        },
+        "gp_Vec_3": {
+          "calls": 464,
+          "totalMs": 0.38
+        },
+        "gp_Ax3_1": {
+          "calls": 12,
+          "totalMs": 0.02
+        },
+        "gp_Pnt_2": {
+          "calls": 14,
+          "totalMs": 0.02
+        },
+        "gp_Dir_4": {
+          "calls": 28,
+          "totalMs": 0.03
+        },
+        "gp_Ax3_3": {
+          "calls": 12,
+          "totalMs": 0.02
+        },
+        "gp_Trsf_1": {
+          "calls": 12,
+          "totalMs": 0.02
+        },
+        "gp_Ax2_2": {
+          "calls": 2,
+          "totalMs": 0.01
+        },
+        "BRepBuilderAPI_MakeEdge_24": {
+          "calls": 13,
+          "totalMs": 0.18
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 3,
+          "totalMs": 0.03
+        },
+        "Message_ProgressRange_1": {
+          "calls": 5,
+          "totalMs": 0.02
+        },
+        "BRepAdaptor_CompCurve_2": {
+          "calls": 2,
+          "totalMs": 0.36
+        },
+        "gp_Pnt_1": {
+          "calls": 89,
+          "totalMs": 0.11
+        },
+        "gp_Vec_1": {
+          "calls": 89,
+          "totalMs": 0.08
+        },
+        "BRepOffsetAPI_MakePipeShell": {
+          "calls": 1,
+          "totalMs": 0.11
+        },
+        "TopExp_Explorer_2": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "BRepAdaptor_Curve_2": {
+          "calls": 144,
+          "totalMs": 0.26
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 2,
+          "totalMs": 2.21
+        },
+        "BRepBuilderAPI_Sewing": {
+          "calls": 1,
+          "totalMs": 0.17
+        },
+        "ShapeFix_Solid_1": {
+          "calls": 1,
+          "totalMs": 0.06
+        }
+      }
+    },
+    {
+      "name": "birdhouse",
+      "category": "examples",
+      "iterations": 5,
+      "timings": [
+        487.23879099999976,
+        476.8047920000008,
+        473.65591700000004,
+        477.21641699999964,
+        476.16391699999986
+      ],
+      "mean": 478.21596680000005,
+      "median": 476.8047920000008,
+      "p95": 485.23431619999974,
+      "p99": 486.83789603999975,
+      "stddev": 4.677752306890461,
+      "ocSummary": {
+        "gp_Pnt2d_3": {
+          "calls": 25,
+          "totalMs": 0.09
+        },
+        "GCE2d_MakeSegment_1": {
+          "calls": 5,
+          "totalMs": 0.07
+        },
+        "Handle_Geom2d_Curve_2": {
+          "calls": 15,
+          "totalMs": 0.04
+        },
+        "gp_Vec_4": {
+          "calls": 21,
+          "totalMs": 0.06
+        },
+        "gp_Vec_3": {
+          "calls": 214,
+          "totalMs": 0.19
+        },
+        "gp_Ax3_1": {
+          "calls": 24,
+          "totalMs": 0.04
+        },
+        "gp_Pnt_2": {
+          "calls": 28,
+          "totalMs": 0.04
+        },
+        "gp_Dir_4": {
+          "calls": 55,
+          "totalMs": 0.06
+        },
+        "gp_Ax3_3": {
+          "calls": 24,
+          "totalMs": 0.05
+        },
+        "gp_Trsf_1": {
+          "calls": 26,
+          "totalMs": 0.05
+        },
+        "gp_Ax2_2": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "BRepBuilderAPI_MakeEdge_24": {
+          "calls": 13,
+          "totalMs": 0.28
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 3,
+          "totalMs": 0.02
+        },
+        "Message_ProgressRange_1": {
+          "calls": 7,
+          "totalMs": 0.02
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 3,
+          "totalMs": 2.68
+        },
+        "BRepPrimAPI_MakePrism_1": {
+          "calls": 3,
+          "totalMs": 1.06
+        },
+        "TopExp_Explorer_2": {
+          "calls": 2,
+          "totalMs": 0.02
+        },
+        "gp_Pnt_1": {
+          "calls": 33,
+          "totalMs": 0.05
+        },
+        "gp_Vec_1": {
+          "calls": 33,
+          "totalMs": 0.03
+        },
+        "BRepGProp_Face_2": {
+          "calls": 5,
+          "totalMs": 0.28
+        },
+        "TopTools_ListOfShape_1": {
+          "calls": 1,
+          "totalMs": 0.02
+        },
+        "BRepOffsetAPI_MakeThickSolid": {
+          "calls": 1,
+          "totalMs": 0.19
+        },
+        "BRepFilletAPI_MakeFillet": {
+          "calls": 1,
+          "totalMs": 0.22
+        },
+        "BRepAdaptor_Curve_2": {
+          "calls": 38,
+          "totalMs": 0.1
+        },
+        "GCE2d_MakeArcOfCircle_4": {
+          "calls": 2,
+          "totalMs": 0.04
+        },
+        "BRepAlgoAPI_Cut_3": {
+          "calls": 1,
+          "totalMs": 39.64
+        },
+        "gp_Ax1_2": {
+          "calls": 1,
+          "totalMs": 0.02
+        },
+        "BRepBuilderAPI_Transform_2": {
+          "calls": 2,
+          "totalMs": 1.31
+        },
+        "BRepAlgoAPI_Fuse_3": {
+          "calls": 2,
+          "totalMs": 219.02
+        },
+        "TColgp_Array1OfPnt2d_2": {
+          "calls": 2,
+          "totalMs": 0.09
+        },
+        "Geom2d_BezierCurve_1": {
+          "calls": 2,
+          "totalMs": 0.1
+        },
+        "gp_Pnt2d_1": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "gp_Vec2d_1": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "gp_Dir2d_5": {
+          "calls": 1,
+          "totalMs": 0.04
+        },
+        "gp_Ax2d_2": {
+          "calls": 1,
+          "totalMs": 0.02
+        }
+      }
+    },
+    {
+      "name": "bottle",
+      "category": "examples",
+      "iterations": 5,
+      "timings": [
+        613.8730410000026,
+        548.8420829999995,
+        552.9531669999997,
+        547.4232080000002,
+        549.9667090000003
+      ],
+      "mean": 562.6116416000004,
+      "median": 549.9667090000003,
+      "p95": 601.689066200002,
+      "p99": 611.4362460400024,
+      "stddev": 25.695138761113633,
+      "ocSummary": {
+        "gp_Pnt2d_3": {
+          "calls": 18,
+          "totalMs": 0.08
+        },
+        "GCE2d_MakeSegment_1": {
+          "calls": 4,
+          "totalMs": 0.07
+        },
+        "Handle_Geom2d_Curve_2": {
+          "calls": 14,
+          "totalMs": 0.03
+        },
+        "GCE2d_MakeArcOfCircle_4": {
+          "calls": 1,
+          "totalMs": 0.03
+        },
+        "gp_Dir2d_5": {
+          "calls": 7,
+          "totalMs": 0.03
+        },
+        "gp_Ax2d_2": {
+          "calls": 7,
+          "totalMs": 0.03
+        },
+        "gp_Vec_4": {
+          "calls": 13,
+          "totalMs": 0.07
+        },
+        "gp_Vec_3": {
+          "calls": 137,
+          "totalMs": 0.15
+        },
+        "gp_Ax3_1": {
+          "calls": 6,
+          "totalMs": 0.02
+        },
+        "gp_Pnt_2": {
+          "calls": 9,
+          "totalMs": 0.03
+        },
+        "gp_Dir_4": {
+          "calls": 15,
+          "totalMs": 0.02
+        },
+        "gp_Ax3_3": {
+          "calls": 6,
+          "totalMs": 0.01
+        },
+        "gp_Trsf_1": {
+          "calls": 6,
+          "totalMs": 0.01
+        },
+        "gp_Ax2_2": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "BRepBuilderAPI_MakeEdge_24": {
+          "calls": 6,
+          "totalMs": 0.13
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 3,
+          "totalMs": 0.02
+        },
+        "Message_ProgressRange_1": {
+          "calls": 65,
+          "totalMs": 0.09
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 3,
+          "totalMs": 4.71
+        },
+        "BRepPrimAPI_MakePrism_1": {
+          "calls": 1,
+          "totalMs": 0.54
+        },
+        "BRepFilletAPI_MakeFillet": {
+          "calls": 1,
+          "totalMs": 0.18
+        },
+        "TopExp_Explorer_2": {
+          "calls": 5,
+          "totalMs": 0.03
+        },
+        "gp_Ax2_4": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "BRepPrimAPI_MakeCylinder_3": {
+          "calls": 1,
+          "totalMs": 0.02
+        },
+        "BRepAlgoAPI_Fuse_3": {
+          "calls": 2,
+          "totalMs": 199.2
+        },
+        "gp_Pnt_1": {
+          "calls": 88,
+          "totalMs": 0.17
+        },
+        "gp_Vec_1": {
+          "calls": 86,
+          "totalMs": 0.09
+        },
+        "BRepGProp_Face_2": {
+          "calls": 86,
+          "totalMs": 0.8
+        },
+        "GProp_GProps_1": {
+          "calls": 3,
+          "totalMs": 0.05
+        },
+        "TopTools_ListOfShape_1": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "BRepOffsetAPI_MakeThickSolid": {
+          "calls": 1,
+          "totalMs": 0.03
+        },
+        "BRepBuilderAPI_MakeVertex": {
+          "calls": 1,
+          "totalMs": 0.08
+        },
+        "BRepExtrema_DistShapeShape_1": {
+          "calls": 1,
+          "totalMs": 0.06
+        },
+        "BRepAdaptor_Surface_2": {
+          "calls": 4,
+          "totalMs": 0.06
+        },
+        "BRepOffsetAPI_MakeOffsetShape": {
+          "calls": 2,
+          "totalMs": 0.05
+        },
+        "gp_Elips2d_2": {
+          "calls": 2,
+          "totalMs": 0.07
+        },
+        "GCE2d_MakeArcOfEllipse_1": {
+          "calls": 2,
+          "totalMs": 0.08
+        },
+        "gp_GTrsf2d_1": {
+          "calls": 4,
+          "totalMs": 0.02
+        },
+        "BRepBuilderAPI_MakeEdge_30": {
+          "calls": 4,
+          "totalMs": 0.3
+        },
+        "ShapeFix_Wire_2": {
+          "calls": 2,
+          "totalMs": 0.11
+        },
+        "BRepAdaptor_CompCurve_2": {
+          "calls": 2,
+          "totalMs": 0.07
+        },
+        "BRepOffsetAPI_ThruSections": {
+          "calls": 1,
+          "totalMs": 0.07
+        }
+      }
+    },
+    {
+      "name": "gridfinity-box",
+      "category": "examples",
+      "iterations": 5,
+      "timings": [
+        540.4268330000014,
+        542.8535830000001,
+        541.4753329999985,
+        616.6090839999997,
+        541.0409999999974
+      ],
+      "mean": 556.4811665999994,
+      "median": 541.4753329999985,
+      "p95": 601.8579837999998,
+      "p99": 613.6588639599997,
+      "stddev": 30.074550369516714,
+      "ocSummary": {
+        "gp_Pnt2d_3": {
+          "calls": 230,
+          "totalMs": 0.27
+        },
+        "GCE2d_MakeSegment_1": {
+          "calls": 49,
+          "totalMs": 0.2
+        },
+        "Handle_Geom2d_Curve_2": {
+          "calls": 144,
+          "totalMs": 0.15
+        },
+        "gp_Pnt2d_1": {
+          "calls": 12,
+          "totalMs": 0.03
+        },
+        "gp_Vec2d_1": {
+          "calls": 12,
+          "totalMs": 0.03
+        },
+        "gp_Vec2d_4": {
+          "calls": 18,
+          "totalMs": 0.03
+        },
+        "GCE2d_MakeArcOfCircle_5": {
+          "calls": 12,
+          "totalMs": 0.11
+        },
+        "gp_Vec_4": {
+          "calls": 27,
+          "totalMs": 0.07
+        },
+        "gp_Vec_3": {
+          "calls": 1031,
+          "totalMs": 0.75
+        },
+        "gp_Ax3_1": {
+          "calls": 30,
+          "totalMs": 0.06
+        },
+        "gp_Pnt_2": {
+          "calls": 37,
+          "totalMs": 0.04
+        },
+        "gp_Dir_4": {
+          "calls": 70,
+          "totalMs": 0.07
+        },
+        "gp_Ax3_3": {
+          "calls": 30,
+          "totalMs": 0.06
+        },
+        "gp_Trsf_1": {
+          "calls": 33,
+          "totalMs": 0.05
+        },
+        "gp_Ax2_2": {
+          "calls": 5,
+          "totalMs": 0.02
+        },
+        "BRepBuilderAPI_MakeEdge_24": {
+          "calls": 36,
+          "totalMs": 0.36
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 7,
+          "totalMs": 0.05
+        },
+        "Message_ProgressRange_1": {
+          "calls": 142,
+          "totalMs": 0.19
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 3,
+          "totalMs": 4.17
+        },
+        "BRepPrimAPI_MakePrism_1": {
+          "calls": 1,
+          "totalMs": 0.52
+        },
+        "TopExp_Explorer_2": {
+          "calls": 4,
+          "totalMs": 0.02
+        },
+        "gp_Pnt_1": {
+          "calls": 284,
+          "totalMs": 0.28
+        },
+        "gp_Vec_1": {
+          "calls": 284,
+          "totalMs": 0.26
+        },
+        "BRepGProp_Face_2": {
+          "calls": 10,
+          "totalMs": 0.38
+        },
+        "GProp_GProps_1": {
+          "calls": 2,
+          "totalMs": 0.01
+        },
+        "TopTools_ListOfShape_1": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "BRepOffsetAPI_MakeThickSolid": {
+          "calls": 1,
+          "totalMs": 0.03
+        },
+        "BRepAdaptor_CompCurve_2": {
+          "calls": 4,
+          "totalMs": 0.19
+        },
+        "gp_Trsf2d_1": {
+          "calls": 6,
+          "totalMs": 0.03
+        },
+        "gp_GTrsf2d_2": {
+          "calls": 6,
+          "totalMs": 0.02
+        },
+        "Bnd_Box2d": {
+          "calls": 46,
+          "totalMs": 0.09
+        },
+        "Geom2dAPI_InterCurveCurve_1": {
+          "calls": 23,
+          "totalMs": 0.09
+        },
+        "Geom2dAPI_ProjectPointOnCurve_2": {
+          "calls": 82,
+          "totalMs": 0.56
+        },
+        "Geom2dAdaptor_Curve_2": {
+          "calls": 44,
+          "totalMs": 0.1
+        },
+        "Geom2d_TrimmedCurve": {
+          "calls": 22,
+          "totalMs": 0.06
+        },
+        "Handle_Geom2d_Curve_1": {
+          "calls": 2,
+          "totalMs": 0.03
+        },
+        "BRepOffsetAPI_MakePipeShell": {
+          "calls": 2,
+          "totalMs": 0.03
+        },
+        "BRepFilletAPI_MakeFillet": {
+          "calls": 1,
+          "totalMs": 0.66
+        },
+        "BRepPrimAPI_MakeBox_4": {
+          "calls": 1,
+          "totalMs": 0.07
+        },
+        "BRepExtrema_DistShapeShape_1": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "BRepAdaptor_Curve_2": {
+          "calls": 352,
+          "totalMs": 0.72
+        },
+        "BRepBuilderAPI_Transform_2": {
+          "calls": 3,
+          "totalMs": 5.51
+        },
+        "BRepBuilderAPI_Sewing": {
+          "calls": 1,
+          "totalMs": 0.04
+        },
+        "ShapeFix_Solid_1": {
+          "calls": 1,
+          "totalMs": 0.03
+        },
+        "BRepAlgoAPI_Fuse_3": {
+          "calls": 3,
+          "totalMs": 186.6
+        }
+      }
+    },
+    {
+      "name": "vase",
+      "category": "examples",
+      "iterations": 5,
+      "timings": [
+        247.8224169999994,
+        319.98212499999863,
+        251.3924160000024,
+        249.77087500000198,
+        245.13124999999854
+      ],
+      "mean": 262.8198166000002,
+      "median": 249.77087500000198,
+      "p95": 306.26418319999937,
+      "p99": 317.23853663999876,
+      "stddev": 28.657275676848013,
+      "ocSummary": {
+        "gp_Pnt2d_3": {
+          "calls": 18,
+          "totalMs": 0.05
+        },
+        "GCE2d_MakeSegment_1": {
+          "calls": 3,
+          "totalMs": 0.07
+        },
+        "Handle_Geom2d_Curve_2": {
+          "calls": 9,
+          "totalMs": 0.02
+        },
+        "gp_Pnt2d_1": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "gp_Vec2d_1": {
+          "calls": 3,
+          "totalMs": 0.01
+        },
+        "TColgp_Array1OfPnt2d_2": {
+          "calls": 3,
+          "totalMs": 0.02
+        },
+        "Geom2d_BezierCurve_1": {
+          "calls": 3,
+          "totalMs": 0.02
+        },
+        "gp_Vec_4": {
+          "calls": 8,
+          "totalMs": 0.05
+        },
+        "gp_Vec_3": {
+          "calls": 100,
+          "totalMs": 0.09
+        },
+        "gp_Ax3_1": {
+          "calls": 6,
+          "totalMs": 0.03
+        },
+        "gp_Pnt_2": {
+          "calls": 9,
+          "totalMs": 0.02
+        },
+        "gp_Dir_4": {
+          "calls": 15,
+          "totalMs": 0.02
+        },
+        "gp_Ax3_3": {
+          "calls": 6,
+          "totalMs": 0.02
+        },
+        "gp_Trsf_1": {
+          "calls": 6,
+          "totalMs": 0.02
+        },
+        "gp_Ax2_2": {
+          "calls": 1,
+          "totalMs": 0.02
+        },
+        "BRepBuilderAPI_MakeEdge_24": {
+          "calls": 6,
+          "totalMs": 0.15
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "Message_ProgressRange_1": {
+          "calls": 7,
+          "totalMs": 0.03
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 1,
+          "totalMs": 1.13
+        },
+        "gp_Ax1_2": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "BRepPrimAPI_MakeRevol_1": {
+          "calls": 1,
+          "totalMs": 3.47
+        },
+        "BRepBuilderAPI_MakeVertex": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "BRepExtrema_DistShapeShape_1": {
+          "calls": 1,
+          "totalMs": 0.01
+        },
+        "TopExp_Explorer_2": {
+          "calls": 2,
+          "totalMs": 0.02
+        },
+        "gp_Pnt_1": {
+          "calls": 19,
+          "totalMs": 0.05
+        },
+        "gp_Vec_1": {
+          "calls": 19,
+          "totalMs": 0.02
+        },
+        "BRepGProp_Face_2": {
+          "calls": 5,
+          "totalMs": 0.07
+        },
+        "TopTools_ListOfShape_1": {
+          "calls": 1,
+          "totalMs": 0.02
+        },
+        "BRepOffsetAPI_MakeThickSolid": {
+          "calls": 1,
+          "totalMs": 0.03
+        },
+        "BRepFilletAPI_MakeFillet": {
+          "calls": 1,
+          "totalMs": 0.15
+        },
+        "BRepAdaptor_Curve_2": {
+          "calls": 24,
+          "totalMs": 0.08
+        }
+      }
+    },
+    {
+      "name": "deep-boolean-chain",
+      "category": "stress",
+      "iterations": 5,
+      "timings": [
+        362.6354170000013,
+        356.08179200000086,
+        360.9469160000008,
+        356.7977499999979,
+        354.29991599999994
+      ],
+      "mean": 358.15235820000015,
+      "median": 356.7977499999979,
+      "p95": 362.29771680000124,
+      "p99": 362.5678769600013,
+      "stddev": 3.1263681219666903,
+      "ocSummary": {
+        "gp_Vec_4": {
+          "calls": 107,
+          "totalMs": 0.2
+        },
+        "gp_Vec_3": {
+          "calls": 468,
+          "totalMs": 0.37
+        },
+        "gp_Ax3_1": {
+          "calls": 36,
+          "totalMs": 0.08
+        },
+        "gp_Pnt_2": {
+          "calls": 240,
+          "totalMs": 0.2
+        },
+        "gp_Dir_4": {
+          "calls": 72,
+          "totalMs": 0.08
+        },
+        "gp_Ax3_3": {
+          "calls": 36,
+          "totalMs": 0.07
+        },
+        "gp_Trsf_1": {
+          "calls": 47,
+          "totalMs": 0.07
+        },
+        "BRepBuilderAPI_MakeEdge_3": {
+          "calls": 48,
+          "totalMs": 0.57
+        },
+        "BRepBuilderAPI_MakeWire_1": {
+          "calls": 12,
+          "totalMs": 0.07
+        },
+        "Message_ProgressRange_1": {
+          "calls": 23,
+          "totalMs": 0.04
+        },
+        "BRepBuilderAPI_MakeFace_15": {
+          "calls": 12,
+          "totalMs": 4.78
+        },
+        "BRepPrimAPI_MakePrism_1": {
+          "calls": 12,
+          "totalMs": 2.33
+        },
+        "BRepBuilderAPI_Transform_2": {
+          "calls": 11,
+          "totalMs": 2.63
+        },
+        "BRepAlgoAPI_Fuse_3": {
+          "calls": 11,
+          "totalMs": 144.67
+        }
+      }
+    }
+  ],
+  "totalDurationMs": 28143.458541
+}

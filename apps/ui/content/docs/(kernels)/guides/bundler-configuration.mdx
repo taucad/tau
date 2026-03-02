@@ -6,7 +6,7 @@ icon: lucide:package
 
 # Bundler Configuration
 
-Configure the esbuild bundler for JS/TS kernels (Replicad, JSCAD). The bundler resolves imports, bundles code, and executes it inside the worker. You can customize extensions, and for advanced use cases, define custom bundlers.
+Configure the esbuild bundler for JS/TS kernels (Replicad, Manifold, JSCAD). The bundler resolves imports, bundles code, and executes it inside the worker. You can customize extensions, and for advanced use cases, define custom bundlers.
 
 ## Prerequisites
 
@@ -30,7 +30,7 @@ import { esbuild } from '@taucad/kernels/bundler';
 
 ### 2. Add the Bundler to createKernelClient
 
-Pass the bundler in the `bundlers` array. JS/TS kernels (Replicad, JSCAD) require a bundler to resolve imports and execute code:
+Pass the bundler in the `bundlers` array. JS/TS kernels (Replicad, Manifold, JSCAD) require a bundler to resolve imports and execute code:
 
 ```typescript
 import { createKernelClient, fromMemoryFS } from '@taucad/kernels';
@@ -58,7 +58,7 @@ Default extensions are `['ts', 'js', 'tsx', 'jsx']`. Restrict to TypeScript only
 
 ### 4. Understand How Bundling Works with JS/TS Kernels
 
-The flow for Replicad and JSCAD:
+The flow for Replicad, Manifold, and JSCAD:
 
 1. **detectImports**: The bundler runs a lightweight pass (externals mode) to discover bare-specifier imports (e.g., `replicad`, `@jscad/modeling`). No modules need to be registered. This drives kernel selection.
 2. **Kernel initialization**: The selected kernel registers built-in modules (WASM-loaded libraries) via `runtime.bundler.registerModule`.

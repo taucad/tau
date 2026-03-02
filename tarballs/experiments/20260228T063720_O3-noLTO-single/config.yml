@@ -1,0 +1,16 @@
+name: "O3-noLTO-single"
+description: "Performance-optimized: -O3 compile, noLTO, no exceptions, single-threaded"
+
+compilation:
+  optimization: "-O3"
+  lto: false
+  exceptions: "none"
+  threading: "single-threaded"
+
+linking:
+  yaml: "custom_build_single_v8.yml"
+  wasmOptLevel: "-O3"
+
+benchmark:
+  iterations: 10
+  filter: ["primitives", "booleans", "fillets", "extrusions", "complex", "examples", "stress"]

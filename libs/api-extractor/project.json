@@ -25,6 +25,13 @@
         "command": "tsx src/extract-kcl-api.ts",
         "cwd": "libs/api-extractor"
       }
+    },
+    "extract-manifold": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/extract-manifold-types.ts",
+        "cwd": "libs/api-extractor"
+      }
     }
   }
 }

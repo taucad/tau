@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import type { MouseEvent } from 'react';
 import { AccountView } from '@daveyplate/better-auth-ui';
-import { CreditCard, HardDrive, Key, Lock, Settings2, User } from 'lucide-react';
+import { CreditCard, FlaskConical, HardDrive, Key, Lock, Settings2, User } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '#components/ui/dialog.js';
 import {
@@ -13,6 +13,7 @@ import {
 import type { SettingsSection } from '#hooks/use-settings-dialog.js';
 import { FilesystemSettings } from '#components/settings/filesystem-settings.js';
 import { GeneralSettings } from '#components/settings/general-settings.js';
+import { ExperimentalSettings } from '#components/settings/experimental-settings.js';
 import { SettingsAuthGate } from '#components/settings/settings-auth-gate.js';
 import { cn } from '#utils/ui.utils.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
@@ -34,6 +35,7 @@ const sections: readonly SettingsSectionDefinition[] = [
   { id: 'security', label: 'Security', icon: Lock, requiresAuth: true },
   { id: 'api-keys', label: 'API Keys', icon: Key, requiresAuth: true },
   { id: 'billing', label: 'Billing', icon: CreditCard, requiresAuth: true },
+  { id: 'experimental', label: 'Experimental', icon: FlaskConical, requiresAuth: false },
 ] as const;
 
 const sectionPathMap: Record<SettingsSection, string> = {
@@ -43,6 +45,7 @@ const sectionPathMap: Record<SettingsSection, string> = {
   security: '/settings/security',
   'api-keys': '/settings/api-keys',
   billing: '/settings/billing',
+  experimental: '/settings/experimental',
 };
 
 /**
@@ -144,6 +147,9 @@ export function SettingsDialog(): React.JSX.Element {
               <SettingsAuthGate>
                 <div className="py-4 text-sm text-muted-foreground">Billing - coming soon.</div>
               </SettingsAuthGate>
+            </TabsContent>
+            <TabsContent enableAnimation={false} value="Experimental">
+              <ExperimentalSettings />
             </TabsContent>
           </ResponsiveTabs>
         </div>

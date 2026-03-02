@@ -140,6 +140,104 @@ function generateOcTracingSection(results: BenchmarkResult[]): string {
   return `<h2>OpenCASCADE API Tracing</h2>${sections}`;
 }
 
+type ProvenanceCompilation = {
+  cacheKey?: string;
+  cacheHit?: boolean;
+  optimization?: string;
+  lto?: boolean;
+  exceptions?: string;
+  threading?: string;
+  sourceFiles?: number;
+  bindingFiles?: number;
+};
+
+type ProvenanceLinking = {
+  boundSymbols?: number;
+};
+
+type ProvenancePostProcessing = {
+  preOptSize?: number;
+  postOptSize?: number;
+  optReduction?: string;
+};
+
+function formatProvSize(bytes: number | undefined): string {
+  if (bytes === undefined || bytes === 0) {
+    return '—';
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function generateProvenanceSection(run: BenchmarkRunResult): string {
+  const prov = run.provenance;
+  if (!prov) {
+    return '';
+  }
+
+  const comp = prov.compilation as ProvenanceCompilation;
+  const link = prov.linking as ProvenanceLinking;
+  const post = prov.postProcessing as ProvenancePostProcessing;
+  const { toolchain } = prov;
+
+  const configCards = `
+    <div class="prov-grid">
+      <div class="prov-card">
+        <div class="prov-card-label">Optimization</div>
+        <div class="prov-card-value">${escapeHtml(comp.optimization ?? '—')}</div>
+      </div>
+      <div class="prov-card">
+        <div class="prov-card-label">LTO</div>
+        <div class="prov-card-value">${comp.lto ? 'Yes' : 'No'}</div>
+      </div>
+      <div class="prov-card">
+        <div class="prov-card-label">Exceptions</div>
+        <div class="prov-card-value">${escapeHtml(comp.exceptions ?? 'none')}</div>
+      </div>
+      <div class="prov-card">
+        <div class="prov-card-label">Threading</div>
+        <div class="prov-card-value">${escapeHtml(comp.threading ?? '—')}</div>
+      </div>
+      <div class="prov-card">
+        <div class="prov-card-label">WASM Size</div>
+        <div class="prov-card-value prov-card-highlight">${formatProvSize(post.postOptSize)}</div>
+      </div>
+      <div class="prov-card">
+        <div class="prov-card-label">wasm-opt Δ</div>
+        <div class="prov-card-value">${escapeHtml(post.optReduction ?? '—')}</div>
+      </div>
+      <div class="prov-card">
+        <div class="prov-card-label">Bound Symbols</div>
+        <div class="prov-card-value">${String(link.boundSymbols ?? '—')}</div>
+      </div>
+      <div class="prov-card">
+        <div class="prov-card-label">Cache Hit</div>
+        <div class="prov-card-value">${comp.cacheHit ? '✓ Yes' : '✗ No'}</div>
+      </div>
+    </div>`;
+
+  let detailRows = '';
+  detailRows += `<tr><td>Build ID</td><td><code>${escapeHtml(prov.buildId)}</code></td></tr>`;
+  detailRows += `<tr><td>Cache Key</td><td><code>${escapeHtml(comp.cacheKey ?? '')}</code></td></tr>`;
+  detailRows += `<tr><td>Source Files</td><td>${String(comp.sourceFiles ?? '—')}</td></tr>`;
+  detailRows += `<tr><td>Binding Files</td><td>${String(comp.bindingFiles ?? '—')}</td></tr>`;
+  detailRows += `<tr><td>Pre-opt Size</td><td>${formatProvSize(post.preOptSize)}</td></tr>`;
+  detailRows += `<tr><td>Post-opt Size</td><td>${formatProvSize(post.postOptSize)}</td></tr>`;
+  detailRows += `<tr><td>Emscripten</td><td>${escapeHtml(toolchain['emscripten'] ?? '—')}</td></tr>`;
+  detailRows += `<tr><td>LLVM</td><td>${escapeHtml(toolchain['llvm'] ?? '—')}</td></tr>`;
+  detailRows += `<tr><td>Timestamp</td><td>${escapeHtml(prov.timestamp)}</td></tr>`;
+
+  return `<h2>Build Provenance</h2>
+    ${configCards}
+    <details>
+      <summary>Full build details</summary>
+      <table>
+        <thead><tr><th>Property</th><th>Value</th></tr></thead>
+        <tbody>${detailRows}</tbody>
+      </table>
+    </details>`;
+}
+
 /**
  * Generate a self-contained HTML benchmark report.
  */
@@ -173,6 +271,11 @@ export function generateHtmlReport(run: BenchmarkRunResult, comparison?: Benchma
   .oc-table { margin-top: 0.5rem; }
   .oc-table td, .oc-table th { padding: 0.35rem 0.5rem; }
   code { background: #F3F4F6; padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; }
+  .prov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.75rem; margin-bottom: 1.5rem; }
+  .prov-card { background: white; border: 1px solid #E5E7EB; border-radius: 8px; padding: 0.75rem 1rem; }
+  .prov-card-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: #6B7280; margin-bottom: 0.25rem; font-weight: 600; }
+  .prov-card-value { font-size: 1.1rem; font-weight: 700; color: #1F2937; }
+  .prov-card-highlight { color: #3B82F6; }
   .footer { margin-top: 3rem; color: #9CA3AF; font-size: 0.75rem; border-top: 1px solid #E5E7EB; padding-top: 1rem; }
 </style>
 </head>
@@ -180,6 +283,8 @@ export function generateHtmlReport(run: BenchmarkRunResult, comparison?: Benchma
   <h1>${escapeHtml(title)}</h1>
   <p class="meta">Generated ${escapeHtml(run.timestamp)} &bull; Total duration: ${formatMs(run.totalDurationMs)}</p>
   ${comparisonNote}
+
+  ${generateProvenanceSection(run)}
 
   <h2>Summary</h2>
   ${generateSummaryTable(run.results, comparison)}
@@ -216,6 +321,8 @@ export function serializeRunResult(run: BenchmarkRunResult): string {
       stddev: r.stddev,
       ocSummary: r.ocSummary,
     })),
+    wasmSizes: run.wasmSizes,
+    provenance: run.provenance,
   };
   return JSON.stringify(stripped, undefined, 2);
 }

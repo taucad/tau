@@ -1,0 +1,59 @@
+{
+  "schema": "wasm-build-provenance-v1",
+  "buildId": "baseline-v762-O0-noLTO-single",
+  "timestamp": "2026-02-26T12:00:00Z",
+  "toolchain": {
+    "emscripten": "3.1.14",
+    "llvm": "15",
+    "wasmOpt": "binaryen-112",
+    "python": "3.x"
+  },
+  "source": {
+    "occtVersion": "V7_6_2",
+    "occtCommit": "unknown",
+    "opencascadejsCommit": "unknown",
+    "filterPackagesHash": "unknown"
+  },
+  "compilation": {
+    "cacheKey": "O0-noLTO-noExc-single-v762",
+    "cacheHit": false,
+    "optimization": "-O0",
+    "lto": false,
+    "exceptions": "none",
+    "threading": "single-threaded",
+    "wasmOptLevel": "-O3",
+    "emccCompileFlags": ["-O0", "-sDISABLE_EXCEPTION_CATCHING=1"],
+    "sourceFiles": 0,
+    "bindingFiles": 0,
+    "compileDuration_s": 0
+  },
+  "linking": {
+    "yamlConfig": "custom_build_single.yml",
+    "yamlConfigHash": "unknown",
+    "boundSymbols": 262,
+    "symbolList": [],
+    "emccFlags": ["-flto", "-fexceptions", "-O3", "-sDISABLE_EXCEPTION_CATCHING=1"],
+    "linkDuration_s": 0
+  },
+  "postProcessing": {
+    "wasmOptFlags": ["-O3"],
+    "preOptSize": 10800306,
+    "postOptSize": 10800306,
+    "optReduction": "0.0%",
+    "wasmOptDuration_s": 0
+  },
+  "output": {
+    "replicad_single.wasm": {
+      "size": 10800306,
+      "sha256": "unknown"
+    }
+  },
+  "sections": {
+    "code": 7737360,
+    "data": 2578872,
+    "functionCount": 31607
+  },
+  "filtering": {
+    "excludedPackages": []
+  }
+}

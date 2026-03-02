@@ -10,7 +10,7 @@ import type { PartialDeep } from 'type-fest';
 import type { ExportFormat, GeometryResponse, GeometryFile, OnWorkerLog } from '@taucad/types';
 import { dirname } from '@zenfs/core/path';
 import type { Mock } from 'vitest';
-import { vi } from 'vitest';
+import { expect, vi } from 'vitest';
 import { configure, fs } from '@zenfs/core';
 import { InMemory } from '@zenfs/core/backends/memory.js';
 import { joinPath } from '@taucad/utils/path';
@@ -18,6 +18,9 @@ import type {
   CreateGeometryResult,
   HashedGeometryResult,
   KernelIssue,
+  KernelResult,
+  KernelSuccessResult,
+  KernelErrorResult,
   GetParametersResult,
   ExportGeometryResult,
   MiddlewareRegistrations,
@@ -98,7 +101,7 @@ export async function clearTestFilesystem(): Promise<void> {
 export type InitializeWorkerOptions = {
   /** Custom log handler */
   onLog?: OnWorkerLog;
-  /** Worker-specific options passed to initialize (e.g., ReplicadWorker: { withExceptions: true }) */
+  /** Worker-specific options passed to initialize (e.g., ReplicadWorker: { withBrepEdges: true }) */
   workerOptions?: Record<string, unknown>;
   /** Middleware configuration (defaults to empty array for tests that bypass dynamic loading) */
   middlewareEntries?: MiddlewareRegistrations;
@@ -116,7 +119,7 @@ export type InitializeWorkerOptions = {
  * so the fileManager's ensureFilesystemConfigured('indexeddb') just waits.
  *
  * @param worker - The kernel worker instance to initialize
- * @param options - Optional configuration (onLog, workerOptions for kernel-specific settings like withExceptions)
+ * @param options - Optional configuration (onLog, workerOptions for kernel-specific settings like withBrepEdges)
  * @returns Promise resolving to the initialized worker
  */
 export async function initializeWorkerForTesting<T extends KernelWorker>(
@@ -351,6 +354,20 @@ export function createGltfSuccessResult(content: Uint8Array<ArrayBuffer>): Creat
 }
 
 /**
+ * Create a successful CreateGeometryResultInternal with a single GLTF geometry and issues.
+ */
+export function createGltfSuccessResultWithIssues(
+  content: Uint8Array<ArrayBuffer>,
+  issues: KernelIssue[],
+): CreateGeometryResult {
+  return {
+    success: true,
+    data: [{ format: 'gltf', content }],
+    issues,
+  };
+}
+
+/**
  * Create a failed CreateGeometryResultInternal.
  */
 export function createErrorResult(issues?: KernelIssue[]): CreateGeometryResult {
@@ -371,6 +388,39 @@ export function createErrorResult(issues?: KernelIssue[]): CreateGeometryResult 
  */
 export function createEmptySuccessResult(): CreateGeometryResult {
   return createSuccessResult([]);
+}
+
+// =============================================================================
+// Type-Narrowing Assertion Helpers
+// =============================================================================
+
+/**
+ * Asserts that a kernel result is successful. Acts as a type guard narrowing
+ * the result to KernelSuccessResult<T> for subsequent assertions.
+ * Logs detailed error information when the assertion fails.
+ */
+export function assertSuccess<T>(result: KernelResult<T>, context?: string): asserts result is KernelSuccessResult<T> {
+  if (!result.success) {
+    const prefix = context ? `[${context}] ` : '';
+    const issuesSummary = result.issues.map((issue) => `  [${issue.severity}] ${issue.message}`).join('\n');
+    console.error(`${prefix}Expected success but got failure:\n${issuesSummary}`);
+  }
+
+  expect(result.success).toBe(true);
+}
+
+/**
+ * Asserts that a kernel result is a failure. Acts as a type guard narrowing
+ * the result to KernelErrorResult for subsequent assertions.
+ * Logs the unexpected success data when the assertion fails.
+ */
+export function assertFailure<T>(result: KernelResult<T>, context?: string): asserts result is KernelErrorResult {
+  if (result.success) {
+    const prefix = context ? `[${context}] ` : '';
+    console.error(`${prefix}Expected failure but got success with data:`, JSON.stringify(result.data).slice(0, 500));
+  }
+
+  expect(result.success).toBe(false);
 }
 
 /**
@@ -404,7 +454,7 @@ export function createGeometryFile(filename: string, basePath = '/builds/test'):
  * Options for createTestWorker.
  */
 export type CreateTestWorkerOptions = {
-  /** Worker-specific options passed to initialize (e.g., ReplicadWorker: { withExceptions: true }) */
+  /** Worker-specific options passed to initialize (e.g., ReplicadWorker: { withBrepEdges: true }) */
   workerOptions?: Record<string, unknown>;
   /** Extensions the kernel handles (defaults to ['ts', 'js', 'scad', 'kcl', '*']) */
   extensions?: string[];
@@ -429,7 +479,7 @@ export type CreateTestWorkerOptions = {
 function inferExtensions(definition: KernelDefinition): string[] {
   const name = definition.name.toLowerCase();
 
-  if (name.includes('replicad') || name.includes('jscad')) {
+  if (name.includes('replicad') || name.includes('manifold') || name.includes('jscad')) {
     return ['ts', 'js'];
   }
 
@@ -569,7 +619,20 @@ export async function createTestGeometry(input: {
 }): Promise<CreateGeometryResult> {
   const worker = await createTestWorker(input.definition, input.files, input.options);
   const geometryFile = createGeometryFile(input.mainFile);
-  return worker.createGeometry({ file: geometryFile, parameters: input.parameters ?? {} });
+
+  let parameters = input.parameters ?? {};
+
+  if (!input.parameters) {
+    const parametersResult = await worker.getParameters(geometryFile);
+    if (parametersResult.success) {
+      const extracted = parametersResult.data as { defaultParameters?: Record<string, unknown> };
+      if (extracted.defaultParameters) {
+        parameters = deepmerge(extracted.defaultParameters, parameters);
+      }
+    }
+  }
+
+  return worker.createGeometry({ file: geometryFile, parameters });
 }
 
 /**

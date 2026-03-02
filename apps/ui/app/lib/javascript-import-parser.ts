@@ -62,7 +62,7 @@ async function getImportsForModel(model: Monaco.editor.ITextModel): Promise<read
   const cached = parseCache.get(model);
   const currentVersion = model.getVersionId();
 
-  if (cached && cached.version === currentVersion) {
+  if (cached?.version === currentVersion) {
     return cached.imports;
   }
 

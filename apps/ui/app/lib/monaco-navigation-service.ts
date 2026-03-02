@@ -51,7 +51,7 @@ export function registerMonacoNavigation(options: {
 
   // Subscribe to fileOpened events for position jumping after file opens
   fileOpenedSub = editorRef.on('fileOpened', (event: { path: string; lineNumber?: number; column?: number }) => {
-    if (!pendingNavigation || event.path !== pendingNavigation.path) {
+    if (event.path !== pendingNavigation?.path) {
       return;
     }
 

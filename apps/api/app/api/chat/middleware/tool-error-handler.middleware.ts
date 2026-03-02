@@ -43,7 +43,7 @@ function parseValidationErrors(message: string): Array<{ path: string; message: 
     if (pathValue && validationErrors.length > 0) {
       // Update the last error with the path
       const lastError = validationErrors.at(-1);
-      if (lastError && lastError.path === 'root') {
+      if (lastError?.path === 'root') {
         lastError.path = pathValue.trim();
       }
     }

@@ -1,0 +1,16 @@
+name: "O2-noLTO-Oz-link"
+description: "Standard compile, size-optimized wasm-opt: -O2 compile, -Oz wasm-opt"
+
+compilation:
+  optimization: "-O2"
+  lto: false
+  exceptions: "none"
+  threading: "single-threaded"
+
+linking:
+  yaml: "custom_build_single_v8.yml"
+  wasmOptLevel: "-Oz"
+
+benchmark:
+  iterations: 10
+  filter: ["primitives", "booleans", "fillets", "extrusions", "complex", "examples", "stress"]

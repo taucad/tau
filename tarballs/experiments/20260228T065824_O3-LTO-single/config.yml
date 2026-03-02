@@ -1,0 +1,16 @@
+name: "O3-LTO-single"
+description: "Max speed with LTO: -O3 compile with LTO, aggressive inlining + dead-code elimination"
+
+compilation:
+  optimization: "-O3"
+  lto: true
+  exceptions: "none"
+  threading: "single-threaded"
+
+linking:
+  yaml: "custom_build_single_v8.yml"
+  wasmOptLevel: "-O3"
+
+benchmark:
+  iterations: 10
+  filter: ["primitives", "booleans", "fillets", "extrusions", "complex", "examples", "stress"]

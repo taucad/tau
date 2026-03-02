@@ -31,53 +31,15 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
       },
       configuration: {
         streaming: true,
-        maxTokens: 20_000,
+        maxTokens: 40_000,
         // @ts-expect-error: FIXME - some models use camelCase
         // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
-        max_tokens: 20_000,
+        max_tokens: 40_000,
         thinking: {
           type: 'adaptive',
         },
         outputConfig: {
-          effort: 'medium',
-        },
-      },
-    },
-    'claude-4.5-opus': {
-      id: 'anthropic-claude-opus-4.5',
-      name: 'Opus 4.5',
-      slug: 'claude-opus-4.5',
-      description: 'Previous Anthropic flagship with extended thinking capabilities.',
-      provider: {
-        id: 'anthropic',
-        name: 'Anthropic',
-      },
-      model: 'claude-opus-4-5-20251101',
-      support: {
-        toolChoice: false,
-      },
-      details: {
-        family: 'claude',
-        families: ['claude'],
-        contextWindow: 200_000,
-        maxTokens: 32_000,
-        cost: {
-          inputTokens: 5,
-          outputTokens: 25,
-          cacheReadTokens: 0.5,
-          cacheWriteTokens: 6.25,
-        },
-      },
-      configuration: {
-        streaming: true,
-        maxTokens: 20_000,
-        // @ts-expect-error: FIXME - some models use camelCase
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
-        max_tokens: 20_000,
-        thinking: {
-          type: 'enabled',
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
-          budget_tokens: 5000,
+          effort: 'high',
         },
       },
     },
@@ -108,15 +70,15 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
       },
       configuration: {
         streaming: true,
-        maxTokens: 20_000,
+        maxTokens: 40_000,
         // @ts-expect-error: FIXME - some models use camelCase
         // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
-        max_tokens: 20_000,
+        max_tokens: 40_000,
         thinking: {
           type: 'adaptive',
         },
         outputConfig: {
-          effort: 'medium',
+          effort: 'high',
         },
       },
     },

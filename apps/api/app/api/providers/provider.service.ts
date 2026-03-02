@@ -112,7 +112,7 @@ export class ProviderService {
         configuration: {
           apiKey: undefined,
         },
-        inputTokensIncludesCacheReadTokens: false,
+        inputTokensIncludesCacheReadTokens: true,
         inputTokensIncludesCacheWriteTokens: false,
         streamingDoublesCacheTokens: false,
         createClass(options) {

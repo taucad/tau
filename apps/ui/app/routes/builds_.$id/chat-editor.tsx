@@ -14,7 +14,9 @@ import { ChatEditorTabs } from '#routes/builds_.$id/chat-editor-tabs.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 import { getFileExtension, isBinaryFile, decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
 import { ChatEditorBinaryWarning } from '#routes/builds_.$id/chat-editor-binary-warning.js';
+import { ChatEditorPlanViewer } from '#routes/builds_.$id/chat-editor-plan-viewer.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
+import { useFeature } from '#flags/use-feature.js';
 import { useViewContext } from '#routes/builds_.$id/chat-interface-view-context.js';
 import { useMonacoServices } from '#hooks/use-monaco-model-service.js';
 import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
@@ -43,6 +45,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
   const [forceOpenBinary, setForceOpenBinary] = useState(false);
   const { setIsEditorOpen } = useViewContext();
   const { modelService, markerService } = useMonacoServices();
+  const planModeEnabled = useFeature('planMode');
 
   // Kernel diagnostics (replaces manual marker management) - uses viewport's compilation unit
   const { handleValidate } = useKernelDiagnostics({
@@ -169,7 +172,9 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       <ChatEditorTabs />
       {activeFilePath ? <ChatEditorBreadcrumbs filePath={activeFilePath} /> : undefined}
       {activeFile ? (
-        activeFile.isBinary && !forceOpenBinary ? (
+        planModeEnabled && activeFile.path.endsWith('.plan.md') ? (
+          <ChatEditorPlanViewer content={editorContent} filePath={activeFile.path} />
+        ) : activeFile.isBinary && !forceOpenBinary ? (
           <ChatEditorBinaryWarning onForceOpen={handleForceOpenBinary} />
         ) : (
           <CodeEditor

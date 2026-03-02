@@ -6,6 +6,7 @@
  */
 
 import type { KernelCommand, KernelResponse } from '#types/kernel-protocol.types.js';
+import { isWebWorker } from '#framework/environment.js';
 
 /**
  * Unified message port interface for kernel worker communication.
@@ -16,15 +17,6 @@ export type KernelMessagePort = {
   onMessage(handler: (data: KernelCommand | KernelResponse) => void): void;
   close(): void;
 };
-
-function isBrowserWorkerContext(): boolean {
-  return (
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- May not exist in Node.js
-    globalThis.self !== undefined &&
-    typeof globalThis.self.addEventListener === 'function' &&
-    typeof globalThis.self.postMessage === 'function'
-  );
-}
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- Dynamic require for Node.js detection
 function getNodeParentPort(): import('node:worker_threads').MessagePort | undefined {
@@ -42,11 +34,7 @@ function getNodeParentPort(): import('node:worker_threads').MessagePort | undefi
  * Use this to guard dispatcher setup in worker files.
  */
 export function isWorkerContext(): boolean {
-  if (isBrowserWorkerContext()) {
-    return true;
-  }
-
-  return getNodeParentPort() !== undefined;
+  return isWebWorker() || getNodeParentPort() !== undefined;
 }
 
 /**
@@ -57,7 +45,7 @@ export function isWorkerContext(): boolean {
  * @throws Error if called outside a worker context
  */
 export function getWorkerMessagePort(): KernelMessagePort {
-  if (isBrowserWorkerContext()) {
+  if (isWebWorker()) {
     return {
       postMessage(message, transferables) {
         self.postMessage(message, { transfer: transferables ?? [] });

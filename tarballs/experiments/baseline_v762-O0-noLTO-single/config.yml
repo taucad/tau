@@ -1,0 +1,16 @@
+name: "v762-O0-noLTO-single"
+description: "OCCT v7.6.2 baseline: -O0 compile (Docker default), no LTO, no exceptions, binaryen -O3"
+
+compilation:
+  optimization: "-O0"
+  lto: false
+  exceptions: "none"
+  threading: "single-threaded"
+
+linking:
+  yaml: "custom_build_single.yml"
+  wasmOptLevel: "-O3"
+
+benchmark:
+  iterations: 5
+  filter: ["primitives", "booleans", "fillets", "extrusions", "complex", "examples", "stress"]

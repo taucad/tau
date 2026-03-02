@@ -723,7 +723,7 @@ describe('importFiles', () => {
     function createMapResolver(files: Map<string, Uint8Array<ArrayBuffer>>): FileResolver {
       return {
         exists: (filename: string) => files.has(filename),
-        readFile: (filename: string) => {
+        readFile(filename: string) {
           const bytes = files.get(filename);
           if (!bytes) {
             throw new Error(`File not found: ${filename}`);
@@ -771,17 +771,17 @@ describe('importFiles', () => {
     });
 
     it('should import OBJ with MTL sidecar via FileResolver (assimpjs ConvertFile)', async () => {
-      const objData = loadFixture('cube-materials.obj');
+      const objectData = loadFixture('cube-materials.obj');
       const mtlData = loadFixture('cube-materials.mtl');
 
       const resolver = createMapResolver(
         new Map([
-          ['cube-materials.obj', objData],
+          ['cube-materials.obj', objectData],
           ['cube-materials.mtl', mtlData],
         ]),
       );
 
-      const glbData = await importFiles([{ name: 'cube-materials.obj', bytes: objData }], 'obj', resolver);
+      const glbData = await importFiles([{ name: 'cube-materials.obj', bytes: objectData }], 'obj', resolver);
       validateGlbData(glbData);
 
       const report = await getInspectReport(glbData);

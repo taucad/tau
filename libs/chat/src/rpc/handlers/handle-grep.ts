@@ -2,12 +2,9 @@ import type { GrepRpcInput, GrepRpcResult } from '#schemas/rpc.schema.js';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
 
-const MAX_MATCHES = 100;
+const maxMatches = 100;
 
-async function collectFilePaths(
-  fileSystem: RpcFileSystem,
-  basePath: string,
-): Promise<string[]> {
+async function collectFilePaths(fileSystem: RpcFileSystem, basePath: string): Promise<string[]> {
   const paths: string[] = [];
   const entries = await fileSystem.readdir(basePath);
 
@@ -15,7 +12,7 @@ async function collectFilePaths(
     const fullPath = basePath ? `${basePath}/${entry.name}` : entry.name;
     if (entry.type === 'file') {
       paths.push(fullPath);
-    } else if (entry.type === 'directory') {
+    } else {
       // eslint-disable-next-line no-await-in-loop -- recursive traversal
       const subPaths = await collectFilePaths(fileSystem, fullPath);
       paths.push(...subPaths);
@@ -25,10 +22,7 @@ async function collectFilePaths(
   return paths;
 }
 
-export async function handleGrep(
-  input: GrepRpcInput,
-  fileSystem: RpcFileSystem,
-): Promise<GrepRpcResult> {
+export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem): Promise<GrepRpcResult> {
   const matches: Array<{ file: string; line: number; content: string }> = [];
 
   try {
@@ -76,7 +70,7 @@ export async function handleGrep(
 
     for (const fileMatches of allFileMatches) {
       for (const match of fileMatches) {
-        if (matches.length < MAX_MATCHES) {
+        if (matches.length < maxMatches) {
           matches.push(match);
         }
       }
@@ -86,7 +80,7 @@ export async function handleGrep(
       success: true,
       matches,
       totalMatches,
-      truncated: totalMatches > MAX_MATCHES,
+      truncated: totalMatches > maxMatches,
     };
   } catch (error) {
     return toRpcError(error);

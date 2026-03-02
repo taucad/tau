@@ -19,6 +19,8 @@ export const rpcName = {
   globSearch: 'glob_search',
   getKernelResult: 'get_kernel_result',
   captureObservations: 'capture_observations',
+  fetchGeometry: 'fetch_geometry',
+  captureScreenshot: 'capture_screenshot',
 } as const satisfies Record<string, string>;
 
 /**

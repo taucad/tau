@@ -1,0 +1,194 @@
+[
+  {
+    "kernel": "jscad",
+    "name": "cube",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "jscad",
+    "name": "cylinder",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "jscad",
+    "name": "gear",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "birdhouse",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "bottle",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "card-holder",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "chair",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "cycloidal-gear",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "decorated-box",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "drinking-glass",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "gridfinity-box",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "hex-screwdriver",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "hollow-box",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "ibeam",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "lego",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "pot-plant",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "simple-tray",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "staircase",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "stress-test",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "t-slot-rail",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "table",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "tray",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "vase",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "wavy-vase",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts"
+    ]
+  }
+]

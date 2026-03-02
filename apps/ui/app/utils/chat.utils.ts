@@ -203,9 +203,9 @@ const toolSerializers = {
       return joinLines(...lines);
     },
   },
-  [toolName.reasoning]: {
-    input: (input) => `thinking: <${input.thinking?.length ?? 0} chars>`,
-    output: (output) => output,
+  [toolName.screenshot]: {
+    input: (input) => `mode: ${input.mode}`,
+    output: (output) => `Captured ${output.images.length} image(s)`,
   },
 } satisfies { [K in keyof MyTools]: ToolSerializer<K> };
 
@@ -400,7 +400,7 @@ export function serializeTranscript(messages: MyUIMessage[], title: string): str
  */
 export function finalizeInterruptedToolParts(messages: MyUIMessage[]): MyUIMessage[] {
   const lastMessage = messages.at(-1);
-  if (!lastMessage || lastMessage.role !== 'assistant') {
+  if (lastMessage?.role !== 'assistant') {
     return messages;
   }
 

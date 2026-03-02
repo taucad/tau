@@ -9,7 +9,7 @@
  * and export operation. No timers are used, so the collector adds zero overhead
  * when idle and does not keep the event loop alive.
  *
- * See docs/kernel-telemetry-policy.md for the full telemetry policy.
+ * See docs/policy/kernel-telemetry-policy.md for the full telemetry policy.
  *
  * Naming convention: {subsystem}.{operation} (OTel-inspired)
  *

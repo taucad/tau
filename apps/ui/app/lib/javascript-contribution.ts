@@ -8,7 +8,7 @@
  */
 
 import type * as Monaco from 'monaco-editor';
-import { replicadTypesOriginal, jscadModelingTypes } from '@taucad/api-extractor';
+import { replicadTypesOriginal, jscadModelingTypes, manifoldTypes } from '@taucad/api-extractor';
 import type { LanguageContribution, ActivationContext, ActivationResult } from '#lib/monaco-language-registry.js';
 import { createJsDefinitionProvider } from '#lib/javascript-definition-provider.js';
 import { ModuleResolver } from '#lib/javascript-module-resolver.js';
@@ -93,6 +93,7 @@ export const jsTsContribution: LanguageContribution = {
       staticTypes: [
         { packageName: 'replicad', content: replicadTypesOriginal, prewrapped: true },
         { packageName: '@jscad/modeling', content: jscadModelingTypes, prewrapped: true },
+        { packageName: 'manifold-3d', content: manifoldTypes, prewrapped: true },
       ],
     });
     ataInstance.startWatching();

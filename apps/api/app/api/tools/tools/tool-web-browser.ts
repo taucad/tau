@@ -4,18 +4,22 @@ import { StructuredTool } from '@langchain/core/tools';
 import type { CallbackManagerForToolRun } from '@langchain/core/callbacks/manager';
 import { z } from 'zod';
 import { toolName } from '@taucad/chat/constants';
+import { ToolError } from '@taucad/chat/utils';
 import type { WebBrowserOutput } from '@taucad/chat';
 
 type CreateWebBrowserToolOptions = {
   tavilyApiKey: string;
 };
 
-/**
- * Input schema for the web browser tool.
- */
 const webBrowserInputSchema = z.object({
   urls: z.array(z.string()).min(1).max(5).describe('One or more URLs to extract content from (max 5)'),
   query: z.string().optional().describe('Optional query to rerank extracted chunks by relevance'),
+  extractDepth: z
+    .enum(['basic', 'advanced'])
+    .optional()
+    .describe(
+      'Extraction depth. Use "basic" (default) for fast text extraction. Use "advanced" for JS-heavy or complex pages that fail with basic extraction.',
+    ),
 });
 
 /**
@@ -32,28 +36,45 @@ class WebBrowserTool extends StructuredTool {
 
   public override schema = webBrowserInputSchema;
 
-  private readonly tavilyTool: TavilyExtract;
+  private readonly tavilyApiKey: string;
 
-  public constructor(tavilyTool: TavilyExtract) {
+  public constructor(tavilyApiKey: string) {
     super();
-    this.tavilyTool = tavilyTool;
+    this.tavilyApiKey = tavilyApiKey;
   }
 
   protected override async _call(
     input: z.infer<typeof webBrowserInputSchema>,
     _runManager?: CallbackManagerForToolRun,
   ): Promise<WebBrowserOutput> {
-    const rawResult = (await this.tavilyTool.invoke({
+    const tavilyTool = new TavilyExtract({
+      extractDepth: input.extractDepth ?? 'basic',
+      includeImages: false,
+      format: 'markdown',
+      tavilyApiKey: this.tavilyApiKey,
+    });
+
+    const rawResult = (await tavilyTool.invoke({
       urls: input.urls,
       ...(input.query ? { query: input.query } : {}),
     })) as TavilyExtractResponse | { error: string };
 
-    // Handle error responses
     if ('error' in rawResult) {
+      const isNoResults = typeof rawResult.error === 'string' && rawResult.error.startsWith('No extracted results');
+
+      if (isNoResults) {
+        throw new ToolError({
+          errorCode: 'TOOL_NO_RESULTS',
+          message:
+            'No content could be extracted from the requested URLs. The pages may block automated access, require JavaScript rendering, or be behind authentication. Try alternative sources via web_search, or retry with extractDepth: "advanced" for complex pages.',
+          toolName: this.name,
+          toolCallId: _runManager?.runId ?? 'unknown',
+        });
+      }
+
       throw new Error(String(rawResult.error));
     }
 
-    // Extract and transform only the results array
     return rawResult.results.map((result) => ({
       url: result.url,
       content: result.raw_content,
@@ -61,13 +82,5 @@ class WebBrowserTool extends StructuredTool {
   }
 }
 
-export const createWebBrowserTool = ({ tavilyApiKey }: CreateWebBrowserToolOptions): WebBrowserTool => {
-  const tavilyTool = new TavilyExtract({
-    extractDepth: 'basic',
-    includeImages: false,
-    format: 'markdown',
-    tavilyApiKey,
-  });
-
-  return new WebBrowserTool(tavilyTool);
-};
+export const createWebBrowserTool = ({ tavilyApiKey }: CreateWebBrowserToolOptions): WebBrowserTool =>
+  new WebBrowserTool(tavilyApiKey);

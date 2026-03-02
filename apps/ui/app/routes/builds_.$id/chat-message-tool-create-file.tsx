@@ -3,18 +3,26 @@ import type { ToolInvocation } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import { CollapsibleFileOperation } from '#components/chat/chat-tool-file-operation.js';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
+import { ChatMessagePlanCard } from '#routes/builds_.$id/chat-message-plan-card.js';
+import { useFeature } from '#flags/use-feature.js';
 
 export function ChatMessageToolCreateFile({
   part,
 }: {
   readonly part: ToolInvocation<typeof toolName.createFile>;
 }): React.JSX.Element {
+  const planModeEnabled = useFeature('planMode');
+
   switch (part.state) {
     case 'input-streaming':
     case 'input-available': {
       const { input } = part;
       const targetFile = input?.targetFile ?? '';
       const content = input?.content ?? '';
+
+      if (planModeEnabled && targetFile.endsWith('.plan.md')) {
+        return <ChatMessagePlanCard targetFile={targetFile} content={content} status="loading" />;
+      }
 
       return <CollapsibleFileOperation targetFile={targetFile} toolStatus={part.state} content={content} />;
     }
@@ -23,6 +31,10 @@ export function ChatMessageToolCreateFile({
       const { input, output } = part;
       const { targetFile, content } = input;
       const { diffStats } = output;
+
+      if (planModeEnabled && targetFile.endsWith('.plan.md')) {
+        return <ChatMessagePlanCard targetFile={targetFile} content={content} status="ready" />;
+      }
 
       return (
         <CollapsibleFileOperation

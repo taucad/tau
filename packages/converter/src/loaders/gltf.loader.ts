@@ -17,10 +17,7 @@ type GltfLoaderOptions = {
  * Loader for GLTF/GLB files using gltf-transform.
  */
 export class GltfLoader extends BaseLoader<Uint8Array<ArrayBuffer>, GltfLoaderOptions> {
-  protected async parseAsync(
-    files: FileInput[],
-    options: GltfLoaderOptions,
-  ): Promise<Uint8Array<ArrayBuffer>> {
+  protected async parseAsync(files: FileInput[], options: GltfLoaderOptions): Promise<Uint8Array<ArrayBuffer>> {
     const io = new NodeIO().registerExtensions(allExtensions).registerDependencies({
       // eslint-disable-next-line @typescript-eslint/naming-convention -- External library property names
       'draco3d.decoder': await draco3d.createDecoderModule({

@@ -1,9 +1,11 @@
 import { memo } from 'react';
 import { ChevronDown, Paperclip, CircuitBoard, Wrench } from 'lucide-react';
 import type { ToolSelection } from '@taucad/chat';
+import type { ChatMode } from '@taucad/chat/constants';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
+import { ChatModeSelector } from '#components/chat/chat-mode-selector.js';
 import { Button } from '#components/ui/button.js';
 import { Textarea } from '#components/ui/textarea.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
@@ -14,7 +16,9 @@ import { ChatTextareaContextMenu } from '#components/chat/chat-textarea-context-
 import { ChatTextareaDesktopImages } from '#components/chat/chat-textarea-desktop-images.js';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import { focusTrapAttribute } from '#components/chat/chat-textarea-types.js';
+import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import type { useModels } from '#hooks/use-models.js';
+import { useFeature } from '#flags/use-feature.js';
 
 type ChatTextareaDesktopProperties = {
   readonly className?: string;
@@ -194,6 +198,8 @@ export const ChatTextareaDesktop = memo(function ({
 
       {/* Main input controls */}
       <div className="absolute bottom-2 left-2 flex flex-row items-center gap-1 text-muted-foreground">
+        {/* Mode selector (behind feature flag) */}
+        <ChatTextareaModeControl />
         {/* Model selector */}
         <Tooltip>
           <ChatModelSelector
@@ -354,3 +360,15 @@ export const ChatTextareaDesktop = memo(function ({
 });
 
 ChatTextareaDesktop.displayName = 'ChatTextareaDesktop';
+
+function ChatTextareaModeControl(): React.JSX.Element | undefined {
+  const planModeEnabled = useFeature('planMode');
+  const mode = useChatSelector((state) => (state.draftMode as ChatMode) ?? 'agent');
+  const { setDraftMode } = useChatActions();
+
+  if (!planModeEnabled) {
+    return undefined;
+  }
+
+  return <ChatModeSelector mode={mode} onModeChange={setDraftMode} />;
+}

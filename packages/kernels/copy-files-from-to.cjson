@@ -5,7 +5,7 @@
       "from": "./node_modules/esbuild-wasm/esbuild.wasm",
       "to": "src/bundler/wasm/esbuild.wasm"
     },
-    // OpenCascade WASM files for Replicad kernel
+    // OpenCascade WASM files for Replicad kernel (single = fast/compact, with_exceptions = OC error decoding)
     {
       "from": "./node_modules/replicad-opencascadejs/src/replicad_single.wasm",
       "to": "src/kernels/replicad/wasm/replicad_single.wasm"
@@ -32,6 +32,16 @@
     {
       "from": "./node_modules/geist/dist/fonts/geist-sans/Geist-Regular.ttf",
       "to": "src/kernels/replicad/fonts/Geist-Regular.ttf"
+    },
+    // Replicad source map for library stack frame resolution
+    {
+      "from": "./node_modules/replicad/dist/replicad.js.map",
+      "to": "src/kernels/replicad/sourcemaps/replicad.js.map"
+    },
+    // Manifold WASM file for Manifold kernel
+    {
+      "from": "./node_modules/manifold-3d/manifold.wasm",
+      "to": "src/kernels/manifold/wasm/manifold.wasm"
     }
   ],
   // Always overwrite files

@@ -83,6 +83,7 @@ export class ModelService implements OnModuleInit {
         (provider.inputTokensIncludesCacheReadTokens ? usage.cacheReadTokens : 0) -
         (provider.inputTokensIncludesCacheWriteTokens ? usage.cacheWriteTokens : 0),
       outputTokens: usage.outputTokens,
+      reasoningTokens: usage.reasoningTokens,
       cacheReadTokens: usage.cacheReadTokens,
       cacheWriteTokens: usage.cacheWriteTokens,
     };

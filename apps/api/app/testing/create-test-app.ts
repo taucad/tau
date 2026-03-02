@@ -17,7 +17,7 @@ import { ModelService } from '#api/models/model.service.js';
 import { ProviderService } from '#api/providers/provider.service.js';
 import { ToolService } from '#api/tools/tool.service.js';
 import { FileEditService } from '#api/file-edit/file-edit.service.js';
-import { AnalysisService } from '#api/analysis/analysis.service.js';
+import { GeometryAnalysisService } from '#api/analysis/geometry-analysis.service.js';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { HeadlessChatRpcService } from '#testing/headless-chat-rpc.service.js';
 import { createHeadlessRpcFileSystem } from '#testing/headless-rpc-filesystem.js';
@@ -68,7 +68,7 @@ const mockAuthInstance = {
     ProviderService,
     ToolService,
     FileEditService,
-    AnalysisService,
+    GeometryAnalysisService,
     CheckpointerService,
     { provide: authInstanceKey, useValue: mockAuthInstance },
     { provide: APP_PIPE, useClass: ZodValidationPipe },

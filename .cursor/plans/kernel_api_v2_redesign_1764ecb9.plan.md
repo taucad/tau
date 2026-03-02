@@ -33,7 +33,7 @@ todos:
     content: Migrate apps/ui to new createKernelClient API with plugin factories and .on() events
     status: in_progress
   - id: update-architecture-doc
-    content: Update docs/kernel-architecture-policy.md with v2 entity model, layered architecture, and API tiers
+    content: Update docs/policy/kernel-architecture-policy.md with v2 entity model, layered architecture, and API tiers
     status: completed
   - id: jsdoc-eslint
     content: Install eslint-plugin-jsdoc, configure rules for packages/, add comprehensive JSDoc to all public APIs
@@ -689,7 +689,7 @@ Distilled from Clerk JS codebase analysis:
 - Plugin factories return plain objects, not class instances
 - No optional interface methods -- all required, framework builds higher-level ops internally
 
-### `[docs/kernel-architecture-policy.md](docs/kernel-architecture-policy.md)` (update)
+### `[docs/policy/kernel-architecture-policy.md](docs/policy/kernel-architecture-policy.md)` (update)
 
 Update entity model for v2:
 

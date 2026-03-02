@@ -13,9 +13,9 @@ This guide documents the complete process for adding new tools that can be used 
 
 ## Architecture Overview
 
-Tools follow a client-server pattern with LangGraph interrupt-resume:
-1. **Backend (API)**: Defines tool schema and uses `interrupt()` to pause execution
-2. **Frontend (UI)**: Handles the tool call, executes the actual logic, and returns results
+Tools follow a client-server RPC pattern via Socket.IO:
+1. **Backend (API)**: Defines tool schema and uses `chatRpcService.sendRpcRequest()` to execute operations on the client via Socket.IO RPC
+2. **Frontend (UI)**: RPC handlers execute the actual logic (filesystem, kernel, graphics) and return results via Socket.IO
 3. **Schemas (libs/chat)**: Shared type definitions between frontend and backend
 
 ## Step-by-Step Process
@@ -91,23 +91,42 @@ const toolPartSchemas = [
 Create `apps/api/app/api/tools/tools/tool-my-tool.ts`:
 
 ```typescript
+import type { ToolRuntime } from '@langchain/core/tools';
 import { tool } from '@langchain/core/tools';
-import { z } from 'zod';
-import { interrupt } from '@langchain/langgraph';
 import { myToolInputSchema } from '@taucad/chat';
-import type { MyToolOutput } from '@taucad/chat';
-import { toolName } from '@taucad/chat/constants';
-
-const myToolJsonSchema = z.toJSONSchema(myToolInputSchema);
+import { assertRpcSuccess } from '@taucad/chat/utils';
+import type { ChatTool, MyToolInput, MyToolOutput } from '@taucad/chat';
+import { rpcName, toolName } from '@taucad/chat/constants';
+import type { ChatRpcConfigurable } from '#api/tools/tool.types.js';
 
 export const myToolDefinition = {
   name: toolName.myTool,
   description: `Detailed description for the LLM explaining when and how to use this tool.`,
-  schema: myToolJsonSchema,
+  schema: myToolInputSchema,
 } as const;
 
-export const myTool = tool((args) => {
-  const result = interrupt<unknown, MyToolOutput>(args);
+export const myTool: ChatTool<
+  typeof myToolInputSchema,
+  MyToolInput,
+  MyToolOutput,
+  typeof toolName.myTool
+> = tool(async (args, runtime: ToolRuntime) => {
+  const { chatRpcService, thread_id: chatId } = runtime.configurable as ChatRpcConfigurable;
+  const { toolCallId } = runtime;
+
+  const result = await chatRpcService.sendRpcRequest({
+    chatId,
+    toolCallId,
+    rpcName: rpcName.myRpc,
+    args,
+  });
+
+  assertRpcSuccess(result, {
+    toolName: toolName.myTool,
+    toolCallId,
+    clientErrorMessage: 'Failed to execute my tool',
+  });
+
   return result;
 }, myToolDefinition);
 ```
@@ -141,36 +160,17 @@ const cadTools = [
 ].filter((tool) => tool !== undefined);
 ```
 
-### Step 9: Implement UI Handler
+### Step 9: Implement RPC Handler (if new RPC needed)
 
-Update `apps/ui/app/hooks/use-chat-tools.tsx`:
+If your tool needs a new RPC (e.g., for a new client-side operation), add the RPC handler:
 
-```typescript
-import type { MyToolInput, MyToolOutput } from '@taucad/chat';
+1. Add RPC name to `libs/chat/src/constants/rpc.constants.ts`
+2. Add RPC schema to `libs/chat/src/schemas/rpc.schema.ts` using `defineRpc()`
+3. Create handler at `libs/chat/src/rpc/handlers/handle-my-rpc.ts`
+4. Register in `libs/chat/src/rpc/rpc-dispatcher.ts`
+5. Add browser implementation in `apps/ui/app/hooks/rpc-handlers.ts`
 
-// Inside createOnToolCall:
-const handleMyTool = async (toolCall: { toolCallId: string; input: unknown }): Promise<void> => {
-  const input = toolCall.input as MyToolInput;
-  
-  try {
-    // Implement tool logic here
-    const output: MyToolOutput = { result: 'done', success: true };
-    void addToolOutput({ tool: toolName.myTool, toolCallId: toolCall.toolCallId, output });
-  } catch (error) {
-    const output: MyToolOutput = { 
-      result: `Error: ${getErrorMessage(error)}`, 
-      success: false 
-    };
-    void addToolOutput({ tool: toolName.myTool, toolCallId: toolCall.toolCallId, output });
-  }
-};
-
-// In switch statement:
-case toolName.myTool: {
-  await handleMyTool(toolCall);
-  break;
-}
-```
+Most tools reuse existing RPCs (e.g., `readFile`, `createFile`, `getKernelResult`, `captureObservations`).
 
 ### Step 10: Create UI Component
 

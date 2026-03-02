@@ -1,4 +1,3 @@
-/* eslint-disable no-barrel-files/no-barrel-files -- package entry point. */
 export * from '#constants/api.constants.js';
 export * from '#constants/cad.constants.js';
 export * from '#constants/code.constants.js';

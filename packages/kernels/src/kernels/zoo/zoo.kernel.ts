@@ -139,9 +139,17 @@ async function getKclUtilsWithEngine(context: ZooContext): Promise<KclUtils> {
 // Options schema
 // =============================================================================
 
+/**
+ * Zoo (KCL) kernel options.
+ */
+export type ZooOptions = {
+  /** WebSocket base URL for the Zoo engine connection. Defaults to 'wss://api.zoo.dev'. */
+  baseUrl?: string;
+};
+
 const zooOptionsSchema = z.object({
   baseUrl: z.string().default('wss://api.zoo.dev'),
-});
+}) satisfies z.ZodType<Required<ZooOptions>>;
 
 // =============================================================================
 // Kernel module definition

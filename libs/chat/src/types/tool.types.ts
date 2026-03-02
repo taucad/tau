@@ -17,7 +17,7 @@ import type { DeleteFileInput, DeleteFileOutput } from '#schemas/tools/delete-fi
 import type { GrepInput, GrepOutput } from '#schemas/tools/grep.tool.schema.js';
 import type { GlobSearchInput, GlobSearchOutput } from '#schemas/tools/glob-search.tool.schema.js';
 import type { GetKernelResultInput, GetKernelResultOutput } from '#schemas/tools/get-kernel-result.tool.schema.js';
-import type { ReasoningInput, ReasoningOutput } from '#schemas/tools/reasoning.tool.schema.js';
+import type { ScreenshotInput, ScreenshotOutput } from '#schemas/tools/screenshot.tool.schema.js';
 import type {
   TransferToCadExpertInput,
   TransferToCadExpertOutput,
@@ -119,6 +119,18 @@ export type ToolUserInterruptedError = {
 };
 
 /**
+ * Structured error for when a tool completes successfully but returns no results.
+ * Common with web extraction (blocked pages, JS-rendered content, auth-gated sites).
+ * Treated as a recoverable, expected case rather than a failure.
+ */
+export type ToolNoResultsError = {
+  errorCode: 'TOOL_NO_RESULTS';
+  message: string;
+  toolName: string;
+  toolCallId: string;
+};
+
+/**
  * All possible structured tool errors including validation errors.
  * These are returned to the LLM so it can reason about errors.
  */
@@ -128,7 +140,8 @@ export type ToolExecutionError =
   | ToolNoConnectionError
   | ToolValidationError
   | ToolGenericExecutionError
-  | ToolUserInterruptedError;
+  | ToolUserInterruptedError
+  | ToolNoResultsError;
 
 // =============================================================================
 // Tool Name Types
@@ -163,7 +176,7 @@ export type MyTools = InferUITools<{
   [toolName.grep]: AiTool<GrepInput, GrepOutput>;
   [toolName.globSearch]: AiTool<GlobSearchInput, GlobSearchOutput>;
   [toolName.getKernelResult]: AiTool<GetKernelResultInput, GetKernelResultOutput>;
-  [toolName.reasoning]: AiTool<ReasoningInput, ReasoningOutput>;
+  [toolName.screenshot]: AiTool<ScreenshotInput, ScreenshotOutput>;
   [toolName.transferToCadExpert]: AiTool<TransferToCadExpertInput, TransferToCadExpertOutput>;
   [toolName.transferToResearchExpert]: AiTool<TransferToResearchExpertInput, TransferToResearchExpertOutput>;
   [toolName.transferBackToSupervisor]: AiTool<TransferBackToSupervisorInput, TransferBackToSupervisorOutput>;

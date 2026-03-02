@@ -8,6 +8,7 @@
 
 import { setup, assign, fromPromise } from 'xstate';
 import type { Chat, MyUIMessage } from '@taucad/chat';
+import type { ChatMode } from '@taucad/chat/constants';
 
 // Context for draft state
 export type DraftMachineContext = {
@@ -16,6 +17,7 @@ export type DraftMachineContext = {
   draftText: string;
   draftImages: string[];
   draftToolChoice: string | string[];
+  draftMode: ChatMode;
   // Edit draft state
   messageEdits: Record<string, MyUIMessage>;
   activeEditMessageId?: string;
@@ -78,6 +80,7 @@ type DraftMachineEvents =
   | { type: 'addDraftImage'; image: string }
   | { type: 'removeDraftImage'; index: number }
   | { type: 'setDraftToolChoice'; toolChoice: string | string[] }
+  | { type: 'setDraftMode'; mode: ChatMode }
   | { type: 'clearDraft' }
   | { type: 'loadDraftFromMessage'; draft: MyUIMessage }
   | { type: 'setEditDraftText'; text: string }
@@ -133,6 +136,7 @@ export const draftMachine = setup({
       draftText: '',
       draftImages: [],
       draftToolChoice: 'auto',
+      draftMode: 'agent' as ChatMode,
       messageEdits: {},
       activeEditMessageId: undefined,
       editDraftText: '',
@@ -193,6 +197,11 @@ export const draftMachine = setup({
         setDraftToolChoice: {
           actions: assign({
             draftToolChoice: ({ event }) => event.toolChoice,
+          }),
+        },
+        setDraftMode: {
+          actions: assign({
+            draftMode: ({ event }) => event.mode,
           }),
         },
         clearDraft: {

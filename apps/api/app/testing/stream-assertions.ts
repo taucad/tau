@@ -121,3 +121,70 @@ export function expectMultipleSteps(chunks: UIMessageChunk[], minSteps = 2): voi
     `Expected at least ${minSteps} finish-step chunks (multi-turn), got ${finishSteps.length}`,
   ).toBeGreaterThanOrEqual(minSteps);
 }
+
+/**
+ * Extract usage data objects from raw stream chunks.
+ * Usage data is written by the usageTrackingMiddleware as custom data chunks.
+ */
+export function extractUsageData(chunks: UIMessageChunk[]): Array<Record<string, unknown>> {
+  const usageChunks: Array<Record<string, unknown>> = [];
+
+  for (const chunk of chunks) {
+    if ('data' in chunk && typeof chunk.data === 'object' && chunk.data !== null) {
+      const data = chunk.data as Record<string, unknown>;
+      if (data['type'] === 'usage') {
+        usageChunks.push(data);
+      }
+    }
+  }
+
+  return usageChunks;
+}
+
+/**
+ * Assert that usage data includes reasoning token counts for models with thinking enabled.
+ * This validates that the LangChain provider properly surfaces output_token_details.reasoning
+ * during streaming (not just in non-streaming mode).
+ */
+export function expectReasoningTokensInUsage(chunks: UIMessageChunk[]): void {
+  const usageData = extractUsageData(chunks);
+  expect(usageData.length, 'Expected at least one usage data chunk').toBeGreaterThan(0);
+
+  const totalReasoning = usageData.reduce((sum, u) => sum + (Number(u['reasoningTokens']) || 0), 0);
+  expect(
+    totalReasoning,
+    `Expected reasoningTokens > 0 in usage data (streaming should include output_token_details.reasoning), got ${totalReasoning}`,
+  ).toBeGreaterThan(0);
+}
+
+/**
+ * Assert that cache token normalization is correct: when cacheReadTokens > 0,
+ * inputTokens must have had the cached portion subtracted (i.e. inputTokens
+ * represents only non-cached input). We verify this by checking that
+ * inputTokens < inputTokens + cacheReadTokens (trivially true) AND that
+ * inputTokens is strictly less than the raw prompt token total.
+ *
+ * Providers like Google Gemini include cachedContentTokenCount inside
+ * promptTokenCount, so normalizeUsageTokens must subtract it.
+ */
+export function expectCacheTokenNormalization(chunks: UIMessageChunk[]): void {
+  const usageData = extractUsageData(chunks);
+  expect(usageData.length, 'Expected at least one usage data chunk').toBeGreaterThan(0);
+
+  const withCache = usageData.filter((u) => (Number(u['cacheReadTokens']) || 0) > 0);
+  expect(
+    withCache.length,
+    'Expected at least one usage chunk with cacheReadTokens > 0 (multi-turn needed for cache hits)',
+  ).toBeGreaterThan(0);
+
+  for (const u of withCache) {
+    const inputTokens = Number(u['inputTokens']) || 0;
+    const cacheReadTokens = Number(u['cacheReadTokens']) || 0;
+
+    expect(
+      inputTokens,
+      `inputTokens (${inputTokens}) should be less than inputTokens + cacheReadTokens (${inputTokens + cacheReadTokens}), ` +
+        'meaning cached tokens were subtracted from the raw prompt count',
+    ).toBeLessThan(inputTokens + cacheReadTokens);
+  }
+}

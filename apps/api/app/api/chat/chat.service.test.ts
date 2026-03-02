@@ -45,7 +45,6 @@ describe('ChatService', () => {
   const mockToolService = {
     getTools: vi.fn(() => ({
       tools: {
-        reasoning: { name: 'reasoning' },
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Tool name uses snake_case
         test_model: { name: 'test_model' },
       },
@@ -75,7 +74,7 @@ describe('ChatService', () => {
   describe('createAgent', () => {
     it('should get checkpointer from CheckpointerService', async () => {
       // Act
-      await service.createAgent('model-1', 'auto', 'openscad');
+      await service.createAgent({ modelId: 'model-1', kernel: 'openscad', tools: { choice: 'auto' } });
 
       // Assert
       expect(mockCheckpointerService.getCheckpointer).toHaveBeenCalledTimes(1);
@@ -83,9 +82,9 @@ describe('ChatService', () => {
 
     it('should reuse the same checkpointer across multiple agent creations', async () => {
       // Act - create multiple agents (simulating multiple chat requests)
-      await service.createAgent('model-1', 'auto', 'openscad');
-      await service.createAgent('model-2', 'auto', 'replicad');
-      await service.createAgent('model-3', 'auto', 'jscad');
+      await service.createAgent({ modelId: 'model-1', kernel: 'openscad', tools: { choice: 'auto' } });
+      await service.createAgent({ modelId: 'model-2', kernel: 'replicad', tools: { choice: 'auto' } });
+      await service.createAgent({ modelId: 'model-3', kernel: 'jscad', tools: { choice: 'auto' } });
 
       // Assert - checkpointer retrieved each time (but same instance from service)
       expect(mockCheckpointerService.getCheckpointer).toHaveBeenCalledTimes(3);
@@ -94,11 +93,11 @@ describe('ChatService', () => {
     it('should handle concurrent agent creation', async () => {
       // Act - simulate multiple concurrent chat requests
       await Promise.all([
-        service.createAgent('model-1', 'auto', 'openscad'),
-        service.createAgent('model-2', 'auto', 'replicad'),
-        service.createAgent('model-3', 'auto', 'jscad'),
-        service.createAgent('model-4', 'auto', 'openscad'),
-        service.createAgent('model-5', 'auto', 'replicad'),
+        service.createAgent({ modelId: 'model-1', kernel: 'openscad', tools: { choice: 'auto' } }),
+        service.createAgent({ modelId: 'model-2', kernel: 'replicad', tools: { choice: 'auto' } }),
+        service.createAgent({ modelId: 'model-3', kernel: 'jscad', tools: { choice: 'auto' } }),
+        service.createAgent({ modelId: 'model-4', kernel: 'openscad', tools: { choice: 'auto' } }),
+        service.createAgent({ modelId: 'model-5', kernel: 'replicad', tools: { choice: 'auto' } }),
       ]);
 
       // Assert
@@ -107,7 +106,7 @@ describe('ChatService', () => {
 
     it('should build model with provided modelId', async () => {
       // Act
-      await service.createAgent('claude-3-opus', 'auto', 'openscad');
+      await service.createAgent({ modelId: 'claude-3-opus', kernel: 'openscad', tools: { choice: 'auto' } });
 
       // Assert
       expect(mockModelService.buildModel).toHaveBeenCalledWith('claude-3-opus');
@@ -115,7 +114,7 @@ describe('ChatService', () => {
 
     it('should get tools with provided tool selection', async () => {
       // Act
-      await service.createAgent('model-1', 'auto', 'openscad');
+      await service.createAgent({ modelId: 'model-1', kernel: 'openscad', tools: { choice: 'auto' } });
 
       // Assert
       expect(mockToolService.getTools).toHaveBeenCalledWith('auto');

@@ -153,7 +153,7 @@ export type KernelRegistration = {
  * ```ts
  * const modules: KernelModules = [
  *   { id: 'openscad', extensions: ['scad'], kernelModuleUrl: openscadKernelModuleUrl },
- *   { id: 'replicad', extensions: ['ts', 'js'], kernelModuleUrl: replicadKernelModuleUrl, options: { withExceptions: true } },
+ *   { id: 'replicad', extensions: ['ts', 'js'], kernelModuleUrl: replicadKernelModuleUrl, options: { withBrepEdges: true } },
  * ];
  * ```
  *

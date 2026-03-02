@@ -3,5 +3,13 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "libs/tau-examples",
   "projectType": "library",
-  "tags": ["scope:shared", "type:examples"]
+  "tags": ["scope:shared", "type:examples"],
+  "targets": {
+    "generate-manifest": {
+      "command": "tsx scripts/generate-manifest.mts",
+      "options": {
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
 }

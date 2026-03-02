@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Clock, Unplug, WifiOff, ChevronRight, TriangleAlert, CircleStop } from 'lucide-react';
+import { Clock, Unplug, WifiOff, ChevronRight, TriangleAlert, CircleStop, SearchX } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ToolExecutionError } from '@taucad/chat';
 import { getToolErrorTitle, getToolErrorDescription, parseToolErrorText } from '@taucad/chat/utils';
@@ -32,6 +32,8 @@ const errorIcons = {
   TOOL_EXECUTION_ERROR: TriangleAlert,
   // eslint-disable-next-line @typescript-eslint/naming-convention -- error code
   USER_INTERRUPTED: CircleStop,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- error code
+  TOOL_NO_RESULTS: SearchX,
 } as const;
 
 /**
@@ -94,9 +96,8 @@ export function StructuredToolError({ error, className }: StructuredToolErrorPro
     (error.errorCode === 'TOOL_INPUT_VALIDATION_FAILED' || error.errorCode === 'TOOL_OUTPUT_VALIDATION_FAILED') &&
     (error.validationErrors.length > 0 || error.rawOutput !== undefined);
 
-  // User interruptions are not errors — use muted styling instead of destructive red
-  const isInterrupted = error.errorCode === 'USER_INTERRUPTED';
-  const accentColor = isInterrupted ? 'text-muted-foreground' : 'text-destructive';
+  const isMuted = error.errorCode === 'USER_INTERRUPTED' || error.errorCode === 'TOOL_NO_RESULTS';
+  const accentColor = isMuted ? 'text-muted-foreground' : 'text-destructive';
 
   if (!hasDetails) {
     // Simple non-expandable error display - single line layout

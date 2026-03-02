@@ -13,7 +13,7 @@ import { ChatService } from '#api/chat/chat.service.js';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 import { ModelService } from '#api/models/model.service.js';
 import { FileEditService } from '#api/file-edit/file-edit.service.js';
-import { AnalysisService } from '#api/analysis/analysis.service.js';
+import { GeometryAnalysisService } from '#api/analysis/geometry-analysis.service.js';
 import { AuthGuard } from '#auth/auth.guard.js';
 
 // Mock the @ai-sdk/langchain module
@@ -158,7 +158,7 @@ describe('ChatController', () => {
 
     const mockFileEditService = {};
 
-    const mockAnalysisService = {};
+    const mockGeometryAnalysisService = {};
 
     const moduleRef = await Test.createTestingModule({
       controllers: [ChatController],
@@ -180,8 +180,8 @@ describe('ChatController', () => {
           useValue: mockFileEditService,
         },
         {
-          provide: AnalysisService,
-          useValue: mockAnalysisService,
+          provide: GeometryAnalysisService,
+          useValue: mockGeometryAnalysisService,
         },
         Reflector,
       ],
@@ -213,7 +213,12 @@ describe('ChatController', () => {
       await controller.createChat(body, mockResponse);
 
       // Assert
-      expect(chatService.createAgent).toHaveBeenCalledWith('test-model', 'auto', 'openscad');
+      expect(chatService.createAgent).toHaveBeenCalledWith({
+        modelId: 'test-model',
+        kernel: 'openscad',
+        mode: 'agent',
+        tools: { choice: 'auto', testingEnabled: true },
+      });
       expect(mockAgent.graph.stream).toHaveBeenCalledTimes(1);
 
       // Verify stream was called with messages and correct config
@@ -248,7 +253,12 @@ describe('ChatController', () => {
       await controller.createChat(body, mockResponse);
 
       // Assert
-      expect(chatService.createAgent).toHaveBeenCalledWith('test-model', 'none', 'openscad');
+      expect(chatService.createAgent).toHaveBeenCalledWith({
+        modelId: 'test-model',
+        kernel: 'openscad',
+        mode: 'agent',
+        tools: { choice: 'none', testingEnabled: true },
+      });
     });
   });
 

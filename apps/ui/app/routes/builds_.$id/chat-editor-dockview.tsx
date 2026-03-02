@@ -13,7 +13,12 @@ import type {
   IWatermarkPanelProps,
 } from 'dockview-react';
 import type { FileEntry } from '@taucad/types';
-import { languageFromExtension, tauFileDragMime } from '@taucad/types/constants';
+import {
+  languageFromExtension,
+  tauFileDragMime,
+  tauEditorPanelDragMime,
+  tauViewerPanelDragMime,
+} from '@taucad/types/constants';
 import { CodeEditor } from '#components/code/code-editor.client.js';
 import { FileSelector } from '#components/files/file-selector.js';
 import { Loader } from '#components/ui/loader.js';
@@ -37,6 +42,7 @@ import { useViewContext } from '#routes/builds_.$id/chat-interface-view-context.
 import { useMonacoServices } from '#hooks/use-monaco-model-service.js';
 import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
 import { Button } from '#components/ui/button.js';
+
 
 /**
  * Create a root-level Monaco URI for a file path.
@@ -464,14 +470,40 @@ export const EditorDockview = memo(function (): React.JSX.Element {
     };
   }, [api, editorRef]);
 
-  // Accept external file drags
+  // Tag outgoing tab drags with the editor MIME so the viewer can identify them
+  useEffect(() => {
+    if (!api) {
+      return;
+    }
+
+    const disposable = api.onWillDragPanel((event) => {
+      const filePath = (event.panel.params as EditorPanelParameters | undefined)?.filePath;
+      if (filePath) {
+        event.nativeEvent.dataTransfer?.setData(tauEditorPanelDragMime, JSON.stringify({ filePath }));
+      }
+    });
+
+    return () => {
+      disposable.dispose();
+    };
+  }, [api]);
+
+  // Accept external file drags and cross-dockview panel drags
   useEffect(() => {
     if (!api) {
       return;
     }
 
     const disposable = api.onUnhandledDragOverEvent((event) => {
-      if (event.nativeEvent.dataTransfer?.types.includes(tauFileDragMime)) {
+      const types = event.nativeEvent.dataTransfer?.types;
+
+      if (types?.includes(tauFileDragMime)) {
+        event.accept();
+        return;
+      }
+
+      const panelData = typeof event.getData === 'function' ? event.getData() : undefined;
+      if (panelData ?? types?.includes(tauViewerPanelDragMime)) {
         event.accept();
       }
     });
@@ -542,9 +574,25 @@ export const EditorDockview = memo(function (): React.JSX.Element {
     [editorLayout, editorRef, mainEntryFile],
   );
 
-  // Handle external file drops
+  // Handle external file drops and cross-dockview viewer panel drops
   const onDidDrop = useCallback(
     (event: DockviewDidDropEvent) => {
+      // Handle viewer panel drag → open its entry file in the editor
+      const viewerData = event.nativeEvent.dataTransfer?.getData(tauViewerPanelDragMime);
+      if (viewerData) {
+        try {
+          const { entryFile } = JSON.parse(viewerData) as { entryFile?: string };
+          if (entryFile) {
+            editorRef.send({ type: 'openFile', path: entryFile, source: 'user' });
+          }
+        } catch {
+          // Ignore corrupt data
+        }
+
+        return;
+      }
+
+      // Handle file tree drags
       const data = event.nativeEvent.dataTransfer?.getData(tauFileDragMime);
       if (!data) {
         return;
@@ -558,7 +606,6 @@ export const EditorDockview = memo(function (): React.JSX.Element {
       }
 
       for (const filePath of paths) {
-        // Open file in editor machine (this triggers the fileOpened event)
         editorRef.send({ type: 'openFile', path: filePath, source: 'user' });
       }
     },

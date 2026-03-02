@@ -55,7 +55,7 @@ jobs:
       - name: Deploy UI PR app to Fly.io
         id: deploy
         continue-on-error: true
-        uses: superfly/fly-pr-review-apps@1.5.0
+        uses: superfly/fly-pr-review-apps@1.6.0
         with:
           name: ${{ env.UI_APP_NAME }}
           region: syd
@@ -132,7 +132,7 @@ jobs:
       - name: Deploy API PR app to Fly.io
         id: deploy
         continue-on-error: true
-        uses: superfly/fly-pr-review-apps@1.5.0
+        uses: superfly/fly-pr-review-apps@1.6.0
         with:
           name: ${{ env.API_APP_NAME }}
           region: syd

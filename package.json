@@ -244,7 +244,7 @@
     "eslint": "catalog:",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-no-barrel-files": "^1.2.2",
-    "eslint-plugin-prettier": "5.5.3",
+    "eslint-plugin-prettier": "5.5.5",
     "happy-dom": "^16.8.1",
     "jsdom": "~26.0.0",
     "ky": "^1.8.2",

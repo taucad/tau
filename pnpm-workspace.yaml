@@ -14,7 +14,7 @@ catalog:
   '@nx/devkit': 21.3.10
   '@nx/eslint': 21.3.10
   '@nx/eslint-plugin': 21.3.10
-  '@nx/js': 21.3.10
+  '@nx/js': 22.5.4
   '@nx/nest': 21.3.10
   '@nx/node': 21.3.10
   '@nx/playwright': 21.3.10

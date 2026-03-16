@@ -19,7 +19,7 @@ catalog:
   '@nx/node': 21.3.10
   '@nx/playwright': 21.3.10
   '@nx/react': 21.3.10
-  '@nx/vite': 21.3.10
+  '@nx/vite': 22.5.4
   '@nx/web': 21.3.10
   '@nx/webpack': 21.3.10
   '@react-router/dev': ^7.9.6

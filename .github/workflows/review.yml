@@ -44,7 +44,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Post initial UI status
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: fly-review-ui
           message: |
@@ -64,7 +64,7 @@ jobs:
 
       - name: Update UI status - success
         if: steps.deploy.outcome == 'success'
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: fly-review-ui
           message: |
@@ -74,7 +74,7 @@ jobs:
 
       - name: Update UI status - failure
         if: steps.deploy.outcome == 'failure'
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: fly-review-ui
           message: |
@@ -84,7 +84,7 @@ jobs:
 
       - name: Update UI status - cancelled
         if: steps.deploy.outcome == 'cancelled'
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: fly-review-ui
           message: |
@@ -121,7 +121,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Post initial API status
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: fly-review-api
           message: |
@@ -141,7 +141,7 @@ jobs:
 
       - name: Update API status - success
         if: steps.deploy.outcome == 'success'
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: fly-review-api
           message: |
@@ -151,7 +151,7 @@ jobs:
 
       - name: Update API status - failure
         if: steps.deploy.outcome == 'failure'
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: fly-review-api
           message: |
@@ -161,7 +161,7 @@ jobs:
 
       - name: Update API status - cancelled
         if: steps.deploy.outcome == 'cancelled'
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: fly-review-api
           message: |

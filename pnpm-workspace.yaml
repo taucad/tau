@@ -21,7 +21,7 @@ catalog:
   '@nx/react': 21.3.10
   '@nx/vite': 21.3.10
   '@nx/web': 21.3.10
-  '@nx/webpack': 21.3.10
+  '@nx/webpack': 22.5.4
   '@react-router/dev': ^7.9.6
   '@react-router/fs-routes': ^7.9.6
   '@react-router/node': ^7.9.6

@@ -1,5 +1,5 @@
 import { Link, NavLink, useNavigate } from 'react-router';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { KernelSelector } from '#components/chat/kernel-selector.js';
@@ -29,6 +29,66 @@ import { Loader } from '#components/ui/loader.js';
 import type { Handle } from '#types/matches.types.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useKernel } from '#hooks/use-kernel.js';
+import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
+import { useChatContext } from '#hooks/use-chat.js';
+import { useChats } from '#hooks/use-chats.js';
+
+const homepageChatResourceId = 'homepage_main_chat_resource';
+const homepageChatId = 'chat_homepage_main';
+
+function useHomepageChatSession(): { chatId: string | undefined; resourceId: string; isReady: boolean } {
+  const { createChat, getChat } = useChats(homepageChatResourceId);
+  const [isReady, setIsReady] = useState(false);
+  const createInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (isReady || createInFlightRef.current) {
+      return;
+    }
+
+    createInFlightRef.current = true;
+    const ensureHomepageChat = async (): Promise<void> => {
+      try {
+        const existingChat = await getChat(homepageChatId);
+        if (!existingChat) {
+          await createChat({
+            id: homepageChatId,
+            name: 'Homepage chat',
+            messages: [],
+          });
+        }
+        setIsReady(true);
+      } catch (error) {
+        console.error('Failed to initialize homepage chat session:', error);
+        toast.error('Failed to restore homepage chat draft');
+      } finally {
+        createInFlightRef.current = false;
+      }
+    };
+
+    void ensureHomepageChat();
+  }, [createChat, getChat, isReady]);
+
+  return {
+    chatId: isReady ? homepageChatId : undefined,
+    resourceId: homepageChatResourceId,
+    isReady,
+  };
+}
+
+function HomepageChatFlushOnCloseGuard(): React.JSX.Element {
+  const { persistenceActorRef, draftActorRef } = useChatContext();
+
+  useFlushOnClose(() => {
+    persistenceActorRef.send({ type: 'flushNow' });
+  });
+  useFlushOnClose(() => {
+    draftActorRef.send({ type: 'flushNow' });
+  });
+
+  // oxlint-disable-next-line react/jsx-no-useless-fragment -- headless hook-only component
+  return <></>;
+}
 
 export const handle: Handle = {
   enableOverflowY: true,
@@ -39,6 +99,7 @@ export default function ChatStart(): React.JSX.Element {
   const navigate = useNavigate();
   const { kernel, setKernel } = useKernel();
   const projectManager = useProjectManager();
+  const homepageChatSession = useHomepageChatSession();
 
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
     async ({ content, model, metadata, imageUrls }) => {
@@ -71,33 +132,45 @@ export default function ChatStart(): React.JSX.Element {
             </h1>
           </div>
 
-          <ChatProvider>
+          {homepageChatSession.chatId ? (
+            <ChatProvider chatId={homepageChatSession.chatId} resourceId={homepageChatSession.resourceId}>
+              <HomepageChatFlushOnCloseGuard />
+              <div className='space-y-4'>
+                <div className='flex justify-center'>
+                  <KernelSelector selectedKernel={kernel} onKernelChange={setKernel} />
+                </div>
+                <ChatTextarea
+                  enableContextActions={false}
+                  enableKernelSelector={false}
+                  className='pt-1'
+                  onSubmit={onSubmit}
+                />
+              </div>
+              <div className='mx-auto my-6 flex w-20 items-center justify-center'>
+                <Separator />
+                <div className='mx-4 text-sm font-light text-muted-foreground'>or</div>
+                <Separator />
+              </div>
+              <div className='flex justify-center'>
+                <NavLink to='/projects/new' tabIndex={-1}>
+                  {({ isPending }) => (
+                    <InteractiveHoverButton className='flex items-center gap-2 font-light [&_svg]:size-4 [&_svg]:stroke-1'>
+                      {isPending ? <Loader /> : 'Build from code'}
+                    </InteractiveHoverButton>
+                  )}
+                </NavLink>
+              </div>
+            </ChatProvider>
+          ) : (
             <div className='space-y-4'>
               <div className='flex justify-center'>
                 <KernelSelector selectedKernel={kernel} onKernelChange={setKernel} />
               </div>
-              <ChatTextarea
-                enableContextActions={false}
-                enableKernelSelector={false}
-                className='pt-1'
-                onSubmit={onSubmit}
-              />
+              <div className='flex justify-center py-6'>
+                <Loader />
+              </div>
             </div>
-            <div className='mx-auto my-6 flex w-20 items-center justify-center'>
-              <Separator />
-              <div className='mx-4 text-sm font-light text-muted-foreground'>or</div>
-              <Separator />
-            </div>
-            <div className='flex justify-center'>
-              <NavLink to='/projects/new' tabIndex={-1}>
-                {({ isPending }) => (
-                  <InteractiveHoverButton className='flex items-center gap-2 font-light [&_svg]:size-4 [&_svg]:stroke-1'>
-                    {isPending ? <Loader /> : 'Build from code'}
-                  </InteractiveHoverButton>
-                )}
-              </NavLink>
-            </div>
-          </ChatProvider>
+          )}
         </div>
       </div>
 

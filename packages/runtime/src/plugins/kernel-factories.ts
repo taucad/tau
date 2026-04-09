@@ -14,3 +14,4 @@ export { openscad } from '#kernels/openscad/openscad.plugin.js';
 export { jscad } from '#kernels/jscad/jscad.plugin.js';
 export { manifold } from '#kernels/manifold/manifold.plugin.js';
 export { tau } from '#kernels/tau/tau.plugin.js';
+export { buerli } from '#kernels/buerli/buerli.plugin.js';

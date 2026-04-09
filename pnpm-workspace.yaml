@@ -8,6 +8,7 @@ packages:
 catalog:
   '@ai-sdk/provider-utils': ^4.0.15
   '@arethetypeswrong/cli': ^0.18.2
+  '@buerli.io/classcad': ^1.0.1
   '@eslint-community/eslint-plugin-eslint-comments': ^4.7.1
   '@fastify/otel': ^0.17.1
   '@gltf-transform/core': ^4.3.0

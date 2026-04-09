@@ -46,6 +46,7 @@
     "./kernels/zoo": "./src/kernels/zoo/zoo.kernel.ts",
     "./kernels/zoo/engine-connection": "./src/kernels/zoo/engine-connection.ts",
     "./kernels/tau": "./src/kernels/tau/tau.kernel.ts",
+    "./kernels/buerli": "./src/kernels/buerli/buerli.kernel.ts",
     "./bundler/esbuild": "./src/bundler/esbuild.bundler.ts",
     "./middleware/runtime-middleware": "./src/middleware/runtime-middleware.ts",
     "./middleware/parameter-cache": "./src/middleware/parameter-cache.middleware.ts",
@@ -216,6 +217,16 @@
           "default": "./dist/esm/kernels/tau/tau.kernel.js"
         }
       },
+      "./kernels/buerli": {
+        "require": {
+          "types": "./dist/cjs/kernels/buerli/buerli.kernel.d.cts",
+          "default": "./dist/cjs/kernels/buerli/buerli.kernel.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/kernels/buerli/buerli.kernel.d.ts",
+          "default": "./dist/esm/kernels/buerli/buerli.kernel.js"
+        }
+      },
       "./bundler/esbuild": {
         "require": {
           "types": "./dist/cjs/bundler/esbuild.bundler.d.cts",
@@ -292,16 +303,17 @@
     "#*": "./src/*"
   },
   "dependencies": {
+    "@buerli.io/classcad": "catalog:",
     "@gltf-transform/core": "catalog:",
     "@gltf-transform/extensions": "catalog:",
     "@gltf-transform/functions": "catalog:",
     "@jscad/modeling": "catalog:",
     "@kittycad/lib": "catalog:",
     "@msgpack/msgpack": "catalog:",
-    "@taucad/memory": "workspace:*",
     "@taucad/converter": "workspace:*",
     "@taucad/json-schema": "workspace:*",
     "@taucad/kcl-wasm-lib": "catalog:",
+    "@taucad/memory": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "cdn-resolve": "catalog:",

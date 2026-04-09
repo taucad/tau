@@ -1,4 +1,4 @@
-import { replicad, opencascade, zoo, openscad, jscad, manifold, tau } from '@taucad/runtime/kernels';
+import { replicad, opencascade, zoo, openscad, jscad, manifold, tau, buerli } from '@taucad/runtime/kernels';
 import { parameterCache, geometryCache, gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/runtime/middleware';
 import { esbuild } from '@taucad/runtime/bundler';
 import { createRuntimeClientOptions } from '@taucad/runtime';
@@ -26,6 +26,7 @@ export const defaultKernelOptions = createRuntimeClientOptions({
     opencascade(),
     manifold(),
     jscad(),
+    buerli({ classcadKey: ENV.CLASSCAD_WASM_KEY ?? '' }),
     tau(),
   ],
   middleware: [

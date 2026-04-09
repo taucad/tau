@@ -14,6 +14,7 @@ const baseConfig: Options = {
     'src/kernels/zoo/zoo.kernel.ts',
     'src/kernels/zoo/engine-connection.ts',
     'src/kernels/tau/tau.kernel.ts',
+    'src/kernels/buerli/buerli.kernel.ts',
     'src/bundler/esbuild.bundler.ts',
     'src/middleware/parameter-cache.middleware.ts',
     'src/middleware/geometry-cache.middleware.ts',

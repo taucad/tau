@@ -3,7 +3,7 @@
  */
 
 import type { KernelPlugin, MiddlewarePlugin, BundlerPlugin } from '#plugins/plugin-types.js';
-import { replicad, opencascade, zoo, openscad, jscad, manifold, tau } from '#plugins/kernel-factories.js';
+import { replicad, opencascade, zoo, openscad, jscad, manifold, tau, buerli } from '#plugins/kernel-factories.js';
 import {
   parameterCache,
   geometryCache,
@@ -47,7 +47,7 @@ export const presets = {
    */
   all(): PresetOptions {
     return {
-      kernels: [openscad(), zoo(), replicad(), opencascade(), manifold(), jscad(), tau()],
+      kernels: [openscad(), zoo(), replicad(), opencascade(), manifold(), jscad(), buerli(), tau()],
       middleware: [parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()],
       bundlers: [esbuild()],
     };

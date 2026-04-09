@@ -39,6 +39,13 @@
         "command": "tsx src/extract-opencascade-types.ts",
         "cwd": "libs/api-extractor"
       }
+    },
+    "extract-buerli": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/extract-buerli-types.ts",
+        "cwd": "libs/api-extractor"
+      }
     }
   }
 }

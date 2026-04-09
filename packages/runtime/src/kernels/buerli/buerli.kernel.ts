@@ -10,6 +10,7 @@
  * Solid, Part, Assembly, Sketch, and Curve APIs.
  */
 
+import type { Document as GltfDocument, Scene as GltfScene, Buffer as GltfBuffer } from '@gltf-transform/core';
 import { jsonSchemaFromJson } from '@taucad/utils/schema';
 import { createExportFile } from '@taucad/types/constants';
 import { asBuffer } from '@taucad/utils/file';
@@ -146,43 +147,76 @@ function enrichIssueLocation(issues: KernelIssue[], fallbackFileName: string): K
 // Geometry conversion
 // =============================================================================
 
+type GltfDocumentContext = {
+  document: GltfDocument;
+  scene: GltfScene;
+  buffer: GltfBuffer;
+};
+
+function extractPositionArray(geom: Record<string, unknown>): number[] | undefined {
+  const geomData = geom['data'] as Record<string, unknown> | undefined;
+  const attributes = geomData?.['attributes'] as Record<string, unknown> | undefined;
+  if (!attributes?.['position']) {
+    return undefined;
+  }
+
+  const posData = attributes['position'] as Record<string, unknown>;
+  const array = posData['array'] as number[] | undefined;
+  return array && array.length > 0 ? array : undefined;
+}
+
+function addPositionGeometry(context: GltfDocumentContext, positions: Float32Array, indices?: Uint32Array): void {
+  const accessor = context.document
+    .createAccessor('position')
+    .setArray(positions)
+    .setType('VEC3')
+    .setBuffer(context.buffer);
+  const primitive = context.document.createPrimitive().setAttribute('POSITION', accessor);
+  if (indices) {
+    const indexAccessor = context.document
+      .createAccessor('index')
+      .setArray(new Uint32Array(indices))
+      .setType('SCALAR')
+      .setBuffer(context.buffer);
+    primitive.setIndices(indexAccessor);
+  }
+
+  const mesh = context.document.createMesh('buerli-mesh').addPrimitive(primitive);
+  const node = context.document.createNode('buerli-node').setMesh(mesh);
+  context.scene.addChild(node);
+}
+
 /**
+ * Convert buerli output to GLB binary.
+ *
  * Buerli's `createBufferGeometry` returns Three.js BufferGeometry objects.
  * We extract the position attribute and convert to a minimal glTF binary.
+ * If user code returns raw ArrayBuffer/typed array data, it is passed through.
  *
- * If user code returns raw Three.js geometry or mesh data, we serialize it
- * to a glTF/GLB via the available scene data.
+ * @param output - geometry output from user's main() function
+ * @returns GLB binary data
  */
 async function convertBuerliOutputToGlb(output: unknown): Promise<Uint8Array<ArrayBuffer>> {
-  const { NodeIO, Document } = await import('@gltf-transform/core');
-
-  const document = new Document();
-  const scene = document.createScene('BuerliScene');
-  const buffer = document.createBuffer('geometry');
-
   if (output instanceof ArrayBuffer || ArrayBuffer.isView(output)) {
     return new Uint8Array(output instanceof ArrayBuffer ? output : output.buffer) as Uint8Array<ArrayBuffer>;
   }
 
+  const gltfCore = await import('@gltf-transform/core');
+  const document = new gltfCore.Document();
+  const context: GltfDocumentContext = {
+    document,
+    scene: document.createScene('BuerliScene'),
+    buffer: document.createBuffer('geometry'),
+  };
+
   if (isRecordObject(output) && 'toJSON' in output && typeof output['toJSON'] === 'function') {
-    const json = output['toJSON']() as Record<string, unknown>;
-    if (json['metadata'] && json['geometries']) {
-      const geometries = json['geometries'] as Array<Record<string, unknown>>;
+    const json = (output['toJSON'] as () => Record<string, unknown>)();
+    const geometries = json['geometries'] as Array<Record<string, unknown>> | undefined;
+    if (json['metadata'] && geometries) {
       for (const geom of geometries) {
-        const positionAttr = (geom['data'] as Record<string, unknown>)?.['attributes'] as
-          | Record<string, unknown>
-          | undefined;
-        if (positionAttr?.['position']) {
-          const posData = positionAttr['position'] as Record<string, unknown>;
-          const array = posData['array'] as number[];
-          if (array?.length) {
-            const positions = new Float32Array(array);
-            const accessor = document.createAccessor('position').setArray(positions).setType('VEC3').setBuffer(buffer);
-            const prim = document.createPrimitive().setAttribute('POSITION', accessor);
-            const mesh = document.createMesh('buerli-mesh').addPrimitive(prim);
-            const node = document.createNode('buerli-node').setMesh(mesh);
-            scene.addChild(node);
-          }
+        const array = extractPositionArray(geom);
+        if (array) {
+          addPositionGeometry(context, new Float32Array(array));
         }
       }
     }
@@ -190,33 +224,21 @@ async function convertBuerliOutputToGlb(output: unknown): Promise<Uint8Array<Arr
 
   if (Array.isArray(output)) {
     for (const item of output) {
-      if (isRecordObject(item)) {
-        const posArray = (item as Record<string, unknown>)['position'] as Float32Array | undefined;
-        const indexArray = (item as Record<string, unknown>)['index'] as Uint32Array | undefined;
-        if (posArray) {
-          const accessor = document
-            .createAccessor('position')
-            .setArray(new Float32Array(posArray))
-            .setType('VEC3')
-            .setBuffer(buffer);
-          const prim = document.createPrimitive().setAttribute('POSITION', accessor);
-          if (indexArray) {
-            const indexAccessor = document
-              .createAccessor('index')
-              .setArray(new Uint32Array(indexArray))
-              .setType('SCALAR')
-              .setBuffer(buffer);
-            prim.setIndices(indexAccessor);
-          }
-          const mesh = document.createMesh('buerli-mesh').addPrimitive(prim);
-          const node = document.createNode('buerli-node').setMesh(mesh);
-          scene.addChild(node);
-        }
+      if (!isRecordObject(item)) {
+        continue;
       }
+
+      const posArray = item['position'] as Float32Array | undefined;
+      if (!posArray) {
+        continue;
+      }
+
+      const indexArray = item['index'] as Uint32Array | undefined;
+      addPositionGeometry(context, new Float32Array(posArray), indexArray);
     }
   }
 
-  const io = new NodeIO();
+  const io = new gltfCore.NodeIO();
   return io.writeBinary(document);
 }
 
@@ -226,16 +248,17 @@ async function convertBuerliOutputToGlb(output: unknown): Promise<Uint8Array<Arr
 
 /**
  * Configuration for the Buerli (ClassCAD) kernel.
- * Requires a ClassCAD WASM API key.
+ * The ClassCAD WASM API key is required for WASM engine initialization.
+ * When omitted, the kernel registers modules but defers WASM init.
  * @public
  */
 export type BuerliOptions = {
   /** ClassCAD WASM API key for license validation. */
-  classcadKey: string;
+  classcadKey?: string;
 };
 
 const optionsSchema = z.object({
-  classcadKey: z.string().min(1, 'ClassCAD WASM key is required'),
+  classcadKey: z.string().optional(),
 }) satisfies z.ZodType<BuerliOptions>;
 
 // =============================================================================
@@ -251,16 +274,23 @@ export default defineKernel({
   async initialize(options, runtime) {
     const classcadModule = await registerBuerliModules(runtime);
 
-    const initFn = classcadModule['init'] as ((factory: (drawingId: unknown) => unknown) => void) | undefined;
-    const WASMClientClass = classcadModule['WASMClient'] as
-      | (new (drawingId: unknown, config: { classcadKey: string }) => unknown)
-      | undefined;
+    if (options.classcadKey) {
+      const initFunction = classcadModule['init'] as ((factory: (drawingId: unknown) => unknown) => void) | undefined;
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- WASMClient is the upstream class name
+      const WASMClient = classcadModule['WASMClient'] as
+        | (new (drawingId: unknown, config: { classcadKey: string }) => unknown)
+        | undefined;
 
-    if (initFn && WASMClientClass) {
-      initFn((drawingId: unknown) => new WASMClientClass(drawingId, { classcadKey: options.classcadKey }));
+      if (initFunction && WASMClient) {
+        const key = options.classcadKey;
+        initFunction((drawingId: unknown) => new WASMClient(drawingId, { classcadKey: key }));
+      }
+
+      runtime.logger.debug('Initialized Buerli (ClassCAD) kernel with WASM client');
+    } else {
+      runtime.logger.debug('Buerli kernel registered without WASM init (no classcadKey)');
     }
 
-    runtime.logger.debug('Initialized Buerli (ClassCAD) kernel with WASM client');
     return { classcadModule, classcadKey: options.classcadKey };
   },
 

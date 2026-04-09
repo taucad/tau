@@ -187,9 +187,11 @@ export declare function init(source: ClientFactory, options?: Record<string, unk
  * Build the bundled type declarations as a map of module path to raw `.d.ts`
  * content. Exported for testing.
  */
+const buerliModulePath = '@buerli.io/classcad';
+
 export function buildBundledTypes(): Record<string, string> {
   return {
-    '@buerli.io/classcad': buildClasscadModuleContent(),
+    [buerliModulePath]: buildClasscadModuleContent(),
   };
 }
 

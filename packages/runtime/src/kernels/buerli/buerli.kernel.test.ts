@@ -324,7 +324,7 @@ describe('BuerliKernel', () => {
 
       assertSuccess(result);
       expect(result.data).toHaveLength(1);
-      expect(result.data[0]!.fileName).toBe('model.glb');
+      expect(result.data[0]!.name).toBe('model.glb');
     });
 
     it('should export GLTF format', async () => {
@@ -340,7 +340,7 @@ describe('BuerliKernel', () => {
 
       assertSuccess(result);
       expect(result.data).toHaveLength(1);
-      expect(result.data[0]!.fileName).toBe('model.gltf');
+      expect(result.data[0]!.name).toBe('model.gltf');
     });
 
     it('should return error for unsupported format', async () => {
@@ -400,17 +400,17 @@ describe('BuerliKernel', () => {
       expect(buerliKernel.version).toBe('1.0.0');
     });
 
-    it('should have an options schema requiring classcadKey', () => {
+    it('should have an options schema with optional classcadKey', () => {
       expect(buerliKernel.optionsSchema).toBeDefined();
 
       const validResult = buerliKernel.optionsSchema!.safeParse({ classcadKey: 'test-key-123' });
       expect(validResult.success).toBe(true);
 
-      const invalidResult = buerliKernel.optionsSchema!.safeParse({});
-      expect(invalidResult.success).toBe(false);
+      const emptyResult = buerliKernel.optionsSchema!.safeParse({});
+      expect(emptyResult.success).toBe(true);
 
-      const emptyKeyResult = buerliKernel.optionsSchema!.safeParse({ classcadKey: '' });
-      expect(emptyKeyResult.success).toBe(false);
+      const undefinedKeyResult = buerliKernel.optionsSchema!.safeParse({ classcadKey: undefined });
+      expect(undefinedKeyResult.success).toBe(true);
     });
   });
 });

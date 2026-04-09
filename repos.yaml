@@ -19,6 +19,7 @@ groups:
       - bitbybit-occt
       - brepjs
       - zalo-opencascade.js
+      - buerli-examples
   slicers:
     description: 3D printer slicer applications
     repos:
@@ -370,3 +371,6 @@ repos:
   primitives:
     upstream: radix-ui/primitives
     description: Radix UI primitives - accessible component library
+  buerli-examples:
+    upstream: awv-informatik/buerli-examples
+    description: Examples that show what buerli and ClassCAD can do

@@ -42,6 +42,9 @@ const environmentSchema = z.preprocess(
       .default('us-assets.i.posthog.com')
       .describe('PostHog asset host for the PostHog client.'),
     POSTHOG_CLIENT_KEY: z.string().optional().describe('PostHog client key. Set to enable analytics.'),
+
+    // ClassCAD / Buerli
+    CLASSCAD_WASM_KEY: z.string().optional().describe('ClassCAD WASM API key for the Buerli kernel.'),
     /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
   }),
 );

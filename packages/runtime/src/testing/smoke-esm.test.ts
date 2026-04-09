@@ -54,6 +54,9 @@ describe('ESM import smoke tests', () => {
 
     const opencascadeModule = await import('#kernels/opencascade/opencascade.kernel.js');
     expect(opencascadeModule.default).toBeDefined();
+
+    const buerliModule = await import('#kernels/buerli/buerli.kernel.js');
+    expect(buerliModule.default).toBeDefined();
   });
 
   it('should resolve the bundler module', async () => {

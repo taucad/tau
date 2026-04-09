@@ -1,5 +1,6 @@
 import type { KernelProvider } from '@taucad/runtime';
 import type { KernelConfig } from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.types.js';
+import { buerliConfig } from '#api/chat/prompts/kernel-prompt-configs/buerli.prompt.config.js';
 import { jscadConfig } from '#api/chat/prompts/kernel-prompt-configs/jscad.prompt.config.js';
 import { manifoldConfig } from '#api/chat/prompts/kernel-prompt-configs/manifold.prompt.config.js';
 import { opencascadejsConfig } from '#api/chat/prompts/kernel-prompt-configs/opencascadejs.prompt.config.js';
@@ -14,6 +15,7 @@ const kernelConfigs: Record<KernelProvider, KernelConfig> = {
   zoo: zooConfig,
   jscad: jscadConfig,
   opencascadejs: opencascadejsConfig,
+  buerli: buerliConfig,
 };
 
 export function getKernelConfig(kernel: KernelProvider): KernelConfig {

@@ -83,11 +83,11 @@ Two distinct "define" patterns serve different audiences:
 
 All non-generic capabilities are provided by injectable plugins, not hardcoded in the framework:
 
-| Plugin Type | Author API                              | Consumer API                            | Purpose                                                          | Example                                       |
-| ----------- | --------------------------------------- | --------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------- |
-| Kernel      | `defineKernel` → `KernelDefinition`     | `replicad()` → `KernelPlugin`           | Geometry computation, parameter extraction, export               | replicad, manifold, jscad, openscad, zoo, tau |
-| Bundler     | `defineBundler` → `BundlerDefinition`   | `esbuild()` → `BundlerPlugin`           | File bundling, code execution, module registry, import detection | esbuild bundler                               |
-| Middleware  | `defineMiddleware` → `KernelMiddleware` | `parameterCache()` → `MiddlewarePlugin` | Operation wrapping (caching, transforms, edge detection)         | geometry-cache, parameter-cache               |
+| Plugin Type | Author API                              | Consumer API                            | Purpose                                                          | Example                                               |
+| ----------- | --------------------------------------- | --------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------- |
+| Kernel      | `defineKernel` → `KernelDefinition`     | `replicad()` → `KernelPlugin`           | Geometry computation, parameter extraction, export               | replicad, manifold, jscad, openscad, zoo, buerli, tau |
+| Bundler     | `defineBundler` → `BundlerDefinition`   | `esbuild()` → `BundlerPlugin`           | File bundling, code execution, module registry, import detection | esbuild bundler                                       |
+| Middleware  | `defineMiddleware` → `KernelMiddleware` | `parameterCache()` → `MiddlewarePlugin` | Operation wrapping (caching, transforms, edge detection)         | geometry-cache, parameter-cache                       |
 
 ### Multi-Bundler Support
 
@@ -117,6 +117,7 @@ With the single-worker-per-CU architecture, only the WASM runtime for the select
 - replicad file: ~55-66 MB (OpenCASCADE WASM)
 - manifold file: ~14 MB (Manifold WASM)
 - openscad file: ~14 MB (Manifold WASM)
+- buerli file: ~302 KB + ClassCAD WASM (loaded at runtime via API key)
 - jscad file: ~5 MB
 - kcl file: ~3 MB (KCL WASM)
 - STEP/STL file: ~5 MB (converter)
@@ -283,7 +284,7 @@ ProjectMachine.stopStatefulActors()
 ### Detection Priority
 
 ```
-Priority: openscad → zoo → replicad → manifold → jscad → tau
+Priority: openscad → zoo → replicad → manifold → jscad → buerli → tau
 ```
 
 | Kernel   | Detection Method              | Scope                   |
@@ -369,7 +370,7 @@ During detection, bare specifiers appear as external imports in `metafile.output
 
 ```
 @taucad/runtime          → createRuntimeClient, types, presets, fromNodeFS, fromMemoryFS, fromFsLike
-@taucad/runtime/kernels  → replicad(), manifold(), zoo(), openscad(), jscad(), tau()
+@taucad/runtime/kernels  → replicad(), manifold(), zoo(), openscad(), jscad(), buerli(), tau()
 @taucad/runtime/middleware → parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()
 @taucad/runtime/bundler  → esbuild()
 @taucad/runtime/transport → RuntimeTransport, createWorkerTransport()

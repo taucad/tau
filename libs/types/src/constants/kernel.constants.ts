@@ -3,7 +3,7 @@ import type { CodeLanguage } from '#types/code.types.js';
 /** The number of dimensions the kernel supports. */
 export type KernelDimensions = 2 | 3;
 
-export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad';
+export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad' | 'buerli';
 
 export type KernelConfiguration = {
   id: string;
@@ -156,6 +156,38 @@ export default function main(p = defaultParams) {
       'STEP/STL export',
       'Advanced boolean operations',
       'Precise tolerancing',
+    ],
+  },
+  {
+    id: 'buerli',
+    name: 'Buerli (ClassCAD)',
+    dimensions: [2, 3],
+    language: 'typescript',
+    description: 'ClassCAD WASM kernel for parametric CAD',
+    mainFile: 'main.ts',
+    backendProvider: 'buerli',
+    longDescription:
+      'BRep-based parametric CAD kernel powered by ClassCAD WASM. Features history-based Part API, Assembly API with constraints, Sketch API with 2D constraint solver, and Solid API for destructive modeling. Runs entirely in the browser via WebAssembly.',
+    emptyCode: `import { BuerliCadFacade } from '@buerli.io/classcad';
+
+export const defaultParams = {};
+
+export default async function main(p = defaultParams) {
+  const bcf = new BuerliCadFacade();
+  await bcf.connect();
+  const api = bcf.api.v1;
+  const part = await api.part.create({ name: 'Part' });
+  return bcf.createBufferGeometry(part);
+}
+`,
+    recommended: 'Parametric CAD & Assemblies',
+    tags: ['ClassCAD', 'BRep', 'TypeScript', 'WASM', 'Parametric', 'Assemblies'],
+    features: [
+      'History-based parametric modeling',
+      'Assembly constraints',
+      '2D sketch constraint solver',
+      'Boolean operations',
+      'WASM runtime',
     ],
   },
 ] as const satisfies KernelConfiguration[];

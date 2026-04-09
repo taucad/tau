@@ -21,7 +21,7 @@ import {
   ComingSoonSkeleton,
   CtaSkeleton,
 } from '#routes/_index/section-skeletons.js';
-import { ChatProvider } from '#hooks/use-chat.js';
+import { ChatProvider, useChatContext } from '#hooks/use-chat.js';
 import { Separator } from '#components/ui/separator.js';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { toast } from '#components/ui/sonner.js';
@@ -30,14 +30,12 @@ import type { Handle } from '#types/matches.types.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
-import { useChatContext } from '#hooks/use-chat.js';
-import { useChats } from '#hooks/use-chats.js';
 
 const homepageChatResourceId = 'homepage_main_chat_resource';
 const homepageChatId = 'chat_homepage_main';
 
 function useHomepageChatSession(): { chatId: string | undefined; resourceId: string; isReady: boolean } {
-  const { createChat, getChat } = useChats(homepageChatResourceId);
+  const projectManager = useProjectManager();
   const [isReady, setIsReady] = useState(false);
   const createInFlightRef = useRef(false);
 
@@ -49,9 +47,9 @@ function useHomepageChatSession(): { chatId: string | undefined; resourceId: str
     createInFlightRef.current = true;
     const ensureHomepageChat = async (): Promise<void> => {
       try {
-        const existingChat = await getChat(homepageChatId);
+        const existingChat = await projectManager.getChat(homepageChatId);
         if (!existingChat) {
-          await createChat({
+          await projectManager.createChat(homepageChatResourceId, {
             id: homepageChatId,
             name: 'Homepage chat',
             messages: [],
@@ -67,7 +65,7 @@ function useHomepageChatSession(): { chatId: string | undefined; resourceId: str
     };
 
     void ensureHomepageChat();
-  }, [createChat, getChat, isReady]);
+  }, [isReady, projectManager]);
 
   return {
     chatId: isReady ? homepageChatId : undefined,

@@ -1,6 +1,6 @@
 ---
 title: 'Buerli ClassCAD Kernel Integration'
-description: 'Investigation of @buerli.io/classcad WASM integration for Tau kernel plugin, covering API surface, runtime constraints, and test strategy.'
+description: 'Investigation of @buerli.io/classcad WASM integration, direct API bypass strategy, and test blueprint for real geometry validation.'
 status: active
 created: '2026-04-09'
 updated: '2026-04-09'
@@ -11,185 +11,222 @@ related:
 
 # Buerli ClassCAD Kernel Integration
 
-Investigation of how `@buerli.io/classcad` integrates as a Tau kernel plugin, its WASM runtime constraints, and the testing strategy for validating the geometry pipeline.
+Investigation of how `@buerli.io/classcad` integrates as a Tau kernel plugin, the strategy for bypassing the Comlink/Worker layer, and the blueprint for testing with real ClassCAD geometry creation.
 
 ## Executive Summary
 
-ClassCAD via `@buerli.io/classcad` provides a powerful BRep-based parametric CAD engine that runs in-browser via WebAssembly. The WASM variant requires the browser `Worker` API (Comlink-based) and **cannot execute in Node.js/Vitest**. This is fundamentally different from replicad/manifold/JSCAD whose WASM runtimes are Node-compatible. The testing strategy must account for this constraint by validating the kernel's bundler pipeline, module registration, and geometry conversion using the real esbuild bundler while the actual ClassCAD engine calls are structurally verified rather than executed.
+ClassCAD via `@buerli.io/classcad` provides a BRep parametric CAD engine running in-browser via WASM. While the library's `WASMClient` wraps a Comlink Worker, the underlying `classCadWorkerApi` class (fetched from CDN as `ClassCADWasmWorker.js`) is a plain JavaScript class that loads the Emscripten module and calls `module.init()` / `module.execute()` directly. This class has no inherent Worker dependency and can be instantiated on any thread. The recommended path for Node.js/Vitest integration tests is to implement a custom `AwvNodeClient` subclass that uses `classCadWorkerApi` directly without the Comlink proxy, enabling real part and assembly creation in tests.
 
 ## Problem Statement
 
-Unlike replicad (which runs OCCT WASM in Node.js), `@buerli.io/classcad`'s `WASMClient` uses Comlink to spawn a browser Web Worker for the ClassCAD WASM module. In Node.js:
-
-- `init()` succeeds (registers the client factory)
-- `WASMClient.connect()` throws `ReferenceError: Worker is not defined`
-- No geometry can be produced without a running ClassCAD engine instance
-
-This means the "gold standard" replicad test pattern (real WASM → real geometry → GLB validation) is not directly reproducible.
+The `WASMClient.connect()` method fails in Node.js with `ReferenceError: Worker is not defined` because it uses `new Worker(url)` + Comlink `wrap()`. This prevents real ClassCAD geometry tests in Vitest. However, the ClassCAD WASM engine itself is not Worker-dependent — the Comlink layer is only a transport convenience.
 
 ## Methodology
 
-- Cloned `awv-informatik/buerli-examples` and `awv-informatik/buerligons` via `pnpm repos`
-- Read 56 example files covering Solid, Part, Assembly, Sketch, and Curve APIs
-- Verified WASM runtime constraints with direct Node.js invocation
-- Studied the replicad test suite (~4000 lines) as the gold standard
-- Analyzed existing Tau kernel test infrastructure (`createTestWorker`, `createTestGeometry`, geometry helpers)
+1. Read the full `WASMClient.js` source in `@buerli.io/classcad/build/esm/io/`
+2. Fetched and deminified `ClassCADWasmWorker.js` from the ClassCAD CDN at `https://awvstatic.com/classcad/download/release/21.0.0/wasm/`
+3. Traced the `facade.js` → `__callAPI` → `comClient.executeRequest` → `request` → `this.service.execute(command)` call chain
+4. Analyzed `@classcad/api-js` v1 API command builders (`part.js`, `solid.js`, `sketch.js`)
+5. Studied the `AwvNodeClient` base class contract (`executeRequest`, `request`, `requestTree`)
 
 ## Findings
 
-### Finding 1: ClassCAD API Surface — Two Modeling Paradigms
+### Finding 1: ClassCADWasmWorker.js Contains a Standalone WASM Loader
 
-ClassCAD exposes two distinct modeling paradigms:
+The CDN worker script (`ClassCADWasmWorker.js`) contains a class `classCadWorkerApi` (minified as `Oa`) with two methods:
 
-| Paradigm            | API Namespace                       | Description                                                                            |
-| ------------------- | ----------------------------------- | -------------------------------------------------------------------------------------- |
-| **History/Feature** | `api.part.*`, `api.sketch.*`        | Parametric: features auto-recalculate. `create` → `cylinder` → `fillet` → `boolean`    |
-| **Solid/Direct**    | `api.solid.*` via `entityInjection` | Destructive: in-place operations. `create` → `entityInjection` → `box` → `subtraction` |
+```text
+classCadWorkerApi.init(url, config)
+  → import(ClassCADWasm.js)     // Dynamic ESM import of Emscripten module
+  → factory({ locateFile })     // Emscripten module instantiation
+  → FS setup (mkdir, writeFile) // Virtual filesystem for ClassCAD config
+  → module.init(jsonConfig)     // ClassCAD kernel initialization
 
-Both paradigms share `api.curve.*` (shape creation) and `api.common.*` (save/load/settings).
-
-### Finding 2: Key API Call Signatures (from examples)
-
-**Part (History) API:**
-
-| Method                         | Signature                                                               |
-| ------------------------------ | ----------------------------------------------------------------------- |
-| `part.create`                  | `({ name?: string })`                                                   |
-| `part.cylinder`                | `({ id, diameter, height, references? })`                               |
-| `part.box`                     | `({ id, length, width, height })`                                       |
-| `part.fillet`                  | `({ id, references, radius })`                                          |
-| `part.chamfer`                 | `({ id, type, references, distance1 })`                                 |
-| `part.boolean`                 | `({ id, type: 'UNION'\|'SUBTRACTION'\|'INTERSECTION', target, tools })` |
-| `part.extrusion`               | `({ id, references, limit2, type? })`                                   |
-| `part.sketch`                  | `({ id, planeId })`                                                     |
-| `part.workPlane`               | `({ id, position?, normal?, name? })`                                   |
-| `part.expression`              | `({ id, toCreate: [{name, value}] })`                                   |
-| `part.circularPattern`         | `({ id, targets, references, angle, count, merged })`                   |
-| `part.getGeometryIds`          | `({ id, circles?: [{pos}], lines?: [{pos}] })`                          |
-| `part.calculateMassProperties` | `({ id })` → `{ volume }`                                               |
-| `part.setAppearance`           | `({ target, color, transparency })`                                     |
-
-**Solid (Direct) API:**
-
-| Method              | Signature                                                           |
-| ------------------- | ------------------------------------------------------------------- |
-| `solid.box`         | `({ id: entityInjectionId, width, height, length, translation? })`  |
-| `solid.cylinder`    | `({ id, diameter, height, translation?, rotation?, rotateFirst? })` |
-| `solid.extrusion`   | `({ id, curves, direction })`                                       |
-| `solid.union`       | `({ id, target, tools })`                                           |
-| `solid.subtraction` | `({ id, target, tools, keepTools? })`                               |
-| `solid.slice`       | `({ id, target, originPos, normal })`                               |
-| `solid.mirror`      | `({ id, target, originPos, normal })`                               |
-| `solid.fillet`      | `({ id, target, edges, radius })`                                   |
-| `solid.copy`        | `({ id, target, translation })`                                     |
-| `solid.deleteSolid` | `({ id, ids })`                                                     |
-| `solid.rotation`    | `({ id, target, ... })`                                             |
-| `solid.translation` | `({ id, target, ... })`                                             |
-
-**Sketch API:**
-
-| Method                | Signature                                             |
-| --------------------- | ----------------------------------------------------- |
-| `sketch.create`       | `({ id: partId, planeId })`                           |
-| `sketch.geometry`     | `({ id, lines: [{startPos, endPos}] })` → `{ lines }` |
-| `sketch.arcByCenter`  | `({ id, startPos, endPos, centerPos })`               |
-| `sketch.arcBy3Points` | `({ id, startPos, endPos, midPos })`                  |
-| `sketch.circle`       | `({ id, center, radius })`                            |
-| `sketch.constraint`   | `({ id, type, geomIds })`                             |
-| `sketch.dimension`    | `({ id, type, geomIds, value })`                      |
-
-**Geometry Retrieval:**
-
-| Method                                  | Returns                                  |
-| --------------------------------------- | ---------------------------------------- |
-| `model.createBufferGeometry(objectId)`  | `BufferGeometry[]` (Three.js)            |
-| `model.createScene(objectId, options?)` | `{ scene, nodes, materials }` (Three.js) |
-
-**Export:**
-
-| Method                                                        | Returns      |
-| ------------------------------------------------------------- | ------------ |
-| `api.common.save({ format: 'OFB'\|'STP'\|'STL', encoding? })` | File content |
-
-### Finding 3: WASM Runtime Constraint
-
-`WASMClient` uses Comlink + browser `Worker` API. Node.js invocation:
-
-```
-init(id => new WASMClient(id, { classcadKey: '...' })) // succeeds
-new BuerliCadFacade().connect()                         // throws: Worker is not defined
+classCadWorkerApi.execute(command)
+  → module.execute(JSON.stringify(command), module, onSend, onSendBinary)
+  → Returns { messages: ServerResponse[], binaryMessages: ScgGraphicPackage[] }
 ```
 
-The `@buerli.io/classcad` module itself **loads successfully** in Node.js (all exports available), only the WASM connection fails. This means:
+**This class has zero Worker dependency.** It uses `import()` for module loading, `fetch()` for config files, and `this.module.*` for WASM calls. The `Comlink.expose()` call at the end is the _only_ Worker-specific line.
 
-- Module registration and bundler integration **can** be tested
-- Actual ClassCAD geometry creation **cannot** be tested in Vitest
-- The kernel's `convertBuerliOutputToGlb` conversion logic **can** be tested with synthetic data matching the real output shape
+### Finding 2: Full Command Protocol from Facade to WASM
 
-### Finding 4: Geometry Pipeline Architecture
+The `@buerli.io/classcad` facade builds commands as JSON arrays and passes them through the client:
 
-The buerli kernel operates as:
-
-```
-User code (imports @buerli.io/classcad)
-  → esbuild bundler (resolves built-in module shim)
-  → runtime.execute (runs bundled code)
-  → main() returns geometry data
-  → convertBuerliOutputToGlb (Three.js BufferGeometry → GLB)
-  → GLB output
+```text
+api.v1.part.box({ id, length, width, height })
+  → facade.callSafeApiV('v1', 'part', 'box', [{ id, length, width, height }])
+  → facade.callSafeApi('v1.part', 'box', [{ id, length, width, height }])
+  → __callAPI(drawingId, [{ "v1.part.box": [{ id, length, width, height }] }])
+  → comClient.executeRequest(task)
+  → comClient.request({ command: 'Execute', task })
+  → this.service.execute({ command: 'Execute', task })
+  → WASM module.execute(JSON.stringify(command), ...)
 ```
 
-The conversion handles three output shapes:
+The response flows back as `{ messages: [...], binaryMessages: [...] }` where messages contain `{ command: 'Result', from: 'Execute', result: { result, messages } }` and `{ command: 'Patch', ops: [...] }`.
 
-1. **Raw ArrayBuffer/Uint8Array** — passthrough as GLB
-2. **Three.js `toJSON()` objects** — extract position arrays from `geometries[].data.attributes.position.array`
-3. **Position/index array objects** — `[{ position: Float32Array, index?: Uint32Array }]`
+### Finding 3: AwvNodeClient Is the Abstraction Boundary
 
-### Finding 5: Comparison with Replicad Test Strategy
+`AwvNodeClient` is the base class that both `WASMClient` and `SocketIOClient` extend. It defines:
 
-| Aspect              | Replicad                                                   | Buerli                                        |
-| ------------------- | ---------------------------------------------------------- | --------------------------------------------- |
-| WASM in Node.js     | Works (OCCT WASM is Node-compatible)                       | Fails (requires browser Worker)               |
-| Real geometry tests | Real replicad calls → real GLB → gltf-transform validation | Not possible in Vitest                        |
-| Module registration | `registerReplicadModule` tested via bundler                | `registerBuerliModules` tested via bundler    |
-| `createTestWorker`  | Full pipeline works end-to-end                             | Pipeline works up to `main()` execution       |
-| Error handling      | Tests real OCCT errors                                     | Tests bundler/execute errors + runtime errors |
+- `request(command: ServerRequest): Promise<ServerResponse>` — abstract, implemented by subclasses
+- `executeRequest(task, streamMap?, options?)` — wraps `request` with stream handling
+- `requestTree()` — calls `request({ command: 'GetTree' })`
+
+Any object implementing these methods can be used as a `comClient` in `Globals.clientCache`. The high-level APIs (`createApi`, `BuerliCadFacade`) operate through this abstraction.
+
+### Finding 4: Custom Node-Compatible Client Architecture
+
+To bypass the Worker layer, we need a custom client that:
+
+1. Fetches `ClassCADWasmWorker.js` from the CDN
+2. Extracts the `classCadWorkerApi` class
+3. Instantiates it directly (no Worker, no Comlink)
+4. Calls `init(wasmUrl, config)` with the WASM URL and API key
+5. Implements `request(command)` by calling `service.execute(command)` and processing the response (same logic as `WASMClient.requestByName`)
+
+```text
+┌─────────────────────────────────────────────────┐
+│  BuerliCadFacade / createApi / api.v1.*          │
+│  (unchanged — uses Globals.clientCache)          │
+├─────────────────────────────────────────────────┤
+│  NodeWASMClient extends AwvNodeClient            │  ← New
+│  - Loads classCadWorkerApi directly              │
+│  - No Worker/Comlink                             │
+│  - Calls service.init() + service.execute()      │
+├─────────────────────────────────────────────────┤
+│  classCadWorkerApi (from ClassCADWasmWorker.js)   │
+│  - import(ClassCADWasm.js)                       │
+│  - module.init(config) / module.execute(cmd)     │
+├─────────────────────────────────────────────────┤
+│  ClassCAD WASM (Emscripten module)               │
+│  - BRep kernel, constraint solver, meshing       │
+└─────────────────────────────────────────────────┘
+```
+
+### Finding 5: Node.js Compatibility Blockers
+
+The `classCadWorkerApi.init()` method uses:
+
+1. **`import(ClassCADWasm.js)`** — dynamic import from CDN URL. Node.js supports `import()` of local modules but not HTTP URLs natively. Requires either: (a) fetching the script, writing to a temp file, and importing that, or (b) using a data URL with `--experimental-vm-modules`.
+
+2. **`fetch()`** — used to load `classcad.cfe` (config file) and `filterconfig.json`. Node.js 18+ has global `fetch()`.
+
+3. **Emscripten module** — `ClassCADWasm.js` is an Emscripten-generated loader that calls `WebAssembly.instantiate`. This works in Node.js.
+
+4. **`window.location`** — referenced in WASMClient config but may not be needed for standalone init.
 
 ## Recommendations
 
-| #   | Action                                                             | Priority | Rationale                                                        |
-| --- | ------------------------------------------------------------------ | -------- | ---------------------------------------------------------------- |
-| R1  | Test full bundler pipeline with real `@buerli.io/classcad` imports | P0       | Validates module registration, import resolution, bundling       |
-| R2  | Test geometry conversion with realistic Three.js-shaped data       | P0       | Validates `convertBuerliOutputToGlb` with production-like shapes |
-| R3  | Test parametric user code with real parameter flow                 | P0       | Validates `getParameters` + `createGeometry` parameter pipeline  |
-| R4  | Test error handling (syntax, runtime, empty geometry)              | P0       | Validates structured error reporting                             |
-| R5  | Test multi-file projects with local imports                        | P1       | Validates bundler dependency resolution                          |
-| R6  | Test user code that exercises ClassCAD API patterns structurally   | P1       | Validates that real-world code bundles and executes correctly    |
-| R7  | Document browser-only WASM constraint in kernel JSDoc              | P2       | Developer awareness                                              |
+| #   | Action                                                                               | Priority | Effort | Impact                         |
+| --- | ------------------------------------------------------------------------------------ | -------- | ------ | ------------------------------ |
+| R1  | Create `NodeWASMClient` that loads `classCadWorkerApi` directly                      | P0       | Medium | Enables real geometry tests    |
+| R2  | Fetch and cache `ClassCADWasmWorker.js` + `ClassCADWasm.js` + `classcad.cfe` locally | P0       | Low    | Avoids CDN dependency in tests |
+| R3  | Write integration tests with real `api.v1.part.*` calls                              | P0       | Medium | Validates the full pipeline    |
+| R4  | Add `api.v1.solid.*` tests for direct modeling                                       | P1       | Low    | Coverage for both paradigms    |
+| R5  | Test export via `api.v1.common.save` (OFB, STP, STL)                                 | P2       | Low    | Validates export pipeline      |
 
-## Test Strategy
+## Blueprint: Real Geometry Tests
 
-Since ClassCAD WASM cannot run in Node.js, the tests exercise the kernel via `createTestWorker` with the real esbuild bundler. User code imports from `@buerli.io/classcad` (resolved via the kernel's built-in module shim), and `main()` functions return geometry in the formats the kernel handles. This validates:
+### Phase 1 — NodeWASMClient (bypasses Comlink/Worker)
 
-1. **Module registration** — `@buerli.io/classcad` resolves as a built-in
-2. **Bundler pipeline** — esbuild bundles user code with buerli imports
-3. **Parameter extraction** — `defaultParams` → JSON schema
-4. **Geometry conversion** — Three.js-like structures → valid GLB
-5. **Error handling** — syntax errors, runtime errors, empty geometry
-6. **Export pipeline** — GLB export from converted geometry
+Create a test-only client at `packages/runtime/src/kernels/buerli/node-wasm-client.ts`:
 
-Test categories follow the buerli API paradigms:
+```typescript
+import { AwvNodeClient } from '@buerli.io/classcad';
 
-- **Solid API patterns** — box, cylinder, subtraction, union, extrusion, mirror, fillet
-- **Part API patterns** — create, cylinder, fillet, chamfer, boolean, extrusion, sketch
-- **Multi-shape scenes** — multiple geometries, multi-mesh output
-- **Parametric models** — configurable dimensions, expression-driven
-- **Error scenarios** — invalid code, missing returns, type errors
+export class NodeWASMClient extends AwvNodeClient {
+  private service: InstanceType<typeof classCadWorkerApi>;
+
+  async connect(wasmUrl: string, classcadKey: string): Promise<void> {
+    // 1. Fetch ClassCADWasmWorker.js from CDN or local cache
+    // 2. Extract classCadWorkerApi class
+    // 3. this.service = new classCadWorkerApi()
+    // 4. await this.service.init(wasmUrl, { cclasses: { type: 'classcadkey', key } })
+  }
+
+  async request(command: ServerRequest): Promise<ServerResponse> {
+    // Mirror WASMClient.requestByName logic:
+    // 1. await this.service.execute(command)
+    // 2. Process messages (Result, Patch, ErrorMessage)
+    // 3. Return structured ServerResponse
+  }
+}
+```
+
+### Phase 2 — Wire into BuerliCadFacade
+
+```typescript
+import { init, BuerliCadFacade } from '@buerli.io/classcad';
+
+// Register NodeWASMClient as the client factory
+init((drawingId) => new NodeWASMClient(drawingId, { classcadKey }));
+
+// Use standard BuerliCadFacade
+const bcf = new BuerliCadFacade();
+await bcf.connect();
+const api = bcf.api.v1;
+```
+
+### Phase 3 — Real Geometry Tests
+
+Test categories following `buerli-examples` patterns:
+
+**Part API (history-based):**
+
+```typescript
+// CreatePart pattern
+const part = await api.part.create({ name: 'Part' });
+await api.part.cylinder({ id: part, diameter: 50, height: 100 });
+await api.part.fillet({ id: part, references: topEdges, radius: 10 });
+const geom = await bcf.createBufferGeometry(part);
+```
+
+**Solid API (direct modeling):**
+
+```typescript
+// Lego pattern
+const part = await api.part.create();
+const ei = await api.part.entityInjection({ id: part });
+const box = await api.solid.box({ id: ei, width: 90, height: 80, length: 90 });
+const sub = await api.solid.box({ id: ei, width: 80, height: 70, length: 80 });
+await api.solid.subtraction({ id: ei, target: box, tools: [sub] });
+```
+
+**Sketch + Extrusion:**
+
+```typescript
+const wp = await api.part.workPlane({ id: part, normal: { x: 0, y: 0, z: 1 } });
+const sketch = await api.sketch.create({ id: part, planeId: wp });
+const geom = await api.sketch.geometry({ id: sketch, lines: [...] });
+await api.part.extrusion({ id: part, references: geom.lines, limit2: 20 });
+```
+
+### Phase 4 — Geometry Validation
+
+Use existing test helpers:
+
+```typescript
+const result = await buerliKernel.createGeometry(...);
+await geometryHelpers.expectValidGltf(result);
+await geometryHelpers.expectMeshCount(result, 1);
+await geometryHelpers.expectBoundingBoxSize(result, [w, h, d], tolerance);
+```
+
+## Trade-offs
+
+| Approach                       | Pros                               | Cons                                                         |
+| ------------------------------ | ---------------------------------- | ------------------------------------------------------------ |
+| NodeWASMClient (direct WASM)   | Real geometry, full API validation | Medium effort, CDN fetch of WASM (~50MB), Node.js ESM compat |
+| SocketIOClient (remote server) | Uses existing client code          | Requires running ClassCAD server, external dependency        |
+| Synthetic geometry (current)   | Fast, no WASM dependency           | No real CAD validation, conversion-only                      |
 
 ## References
 
+- CDN worker: `https://awvstatic.com/classcad/download/release/21.0.0/wasm/ClassCADWasmWorker.js`
 - Source: `repos/buerli-examples/` (56 example files)
 - Source: `repos/buerligons/` (production app)
 - Docs: [buerli.io/docs](https://buerli.io/docs)
-- npm: `@buerli.io/classcad@1.0.1`
-- Related: `packages/runtime/src/kernels/replicad/replicad.kernel.test.ts` (gold standard test)
+- npm: `@buerli.io/classcad@1.0.1`, `@classcad/api-js@21.0.0`
+- Related: `packages/runtime/src/kernels/replicad/replicad.kernel.test.ts` (gold standard)

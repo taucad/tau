@@ -21,7 +21,7 @@ import {
   ComingSoonSkeleton,
   CtaSkeleton,
 } from '#routes/_index/section-skeletons.js';
-import { ChatProvider, useChatContext } from '#hooks/use-chat.js';
+import { ChatProvider, useChatActions, useChatContext } from '#hooks/use-chat.js';
 import { Separator } from '#components/ui/separator.js';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { toast } from '#components/ui/sonner.js';
@@ -94,31 +94,8 @@ export const handle: Handle = {
 };
 
 export default function ChatStart(): React.JSX.Element {
-  const navigate = useNavigate();
   const { kernel, setKernel } = useKernel();
-  const projectManager = useProjectManager();
   const homepageChatSession = useHomepageChatSession();
-
-  const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
-    async ({ content, model, metadata, imageUrls }) => {
-      try {
-        const createProject = await projectManager.createProject({
-          kernel,
-          initialMessage: { content, model, metadata, imageUrls },
-          // Set initial panel state: chat open
-          editorState: { panelState: { openPanels: { chat: true } } },
-        });
-
-        // Navigate immediately - the project page will handle the streaming
-        await navigate(`/projects/${createProject.id}`);
-      } catch (error) {
-        console.error('Failed to create project:', error);
-        toast.error('Failed to create project');
-      }
-    },
-    [kernel, projectManager, navigate],
-  );
-
   return (
     <>
       {/* Chat Input Section */}
@@ -133,31 +110,7 @@ export default function ChatStart(): React.JSX.Element {
           {homepageChatSession.chatId ? (
             <ChatProvider chatId={homepageChatSession.chatId} resourceId={homepageChatSession.resourceId}>
               <HomepageChatFlushOnCloseGuard />
-              <div className='space-y-4'>
-                <div className='flex justify-center'>
-                  <KernelSelector selectedKernel={kernel} onKernelChange={setKernel} />
-                </div>
-                <ChatTextarea
-                  enableContextActions={false}
-                  enableKernelSelector={false}
-                  className='pt-1'
-                  onSubmit={onSubmit}
-                />
-              </div>
-              <div className='mx-auto my-6 flex w-20 items-center justify-center'>
-                <Separator />
-                <div className='mx-4 text-sm font-light text-muted-foreground'>or</div>
-                <Separator />
-              </div>
-              <div className='flex justify-center'>
-                <NavLink to='/projects/new' tabIndex={-1}>
-                  {({ isPending }) => (
-                    <InteractiveHoverButton className='flex items-center gap-2 font-light [&_svg]:size-4 [&_svg]:stroke-1'>
-                      {isPending ? <Loader /> : 'Build from code'}
-                    </InteractiveHoverButton>
-                  )}
-                </NavLink>
-              </div>
+              <HomepageChatInput kernel={kernel} setKernel={setKernel} />
             </ChatProvider>
           ) : (
             <div className='space-y-4'>
@@ -214,6 +167,67 @@ export default function ChatStart(): React.JSX.Element {
       <LazySection minHeight='200px' fallback={<CtaSkeleton />}>
         <CtaSection />
       </LazySection>
+    </>
+  );
+}
+
+function HomepageChatInput({
+  kernel,
+  setKernel,
+}: {
+  readonly kernel: ReturnType<typeof useKernel>['kernel'];
+  readonly setKernel: ReturnType<typeof useKernel>['setKernel'];
+}): React.JSX.Element {
+  const navigate = useNavigate();
+  const projectManager = useProjectManager();
+  const { clearDraft } = useChatActions();
+  const { draftActorRef } = useChatContext();
+
+  const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
+    async ({ content, model, metadata, imageUrls }) => {
+      try {
+        const createProject = await projectManager.createProject({
+          kernel,
+          initialMessage: { content, model, metadata, imageUrls },
+          // Set initial panel state: chat open
+          editorState: { panelState: { openPanels: { chat: true } } },
+        });
+
+        clearDraft();
+        draftActorRef.send({ type: 'flushNow' });
+
+        // Navigate immediately - the project page will handle the streaming
+        await navigate(`/projects/${createProject.id}`);
+      } catch (error) {
+        console.error('Failed to create project:', error);
+        toast.error('Failed to create project');
+      }
+    },
+    [clearDraft, draftActorRef, kernel, navigate, projectManager],
+  );
+
+  return (
+    <>
+      <div className='space-y-4'>
+        <div className='flex justify-center'>
+          <KernelSelector selectedKernel={kernel} onKernelChange={setKernel} />
+        </div>
+        <ChatTextarea enableContextActions={false} enableKernelSelector={false} className='pt-1' onSubmit={onSubmit} />
+      </div>
+      <div className='mx-auto my-6 flex w-20 items-center justify-center'>
+        <Separator />
+        <div className='mx-4 text-sm font-light text-muted-foreground'>or</div>
+        <Separator />
+      </div>
+      <div className='flex justify-center'>
+        <NavLink to='/projects/new' tabIndex={-1}>
+          {({ isPending }) => (
+            <InteractiveHoverButton className='flex items-center gap-2 font-light [&_svg]:size-4 [&_svg]:stroke-1'>
+              {isPending ? <Loader /> : 'Build from code'}
+            </InteractiveHoverButton>
+          )}
+        </NavLink>
+      </div>
     </>
   );
 }

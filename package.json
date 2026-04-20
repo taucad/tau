@@ -50,7 +50,7 @@
   },
   "dependencies": {
     "@ai-sdk/cerebras": "^2.0.34",
-    "@ai-sdk/langchain": "2.0.147",
+    "@ai-sdk/langchain": "2.0.174",
     "@ai-sdk/openai": "^3.0.33",
     "@ai-sdk/provider-utils": "catalog:",
     "@ai-sdk/react": "^3.0.101",

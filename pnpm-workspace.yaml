@@ -61,7 +61,7 @@ catalog:
   '@opentelemetry/sdk-node': ^0.213.0
   '@oxc-node/core': ^0.0.35
   '@playwright/test': ^1.58.2
-  '@pyroscope/nodejs': ^0.4.10
+  '@pyroscope/nodejs': ^0.4.11
   '@react-router/dev': 7.14.2
   '@react-router/express': 7.14.2
   '@react-router/fs-routes': 7.14.2
@@ -122,12 +122,12 @@ catalog:
   hast-util-sanitize: ^5.0.2
   husky: ^9.1.7
   ink: ^6.8.0
-  isbot: ^5.1.35
+  isbot: ^5.1.40
   js-yaml: ^4.1.1
   jsdom: ~26.0.0
   json-schema: ^0.4.0
   json-schema-default: ^1.0.2
-  katex: ^0.16.38
+  katex: ^0.16.45
   knip: ^6.0.4
   langchain: ^1.4.0
   lint-staged: ^16.3.2
@@ -141,7 +141,7 @@ catalog:
   oxlint: ^1.51.0
   oxlint-tsgolint: ^0.16.0
   pdf-parse: ^2.4.5
-  publint: ^0.3.17
+  publint: ^0.3.19
   qrcode-terminal: ^0.12.0
   react: ^19.2.4
   react-dom: ^19.2.4

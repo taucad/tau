@@ -23,7 +23,7 @@ catalog:
   '@inkjs/ui': ^2.0.0
   '@jscad/modeling': ^2.13.0
   '@kittycad/lib': ^2.0.48
-  '@langchain/anthropic': ^1.3.28
+  '@langchain/anthropic': ^1.3.29
   '@langchain/cerebras': ^1.0.4
   '@langchain/classic': ^1.0.32
   '@langchain/community': ^1.1.28
@@ -61,7 +61,7 @@ catalog:
   '@opentelemetry/sdk-node': ^0.213.0
   '@oxc-node/core': ^0.0.35
   '@playwright/test': ^1.58.2
-  '@pyroscope/nodejs': ^0.4.10
+  '@pyroscope/nodejs': ^0.4.11
   '@react-router/dev': 7.14.2
   '@react-router/express': 7.14.2
   '@react-router/fs-routes': 7.14.2
@@ -122,12 +122,12 @@ catalog:
   hast-util-sanitize: ^5.0.2
   husky: ^9.1.7
   ink: ^6.8.0
-  isbot: ^5.1.35
+  isbot: ^5.1.40
   js-yaml: ^4.1.1
   jsdom: ~26.0.0
   json-schema: ^0.4.0
   json-schema-default: ^1.0.2
-  katex: ^0.16.38
+  katex: ^0.16.45
   knip: ^6.0.4
   langchain: ^1.4.0
   lint-staged: ^16.3.2
@@ -141,7 +141,7 @@ catalog:
   oxlint: ^1.51.0
   oxlint-tsgolint: ^0.16.0
   pdf-parse: ^2.4.5
-  publint: ^0.3.17
+  publint: ^0.3.20
   qrcode-terminal: ^0.12.0
   react: ^19.2.4
   react-dom: ^19.2.4
@@ -166,7 +166,7 @@ catalog:
   unified: ^11.0.5
   unist-util-visit: ^5.1.0
   uzip: ^0.20201231.0
-  vite: 8.0.10
+  vite: 8.0.12
   vite-plugin-mkcert: ^2.0.0
   vite-plugin-static-copy: ^4.1.0
   vitest: 4.1.5

@@ -48,7 +48,7 @@ catalog:
   '@nx/nest': 22.7.1
   '@nx/node': 22.7.1
   '@nx/playwright': 22.7.1
-  '@nx/react': 22.7.1
+  '@nx/react': 22.7.2
   '@nx/vite': 22.7.1
   '@nx/web': 22.7.1
   '@nx/webpack': 22.7.1
@@ -66,10 +66,10 @@ catalog:
   '@oxc-node/core': ^0.0.35
   '@playwright/test': ^1.58.2
   '@pyroscope/nodejs': ^0.4.10
-  '@react-router/dev': 7.14.2
-  '@react-router/express': 7.14.2
-  '@react-router/fs-routes': 7.14.2
-  '@react-router/node': 7.14.2
+  '@react-router/dev': 7.15.1
+  '@react-router/express': 7.15.1
+  '@react-router/fs-routes': 7.15.1
+  '@react-router/node': 7.15.1
   '@size-limit/file': ^12.0.1
   '@socket.io/redis-streams-adapter': ^0.3.1
   '@tanstack/react-pacer': ^0.22.1
@@ -77,7 +77,7 @@ catalog:
   '@taucad/kcl-wasm-lib': 0.1.148
   '@testing-library/dom': ^10.4.1
   '@testing-library/jest-dom': 6.6.3
-  '@testing-library/react': 16.2.0
+  '@testing-library/react': 16.3.2
   '@tiptap/core': ^3.20.4
   '@tiptap/extension-document': ^3.20.4
   '@tiptap/extension-hard-break': ^3.20.4
@@ -87,7 +87,7 @@ catalog:
   '@tiptap/extension-placeholder': ^3.20.4
   '@tiptap/extension-text': ^3.20.4
   '@tiptap/pm': ^3.20.4
-  '@tiptap/react': ^3.20.4
+  '@tiptap/react': ^3.23.4
   '@tiptap/suggestion': ^3.20.4
   '@traceloop/instrumentation-langchain': ^0.22.6
   '@types/express': ^5.0.0
@@ -96,14 +96,14 @@ catalog:
   '@types/json-schema': ^7.0.15
   '@types/madge': ^5.0.3
   '@types/node': ~24.0.15
-  '@types/react': 19.0.12
-  '@types/react-dom': 19.0.4
+  '@types/react': 19.2.14
+  '@types/react-dom': 19.2.3
   '@types/turndown': ^5.0.6
   '@typescript/native-preview': 7.0.0-dev.20260223.1
   '@typescript/vfs': ^1.6.4
   '@vitest/coverage-v8': 4.1.5
   '@vitest/ui': 4.1.5
-  '@xyflow/react': ^12.10.1
+  '@xyflow/react': ^12.10.2
   better-auth: ^1.6.11
   bowser: ^2.14.1
   cdn-resolve: ^2.1.2
@@ -161,7 +161,7 @@ catalog:
   react: ^19.2.6
   react-day-picker: ^10.0.0
   react-dom: ^19.2.6
-  react-router: 7.14.2
+  react-router: 7.15.1
   rehype-sanitize: ^6.0.0
   rehype-stringify: ^10.0.1
   remark-math: ^6.0.0

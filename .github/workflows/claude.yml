@@ -72,6 +72,27 @@ jobs:
       id-token: write
       actions: read
     steps:
+      - name: Resolve checkout ref
+        id: checkout-ref
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const pullNumber = context.payload.pull_request?.number ??
+              (context.payload.issue?.pull_request ? context.payload.issue.number : undefined);
+
+            const ref = pullNumber
+              ? `refs/pull/${pullNumber}/head`
+              : context.payload.repository.default_branch;
+
+            core.info(`Checking out ${ref}`);
+            core.setOutput('ref', ref);
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ steps.checkout-ref.outputs.ref }}
+          fetch-depth: 20
+
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@38ec876110f9fbf8b950c79f534430740c3ac009 # v1
@@ -116,6 +137,27 @@ jobs:
       id-token: write
       actions: read
     steps:
+      - name: Resolve checkout ref
+        id: checkout-ref
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const pullNumber = context.payload.pull_request?.number ??
+              (context.payload.issue?.pull_request ? context.payload.issue.number : undefined);
+
+            const ref = pullNumber
+              ? `refs/pull/${pullNumber}/head`
+              : context.payload.repository.default_branch;
+
+            core.info(`Checking out ${ref}`);
+            core.setOutput('ref', ref);
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ steps.checkout-ref.outputs.ref }}
+          fetch-depth: 20
+
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@38ec876110f9fbf8b950c79f534430740c3ac009 # v1

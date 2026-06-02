@@ -556,8 +556,8 @@ catalogs:
       specifier: ^4.1.0
       version: 4.1.0
     vitest-mock-extended:
-      specifier: ^3.1.1
-      version: 3.1.1
+      specifier: ^4.0.0
+      version: 4.0.0
     vscode-uri:
       specifier: 3.1.0
       version: 3.1.0
@@ -2175,7 +2175,7 @@ importers:
         version: 0.20201231.0
       vitest-mock-extended:
         specifier: 'catalog:'
-        version: 3.1.1(typescript@5.9.3)(vitest@4.1.5)
+        version: 4.0.0(typescript@5.9.3)(vitest@4.1.5)
       ws:
         specifier: 'catalog:'
         version: 8.21.0
@@ -10290,10 +10290,6 @@ packages:
 
   '@smithy/signature-v4@5.4.5':
     resolution: {integrity: sha512-QBJKWGqIknH0dc9LWpfH1mkdokAx6iXYN3UcQ3eY6uIEyScuoQAhfl94ge7ozUy9WgFUdE8xsvwBjaYBbWmPNA==}
-    engines: {node: '>=18.0.0'}
-
-  '@smithy/types@4.14.1':
-    resolution: {integrity: sha512-59b5HtSVrVR/eYNei3BUj3DCPKD/G7EtDDe7OEJE7i7FtQFugYo6MxbotS8mVJkLNVf8gYaAlEBwwtJ9HzhWSg==}
     engines: {node: '>=18.0.0'}
 
   '@smithy/types@4.14.2':
@@ -22116,6 +22112,12 @@ packages:
       typescript: 3.x || 4.x || 5.x || 6.x
       vitest: 4.1.5
 
+  vitest-mock-extended@4.0.0:
+    resolution: {integrity: sha512-m2FmH8JYfxzZoLsHuhXRY+Pv++a3zd91HYpSz81tpRLEHbtFkEL2QcWvJowucWuNTirzQURKfWbJJSXbYqkTsA==}
+    peerDependencies:
+      typescript: 3.x || 4.x || 5.x || 6.x
+      vitest: 4.1.5
+
   vitest@4.1.5:
     resolution: {integrity: sha512-9Xx1v3/ih3m9hN+SbfkUyy0JAs72ap3r7joc87XL6jwF0jGg6mFBvQ1SrwaX+h8BlkX6Hz9shdd1uo6AF+ZGpg==}
     engines: {node: ^20.0.0 || ^22.0.0 || >=24.0.0}
@@ -24118,7 +24120,7 @@ snapshots:
       deepmerge: 4.3.1
       dotenv: 17.4.2
       openai: 4.104.0(encoding@0.1.13)(ws@8.21.0)(zod@4.4.3)
-      ws: 8.20.1
+      ws: 8.21.0
       zod: 4.4.3
       zod-to-json-schema: 3.25.2(zod@4.4.3)
     transitivePeerDependencies:
@@ -31287,7 +31289,7 @@ snapshots:
   '@smithy/eventstream-codec@4.2.14':
     dependencies:
       '@aws-crypto/crc32': 5.2.0
-      '@smithy/types': 4.14.1
+      '@smithy/types': 4.14.2
       '@smithy/util-hex-encoding': 4.2.2
       tslib: 2.8.1
     optional: true
@@ -31315,7 +31317,7 @@ snapshots:
 
   '@smithy/protocol-http@5.3.14':
     dependencies:
-      '@smithy/types': 4.14.1
+      '@smithy/types': 4.14.2
       tslib: 2.8.1
     optional: true
 
@@ -31324,11 +31326,6 @@ snapshots:
       '@smithy/core': 3.24.5
       '@smithy/types': 4.14.2
       tslib: 2.8.1
-
-  '@smithy/types@4.14.1':
-    dependencies:
-      tslib: 2.8.1
-    optional: true
 
   '@smithy/types@4.14.2':
     dependencies:
@@ -37678,7 +37675,7 @@ snapshots:
       isstream: 0.1.2
       jsonwebtoken: 9.0.3
       mime-types: 2.1.35
-      retry-axios: 2.6.0(axios@1.7.9(debug@4.4.3))
+      retry-axios: 2.6.0(axios@1.7.9)
       tough-cookie: 4.1.4
     transitivePeerDependencies:
       - supports-color
@@ -43242,7 +43239,7 @@ snapshots:
 
   ret@0.5.0: {}
 
-  retry-axios@2.6.0(axios@1.7.9(debug@4.4.3)):
+  retry-axios@2.6.0(axios@1.7.9):
     dependencies:
       axios: 1.7.9(debug@4.4.3)
 
@@ -45706,6 +45703,12 @@ snapshots:
       yaml: 2.9.0
 
   vitest-mock-extended@3.1.1(typescript@5.9.3)(vitest@4.1.5):
+    dependencies:
+      ts-essentials: 10.1.1(typescript@5.9.3)
+      typescript: 5.9.3
+      vitest: 4.1.5(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(@vitest/coverage-v8@4.1.5)(@vitest/ui@4.1.5)(happy-dom@16.8.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.10(@types/node@24.0.15)(esbuild@0.27.7)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.97.3)(sass@1.97.3)(stylus@0.64.0)(terser@5.46.0)(tsx@4.22.3)(yaml@2.9.0))
+
+  vitest-mock-extended@4.0.0(typescript@5.9.3)(vitest@4.1.5):
     dependencies:
       ts-essentials: 10.1.1(typescript@5.9.3)
       typescript: 5.9.3

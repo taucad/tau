@@ -1,0 +1,7 @@
+{
+  "name": "geospec",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/geospec",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:lib"]
+}

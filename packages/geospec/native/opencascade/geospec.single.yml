@@ -1,0 +1,55 @@
+additionalCppFiles:
+  - wrappers/geospec-mesh-metrics.cpp
+  - wrappers/geospec-step-reader.cpp
+
+mainBuild:
+  name: geospec_opencascade_single.js
+  bindings:
+    - symbol: Message_ProgressRange
+    - symbol: STEPControl_Reader
+    - symbol: IFSelect_ReturnStatus
+    - symbol: gp_Pnt
+    - symbol: gp_Vec
+    - symbol: gp_XYZ
+    - symbol: gp_Dir
+    - symbol: gp_Pln
+    - symbol: gp_Cylinder
+    - symbol: TopAbs_ShapeEnum
+    - symbol: TopAbs_Orientation
+    - symbol: TopLoc_Location
+    - symbol: TopExp_Explorer
+    - symbol: TopoDS
+    - symbol: TopoDS_Shape
+    - symbol: TopoDS_Face
+    - symbol: Poly_Triangle
+    - symbol: Poly_Triangulation
+    - symbol: BRep_Tool
+    - symbol: BRepTools
+    - symbol: BRepMesh_IncrementalMesh
+    - symbol: BRepCheck_Analyzer
+    - symbol: BRepBndLib
+    - symbol: BRepGProp
+    - symbol: GProp_GProps
+    - symbol: BRepAdaptor_Surface
+    - symbol: GeomAbs_SurfaceType
+    - symbol: GeoSpecMeshDistanceStats
+    - symbol: GeoSpecMeshMetrics
+    - symbol: GeoSpecStepReadResult
+    - symbol: GeoSpecStepStreamReader
+  emccFlags:
+    - -flto
+    - -O3
+    - -fwasm-exceptions
+    - -msimd128
+    - -sMODULARIZE
+    - -sEXPORT_ES6=1
+    - -sWASM_BIGINT
+    - -sEVAL_CTORS=2
+    - -sEXPORT_EXCEPTION_HANDLING_HELPERS
+    - -sALLOW_MEMORY_GROWTH=1
+    - -sINITIAL_MEMORY=100MB
+    - -sMAXIMUM_MEMORY=4GB
+    - -sEXPORTED_RUNTIME_METHODS=["HEAPF64","FS"]
+    - -sEXPORTED_FUNCTIONS=["_malloc","_free"]
+    - -sERROR_ON_UNDEFINED_SYMBOLS=1
+    - --no-entry

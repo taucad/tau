@@ -1,0 +1,150 @@
+{
+  "name": "geospec",
+  "version": "0.0.1",
+  "description": "Vitest-style geometry specification runner for CAD models",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/geospec"
+  },
+  "main": "./dist/cjs/index.cjs",
+  "types": "./dist/esm/index.d.ts",
+  "module": "./dist/esm/index.js",
+  "bin": {
+    "geospec": "./dist/esm/cli.js"
+  },
+  "files": [
+    "dist",
+    "native",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./brep": "./src/brep/index.ts",
+    "./config": "./src/config/index.ts",
+    "./mesh": "./src/mesh/index.ts",
+    "./model": "./src/model/index.ts",
+    "./runner": "./src/runner/index.ts",
+    "./step": "./src/step/index.ts",
+    "./native/opencascade/single": "./native/opencascade/geospec_opencascade_single.js"
+  },
+  "publishConfig": {
+    "access": "public",
+    "bin": {
+      "geospec": "./dist/esm/cli.js"
+    },
+    "exports": {
+      ".": {
+        "require": {
+          "types": "./dist/cjs/index.d.cts",
+          "default": "./dist/cjs/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/index.d.ts",
+          "default": "./dist/esm/index.js"
+        }
+      },
+      "./brep": {
+        "require": {
+          "types": "./dist/cjs/brep/index.d.cts",
+          "default": "./dist/cjs/brep/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/brep/index.d.ts",
+          "default": "./dist/esm/brep/index.js"
+        }
+      },
+      "./config": {
+        "require": {
+          "types": "./dist/cjs/config/index.d.cts",
+          "default": "./dist/cjs/config/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/config/index.d.ts",
+          "default": "./dist/esm/config/index.js"
+        }
+      },
+      "./mesh": {
+        "require": {
+          "types": "./dist/cjs/mesh/index.d.cts",
+          "default": "./dist/cjs/mesh/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/mesh/index.d.ts",
+          "default": "./dist/esm/mesh/index.js"
+        }
+      },
+      "./model": {
+        "require": {
+          "types": "./dist/cjs/model/index.d.cts",
+          "default": "./dist/cjs/model/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/model/index.d.ts",
+          "default": "./dist/esm/model/index.js"
+        }
+      },
+      "./runner": {
+        "require": {
+          "types": "./dist/cjs/runner/index.d.cts",
+          "default": "./dist/cjs/runner/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/runner/index.d.ts",
+          "default": "./dist/esm/runner/index.js"
+        }
+      },
+      "./step": {
+        "require": {
+          "types": "./dist/cjs/step/index.d.cts",
+          "default": "./dist/cjs/step/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/step/index.d.ts",
+          "default": "./dist/esm/step/index.js"
+        }
+      },
+      "./native/opencascade/single": {
+        "import": {
+          "types": "./native/opencascade/geospec_opencascade_single.d.ts",
+          "default": "./native/opencascade/geospec_opencascade_single.js"
+        }
+      }
+    }
+  },
+  "imports": {
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.3.0",
+    "@gltf-transform/functions": "^4.3.0",
+    "@taucad/vm": "workspace:*"
+  },
+  "peerDependencies": {
+    "@taucad/runtime": ">=0.1.0-beta.1",
+    "replicad": ">=0.23.0"
+  },
+  "peerDependenciesMeta": {
+    "@taucad/runtime": {
+      "optional": true
+    },
+    "replicad": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@taucad/runtime": "workspace:*"
+  }
+}

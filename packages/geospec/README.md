@@ -1,0 +1,139 @@
+# geospec
+
+GeoSpec is a standalone CAD geometry testing library with Vitest-style authoring APIs.
+
+```ts
+import { describe, expectGeo, it } from 'geospec';
+import { loadModel } from 'geospec/model';
+
+const code = `
+  import { makeBaseBox } from 'replicad';
+  export default function main() {
+    return makeBaseBox(40, 20, 8);
+  }
+`;
+
+describe('bracket', () => {
+  it('has expected measurements', async () => {
+    const model = await loadModel({
+      code: { 'main.ts': code },
+      file: 'main.ts',
+      kernel: 'replicad',
+      format: 'glb',
+    });
+
+    expectGeo(model).toHaveBoundingBox({ size: { x: 0.04, y: 0.008, z: 0.02 }, tolerance: 0.001 });
+    expectGeo(model).toHaveSurfaceArea({ value: 0.002_56, tolerance: 0.000_1 });
+    expectGeo(model).toHaveVolume({ value: 0.000_006_4, tolerance: 0.000_001 });
+  });
+});
+```
+
+Run standalone GeoSpec modules from Node:
+
+```bash
+geospec run .
+geospec run . --pattern "parts/**/*.geospec.ts"
+geospec run . --file main.geospec.ts --test-name-pattern volume
+geospec run . --json
+```
+
+The CLI and Tau `test_model` tool share the same execution filters:
+
+- `pattern`: file glob, defaulting to `**/*.geospec.{ts,js}`
+- `files`: specific GeoSpec files to run (`--file` in the CLI)
+- `testNamePattern`: case-insensitive substring matched against `suite > test`
+- `testTimeout`: async test timeout in milliseconds (`--test-timeout` in the CLI)
+
+The Tau runtime contract remains file/bytes based: render or export geometry, then pass GLB/glTF or STEP bytes into GeoSpec loaders. `geospec/model` can call `@taucad/runtime` when it is installed, but the root `geospec` import stays lazy and standalone. Tau project tests should use `loadModel` and parameter helpers from `geospec/model`; `@taucad/testing/tau` remains an internal compatibility adapter for Tau runners.
+
+STEP/BRep evidence is imported by GeoSpec's own OpenCascade.js build:
+
+```ts
+import { loadStep } from 'geospec/step';
+
+const subject = await loadStep({ source: stepBytes });
+```
+
+Replicad can author and export deterministic fixtures through `loadModel({ kernel: 'replicad', format: 'step' })`, but GeoSpec does not use Replicad's STEP importer. STEP bytes are read by `GeoSpecStepStreamReader`, which records native-stream or filesystem-fallback provenance and produces GeoSpec-owned BRep and mesh evidence.
+
+Measurement matchers currently support mesh evidence and prefer exact BRep evidence when it is present:
+
+```ts
+expectGeo(subject).toHaveSurfaceArea({ value: 12_345, tolerance: 1 });
+expectGeo(subject).toHaveVolume({ value: 120_000, tolerance: 10 });
+expectGeo(subject).toHaveMass({ value: 94.2, density: 0.000_785, tolerance: 0.5 });
+expectGeo(subject).toHaveCenterOfMass({ point: { x: 0, y: 0, z: 10 }, tolerance: 0.05 });
+expectGeo(actual).toHaveChamferDistanceTo(expected, {
+  mean: { lessThan: 0.02 },
+  max: { lessThan: 0.2 },
+  p95: { lessThan: 0.08 },
+  samples: 100_000,
+});
+```
+
+Initial BRep feature matchers are available when a loader provides BRep evidence:
+
+```ts
+import { loadModel } from 'geospec/model';
+
+const subject = await loadModel({ file: 'main.ts', format: 'step' });
+
+expectGeo(subject).toHavePlanarFace({ normal: { x: 0, y: 0, z: 1 }, offset: 20, tolerance: 0.05 });
+expectGeo(subject).toHaveCylindricalFace({ radius: 15, axis: 'z', tolerance: 0.05 });
+expectGeo(subject).toHaveCircularHole({ diameter: 8, through: true, axis: 'z', center: { x: 25, y: 15 } });
+expectGeo(subject).toHaveChamferFeature({ distance: 2, selection: 'outer top perimeter', tolerance: 0.05 });
+expectGeo(subject).toHaveMinimumWallThickness({ value: { greaterThanOrEqual: 2 }, tolerance: 0.05 });
+```
+
+Large sampled mesh-distance checks can use GeoSpec's optional OpenCascade.js
+native analyzer. The root import remains lazy; native code is mounted through
+`geospec/mesh` only when the caller provides an initialized WASM module.
+
+```ts
+import { createOpenCascadeMeshAnalyzer } from 'geospec/mesh';
+import initOpenCascade from 'geospec/native/opencascade/single';
+
+const oc = await initOpenCascade();
+const nativeAnalyzer = createOpenCascadeMeshAnalyzer(oc);
+```
+
+The custom C++ wrapper and Docker build config live in
+`native/opencascade/`. JavaScript fallback distance analysis is bounded and
+returns diagnostics when a comparison needs the native path.
+
+Tau projects import existing parameter files as real JSON modules through project `package.json#imports`:
+
+```json
+{
+  "type": "module",
+  "imports": {
+    "#params/*.json": "./.tau/parameters/*.json"
+  }
+}
+```
+
+```ts
+import { describe, expectGeo, it } from 'geospec';
+import { loadModel, parameterGroups } from 'geospec/model';
+import mainParams from '#params/main.ts.json' with { type: 'json' };
+
+const groups = parameterGroups(mainParams, { defaults: defaultParams });
+
+describe('parameter variants', () => {
+  for (const group of groups) {
+    it(`should render ${group.name}`, async () => {
+      const model = await loadModel({
+        file: 'main.ts',
+        parameters: group.values,
+        parameterSource: group,
+      });
+
+      expectGeo(model).toHaveBoundingBox({
+        size: { x: group.values.base.width },
+        tolerance: 1,
+      });
+    });
+  }
+});
+```

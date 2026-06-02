@@ -18,7 +18,7 @@ catalog:
   '@better-auth-ui/core': ^1.6.8
   '@better-auth-ui/react': ^1.6.8
   '@better-auth/api-key': ^1.6.11
-  '@eslint-community/eslint-plugin-eslint-comments': ^4.7.1
+  '@eslint-community/eslint-plugin-eslint-comments': ^4.7.2
   '@fastify/cookie': ^11.0.2
   '@fastify/multipart': ^10.0.0
   '@fastify/otel': ^0.17.1
@@ -50,8 +50,8 @@ catalog:
   '@nestjs/testing': ^11.1.24
   '@nestjs/websockets': ^11.1.24
   '@nx/devkit': 22.7.1
-  '@nx/eslint': 22.7.1
-  '@nx/eslint-plugin': 22.7.1
+  '@nx/eslint': 22.7.5
+  '@nx/eslint-plugin': 22.7.5
   '@nx/js': 22.7.1
   '@nx/nest': 22.7.1
   '@nx/node': 22.7.1
@@ -195,7 +195,7 @@ catalog:
   type-fest: ^4.41.0
   typedoc: ^0.28.19
   typescript: ~5.9.3
-  typescript-eslint: ^8.60.0
+  typescript-eslint: ^8.60.1
   uint8array-extras: ^1.5.0
   unified: ^11.0.5
   unist-util-visit: ^5.1.0

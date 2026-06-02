@@ -56,7 +56,7 @@ export type ToolEventSummary = {
   isError: boolean;
   /** True when this tool call returned a recognised "no results" success shape (AP5). */
   isEmptyResult: boolean;
-  /** True for tools that mutate the user's filesystem (`edit_file` / `create_file` / `delete_file` / `edit_tests`). */
+  /** True for tools that mutate the user's filesystem (`edit_file` / `create_file` / `delete_file`). */
   isMutation: boolean;
   /**
    * Optional `targetFile` extracted from args when the tool operates on a single
@@ -181,12 +181,7 @@ export const errorHash = (message: string, errorCode?: string): string => sha256
 // Message → ToolEventSummary projection
 // =============================================================================
 
-const mutationToolNames = new Set<string>([
-  toolName.editFile,
-  toolName.createFile,
-  toolName.deleteFile,
-  toolName.editTests,
-]);
+const mutationToolNames = new Set<string>([toolName.editFile, toolName.createFile, toolName.deleteFile]);
 
 const targetFileTools = new Set<string>([
   toolName.editFile,
@@ -196,7 +191,6 @@ const targetFileTools = new Set<string>([
   toolName.getKernelResult,
   toolName.exportGeometry,
   toolName.screenshot,
-  toolName.editTests,
   toolName.testModel,
 ]);
 

@@ -11,7 +11,7 @@ const defaultTargetFile = 'main.scad';
 /**
  * Creates a mock TestModelOutput with the given failures.
  *
- * Per the multi-file test.json migration every failure/pass carries a
+ * Per the multi-file GeoSpec runner contract every failure/pass carries a
  * `targetFile`. Tests pass already-tagged failures in; this helper tags any
  * passes with the same default file so fixtures stay terse.
  */
@@ -361,7 +361,7 @@ describe('toolResultTrimmerMiddleware', () => {
   });
 
   // ==========================================================================
-  // Multi-file test.json migration
+  // Multi-file GeoSpec trimming
   // ==========================================================================
 
   describe('multi-file test_model trimming', () => {

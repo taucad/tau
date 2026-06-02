@@ -2,13 +2,10 @@
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import type { KernelProvider } from '@taucad/runtime';
+import type { ToolName } from '@taucad/chat';
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { toolName } from '@taucad/chat/constants';
 import { ToolService } from '#api/tools/tool.service.js';
-import { getKernelConfig } from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.js';
-
-const allKernels: readonly KernelProvider[] = ['openscad', 'replicad', 'jscad', 'manifold', 'opencascadejs', 'zoo'];
 
 describe('ToolService.getTools', () => {
   let service: ToolService;
@@ -24,16 +21,6 @@ describe('ToolService.getTools', () => {
 
   afterEach(async () => {
     await module.close();
-  });
-
-  describe.each(allKernels)('%s kernel', (kernel) => {
-    it('routes the kernel to the edit_tests tool description (kernel-native file extension)', () => {
-      const { tools } = service.getTools('auto', kernel);
-      const description = tools[toolName.editTests]?.description ?? '';
-      const config = getKernelConfig(kernel);
-      const exampleKeyPattern = new RegExp(`"main\\${config.fileExtension}"`);
-      expect(description).toMatch(exampleKeyPattern);
-    });
   });
 
   describe('per-kernel cache', () => {
@@ -52,11 +39,9 @@ describe('ToolService.getTools', () => {
       expect(openscadTool).not.toBe(replicadTool);
     });
 
-    it('caches the edit_tests tool per kernel as well', () => {
-      const a = service.getTools('auto', 'replicad').tools[toolName.editTests];
-      const b = service.getTools('auto', 'replicad').tools[toolName.editTests];
-      expect(a).toBeDefined();
-      expect(a).toBe(b);
+    it('should not expose the legacy edit_tests tool in the active agent toolbelt', () => {
+      const { tools } = service.getTools('auto', 'replicad');
+      expect(Object.hasOwn(tools, 'edit_tests')).toBe(false);
     });
   });
 
@@ -69,6 +54,12 @@ describe('ToolService.getTools', () => {
     it('filters tools when an array choice is provided', () => {
       const { tools, resolvedToolChoice } = service.getTools([toolName.testModel], 'openscad');
       expect(Object.keys(tools)).toEqual([toolName.testModel]);
+      expect(resolvedToolChoice).toBe('required');
+    });
+
+    it('should ignore legacy edit_tests if it is requested explicitly', () => {
+      const { tools, resolvedToolChoice } = service.getTools(['edit_tests' as ToolName], 'openscad');
+      expect(tools).toEqual({});
       expect(resolvedToolChoice).toBe('required');
     });
   });

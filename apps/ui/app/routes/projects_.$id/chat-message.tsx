@@ -43,7 +43,6 @@ import { ChatMessageToolWebSearch } from '#routes/projects_.$id/chat-message-too
 import { ChatMessageToolWebBrowser } from '#routes/projects_.$id/chat-message-tool-web-browser.js';
 import { ChatMessageToolFileEdit } from '#routes/projects_.$id/chat-message-tool-edit-file.js';
 import { ChatMessageToolTestModel } from '#routes/projects_.$id/chat-message-tool-test-model.js';
-import { ChatMessageToolEditTests } from '#routes/projects_.$id/chat-message-tool-edit-tests.js';
 import { ChatMessageToolReadFile } from '#routes/projects_.$id/chat-message-tool-read-file.js';
 import { ChatMessageToolListDirectory } from '#routes/projects_.$id/chat-message-tool-list-directory.js';
 import { ChatMessageToolCreateFile } from '#routes/projects_.$id/chat-message-tool-create-file.js';
@@ -214,10 +213,6 @@ function renderAssistantPart(
 
     case 'tool-test_model': {
       return <ChatMessageToolTestModel key={part.toolCallId} part={part} />;
-    }
-
-    case 'tool-edit_tests': {
-      return <ChatMessageToolEditTests key={part.toolCallId} part={part} />;
     }
 
     case 'tool-transfer_to_cad_expert':

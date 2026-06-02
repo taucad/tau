@@ -12,6 +12,8 @@ export const manifoldConfig: KernelConfig = {
   commonErrorPatterns:
     'missing manifold imports, returning undefined from main, invalid boolean operation inputs, non-positive dimensions, segments proliferation on small features, polygon-from-points loops where CrossSection.circle or revolve already exist',
 
+  testingProfile: { includeBrepFeatureExamples: false },
+
   topologyHints: `- No analytical curves — all geometry is mesh. Choose segment count, not curve form.
 - Cylinders / spheres / revolves: segments ≈ \`max(16, π · diameter / 0.3)\` for visible parts, 0.1 for export-grade. Default 32 for small, 64 for large.
 - Prefer \`Manifold.cylinder\` / \`Manifold.sphere\` / \`Manifold.revolve\` over manual CrossSection-from-points loops.

@@ -17,7 +17,7 @@ Examples: \`format: "stl"\`, \`format: "step"\`, \`format: "glb"\`, \`format: "3
 
 Returns \`artifactPath\` plus \`mimeType\` and \`byteLength\` so callers can correlate with on-disk downloads.
 
-For deterministic measurement runs, use \`${toolName.testModel}\` plus \`${toolName.editTests}\` instead.`,
+For deterministic measurement runs, create or edit \`*.geospec.ts\` tests and use \`${toolName.testModel}\` instead.`,
   schema: exportGeometryInputSchema,
 } as const;
 

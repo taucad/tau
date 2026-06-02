@@ -12,7 +12,7 @@ import { createRuntimeFileSystem } from '@taucad/runtime/filesystem';
 import { getTestFileSystem } from '@taucad/runtime/testing';
 import type { RuntimeFileSystemBase } from '@taucad/runtime';
 import { createRpcDispatcher } from '@taucad/chat/rpc';
-import type { RpcGraphicsClient } from '@taucad/chat/rpc';
+import type { RpcGeoSpecClient, RpcGraphicsClient } from '@taucad/chat/rpc';
 import { getEnvironment } from '#config/environment.config.js';
 import { ChatController } from '#api/chat/chat.controller.js';
 import { ChatService } from '#api/chat/chat.service.js';
@@ -115,13 +115,23 @@ export type TestApp = {
 /**
  * Optional overrides for {@link createTestApp}.
  *
- * - `graphicsStub`: replace the default (omitted) graphics client. Used by EVAL
- *   tests for the agent-loop safeguards middleware that need to inject
- *   deterministic `fetch_geometry` / `screenshot` failures so the model is
- *   forced to repeat the same tool call.
+ * - `graphicsStub`: replace the default (omitted) graphics client.
+ * - `geospecStub`: replace the default (omitted) GeoSpec client. Used by
+ *   agent-loop safeguards tests to inject deterministic `test_model` failures.
  */
 export type CreateTestAppOptions = {
   graphicsStub?: RpcGraphicsClient;
+  geospecStub?: RpcGeoSpecClient;
+  modelService?: Pick<
+    ModelService,
+    | 'buildModel'
+    | 'getContextWindow'
+    | 'getKnowledgeCutoff'
+    | 'getModelCost'
+    | 'getOtelProviderName'
+    | 'getProviderId'
+    | 'normalizeUsageTokens'
+  >;
 };
 
 /**
@@ -137,7 +147,7 @@ export type CreateTestAppOptions = {
 export async function createTestApp(options: CreateTestAppOptions = {}): Promise<TestApp> {
   const logger = new Logger('TestApp');
 
-  const moduleRef = await Test.createTestingModule({
+  let builder = Test.createTestingModule({
     imports: [TestChatModule],
   })
     .overrideProvider(ChatRpcService)
@@ -145,8 +155,13 @@ export async function createTestApp(options: CreateTestAppOptions = {}): Promise
     .overrideProvider(CheckpointerService)
     .useClass(MemoryCheckpointerService)
     .overrideProvider(StoreService)
-    .useClass(MemoryStoreService)
-    .compile();
+    .useClass(MemoryStoreService);
+
+  if (options.modelService) {
+    builder = builder.overrideProvider(ModelService).useValue(options.modelService);
+  }
+
+  const moduleRef = await builder.compile();
 
   const app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
   app.enableVersioning({ type: VersioningType.URI });
@@ -168,6 +183,7 @@ export async function createTestApp(options: CreateTestAppOptions = {}): Promise
     fileSystem: createHeadlessRpcFileSystem(createRuntimeFileSystem(memFs)),
     kernelClient: createHeadlessRuntimeClient({ createGeometry: async () => ({ success: true, issues: [] }) }),
     ...(options.graphicsStub ? { graphics: options.graphicsStub } : {}),
+    ...(options.geospecStub ? { geospec: options.geospecStub } : {}),
   });
   headlessRpc.setDispatcher(dispatcher);
 

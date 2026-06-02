@@ -358,11 +358,10 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
  *
  * These tests reproduce the exact failure conditions observed in production:
  *
- * 1. maxHttpBufferSize (Socket.IO default: 1MB) is too small for geometry payloads.
- *    The fetchGeometry RPC returns GLB data (Uint8Array) from the client to the server.
- *    Complex models (e.g. a detailed OpenSCAD helicopter, $fn=48, 7 files) produce
- *    2-5MB GLB. When the rpc_response message exceeds maxHttpBufferSize, Socket.IO's
- *    ws library closes the connection with code 1009 (Message Too Big).
+ * 1. GeoSpec test_model execution now returns compact pass/fail results from
+ *    the browser-side Tau runner instead of shipping GLB bytes back to the API.
+ *    This test locks in the transport shape that prevents large geometry
+ *    payloads from crossing chat RPC in browser-connected sessions.
  *
  * 2. Dev mode handleDevConnection registers Socket.IO event handlers AFTER an async
  *    auth check (await auth.api.getSession()). The client's connect handler emits
@@ -428,14 +427,14 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     return client;
   };
 
-  it('should maintain connection when RPC response contains large geometry payload (>1MB)', async () => {
-    const { serverIo, listen } = createTestServer({ maxHttpBufferSize: 10e6 });
+  it('should keep GeoSpec test_model RPC responses compact instead of returning geometry payloads', async () => {
+    const { serverIo, listen } = createTestServer();
 
-    let serverReceivedResponse = false;
+    let receivedResult: unknown;
     const responseReceived = new Promise<void>((resolve) => {
       serverIo.on('connection', (socket) => {
-        socket.on('rpc_response', () => {
-          serverReceivedResponse = true;
+        socket.on('rpc_response', (message: { result?: unknown }) => {
+          receivedResult = message.result;
           resolve();
         });
       });
@@ -453,12 +452,6 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     await connected;
     expect(client.connected).toBe(true);
 
-    // Simulate fetchGeometry RPC response with realistic GLB payload.
-    // A detailed OpenSCAD helicopter model ($fn=48, 7 component files)
-    // produces 2-5MB of GLB geometry data.
-    const twoMegabytes = 2 * 1024 * 1024;
-    const largeGlb = new Uint8Array(twoMegabytes);
-
     const disconnectPromise = new Promise<string>((resolve) => {
       client.on('disconnect', (reason) => {
         resolve(reason);
@@ -467,10 +460,22 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
 
     client.emit('rpc_response', {
       type: 'rpc_response',
-      rpcName: 'fetch_geometry',
-      requestId: 'req_geometry_001',
+      rpcName: 'run_geospec_tests',
+      requestId: 'req_geospec_001',
       toolCallId: 'tool_test_model_001',
-      result: { success: true, glb: largeGlb },
+      result: {
+        success: true,
+        failures: [],
+        passes: [
+          {
+            id: 'main.geospec.ts:main dimensions > width',
+            requirement: 'main dimensions > width',
+            targetFile: 'main.geospec.ts',
+          },
+        ],
+        passed: 1,
+        total: 1,
+      },
     });
 
     const outcome = await Promise.race([
@@ -483,12 +488,15 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
       }),
     ]);
 
-    expect(
-      outcome,
-      'Socket.IO killed the connection because the payload exceeded maxHttpBufferSize (1MB default)',
-    ).toBe('received');
+    expect(outcome, 'GeoSpec test_model should return compact results rather than large geometry payloads').toBe(
+      'received',
+    );
     expect(client.connected).toBe(true);
-    expect(serverReceivedResponse).toBe(true);
+    expect(receivedResult).toEqual(
+      expect.not.objectContaining({
+        glb: expect.any(Uint8Array) as unknown,
+      }),
+    );
   });
 
   it('should process join event when auth middleware runs before connection handler', async () => {

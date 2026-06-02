@@ -236,6 +236,17 @@ describe('KernelConfig.topologyHints', () => {
   });
 });
 
+describe('KernelConfig.testingProfile', () => {
+  it('should expose BRep feature examples only for kernels with exact BRep evidence', () => {
+    expect(getKernelConfig('replicad').testingProfile.includeBrepFeatureExamples).toBe(true);
+    expect(getKernelConfig('opencascadejs').testingProfile.includeBrepFeatureExamples).toBe(true);
+
+    for (const kernel of ['openscad', 'jscad', 'manifold', 'zoo'] as const) {
+      expect(getKernelConfig(kernel).testingProfile.includeBrepFeatureExamples).toBe(false);
+    }
+  });
+});
+
 describe('formatAddTopLevelExportRecovery', () => {
   describe.each(allKernels)('%s', (kernel) => {
     const config = getKernelConfig(kernel);

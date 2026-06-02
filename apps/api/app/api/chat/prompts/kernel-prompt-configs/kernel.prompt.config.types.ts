@@ -25,6 +25,17 @@ export type MultiFileExample = {
 };
 
 /**
+ * GeoSpec examples a kernel should see in the CAD agent prompt.
+ */
+export type KernelTestingProfile = {
+  /**
+   * True when the kernel can expose exact BRep evidence for GeoSpec feature
+   * matchers such as `toHavePlanarFace` and `toHaveCircularHole`.
+   */
+  includeBrepFeatureExamples: boolean;
+};
+
+/**
  * Configuration for a CAD kernel's system prompt.
  * Optimized per context-engineering.mdc: minimal fields, canonical example demonstrates behavior.
  */
@@ -40,6 +51,9 @@ export type KernelConfig = {
 
   /** Common error patterns - terse, one-line descriptions */
   commonErrorPatterns: string;
+
+  /** GeoSpec testing examples and capabilities to show this kernel. */
+  testingProfile: KernelTestingProfile;
 
   /** How this kernel handles file organization */
   fileLayoutMode: FileLayoutMode;

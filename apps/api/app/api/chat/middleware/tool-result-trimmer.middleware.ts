@@ -225,8 +225,8 @@ const toolResultTrimmers: Record<string, (result: unknown) => unknown> = {
    * Trims the test model result down to its diagnostic essentials.
    *
    * - `failures` is preserved verbatim (each entry already carries `targetFile`
-   *   from the multi-file test.json migration so the LLM can attribute each
-   *   failure to its geometry unit).
+   *   from the GeoSpec runner so the LLM can attribute each failure to its test
+   *   file).
    * - `total` is preserved.
    * - `passes`, `passed`, and `geometryArtifactPaths` are dropped: pass count
    *   is inferable as `total - failures.length`, and the artifact-path map is

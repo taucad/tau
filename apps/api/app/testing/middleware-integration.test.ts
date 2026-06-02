@@ -1,7 +1,16 @@
 // @vitest-environment node
+/* eslint-disable @typescript-eslint/naming-convention -- Scripted LangChain model fixtures use BaseChatModel's required underscore methods and usage_metadata fields. */
+/* oxlint-disable @typescript-eslint/class-literal-property-style -- LangChain BaseChatModel pattern. */
 import process from 'node:process';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import type { RpcGraphicsClient } from '@taucad/chat/rpc';
+import { AIMessage } from '@langchain/core/messages';
+import type { BaseMessage } from '@langchain/core/messages';
+import type { ChatResult } from '@langchain/core/outputs';
+import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager';
+import type { RpcGeoSpecClient } from '@taucad/chat/rpc';
+import { toolName } from '@taucad/chat/constants';
+import type { ChatUsageCost, ChatUsageTokens } from '#api/chat/chat.schema.js';
 import { collectStreamChunks, collectFinalMessage } from '#testing/stream-consumer.js';
 import {
   expectNoErrors,
@@ -10,10 +19,92 @@ import {
   expectHasTextContent,
 } from '#testing/stream-assertions.js';
 import { createTestApp } from '#testing/create-test-app.js';
-import type { TestApp } from '#testing/create-test-app.js';
+import type { CreateTestAppOptions, TestApp } from '#testing/create-test-app.js';
 import { buildCadAgent, providerEnvForModelId, requiresEnv } from '#testing/skip-helpers.js';
 
 const modelId = process.env['TEST_MODEL_ID'] ?? 'anthropic-claude-sonnet-4.6';
+
+class ScriptedGeoSpecLoopModel extends BaseChatModel {
+  private callCount = 0;
+
+  public constructor() {
+    super({});
+  }
+
+  public override _llmType(): string {
+    return 'scripted-geospec-loop-model';
+  }
+
+  public override _combineLLMOutput(): Record<string, unknown> {
+    return {};
+  }
+
+  public override bindTools(): this {
+    return this;
+  }
+
+  public override async _generate(
+    _messages: BaseMessage[],
+    _options: this['ParsedCallOptions'],
+    _runManager?: CallbackManagerForLLMRun,
+  ): Promise<ChatResult> {
+    this.callCount += 1;
+
+    if (this.callCount <= 3) {
+      const message = new AIMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: `call_test_model_${this.callCount}`,
+            name: toolName.testModel,
+            args: { files: ['main.geospec.ts'] },
+            type: 'tool_call',
+          },
+        ],
+        usage_metadata: { input_tokens: 100, output_tokens: 1, total_tokens: 101 },
+        response_metadata: { model: 'scripted-geospec-loop-model' },
+      });
+      return { generations: [{ text: '', message }] };
+    }
+
+    const message = new AIMessage({
+      content: 'Stopped after the safeguard reminder.',
+      usage_metadata: { input_tokens: 100, output_tokens: 5, total_tokens: 105 },
+      response_metadata: { model: 'scripted-geospec-loop-model' },
+    });
+    return { generations: [{ text: message.content as string, message }] };
+  }
+}
+
+const scriptedModelService = {
+  buildModel() {
+    return { model: new ScriptedGeoSpecLoopModel() };
+  },
+  getProviderId() {
+    return 'anthropic';
+  },
+  getContextWindow() {
+    return 200_000;
+  },
+  getKnowledgeCutoff() {
+    return '2026-01-01';
+  },
+  getOtelProviderName() {
+    return 'test';
+  },
+  normalizeUsageTokens(_modelId: string, usage: ChatUsageTokens): ChatUsageTokens {
+    return usage;
+  },
+  getModelCost(_modelId: string, _usage: ChatUsageTokens): ChatUsageCost {
+    return {
+      inputTokensCost: 0,
+      outputTokensCost: 0,
+      cacheReadTokensCost: 0,
+      cacheWriteTokensCost: 0,
+      totalCost: 0,
+    };
+  },
+} satisfies CreateTestAppOptions['modelService'];
 
 // Live test — requires `MORPH_API_KEY` (tool-offloading) plus the provider
 // key derived from `TEST_MODEL_ID`. Skips cleanly when either is missing.
@@ -232,8 +323,8 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
     // ===========================================================================
     // Agent loop safeguards — end-to-end integration
     //
-    // Drives the screenshot prompt against a deterministic broken `fetchGeometry`
-    // RPC handler. The model is forced to repeat `fetch_geometry` -> identical
+    // Drives the test_model prompt against a deterministic broken GeoSpec
+    // RPC handler. The model is forced to repeat `run_geospec_tests` -> identical
     // error, and the safeguards middleware MUST fire AP1 (identical_error) within
     // a small bounded number of agent iterations.
     //
@@ -244,44 +335,38 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
     // cache prefix.
     // ===========================================================================
 
-    it('should fire AP1 (identical_error) within 8 iterations against a deterministic broken fetch_geometry', async () => {
+    it('should fire AP1 (identical_error) within 8 iterations against a deterministic broken GeoSpec runner', async () => {
       const threadId = `test-safeguard-loop-${Date.now()}`;
 
-      const brokenGraphics: RpcGraphicsClient = {
-        async fetchGeometry() {
+      const brokenGeoSpec: RpcGeoSpecClient = {
+        async runTests() {
           return {
             success: false,
             errorCode: 'IO_ERROR',
-            message: 'Deterministic broken fetch_geometry: geometry unavailable',
-          };
-        },
-        async exportGeometry() {
-          return {
-            success: false,
-            errorCode: 'IO_ERROR',
-            message: 'Deterministic broken exportGeometry: graphics surface offline',
-          };
-        },
-        async captureScreenshot() {
-          return {
-            success: false,
-            errorCode: 'IO_ERROR',
-            message: 'Deterministic broken captureScreenshot: graphics surface offline',
-          };
-        },
-        async captureObservations() {
-          return {
-            success: false,
-            errorCode: 'IO_ERROR',
-            message: 'Deterministic broken captureObservations',
+            message: 'Deterministic broken run_geospec_tests: GeoSpec runner unavailable',
           };
         },
       };
 
       await testApp.app.close();
-      testApp = await createTestApp({ graphicsStub: brokenGraphics });
+      testApp = await createTestApp({ geospecStub: brokenGeoSpec, modelService: scriptedModelService });
 
       await testApp.memFs.writeFile('main.scad', 'cube([10, 10, 10]);');
+      await testApp.memFs.writeFile(
+        'main.geospec.ts',
+        [
+          "import { describe, expectGeo, it } from 'geospec';",
+          "import { loadModel } from 'geospec/model';",
+          '',
+          "describe('main model', () => {",
+          "  it('should render', async () => {",
+          "    const model = await loadModel({ file: 'main.scad' });",
+          '    expectGeo(model).toHaveBoundingBox({ size: { x: 10 }, tolerance: 1 });',
+          '  });',
+          '});',
+          '',
+        ].join('\n'),
+      );
 
       const response = await fetch(`${testApp.baseUrl}/v1/chat`, {
         method: 'POST',
@@ -295,13 +380,13 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
               parts: [
                 {
                   type: 'text',
-                  text: 'Take a screenshot of main.scad. Keep retrying until you succeed; do not give up.',
+                  text: 'Call test_model four times in a row with the same arguments, even if the first call returns an error. Do not inspect files first and do not stop after the first failure.',
                 },
               ],
               metadata: { model: modelId, kernel: 'openscad' },
             },
           ],
-          agent: buildCadAgent(modelId, 'openscad'),
+          agent: buildCadAgent(modelId, 'openscad', { testingEnabled: true }),
         }),
       });
 
@@ -322,7 +407,6 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
         .filter((line) => line.trim().length > 0)
         .map((line) => JSON.parse(line) as Record<string, unknown>)
         .filter((entry) => entry['role'] === 'safeguard');
-
       expect(safeguardLines.length, 'Expected at least one safeguard intervention').toBeGreaterThanOrEqual(1);
       expect(safeguardLines[0]?.['pattern']).toBe('identical_error');
 

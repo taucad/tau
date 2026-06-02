@@ -3,6 +3,22 @@ import { describe, it, expect, vi } from 'vitest';
 import { getCadSystemPrompt } from '#api/chat/prompts/cad-agent.prompt.js';
 import { getKernelConfig } from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.js';
 
+const allKernelProviders: readonly KernelProvider[] = [
+  'openscad',
+  'replicad',
+  'jscad',
+  'manifold',
+  'opencascadejs',
+  'zoo',
+];
+
+const bannedSimplificationGuidancePatterns = [
+  /try a simpler model/i,
+  /simplify the model/i,
+  /compare simpler mesh evidence/i,
+  /too complex to verify/i,
+] as const;
+
 describe('getCadSystemPrompt', () => {
   // ===================================================================
   // Anti-gold-plating rules
@@ -23,7 +39,7 @@ describe('getCadSystemPrompt', () => {
       );
       expect(block).toMatch(/anti-gold-plating applies to code, not to geometry/i);
       expect(block).toMatch(/do not add unrelated code features/i);
-      expect(block).toMatch(/implicit ask for a CAD deliverable/i);
+      expect(block).toMatch(/implicit ask for a cad deliverable/i);
       expect(block).toMatch(/modelling a real fastener, fillet, or sub-component is the task/i);
     });
 
@@ -99,13 +115,25 @@ describe('getCadSystemPrompt', () => {
       const result = await getCadSystemPrompt('openscad');
       expect(result.static).toContain('approximately right');
       expect(result.static).toContain("hasn't complained");
-      expect(result.static).toContain('too complex to verify');
+      expect(result.static).toContain('Verification is incomplete');
+      expect(result.static).not.toContain('too complex to verify');
       expect(result.static).toContain('Tests are passing');
     });
 
     it('should instruct to call screenshot if about to write explanation', async () => {
       const result = await getCadSystemPrompt('openscad');
       expect(result.static).toMatch(/catch yourself writing an explanation.*call screenshot/i);
+    });
+
+    it('should not include model-simplification failure guidance in any kernel prompt', async () => {
+      for (const kernel of allKernelProviders) {
+        // oxlint-disable-next-line no-await-in-loop -- intentional sequential loop
+        const result = await getCadSystemPrompt(kernel, 'agent', true);
+        const corpus = `${result.static}\n${result.dynamic}`;
+        for (const pattern of bannedSimplificationGuidancePatterns) {
+          expect(corpus).not.toMatch(pattern);
+        }
+      }
     });
   });
 
@@ -435,10 +463,10 @@ describe('getCadSystemPrompt', () => {
         expect(block).toContain(config.topLevelExportExample);
       });
 
-      it('should NOT instruct the agent to remove files from test.json', async () => {
+      it('should NOT mention legacy test-file editing', async () => {
         const result = await getCadSystemPrompt(kernel, 'agent', true);
         const block = extractTestRequirementsBlock(result.static);
-        expect(block).not.toMatch(/remove .* from test\.json/i);
+        expect(block).not.toMatch(/test\.json|edit_tests/i);
         expect(block).not.toMatch(/skip(?:ping)? the test/i);
       });
 
@@ -1001,7 +1029,7 @@ describe('getCadSystemPrompt', () => {
     it('should encode largest-fillets-first ordering', async () => {
       const result = await getCadSystemPrompt('replicad');
       const block = extractBlock(result.static);
-      expect(block).toMatch(/Largest fillets first/i);
+      expect(block).toMatch(/largest fillets first/i);
       expect(block).toMatch(/part-vs-part shared boundary last/i);
     });
   });
@@ -1165,6 +1193,17 @@ describe('getCadSystemPrompt', () => {
       expect(workflow).toMatch(/multi-component/i);
     });
 
+    it('should require a mini design brief for complex/high-fidelity requests before code', async () => {
+      const result = await getCadSystemPrompt('openscad', 'agent', true);
+      const workflow = result.static.slice(result.static.indexOf('<workflow>'), result.static.indexOf('</workflow>'));
+      expect(workflow).toMatch(/mini design brief/i);
+      expect(workflow).toMatch(/assembly tree/i);
+      expect(workflow).toMatch(/major visible features/i);
+      expect(workflow).toMatch(/key dimensions\/assumptions/i);
+      expect(workflow).toMatch(/materials\/surface treatments/i);
+      expect(workflow).toMatch(/verification targets/i);
+    });
+
     it('should preserve workflow numbering through step 6 when testing enabled', async () => {
       const result = await getCadSystemPrompt('openscad', 'agent', true);
       const workflow = result.static.slice(result.static.indexOf('<workflow>'), result.static.indexOf('</workflow>'));
@@ -1228,31 +1267,53 @@ describe('getCadSystemPrompt', () => {
   });
 
   // ===================================================================
-  // Multi-file test.json migration
+  // GeoSpec test file migration
   // ===================================================================
 
-  describe('multi-file test.json shape in <test_requirements>', () => {
+  describe('GeoSpec test file shape in <test_requirements>', () => {
     const extractTestRequirements = (prompt: string) =>
       /<test_requirements>([\S\s]*?)<\/test_requirements>/.exec(prompt)?.[1] ?? '';
 
-    it('should embed the multi-file test.json shape in <test_requirements>', async () => {
+    it('should embed the GeoSpec authoring shape in <test_requirements>', async () => {
       const result = await getCadSystemPrompt('openscad', 'agent', true);
       const block = extractTestRequirements(result.static);
 
-      // The fenced JSON example must contain a quoted source-path key
-      // (e.g. "main.ts" / "main.scad") at the top level
-      expect(block).toMatch(/"main\.\w+"\s*:\s*{/);
-      // The JSON example must NOT start with a flat top-level { "requirements": [...] }
-      // — every example requires a source-file-path key at the top.
-      const jsonExample = /```json\s*([\S\s]*?)```/.exec(block)?.[1] ?? '';
-      expect(jsonExample).not.toMatch(/^\s*{\s*"requirements"\s*:/);
+      expect(block).toContain('*.geospec.ts');
+      expect(block).toContain("import { describe, expectGeo, it } from 'geospec'");
+      expect(block).toContain("import { loadModel } from 'geospec/model'");
+      expect(block).toContain("with { type: 'json' }");
+      expect(block).not.toMatch(/^\s*{\s*"requirements"\s*:/);
+      expect(block).not.toContain('@taucad/testing/tau');
     });
 
-    it('should explain that adding a new file requires a new key, not deleting existing ones', async () => {
+    it('should route BRep feature examples only to BRep-capable kernels', async () => {
+      const replicad = await getCadSystemPrompt('replicad', 'agent', true);
+      const openscad = await getCadSystemPrompt('openscad', 'agent', true);
+      const opencascade = await getCadSystemPrompt('opencascadejs', 'agent', true);
+
+      expect(extractTestRequirements(replicad.static)).toContain('toHavePlanarFace');
+      expect(extractTestRequirements(replicad.static)).toContain("loadModel({ file: 'main.ts', format: 'step' })");
+      expect(extractTestRequirements(opencascade.static)).toContain('toHavePlanarFace');
+      expect(extractTestRequirements(opencascade.static)).toContain("loadModel({ file: 'main.ts', format: 'step' })");
+      expect(extractTestRequirements(openscad.static)).not.toContain('toHavePlanarFace');
+      expect(extractTestRequirements(openscad.static)).not.toContain("format: 'step'");
+    });
+
+    it('should explain that adding a new file requires preserving sibling GeoSpec coverage', async () => {
       const result = await getCadSystemPrompt('openscad', 'agent', true);
       const block = extractTestRequirements(result.static);
-      expect(block).toMatch(/per[ -]file|keyed by source file/i);
+      expect(block).toMatch(/geospec test|matching geospec/i);
       expect(block).toMatch(/preserve|never delete|do not delete|keep sibling/i);
+    });
+
+    it('should reject whole-model bounding box plus physical properties as sufficient for high-fidelity assemblies', async () => {
+      const result = await getCadSystemPrompt('openscad', 'agent', true);
+      const block = extractTestRequirements(result.static);
+      expect(block).toMatch(/coverage floor/i);
+      expect(block).toMatch(/whole-model bounding box plus physical properties is never sufficient/i);
+      expect(block).toMatch(/every major component and named visible feature/i);
+      expect(block).toMatch(/per-component dimensions or positions/i);
+      expect(block).toMatch(/state the missing coverage explicitly/i);
     });
 
     it('should embed exactly the 3-check vocabulary in the canonical example (no meshCount/vertexCount)', async () => {
@@ -1275,6 +1336,15 @@ describe('getCadSystemPrompt', () => {
       expect(block).toContain('tolerance');
       expect(block).toContain('default 0.1');
     });
+
+    it('should teach agents to assert through expectGeo instead of GeometrySubject internals', async () => {
+      const result = await getCadSystemPrompt('replicad', 'agent', true);
+      const block = extractTestRequirements(result.static);
+      expect(block).toContain('opaque `GeometrySubject`');
+      expect(block).toContain('model.boundingBox.bounds');
+      expect(block).toContain('model.volume()');
+      expect(block).toContain('expectGeo(model)');
+    });
   });
 
   // ===================================================================
@@ -1296,6 +1366,17 @@ describe('getCadSystemPrompt', () => {
       const result = await getCadSystemPrompt('replicad', 'agent', true);
       const block = extractErrorHandling(result.static);
       expect(block).toMatch(/intent|tolerance/i);
+    });
+
+    it('should treat GeoSpec failures as model-code evidence before changing tests', async () => {
+      const result = await getCadSystemPrompt('replicad', 'agent', true);
+      const block = extractErrorHandling(result.static);
+      expect(block).toMatch(/model code first/i);
+      expect(block).toMatch(/fix the modeled geometry at the root cause/i);
+      expect(block).toMatch(
+        /do not remove detail, reduce geometry, weaken tolerances, drop assertions, or delete coverage/i,
+      );
+      expect(block).toMatch(/only update a geospec assertion.*contradicts the user's stated intent/i);
     });
   });
 

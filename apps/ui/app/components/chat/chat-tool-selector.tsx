@@ -39,12 +39,7 @@ const toolMetadata: Partial<Record<ToolName, ToolMetadata>> = {
   },
   [toolName.testModel]: {
     label: 'Test Model',
-    description: 'Run measurement tests across every file in test.json',
-    icon: Image,
-  },
-  [toolName.editTests]: {
-    label: 'Edit Tests',
-    description: 'Edit per-file test requirements in test.json',
+    description: 'Run GeoSpec tests for the current project',
     icon: Image,
   },
 };

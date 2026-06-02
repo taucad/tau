@@ -12,6 +12,8 @@ export const opencascadejsConfig: KernelConfig = {
   commonErrorPatterns:
     'memory leaks from missing .delete() calls, wrong constructor overload suffix (e.g. _2 vs _3), unfreed gp_Pnt/gp_Dir temporaries, using Shape() before Build()',
 
+  testingProfile: { includeBrepFeatureExamples: true },
+
   topologyHints: `- Curves: \`GC_MakeArcOfCircle\`, \`Geom_Circle\`, \`Geom_BSplineCurve\`, \`Geom2dAPI_PointsToBSpline\` (for data-driven fits), \`BRepBuilderAPI_MakeEdge\` from a \`Geom\`-curve. Never chain \`BRepBuilderAPI_MakePolygon\` for what is a single analytical edge.
 - Profile sketches: build wires from analytical edges, not polylines. Close every wire explicitly.
 - Tessellation runs at export time via \`BRepMesh_IncrementalMesh\` — do not parameterise it in \`defaultParams\`.

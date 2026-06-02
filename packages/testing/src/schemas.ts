@@ -1,7 +1,8 @@
 import { z } from 'zod';
 
 // =============================================================================
-// Test Requirement Schemas (for test.json file)
+// Legacy measurement requirement schemas retained for internal benchmark and
+// analysis services. New project-authored tests use *.geospec.{ts,js}.
 // =============================================================================
 
 const baseTestRequirementSchema = z.object({
@@ -53,7 +54,7 @@ export const measurementTestRequirementSchema = baseTestRequirementSchema.extend
     ),
 });
 /**
- * Inferred shape for a measurement requirement row in `test.json`.
+ * Inferred shape for a legacy measurement requirement row.
  * @public
  */
 export type MeasurementTestRequirement = z.infer<typeof measurementTestRequirementSchema>;
@@ -70,7 +71,7 @@ export const testRequirementSchema = measurementTestRequirementSchema;
 export type TestRequirement = z.infer<typeof testRequirementSchema>;
 
 /**
- * Per-file entry inside a `test.json` map. Holds the requirements that will be
+ * Per-file entry inside a legacy measurement-requirement map. Holds the requirements that will be
  * evaluated against THAT file's compiled geometry.
  * @public
  */
@@ -78,20 +79,18 @@ export const testFileEntrySchema = z.object({
   requirements: z.array(testRequirementSchema),
 });
 /**
- * Inferred per-source-file bundle of requirements inside `test.json`.
+ * Inferred per-source-file bundle of legacy measurement requirements.
  * @public
  */
 export type TestFileEntry = z.infer<typeof testFileEntrySchema>;
 
 /**
- * Test file schema -- a `test.json` is a map keyed by source file path so the
- * agent can attach independent measurement requirements to each compilation
- * unit and test multiple files concurrently.
+ * Legacy requirement-map schema keyed by source file path.
  * @public
  */
 export const testFileSchema = z.record(z.string(), testFileEntrySchema);
 /**
- * Inferred full `test.json` map from geometry-unit paths to requirement bundles.
+ * Inferred legacy requirement map from geometry-unit paths to requirement bundles.
  * @public
  */
 export type TestFile = z.infer<typeof testFileSchema>;

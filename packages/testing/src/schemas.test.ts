@@ -9,8 +9,8 @@ import {
   testPassSchema,
 } from '#schemas.js';
 
-describe('testFileSchema', () => {
-  it('should parse a single-file test.json into a record keyed by source path', () => {
+describe('legacy requirement map schema', () => {
+  it('should parse a single-file legacy requirement map keyed by source path', () => {
     const parsed = testFileSchema.parse({
       'main.ts': {
         requirements: [
@@ -30,7 +30,7 @@ describe('testFileSchema', () => {
     expect(parsed['main.ts']?.requirements[0]?.id).toBe('req_box_width');
   });
 
-  it('should parse a multi-file test.json with two distinct CUs', () => {
+  it('should parse a multi-file legacy requirement map with two distinct CUs', () => {
     const parsed = testFileSchema.parse({
       'main.ts': {
         requirements: [

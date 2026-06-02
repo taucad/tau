@@ -1,77 +1,133 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AVAILABLE_CHECKS_COPY,
-  CANONICAL_TEST_REQUIREMENTS_EXAMPLE,
+  availableChecksCopy,
+  canonicalBrepGeoSpecTestExample,
+  canonicalGeoSpecTestExample,
+  geospecParameterTestingCopy,
   renderCanonicalExample,
 } from '#prompt-examples.js';
 
-describe('CANONICAL_TEST_REQUIREMENTS_EXAMPLE', () => {
-  it('should expose a per-file map keyed by the <file> placeholder', () => {
-    expect(Object.keys(CANONICAL_TEST_REQUIREMENTS_EXAMPLE)).toEqual(['<file>']);
-    const entry = CANONICAL_TEST_REQUIREMENTS_EXAMPLE['<file>'];
-    expect(Array.isArray(entry.requirements)).toBe(true);
-    expect(entry.requirements.length).toBeGreaterThan(0);
+describe('canonicalGeoSpecTestExample', () => {
+  it('should expose executable GeoSpec syntax keyed by the <file> placeholder', () => {
+    expect(canonicalGeoSpecTestExample).toContain("import { describe, expectGeo, it } from 'geospec'");
+    expect(canonicalGeoSpecTestExample).toContain("import { loadModel } from 'geospec/model'");
+    expect(canonicalGeoSpecTestExample).toContain("file: '<file>'");
   });
 
-  it('should include exactly one example per agent-facing check (boundingBox, connectedComponents, watertight)', () => {
-    const checks = CANONICAL_TEST_REQUIREMENTS_EXAMPLE['<file>'].requirements.map((r) => r.check);
-    expect(checks).toContain('boundingBox');
-    expect(checks).toContain('connectedComponents');
-    expect(checks).toContain('watertight');
+  it('should include examples for shape checks and physical measurements', () => {
+    expect(canonicalGeoSpecTestExample).toContain('toHaveBoundingBox');
+    expect(canonicalGeoSpecTestExample).toContain('toHaveConnectedComponents');
+    expect(canonicalGeoSpecTestExample).toContain('toBeWatertight');
+    expect(canonicalGeoSpecTestExample).toContain('toHaveSurfaceArea');
+    expect(canonicalGeoSpecTestExample).toContain('toHaveVolume');
+    expect(canonicalGeoSpecTestExample).toContain('toHaveCenterOfMass');
   });
 
-  it('should never reference the deprecated meshCount or vertexCount checks', () => {
-    const json = JSON.stringify(CANONICAL_TEST_REQUIREMENTS_EXAMPLE);
-    expect(json).not.toContain('meshCount');
-    expect(json).not.toContain('vertexCount');
+  it('should never reference legacy requirement-file or deprecated checks', () => {
+    expect(canonicalGeoSpecTestExample).not.toContain('legacy requirement file');
+    expect(canonicalGeoSpecTestExample).not.toContain('meshCount');
+    expect(canonicalGeoSpecTestExample).not.toContain('vertexCount');
   });
 });
 
 describe('renderCanonicalExample', () => {
   it('should substitute the supplied file extension into the example key', () => {
     const rendered = renderCanonicalExample('ts');
-    expect(rendered).toContain('"main.ts"');
+    expect(rendered).toContain("file: 'main.ts'");
     expect(rendered).not.toContain('<file>');
   });
 
-  it('should produce a fenced JSON code block that round-trips through JSON.parse', () => {
+  it('should produce a fenced TypeScript GeoSpec code block', () => {
     const rendered = renderCanonicalExample('scad');
-    expect(rendered).toMatch(/^```json/);
+    expect(rendered).toMatch(/^```ts/);
     expect(rendered).toMatch(/```$/);
-    const body = rendered.replace(/^```json\n/, '').replace(/\n```$/, '');
-    expect(() => {
-      JSON.parse(body);
-    }).not.toThrow();
+    expect(rendered).toContain("loadModel({ file: 'main.scad' })");
   });
 
   it('should accept a leading dot on the extension (defensive normalisation)', () => {
-    expect(renderCanonicalExample('.ts')).toContain('"main.ts"');
+    expect(renderCanonicalExample('.ts')).toContain("file: 'main.ts'");
+  });
+
+  it('should include BRep examples only when requested', () => {
+    expect(renderCanonicalExample('ts')).not.toContain('toHavePlanarFace');
+    expect(renderCanonicalExample('ts', { includeBrepFeatures: true })).toContain('toHavePlanarFace');
+    expect(renderCanonicalExample('ts', { includeBrepFeatures: true })).toContain('toHaveCircularHole');
+  });
+
+  it('should teach exact BRep checks to load STEP evidence explicitly', () => {
+    expect(canonicalGeoSpecTestExample).not.toContain("format: 'step'");
+    expect(canonicalBrepGeoSpecTestExample).toContain("loadModel({ file: '<file>', format: 'step' })");
+    expect(renderCanonicalExample('ts', { includeBrepFeatures: true })).toContain(
+      "loadModel({ file: 'main.ts', format: 'step' })",
+    );
   });
 });
 
-describe('AVAILABLE_CHECKS_COPY', () => {
-  it('should mention all 3 surviving checks with their unique-question framing', () => {
-    expect(AVAILABLE_CHECKS_COPY).toContain('boundingBox');
-    expect(AVAILABLE_CHECKS_COPY).toContain('connectedComponents');
-    expect(AVAILABLE_CHECKS_COPY).toContain('watertight');
-    expect(AVAILABLE_CHECKS_COPY).toContain('SIZE / POSITION');
-    expect(AVAILABLE_CHECKS_COPY).toContain('SPATIALLY-DISJOINT CHUNKS');
-    expect(AVAILABLE_CHECKS_COPY).toContain('CLOSED (manifold / 3D-printable)');
+describe('availableChecksCopy', () => {
+  it('should mention the core GeoSpec checks with their unique-question framing', () => {
+    expect(availableChecksCopy).toContain('boundingBox');
+    expect(availableChecksCopy).toContain('connectedComponents');
+    expect(availableChecksCopy).toContain('watertight');
+    expect(availableChecksCopy).toContain('surfaceArea');
+    expect(availableChecksCopy).toContain('volume');
+    expect(availableChecksCopy).toContain('centerOfMass');
+    expect(availableChecksCopy).toContain('chamferDistance');
+    expect(availableChecksCopy).toContain('SIZE / POSITION');
+    expect(availableChecksCopy).toContain('SPATIALLY-DISJOINT CHUNKS');
+    expect(availableChecksCopy).toContain('CLOSED (manifold / 3D-printable)');
   });
 
   it('should explicitly mention the connectedComponents tolerance knob (mm) and its default', () => {
-    expect(AVAILABLE_CHECKS_COPY).toContain('tolerance');
-    expect(AVAILABLE_CHECKS_COPY).toContain('mm');
-    expect(AVAILABLE_CHECKS_COPY).toContain('default 0.1');
+    expect(availableChecksCopy).toContain('tolerance');
+    expect(availableChecksCopy).toContain('mm');
+    expect(availableChecksCopy).toContain('default 0.1');
   });
 
   it('should never reference the deprecated meshCount or vertexCount checks', () => {
-    expect(AVAILABLE_CHECKS_COPY).not.toContain('meshCount');
-    expect(AVAILABLE_CHECKS_COPY).not.toContain('vertexCount');
+    expect(availableChecksCopy).not.toContain('meshCount');
+    expect(availableChecksCopy).not.toContain('vertexCount');
   });
 
   it('should clarify that "is this one fused solid?" maps to watertight (not connectedComponents:1)', () => {
-    expect(AVAILABLE_CHECKS_COPY).toContain('one fused solid');
-    expect(AVAILABLE_CHECKS_COPY).toContain('watertight');
+    expect(availableChecksCopy).toContain('one fused solid');
+    expect(availableChecksCopy).toContain('watertight');
+  });
+
+  it('should teach agents to use matchers instead of GeometrySubject internals', () => {
+    expect(availableChecksCopy).toContain('opaque `GeometrySubject`');
+    expect(availableChecksCopy).toContain('do not read `model.boundingBox.bounds`');
+    expect(availableChecksCopy).toContain('call `model.volume()`');
+    expect(availableChecksCopy).toContain('Assert through `expectGeo(model)`');
+  });
+});
+
+describe('geospecParameterTestingCopy', () => {
+  it('should teach the agent that parameters are mutable GeoSpec test inputs', () => {
+    expect(geospecParameterTestingCopy).toContain('Parameter-aware GeoSpec tests');
+    expect(geospecParameterTestingCopy).toContain("import { loadModel, parameterGroups } from 'geospec/model'");
+    expect(geospecParameterTestingCopy).toContain(
+      "import mainParams from '#params/main.ts.json' with { type: 'json' }",
+    );
+    expect(geospecParameterTestingCopy).toContain('Do not import named `values` from JSON');
+    expect(geospecParameterTestingCopy).toContain('Parameters are real test inputs');
+    expect(geospecParameterTestingCopy).toContain('"#params/*.json": "./.tau/parameters/*.json"');
+    expect(geospecParameterTestingCopy).toContain("import { describe, expectGeo, it } from 'geospec'");
+    expect(geospecParameterTestingCopy).not.toContain('@taucad/testing/tau');
+  });
+});
+
+describe('agent-facing GeoSpec copy', () => {
+  it('should not tell the agent to simplify models when tests fail', () => {
+    const corpus = [
+      availableChecksCopy,
+      canonicalGeoSpecTestExample,
+      geospecParameterTestingCopy,
+      renderCanonicalExample('ts'),
+      renderCanonicalExample('ts', { includeBrepFeatures: true }),
+    ].join('\n');
+
+    expect(corpus).not.toMatch(
+      /try a simpler model|simplify the model|compare simpler mesh evidence|too complex to verify/i,
+    );
   });
 });

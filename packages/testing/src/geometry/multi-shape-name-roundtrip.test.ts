@@ -24,20 +24,16 @@ const multiNamedReplicad = `
 `;
 
 const multiNamedOcct = `
-import { BRepPrimAPI_MakeBox, gp_Trsf, gp_Vec, BRepBuilderAPI_Transform } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox, gp_Pnt } from 'opencascade.js';
 export default function main() {
   const bodyMaker = new BRepPrimAPI_MakeBox(20, 20, 20);
   const body = bodyMaker.Shape();
-  const handleMaker = new BRepPrimAPI_MakeBox(5, 5, 5);
-  const handleRaw = handleMaker.Shape();
-  const trsf = new gp_Trsf();
-  const vec = new gp_Vec(100, 0, 0);
-  trsf.SetTranslation(vec);
-  const xform = new BRepBuilderAPI_Transform(handleRaw, trsf, true, false);
-  const handle = xform.Shape();
-  vec.delete();
-  trsf.delete();
-  xform.delete();
+  const handleOrigin = new gp_Pnt(100, 0, 0);
+  const handleMaker = new BRepPrimAPI_MakeBox(handleOrigin, 5, 5, 5);
+  const handle = handleMaker.Shape();
+  handleOrigin.delete();
+  bodyMaker.delete();
+  handleMaker.delete();
   return [
     { shape: body, name: 'BodyShell', color: '#F5C518' },
     { shape: handle, name: 'CarryHandle', color: '#1F1F1F' },

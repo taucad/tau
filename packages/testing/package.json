@@ -24,7 +24,9 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
-    "./geometry": "./src/geometry/index.ts"
+    "./geometry": "./src/geometry/index.ts",
+    "./parameters": "./src/parameters.ts",
+    "./tau": "./src/tau.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -48,12 +50,33 @@
           "types": "./dist/esm/geometry/index.d.ts",
           "default": "./dist/esm/geometry/index.js"
         }
+      },
+      "./parameters": {
+        "require": {
+          "types": "./dist/cjs/parameters.d.cts",
+          "default": "./dist/cjs/parameters.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/parameters.d.ts",
+          "default": "./dist/esm/parameters.js"
+        }
+      },
+      "./tau": {
+        "require": {
+          "types": "./dist/cjs/tau.d.cts",
+          "default": "./dist/cjs/tau.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/tau.d.ts",
+          "default": "./dist/esm/tau.js"
+        }
       }
     }
   },
   "dependencies": {
     "@gltf-transform/core": "^4.3.0",
-    "@gltf-transform/functions": "^4.3.0"
+    "@gltf-transform/functions": "^4.3.0",
+    "geospec": "workspace:*"
   },
   "devDependencies": {
     "@taucad/openscad": "workspace:*",

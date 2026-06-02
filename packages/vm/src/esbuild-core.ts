@@ -13,23 +13,15 @@
 
 import * as esbuild from 'esbuild-wasm';
 import type { Plugin, BuildOptions, Loader, Message, Metafile } from 'esbuild-wasm';
-import type * as NodeFs from 'node:fs';
-import type * as NodeOs from 'node:os';
-import type * as NodePath from 'node:path';
-import type * as NodeProcess from 'node:process';
 import { isBareSpecifier, parsePackageSpecifier, getCdnCachePath, resolveRelativePath } from '@taucad/utils/import';
 import { base64ToString } from 'uint8array-extras';
 import type { VmIssue, VmFileSystem, VmExecuteResult } from '#types.js';
 import type { BuiltinModule } from '#module-manager.js';
 import { ModuleManager } from '#module-manager.js';
 import { isNode } from '#environment.js';
-import {
-  esbuildNamespace,
-  vfsNamespacePrefix,
-  httpFetchTimeout,
-  httpFetchMaxSizeBytes,
-  nodeExecFilePrefix,
-} from '#esbuild.constants.js';
+import { importBrowserModule } from '#browser-module-import.js';
+import { executeCodeInNode } from '#node-module-execution.js';
+import { esbuildNamespace, vfsNamespacePrefix, httpFetchTimeout, httpFetchMaxSizeBytes } from '#esbuild.constants.js';
 
 // =============================================================================
 // Types
@@ -287,6 +279,184 @@ function stripPathQuery(relativePath: string): string {
   return queryStart === -1 ? relativePath : relativePath.slice(0, queryStart);
 }
 
+type PackageImportsMap = Record<string, unknown>;
+
+type PackageImportsScope = {
+  directory: string;
+  imports: PackageImportsMap;
+};
+
+const packageImportConditions = ['browser', 'import', 'default'] as const;
+
+const dirname = (path: string): string => {
+  const index = path.lastIndexOf('/');
+  return index <= 0 ? '/' : path.slice(0, index);
+};
+
+const normalizeAbsolutePath = (path: string): string => {
+  const parts: string[] = [];
+  for (const part of path.split('/')) {
+    if (!part || part === '.') {
+      continue;
+    }
+    if (part === '..') {
+      parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+  return `/${parts.join('/')}`;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const selectPackageImportTarget = (value: unknown): string | undefined => {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  for (const condition of packageImportConditions) {
+    const target = selectPackageImportTarget(value[condition]);
+    if (target !== undefined) {
+      return target;
+    }
+  }
+
+  return undefined;
+};
+
+const findPackageImportTarget = (
+  specifier: string,
+  imports: PackageImportsMap,
+): { target: string; pattern: string; wildcard: string } | undefined => {
+  const exact = selectPackageImportTarget(imports[specifier]);
+  if (exact !== undefined) {
+    return { target: exact, pattern: specifier, wildcard: '' };
+  }
+
+  let best:
+    | {
+        target: string;
+        pattern: string;
+        wildcard: string;
+      }
+    | undefined;
+
+  for (const [pattern, value] of Object.entries(imports)) {
+    const wildcardIndex = pattern.indexOf('*');
+    if (wildcardIndex === -1) {
+      continue;
+    }
+
+    const prefix = pattern.slice(0, wildcardIndex);
+    const suffix = pattern.slice(wildcardIndex + 1);
+    if (!specifier.startsWith(prefix) || !specifier.endsWith(suffix)) {
+      continue;
+    }
+
+    const target = selectPackageImportTarget(value);
+    if (target === undefined) {
+      continue;
+    }
+
+    const wildcard = specifier.slice(prefix.length, specifier.length - suffix.length);
+    if (!best || prefix.length > best.pattern.indexOf('*') || pattern.length > best.pattern.length) {
+      best = { target, pattern, wildcard };
+    }
+  }
+
+  return best;
+};
+
+const findPackageImportsScope = async (
+  filesystem: VmFileSystem,
+  importerAbsolute: string,
+  projectPath: string,
+): Promise<PackageImportsScope | undefined> => {
+  const projectRoot = projectPath.endsWith('/') ? projectPath.slice(0, -1) : projectPath;
+  let directory = normalizeAbsolutePath(dirname(importerAbsolute));
+
+  while (directory.startsWith(projectRoot)) {
+    const packageJsonPath = `${directory}/package.json`;
+    if (await filesystem.exists(packageJsonPath)) {
+      const packageJson = JSON.parse(await filesystem.readFile(packageJsonPath, 'utf8')) as unknown;
+      if (isRecord(packageJson) && isRecord(packageJson['imports'])) {
+        return { directory, imports: packageJson['imports'] };
+      }
+      return undefined;
+    }
+
+    if (directory === projectRoot) {
+      break;
+    }
+    directory = dirname(directory);
+  }
+
+  return undefined;
+};
+
+const resolvePackageImport = async (options: {
+  filesystem: VmFileSystem;
+  specifier: string;
+  importerAbsolute: string;
+  projectPath: string;
+}): Promise<
+  | { success: true; path: string }
+  | {
+      success: false;
+      message: string;
+      missingPath?: string;
+    }
+> => {
+  const scope = await findPackageImportsScope(options.filesystem, options.importerAbsolute, options.projectPath);
+  if (!scope) {
+    return {
+      success: false,
+      message: `Package import '${options.specifier}' requires a package.json imports mapping in the project.`,
+    };
+  }
+
+  const match = findPackageImportTarget(options.specifier, scope.imports);
+  if (!match) {
+    return {
+      success: false,
+      message: `Package import '${options.specifier}' is not defined by ${scope.directory}/package.json imports.`,
+    };
+  }
+
+  const target = match.target.replaceAll('*', match.wildcard);
+  if (!target.startsWith('./')) {
+    return {
+      success: false,
+      message: `Package import '${match.pattern}' must resolve to a project file target starting with './'.`,
+    };
+  }
+
+  const resolvedPath = normalizeAbsolutePath(`${scope.directory}/${target.slice(2)}`);
+  const scopePrefix = scope.directory.endsWith('/') ? scope.directory : `${scope.directory}/`;
+  if (resolvedPath !== scope.directory && !resolvedPath.startsWith(scopePrefix)) {
+    return {
+      success: false,
+      message: `Package import '${options.specifier}' resolves outside of its package scope.`,
+    };
+  }
+
+  if (!(await options.filesystem.exists(resolvedPath))) {
+    return {
+      success: false,
+      message: `Package import '${options.specifier}' resolved to missing file '${resolvedPath}'.`,
+      missingPath: resolvedPath,
+    };
+  }
+
+  return { success: true, path: resolvedPath };
+};
+
 /**
  * Determine the esbuild loader based on file extension.
  *
@@ -531,6 +701,31 @@ export function createVfsPlugin(options: VfsPluginOptions): Plugin {
         // Handle http/https URLs - fetch and bundle them
         if (args.path.startsWith('http://') || args.path.startsWith('https://')) {
           return { path: args.path, namespace: esbuildNamespace.httpUrl };
+        }
+
+        // Package imports (`#params/main.ts.json`) are project-local mappings
+        // defined by package.json#imports. They must resolve before generic bare
+        // specifiers so project-private files are never sent to the CDN resolver.
+        if (args.path.startsWith('#')) {
+          const importerAbsolute = toAbsolute(args.importer || relativeEntryPath);
+          const resolved = await resolvePackageImport({
+            filesystem,
+            specifier: args.path,
+            importerAbsolute,
+            projectPath,
+          });
+
+          if (!resolved.success) {
+            if (resolved.missingPath && unresolvedPaths) {
+              unresolvedPaths.add(resolved.missingPath);
+            }
+            return { errors: [{ text: resolved.message }] };
+          }
+
+          return {
+            path: toRelative(resolved.path),
+            namespace: esbuildNamespace.vfs,
+          };
         }
 
         // --- Bare specifiers ---
@@ -1116,6 +1311,20 @@ export function createDetectionPlugin({ filesystem, projectPath }: DetectionPlug
           return { external: true };
         }
 
+        if (args.path.startsWith('#')) {
+          const importerAbsolute = toAbsolute(args.importer || relativeEntryPath);
+          const resolved = await resolvePackageImport({
+            filesystem,
+            specifier: args.path,
+            importerAbsolute,
+            projectPath,
+          });
+
+          return resolved.success
+            ? { path: toRelative(resolved.path), namespace: esbuildNamespace.vfs }
+            : { path: args.path, external: true };
+        }
+
         if (isBareSpecifier(args.path)) {
           return { path: args.path, external: true };
         }
@@ -1237,58 +1446,11 @@ export function extractExternalImports(metafile: Metafile | undefined): string[]
 // =============================================================================
 
 const executeCacheMap = new Map<string, unknown>();
-let nodeExecuteCounter = 0;
 
 type ExecuteCodeOptions = {
   /** Reuse module exports for identical bundled code strings. */
   cache?: boolean;
 };
-
-const importNodeBuiltin = async <T>(specifier: string): Promise<T> =>
-  import(/* @vite-ignore */ specifier) as Promise<T>;
-
-/**
- * Strip inline source map comments to prevent Node.js `--enable-source-maps`
- * from applying them before our own stack trace parser has a chance to.
- *
- * @param code - bundled module source potentially containing an inline source-map comment
- * @returns the input source with the inline source-map comment removed
- */
-function stripInlineSourceMap(code: string): string {
-  return code.replace(/\/\/# sourceMappingURL=data:[^\n]+$/m, '');
-}
-
-/**
- * Execute bundled code in Node.js without statically importing Node built-ins.
- *
- * Browser/client bundlers still parse this file, so Node imports are intentionally hidden behind
- * an opaque dynamic importer and guarded by `isNode()`.
- *
- * @param code - bundled JavaScript code to execute
- * @returns module exports and the temp-file URL used for import
- */
-async function executeCodeInNode(code: string): Promise<{ value: unknown; entryUrl: string }> {
-  const [fs, os, path, nodeProcess] = await Promise.all([
-    importNodeBuiltin<typeof NodeFs>('node:fs'),
-    importNodeBuiltin<typeof NodeOs>('node:os'),
-    importNodeBuiltin<typeof NodePath>('node:path'),
-    importNodeBuiltin<typeof NodeProcess>('node:process'),
-  ]);
-
-  const temporaryFile = path.join(os.tmpdir(), `${nodeExecFilePrefix}${nodeProcess.pid}-${++nodeExecuteCounter}.mjs`);
-  const entryUrl = `file://${temporaryFile}?v=${nodeExecuteCounter}`;
-  fs.writeFileSync(temporaryFile, stripInlineSourceMap(code), 'utf8');
-  try {
-    const value: unknown = await import(/* @vite-ignore */ entryUrl);
-    return { value, entryUrl };
-  } finally {
-    try {
-      fs.unlinkSync(temporaryFile);
-    } catch {
-      // Best-effort cleanup; the OS will reclaim the temp file if unlink fails.
-    }
-  }
-}
 
 /**
  * Clear the module execute cache.
@@ -1344,7 +1506,7 @@ export async function executeCode<T = unknown>(
       const blob = new Blob([code], { type: 'application/javascript' });
       entryUrl = URL.createObjectURL(blob);
       try {
-        moduleExports = await import(/* @vite-ignore */ entryUrl);
+        moduleExports = await importBrowserModule(entryUrl);
       } finally {
         URL.revokeObjectURL(entryUrl);
       }

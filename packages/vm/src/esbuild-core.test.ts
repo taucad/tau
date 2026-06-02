@@ -324,6 +324,140 @@ describe('ESBuild VM – CDN absolute-path resolution', () => {
 });
 
 // =============================================================================
+// Package Imports Resolution
+// =============================================================================
+
+describe('ESBuild VM – package imports resolution', () => {
+  let filesystem: MockFileSystem;
+  let mainOnResolve: CapturedResolveHandler;
+  let vfsOnLoad: CapturedHandler;
+
+  beforeEach(() => {
+    filesystem = createMockFileSystem();
+    const handlers = capturePluginHandlers(filesystem);
+    mainOnResolve = handlers.mainOnResolve;
+    vfsOnLoad = handlers.vfsOnLoad;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should resolve #params JSON imports through project package.json imports', async () => {
+    filesystem.mocks.exists.mockImplementation(
+      async (path: string) => path === '/project/package.json' || path === '/project/.tau/parameters/main.ts.json',
+    );
+    filesystem.mocks.readFile.mockImplementation(async (path: string, encoding?: 'utf8') => {
+      if (path === '/project/package.json' && encoding === 'utf8') {
+        return JSON.stringify({ imports: { '#params/*.json': './.tau/parameters/*.json' } });
+      }
+      if (path === '/project/.tau/parameters/main.ts.json' && encoding === 'utf8') {
+        return '{"activeGroup":"default","groups":{"default":{"values":{"width":42}}}}';
+      }
+      throw new Error(`Unexpected readFile: ${path}`);
+    });
+
+    const result = (await mainOnResolve({
+      path: '#params/main.ts.json',
+      importer: 'main.geospec.ts',
+      namespace: esbuildNamespace.vfs,
+      kind: 'import-statement',
+      resolveDir: '/project',
+      suffix: '',
+      pluginData: undefined,
+      with: { type: 'json' },
+    })) as { path: string; namespace: string };
+
+    expect(result).toEqual({
+      path: '.tau/parameters/main.ts.json',
+      namespace: esbuildNamespace.vfs,
+    });
+
+    const loaded = (await vfsOnLoad({
+      path: result.path,
+      namespace: esbuildNamespace.vfs,
+      suffix: '',
+      pluginData: undefined,
+      with: { type: 'json' },
+    })) as { loader: string; contents: string };
+
+    expect(loaded.loader).toBe('json');
+    expect(loaded.contents).toContain('"width":42');
+  });
+
+  it('should resolve nested #params JSON imports with one package-import pattern', async () => {
+    filesystem.mocks.exists.mockImplementation(
+      async (path: string) => path === '/project/package.json' || path === '/project/.tau/parameters/lib/part.ts.json',
+    );
+    filesystem.mocks.readFile.mockImplementation(async (path: string, encoding?: 'utf8') => {
+      if (path === '/project/package.json' && encoding === 'utf8') {
+        return JSON.stringify({ imports: { '#params/*.json': './.tau/parameters/*.json' } });
+      }
+      return '{}';
+    });
+
+    const result = (await mainOnResolve({
+      path: '#params/lib/part.ts.json',
+      importer: 'tests/part.geospec.ts',
+      namespace: esbuildNamespace.vfs,
+      kind: 'import-statement',
+      resolveDir: '/project/tests',
+      suffix: '',
+      pluginData: undefined,
+      with: { type: 'json' },
+    })) as { path: string; namespace: string };
+
+    expect(result).toEqual({
+      path: '.tau/parameters/lib/part.ts.json',
+      namespace: esbuildNamespace.vfs,
+    });
+  });
+
+  it('should fail clearly when #params has no package imports mapping', async () => {
+    filesystem.mocks.exists.mockResolvedValue(false);
+
+    const result = (await mainOnResolve({
+      path: '#params/main.ts.json',
+      importer: 'main.geospec.ts',
+      namespace: esbuildNamespace.vfs,
+      kind: 'import-statement',
+      resolveDir: '/project',
+      suffix: '',
+      pluginData: undefined,
+      with: { type: 'json' },
+    })) as { errors: Array<{ text: string }> };
+
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]!.text).toContain('package.json imports mapping');
+    expect(result.errors[0]!.text).toContain('#params/main.ts.json');
+  });
+
+  it('should fail clearly when a mapped #params file is missing', async () => {
+    filesystem.mocks.exists.mockImplementation(async (path: string) => path === '/project/package.json');
+    filesystem.mocks.readFile.mockImplementation(async (path: string, encoding?: 'utf8') => {
+      if (path === '/project/package.json' && encoding === 'utf8') {
+        return JSON.stringify({ imports: { '#params/*.json': './.tau/parameters/*.json' } });
+      }
+      throw new Error(`Unexpected readFile: ${path}`);
+    });
+
+    const result = (await mainOnResolve({
+      path: '#params/missing.ts.json',
+      importer: 'main.geospec.ts',
+      namespace: esbuildNamespace.vfs,
+      kind: 'import-statement',
+      resolveDir: '/project',
+      suffix: '',
+      pluginData: undefined,
+      with: { type: 'json' },
+    })) as { errors: Array<{ text: string }> };
+
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]!.text).toContain("resolved to missing file '/project/.tau/parameters/missing.ts.json'");
+  });
+});
+
+// =============================================================================
 // extractProjectDependencies
 // =============================================================================
 

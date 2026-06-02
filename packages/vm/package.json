@@ -26,6 +26,7 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
+    "./constants": "./src/constants.ts",
     "./internal": "./src/internal.ts"
   },
   "publishConfig": {
@@ -50,10 +51,21 @@
           "types": "./dist/esm/internal.d.ts",
           "default": "./dist/esm/internal.js"
         }
+      },
+      "./constants": {
+        "require": {
+          "types": "./dist/esm/constants.d.ts",
+          "default": "./dist/cjs/constants.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/constants.d.ts",
+          "default": "./dist/esm/constants.js"
+        }
       }
     }
   },
   "imports": {
+    "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
   "dependencies": {

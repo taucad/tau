@@ -56,7 +56,7 @@
     "@ai-sdk/react": "^3.0.101",
     "@ai-sdk/ui-utils": "^1.2.11",
     "@better-auth-ui/core": "^1.6.8",
-    "@better-auth-ui/react": "^1.6.8",
+    "@better-auth-ui/react": "^1.6.15",
     "@better-auth/api-key": "^1.6.11",
     "@fastify/cookie": "catalog:",
     "@fastify/cors": "^11.2.0",

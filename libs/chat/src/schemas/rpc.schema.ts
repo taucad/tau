@@ -13,8 +13,9 @@ import { z as zod } from 'zod';
 import { rpcName } from '#constants/rpc.constants.js';
 import { diffStatsWithContentSchema } from '#schemas/tools/diff.schema.js';
 import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
-import { observationSchema } from '#schemas/tools/test-model.tool.schema.js';
+import { geoSpecRunFilterInputSchema, observationSchema } from '#schemas/tools/test-model.tool.schema.js';
 import { exportGeometryFormatSchema } from '#schemas/tools/export-geometry.tool.schema.js';
+import { testModelOutputSchema } from '@taucad/testing';
 
 // =============================================================================
 // RPC Error Types
@@ -211,6 +212,11 @@ const captureObservationsRpc = defineRpc({
   }),
 });
 
+const runGeoSpecTestsRpc = defineRpc({
+  input: geoSpecRunFilterInputSchema,
+  success: testModelOutputSchema,
+});
+
 const exportGeometryRpc = defineRpc({
   input: zod.object({
     toolCallId: zod.string(),
@@ -229,6 +235,7 @@ const fetchGeometryRpc = defineRpc({
   input: zod.object({
     artifactId: zod.string().optional(),
     targetFile: zod.string(),
+    parameters: zod.record(zod.string(), zod.unknown()).optional(),
   }),
   success: zod.object({
     glb: zod.instanceof(Uint8Array),
@@ -297,6 +304,7 @@ export type RpcSchemasRegistry = {
   [rpcName.globSearch]: RpcSchemaEntry<GlobSearchRpcInput, GlobSearchRpcResult>;
   [rpcName.getKernelResult]: RpcSchemaEntry<GetKernelResultRpcInput, GetKernelResultRpcResult>;
   [rpcName.captureObservations]: RpcSchemaEntry<CaptureObservationsRpcInput, CaptureObservationsRpcResult>;
+  [rpcName.runGeoSpecTests]: RpcSchemaEntry<RunGeoSpecTestsRpcInput, RunGeoSpecTestsRpcResult>;
   [rpcName.fetchGeometry]: RpcSchemaEntry<FetchGeometryRpcInput, FetchGeometryRpcResult>;
   [rpcName.exportGeometry]: RpcSchemaEntry<ExportGeometryRpcInput, ExportGeometryRpcResult>;
   [rpcName.captureScreenshot]: RpcSchemaEntry<CaptureScreenshotRpcInput, CaptureScreenshotRpcResult>;
@@ -341,6 +349,10 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
   [rpcName.captureObservations]: {
     inputSchema: captureObservationsRpc.inputSchema,
     resultSchema: captureObservationsRpc.resultSchema,
+  },
+  [rpcName.runGeoSpecTests]: {
+    inputSchema: runGeoSpecTestsRpc.inputSchema,
+    resultSchema: runGeoSpecTestsRpc.resultSchema,
   },
   [rpcName.fetchGeometry]: {
     inputSchema: fetchGeometryRpc.inputSchema,
@@ -489,6 +501,13 @@ export type CaptureObservationsRpcInput = z.infer<typeof captureObservationsRpc.
 export type CaptureObservationsRpcSuccess = z.infer<typeof captureObservationsRpc.successSchema>;
 /** @public */
 export type CaptureObservationsRpcResult = z.infer<typeof captureObservationsRpc.resultSchema>;
+
+/** @public */
+export type RunGeoSpecTestsRpcInput = z.infer<typeof runGeoSpecTestsRpc.inputSchema>;
+/** @public */
+export type RunGeoSpecTestsRpcSuccess = z.infer<typeof runGeoSpecTestsRpc.successSchema>;
+/** @public */
+export type RunGeoSpecTestsRpcResult = z.infer<typeof runGeoSpecTestsRpc.resultSchema>;
 
 /** @public */
 export type ExportGeometryRpcInput = z.infer<typeof exportGeometryRpc.inputSchema>;

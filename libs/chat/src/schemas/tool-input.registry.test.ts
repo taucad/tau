@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { toolName, toolNames } from '#constants/tool.constants.js';
 import { toolInputSchemas, getToolInputSchema } from '#schemas/tool-input.registry.js';
+import { geoSpecRunFilterInputSchema } from '#schemas/tools/test-model.tool.schema.js';
 
 const requireSchema = (key: `tool-${string}`) => {
   const schema = getToolInputSchema(key);
@@ -36,7 +37,30 @@ describe('toolInputSchemas registry', () => {
     expect(result.error.issues.some((issue) => issue.path.includes('targetFile'))).toBe(true);
   });
 
-  it('should reject any non-empty input for empty-input tools (test_model)', () => {
+  it('should validate a well-formed test_model filter input as the strict per-tool schema', () => {
+    const result = requireSchema(`tool-${toolName.testModel}`).safeParse({
+      files: ['main.geospec.ts'],
+      testNamePattern: 'watertight',
+      testTimeout: 5000,
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject bracket-key test_model file filters', () => {
+    const input = Object.fromEntries([['files[0]', 'main.geospec.ts']]);
+    const result = requireSchema(`tool-${toolName.testModel}`).safeParse(input);
+
+    expect(result.success).toBe(false);
+  });
+
+  it('should describe test_model files as a JSON array rather than bracket keys', () => {
+    expect(geoSpecRunFilterInputSchema.shape.files.description).toContain('["main.geospec.ts"]');
+    expect(geoSpecRunFilterInputSchema.shape.files.description).toContain('files[0]');
+    expect(geoSpecRunFilterInputSchema.shape.testNamePattern.description).toContain('"watertight"');
+  });
+
+  it('should reject unknown test_model input fields', () => {
     const result = requireSchema(`tool-${toolName.testModel}`).safeParse({ stray: 'value' });
 
     expect(result.success).toBe(false);

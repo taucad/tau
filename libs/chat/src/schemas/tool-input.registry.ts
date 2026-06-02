@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { editFileInputSchema } from '#schemas/tools/edit-file.tool.schema.js';
-import { editTestsInputSchema } from '#schemas/tools/test-model.tool.schema.js';
 import { webBrowserInputSchema } from '#schemas/tools/web-browser.tool.schema.js';
 import { webSearchInputSchema } from '#schemas/tools/web-search.tool.schema.js';
 import { readFileInputSchema } from '#schemas/tools/read-file.tool.schema.js';
@@ -12,11 +11,12 @@ import { globSearchInputSchema } from '#schemas/tools/glob-search.tool.schema.js
 import { getKernelResultInputSchema } from '#schemas/tools/get-kernel-result.tool.schema.js';
 import { screenshotInputSchema } from '#schemas/tools/screenshot.tool.schema.js';
 import { exportGeometryInputSchema } from '#schemas/tools/export-geometry.tool.schema.js';
+import { testModelInputSchema } from '#schemas/tools/test-model.tool.schema.js';
 import type { ToolName } from '#types/tool.types.js';
 
 /**
  * Empty-input schema enforced by `createEmptyInputToolSchemas` in
- * `message.schema.ts`. Tools with no parameters (test_model, transfer_*) only
+ * `message.schema.ts`. Transfer tools with no parameters only
  * accept the literal empty object on the wire; anything else is invalid input
  * and must be forensically demoted to `rawInput` by the server-side healing
  * transform. Defined locally to keep this registry the single source of truth
@@ -50,8 +50,7 @@ export type ToolPartType = `tool-${ToolName}`;
 export const toolInputSchemas: Record<ToolPartType, z.ZodType> = {
   'tool-web_search': webSearchInputSchema,
   'tool-web_browser': webBrowserInputSchema,
-  'tool-test_model': emptyInputSchema,
-  'tool-edit_tests': editTestsInputSchema,
+  'tool-test_model': testModelInputSchema,
   'tool-read_file': readFileInputSchema,
   'tool-list_directory': listDirectoryInputSchema,
   'tool-create_file': createFileInputSchema,

@@ -3,6 +3,7 @@ export type {
   RpcFileStat,
   RpcRuntimeClient,
   RpcGraphicsClient,
+  RpcGeoSpecClient,
   RpcGraphicsExportGeometryResult,
   RpcDependencies,
   RpcHandlerError,
@@ -17,3 +18,4 @@ export { handleGrep } from '#rpc/handlers/handle-grep.js';
 export { handleGlobSearch } from '#rpc/handlers/handle-glob-search.js';
 export { handleGetKernelResult } from '#rpc/handlers/handle-get-kernel-result.js';
 export { handleCaptureObservations } from '#rpc/handlers/handle-capture-observations.js';
+export { handleRunGeoSpecTests } from '#rpc/handlers/handle-run-geospec-tests.js';

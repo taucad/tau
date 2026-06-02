@@ -18,14 +18,18 @@ describe('handleFetchGeometry', () => {
     expect(result.success).toBe(true);
   });
 
-  it('should call graphics.fetchGeometry with the supplied targetFile', async () => {
+  it('should call graphics.fetchGeometry with the supplied targetFile and parameters', async () => {
     const graphics = mock<RpcGraphicsClient>();
     graphics.fetchGeometry.mockResolvedValue({ success: true, glb: new Uint8Array([1, 2, 3]) });
     const fileSystem = mock<RpcFileSystem>();
 
-    await handleFetchGeometry({ artifactId: 'tc-1', targetFile: 'src/pen.ts' }, graphics, fileSystem);
+    await handleFetchGeometry(
+      { artifactId: 'tc-1', targetFile: 'src/pen.ts', parameters: { width: 12 } },
+      graphics,
+      fileSystem,
+    );
 
-    expect(graphics.fetchGeometry).toHaveBeenCalledWith({ targetFile: 'src/pen.ts' });
+    expect(graphics.fetchGeometry).toHaveBeenCalledWith({ targetFile: 'src/pen.ts', parameters: { width: 12 } });
   });
 
   it('should embed slug(targetFile) in artifactPath', async () => {

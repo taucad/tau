@@ -3,7 +3,7 @@ import type { InferUITools, Tool as AiTool, UIToolInvocation } from 'ai';
 import type { toolName, toolMode } from '#constants/tool.constants.js';
 import type { EditFileInput, EditFileOutput } from '#schemas/tools/edit-file.tool.schema.js';
 import type { TestModelOutput } from '@taucad/testing';
-import type { TestModelInput, EditTestsInput, EditTestsOutput } from '#schemas/tools/test-model.tool.schema.js';
+import type { TestModelInput } from '#schemas/tools/test-model.tool.schema.js';
 import type { WebBrowserInput, WebBrowserOutput } from '#schemas/tools/web-browser.tool.schema.js';
 import type { WebSearchInput, WebSearchOutput } from '#schemas/tools/web-search.tool.schema.js';
 import type { ReadFileInput, ReadFileOutput } from '#schemas/tools/read-file.tool.schema.js';
@@ -190,7 +190,6 @@ export type ToolSelection = ToolMode | ToolName[];
 export type MyTools = InferUITools<{
   [toolName.editFile]: AiTool<EditFileInput, EditFileOutput>;
   [toolName.testModel]: AiTool<TestModelInput, TestModelOutput>;
-  [toolName.editTests]: AiTool<EditTestsInput, EditTestsOutput>;
   [toolName.webBrowser]: AiTool<WebBrowserInput, WebBrowserOutput>;
   [toolName.webSearch]: AiTool<WebSearchInput, WebSearchOutput>;
   [toolName.readFile]: AiTool<ReadFileInput, ReadFileOutput>;

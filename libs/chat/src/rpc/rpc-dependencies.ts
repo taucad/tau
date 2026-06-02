@@ -11,9 +11,12 @@ import type {
   CaptureObservationsRpcResult,
   CaptureScreenshotRpcResult,
   ExportGeometryRpcInput,
+  FetchGeometryRpcInput,
   FetchGeometryRpcResult,
   GetKernelResultRpcResult,
   RpcClientErrorCode,
+  RunGeoSpecTestsRpcInput,
+  RunGeoSpecTestsRpcResult,
 } from '#schemas/rpc.schema.js';
 
 /**
@@ -95,9 +98,20 @@ export type RpcGraphicsExportGeometryResult =
  */
 export type RpcGraphicsClient = {
   captureObservations(args: { targetFile: string }): Promise<CaptureObservationsRpcResult>;
-  fetchGeometry(args: { targetFile: string }): Promise<FetchGeometryRpcResult>;
+  fetchGeometry(args: Pick<FetchGeometryRpcInput, 'targetFile' | 'parameters'>): Promise<FetchGeometryRpcResult>;
   exportGeometry(args: Pick<ExportGeometryRpcInput, 'targetFile' | 'format'>): Promise<RpcGraphicsExportGeometryResult>;
   captureScreenshot(args: { targetFile: string }): Promise<CaptureScreenshotRpcResult>;
+};
+
+/**
+ * Abstract GeoSpec client for executing tests where geometry bytes already
+ * live. Browser implementations run the VM and mesh analysis locally so large
+ * GLB/STEP payloads do not cross the chat RPC boundary.
+ *
+ * @public
+ */
+export type RpcGeoSpecClient = {
+  runTests(args: RunGeoSpecTestsRpcInput): Promise<RunGeoSpecTestsRpcResult>;
 };
 
 /**
@@ -110,6 +124,7 @@ export type RpcDependencies = {
   fileSystem: RpcFileSystem;
   kernelClient: RpcRuntimeClient;
   graphics?: RpcGraphicsClient;
+  geospec?: RpcGeoSpecClient;
 };
 
 /**

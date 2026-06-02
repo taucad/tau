@@ -10,6 +10,7 @@ import { handleGrep } from '#rpc/handlers/handle-grep.js';
 import { handleGlobSearch } from '#rpc/handlers/handle-glob-search.js';
 import { handleGetKernelResult } from '#rpc/handlers/handle-get-kernel-result.js';
 import { handleCaptureObservations } from '#rpc/handlers/handle-capture-observations.js';
+import { handleRunGeoSpecTests } from '#rpc/handlers/handle-run-geospec-tests.js';
 import { handleFetchGeometry } from '#rpc/handlers/handle-fetch-geometry.js';
 import { handleExportGeometry } from '#rpc/handlers/handle-export-geometry.js';
 import { handleCaptureScreenshot } from '#rpc/handlers/handle-capture-screenshot.js';
@@ -46,6 +47,7 @@ export function createRpcDispatcher(deps: RpcDependencies): RpcDispatcher {
     [rpcName.globSearch]: async (args) => handleGlobSearch(args, deps.fileSystem),
     [rpcName.getKernelResult]: async (args) => handleGetKernelResult(args, deps.kernelClient),
     [rpcName.captureObservations]: async (args) => handleCaptureObservations(args, deps.graphics),
+    [rpcName.runGeoSpecTests]: async (args) => handleRunGeoSpecTests(args, deps.geospec),
     [rpcName.fetchGeometry]: async (args) => handleFetchGeometry(args, deps.graphics, deps.fileSystem),
     [rpcName.exportGeometry]: async (args) => handleExportGeometry(args, deps.graphics, deps.fileSystem),
     [rpcName.captureScreenshot]: async (args) => handleCaptureScreenshot(args, deps.graphics),

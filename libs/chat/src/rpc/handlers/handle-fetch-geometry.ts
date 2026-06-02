@@ -16,7 +16,7 @@ export async function handleFetchGeometry(
     };
   }
 
-  const result = await graphics.fetchGeometry({ targetFile: input.targetFile });
+  const result = await graphics.fetchGeometry({ targetFile: input.targetFile, parameters: input.parameters });
 
   if (!result.success || !input.artifactId) {
     return result;

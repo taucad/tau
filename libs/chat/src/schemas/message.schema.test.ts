@@ -222,7 +222,7 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
       expect((part as { rawInput?: unknown }).rawInput).toEqual({ limit: 15 });
     });
 
-    it('should accept tool-test_model (empty-input) in output-error with rawInput populated', () => {
+    it('should accept tool-test_model in output-error with rawInput populated', () => {
       const result = uiMessagesSchema.safeParse([
         userMessage,
         baseMessage([
@@ -389,7 +389,7 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should accept an empty-input tool-test_model part in approval-requested state', () => {
+    it('should accept a filtered tool-test_model part in approval-requested state', () => {
       const result = uiMessagesSchema.safeParse([
         userMessage,
         baseMessage([
@@ -397,7 +397,7 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
             type: `tool-${toolName.testModel}`,
             toolCallId: 'call_test_model_approval',
             state: 'approval-requested',
-            input: {},
+            input: { files: ['main.geospec.ts'], testNamePattern: 'watertight' },
             approval: { id: 'approval_test_model' },
           } as unknown as MyMessagePart,
         ]),

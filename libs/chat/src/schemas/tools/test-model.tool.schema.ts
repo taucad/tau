@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { diffStatsWithContentSchema } from '#schemas/tools/diff.schema.js';
 
 // =============================================================================
 // View and Observation Schemas (internal use for capturing screenshots)
@@ -32,40 +31,49 @@ export type Observation = z.infer<typeof observationSchema>;
 // =============================================================================
 
 /**
- * Input schema for test_model tool.
- * No input required - reads requirements from test.json.
+ * Shared filter input for GeoSpec runs.
+ *
+ * The same fields are accepted by the `test_model` tool and the
+ * `run_geospec_tests` browser RPC. They intentionally mirror the GeoSpec CLI
+ * filters while keeping output-format flags (for example `--json`) CLI-only.
  * @public
  */
-export const testModelInputSchema = z.object({});
+export const geoSpecRunFilterInputSchema = z
+  .object({
+    pattern: z.string().min(1).max(200).optional().describe('GeoSpec file glob. Defaults to **/*.geospec.{ts,js}.'),
+    files: z
+      .array(z.string().min(1).max(512))
+      .max(50)
+      .optional()
+      .describe(
+        'JSON array of GeoSpec file paths, e.g. ["main.geospec.ts"]; do not use bracket keys like files[0]. Equivalent to repeated CLI --file flags.',
+      ),
+    testNamePattern: z
+      .string()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe(
+        'Substring matched against suite > test names, e.g. "watertight". Equivalent to CLI --test-name-pattern.',
+      ),
+    testTimeout: z
+      .number()
+      .int()
+      .min(1)
+      .max(300_000)
+      .optional()
+      .describe('Async test timeout in milliseconds. Equivalent to CLI --test-timeout.'),
+  })
+  .strict();
+
+/**
+ * Input schema for test_model tool.
+ *
+ * No input is required: by default the tool discovers and runs all GeoSpec
+ * test files. Filters match the standalone GeoSpec CLI.
+ *
+ * @public
+ */
+export const testModelInputSchema = geoSpecRunFilterInputSchema;
 /** @public */
 export type TestModelInput = z.infer<typeof testModelInputSchema>;
-
-// =============================================================================
-// Edit Tests Tool Schemas (input/output for edit_tests tool)
-// =============================================================================
-
-/**
- * Input schema for edit_tests tool.
- * Uses the same pattern as edit_file for consistency.
- * @public
- */
-export const editTestsInputSchema = z.object({
-  codeEdit: z
-    .string()
-    .describe(
-      'The edit to apply to test.json using // ... existing code ... pattern. test.json is a per-file map keyed by source file path (e.g. "main.ts", "lib/pen.ts") whose values are { "requirements": [...] }. Add or update top-level keys to introduce new files; do not delete sibling files\' requirements. A top-level "requirements" array (without a file-path key) is rejected by post-write validation.',
-    ),
-});
-/** @public */
-export type EditTestsInput = z.infer<typeof editTestsInputSchema>;
-
-/**
- * Output schema for edit_tests tool.
- * Mirrors edit_file output for consistent UX.
- * @public
- */
-export const editTestsOutputSchema = z.object({
-  diffStats: diffStatsWithContentSchema.describe('Statistics and content diff for the changes made'),
-});
-/** @public */
-export type EditTestsOutput = z.infer<typeof editTestsOutputSchema>;

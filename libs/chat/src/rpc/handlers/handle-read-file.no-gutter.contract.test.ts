@@ -16,7 +16,7 @@ describe('handleReadFile — RPC primitive is raw (no cat-n gutter)', () => {
       modifiedAt: '2026-05-13T00:00:00.000Z',
     });
 
-    const result = await handleReadFile({ targetFile: 'test.json', offset: 1, limit: 10 }, fileSystem);
+    const result = await handleReadFile({ targetFile: 'example.json', offset: 1, limit: 10 }, fileSystem);
 
     expect(result.success).toBe(true);
     if (result.success) {

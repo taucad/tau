@@ -40,7 +40,7 @@ describe('getErrorCode', () => {
 
   describe('Node.js-style errors (ErrnoException)', () => {
     it('should classify ENOENT ErrnoException as FILE_NOT_FOUND', () => {
-      const error = makeErrnoError("ENOENT: no such file or directory, open '/test.json'", 'ENOENT');
+      const error = makeErrnoError("ENOENT: no such file or directory, open '/missing.json'", 'ENOENT');
       expect(getErrorCode(error)).toBe(rpcClientErrorCode.fileNotFound);
     });
 
@@ -52,7 +52,7 @@ describe('getErrorCode', () => {
 
   describe('fromMemoryFS-style errors (with code property)', () => {
     it('should classify ENOENT memoryFS error as FILE_NOT_FOUND', () => {
-      const error = makeErrnoError('ENOENT: no such file: /test.json', 'ENOENT');
+      const error = makeErrnoError('ENOENT: no such file: /missing.json', 'ENOENT');
       expect(getErrorCode(error)).toBe(rpcClientErrorCode.fileNotFound);
     });
   });

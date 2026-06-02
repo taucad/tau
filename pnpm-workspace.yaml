@@ -9,15 +9,15 @@ packages:
 
 catalog:
   '@ai-sdk/provider-utils': ^4.0.15
-  '@arethetypeswrong/cli': ^0.18.2
+  '@arethetypeswrong/cli': ^0.18.3
   '@aws-sdk/client-s3': ^3.1053.0
   '@aws-sdk/lib-storage': ^3.1053.0
   '@aws-sdk/s3-request-presigner': ^3.1053.0
   '@axe-core/playwright': ^4.11.3
   '@base-ui/react': ^1.5.0
-  '@better-auth-ui/core': ^1.6.8
+  '@better-auth-ui/core': ^1.6.15
   '@better-auth-ui/react': ^1.6.8
-  '@better-auth/api-key': ^1.6.11
+  '@better-auth/api-key': ^1.6.13
   '@eslint-community/eslint-plugin-eslint-comments': ^4.7.1
   '@fastify/cookie': ^11.0.2
   '@fastify/multipart': ^10.0.0
@@ -30,15 +30,15 @@ catalog:
   '@kittycad/lib': ^2.0.48
   '@langchain/anthropic': ^1.3.28
   '@langchain/cerebras': ^1.0.4
-  '@langchain/classic': ^1.0.32
-  '@langchain/community': ^1.1.28
+  '@langchain/classic': ^1.0.34
+  '@langchain/community': ^1.1.29
   '@langchain/core': ^1.1.44
   '@langchain/google-vertexai': ^2.1.20
-  '@langchain/langgraph': ^1.3.0
-  '@langchain/langgraph-checkpoint': ^1.0.2
-  '@langchain/langgraph-checkpoint-postgres': ^1.0.1
+  '@langchain/langgraph': ^1.3.3
+  '@langchain/langgraph-checkpoint': ^1.0.4
+  '@langchain/langgraph-checkpoint-postgres': ^1.0.2
   '@langchain/ollama': ^1.2.7
-  '@langchain/openai': ^1.4.5
+  '@langchain/openai': ^1.4.7
   '@langchain/tavily': ^1.2.0
   '@msgpack/msgpack': ^3.1.3
   '@nestjs/common': ^11.1.24
@@ -114,7 +114,7 @@ catalog:
   '@vitest/coverage-v8': 4.1.5
   '@vitest/ui': 4.1.5
   '@xyflow/react': ^12.10.2
-  better-auth: ^1.6.11
+  better-auth: ^1.6.13
   bowser: ^2.14.1
   cdn-resolve: ^2.1.2
   chrome-launcher: ^1.2.1
@@ -141,7 +141,7 @@ catalog:
   express: ^5.2.1
   fake-indexeddb: ^6.2.5
   fastify: ^5.8.5
-  geist: ^1.7.1
+  geist: ^1.7.2
   gray-matter: ^4.0.3
   hast-util-sanitize: ^5.0.2
   husky: ^9.1.7
@@ -154,7 +154,7 @@ catalog:
   json-schema-default: ^1.0.2
   katex: ^0.16.47
   knip: ^6.14.2
-  langchain: ^1.4.0
+  langchain: ^1.4.4
   lighthouse: ^13.3.0
   lint-staged: ^16.4.0
   lucide-react: ^0.552.0
@@ -181,7 +181,7 @@ catalog:
   remark-math: ^6.0.0
   remark-parse: ^11.0.0
   remark-rehype: ^11.1.2
-  rolldown: 1.0.0-rc.17
+  rolldown: 1.0.3
   size-limit: ^12.1.0
   socket.io-prometheus-metrics: ^1.0.6
   sonner: ^2.0.7
@@ -200,7 +200,7 @@ catalog:
   unified: ^11.0.5
   unist-util-visit: ^5.1.0
   uzip: ^0.20201231.0
-  vite: 8.0.10
+  vite: 8.0.16
   vite-plugin-mkcert: ^2.0.0
   vite-plugin-static-copy: ^4.1.0
   vitest: 4.1.5

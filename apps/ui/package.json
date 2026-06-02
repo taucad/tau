@@ -5,7 +5,7 @@
   "private": true,
   "dependencies": {
     "@base-ui/react": "catalog:",
-    "@better-auth-ui/core": "^1.6.8",
+    "@better-auth-ui/core": "^1.6.15",
     "@better-auth-ui/react": "^1.6.8",
     "@better-auth/api-key": "catalog:",
     "@react-router/express": "catalog:",

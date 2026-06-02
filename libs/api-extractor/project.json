@@ -19,6 +19,13 @@
         "cwd": "libs/api-extractor"
       }
     },
+    "extract-geospec": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/extract-geospec-types.ts",
+        "cwd": "libs/api-extractor"
+      }
+    },
     "extract-kcl": {
       "executor": "nx:run-commands",
       "options": {

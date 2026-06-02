@@ -1,156 +1,62 @@
-# Replicad API Extraction Scripts
+# @taucad/api-extractor
 
-This directory contains scripts to programmatically extract and analyze the most useful public APIs from the replicad 3D modeling library.
+`@taucad/api-extractor` packages public TypeScript declarations that Tau mounts into the in-browser `/node_modules` workspace. The output is consumed by Monaco, the file manager bundled-types tree, and agent-authored project files that import first-party authoring APIs.
 
-## Overview
+The root package intentionally stays asset-light. Use the dedicated subpaths:
 
-The API extraction tool analyzes the replicad TypeScript type definitions (`replicad.d.ts`) and cross-references them with actual usage patterns from build examples to identify the most useful and commonly used APIs.
+- `@taucad/api-extractor/kernel-types` for CAD kernel declarations such as Replicad, JSCAD, Manifold, and OpenCascade.js.
+- `@taucad/api-extractor/authoring-types` for non-kernel authoring packages such as GeoSpec.
+- `@taucad/api-extractor/kcl-reference` for compact KCL markdown reference text.
 
-## Files
+## GeoSpec Authoring Types
 
-- **`extract-replicad-api.ts`** - Main extraction script
-- **`use-extracted-api.ts`** - Helper utilities and analysis examples
-- **`README.md`** - This documentation
+GeoSpec declarations are generated from `packages/geospec/src` into `src/generated/geospec/geospec.bundled.json`. The generated bundle is package-shaped so Monaco can mount it exactly like a local package:
 
-## Generated Files
+- `/node_modules/geospec/package.json`
+- `/node_modules/geospec/index.d.ts`
+- `/node_modules/geospec/config/index.d.ts`
+- `/node_modules/geospec/mesh/index.d.ts`
+- `/node_modules/geospec/model/index.d.ts`
+- `/node_modules/geospec/runner/index.d.ts`
+- `/node_modules/geospec/step/index.d.ts`
+- `/node_modules/geospec/brep/index.d.ts`
 
-When you run the extraction, these files are created in the project root:
-
-- **`replicad-api-reference.md`** - Human-readable API documentation
-- **`replicad-core-api.d.ts`** - TypeScript definitions for core APIs
-- **`replicad-api-data.json`** - Structured data for programmatic use
-
-## Usage
-
-### Extract APIs
-
-```bash
-pnpm extract-replicad-api
-```
-
-This will:
-
-1. Parse the replicad type definitions
-2. Analyze usage patterns from build examples
-3. Categorize and rank APIs by importance
-4. Generate documentation and data files
-
-### Analyze Results
+Regenerate the GeoSpec bundle any time a public GeoSpec matcher, loader, option type, or subpath changes:
 
 ```bash
-pnpm analyze-replicad-api
+pnpm nx run api-extractor:extract-geospec
 ```
 
-This demonstrates how to use the extracted data programmatically.
+Then verify the authoring surface:
 
-## API Categories
-
-The extraction organizes APIs into logical categories:
-
-1. **Drawing & Sketching** - Functions for 2D drawing and sketching
-2. **Primitives & Makers** - Functions that create basic 3D geometries
-3. **3D Operations** - Extrusion, revolution, lofting operations
-4. **Transformations** - Move, rotate, scale, mirror operations
-5. **Modifications** - Fillet, chamfer, cut, fuse operations
-6. **Finders & Filters** - Tools to select edges, faces, etc.
-7. **Measurements** - Functions to measure distance, area, volume
-8. **Geometry Types** - Core types like Point, Vector, Shape
-9. **Utilities** - Helper functions and utilities
-
-## Classification System
-
-Each API is classified with:
-
-- **Type**: function, class, type, interface, constant
-- **Category**: Logical grouping (see above)
-- **Core Status**: Whether it's frequently used (🌟)
-- **Usage Count**: How many times it appears in examples (📊)
-
-### Core APIs
-
-Core APIs are those identified as most essential based on:
-
-- Frequency of use in build examples
-- Fundamental importance for 3D modeling
-- Common patterns in user code
-
-### Usage-Based Ranking
-
-APIs are ranked by actual usage in real build examples, helping identify:
-
-- Most practical functions for users
-- Common workflows and patterns
-- Essential vs. advanced functionality
-
-## Example: Using Extracted Data
-
-```typescript
-import { ReplicadAPIHelper } from './scripts/use-extracted-api.js';
-
-const helper = new ReplicadAPIHelper();
-
-// Get the most used APIs
-const topAPIs = helper.getMostUsedAPIs(10);
-
-// Get APIs by category
-const drawingAPIs = helper.getAPIsByCategory('Drawing & Sketching');
-
-// Search for specific patterns
-const makeAPIs = helper.searchAPIs('^make');
-
-// Get learning path for beginners
-const learningPath = helper.getLearningPath();
-
-// Generate autocomplete data for IDEs
-const autocompleteData = helper.generateAutocompleteData();
+```bash
+pnpm nx test api-extractor --watch=false
 ```
 
-## Use Cases
+The regression tests assert that generated declarations expose current BRep and STEP APIs, including `loadModel({ format: 'step' })`, `loadStep`, `toBeValidBrep`, exact measurement matchers, feature matchers, and distance matchers. If an agent reads `node_modules/geospec/*.d.ts`, it should see the same public API that package consumers see.
 
-This extracted API data can be used for:
+## Kernel Type Bundles
 
-1. **Documentation Generation** - Auto-generate focused API docs
-2. **IDE Autocomplete** - Provide smart suggestions based on usage
-3. **Learning Materials** - Create guided tutorials for common APIs
-4. **Code Analysis** - Understand which APIs are most important
-5. **Library Evolution** - Track API usage over time
+Kernel declaration extractors produce JSON maps under `src/generated/<kernel>/`:
 
-## Customization
+```bash
+pnpm nx run api-extractor:extract-replicad
+pnpm nx run api-extractor:extract-jscad
+pnpm nx run api-extractor:extract-manifold
+pnpm nx run api-extractor:extract-opencascade
+pnpm nx run api-extractor:extract-kcl
+```
 
-You can customize the extraction by modifying:
+These outputs are used by `kernel-types` and mounted separately from GeoSpec authoring declarations.
 
-- **Core Functions Set** - Which APIs are considered "core"
-- **Categories** - How APIs are grouped
-- **Patterns** - Regex patterns for API detection
-- **Usage Analysis** - Which code examples to analyze
+## Runtime Integration
 
-## Output Format
+`apps/ui/app/machines/file-manager.worker.ts` imports `kernelTypeMaps` and `authoringTypeMaps`, then calls `populateBundledTypesMount(...)` so the editor sees package declarations before TypeScript acquisition falls back to network or package installation. GeoSpec must stay in `authoring-types` rather than `kernel-types`, because it is a test-authoring package used across kernels.
 
-### Markdown Documentation
+## Maintenance Rules
 
-- Organized by category
-- Usage indicators (🌟 for core, 📊 for usage count)
-- TypeScript signatures
-- Table of contents
-
-### TypeScript Definitions
-
-- Clean, organized type definitions
-- Grouped by category
-- Only includes frequently used APIs
-
-### JSON Data
-
-- Structured data for programmatic access
-- Metadata about extraction
-- Full API details with classifications
-
-## Future Enhancements
-
-Potential improvements:
-
-- Integration with LSP for real-time suggestions
-- Usage analytics from larger codebases
-- API deprecation tracking
-- Performance impact analysis
-- Community usage patterns
+- Keep generated JSON in source control; the browser editor depends on it at build time.
+- Add a public subpath to both the package extractor and its regression tests.
+- Prefer package-shaped declarations for authoring APIs so `package.json#exports` matches real Node/package resolution.
+- Do not hand-write app-local GeoSpec declarations. Generate them from `packages/geospec/src`.
+- Do not add runtime assets to the root `@taucad/api-extractor` entrypoint.

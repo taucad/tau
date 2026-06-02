@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { authoringTypeMaps, geospecTypes } from '#authoring-types.js';
 import { jscadModelingTypes, kernelTypeMaps, manifoldTypes, opencascadeTypes, replicadTypes } from '#kernel-types.js';
 import { kclStdlibReference } from '#kcl-reference.js';
 
@@ -31,5 +32,76 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     expect(indexSource).not.toMatch(/\?raw/);
     expect(indexSource).not.toContain('kernelTypeMaps');
     expect(indexSource).not.toContain('kclStdlibReference');
+    expect(indexSource).not.toContain('authoringTypeMaps');
+  });
+
+  it('authoring-types exposes generated GeoSpec package declarations for all public subpaths', () => {
+    expect(authoringTypeMaps).toContain(geospecTypes);
+    const { geospec } = geospecTypes;
+    if (!geospec) {
+      throw new Error('Generated GeoSpec authoring types are missing.');
+    }
+    const { content = '', files = {}, packageJson = {} } = geospec;
+
+    expect(content).toContain("from './runner/types.js'");
+    for (const declarationFile of [
+      'brep/index.d.ts',
+      'config/index.d.ts',
+      'mesh/index.d.ts',
+      'model/index.d.ts',
+      'runner/index.d.ts',
+      'step/index.d.ts',
+    ]) {
+      expect(typeof files[declarationFile]).toBe('string');
+    }
+
+    expect(packageJson['name']).toBe('geospec');
+    const exportsValue = packageJson['exports'];
+    if (!exportsValue || typeof exportsValue !== 'object' || Array.isArray(exportsValue)) {
+      throw new TypeError('Generated GeoSpec package.json exports must be an object.');
+    }
+    const packageExports: Record<string, unknown> = exportsValue as Record<string, unknown>;
+    const expectedPublicExports = [
+      ['./brep', './brep/index.d.ts'],
+      ['./model', './model/index.d.ts'],
+      ['./step', './step/index.d.ts'],
+    ] as const;
+    for (const [specifier, typePath] of expectedPublicExports) {
+      const exportEntry = packageExports[specifier];
+      if (!exportEntry || typeof exportEntry !== 'object' || Array.isArray(exportEntry)) {
+        throw new TypeError(`Generated GeoSpec package export ${specifier} must be an object.`);
+      }
+      expect((exportEntry as Record<string, unknown>)['types']).toBe(typePath);
+    }
+  });
+
+  it('generated GeoSpec declarations preserve model-loader and matcher JSDoc', () => {
+    const { geospec } = geospecTypes;
+    if (!geospec) {
+      throw new Error('Generated GeoSpec authoring types are missing.');
+    }
+    const { files = {} } = geospec;
+    const modelTypes = files['model/index.d.ts'] ?? '';
+    const modelLoaderTypes = files['model/load-model.d.ts'] ?? '';
+    const modelOptionTypes = files['model/types.d.ts'] ?? '';
+    const runnerTypes = files['runner/types.d.ts'] ?? '';
+    const stepTypes = files['step/index.d.ts'] ?? '';
+    const stepLoaderTypes = files['step/load-step.d.ts'] ?? '';
+
+    expect(modelTypes).toContain("export { createModelLoader, loadModel } from './load-model.js';");
+    expect(modelLoaderTypes).toContain('Load a CAD model into GeoSpec evidence.');
+    expect(modelLoaderTypes).toContain('export declare function loadModel');
+    expect(modelOptionTypes).toContain("'step' | 'stp'");
+    expect(modelTypes).toContain('GeoSpecModelLoadError');
+    expect(modelTypes).not.toContain('loadModelSafe');
+    expect(modelTypes).not.toContain('tryLoadModel');
+    expect(runnerTypes).toContain('Assert total surface area');
+    expect(runnerTypes).toContain('toBeValidBrep');
+    expect(runnerTypes).toContain('toHaveHausdorffDistanceTo');
+    expect(runnerTypes).toContain('toHaveCircularHolePattern');
+    expect(runnerTypes).toContain('toHaveFilletFeature');
+    expect(runnerTypes).toContain('toHavePlanarFace');
+    expect(stepTypes).toContain('loadStep');
+    expect(stepLoaderTypes).toContain('Load STEP/XDE/BRep evidence');
   });
 });

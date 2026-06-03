@@ -168,17 +168,17 @@ describe('cross-provider tool-call replay (hermetic)', () => {
       new HumanMessage('a cube'),
       new AIMessage({
         content: [
-          { type: 'text', text: 'Creating tests.' },
-          { type: 'tool_call', id: toolCallId, name: 'edit_tests', args: '' },
+          { type: 'text', text: 'Inspecting files.' },
+          { type: 'tool_call', id: toolCallId, name: 'list_directory', args: '' },
         ],
         // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-        tool_calls: [{ id: toolCallId, name: 'edit_tests', args: toolArgs, type: 'tool_call' }],
+        tool_calls: [{ id: toolCallId, name: 'list_directory', args: toolArgs, type: 'tool_call' }],
       }),
       new ToolMessage({
         content: '{}',
         // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
         tool_call_id: toolCallId,
-        name: 'edit_tests',
+        name: 'list_directory',
       }),
       new HumanMessage('continue'),
     ];

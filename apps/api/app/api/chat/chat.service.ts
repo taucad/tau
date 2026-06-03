@@ -97,7 +97,7 @@ export class ChatService {
     // Combine all tools into a single array for the unified agent
     const allTools = [
       // CAD tools (testing tools conditionally included)
-      ...(testingEnabled ? [tools.test_model, tools.edit_tests] : []),
+      ...(testingEnabled ? [tools.test_model] : []),
       tools.get_kernel_result,
       tools.export_geometry,
       tools.screenshot,

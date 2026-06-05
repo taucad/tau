@@ -9,6 +9,6 @@
  */
 
 /* oxlint-disable no-barrel-files/no-barrel-files -- public package entry */
-export { openscad } from '#openscad.plugin.js';
+export { openscad } from '#openscad.kernel.js';
 export { openscadExportSchemas, openscadRenderSchema, openscadTessellationSchema } from '#openscad.schemas.js';
 export type { OpenScadTessellationOptions } from '#openscad.schemas.js';

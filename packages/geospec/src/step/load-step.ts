@@ -331,6 +331,7 @@ const meshStepCapabilities: GeometryCapability[] = [
   { kind: 'mesh', feature: 'volume' },
   { kind: 'mesh', feature: 'center-of-mass' },
   { kind: 'mesh', feature: 'distance' },
+  { kind: 'mesh', feature: 'component-overlap' },
   { kind: 'step', feature: 'schema' },
   { kind: 'step', feature: 'units' },
   { kind: 'step', feature: 'product-structure' },

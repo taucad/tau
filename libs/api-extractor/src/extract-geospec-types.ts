@@ -22,6 +22,9 @@ const publicEntries = [
   ['mesh/index.d.ts', 'geospec/mesh'],
   ['model/index.d.ts', 'geospec/model'],
   ['runner/index.d.ts', 'geospec/runner'],
+  ['runner/node/index.d.ts', 'geospec/runner/node'],
+  ['runner/web/index.d.ts', 'geospec/runner/web'],
+  ['runner/worker/index.d.ts', 'geospec/runner/worker'],
   ['step/index.d.ts', 'geospec/step'],
 ] as const;
 
@@ -104,6 +107,9 @@ const buildPackageJson = (): Record<string, unknown> => {
     ['./mesh', './mesh/index.d.ts'],
     ['./model', './model/index.d.ts'],
     ['./runner', './runner/index.d.ts'],
+    ['./runner/node', './runner/node/index.d.ts'],
+    ['./runner/web', './runner/web/index.d.ts'],
+    ['./runner/worker', './runner/worker/index.d.ts'],
     ['./step', './step/index.d.ts'],
   ] as const;
   const packageExports: Record<string, { types: string }> = {};

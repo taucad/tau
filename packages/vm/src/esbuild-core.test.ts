@@ -413,6 +413,39 @@ describe('ESBuild VM – package imports resolution', () => {
     });
   });
 
+  it('should prefer the most specific package-import wildcard pattern', async () => {
+    filesystem.mocks.exists.mockImplementation(
+      async (path: string) => path === '/project/package.json' || path === '/project/.tau/parameters/lib/part.ts.json',
+    );
+    filesystem.mocks.readFile.mockImplementation(async (path: string, encoding?: 'utf8') => {
+      if (path === '/project/package.json' && encoding === 'utf8') {
+        return JSON.stringify({
+          imports: {
+            '#params/*.json': './wrong/*.json',
+            '#params/lib/*.json': './.tau/parameters/lib/*.json',
+          },
+        });
+      }
+      return '{}';
+    });
+
+    const result = (await mainOnResolve({
+      path: '#params/lib/part.ts.json',
+      importer: 'tests/part.geospec.ts',
+      namespace: esbuildNamespace.vfs,
+      kind: 'import-statement',
+      resolveDir: '/project/tests',
+      suffix: '',
+      pluginData: undefined,
+      with: { type: 'json' },
+    })) as { path: string; namespace: string };
+
+    expect(result).toEqual({
+      path: '.tau/parameters/lib/part.ts.json',
+      namespace: esbuildNamespace.vfs,
+    });
+  });
+
   it('should fail clearly when #params has no package imports mapping', async () => {
     filesystem.mocks.exists.mockResolvedValue(false);
 

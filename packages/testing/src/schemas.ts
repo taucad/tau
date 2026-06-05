@@ -185,6 +185,23 @@ export type TestFailurePayload = z.infer<typeof testFailurePayloadSchema>;
 // Test Result Schemas (output from test runner)
 // =============================================================================
 
+const geometryDiagnosticSchema = z
+  .object({
+    code: z.string(),
+    severity: z.enum(['error', 'warning', 'info']),
+    message: z.string(),
+    suggestion: z.string().optional(),
+    spatial: z
+      .object({
+        min: z.tuple([z.number(), z.number(), z.number()]).optional(),
+        max: z.tuple([z.number(), z.number(), z.number()]).optional(),
+        center: z.tuple([z.number(), z.number(), z.number()]).optional(),
+      })
+      .optional(),
+    details: z.unknown().optional(),
+  })
+  .describe('Structured GeoSpec diagnostic preserved from the matcher runner');
+
 /**
  * Test failure result -- failures include detailed feedback for the LLM and
  * are tagged with the source file whose geometry failed the requirement.
@@ -199,6 +216,10 @@ export const testFailureSchema = z.object({
   failure: testFailurePayloadSchema
     .optional()
     .describe('Structured geometry diagnostics for UI / programmatic consumers'),
+  diagnostics: z
+    .array(geometryDiagnosticSchema)
+    .optional()
+    .describe('Structured GeoSpec matcher diagnostics for UI / programmatic consumers'),
 });
 /**
  * Inferred failed-test row emitted by the geometry harness / agent tooling.

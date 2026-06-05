@@ -10,7 +10,28 @@
 #include <cstdint>
 #include <limits>
 #include <queue>
+#include <sstream>
+#include <string>
 #include <vector>
+
+#include <Bnd_Box.hxx>
+#include <BRepAlgoAPI_Common.hxx>
+#include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
+#include <TopAbs_ShapeEnum.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Face.hxx>
+#include <TopoDS_Shape.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Solid.hxx>
+#include <gp_Pnt.hxx>
 
 struct GeoSpecMeshDistanceStats {
   double min;
@@ -46,6 +67,190 @@ struct GeoSpecBvhNode {
   int start;
   int count;
 };
+
+class GeoSpecMeshOverlapResult {
+public:
+  bool success;
+
+  GeoSpecMeshOverlapResult()
+    : success(false), evidenceJson_("{\"success\":false,\"componentCount\":0,\"checkedPairs\":0,\"overlaps\":[],\"diagnostics\":[]}") {}
+
+  GeoSpecMeshOverlapResult(bool ok, const std::string& evidenceJson)
+    : success(ok), evidenceJson_(evidenceJson) {}
+
+  std::string evidenceJson() const {
+    return evidenceJson_;
+  }
+
+private:
+  std::string evidenceJson_;
+};
+
+static std::string geospecOverlapEscapeJson(const std::string& value) {
+  std::ostringstream output;
+  for (char character : value) {
+    switch (character) {
+      case '\\': output << "\\\\"; break;
+      case '"': output << "\\\""; break;
+      case '\n': output << "\\n"; break;
+      case '\r': output << "\\r"; break;
+      case '\t': output << "\\t"; break;
+      default: output << character; break;
+    }
+  }
+  return output.str();
+}
+
+static void geospecOverlapAppendDiagnostics(
+  std::ostringstream& output,
+  const std::vector<std::pair<std::string, std::string>>& diagnostics
+) {
+  output << "[";
+  for (std::size_t index = 0; index < diagnostics.size(); index++) {
+    if (index > 0) output << ",";
+    output << "{\"code\":\"" << geospecOverlapEscapeJson(diagnostics[index].first)
+      << "\",\"message\":\"" << geospecOverlapEscapeJson(diagnostics[index].second) << "\"}";
+  }
+  output << "]";
+}
+
+static GeoSpecMeshOverlapResult geospecOverlapFailure(
+  int componentCount,
+  int checkedPairs,
+  const std::vector<std::pair<std::string, std::string>>& diagnostics
+) {
+  std::ostringstream output;
+  output << "{\"success\":false,\"componentCount\":" << componentCount
+    << ",\"checkedPairs\":" << checkedPairs
+    << ",\"overlaps\":[],\"diagnostics\":";
+  geospecOverlapAppendDiagnostics(output, diagnostics);
+  output << "}";
+  return GeoSpecMeshOverlapResult(false, output.str());
+}
+
+static TopoDS_Face geospecOverlapTriangleFace(const GeoSpecTriangle& triangle) {
+  BRepBuilderAPI_MakePolygon polygon;
+  polygon.Add(gp_Pnt(triangle.a.x, triangle.a.y, triangle.a.z));
+  polygon.Add(gp_Pnt(triangle.b.x, triangle.b.y, triangle.b.z));
+  polygon.Add(gp_Pnt(triangle.c.x, triangle.c.y, triangle.c.z));
+  polygon.Close();
+  if (!polygon.IsDone()) {
+    return TopoDS_Face();
+  }
+  BRepBuilderAPI_MakeFace faceBuilder(polygon.Wire(), true);
+  if (!faceBuilder.IsDone()) {
+    return TopoDS_Face();
+  }
+  return faceBuilder.Face();
+}
+
+static TopoDS_Shape geospecOverlapBuildSolid(
+  const std::vector<GeoSpecTriangle>& triangles,
+  double tolerance,
+  int componentId,
+  std::vector<std::pair<std::string, std::string>>& diagnostics
+) {
+  if (triangles.size() < 4) {
+    diagnostics.push_back({
+      "GEOSPEC_COMPONENT_SOLID_INVALID",
+      "component " + std::to_string(componentId) + " has fewer than four triangles"
+    });
+    return TopoDS_Shape();
+  }
+
+  BRepBuilderAPI_Sewing sewing(tolerance);
+  int faceCount = 0;
+  for (const GeoSpecTriangle& triangle : triangles) {
+    TopoDS_Face face = geospecOverlapTriangleFace(triangle);
+    if (!face.IsNull()) {
+      sewing.Add(face);
+      faceCount++;
+    }
+  }
+  if (faceCount < 4) {
+    diagnostics.push_back({
+      "GEOSPEC_COMPONENT_SOLID_INVALID",
+      "component " + std::to_string(componentId) + " did not produce enough valid faces"
+    });
+    return TopoDS_Shape();
+  }
+
+  sewing.Perform();
+  TopoDS_Shape sewed = sewing.SewedShape();
+  if (sewed.IsNull()) {
+    diagnostics.push_back({
+      "GEOSPEC_COMPONENT_SOLID_INVALID",
+      "component " + std::to_string(componentId) + " could not be sewn into a shell"
+    });
+    return TopoDS_Shape();
+  }
+
+  TopoDS_Shell shell;
+  if (sewed.ShapeType() == TopAbs_SHELL) {
+    shell = TopoDS::Shell(sewed);
+  } else {
+    for (TopExp_Explorer explorer(sewed, TopAbs_SHELL); explorer.More(); explorer.Next()) {
+      shell = TopoDS::Shell(explorer.Current());
+      break;
+    }
+  }
+  if (shell.IsNull()) {
+    diagnostics.push_back({
+      "GEOSPEC_COMPONENT_SOLID_INVALID",
+      "component " + std::to_string(componentId) + " did not contain a closed shell"
+    });
+    return TopoDS_Shape();
+  }
+
+  BRepBuilderAPI_MakeSolid solidBuilder(shell);
+  TopoDS_Solid solid = solidBuilder.Solid();
+  if (solid.IsNull()) {
+    diagnostics.push_back({
+      "GEOSPEC_COMPONENT_SOLID_INVALID",
+      "component " + std::to_string(componentId) + " could not be converted to a solid"
+    });
+    return TopoDS_Shape();
+  }
+
+  BRepCheck_Analyzer analyzer(solid);
+  if (!analyzer.IsValid()) {
+    diagnostics.push_back({
+      "GEOSPEC_COMPONENT_SOLID_INVALID",
+      "component " + std::to_string(componentId) + " is not a valid closed solid"
+    });
+    return TopoDS_Shape();
+  }
+  return solid;
+}
+
+static double geospecOverlapVolume(const TopoDS_Shape& shape) {
+  if (shape.IsNull()) {
+    return 0.0;
+  }
+  GProp_GProps properties;
+  BRepGProp::VolumeProperties(shape, properties);
+  return std::abs(properties.Mass());
+}
+
+static GeoSpecPoint geospecOverlapWitnessPoint(const TopoDS_Shape& shape) {
+  Bnd_Box box;
+  BRepBndLib::Add(shape, box);
+  if (box.IsVoid()) {
+    return {0.0, 0.0, 0.0};
+  }
+  double xmin = 0.0;
+  double ymin = 0.0;
+  double zmin = 0.0;
+  double xmax = 0.0;
+  double ymax = 0.0;
+  double zmax = 0.0;
+  box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+  return {
+    (xmin + xmax) / 2.0,
+    (ymin + ymax) / 2.0,
+    (zmin + zmax) / 2.0,
+  };
+}
 
 static GeoSpecPoint geospecSub(const GeoSpecPoint& a, const GeoSpecPoint& b) {
   return {a.x - b.x, a.y - b.y, a.z - b.z};
@@ -285,6 +490,115 @@ static void geospecAppendDistances(
 
 class GeoSpecMeshMetrics {
 public:
+  static GeoSpecMeshOverlapResult componentOverlapFromTrianglePointers(
+    uintptr_t trianglePointer,
+    int triangleCount,
+    uintptr_t componentIdPointer,
+    int componentCount,
+    double tolerance
+  ) {
+    std::vector<std::pair<std::string, std::string>> diagnostics;
+    if (triangleCount <= 0) {
+      diagnostics.push_back({"GEOSPEC_NATIVE_OVERLAP_INVALID_INPUT", "triangleCount must be positive"});
+    }
+    if (componentCount < 2) {
+      diagnostics.push_back({"GEOSPEC_NATIVE_OVERLAP_INVALID_INPUT", "componentCount must be at least two"});
+    }
+    if (!std::isfinite(tolerance) || tolerance < 0.0) {
+      diagnostics.push_back({"GEOSPEC_NATIVE_OVERLAP_INVALID_INPUT", "tolerance must be a non-negative finite number"});
+    }
+    if (!diagnostics.empty()) {
+      return geospecOverlapFailure(componentCount, 0, diagnostics);
+    }
+
+    const double* rawTriangles = reinterpret_cast<const double*>(trianglePointer);
+    const int* componentIds = reinterpret_cast<const int*>(componentIdPointer);
+    std::vector<std::vector<GeoSpecTriangle>> componentTriangles(static_cast<std::size_t>(componentCount));
+    for (int triangleIndex = 0; triangleIndex < triangleCount; triangleIndex++) {
+      const int componentId = componentIds[triangleIndex];
+      if (componentId < 0 || componentId >= componentCount) {
+        diagnostics.push_back({
+          "GEOSPEC_NATIVE_OVERLAP_INVALID_INPUT",
+          "triangle " + std::to_string(triangleIndex) + " has invalid component id " + std::to_string(componentId)
+        });
+        continue;
+      }
+      const double* base = rawTriangles + triangleIndex * 9;
+      componentTriangles[static_cast<std::size_t>(componentId)].push_back({
+        {base[0], base[1], base[2]},
+        {base[3], base[4], base[5]},
+        {base[6], base[7], base[8]},
+        {0.0, 0.0, 0.0},
+        {0.0, 0.0, 0.0},
+        {0.0, 0.0, 0.0},
+      });
+    }
+    if (!diagnostics.empty()) {
+      return geospecOverlapFailure(componentCount, 0, diagnostics);
+    }
+
+    const double sewingTolerance = std::max(tolerance, 1e-7);
+    std::vector<TopoDS_Shape> solids(static_cast<std::size_t>(componentCount));
+    for (int componentId = 0; componentId < componentCount; componentId++) {
+      solids[static_cast<std::size_t>(componentId)] = geospecOverlapBuildSolid(
+        componentTriangles[static_cast<std::size_t>(componentId)],
+        sewingTolerance,
+        componentId,
+        diagnostics
+      );
+    }
+    if (!diagnostics.empty()) {
+      return geospecOverlapFailure(componentCount, 0, diagnostics);
+    }
+
+    struct OverlapRecord {
+      int left;
+      int right;
+      double volume;
+      GeoSpecPoint witness;
+    };
+    std::vector<OverlapRecord> overlaps;
+    int checkedPairs = 0;
+    const double volumeEpsilon = std::max(tolerance * tolerance * tolerance, 1e-12);
+    for (int left = 0; left < componentCount; left++) {
+      for (int right = left + 1; right < componentCount; right++) {
+        checkedPairs++;
+        BRepAlgoAPI_Common common(solids[static_cast<std::size_t>(left)], solids[static_cast<std::size_t>(right)]);
+        common.Build();
+        if (!common.IsDone()) {
+          diagnostics.push_back({
+            "GEOSPEC_NATIVE_OVERLAP_BOOLEAN_FAILED",
+            "boolean common failed for component pair " + std::to_string(left) + "/" + std::to_string(right)
+          });
+          continue;
+        }
+        const TopoDS_Shape commonShape = common.Shape();
+        const double volume = geospecOverlapVolume(commonShape);
+        if (volume > volumeEpsilon) {
+          overlaps.push_back({left, right, volume, geospecOverlapWitnessPoint(commonShape)});
+        }
+      }
+    }
+    if (!diagnostics.empty()) {
+      return geospecOverlapFailure(componentCount, checkedPairs, diagnostics);
+    }
+
+    std::ostringstream output;
+    output << "{\"success\":true,\"componentCount\":" << componentCount
+      << ",\"checkedPairs\":" << checkedPairs
+      << ",\"overlaps\":[";
+    for (std::size_t index = 0; index < overlaps.size(); index++) {
+      if (index > 0) output << ",";
+      const OverlapRecord& overlap = overlaps[index];
+      output << "{\"leftComponentId\":" << overlap.left
+        << ",\"rightComponentId\":" << overlap.right
+        << ",\"intersectionVolume\":" << overlap.volume
+        << ",\"witnessPoint\":[" << overlap.witness.x << "," << overlap.witness.y << "," << overlap.witness.z << "]}";
+    }
+    output << "],\"diagnostics\":[]}";
+    return GeoSpecMeshOverlapResult(true, output.str());
+  }
+
   static GeoSpecMeshDistanceStats chamferDistanceFromTrianglePointers(
     uintptr_t actualPointer,
     int actualTriangleCount,
@@ -307,14 +621,14 @@ public:
 
     const double* actual = reinterpret_cast<const double*>(actualPointer);
     const double* expected = reinterpret_cast<const double*>(expectedPointer);
-    const int perDirectionLimit = std::max(1, samples / 2);
+    const int actualDirectionLimit = (samples + 1) / 2;
     GeoSpecTriangleBvh expectedBvh(expected, expectedTriangleCount);
     GeoSpecTriangleBvh actualBvh(actual, actualTriangleCount);
     std::vector<double> distances;
-    distances.reserve(static_cast<size_t>(perDirectionLimit * 2));
+    distances.reserve(static_cast<size_t>(samples));
 
-    geospecAppendDistances(distances, actual, actualTriangleCount, perDirectionLimit, expectedBvh);
-    geospecAppendDistances(distances, expected, expectedTriangleCount, perDirectionLimit * 2, actualBvh);
+    geospecAppendDistances(distances, actual, actualTriangleCount, actualDirectionLimit, expectedBvh);
+    geospecAppendDistances(distances, expected, expectedTriangleCount, samples, actualBvh);
 
     double sum = 0.0;
     double squaredSum = 0.0;

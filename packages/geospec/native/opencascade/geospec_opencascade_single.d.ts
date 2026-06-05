@@ -465,11 +465,11 @@ export declare class BRepTools {
   /**
    * Update a shell (nothing is done)
    */
-  static Update(S: unknown): void;
+  static Update(S: TopoDS_Shell): void;
   /**
    * Update a solid (nothing is done)
    */
-  static Update(S: unknown): void;
+  static Update(S: TopoDS_Solid): void;
   /**
    * Update a composite solid (nothing is done)
    */
@@ -619,6 +619,40 @@ export declare class BRepTools {
    * @param theProblemShapes Mutated in place; read the updated value from this argument after the call.
    */
   static CheckLocations(theS: TopoDS_Shape, theProblemShapes: NCollection_List_TopoDS_Shape): void;
+  /** Releases the C++ object. The caller must ensure no further access. */
+  delete(): void;
+  [Symbol.dispose](): void;
+}
+
+/**
+ * Describes a solid shape which.
+ *
+ * - references an underlying solid shape with the potential to be given a location and an orientation
+ * - has a location for the underlying shape, giving its placement in the local coordinate system
+ * - has an orientation for the underlying shape, in terms of its geometry (as opposed to orientation in relation to other shapes).
+ */
+export declare class TopoDS_Solid extends TopoDS_Shape {
+  /**
+   * Constructs an Undefined Solid.
+   */
+  constructor();
+  /** Releases the C++ object. The caller must ensure no further access. */
+  delete(): void;
+  [Symbol.dispose](): void;
+}
+
+/**
+ * Describes a shell which.
+ *
+ * - references an underlying shell with the potential to be given a location and an orientation
+ * - has a location for the underlying shell, giving its placement in the local coordinate system
+ * - has an orientation for the underlying shell, in terms of its geometry (as opposed to orientation in relation to other shapes).
+ */
+export declare class TopoDS_Shell extends TopoDS_Shape {
+  /**
+   * Constructs an Undefined Shell.
+   */
+  constructor();
   /** Releases the C++ object. The caller must ensure no further access. */
   delete(): void;
   [Symbol.dispose](): void;
@@ -1128,6 +1162,26 @@ export declare class GProp_GProps {
   [Symbol.dispose](): void;
 }
 
+export declare class GeoSpecMeshOverlapResult {
+  constructor();
+  constructor(ok: boolean, evidenceJson: string);
+  success: boolean;
+  evidenceJson(): string;
+  /** Releases the C++ object. The caller must ensure no further access. */
+  delete(): void;
+  [Symbol.dispose](): void;
+}
+
+export declare class GeoSpecNativeVec3 {
+  constructor();
+  x: number;
+  y: number;
+  z: number;
+  /** Releases the C++ object. The caller must ensure no further access. */
+  delete(): void;
+  [Symbol.dispose](): void;
+}
+
 export declare class GeoSpecMeshDistanceStats {
   constructor();
   min: number;
@@ -1612,6 +1666,13 @@ export declare class NCollection_Sequence_handle_Standard_Transient {
 
 export declare class GeoSpecMeshMetrics {
   constructor();
+  static componentOverlapFromTrianglePointers(
+    trianglePointer: number,
+    triangleCount: number,
+    componentIdPointer: number,
+    componentCount: number,
+    tolerance: number,
+  ): GeoSpecMeshOverlapResult;
   static chamferDistanceFromTrianglePointers(
     actualPointer: number,
     actualTriangleCount: number,
@@ -2007,6 +2068,16 @@ export declare class NCollection_HArray1_float {
   static get_type_name(): string;
   static get_type_descriptor(): unknown;
   DynamicType(): unknown;
+  /** Releases the C++ object. The caller must ensure no further access. */
+  delete(): void;
+  [Symbol.dispose](): void;
+}
+
+export declare class GeoSpecPoint {
+  constructor();
+  x: number;
+  y: number;
+  z: number;
   /** Releases the C++ object. The caller must ensure no further access. */
   delete(): void;
   [Symbol.dispose](): void;
@@ -4837,6 +4908,25 @@ export declare class Message_ProgressRange {
 }
 
 /**
+ * The class provides Boolean common operation between arguments and tools (Boolean Intersection).
+ */
+export declare class BRepAlgoAPI_Common {
+  /**
+   * Empty constructor.
+   */
+  constructor();
+  /**
+   * Constructor with two shapes <S1> -argument <S2> -tool <anOperation> - the type of the operation Obsolete.
+   */
+  constructor(S1: TopoDS_Shape, S2: TopoDS_Shape, theRange?: Message_ProgressRange);
+  // dropped: BRepAlgoAPI_Common param 0 resolves to excluded type BOPAlgo_PaveFiller
+  // dropped: BRepAlgoAPI_Common param 2 resolves to excluded type BOPAlgo_PaveFiller
+  /** Releases the C++ object. The caller must ensure no further access. */
+  delete(): void;
+  [Symbol.dispose](): void;
+}
+
+/**
  * Builds the mesh of a shape with respect of their correctly triangulated parts.
  */
 export declare class BRepMesh_IncrementalMesh {
@@ -5061,6 +5151,510 @@ export declare class BRepGProp {
 }
 
 /**
+ * Provides methods to.
+ *
+ * - identify possible contiguous boundaries (for control afterwards (of continuity: C0, C1, ...))
+ * - assemble contiguous shapes into one shape. Only manifold shapes will be found. Sewing will not be done in case of multiple edges.
+ *
+ * For sewing, use this function as following:
+ *
+ * - create an empty object
+ * - default tolerance 1.E-06
+ * - with face analysis on
+ * - with sewing operation on
+ * - set the cutting option as you need (default True)
+ * - define a tolerance
+ * - add shapes to be sewed -> Add
+ * - compute -> Perform
+ * - output the resulted shapes
+ * - output free edges if necessary
+ * - output multiple edges if necessary
+ * - output the problems if any
+ */
+export declare class BRepBuilderAPI_Sewing {
+  /**
+   * Creates an object with tolerance of connexity option for sewing (if false only control) option for analysis of degenerated shapes option for cutting of free edges. option for non manifold processing.
+   */
+  constructor(tolerance?: number, option1?: boolean, option2?: boolean, option3?: boolean, option4?: boolean);
+  /**
+   * initialize the parameters if necessary
+   */
+  Init(tolerance?: number, option1?: boolean, option2?: boolean, option3?: boolean, option4?: boolean): void;
+  /**
+   * Loads the context shape.
+   */
+  Load(shape: TopoDS_Shape): void;
+  /**
+   * Defines the shapes to be sewed or controlled.
+   */
+  Add(shape: TopoDS_Shape): void;
+  /**
+   * Computing theProgress - progress indicator of algorithm.
+   */
+  Perform(theProgress?: Message_ProgressRange): void;
+  /**
+   * Gives the sewed shape a null shape if nothing constructed may be a face, a shell, a solid or a compound.
+   */
+  SewedShape(): TopoDS_Shape;
+  /**
+   * set context
+   */
+  SetContext(theContext: unknown): void;
+  /**
+   * return context
+   */
+  GetContext(): unknown;
+  /**
+   * Gives the number of free edges (edge shared by one face)
+   */
+  NbFreeEdges(): number;
+  /**
+   * Gives each free edge.
+   */
+  FreeEdge(index: number): unknown;
+  /**
+   * Gives the number of multiple edges (edge shared by more than two faces)
+   */
+  NbMultipleEdges(): number;
+  /**
+   * Gives each multiple edge.
+   */
+  MultipleEdge(index: number): unknown;
+  /**
+   * Gives the number of contiguous edges (edge shared by two faces)
+   */
+  NbContigousEdges(): number;
+  /**
+   * Gives each contiguous edge.
+   */
+  ContigousEdge(index: number): unknown;
+  /**
+   * Gives the sections (edge) belonging to a contiguous edge.
+   */
+  ContigousEdgeCouple(index: number): NCollection_List_TopoDS_Shape;
+  /**
+   * Indicates if a section is bound (before use SectionToBoundary)
+   */
+  IsSectionBound(section: unknown): boolean;
+  /**
+   * Gives the original edge (free boundary) which becomes the the section. Remember that sections constitute common edges. This information is important for control because with original edge we can find the surface to which the section is attached.
+   */
+  SectionToBoundary(section: unknown): unknown;
+  /**
+   * Gives the number of degenerated shapes.
+   */
+  NbDegeneratedShapes(): number;
+  /**
+   * Gives each degenerated shape.
+   */
+  DegeneratedShape(index: number): TopoDS_Shape;
+  /**
+   * Indicates if a input shape is degenerated.
+   */
+  IsDegenerated(shape: TopoDS_Shape): boolean;
+  /**
+   * Indicates if a input shape has been modified.
+   */
+  IsModified(shape: TopoDS_Shape): boolean;
+  /**
+   * Gives a modifieded shape.
+   */
+  Modified(shape: TopoDS_Shape): TopoDS_Shape;
+  /**
+   * Indicates if a input subshape has been modified.
+   */
+  IsModifiedSubShape(shape: TopoDS_Shape): boolean;
+  /**
+   * Gives a modifieded subshape.
+   */
+  ModifiedSubShape(shape: TopoDS_Shape): TopoDS_Shape;
+  /**
+   * print the information
+   */
+  Dump(): void;
+  /**
+   * Gives the number of deleted faces (faces smallest than tolerance)
+   */
+  NbDeletedFaces(): number;
+  /**
+   * Gives each deleted face.
+   */
+  DeletedFace(index: number): TopoDS_Face;
+  /**
+   * Gives a modified shape.
+   */
+  WhichFace(theEdg: unknown, index?: number): TopoDS_Face;
+  /**
+   * Gets same parameter mode.
+   */
+  SameParameterMode(): boolean;
+  /**
+   * Sets same parameter mode.
+   */
+  SetSameParameterMode(SameParameterMode: boolean): void;
+  /**
+   * Gives set tolerance.
+   */
+  Tolerance(): number;
+  /**
+   * Sets tolerance.
+   */
+  SetTolerance(theToler: number): void;
+  /**
+   * Gives set min tolerance.
+   */
+  MinTolerance(): number;
+  /**
+   * Sets min tolerance.
+   */
+  SetMinTolerance(theMinToler: number): void;
+  /**
+   * Gives set max tolerance.
+   */
+  MaxTolerance(): number;
+  /**
+   * Sets max tolerance.
+   */
+  SetMaxTolerance(theMaxToler: number): void;
+  /**
+   * Returns mode for sewing faces By default - true.
+   */
+  FaceMode(): boolean;
+  /**
+   * Sets mode for sewing faces By default - true.
+   */
+  SetFaceMode(theFaceMode: boolean): void;
+  /**
+   * Returns mode for sewing floating edges By default - false.
+   */
+  FloatingEdgesMode(): boolean;
+  /**
+   * Sets mode for sewing floating edges By default - false. Returns mode for cutting floating edges By default - false. Sets mode for cutting floating edges By default - false.
+   */
+  SetFloatingEdgesMode(theFloatingEdgesMode: boolean): void;
+  /**
+   * Returns mode for accounting of local tolerances of edges and vertices during of merging.
+   */
+  LocalTolerancesMode(): boolean;
+  /**
+   * Sets mode for accounting of local tolerances of edges and vertices during of merging in this case WorkTolerance = myTolerance + tolEdge1+ tolEdg2;.
+   */
+  SetLocalTolerancesMode(theLocalTolerancesMode: boolean): void;
+  /**
+   * Sets mode for non-manifold sewing.
+   */
+  SetNonManifoldMode(theNonManifoldMode: boolean): void;
+  /**
+   * Gets mode for non-manifold sewing.
+   *
+   * INTERNAL FUNCTIONS --
+   */
+  NonManifoldMode(): boolean;
+  static get_type_name(): string;
+  static get_type_descriptor(): unknown;
+  DynamicType(): unknown;
+  /** Releases the C++ object. The caller must ensure no further access. */
+  delete(): void;
+  [Symbol.dispose](): void;
+}
+
+/**
+ * Provides methods to build faces.
+ *
+ * A face may be built:
+ *
+ * - From a surface.
+ * - Elementary surface from gp.
+ * - Surface from Geom.
+ * - From a surface and U,V values.
+ * - From a wire.
+ * - Find the surface automatically if possible.
+ * - From a surface and a wire.
+ * - A flag Inside is given, when this flag is True the wire is oriented to bound a finite area on the surface.
+ * - From a face and a wire.
+ * - The new wire is a perforation.
+ */
+export declare class BRepBuilderAPI_MakeFace {
+  /**
+   * Not done.
+   */
+  constructor();
+  /**
+   * Load a face. useful to add wires.
+   */
+  constructor(F: TopoDS_Face);
+  /**
+   * Make a face from a plane.
+   */
+  constructor(P: gp_Pln);
+  /**
+   * Make a face from a cylinder.
+   */
+  constructor(C: gp_Cylinder);
+  /**
+   * Make a face from a cone.
+   */
+  constructor(C: unknown);
+  /**
+   * Make a face from a sphere.
+   */
+  constructor(S: unknown);
+  /**
+   * Make a face from a torus.
+   */
+  constructor(C: unknown);
+  /**
+   * Make a face from a Surface. Accepts tolerance value (TolDegen) for resolution of degenerated edges.
+   */
+  constructor(S: unknown, TolDegen: number);
+  /**
+   * Find a surface from the wire and make a face. if <OnlyPlane> is true, the computed surface will be a plane. If it is not possible to find a plane, the flag NotDone will be set.
+   */
+  constructor(W: unknown, OnlyPlane?: boolean);
+  /**
+   * Adds the wire <W> in the face <F> A general method to create a face is to give.
+   *
+   * - a surface S as the support (the geometric domain) of the face,
+   * - and a wire W to bound it.
+   * The bounds of the face can also be defined by four parameter values umin, umax, vmin, vmax which determine isoparametric limitations on the parametric space of the surface. In this way, a patch is defined. The parameter values are optional. If they are omitted, the natural bounds of the surface are used. A wire is automatically built using the defined bounds.
+   * Up to four edges and four vertices are created with this wire (no edge is created when the corresponding parameter value is infinite). Wires can then be added using the function Add to define other restrictions on the face. These restrictions represent holes.
+   * More than one wire may be added by this way, provided that the wires do not cross each other and that they define only one area on the surface. (Be careful, however, as this is not checked).
+   * Forbidden addition of wires Note that in this schema, the third case is valid if edges of the wire W are declared internal to the face. As a result, these edges are no longer bounds of the face.
+   * A default tolerance (`Precision::Confusion()`) is given to the face, this tolerance may be increased during construction of the face using various algorithms. Rules applied to the arguments For the surface:
+   * - The surface must not be a 'null handle'.
+   * - If the surface is a trimmed surface, the basis surface is used.
+   * - For the wire: the wire is composed of connected edges, each edge having a parametric curve description in the parametric domain of the surface; in other words, as a pcurve. For the parameters:
+   * - The parameter values must be in the parametric range of the surface (or the basis surface, if the surface is trimmed). If this condition is not satisfied, the face is not built, and the Error function will return BRepBuilderAPI_ParametersOutOfRange.
+   * - The bounding parameters p1 and p2 are adjusted on a periodic surface in a given parametric direction by adding or subtracting the period to obtain p1 in the parametric range of the surface and such p2, that p2 - p1 <= Period, where Period is the period of the surface in this parametric direction.
+   * - A parameter value may be infinite. There will be no edge and no vertex in the corresponding direction.
+   */
+  constructor(F: TopoDS_Face, W: unknown);
+  /**
+   * Make a face from a plane and a wire.
+   */
+  constructor(P: gp_Pln, W: unknown, Inside?: boolean);
+  /**
+   * Make a face from a cylinder and a wire.
+   */
+  constructor(C: gp_Cylinder, W: unknown, Inside?: boolean);
+  /**
+   * Make a face from a cone and a wire.
+   */
+  constructor(C: unknown, W: unknown, Inside?: boolean);
+  /**
+   * Make a face from a sphere and a wire.
+   */
+  constructor(S: unknown, W: unknown, Inside?: boolean);
+  /**
+   * Make a face from a torus and a wire.
+   */
+  constructor(C: unknown, W: unknown, Inside?: boolean);
+  /**
+   * Make a face from a Surface and a wire. If the surface S is not plane, it must contain pcurves for all edges in W, otherwise the wrong shape will be created.
+   */
+  constructor(S: unknown, W: unknown, Inside?: boolean);
+  /**
+   * Make a face from a plane.
+   */
+  constructor(P: gp_Pln, UMin: number, UMax: number, VMin: number, VMax: number);
+  /**
+   * Make a face from a cylinder.
+   */
+  constructor(C: gp_Cylinder, UMin: number, UMax: number, VMin: number, VMax: number);
+  /**
+   * Make a face from a cone.
+   */
+  constructor(C: unknown, UMin: number, UMax: number, VMin: number, VMax: number);
+  /**
+   * Make a face from a sphere.
+   */
+  constructor(S: unknown, UMin: number, UMax: number, VMin: number, VMax: number);
+  /**
+   * Make a face from a torus.
+   */
+  constructor(C: unknown, UMin: number, UMax: number, VMin: number, VMax: number);
+  /**
+   * Make a face from a Surface. Accepts tolerance value (TolDegen) for resolution of degenerated edges.
+   */
+  constructor(S: unknown, UMin: number, UMax: number, VMin: number, VMax: number, TolDegen: number);
+  /**
+   * Initializes (or reinitializes) the construction of a face by creating a new object which is a copy of the face F, in order to add wires to it, using the function Add. Note: this complete copy of the geometry is only required if you want to work on the geometries of the two faces independently.
+   */
+  Init(F: TopoDS_Face): void;
+  /**
+   * Initializes (or reinitializes) the construction of a face on the surface S. If Bound is true, a wire is automatically created from the natural bounds of the surface S and added to the face in order to bound it. If Bound is false, no wire is added. This option is used when real bounds are known. These will be added to the face after this initialization, using the function Add. TolDegen parameter is used for resolution of degenerated edges if calculation of natural bounds is turned on.
+   */
+  Init(S: unknown, Bound: boolean, TolDegen: number): void;
+  /**
+   * Initializes (or reinitializes) the construction of a face on the surface S, limited in the u parametric direction by the two parameter values UMin and UMax and in the v parametric direction by the two parameter values VMin and VMax. Warning Error returns:
+   *
+   * - BRepBuilderAPI_ParametersOutOfRange when the parameters given are outside the bounds of the surface or the basis surface of a trimmed surface. TolDegen parameter is used for resolution of degenerated edges.
+   */
+  Init(S: unknown, UMin: number, UMax: number, VMin: number, VMax: number, TolDegen: number): void;
+  /**
+   * Adds the wire W to the constructed face as a hole. Warning W must not cross the other bounds of the face, and all the bounds must define only one area on the surface. (Be careful, however, as this is not checked.) Example // a cylinder {@link gp_Cylinder | `gp_Cylinder`} C = ..; // a wire {@link TopoDS_Wire | `TopoDS_Wire`} W = ...; {@link BRepBuilderAPI_MakeFace | `BRepBuilderAPI_MakeFace`} MF(C); MF.Add(W); {@link TopoDS_Face | `TopoDS_Face`} F = MF;.
+   */
+  Add(W: unknown): void;
+  /**
+   * Returns true if this algorithm has a valid face.
+   */
+  IsDone(): boolean;
+  /**
+   * Returns the construction status BRepBuilderAPI_FaceDone if the face is built, or.
+   *
+   * - another value of the BRepBuilderAPI_FaceError enumeration indicating why the construction failed, in particular when the given parameters are outside the bounds of the surface.
+   */
+  Error(): unknown;
+  /**
+   * Returns the constructed face. Exceptions StdFail_NotDone if no face is built.
+   */
+  Face(): TopoDS_Face;
+  /** Releases the C++ object. The caller must ensure no further access. */
+  delete(): void;
+  [Symbol.dispose](): void;
+}
+
+/**
+ * Describes functions to build a solid from shells. A solid is made of one shell, or a series of shells, which do not intersect each other. One of these shells constitutes the outside skin of the solid. It may be closed (a finite solid) or open (an infinite solid). Other shells form hollows (cavities) in these previous ones. Each must bound a closed volume. A MakeSolid object provides a framework for:
+ *
+ * - defining and implementing the construction of a solid, and
+ * - consulting the result.
+ */
+export declare class BRepBuilderAPI_MakeSolid {
+  /**
+   * Initializes the construction of a solid. An empty solid is considered to cover the whole space. The Add function is used to define shells to bound it.
+   */
+  constructor();
+  /**
+   * Make a solid from a CompSolid.
+   */
+  constructor(S: unknown);
+  /**
+   * Make a solid from a shell.
+   */
+  constructor(S: TopoDS_Shell);
+  /**
+   * Make a solid from a solid. useful for adding later.
+   */
+  constructor(So: TopoDS_Solid);
+  /**
+   * Make a solid from two shells.
+   */
+  constructor(S1: TopoDS_Shell, S2: TopoDS_Shell);
+  /**
+   * Add a shell to a solid.
+   *
+   * Constructs a solid:
+   *
+   * - from the solid So, to which shells can be added, or
+   * - by adding the shell S to the solid So. Warning No check is done to verify the conditions of coherence of the resulting solid. In particular S must not intersect the solid S0. Besides, after all shells have been added using the Add function, one of these shells should constitute the outside skin of the solid. It may be closed (a finite solid) or open (an infinite solid). Other shells form hollows (cavities) in the previous ones. Each must bound a closed volume.
+   */
+  constructor(So: TopoDS_Solid, S: TopoDS_Shell);
+  /**
+   * Make a solid from three shells. Constructs a solid.
+   *
+   * - covering the whole space, or
+   * - from shell S, or
+   * - from two shells S1 and S2, or
+   * - from three shells S1, S2 and S3, or Warning No check is done to verify the conditions of coherence of the resulting solid. In particular, S1, S2 (and S3) must not intersect each other. Besides, after all shells have been added using the Add function, one of these shells should constitute the outside skin of the solid; it may be closed (a finite solid) or open (an infinite solid). Other shells form hollows (cavities) in these previous ones. Each must bound a closed volume.
+   */
+  constructor(S1: TopoDS_Shell, S2: TopoDS_Shell, S3: TopoDS_Shell);
+  /**
+   * Adds the shell to the current solid. Warning No check is done to verify the conditions of coherence of the resulting solid. In particular, S must not intersect other shells of the solid under construction. Besides, after all shells have been added, one of these shells should constitute the outside skin of the solid. It may be closed (a finite solid) or open (an infinite solid). Other shells form hollows (cavities) in these previous ones. Each must bound a closed volume.
+   */
+  Add(S: TopoDS_Shell): void;
+  /**
+   * Returns true if the solid is built. For this class, a solid under construction is always valid. If no shell has been added, it could be a whole-space solid. However, no check was done to verify the conditions of coherence of the resulting solid.
+   */
+  IsDone(): boolean;
+  /**
+   * Returns the new Solid.
+   */
+  Solid(): TopoDS_Solid;
+  /**
+   * Returns true if the shape S has been deleted.
+   */
+  IsDeleted(S: TopoDS_Shape): boolean;
+  /** Releases the C++ object. The caller must ensure no further access. */
+  delete(): void;
+  [Symbol.dispose](): void;
+}
+
+/**
+ * Describes functions to build polygonal wires. A polygonal wire can be built from any number of points or vertices, and consists of a sequence of connected rectilinear edges. When a point or vertex is added to the polygon if it is identic to the previous point no edge is built. The method added can be used to test it. Construction of a Polygonal Wire You can construct:
+ *
+ * - a complete polygonal wire by defining all its points or vertices (limited to four), or
+ * - an empty polygonal wire and add its points or vertices in sequence (unlimited number). A MakePolygon object provides a framework for:
+ * - initializing the construction of a polygonal wire,
+ * - adding points or vertices to the polygonal wire under construction, and
+ * - consulting the result.
+ */
+export declare class BRepBuilderAPI_MakePolygon {
+  /**
+   * Initializes an empty polygonal wire, to which points or vertices are added using the Add function. As soon as the polygonal wire under construction contains vertices, it can be consulted using the Wire function.
+   */
+  constructor();
+  constructor(P1: gp_Pnt, P2: gp_Pnt);
+  constructor(V1: unknown, V2: unknown);
+  constructor(P1: gp_Pnt, P2: gp_Pnt, P3: gp_Pnt, Close?: boolean);
+  constructor(V1: unknown, V2: unknown, V3: unknown, Close?: boolean);
+  /**
+   * Constructs a polygonal wire from 2, 3 or 4 points. Vertices are automatically created on the given points. The polygonal wire is closed if Close is true; otherwise it is open. Further vertices can be added using the Add function. The polygonal wire under construction can be consulted at any time by using the Wire function. Example //an open polygon from four points {@link TopoDS_Wire | `TopoDS_Wire`} W = `BRepBuilderAPI_MakePolygon(P1,P2,P3,P4)`; Warning: The process is equivalent to:
+   *
+   * - initializing an empty polygonal wire,
+   * - and adding the given points in sequence. Consequently, be careful when using this function: if the sequence of points p1 - p2 - p1 is found among the arguments of the constructor, you will create a polygonal wire with two consecutive coincident edges.
+   */
+  constructor(P1: gp_Pnt, P2: gp_Pnt, P3: gp_Pnt, P4: gp_Pnt, Close?: boolean);
+  /**
+   * Constructs a polygonal wire from 2, 3 or 4 vertices. The polygonal wire is closed if Close is true; otherwise it is open (default value). Further vertices can be added using the Add function. The polygonal wire under construction can be consulted at any time by using the Wire function. Example //a closed triangle from three vertices {@link TopoDS_Wire | `TopoDS_Wire`} W = `BRepBuilderAPI_MakePolygon(V1,V2,V3,true)`; Warning The process is equivalent to:
+   *
+   * - initializing an empty polygonal wire,
+   * - then adding the given points in sequence. So be careful, as when using this function, you could create a polygonal wire with two consecutive coincident edges if the sequence of vertices v1 - v2 - v1 is found among the constructor's arguments.
+   */
+  constructor(V1: unknown, V2: unknown, V3: unknown, V4: unknown, Close?: boolean);
+  Add(P: gp_Pnt): void;
+  /**
+   * Adds the point P or the vertex V at the end of the polygonal wire under construction. A vertex is automatically created on the point P. Warning.
+   *
+   * - When P or V is coincident to the previous vertex, no edge is built. The method Added can be used to test for this. Neither P nor V is checked to verify that it is coincident with another vertex than the last one, of the polygonal wire under construction. It is also possible to add vertices on a closed polygon (built for example by using a constructor which declares the polygon closed, or after the use of the Close function). Consequently, be careful using this function: you might create:
+   * - a polygonal wire with two consecutive coincident edges, or
+   * - a non manifold polygonal wire.
+   * - P or V is not checked to verify if it is coincident with another vertex but the last one, of the polygonal wire under construction. It is also possible to add vertices on a closed polygon (built for example by using a constructor which declares the polygon closed, or after the use of the Close function). Consequently, be careful when using this function: you might create:
+   * - a polygonal wire with two consecutive coincident edges, or
+   * - a non-manifold polygonal wire.
+   */
+  Add(V: unknown): void;
+  /**
+   * Returns true if the last vertex added to the constructed polygonal wire is not coincident with the previous one.
+   */
+  Added(): boolean;
+  /**
+   * Closes the polygonal wire under construction. Note - this is equivalent to adding the first vertex to the polygonal wire under construction.
+   */
+  Close(): void;
+  FirstVertex(): unknown;
+  /**
+   * Returns the first or the last vertex of the polygonal wire under construction. If the constructed polygonal wire is closed, the first and the last vertices are identical.
+   */
+  LastVertex(): unknown;
+  /**
+   * Returns true if this algorithm contains a valid polygonal wire (i.e. if there is at least one edge). IsDone returns false if fewer than two vertices have been chained together by this construction algorithm.
+   */
+  IsDone(): boolean;
+  /**
+   * Returns the edge built between the last two points or vertices added to the constructed polygonal wire under construction. Warning If there is only one vertex in the polygonal wire, the result is a null edge.
+   */
+  Edge(): unknown;
+  /**
+   * Returns the constructed polygonal wire, or the already built part of the polygonal wire under construction. Exceptions StdFail_NotDone if the wire is not built, i.e. if fewer than two vertices have been chained together by this construction algorithm.
+   */
+  Wire(): unknown;
+  /** Releases the C++ object. The caller must ensure no further access. */
+  delete(): void;
+  [Symbol.dispose](): void;
+}
+
+/**
  * Reads STEP files, checks them and translates their contents into Open CASCADE models. The STEP data can be that of a whole model or that of a specific list of entities in the model. As in {@link XSControl_Reader | `XSControl_Reader`}, you specify the list using a selection.
  * For the translation of iges files it is possible to use next sequence: To change translation parameters class {@link Interface_Static | `Interface_Static`} should be used before beginning of translation (see STEP Parameters and General Parameters) Creation of reader - {@link STEPControl_Reader | `STEPControl_Reader`} reader; To load s file in a model use method reader.ReadFile("filename.stp") To print load results reader.PrintCheckLoad(failsonly,mode) where mode is equal to the value of enumeration IFSelect_PrintCount For definition number of candidates : int nbroots = reader. `NbRootsForTransfer()`; To transfer entities from a model the following methods can be used: for the whole model - reader.TransferRoots(); to transfer a list of entities: reader.TransferList(list); to transfer one entity `occ::handle<Standard_Transient>` ent = reader.RootForTransfer(num); reader.TransferEntity(ent), or reader.TransferOneRoot(num), or reader.TransferOne(num), or reader.TransferRoot(num) To obtain
  * the result the following method can be used: reader.NbShapes() and reader.Shape(num); or reader.OneShape(); To print the results of transfer use method: reader.PrintCheckTransfer(failwarn,mode); where printfail is equal to the value of enumeration IFSelect_PrintFail, mode see above; or reader.PrintStatsTransfer(); Gets correspondence between a STEP entity and a result shape obtained from it. `occ::handle<XSControl_WorkSession>` WS = reader.WS(); if ( WS->TransferReader()->HasResult(ent) ) {@link TopoDS_Shape | `TopoDS_Shape`} shape = WS->TransferReader()->ShapeResult(ent);.
@@ -5183,14 +5777,14 @@ export declare class TopoDS {
    * @param shape - The shape to cast (must have `ShapeType() === TopAbs_SHELL`).
    * @returns The same shape typed as `TopoDS_Shell`.
    */
-  static Shell(shape: TopoDS_Shape): unknown;
+  static Shell(shape: TopoDS_Shape): TopoDS_Shell;
   /**
    * Downcast a generic shape to a solid.
    *
    * @param shape - The shape to cast (must have `ShapeType() === TopAbs_SOLID`).
    * @returns The same shape typed as `TopoDS_Solid`.
    */
-  static Solid(shape: TopoDS_Shape): unknown;
+  static Solid(shape: TopoDS_Shape): TopoDS_Solid;
   /**
    * Downcast a generic shape to a compound.
    *
@@ -5834,16 +6428,20 @@ export declare function decrementExceptionRefcount(ex: WebAssembly.Exception): v
  *
  * Returned by {@link init | `init`} after the WASM module is fully loaded. Access any
  * OCCT binding as a property (e.g. `oc.BRepPrimAPI_MakeBox`) and use
- * the Emscripten virtual filesystem (`oc.FS`) and WASM heap views (`oc.HEAPF64`).
+ * the Emscripten virtual filesystem (`oc.FS`) and WASM heap views (`oc.HEAP32`, `oc.HEAPF64`).
  */
 export type OpenCascadeInstance = {
   /** Emscripten virtual filesystem for reading/writing files in the WASM heap. */
   FS: typeof FS;
+  /** Signed 32-bit integer view of the WASM linear memory. Index by byte offset / 4. */
+  HEAP32: typeof HEAP32;
   /** 64-bit floating-point view of the WASM linear memory. Index by byte offset / 8. */
   HEAPF64: typeof HEAPF64;
 } & {
   BRep_Tool: typeof BRep_Tool;
   BRepTools: typeof BRepTools;
+  TopoDS_Solid: typeof TopoDS_Solid;
+  TopoDS_Shell: typeof TopoDS_Shell;
   TopoDS_Face: typeof TopoDS_Face;
   TopoDS_Shape: typeof TopoDS_Shape;
   BRepAdaptor_Surface: typeof BRepAdaptor_Surface;
@@ -5851,6 +6449,8 @@ export type OpenCascadeInstance = {
   TopAbs_Orientation: typeof TopAbs_Orientation;
   TopAbs_ShapeEnum: typeof TopAbs_ShapeEnum;
   GProp_GProps: typeof GProp_GProps;
+  GeoSpecMeshOverlapResult: typeof GeoSpecMeshOverlapResult;
+  GeoSpecNativeVec3: typeof GeoSpecNativeVec3;
   GeoSpecMeshDistanceStats: typeof GeoSpecMeshDistanceStats;
   NCollection_Array1_int: typeof NCollection_Array1_int;
   NCollection_Array1_gp_Pnt: typeof NCollection_Array1_gp_Pnt;
@@ -5861,6 +6461,7 @@ export type OpenCascadeInstance = {
   NCollection_Array1_NCollection_Vec3_float: typeof NCollection_Array1_NCollection_Vec3_float;
   NCollection_Array1_gp_Pnt2d: typeof NCollection_Array1_gp_Pnt2d;
   NCollection_HArray1_float: typeof NCollection_HArray1_float;
+  GeoSpecPoint: typeof GeoSpecPoint;
   GeoSpecStepReadResult: typeof GeoSpecStepReadResult;
   NCollection_List_TopoDS_Shape: typeof NCollection_List_TopoDS_Shape;
   NCollection_Array1_float: typeof NCollection_Array1_float;
@@ -5892,10 +6493,15 @@ export type OpenCascadeInstance = {
   gp_XYZ: typeof gp_XYZ;
   gp_Pnt: typeof gp_Pnt;
   Message_ProgressRange: typeof Message_ProgressRange;
+  BRepAlgoAPI_Common: typeof BRepAlgoAPI_Common;
   BRepMesh_IncrementalMesh: typeof BRepMesh_IncrementalMesh;
   BRepCheck_Analyzer: typeof BRepCheck_Analyzer;
   BRepBndLib: typeof BRepBndLib;
   BRepGProp: typeof BRepGProp;
+  BRepBuilderAPI_Sewing: typeof BRepBuilderAPI_Sewing;
+  BRepBuilderAPI_MakeFace: typeof BRepBuilderAPI_MakeFace;
+  BRepBuilderAPI_MakeSolid: typeof BRepBuilderAPI_MakeSolid;
+  BRepBuilderAPI_MakePolygon: typeof BRepBuilderAPI_MakePolygon;
   STEPControl_Reader: typeof STEPControl_Reader;
   IFSelect_ReturnStatus: typeof IFSelect_ReturnStatus;
   TColStd_IndexedDataMapOfStringString: typeof TColStd_IndexedDataMapOfStringString;

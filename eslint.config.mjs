@@ -203,6 +203,7 @@ const config = [
       '**/stats.html',
       '**/out-tsc',
       '**/generated',
+      '**/native/opencascade/geospec_opencascade_single.*',
       '**/assets',
       '**/.source/**/*',
       '**/.netlify',

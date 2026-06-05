@@ -299,9 +299,10 @@ export const analyzeChamferDistance = (options: AnalyzeChamferDistanceOptions): 
     }
   }
 
-  const perDirectionLimit = Math.max(1, Math.floor(sampleLimit / 2));
-  const actualSamples = samplePoints(actual, perDirectionLimit);
-  const expectedSamples = samplePoints(expected, perDirectionLimit);
+  const actualSampleLimit = Math.ceil(sampleLimit / 2);
+  const expectedSampleLimit = Math.floor(sampleLimit / 2);
+  const actualSamples = samplePoints(actual, actualSampleLimit);
+  const expectedSamples = samplePoints(expected, expectedSampleLimit);
   const estimatedTrianglePairs = actualSamples.length * expected.length + expectedSamples.length * actual.length;
   const maxNaiveTrianglePairs = options.maxNaiveTrianglePairs ?? defaultMaxNaiveTrianglePairs;
   if (estimatedTrianglePairs > maxNaiveTrianglePairs) {

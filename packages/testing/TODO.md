@@ -95,6 +95,11 @@ See `docs/research/geospec-standalone-cad-testing-blueprint.md` for the current 
 - [ ] `toHaveBoundingBox({ min, max, size, center, tolerance })`
 - [ ] `toHaveConnectedComponents(count, { tolerance })`
 - [ ] `toBeWatertight()`
+- [x] `toHaveNoComponentOverlap({ tolerance })`
+  - Chosen first-class assembly-overlap API.
+  - Public options stay limited to `{ tolerance?: number }`; no component mode, pair exemptions, sample budget, or volume budget is exposed.
+  - Verdicts are native-only through GeoSpec OpenCascade.js faceted-solid intersection. Correct gear meshing and tangent contact pass because only positive common solid volume fails.
+  - If GeoSpec cannot identify independently testable components or native overlap support is missing, return structured diagnostics rather than a false pass or a JavaScript fallback.
 - [ ] `toHaveNoDegenerateTriangles({ areaTolerance })`
 - [ ] `toHaveNoNonFiniteVertices()`
 - [ ] `toHaveNoDuplicateFaces({ tolerance })`
@@ -146,7 +151,9 @@ See `docs/research/geospec-standalone-cad-testing-blueprint.md` for the current 
 - [ ] `toBeParallelTo(leftSelector, rightSelector, { angularTolerance })`
 - [ ] `toBePerpendicularTo(leftSelector, rightSelector, { angularTolerance })`
 - [ ] `toHaveClearanceTo(selector, { min, max, tolerance })`
-- [ ] `toHaveNoInterferenceWith(selector, { tolerance })`
+- [ ] Selector-aware exact interference API for a future slice.
+  - Do not add a duplicate alias for the P0 whole-assembly invariant. Use `toHaveNoComponentOverlap({ tolerance })` today.
+  - Future selector APIs should express positive relationships such as clearance, contact, press-fit, or intentional interference with explicit selector evidence.
 - [ ] `toHaveContactWith(selector, { tolerance })`
 - [ ] `toHaveMateDelta({ translation, rotation, tolerance })`
 

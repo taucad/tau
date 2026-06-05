@@ -121,12 +121,12 @@ const collectWatertightGeometry = (
 
       const posAccessor = primitive.getAttribute('POSITION');
       const indexAccessor = primitive.getIndices();
-      if (!posAccessor || !indexAccessor) {
+      if (!posAccessor) {
         continue;
       }
 
       const vCount = posAccessor.getCount();
-      const indexCount = indexAccessor.getCount();
+      const indexCount = indexAccessor?.getCount() ?? vCount;
       const name =
         resolvedMeshName && resolvedMeshName.length > 0 ? resolvedMeshName : `${fallbackName}#${primOrdinal}`;
       primOrdinal += 1;
@@ -138,9 +138,9 @@ const collectWatertightGeometry = (
 
       for (let i = 0; i < indexCount; i += 3) {
         allTriangles.push([
-          indexAccessor.getScalar(i) + vertexOffset,
-          indexAccessor.getScalar(i + 1) + vertexOffset,
-          indexAccessor.getScalar(i + 2) + vertexOffset,
+          (indexAccessor?.getScalar(i) ?? i) + vertexOffset,
+          (indexAccessor?.getScalar(i + 1) ?? i + 1) + vertexOffset,
+          (indexAccessor?.getScalar(i + 2) ?? i + 2) + vertexOffset,
         ]);
       }
 

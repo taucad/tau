@@ -14,11 +14,22 @@ export {
 export { analyzeMeshQuality } from '#mesh/mesh-quality.js';
 export { analyzeChamferDistance } from '#mesh/distance.js';
 export type { AnalyzeChamferDistanceOptions, AnalyzeChamferDistanceResult, MeshDistanceStats } from '#mesh/distance.js';
+export { analyzeMeshOverlap } from '#mesh/overlap.js';
+export type {
+  AnalyzeMeshOverlapOptions,
+  AnalyzeMeshOverlapResult,
+  MeshComponentOverlap,
+  MeshOverlapEvidence,
+} from '#mesh/overlap.js';
 export { analyzeMesh, loadMesh } from '#mesh/load-mesh.js';
 export { createOpenCascadeMeshAnalyzer } from '#mesh/native.js';
 export type {
   GeoSpecNativeChamferDistanceOptions,
+  GeoSpecNativeMeshComponent,
   GeoSpecNativeMeshAnalyzer,
+  GeoSpecNativeMeshOverlap,
+  GeoSpecNativeMeshOverlapOptions,
+  GeoSpecNativeMeshOverlapResult,
   GeoSpecNativeTriangleSoup,
   GeoSpecOpenCascadeMeshModule,
 } from '#mesh/native.js';

@@ -7,9 +7,13 @@ import type { WorkspaceFileService } from '#workspace-file-service.js';
  */
 export type BundledTypesMountEntry = Readonly<{
   packageName: string;
-  content: string;
+  content?: string;
   /** When true, `content` is emitted verbatim (already `declare module` or ambient). */
   prewrapped?: boolean;
+  /** Additional files to write relative to `/node_modules/<packageName>/`. */
+  files?: Readonly<Record<string, string>>;
+  /** Package metadata to write instead of the minimal default package.json. */
+  packageJson?: Readonly<Record<string, unknown>>;
 }>;
 
 /**
@@ -20,7 +24,8 @@ export type BundledTypesMountEntry = Readonly<{
 export type BundledTypesPayload = readonly BundledTypesMountEntry[];
 
 function declarationSource(entry: BundledTypesMountEntry): string {
-  return entry.prewrapped ? entry.content : `declare module '${entry.packageName}' {\n${entry.content}\n}`;
+  const content = entry.content ?? '';
+  return entry.prewrapped ? content : `declare module '${entry.packageName}' {\n${content}\n}`;
 }
 
 function bytesEqual(a: Uint8Array<ArrayBuffer>, b: Uint8Array<ArrayBuffer>): boolean {
@@ -71,13 +76,30 @@ export async function populateBundledTypesMount(
       const packageJsonPath = `/node_modules/${entry.packageName}/package.json`;
       const source = declarationSource(entry);
       const expectedDeclarationBytes = new TextEncoder().encode(source);
-      const packageJsonText = JSON.stringify({ name: entry.packageName, types: 'index.d.ts' });
+      const packageJsonText = JSON.stringify(
+        entry.packageJson ?? { name: entry.packageName, types: 'index.d.ts' },
+        null,
+        2,
+      );
       const expectedPackageJsonBytes = new TextEncoder().encode(packageJsonText);
 
-      const existingDeclaration = await readFileBytes(fileService, declarationTypesPath);
-      if (existingDeclaration === undefined || !bytesEqual(existingDeclaration, expectedDeclarationBytes)) {
-        await fileService.writeFile(declarationTypesPath, source);
+      if (entry.content !== undefined) {
+        const existingDeclaration = await readFileBytes(fileService, declarationTypesPath);
+        if (existingDeclaration === undefined || !bytesEqual(existingDeclaration, expectedDeclarationBytes)) {
+          await fileService.writeFile(declarationTypesPath, source);
+        }
       }
+
+      await Promise.all(
+        Object.entries(entry.files ?? {}).map(async ([relativePath, content]) => {
+          const filePath = `/node_modules/${entry.packageName}/${relativePath}`;
+          const expectedFileBytes = new TextEncoder().encode(content);
+          const existingFile = await readFileBytes(fileService, filePath);
+          if (existingFile === undefined || !bytesEqual(existingFile, expectedFileBytes)) {
+            await fileService.writeFile(filePath, content);
+          }
+        }),
+      );
 
       const existingPackageJson = await readFileBytes(fileService, packageJsonPath);
       if (existingPackageJson === undefined || !bytesEqual(existingPackageJson, expectedPackageJsonBytes)) {

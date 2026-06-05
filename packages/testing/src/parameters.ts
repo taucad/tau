@@ -90,6 +90,15 @@ const parseParameterEntry = (value: string | ParameterFileEntry): ParameterFileE
   return parsed as ParameterFileEntry;
 };
 
+const replaceExtension = (path: string, extension: string): string => {
+  const lastSlash = path.lastIndexOf('/');
+  const lastDot = path.lastIndexOf('.');
+  if (lastDot > lastSlash) {
+    return `${path.slice(0, lastDot)}.${extension}`;
+  }
+  return `${path}.${extension}`;
+};
+
 /**
  * Build parameter cases by merging defaults with explicit case overrides.
  *
@@ -160,7 +169,7 @@ export async function analyze(options: AnalyzeParameterizedGeometryOptions): Pro
   const bytes = await render({ file: options.file, parameters, renderer: options.renderer });
   return analyzeMesh({
     source: bytes,
-    path: options.file,
+    path: replaceExtension(options.file, 'glb'),
     parameters,
     ...options.mesh,
   });

@@ -40,6 +40,7 @@ describe('populateBundledTypesMount', () => {
 
     const packageJsonRead = await service.readFile('/node_modules/replicad/package.json');
     const packageJsonText = typeof packageJsonRead === 'string' ? packageJsonRead : decoder.decode(packageJsonRead);
+    expect(packageJsonText).toBe('{\n  "name": "replicad",\n  "types": "index.d.ts"\n}');
     expect(JSON.parse(packageJsonText)).toEqual({ name: 'replicad', types: 'index.d.ts' });
   });
 

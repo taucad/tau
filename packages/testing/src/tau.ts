@@ -69,6 +69,7 @@ export type TauModelRendererOutput = Uint8Array<ArrayBuffer> | GeometrySubject;
  */
 export type TauModelRenderer = (input: {
   file: string;
+  kernel?: string;
   format?: GeoSpecModelFormat;
   parameters?: Record<string, unknown>;
   parameterSource?: TauParameterGroup;
@@ -81,6 +82,7 @@ export type TauModelRenderer = (input: {
  */
 export type RenderTauModelOptions = {
   file: string;
+  kernel?: string;
   format?: GeoSpecModelFormat;
   parameters?: Record<string, unknown>;
   parameterSource?: TauParameterGroup;
@@ -113,24 +115,49 @@ export type RunTauGeoSpecTestsOptions = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+const cloneValue = <T>(value: T): T => {
+  if (value === undefined || value === null) {
+    return value;
+  }
+  return structuredClone(value);
+};
+
 const mergeParameters = (
   defaults: Record<string, unknown>,
   overrides: Record<string, unknown>,
 ): Record<string, unknown> => {
-  const merged: Record<string, unknown> = { ...defaults };
+  const merged: Record<string, unknown> = cloneValue(defaults);
   for (const [key, value] of Object.entries(overrides)) {
     const current = merged[key];
-    merged[key] = isRecord(current) && isRecord(value) ? mergeParameters(current, value) : value;
+    merged[key] = isRecord(current) && isRecord(value) ? mergeParameters(current, value) : cloneValue(value);
   }
   return merged;
 };
 
 const parseParameterEntry = (entry: string | TauParameterFileEntry): TauParameterFileEntry => {
+  if (typeof entry === 'string' && !entry.trimStart().startsWith('{')) {
+    throw new Error('Invalid Tau parameter file input: pass parsed JSON or raw JSON text, not a filesystem path.');
+  }
+
   const parsed: unknown = typeof entry === 'string' ? JSON.parse(entry) : entry;
   if (!isRecord(parsed) || typeof parsed['activeGroup'] !== 'string' || !isRecord(parsed['groups'])) {
     throw new Error('Invalid Tau parameter file: expected activeGroup and groups.');
   }
+  for (const [name, group] of Object.entries(parsed['groups'])) {
+    if (!isRecord(group) || !isRecord(group['values'])) {
+      throw new Error(`Invalid Tau parameter file: group '${name}' must contain a values object.`);
+    }
+  }
   return parsed as TauParameterFileEntry;
+};
+
+const replaceExtension = (path: string, extension: string): string => {
+  const lastSlash = path.lastIndexOf('/');
+  const lastDot = path.lastIndexOf('.');
+  if (lastDot > lastSlash) {
+    return `${path.slice(0, lastDot)}.${extension}`;
+  }
+  return `${path}.${extension}`;
 };
 
 const groupNames = (entry: TauParameterFileEntry): string[] => {
@@ -169,9 +196,9 @@ const isGeometrySubject = (value: unknown): value is GeometrySubject => {
  */
 export function params(entry: TauParameterFileEntry | string, options: TauParameterOptions = {}): TauParameters {
   const parsed = parseParameterEntry(entry);
-  const defaults = options.defaults ?? {};
+  const defaults = cloneValue(options.defaults ?? {});
   const groups = groupNames(parsed).map<TauParameterGroup>((name) => {
-    const overrides = parsed.groups[name]?.values ?? {};
+    const overrides = cloneValue(parsed.groups[name]?.values ?? {});
     return {
       name,
       active: name === parsed.activeGroup,
@@ -190,7 +217,7 @@ export function params(entry: TauParameterFileEntry | string, options: TauParame
     throw new Error(`Invalid Tau parameter file: active group '${parsed.activeGroup}' is missing.`);
   }
 
-  return { active, groups, defaults };
+  return { active, groups, defaults: cloneValue(defaults) };
 }
 
 /**
@@ -241,6 +268,7 @@ export async function renderTauModel(options: RenderTauModelOptions): Promise<Ge
   const format = options.format ?? 'glb';
   const rendered = await options.renderer({
     file: options.file,
+    ...(options.kernel === undefined ? {} : { kernel: options.kernel }),
     format,
     ...(parameters === undefined ? {} : { parameters }),
     ...(options.parameterSource ? { parameterSource: options.parameterSource } : {}),
@@ -260,7 +288,10 @@ export async function renderTauModel(options: RenderTauModelOptions): Promise<Ge
 
   const result = await analyzeMesh({
     source: rendered,
-    path: options.file,
+    path: replaceExtension(options.file, format),
+    format: format === 'gltf' ? 'gltf' : 'glb',
+    sourceUnit: 'mm',
+    unit: 'mm',
     parameters: parameters ?? {},
   });
   if (!result.success) {
@@ -286,23 +317,60 @@ export async function analyzeTauModel(options: AnalyzeTauModelOptions): Promise<
   };
 }
 
-const tauGeoSpecRendererGlobalKey = '__TAUCAD_GEOSPEC_RENDER__';
+const tauGeoSpecBindingsGlobalKey = '__TAUCAD_GEOSPEC_BINDINGS__';
 const tauTestingModuleSpecifier = '@taucad/testing/tau';
 
-const tauTestingBuiltinCode = `
+type TauGeoSpecBinding = {
+  renderer: TauModelRenderer;
+};
+
+const tauGeoSpecBindingsGlobal = globalThis as typeof globalThis & {
+  [tauGeoSpecBindingsGlobalKey]?: Map<string, TauGeoSpecBinding>;
+};
+
+const createTauGeoSpecRunToken = (): string =>
+  `taucad-geospec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
+const ensureTauGeoSpecBindings = (): Map<string, TauGeoSpecBinding> => {
+  const existing = tauGeoSpecBindingsGlobal[tauGeoSpecBindingsGlobalKey];
+  if (existing) {
+    return existing;
+  }
+  const bindings = new Map<string, TauGeoSpecBinding>();
+  tauGeoSpecBindingsGlobal[tauGeoSpecBindingsGlobalKey] = bindings;
+  return bindings;
+};
+
+const createTauTestingBuiltinCode = (runToken: string): string => `
+const getTauGeoSpecBinding = () => {
+  const binding = globalThis.${tauGeoSpecBindingsGlobalKey}?.get(${JSON.stringify(runToken)});
+  if (!binding) {
+    throw new Error('Tau GeoSpec renderer is not active for this runner.');
+  }
+  return binding;
+};
 const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+const cloneValue = (value) => value === undefined || value === null ? value : structuredClone(value);
 const mergeParameters = (defaults, overrides) => {
-  const merged = { ...defaults };
+  const merged = cloneValue(defaults);
   for (const [key, value] of Object.entries(overrides ?? {})) {
     const current = merged[key];
-    merged[key] = isRecord(current) && isRecord(value) ? mergeParameters(current, value) : value;
+    merged[key] = isRecord(current) && isRecord(value) ? mergeParameters(current, value) : cloneValue(value);
   }
   return merged;
 };
 const parseParameterEntry = (entry) => {
+  if (typeof entry === 'string' && !entry.trimStart().startsWith('{')) {
+    throw new Error('Invalid Tau parameter file input: pass parsed JSON or raw JSON text, not a filesystem path.');
+  }
   const parsed = typeof entry === 'string' ? JSON.parse(entry) : entry;
   if (!isRecord(parsed) || typeof parsed.activeGroup !== 'string' || !isRecord(parsed.groups)) {
     throw new Error('Invalid Tau parameter file: expected activeGroup and groups.');
+  }
+  for (const [name, group] of Object.entries(parsed.groups)) {
+    if (!isRecord(group) || !isRecord(group.values)) {
+      throw new Error(\`Invalid Tau parameter file: group '\${name}' must contain a values object.\`);
+    }
   }
   return parsed;
 };
@@ -319,9 +387,9 @@ const groupNames = (entry) => {
 };
 export const params = (entry, options = {}) => {
   const parsed = parseParameterEntry(entry);
-  const defaults = options.defaults ?? {};
+  const defaults = cloneValue(options.defaults ?? {});
   const groups = groupNames(parsed).map((name) => {
-    const overrides = parsed.groups[name]?.values ?? {};
+    const overrides = cloneValue(parsed.groups[name]?.values ?? {});
     return {
       name,
       active: name === parsed.activeGroup,
@@ -338,18 +406,19 @@ export const params = (entry, options = {}) => {
   if (!active) {
     throw new Error(\`Invalid Tau parameter file: active group '\${parsed.activeGroup}' is missing.\`);
   }
-  return { active, groups, defaults };
+  return { active, groups, defaults: cloneValue(defaults) };
 };
 export const activeParams = (entry, options = {}) => params(entry, options).active.values;
 export const parameterGroups = (entry, options = {}) => params(entry, options).groups;
 export const renderTauModel = async (options) => {
-  const renderer = globalThis.${tauGeoSpecRendererGlobalKey};
+  const renderer = getTauGeoSpecBinding().renderer;
   if (typeof renderer !== 'function') {
     throw new Error('renderTauModel() requires a Tau test renderer.');
   }
   const parameters = options.parameters ?? options.parameterSource?.values;
   return renderer({
     file: options.file,
+    ...(options.kernel === undefined ? {} : { kernel: options.kernel }),
     ...(options.format === undefined ? {} : { format: options.format }),
     ...(parameters === undefined ? {} : { parameters }),
     ...(options.parameterSource === undefined ? {} : { parameterSource: options.parameterSource }),
@@ -365,6 +434,32 @@ const fullTestName = (test: Pick<GeoSpecTestCase, 'suite' | 'name'>): string => 
 
 const diagnosticText = (diagnostics: readonly GeometryDiagnostic[] | undefined): string | undefined =>
   diagnostics?.map((diagnostic) => diagnostic.message).join('\n');
+
+type TransportDiagnostic = NonNullable<TestFailure['diagnostics']>[number];
+type TransportVec3 = [number, number, number];
+
+const cloneVec3 = (value: readonly [number, number, number] | undefined): TransportVec3 | undefined =>
+  value === undefined ? undefined : [value[0], value[1], value[2]];
+
+const transportDiagnostics = (
+  diagnostics: readonly GeometryDiagnostic[] | undefined,
+): TransportDiagnostic[] | undefined =>
+  diagnostics?.map((diagnostic) => ({
+    code: diagnostic.code,
+    severity: diagnostic.severity,
+    message: diagnostic.message,
+    ...(diagnostic.suggestion === undefined ? {} : { suggestion: diagnostic.suggestion }),
+    ...(diagnostic.spatial === undefined
+      ? {}
+      : {
+          spatial: {
+            ...(diagnostic.spatial.min === undefined ? {} : { min: cloneVec3(diagnostic.spatial.min) }),
+            ...(diagnostic.spatial.max === undefined ? {} : { max: cloneVec3(diagnostic.spatial.max) }),
+            ...(diagnostic.spatial.center === undefined ? {} : { center: cloneVec3(diagnostic.spatial.center) }),
+          },
+        }),
+    ...(diagnostic.details === undefined ? {} : { details: diagnostic.details }),
+  }));
 
 const geospecFailure = (options: {
   id: string;
@@ -382,6 +477,7 @@ const geospecFailure = (options: {
     options.suggestion ??
     options.diagnostics?.find((diagnostic) => diagnostic.suggestion)?.suggestion ??
     'Inspect the GeoSpec diagnostics and update the model or expected geometry assertion.',
+  diagnostics: transportDiagnostics(options.diagnostics),
 });
 
 /**
@@ -416,19 +512,19 @@ export async function runTauGeoSpecTests(options: RunTauGeoSpecTestsOptions): Pr
 
   const failures: TestFailure[] = [];
   const passes: TestPass[] = [];
-  const globalWithRenderer = globalThis as typeof globalThis & {
-    [tauGeoSpecRendererGlobalKey]?: TauModelRenderer;
-  };
-  const previousRenderer = globalWithRenderer[tauGeoSpecRendererGlobalKey];
-
-  globalWithRenderer[tauGeoSpecRendererGlobalKey] = async (input) =>
-    renderTauModel({
-      file: input.file,
-      format: input.format,
-      parameters: input.parameters,
-      parameterSource: input.parameterSource,
-      renderer: options.renderer,
-    });
+  const runToken = createTauGeoSpecRunToken();
+  const bindings = ensureTauGeoSpecBindings();
+  bindings.set(runToken, {
+    renderer: async (input) =>
+      renderTauModel({
+        file: input.file,
+        kernel: input.kernel,
+        format: input.format,
+        parameters: input.parameters,
+        parameterSource: input.parameterSource,
+        renderer: options.renderer,
+      }),
+  });
 
   try {
     for (const entry of [...options.entryPaths].sort()) {
@@ -452,6 +548,7 @@ export async function runTauGeoSpecTests(options: RunTauGeoSpecTestsOptions): Pr
 
           return renderTauModel({
             file: input.file,
+            kernel: 'kernel' in input && typeof input.kernel === 'string' ? input.kernel : undefined,
             format: input.format,
             parameters: input.parameters,
             parameterSource: input.parameterSource,
@@ -461,7 +558,7 @@ export async function runTauGeoSpecTests(options: RunTauGeoSpecTestsOptions): Pr
         builtinModules: {
           [tauTestingModuleSpecifier]: {
             version: '0.0.0-tau-runner',
-            code: tauTestingBuiltinCode,
+            code: createTauTestingBuiltinCode(runToken),
           },
         },
       });
@@ -507,11 +604,27 @@ export async function runTauGeoSpecTests(options: RunTauGeoSpecTestsOptions): Pr
       }
     }
   } finally {
-    if (previousRenderer) {
-      globalWithRenderer[tauGeoSpecRendererGlobalKey] = previousRenderer;
-    } else {
-      Reflect.deleteProperty(globalWithRenderer, tauGeoSpecRendererGlobalKey);
+    bindings.delete(runToken);
+    if (bindings.size === 0) {
+      Reflect.deleteProperty(tauGeoSpecBindingsGlobal, tauGeoSpecBindingsGlobalKey);
     }
+  }
+
+  if (passes.length === 0 && failures.length === 0) {
+    return {
+      failures: [
+        {
+          id: 'no_matching_geospec_tests',
+          requirement: 'At least one selected GeoSpec test must run',
+          reason: 'GeoSpec files were found, but the supplied filters did not select any tests.',
+          suggestion: 'Run without filters or use { files: ["main.geospec.ts"] } and a matching testNamePattern.',
+          targetFile: options.entryPaths.join(', '),
+        },
+      ],
+      passes: [],
+      passed: 0,
+      total: 1,
+    };
   }
 
   return {

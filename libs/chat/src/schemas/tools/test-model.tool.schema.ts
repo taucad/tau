@@ -45,9 +45,7 @@ export const geoSpecRunFilterInputSchema = z
       .array(z.string().min(1).max(512))
       .max(50)
       .optional()
-      .describe(
-        'JSON array of GeoSpec file paths, e.g. ["main.geospec.ts"]; do not use bracket keys like files[0]. Equivalent to repeated CLI --file flags.',
-      ),
+      .describe('JSON array of GeoSpec file paths, e.g. ["main.geospec.ts"]. Equivalent to repeated CLI --file flags.'),
     testNamePattern: z
       .string()
       .min(1)

@@ -16,6 +16,13 @@ export type GeoSpecModelFormat = MeshFileFormat | 'step' | 'stp';
  */
 export type GeoSpecRuntimeClient = {
   /**
+   * Connect the runtime and populate capabilities before route metadata is read.
+   *
+   * Custom runtime clients may omit this when they already return canonical
+   * Z-up millimeter geometry bytes from `export`.
+   */
+  connect?(): Promise<void>;
+  /**
    * Export a rendered model to geometry bytes.
    *
    * @param format - Output geometry format such as `glb`.
@@ -59,13 +66,13 @@ export type GeoSpecParameterFileEntry = {
  *
  * @public
  */
-export type GeoSpecParameterGroup = {
+export type GeoSpecParameterGroup<Values extends Record<string, unknown> = Record<string, unknown>> = {
   /** Stored group name. */
   name: string;
   /** True when this is the file's active group. */
   active: boolean;
   /** Defaults merged with this group's stored overrides. */
-  values: Record<string, unknown>;
+  values: Values;
   /** Stored overrides before defaults were merged. */
   overrides: Record<string, unknown>;
   /** Provenance used in test diagnostics. */
@@ -81,13 +88,13 @@ export type GeoSpecParameterGroup = {
  *
  * @public
  */
-export type GeoSpecParameters = {
+export type GeoSpecParameters<Values extends Record<string, unknown> = Record<string, unknown>> = {
   /** Active parameter group. */
-  active: GeoSpecParameterGroup;
+  active: GeoSpecParameterGroup<Values>;
   /** All parameter groups in stored order. */
-  groups: GeoSpecParameterGroup[];
+  groups: Array<GeoSpecParameterGroup<Values>>;
   /** Defaults used while resolving groups. */
-  defaults: Record<string, unknown>;
+  defaults: Values;
 };
 
 /**
@@ -95,9 +102,9 @@ export type GeoSpecParameters = {
  *
  * @public
  */
-export type GeoSpecParameterOptions = {
+export type GeoSpecParameterOptions<Defaults extends Record<string, unknown> = Record<string, unknown>> = {
   /** Source-code defaults merged beneath stored group overrides. */
-  defaults?: Record<string, unknown>;
+  defaults?: Defaults;
   /** Optional parameter-file path recorded in provenance. */
   parameterFile?: string;
 };
@@ -156,8 +163,6 @@ export type LoadModelCodeOptions<Code extends Record<string, string> = Record<st
   runtime?: GeoSpecRuntimeClient | (() => Promise<GeoSpecRuntimeClient>);
   /** Project root used by runtime integrations. */
   projectPath?: string;
-  /** Geometry units. */
-  unit?: GeoSpecUnit;
   /** OpenCascade.js module or factory used when loading STEP/BRep evidence. */
   openCascade?: GeoSpecOpenCascadeStepModule | (() => Promise<GeoSpecOpenCascadeStepModule>);
   /** STEP reader strategy used for STEP exports. */
@@ -188,8 +193,6 @@ export type LoadModelFileOptions = {
   parameterSource?: GeoSpecParameterGroup;
   /** Runtime client or lazy runtime factory. */
   runtime?: GeoSpecRuntimeClient | (() => Promise<GeoSpecRuntimeClient>);
-  /** Geometry units. */
-  unit?: GeoSpecUnit;
   /** OpenCascade.js module or factory used when loading STEP/BRep evidence. */
   openCascade?: GeoSpecOpenCascadeStepModule | (() => Promise<GeoSpecOpenCascadeStepModule>);
   /** STEP reader strategy used for STEP exports. */
@@ -230,8 +233,6 @@ export type GeoSpecModelLoader = <Code extends Record<string, string> = Record<s
 export type CreateModelLoaderOptions = {
   /** Geometry format to export when an individual call does not specify one. */
   format?: GeoSpecModelFormat;
-  /** Geometry units used when an individual call does not specify units. */
-  unit?: GeoSpecUnit;
   /** Runtime client or lazy runtime factory. */
   runtime?: GeoSpecRuntimeClient | (() => Promise<GeoSpecRuntimeClient>);
   /** Project root used by runtime integrations. */

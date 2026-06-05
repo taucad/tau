@@ -20,12 +20,17 @@ pnpm add @taucad/openscad @taucad/runtime
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { replicad } from '@taucad/runtime/kernels';
 import { openscad } from '@taucad/openscad';
 
-const client = createRuntimeClient({
+const runtime = defineRuntime({
   kernels: [replicad(), openscad()],
+});
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
 });
 ```
 
-The `openscad()` factory returns a standard `KernelPlugin` registration. The kernel module itself (loaded dynamically by the runtime worker) lives at `@taucad/openscad/kernel`.
+The `openscad()` factory returns a standard worker-owned `KernelPlugin` registration for `defineRuntime`.

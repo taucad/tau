@@ -1,13 +1,13 @@
 /**
  * OpenSCAD kernel Zod schemas — single source of truth.
  *
- * Consumed by `openscad.plugin.ts` (type inference) and `openscad.kernel.ts` (runtime validation).
+ * Consumed by `openscad.kernel.ts` for factory type inference and runtime validation.
  *
  * @public
  */
 
 import { z } from 'zod';
-import { coordinateSystemSchema } from '@taucad/runtime/kernel';
+import { coordinateSystemSchema, unitSchema } from '@taucad/runtime/kernel';
 
 /**
  * OpenSCAD-native tessellation schema fragment for exports.
@@ -79,6 +79,6 @@ export const openscadRenderSchema = z.object({
  * @public
  */
 export const openscadExportSchemas = {
-  glb: openscadTessellationSchema.extend(coordinateSystemSchema.shape),
-  gltf: openscadTessellationSchema.extend(coordinateSystemSchema.shape),
+  glb: openscadTessellationSchema.extend(coordinateSystemSchema.shape).extend(unitSchema.shape),
+  gltf: openscadTessellationSchema.extend(coordinateSystemSchema.shape).extend(unitSchema.shape),
 } as const satisfies Record<string, z.ZodType>;

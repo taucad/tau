@@ -14,8 +14,8 @@
  * Canonical GeoSpec example, keyed by the `<file>` placeholder. Renderers
  * substitute the placeholder with the kernel-appropriate source file.
  *
- * Includes one example each of the surviving 3-check vocabulary
- * (boundingBox, connectedComponents, watertight).
+ * Includes examples for mesh checks, assembly overlap, and physical
+ * measurements that every mesh-capable kernel can run.
  *
  * @public
  */
@@ -49,6 +49,11 @@ describe('main geometry', () => {
     expectGeo(model).toBeWatertight();
   });
 
+  it('should have no physical component overlap', async () => {
+    const model = await loadModel({ file: '<file>' });
+    expectGeo(model).toHaveNoComponentOverlap({ tolerance: 0.1 });
+  });
+
   it('should have expected physical measurements', async () => {
     const model = await loadModel({ file: '<file>' });
     expectGeo(model).toHaveSurfaceArea({ value: 12_345, tolerance: 5 });
@@ -72,7 +77,16 @@ export const canonicalBrepGeoSpecTestExample = `import { describe, expectGeo, it
 import { loadModel } from 'geospec/model';
 
 describe('main exact features', () => {
-  it('should expose the top planar face', async () => {
+  it('should load valid STEP/BRep evidence', async () => {
+    const model = await loadModel({ file: '<file>', format: 'step' });
+    expectGeo(model).toBeValidBrep();
+    expectGeo(model).toHaveTopologyCounts({
+      faces: { greaterThan: 0 },
+      solids: { greaterThanOrEqual: 1 },
+    });
+  });
+
+  it('should expose exact face and hole features', async () => {
     const model = await loadModel({ file: '<file>', format: 'step' });
     expectGeo(model).toHavePlanarFace({
       normal: { x: 0, y: 0, z: 1 },
@@ -80,10 +94,6 @@ describe('main exact features', () => {
       area: { greaterThan: 5_000 },
       tolerance: 0.05,
     });
-  });
-
-  it('should expose cylindrical and hole features', async () => {
-    const model = await loadModel({ file: '<file>', format: 'step' });
     expectGeo(model).toHaveCylindricalFace({
       radius: 15,
       axis: 'z',
@@ -94,6 +104,19 @@ describe('main exact features', () => {
       through: true,
       axis: 'z',
       center: { x: 25, y: 15 },
+      tolerance: 0.05,
+    });
+  });
+
+  it('should expose manufacturing features', async () => {
+    const model = await loadModel({ file: '<file>', format: 'step' });
+    expectGeo(model).toHaveChamferFeature({
+      distance: 2,
+      selection: 'outer top perimeter',
+      tolerance: 0.05,
+    });
+    expectGeo(model).toHaveMinimumWallThickness({
+      value: { greaterThanOrEqual: 2 },
       tolerance: 0.05,
     });
   });
@@ -129,22 +152,16 @@ export const renderCanonicalExample = (fileExtension: string, options: RenderCan
   return ['```ts', concrete.trimEnd(), '```'].join('\n');
 };
 
-/**
- * Single-sourced "Available checks" blurb. Rendered identically by the system
- * prompt body so the LLM sees one coherent geometry-test vocabulary.
- *
- * @public
- */
-export const availableChecksCopy = `Available checks (each answers exactly one question — no overlap):
+const universalAvailableChecksCopy = `Available checks (each answers one distinct geometry question):
 \`loadModel\` returns an opaque \`GeometrySubject\`: do not read \`model.boundingBox.bounds\`,
 call \`model.volume()\`, or inspect subject fields. Assert through \`expectGeo(model)\` so
 GeoSpec records structured diagnostics.
 - boundingBox          — "Is the model the right SIZE / POSITION?" Per-axis opt-in for
                          size and center; \`tolerance\` is per-axis tolerance in mm.
 - connectedComponents  — "How many SPATIALLY-DISJOINT CHUNKS does the geometry contain?"
-                         Pure-geometry AABB clustering. \`tolerance\` (mm, default 0.1) is
-                         the maximum gap between two parts' bounding boxes that still
-                         counts as "connected." Use \`count: 1\` for "the assembly
+                         Pure-geometry spatial welding. \`tolerance\` (mm, default 0.1) is
+                         the maximum weld gap that still counts as "connected."
+                         Use \`count: 1\` for "the assembly
                          is one cohesive thing"; raise tolerance if parts visibly touch
                          but the test still reports >1.
 - watertight           — "Is each geometry unit's surface CLOSED (manifold / 3D-printable)?"
@@ -154,16 +171,46 @@ GeoSpec records structured diagnostics.
 - surfaceArea / volume / centerOfMass / mass — "Does the model have the expected
                          physical measurements?" Use these for scale, balance, material
                          estimates, and regression checks.
+- componentOverlap     — "Do separate assembly components occupy the same solid volume?"
+                         Use \`toHaveNoComponentOverlap({ tolerance: 0.1 })\`. GeoSpec
+                         uses native exact solid intersection of mesh evidence; tangent
+                         contact and correctly meshed gears pass.
 - chamferDistance      — "How close is this geometry to a reference geometry?" Use
-                         \`toHaveChamferDistanceTo\` for sampled shape comparison.
-- planarFace / cylindricalFace / circularHole / chamferFeature / minimumWallThickness
-                       — "Does this BRep-capable kernel expose the expected exact feature?"
-                         Use these only when BRep evidence is available.
+                         \`toHaveChamferDistanceTo\` for sampled shape comparison.`;
 
-For "is this one fused solid?" assert \`watertight\` on a geometry unit that exports a
+const brepAvailableChecksCopy = `- planarFace / cylindricalFace / circularHole / chamferFeature / minimumWallThickness
+                       — "Does this BRep-capable kernel expose the expected exact feature?"
+                         Use these only with \`loadModel({ format: 'step' })\` when BRep
+                         evidence is available.`;
+
+const fusedSolidGuidanceCopy = `For "is this one fused solid?" assert \`watertight\` on a geometry unit that exports a
 single solid — a fused solid is closed-manifold iff the boolean fuse succeeded. Do NOT
 use \`connectedComponents\` for that intent (it answers "how many spatial chunks," not
 "is the boolean fuse welded").`;
+
+/**
+ * Renders the single-sourced "Available checks" blurb for a kernel profile.
+ *
+ * @param options - Capability switches for the active kernel.
+ * @returns Agent-facing check vocabulary copy.
+ * @public
+ */
+export const renderAvailableChecksCopy = (options: RenderCanonicalExampleOptions = {}): string =>
+  [
+    universalAvailableChecksCopy,
+    options.includeBrepFeatures ? brepAvailableChecksCopy : undefined,
+    fusedSolidGuidanceCopy,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+/**
+ * Single-sourced "Available checks" blurb including BRep checks. Use
+ * {@link renderAvailableChecksCopy} when rendering kernel-specific prompts.
+ *
+ * @public
+ */
+export const availableChecksCopy = renderAvailableChecksCopy({ includeBrepFeatures: true });
 
 /**
  * Agent-facing note for the new GeoSpec-style parameter testing workflow.

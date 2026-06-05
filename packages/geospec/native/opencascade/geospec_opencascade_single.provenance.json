@@ -1,7 +1,7 @@
 {
   "schema": "wasm-build-provenance-v1.1",
-  "buildId": "20260602T011941-O3-noLTO-single",
-  "timestamp": "2026-06-02T01:19:41.249075+00:00",
+  "buildId": "20260603T231324-O3-noLTO-single",
+  "timestamp": "2026-06-03T23:13:24.794777+00:00",
   "toolchain": {
     "emscripten": "5.0.1",
     "llvm": "unknown",
@@ -49,8 +49,8 @@
   },
   "linking": {
     "yamlConfig": "geospec_opencascade_single.js",
-    "yamlConfigHash": "9ded6a603944",
-    "boundSymbols": 31,
+    "yamlConfigHash": "c89eaf86db60",
+    "boundSymbols": 41,
     "symbolList": [
       "Message_ProgressRange",
       "STEPControl_Reader",
@@ -68,9 +68,16 @@
       "TopoDS",
       "TopoDS_Shape",
       "TopoDS_Face",
+      "TopoDS_Shell",
+      "TopoDS_Solid",
       "Poly_Triangle",
       "Poly_Triangulation",
       "BRep_Tool",
+      "BRepAlgoAPI_Common",
+      "BRepBuilderAPI_MakeFace",
+      "BRepBuilderAPI_MakePolygon",
+      "BRepBuilderAPI_MakeSolid",
+      "BRepBuilderAPI_Sewing",
       "BRepTools",
       "BRepMesh_IncrementalMesh",
       "BRepCheck_Analyzer",
@@ -79,8 +86,11 @@
       "GProp_GProps",
       "BRepAdaptor_Surface",
       "GeomAbs_SurfaceType",
+      "GeoSpecPoint",
       "GeoSpecMeshDistanceStats",
+      "GeoSpecMeshOverlapResult",
       "GeoSpecMeshMetrics",
+      "GeoSpecNativeVec3",
       "GeoSpecStepReadResult",
       "GeoSpecStepStreamReader"
     ],
@@ -98,12 +108,12 @@
       "-sALLOW_MEMORY_GROWTH=1",
       "-sINITIAL_MEMORY=100MB",
       "-sMAXIMUM_MEMORY=4GB",
-      "-sEXPORTED_RUNTIME_METHODS=[\"HEAPF64\",\"FS\"]",
+      "-sEXPORTED_RUNTIME_METHODS=[\"HEAP32\",\"HEAPF64\",\"FS\"]",
       "-sEXPORTED_FUNCTIONS=[\"_malloc\",\"_free\"]",
-      "-sERROR_ON_UNDEFINED_SYMBOLS=1",
+      "-sERROR_ON_UNDEFINED_SYMBOLS=0",
       "--no-entry"
     ],
-    "linkDuration_s": 41.5
+    "linkDuration_s": 64.2
   },
   "postProcessing": {
     "wasmOptFlags": [
@@ -119,22 +129,22 @@
       "--enable-exception-handling",
       "--enable-simd"
     ],
-    "preOptSize": 10504837,
-    "postOptSize": 10500224,
-    "optReduction": "0.0%",
-    "wasmOptDuration_s": 67.7
+    "preOptSize": 12996813,
+    "postOptSize": 12988785,
+    "optReduction": "0.1%",
+    "wasmOptDuration_s": 81.8
   },
   "output": {
     "geospec_opencascade_single.wasm": {
-      "size": 10500224,
-      "sha256": "b79f230753769831"
+      "size": 12988785,
+      "sha256": "942599f738f0fb99"
     },
     "geospec_opencascade_single.js": {
-      "size": 60241
+      "size": 60586
     },
     "geospec_opencascade_single.d.ts": {
-      "size": 243196,
-      "lines": 5723
+      "size": 270298,
+      "lines": 6323
     }
   },
   "sections": {},
@@ -146,5 +156,5 @@
     "total": 878,
     "dropped": 859
   },
-  "totalDuration_s": 136
+  "totalDuration_s": 184
 }

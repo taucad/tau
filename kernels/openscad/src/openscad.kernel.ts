@@ -13,12 +13,13 @@
 import { createOpenSCAD } from 'openscad-wasm-prebuilt';
 import type { OpenSCAD } from 'openscad-wasm-prebuilt';
 import { jsonDefault } from 'json-schema-default';
+import type { z } from 'zod';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { GeometryGltf, LogLevel } from '@taucad/types';
 import { logLevels, createExportFile } from '@taucad/types/constants';
 import { asBuffer } from '@taucad/utils/file';
 import { joinPath, joinRelativePath } from '@taucad/utils/path';
-import type { KernelIssue, KernelFileSystem, RuntimeLogger } from '@taucad/runtime/kernel';
+import type { KernelIssue, KernelFileSystem, KernelPluginFactory, RuntimeLogger } from '@taucad/runtime/kernel';
 import {
   convertOffToGltf,
   createKernelError,
@@ -46,6 +47,12 @@ type OpenScadContext = {
   lastBasePath?: string;
   lastParameters?: Record<string, unknown>;
 };
+
+type OpenScadFormatMap = {
+  [Format in keyof typeof openscadExportSchemas]: z.input<(typeof openscadExportSchemas)[Format]>;
+};
+
+type OpenScadRenderOptions = z.input<typeof openscadRenderSchema>;
 
 const maxIncludeDepth = 50;
 const useIncludeRegex = /^\s*(?:use|include)\s*["<]([^">]+)[">]/gm;
@@ -478,7 +485,9 @@ async function runOpenScadBuild(options: OpenScadBuildOptions): Promise<string> 
 // =============================================================================
 
 /** @public */
-export default defineKernel({
+export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenScadRenderOptions> = defineKernel({
+  id: 'openscad',
+  extensions: ['scad'],
   name: 'OpenScadKernel',
   version: '1.0.0',
   renderSchema: openscadRenderSchema,
@@ -677,7 +686,11 @@ export default defineKernel({
       const convertSpan = tracer.startSpan('openscad.convert-geometry', {
         phase: 'computingGeometry',
       });
-      const gltfBlob = await convertOffToGltf(offData, 'glb', 'y-up');
+      const gltfBlob = await convertOffToGltf(offData, {
+        format: 'glb',
+        coordinateSystem: 'y-up',
+        unit: { length: 'meter' },
+      });
       convertSpan.end();
 
       context.lastFilePath = filePath;
@@ -738,16 +751,16 @@ export default defineKernel({
       });
     }
 
-    const { coordinateSystem } = options;
+    const { coordinateSystem, unit } = options;
 
     switch (format) {
       case 'glb': {
-        const glbData = await convertOffToGltf(offData, 'glb', coordinateSystem);
+        const glbData = await convertOffToGltf(offData, { format: 'glb', coordinateSystem, unit });
         return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(glbData))]);
       }
 
       case 'gltf': {
-        const gltfData = await convertOffToGltf(offData, 'gltf', coordinateSystem);
+        const gltfData = await convertOffToGltf(offData, { format: 'gltf', coordinateSystem, unit });
         return createKernelSuccess([createExportFile('gltf', 'model.gltf', asBuffer(gltfData))]);
       }
 

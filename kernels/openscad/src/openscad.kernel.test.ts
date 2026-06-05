@@ -1,7 +1,8 @@
 /* oxlint-disable max-lines -- comprehensive kernel test suite */
 import { describe, it, expect } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
-import openscadKernel from '#openscad.kernel.js';
+import { openscad as openscadKernel } from '#openscad.kernel.js';
+import * as openscadKernelModule from '#openscad.kernel.js';
 import {
   assertSuccess,
   createGeometryFile,
@@ -109,6 +110,11 @@ function analyzeOffColorComponents(offData: string): {
 // =============================================================================
 
 describe('OpenSCAD Kernel', () => {
+  it('should expose the named kernel factory without a module default export', () => {
+    expect(openscadKernelModule.openscad).toEqual(expect.any(Function));
+    expect(Object.hasOwn(openscadKernelModule, 'default')).toBe(false);
+  });
+
   describe('getParameters', () => {
     describe('Single file projects', () => {
       it('should extract parameters from a simple file', async () => {

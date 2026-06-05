@@ -21,9 +21,16 @@ mainBuild:
     - symbol: TopoDS
     - symbol: TopoDS_Shape
     - symbol: TopoDS_Face
+    - symbol: TopoDS_Shell
+    - symbol: TopoDS_Solid
     - symbol: Poly_Triangle
     - symbol: Poly_Triangulation
     - symbol: BRep_Tool
+    - symbol: BRepAlgoAPI_Common
+    - symbol: BRepBuilderAPI_MakeFace
+    - symbol: BRepBuilderAPI_MakePolygon
+    - symbol: BRepBuilderAPI_MakeSolid
+    - symbol: BRepBuilderAPI_Sewing
     - symbol: BRepTools
     - symbol: BRepMesh_IncrementalMesh
     - symbol: BRepCheck_Analyzer
@@ -32,8 +39,11 @@ mainBuild:
     - symbol: GProp_GProps
     - symbol: BRepAdaptor_Surface
     - symbol: GeomAbs_SurfaceType
+    - symbol: GeoSpecPoint
     - symbol: GeoSpecMeshDistanceStats
+    - symbol: GeoSpecMeshOverlapResult
     - symbol: GeoSpecMeshMetrics
+    - symbol: GeoSpecNativeVec3
     - symbol: GeoSpecStepReadResult
     - symbol: GeoSpecStepStreamReader
   emccFlags:
@@ -49,7 +59,10 @@ mainBuild:
     - -sALLOW_MEMORY_GROWTH=1
     - -sINITIAL_MEMORY=100MB
     - -sMAXIMUM_MEMORY=4GB
-    - -sEXPORTED_RUNTIME_METHODS=["HEAPF64","FS"]
+    - -sEXPORTED_RUNTIME_METHODS=["HEAP32","HEAPF64","FS"]
     - -sEXPORTED_FUNCTIONS=["_malloc","_free"]
-    - -sERROR_ON_UNDEFINED_SYMBOLS=1
+    # BRepAlgoAPI_Common pulls OCCT OSD_MemInfo, which references glibc
+    # mallinfo. The wasm path never calls that reporter; allow Emscripten's
+    # dormant missing-function stub for this custom Boolean-analysis build.
+    - -sERROR_ON_UNDEFINED_SYMBOLS=0
     - --no-entry

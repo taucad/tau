@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-import { readdir, readFile, mkdir, stat, writeFile } from 'node:fs/promises';
+import { readFile, mkdir, stat, writeFile, readdir } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadModel } from '#model/index.js';
-import { runGeoSpecModule } from '#runner/index.js';
+import { defaultGeoSpecPattern, discoverGeoSpecFiles } from '#runner/discovery.js';
+import type { GeoSpecDiscoveryFileSystem } from '#runner/discovery.js';
+import { createGeoSpecNodeRunner } from '#runner/node/index.js';
 import { loadStep } from '#step/index.js';
 import type { VmFileSystem } from '@taucad/vm';
 
@@ -33,9 +35,6 @@ export type GeoSpecCliRunOptions = {
   testTimeout?: number;
   json: boolean;
 };
-
-const defaultGeoSpecPattern = '**/*.geospec.{ts,js}';
-const geoSpecFileNamePattern = /\.geospec\.[jt]s$/u;
 
 const createNodeVmFileSystem = (root: string): VmFileSystem => {
   async function readNodeVmFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
@@ -75,102 +74,15 @@ const createNodeVmFileSystem = (root: string): VmFileSystem => {
 const resolveNodeVmPath = (options: { root: string; path: string }): string =>
   isAbsolute(options.path) ? options.path : join(options.root, options.path);
 
-const ignoredDirectories = new Set(['.git', 'node_modules', 'dist', 'coverage']);
-
-const normalizeCliPath = (path: string): string => path.replaceAll('\\', '/').replace(/^\.\//u, '');
-
-const escapeRegExp = (value: string): string => value.replaceAll(/[|\\{}()[\]^$+?.]/gu, String.raw`\$&`);
-
-const globPatternToRegExp = (pattern: string): RegExp => {
-  const normalizedPattern = normalizeCliPath(pattern);
-  let source = '^';
-  for (let index = 0; index < normalizedPattern.length; ) {
-    const character = normalizedPattern[index];
-    if (character === undefined) {
-      break;
-    }
-    const next = normalizedPattern[index + 1];
-    if (character === '*' && next === '*') {
-      if (normalizedPattern[index + 2] === '/') {
-        source += String.raw`(?:.*\/)?`;
-        index += 3;
-      } else {
-        source += '.*';
-        index += 2;
-      }
-      continue;
-    }
-    if (character === '*') {
-      source += '[^/]*';
-      index += 1;
-      continue;
-    }
-    if (character === '?') {
-      source += '[^/]';
-      index += 1;
-      continue;
-    }
-    if (character === '{') {
-      const closeIndex = normalizedPattern.indexOf('}', index + 1);
-      if (closeIndex !== -1) {
-        const alternatives = normalizedPattern
-          .slice(index + 1, closeIndex)
-          .split(',')
-          .map((alternative) => escapeRegExp(alternative));
-        source += `(?:${alternatives.join('|')})`;
-        index = closeIndex + 1;
-        continue;
-      }
-    }
-    source += character === '/' ? String.raw`\/` : escapeRegExp(character);
-    index += 1;
-  }
-
-  return new RegExp(`${source}$`, 'u');
-};
-
-const matchesGeoSpecFilePattern = (path: string, pattern: string): boolean =>
-  globPatternToRegExp(pattern).test(normalizeCliPath(path));
-
-const collectGeoSpecFiles = async (directory: string): Promise<string[]> => {
-  const entries = await readdir(directory, { withFileTypes: true });
-  const files: string[] = [];
-  const directories: string[] = [];
-
-  for (const entry of entries) {
-    const fullPath = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      if (!ignoredDirectories.has(entry.name)) {
-        directories.push(fullPath);
-      }
-      continue;
-    }
-
-    if (geoSpecFileNamePattern.test(entry.name)) {
-      files.push(fullPath);
-    }
-  }
-
-  const nestedFiles = await Promise.all(
-    directories.map(async (nestedDirectory) => collectGeoSpecFiles(nestedDirectory)),
-  );
-  files.push(...nestedFiles.flat());
-
-  return files;
-};
-
-export const discoverGeoSpecFiles = async (
-  directory: string,
-  options: { pattern?: string; files?: readonly string[] } = {},
-): Promise<string[]> => {
-  if (options.files && options.files.length > 0) {
-    return options.files.map((file) => resolve(directory, file)).filter((file) => geoSpecFileNamePattern.test(file));
-  }
-
-  const pattern = options.pattern ?? defaultGeoSpecPattern;
-  const files = await collectGeoSpecFiles(directory);
-  return files.filter((file) => matchesGeoSpecFilePattern(relative(directory, file), pattern));
-};
+const createNodeDiscoveryFileSystem = (root: string): GeoSpecDiscoveryFileSystem => ({
+  async readdir(path: string): Promise<readonly string[]> {
+    return readdir(resolveNodeVmPath({ root, path }));
+  },
+  async stat(path: string) {
+    const fileStat = await stat(resolveNodeVmPath({ root, path }));
+    return { kind: fileStat.isDirectory() ? ('directory' as const) : ('file' as const) };
+  },
+});
 
 const helpText = `Usage: geospec [run] [project-directory] [options]
 
@@ -178,7 +90,7 @@ Runs *.geospec.ts and *.geospec.js files through the GeoSpec VM runner.
 
 Options:
   --pattern <glob>              File glob, default: ${defaultGeoSpecPattern}
-  --file <path>                 Specific GeoSpec file to run; repeatable
+  --file <path>                 GeoSpec file or directory root to run; repeatable
   --test-name-pattern <text>    Case-insensitive substring matched against suite > test names
   -t, --grep <text>             Alias for --test-name-pattern
   --test-timeout <ms>           Async test timeout in milliseconds
@@ -286,10 +198,12 @@ const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
   return { help: false, projectDirectory, run, errors };
 };
 
+type GeoSpecCliIssue = { code: string; message: string; severity: string; type: string };
+
 type GeoSpecCliFileResult = {
   file: string;
   success: boolean;
-  issues?: Array<{ code: string; message: string; severity: string; type: string }>;
+  issues?: GeoSpecCliIssue[];
   tests?: Array<{ name: string; suite: string[]; status: string }>;
 };
 
@@ -297,6 +211,7 @@ type GeoSpecCliJsonResult = {
   success: boolean;
   passed: number;
   failed: number;
+  issues?: GeoSpecCliIssue[];
   files: GeoSpecCliFileResult[];
 };
 
@@ -324,38 +239,37 @@ export const runGeoSpecCli = async (options: GeoSpecCliOptions = {}): Promise<nu
 
   const projectPath = resolve(options.cwd ?? process.cwd(), parsed.projectDirectory);
   const filesystem = createNodeVmFileSystem(projectPath);
-  const files = await discoverGeoSpecFiles(projectPath, {
+  const discovery = await discoverGeoSpecFiles({
+    filesystem: createNodeDiscoveryFileSystem(projectPath),
+    projectPath,
     pattern: parsed.run.pattern,
     files: parsed.run.files,
   });
+  const files = discovery.files;
 
   if (files.length === 0) {
     stderr('No matching *.geospec.ts or *.geospec.js files found.');
     return 1;
   }
 
-  let failed = 0;
-  let passed = 0;
-  const fileResults: GeoSpecCliFileResult[] = [];
-  const runs = await Promise.all(
-    files.sort().map(async (file) => ({
-      file,
-      result: await runGeoSpecModule({
-        filesystem,
-        projectPath,
-        entryPath: file,
-        testNamePattern: parsed.run.testNamePattern,
-        testTimeout: parsed.run.testTimeout,
-        modelLoader: async (input) => ('source' in input ? loadModel(input) : loadModel({ projectPath, ...input })),
-        stepLoader: async (input) => loadStep(input),
-      }),
-    })),
-  );
+  const runner = createGeoSpecNodeRunner({
+    filesystem,
+    projectPath,
+    modelLoader: async (input) => ('source' in input ? loadModel(input) : loadModel({ projectPath, ...input })),
+    stepLoader: async (input) => loadStep(input),
+  });
+  const aggregate = await runner.run({
+    files: files.sort(),
+    testNamePattern: parsed.run.testNamePattern,
+    testTimeout: parsed.run.testTimeout,
+  });
+  await runner.close();
 
-  for (const { file, result } of runs) {
-    const label = relative(projectPath, file);
+  const fileResults: GeoSpecCliFileResult[] = [];
+
+  for (const { file, result } of aggregate.files) {
+    const label = isAbsolute(file) ? relative(projectPath, file) : file;
     if (!result.success) {
-      failed += 1;
       fileResults.push({
         file: label,
         success: false,
@@ -378,13 +292,10 @@ export const runGeoSpecCli = async (options: GeoSpecCliOptions = {}): Promise<nu
         continue;
       }
       if (test.status === 'failed') {
-        failed += 1;
         stderr(`FAIL ${label} ${[...test.suite, test.name].join(' > ')}`);
         for (const diagnostic of test.diagnostics) {
           stderr(`  ${diagnostic.message}`);
         }
-      } else {
-        passed += 1;
       }
     }
     fileResults.push({
@@ -398,18 +309,29 @@ export const runGeoSpecCli = async (options: GeoSpecCliOptions = {}): Promise<nu
     });
   }
 
+  const runIssues: GeoSpecCliIssue[] = (aggregate.issues ?? []).map((issue) => ({
+    code: issue.code,
+    message: issue.message,
+    severity: issue.severity,
+    type: issue.type,
+  }));
+  for (const issue of runIssues) {
+    stderr(issue.message);
+  }
+
   if (parsed.run.json) {
     const jsonResult: GeoSpecCliJsonResult = {
-      success: failed === 0,
-      passed,
-      failed,
+      success: aggregate.success,
+      passed: aggregate.passed,
+      failed: aggregate.failed,
+      ...(runIssues.length > 0 ? { issues: runIssues } : {}),
       files: fileResults,
     };
     stdout(JSON.stringify(jsonResult, null, 2));
   } else {
-    stdout(`${passed} passed, ${failed} failed`);
+    stdout(`${aggregate.passed} passed, ${aggregate.failed} failed`);
   }
-  return failed === 0 ? 0 : 1;
+  return aggregate.failed === 0 ? 0 : 1;
 };
 
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

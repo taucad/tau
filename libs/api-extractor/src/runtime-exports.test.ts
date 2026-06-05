@@ -50,6 +50,9 @@ describe('@taucad/api-extractor runtime subpaths', () => {
       'mesh/index.d.ts',
       'model/index.d.ts',
       'runner/index.d.ts',
+      'runner/node/index.d.ts',
+      'runner/web/index.d.ts',
+      'runner/worker/index.d.ts',
       'step/index.d.ts',
     ]) {
       expect(typeof files[declarationFile]).toBe('string');
@@ -64,6 +67,9 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     const expectedPublicExports = [
       ['./brep', './brep/index.d.ts'],
       ['./model', './model/index.d.ts'],
+      ['./runner/node', './runner/node/index.d.ts'],
+      ['./runner/web', './runner/web/index.d.ts'],
+      ['./runner/worker', './runner/worker/index.d.ts'],
       ['./step', './step/index.d.ts'],
     ] as const;
     for (const [specifier, typePath] of expectedPublicExports) {
@@ -85,6 +91,10 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     const modelLoaderTypes = files['model/load-model.d.ts'] ?? '';
     const modelOptionTypes = files['model/types.d.ts'] ?? '';
     const runnerTypes = files['runner/types.d.ts'] ?? '';
+    const runnerIndexTypes = files['runner/index.d.ts'] ?? '';
+    const runnerNodeTypes = files['runner/node/index.d.ts'] ?? '';
+    const runnerWebTypes = files['runner/web/index.d.ts'] ?? '';
+    const runnerWorkerTypes = files['runner/worker/index.d.ts'] ?? '';
     const stepTypes = files['step/index.d.ts'] ?? '';
     const stepLoaderTypes = files['step/load-step.d.ts'] ?? '';
 
@@ -101,7 +111,31 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     expect(runnerTypes).toContain('toHaveCircularHolePattern');
     expect(runnerTypes).toContain('toHaveFilletFeature');
     expect(runnerTypes).toContain('toHavePlanarFace');
+    expect(runnerTypes).toContain('GeoSpecComponentOverlapExpectation');
+    expect(runnerTypes).toContain('toHaveNoComponentOverlap');
+    expect(runnerTypes).toContain('Assert that separate assembly components do not occupy the same solid volume');
+    expect(runnerIndexTypes).toContain('GeoSpecComponentOverlapExpectation');
+    expect(runnerNodeTypes).toContain('Create a GeoSpec runner for Node.js and CLI environments.');
+    expect(runnerWebTypes).toContain('Create a GeoSpec runner for browser environments.');
+    expect(runnerWorkerTypes).toContain('Lifecycle event emitted by GeoSpec worker-style runners.');
     expect(stepTypes).toContain('loadStep');
     expect(stepLoaderTypes).toContain('Load STEP/XDE/BRep evidence');
+  });
+
+  it('generated GeoSpec mesh declarations expose native component-overlap analysis', () => {
+    const { geospec } = geospecTypes;
+    if (!geospec) {
+      throw new Error('Generated GeoSpec authoring types are missing.');
+    }
+    const { files = {} } = geospec;
+    const meshIndexTypes = files['mesh/index.d.ts'] ?? '';
+    const meshOverlapTypes = files['mesh/overlap.d.ts'] ?? '';
+    const meshNativeTypes = files['mesh/native.d.ts'] ?? '';
+
+    expect(meshIndexTypes).toContain('analyzeMeshOverlap');
+    expect(meshOverlapTypes).toContain('Analyze whether separate mesh components physically occupy the same solid');
+    expect(meshOverlapTypes).toContain('AnalyzeMeshOverlapOptions');
+    expect(meshOverlapTypes).toContain('MeshComponentOverlap');
+    expect(meshNativeTypes).toContain('GeoSpecNativeMeshOverlapResult');
   });
 });

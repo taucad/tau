@@ -3,6 +3,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { createRuntimeClient } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { replicad } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
 import type { MeasurementTestRequirement } from '#schemas.js';
@@ -12,12 +13,12 @@ import type { ConnectedComponentsResult, CheckResult, GeometryStats, WatertightR
 
 async function renderGlb(filename: string, code: string): Promise<Uint8Array<ArrayBuffer>> {
   const filePath = filename.startsWith('/') ? filename : `/${filename}`;
+  const runtime = defineRuntime({ kernels: [replicad()], bundlers: [esbuild()] });
   const client = createRuntimeClient({
     transport: inProcessTransport({
+      runtime,
       fileSystem: fromMemoryFs({ [filePath]: code }),
     }),
-    kernels: [replicad()],
-    bundlers: [esbuild()],
   });
 
   try {
@@ -57,7 +58,8 @@ describe('evaluateRequirement', () => {
         description: 'box size',
         type: 'measurement',
         check: 'boundingBox',
-        expected: { size: { x: 0.01, y: 0.03, z: 0.02 } },
+        expected: { size: { x: 0.01, y: 0.02, z: 0.03 } },
+        tolerance: 0.001,
       };
 
       const result: CheckResult = evaluateRequirement(requirement, boxStats);
@@ -106,7 +108,7 @@ describe('evaluateRequirement', () => {
         description: 'loose tolerance',
         type: 'measurement',
         check: 'boundingBox',
-        expected: { size: { x: 0.011, y: 0.031, z: 0.021 } },
+        expected: { size: { x: 0.011, y: 0.021, z: 0.031 } },
         tolerance: 0.01,
       };
 

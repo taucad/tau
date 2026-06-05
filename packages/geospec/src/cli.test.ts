@@ -67,6 +67,102 @@ describe('runGeoSpecCli', () => {
     expect(stdout).toEqual(['1 passed, 0 failed']);
   });
 
+  it('should run OpenSCAD source-file GeoSpec tests from Node', { timeout: 120_000 }, async () => {
+    const projectPath = await createTemporaryProject();
+    const stdout: string[] = [];
+    await writeFile(
+      join(projectPath, 'main.scad'),
+      [
+        '$fa = 2;',
+        '$fs = 0.4;',
+        'difference() {',
+        '  cube([50, 50, 50], center = true);',
+        '  cylinder(h = 60, r = 10, center = true);',
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+    await writeFile(
+      join(projectPath, 'main.geospec.ts'),
+      [
+        "import { describe, expectGeo, it } from 'geospec';",
+        "import { loadModel } from 'geospec/model';",
+        "describe('OpenSCAD cube cutout', () => {",
+        "  it('should test the source file directly', async () => {",
+        "    const model = await loadModel({ file: 'main.scad' });",
+        '    expectGeo(model).toHaveBoundingBox({ size: { x: 50, y: 50, z: 50 }, tolerance: 1 });',
+        '    expectGeo(model).toHaveBoundingBox({ center: { x: 0, y: 0, z: 0 }, tolerance: 0.5 });',
+        '    expectGeo(model).toHaveConnectedComponents({ count: 1 });',
+        '    expectGeo(model).toBeWatertight();',
+        '  });',
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const exitCode = await runGeoSpecCli({
+      argv: ['run', '.', '--test-timeout', '120000'],
+      cwd: projectPath,
+      stderr() {
+        return undefined;
+      },
+      stdout(message) {
+        stdout.push(message);
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toEqual(['1 passed, 0 failed']);
+  });
+
+  it('should run Replicad source-file GeoSpec tests from Node with CLI filters', { timeout: 120_000 }, async () => {
+    const projectPath = await createTemporaryProject();
+    const stdout: string[] = [];
+    await writeFile(
+      join(projectPath, 'main.ts'),
+      [
+        "import { makeBaseBox } from 'replicad';",
+        '',
+        'export default function main() {',
+        '  return makeBaseBox(10, 20, 30);',
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+    await writeFile(
+      join(projectPath, 'main.geospec.ts'),
+      [
+        "import { describe, expectGeo, it } from 'geospec';",
+        "import { loadModel } from 'geospec/model';",
+        "describe('Replicad cuboid', () => {",
+        "  it('should check the width in millimeters', async () => {",
+        "    const model = await loadModel({ file: 'main.ts' });",
+        '    expectGeo(model).toHaveBoundingBox({ size: { x: 10 }, tolerance: 0.1 });',
+        '  });',
+        "  it('should check the height in millimeters', async () => {",
+        "    const model = await loadModel({ file: 'main.ts' });",
+        '    expectGeo(model).toHaveBoundingBox({ size: { z: 30 }, tolerance: 0.1 });',
+        '  });',
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const exitCode = await runGeoSpecCli({
+      argv: ['run', '.', '--file', 'main.geospec.ts', '--test-name-pattern', 'height', '--test-timeout', '120000'],
+      cwd: projectPath,
+      stderr() {
+        return undefined;
+      },
+      stdout(message) {
+        stdout.push(message);
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toEqual(['1 passed, 0 failed']);
+  });
+
   it('should print structured GeoSpec failures from Node', async () => {
     const projectPath = await createTemporaryProject();
     const stderr: string[] = [];
@@ -172,6 +268,80 @@ describe('runGeoSpecCli', () => {
 
     expect(exitCode).toBe(0);
     expect(stdout).toEqual(['1 passed, 0 failed']);
+  });
+
+  it('should fail when filters select no GeoSpec tests', async () => {
+    const projectPath = await createTemporaryProject();
+    const stderr: string[] = [];
+    const stdout: string[] = [];
+    await writeFile(
+      join(projectPath, 'box.geospec.ts'),
+      [
+        "import { describe, it } from 'geospec';",
+        "describe('box', () => {",
+        "  it('should check width', () => {});",
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const exitCode = await runGeoSpecCli({
+      argv: ['run', '.', '--test-name-pattern', 'missing'],
+      cwd: projectPath,
+      stderr(message) {
+        stderr.push(message);
+      },
+      stdout(message) {
+        stdout.push(message);
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toEqual(['No matching GeoSpec tests were selected by the supplied filters.']);
+    expect(stdout).toEqual(['0 passed, 1 failed']);
+  });
+
+  it('should include structured zero-test diagnostics in JSON output', async () => {
+    const projectPath = await createTemporaryProject();
+    const stdout: string[] = [];
+    await writeFile(
+      join(projectPath, 'box.geospec.ts'),
+      [
+        "import { describe, it } from 'geospec';",
+        "describe('box', () => {",
+        "  it('should check width', () => {});",
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const exitCode = await runGeoSpecCli({
+      argv: ['run', '.', '--test-name-pattern', 'missing', '--json'],
+      cwd: projectPath,
+      stderr() {
+        return undefined;
+      },
+      stdout(message) {
+        stdout.push(message);
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join('\n'))).toEqual(
+      expect.objectContaining({
+        success: false,
+        passed: 0,
+        failed: 1,
+        issues: [
+          {
+            code: 'NO_MATCHING_GEOSPEC_TESTS',
+            message: 'No matching GeoSpec tests were selected by the supplied filters.',
+            severity: 'error',
+            type: 'runtime',
+          },
+        ],
+      }),
+    );
   });
 
   it('should run broad measurement and BRep assertions from an explicit file', async () => {

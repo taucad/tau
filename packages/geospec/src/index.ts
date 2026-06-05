@@ -19,6 +19,7 @@ export type {
   GeoSpecChamferFeatureExpectation,
   GeoSpecCircularHoleExpectation,
   GeoSpecCylindricalFaceExpectation,
+  GeoSpecComponentOverlapExpectation,
   GeoSpecConnectedComponentsExpectation,
   GeoSpecMatcher,
   GeoSpecMassExpectation,

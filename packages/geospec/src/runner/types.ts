@@ -41,6 +41,19 @@ export type GeoSpecConnectedComponentsExpectation = {
 };
 
 /**
+ * Component-overlap expectation accepted by
+ * `expectGeo(...).toHaveNoComponentOverlap(...)`.
+ *
+ * GeoSpec checks for positive solid intersection volume between assembly
+ * components. Tangent contact and correctly meshed gears are allowed.
+ *
+ * @public
+ */
+export type GeoSpecComponentOverlapExpectation = {
+  tolerance?: number;
+};
+
+/**
  * Shared scalar expectation used by geometry measurements.
  *
  * @public
@@ -279,6 +292,10 @@ export type GeoSpecMatcher = {
    */
   toBeWatertight(): GeoSpecAssertion;
   /**
+   * Assert that separate assembly components do not occupy the same solid volume.
+   */
+  toHaveNoComponentOverlap(expected?: GeoSpecComponentOverlapExpectation): GeoSpecAssertion;
+  /**
    * Assert total surface area, preferring exact BRep mass properties when available.
    */
   toHaveSurfaceArea(expected: GeoSpecSurfaceAreaExpectation): GeoSpecAssertion;
@@ -363,6 +380,7 @@ export type GeoSpecAssertion = {
     | 'boundingBox'
     | 'connectedComponents'
     | 'watertight'
+    | 'componentOverlap'
     | 'surfaceArea'
     | 'volume'
     | 'mass'

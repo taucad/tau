@@ -4,18 +4,19 @@ import { NodeIO } from '@gltf-transform/core';
 import { createRuntimeClient } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { esbuild } from '@taucad/runtime/bundler';
 import { openscad } from '@taucad/openscad';
 import { countConnectedComponents } from '#geometry/connected-components.js';
 
 async function renderOpenScadGlb(relativePath: string, code: string): Promise<Uint8Array<ArrayBuffer>> {
   const filePath = relativePath.startsWith('/') ? relativePath : `/${relativePath}`;
+  const runtime = defineRuntime({ kernels: [openscad()], bundlers: [esbuild()] });
   const client = createRuntimeClient({
     transport: inProcessTransport({
+      runtime,
       fileSystem: fromMemoryFs({ [filePath]: code }),
     }),
-    kernels: [openscad()],
-    bundlers: [esbuild()],
   });
   try {
     const result = await client.export('glb', { file: filePath });

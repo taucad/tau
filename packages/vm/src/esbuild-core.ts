@@ -365,7 +365,22 @@ const findPackageImportTarget = (
     }
 
     const wildcard = specifier.slice(prefix.length, specifier.length - suffix.length);
-    if (!best || prefix.length > best.pattern.indexOf('*') || pattern.length > best.pattern.length) {
+    if (!best) {
+      best = { target, pattern, wildcard };
+      continue;
+    }
+
+    const bestWildcardIndex = best.pattern.indexOf('*');
+    const bestPrefix = best.pattern.slice(0, bestWildcardIndex);
+    const bestSuffix = best.pattern.slice(bestWildcardIndex + 1);
+    const isMoreSpecific =
+      prefix.length > bestPrefix.length ||
+      (prefix.length === bestPrefix.length && suffix.length > bestSuffix.length) ||
+      (prefix.length === bestPrefix.length &&
+        suffix.length === bestSuffix.length &&
+        pattern.length > best.pattern.length);
+
+    if (isMoreSpecific) {
       best = { target, pattern, wildcard };
     }
   }

@@ -37,6 +37,9 @@
     "./mesh": "./src/mesh/index.ts",
     "./model": "./src/model/index.ts",
     "./runner": "./src/runner/index.ts",
+    "./runner/node": "./src/runner/node/index.ts",
+    "./runner/web": "./src/runner/web/index.ts",
+    "./runner/worker": "./src/runner/worker/index.ts",
     "./step": "./src/step/index.ts",
     "./native/opencascade/single": "./native/opencascade/geospec_opencascade_single.js"
   },
@@ -106,6 +109,36 @@
           "default": "./dist/esm/runner/index.js"
         }
       },
+      "./runner/node": {
+        "require": {
+          "types": "./dist/cjs/runner/node/index.d.cts",
+          "default": "./dist/cjs/runner/node/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/runner/node/index.d.ts",
+          "default": "./dist/esm/runner/node/index.js"
+        }
+      },
+      "./runner/web": {
+        "require": {
+          "types": "./dist/cjs/runner/web/index.d.cts",
+          "default": "./dist/cjs/runner/web/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/runner/web/index.d.ts",
+          "default": "./dist/esm/runner/web/index.js"
+        }
+      },
+      "./runner/worker": {
+        "require": {
+          "types": "./dist/cjs/runner/worker/index.d.cts",
+          "default": "./dist/cjs/runner/worker/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/runner/worker/index.d.ts",
+          "default": "./dist/esm/runner/worker/index.js"
+        }
+      },
       "./step": {
         "require": {
           "types": "./dist/cjs/step/index.d.cts",
@@ -133,10 +166,14 @@
     "@taucad/vm": "workspace:*"
   },
   "peerDependencies": {
+    "@taucad/openscad": ">=0.1.0-beta.0",
     "@taucad/runtime": ">=0.1.0-beta.1",
     "replicad": ">=0.23.0"
   },
   "peerDependenciesMeta": {
+    "@taucad/openscad": {
+      "optional": true
+    },
     "@taucad/runtime": {
       "optional": true
     },
@@ -145,6 +182,7 @@
     }
   },
   "devDependencies": {
+    "@taucad/openscad": "workspace:*",
     "@taucad/runtime": "workspace:*"
   }
 }

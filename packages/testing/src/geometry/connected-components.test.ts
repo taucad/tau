@@ -4,6 +4,7 @@ import { Document, NodeIO } from '@gltf-transform/core';
 import { createRuntimeClient } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { replicad } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
 import { countConnectedComponents } from '#geometry/connected-components.js';
@@ -13,12 +14,12 @@ import type { MeasurementTestRequirement } from '#schemas.js';
 
 async function renderGlb(filename: string, code: string): Promise<Uint8Array<ArrayBuffer>> {
   const filePath = filename.startsWith('/') ? filename : `/${filename}`;
+  const runtime = defineRuntime({ kernels: [replicad()], bundlers: [esbuild()] });
   const client = createRuntimeClient({
     transport: inProcessTransport({
+      runtime,
       fileSystem: fromMemoryFs({ [filePath]: code }),
     }),
-    kernels: [replicad()],
-    bundlers: [esbuild()],
   });
 
   try {

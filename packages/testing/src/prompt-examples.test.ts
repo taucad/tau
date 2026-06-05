@@ -4,6 +4,7 @@ import {
   canonicalBrepGeoSpecTestExample,
   canonicalGeoSpecTestExample,
   geospecParameterTestingCopy,
+  renderAvailableChecksCopy,
   renderCanonicalExample,
 } from '#prompt-examples.js';
 
@@ -18,6 +19,7 @@ describe('canonicalGeoSpecTestExample', () => {
     expect(canonicalGeoSpecTestExample).toContain('toHaveBoundingBox');
     expect(canonicalGeoSpecTestExample).toContain('toHaveConnectedComponents');
     expect(canonicalGeoSpecTestExample).toContain('toBeWatertight');
+    expect(canonicalGeoSpecTestExample).toContain('toHaveNoComponentOverlap');
     expect(canonicalGeoSpecTestExample).toContain('toHaveSurfaceArea');
     expect(canonicalGeoSpecTestExample).toContain('toHaveVolume');
     expect(canonicalGeoSpecTestExample).toContain('toHaveCenterOfMass');
@@ -42,6 +44,7 @@ describe('renderCanonicalExample', () => {
     expect(rendered).toMatch(/^```ts/);
     expect(rendered).toMatch(/```$/);
     expect(rendered).toContain("loadModel({ file: 'main.scad' })");
+    expect(rendered).not.toMatch(/\.ts wrapper|typescript wrapper|fake wrapper/i);
   });
 
   it('should accept a leading dot on the extension (defensive normalisation)', () => {
@@ -52,6 +55,10 @@ describe('renderCanonicalExample', () => {
     expect(renderCanonicalExample('ts')).not.toContain('toHavePlanarFace');
     expect(renderCanonicalExample('ts', { includeBrepFeatures: true })).toContain('toHavePlanarFace');
     expect(renderCanonicalExample('ts', { includeBrepFeatures: true })).toContain('toHaveCircularHole');
+    expect(renderCanonicalExample('ts', { includeBrepFeatures: true })).toContain('toBeValidBrep');
+    expect(renderCanonicalExample('ts', { includeBrepFeatures: true })).toContain('toHaveTopologyCounts');
+    expect(renderCanonicalExample('ts', { includeBrepFeatures: true })).toContain('toHaveChamferFeature');
+    expect(renderCanonicalExample('ts', { includeBrepFeatures: true })).toContain('toHaveMinimumWallThickness');
   });
 
   it('should teach exact BRep checks to load STEP evidence explicitly', () => {
@@ -71,6 +78,8 @@ describe('availableChecksCopy', () => {
     expect(availableChecksCopy).toContain('surfaceArea');
     expect(availableChecksCopy).toContain('volume');
     expect(availableChecksCopy).toContain('centerOfMass');
+    expect(availableChecksCopy).toContain('componentOverlap');
+    expect(availableChecksCopy).toContain('toHaveNoComponentOverlap({ tolerance: 0.1 })');
     expect(availableChecksCopy).toContain('chamferDistance');
     expect(availableChecksCopy).toContain('SIZE / POSITION');
     expect(availableChecksCopy).toContain('SPATIALLY-DISJOINT CHUNKS');
@@ -88,6 +97,15 @@ describe('availableChecksCopy', () => {
     expect(availableChecksCopy).not.toContain('vertexCount');
   });
 
+  it('should not expose component-overlap implementation knobs or shortcut algorithms', () => {
+    expect(availableChecksCopy).not.toContain('components:');
+    expect(availableChecksCopy).not.toContain('volumeTolerance');
+    expect(availableChecksCopy).not.toContain('sampleCount');
+    expect(availableChecksCopy).not.toContain('AABB');
+    expect(availableChecksCopy).not.toContain('envelope');
+    expect(availableChecksCopy).not.toContain('toHaveNoInterference');
+  });
+
   it('should clarify that "is this one fused solid?" maps to watertight (not connectedComponents:1)', () => {
     expect(availableChecksCopy).toContain('one fused solid');
     expect(availableChecksCopy).toContain('watertight');
@@ -98,6 +116,15 @@ describe('availableChecksCopy', () => {
     expect(availableChecksCopy).toContain('do not read `model.boundingBox.bounds`');
     expect(availableChecksCopy).toContain('call `model.volume()`');
     expect(availableChecksCopy).toContain('Assert through `expectGeo(model)`');
+  });
+
+  it('should omit BRep-only STEP guidance for mesh-only kernels', () => {
+    const meshOnly = renderAvailableChecksCopy({ includeBrepFeatures: false });
+
+    expect(meshOnly).toContain('boundingBox');
+    expect(meshOnly).toContain('surfaceArea');
+    expect(meshOnly).not.toContain('planarFace');
+    expect(meshOnly).not.toContain("format: 'step'");
   });
 });
 
@@ -122,12 +149,32 @@ describe('agent-facing GeoSpec copy', () => {
       availableChecksCopy,
       canonicalGeoSpecTestExample,
       geospecParameterTestingCopy,
+      renderCanonicalExample('scad'),
       renderCanonicalExample('ts'),
       renderCanonicalExample('ts', { includeBrepFeatures: true }),
     ].join('\n');
 
     expect(corpus).not.toMatch(
-      /try a simpler model|simplify the model|compare simpler mesh evidence|too complex to verify/i,
+      /try a simpler model|simplify the model|compare simpler mesh evidence|too complex to verify|\.ts wrapper|typescript wrapper|fake wrapper/i,
     );
+  });
+
+  it('should not teach unit or preview workarounds for runtime-backed loadModel', () => {
+    const corpus = [
+      availableChecksCopy,
+      canonicalGeoSpecTestExample,
+      canonicalBrepGeoSpecTestExample,
+      geospecParameterTestingCopy,
+      renderCanonicalExample('scad'),
+      renderCanonicalExample('kcl'),
+      renderCanonicalExample('ts'),
+      renderCanonicalExample('ts', { includeBrepFeatures: true }),
+    ].join('\n');
+
+    expect(corpus).not.toContain('S = 1000');
+    expect(corpus).not.toContain('previewGeometry');
+    expect(corpus).not.toContain('test.json');
+    expect(corpus).not.toMatch(/loadModel\([^)]*(?:scale|sourceUnit|coordinateSystem)/);
+    expect(corpus).not.toMatch(/loadModel\([^)]*unit\s*:/);
   });
 });

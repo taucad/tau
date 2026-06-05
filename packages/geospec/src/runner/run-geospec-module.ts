@@ -1,15 +1,47 @@
 import { createEsbuildModuleVm } from '@taucad/vm';
-import { clearCollectorGlobals, collectorGlobalKey, createCollector, installCollector } from '#runner/collector.js';
+import { createCollector } from '#runner/collector.js';
 import { filterGeoSpecTests } from '#runner/filter.js';
 import type { GeoSpecRunResult, RunGeoSpecModuleOptions } from '#runner/types.js';
 
 const defaultTestTimeout = 30_000;
-const geospecModelLoaderGlobalKey = '__GEOSPEC_MODEL_LOADER__';
-const geospecStepLoaderGlobalKey = '__GEOSPEC_STEP_LOADER__';
+const geospecRunBindingsGlobalKey = '__GEOSPEC_RUN_BINDINGS__';
 
-const geospecBuiltinCode = `
+type GeoSpecRunBinding = {
+  collector: ReturnType<typeof createCollector>;
+  modelLoader?: RunGeoSpecModuleOptions['modelLoader'];
+  stepLoader?: RunGeoSpecModuleOptions['stepLoader'];
+};
+
+const runBindingsGlobal = globalThis as typeof globalThis & {
+  [geospecRunBindingsGlobalKey]?: Map<string, GeoSpecRunBinding>;
+};
+
+const createRunToken = (): string => `geospec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
+const ensureRunBindings = (): Map<string, GeoSpecRunBinding> => {
+  const existing = runBindingsGlobal[geospecRunBindingsGlobalKey];
+  if (existing) {
+    return existing;
+  }
+  const bindings = new Map<string, GeoSpecRunBinding>();
+  runBindingsGlobal[geospecRunBindingsGlobalKey] = bindings;
+  return bindings;
+};
+
+const createBindingAccessorCode = (runToken: string): string => `
+const getRunBinding = () => {
+  const binding = globalThis.${geospecRunBindingsGlobalKey}?.get(${JSON.stringify(runToken)});
+  if (!binding) {
+    throw new Error('GeoSpec runner binding is not active. Run the module through runGeoSpecModule().');
+  }
+  return binding;
+};
+`;
+
+const createGeospecBuiltinCode = (runToken: string): string => `
+${createBindingAccessorCode(runToken)}
 const getCollector = () => {
-  const collector = globalThis.${collectorGlobalKey};
+  const collector = getRunBinding().collector;
   if (!collector) {
     throw new Error('GeoSpec collector is not active. Run the module through runGeoSpecModule().');
   }
@@ -26,24 +58,32 @@ export const test = it;
 export const expectGeo = (subject) => getCollector().expectGeo(subject);
 `;
 
-const geospecModelBuiltinCode = `
-const modelLoaderGlobalKey = '${geospecModelLoaderGlobalKey}';
-
+const createGeospecModelBuiltinCode = (runToken: string): string => `
+${createBindingAccessorCode(runToken)}
 const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+const cloneValue = (value) => value === undefined || value === null ? value : structuredClone(value);
 
 const mergeParameters = (defaults, overrides) => {
-  const merged = { ...defaults };
+  const merged = cloneValue(defaults);
   for (const [key, value] of Object.entries(overrides ?? {})) {
     const current = merged[key];
-    merged[key] = isRecord(current) && isRecord(value) ? mergeParameters(current, value) : value;
+    merged[key] = isRecord(current) && isRecord(value) ? mergeParameters(current, value) : cloneValue(value);
   }
   return merged;
 };
 
 const parseParameterEntry = (entry) => {
+  if (typeof entry === 'string' && !entry.trimStart().startsWith('{')) {
+    throw new Error('Invalid GeoSpec parameter file input: pass parsed JSON or raw JSON text, not a filesystem path.');
+  }
   const parsed = typeof entry === 'string' ? JSON.parse(entry) : entry;
   if (!isRecord(parsed) || typeof parsed.activeGroup !== 'string' || !isRecord(parsed.groups)) {
     throw new Error('Invalid GeoSpec parameter file: expected activeGroup and groups.');
+  }
+  for (const [name, group] of Object.entries(parsed.groups)) {
+    if (!isRecord(group) || !isRecord(group.values)) {
+      throw new Error(\`Invalid GeoSpec parameter file: group '\${name}' must contain a values object.\`);
+    }
   }
   return parsed;
 };
@@ -62,17 +102,27 @@ const groupNames = (entry) => {
 
 export class GeoSpecModelLoadError extends Error {
   constructor(diagnostics) {
-    super(diagnostics.map((diagnostic) => diagnostic.message).join('\\n') || 'GeoSpec model load failed.');
+    const snapshot = diagnostics.map((diagnostic) => {
+      try {
+        return structuredClone(diagnostic);
+      } catch {
+        return {
+          ...diagnostic,
+          details: diagnostic?.details === undefined ? undefined : String(diagnostic.details),
+        };
+      }
+    });
+    super(snapshot.map((diagnostic) => diagnostic.message).join('\\n') || 'GeoSpec model load failed.');
     this.name = 'GeoSpecModelLoadError';
-    this.diagnostics = diagnostics;
+    this.diagnostics = Object.freeze(snapshot);
   }
 }
 
 export const params = (entry, options = {}) => {
   const parsed = parseParameterEntry(entry);
-  const defaults = options.defaults ?? {};
+  const defaults = cloneValue(options.defaults ?? {});
   const groups = groupNames(parsed).map((name) => {
-    const overrides = parsed.groups[name]?.values ?? {};
+    const overrides = cloneValue(parsed.groups[name]?.values ?? {});
     return {
       name,
       active: name === parsed.activeGroup,
@@ -89,14 +139,14 @@ export const params = (entry, options = {}) => {
   if (!active) {
     throw new Error(\`Invalid GeoSpec parameter file: active group '\${parsed.activeGroup}' is missing.\`);
   }
-  return { active, groups, defaults };
+  return { active, groups, defaults: cloneValue(defaults) };
 };
 
 export const activeParams = (entry, options = {}) => params(entry, options).active.values;
 export const parameterGroups = (entry, options = {}) => params(entry, options).groups;
 
 export const loadModel = async (options) => {
-  const loader = globalThis[modelLoaderGlobalKey];
+  const loader = getRunBinding().modelLoader;
   if (typeof loader !== 'function') {
     throw new GeoSpecModelLoadError([
       {
@@ -113,11 +163,10 @@ export const loadModel = async (options) => {
 export const createModelLoader = (defaults = {}) => async (options) => loadModel({ ...defaults, ...options });
 `;
 
-const geospecStepBuiltinCode = `
-const stepLoaderGlobalKey = '${geospecStepLoaderGlobalKey}';
-
+const createGeospecStepBuiltinCode = (runToken: string): string => `
+${createBindingAccessorCode(runToken)}
 export const loadStep = async (options) => {
-  const loader = globalThis[stepLoaderGlobalKey];
+  const loader = getRunBinding().stepLoader;
   if (typeof loader !== 'function') {
     throw new Error('No GeoSpec STEP loader is active for this runner. Run this test through the GeoSpec CLI or pass stepLoader to runGeoSpecModule().');
   }
@@ -151,7 +200,7 @@ export const analyzeBrep = ({ subject }) => {
       }],
     };
   }
-  return { success: true, evidence: subject.brep, diagnostics: subject.diagnostics ?? [] };
+  return { success: true, brep: subject.brep, diagnostics: subject.diagnostics ?? [] };
 };
 `;
 
@@ -169,24 +218,25 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     projectPath: options.projectPath,
   });
   const collector = createCollector();
-  const globalWithModelLoader = globalThis as typeof globalThis & {
-    [geospecModelLoaderGlobalKey]?: RunGeoSpecModuleOptions['modelLoader'];
-    [geospecStepLoaderGlobalKey]?: RunGeoSpecModuleOptions['stepLoader'];
-  };
-  const previousModelLoader = globalWithModelLoader[geospecModelLoaderGlobalKey];
-  const previousStepLoader = globalWithModelLoader[geospecStepLoaderGlobalKey];
+  const runToken = createRunToken();
+  const bindings = ensureRunBindings();
+  bindings.set(runToken, {
+    collector,
+    ...(options.modelLoader ? { modelLoader: options.modelLoader } : {}),
+    ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
+  });
 
   vm.registerModule('geospec', {
     version: '0.0.0-poc',
-    code: geospecBuiltinCode,
+    code: createGeospecBuiltinCode(runToken),
   });
   vm.registerModule('geospec/model', {
     version: '0.0.0-poc',
-    code: geospecModelBuiltinCode,
+    code: createGeospecModelBuiltinCode(runToken),
   });
   vm.registerModule('geospec/step', {
     version: '0.0.0-poc',
-    code: geospecStepBuiltinCode,
+    code: createGeospecStepBuiltinCode(runToken),
   });
   vm.registerModule('geospec/brep', {
     version: '0.0.0-poc',
@@ -195,12 +245,6 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
   for (const [name, module_] of Object.entries(options.builtinModules ?? {})) {
     vm.registerModule(name, module_);
   }
-  if (options.modelLoader) {
-    globalWithModelLoader[geospecModelLoaderGlobalKey] = options.modelLoader;
-  }
-  if (options.stepLoader) {
-    globalWithModelLoader[geospecStepLoaderGlobalKey] = options.stepLoader;
-  }
 
   try {
     const bundle = await vm.bundle(options.entryPath);
@@ -208,12 +252,11 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
       return { success: false, issues: bundle.issues, bundle };
     }
 
-    installCollector(collector);
     const executed = await vm.execute(bundle.code);
     if (!executed.success) {
       return { success: false, issues: executed.issues, bundle };
     }
-    await collector.waitForCompletion(options.testTimeout ?? defaultTestTimeout);
+    await collector.waitForCompletion(options.testTimeout ?? defaultTestTimeout, options.testNamePattern);
     const tests = filterGeoSpecTests(collector.tests, options.testNamePattern);
 
     return {
@@ -223,16 +266,9 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
       bundle,
     };
   } finally {
-    clearCollectorGlobals();
-    if (previousModelLoader === undefined) {
-      Reflect.deleteProperty(globalWithModelLoader, geospecModelLoaderGlobalKey);
-    } else {
-      globalWithModelLoader[geospecModelLoaderGlobalKey] = previousModelLoader;
-    }
-    if (previousStepLoader === undefined) {
-      Reflect.deleteProperty(globalWithModelLoader, geospecStepLoaderGlobalKey);
-    } else {
-      globalWithModelLoader[geospecStepLoaderGlobalKey] = previousStepLoader;
+    bindings.delete(runToken);
+    if (bindings.size === 0) {
+      Reflect.deleteProperty(runBindingsGlobal, geospecRunBindingsGlobalKey);
     }
     vm.dispose();
   }

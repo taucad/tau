@@ -1,5 +1,6 @@
 import type { GeometryDiagnostic, GeometrySubject, Vec3 } from '#mesh/types.js';
 import { analyzeChamferDistance } from '#mesh/distance.js';
+import { analyzeMeshOverlap } from '#mesh/overlap.js';
 import type {
   GeoSpecAssertion,
   GeoSpecAxisExpectation,
@@ -10,6 +11,7 @@ import type {
   GeoSpecCircularHoleExpectation,
   GeoSpecCircularHolePatternExpectation,
   GeoSpecCylindricalFaceExpectation,
+  GeoSpecComponentOverlapExpectation,
   GeoSpecConnectedComponentsExpectation,
   GeoSpecFilletFeatureExpectation,
   GeoSpecMatcher,
@@ -42,11 +44,10 @@ export type GeoSpecCollector = {
   it(name: string, function_: GeoSpecTestFunction): void;
   itSkip(name: string, _function?: GeoSpecTestFunction): void;
   expectGeo(subject: unknown): GeoSpecMatcher;
-  waitForCompletion(testTimeout: number): Promise<void>;
+  waitForCompletion(testTimeout: number, testNamePattern?: string): Promise<void>;
 };
 
 export const collectorGlobalKey = '__GEOSPEC_COLLECTOR__';
-const activeTestGlobalKey = '__GEOSPEC_ACTIVE_TEST__';
 const geospecGlobal = globalThis as typeof globalThis & Record<string, unknown>;
 
 const isPromiseLike = (value: unknown): value is PromiseLike<unknown> =>
@@ -55,33 +56,61 @@ const isPromiseLike = (value: unknown): value is PromiseLike<unknown> =>
   'then' in value &&
   typeof (value as { then?: unknown }).then === 'function';
 
-const createErrorDiagnostic = (error: unknown): GeometryDiagnostic => {
+/**
+ * Assertion error thrown by GeoSpec matchers when an expectation does not hold.
+ *
+ * Runner, CLI, and tool adapters unwrap this error to preserve structured
+ * diagnostics instead of collapsing them into a single string.
+ *
+ * @public
+ */
+export class GeoSpecAssertionError extends Error {
+  public readonly diagnostics: readonly GeometryDiagnostic[];
+
+  public constructor(diagnostics: readonly GeometryDiagnostic[]) {
+    super(diagnostics.map((diagnostic) => diagnostic.message).join('\n') || 'GeoSpec assertion failed.');
+    this.name = 'GeoSpecAssertionError';
+    this.diagnostics = Object.freeze([...diagnostics]);
+  }
+}
+
+const createErrorDiagnostics = (error: unknown): GeometryDiagnostic[] => {
+  if (error instanceof GeoSpecAssertionError) {
+    return [...error.diagnostics];
+  }
+
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes('model.volume is not a function')) {
-    return {
-      code: 'GEOSPEC_SUBJECT_API_MISUSE',
-      severity: 'error',
-      message: 'GeoSpec GeometrySubject does not expose model.volume().',
-      suggestion: 'Use expectGeo(model).toHaveVolume({ value, tolerance }) instead of reading model.volume().',
-      details: error,
-    };
+    return [
+      {
+        code: 'GEOSPEC_SUBJECT_API_MISUSE',
+        severity: 'error',
+        message: 'GeoSpec GeometrySubject does not expose model.volume().',
+        suggestion: 'Use expectGeo(model).toHaveVolume({ value, tolerance }) instead of reading model.volume().',
+        details: error,
+      },
+    ];
   }
   if (/Cannot read properties of undefined \(reading 'bounds'\)/u.test(message)) {
-    return {
-      code: 'GEOSPEC_SUBJECT_API_MISUSE',
-      severity: 'error',
-      message: 'GeoSpec GeometrySubject does not expose model.boundingBox.bounds.',
-      suggestion:
-        'Use expectGeo(model).toHaveBoundingBox({ min, max, size, center, tolerance }) instead of reading model.boundingBox.',
-      details: error,
-    };
+    return [
+      {
+        code: 'GEOSPEC_SUBJECT_API_MISUSE',
+        severity: 'error',
+        message: 'GeoSpec GeometrySubject does not expose model.boundingBox.bounds.',
+        suggestion:
+          'Use expectGeo(model).toHaveBoundingBox({ min, max, size, center, tolerance }) instead of reading model.boundingBox.',
+        details: error,
+      },
+    ];
   }
-  return {
-    code: 'TEST_FAILED',
-    severity: 'error',
-    message,
-    details: error,
-  };
+  return [
+    {
+      code: 'TEST_FAILED',
+      severity: 'error',
+      message,
+      details: error,
+    },
+  ];
 };
 
 const defaultLengthTolerance = 0.1;
@@ -89,6 +118,7 @@ const defaultConnectedToleranceMm = 0.1;
 const defaultScalarTolerance = 0.1;
 const defaultUnitVectorTolerance = 1e-4;
 const defaultChamferSamples = 10_000;
+const defaultComponentOverlapTolerance = 0.1;
 
 const axisNames = ['x', 'y', 'z'] as const;
 
@@ -112,6 +142,414 @@ const unsupportedEvidenceDiagnostic = (matcher: string, evidence: string): Geome
   suggestion:
     'Load a STEP/BRep-capable subject with loadModel({ format: "step" }) or use a mesh measurement matcher that supports approximate mesh evidence.',
 });
+
+const invalidExpectationDiagnostic = (options: {
+  matcher: string;
+  path: string;
+  message: string;
+  expected: unknown;
+  accepted: string;
+}): GeometryDiagnostic => ({
+  code: 'GEOSPEC_INVALID_EXPECTATION',
+  severity: 'error',
+  message: `${options.matcher} received an invalid expectation at ${options.path}: ${options.message}`,
+  suggestion: `Use ${options.matcher}(${options.accepted}).`,
+  details: {
+    matcher: options.matcher,
+    path: options.path,
+    field: options.path.startsWith('$.') ? options.path.slice(2).split('.')[0] : undefined,
+    expected: options.expected,
+    accepted: options.accepted,
+  },
+});
+
+const validateObjectExpectation = (options: {
+  matcher: string;
+  expected: unknown;
+  allowed: readonly string[];
+  required?: readonly string[];
+  accepted: string;
+}): GeometryDiagnostic[] => {
+  if (!isRecord(options.expected)) {
+    return [
+      invalidExpectationDiagnostic({
+        matcher: options.matcher,
+        path: '$',
+        message: 'expected an options object.',
+        expected: options.expected,
+        accepted: options.accepted,
+      }),
+    ];
+  }
+
+  const allowed = new Set(options.allowed);
+  const diagnostics: GeometryDiagnostic[] = [];
+  for (const key of Object.keys(options.expected)) {
+    if (!allowed.has(key)) {
+      diagnostics.push(
+        invalidExpectationDiagnostic({
+          matcher: options.matcher,
+          path: `$.${key}`,
+          message: `unknown field '${key}'.`,
+          expected: options.expected[key],
+          accepted: options.accepted,
+        }),
+      );
+    }
+  }
+
+  for (const key of options.required ?? []) {
+    if (!(key in options.expected)) {
+      diagnostics.push(
+        invalidExpectationDiagnostic({
+          matcher: options.matcher,
+          path: `$.${key}`,
+          message: `missing required field '${key}'.`,
+          expected: undefined,
+          accepted: options.accepted,
+        }),
+      );
+    }
+  }
+  return diagnostics;
+};
+
+const numericExpectationKeys = ['value', 'greaterThan', 'greaterThanOrEqual', 'lessThan', 'lessThanOrEqual'] as const;
+
+const validateNumericExpectation = (options: {
+  matcher: string;
+  path: string;
+  expected: unknown;
+  accepted: string;
+}): GeometryDiagnostic[] => {
+  if (typeof options.expected === 'number' && Number.isFinite(options.expected)) {
+    return [];
+  }
+  if (!isRecord(options.expected)) {
+    return [
+      invalidExpectationDiagnostic({
+        matcher: options.matcher,
+        path: options.path,
+        message: 'expected a finite number or a numeric range object.',
+        expected: options.expected,
+        accepted: options.accepted,
+      }),
+    ];
+  }
+
+  const diagnostics: GeometryDiagnostic[] = [];
+  let hasComparator = false;
+  for (const key of Object.keys(options.expected)) {
+    if (!numericExpectationKeys.includes(key as (typeof numericExpectationKeys)[number])) {
+      diagnostics.push(
+        invalidExpectationDiagnostic({
+          matcher: options.matcher,
+          path: `${options.path}.${key}`,
+          message: `unknown numeric comparator '${key}'.`,
+          expected: options.expected[key],
+          accepted: options.accepted,
+        }),
+      );
+      continue;
+    }
+    hasComparator = true;
+    if (typeof options.expected[key] !== 'number' || !Number.isFinite(options.expected[key])) {
+      diagnostics.push(
+        invalidExpectationDiagnostic({
+          matcher: options.matcher,
+          path: `${options.path}.${key}`,
+          message: `expected '${key}' to be a finite number.`,
+          expected: options.expected[key],
+          accepted: options.accepted,
+        }),
+      );
+    }
+  }
+
+  if (!hasComparator) {
+    diagnostics.push(
+      invalidExpectationDiagnostic({
+        matcher: options.matcher,
+        path: options.path,
+        message: 'expected at least one numeric comparator.',
+        expected: options.expected,
+        accepted: options.accepted,
+      }),
+    );
+  }
+  return diagnostics;
+};
+
+const validateFiniteNumberField = (options: {
+  matcher: string;
+  expected: Record<string, unknown>;
+  field: string;
+  accepted: string;
+}): GeometryDiagnostic[] => {
+  if (options.expected[options.field] === undefined) {
+    return [];
+  }
+  return typeof options.expected[options.field] === 'number' && Number.isFinite(options.expected[options.field])
+    ? []
+    : [
+        invalidExpectationDiagnostic({
+          matcher: options.matcher,
+          path: `$.${options.field}`,
+          message: `expected '${options.field}' to be a finite number.`,
+          expected: options.expected[options.field],
+          accepted: options.accepted,
+        }),
+      ];
+};
+
+const validatePositiveIntegerField = (options: {
+  matcher: string;
+  expected: Record<string, unknown>;
+  field: string;
+  accepted: string;
+}): GeometryDiagnostic[] => {
+  if (options.expected[options.field] === undefined) {
+    return [];
+  }
+  const value = options.expected[options.field];
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+    ? []
+    : [
+        invalidExpectationDiagnostic({
+          matcher: options.matcher,
+          path: `$.${options.field}`,
+          message: `expected '${options.field}' to be a positive integer.`,
+          expected: value,
+          accepted: options.accepted,
+        }),
+      ];
+};
+
+const validateStringField = (options: {
+  matcher: string;
+  expected: Record<string, unknown>;
+  field: string;
+  accepted: string;
+  optional?: boolean;
+}): GeometryDiagnostic[] => {
+  const value = options.expected[options.field];
+  if (value === undefined && options.optional) {
+    return [];
+  }
+  return typeof value === 'string'
+    ? []
+    : [
+        invalidExpectationDiagnostic({
+          matcher: options.matcher,
+          path: `$.${options.field}`,
+          message: `expected '${options.field}' to be a string.`,
+          expected: value,
+          accepted: options.accepted,
+        }),
+      ];
+};
+
+const validateBooleanField = (options: {
+  matcher: string;
+  expected: Record<string, unknown>;
+  field: string;
+  accepted: string;
+  optional?: boolean;
+}): GeometryDiagnostic[] => {
+  const value = options.expected[options.field];
+  if (value === undefined && options.optional) {
+    return [];
+  }
+  return typeof value === 'boolean'
+    ? []
+    : [
+        invalidExpectationDiagnostic({
+          matcher: options.matcher,
+          path: `$.${options.field}`,
+          message: `expected '${options.field}' to be a boolean.`,
+          expected: value,
+          accepted: options.accepted,
+        }),
+      ];
+};
+
+const validateAxisField = (options: {
+  matcher: string;
+  expected: Record<string, unknown>;
+  accepted: string;
+  optional?: boolean;
+}): GeometryDiagnostic[] => {
+  const { axis } = options.expected;
+  if (axis === undefined && options.optional) {
+    return [];
+  }
+  return axis === 'x' || axis === 'y' || axis === 'z'
+    ? []
+    : [
+        invalidExpectationDiagnostic({
+          matcher: options.matcher,
+          path: '$.axis',
+          message: "expected axis to be 'x', 'y', or 'z'.",
+          expected: axis,
+          accepted: options.accepted,
+        }),
+      ];
+};
+
+const validatePointExpectation = (options: {
+  matcher: string;
+  path: string;
+  expected: unknown;
+  accepted: string;
+  optional?: boolean;
+}): GeometryDiagnostic[] => {
+  if (options.expected === undefined && options.optional) {
+    return [];
+  }
+
+  if (Array.isArray(options.expected)) {
+    return options.expected.length === 3 &&
+      options.expected.every((entry) => typeof entry === 'number' && Number.isFinite(entry))
+      ? []
+      : [
+          invalidExpectationDiagnostic({
+            matcher: options.matcher,
+            path: options.path,
+            message: 'expected a three-number point array.',
+            expected: options.expected,
+            accepted: options.accepted,
+          }),
+        ];
+  }
+
+  if (!isRecord(options.expected)) {
+    return [
+      invalidExpectationDiagnostic({
+        matcher: options.matcher,
+        path: options.path,
+        message: 'expected a point object with finite x, y, or z fields.',
+        expected: options.expected,
+        accepted: options.accepted,
+      }),
+    ];
+  }
+
+  const diagnostics: GeometryDiagnostic[] = [];
+  const allowed = new Set(axisNames);
+  let hasAxisValue = false;
+  for (const key of Object.keys(options.expected)) {
+    if (!allowed.has(key as (typeof axisNames)[number])) {
+      diagnostics.push(
+        invalidExpectationDiagnostic({
+          matcher: options.matcher,
+          path: `${options.path}.${key}`,
+          message: `unknown point field '${key}'.`,
+          expected: options.expected[key],
+          accepted: options.accepted,
+        }),
+      );
+    }
+  }
+  for (const axis of axisNames) {
+    const value = options.expected[axis];
+    if (value !== undefined) {
+      hasAxisValue = true;
+    }
+    if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) {
+      diagnostics.push(
+        invalidExpectationDiagnostic({
+          matcher: options.matcher,
+          path: `${options.path}.${axis}`,
+          message: `expected '${axis}' to be a finite number.`,
+          expected: value,
+          accepted: options.accepted,
+        }),
+      );
+    }
+  }
+  if (!hasAxisValue) {
+    diagnostics.push(
+      invalidExpectationDiagnostic({
+        matcher: options.matcher,
+        path: options.path,
+        message: 'expected at least one finite point coordinate.',
+        expected: options.expected,
+        accepted: options.accepted,
+      }),
+    );
+  }
+  return diagnostics;
+};
+
+const distanceStatisticKeys = ['min', 'mean', 'max', 'p50', 'p95', 'p99', 'rms'] as const;
+
+const validateChamferDistanceExpectation = (expected: unknown, accepted: string): GeometryDiagnostic[] => {
+  const matcher = 'toHaveChamferDistanceTo';
+  const objectDiagnostics = validateObjectExpectation({
+    matcher,
+    expected,
+    allowed: [...distanceStatisticKeys, 'samples', 'seed'],
+    accepted,
+  });
+  if (!isRecord(expected)) {
+    return objectDiagnostics;
+  }
+
+  const hasStatistic = distanceStatisticKeys.some((key) => expected[key] !== undefined);
+  const statisticDiagnostics = distanceStatisticKeys.flatMap((key) =>
+    expected[key] === undefined
+      ? []
+      : validateNumericExpectation({ matcher, path: `$.${key}`, expected: expected[key], accepted }),
+  );
+  return [
+    ...objectDiagnostics,
+    ...(hasStatistic
+      ? []
+      : [
+          invalidExpectationDiagnostic({
+            matcher,
+            path: '$',
+            message: 'expected at least one distance statistic.',
+            expected,
+            accepted,
+          }),
+        ]),
+    ...statisticDiagnostics,
+    ...validatePositiveIntegerField({ matcher, expected, field: 'samples', accepted }),
+    ...validateFiniteNumberField({ matcher, expected, field: 'seed', accepted }),
+  ];
+};
+
+const validateMinimumDistanceExpectation = (
+  matcher: string,
+  expected: unknown,
+  accepted: string,
+): GeometryDiagnostic[] => {
+  const objectDiagnostics = validateObjectExpectation({
+    matcher,
+    expected,
+    allowed: ['value', 'samples', 'seed', 'tolerance'],
+    required: ['value'],
+    accepted,
+  });
+  if (!isRecord(expected)) {
+    return objectDiagnostics;
+  }
+  return [
+    ...objectDiagnostics,
+    ...validateNumericExpectation({ matcher, path: '$.value', expected: expected['value'], accepted }),
+    ...validatePositiveIntegerField({ matcher, expected, field: 'samples', accepted }),
+    ...validateFiniteNumberField({ matcher, expected, field: 'seed', accepted }),
+    ...validateFiniteNumberField({ matcher, expected, field: 'tolerance', accepted }),
+  ];
+};
+
+const recordValidatedAssertion = (
+  assertion: GeoSpecAssertion,
+  validationDiagnostics: GeometryDiagnostic[],
+  evaluate: () => GeometryDiagnostic[],
+): GeoSpecAssertion =>
+  recordAssertion(assertion, validationDiagnostics.length > 0 ? validationDiagnostics : evaluate());
 
 const isVec3 = (value: unknown): value is Vec3 =>
   Array.isArray(value) && value.length === 3 && value.every((entry) => typeof entry === 'number');
@@ -366,11 +804,83 @@ const evaluateWatertight = (subject: unknown): GeometryDiagnostic[] => {
   ];
 };
 
-const meshMeasurementDetails = (kind: string, actual: unknown, expected: unknown): Record<string, unknown> => ({
+const validateComponentOverlapExpectation = (expected: unknown): GeometryDiagnostic[] => {
+  const matcher = 'toHaveNoComponentOverlap';
+  const accepted = '{ tolerance?: number }';
+  const normalized = expected ?? {};
+  const objectDiagnostics = validateObjectExpectation({
+    matcher,
+    expected: normalized,
+    allowed: ['tolerance'],
+    accepted,
+  });
+  if (!isRecord(normalized)) {
+    return objectDiagnostics;
+  }
+  return [
+    ...objectDiagnostics,
+    ...validateFiniteNumberField({ matcher, expected: normalized, field: 'tolerance', accepted }),
+  ];
+};
+
+const evaluateComponentOverlap = async (
+  subject: unknown,
+  expected: GeoSpecComponentOverlapExpectation,
+): Promise<GeometryDiagnostic[]> => {
+  if (!isGeometrySubject(subject)) {
+    return [unsupportedSubjectDiagnostic('toHaveNoComponentOverlap')];
+  }
+
+  const analysis = await analyzeMeshOverlap({
+    subject,
+    tolerance: expected.tolerance ?? defaultComponentOverlapTolerance,
+  });
+  if (!analysis.success) {
+    return analysis.diagnostics;
+  }
+  if (analysis.evidence.overlaps.length === 0) {
+    return [];
+  }
+
+  const pairSummary = analysis.evidence.overlaps
+    .map((overlap) => `${overlap.leftLabel} to ${overlap.rightLabel}: volume ${overlap.intersectionVolume}`)
+    .join('\n');
+  return [
+    {
+      code: 'GEOSPEC_COMPONENT_OVERLAP_DETECTED',
+      severity: 'error',
+      message: `Component overlap detected between ${analysis.evidence.overlaps.length} component pair(s):\n${pairSummary}`,
+      suggestion:
+        'Fix the assembly positions, clearances, boolean operations, or component dimensions so separate parts do not occupy the same solid volume.',
+      spatial: analysis.evidence.overlaps[0]?.witnessPoint
+        ? { center: analysis.evidence.overlaps[0].witnessPoint }
+        : undefined,
+      details: {
+        ...analysis.evidence,
+        ...subjectDiagnosticContext(subject),
+      },
+    },
+  ];
+};
+
+const subjectDiagnosticContext = (subject: GeometrySubject): Record<string, unknown> => ({
+  unit: subject.provenance.unit,
+  source: subject.provenance.source,
+  format: subject.provenance.source.format,
+  parameters: subject.provenance.parameters,
+});
+
+const meshMeasurementDetails = (options: {
+  subject: GeometrySubject;
+  kind: string;
+  actual: unknown;
+  expected: unknown;
+}): Record<string, unknown> => ({
   evidence: 'mesh',
-  measurement: kind,
-  actual,
-  expected,
+  measurement: options.kind,
+  actual: options.actual,
+  expected: options.expected,
+  ...subjectDiagnosticContext(options.subject),
 });
 
 const measurementEvidence = (expected: { evidence?: 'auto' | 'mesh' | 'brep' } | undefined): 'auto' | 'mesh' | 'brep' =>
@@ -416,7 +926,7 @@ const evaluateSurfaceArea = (subject: unknown, expected: GeoSpecSurfaceAreaExpec
       suggestion:
         'Check model dimensions, missing faces, unintended holes, or parameter values that affect surface scale.',
       details: {
-        ...meshMeasurementDetails('surfaceArea', actual, expected),
+        ...meshMeasurementDetails({ subject, kind: 'surfaceArea', actual, expected }),
         evidence: brepValue !== undefined && required !== 'mesh' ? 'brep' : 'mesh',
       },
     },
@@ -455,7 +965,7 @@ const evaluateVolume = (subject: unknown, expected: GeoSpecVolumeExpectation): G
       suggestion:
         'Check extrusion depth, boolean operations, shell thickness, and whether the mesh is closed and consistently oriented.',
       details: {
-        ...meshMeasurementDetails('volume', actual, expected),
+        ...meshMeasurementDetails({ subject, kind: 'volume', actual, expected }),
         evidence: brepValue !== undefined && required !== 'mesh' ? 'brep' : 'mesh',
       },
     },
@@ -496,7 +1006,7 @@ const evaluateMass = (subject: unknown, expected: GeoSpecMassExpectation): Geome
       message: `Mass mismatch:\n${failures.map((failure) => `- ${failure}`).join('\n')}`,
       suggestion: 'Check the model volume and the density used by this assertion.',
       details: {
-        ...meshMeasurementDetails('mass', actual, expected),
+        ...meshMeasurementDetails({ subject, kind: 'mass', actual, expected }),
         evidence: exactValue !== undefined && required !== 'mesh' ? 'brep' : 'mesh',
       },
     },
@@ -542,7 +1052,7 @@ const evaluateCenterOfMass = (subject: unknown, expected: GeoSpecCenterOfMassExp
       message: `Center of mass mismatch:\n${failures.map((failure) => `- ${failure}`).join('\n')}`,
       suggestion: 'Check asymmetric features, mirrored components, and parameter cases that shift the model balance.',
       spatial: { center: actual },
-      details: meshMeasurementDetails('centerOfMass', actual, expected),
+      details: meshMeasurementDetails({ subject, kind: 'centerOfMass', actual, expected }),
     },
   ];
 };
@@ -696,7 +1206,7 @@ const evaluatePlanarFace = (subject: unknown, expected: GeoSpecPlanarFaceExpecta
       severity: 'error',
       message: 'No planar face matched the expected normal, offset, and area constraints.',
       suggestion: 'Check the modeled plane orientation, extrusion depth, and whether exact BRep evidence is available.',
-      details: { evidence: 'brep', expected, actual: faces },
+      details: { evidence: 'brep', expected, actual: faces, ...subjectDiagnosticContext(subject) },
     },
   ];
 };
@@ -734,7 +1244,7 @@ const evaluateCylindricalFace = (
       severity: 'error',
       message: 'No cylindrical face matched the expected radius and axis.',
       suggestion: 'Check hole, boss, or shaft radius and whether exact BRep evidence is available.',
-      details: { evidence: 'brep', expected, actual: faces },
+      details: { evidence: 'brep', expected, actual: faces, ...subjectDiagnosticContext(subject) },
     },
   ];
 };
@@ -790,7 +1300,7 @@ const evaluateCircularHole = (subject: unknown, expected: GeoSpecCircularHoleExp
       message: `No circular hole matched the expected diameter, through-state, axis, and center. ${actualSummary}`,
       suggestion:
         'Check the hole diameter, placement, cut direction, and whether the cut tool fully spans the part when a through-hole is expected.',
-      details: { evidence: 'brep', expected, actual: holes },
+      details: { evidence: 'brep', expected, actual: holes, ...subjectDiagnosticContext(subject) },
     },
   ];
 };
@@ -825,7 +1335,7 @@ const evaluateChamferFeature = (subject: unknown, expected: GeoSpecChamferFeatur
       severity: 'error',
       message: 'No chamfer feature matched the expected distance and selection.',
       suggestion: 'Check the selected edge/perimeter, chamfer operation, and whether exact BRep evidence is available.',
-      details: { evidence: 'brep', expected, actual: features },
+      details: { evidence: 'brep', expected, actual: features, ...subjectDiagnosticContext(subject) },
     },
   ];
 };
@@ -860,7 +1370,7 @@ const evaluateMinimumWallThickness = (
       message: `Minimum wall thickness mismatch:\n${failures.map((failure) => `- ${failure}`).join('\n')}`,
       suggestion: 'Thicken the shell, reduce interior cutouts, or update the expected manufacturing constraint.',
       spatial: { center: thickness.location },
-      details: { evidence: 'brep', expected, actual: thickness },
+      details: { evidence: 'brep', expected, actual: thickness, ...subjectDiagnosticContext(subject) },
     },
   ];
 };
@@ -882,7 +1392,7 @@ const evaluateValidBrep = (subject: unknown): GeometryDiagnostic[] => {
       severity: 'error',
       message: 'BRep validity check failed.',
       suggestion: 'Inspect failed booleans, missing caps, self-intersections, and imported STEP diagnostics.',
-      details: validity,
+      details: { actual: validity, ...subjectDiagnosticContext(subject) },
     },
   ];
 };
@@ -913,7 +1423,7 @@ const evaluateTopologyCounts = (subject: unknown, expected: GeoSpecTopologyCount
       severity: 'error',
       message: `Topology counts mismatch:\n${failures.map((failure) => `- ${failure}`).join('\n')}`,
       suggestion: 'Check whether features were added, removed, fused, or failed during STEP/BRep generation.',
-      details: { evidence: 'brep', expected, actual: counts },
+      details: { evidence: 'brep', expected, actual: counts, ...subjectDiagnosticContext(subject) },
     },
   ];
 };
@@ -934,7 +1444,12 @@ const evaluateStepUnits = (subject: unknown, expected: GeoSpecStepUnitsExpectati
       severity: 'error',
       message: `STEP units mismatch: expected ${expected.unit}, got ${subject.step.unit ?? 'unknown'}.`,
       suggestion: 'Check export unit settings and loader unit options.',
-      details: { expected, actual: subject.step.unit, readStrategy: subject.step.readStrategy },
+      details: {
+        expected,
+        actual: subject.step.unit,
+        readStrategy: subject.step.readStrategy,
+        ...subjectDiagnosticContext(subject),
+      },
     },
   ];
 };
@@ -972,7 +1487,7 @@ const evaluateProductStructure = (
       severity: 'error',
       message: `Product structure mismatch:\n${failures.map((failure) => `- ${failure}`).join('\n')}`,
       suggestion: 'Check named exports, assembly shape names, and STEP product metadata.',
-      details: { expected, actual: productStructure },
+      details: { expected, actual: productStructure, ...subjectDiagnosticContext(subject) },
     },
   ];
 };
@@ -1021,7 +1536,7 @@ const evaluateCircularHolePattern = (
       severity: 'error',
       message: 'No circular hole pattern matched the expected count, diameter, axis, and bolt circle constraints.',
       suggestion: 'Check repeated hole placement, bolt circle radius, and through-hole construction.',
-      details: { evidence: 'brep', expected, actual: patterns },
+      details: { evidence: 'brep', expected, actual: patterns, ...subjectDiagnosticContext(subject) },
     },
   ];
 };
@@ -1050,7 +1565,7 @@ const evaluateFilletFeature = (subject: unknown, expected: GeoSpecFilletFeatureE
       severity: 'error',
       message: 'No fillet feature matched the expected radius and selection.',
       suggestion: 'Check the selected edge/perimeter, fillet operation, and whether exact BRep evidence is available.',
-      details: { evidence: 'brep', expected, actual: features },
+      details: { evidence: 'brep', expected, actual: features, ...subjectDiagnosticContext(subject) },
     },
   ];
 };
@@ -1059,7 +1574,7 @@ const recordAssertion = (assertion: GeoSpecAssertion, diagnostics: GeometryDiagn
   assertion.passed = diagnostics.length === 0;
   assertion.diagnostics = diagnostics;
   if (diagnostics.length > 0) {
-    throw new Error(diagnostics.map((diagnostic) => diagnostic.message).join('\n'));
+    throw new GeoSpecAssertionError(diagnostics);
   }
   return assertion;
 };
@@ -1102,13 +1617,7 @@ const isGeoSpecCollector = (value: unknown): value is GeoSpecCollector =>
 const isGeoSpecTestCase = (value: unknown): value is GeoSpecTestCase =>
   typeof value === 'object' && value !== null && 'suite' in value && 'name' in value && 'assertions' in value;
 
-const setActiveTest = (test: GeoSpecTestCase | undefined): void => {
-  if (test === undefined) {
-    Reflect.deleteProperty(geospecGlobal, activeTestGlobalKey);
-    return;
-  }
-  geospecGlobal[activeTestGlobalKey] = test;
-};
+const fullTestName = (test: Pick<GeoSpecTestCase, 'suite' | 'name'>): string => [...test.suite, test.name].join(' > ');
 
 /**
  * Create a collector used by the embedded GeoSpec runner.
@@ -1118,16 +1627,20 @@ const setActiveTest = (test: GeoSpecTestCase | undefined): void => {
 export const createCollector = (): GeoSpecCollector => {
   const suite: string[] = [];
   const tests: GeoSpecTestCase[] = [];
-  const pending: Array<Promise<unknown>> = [];
+  const definitionPending: Array<Promise<unknown>> = [];
+  const scheduled: Array<{ test: GeoSpecTestCase; function_: GeoSpecTestFunction }> = [];
+  const pendingAssertions = new WeakMap<GeoSpecTestCase, Array<Promise<void>>>();
+  let activeTest: GeoSpecTestCase | undefined;
+  let executed = false;
 
-  const trackPending = (
+  const trackDefinitionPending = (
     operation: PromiseLike<unknown>,
     handlers: {
       onError(error: unknown): void;
       onFinally(): void;
     },
   ): void => {
-    pending.push(
+    definitionPending.push(
       (async () => {
         try {
           await operation;
@@ -1150,20 +1663,40 @@ export const createCollector = (): GeoSpecCollector => {
     });
   };
 
+  const recordAsyncAssertion = (
+    test: GeoSpecTestCase,
+    assertion: GeoSpecAssertion,
+    evaluate: () => Promise<GeometryDiagnostic[]>,
+  ): GeoSpecAssertion => {
+    const pending = (async () => {
+      const diagnostics = await evaluate();
+      assertion.passed = diagnostics.length === 0;
+      assertion.diagnostics = diagnostics;
+      if (diagnostics.length > 0) {
+        throw new GeoSpecAssertionError(diagnostics);
+      }
+    })();
+    const existing = pendingAssertions.get(test) ?? [];
+    existing.push(pending);
+    pendingAssertions.set(test, existing);
+    return assertion;
+  };
+
   return {
     describe(name, function_) {
       suite.push(name);
       try {
         const result = function_();
         if (isPromiseLike(result)) {
-          trackPending(result, {
+          const capturedSuite = [...suite];
+          trackDefinitionPending(result, {
             onError(error) {
               tests.push({
-                suite: [...suite],
+                suite: capturedSuite,
                 name,
                 assertions: [],
                 status: 'failed',
-                diagnostics: [createErrorDiagnostic(error)],
+                diagnostics: createErrorDiagnostics(error),
               });
             },
             onFinally() {
@@ -1178,7 +1711,7 @@ export const createCollector = (): GeoSpecCollector => {
           name,
           assertions: [],
           status: 'failed',
-          diagnostics: [createErrorDiagnostic(error)],
+          diagnostics: createErrorDiagnostics(error),
         });
       }
       suite.pop();
@@ -1197,29 +1730,7 @@ export const createCollector = (): GeoSpecCollector => {
         diagnostics: [],
       };
       tests.push(test);
-      const previousTest = geospecGlobal[activeTestGlobalKey];
-      setActiveTest(test);
-      const restore = (): void => {
-        setActiveTest(isGeoSpecTestCase(previousTest) ? previousTest : undefined);
-      };
-
-      try {
-        const result = function_();
-        if (isPromiseLike(result)) {
-          trackPending(result, {
-            onError(error) {
-              test.status = 'failed';
-              test.diagnostics.push(createErrorDiagnostic(error));
-            },
-            onFinally: restore,
-          });
-          return;
-        }
-      } catch (error) {
-        test.status = 'failed';
-        test.diagnostics.push(createErrorDiagnostic(error));
-      }
-      restore();
+      scheduled.push({ test, function_ });
     },
 
     itSkip(name) {
@@ -1229,7 +1740,6 @@ export const createCollector = (): GeoSpecCollector => {
     expectGeo(subject) {
       return {
         toHaveBoundingBox(first, second) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
@@ -1245,7 +1755,6 @@ export const createCollector = (): GeoSpecCollector => {
         },
 
         toHaveConnectedComponents(expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
@@ -1260,7 +1769,6 @@ export const createCollector = (): GeoSpecCollector => {
         },
 
         toBeWatertight() {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
@@ -1274,105 +1782,219 @@ export const createCollector = (): GeoSpecCollector => {
           return recordAssertion(assertion, evaluateWatertight(subject));
         },
 
+        toHaveNoComponentOverlap(expected) {
+          if (!isGeoSpecTestCase(activeTest)) {
+            throw new Error('expectGeo() must be called inside it().');
+          }
+
+          const normalizedExpected = expected ?? {};
+          const assertion: GeoSpecAssertion = {
+            kind: 'componentOverlap',
+            subject,
+            expected: normalizedExpected,
+          };
+          activeTest.assertions.push(assertion);
+          const validationDiagnostics = validateComponentOverlapExpectation(normalizedExpected);
+          if (validationDiagnostics.length > 0) {
+            return recordAssertion(assertion, validationDiagnostics);
+          }
+          return recordAsyncAssertion(activeTest, assertion, async () =>
+            evaluateComponentOverlap(subject, normalizedExpected),
+          );
+        },
+
         toHaveSurfaceArea(expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'surfaceArea', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluateSurfaceArea(subject, expected));
+          const accepted =
+            '{ value: number | { greaterThan?: number }, tolerance?: number, evidence?: "auto" | "mesh" | "brep" }';
+          const objectDiagnostics = validateObjectExpectation({
+            matcher: 'toHaveSurfaceArea',
+            expected,
+            allowed: ['value', 'tolerance', 'evidence'],
+            required: ['value'],
+            accepted,
+          });
+          const fieldDiagnostics = isRecord(expected)
+            ? [
+                ...validateNumericExpectation({
+                  matcher: 'toHaveSurfaceArea',
+                  path: '$.value',
+                  expected: expected.value,
+                  accepted,
+                }),
+                ...validateFiniteNumberField({ matcher: 'toHaveSurfaceArea', expected, field: 'tolerance', accepted }),
+              ]
+            : [];
+          return recordValidatedAssertion(assertion, [...objectDiagnostics, ...fieldDiagnostics], () =>
+            evaluateSurfaceArea(subject, expected),
+          );
         },
 
         toHaveVolume(expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'volume', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluateVolume(subject, expected));
+          const accepted =
+            '{ value: number | { lessThan?: number }, tolerance?: number, evidence?: "auto" | "mesh" | "brep" }';
+          const objectDiagnostics = validateObjectExpectation({
+            matcher: 'toHaveVolume',
+            expected,
+            allowed: ['value', 'tolerance', 'evidence'],
+            required: ['value'],
+            accepted,
+          });
+          const fieldDiagnostics = isRecord(expected)
+            ? [
+                ...validateNumericExpectation({
+                  matcher: 'toHaveVolume',
+                  path: '$.value',
+                  expected: expected.value,
+                  accepted,
+                }),
+                ...validateFiniteNumberField({ matcher: 'toHaveVolume', expected, field: 'tolerance', accepted }),
+              ]
+            : [];
+          return recordValidatedAssertion(assertion, [...objectDiagnostics, ...fieldDiagnostics], () =>
+            evaluateVolume(subject, expected),
+          );
         },
 
         toHaveMass(expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'mass', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluateMass(subject, expected));
+          const accepted =
+            '{ value: number | { greaterThan?: number }, density?: number, tolerance?: number, evidence?: "auto" | "mesh" | "brep" }';
+          const objectDiagnostics = validateObjectExpectation({
+            matcher: 'toHaveMass',
+            expected,
+            allowed: ['value', 'density', 'tolerance', 'evidence'],
+            required: ['value'],
+            accepted,
+          });
+          const fieldDiagnostics = isRecord(expected)
+            ? [
+                ...validateNumericExpectation({
+                  matcher: 'toHaveMass',
+                  path: '$.value',
+                  expected: expected.value,
+                  accepted,
+                }),
+                ...validateFiniteNumberField({ matcher: 'toHaveMass', expected, field: 'density', accepted }),
+                ...validateFiniteNumberField({ matcher: 'toHaveMass', expected, field: 'tolerance', accepted }),
+              ]
+            : [];
+          return recordValidatedAssertion(assertion, [...objectDiagnostics, ...fieldDiagnostics], () =>
+            evaluateMass(subject, expected),
+          );
         },
 
         toHaveCenterOfMass(expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'centerOfMass', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluateCenterOfMass(subject, expected));
+          const accepted =
+            '{ point: { x?: number, y?: number, z?: number }, tolerance?: number, evidence?: "auto" | "mesh" | "brep" }';
+          const objectDiagnostics = validateObjectExpectation({
+            matcher: 'toHaveCenterOfMass',
+            expected,
+            allowed: ['point', 'tolerance', 'evidence'],
+            required: ['point'],
+            accepted,
+          });
+          const fieldDiagnostics = isRecord(expected)
+            ? [
+                ...validatePointExpectation({
+                  matcher: 'toHaveCenterOfMass',
+                  path: '$.point',
+                  expected: expected.point,
+                  accepted,
+                }),
+                ...validateFiniteNumberField({ matcher: 'toHaveCenterOfMass', expected, field: 'tolerance', accepted }),
+              ]
+            : [];
+          return recordValidatedAssertion(assertion, [...objectDiagnostics, ...fieldDiagnostics], () =>
+            evaluateCenterOfMass(subject, expected),
+          );
         },
 
         toHaveChamferDistanceTo(reference, expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'chamferDistance', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluateChamferDistance(subject, reference, expected));
+          const accepted =
+            '{ mean?: number | { lessThan?: number }, max?: number | { lessThan?: number }, p95?: number | { lessThan?: number }, samples?: number, seed?: number }';
+          return recordValidatedAssertion(assertion, validateChamferDistanceExpectation(expected, accepted), () =>
+            evaluateChamferDistance(subject, reference, expected),
+          );
         },
 
         toHaveHausdorffDistanceTo(reference, expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'hausdorffDistance', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(
+          const accepted =
+            '{ value: number | { lessThanOrEqual?: number }, samples?: number, seed?: number, tolerance?: number }';
+          return recordValidatedAssertion(
             assertion,
-            evaluateDistanceSummary({
-              subject,
-              reference,
-              expected,
-              metric: 'max',
-              matcher: 'toHaveHausdorffDistanceTo',
-              code: 'HAUSDORFF_DISTANCE_MISMATCH',
-            }),
+            validateMinimumDistanceExpectation('toHaveHausdorffDistanceTo', expected, accepted),
+            () =>
+              evaluateDistanceSummary({
+                subject,
+                reference,
+                expected,
+                metric: 'max',
+                matcher: 'toHaveHausdorffDistanceTo',
+                code: 'HAUSDORFF_DISTANCE_MISMATCH',
+              }),
           );
         },
 
         toHaveMinimumDistanceTo(reference, expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'minimumDistance', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(
+          const accepted =
+            '{ value: number | { greaterThanOrEqual?: number }, samples?: number, seed?: number, tolerance?: number }';
+          return recordValidatedAssertion(
             assertion,
-            evaluateDistanceSummary({
-              subject,
-              reference,
-              expected,
-              metric: 'min',
-              matcher: 'toHaveMinimumDistanceTo',
-              code: 'MINIMUM_DISTANCE_MISMATCH',
-            }),
+            validateMinimumDistanceExpectation('toHaveMinimumDistanceTo', expected, accepted),
+            () =>
+              evaluateDistanceSummary({
+                subject,
+                reference,
+                expected,
+                metric: 'min',
+                matcher: 'toHaveMinimumDistanceTo',
+                code: 'MINIMUM_DISTANCE_MISMATCH',
+              }),
           );
         },
 
         toBeValidBrep() {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
@@ -1383,119 +2005,434 @@ export const createCollector = (): GeoSpecCollector => {
         },
 
         toHaveTopologyCounts(expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'topologyCounts', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluateTopologyCounts(subject, expected));
+          const accepted =
+            '{ faces?: number | { greaterThan?: number }, edges?: number, solids?: number, tolerance?: number }';
+          const objectDiagnostics = validateObjectExpectation({
+            matcher: 'toHaveTopologyCounts',
+            expected,
+            allowed: ['vertices', 'edges', 'wires', 'faces', 'shells', 'solids', 'compounds', 'tolerance'],
+            accepted,
+          });
+          const fieldDiagnostics = isRecord(expected)
+            ? [
+                ...(['vertices', 'edges', 'wires', 'faces', 'shells', 'solids', 'compounds'] as const).flatMap(
+                  (field) =>
+                    expected[field] === undefined
+                      ? []
+                      : validateNumericExpectation({
+                          matcher: 'toHaveTopologyCounts',
+                          path: `$.${field}`,
+                          expected: expected[field],
+                          accepted,
+                        }),
+                ),
+                ...validateFiniteNumberField({
+                  matcher: 'toHaveTopologyCounts',
+                  expected,
+                  field: 'tolerance',
+                  accepted,
+                }),
+              ]
+            : [];
+          return recordValidatedAssertion(assertion, [...objectDiagnostics, ...fieldDiagnostics], () =>
+            evaluateTopologyCounts(subject, expected),
+          );
         },
 
         toHaveStepUnits(expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'stepUnits', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluateStepUnits(subject, expected));
+          const accepted = '{ unit: string }';
+          const objectDiagnostics = validateObjectExpectation({
+            matcher: 'toHaveStepUnits',
+            expected,
+            allowed: ['unit'],
+            required: ['unit'],
+            accepted,
+          });
+          const fieldDiagnostics = isRecord(expected)
+            ? validateStringField({ matcher: 'toHaveStepUnits', expected, field: 'unit', accepted })
+            : [];
+          return recordValidatedAssertion(assertion, [...objectDiagnostics, ...fieldDiagnostics], () =>
+            evaluateStepUnits(subject, expected),
+          );
         },
 
         toHaveProductStructure(expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'productStructure', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluateProductStructure(subject, expected));
+          const accepted = '{ names?: string[], count?: number | { greaterThan?: number } }';
+          const objectDiagnostics = validateObjectExpectation({
+            matcher: 'toHaveProductStructure',
+            expected,
+            allowed: ['names', 'count'],
+            accepted,
+          });
+          const fieldDiagnostics = isRecord(expected)
+            ? [
+                ...(expected.count === undefined
+                  ? []
+                  : validateNumericExpectation({
+                      matcher: 'toHaveProductStructure',
+                      path: '$.count',
+                      expected: expected.count,
+                      accepted,
+                    })),
+                ...(expected.names === undefined ||
+                (Array.isArray(expected.names) && expected.names.every((name) => typeof name === 'string'))
+                  ? []
+                  : [
+                      invalidExpectationDiagnostic({
+                        matcher: 'toHaveProductStructure',
+                        path: '$.names',
+                        message: 'expected names to be a string array.',
+                        expected: expected.names,
+                        accepted,
+                      }),
+                    ]),
+              ]
+            : [];
+          return recordValidatedAssertion(assertion, [...objectDiagnostics, ...fieldDiagnostics], () =>
+            evaluateProductStructure(subject, expected),
+          );
         },
 
         toHavePlanarFace(expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'planarFace', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluatePlanarFace(subject, expected));
+          const accepted =
+            '{ normal: { x?: number, y?: number, z?: number }, offset: number, area?: number | { greaterThan?: number }, tolerance?: number }';
+          const objectDiagnostics = validateObjectExpectation({
+            matcher: 'toHavePlanarFace',
+            expected,
+            allowed: ['normal', 'offset', 'area', 'tolerance'],
+            required: ['normal', 'offset'],
+            accepted,
+          });
+          const fieldDiagnostics = isRecord(expected)
+            ? [
+                ...validatePointExpectation({
+                  matcher: 'toHavePlanarFace',
+                  path: '$.normal',
+                  expected: expected.normal,
+                  accepted,
+                }),
+                ...validateFiniteNumberField({ matcher: 'toHavePlanarFace', expected, field: 'offset', accepted }),
+                ...validateFiniteNumberField({ matcher: 'toHavePlanarFace', expected, field: 'tolerance', accepted }),
+                ...(expected.area === undefined
+                  ? []
+                  : validateNumericExpectation({
+                      matcher: 'toHavePlanarFace',
+                      path: '$.area',
+                      expected: expected.area,
+                      accepted,
+                    })),
+              ]
+            : [];
+          return recordValidatedAssertion(assertion, [...objectDiagnostics, ...fieldDiagnostics], () =>
+            evaluatePlanarFace(subject, expected),
+          );
         },
 
         toHaveCylindricalFace(expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'cylindricalFace', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluateCylindricalFace(subject, expected));
+          const accepted = "{ radius: number, axis: 'x' | 'y' | 'z', tolerance?: number }";
+          const objectDiagnostics = validateObjectExpectation({
+            matcher: 'toHaveCylindricalFace',
+            expected,
+            allowed: ['radius', 'axis', 'tolerance'],
+            required: ['radius', 'axis'],
+            accepted,
+          });
+          const fieldDiagnostics = isRecord(expected)
+            ? [
+                ...validateFiniteNumberField({ matcher: 'toHaveCylindricalFace', expected, field: 'radius', accepted }),
+                ...validateFiniteNumberField({
+                  matcher: 'toHaveCylindricalFace',
+                  expected,
+                  field: 'tolerance',
+                  accepted,
+                }),
+                ...validateAxisField({ matcher: 'toHaveCylindricalFace', expected, accepted }),
+              ]
+            : [];
+          return recordValidatedAssertion(assertion, [...objectDiagnostics, ...fieldDiagnostics], () =>
+            evaluateCylindricalFace(subject, expected),
+          );
         },
 
         toHaveCircularHole(expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'circularHole', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluateCircularHole(subject, expected));
+          const accepted =
+            "{ diameter: number, through?: boolean, axis?: 'x' | 'y' | 'z', center?: { x?: number, y?: number, z?: number }, tolerance?: number }";
+          const objectDiagnostics = validateObjectExpectation({
+            matcher: 'toHaveCircularHole',
+            expected,
+            allowed: ['diameter', 'through', 'axis', 'center', 'tolerance'],
+            required: ['diameter'],
+            accepted,
+          });
+          const fieldDiagnostics = isRecord(expected)
+            ? [
+                ...validateFiniteNumberField({ matcher: 'toHaveCircularHole', expected, field: 'diameter', accepted }),
+                ...validateFiniteNumberField({ matcher: 'toHaveCircularHole', expected, field: 'tolerance', accepted }),
+                ...validateBooleanField({
+                  matcher: 'toHaveCircularHole',
+                  expected,
+                  field: 'through',
+                  accepted,
+                  optional: true,
+                }),
+                ...validateAxisField({ matcher: 'toHaveCircularHole', expected, accepted, optional: true }),
+                ...validatePointExpectation({
+                  matcher: 'toHaveCircularHole',
+                  path: '$.center',
+                  expected: expected.center,
+                  accepted,
+                  optional: true,
+                }),
+              ]
+            : [];
+          return recordValidatedAssertion(assertion, [...objectDiagnostics, ...fieldDiagnostics], () =>
+            evaluateCircularHole(subject, expected),
+          );
         },
 
         toHaveCircularHolePattern(expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'circularHolePattern', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluateCircularHolePattern(subject, expected));
+          const accepted =
+            "{ count: number, holeDiameter: number, boltCircleDiameter?: number, axis?: 'x' | 'y' | 'z', center?: { x?: number, y?: number, z?: number }, tolerance?: number }";
+          const objectDiagnostics = validateObjectExpectation({
+            matcher: 'toHaveCircularHolePattern',
+            expected,
+            allowed: ['count', 'holeDiameter', 'boltCircleDiameter', 'axis', 'center', 'tolerance'],
+            required: ['count', 'holeDiameter'],
+            accepted,
+          });
+          const fieldDiagnostics = isRecord(expected)
+            ? [
+                ...validatePositiveIntegerField({
+                  matcher: 'toHaveCircularHolePattern',
+                  expected,
+                  field: 'count',
+                  accepted,
+                }),
+                ...validateFiniteNumberField({
+                  matcher: 'toHaveCircularHolePattern',
+                  expected,
+                  field: 'holeDiameter',
+                  accepted,
+                }),
+                ...validateFiniteNumberField({
+                  matcher: 'toHaveCircularHolePattern',
+                  expected,
+                  field: 'boltCircleDiameter',
+                  accepted,
+                }),
+                ...validateFiniteNumberField({
+                  matcher: 'toHaveCircularHolePattern',
+                  expected,
+                  field: 'tolerance',
+                  accepted,
+                }),
+                ...validateAxisField({
+                  matcher: 'toHaveCircularHolePattern',
+                  expected,
+                  accepted,
+                  optional: true,
+                }),
+                ...validatePointExpectation({
+                  matcher: 'toHaveCircularHolePattern',
+                  path: '$.center',
+                  expected: expected.center,
+                  accepted,
+                  optional: true,
+                }),
+              ]
+            : [];
+          return recordValidatedAssertion(assertion, [...objectDiagnostics, ...fieldDiagnostics], () =>
+            evaluateCircularHolePattern(subject, expected),
+          );
         },
 
         toHaveChamferFeature(expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'chamferFeature', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluateChamferFeature(subject, expected));
+          const accepted = '{ distance: number, selection?: string, tolerance?: number }';
+          const objectDiagnostics = validateObjectExpectation({
+            matcher: 'toHaveChamferFeature',
+            expected,
+            allowed: ['distance', 'selection', 'tolerance'],
+            required: ['distance'],
+            accepted,
+          });
+          const fieldDiagnostics = isRecord(expected)
+            ? [
+                ...validateFiniteNumberField({
+                  matcher: 'toHaveChamferFeature',
+                  expected,
+                  field: 'distance',
+                  accepted,
+                }),
+                ...validateStringField({
+                  matcher: 'toHaveChamferFeature',
+                  expected,
+                  field: 'selection',
+                  accepted,
+                  optional: true,
+                }),
+                ...validateFiniteNumberField({
+                  matcher: 'toHaveChamferFeature',
+                  expected,
+                  field: 'tolerance',
+                  accepted,
+                }),
+              ]
+            : [];
+          return recordValidatedAssertion(assertion, [...objectDiagnostics, ...fieldDiagnostics], () =>
+            evaluateChamferFeature(subject, expected),
+          );
         },
 
         toHaveFilletFeature(expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'filletFeature', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluateFilletFeature(subject, expected));
+          const accepted = '{ radius: number, selection?: string, tolerance?: number }';
+          const objectDiagnostics = validateObjectExpectation({
+            matcher: 'toHaveFilletFeature',
+            expected,
+            allowed: ['radius', 'selection', 'tolerance'],
+            required: ['radius'],
+            accepted,
+          });
+          const fieldDiagnostics = isRecord(expected)
+            ? [
+                ...validateFiniteNumberField({ matcher: 'toHaveFilletFeature', expected, field: 'radius', accepted }),
+                ...validateStringField({
+                  matcher: 'toHaveFilletFeature',
+                  expected,
+                  field: 'selection',
+                  accepted,
+                  optional: true,
+                }),
+                ...validateFiniteNumberField({
+                  matcher: 'toHaveFilletFeature',
+                  expected,
+                  field: 'tolerance',
+                  accepted,
+                }),
+              ]
+            : [];
+          return recordValidatedAssertion(assertion, [...objectDiagnostics, ...fieldDiagnostics], () =>
+            evaluateFilletFeature(subject, expected),
+          );
         },
 
         toHaveMinimumWallThickness(expected) {
-          const activeTest = geospecGlobal[activeTestGlobalKey];
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const assertion: GeoSpecAssertion = { kind: 'minimumWallThickness', subject, expected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluateMinimumWallThickness(subject, expected));
+          const accepted = '{ value: number | { greaterThanOrEqual?: number }, tolerance?: number }';
+          const objectDiagnostics = validateObjectExpectation({
+            matcher: 'toHaveMinimumWallThickness',
+            expected,
+            allowed: ['value', 'tolerance'],
+            required: ['value'],
+            accepted,
+          });
+          const fieldDiagnostics = isRecord(expected)
+            ? [
+                ...validateNumericExpectation({
+                  matcher: 'toHaveMinimumWallThickness',
+                  path: '$.value',
+                  expected: expected.value,
+                  accepted,
+                }),
+                ...validateFiniteNumberField({
+                  matcher: 'toHaveMinimumWallThickness',
+                  expected,
+                  field: 'tolerance',
+                  accepted,
+                }),
+              ]
+            : [];
+          return recordValidatedAssertion(assertion, [...objectDiagnostics, ...fieldDiagnostics], () =>
+            evaluateMinimumWallThickness(subject, expected),
+          );
         },
       };
     },
 
-    async waitForCompletion(testTimeout) {
-      await withTimeout(Promise.allSettled(pending), testTimeout);
+    async waitForCompletion(testTimeout, testNamePattern) {
+      if (executed) {
+        return;
+      }
+      executed = true;
+      await withTimeout(Promise.allSettled(definitionPending), testTimeout);
+      const normalizedPattern = testNamePattern?.toLowerCase();
+      for (const scheduledTest of scheduled) {
+        if (normalizedPattern && !fullTestName(scheduledTest.test).toLowerCase().includes(normalizedPattern)) {
+          continue;
+        }
+
+        const previousTest = activeTest;
+        activeTest = scheduledTest.test;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- GeoSpec CAD tests run serially so model-loader state and native resources cannot cross-wire.
+          await withTimeout(Promise.resolve(scheduledTest.function_()), testTimeout);
+          // oxlint-disable-next-line no-await-in-loop -- Assertions must settle before the next CAD test mutates runner bindings.
+          await withTimeout(Promise.all(pendingAssertions.get(scheduledTest.test) ?? []), testTimeout);
+        } catch (error) {
+          scheduledTest.test.status = 'failed';
+          scheduledTest.test.diagnostics.push(...createErrorDiagnostics(error));
+        } finally {
+          activeTest = previousTest;
+        }
+      }
     },
 
     tests,
@@ -1507,7 +2444,6 @@ export const createCollector = (): GeoSpecCollector => {
  */
 export const clearCollectorGlobals = (): void => {
   Reflect.deleteProperty(geospecGlobal, collectorGlobalKey);
-  Reflect.deleteProperty(geospecGlobal, activeTestGlobalKey);
 };
 
 /**

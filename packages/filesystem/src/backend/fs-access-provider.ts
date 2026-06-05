@@ -14,6 +14,16 @@ import { streamChunkSize } from '#backend/stream-utils.js';
 
 const handleCacheMaxEntries = 10_000;
 
+type FileSystemDirectoryEntryHandle = FileSystemDirectoryHandle | FileSystemFileHandle;
+type IterableFileSystemDirectoryHandle = FileSystemDirectoryHandle & {
+  entries(): AsyncIterableIterator<[string, FileSystemDirectoryEntryHandle]>;
+};
+
+const directoryEntries = (
+  handle: FileSystemDirectoryHandle,
+): AsyncIterableIterator<[string, FileSystemDirectoryEntryHandle]> =>
+  (handle as IterableFileSystemDirectoryHandle).entries();
+
 /**
  * Filesystem provider backed by the File System Access API.
  *
@@ -73,7 +83,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   public async readdir(path: string): Promise<string[]> {
     const directoryHandle = await this._resolveDirectoryHandle(path);
     const entries: string[] = [];
-    for await (const [name] of directoryHandle.entries()) {
+    for await (const [name] of directoryEntries(directoryHandle)) {
       entries.push(name);
     }
     return entries;
@@ -88,7 +98,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
     const directoryHandle = await this._resolveDirectoryHandle(path);
     const result: Array<{ name: string } & FileStat> = [];
-    for await (const [name, handle] of directoryHandle.entries()) {
+    for await (const [name, handle] of directoryEntries(directoryHandle)) {
       if (handle.kind === 'directory') {
         result.push({ name, type: 'dir', size: 0, mtimeMs: Date.now() });
       } else {
@@ -422,7 +432,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       destinationHandle = await destinationHandle.getDirectoryHandle(segment, { create: true });
     }
 
-    for await (const [entryName, entryHandle] of sourceHandle.entries()) {
+    for await (const [entryName, entryHandle] of directoryEntries(sourceHandle)) {
       if (entryHandle.kind === 'directory') {
         await this._copyDirectoryContents(`${source}/${entryName}`, `${destination}/${entryName}`);
       } else {

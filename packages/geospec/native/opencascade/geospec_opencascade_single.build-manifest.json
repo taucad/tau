@@ -1,13 +1,18 @@
 {
   "schema": "build-manifest-v2",
-  "timestamp": "2026-06-02T01:21:57Z",
+  "timestamp": "2026-06-03T23:16:28Z",
   "yaml_config": "geospec.single.yml",
-  "yaml_hash": "9ded6a603944",
+  "yaml_hash": "c89eaf86db60",
   "validation_passed": true,
   "symbols": {
     "requested": [
       "BRepAdaptor_Surface",
+      "BRepAlgoAPI_Common",
       "BRepBndLib",
+      "BRepBuilderAPI_MakeFace",
+      "BRepBuilderAPI_MakePolygon",
+      "BRepBuilderAPI_MakeSolid",
+      "BRepBuilderAPI_Sewing",
       "BRepCheck_Analyzer",
       "BRepGProp",
       "BRepMesh_IncrementalMesh",
@@ -16,6 +21,9 @@
       "GProp_GProps",
       "GeoSpecMeshDistanceStats",
       "GeoSpecMeshMetrics",
+      "GeoSpecMeshOverlapResult",
+      "GeoSpecNativeVec3",
+      "GeoSpecPoint",
       "GeoSpecStepReadResult",
       "GeoSpecStepStreamReader",
       "GeomAbs_SurfaceType",
@@ -31,6 +39,8 @@
       "TopoDS",
       "TopoDS_Face",
       "TopoDS_Shape",
+      "TopoDS_Shell",
+      "TopoDS_Solid",
       "gp_Cylinder",
       "gp_Dir",
       "gp_Pln",
@@ -38,11 +48,11 @@
       "gp_Vec",
       "gp_XYZ"
     ],
-    "compiled": 5330,
+    "compiled": 5331,
     "missing": [],
     "alias_resolved": [],
     "builtin": ["TopoDS"],
-    "extra_compiled": 5300,
+    "extra_compiled": 5291,
     "pass": true
   },
   "outputs": [
@@ -50,9 +60,9 @@
       "name": "geospec_opencascade_single.js",
       "wasm_file": "geospec_opencascade_single.wasm",
       "wasm_exists": true,
-      "wasm_size": 10500224,
+      "wasm_size": 12988785,
       "js_exists": true,
-      "js_size": 60241,
+      "js_size": 60586,
       "pass": true
     }
   ],

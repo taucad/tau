@@ -179,6 +179,42 @@ describe('testFailureSchema / testPassSchema', () => {
     expect(testFailureSchema.parse(data)).toEqual(data);
   });
 
+  it('should round-trip GeoSpec matcher diagnostics on failures', () => {
+    const data = testFailureSchema.parse({
+      id: 'main.geospec.ts:assembly > should have no overlap',
+      requirement: 'assembly > should have no overlap',
+      reason: 'Component overlap detected.',
+      suggestion: 'Fix component placement.',
+      targetFile: 'main.geospec.ts',
+      diagnostics: [
+        {
+          code: 'GEOSPEC_COMPONENT_OVERLAP_DETECTED',
+          severity: 'error',
+          message: 'GeoSpec found 1 overlapping component pair.',
+          suggestion: 'Fix component placement.',
+          spatial: { center: [1, 2, 3] },
+          details: {
+            overlaps: [
+              {
+                leftLabel: 'sun#0',
+                rightLabel: 'ring#0',
+                intersectionVolume: 12.5,
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(data.diagnostics?.[0]).toEqual(
+      expect.objectContaining({
+        code: 'GEOSPEC_COMPONENT_OVERLAP_DETECTED',
+        spatial: { center: [1, 2, 3] },
+      }),
+    );
+    expect(testFailureSchema.parse(data)).toEqual(data);
+  });
+
   it('should require targetFile on every pass', () => {
     const missing = testPassSchema.safeParse({
       id: 'req_x',

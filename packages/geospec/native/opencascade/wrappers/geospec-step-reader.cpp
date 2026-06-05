@@ -14,6 +14,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <Bnd_Box.hxx>
@@ -89,11 +90,52 @@ public:
   GeoSpecStepReadResult(const GeoSpecStepReadResult& other)
     : success(other.success),
       evidenceJson_(other.evidenceJson_),
+      meshTrianglesPtr_(nullptr),
+      meshTriangleCount_(other.meshTriangleCount_) {
+    if (other.meshTrianglesPtr_ != nullptr && other.meshTriangleCount_ > 0) {
+      const std::size_t byteLength = static_cast<std::size_t>(other.meshTriangleCount_) * 9 * sizeof(double);
+      meshTrianglesPtr_ = static_cast<double*>(std::malloc(byteLength));
+      if (!meshTrianglesPtr_) throw std::bad_alloc();
+      std::copy(other.meshTrianglesPtr_, other.meshTrianglesPtr_ + other.meshTriangleCount_ * 9, meshTrianglesPtr_);
+    }
+  }
+
+  GeoSpecStepReadResult& operator=(const GeoSpecStepReadResult& other) {
+    if (this == &other) return *this;
+    double* copiedTriangles = nullptr;
+    if (other.meshTrianglesPtr_ != nullptr && other.meshTriangleCount_ > 0) {
+      const std::size_t byteLength = static_cast<std::size_t>(other.meshTriangleCount_) * 9 * sizeof(double);
+      copiedTriangles = static_cast<double*>(std::malloc(byteLength));
+      if (!copiedTriangles) throw std::bad_alloc();
+      std::copy(other.meshTrianglesPtr_, other.meshTrianglesPtr_ + other.meshTriangleCount_ * 9, copiedTriangles);
+    }
+    std::free(meshTrianglesPtr_);
+    success = other.success;
+    evidenceJson_ = other.evidenceJson_;
+    meshTrianglesPtr_ = copiedTriangles;
+    meshTriangleCount_ = other.meshTriangleCount_;
+    return *this;
+  }
+
+  GeoSpecStepReadResult(GeoSpecStepReadResult&& other) noexcept
+    : success(other.success),
+      evidenceJson_(std::move(other.evidenceJson_)),
       meshTrianglesPtr_(other.meshTrianglesPtr_),
       meshTriangleCount_(other.meshTriangleCount_) {
-    auto& mutableOther = const_cast<GeoSpecStepReadResult&>(other);
-    mutableOther.meshTrianglesPtr_ = nullptr;
-    mutableOther.meshTriangleCount_ = 0;
+    other.meshTrianglesPtr_ = nullptr;
+    other.meshTriangleCount_ = 0;
+  }
+
+  GeoSpecStepReadResult& operator=(GeoSpecStepReadResult&& other) noexcept {
+    if (this == &other) return *this;
+    std::free(meshTrianglesPtr_);
+    success = other.success;
+    evidenceJson_ = std::move(other.evidenceJson_);
+    meshTrianglesPtr_ = other.meshTrianglesPtr_;
+    meshTriangleCount_ = other.meshTriangleCount_;
+    other.meshTrianglesPtr_ = nullptr;
+    other.meshTriangleCount_ = 0;
+    return *this;
   }
 
   std::string evidenceJson() const {

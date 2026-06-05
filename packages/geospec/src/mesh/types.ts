@@ -49,6 +49,38 @@ export type GeometrySource = {
 };
 
 /**
+ * Runtime export intent recorded when GeoSpec obtains evidence from a CAD
+ * runtime instead of a direct geometry file.
+ *
+ * @public
+ */
+export type GeometryExportIntent = {
+  requested: {
+    format: GeometryFileFormat;
+    coordinateSystem?: 'y-up' | 'z-up';
+    unit?: {
+      length?: 'meter' | 'millimeter';
+    };
+  };
+  honored?: {
+    format: GeometryFileFormat;
+    coordinateSystem?: 'y-up' | 'z-up';
+    unit?: {
+      length?: 'meter' | 'millimeter';
+    };
+    sourceUnit?: GeoSpecUnit;
+  };
+  route?: {
+    kernelId?: string;
+    sourceFormat?: string;
+    targetFormat?: string;
+    transcoderId?: string;
+    fidelity?: 'mesh' | 'brep' | (string & {});
+    direct: boolean;
+  };
+};
+
+/**
  * Provenance recorded by GeoSpec loaders. Tau runtime still emits geometry
  * bytes/files; GeoSpec records how those bytes were consumed.
  *
@@ -60,6 +92,7 @@ export type GeometryProvenance = {
   loader: 'gltf-transform' | 'in-memory' | 'opencascade-step';
   contentHash?: string;
   parameters?: Record<string, unknown>;
+  exportIntent?: GeometryExportIntent;
 };
 
 /**
@@ -78,7 +111,8 @@ export type GeometryCapability =
         | 'surface-area'
         | 'volume'
         | 'center-of-mass'
-        | 'distance';
+        | 'distance'
+        | 'component-overlap';
     }
   | {
       kind: 'brep';

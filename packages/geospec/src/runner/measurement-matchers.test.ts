@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { clearCollectorGlobals, createCollector, installCollector } from '#runner/collector.js';
 import { loadMesh } from '#mesh/load-mesh.js';
 import type { GeometrySubject } from '#mesh/types.js';
+import type { GeoSpecVolumeExpectation } from '#runner/types.js';
 
 const boxPositions = [
   0, 0, 0, 10, 20, 0, 10, 0, 0, 0, 0, 0, 0, 20, 0, 10, 20, 0, 0, 0, 30, 10, 0, 30, 10, 20, 30, 0, 0, 30, 10, 20, 30, 0,
@@ -75,9 +76,32 @@ describe('measurement matchers', () => {
           evidence: 'mesh',
           measurement: 'volume',
           actual: 6000,
+          unit: 'mm',
+          source: { kind: 'mesh-buffer', format: 'mesh-buffer', name: 'box' },
         },
       },
     ]);
+  });
+
+  it('should report invalid expectation diagnostics for malformed measurement input', async () => {
+    const invalidExpectation = {
+      value: 6000,
+      tolerance: 1,
+      expectedCount: 1,
+    } as unknown as GeoSpecVolumeExpectation;
+
+    const test = await runOneAssertion((subject, collector) => {
+      collector.expectGeo(subject).toHaveVolume(invalidExpectation);
+    });
+
+    expect(test.status).toBe('failed');
+    const diagnostic = test.assertions[0]?.diagnostics?.[0];
+    expect(diagnostic?.code).toBe('GEOSPEC_INVALID_EXPECTATION');
+    expect(diagnostic?.message).toContain("unknown field 'expectedCount'");
+    expect(diagnostic?.details).toMatchObject({
+      matcher: 'toHaveVolume',
+      field: 'expectedCount',
+    });
   });
 
   it('should validate deterministic chamfer distance against a reference mesh', async () => {
@@ -101,6 +125,31 @@ describe('measurement matchers', () => {
       });
       await collector.waitForCompletion(1000);
       expect(collector.tests[0]?.status).toBe('passed');
+    } finally {
+      clearCollectorGlobals();
+    }
+  });
+
+  it('should reject vacuous distance expectations before sampling geometry', async () => {
+    const subject = await loadBox();
+    const collector = createCollector();
+    installCollector(collector);
+    try {
+      collector.it('should reject distance checks with no statistic', () => {
+        collector.expectGeo(subject).toHaveChamferDistanceTo(subject, {
+          samples: 3,
+        });
+      });
+      await collector.waitForCompletion(1000);
+
+      expect(collector.tests[0]?.status).toBe('failed');
+      const assertion = collector.tests[0]?.assertions[0];
+      expect(assertion?.kind).toBe('chamferDistance');
+      expect(assertion?.passed).toBe(false);
+      const diagnostic = assertion?.diagnostics?.[0];
+      expect(diagnostic?.code).toBe('GEOSPEC_INVALID_EXPECTATION');
+      expect(diagnostic?.message).toContain('expected at least one distance statistic');
+      expect(diagnostic?.details).toMatchObject({ matcher: 'toHaveChamferDistanceTo' });
     } finally {
       clearCollectorGlobals();
     }

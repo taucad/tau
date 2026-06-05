@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { createRuntimeClient } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { esbuild } from '@taucad/runtime/bundler';
 import { replicad, opencascade } from '@taucad/runtime/kernels';
 import { openscad } from '@taucad/openscad';
@@ -50,12 +51,12 @@ async function exportGlbForKernel(
   filePath: string,
   code: string,
 ): Promise<Uint8Array<ArrayBuffer>> {
+  const runtime = defineRuntime({ kernels: [kernel], bundlers: [esbuild()] });
   const client = createRuntimeClient({
     transport: inProcessTransport({
+      runtime,
       fileSystem: fromMemoryFs({ [filePath]: code }),
     }),
-    kernels: [kernel],
-    bundlers: [esbuild()],
   });
   try {
     const result = await client.export('glb', { file: filePath });

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { clearCollectorGlobals, createCollector, installCollector } from '#runner/collector.js';
 import type { GeometrySubject } from '#mesh/types.js';
+import type {
+  GeoSpecAssertion,
+  GeoSpecChamferFeatureExpectation,
+  GeoSpecCylindricalFaceExpectation,
+  GeoSpecMinimumWallThicknessExpectation,
+} from '#runner/types.js';
 
 const createSubject = (withBrep: boolean): GeometrySubject => ({
   kind: 'geometry-subject',
@@ -63,6 +69,12 @@ const createSubject = (withBrep: boolean): GeometrySubject => ({
       }
     : undefined,
 });
+
+const getAssertion = (collector: ReturnType<typeof createCollector>, testIndex: number): GeoSpecAssertion => {
+  const assertion = collector.tests[testIndex]?.assertions[0];
+  expect(assertion).toBeDefined();
+  return assertion!;
+};
 
 describe('BRep feature matchers', () => {
   it('should validate initial BRep feature evidence', async () => {
@@ -129,6 +141,100 @@ describe('BRep feature matchers', () => {
           severity: 'error',
         },
       ]);
+    } finally {
+      clearCollectorGlobals();
+    }
+  });
+
+  it('should include candidate features and subject context in BRep mismatch diagnostics', async () => {
+    const collector = createCollector();
+    installCollector(collector);
+    try {
+      collector.it('should report the checked BRep evidence', () => {
+        collector.expectGeo(createSubject(true)).toHaveCylindricalFace({
+          radius: 99,
+          axis: 'z',
+          tolerance: 0.05,
+        });
+      });
+      await collector.waitForCompletion(1000);
+
+      expect(collector.tests[0]?.status).toBe('failed');
+      const diagnostic = getAssertion(collector, 0).diagnostics?.[0];
+      expect(diagnostic).toBeDefined();
+      expect(diagnostic).toMatchObject({
+        code: 'CYLINDRICAL_FACE_NOT_FOUND',
+        details: {
+          evidence: 'brep',
+          unit: 'mm',
+          source: { kind: 'mesh-buffer', format: 'mesh-buffer', name: 'brep-fixture' },
+          actual: [{ radius: 15, axis: 'z' }],
+        },
+      });
+    } finally {
+      clearCollectorGlobals();
+    }
+  });
+
+  it('should report invalid expectation diagnostics for malformed BRep matcher input', async () => {
+    const collector = createCollector();
+    installCollector(collector);
+    try {
+      collector.it('should reject malformed wall-thickness checks', () => {
+        collector.expectGeo(createSubject(true)).toHaveMinimumWallThickness({
+          value: { atLeast: 2 },
+          tolerance: 0.05,
+        } as unknown as GeoSpecMinimumWallThicknessExpectation);
+      });
+      collector.it('should reject unknown cylindrical-face fields', () => {
+        collector.expectGeo(createSubject(true)).toHaveCylindricalFace({
+          radius: 15,
+          axis: 'z',
+          tolerance: 0.05,
+          expectedCount: 1,
+        } as unknown as GeoSpecCylindricalFaceExpectation);
+      });
+      collector.it('should reject malformed chamfer-feature distance', () => {
+        collector.expectGeo(createSubject(true)).toHaveChamferFeature({
+          distance: { greaterThanOrEqual: 2 },
+          tolerance: 0.05,
+        } as unknown as GeoSpecChamferFeatureExpectation);
+      });
+      await collector.waitForCompletion(1000);
+
+      expect(collector.tests.map((test) => test.status)).toEqual(['failed', 'failed', 'failed']);
+      const wallThicknessAssertion = getAssertion(collector, 0);
+      expect(wallThicknessAssertion.kind).toBe('minimumWallThickness');
+      expect(wallThicknessAssertion.passed).toBe(false);
+      expect(
+        (wallThicknessAssertion.diagnostics ?? []).find(
+          (diagnostic) => diagnostic.code === 'GEOSPEC_INVALID_EXPECTATION',
+        ),
+      ).toMatchObject({
+        details: { field: 'value' },
+      });
+
+      const cylindricalFaceAssertion = getAssertion(collector, 1);
+      expect(cylindricalFaceAssertion.kind).toBe('cylindricalFace');
+      expect(cylindricalFaceAssertion.passed).toBe(false);
+      expect(
+        (cylindricalFaceAssertion.diagnostics ?? []).find(
+          (diagnostic) => diagnostic.code === 'GEOSPEC_INVALID_EXPECTATION',
+        ),
+      ).toMatchObject({
+        details: { field: 'expectedCount' },
+      });
+
+      const chamferFeatureAssertion = getAssertion(collector, 2);
+      expect(chamferFeatureAssertion.kind).toBe('chamferFeature');
+      expect(chamferFeatureAssertion.passed).toBe(false);
+      expect(
+        (chamferFeatureAssertion.diagnostics ?? []).find(
+          (diagnostic) => diagnostic.code === 'GEOSPEC_INVALID_EXPECTATION',
+        ),
+      ).toMatchObject({
+        details: { field: 'distance', matcher: 'toHaveChamferFeature' },
+      });
     } finally {
       clearCollectorGlobals();
     }

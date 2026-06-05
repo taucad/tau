@@ -2,6 +2,7 @@ import { Accessor, Document, WebIO } from '@gltf-transform/core';
 import { describe, expect, it } from 'vitest';
 import { activeParams, analyzeTauModel, parameterGroups, params, renderTauModel, runTauGeoSpecTests } from '#tau.js';
 import type { GeometrySubject } from 'geospec';
+import type { GeoSpecModelFormat } from 'geospec/model';
 
 type TestVmFileSystem = {
   exists(path: string): Promise<boolean>;
@@ -60,6 +61,23 @@ const createTriangleGlb = async (): Promise<Uint8Array<ArrayBuffer>> => {
   document.createScene().addChild(document.createNode('triangle').setMesh(mesh));
   return new WebIO().writeBinary(document);
 };
+
+const createGeometrySubject = (sizeX: number): GeometrySubject =>
+  ({
+    kind: 'geometry-subject',
+    capabilities: ['mesh'],
+    provenance: {
+      source: { kind: 'bytes', path: 'main.scad' },
+      parameters: {},
+    },
+    mesh: {
+      stats: {
+        boundingBox: { center: [sizeX / 2, 0, 0], size: [sizeX, 1, 1] },
+        analyseConnectedComponents: () => ({ count: 1, components: [] }),
+        analyseWatertight: () => ({ watertight: true, irregularEdges: 0, openBoundaryEdges: 0 }),
+      },
+    },
+  }) as unknown as GeometrySubject;
 
 describe('Tau parameter helpers', () => {
   it('should resolve active and ordered groups from the existing .tau parameter shape', () => {
@@ -120,6 +138,28 @@ describe('Tau parameter helpers', () => {
       }),
     ).toThrow("active group 'missing' is missing");
   });
+
+  it('should deep-clone defaults and overrides for isolated Tau parameter cases', () => {
+    const entry = {
+      activeGroup: 'wide',
+      groups: {
+        wide: { values: { base: { width: 60 } } },
+      },
+    };
+    const defaults = { base: { width: 30, depth: 20 } };
+
+    const resolved = params(entry, { defaults });
+    (resolved.active.values as { base: { depth: number } }).base.depth = 99;
+    (resolved.active.overrides as { base: { width: number } }).base.width = 99;
+
+    expect(defaults).toEqual({ base: { width: 30, depth: 20 } });
+    expect(entry.groups.wide.values).toEqual({ base: { width: 60 } });
+    expect(params(entry, { defaults }).active.values).toEqual({ base: { width: 60, depth: 20 } });
+  });
+
+  it('should reject path-like parameter strings before JSON parsing', () => {
+    expect(() => params('.tau/parameters/main.ts.json')).toThrow('pass parsed JSON or raw JSON text');
+  });
 });
 
 describe('Tau model render helpers', () => {
@@ -169,6 +209,20 @@ describe('Tau model render helpers', () => {
       expect(result.subject.provenance.parameters).toEqual({ width: 12 });
       expect(result.stats.triangleCount).toBe(1);
     }
+  });
+
+  it('should analyze runtime GLB bytes for OpenSCAD source filenames as millimetre evidence', async () => {
+    const bytes = await createTriangleGlb();
+    const subject = await renderTauModel({
+      file: 'main.scad',
+      renderer: async () => bytes,
+    });
+
+    expect(subject.provenance.source.path).toBe('main.glb');
+    expect(subject.provenance.unit).toBe('mm');
+    expect(subject.mesh.stats.boundingBox?.size[0]).toBeCloseTo(1, 5);
+    expect(subject.mesh.stats.boundingBox?.size[1]).toBeCloseTo(1, 5);
+    expect(subject.mesh.stats.triangleCount).toBe(1);
   });
 });
 
@@ -225,6 +279,45 @@ describe('runTauGeoSpecTests', () => {
     ]);
   });
 
+  it('should group runtime byte assertions for OpenSCAD source targets under the GeoSpec test file', async () => {
+    const filesystem = new MemoryFileSystem();
+    filesystem.setText(
+      '/project/main.geospec.ts',
+      [
+        "import { describe, expectGeo, it } from 'geospec';",
+        "import { loadModel } from 'geospec/model';",
+        "describe('OpenSCAD geometry', () => {",
+        "  it('should use exported GLB evidence for the source file', async () => {",
+        "    const model = await loadModel({ file: 'main.scad' });",
+        '    expectGeo(model).toHaveBoundingBox({ size: { x: 1, y: 1 }, tolerance: 0.01 });',
+        '  });',
+        '});',
+      ].join('\n'),
+    );
+    const bytes = await createTriangleGlb();
+    const calls: Array<{ file: string; format?: GeoSpecModelFormat }> = [];
+
+    const result = await runTauGeoSpecTests({
+      filesystem,
+      projectPath: '/project',
+      entryPaths: ['main.geospec.ts'],
+      renderer: async (input) => {
+        calls.push({ file: input.file, format: input.format });
+        return bytes;
+      },
+    });
+
+    expect(calls).toEqual([{ file: 'main.scad', format: 'glb' }]);
+    expect(result.failures).toEqual([]);
+    expect(result.passes).toEqual([
+      {
+        id: 'main.geospec.ts:OpenSCAD geometry > should use exported GLB evidence for the source file',
+        requirement: 'OpenSCAD geometry > should use exported GLB evidence for the source file',
+        targetFile: 'main.geospec.ts',
+      },
+    ]);
+  });
+
   it('should filter Tau GeoSpec results by test name pattern', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText(
@@ -272,6 +365,98 @@ describe('runTauGeoSpecTests', () => {
     expect(result.failures).toEqual([]);
     expect(result.passes.map((pass) => pass.requirement)).toEqual(['filtered table geometry > should check width']);
     expect(result.total).toBe(1);
+  });
+
+  it('should fail when filters select no GeoSpec tests', async () => {
+    const filesystem = new MemoryFileSystem();
+    filesystem.setText(
+      '/project/main.geospec.ts',
+      [
+        "import { describe, expectGeo, it } from 'geospec';",
+        "import { loadModel } from 'geospec/model';",
+        "describe('filtered geometry', () => {",
+        "  it('should check width', async () => {",
+        "    const model = await loadModel({ file: 'main.scad' });",
+        '    expectGeo(model).toHaveBoundingBox({ size: { x: 800 }, tolerance: 2 });',
+        '  });',
+        '});',
+      ].join('\n'),
+    );
+
+    const result = await runTauGeoSpecTests({
+      filesystem,
+      projectPath: '/project',
+      entryPaths: ['main.geospec.ts'],
+      testNamePattern: 'height',
+      renderer: async () => createGeometrySubject(800),
+    });
+
+    expect(result.passed).toBe(0);
+    expect(result.total).toBe(1);
+    expect(result.failures).toEqual([
+      expect.objectContaining({
+        id: 'no_matching_geospec_tests',
+        requirement: 'At least one selected GeoSpec test must run',
+        targetFile: 'main.geospec.ts',
+      }),
+    ]);
+  });
+
+  it('should keep concurrent Tau GeoSpec renderer bindings isolated per invocation', async () => {
+    const filesystem = new MemoryFileSystem();
+    filesystem.setText(
+      '/project/first.geospec.ts',
+      [
+        "import { describe, expectGeo, it } from 'geospec';",
+        "import { loadModel } from 'geospec/model';",
+        "describe('first tau run', () => {",
+        "  it('should use the first renderer', async () => {",
+        "    const model = await loadModel({ file: 'main.scad', parameters: { width: 10 } });",
+        '    expectGeo(model).toHaveBoundingBox({ size: { x: 10 }, tolerance: 0.001 });',
+        '  });',
+        '});',
+      ].join('\n'),
+    );
+    filesystem.setText(
+      '/project/second.geospec.ts',
+      [
+        "import { describe, expectGeo, it } from 'geospec';",
+        "import { loadModel } from 'geospec/model';",
+        "describe('second tau run', () => {",
+        "  it('should use the second renderer', async () => {",
+        "    const model = await loadModel({ file: 'main.scad', parameters: { width: 20 } });",
+        '    expectGeo(model).toHaveBoundingBox({ size: { x: 20 }, tolerance: 0.001 });',
+        '  });',
+        '});',
+      ].join('\n'),
+    );
+
+    const [first, second] = await Promise.all([
+      runTauGeoSpecTests({
+        filesystem,
+        projectPath: '/project',
+        entryPaths: ['first.geospec.ts'],
+        renderer: async (input) => {
+          await Promise.resolve();
+          expect(input.parameters).toEqual({ width: 10 });
+          return createGeometrySubject(10);
+        },
+      }),
+      runTauGeoSpecTests({
+        filesystem,
+        projectPath: '/project',
+        entryPaths: ['second.geospec.ts'],
+        renderer: async (input) => {
+          expect(input.parameters).toEqual({ width: 20 });
+          return createGeometrySubject(20);
+        },
+      }),
+    ]);
+
+    expect(first.failures).toEqual([]);
+    expect(second.failures).toEqual([]);
+    expect(first.passed).toBe(1);
+    expect(second.passed).toBe(1);
   });
 
   it('should run initial BRep feature matchers through the Tau GeoSpec harness', async () => {

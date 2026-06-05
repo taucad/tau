@@ -16,8 +16,9 @@ The generated module exposes:
 - `GeoSpecStepStreamReader.readText(...)`
 - `GeoSpecStepStreamReader.readFile(...)`
 - `GeoSpecMeshMetrics.chamferDistanceFromTrianglePointers(...)`
+- `GeoSpecMeshMetrics.componentOverlapFromTrianglePointers(...)`
 - `_malloc`, `_free`
-- `HEAPF64`, `FS`
+- `HEAP32`, `HEAPF64`, `FS`
 
 GeoSpec owns STEP import through `GeoSpecStepStreamReader`. Replicad may author
 and export deterministic STEP fixtures through Tau runtime, but GeoSpec does not
@@ -44,3 +45,11 @@ const nativeAnalyzer = createOpenCascadeMeshAnalyzer(oc);
 GeoSpec uses that analyzer for large sampled mesh-distance checks. Without it,
 the JavaScript fallback is deliberately bounded and reports a diagnostic when
 the requested comparison would require too many triangle-pair visits.
+
+Component-overlap checks are stricter: there is no JavaScript verdict fallback.
+`toHaveNoComponentOverlap({ tolerance })` and `analyzeMeshOverlap(...)` use the
+native C++ wrapper to build faceted OpenCascade solids, run Boolean common, and
+measure positive common volume. Tangent contact and correctly meshed gears pass
+because zero-volume contact is not overlap. If the native wrapper is unavailable
+or component solids cannot be certified, GeoSpec reports a structured diagnostic
+instead of producing a weaker JavaScript result.

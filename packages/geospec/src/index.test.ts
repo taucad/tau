@@ -79,6 +79,50 @@ const geometrySubjectModule = [
   '});',
 ].join('\n');
 
+const createGeometrySubject = (sizeX: number): GeometrySubject =>
+  ({
+    kind: 'geometry-subject',
+    provenance: {
+      source: { kind: 'mesh-buffer', format: 'mesh-buffer', name: `box-${sizeX}` },
+      unit: 'mm',
+      loader: 'memory-fixture',
+    },
+    capabilities: [],
+    diagnostics: [],
+    mesh: {
+      format: 'mesh-buffer',
+      stats: {
+        boundingBox: {
+          size: [sizeX, 20, 30],
+          center: [sizeX / 2, 10, 15],
+          primitives: [],
+        },
+        analyseConnectedComponents: () => ({ count: 1, clusters: [], gaps: [] }),
+        connectedComponents: () => 1,
+        watertight: true,
+        analyseWatertight: () => ({
+          watertight: true,
+          irregularEdges: 0,
+          openBoundaryEdges: 0,
+          totalEdges: 0,
+          irregularEdgeFraction: 0,
+          perPrimitive: [],
+        }),
+        vertexCount: 8,
+        meshCount: 1,
+        triangleCount: 12,
+        meshQuality: {
+          triangleCount: 12,
+          nonFiniteVertices: [],
+          degenerateTriangles: [],
+          duplicateFaces: [],
+          surfaceArea: 1,
+          signedVolume: 1,
+        },
+      },
+    },
+  }) as unknown as GeometrySubject;
+
 describe('runGeoSpecModule', () => {
   it('should collect vitest-style geometry assertions from an ESM module', async () => {
     const filesystem = new MemoryFileSystem();
@@ -494,6 +538,67 @@ describe('runGeoSpecModule', () => {
     }
   });
 
+  it('should keep concurrent model-loader bindings isolated per invocation', async () => {
+    const filesystem = new MemoryFileSystem();
+    filesystem.setText(
+      '/project/first.geospec.ts',
+      [
+        "import { describe, expectGeo, it } from 'geospec';",
+        "import { loadModel } from 'geospec/model';",
+        "describe('first invocation', () => {",
+        "  it('should use the first loader', async () => {",
+        "    const model = await loadModel({ file: 'main.ts', parameters: { width: 10 } });",
+        '    expectGeo(model).toHaveBoundingBox({ size: { x: 10 } });',
+        '  });',
+        '});',
+      ].join('\n'),
+    );
+    filesystem.setText(
+      '/project/second.geospec.ts',
+      [
+        "import { describe, expectGeo, it } from 'geospec';",
+        "import { loadModel } from 'geospec/model';",
+        "describe('second invocation', () => {",
+        "  it('should use the second loader', async () => {",
+        "    const model = await loadModel({ file: 'main.ts', parameters: { width: 20 } });",
+        '    expectGeo(model).toHaveBoundingBox({ size: { x: 20 } });',
+        '  });',
+        '});',
+      ].join('\n'),
+    );
+
+    const [first, second] = await Promise.all([
+      runGeoSpecModule({
+        filesystem,
+        projectPath: '/project',
+        entryPath: '/project/first.geospec.ts',
+        modelLoader: async (options) => {
+          await Promise.resolve();
+          expect(options.parameters).toEqual({ width: 10 });
+          return createGeometrySubject(10);
+        },
+      }),
+      runGeoSpecModule({
+        filesystem,
+        projectPath: '/project',
+        entryPath: '/project/second.geospec.ts',
+        modelLoader: async (options) => {
+          expect(options.parameters).toEqual({ width: 20 });
+          return createGeometrySubject(20);
+        },
+      }),
+    ]);
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    if (first.success && second.success) {
+      expect(first.passed).toBe(true);
+      expect(second.passed).toBe(true);
+      expect(first.tests[0]?.suite).toEqual(['first invocation']);
+      expect(second.tests[0]?.suite).toEqual(['second invocation']);
+    }
+  });
+
   it('should fail unsupported geometry subjects with actionable diagnostics', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText(
@@ -539,9 +644,11 @@ describe('runGeoSpecModule', () => {
           ],
           diagnostics: [
             expect.objectContaining({
-              code: 'TEST_FAILED',
+              code: 'UNSUPPORTED_GEOMETRY_SUBJECT',
               message: 'toBeWatertight requires a GeoSpec GeometrySubject loaded from geometry evidence.',
               severity: 'error',
+              suggestion:
+                'Use loadMesh(...) or loadModel(...) and pass the returned GeometrySubject to expectGeo(...).',
             }),
           ],
         }),

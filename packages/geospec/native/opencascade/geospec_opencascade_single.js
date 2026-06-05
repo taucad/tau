@@ -87,7 +87,7 @@ async function Module(moduleArg = {}) {
     y = new Int16Array(a);
     w = new Uint8Array(a);
     sa = new Uint16Array(a);
-    D = new Int32Array(a);
+    g.HEAP32 = D = new Int32Array(a);
     E = new Uint32Array(a);
     ta = new Float32Array(a);
     g.HEAPF64 = ua = new Float64Array(a);
@@ -310,31 +310,31 @@ async function Module(moduleArg = {}) {
     },
     cb = [];
   function db(a, b) {
-    cb[a] = { input: [], output: [], Eb: b };
+    cb[a] = { input: [], output: [], Gb: b };
     eb(a, fb);
   }
   var fb = {
       open(a) {
         var b = cb[a.node.rdev];
-        if (!b) throw new I.Ya(43);
+        if (!b) throw new I.$a(43);
         a.tty = b;
         a.seekable = !1;
       },
       close(a) {
-        a.tty.Eb.fsync(a.tty);
+        a.tty.Gb.fsync(a.tty);
       },
       fsync(a) {
-        a.tty.Eb.fsync(a.tty);
+        a.tty.Gb.fsync(a.tty);
       },
       read(a, b, c, d) {
-        if (!a.tty || !a.tty.Eb.uc) throw new I.Ya(60);
+        if (!a.tty || !a.tty.Gb.wc) throw new I.$a(60);
         for (var e = 0, f = 0; f < d; f++) {
           try {
-            var h = a.tty.Eb.uc(a.tty);
+            var h = a.tty.Gb.wc(a.tty);
           } catch (k) {
-            throw new I.Ya(29);
+            throw new I.$a(29);
           }
-          if (void 0 === h && 0 === e) throw new I.Ya(6);
+          if (void 0 === h && 0 === e) throw new I.$a(6);
           if (null === h || void 0 === h) break;
           e++;
           b[c + f] = h;
@@ -343,18 +343,18 @@ async function Module(moduleArg = {}) {
         return e;
       },
       write(a, b, c, d) {
-        if (!a.tty || !a.tty.Eb.jc) throw new I.Ya(60);
+        if (!a.tty || !a.tty.Gb.lc) throw new I.$a(60);
         try {
-          for (var e = 0; e < d; e++) a.tty.Eb.jc(a.tty, b[c + e]);
+          for (var e = 0; e < d; e++) a.tty.Gb.lc(a.tty, b[c + e]);
         } catch (f) {
-          throw new I.Ya(29);
+          throw new I.$a(29);
         }
         d && (a.node.mtime = a.node.ctime = Date.now());
         return e;
       },
     },
     gb = {
-      uc() {
+      wc() {
         a: {
           if (!Za.length) {
             var a = null;
@@ -380,32 +380,32 @@ async function Module(moduleArg = {}) {
         }
         return a;
       },
-      jc(a, b) {
+      lc(a, b) {
         null === b || 10 === b ? (ma(Ya(a.output)), (a.output = [])) : 0 != b && a.output.push(b);
       },
       fsync(a) {
         0 < a.output?.length && (ma(Ya(a.output)), (a.output = []));
       },
-      Uc() {
+      Wc() {
         return {
-          qd: 25856,
-          sd: 5,
-          pd: 191,
-          rd: 35387,
-          od: [
+          td: 25856,
+          vd: 5,
+          sd: 191,
+          ud: 35387,
+          rd: [
             3, 28, 127, 21, 4, 0, 1, 0, 17, 19, 26, 0, 18, 15, 23, 22, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
           ],
         };
       },
-      Vc() {
+      Xc() {
         return 0;
       },
-      Wc() {
+      Yc() {
         return [24, 80];
       },
     },
     hb = {
-      jc(a, b) {
+      lc(a, b) {
         null === b || 10 === b ? (p(Ya(a.output)), (a.output = [])) : 0 != b && a.output.push(b);
       },
       fsync(a) {
@@ -413,52 +413,52 @@ async function Module(moduleArg = {}) {
       },
     },
     J = {
-      yb: null,
-      jb() {
+      Ab: null,
+      lb() {
         return J.createNode(null, '/', 16895, 0);
       },
       createNode(a, b, c, d) {
-        if (24576 === (c & 61440) || I.isFIFO(c)) throw new I.Ya(63);
-        J.yb ||
-          (J.yb = {
+        if (24576 === (c & 61440) || I.isFIFO(c)) throw new I.$a(63);
+        J.Ab ||
+          (J.Ab = {
             dir: {
               node: {
-                vb: J.$a.vb,
-                xb: J.$a.xb,
-                lookup: J.$a.lookup,
-                Cb: J.$a.Cb,
-                rename: J.$a.rename,
-                unlink: J.$a.unlink,
-                rmdir: J.$a.rmdir,
-                readdir: J.$a.readdir,
-                symlink: J.$a.symlink,
+                xb: J.bb.xb,
+                zb: J.bb.zb,
+                lookup: J.bb.lookup,
+                Eb: J.bb.Eb,
+                rename: J.bb.rename,
+                unlink: J.bb.unlink,
+                rmdir: J.bb.rmdir,
+                readdir: J.bb.readdir,
+                symlink: J.bb.symlink,
               },
-              stream: { rb: J.cb.rb },
+              stream: { tb: J.fb.tb },
             },
             file: {
-              node: { vb: J.$a.vb, xb: J.$a.xb },
-              stream: { rb: J.cb.rb, read: J.cb.read, write: J.cb.write, Lb: J.cb.Lb, Rb: J.cb.Rb },
+              node: { xb: J.bb.xb, zb: J.bb.zb },
+              stream: { tb: J.fb.tb, read: J.fb.read, write: J.fb.write, Nb: J.fb.Nb, Tb: J.fb.Tb },
             },
-            link: { node: { vb: J.$a.vb, xb: J.$a.xb, readlink: J.$a.readlink }, stream: {} },
-            oc: { node: { vb: J.$a.vb, xb: J.$a.xb }, stream: I.Hc },
+            link: { node: { xb: J.bb.xb, zb: J.bb.zb, readlink: J.bb.readlink }, stream: {} },
+            pc: { node: { xb: J.bb.xb, zb: J.bb.zb }, stream: I.Ic },
           });
         c = I.createNode(a, b, c, d);
         K(c.mode)
-          ? ((c.$a = J.yb.dir.node), (c.cb = J.yb.dir.stream), (c.eb = {}))
+          ? ((c.bb = J.Ab.dir.node), (c.fb = J.Ab.dir.stream), (c.gb = {}))
           : I.isFile(c.mode)
-            ? ((c.$a = J.yb.file.node), (c.cb = J.yb.file.stream), (c.mb = 0), (c.eb = null))
+            ? ((c.bb = J.Ab.file.node), (c.fb = J.Ab.file.stream), (c.pb = 0), (c.gb = null))
             : 40960 === (c.mode & 61440)
-              ? ((c.$a = J.yb.link.node), (c.cb = J.yb.link.stream))
-              : 8192 === (c.mode & 61440) && ((c.$a = J.yb.oc.node), (c.cb = J.yb.oc.stream));
+              ? ((c.bb = J.Ab.link.node), (c.fb = J.Ab.link.stream))
+              : 8192 === (c.mode & 61440) && ((c.bb = J.Ab.pc.node), (c.fb = J.Ab.pc.stream));
         c.atime = c.mtime = c.ctime = Date.now();
-        a && ((a.eb[b] = c), (a.atime = a.mtime = a.ctime = c.atime));
+        a && ((a.gb[b] = c), (a.atime = a.mtime = a.ctime = c.atime));
         return c;
       },
-      Dd(a) {
-        return a.eb ? (a.eb.subarray ? a.eb.subarray(0, a.mb) : new Uint8Array(a.eb)) : new Uint8Array(0);
+      Gd(a) {
+        return a.gb ? (a.gb.subarray ? a.gb.subarray(0, a.pb) : new Uint8Array(a.gb)) : new Uint8Array(0);
       },
-      $a: {
-        vb(a) {
+      bb: {
+        xb(a) {
           var b = {};
           b.dev = 8192 === (a.mode & 61440) ? a.id : 1;
           b.ino = a.id;
@@ -470,7 +470,7 @@ async function Module(moduleArg = {}) {
           K(a.mode)
             ? (b.size = 4096)
             : I.isFile(a.mode)
-              ? (b.size = a.mb)
+              ? (b.size = a.pb)
               : 40960 === (a.mode & 61440)
                 ? (b.size = a.link.length)
                 : (b.size = 0);
@@ -481,51 +481,51 @@ async function Module(moduleArg = {}) {
           b.blocks = Math.ceil(b.size / b.blksize);
           return b;
         },
-        xb(a, b) {
+        zb(a, b) {
           for (var c of ['mode', 'atime', 'mtime', 'ctime']) null != b[c] && (a[c] = b[c]);
           void 0 !== b.size &&
             ((b = b.size),
-            a.mb != b &&
+            a.pb != b &&
               (0 == b
-                ? ((a.eb = null), (a.mb = 0))
-                : ((c = a.eb),
-                  (a.eb = new Uint8Array(b)),
-                  c && a.eb.set(c.subarray(0, Math.min(b, a.mb))),
-                  (a.mb = b))));
+                ? ((a.gb = null), (a.pb = 0))
+                : ((c = a.gb),
+                  (a.gb = new Uint8Array(b)),
+                  c && a.gb.set(c.subarray(0, Math.min(b, a.pb))),
+                  (a.pb = b))));
         },
         lookup() {
-          J.$b || ((J.$b = new I.Ya(44)), (J.$b.stack = '<generic error, no stack>'));
-          throw J.$b;
+          J.bc || ((J.bc = new I.$a(44)), (J.bc.stack = '<generic error, no stack>'));
+          throw J.bc;
         },
-        Cb(a, b, c, d) {
+        Eb(a, b, c, d) {
           return J.createNode(a, b, c, d);
         },
         rename(a, b, c) {
           try {
-            var d = M(b, c);
+            var d = L(b, c);
           } catch (f) {}
           if (d) {
-            if (K(a.mode)) for (var e in d.eb) throw new I.Ya(55);
+            if (K(a.mode)) for (var e in d.gb) throw new I.$a(55);
             ib(d);
           }
-          delete a.parent.eb[a.name];
-          b.eb[c] = a;
+          delete a.parent.gb[a.name];
+          b.gb[c] = a;
           a.name = c;
           b.ctime = b.mtime = a.parent.ctime = a.parent.mtime = Date.now();
         },
         unlink(a, b) {
-          delete a.eb[b];
+          delete a.gb[b];
           a.ctime = a.mtime = Date.now();
         },
         rmdir(a, b) {
-          var c = M(a, b),
+          var c = L(a, b),
             d;
-          for (d in c.eb) throw new I.Ya(55);
-          delete a.eb[b];
+          for (d in c.gb) throw new I.$a(55);
+          delete a.gb[b];
           a.ctime = a.mtime = Date.now();
         },
         readdir(a) {
-          return ['.', '..', ...Object.keys(a.eb)];
+          return ['.', '..', ...Object.keys(a.gb)];
         },
         symlink(a, b, c) {
           a = J.createNode(a, b, 41471, 0);
@@ -533,15 +533,15 @@ async function Module(moduleArg = {}) {
           return a;
         },
         readlink(a) {
-          if (40960 !== (a.mode & 61440)) throw new I.Ya(28);
+          if (40960 !== (a.mode & 61440)) throw new I.$a(28);
           return a.link;
         },
       },
-      cb: {
+      fb: {
         read(a, b, c, d, e) {
-          var f = a.node.eb;
-          if (e >= a.node.mb) return 0;
-          a = Math.min(a.node.mb - e, d);
+          var f = a.node.gb;
+          if (e >= a.node.pb) return 0;
+          a = Math.min(a.node.pb - e, d);
           if (8 < a && f.subarray) b.set(f.subarray(e, e + a), c);
           else for (d = 0; d < a; d++) b[c + d] = f[e + d];
           return a;
@@ -551,47 +551,47 @@ async function Module(moduleArg = {}) {
           if (!d) return 0;
           a = a.node;
           a.mtime = a.ctime = Date.now();
-          if (b.subarray && (!a.eb || a.eb.subarray)) {
-            if (f) return ((a.eb = b.subarray(c, c + d)), (a.mb = d));
-            if (0 === a.mb && 0 === e) return ((a.eb = b.slice(c, c + d)), (a.mb = d));
-            if (e + d <= a.mb) return (a.eb.set(b.subarray(c, c + d), e), d);
+          if (b.subarray && (!a.gb || a.gb.subarray)) {
+            if (f) return ((a.gb = b.subarray(c, c + d)), (a.pb = d));
+            if (0 === a.pb && 0 === e) return ((a.gb = b.slice(c, c + d)), (a.pb = d));
+            if (e + d <= a.pb) return (a.gb.set(b.subarray(c, c + d), e), d);
           }
           f = e + d;
-          var h = a.eb ? a.eb.length : 0;
+          var h = a.gb ? a.gb.length : 0;
           h >= f ||
             ((f = Math.max(f, (h * (1048576 > h ? 2 : 1.125)) >>> 0)),
             0 != h && (f = Math.max(f, 256)),
-            (h = a.eb),
-            (a.eb = new Uint8Array(f)),
-            0 < a.mb && a.eb.set(h.subarray(0, a.mb), 0));
-          if (a.eb.subarray && b.subarray) a.eb.set(b.subarray(c, c + d), e);
-          else for (f = 0; f < d; f++) a.eb[e + f] = b[c + f];
-          a.mb = Math.max(a.mb, e + d);
+            (h = a.gb),
+            (a.gb = new Uint8Array(f)),
+            0 < a.pb && a.gb.set(h.subarray(0, a.pb), 0));
+          if (a.gb.subarray && b.subarray) a.gb.set(b.subarray(c, c + d), e);
+          else for (f = 0; f < d; f++) a.gb[e + f] = b[c + f];
+          a.pb = Math.max(a.pb, e + d);
           return d;
         },
-        rb(a, b, c) {
-          1 === c ? (b += a.position) : 2 === c && I.isFile(a.node.mode) && (b += a.node.mb);
-          if (0 > b) throw new I.Ya(28);
+        tb(a, b, c) {
+          1 === c ? (b += a.position) : 2 === c && I.isFile(a.node.mode) && (b += a.node.pb);
+          if (0 > b) throw new I.$a(28);
           return b;
         },
-        Lb(a, b, c, d, e) {
-          if (!I.isFile(a.node.mode)) throw new I.Ya(43);
-          a = a.node.eb;
+        Nb(a, b, c, d, e) {
+          if (!I.isFile(a.node.mode)) throw new I.$a(43);
+          a = a.node.gb;
           if (e & 2 || !a || a.buffer !== u.buffer) {
             d = !0;
             H();
             e = void 0;
-            if (!e) throw new I.Ya(48);
+            if (!e) throw new I.$a(48);
             if (a) {
               if (0 < c || c + b < a.length)
                 a.subarray ? (a = a.subarray(c, c + b)) : (a = Array.prototype.slice.call(a, c, c + b));
               u.set(a, e >>> 0);
             }
           } else ((d = !1), (e = a.byteOffset));
-          return { gb: e, kd: d };
+          return { ib: e, nd: d };
         },
-        Rb(a, b, c, d) {
-          J.cb.write(a, b, 0, d, c, !1);
+        Tb(a, b, c, d) {
+          J.fb.write(a, b, 0, d, c, !1);
           return 0;
         },
       },
@@ -648,27 +648,27 @@ async function Module(moduleArg = {}) {
     };
   function ob() {
     var a, b, c;
-    I.bc = !0;
+    I.dc = !0;
     a ??= g.stdin;
     b ??= g.stdout;
     c ??= g.stderr;
-    a ? I.Ib('/dev', 'stdin', a) : I.symlink('/dev/tty', '/dev/stdin');
-    b ? I.Ib('/dev', 'stdout', null, b) : I.symlink('/dev/tty', '/dev/stdout');
-    c ? I.Ib('/dev', 'stderr', null, c) : I.symlink('/dev/tty1', '/dev/stderr');
+    a ? I.Kb('/dev', 'stdin', a) : I.symlink('/dev/tty', '/dev/stdin');
+    b ? I.Kb('/dev', 'stdout', null, b) : I.symlink('/dev/tty', '/dev/stdout');
+    c ? I.Kb('/dev', 'stderr', null, c) : I.symlink('/dev/tty1', '/dev/stderr');
     I.open('/dev/stdin', 0);
     I.open('/dev/stdout', 1);
     I.open('/dev/stderr', 1);
   }
   function eb(a, b) {
-    I.rc[a] = { cb: b };
+    I.sc[a] = { fb: b };
   }
   function K(a) {
     return 16384 === (a & 61440);
   }
-  function M(a, b) {
-    var c = K(a.mode) ? ((c = sb(a, 'x')) ? c : a.$a.lookup ? 0 : 2) : 54;
-    if (c) throw new I.Ya(c);
-    for (c = I.Db[tb(a.id, b)]; c; c = c.Kb) {
+  function L(a, b) {
+    var c = K(a.mode) ? ((c = sb(a, 'x')) ? c : a.bb.lookup ? 0 : 2) : 54;
+    if (c) throw new I.$a(c);
+    for (c = I.Fb[tb(a.id, b)]; c; c = c.Mb) {
       var d = c.name;
       if (c.parent.id === a.id && d === b) return c;
     }
@@ -676,19 +676,19 @@ async function Module(moduleArg = {}) {
   }
   function ib(a) {
     var b = tb(a.parent.id, a.name);
-    if (I.Db[b] === a) I.Db[b] = a.Kb;
+    if (I.Fb[b] === a) I.Fb[b] = a.Mb;
     else
-      for (b = I.Db[b]; b; ) {
-        if (b.Kb === a) {
-          b.Kb = a.Kb;
+      for (b = I.Fb[b]; b; ) {
+        if (b.Mb === a) {
+          b.Mb = a.Mb;
           break;
         }
-        b = b.Kb;
+        b = b.Mb;
       }
   }
   function N(a, b = {}) {
-    if (!a) throw new I.Ya(44);
-    b.Vb ?? (b.Vb = !0);
+    if (!a) throw new I.$a(44);
+    b.Xb ?? (b.Xb = !0);
     '/' === a.charAt(0) || (a = I.cwd() + '/' + a);
     var c = 0;
     a: for (; 40 > c; c++) {
@@ -698,7 +698,7 @@ async function Module(moduleArg = {}) {
         if (h && b.parent) break;
         if ('.' !== a[f])
           if ('..' === a[f])
-            if (((e = Pa(e)), I.ec(d))) {
+            if (((e = Pa(e)), I.hc(d))) {
               a = e + '/' + a.slice(f + 1).join('/');
               c--;
               continue a;
@@ -706,15 +706,15 @@ async function Module(moduleArg = {}) {
           else {
             e = Oa(e + '/' + a[f]);
             try {
-              d = M(d, a[f]);
+              d = L(d, a[f]);
             } catch (k) {
-              if (44 === k?.nb && h && b.Zc) return { path: e };
+              if (44 === k?.mb && h && b.ad) return { path: e };
               throw k;
             }
-            !d.wb || (h && !b.Vb) || (d = d.wb.root);
-            if (40960 === (d.mode & 61440) && (!h || b.ub)) {
-              if (!d.$a.readlink) throw new I.Ya(52);
-              d = d.$a.readlink(d);
+            !d.yb || (h && !b.Xb) || (d = d.yb.root);
+            if (40960 === (d.mode & 61440) && (!h || b.vb)) {
+              if (!d.bb.readlink) throw new I.$a(52);
+              d = d.bb.readlink(d);
               '/' === d.charAt(0) || (d = Pa(e) + '/' + d);
               a = d + '/' + a.slice(f + 1).join('/');
               continue a;
@@ -723,26 +723,26 @@ async function Module(moduleArg = {}) {
       }
       return { path: e, node: d };
     }
-    throw new I.Ya(32);
+    throw new I.$a(32);
   }
   function qb(a) {
     for (var b; ; ) {
-      if (I.ec(a)) return ((a = a.jb.xc), b ? ('/' !== a[a.length - 1] ? `${a}/${b}` : a + b) : a);
+      if (I.hc(a)) return ((a = a.lb.zc), b ? ('/' !== a[a.length - 1] ? `${a}/${b}` : a + b) : a);
       b = b ? `${a.name}/${b}` : a.name;
       a = a.parent;
     }
   }
   function tb(a, b) {
     for (var c = 0, d = 0; d < b.length; d++) c = ((c << 5) - c + b.charCodeAt(d)) | 0;
-    return ((a + c) >>> 0) % I.Db.length;
+    return ((a + c) >>> 0) % I.Fb.length;
   }
   function ub(a) {
     var b = tb(a.parent.id, a.name);
-    a.Kb = I.Db[b];
-    I.Db[b] = a;
+    a.Mb = I.Fb[b];
+    I.Fb[b] = a;
   }
   function sb(a, b) {
-    return I.vc
+    return I.xc
       ? 0
       : (b.includes('r') && !(a.mode & 292)) ||
           (b.includes('w') && !(a.mode & 146)) ||
@@ -753,51 +753,51 @@ async function Module(moduleArg = {}) {
   function vb(a, b) {
     if (!K(a.mode)) return 54;
     try {
-      return (M(a, b), 20);
+      return (L(a, b), 20);
     } catch (c) {}
     return sb(a, 'wx');
   }
   function wb(a, b, c) {
     try {
-      var d = M(a, b);
+      var d = L(a, b);
     } catch (e) {
-      return e.nb;
+      return e.mb;
     }
     if ((a = sb(a, 'wx'))) return a;
     if (c) {
       if (!K(d.mode)) return 54;
-      if (I.ec(d) || qb(d) === I.cwd()) return 10;
+      if (I.hc(d) || qb(d) === I.cwd()) return 10;
     } else if (K(d.mode)) return 31;
     return 0;
   }
   function xb(a, b) {
-    if (!a) throw new I.Ya(b);
+    if (!a) throw new I.$a(b);
     return a;
   }
   function O(a) {
-    a = I.Qc(a);
-    if (!a) throw new I.Ya(8);
+    a = I.Sc(a);
+    if (!a) throw new I.$a(8);
     return a;
   }
   function yb(a, b = -1) {
-    a = Object.assign(new I.Ec(), a);
+    a = Object.assign(new I.Gc(), a);
     if (-1 == b)
       a: {
-        for (b = 0; b <= I.Fc; b++) if (!I.streams[b]) break a;
-        throw new I.Ya(33);
+        for (b = 0; b <= I.Hc; b++) if (!I.streams[b]) break a;
+        throw new I.$a(33);
       }
     a.fd = b;
     return (I.streams[b] = a);
   }
   function zb(a, b = -1) {
     a = yb(a, b);
-    a.cb?.xd?.(a);
+    a.fb?.Ad?.(a);
     return a;
   }
   function Ab(a, b, c) {
-    var d = a?.cb.xb;
+    var d = a?.fb.zb;
     a = d ? a : b;
-    d ??= b.$a.xb;
+    d ??= b.bb.zb;
     xb(d, 63);
     d(a, c);
   }
@@ -806,27 +806,27 @@ async function Module(moduleArg = {}) {
     for (a = [a]; a.length; ) {
       var c = a.pop();
       b.push(c);
-      a.push(...c.Qb);
+      a.push(...c.Sb);
     }
     return b;
   }
   function Cb(a) {
-    var b = { nd: 4096, Ad: 4096, blocks: 1e6, md: 5e5, ld: 5e5, files: I.ic, yd: I.ic - 1, Bd: 42, flags: 2, Gd: 255 };
-    a.$a.Ac && Object.assign(b, a.$a.Ac(a.jb.$c.root));
+    var b = { qd: 4096, Dd: 4096, blocks: 1e6, pd: 5e5, od: 5e5, files: I.kc, Bd: I.kc - 1, Ed: 42, flags: 2, Jd: 255 };
+    a.bb.Cc && Object.assign(b, a.bb.Cc(a.lb.bd.root));
     return b;
   }
   function Db(a, b, c) {
     'undefined' == typeof c && ((c = b), (b = 438));
-    return I.Cb(a, b | 8192, c);
+    return I.Eb(a, b | 8192, c);
   }
   function Eb(a, b, c, d) {
-    Ab(a, b, { mode: (c & 4095) | (b.mode & -4096), ctime: Date.now(), sc: d });
+    Ab(a, b, { mode: (c & 4095) | (b.mode & -4096), ctime: Date.now(), tc: d });
   }
-  function Hb(a, b, c) {
-    if (K(b.mode)) throw new I.Ya(31);
-    if (!I.isFile(b.mode)) throw new I.Ya(28);
+  function Fb(a, b, c) {
+    if (K(b.mode)) throw new I.$a(31);
+    if (!I.isFile(b.mode)) throw new I.$a(28);
     var d = sb(b, 'w');
-    if (d) throw new I.Ya(d);
+    if (d) throw new I.$a(d);
     Ab(a, b, { size: c, timestamp: Date.now() });
   }
   function Ib(a, b, c, d) {
@@ -835,38 +835,38 @@ async function Module(moduleArg = {}) {
     return I.create(b, jb(c, d));
   }
   function Jb(a) {
-    if (!(a.Xc || a.Yc || a.link || a.eb))
+    if (!(a.Zc || a.$c || a.link || a.gb))
       if (globalThis.XMLHttpRequest)
         H(
           'Lazy loading should have been performed (contents set) in createLazyFile, but it was not. Lazy loading only works in web workers. Use --embed-file or --preload-file in emcc on the main thread.',
         );
       else
         try {
-          a.eb = ka(a.url);
+          a.gb = ka(a.url);
         } catch (b) {
-          throw new I.Ya(29);
+          throw new I.$a(29);
         }
   }
   var I = {
       root: null,
-      Qb: [],
-      rc: {},
+      Sb: [],
+      sc: {},
       streams: [],
-      ic: 1,
-      Db: null,
-      pc: '/',
-      bc: !1,
-      vc: !0,
-      Mc: null,
-      Yb: 0,
-      Ya: class {
+      kc: 1,
+      Fb: null,
+      qc: '/',
+      dc: !1,
+      xc: !0,
+      Oc: null,
+      $b: 0,
+      $a: class {
         name = 'ErrnoError';
         constructor(a) {
-          this.nb = a;
+          this.mb = a;
         }
       },
-      Ec: class {
-        Ab = {};
+      Gc: class {
+        Cb = {};
         node = null;
         get object() {
           return this.node;
@@ -875,27 +875,27 @@ async function Module(moduleArg = {}) {
           this.node = a;
         }
         get flags() {
-          return this.Ab.flags;
+          return this.Cb.flags;
         }
         set flags(a) {
-          this.Ab.flags = a;
+          this.Cb.flags = a;
         }
         get position() {
-          return this.Ab.position;
+          return this.Cb.position;
         }
         set position(a) {
-          this.Ab.position = a;
+          this.Cb.position = a;
         }
       },
-      Dc: class {
-        $a = {};
-        cb = {};
-        wb = null;
+      Fc: class {
+        bb = {};
+        fb = {};
+        yb = null;
         constructor(a, b, c, d) {
           a ||= this;
           this.parent = a;
-          this.jb = a.jb;
-          this.id = I.ic++;
+          this.lb = a.lb;
+          this.id = I.kc++;
           this.name = b;
           this.mode = c;
           this.rdev = d;
@@ -913,19 +913,19 @@ async function Module(moduleArg = {}) {
         set write(a) {
           a ? (this.mode |= 146) : (this.mode &= -147);
         }
-        get Yc() {
+        get $c() {
           return K(this.mode);
         }
-        get Xc() {
+        get Zc() {
           return 8192 === (this.mode & 61440);
         }
       },
       createNode(a, b, c, d) {
-        a = new I.Dc(a, b, c, d);
+        a = new I.Fc(a, b, c, d);
         ub(a);
         return a;
       },
-      ec(a) {
+      hc(a) {
         return a === a.parent;
       },
       isFile(a) {
@@ -937,97 +937,97 @@ async function Module(moduleArg = {}) {
       isSocket(a) {
         return 49152 === (a & 49152);
       },
-      Fc: 4096,
-      Qc: (a) => I.streams[a],
-      Hc: {
+      Hc: 4096,
+      Sc: (a) => I.streams[a],
+      Ic: {
         open(a) {
-          a.cb = I.Oc(a.node.rdev).cb;
-          a.cb.open?.(a);
+          a.fb = I.Qc(a.node.rdev).fb;
+          a.fb.open?.(a);
         },
-        rb() {
-          throw new I.Ya(70);
+        tb() {
+          throw new I.$a(70);
         },
       },
-      hc: (a) => a >> 8,
-      Ed: (a) => a & 255,
-      Jb: (a, b) => (a << 8) | b,
-      Oc: (a) => I.rc[a],
-      Bc(a, b) {
+      jc: (a) => a >> 8,
+      Hd: (a) => a & 255,
+      Lb: (a, b) => (a << 8) | b,
+      Qc: (a) => I.sc[a],
+      Dc(a, b) {
         function c(k) {
-          I.Yb--;
+          I.$b--;
           return b(k);
         }
         function d(k) {
           if (k) {
-            if (!d.Kc) return ((d.Kc = !0), c(k));
+            if (!d.Lc) return ((d.Lc = !0), c(k));
           } else ++f >= e.length && c(null);
         }
         'function' == typeof a && ((b = a), (a = !1));
-        I.Yb++;
-        1 < I.Yb && p(`warning: ${I.Yb} FS.syncfs operations in flight at once, probably just doing extra work`);
-        var e = Bb(I.root.jb),
+        I.$b++;
+        1 < I.$b && p(`warning: ${I.$b} FS.syncfs operations in flight at once, probably just doing extra work`);
+        var e = Bb(I.root.lb),
           f = 0,
           h;
-        for (h of e) h.type.Bc ? h.type.Bc(h, a, d) : d(null);
+        for (h of e) h.type.Dc ? h.type.Dc(h, a, d) : d(null);
       },
-      jb(a, b, c) {
+      lb(a, b, c) {
         var d = '/' === c;
-        if (d && I.root) throw new I.Ya(10);
+        if (d && I.root) throw new I.$a(10);
         if (!d && c) {
-          var e = N(c, { Vb: !1 });
+          var e = N(c, { Xb: !1 });
           c = e.path;
           e = e.node;
-          if (e.wb) throw new I.Ya(10);
-          if (!K(e.mode)) throw new I.Ya(54);
+          if (e.yb) throw new I.$a(10);
+          if (!K(e.mode)) throw new I.$a(54);
         }
-        b = { type: a, $c: b, xc: c, Qb: [] };
-        a = a.jb(b);
-        a.jb = b;
+        b = { type: a, bd: b, zc: c, Sb: [] };
+        a = a.lb(b);
+        a.lb = b;
         b.root = a;
-        d ? (I.root = a) : e && ((e.wb = b), e.jb && e.jb.Qb.push(b));
+        d ? (I.root = a) : e && ((e.yb = b), e.lb && e.lb.Sb.push(b));
         return a;
       },
-      Ld(a) {
-        a = N(a, { Vb: !1 });
-        if (!a.node.wb) throw new I.Ya(28);
+      Od(a) {
+        a = N(a, { Xb: !1 });
+        if (!a.node.yb) throw new I.$a(28);
         a = a.node;
-        var b = a.wb,
+        var b = a.yb,
           c = Bb(b);
-        for ([, e] of Object.entries(I.Db))
+        for ([, e] of Object.entries(I.Fb))
           for (; e; ) {
-            var d = e.Kb;
-            c.includes(e.jb) && ib(e);
+            var d = e.Mb;
+            c.includes(e.lb) && ib(e);
             var e = d;
           }
-        a.wb = null;
-        a.jb.Qb.splice(a.jb.Qb.indexOf(b), 1);
+        a.yb = null;
+        a.lb.Sb.splice(a.lb.Sb.indexOf(b), 1);
       },
       lookup(a, b) {
-        return a.$a.lookup(a, b);
+        return a.bb.lookup(a, b);
       },
-      Cb(a, b, c) {
+      Eb(a, b, c) {
         var d = N(a, { parent: !0 }).node;
         a = Qa(a);
-        if (!a) throw new I.Ya(28);
-        if ('.' === a || '..' === a) throw new I.Ya(20);
+        if (!a) throw new I.$a(28);
+        if ('.' === a || '..' === a) throw new I.$a(20);
         var e = vb(d, a);
-        if (e) throw new I.Ya(e);
-        if (!d.$a.Cb) throw new I.Ya(63);
-        return d.$a.Cb(d, a, b, c);
+        if (e) throw new I.$a(e);
+        if (!d.bb.Eb) throw new I.$a(63);
+        return d.bb.Eb(d, a, b, c);
       },
-      Ac(a) {
-        return Cb(N(a, { ub: !0 }).node);
+      Cc(a) {
+        return Cb(N(a, { vb: !0 }).node);
       },
-      Jd(a) {
+      Md(a) {
         return Cb(a.node);
       },
       create(a, b = 438) {
-        return I.Cb(a, (b & 4095) | 32768, 0);
+        return I.Eb(a, (b & 4095) | 32768, 0);
       },
       mkdir(a, b = 511) {
-        return I.Cb(a, (b & 1023) | 16384, 0);
+        return I.Eb(a, (b & 1023) | 16384, 0);
       },
-      Fd(a, b) {
+      Id(a, b) {
         var c = a.split('/'),
           d = '',
           e;
@@ -1038,19 +1038,19 @@ async function Module(moduleArg = {}) {
             try {
               I.mkdir(d, b);
             } catch (f) {
-              if (20 != f.nb) throw f;
+              if (20 != f.mb) throw f;
             }
           }
       },
       symlink(a, b) {
-        if (!Ua(a)) throw new I.Ya(44);
+        if (!Ua(a)) throw new I.$a(44);
         var c = N(b, { parent: !0 }).node;
-        if (!c) throw new I.Ya(44);
+        if (!c) throw new I.$a(44);
         b = Qa(b);
         var d = vb(c, b);
-        if (d) throw new I.Ya(d);
-        if (!c.$a.symlink) throw new I.Ya(63);
-        return c.$a.symlink(c, b, a);
+        if (d) throw new I.$a(d);
+        if (!c.bb.symlink) throw new I.$a(63);
+        return c.bb.symlink(c, b, a);
       },
       rename(a, b) {
         var c = Pa(a),
@@ -1061,26 +1061,26 @@ async function Module(moduleArg = {}) {
         var k = h.node;
         h = N(b, { parent: !0 });
         h = h.node;
-        if (!k || !h) throw new I.Ya(44);
-        if (k.jb !== h.jb) throw new I.Ya(75);
-        var m = M(k, e);
+        if (!k || !h) throw new I.$a(44);
+        if (k.lb !== h.lb) throw new I.$a(75);
+        var m = L(k, e);
         a = Va(a, d);
-        if ('.' !== a.charAt(0)) throw new I.Ya(28);
+        if ('.' !== a.charAt(0)) throw new I.$a(28);
         a = Va(b, c);
-        if ('.' !== a.charAt(0)) throw new I.Ya(55);
+        if ('.' !== a.charAt(0)) throw new I.$a(55);
         try {
-          var l = M(h, f);
+          var l = L(h, f);
         } catch (n) {}
         if (m !== l) {
           b = K(m.mode);
-          if ((e = wb(k, e, b))) throw new I.Ya(e);
-          if ((e = l ? wb(h, f, b) : vb(h, f))) throw new I.Ya(e);
-          if (!k.$a.rename) throw new I.Ya(63);
-          if (m.wb || (l && l.wb)) throw new I.Ya(10);
-          if (h !== k && (e = sb(k, 'w'))) throw new I.Ya(e);
+          if ((e = wb(k, e, b))) throw new I.$a(e);
+          if ((e = l ? wb(h, f, b) : vb(h, f))) throw new I.$a(e);
+          if (!k.bb.rename) throw new I.$a(63);
+          if (m.yb || (l && l.yb)) throw new I.$a(10);
+          if (h !== k && (e = sb(k, 'w'))) throw new I.$a(e);
           ib(m);
           try {
-            (k.$a.rename(m, h, f), (m.parent = h));
+            (k.bb.rename(m, h, f), (m.parent = h));
           } catch (n) {
             throw n;
           } finally {
@@ -1091,46 +1091,46 @@ async function Module(moduleArg = {}) {
       rmdir(a) {
         var b = N(a, { parent: !0 }).node;
         a = Qa(a);
-        var c = M(b, a),
+        var c = L(b, a),
           d = wb(b, a, !0);
-        if (d) throw new I.Ya(d);
-        if (!b.$a.rmdir) throw new I.Ya(63);
-        if (c.wb) throw new I.Ya(10);
-        b.$a.rmdir(b, a);
+        if (d) throw new I.$a(d);
+        if (!b.bb.rmdir) throw new I.$a(63);
+        if (c.yb) throw new I.$a(10);
+        b.bb.rmdir(b, a);
         ib(c);
       },
       readdir(a) {
-        a = N(a, { ub: !0 }).node;
-        return xb(a.$a.readdir, 54)(a);
+        a = N(a, { vb: !0 }).node;
+        return xb(a.bb.readdir, 54)(a);
       },
       unlink(a) {
         var b = N(a, { parent: !0 }).node;
-        if (!b) throw new I.Ya(44);
+        if (!b) throw new I.$a(44);
         a = Qa(a);
-        var c = M(b, a),
+        var c = L(b, a),
           d = wb(b, a, !1);
-        if (d) throw new I.Ya(d);
-        if (!b.$a.unlink) throw new I.Ya(63);
-        if (c.wb) throw new I.Ya(10);
-        b.$a.unlink(b, a);
+        if (d) throw new I.$a(d);
+        if (!b.bb.unlink) throw new I.$a(63);
+        if (c.yb) throw new I.$a(10);
+        b.bb.unlink(b, a);
         ib(c);
       },
       readlink(a) {
         a = N(a).node;
-        if (!a) throw new I.Ya(44);
-        if (!a.$a.readlink) throw new I.Ya(28);
-        return a.$a.readlink(a);
+        if (!a) throw new I.$a(44);
+        if (!a.bb.readlink) throw new I.$a(28);
+        return a.bb.readlink(a);
       },
       stat(a, b) {
-        a = N(a, { ub: !b }).node;
-        return xb(a.$a.vb, 63)(a);
+        a = N(a, { vb: !b }).node;
+        return xb(a.bb.xb, 63)(a);
       },
       fstat(a) {
         var b = O(a);
         a = b.node;
-        var c = b.cb.vb;
+        var c = b.fb.xb;
         b = c ? b : a;
-        c ??= a.$a.vb;
+        c ??= a.bb.xb;
         xb(c, 63);
         return c(b);
       },
@@ -1138,7 +1138,7 @@ async function Module(moduleArg = {}) {
         return I.stat(a, !0);
       },
       chmod(a, b, c) {
-        a = 'string' == typeof a ? N(a, { ub: !c }).node : a;
+        a = 'string' == typeof a ? N(a, { vb: !c }).node : a;
         Eb(null, a, b, c);
       },
       lchmod(a, b) {
@@ -1149,32 +1149,32 @@ async function Module(moduleArg = {}) {
         Eb(a, a.node, b, !1);
       },
       chown(a, b, c, d) {
-        a = 'string' == typeof a ? N(a, { ub: !d }).node : a;
-        Ab(null, a, { timestamp: Date.now(), sc: d });
+        a = 'string' == typeof a ? N(a, { vb: !d }).node : a;
+        Ab(null, a, { timestamp: Date.now(), tc: d });
       },
       lchown(a, b, c) {
         I.chown(a, b, c, !0);
       },
       fchown(a) {
         a = O(a);
-        Ab(a, a.node, { timestamp: Date.now(), sc: !1 });
+        Ab(a, a.node, { timestamp: Date.now(), tc: !1 });
       },
       truncate(a, b) {
-        if (0 > b) throw new I.Ya(28);
-        a = 'string' == typeof a ? N(a, { ub: !0 }).node : a;
-        Hb(null, a, b);
+        if (0 > b) throw new I.$a(28);
+        a = 'string' == typeof a ? N(a, { vb: !0 }).node : a;
+        Fb(null, a, b);
       },
-      Cd(a, b) {
+      Fd(a, b) {
         a = O(a);
-        if (0 > b || 0 === (a.flags & 2097155)) throw new I.Ya(28);
-        Hb(a, a.node, b);
+        if (0 > b || 0 === (a.flags & 2097155)) throw new I.$a(28);
+        Fb(a, a.node, b);
       },
-      Md(a, b, c) {
-        a = N(a, { ub: !0 }).node;
-        xb(a.$a.xb, 63)(a, { atime: b, mtime: c });
+      Pd(a, b, c) {
+        a = N(a, { vb: !0 }).node;
+        xb(a.bb.zb, 63)(a, { atime: b, mtime: c });
       },
       open(a, b, c = 438) {
-        if ('' === a) throw new I.Ya(44);
+        if ('' === a) throw new I.$a(44);
         if ('string' == typeof b) {
           var d = { r: 0, 'r+': 2, w: 577, 'w+': 578, a: 1089, 'a+': 1090 }[b];
           if ('undefined' == typeof d) throw Error(`Unknown file open mode: ${b}`);
@@ -1184,22 +1184,22 @@ async function Module(moduleArg = {}) {
         if ('object' == typeof a) d = a;
         else {
           var e = a.endsWith('/');
-          var f = N(a, { ub: !(b & 131072), Zc: !0 });
+          var f = N(a, { vb: !(b & 131072), ad: !0 });
           d = f.node;
           a = f.path;
         }
         f = !1;
         if (b & 64)
           if (d) {
-            if (b & 128) throw new I.Ya(20);
+            if (b & 128) throw new I.$a(20);
           } else {
-            if (e) throw new I.Ya(31);
-            d = I.Cb(a, c | 511, 0);
+            if (e) throw new I.$a(31);
+            d = I.Eb(a, c | 511, 0);
             f = !0;
           }
-        if (!d) throw new I.Ya(44);
+        if (!d) throw new I.$a(44);
         8192 === (d.mode & 61440) && (b &= -513);
-        if (b & 65536 && !K(d.mode)) throw new I.Ya(54);
+        if (b & 65536 && !K(d.mode)) throw new I.$a(54);
         if (
           !f &&
           (d
@@ -1211,19 +1211,19 @@ async function Module(moduleArg = {}) {
             : (e = 44),
           e)
         )
-          throw new I.Ya(e);
+          throw new I.$a(e);
         b & 512 && !f && I.truncate(d, 0);
         b &= -131713;
-        b = yb({ node: d, path: qb(d), flags: b, seekable: !0, position: 0, cb: d.cb, jd: [], error: !1 });
-        b.cb.open && b.cb.open(b);
+        b = yb({ node: d, path: qb(d), flags: b, seekable: !0, position: 0, fb: d.fb, ld: [], error: !1 });
+        b.fb.open && b.fb.open(b);
         f && I.chmod(d, c & 511);
         return b;
       },
       close(a) {
-        if (null === a.fd) throw new I.Ya(8);
-        a.ac && (a.ac = null);
+        if (null === a.fd) throw new I.$a(8);
+        a.cc && (a.cc = null);
         try {
-          a.cb.close && a.cb.close(a);
+          a.fb.close && a.fb.close(a);
         } catch (b) {
           throw b;
         } finally {
@@ -1231,54 +1231,54 @@ async function Module(moduleArg = {}) {
         }
         a.fd = null;
       },
-      rb(a, b, c) {
-        if (null === a.fd) throw new I.Ya(8);
-        if (!a.seekable || !a.cb.rb) throw new I.Ya(70);
-        if (0 != c && 1 != c && 2 != c) throw new I.Ya(28);
-        a.position = a.cb.rb(a, b, c);
-        a.jd = [];
+      tb(a, b, c) {
+        if (null === a.fd) throw new I.$a(8);
+        if (!a.seekable || !a.fb.tb) throw new I.$a(70);
+        if (0 != c && 1 != c && 2 != c) throw new I.$a(28);
+        a.position = a.fb.tb(a, b, c);
+        a.ld = [];
         return a.position;
       },
       read(a, b, c, d, e) {
-        if (0 > d || 0 > e) throw new I.Ya(28);
-        if (null === a.fd) throw new I.Ya(8);
-        if (1 === (a.flags & 2097155)) throw new I.Ya(8);
-        if (K(a.node.mode)) throw new I.Ya(31);
-        if (!a.cb.read) throw new I.Ya(28);
+        if (0 > d || 0 > e) throw new I.$a(28);
+        if (null === a.fd) throw new I.$a(8);
+        if (1 === (a.flags & 2097155)) throw new I.$a(8);
+        if (K(a.node.mode)) throw new I.$a(31);
+        if (!a.fb.read) throw new I.$a(28);
         var f = 'undefined' != typeof e;
         if (!f) e = a.position;
-        else if (!a.seekable) throw new I.Ya(70);
-        b = a.cb.read(a, b, c, d, e);
+        else if (!a.seekable) throw new I.$a(70);
+        b = a.fb.read(a, b, c, d, e);
         f || (a.position += b);
         return b;
       },
       write(a, b, c, d, e, f) {
-        if (0 > d || 0 > e) throw new I.Ya(28);
-        if (null === a.fd) throw new I.Ya(8);
-        if (0 === (a.flags & 2097155)) throw new I.Ya(8);
-        if (K(a.node.mode)) throw new I.Ya(31);
-        if (!a.cb.write) throw new I.Ya(28);
-        a.seekable && a.flags & 1024 && I.rb(a, 0, 2);
+        if (0 > d || 0 > e) throw new I.$a(28);
+        if (null === a.fd) throw new I.$a(8);
+        if (0 === (a.flags & 2097155)) throw new I.$a(8);
+        if (K(a.node.mode)) throw new I.$a(31);
+        if (!a.fb.write) throw new I.$a(28);
+        a.seekable && a.flags & 1024 && I.tb(a, 0, 2);
         var h = 'undefined' != typeof e;
         if (!h) e = a.position;
-        else if (!a.seekable) throw new I.Ya(70);
-        b = a.cb.write(a, b, c, d, e, f);
+        else if (!a.seekable) throw new I.$a(70);
+        b = a.fb.write(a, b, c, d, e, f);
         h || (a.position += b);
         return b;
       },
-      Lb(a, b, c, d, e) {
-        if (0 !== (d & 2) && 0 === (e & 2) && 2 !== (a.flags & 2097155)) throw new I.Ya(2);
-        if (1 === (a.flags & 2097155)) throw new I.Ya(2);
-        if (!a.cb.Lb) throw new I.Ya(43);
-        if (!b) throw new I.Ya(28);
-        return a.cb.Lb(a, b, c, d, e);
+      Nb(a, b, c, d, e) {
+        if (0 !== (d & 2) && 0 === (e & 2) && 2 !== (a.flags & 2097155)) throw new I.$a(2);
+        if (1 === (a.flags & 2097155)) throw new I.$a(2);
+        if (!a.fb.Nb) throw new I.$a(43);
+        if (!b) throw new I.$a(28);
+        return a.fb.Nb(a, b, c, d, e);
       },
-      Rb(a, b, c, d, e) {
-        return a.cb.Rb ? a.cb.Rb(a, b, c, d, e) : 0;
+      Tb(a, b, c, d, e) {
+        return a.fb.Tb ? a.fb.Tb(a, b, c, d, e) : 0;
       },
-      cc(a, b, c) {
-        if (!a.cb.cc) throw new I.Ya(59);
-        return a.cb.cc(a, b, c);
+      ec(a, b, c) {
+        if (!a.fb.ec) throw new I.$a(59);
+        return a.fb.ec(a, b, c);
       },
       readFile(a, b = {}) {
         b.flags = b.flags || 0;
@@ -1296,35 +1296,35 @@ async function Module(moduleArg = {}) {
         c.flags = c.flags || 577;
         a = I.open(a, c.flags, c.mode);
         'string' == typeof b && (b = new Uint8Array(bb(b)));
-        ArrayBuffer.isView(b) ? I.write(a, b, 0, b.byteLength, void 0, c.td) : H('Unsupported data type');
+        ArrayBuffer.isView(b) ? I.write(a, b, 0, b.byteLength, void 0, c.wd) : H('Unsupported data type');
         I.close(a);
       },
-      cwd: () => I.pc,
+      cwd: () => I.qc,
       chdir(a) {
-        a = N(a, { ub: !0 });
-        if (null === a.node) throw new I.Ya(44);
-        if (!K(a.node.mode)) throw new I.Ya(54);
+        a = N(a, { vb: !0 });
+        if (null === a.node) throw new I.$a(44);
+        if (!K(a.node.mode)) throw new I.$a(54);
         var b = sb(a.node, 'x');
-        if (b) throw new I.Ya(b);
-        I.pc = a.path;
+        if (b) throw new I.$a(b);
+        I.qc = a.path;
       },
-      Id() {
-        I.bc = !1;
+      Ld() {
+        I.dc = !1;
         for (var a of I.streams) a && I.close(a);
       },
-      zd(a, b) {
+      Cd(a, b) {
         try {
-          var c = N(a, { ub: !b });
+          var c = N(a, { vb: !b });
           a = c.path;
         } catch (f) {}
         var d = !1,
           e = null;
         try {
-          ((c = N(a, { parent: !0 })), Qa(a), (c = N(a, { ub: !b })), (d = !0), (e = c.node));
+          ((c = N(a, { parent: !0 })), Qa(a), (c = N(a, { vb: !b })), (d = !0), (e = c.node));
         } catch (f) {}
         return d ? e : null;
       },
-      vd(a, b) {
+      yd(a, b) {
         a = 'string' == typeof a ? a : qb(a);
         for (b = b.split('/').reverse(); b.length; ) {
           var c = b.pop();
@@ -1333,19 +1333,19 @@ async function Module(moduleArg = {}) {
             try {
               I.mkdir(d);
             } catch (e) {
-              if (20 != e.nb) throw e;
+              if (20 != e.mb) throw e;
             }
             a = d;
           }
         }
         return d;
       },
-      Ib(a, b, c, d) {
+      Kb(a, b, c, d) {
         a = Ra('string' == typeof a ? a : qb(a), b);
         b = jb(!!c, !!d);
         var e;
-        (e = I.Ib).hc ?? (e.hc = 64);
-        e = I.Jb(I.Ib.hc++, 0);
+        (e = I.Kb).jc ?? (e.jc = 64);
+        e = I.Lb(I.Kb.jc++, 0);
         eb(e, {
           open(f) {
             f.seekable = !1;
@@ -1358,9 +1358,9 @@ async function Module(moduleArg = {}) {
               try {
                 var r = c();
               } catch (q) {
-                throw new I.Ya(29);
+                throw new I.$a(29);
               }
-              if (void 0 === r && 0 === l) throw new I.Ya(6);
+              if (void 0 === r && 0 === l) throw new I.$a(6);
               if (null === r || void 0 === r) break;
               l++;
               h[k + n] = r;
@@ -1373,7 +1373,7 @@ async function Module(moduleArg = {}) {
               try {
                 d(h[k + l]);
               } catch (n) {
-                throw new I.Ya(29);
+                throw new I.$a(29);
               }
             m && (f.node.mtime = f.node.ctime = Date.now());
             return l;
@@ -1381,23 +1381,23 @@ async function Module(moduleArg = {}) {
         });
         return Db(a, b, e);
       },
-      ud(a, b, c, d, e) {
+      xd(a, b, c, d, e) {
         class f {
-          Zb = !1;
-          Ab = [];
-          Pb = void 0;
-          mc = 0;
-          lc = 0;
+          ac = !1;
+          Cb = [];
+          Rb = void 0;
+          oc = 0;
+          nc = 0;
           get(l) {
             if (!(l > this.length - 1 || 0 > l)) {
               var n = l % this.chunkSize;
-              return this.Pb((l / this.chunkSize) | 0)[n];
+              return this.Rb((l / this.chunkSize) | 0)[n];
             }
           }
-          Gc(l) {
-            this.Pb = l;
+          Mc(l) {
+            this.Rb = l;
           }
-          nc() {
+          uc() {
             var l = new XMLHttpRequest();
             l.open('HEAD', c, !1);
             l.send(null);
@@ -1411,12 +1411,12 @@ async function Module(moduleArg = {}) {
             var t = 1048576;
             q || (t = n);
             var v = this;
-            v.Gc((x) => {
+            v.Mc((x) => {
               var B = x * t,
                 A = (x + 1) * t - 1;
               A = Math.min(A, n - 1);
-              if ('undefined' == typeof v.Ab[x]) {
-                var z = v.Ab;
+              if ('undefined' == typeof v.Cb[x]) {
+                var z = v.Cb;
                 B > A && H('invalid range (' + B + ', ' + A + ') or no bytes requested!');
                 A > n - 1 && H('only ' + n + ' bytes available! programmer error!');
                 var C = new XMLHttpRequest();
@@ -1431,24 +1431,24 @@ async function Module(moduleArg = {}) {
                 B = void 0 !== C.response ? new Uint8Array(C.response || []) : bb(C.responseText || '');
                 z[x] = B;
               }
-              'undefined' == typeof v.Ab[x] && H('doXHR failed!');
-              return v.Ab[x];
+              'undefined' == typeof v.Cb[x] && H('doXHR failed!');
+              return v.Cb[x];
             });
             if (l || !n)
               ((t = n = 1),
-                (t = n = this.Pb(0).length),
+                (t = n = this.Rb(0).length),
                 ma('LazyFiles on gzip forces download of the whole file when length is accessed'));
-            this.mc = n;
-            this.lc = t;
-            this.Zb = !0;
+            this.oc = n;
+            this.nc = t;
+            this.ac = !0;
           }
           get length() {
-            this.Zb || this.nc();
-            return this.mc;
+            this.ac || this.uc();
+            return this.oc;
           }
           get chunkSize() {
-            this.Zb || this.nc();
-            return this.lc;
+            this.ac || this.uc();
+            return this.nc;
           }
         }
         if (globalThis.XMLHttpRequest) {
@@ -1460,23 +1460,23 @@ async function Module(moduleArg = {}) {
           var k = void 0;
         } else ((k = c), (h = void 0));
         var m = Ib(a, b, d, e);
-        h ? (m.eb = h) : k && ((m.eb = null), (m.url = k));
+        h ? (m.gb = h) : k && ((m.gb = null), (m.url = k));
         Object.defineProperties(m, {
-          mb: {
+          pb: {
             get: function () {
-              return this.eb.length;
+              return this.gb.length;
             },
           },
         });
         a = {};
-        for (const [l, n] of Object.entries(m.cb))
+        for (const [l, n] of Object.entries(m.fb))
           a[l] = (...r) => {
             Jb(m);
             return n(...r);
           };
         a.read = (l, n, r, q, t) => {
           Jb(m);
-          l = l.node.eb;
+          l = l.node.gb;
           if (t >= l.length) n = 0;
           else {
             q = Math.min(l.length - t, q);
@@ -1486,12 +1486,12 @@ async function Module(moduleArg = {}) {
           }
           return n;
         };
-        a.Lb = () => {
+        a.Nb = () => {
           Jb(m);
           H();
-          throw new I.Ya(48);
+          throw new I.$a(48);
         };
-        m.cb = a;
+        m.fb = a;
         return m;
       },
     },
@@ -1500,7 +1500,7 @@ async function Module(moduleArg = {}) {
     if ('/' === b.charAt(0)) return b;
     a = -100 === a ? I.cwd() : O(a).path;
     if (0 == b.length) {
-      if (!c) throw new I.Ya(44);
+      if (!c) throw new I.$a(44);
       return a;
     }
     return a + '/' + b;
@@ -1541,7 +1541,7 @@ async function Module(moduleArg = {}) {
       }
     };
   function Pb(a) {
-    return this.fb(E[(a >>> 2) >>> 0]);
+    return this.hb(E[(a >>> 2) >>> 0]);
   }
   var Qb = {},
     R = {},
@@ -1595,7 +1595,7 @@ async function Module(moduleArg = {}) {
     var d = b.name;
     if (!a) throw new V(`type "${d}" must have a positive integer typeid pointer`);
     if (R.hasOwnProperty(a)) {
-      if (c.Tc) return;
+      if (c.Vc) return;
       throw new V(`Cannot register type '${d}' twice`);
     }
     R[a] = b;
@@ -1620,20 +1620,20 @@ async function Module(moduleArg = {}) {
       }
     },
     Wb = (a) => {
-      throw new V(a.Za.ib.ab.name + ' instance already deleted');
+      throw new V(a.ab.kb.cb.name + ' instance already deleted');
     },
     Xb = !1,
     Yb = () => {},
     Zb = (a) => {
       if (!globalThis.FinalizationRegistry) return ((Zb = (b) => b), a);
       Xb = new FinalizationRegistry((b) => {
-        b = b.Za;
+        b = b.ab;
         --b.count.value;
-        0 === b.count.value && (b.pb ? b.tb.zb(b.pb) : b.ib.ab.zb(b.gb));
+        0 === b.count.value && (b.rb ? b.wb.Bb(b.rb) : b.kb.cb.Bb(b.ib));
       });
       Zb = (b) => {
-        var c = b.Za;
-        c.pb && Xb.register(b, { Za: c }, b);
+        var c = b.ab;
+        c.rb && Xb.register(b, { ab: c }, b);
         return b;
       };
       Yb = (b) => {
@@ -1646,26 +1646,26 @@ async function Module(moduleArg = {}) {
   var bc = (a, b) => Object.defineProperty(b, 'name', { value: a }),
     cc = {},
     dc = (a, b, c) => {
-      if (void 0 === a[b].bb) {
+      if (void 0 === a[b].eb) {
         var d = a[b];
         a[b] = function (...e) {
-          if (!a[b].bb.hasOwnProperty(e.length)) {
+          if (!a[b].eb.hasOwnProperty(e.length)) {
             var f = -1,
               h;
-            for (h in a[b].bb) {
+            for (h in a[b].eb) {
               var k = +h;
               k > e.length && (0 > f || k < f) && (f = k);
             }
             if (0 <= f) for (; e.length < f; ) e.push(void 0);
           }
-          if (!a[b].bb.hasOwnProperty(e.length))
+          if (!a[b].eb.hasOwnProperty(e.length))
             throw new V(
-              `Function '${c}' called with an invalid number of arguments (${e.length}) - expects one of (${a[b].bb})!`,
+              `Function '${c}' called with an invalid number of arguments (${e.length}) - expects one of (${a[b].eb})!`,
             );
-          return a[b].bb[e.length].apply(this, e);
+          return a[b].eb[e.length].apply(this, e);
         };
-        a[b].bb = [];
-        a[b].bb[d.Bb] = d;
+        a[b].eb = [];
+        a[b].eb[d.Db] = d;
       }
     },
     ec = (a, b) => {
@@ -1678,7 +1678,7 @@ async function Module(moduleArg = {}) {
                 return (void 0 !== h && !0 === h.optional) ||
                   'emscripten::val' === e ||
                   ('bigint' === typeof a[f] && 'number' === e) ||
-                  ('object' === typeof a[f] && void 0 !== h && void 0 !== h.ab && a[f] instanceof h.ab.constructor) ||
+                  ('object' === typeof a[f] && void 0 !== h && void 0 !== h.cb && a[f] instanceof h.cb.constructor) ||
                   typeof a[f] === e ||
                   ('number' === typeof e &&
                     void 0 !== h &&
@@ -1711,24 +1711,24 @@ async function Module(moduleArg = {}) {
     },
     fc = (a, b, c, d) => {
       dc(a, b, c);
-      if (void 0 !== a[b].bb && void 0 !== a[b].bb[d] && void 0 === a[b].bb[d].kb) {
-        var e = a[b].bb[d];
-        a[b].bb[d] = function (...f) {
-          var h = ec(f, a[b].bb[f.length].Gb);
-          if (!a[b].bb[f.length].kb.hasOwnProperty(h))
+      if (void 0 !== a[b].eb && void 0 !== a[b].eb[d] && void 0 === a[b].eb[d].nb) {
+        var e = a[b].eb[d];
+        a[b].eb[d] = function (...f) {
+          var h = ec(f, a[b].eb[f.length].Ib);
+          if (!a[b].eb[f.length].nb.hasOwnProperty(h))
             throw (
-              (h = a[b].bb[f.length].Gb.map((k) => '(' + k.map((m) => ('string' === typeof m ? m : R[m].name)) + ')')),
+              (h = a[b].eb[f.length].Ib.map((k) => '(' + k.map((m) => ('string' === typeof m ? m : R[m].name)) + ')')),
               (f = f.map((k) =>
                 'object' === typeof k && k.constructor && k.constructor.name ? k.constructor.name : typeof k,
               )),
               new V(`Function '${c}' called with an invalid signature (${f}) - expects one of (${h})!`)
             );
-          return a[b].bb[f.length].kb[h].apply(this, f);
+          return a[b].eb[f.length].nb[h].apply(this, f);
         };
-        a[b].bb[d].kb = {};
-        a[b].bb[d].kb[e.Fb] = e;
-        a[b].bb[d].Gb = [];
-        e.Mb && a[b].bb[d].Gb.push(e.Mb);
+        a[b].eb[d].nb = {};
+        a[b].eb[d].nb[e.Hb] = e;
+        a[b].eb[d].Ib = [];
+        e.Ob && a[b].eb[d].Ib.push(e.Ob);
       }
     },
     gc = (a, b) => {
@@ -1743,19 +1743,19 @@ async function Module(moduleArg = {}) {
   function ic(a, b, c, d, e, f, h, k) {
     this.name = a;
     this.constructor = b;
-    this.Hb = c;
-    this.zb = d;
-    this.qb = e;
-    this.Nc = f;
-    this.Tb = h;
-    this.Jc = k;
-    this.bd = [];
+    this.Jb = c;
+    this.Bb = d;
+    this.sb = e;
+    this.Pc = f;
+    this.Vb = h;
+    this.Kc = k;
+    this.dd = [];
   }
   var jc = (a, b, c) => {
       for (; b !== c; ) {
-        if (!b.Tb) throw new V(`Expected null or instance of ${c.name}, got an instance of ${b.name}`);
-        a = b.Tb(a);
-        b = b.qb;
+        if (!b.Vb) throw new V(`Expected null or instance of ${c.name}, got an instance of ${b.name}`);
+        a = b.Vb(a);
+        b = b.sb;
       }
       return a;
     },
@@ -1766,52 +1766,52 @@ async function Module(moduleArg = {}) {
     };
   function lc(a, b) {
     if (null === b) {
-      if (this.dc) throw new V(`null is not a valid ${this.name}`);
+      if (this.fc) throw new V(`null is not a valid ${this.name}`);
       return 0;
     }
-    if (!b.Za) throw new V(`Cannot pass "${kc(b)}" as a ${this.name}`);
-    if (!b.Za.gb) throw new V(`Cannot pass deleted object as a pointer of type ${this.name}`);
-    return jc(b.Za.gb, b.Za.ib.ab, this.ab);
+    if (!b.ab) throw new V(`Cannot pass "${kc(b)}" as a ${this.name}`);
+    if (!b.ab.ib) throw new V(`Cannot pass deleted object as a pointer of type ${this.name}`);
+    return jc(b.ab.ib, b.ab.kb.cb, this.cb);
   }
   function mc(a, b) {
     if (null === b) {
-      if (this.dc) throw new V(`null is not a valid ${this.name}`);
-      if (this.Xb) {
-        var c = this.kc();
-        null !== a && a.push(this.zb, c);
+      if (this.fc) throw new V(`null is not a valid ${this.name}`);
+      if (this.Zb) {
+        var c = this.mc();
+        null !== a && a.push(this.Bb, c);
         return c;
       }
       return 0;
     }
-    if (!b || !b.Za) throw new V(`Cannot pass "${kc(b)}" as a ${this.name}`);
-    if (!b.Za.gb) throw new V(`Cannot pass deleted object as a pointer of type ${this.name}`);
-    if (!this.Wb && b.Za.ib.Wb)
+    if (!b || !b.ab) throw new V(`Cannot pass "${kc(b)}" as a ${this.name}`);
+    if (!b.ab.ib) throw new V(`Cannot pass deleted object as a pointer of type ${this.name}`);
+    if (!this.Yb && b.ab.kb.Yb)
       throw new V(
-        `Cannot convert argument of type ${b.Za.tb ? b.Za.tb.name : b.Za.ib.name} to parameter type ${this.name}`,
+        `Cannot convert argument of type ${b.ab.wb ? b.ab.wb.name : b.ab.kb.name} to parameter type ${this.name}`,
       );
-    c = jc(b.Za.gb, b.Za.ib.ab, this.ab);
-    if (this.Xb) {
-      if (void 0 === b.Za.pb) throw new V('Passing raw pointer to smart pointer is illegal');
-      switch (this.hd) {
+    c = jc(b.ab.ib, b.ab.kb.cb, this.cb);
+    if (this.Zb) {
+      if (void 0 === b.ab.rb) throw new V('Passing raw pointer to smart pointer is illegal');
+      switch (this.kd) {
         case 0:
-          if (b.Za.tb === this) c = b.Za.pb;
+          if (b.ab.wb === this) c = b.ab.rb;
           else
             throw new V(
-              `Cannot convert argument of type ${b.Za.tb ? b.Za.tb.name : b.Za.ib.name} to parameter type ${this.name}`,
+              `Cannot convert argument of type ${b.ab.wb ? b.ab.wb.name : b.ab.kb.name} to parameter type ${this.name}`,
             );
           break;
         case 1:
-          c = b.Za.pb;
+          c = b.ab.rb;
           break;
         case 2:
-          if (b.Za.tb === this) c = b.Za.pb;
+          if (b.ab.wb === this) c = b.ab.rb;
           else {
             var d = b.clone();
-            c = this.cd(
+            c = this.ed(
               c,
               W(() => d['delete']()),
             );
-            null !== a && a.push(this.zb, c);
+            null !== a && a.push(this.Bb, c);
           }
           break;
         default:
@@ -1822,52 +1822,52 @@ async function Module(moduleArg = {}) {
   }
   function nc(a, b) {
     if (null === b) {
-      if (this.dc) throw new V(`null is not a valid ${this.name}`);
+      if (this.fc) throw new V(`null is not a valid ${this.name}`);
       return 0;
     }
-    if (!b.Za) throw new V(`Cannot pass "${kc(b)}" as a ${this.name}`);
-    if (!b.Za.gb) throw new V(`Cannot pass deleted object as a pointer of type ${this.name}`);
-    if (b.Za.ib.Wb) throw new V(`Cannot convert argument of type ${b.Za.ib.name} to parameter type ${this.name}`);
-    return jc(b.Za.gb, b.Za.ib.ab, this.ab);
+    if (!b.ab) throw new V(`Cannot pass "${kc(b)}" as a ${this.name}`);
+    if (!b.ab.ib) throw new V(`Cannot pass deleted object as a pointer of type ${this.name}`);
+    if (b.ab.kb.Yb) throw new V(`Cannot convert argument of type ${b.ab.kb.name} to parameter type ${this.name}`);
+    return jc(b.ab.ib, b.ab.kb.cb, this.cb);
   }
   var oc = (a, b, c) => {
       if (b === c) return a;
-      if (void 0 === c.qb) return null;
-      a = oc(a, b, c.qb);
-      return null === a ? null : c.Jc(a);
+      if (void 0 === c.sb) return null;
+      a = oc(a, b, c.sb);
+      return null === a ? null : c.Kc(a);
     },
     pc = {},
     qc = (a, b) => {
       if (void 0 === b) throw new V('ptr should not be undefined');
-      for (; a.qb; ) ((b = a.Tb(b)), (a = a.qb));
+      for (; a.sb; ) ((b = a.Vb(b)), (a = a.sb));
       return pc[b];
     },
     rc = (a, b) => {
-      if (!b.ib || !b.gb) throw new Sb('makeClassHandle requires ptr and ptrType');
-      if (!!b.tb !== !!b.pb) throw new Sb('Both smartPtrType and smartPtr must be specified');
+      if (!b.kb || !b.ib) throw new Sb('makeClassHandle requires ptr and ptrType');
+      if (!!b.wb !== !!b.rb) throw new Sb('Both smartPtrType and smartPtr must be specified');
       b.count = { value: 1 };
-      return Zb(Object.create(a, { Za: { value: b, writable: !0 } }));
+      return Zb(Object.create(a, { ab: { value: b, writable: !0 } }));
     };
   function sc(a, b, c, d, e, f, h, k, m, l, n) {
     this.name = a;
-    this.ab = b;
-    this.dc = c;
-    this.Wb = d;
-    this.Xb = e;
-    this.ad = f;
-    this.hd = h;
-    this.yc = k;
-    this.kc = m;
-    this.cd = l;
-    this.zb = n;
-    e || void 0 !== b.qb ? (this.lb = mc) : ((this.lb = d ? lc : nc), (this.ob = null));
+    this.cb = b;
+    this.fc = c;
+    this.Yb = d;
+    this.Zb = e;
+    this.cd = f;
+    this.kd = h;
+    this.Ac = k;
+    this.mc = m;
+    this.ed = l;
+    this.Bb = n;
+    e || void 0 !== b.sb ? (this.ob = mc) : ((this.ob = d ? lc : nc), (this.qb = null));
   }
   var tc = (a, b) => {
       if (!g.hasOwnProperty(a)) throw new Sb('Replacing nonexistent public symbol');
       g[a] = b;
-      g[a].Bb = void 0;
-      g[a].Fb = void 0;
-      g[a].Mb = void 0;
+      g[a].Db = void 0;
+      g[a].Hb = void 0;
+      g[a].Ob = void 0;
     },
     uc = (a, b, c = []) => {
       b = Ma(b)(...c);
@@ -1900,7 +1900,7 @@ async function Module(moduleArg = {}) {
       throw new wc(`${a}: ` + d.map(yc).join([', ']));
     };
   function Ac(a) {
-    for (var b = 1; b < a.length; ++b) if (null !== a[b] && void 0 === a[b].ob) return !0;
+    for (var b = 1; b < a.length; ++b) if (null !== a[b] && void 0 === a[b].qb) return !0;
     return !1;
   }
   function Bc(a, b, c, d, e, f) {
@@ -1908,12 +1908,12 @@ async function Module(moduleArg = {}) {
     if (2 > h) throw new V("argTypes array size mismatch! Must at least get return value and 'this' types!");
     var k = null !== b[1] && null !== c,
       m = Ac(b);
-    c = !b[0].wc;
+    c = !b[0].yc;
     var l = b[0],
       n = b[1];
-    d = [a, Tb, d, e, Ob, l.fb.bind(l), n?.lb.bind(n)];
-    for (e = 2; e < h; ++e) ((l = b[e]), d.push(l.lb.bind(l)));
-    if (!m) for (e = k ? 1 : 2; e < b.length; ++e) null !== b[e].ob && d.push(b[e].ob);
+    d = [a, Tb, d, e, Ob, l.hb.bind(l), n?.ob.bind(n)];
+    for (e = 2; e < h; ++e) ((l = b[e]), d.push(l.ob.bind(l)));
+    if (!m) for (e = k ? 1 : 2; e < b.length; ++e) null !== b[e].qb && d.push(b[e].qb);
     m = Ac(b);
     e = b.length - 2;
     n = [];
@@ -1937,7 +1937,7 @@ async function Module(moduleArg = {}) {
     else
       for (h = k ? 1 : 2; h < b.length; ++h)
         ((f = 1 === h ? 'thisWired' : 'arg' + (h - 2) + 'Wired'),
-          null !== b[h].ob && ((n += `${f}_dtor(${f});\n`), q.push(`${f}_dtor`)));
+          null !== b[h].qb && ((n += `${f}_dtor(${f});\n`), q.push(`${f}_dtor`)));
     c && (n += 'var ret = fromRetWire(rv);\nreturn ret;\n');
     b = new Function(q, n + '}\n')(...d);
     return bc(a, b);
@@ -1971,9 +1971,9 @@ async function Module(moduleArg = {}) {
     },
     Fc = (a, b, c) => {
       if (!(a instanceof Object)) throw new V(`${c} with invalid "this": ${a}`);
-      if (!(a instanceof b.ab.constructor)) throw new V(`${c} incompatible with "this" of type ${a.constructor.name}`);
-      if (!a.Za.gb) throw new V(`cannot call emscripten binding method ${c} on deleted object`);
-      return jc(a.Za.gb, a.Za.ib.ab, b.ab);
+      if (!(a instanceof b.cb.constructor)) throw new V(`${c} incompatible with "this" of type ${a.constructor.name}`);
+      if (!a.ab.ib) throw new V(`cannot call emscripten binding method ${c} on deleted object`);
+      return jc(a.ab.ib, a.ab.kb.cb, b.cb);
     },
     Gc = [],
     Hc = [0, 1, , 1, null, 1, !0, 1, !1, 1];
@@ -2004,40 +2004,40 @@ async function Module(moduleArg = {}) {
     },
     Kc = {
       name: 'emscripten::val',
-      fb: (a) => {
+      hb: (a) => {
         var b = Z(a);
         Ic(a);
         return b;
       },
-      lb: (a, b) => W(b),
-      sb: Pb,
-      ob: null,
+      ob: (a, b) => W(b),
+      ub: Pb,
+      qb: null,
     },
     Lc = (a, b, c) => {
       switch (b) {
         case 1:
           return c
             ? function (d) {
-                return this.fb(u[d >>> 0]);
+                return this.hb(u[d >>> 0]);
               }
             : function (d) {
-                return this.fb(w[d >>> 0]);
+                return this.hb(w[d >>> 0]);
               };
         case 2:
           return c
             ? function (d) {
-                return this.fb(y[(d >>> 1) >>> 0]);
+                return this.hb(y[(d >>> 1) >>> 0]);
               }
             : function (d) {
-                return this.fb(sa[(d >>> 1) >>> 0]);
+                return this.hb(sa[(d >>> 1) >>> 0]);
               };
         case 4:
           return c
             ? function (d) {
-                return this.fb(D[(d >>> 2) >>> 0]);
+                return this.hb(D[(d >>> 2) >>> 0]);
               }
             : function (d) {
-                return this.fb(E[(d >>> 2) >>> 0]);
+                return this.hb(E[(d >>> 2) >>> 0]);
               };
         default:
           throw new TypeError(`invalid integer width (${b}): ${a}`);
@@ -2052,11 +2052,11 @@ async function Module(moduleArg = {}) {
       switch (b) {
         case 4:
           return function (c) {
-            return this.fb(ta[(c >>> 2) >>> 0]);
+            return this.hb(ta[(c >>> 2) >>> 0]);
           };
         case 8:
           return function (c) {
-            return this.fb(ua[(c >>> 3) >>> 0]);
+            return this.hb(ua[(c >>> 3) >>> 0]);
           };
         default:
           throw new TypeError(`invalid float width (${b}): ${a}`);
@@ -2221,31 +2221,31 @@ async function Module(moduleArg = {}) {
       a = a.getArg(qd, 0);
       return rd(a);
     };
-  I.wd = (a, b, c, d, e, f, h, k, m, l) => {
+  I.zd = (a, b, c, d, e, f, h, k, m, l) => {
     rb(a, b, c, d, e, k, m, l).then(f).catch(h);
   };
-  I.Hd = rb;
-  I.Db = Array(4096);
-  I.jb(J, {}, '/');
+  I.Kd = rb;
+  I.Fb = Array(4096);
+  I.lb(J, {}, '/');
   I.mkdir('/tmp');
   I.mkdir('/home');
   I.mkdir('/home/web_user');
   (function () {
     I.mkdir('/dev');
-    eb(I.Jb(1, 3), { read: () => 0, write: (d, e, f, h) => h, rb: () => 0 });
-    Db('/dev/null', I.Jb(1, 3));
-    db(I.Jb(5, 0), gb);
-    db(I.Jb(6, 0), hb);
-    Db('/dev/tty', I.Jb(5, 0));
-    Db('/dev/tty1', I.Jb(6, 0));
+    eb(I.Lb(1, 3), { read: () => 0, write: (d, e, f, h) => h, tb: () => 0 });
+    Db('/dev/null', I.Lb(1, 3));
+    db(I.Lb(5, 0), gb);
+    db(I.Lb(6, 0), hb);
+    Db('/dev/tty', I.Lb(5, 0));
+    Db('/dev/tty1', I.Lb(6, 0));
     var a = new Uint8Array(1024),
       b = 0,
       c = () => {
         0 === b && (Ta(a), (b = a.byteLength));
         return a[--b];
       };
-    I.Ib('/dev', 'random', c);
-    I.Ib('/dev', 'urandom', c);
+    I.Kb('/dev', 'random', c);
+    I.Kb('/dev', 'urandom', c);
     I.mkdir('/dev/shm');
     I.mkdir('/dev/shm/tmp');
   })();
@@ -2253,16 +2253,16 @@ async function Module(moduleArg = {}) {
     I.mkdir('/proc');
     var a = I.mkdir('/proc/self');
     I.mkdir('/proc/self/fd');
-    I.jb(
+    I.lb(
       {
-        jb() {
+        lb() {
           var b = I.createNode(a, 'fd', 16895, 73);
-          b.cb = { rb: J.cb.rb };
-          b.$a = {
+          b.fb = { tb: J.fb.tb };
+          b.bb = {
             lookup(c, d) {
               c = +d;
               var e = O(c);
-              c = { parent: null, jb: { xc: 'fake' }, $a: { readlink: () => e.path }, id: c + 1 };
+              c = { parent: null, lb: { zc: 'fake' }, bb: { readlink: () => e.path }, id: c + 1 };
               return (c.parent = c);
             },
             readdir() {
@@ -2278,54 +2278,54 @@ async function Module(moduleArg = {}) {
       '/proc/self/fd',
     );
   })();
-  I.Mc = { MEMFS: J };
+  I.Oc = { MEMFS: J };
   (() => {
     let a = ac.prototype;
     Object.assign(a, {
       isAliasOf: function (c) {
         if (!(this instanceof ac && c instanceof ac)) return !1;
-        var d = this.Za.ib.ab,
-          e = this.Za.gb;
-        c.Za = c.Za;
-        var f = c.Za.ib.ab;
-        for (c = c.Za.gb; d.qb; ) ((e = d.Tb(e)), (d = d.qb));
-        for (; f.qb; ) ((c = f.Tb(c)), (f = f.qb));
+        var d = this.ab.kb.cb,
+          e = this.ab.ib;
+        c.ab = c.ab;
+        var f = c.ab.kb.cb;
+        for (c = c.ab.ib; d.sb; ) ((e = d.Vb(e)), (d = d.sb));
+        for (; f.sb; ) ((c = f.Vb(c)), (f = f.sb));
         return d === f && e === c;
       },
       clone: function () {
-        this.Za.gb || Wb(this);
-        if (this.Za.Sb) return ((this.Za.count.value += 1), this);
+        this.ab.ib || Wb(this);
+        if (this.ab.Ub) return ((this.ab.count.value += 1), this);
         var c = Zb,
           d = Object,
           e = d.create,
           f = Object.getPrototypeOf(this),
-          h = this.Za;
+          h = this.ab;
         c = c(
           e.call(d, f, {
-            Za: { value: { count: h.count, Nb: h.Nb, Sb: h.Sb, gb: h.gb, ib: h.ib, pb: h.pb, tb: h.tb } },
+            ab: { value: { count: h.count, Pb: h.Pb, Ub: h.Ub, ib: h.ib, kb: h.kb, rb: h.rb, wb: h.wb } },
           }),
         );
-        c.Za.count.value += 1;
-        c.Za.Nb = !1;
+        c.ab.count.value += 1;
+        c.ab.Pb = !1;
         return c;
       },
       ['delete']() {
-        this.Za.gb || Wb(this);
-        if (this.Za.Nb && !this.Za.Sb) throw new V('Object already scheduled for deletion');
+        this.ab.ib || Wb(this);
+        if (this.ab.Pb && !this.ab.Ub) throw new V('Object already scheduled for deletion');
         Yb(this);
-        var c = this.Za;
+        var c = this.ab;
         --c.count.value;
-        0 === c.count.value && (c.pb ? c.tb.zb(c.pb) : c.ib.ab.zb(c.gb));
-        this.Za.Sb || ((this.Za.pb = void 0), (this.Za.gb = void 0));
+        0 === c.count.value && (c.rb ? c.wb.Bb(c.rb) : c.kb.cb.Bb(c.ib));
+        this.ab.Ub || ((this.ab.rb = void 0), (this.ab.ib = void 0));
       },
       isDeleted: function () {
-        return !this.Za.gb;
+        return !this.ab.ib;
       },
       deleteLater: function () {
-        this.Za.gb || Wb(this);
-        if (this.Za.Nb && !this.Za.Sb) throw new V('Object already scheduled for deletion');
+        this.ab.ib || Wb(this);
+        if (this.ab.Pb && !this.ab.Ub) throw new V('Object already scheduled for deletion');
         $b.push(this);
-        this.Za.Nb = !0;
+        this.ab.Pb = !0;
         return this;
       },
     });
@@ -2333,37 +2333,37 @@ async function Module(moduleArg = {}) {
     b && (a[b] = a['delete']);
   })();
   Object.assign(sc.prototype, {
-    Pc(a) {
-      this.yc && (a = this.yc(a));
+    Rc(a) {
+      this.Ac && (a = this.Ac(a));
       return a;
     },
-    qc(a) {
-      this.zb?.(a);
+    rc(a) {
+      this.Bb?.(a);
     },
-    sb: Pb,
-    fb: function (a) {
+    ub: Pb,
+    hb: function (a) {
       function b() {
-        return this.Xb ? rc(this.ab.Hb, { ib: this.ad, gb: c, tb: this, pb: a }) : rc(this.ab.Hb, { ib: this, gb: a });
+        return this.Zb ? rc(this.cb.Jb, { kb: this.cd, ib: c, wb: this, rb: a }) : rc(this.cb.Jb, { kb: this, ib: a });
       }
-      var c = this.Pc(a);
-      if (!c) return (this.qc(a), null);
-      var d = qc(this.ab, c);
+      var c = this.Rc(a);
+      if (!c) return (this.rc(a), null);
+      var d = qc(this.cb, c);
       if (void 0 !== d) {
-        if (0 === d.Za.count.value) return ((d.Za.gb = c), (d.Za.pb = a), d.clone());
+        if (0 === d.ab.count.value) return ((d.ab.ib = c), (d.ab.rb = a), d.clone());
         d = d.clone();
-        this.qc(a);
+        this.rc(a);
         return d;
       }
-      d = this.ab.Nc(c);
+      d = this.cb.Pc(c);
       d = cc[d];
       if (!d) return b.call(this);
-      d = this.Wb ? d.Ic : d.pointerType;
-      var e = oc(c, this.ab, d.ab);
+      d = this.Yb ? d.Jc : d.pointerType;
+      var e = oc(c, this.cb, d.cb);
       return null === e
         ? b.call(this)
-        : this.Xb
-          ? rc(d.ab.Hb, { ib: d, gb: e, tb: this, pb: a })
-          : rc(d.ab.Hb, { ib: d, gb: e });
+        : this.Zb
+          ? rc(d.cb.Jb, { kb: d, ib: e, wb: this, rb: a })
+          : rc(d.cb.Jb, { kb: d, ib: e });
     },
   });
   g.noExitRuntime && (Ja = g.noExitRuntime);
@@ -2417,6 +2417,9 @@ async function Module(moduleArg = {}) {
     ya,
     La,
     Bd = {
+      ja: function () {
+        return g.md.length;
+      },
       S: function (a, b) {
         return Ma(a >>> 0)(b);
       },
@@ -2426,7 +2429,25 @@ async function Module(moduleArg = {}) {
           return ((a = P(a)), I.chmod(a, b), 0);
         } catch (c) {
           if ('undefined' == typeof I || 'ErrnoError' !== c.name) throw c;
-          return -c.nb;
+          return -c.mb;
+        }
+      },
+      ea: function (a, b, c) {
+        b >>>= 0;
+        try {
+          b = P(b);
+          b = Kb(a, b);
+          if (c & -8) return -28;
+          var d = N(b, { vb: !0 }).node;
+          if (!d) return -44;
+          a = '';
+          c & 4 && (a += 'r');
+          c & 2 && (a += 'w');
+          c & 1 && (a += 'x');
+          return a && sb(d, a) ? -2 : 0;
+        } catch (e) {
+          if ('undefined' == typeof I || 'ErrnoError' !== e.name) throw e;
+          return -e.mb;
         }
       },
       F: function (a, b, c) {
@@ -2455,7 +2476,7 @@ async function Module(moduleArg = {}) {
           return -28;
         } catch (f) {
           if ('undefined' == typeof I || 'ErrnoError' !== f.name) throw f;
-          return -f.nb;
+          return -f.mb;
         }
       },
       ba: function (a, b) {
@@ -2463,10 +2484,10 @@ async function Module(moduleArg = {}) {
           return Lb(b >>> 0, I.fstat(a));
         } catch (c) {
           if ('undefined' == typeof I || 'ErrnoError' !== c.name) throw c;
-          return -c.nb;
+          return -c.mb;
         }
       },
-      ha: function (a, b, c) {
+      ia: function (a, b, c) {
         Mb = c >>> 0;
         try {
           var d = O(a);
@@ -2475,7 +2496,7 @@ async function Module(moduleArg = {}) {
               return d.tty ? 0 : -59;
             case 21505:
               if (!d.tty) return -59;
-              if (d.tty.Eb.Uc) {
+              if (d.tty.Gb.Wc) {
                 a = [
                   3, 28, 127, 21, 4, 0, 1, 0, 17, 19, 26, 0, 18, 15, 23, 22, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                   0, 0,
@@ -2496,7 +2517,7 @@ async function Module(moduleArg = {}) {
             case 21507:
             case 21508:
               if (!d.tty) return -59;
-              if (d.tty.Eb.Vc) for (e = Q(), a = [], f = 0; 32 > f; f++) a.push(u[(e + f + 17) >>> 0]);
+              if (d.tty.Gb.Xc) for (e = Q(), a = [], f = 0; 32 > f; f++) a.push(u[(e + f + 17) >>> 0]);
               return 0;
             case 21519:
               if (!d.tty) return -59;
@@ -2506,10 +2527,10 @@ async function Module(moduleArg = {}) {
               return d.tty ? -28 : -59;
             case 21537:
             case 21531:
-              return ((e = Q()), I.cc(d, b, e));
+              return ((e = Q()), I.ec(d, b, e));
             case 21523:
               if (!d.tty) return -59;
-              d.tty.Eb.Wc &&
+              d.tty.Gb.Yc &&
                 ((f = [24, 80]), (e = Q()), (y[(e >>> 1) >>> 0] = f[0]), (y[((e + 2) >>> 1) >>> 0] = f[1]));
               return 0;
             case 21524:
@@ -2521,7 +2542,7 @@ async function Module(moduleArg = {}) {
           }
         } catch (h) {
           if ('undefined' == typeof I || 'ErrnoError' !== h.name) throw h;
-          return -h.nb;
+          return -h.mb;
         }
       },
       $: function (a, b) {
@@ -2531,7 +2552,7 @@ async function Module(moduleArg = {}) {
           return ((a = P(a)), Lb(b, I.lstat(a)));
         } catch (c) {
           if ('undefined' == typeof I || 'ErrnoError' !== c.name) throw c;
-          return -c.nb;
+          return -c.mb;
         }
       },
       _: function (a, b, c, d) {
@@ -2544,7 +2565,7 @@ async function Module(moduleArg = {}) {
           return Lb(c, e ? I.lstat(b) : I.stat(b));
         } catch (f) {
           if ('undefined' == typeof I || 'ErrnoError' !== f.name) throw f;
-          return -f.nb;
+          return -f.mb;
         }
       },
       I: function (a, b, c, d) {
@@ -2557,7 +2578,7 @@ async function Module(moduleArg = {}) {
           return I.open(b, c, e).fd;
         } catch (f) {
           if ('undefined' == typeof I || 'ErrnoError' !== f.name) throw f;
-          return -f.nb;
+          return -f.mb;
         }
       },
       aa: function (a, b) {
@@ -2567,7 +2588,7 @@ async function Module(moduleArg = {}) {
           return ((a = P(a)), Lb(b, I.stat(a)));
         } catch (c) {
           if ('undefined' == typeof I || 'ErrnoError' !== c.name) throw c;
-          return -c.nb;
+          return -c.mb;
         }
       },
       V: () => H(''),
@@ -2575,26 +2596,26 @@ async function Module(moduleArg = {}) {
         a >>>= 0;
         var b = Nb[a];
         delete Nb[a];
-        var c = b.kc,
-          d = b.zb,
-          e = b.tc,
-          f = e.map((h) => h.Sc).concat(e.map((h) => h.ed));
+        var c = b.mc,
+          d = b.Bb,
+          e = b.vc,
+          f = e.map((h) => h.Uc).concat(e.map((h) => h.hd));
         T([a], f, (h) => {
           var k = {},
             m,
             l;
           for ([m, l] of e.entries()) {
             const n = h[m],
-              r = l.Pb,
-              q = l.Rc,
+              r = l.Rb,
+              q = l.Tc,
               t = h[m + e.length],
-              v = l.dd,
-              x = l.gd;
-            k[l.Lc] = {
-              read: (B) => n.fb(r(q, B)),
+              v = l.gd,
+              x = l.jd;
+            k[l.Nc] = {
+              read: (B) => n.hb(r(q, B)),
               write: (B, A) => {
                 var z = [];
-                v(x, B, t.lb(z, A));
+                v(x, B, t.ob(z, A));
                 Ob(z);
               },
               optional: n.optional,
@@ -2603,22 +2624,22 @@ async function Module(moduleArg = {}) {
           return [
             {
               name: b.name,
-              fb: (n) => {
+              hb: (n) => {
                 var r = {},
                   q;
                 for (q in k) r[q] = k[q].read(n);
                 d(n);
                 return r;
               },
-              lb: (n, r) => {
+              ob: (n, r) => {
                 for (var q in k) if (!(q in r || k[q].optional)) throw new TypeError(`Missing field: "${q}"`);
                 var t = c();
                 for (q in k) k[q].write(t, r[q]);
                 null !== n && n.push(d, t);
                 return t;
               },
-              sb: Pb,
-              ob: d,
+              ub: Pb,
+              qb: d,
             },
           ];
         });
@@ -2636,29 +2657,29 @@ async function Module(moduleArg = {}) {
         }
         S(a, {
           name: b,
-          fb: f,
-          lb: (h, k) => {
+          hb: f,
+          ob: (h, k) => {
             'number' == typeof k && (k = BigInt(k));
             return k;
           },
-          sb: Vb(b, c, !d),
-          ob: null,
+          ub: Vb(b, c, !d),
+          qb: null,
         });
       },
       L: function (a, b, c, d) {
         b = U(b >>> 0);
         S(a >>> 0, {
           name: b,
-          fb: function (e) {
+          hb: function (e) {
             return !!e;
           },
-          lb: function (e, f) {
+          ob: function (e, f) {
             return f ? c : d;
           },
-          sb: function (e) {
-            return this.fb(w[e >>> 0]);
+          ub: function (e) {
+            return this.hb(w[e >>> 0]);
           },
-          ob: null,
+          qb: null,
         });
       },
       l: function (a, b, c, d, e, f, h, k, m, l, n, r, q) {
@@ -2686,53 +2707,53 @@ async function Module(moduleArg = {}) {
         T([a, b, c], d ? [d] : [], (v) => {
           v = v[0];
           if (d) {
-            var x = v.ab;
-            var B = x.Hb;
+            var x = v.cb;
+            var B = x.Jb;
           } else B = ac.prototype;
           v = bc(n, function (...G) {
             if (Object.getPrototypeOf(this) !== A) throw new V(`Use 'new' to construct ${n}`);
-            if (void 0 === z.hb) throw new V(`${n} has no accessible constructor`);
-            if (void 0 === z.hb[G.length]) {
-              var L = -1,
+            if (void 0 === z.jb) throw new V(`${n} has no accessible constructor`);
+            if (void 0 === z.jb[G.length]) {
+              var M = -1,
                 Jc;
-              for (Jc in z.hb) {
-                var Fb = +Jc;
-                Fb > G.length && (0 > L || Fb < L) && (L = Fb);
+              for (Jc in z.jb) {
+                var Gb = +Jc;
+                Gb > G.length && (0 > M || Gb < M) && (M = Gb);
               }
-              if (0 <= L) for (; G.length < L; ) G.push(void 0);
+              if (0 <= M) for (; G.length < M; ) G.push(void 0);
             }
-            L = void 0;
-            void 0 !== z.hb[G.length] &&
-              (void 0 !== z.hb[G.length].Ob
-                ? (L = z.hb[G.length].Ob)
-                : ((L = ec(G, z.hb[G.length].Gb)), (L = z.hb[G.length].kb[L])));
-            if (void 0 === L) {
-              if (void 0 === z.hb[G.length])
+            M = void 0;
+            void 0 !== z.jb[G.length] &&
+              (void 0 !== z.jb[G.length].Qb
+                ? (M = z.jb[G.length].Qb)
+                : ((M = ec(G, z.jb[G.length].Ib)), (M = z.jb[G.length].nb[M])));
+            if (void 0 === M) {
+              if (void 0 === z.jb[G.length])
                 throw new V(
-                  `Tried to invoke ctor of ${n} with invalid number of parameters (${G.length}) - expected (${Object.keys(z.hb).toString()}) parameters instead!`,
+                  `Tried to invoke ctor of ${n} with invalid number of parameters (${G.length}) - expected (${Object.keys(z.jb).toString()}) parameters instead!`,
                 );
-              L = z.hb[G.length].Gb.map((fa) => '(' + fa.map((Gb) => ('string' === typeof Gb ? Gb : R[Gb].name)) + ')');
+              M = z.jb[G.length].Ib.map((fa) => '(' + fa.map((Hb) => ('string' === typeof Hb ? Hb : R[Hb].name)) + ')');
               G = G.map((fa) =>
                 'object' === typeof fa && fa.constructor && fa.constructor.name ? fa.constructor.name : typeof fa,
               );
               throw new V(
-                `Tried to invoke ctor of ${n} with invalid signature (${G}) - expected [${L}] parameters instead!`,
+                `Tried to invoke ctor of ${n} with invalid signature (${G}) - expected [${M}] parameters instead!`,
               );
             }
-            return L.apply(this, G);
+            return M.apply(this, G);
           });
           var A = Object.create(B, { constructor: { value: v } });
           v.prototype = A;
           var z = new ic(n, v, A, q, x, f, k, l);
-          if (z.qb) {
+          if (z.sb) {
             var C;
-            (C = z.qb).Ub ?? (C.Ub = []);
-            z.qb.Ub.push(z);
+            (C = z.sb).Wb ?? (C.Wb = []);
+            z.sb.Wb.push(z);
           }
           x = new sc(n, z, !0, !1, !1);
           C = new sc(n + '*', z, !1, !1, !1);
           B = new sc(n + ' const*', z, !1, !0, !1);
-          cc[a] = { pointerType: C, Ic: B };
+          cc[a] = { pointerType: C, Jc: B };
           tc(t, v);
           return [x, C, B];
         });
@@ -2754,25 +2775,25 @@ async function Module(moduleArg = {}) {
           l = l[0];
           var r = `${l.name}.${b}`;
           b.startsWith('@@') && (b = Symbol[b.substring(2)]);
-          var q = l.ab.constructor,
+          var q = l.cb.constructor,
             t = m.slice(1),
             v = t.join(', ');
           void 0 === q[b]
-            ? ((n.Bb = c - 1), (q[b] = n))
-            : (void 0 === q[b].bb && q[b].Bb !== c - 1) || (void 0 !== q[b].bb && void 0 === q[b].bb[c - 1])
-              ? (dc(q, b, r), (n.Fb = v), (q[b].bb[c - 1] = n))
-              : (fc(q, b, r, c - 1), (q[b].bb[c - 1].kb[v] = n));
+            ? ((n.Db = c - 1), (q[b] = n))
+            : (void 0 === q[b].eb && q[b].Db !== c - 1) || (void 0 !== q[b].eb && void 0 === q[b].eb[c - 1])
+              ? (dc(q, b, r), (n.Hb = v), (q[b].eb[c - 1] = n))
+              : (fc(q, b, r, c - 1), (q[b].eb[c - 1].nb[v] = n));
           T([], m, (x) => {
             x = [x[0], null].concat(x.slice(1));
             x = Bc(r, x, null, f, h, k);
             var B = t.map((z) => Ec(z)),
               A = B.join(', ');
-            void 0 === q[b].bb
-              ? ((x.Bb = c - 1), (x.Fb = A), (x.Mb = B), (q[b] = x))
-              : void 0 === q[b].bb[c - 1].kb
-                ? ((x.Fb = A), (x.Mb = B), (q[b].bb[c - 1] = x))
-                : (delete q[b].bb[c - 1].kb[v], (q[b].bb[c - 1].kb[A] = x), q[b].bb[c - 1].Gb.push(B));
-            if (l.ab.Ub) for (const z of l.ab.Ub) z.constructor.hasOwnProperty(b) || (z.constructor[b] = x);
+            void 0 === q[b].eb
+              ? ((x.Db = c - 1), (x.Hb = A), (x.Ob = B), (q[b] = x))
+              : void 0 === q[b].eb[c - 1].nb
+                ? ((x.Hb = A), (x.Ob = B), (q[b].eb[c - 1] = x))
+                : (delete q[b].eb[c - 1].nb[v], (q[b].eb[c - 1].nb[A] = x), q[b].eb[c - 1].Ib.push(B));
+            if (l.cb.Wb) for (const z of l.cb.Wb) z.constructor.hasOwnProperty(b) || (z.constructor[b] = x);
             return [];
           });
           return [];
@@ -2791,24 +2812,24 @@ async function Module(moduleArg = {}) {
           }
           k = k[0];
           var l = `constructor ${k.name}`;
-          void 0 === k.ab.hb && (k.ab.hb = []);
+          void 0 === k.cb.jb && (k.cb.jb = []);
           var n = h.slice(1),
             r = n.join(', ');
-          if (void 0 !== k.ab.hb[b - 1] && void 0 !== k.ab.hb[b - 1].kb[r])
+          if (void 0 !== k.cb.jb[b - 1] && void 0 !== k.cb.jb[b - 1].nb[r])
             throw new V(
               `Cannot register multiple constructors with identical javascript types of parameters for class '${k.name}'!`,
             );
-          void 0 === k.ab.hb[b - 1] ? (k.ab.hb[b - 1] = { Ob: m, kb: {}, Gb: [] }) : delete k.ab.hb[b - 1].Ob;
-          k.ab.hb[b - 1].kb[r] = m;
+          void 0 === k.cb.jb[b - 1] ? (k.cb.jb[b - 1] = { Qb: m, nb: {}, Ib: [] }) : delete k.cb.jb[b - 1].Qb;
+          k.cb.jb[b - 1].nb[r] = m;
           T([], h, (q) => {
             q.splice(1, 0, null);
-            delete k.ab.hb[b - 1].kb[r];
+            delete k.cb.jb[b - 1].nb[r];
             q = Bc(l, q, null, e, f);
             var t = n.map((x) => Ec(x)),
               v = t.join(', ');
-            void 0 !== k.ab.hb[b - 1].Ob && (k.ab.hb[b - 1].Ob = q);
-            k.ab.hb[b - 1].kb[v] = q;
-            k.ab.hb[b - 1].Gb.push(t);
+            void 0 !== k.cb.jb[b - 1].Qb && (k.cb.jb[b - 1].Qb = q);
+            k.cb.jb[b - 1].nb[v] = q;
+            k.cb.jb[b - 1].Ib.push(t);
             return [];
           });
           return [];
@@ -2831,31 +2852,31 @@ async function Module(moduleArg = {}) {
           n = n[0];
           var q = `${n.name}.${b}`;
           b.startsWith('@@') && (b = Symbol[b.substring(2)]);
-          k && n.ab.bd.push(b);
-          var t = n.ab.Hb,
+          k && n.cb.dd.push(b);
+          var t = n.cb.Jb,
             v = t[b],
             x = l.slice(2),
             B = x.join(', ');
-          void 0 === v || (void 0 === v.bb && v.className !== n.name && v.Fb === B)
-            ? ((r.Bb = c - 2), (r.Fb = B), (r.className = n.name), (t[b] = r))
-            : (void 0 === t[b].bb && t[b].Bb !== c - 2) || (void 0 !== t[b].bb && void 0 === t[b].bb[c - 2])
-              ? (dc(t, b, q), (r.Fb = B), (t[b].bb[c - 2] = r))
-              : (fc(t, b, q, c - 2), (t[b].bb[c - 2].kb[B] = r));
+          void 0 === v || (void 0 === v.eb && v.className !== n.name && v.Hb === B)
+            ? ((r.Db = c - 2), (r.Hb = B), (r.className = n.name), (t[b] = r))
+            : (void 0 === t[b].eb && t[b].Db !== c - 2) || (void 0 !== t[b].eb && void 0 === t[b].eb[c - 2])
+              ? (dc(t, b, q), (r.Hb = B), (t[b].eb[c - 2] = r))
+              : (fc(t, b, q, c - 2), (t[b].eb[c - 2].nb[B] = r));
           T([], l, (A) => {
             A = Bc(q, A, n, f, h, m);
             var z = x.map((G) => Ec(G)),
               C = z.join(', ');
-            void 0 === t[b].bb
-              ? ((A.Bb = c - 2), (A.Fb = C), (A.Mb = z), (t[b] = A))
-              : void 0 === t[b].bb[c - 2].kb
-                ? ((A.Fb = C), (A.Mb = z), (t[b].bb[c - 2] = A))
-                : (delete t[b].bb[c - 2].kb[B], (t[b].bb[c - 2].kb[C] = A), t[b].bb[c - 2].Gb.push(z));
+            void 0 === t[b].eb
+              ? ((A.Db = c - 2), (A.Hb = C), (A.Ob = z), (t[b] = A))
+              : void 0 === t[b].eb[c - 2].nb
+                ? ((A.Hb = C), (A.Ob = z), (t[b].eb[c - 2] = A))
+                : (delete t[b].eb[c - 2].nb[B], (t[b].eb[c - 2].nb[C] = A), t[b].eb[c - 2].Ib.push(z));
             return [];
           });
           return [];
         });
       },
-      x: function (a, b, c, d, e, f, h, k, m, l) {
+      t: function (a, b, c, d, e, f, h, k, m, l) {
         a >>>= 0;
         b >>>= 0;
         c >>>= 0;
@@ -2882,13 +2903,13 @@ async function Module(moduleArg = {}) {
             : () => {
                 throw new V(r + ' is a read-only property');
               };
-          Object.defineProperty(n.ab.Hb, b, q);
+          Object.defineProperty(n.cb.Jb, b, q);
           T([], m ? [c, h] : [c], (t) => {
             var v = t[0],
               x = {
                 get() {
                   var A = Fc(this, n, r + ' getter');
-                  return v.fb(e(f, A));
+                  return v.hb(e(f, A));
                 },
                 enumerable: !0,
               };
@@ -2898,17 +2919,17 @@ async function Module(moduleArg = {}) {
               x.set = function (A) {
                 var z = Fc(this, n, r + ' setter'),
                   C = [];
-                m(l, z, B.lb(C, A));
+                m(l, z, B.ob(C, A));
                 Ob(C);
               };
             }
-            Object.defineProperty(n.ab.Hb, b, x);
+            Object.defineProperty(n.cb.Jb, b, x);
             return [];
           });
           return [];
         });
       },
-      la: function (a) {
+      oa: function (a) {
         return S(a >>> 0, Kc);
       },
       C: function (a, b, c, d, e) {
@@ -2924,43 +2945,43 @@ async function Module(moduleArg = {}) {
               name: b,
               constructor: h,
               valueType: e,
-              fb: function (k) {
+              hb: function (k) {
                 return this.constructor.values[k];
               },
-              lb: (k, m) => m.value,
-              sb: Lc(b, c, d),
-              ob: null,
+              ob: (k, m) => m.value,
+              ub: Lc(b, c, d),
+              qb: null,
             });
             gc(b, h);
             break;
           case 'number':
             var f = {};
-            S(a, { name: b, fc: f, valueType: e, fb: (k) => k, lb: (k, m) => m, sb: Lc(b, c, d), ob: null });
+            S(a, { name: b, ic: f, valueType: e, hb: (k) => k, ob: (k, m) => m, ub: Lc(b, c, d), qb: null });
             gc(b, f);
-            delete g[b].Bb;
+            delete g[b].Db;
             break;
           case 'string':
             ((f = {}),
               S(a, {
                 name: b,
-                Cc: {},
-                zc: {},
-                fc: f,
+                Ec: {},
+                Bc: {},
+                ic: f,
                 valueType: e,
-                fb: function (k) {
-                  return this.zc[k];
+                hb: function (k) {
+                  return this.Bc[k];
                 },
-                lb: function (k, m) {
-                  return this.Cc[m];
+                ob: function (k, m) {
+                  return this.Ec[m];
                 },
-                sb: Lc(b, c, d),
-                ob: null,
+                ub: Lc(b, c, d),
+                qb: null,
               }),
               gc(b, f),
-              delete g[b].Bb);
+              delete g[b].Db);
         }
       },
-      o: function (a, b, c) {
+      p: function (a, b, c) {
         b >>>= 0;
         var d = Mc(a >>> 0, 'enum');
         b = U(b);
@@ -2975,15 +2996,15 @@ async function Module(moduleArg = {}) {
             a[b] = d;
             break;
           case 'number':
-            d.fc[b] = c;
+            d.ic[b] = c;
             break;
           case 'string':
-            ((d.Cc[b] = c), (d.zc[c] = b), (d.fc[b] = b));
+            ((d.Ec[b] = c), (d.Bc[c] = b), (d.ic[b] = b));
         }
       },
       J: function (a, b, c) {
         b = U(b >>> 0);
-        S(a >>> 0, { name: b, fb: (d) => d, lb: (d, e) => e, sb: Nc(b, c >>> 0), ob: null });
+        S(a >>> 0, { name: b, hb: (d) => d, ob: (d, e) => e, ub: Nc(b, c >>> 0), qb: null });
       },
       A: function (a, b, c, d, e) {
         a >>>= 0;
@@ -2995,7 +3016,7 @@ async function Module(moduleArg = {}) {
           f = (k) => (k << h) >>> h;
           e = f(e);
         }
-        S(a, { name: b, fb: f, lb: (k, m) => m, sb: Vb(b, c, 0 !== d), ob: null });
+        S(a, { name: b, hb: f, ob: (k, m) => m, ub: Vb(b, c, 0 !== d), qb: null });
       },
       r: function (a, b, c) {
         function d(f) {
@@ -3014,7 +3035,7 @@ async function Module(moduleArg = {}) {
           BigUint64Array,
         ][b];
         c = U(c >>> 0);
-        S(a >>> 0, { name: c, fb: d, sb: d }, { Tc: !0 });
+        S(a >>> 0, { name: c, hb: d, ub: d }, { Vc: !0 });
       },
       B: function (a) {
         S(a >>> 0, Oc);
@@ -3037,19 +3058,19 @@ async function Module(moduleArg = {}) {
         r = X(n, r);
         T([a], [b], (q) => {
           q = q[0];
-          return [new sc(c, q.ab, !1, !1, !0, q, d, f, k, l, r)];
+          return [new sc(c, q.cb, !1, !1, !0, q, d, f, k, l, r)];
         });
       },
-      ma: function (a, b) {
+      pa: function (a, b) {
         b = U(b >>> 0);
         S(a >>> 0, {
           name: b,
-          fb(c) {
+          hb(c) {
             var d = P(c + 4, E[(c >>> 2) >>> 0], !0);
             Y(c);
             return d;
           },
-          lb(c, d) {
+          ob(c, d) {
             d instanceof ArrayBuffer && (d = new Uint8Array(d));
             var e = 'string' == typeof d;
             if (!(e || (ArrayBuffer.isView(d) && 1 == d.BYTES_PER_ELEMENT)))
@@ -3062,8 +3083,8 @@ async function Module(moduleArg = {}) {
             null !== c && c.push(Y, h);
             return h;
           },
-          sb: Pb,
-          ob(c) {
+          ub: Pb,
+          qb(c) {
             Y(c);
           },
         });
@@ -3079,12 +3100,12 @@ async function Module(moduleArg = {}) {
         } else ((d = Tc), (e = Uc), (f = Vc));
         S(a >>> 0, {
           name: c,
-          fb: (h) => {
+          hb: (h) => {
             var k = d(h + 4, E[(h >>> 2) >>> 0] * b, !0);
             Y(h);
             return k;
           },
-          lb: (h, k) => {
+          ob: (h, k) => {
             if ('string' != typeof k) throw new V(`Cannot pass non-string to C++ string type ${c}`);
             var m = f(k),
               l = zd(4 + m + b);
@@ -3093,28 +3114,28 @@ async function Module(moduleArg = {}) {
             null !== h && h.push(Y, l);
             return l;
           },
-          sb: Pb,
-          ob(h) {
+          ub: Pb,
+          qb(h) {
             Y(h);
           },
         });
       },
-      t: function (a, b, c, d, e, f) {
+      u: function (a, b, c, d, e, f) {
         e >>>= 0;
         f >>>= 0;
-        Nb[a >>> 0] = { name: U(b >>> 0), kc: X(c >>> 0, d >>> 0), zb: X(e, f), tc: [] };
+        Nb[a >>> 0] = { name: U(b >>> 0), mc: X(c >>> 0, d >>> 0), Bb: X(e, f), vc: [] };
       },
-      n: function (a, b, c, d, e, f, h, k, m, l) {
+      o: function (a, b, c, d, e, f, h, k, m, l) {
         f >>>= 0;
         h >>>= 0;
         k >>>= 0;
         m >>>= 0;
         l >>>= 0;
-        Nb[a >>> 0].tc.push({ Lc: U(b >>> 0), Sc: c >>> 0, Pb: X(d >>> 0, e >>> 0), Rc: f, ed: h, dd: X(k, m), gd: l });
+        Nb[a >>> 0].vc.push({ Nc: U(b >>> 0), Uc: c >>> 0, Rb: X(d >>> 0, e >>> 0), Tc: f, hd: h, gd: X(k, m), jd: l });
       },
       M: function (a, b) {
         b = U(b >>> 0);
-        S(a >>> 0, { wc: !0, name: b, fb: () => {}, lb: () => {} });
+        S(a >>> 0, { yc: !0, name: b, hb: () => {}, ob: () => {} });
       },
       O: function (a) {
         a = P(a >>> 0);
@@ -3132,8 +3153,8 @@ async function Module(moduleArg = {}) {
       },
       h: function (a, b, c) {
         var [d, ...e] = dd(a, b >>> 0);
-        b = d.lb.bind(d);
-        var f = e.map((m) => m.sb.bind(m));
+        b = d.ob.bind(d);
+        var f = e.map((m) => m.ub.bind(m));
         a--;
         var h = { toValue: Z };
         a = f.map((m, l) => {
@@ -3155,7 +3176,7 @@ async function Module(moduleArg = {}) {
             ((h.getStringOrSymbol = gd), (k = 'toValue(handle)[getStringOrSymbol(methodName)]'));
         }
         k += `(${a})`;
-        d.wc ||
+        d.yc ||
           ((h.toReturnWire = b),
           (h.emval_returnValue = ed),
           (k = `return emval_returnValue(toReturnWire, destructorsRef, ${k})`));
@@ -3165,7 +3186,7 @@ async function Module(moduleArg = {}) {
         return cd(bc(k, c));
       },
       b: Ic,
-      p: function (a) {
+      n: function (a) {
         a >>>= 0;
         if (!a) return W(globalThis);
         a = gd(a);
@@ -3181,7 +3202,7 @@ async function Module(moduleArg = {}) {
         b = Z(b);
         return W(a[b]);
       },
-      i: function (a) {
+      j: function (a) {
         a >>>= 0;
         9 < a && (Hc[a + 1] += 1);
       },
@@ -3197,7 +3218,7 @@ async function Module(moduleArg = {}) {
       m: function (a) {
         return W(gd(a >>> 0));
       },
-      v: function () {
+      w: function () {
         return W({});
       },
       f: function (a) {
@@ -3214,11 +3235,11 @@ async function Module(moduleArg = {}) {
         c = Z(c);
         a[b] = c;
       },
-      ka: function (a) {
+      na: function (a) {
         a = Z(a >>> 0);
         throw a;
       },
-      j: function (a) {
+      i: function (a) {
         a = Z(a >>> 0);
         return W(typeof a);
       },
@@ -3248,10 +3269,10 @@ async function Module(moduleArg = {}) {
           delete kd[a];
           md(() => Ad(a, performance.now()));
         }, b);
-        kd[a] = { id: c, Kd: b };
+        kd[a] = { id: c, Nd: b };
         return 0;
       },
-      ea: function (a, b, c, d) {
+      fa: function (a, b, c, d) {
         c >>>= 0;
         d >>>= 0;
         var e = new Date().getFullYear(),
@@ -3261,7 +3282,10 @@ async function Module(moduleArg = {}) {
         D[((b >>> 0) >>> 2) >>> 0] = Number(f != e);
         b = (h) => {
           var k = Math.abs(h);
-          return `UTC${0 <= h ? '-' : '+'}${String(Math.floor(k / 60)).padStart(2, '0')}${String(k % 60).padStart(2, '0')}`;
+          return `UTC${0 <= h ? '-' : '+'}${String(Math.floor(k / 60)).padStart(2, '0')}${String(k % 60).padStart(
+            2,
+            '0',
+          )}`;
         };
         a = b(f);
         b = b(e);
@@ -3272,11 +3296,11 @@ async function Module(moduleArg = {}) {
         F[((c >>> 0) >>> 3) >>> 0] = BigInt(Math.round(1e6 * (0 === a ? Date.now() : performance.now())));
         return 0;
       },
-      u: () => Date.now(),
+      v: () => Date.now(),
       H: function (a) {
         return p(P(a >>> 0));
       },
-      ia: function (a, b, c) {
+      la: function (a, b, c) {
         b >>>= 0;
         var d = Error().stack.toString(),
           e = d.split('\n');
@@ -3357,7 +3381,7 @@ async function Module(moduleArg = {}) {
         E[(b >>> 2) >>> 0] = a;
         return 0;
       },
-      ja: (a) => {
+      ma: (a) => {
         pa = a;
         ld(a);
       },
@@ -3368,10 +3392,10 @@ async function Module(moduleArg = {}) {
           return 0;
         } catch (c) {
           if ('undefined' == typeof I || 'ErrnoError' !== c.name) throw c;
-          return c.nb;
+          return c.mb;
         }
       },
-      ga: function (a, b, c, d) {
+      ha: function (a, b, c, d) {
         b >>>= 0;
         c >>>= 0;
         d >>>= 0;
@@ -3398,7 +3422,7 @@ async function Module(moduleArg = {}) {
           return 0;
         } catch (r) {
           if ('undefined' == typeof I || 'ErrnoError' !== r.name) throw r;
-          return r.nb;
+          return r.mb;
         }
       },
       X: function (a, b, c, d) {
@@ -3407,16 +3431,16 @@ async function Module(moduleArg = {}) {
         try {
           if (isNaN(b)) return 61;
           var e = O(a);
-          I.rb(e, b, c);
+          I.tb(e, b, c);
           F[(d >>> 3) >>> 0] = BigInt(e.position);
-          e.ac && 0 === b && 0 === c && (e.ac = null);
+          e.cc && 0 === b && 0 === c && (e.cc = null);
           return 0;
         } catch (f) {
           if ('undefined' == typeof I || 'ErrnoError' !== f.name) throw f;
-          return f.nb;
+          return f.mb;
         }
       },
-      fa: function (a, b, c, d) {
+      ga: function (a, b, c, d) {
         b >>>= 0;
         c >>>= 0;
         d >>>= 0;
@@ -3443,10 +3467,13 @@ async function Module(moduleArg = {}) {
           return 0;
         } catch (r) {
           if ('undefined' == typeof I || 'ErrnoError' !== r.name) throw r;
-          return r.nb;
+          return r.mb;
         }
       },
-      w: function () {
+      ka: function () {
+        H('missing function: mallinfo');
+      },
+      x: function () {
         g.__ocjsRbvDispose__ = function () {
           for (const a in this)
             if (Object.prototype.hasOwnProperty.call(this, a)) {
@@ -3467,7 +3494,7 @@ async function Module(moduleArg = {}) {
           return (Ta(w.subarray(a >>> 0, (a + (b >>> 0)) >>> 0)), 0);
         } catch (c) {
           if ('undefined' == typeof I || 'ErrnoError' !== c.name) throw c;
-          return c.nb;
+          return c.mb;
         }
       },
     };
@@ -3476,17 +3503,17 @@ async function Module(moduleArg = {}) {
     a = Object.assign({}, a);
     var b = (d) => (e) => d(e) >>> 0,
       c = (d) => (e, f) => d(e, f) >>> 0;
-    a.pa = b(a.pa);
     a.sa = b(a.sa);
+    a.va = b(a.va);
     a.realloc = c(a.realloc);
     a.calloc = c(a.calloc);
-    a.za = b(a.za);
-    a.Ka = c(a.Ka);
-    a.Sa = b(a.Sa);
-    a.Ta = (
+    a.Ca = b(a.Ca);
+    a.Na = c(a.Na);
+    a.Va = b(a.Va);
+    a.Wa = (
       (d) => () =>
         d() >>> 0
-    )(a.Ta);
+    )(a.Wa);
     return a;
   }
   function Ed() {
@@ -3494,9 +3521,9 @@ async function Module(moduleArg = {}) {
       g.calledRun = !0;
       if (!oa) {
         wa = !0;
-        g.noFSInit || I.bc || ob();
-        Dd.oa();
-        I.vc = !1;
+        g.noFSInit || I.dc || ob();
+        Dd.ra();
+        I.xc = !1;
         qa?.(g);
         g.onRuntimeInitialized?.();
         if (g.postRun)
@@ -3527,42 +3554,42 @@ async function Module(moduleArg = {}) {
     function a(c) {
       Dd = c.exports;
       c = Dd = Cd();
-      xc = c.pa;
-      g.__ZdlPvm = c.qa;
-      zd = g._malloc = c.sa;
-      Y = g._free = c.ta;
-      g.__ZdaPv = c.va;
-      g.__ZdlPv = c.wa;
-      g.___libc_free = c.xa;
-      g.___libc_malloc = c.ya;
-      g._emscripten_builtin_malloc = c.za;
-      Xc = c.Aa;
-      Ad = c.Ba;
-      g._strndup = c.Ca;
-      g.__ZdaPvm = c.Da;
-      g.__Znaj = c.Ea;
-      g.__ZnajSt11align_val_t = c.Fa;
-      g.__Znwj = c.Ga;
-      g.__ZnwjSt11align_val_t = c.Ha;
-      g.___libc_calloc = c.Ia;
-      g.___libc_realloc = c.Ja;
-      g._emscripten_builtin_calloc = c.Ka;
-      g._emscripten_builtin_free = c.La;
-      g._emscripten_builtin_realloc = c.Ma;
-      g._malloc_size = c.Na;
-      g._malloc_usable_size = c.Oa;
-      g._reallocf = c.Pa;
-      za = c.Qa;
-      yd = c.Ra;
-      wd = c.Sa;
-      vd = c.Ta;
-      ud = c.Ua;
-      td = c.Va;
-      rd = c.Wa;
-      xd = c.Xa;
-      ya = c.na;
-      La = c.ra;
-      qd = c.ua;
+      xc = c.sa;
+      g.__ZdlPvm = c.ta;
+      zd = g._malloc = c.va;
+      Y = g._free = c.wa;
+      g.__ZdlPv = c.ya;
+      g.__ZdaPv = c.za;
+      g.___libc_free = c.Aa;
+      g.___libc_malloc = c.Ba;
+      g._emscripten_builtin_malloc = c.Ca;
+      Xc = c.Da;
+      Ad = c.Ea;
+      g._strndup = c.Fa;
+      g.__ZdaPvm = c.Ga;
+      g.__Znaj = c.Ha;
+      g.__ZnajSt11align_val_t = c.Ia;
+      g.__Znwj = c.Ja;
+      g.__ZnwjSt11align_val_t = c.Ka;
+      g.___libc_calloc = c.La;
+      g.___libc_realloc = c.Ma;
+      g._emscripten_builtin_calloc = c.Na;
+      g._emscripten_builtin_free = c.Oa;
+      g._emscripten_builtin_realloc = c.Pa;
+      g._malloc_size = c.Qa;
+      g._malloc_usable_size = c.Ra;
+      g._reallocf = c.Sa;
+      za = c.Ta;
+      yd = c.Ua;
+      wd = c.Va;
+      vd = c.Wa;
+      ud = c.Xa;
+      td = c.Ya;
+      rd = c.Za;
+      xd = c._a;
+      ya = c.qa;
+      La = c.ua;
+      qd = c.xa;
       xa();
       return Dd;
     }

@@ -7,7 +7,7 @@
  * `baseColorFactor`. See docs/policy/color-space-policy.md.
  */
 import { describe, expect, it } from 'vitest';
-import openscadKernel from '#openscad.kernel.js';
+import { openscad as openscadKernel } from '#openscad.kernel.js';
 import {
   assertSuccess,
   colorParityCases,

@@ -8,22 +8,38 @@ import type {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const mergeParameters = (
-  defaults: Record<string, unknown>,
+const cloneValue = <T>(value: T): T => {
+  if (value === undefined || value === null) {
+    return value;
+  }
+  return structuredClone(value);
+};
+
+const mergeParameters = <Defaults extends Record<string, unknown>>(
+  defaults: Defaults,
   overrides: Record<string, unknown>,
-): Record<string, unknown> => {
-  const merged: Record<string, unknown> = { ...defaults };
+): Defaults => {
+  const merged: Record<string, unknown> = cloneValue(defaults);
   for (const [key, value] of Object.entries(overrides)) {
     const current = merged[key];
-    merged[key] = isRecord(current) && isRecord(value) ? mergeParameters(current, value) : value;
+    merged[key] = isRecord(current) && isRecord(value) ? mergeParameters(current, value) : cloneValue(value);
   }
-  return merged;
+  return merged as Defaults;
 };
 
 const parseParameterEntry = (entry: GeoSpecParameterFileEntry | string): GeoSpecParameterFileEntry => {
+  if (typeof entry === 'string' && !entry.trimStart().startsWith('{')) {
+    throw new Error('Invalid GeoSpec parameter file input: pass parsed JSON or raw JSON text, not a filesystem path.');
+  }
+
   const parsed: unknown = typeof entry === 'string' ? JSON.parse(entry) : entry;
   if (!isRecord(parsed) || typeof parsed['activeGroup'] !== 'string' || !isRecord(parsed['groups'])) {
     throw new Error('Invalid GeoSpec parameter file: expected activeGroup and groups.');
+  }
+  for (const [name, group] of Object.entries(parsed['groups'])) {
+    if (!isRecord(group) || !isRecord(group['values'])) {
+      throw new Error(`Invalid GeoSpec parameter file: group '${name}' must contain a values object.`);
+    }
   }
   return parsed as GeoSpecParameterFileEntry;
 };
@@ -53,14 +69,14 @@ const groupNames = (entry: GeoSpecParameterFileEntry): string[] => {
  * @returns Concrete parameter groups for GeoSpec tests.
  * @public
  */
-export function params(
+export function params<const Defaults extends Record<string, unknown> = Record<string, unknown>>(
   entry: GeoSpecParameterFileEntry | string,
-  options: GeoSpecParameterOptions = {},
-): GeoSpecParameters {
+  options: GeoSpecParameterOptions<Defaults> = {},
+): GeoSpecParameters<Defaults> {
   const parsed = parseParameterEntry(entry);
-  const defaults = options.defaults ?? {};
-  const groups = groupNames(parsed).map<GeoSpecParameterGroup>((name) => {
-    const overrides = parsed.groups[name]?.values ?? {};
+  const defaults = cloneValue((options.defaults ?? {}) as Defaults);
+  const groups = groupNames(parsed).map<GeoSpecParameterGroup<Defaults>>((name) => {
+    const overrides = cloneValue(parsed.groups[name]?.values ?? {});
     return {
       name,
       active: name === parsed.activeGroup,
@@ -79,7 +95,7 @@ export function params(
     throw new Error(`Invalid GeoSpec parameter file: active group '${parsed.activeGroup}' is missing.`);
   }
 
-  return { active, groups, defaults };
+  return { active, groups, defaults: cloneValue(defaults) };
 }
 
 /**
@@ -90,10 +106,10 @@ export function params(
  * @returns Merged active parameter values.
  * @public
  */
-export function activeParams(
+export function activeParams<const Defaults extends Record<string, unknown> = Record<string, unknown>>(
   entry: GeoSpecParameterFileEntry | string,
-  options: GeoSpecParameterOptions = {},
-): Record<string, unknown> {
+  options: GeoSpecParameterOptions<Defaults> = {},
+): Defaults {
   return params(entry, options).active.values;
 }
 
@@ -105,9 +121,9 @@ export function activeParams(
  * @returns Concrete parameter groups for repeatable tests.
  * @public
  */
-export function parameterGroups(
+export function parameterGroups<const Defaults extends Record<string, unknown> = Record<string, unknown>>(
   entry: GeoSpecParameterFileEntry | string,
-  options: GeoSpecParameterOptions = {},
-): GeoSpecParameterGroup[] {
+  options: GeoSpecParameterOptions<Defaults> = {},
+): Array<GeoSpecParameterGroup<Defaults>> {
   return params(entry, options).groups;
 }

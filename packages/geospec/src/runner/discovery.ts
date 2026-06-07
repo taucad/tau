@@ -1,9 +1,9 @@
 /**
- * Default file pattern used by GeoSpec test discovery.
+ * Default file globs used by GeoSpec test discovery.
  *
  * @public
  */
-export const defaultGeoSpecPattern = '**/*.geospec.{ts,js}';
+export const defaultGeoSpecInclude = ['**/*.geospec.{ts,js}'] as const;
 
 /**
  * Directories skipped by recursive GeoSpec discovery unless callers provide
@@ -56,13 +56,17 @@ export type GeoSpecDiscoveryFileSystem = {
  * `files` accepts either exact `*.geospec.ts` / `*.geospec.js` files or
  * directory roots. When omitted, discovery starts at `projectPath`.
  *
+ * `include` and `exclude` are Vitest-style file globs applied to
+ * project-relative GeoSpec paths after `files` roots have been expanded.
+ *
  * @public
  */
 export type DiscoverGeoSpecFilesOptions = {
   filesystem: GeoSpecDiscoveryFileSystem;
   projectPath: string;
   files?: readonly string[];
-  pattern?: string;
+  include?: readonly string[];
+  exclude?: readonly string[];
   ignoredDirectories?: readonly string[];
 };
 
@@ -83,7 +87,7 @@ export type GeoSpecDiscoveryResult = {
 const geoSpecFileNamePattern = /\.geospec\.(?:ts|js)$/u;
 
 const normalizeGeoSpecPath = (path: string): string =>
-  path.replaceAll('\\', '/').replace(/\/+/gu, '/').replace(/^\.\//u, '');
+  path.replaceAll('\\', '/').replaceAll(/\/+/gu, '/').replace(/^\.\//u, '');
 
 const normalizeProjectPath = (path: string): string => {
   const normalized = normalizeGeoSpecPath(path).replace(/\/$/u, '');
@@ -171,6 +175,9 @@ const globPatternToRegExp = (pattern: string): RegExp => {
 const matchesGeoSpecFilePattern = (path: string, pattern: string): boolean =>
   globPatternToRegExp(pattern).test(normalizeGeoSpecPath(path));
 
+const matchesAnyGeoSpecFilePattern = (path: string, patterns: readonly string[]): boolean =>
+  patterns.some((pattern) => matchesGeoSpecFilePattern(path, pattern));
+
 const isIgnoredDirectory = (path: string, ignoredDirectories: ReadonlySet<string>): boolean => {
   const normalizedPath = normalizeGeoSpecPath(path).replace(/\/$/u, '');
   const directoryName = normalizedPath.split('/').at(-1) ?? normalizedPath;
@@ -180,6 +187,8 @@ const isIgnoredDirectory = (path: string, ignoredDirectories: ReadonlySet<string
 /**
  * Return true when a project-relative path names a GeoSpec test file.
  *
+ * @param path - Project-relative path to inspect.
+ * @returns True when the path ends with `.geospec.ts` or `.geospec.js`.
  * @public
  */
 export const isGeoSpecTestFile = (path: string): boolean => geoSpecFileNamePattern.test(normalizeGeoSpecPath(path));
@@ -188,7 +197,6 @@ const collectGeoSpecFiles = async (options: {
   filesystem: GeoSpecDiscoveryFileSystem;
   directoryPath: string;
   projectPath: string;
-  pattern: string;
   ignoredDirectories: ReadonlySet<string>;
   selectedFiles: Set<string>;
 }): Promise<void> => {
@@ -208,7 +216,7 @@ const collectGeoSpecFiles = async (options: {
       continue;
     }
 
-    if (isGeoSpecTestFile(relativePath) && matchesGeoSpecFilePattern(relativePath, options.pattern)) {
+    if (isGeoSpecTestFile(relativePath)) {
       options.selectedFiles.add(relativePath);
     }
   }
@@ -224,7 +232,6 @@ const discoverFromRoot = async (options: {
   filesystem: GeoSpecDiscoveryFileSystem;
   projectPath: string;
   root: string;
-  pattern: string;
   ignoredDirectories: ReadonlySet<string>;
 }): Promise<string[]> => {
   const selectedFiles = new Set<string>();
@@ -239,7 +246,7 @@ const discoverFromRoot = async (options: {
 
   if (rootStat.kind === 'file') {
     const relativePath = toProjectRelativePath(absoluteRoot, options.projectPath);
-    if (isGeoSpecTestFile(relativePath) && matchesGeoSpecFilePattern(relativePath, options.pattern)) {
+    if (isGeoSpecTestFile(relativePath)) {
       selectedFiles.add(relativePath);
     }
     return [...selectedFiles];
@@ -254,7 +261,6 @@ const discoverFromRoot = async (options: {
     filesystem: options.filesystem,
     directoryPath: absoluteRoot,
     projectPath: options.projectPath,
-    pattern: options.pattern,
     ignoredDirectories: options.ignoredDirectories,
     selectedFiles,
   });
@@ -267,14 +273,17 @@ const discoverFromRoot = async (options: {
  * The returned `files` are project-relative paths suitable for
  * `runGeoSpecModule` and runner factory APIs.
  *
+ * @param options - Discovery options containing a filesystem adapter and project roots.
+ * @returns Sorted, de-duplicated project-relative GeoSpec files plus unmatched roots.
  * @public
  */
 export const discoverGeoSpecFiles = async (options: DiscoverGeoSpecFilesOptions): Promise<GeoSpecDiscoveryResult> => {
   const projectPath = normalizeProjectPath(options.projectPath);
-  const pattern = options.pattern ?? defaultGeoSpecPattern;
+  const include = options.include && options.include.length > 0 ? options.include : defaultGeoSpecInclude;
+  const exclude = options.exclude ?? [];
   const ignoredDirectories = new Set(options.ignoredDirectories ?? defaultGeoSpecIgnoredDirectories);
   const roots = options.files && options.files.length > 0 ? options.files : ['.'];
-  const selectedFiles = new Set<string>();
+  const discoveredFiles = new Set<string>();
   const unmatchedRoots: string[] = [];
 
   for (const root of roots) {
@@ -283,7 +292,6 @@ export const discoverGeoSpecFiles = async (options: DiscoverGeoSpecFilesOptions)
       filesystem: options.filesystem,
       projectPath,
       root,
-      pattern,
       ignoredDirectories,
     });
     if (rootFiles.length === 0) {
@@ -291,12 +299,16 @@ export const discoverGeoSpecFiles = async (options: DiscoverGeoSpecFilesOptions)
       continue;
     }
     for (const file of rootFiles) {
-      selectedFiles.add(file);
+      discoveredFiles.add(file);
     }
   }
 
+  const selectedFiles = [...discoveredFiles].filter(
+    (file) => matchesAnyGeoSpecFilePattern(file, include) && !matchesAnyGeoSpecFilePattern(file, exclude),
+  );
+
   return {
-    files: [...selectedFiles].sort((left, right) => left.localeCompare(right)),
+    files: selectedFiles.sort((left, right) => left.localeCompare(right)),
     unmatchedRoots,
   };
 };

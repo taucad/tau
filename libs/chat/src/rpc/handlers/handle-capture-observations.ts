@@ -15,5 +15,7 @@ export async function handleCaptureObservations(
     };
   }
 
-  return graphics.captureObservations({ targetFile: input.targetFile });
+  return graphics.captureObservations({
+    targetFile: input.targetFile,
+  });
 }

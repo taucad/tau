@@ -31,7 +31,7 @@
 import type { KernelProvider } from '@taucad/runtime';
 import { toolName } from '@taucad/chat/constants';
 import type { ChatMode } from '@taucad/chat/constants';
-import { availableChecksCopy, geospecParameterTestingCopy, renderCanonicalExample } from '@taucad/testing';
+import { geospecParameterTestingCopy, renderAvailableChecksCopy, renderCanonicalExample } from '@taucad/testing';
 import type { KernelConfig } from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.types.js';
 import { getKernelConfig } from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.js';
 import { createSectionRegistry } from '#api/chat/prompts/prompt-section-registry.js';
@@ -139,7 +139,9 @@ When you add a new file (e.g. \`lib/bracket${config.fileExtension}\`), add or up
 
 Every file you render in a GeoSpec test must produce top-level geometry so it renders standalone (e.g. \`${config.topLevelExportExample}\`). If a file you want to test does not, **add the missing line(s) with \`${toolName.editFile}\`** — never leave a file untested, never delete coverage, and never quietly drop a test. Prefer adding more coverage over reducing it.
 
-${availableChecksCopy}
+${renderAvailableChecksCopy({
+  includeBrepFeatures: config.testingProfile.includeBrepFeatureExamples,
+})}
 
 ${geospecParameterTestingCopy}
 </test_requirements>`

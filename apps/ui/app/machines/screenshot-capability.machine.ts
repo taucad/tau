@@ -733,8 +733,8 @@ async function captureScreenshots({
     screenshotScene.environment = null;
     screenshotScene.environmentIntensity = 0;
 
-    // Temporarily hide section-view helpers (cap planes, stencil groups) so they
-    // don't inflate the bounding box — their large plane geometry would push the
+    // Temporarily hide section-view helper geometry so contour fills and diagnostic outlines
+    // don't inflate the bounding box — their generated geometry would push the
     // camera too far away, producing blank screenshots.
     const sectionViewHelpers = findBySceneTag(screenshotScene, sceneTag.sectionViewHelper);
     for (const helper of sectionViewHelpers) {
@@ -792,16 +792,17 @@ async function captureScreenshots({
 
         screenshotCamera.position.set(geometryCenter.x + ox, geometryCenter.y + oy, geometryCenter.z + oz);
         screenshotCamera.lookAt(geometryCenter);
-
-        screenshotCamera.zoom = computeViewFittingZoom({
-          cameraPosition: screenshotCamera.position,
-          target: geometryCenter,
-          boundingBox,
-          fovDeg: screenshotFov,
-          aspectRatio: config.aspectRatio,
-        });
       }
 
+      screenshotCamera.lookAt(geometryCenter);
+      screenshotCamera.zoom = computeViewFittingZoom({
+        cameraPosition: screenshotCamera.position,
+        target: geometryCenter,
+        boundingBox,
+        fovDeg: screenshotCamera.fov,
+        aspectRatio: config.aspectRatio,
+        paddingFactor: 0.9,
+      });
       screenshotCamera.updateProjectionMatrix();
       screenshotCamera.updateMatrixWorld(true);
 

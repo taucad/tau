@@ -54,8 +54,8 @@ export type GeoSpecRunnerEvent =
 export type GeoSpecRunnerRunOptions = {
   /** GeoSpec test files to execute. Files run serially by default. */
   files: readonly string[];
-  /** Case-insensitive substring matched against `suite > test` names. */
-  testNamePattern?: string;
+  /** JavaScript regular expression matched against full `suite > test` names. */
+  testNamePattern?: string | RegExp;
   /** Timeout for each async test callback, in milliseconds. */
   testTimeout?: number;
 };

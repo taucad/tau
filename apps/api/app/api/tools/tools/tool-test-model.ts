@@ -21,12 +21,14 @@ export const createTestModelToolDefinition = (
     name: toolName.testModel,
     description: `Run GeoSpec tests against the current 3D model(s).
 
-GeoSpec tests live in *.geospec.ts or *.geospec.js files. They load Tau model
-files through geospec/model and assert geometry with expectGeo.
+No input recursively runs all *.geospec.ts or *.geospec.js files. Tests load
+Tau model files through geospec/model and assert geometry with expectGeo.
 
 Filter examples:
 - Run one file: { files: ['main.geospec.ts'] }
-- Run one test substring in that file: { files: ['main.geospec.ts'], testNamePattern: 'watertight' }
+- Run one directory subtree: { files: ['lib'] }
+- Skip one known failing check: { testNamePattern: '^(?!.*no meshing interference).*' }
+- Skip slow files: { exclude: ['**/*.slow.geospec.ts'] }
 
 Returns compact pass/fail rows tagged by targetFile. Empty failures means all selected tests passed.
 
@@ -57,8 +59,9 @@ export const createTestModelTool = (
       toolCallId,
       rpcName: rpcName.runGeoSpecTests,
       args: {
-        pattern: input.pattern ?? '**/*.geospec.{ts,js}',
         ...(input.files === undefined ? {} : { files: input.files }),
+        ...(input.include === undefined ? {} : { include: input.include }),
+        ...(input.exclude === undefined ? {} : { exclude: input.exclude }),
         ...(input.testNamePattern === undefined ? {} : { testNamePattern: input.testNamePattern }),
         ...(input.testTimeout === undefined ? {} : { testTimeout: input.testTimeout }),
       },

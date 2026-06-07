@@ -19,6 +19,30 @@ afterEach(async () => {
 });
 
 describe('runGeoSpecCli', () => {
+  it('should document directory-root filters in CLI help', async () => {
+    const stdout: string[] = [];
+
+    const exitCode = await runGeoSpecCli({
+      argv: ['--help'],
+      stdout(message) {
+        stdout.push(message);
+      },
+      stderr() {
+        return undefined;
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout.join('\n')).toContain(
+      '--file <path>                 GeoSpec file or directory root to run; repeatable',
+    );
+    expect(stdout.join('\n')).toContain('--include <glob>');
+    expect(stdout.join('\n')).toContain('--exclude <glob>');
+    expect(stdout.join('\n')).toContain('--testNamePattern <regexp>');
+    expect(stdout.join('\n')).not.toContain('--pattern <glob>');
+    expect(stdout.join('\n')).not.toContain('--grep');
+  });
+
   it('should return a failing exit code when no GeoSpec files exist', async () => {
     const projectPath = await createTemporaryProject();
     const stderr: string[] = [];
@@ -65,6 +89,140 @@ describe('runGeoSpecCli', () => {
 
     expect(exitCode).toBe(0);
     expect(stdout).toEqual(['1 passed, 0 failed']);
+  });
+
+  it('should run root and nested GeoSpec files recursively from Node', async () => {
+    const projectPath = await createTemporaryProject();
+    const nestedDirectory = join(projectPath, 'lib');
+    const stdout: string[] = [];
+    await mkdir(nestedDirectory);
+    await writeFile(
+      join(projectPath, 'vase.geospec.ts'),
+      [
+        "import { describe, it } from 'geospec';",
+        "describe('vase geometry', () => {",
+        "  it('should run the root spec', () => {});",
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+    await writeFile(
+      join(nestedDirectory, 'vase_variant.geospec.ts'),
+      [
+        "import { describe, it } from 'geospec';",
+        "describe('variant geometry', () => {",
+        "  it('should run the nested spec', () => {});",
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const exitCode = await runGeoSpecCli({
+      argv: ['run', '.'],
+      cwd: projectPath,
+      stderr() {
+        return undefined;
+      },
+      stdout(message) {
+        stdout.push(message);
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toEqual(['2 passed, 0 failed']);
+  });
+
+  it('should run GeoSpec files below a directory root passed through --file', async () => {
+    const projectPath = await createTemporaryProject();
+    const nestedDirectory = join(projectPath, 'lib');
+    const stdout: string[] = [];
+    await mkdir(nestedDirectory);
+    await writeFile(
+      join(projectPath, 'root.geospec.ts'),
+      [
+        "import { describe, it } from 'geospec';",
+        "describe('root', () => {",
+        "  it('should not run when lib is selected', () => {});",
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+    await writeFile(
+      join(nestedDirectory, 'vase_variant.geospec.ts'),
+      [
+        "import { describe, it } from 'geospec';",
+        "describe('variant geometry', () => {",
+        "  it('should run from a directory root', () => {});",
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const exitCode = await runGeoSpecCli({
+      argv: ['run', '.', '--file', 'lib'],
+      cwd: projectPath,
+      stderr() {
+        return undefined;
+      },
+      stdout(message) {
+        stdout.push(message);
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toEqual(['1 passed, 0 failed']);
+  });
+
+  it('should run an exact nested GeoSpec file passed through --file', async () => {
+    const projectPath = await createTemporaryProject();
+    const nestedDirectory = join(projectPath, 'lib');
+    const stdout: string[] = [];
+    await mkdir(nestedDirectory);
+    await writeFile(
+      join(nestedDirectory, 'vase_variant.geospec.ts'),
+      [
+        "import { describe, it } from 'geospec';",
+        "describe('variant geometry', () => {",
+        "  it('should run from an exact nested file', () => {});",
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const exitCode = await runGeoSpecCli({
+      argv: ['run', '.', '--file', 'lib/vase_variant.geospec.ts'],
+      cwd: projectPath,
+      stderr() {
+        return undefined;
+      },
+      stdout(message) {
+        stdout.push(message);
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toEqual(['1 passed, 0 failed']);
+  });
+
+  it('should fail when a directory-root filter selects no GeoSpec files', async () => {
+    const projectPath = await createTemporaryProject();
+    const stderr: string[] = [];
+    await mkdir(join(projectPath, 'lib'));
+    await writeFile(join(projectPath, 'lib', 'vase_variant.scad'), 'cube([10, 10, 10]);', 'utf8');
+
+    const exitCode = await runGeoSpecCli({
+      argv: ['run', '.', '--file', 'lib'],
+      cwd: projectPath,
+      stderr(message) {
+        stderr.push(message);
+      },
+      stdout() {
+        return undefined;
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toEqual(['No matching *.geospec.ts or *.geospec.js files found.']);
   });
 
   it('should run OpenSCAD source-file GeoSpec tests from Node', { timeout: 120_000 }, async () => {
@@ -199,7 +357,7 @@ describe('runGeoSpecCli', () => {
     expect(stdout).toEqual(['0 passed, 1 failed']);
   });
 
-  it('should filter discovered files with a GeoSpec glob pattern', async () => {
+  it('should include discovered files with repeatable Vitest-style include globs', async () => {
     const projectPath = await createTemporaryProject();
     const nestedDirectory = join(projectPath, 'nested');
     await mkdir(nestedDirectory);
@@ -208,7 +366,7 @@ describe('runGeoSpecCli', () => {
       [
         "import { describe, it } from 'geospec';",
         "describe('root', () => {",
-        "  it('should not run when the pattern excludes it', () => {});",
+        "  it('should not run when include excludes it', () => {});",
         '});',
       ].join('\n'),
       'utf8',
@@ -218,7 +376,7 @@ describe('runGeoSpecCli', () => {
       [
         "import { describe, it } from 'geospec';",
         "describe('nested', () => {",
-        "  it('should run when the pattern includes it', () => {});",
+        "  it('should run when include selects it', () => {});",
         '});',
       ].join('\n'),
       'utf8',
@@ -226,7 +384,48 @@ describe('runGeoSpecCli', () => {
     const stdout: string[] = [];
 
     const exitCode = await runGeoSpecCli({
-      argv: ['run', '.', '--pattern', 'nested/**/*.geospec.ts'],
+      argv: ['run', '.', '--include', 'nested/**/*.geospec.ts', '--include', 'missing/**/*.geospec.ts'],
+      cwd: projectPath,
+      stderr() {
+        return undefined;
+      },
+      stdout(message) {
+        stdout.push(message);
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toEqual(['1 passed, 0 failed']);
+  });
+
+  it('should exclude discovered files with repeatable Vitest-style exclude globs', async () => {
+    const projectPath = await createTemporaryProject();
+    const nestedDirectory = join(projectPath, 'nested');
+    await mkdir(nestedDirectory);
+    await writeFile(
+      join(projectPath, 'root.geospec.ts'),
+      [
+        "import { describe, it } from 'geospec';",
+        "describe('root', () => {",
+        "  it('should run when not excluded', () => {});",
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+    await writeFile(
+      join(nestedDirectory, 'slow.geospec.ts'),
+      [
+        "import { describe, it } from 'geospec';",
+        "describe('nested slow', () => {",
+        "  it('should not run when excluded', () => {});",
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+    const stdout: string[] = [];
+
+    const exitCode = await runGeoSpecCli({
+      argv: ['run', '.', '--exclude', 'nested/**/*.geospec.ts', '--exclude', '**/*.fixture.geospec.ts'],
       cwd: projectPath,
       stderr() {
         return undefined;
@@ -256,7 +455,7 @@ describe('runGeoSpecCli', () => {
     );
 
     const exitCode = await runGeoSpecCli({
-      argv: ['run', '.', '--test-name-pattern', 'width'],
+      argv: ['run', '.', '--testNamePattern', 'width$'],
       cwd: projectPath,
       stderr() {
         return undefined;
@@ -268,6 +467,67 @@ describe('runGeoSpecCli', () => {
 
     expect(exitCode).toBe(0);
     expect(stdout).toEqual(['1 passed, 0 failed']);
+  });
+
+  it('should run all tests except a named check with negative-lookahead testNamePattern', async () => {
+    const projectPath = await createTemporaryProject();
+    const stdout: string[] = [];
+    await writeFile(
+      join(projectPath, 'gear.geospec.ts'),
+      [
+        "import { describe, it } from 'geospec';",
+        "describe('planetary gearbox assembly', () => {",
+        "  it('should check carrier spacing', () => {});",
+        "  it('has correctly phased gear teeth (no meshing interference)', () => {",
+        "    throw new Error('known failing check should not run');",
+        '  });',
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const exitCode = await runGeoSpecCli({
+      argv: ['run', '.', '-t', '^(?!.*no meshing interference).*'],
+      cwd: projectPath,
+      stderr() {
+        return undefined;
+      },
+      stdout(message) {
+        stdout.push(message);
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toEqual(['1 passed, 0 failed']);
+  });
+
+  it('should fail clearly when testNamePattern is not a valid regex', async () => {
+    const projectPath = await createTemporaryProject();
+    const stderr: string[] = [];
+    await writeFile(
+      join(projectPath, 'box.geospec.ts'),
+      [
+        "import { describe, it } from 'geospec';",
+        "describe('box', () => {",
+        "  it('should not execute', () => {});",
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const exitCode = await runGeoSpecCli({
+      argv: ['run', '.', '--test-name-pattern', '['],
+      cwd: projectPath,
+      stderr(message) {
+        stderr.push(message);
+      },
+      stdout() {
+        return undefined;
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toEqual(['FAIL box.geospec.ts', '  testNamePattern is not a valid JavaScript regular expression.']);
   });
 
   it('should fail when filters select no GeoSpec tests', async () => {

@@ -97,6 +97,32 @@ describe('GeoSpec worker-style runners', () => {
     await runner.close();
   });
 
+  it('should return structured file issues when testNamePattern is invalid', async () => {
+    const runner = createGeoSpecNodeRunner({
+      filesystem: createFilesystem(),
+      projectPath: '/',
+    });
+
+    const result = await runner.run({
+      files: ['/first.geospec.ts'],
+      testNamePattern: '[',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.files[0]?.result).toMatchObject({
+      success: false,
+      issues: [
+        {
+          code: 'INVALID_GEOSPEC_TEST_NAME_PATTERN',
+          message: 'testNamePattern is not a valid JavaScript regular expression.',
+          severity: 'error',
+          type: 'runtime',
+        },
+      ],
+    });
+    await runner.close();
+  });
+
   it('should abort before starting the next queued file', async () => {
     const events: GeoSpecRunnerEvent[] = [];
     const runner: GeoSpecRunner = createGeoSpecNodeRunner({

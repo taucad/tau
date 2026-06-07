@@ -1292,11 +1292,27 @@ describe('getCadSystemPrompt', () => {
       const opencascade = await getCadSystemPrompt('opencascadejs', 'agent', true);
 
       expect(extractTestRequirements(replicad.static)).toContain('toHavePlanarFace');
+      expect(extractTestRequirements(replicad.static)).toContain('toBeValidBrep');
+      expect(extractTestRequirements(replicad.static)).toContain('toHaveChamferFeature');
+      expect(extractTestRequirements(replicad.static)).toContain('toHaveMinimumWallThickness');
       expect(extractTestRequirements(replicad.static)).toContain("loadModel({ file: 'main.ts', format: 'step' })");
       expect(extractTestRequirements(opencascade.static)).toContain('toHavePlanarFace');
+      expect(extractTestRequirements(opencascade.static)).toContain('toBeValidBrep');
+      expect(extractTestRequirements(opencascade.static)).toContain('toHaveChamferFeature');
+      expect(extractTestRequirements(opencascade.static)).toContain('toHaveMinimumWallThickness');
       expect(extractTestRequirements(opencascade.static)).toContain("loadModel({ file: 'main.ts', format: 'step' })");
       expect(extractTestRequirements(openscad.static)).not.toContain('toHavePlanarFace');
+      expect(extractTestRequirements(openscad.static)).not.toContain('toBeValidBrep');
+      expect(extractTestRequirements(openscad.static)).not.toContain('toHaveChamferFeature');
       expect(extractTestRequirements(openscad.static)).not.toContain("format: 'step'");
+    });
+
+    it('should teach OpenSCAD tests to load source files directly without wrapper workarounds', async () => {
+      const result = await getCadSystemPrompt('openscad', 'agent', true);
+      const block = extractTestRequirements(result.static);
+
+      expect(block).toContain("loadModel({ file: 'main.scad' })");
+      expect(block).not.toMatch(/\.ts wrapper|typescript wrapper|fake wrapper/i);
     });
 
     it('should explain that adding a new file requires preserving sibling GeoSpec coverage', async () => {
@@ -1316,25 +1332,42 @@ describe('getCadSystemPrompt', () => {
       expect(block).toMatch(/state the missing coverage explicitly/i);
     });
 
-    it('should embed exactly the 3-check vocabulary in the canonical example (no meshCount/vertexCount)', async () => {
+    it('should embed the mesh-capable GeoSpec vocabulary in the canonical example', async () => {
       const result = await getCadSystemPrompt('openscad', 'agent', true);
       const block = extractTestRequirements(result.static);
       expect(block).toContain('boundingBox');
       expect(block).toContain('connectedComponents');
       expect(block).toContain('watertight');
+      expect(block).toContain('toHaveNoComponentOverlap');
+      expect(block).toContain('surfaceArea');
+      expect(block).toContain('volume');
+      expect(block).toContain('centerOfMass');
       expect(block).not.toContain('meshCount');
       expect(block).not.toContain('vertexCount');
     });
 
-    it('should describe the 3 checks with their unique-question framing and the connectedComponents tolerance knob', async () => {
+    it('should describe the mesh checks with their unique-question framing and the connectedComponents tolerance knob', async () => {
       const result = await getCadSystemPrompt('openscad', 'agent', true);
       const block = extractTestRequirements(result.static);
       expect(block).toMatch(/Available checks/);
       expect(block).toContain('SIZE / POSITION');
       expect(block).toContain('SPATIALLY-DISJOINT CHUNKS');
       expect(block).toContain('CLOSED (manifold / 3D-printable)');
+      expect(block).toContain('separate assembly components occupy the same solid volume');
       expect(block).toContain('tolerance');
       expect(block).toContain('default 0.1');
+    });
+
+    it('should not expose shortcut component-overlap knobs or AABB/envelope guidance', async () => {
+      const result = await getCadSystemPrompt('openscad', 'agent', true);
+      const block = extractTestRequirements(result.static);
+
+      expect(block).not.toContain('components:');
+      expect(block).not.toContain('volumeTolerance');
+      expect(block).not.toContain('sampleCount');
+      expect(block).not.toContain('AABB');
+      expect(block).not.toContain('envelope');
+      expect(block).not.toContain('toHaveNoInterference');
     });
 
     it('should teach agents to assert through expectGeo instead of GeometrySubject internals', async () => {
@@ -1344,6 +1377,17 @@ describe('getCadSystemPrompt', () => {
       expect(block).toContain('model.boundingBox.bounds');
       expect(block).toContain('model.volume()');
       expect(block).toContain('expectGeo(model)');
+    });
+
+    it('should not expose unit or preview workarounds in model-facing GeoSpec guidance', async () => {
+      const result = await getCadSystemPrompt('openscad', 'agent', true);
+      const block = extractTestRequirements(result.static);
+
+      expect(block).not.toContain('S = 1000');
+      expect(block).not.toContain('previewGeometry');
+      expect(block).not.toContain('test.json');
+      expect(block).not.toMatch(/loadModel\([^)]*(?:scale|sourceUnit|coordinateSystem)/);
+      expect(block).not.toMatch(/loadModel\([^)]*unit\s*:/);
     });
   });
 

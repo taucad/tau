@@ -446,8 +446,8 @@ export type RunGeoSpecModuleOptions = {
   projectPath: string;
   /** Absolute ESM test entry path. */
   entryPath: string;
-  /** Case-insensitive substring matched against `suite > test` names. */
-  testNamePattern?: string;
+  /** JavaScript regular expression matched against full `suite > test` names. */
+  testNamePattern?: string | RegExp;
   /** Timeout for async test callbacks, in milliseconds. */
   testTimeout?: number;
   /** Model loader exposed to VM tests through `geospec/model`. */

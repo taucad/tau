@@ -33,16 +33,20 @@ Run standalone GeoSpec modules from Node:
 
 ```bash
 geospec run .
-geospec run . --pattern "parts/**/*.geospec.ts"
+geospec run . --include "parts/**/*.geospec.ts"
+geospec run . --exclude "**/*.slow.geospec.ts"
 geospec run . --file main.geospec.ts --test-name-pattern volume
+geospec run . -t "^(?!.*no meshing interference).*"
+geospec run . --file lib
 geospec run . --json
 ```
 
 The CLI and Tau `test_model` tool share the same execution filters:
 
-- `pattern`: file glob, defaulting to `**/*.geospec.{ts,js}`
-- `files`: specific GeoSpec files to run (`--file` in the CLI)
-- `testNamePattern`: case-insensitive substring matched against `suite > test`
+- `files`: GeoSpec files or directory roots to run (`--file` in the CLI). Empty input recursively discovers from the project root.
+- `include`: GeoSpec file include globs (`--include` in the CLI), defaulting to `["**/*.geospec.{ts,js}"]`
+- `exclude`: GeoSpec file exclude globs (`--exclude` in the CLI)
+- `testNamePattern`: JavaScript regular expression matched against full `suite > test` names
 - `testTimeout`: async test timeout in milliseconds (`--test-timeout` in the CLI)
 
 The Tau runtime contract remains file/bytes based: render or export geometry, then pass GLB/glTF or STEP bytes into GeoSpec loaders. `geospec/model` can call `@taucad/runtime` when it is installed, but the root `geospec` import stays lazy and standalone. Tau project tests should use `loadModel` and parameter helpers from `geospec/model`; `@taucad/testing/tau` remains an internal compatibility adapter for Tau runners.

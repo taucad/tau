@@ -90,6 +90,7 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     const modelTypes = files['model/index.d.ts'] ?? '';
     const modelLoaderTypes = files['model/load-model.d.ts'] ?? '';
     const modelOptionTypes = files['model/types.d.ts'] ?? '';
+    const runnerDiscoveryTypes = files['runner/discovery.d.ts'] ?? '';
     const runnerTypes = files['runner/types.d.ts'] ?? '';
     const runnerIndexTypes = files['runner/index.d.ts'] ?? '';
     const runnerNodeTypes = files['runner/node/index.d.ts'] ?? '';
@@ -105,7 +106,13 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     expect(modelTypes).toContain('GeoSpecModelLoadError');
     expect(modelTypes).not.toContain('loadModelSafe');
     expect(modelTypes).not.toContain('tryLoadModel');
+    expect(runnerDiscoveryTypes).toContain('defaultGeoSpecInclude');
+    expect(runnerDiscoveryTypes).toContain('include?: readonly string[]');
+    expect(runnerDiscoveryTypes).toContain('exclude?: readonly string[]');
+    expect(runnerDiscoveryTypes).toContain('Vitest-style file globs');
     expect(runnerTypes).toContain('Assert total surface area');
+    expect(runnerTypes).toContain('testNamePattern?: string | RegExp');
+    expect(runnerTypes).toContain('JavaScript regular expression matched against full `suite > test` names.');
     expect(runnerTypes).toContain('toBeValidBrep');
     expect(runnerTypes).toContain('toHaveHausdorffDistanceTo');
     expect(runnerTypes).toContain('toHaveCircularHolePattern');
@@ -118,6 +125,7 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     expect(runnerNodeTypes).toContain('Create a GeoSpec runner for Node.js and CLI environments.');
     expect(runnerWebTypes).toContain('Create a GeoSpec runner for browser environments.');
     expect(runnerWorkerTypes).toContain('Lifecycle event emitted by GeoSpec worker-style runners.');
+    expect(runnerWorkerTypes).toContain('testNamePattern?: string | RegExp');
     expect(stepTypes).toContain('loadStep');
     expect(stepLoaderTypes).toContain('Load STEP/XDE/BRep evidence');
   });

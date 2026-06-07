@@ -14,5 +14,7 @@ export async function handleCaptureScreenshot(
     };
   }
 
-  return graphics.captureScreenshot({ targetFile: input.targetFile });
+  return graphics.captureScreenshot({
+    targetFile: input.targetFile,
+  });
 }

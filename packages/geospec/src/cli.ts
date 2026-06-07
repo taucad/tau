@@ -3,7 +3,7 @@ import { readFile, mkdir, stat, writeFile, readdir } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadModel } from '#model/index.js';
-import { defaultGeoSpecPattern, discoverGeoSpecFiles } from '#runner/discovery.js';
+import { defaultGeoSpecInclude, discoverGeoSpecFiles } from '#runner/discovery.js';
 import type { GeoSpecDiscoveryFileSystem } from '#runner/discovery.js';
 import { createGeoSpecNodeRunner } from '#runner/node/index.js';
 import { loadStep } from '#step/index.js';
@@ -28,8 +28,9 @@ export type GeoSpecCliOptions = {
  * @public
  */
 export type GeoSpecCliRunOptions = {
-  pattern: string;
   files: string[];
+  include: string[];
+  exclude: string[];
   testNamePattern?: string;
   /** Milliseconds. */
   testTimeout?: number;
@@ -80,7 +81,7 @@ const createNodeDiscoveryFileSystem = (root: string): GeoSpecDiscoveryFileSystem
   },
   async stat(path: string) {
     const fileStat = await stat(resolveNodeVmPath({ root, path }));
-    return { kind: fileStat.isDirectory() ? ('directory' as const) : ('file' as const) };
+    return { kind: fileStat.isDirectory() ? 'directory' : 'file' };
   },
 });
 
@@ -89,10 +90,12 @@ const helpText = `Usage: geospec [run] [project-directory] [options]
 Runs *.geospec.ts and *.geospec.js files through the GeoSpec VM runner.
 
 Options:
-  --pattern <glob>              File glob, default: ${defaultGeoSpecPattern}
   --file <path>                 GeoSpec file or directory root to run; repeatable
-  --test-name-pattern <text>    Case-insensitive substring matched against suite > test names
-  -t, --grep <text>             Alias for --test-name-pattern
+  --include <glob>              GeoSpec file include glob; repeatable
+  --exclude <glob>              GeoSpec file exclude glob; repeatable
+  --testNamePattern <regexp>    RegExp matched against full suite > test names
+  --test-name-pattern <regexp>  Alias for --testNamePattern
+  -t <regexp>                   Alias for --testNamePattern
   --test-timeout <ms>           Async test timeout in milliseconds
   --json                        Print machine-readable JSON
   -h, --help                    Show this help
@@ -106,7 +109,16 @@ type ParsedCliArgs =
   | { help: true; errors: string[] }
   | { help: false; projectDirectory: string; run: GeoSpecCliRunOptions; errors: string[] };
 
-const flagNamesWithValues = new Set(['--pattern', '--file', '--test-name-pattern', '--grep', '-t', '--test-timeout']);
+const flagNamesWithValues = new Set([
+  '--include',
+  '--exclude',
+  '--file',
+  '--testNamePattern',
+  '--test-name-pattern',
+  '-t',
+  '--test-timeout',
+  '--pattern',
+]);
 
 const parseIntegerFlag = (options: {
   flag: string;
@@ -130,8 +142,9 @@ const parseIntegerFlag = (options: {
 const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
   const errors: string[] = [];
   const run: GeoSpecCliRunOptions = {
-    pattern: defaultGeoSpecPattern,
     files: [],
+    include: [],
+    exclude: [],
     json: false,
   };
   let index = 0;
@@ -160,22 +173,32 @@ const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
         index += 1;
         continue;
       }
-      if (token === '--pattern') {
-        run.pattern = value;
-      } else if (token === '--file') {
-        run.files.push(value);
-      } else {
-        switch (token) {
-          case '--test-timeout': {
-            run.testTimeout = parseIntegerFlag({ flag: token, value, errors });
-            break;
-          }
-          case '--test-name-pattern':
-          case '--grep':
-          case '-t': {
-            run.testNamePattern = value;
-            break;
-          }
+      switch (token) {
+        case '--pattern': {
+          run.include = [value];
+          break;
+        }
+        case '--file': {
+          run.files.push(value);
+          break;
+        }
+        case '--include': {
+          run.include.push(value);
+          break;
+        }
+        case '--exclude': {
+          run.exclude.push(value);
+          break;
+        }
+        case '--test-timeout': {
+          run.testTimeout = parseIntegerFlag({ flag: token, value, errors });
+          break;
+        }
+        case '--testNamePattern':
+        case '--test-name-pattern':
+        case '-t': {
+          run.testNamePattern = value;
+          break;
         }
       }
       index += 2;
@@ -187,7 +210,7 @@ const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
       continue;
     }
     if (sawProjectDirectory) {
-      errors.push(`Unexpected argument: ${token}. Use --file to select specific tests.`);
+      errors.push(`Unexpected argument: ${token}. Use --file to select GeoSpec files or directories.`);
     } else {
       projectDirectory = token;
       sawProjectDirectory = true;
@@ -242,10 +265,11 @@ export const runGeoSpecCli = async (options: GeoSpecCliOptions = {}): Promise<nu
   const discovery = await discoverGeoSpecFiles({
     filesystem: createNodeDiscoveryFileSystem(projectPath),
     projectPath,
-    pattern: parsed.run.pattern,
     files: parsed.run.files,
+    include: parsed.run.include.length > 0 ? parsed.run.include : defaultGeoSpecInclude,
+    exclude: parsed.run.exclude,
   });
-  const files = discovery.files;
+  const { files } = discovery;
 
   if (files.length === 0) {
     stderr('No matching *.geospec.ts or *.geospec.js files found.');

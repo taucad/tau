@@ -1619,6 +1619,9 @@ importers:
       '@taucad/vite':
         specifier: workspace:*
         version: link:../../libs/vite
+      geospec:
+        specifier: workspace:*
+        version: link:../../packages/geospec
 
   apps/ui:
     dependencies:

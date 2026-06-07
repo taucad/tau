@@ -16,8 +16,11 @@ import type {
   RpcResult,
   GetKernelResultRpcResult,
   CaptureObservationsRpcResult,
+  CaptureObservationsRpcInput,
   CaptureScreenshotRpcResult,
+  CaptureScreenshotRpcInput,
   FetchGeometryRpcResult,
+  RunGeoSpecTestsRpcResult,
 } from '@taucad/chat';
 import { rpcClientErrorCode, rpcClientErrorCodeSchema } from '@taucad/chat';
 import { mutatingRpcNames } from '@taucad/chat/constants';
@@ -28,14 +31,14 @@ import type {
   RpcFileStat,
   RpcRuntimeClient,
   RpcGraphicsClient,
+  RpcGeoSpecClient,
   RpcGraphicsExportGeometryResult,
 } from '@taucad/chat/rpc';
-import type { FileExtension } from '@taucad/types';
+import type { FileExtension, GeometryComponentKind, ScreenshotTargetRequest } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { DirectoryListingFailedError, DirectoryListingErrorCode } from '@taucad/fs-client/directory-listing';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
-
 import { recordRpcOutcome } from '#services/rpc-ledger.js';
 import { screenshotRequestMachine, orthographicViews } from '#machines/screenshot-request.machine.js';
 import { buildScreenshotOverlayForPath } from '#machines/resolve-screenshot-overlay.js';
@@ -43,9 +46,51 @@ import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
+import { createSkillResolver } from '#lib/skill-resolver.js';
 
 /** Source of file write operations */
 type FileWriteSource = 'editor' | 'user' | 'machine';
+
+const geometryComponentKinds = new Set<GeometryComponentKind>([
+  'model',
+  'assembly',
+  'part',
+  'body',
+  'face',
+  'edge',
+  'vertex',
+  'mesh',
+  'line',
+  'material',
+  'unknown',
+]);
+
+function normalizeGeometryComponentKind(kind: string): GeometryComponentKind {
+  return geometryComponentKinds.has(kind as GeometryComponentKind) ? (kind as GeometryComponentKind) : 'unknown';
+}
+
+function normalizeScreenshotTargetRequest(
+  target: CaptureScreenshotRpcInput['target'],
+): ScreenshotTargetRequest | undefined {
+  if (target === undefined) {
+    return undefined;
+  }
+
+  return {
+    ...(target.filePath === undefined ? {} : { filePath: target.filePath }),
+    ...(target.componentId === undefined ? {} : { componentId: target.componentId }),
+    ...(target.bounds === undefined ? {} : { bounds: target.bounds }),
+    ...(target.padding === undefined ? {} : { padding: target.padding }),
+    ...(target.component === undefined
+      ? {}
+      : {
+          component: {
+            ...target.component,
+            kind: normalizeGeometryComponentKind(target.component.kind),
+          },
+        }),
+  };
+}
 
 /**
  * Resolves the per-viewer-panel graphics actor displaying a given source file.
@@ -105,6 +150,13 @@ export type RpcHandlerDependencies = {
   resolveGraphicsForFile: ResolveGraphicsForFile | undefined;
   projectRef: ActorRefFrom<typeof projectMachine>;
   screenshotQuality: number;
+  /**
+   * Creates a runtime client owned by the GeoSpec test runner.
+   *
+   * The client must be backed by the project filesystem and shared geometry
+   * cache, but must not be the active preview runtime client.
+   */
+  createGeoSpecClient?: () => RpcGeoSpecClient;
 };
 export type RpcCallInput = RpcCall & {
   toolCallId: string;
@@ -248,10 +300,12 @@ export type EnsureGeometryUnitResult =
 async function ensureGeometryUnit(
   projectRef: ActorRefFrom<typeof projectMachine>,
   targetFile: string,
+  parameters?: Record<string, unknown>,
 ): Promise<EnsureGeometryUnitResult> {
   try {
     const projectSnapshot = projectRef.getSnapshot();
     const { geometryUnits } = projectSnapshot.context;
+    const projectPath = `/projects/${projectSnapshot.context.projectId}`;
     let cadUnit = geometryUnits.get(targetFile);
 
     if (!cadUnit) {
@@ -271,6 +325,17 @@ async function ensureGeometryUnit(
       };
     }
 
+    if (parameters !== undefined) {
+      cadUnit.send({
+        type: 'initializeModel',
+        file: {
+          path: projectPath,
+          filename: targetFile,
+        },
+        parameters,
+      });
+    }
+
     const cadSnapshot = await awaitFreshRender(cadUnit);
 
     return { ok: true, cadUnit, cadSnapshot };
@@ -279,7 +344,7 @@ async function ensureGeometryUnit(
       return {
         ok: false,
         errorCode: rpcClientErrorCode.renderTimeout,
-        message: `Render for ${targetFile} did not settle in time. Try a simpler model or wait and retry.`,
+        message: `Render for ${targetFile} did not settle in time. Inspect recent model changes, kernel diagnostics, and parameter values; fix the render blocker or increase render timeout for legitimately long operations.`,
       };
     }
     return {
@@ -325,14 +390,33 @@ function createBrowserRuntimeClient(projectRef: ActorRefFrom<typeof projectMachi
   };
 }
 
+function createBrowserGeoSpecClient(createGeoSpecClient: (() => RpcGeoSpecClient) | undefined): RpcGeoSpecClient {
+  return {
+    async runTests(args): Promise<RunGeoSpecTestsRpcResult> {
+      try {
+        if (!createGeoSpecClient) {
+          throw new Error('GeoSpec browser worker runner is not configured.');
+        }
+        return await createGeoSpecClient().runTests(args);
+      } catch (error) {
+        return {
+          success: false,
+          errorCode: rpcClientErrorCode.unknown,
+          message: error instanceof Error ? error.message : 'GeoSpec tests failed to run.',
+        };
+      }
+    },
+  };
+}
+
 function createBrowserGraphicsClient(
   resolveGraphicsForFile: ResolveGraphicsForFile,
   projectRef: ActorRefFrom<typeof projectMachine>,
   screenshotQuality: number,
 ): RpcGraphicsClient {
   return {
-    async fetchGeometry({ targetFile }): Promise<FetchGeometryRpcResult> {
-      const resolved = await ensureGeometryUnit(projectRef, targetFile);
+    async fetchGeometry({ targetFile, parameters }): Promise<FetchGeometryRpcResult> {
+      const resolved = await ensureGeometryUnit(projectRef, targetFile, parameters);
       if (!resolved.ok) {
         return { success: false, errorCode: resolved.errorCode, message: resolved.message };
       }
@@ -412,7 +496,15 @@ function createBrowserGraphicsClient(
       }
     },
 
-    async captureScreenshot({ targetFile }): Promise<CaptureScreenshotRpcResult> {
+    async captureScreenshot({
+      targetFile,
+      target,
+      camera,
+      display,
+    }: Pick<
+      CaptureScreenshotRpcInput,
+      'targetFile' | 'target' | 'camera' | 'display'
+    >): Promise<CaptureScreenshotRpcResult> {
       const graphicsRef = resolveGraphicsForFile(targetFile);
       if (!graphicsRef) {
         return {
@@ -423,6 +515,7 @@ function createBrowserGraphicsClient(
       }
 
       try {
+        const screenshotTarget = normalizeScreenshotTargetRequest(target);
         const source = await new Promise<string>((resolve, reject) => {
           const screenshotActor = createActor(screenshotRequestMachine, {
             input: { graphicsRef },
@@ -437,6 +530,9 @@ function createBrowserGraphicsClient(
                 isPreview: true,
               },
               cameraAngles: [orthographicViews[0]!],
+              target: screenshotTarget,
+              camera,
+              display,
               aspectRatio: 1,
               maxResolution: 800,
               zoomLevel: 1.2,
@@ -472,7 +568,15 @@ function createBrowserGraphicsClient(
       }
     },
 
-    async captureObservations({ targetFile }): Promise<CaptureObservationsRpcResult> {
+    async captureObservations({
+      targetFile,
+      target,
+      camera,
+      display,
+    }: Pick<
+      CaptureObservationsRpcInput,
+      'targetFile' | 'target' | 'camera' | 'display'
+    >): Promise<CaptureObservationsRpcResult> {
       const graphicsRef = resolveGraphicsForFile(targetFile);
       if (!graphicsRef) {
         return {
@@ -483,6 +587,7 @@ function createBrowserGraphicsClient(
       }
 
       try {
+        const screenshotTarget = normalizeScreenshotTargetRequest(target);
         const viewAngles = orthographicViews.slice(0, 6);
 
         const compositeDataUrl = await new Promise<string>((resolve, reject) => {
@@ -499,6 +604,9 @@ function createBrowserGraphicsClient(
                 isPreview: true,
               },
               cameraAngles: viewAngles,
+              target: screenshotTarget,
+              camera,
+              display,
               overlay: buildScreenshotOverlayForPath(targetFile),
               aspectRatio: 1,
               maxResolution: 800,
@@ -548,11 +656,23 @@ function createBrowserGraphicsClient(
  * to createRpcDispatcher from @taucad/chat/rpc.
  */
 export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
-  const { chatId, fileManager, resolveGraphicsForFile, projectRef, screenshotQuality } = deps;
+  const { chatId, fileManager, resolveGraphicsForFile, projectRef, screenshotQuality, createGeoSpecClient } = deps;
+  const fileSystem = createBrowserRpcFileSystem(fileManager);
+  const skillResolver = createSkillResolver({
+    async readFile(path) {
+      return fileManager.readFile(path);
+    },
+    async listDirectory(path) {
+      const { treeService } = await fileManager.whenServicesReady();
+      return treeService.listDirectory(path);
+    },
+  });
 
   const rpcDeps: RpcDependencies = {
-    fileSystem: createBrowserRpcFileSystem(fileManager),
+    fileSystem,
     kernelClient: createBrowserRuntimeClient(projectRef),
+    geospec: createBrowserGeoSpecClient(createGeoSpecClient),
+    skillResolver,
     graphics: resolveGraphicsForFile
       ? createBrowserGraphicsClient(resolveGraphicsForFile, projectRef, screenshotQuality)
       : undefined,

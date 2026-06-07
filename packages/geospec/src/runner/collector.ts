@@ -1,6 +1,8 @@
 import type { GeometryDiagnostic, GeometrySubject, Vec3 } from '#mesh/types.js';
 import { analyzeChamferDistance } from '#mesh/distance.js';
 import { analyzeMeshOverlap } from '#mesh/overlap.js';
+import { matchesGeoSpecTestName } from '#runner/filter.js';
+import type { GeoSpecTestNamePattern } from '#runner/filter.js';
 import type {
   GeoSpecAssertion,
   GeoSpecAxisExpectation,
@@ -44,7 +46,7 @@ export type GeoSpecCollector = {
   it(name: string, function_: GeoSpecTestFunction): void;
   itSkip(name: string, _function?: GeoSpecTestFunction): void;
   expectGeo(subject: unknown): GeoSpecMatcher;
-  waitForCompletion(testTimeout: number, testNamePattern?: string): Promise<void>;
+  waitForCompletion(testTimeout: number, testNamePattern?: GeoSpecTestNamePattern): Promise<void>;
 };
 
 export const collectorGlobalKey = '__GEOSPEC_COLLECTOR__';
@@ -1617,8 +1619,6 @@ const isGeoSpecCollector = (value: unknown): value is GeoSpecCollector =>
 const isGeoSpecTestCase = (value: unknown): value is GeoSpecTestCase =>
   typeof value === 'object' && value !== null && 'suite' in value && 'name' in value && 'assertions' in value;
 
-const fullTestName = (test: Pick<GeoSpecTestCase, 'suite' | 'name'>): string => [...test.suite, test.name].join(' > ');
-
 /**
  * Create a collector used by the embedded GeoSpec runner.
  *
@@ -2413,9 +2413,8 @@ export const createCollector = (): GeoSpecCollector => {
       }
       executed = true;
       await withTimeout(Promise.allSettled(definitionPending), testTimeout);
-      const normalizedPattern = testNamePattern?.toLowerCase();
       for (const scheduledTest of scheduled) {
-        if (normalizedPattern && !fullTestName(scheduledTest.test).toLowerCase().includes(normalizedPattern)) {
+        if (!matchesGeoSpecTestName(scheduledTest.test, testNamePattern)) {
           continue;
         }
 

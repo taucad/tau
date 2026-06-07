@@ -40,19 +40,30 @@ export type Observation = z.infer<typeof observationSchema>;
  */
 export const geoSpecRunFilterInputSchema = z
   .object({
-    pattern: z.string().min(1).max(200).optional().describe('GeoSpec file glob. Defaults to **/*.geospec.{ts,js}.'),
     files: z
       .array(z.string().min(1).max(512))
       .max(50)
       .optional()
-      .describe('JSON array of GeoSpec file paths, e.g. ["main.geospec.ts"]. Equivalent to repeated CLI --file flags.'),
+      .describe(
+        'JSON array of GeoSpec files or directory roots, e.g. ["main.geospec.ts"] or ["lib"]. Do not use bracket-key syntax.',
+      ),
+    include: z
+      .array(z.string().min(1).max(512))
+      .max(50)
+      .optional()
+      .describe('JSON array of GeoSpec file include globs, e.g. ["parts/**/*.geospec.ts"].'),
+    exclude: z
+      .array(z.string().min(1).max(512))
+      .max(50)
+      .optional()
+      .describe('JSON array of GeoSpec file exclude globs, e.g. ["**/*.slow.geospec.ts"].'),
     testNamePattern: z
       .string()
       .min(1)
-      .max(200)
+      .max(512)
       .optional()
       .describe(
-        'Substring matched against suite > test names, e.g. "watertight". Equivalent to CLI --test-name-pattern.',
+        'JavaScript RegExp source matched against full suite > test names, e.g. "watertight" or "^(?!.*known failing check).*". Equivalent to CLI --testNamePattern.',
       ),
     testTimeout: z
       .number()
@@ -67,8 +78,8 @@ export const geoSpecRunFilterInputSchema = z
 /**
  * Input schema for test_model tool.
  *
- * No input is required: by default the tool discovers and runs all GeoSpec
- * test files. Filters match the standalone GeoSpec CLI.
+ * No input is required: by default the tool recursively discovers and runs all
+ * GeoSpec test files. Filters match the standalone GeoSpec CLI.
  *
  * @public
  */

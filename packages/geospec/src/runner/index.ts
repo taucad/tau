@@ -6,8 +6,14 @@
 
 export { GeoSpecAssertionError } from '#runner/collector.js';
 export {
+  compileGeoSpecTestNamePattern,
+  filterGeoSpecTests,
+  matchesGeoSpecTestName,
+  type GeoSpecTestNamePattern,
+} from '#runner/filter.js';
+export {
   defaultGeoSpecIgnoredDirectories,
-  defaultGeoSpecPattern,
+  defaultGeoSpecInclude,
   discoverGeoSpecFiles,
   isGeoSpecTestFile,
 } from '#runner/discovery.js';

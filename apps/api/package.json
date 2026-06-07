@@ -23,7 +23,8 @@
     "resend": "catalog:"
   },
   "devDependencies": {
-    "@taucad/vite": "workspace:*"
+    "@taucad/vite": "workspace:*",
+    "geospec": "workspace:*"
   },
   "imports": {
     "#*": "./app/*"

@@ -4,14 +4,16 @@ import { z } from 'zod';
  * Input schema for screenshot tool.
  * @public
  */
-export const screenshotInputSchema = z.object({
-  mode: z
-    .enum(['single', 'multi_angle'])
-    .describe('single: current camera perspective. multi_angle: all 6 orthographic views'),
-  targetFile: z
-    .string()
-    .describe('Source file path of the geometry unit to screenshot (e.g. "main.ts", "lib/bracket.scad").'),
-});
+export const screenshotInputSchema = z
+  .object({
+    mode: z
+      .enum(['single', 'multi_angle'])
+      .describe('single: current camera perspective. multi_angle: all 6 orthographic views'),
+    targetFile: z
+      .string()
+      .describe('Source file path of the geometry unit to screenshot (e.g. "main.ts", "lib/bracket.scad").'),
+  })
+  .strict();
 /** @public */
 export type ScreenshotInput = z.infer<typeof screenshotInputSchema>;
 

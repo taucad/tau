@@ -7,17 +7,19 @@ import type { RpcGeoSpecClient } from '#rpc/rpc-dependencies.js';
 const runGeoSpecTestsInputSchema = rpcSchemasRegistry[rpcName.runGeoSpecTests].inputSchema;
 
 describe('handleRunGeoSpecTests', () => {
-  it('accepts the default GeoSpec glob pattern input', () => {
-    const parsed = runGeoSpecTestsInputSchema.safeParse({ pattern: '**/*.geospec.{ts,js}' });
+  it('should accept Vitest-aligned include and exclude filter input', () => {
+    const parsed = runGeoSpecTestsInputSchema.safeParse({
+      include: ['parts/**/*.geospec.ts'],
+      exclude: ['**/*.slow.geospec.ts'],
+    });
 
     expect(parsed.success).toBe(true);
   });
 
-  it('should accept GeoSpec CLI-compatible filter input', () => {
+  it('should accept GeoSpec CLI-compatible file and test-name filter input', () => {
     const parsed = runGeoSpecTestsInputSchema.safeParse({
-      pattern: 'parts/**/*.geospec.ts',
       files: ['main.geospec.ts', 'parts/bracket.geospec.ts'],
-      testNamePattern: 'volume',
+      testNamePattern: '^(?!.*known failing check).*',
       testTimeout: 15_000,
     });
 
@@ -42,9 +44,10 @@ describe('handleRunGeoSpecTests', () => {
     };
 
     const input = {
-      pattern: '**/*.geospec.{ts,js}',
       files: ['main.geospec.ts'],
-      testNamePattern: 'width',
+      include: ['**/*.geospec.ts'],
+      exclude: ['**/*.slow.geospec.ts'],
+      testNamePattern: 'width|height',
       testTimeout: 15_000,
     };
 

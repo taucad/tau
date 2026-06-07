@@ -204,9 +204,11 @@ const getKernelResultRpc = defineRpc({
 });
 
 const captureObservationsRpc = defineRpc({
-  input: zod.object({
-    targetFile: zod.string(),
-  }),
+  input: zod
+    .object({
+      targetFile: zod.string(),
+    })
+    .strict(),
   success: zod.object({
     observations: zod.array(observationSchema),
   }),
@@ -244,9 +246,11 @@ const fetchGeometryRpc = defineRpc({
 });
 
 const captureScreenshotRpc = defineRpc({
-  input: zod.object({
-    targetFile: zod.string(),
-  }),
+  input: zod
+    .object({
+      targetFile: zod.string(),
+    })
+    .strict(),
   success: zod.object({
     images: zod.array(
       zod.object({

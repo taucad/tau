@@ -67,8 +67,11 @@ describe('createTestModelToolDefinition', () => {
 
     it('should document the canonical GeoSpec filter input shape without bracket-key syntax', () => {
       expect(description).toContain("{ files: ['main.geospec.ts'] }");
-      expect(description).toContain("{ files: ['main.geospec.ts'], testNamePattern: 'watertight' }");
+      expect(description).toContain("{ files: ['lib'] }");
+      expect(description).toContain("{ testNamePattern: '^(?!.*no meshing interference).*' }");
+      expect(description).toContain("{ exclude: ['**/*.slow.geospec.ts'] }");
       expect(description).not.toContain('files[0]');
+      expect(description).not.toContain('excludeTestNamePattern');
     });
 
     it('should stay within the context-engineering word budget', () => {
@@ -134,7 +137,7 @@ describe('createTestModelTool', () => {
       chatId: 'chat-1',
       toolCallId: 'tc-1',
       rpcName: rpcName.runGeoSpecTests,
-      args: { pattern: '**/*.geospec.{ts,js}' },
+      args: {},
     });
   });
 
@@ -154,7 +157,9 @@ describe('createTestModelTool', () => {
       configurable: cfg,
       input: {
         files: ['main.geospec.ts'],
-        testNamePattern: 'volume',
+        include: ['**/*.geospec.ts'],
+        exclude: ['**/*.slow.geospec.ts'],
+        testNamePattern: 'volume|surface',
         testTimeout: 15_000,
       },
     });
@@ -164,10 +169,40 @@ describe('createTestModelTool', () => {
       toolCallId: 'tc-1',
       rpcName: rpcName.runGeoSpecTests,
       args: {
-        pattern: '**/*.geospec.{ts,js}',
         files: ['main.geospec.ts'],
-        testNamePattern: 'volume',
+        include: ['**/*.geospec.ts'],
+        exclude: ['**/*.slow.geospec.ts'],
+        testNamePattern: 'volume|surface',
         testTimeout: 15_000,
+      },
+    });
+  });
+
+  it('should pass directory-root GeoSpec filters through to the browser-connected Tau runner', async () => {
+    const cfg = buildConfigurable();
+
+    vi.mocked(cfg.chatRpcService.sendRpcRequest).mockResolvedValue({
+      success: true,
+      failures: [],
+      passes: [],
+      passed: 0,
+      total: 0,
+    } as unknown as RpcResult);
+
+    await callTool({
+      kernel: 'openscad',
+      configurable: cfg,
+      input: {
+        files: ['lib'],
+      },
+    });
+
+    expect(cfg.chatRpcService.sendRpcRequest).toHaveBeenCalledWith({
+      chatId: 'chat-1',
+      toolCallId: 'tc-1',
+      rpcName: rpcName.runGeoSpecTests,
+      args: {
+        files: ['lib'],
       },
     });
   });

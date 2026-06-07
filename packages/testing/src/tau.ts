@@ -108,7 +108,7 @@ export type RunTauGeoSpecTestsOptions = {
   projectPath: string;
   entryPaths: readonly string[];
   renderer: TauModelRenderer;
-  testNamePattern?: string;
+  testNamePattern?: string | RegExp;
   testTimeout?: number;
 };
 
@@ -617,7 +617,7 @@ export async function runTauGeoSpecTests(options: RunTauGeoSpecTestsOptions): Pr
           id: 'no_matching_geospec_tests',
           requirement: 'At least one selected GeoSpec test must run',
           reason: 'GeoSpec files were found, but the supplied filters did not select any tests.',
-          suggestion: 'Run without filters or use { files: ["main.geospec.ts"] } and a matching testNamePattern.',
+          suggestion: 'Run without filters or use a matching Vitest-style testNamePattern.',
           targetFile: options.entryPaths.join(', '),
         },
       ],

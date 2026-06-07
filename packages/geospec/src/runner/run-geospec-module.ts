@@ -1,6 +1,6 @@
 import { createEsbuildModuleVm } from '@taucad/vm';
 import { createCollector } from '#runner/collector.js';
-import { filterGeoSpecTests } from '#runner/filter.js';
+import { compileGeoSpecTestNamePattern, filterGeoSpecTests } from '#runner/filter.js';
 import type { GeoSpecRunResult, RunGeoSpecModuleOptions } from '#runner/types.js';
 
 const defaultTestTimeout = 30_000;
@@ -213,6 +213,11 @@ export const analyzeBrep = ({ subject }) => {
  * @public
  */
 export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promise<GeoSpecRunResult> {
+  const compiledTestNamePattern = compileGeoSpecTestNamePattern(options.testNamePattern);
+  if (!compiledTestNamePattern.success) {
+    return { success: false, issues: [compiledTestNamePattern.issue] };
+  }
+
   const vm = await createEsbuildModuleVm({
     filesystem: options.filesystem,
     projectPath: options.projectPath,
@@ -256,8 +261,8 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     if (!executed.success) {
       return { success: false, issues: executed.issues, bundle };
     }
-    await collector.waitForCompletion(options.testTimeout ?? defaultTestTimeout, options.testNamePattern);
-    const tests = filterGeoSpecTests(collector.tests, options.testNamePattern);
+    await collector.waitForCompletion(options.testTimeout ?? defaultTestTimeout, compiledTestNamePattern.pattern);
+    const tests = filterGeoSpecTests(collector.tests, compiledTestNamePattern.pattern);
 
     return {
       success: true,

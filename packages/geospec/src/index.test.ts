@@ -256,7 +256,7 @@ describe('runGeoSpecModule', () => {
     }
   });
 
-  it('should filter collected tests by case-insensitive test name pattern', async () => {
+  it('should filter collected tests by Vitest-style testNamePattern regex', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText(
       '/project/model.geospec.ts',
@@ -279,13 +279,85 @@ describe('runGeoSpecModule', () => {
       filesystem,
       projectPath: '/project',
       entryPath: '/project/model.geospec.ts',
-      testNamePattern: 'WIDTH',
+      testNamePattern: 'width$',
     });
 
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.tests.map((test) => test.name)).toEqual(['should check width']);
       expect(result.passed).toBe(true);
+    }
+  });
+
+  it('should not execute tests excluded by a negative-lookahead testNamePattern', async () => {
+    const filesystem = new MemoryFileSystem();
+    filesystem.setText(
+      '/project/model.geospec.ts',
+      [
+        "import { describe, expectGeo, it } from 'geospec';",
+        "import { loadModel } from 'geospec/model';",
+        "describe('planetary gearbox assembly', () => {",
+        "  it('should check carrier spacing', async () => {",
+        "    const model = await loadModel({ file: 'main.ts', parameters: { size: 10 } });",
+        '    expectGeo(model).toHaveBoundingBox({ size: { x: 10 } });',
+        '  });',
+        "  it('has correctly phased gear teeth (no meshing interference)', async () => {",
+        "    await loadModel({ file: 'main.ts', parameters: { size: 999 } });",
+        '    throw new Error("known failing check should not run");',
+        '  });',
+        '});',
+      ].join('\n'),
+    );
+    const loadCalls: unknown[] = [];
+
+    const result = await runGeoSpecModule({
+      filesystem,
+      projectPath: '/project',
+      entryPath: '/project/model.geospec.ts',
+      testNamePattern: '^(?!.*no meshing interference).*',
+      modelLoader: async (options) => {
+        loadCalls.push(options);
+        return createGeometrySubject(10);
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.tests.map((test) => test.name)).toEqual(['should check carrier spacing']);
+      expect(result.passed).toBe(true);
+    }
+    expect(loadCalls).toEqual([{ file: 'main.ts', parameters: { size: 10 } }]);
+  });
+
+  it('should fail clearly when testNamePattern is an invalid regular expression', async () => {
+    const filesystem = new MemoryFileSystem();
+    filesystem.setText(
+      '/project/model.geospec.ts',
+      [
+        "import { describe, it } from 'geospec';",
+        "describe('box', () => {",
+        "  it('should not execute', () => {});",
+        '});',
+      ].join('\n'),
+    );
+
+    const result = await runGeoSpecModule({
+      filesystem,
+      projectPath: '/project',
+      entryPath: '/project/model.geospec.ts',
+      testNamePattern: '[',
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.issues).toEqual([
+        expect.objectContaining({
+          code: 'INVALID_GEOSPEC_TEST_NAME_PATTERN',
+          message: 'testNamePattern is not a valid JavaScript regular expression.',
+          severity: 'error',
+          type: 'runtime',
+        }),
+      ]);
     }
   });
 

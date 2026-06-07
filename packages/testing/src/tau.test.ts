@@ -318,7 +318,7 @@ describe('runTauGeoSpecTests', () => {
     ]);
   });
 
-  it('should filter Tau GeoSpec results by test name pattern', async () => {
+  it('should filter Tau GeoSpec results by Vitest-style testNamePattern regex', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText(
       '/project/main.geospec.ts',
@@ -358,13 +358,57 @@ describe('runTauGeoSpecTests', () => {
       filesystem,
       projectPath: '/project',
       entryPaths: ['main.geospec.ts'],
-      testNamePattern: 'width',
+      testNamePattern: 'width$',
       renderer: async () => subject,
     });
 
     expect(result.failures).toEqual([]);
     expect(result.passes.map((pass) => pass.requirement)).toEqual(['filtered table geometry > should check width']);
     expect(result.total).toBe(1);
+  });
+
+  it('should not execute Tau GeoSpec tests excluded by negative-lookahead testNamePattern', async () => {
+    const filesystem = new MemoryFileSystem();
+    filesystem.setText(
+      '/project/main.geospec.ts',
+      [
+        "import { describe, expectGeo, it } from 'geospec';",
+        "import { loadModel } from 'geospec/model';",
+        "describe('planetary gearbox assembly', () => {",
+        "  it('should check carrier spacing', async () => {",
+        "    const model = await loadModel({ file: 'main.scad', parameters: { size: 10 } });",
+        '    expectGeo(model).toHaveBoundingBox({ size: { x: 10 }, tolerance: 0.001 });',
+        '  });',
+        "  it('has correctly phased gear teeth (no meshing interference)', async () => {",
+        "    await loadModel({ file: 'main.scad', parameters: { size: 999 } });",
+        "    throw new Error('known failing check should not run');",
+        '  });',
+        '});',
+      ].join('\n'),
+    );
+    const calls: unknown[] = [];
+
+    const result = await runTauGeoSpecTests({
+      filesystem,
+      projectPath: '/project',
+      entryPaths: ['main.geospec.ts'],
+      testNamePattern: '^(?!.*no meshing interference).*',
+      renderer: async (input) => {
+        calls.push(input);
+        return createGeometrySubject(10);
+      },
+    });
+
+    expect(result.failures).toEqual([]);
+    expect(result.passes.map((pass) => pass.requirement)).toEqual([
+      'planetary gearbox assembly > should check carrier spacing',
+    ]);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        file: 'main.scad',
+        parameters: { size: 10 },
+      }),
+    ]);
   });
 
   it('should fail when filters select no GeoSpec tests', async () => {

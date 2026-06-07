@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { RpcDependencies, RpcFileSystem } from '@taucad/chat/rpc';
 import { rpcClientErrorCodeSchema } from '@taucad/chat';
@@ -96,6 +97,7 @@ function createMockProjectRef(options?: { geometryUnits?: Map<string, unknown>; 
   return {
     getSnapshot: vi.fn().mockReturnValue({
       context: {
+        projectId: 'proj-test',
         geometryUnits: options?.geometryUnits ?? new Map<string, unknown>(),
         mainEntryFile: options?.mainEntryFile ?? 'main.scad',
       },
@@ -130,6 +132,7 @@ function createMockCadUnit(options?: {
         ...(options?.kernelClient === undefined ? {} : { kernelClient: options.kernelClient }),
       },
     }),
+    send: vi.fn(),
     on: vi.fn().mockReturnValue({ unsubscribe: vi.fn() }),
     subscribe: vi.fn().mockReturnValue({ unsubscribe: vi.fn() }),
     id: 'mock-cad',
@@ -150,6 +153,7 @@ function buildDeps(overrides?: {
   resolveGraphicsForFile?: ResolveGraphicsForFile;
   screenshotQuality?: number;
   treeService?: MockTreeService;
+  createGeoSpecClient?: RpcHandlerDependencies['createGeoSpecClient'];
 }): RpcDependencies {
   capturedDeps = undefined;
 
@@ -165,6 +169,7 @@ function buildDeps(overrides?: {
     projectRef: (overrides?.projectRef ?? createMockProjectRef()) as unknown as RpcHandlerDependencies['projectRef'],
     resolveGraphicsForFile: overrides?.resolveGraphicsForFile,
     screenshotQuality: overrides?.screenshotQuality ?? 0.8,
+    createGeoSpecClient: overrides?.createGeoSpecClient,
   });
 
   return capturedDeps!;
@@ -417,6 +422,123 @@ describe('rpc-handlers', () => {
   });
 
   // ===============================================================
+  // createBrowserGeoSpecClient
+  // ===============================================================
+
+  describe('createBrowserGeoSpecClient', () => {
+    it('should delegate GeoSpec execution to the configured worker client without preview actor renders', async () => {
+      const runTests = vi.fn().mockResolvedValue({
+        success: true,
+        failures: [],
+        passes: [
+          {
+            id: 'main.geospec.ts:main parameter tests > should render the explicit width',
+            requirement: 'main parameter tests > should render the explicit width',
+            targetFile: 'main.geospec.ts',
+          },
+        ],
+        passed: 1,
+        total: 1,
+      });
+      const createGeoSpecClient = vi.fn(() => ({ runTests }));
+      const projectRef = createMockProjectRef();
+
+      const deps = buildDeps({
+        projectRef,
+        createGeoSpecClient,
+      });
+
+      const args = {};
+      const result = await deps.geospec!.runTests(args);
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: true,
+          failures: [],
+          passed: 1,
+          total: 1,
+        }),
+      );
+      if (result.success) {
+        expect(result.passes[0]).toEqual(
+          expect.objectContaining({
+            requirement: 'main parameter tests > should render the explicit width',
+            targetFile: 'main.geospec.ts',
+          }),
+        );
+      }
+      expect(mockWaitFor).not.toHaveBeenCalled();
+      expect(createGeoSpecClient).toHaveBeenCalledTimes(1);
+      expect(runTests).toHaveBeenCalledWith(args);
+    });
+
+    it('should forward GeoSpec file and test-name filters to the worker client', async () => {
+      const runTests = vi.fn().mockResolvedValue({
+        success: true,
+        failures: [],
+        passes: [
+          {
+            id: 'main.geospec.ts:filtered geometry > should measure width',
+            requirement: 'filtered geometry > should measure width',
+            targetFile: 'main.geospec.ts',
+          },
+        ],
+        passed: 1,
+        total: 1,
+      });
+      const createGeoSpecClient = vi.fn(() => ({ runTests }));
+      const projectRef = createMockProjectRef();
+
+      const deps = buildDeps({
+        projectRef,
+        createGeoSpecClient,
+      });
+
+      const args = {
+        files: ['main.geospec.ts'],
+        include: ['**/*.geospec.ts'],
+        exclude: ['**/*.slow.geospec.ts'],
+        testNamePattern: 'width$',
+        testTimeout: 5000,
+      };
+      const result = await deps.geospec!.runTests(args);
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: true,
+          failures: [],
+          passed: 1,
+          total: 1,
+        }),
+      );
+      if (result.success) {
+        expect(result.passes).toEqual([
+          expect.objectContaining({
+            requirement: 'filtered geometry > should measure width',
+            targetFile: 'main.geospec.ts',
+          }),
+        ]);
+      }
+      expect(mockWaitFor).not.toHaveBeenCalled();
+      expect(createGeoSpecClient).toHaveBeenCalledTimes(1);
+      expect(runTests).toHaveBeenCalledWith(args);
+    });
+
+    it('should return a structured failure when the worker client is not configured', async () => {
+      const deps = buildDeps();
+
+      const result = await deps.geospec!.runTests({});
+
+      expect(result).toEqual({
+        success: false,
+        errorCode: 'UNKNOWN',
+        message: 'GeoSpec browser worker runner is not configured.',
+      });
+      expect(mockWaitFor).not.toHaveBeenCalled();
+    });
+  });
+
+  // ===============================================================
   // createBrowserGraphicsClient
   // ===============================================================
 
@@ -458,6 +580,30 @@ describe('rpc-handlers', () => {
             glb: glbContent,
           }),
         );
+      });
+
+      it('should render exactly supplied GeoSpec parameters when provided', async () => {
+        const glbContent = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
+        const cadUnit = createMockCadUnit({
+          geometries: [{ format: 'gltf', content: glbContent, hash: 'explicit' }],
+        });
+        const geometryUnits = new Map<string, unknown>([['main.ts', cadUnit]]);
+        const projectRef = createMockProjectRef({ geometryUnits, mainEntryFile: 'main.ts' });
+        mockWaitFor.mockResolvedValue(cadSnapshotWith([{ format: 'gltf', content: glbContent, hash: 'explicit' }]));
+        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const graphics = deps.graphics!;
+
+        const result = await graphics.fetchGeometry({ targetFile: 'main.ts', parameters: { width: 42 } });
+
+        expect(result.success).toBe(true);
+        expect(cadUnit.send).toHaveBeenCalledWith({
+          type: 'initializeModel',
+          file: {
+            path: '/projects/proj-test',
+            filename: 'main.ts',
+          },
+          parameters: { width: 42 },
+        });
       });
 
       it('should send createGeometryUnit and resolve through bootstrap when targetFile points at a missing geometry unit', async () => {
@@ -700,6 +846,10 @@ describe('rpc-handlers', () => {
         if (!result.success) {
           expect(result.errorCode).toBe('RENDER_TIMEOUT');
           expect(result.message).toContain('main.scad');
+          expect(result.message).not.toMatch(/simpler|simplify|wait and retry/i);
+          expect(result.message).toMatch(/inspect recent model changes/i);
+          expect(result.message).toMatch(/fix the render blocker/i);
+          expect(result.message).toMatch(/increase render timeout/i);
           expect(rpcClientErrorCodeSchema.safeParse(result.errorCode).success).toBe(true);
         }
       });

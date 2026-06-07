@@ -18,6 +18,15 @@ describe('handleCaptureObservations', () => {
     expect(result.success).toBe(true);
   });
 
+  it('should reject stale screenshot override fields', () => {
+    const staleFields = ['target', 'camera', 'display'] as const;
+
+    for (const field of staleFields) {
+      const result = captureObservationsInputSchema.safeParse({ targetFile: 'main.ts', [field]: {} });
+      expect(result.success, `${field} should not parse`).toBe(false);
+    }
+  });
+
   it('should call graphics.captureObservations with the supplied targetFile', async () => {
     const graphics = mock<RpcGraphicsClient>();
     graphics.captureObservations.mockResolvedValue({

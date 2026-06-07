@@ -31,6 +31,7 @@ export type CameraAngle = {
 
 /**
  * Options for configuring screenshot capture
+ * @public
  */
 export type ScreenshotOptions = {
   /**

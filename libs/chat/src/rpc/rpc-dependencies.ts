@@ -10,6 +10,8 @@
 import type {
   CaptureObservationsRpcResult,
   CaptureScreenshotRpcResult,
+  CaptureScreenshotRpcInput,
+  CaptureObservationsRpcInput,
   ExportGeometryRpcInput,
   FetchGeometryRpcInput,
   FetchGeometryRpcResult,
@@ -97,10 +99,10 @@ export type RpcGraphicsExportGeometryResult =
  * @public
  */
 export type RpcGraphicsClient = {
-  captureObservations(args: { targetFile: string }): Promise<CaptureObservationsRpcResult>;
+  captureObservations(args: Pick<CaptureObservationsRpcInput, 'targetFile'>): Promise<CaptureObservationsRpcResult>;
   fetchGeometry(args: Pick<FetchGeometryRpcInput, 'targetFile' | 'parameters'>): Promise<FetchGeometryRpcResult>;
   exportGeometry(args: Pick<ExportGeometryRpcInput, 'targetFile' | 'format'>): Promise<RpcGraphicsExportGeometryResult>;
-  captureScreenshot(args: { targetFile: string }): Promise<CaptureScreenshotRpcResult>;
+  captureScreenshot(args: Pick<CaptureScreenshotRpcInput, 'targetFile'>): Promise<CaptureScreenshotRpcResult>;
 };
 
 /**

@@ -55,7 +55,7 @@ catalog:
   '@nx/js': 22.7.1
   '@nx/nest': 22.7.1
   '@nx/node': 22.7.1
-  '@nx/playwright': 22.7.1
+  '@nx/playwright': 22.7.5
   '@nx/react': 22.7.1
   '@nx/vite': 22.7.1
   '@nx/web': 22.7.1
@@ -111,8 +111,8 @@ catalog:
   '@types/turndown': ^5.0.6
   '@typescript/native-preview': 7.0.0-dev.20260223.1
   '@typescript/vfs': ^1.6.4
-  '@vitest/coverage-v8': 4.1.5
-  '@vitest/ui': 4.1.5
+  '@vitest/coverage-v8': 4.1.8
+  '@vitest/ui': 4.1.8
   '@xyflow/react': ^12.10.2
   better-auth: ^1.6.12
   bowser: ^2.14.1
@@ -205,7 +205,7 @@ catalog:
   vite: 8.0.10
   vite-plugin-mkcert: ^2.0.0
   vite-plugin-static-copy: ^4.1.0
-  vitest: 4.1.5
+  vitest: 4.1.8
   vitest-mock-extended: ^3.1.1
   vscode-uri: 3.1.0
   web-vitals: ^5.3.0

@@ -568,8 +568,8 @@ catalogs:
       specifier: ^4.1.0
       version: 4.1.0
     vitest-mock-extended:
-      specifier: ^3.1.1
-      version: 3.1.1
+      specifier: ^4.0.0
+      version: 4.0.0
     vscode-uri:
       specifier: 3.1.0
       version: 3.1.0
@@ -2302,7 +2302,7 @@ importers:
         version: 0.20201231.0
       vitest-mock-extended:
         specifier: 'catalog:'
-        version: 3.1.1(typescript@5.9.3)(vitest@4.1.5)
+        version: 4.0.0(typescript@5.9.3)(vitest@4.1.5)
       ws:
         specifier: 'catalog:'
         version: 8.21.0
@@ -22374,6 +22374,12 @@ packages:
 
   vitest-mock-extended@3.1.1:
     resolution: {integrity: sha512-IQBKkEYB5BW4eJ+8JHZRzrLkKIJu5zkLJsU6u8vB+skSXbES+Di86nrUIbXwEQivDXcR4APMZFSvt398+iqKYA==}
+    peerDependencies:
+      typescript: 3.x || 4.x || 5.x || 6.x
+      vitest: 4.1.5
+
+  vitest-mock-extended@4.0.0:
+    resolution: {integrity: sha512-m2FmH8JYfxzZoLsHuhXRY+Pv++a3zd91HYpSz81tpRLEHbtFkEL2QcWvJowucWuNTirzQURKfWbJJSXbYqkTsA==}
     peerDependencies:
       typescript: 3.x || 4.x || 5.x || 6.x
       vitest: 4.1.5
@@ -46347,6 +46353,12 @@ snapshots:
       yaml: 2.9.0
 
   vitest-mock-extended@3.1.1(typescript@5.9.3)(vitest@4.1.5):
+    dependencies:
+      ts-essentials: 10.1.1(typescript@5.9.3)
+      typescript: 5.9.3
+      vitest: 4.1.5(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(@vitest/coverage-v8@4.1.5)(@vitest/ui@4.1.5)(happy-dom@16.8.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.10(@types/node@24.0.15)(esbuild@0.27.7)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.97.3)(sass@1.97.3)(stylus@0.64.0)(terser@5.46.0)(tsx@4.22.3)(yaml@2.9.0))
+
+  vitest-mock-extended@4.0.0(typescript@5.9.3)(vitest@4.1.5):
     dependencies:
       ts-essentials: 10.1.1(typescript@5.9.3)
       typescript: 5.9.3

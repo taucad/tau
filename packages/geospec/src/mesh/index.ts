@@ -7,10 +7,10 @@
 export { analyzeGlb, analyzeGltfDocument } from '#mesh/analyze-glb.js';
 export {
   analyseConnectedComponents,
-  buildMeshNodeNameMap,
   collectPrimitiveRecords,
   countConnectedComponents,
 } from '#mesh/connected-components.js';
+export { buildMeshNodeNameMap } from '#mesh/analysis-record.js';
 export { analyzeMeshQuality } from '#mesh/mesh-quality.js';
 export { analyzeChamferDistance } from '#mesh/distance.js';
 export type { AnalyzeChamferDistanceOptions, AnalyzeChamferDistanceResult, MeshDistanceStats } from '#mesh/distance.js';
@@ -22,14 +22,10 @@ export type {
   MeshOverlapEvidence,
 } from '#mesh/overlap.js';
 export { analyzeMesh, loadMesh } from '#mesh/load-mesh.js';
-export { createOpenCascadeMeshAnalyzer } from '#mesh/native.js';
+export { createOpenCascadeMeshBackend, resolveDefaultGeoSpecMeshBackend } from '#mesh/native.js';
 export type {
+  GeoSpecMeshBackend,
   GeoSpecNativeChamferDistanceOptions,
-  GeoSpecNativeMeshComponent,
-  GeoSpecNativeMeshAnalyzer,
-  GeoSpecNativeMeshOverlap,
-  GeoSpecNativeMeshOverlapOptions,
-  GeoSpecNativeMeshOverlapResult,
   GeoSpecNativeTriangleSoup,
   GeoSpecOpenCascadeMeshModule,
 } from '#mesh/native.js';

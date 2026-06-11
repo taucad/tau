@@ -71,7 +71,6 @@ const loadCubeCutoutStep = async (): Promise<GeometrySubject> => {
   stepSubjectPromise ??= loadModel({
     code: { [mainFile]: cubeCutoutCode },
     file: mainFile,
-    kernel: 'replicad',
     format: 'step',
   });
   return stepSubjectPromise;
@@ -81,7 +80,6 @@ const loadCubeCutoutGlb = async (): Promise<GeometrySubject> => {
   glbSubjectPromise ??= loadModel({
     code: { [mainFile]: cubeCutoutCode },
     file: mainFile,
-    kernel: 'replicad',
     format: 'glb',
   });
   return glbSubjectPromise;
@@ -91,7 +89,6 @@ const loadTranscriptBlindStep = async (): Promise<GeometrySubject> => {
   transcriptBlindSubjectPromise ??= loadModel({
     code: { [mainFile]: transcriptBlindCutoutCode },
     file: mainFile,
-    kernel: 'replicad',
     format: 'step',
   });
   return transcriptBlindSubjectPromise;
@@ -101,7 +98,6 @@ const loadTranscriptThroughStep = async (): Promise<GeometrySubject> => {
   transcriptThroughSubjectPromise ??= loadModel({
     code: { [mainFile]: transcriptThroughCutoutCode },
     file: mainFile,
-    kernel: 'replicad',
     format: 'step',
   });
   return transcriptThroughSubjectPromise;
@@ -334,14 +330,12 @@ describe('Replicad cube cutout BRep evidence', () => {
     const largerCube = await loadModel({
       code: { [mainFile]: transcriptThroughCutoutCode },
       file: mainFile,
-      kernel: 'replicad',
       format: 'step',
       parameters: { cubeSize: 100, cylinderRadius: 8, cylinderHeight: 120 },
     });
     const widerHole = await loadModel({
       code: { [mainFile]: transcriptThroughCutoutCode },
       file: mainFile,
-      kernel: 'replicad',
       format: 'step',
       parameters: { cubeSize: 50, cylinderRadius: 12, cylinderHeight: 60 },
     });

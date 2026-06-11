@@ -1,22 +1,18 @@
 import { Accessor, Document } from '@gltf-transform/core';
+import {
+  createGeometryStatsFromRecord,
+  getMeshAnalysisRecord,
+  scaleMeshAnalysisRecord,
+} from '#mesh/analysis-record.js';
 import { analyzeGlb, analyzeGltfDocument } from '#mesh/analyze-glb.js';
 import type {
-  AabbMeters,
-  BoundingBoxStats,
-  ClusterReport,
-  ConnectedComponentsResult,
   GeometryCapability,
   GeometryDiagnostic,
   GeometryProvenance,
   GeometryStats,
   GeometrySubject,
   GeoSpecUnit,
-  MeshQualityStats,
   MeshFileFormat,
-  MeshTriangle,
-  PrimitiveRecord,
-  WatertightPrimitiveBreakdown,
-  WatertightResult,
 } from '#mesh/types.js';
 
 /**
@@ -256,89 +252,6 @@ const resolveCoordinateScale = (sourceUnit: GeoSpecUnit, targetUnit: GeoSpecUnit
   return sourceToMeters / targetToMeters;
 };
 
-const scaleNumber = (value: number, factor: number): number => value * factor;
-
-const scaleVector = (value: readonly [number, number, number], factor: number): [number, number, number] => [
-  scaleNumber(value[0], factor),
-  scaleNumber(value[1], factor),
-  scaleNumber(value[2], factor),
-];
-
-const scaleAabb = (aabb: AabbMeters, factor: number): AabbMeters => ({
-  min: scaleVector(aabb.min, factor),
-  max: scaleVector(aabb.max, factor),
-});
-
-const scalePrimitive = (primitive: PrimitiveRecord, factor: number): PrimitiveRecord => ({
-  ...primitive,
-  aabb: scaleAabb(primitive.aabb, factor),
-});
-
-const scaleCluster = (cluster: ClusterReport, factor: number): ClusterReport => ({
-  ...cluster,
-  primitives: cluster.primitives.map((primitive) => scalePrimitive(primitive, factor)),
-  aabb: scaleAabb(cluster.aabb, factor),
-  centroid: scaleVector(cluster.centroid, factor),
-});
-
-const scaleConnectedComponentsResult = (
-  result: ConnectedComponentsResult,
-  factor: number,
-): ConnectedComponentsResult => ({
-  ...result,
-  clusters: result.clusters.map((cluster) => scaleCluster(cluster, factor)),
-});
-
-const scaleWatertightPrimitive = (
-  primitive: WatertightPrimitiveBreakdown,
-  factor: number,
-): WatertightPrimitiveBreakdown => ({
-  ...primitive,
-  loopCentroid: scaleVector(primitive.loopCentroid, factor),
-});
-
-const scaleWatertightResult = (result: WatertightResult, factor: number): WatertightResult => ({
-  ...result,
-  perPrimitive: result.perPrimitive.map((primitive) => scaleWatertightPrimitive(primitive, factor)),
-});
-
-const scaleTriangle = (triangle: MeshTriangle, factor: number): MeshTriangle => ({
-  ...triangle,
-  a: scaleVector(triangle.a, factor),
-  b: scaleVector(triangle.b, factor),
-  c: scaleVector(triangle.c, factor),
-  center: scaleVector(triangle.center, factor),
-  area: scaleNumber(triangle.area, factor ** 2),
-});
-
-const scaleMeshQuality = (quality: MeshQualityStats, factor: number): MeshQualityStats => {
-  const scaled: MeshQualityStats = {
-    ...quality,
-    nonFiniteVertices: quality.nonFiniteVertices.map((vertex) => ({
-      ...vertex,
-      position: scaleVector(vertex.position, factor),
-    })),
-    degenerateTriangles: quality.degenerateTriangles.map((triangle) => ({
-      ...triangle,
-      area: scaleNumber(triangle.area, factor ** 2),
-      center: scaleVector(triangle.center, factor),
-    })),
-    triangles: quality.triangles.map((triangle) => scaleTriangle(triangle, factor)),
-    surfaceArea: scaleNumber(quality.surfaceArea, factor ** 2),
-    signedVolume: scaleNumber(quality.signedVolume, factor ** 3),
-  };
-  if (quality.centerOfMass) {
-    scaled.centerOfMass = scaleVector(quality.centerOfMass, factor);
-  }
-  return scaled;
-};
-
-const scaleBoundingBoxStats = (boundingBox: BoundingBoxStats, factor: number): BoundingBoxStats => ({
-  size: scaleVector(boundingBox.size, factor),
-  center: scaleVector(boundingBox.center, factor),
-  primitives: boundingBox.primitives.map((primitive) => scalePrimitive(primitive, factor)),
-});
-
 const normalizeStatsUnit = (options: {
   stats: GeometryStats;
   sourceUnit: GeoSpecUnit;
@@ -349,31 +262,7 @@ const normalizeStatsUnit = (options: {
     return options.stats;
   }
 
-  const connectedComponentsCache = new Map<number, ConnectedComponentsResult>();
-  const watertightCache: { value?: WatertightResult } = {};
-
-  const normalized: GeometryStats = {
-    ...options.stats,
-    meshQuality: scaleMeshQuality(options.stats.meshQuality, factor),
-    analyseConnectedComponents: (toleranceMm) => {
-      const cached = connectedComponentsCache.get(toleranceMm);
-      if (cached) {
-        return cached;
-      }
-      const scaled = scaleConnectedComponentsResult(options.stats.analyseConnectedComponents(toleranceMm), factor);
-      connectedComponentsCache.set(toleranceMm, scaled);
-      return scaled;
-    },
-    connectedComponents: (toleranceMm) => options.stats.connectedComponents(toleranceMm),
-    analyseWatertight: () => {
-      watertightCache.value ??= scaleWatertightResult(options.stats.analyseWatertight(), factor);
-      return watertightCache.value;
-    },
-  };
-  if (options.stats.boundingBox) {
-    normalized.boundingBox = scaleBoundingBoxStats(options.stats.boundingBox, factor);
-  }
-  return normalized;
+  return createGeometryStatsFromRecord(scaleMeshAnalysisRecord(getMeshAnalysisRecord(options.stats), factor));
 };
 
 const buildSubject = (options: {

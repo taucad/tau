@@ -1,6 +1,6 @@
 # geospec
 
-GeoSpec is a standalone CAD geometry testing library with Vitest-style authoring APIs.
+GeoSpec is a CAD geometry testing library with Vitest-style authoring APIs.
 
 ```ts
 import { describe, expectGeo, it } from 'geospec';
@@ -18,7 +18,6 @@ describe('bracket', () => {
     const model = await loadModel({
       code: { 'main.ts': code },
       file: 'main.ts',
-      kernel: 'replicad',
       format: 'glb',
     });
 
@@ -49,7 +48,31 @@ The CLI and Tau `test_model` tool share the same execution filters:
 - `testNamePattern`: JavaScript regular expression matched against full `suite > test` names
 - `testTimeout`: async test timeout in milliseconds (`--test-timeout` in the CLI)
 
-The Tau runtime contract remains file/bytes based: render or export geometry, then pass GLB/glTF or STEP bytes into GeoSpec loaders. `geospec/model` can call `@taucad/runtime` when it is installed, but the root `geospec` import stays lazy and standalone. Tau project tests should use `loadModel` and parameter helpers from `geospec/model`; `@taucad/testing/tau` remains an internal compatibility adapter for Tau runners.
+The Tau runtime contract remains file/bytes based: render or export geometry, then pass GLB/glTF or STEP bytes into GeoSpec loaders. `geospec/model` is built on `@taucad/runtime` as a package dependency for CAD-source loading, while direct GLB/glTF and STEP loaders remain usable for already-exported evidence. Tau project tests should use `loadModel` and parameter helpers from `geospec/model`; `@taucad/testing/tau` remains an internal compatibility adapter for Tau runners.
+
+Runtime-originated diagnostics keep their runtime issue codes, such as `GEOMETRY_INVALID`, inside `GeometrySubject.diagnostics`. GeoSpec adds matcher-facing facets and spatial evidence around those diagnostics instead of remapping them into kernel-specific or GeoSpec-only aliases.
+
+When several tests inspect the same file and parameter set, keep each test readable with its own `loadModel()` call. The GeoSpec runner deduplicates identical runtime-backed `loadModel()` calls within one run, including across selected files in one Node CLI invocation, so this style keeps the same warm-path performance without module-level promise plumbing:
+
+```ts
+import { describe, expectGeo, it } from 'geospec';
+import { loadModel } from 'geospec/model';
+
+describe('assembly', () => {
+  it('has no global part overlap', async () => {
+    const model = await loadModel({ file: 'main.ts' });
+    expectGeo(model).toHaveNoComponentOverlap({ tolerance: 0.1 });
+  });
+
+  it('keeps the ring and planet clearance pair clean', async () => {
+    const model = await loadModel({ file: 'main.ts' });
+    expectGeo(model).toHaveNoComponentOverlap({
+      tolerance: 0.05,
+      pairs: [{ left: /ring/i, right: /planet gear/i }],
+    });
+  });
+});
+```
 
 STEP/BRep evidence is imported by GeoSpec's own OpenCascade.js build:
 
@@ -59,7 +82,7 @@ import { loadStep } from 'geospec/step';
 const subject = await loadStep({ source: stepBytes });
 ```
 
-Replicad can author and export deterministic fixtures through `loadModel({ kernel: 'replicad', format: 'step' })`, but GeoSpec does not use Replicad's STEP importer. STEP bytes are read by `GeoSpecStepStreamReader`, which records native-stream or filesystem-fallback provenance and produces GeoSpec-owned BRep and mesh evidence.
+Replicad can author and export deterministic fixtures through `loadModel({ file: 'main.ts', format: 'step' })` or inline `loadModel({ code, file: 'main.ts', format: 'step' })`. Tau runtime infers the kernel from the source file and imports; GeoSpec does not use Replicad's STEP importer. STEP bytes are read by `GeoSpecStepStreamReader`, which records native-stream or filesystem-fallback provenance and produces GeoSpec-owned BRep and mesh evidence.
 
 Measurement matchers currently support mesh evidence and prefer exact BRep evidence when it is present:
 
@@ -90,21 +113,23 @@ expectGeo(subject).toHaveChamferFeature({ distance: 2, selection: 'outer top per
 expectGeo(subject).toHaveMinimumWallThickness({ value: { greaterThanOrEqual: 2 }, tolerance: 0.05 });
 ```
 
-Large sampled mesh-distance checks can use GeoSpec's optional OpenCascade.js
-native analyzer. The root import remains lazy; native code is mounted through
-`geospec/mesh` only when the caller provides an initialized WASM module.
+Large sampled mesh-distance checks use GeoSpec's canonical native/WASM mesh
+backend. The root import remains lazy; callers that need explicit lifecycle
+control can mount the backend through `geospec/mesh` with an initialized WASM
+module.
 
 ```ts
-import { createOpenCascadeMeshAnalyzer } from 'geospec/mesh';
+import { createOpenCascadeMeshBackend } from 'geospec/mesh';
 import initOpenCascade from 'geospec/native/opencascade/single';
 
 const oc = await initOpenCascade();
-const nativeAnalyzer = createOpenCascadeMeshAnalyzer(oc);
+const backend = createOpenCascadeMeshBackend(oc);
 ```
 
 The custom C++ wrapper and Docker build config live in
-`native/opencascade/`. JavaScript fallback distance analysis is bounded and
-returns diagnostics when a comparison needs the native path.
+`native/opencascade/`. GeoSpec does not run a production JavaScript
+triangle-distance fallback; native backend failures are returned as structured
+diagnostics.
 
 Tau projects import existing parameter files as real JSON modules through project `package.json#imports`:
 

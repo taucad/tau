@@ -8,6 +8,7 @@
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
     "target": "ESNext",
     "paths": {
+      "#experiments/*": ["./experiments/*"],
       "#*": ["./src/*"]
     }
   },
@@ -21,6 +22,7 @@
     "src/**/*.d.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
+    "experiments/**/*.ts",
     "src/**/*.js",
     "src/**/*.jsx"
   ]

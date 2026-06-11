@@ -1,11 +1,17 @@
 #!/usr/bin/env node
 import { readFile, mkdir, stat, writeFile, readdir } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadModel } from '#model/index.js';
+import type { GeometryDiagnostic } from '#mesh/types.js';
 import { defaultGeoSpecInclude, discoverGeoSpecFiles } from '#runner/discovery.js';
 import type { GeoSpecDiscoveryFileSystem } from '#runner/discovery.js';
+import {
+  createGeoSpecNodeInvocationContext,
+  createGeoSpecNodeInvocationContextStats,
+} from '#runner/node/invocation-context.js';
 import { createGeoSpecNodeRunner } from '#runner/node/index.js';
+import { createGeoSpecRunProfile } from '#runner/profile.js';
+import type { GeoSpecTestCase } from '#runner/types.js';
 import { loadStep } from '#step/index.js';
 import type { VmFileSystem } from '@taucad/vm';
 
@@ -222,12 +228,19 @@ const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
 };
 
 type GeoSpecCliIssue = { code: string; message: string; severity: string; type: string };
+type GeoSpecCliDiagnostic = {
+  code: string;
+  message: string;
+  severity: string;
+  suggestion?: string;
+  details?: unknown;
+};
 
 type GeoSpecCliFileResult = {
   file: string;
   success: boolean;
   issues?: GeoSpecCliIssue[];
-  tests?: Array<{ name: string; suite: string[]; status: string }>;
+  tests?: Array<{ name: string; suite: string[]; status: string; diagnostics?: GeoSpecCliDiagnostic[] }>;
 };
 
 type GeoSpecCliJsonResult = {
@@ -237,6 +250,22 @@ type GeoSpecCliJsonResult = {
   issues?: GeoSpecCliIssue[];
   files: GeoSpecCliFileResult[];
 };
+
+const cliDiagnostics = (diagnostics: readonly GeometryDiagnostic[]): GeoSpecCliDiagnostic[] =>
+  diagnostics.map((diagnostic) => ({
+    code: diagnostic.code,
+    message: diagnostic.message,
+    severity: diagnostic.severity,
+    ...(diagnostic.suggestion === undefined ? {} : { suggestion: diagnostic.suggestion }),
+    ...(diagnostic.details === undefined ? {} : { details: diagnostic.details }),
+  }));
+
+const diagnosticsForTest = (test: GeoSpecTestCase): readonly GeometryDiagnostic[] => {
+  const assertionDiagnostics = test.assertions.flatMap((assertion) => assertion.diagnostics ?? []);
+  return assertionDiagnostics.length > 0 ? assertionDiagnostics : test.diagnostics;
+};
+
+const profilePathEnvironmentKey = 'GEOSPEC_PROFILE_JSON_PATH';
 
 /**
  * Run the GeoSpec command-line interface.
@@ -276,18 +305,49 @@ export const runGeoSpecCli = async (options: GeoSpecCliOptions = {}): Promise<nu
     return 1;
   }
 
+  const profilePath = process.env[profilePathEnvironmentKey];
+  const invocationStats = profilePath ? createGeoSpecNodeInvocationContextStats() : undefined;
+  const runProfile = profilePath ? createGeoSpecRunProfile() : undefined;
+  const invocationContext = createGeoSpecNodeInvocationContext({
+    projectPath,
+    ...(invocationStats ? { stats: invocationStats } : {}),
+  });
   const runner = createGeoSpecNodeRunner({
     filesystem,
     projectPath,
-    modelLoader: async (input) => ('source' in input ? loadModel(input) : loadModel({ projectPath, ...input })),
+    modelLoader: invocationContext.modelLoader,
     stepLoader: async (input) => loadStep(input),
+    ...(runProfile ? { internalProfile: runProfile } : {}),
   });
-  const aggregate = await runner.run({
-    files: files.sort(),
-    testNamePattern: parsed.run.testNamePattern,
-    testTimeout: parsed.run.testTimeout,
-  });
-  await runner.close();
+  const aggregate = await runner
+    .run({
+      files: files.sort(),
+      testNamePattern: parsed.run.testNamePattern,
+      testTimeout: parsed.run.testTimeout,
+    })
+    .finally(async () => {
+      try {
+        await runner.close();
+      } finally {
+        await invocationContext.dispose();
+        if (profilePath && invocationStats && runProfile) {
+          await mkdir(dirname(profilePath), { recursive: true });
+          await writeFile(
+            profilePath,
+            JSON.stringify(
+              {
+                version: 1,
+                runtime: invocationStats,
+                runner: runProfile,
+              },
+              null,
+              2,
+            ),
+            'utf8',
+          );
+        }
+      }
+    });
 
   const fileResults: GeoSpecCliFileResult[] = [];
 
@@ -317,7 +377,7 @@ export const runGeoSpecCli = async (options: GeoSpecCliOptions = {}): Promise<nu
       }
       if (test.status === 'failed') {
         stderr(`FAIL ${label} ${[...test.suite, test.name].join(' > ')}`);
-        for (const diagnostic of test.diagnostics) {
+        for (const diagnostic of diagnosticsForTest(test)) {
           stderr(`  ${diagnostic.message}`);
         }
       }
@@ -325,11 +385,15 @@ export const runGeoSpecCli = async (options: GeoSpecCliOptions = {}): Promise<nu
     fileResults.push({
       file: label,
       success: result.tests.every((test) => test.status !== 'failed'),
-      tests: result.tests.map((test) => ({
-        name: test.name,
-        suite: test.suite,
-        status: test.status,
-      })),
+      tests: result.tests.map((test) => {
+        const diagnostics = diagnosticsForTest(test);
+        return {
+          name: test.name,
+          suite: test.suite,
+          status: test.status,
+          ...(diagnostics.length === 0 ? {} : { diagnostics: cliDiagnostics(diagnostics) }),
+        };
+      }),
     });
   }
 

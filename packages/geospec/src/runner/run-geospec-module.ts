@@ -1,6 +1,8 @@
 import { createEsbuildModuleVm } from '@taucad/vm';
 import { createCollector } from '#runner/collector.js';
 import { compileGeoSpecTestNamePattern, filterGeoSpecTests } from '#runner/filter.js';
+import { createCachedModelLoader } from '#runner/model-load-cache.js';
+import { createGeoSpecResourceScope } from '#runner/resource-scope.js';
 import type { GeoSpecRunResult, RunGeoSpecModuleOptions } from '#runner/types.js';
 
 const defaultTestTimeout = 30_000;
@@ -225,9 +227,18 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
   const collector = createCollector();
   const runToken = createRunToken();
   const bindings = ensureRunBindings();
+  const ownsResourceScope = !options.resourceScope;
+  const resourceScope =
+    options.resourceScope ?? createGeoSpecResourceScope({ profile: options.internalProfile?.resourceScope });
+  const modelLoader = createCachedModelLoader(options.modelLoader, {
+    stats: options.internalProfile?.moduleModelLoadCache,
+    onLoadResolved: (subject) => {
+      resourceScope.trackSubject(subject);
+    },
+  });
   bindings.set(runToken, {
     collector,
-    ...(options.modelLoader ? { modelLoader: options.modelLoader } : {}),
+    ...(modelLoader ? { modelLoader } : {}),
     ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
   });
 
@@ -274,6 +285,9 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     bindings.delete(runToken);
     if (bindings.size === 0) {
       Reflect.deleteProperty(runBindingsGlobal, geospecRunBindingsGlobalKey);
+    }
+    if (ownsResourceScope) {
+      await resourceScope.dispose();
     }
     vm.dispose();
   }

@@ -1,7 +1,7 @@
 {
   "schema": "wasm-build-provenance-v1.1",
-  "buildId": "20260603T231324-O3-noLTO-single",
-  "timestamp": "2026-06-03T23:13:24.794777+00:00",
+  "buildId": "20260608T201553-O3-noLTO-single",
+  "timestamp": "2026-06-08T20:15:53.876151+00:00",
   "toolchain": {
     "emscripten": "5.0.1",
     "llvm": "unknown",
@@ -113,7 +113,7 @@
       "-sERROR_ON_UNDEFINED_SYMBOLS=0",
       "--no-entry"
     ],
-    "linkDuration_s": 64.2
+    "linkDuration_s": 76.6
   },
   "postProcessing": {
     "wasmOptFlags": [
@@ -132,12 +132,12 @@
     "preOptSize": 12996813,
     "postOptSize": 12988785,
     "optReduction": "0.1%",
-    "wasmOptDuration_s": 81.8
+    "wasmOptDuration_s": 93.9
   },
   "output": {
     "geospec_opencascade_single.wasm": {
       "size": 12988785,
-      "sha256": "942599f738f0fb99"
+      "sha256": "f4ac40705e1f42fc"
     },
     "geospec_opencascade_single.js": {
       "size": 60586
@@ -156,5 +156,5 @@
     "total": 878,
     "dropped": 859
   },
-  "totalDuration_s": 184
+  "totalDuration_s": 209
 }

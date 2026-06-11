@@ -1,22 +1,37 @@
-import { weldPositions } from '#mesh/_internal/spatial-welding.js';
-import { createOpenCascadeMeshAnalyzer } from '#mesh/native.js';
-import type {
-  GeoSpecNativeMeshAnalyzer,
-  GeoSpecNativeMeshComponent,
-  GeoSpecNativeMeshOverlap,
-  GeoSpecNativeTriangleSoup,
-} from '#mesh/native.js';
-import type { GeometryDiagnostic, GeometrySubject, MeshTriangle, Vec3 } from '#mesh/types.js';
+import initManifold from 'manifold-3d';
+import type { Manifold as ManifoldSolid, ManifoldToplevel } from 'manifold-3d';
+import { getMeshAnalysisRecord } from '#mesh/analysis-record.js';
+import type { MeshAnalysisRecord, MeshComponentRecord } from '#mesh/analysis-record.js';
+import type { GeometryDiagnostic, GeometrySubject, Vec3, WatertightPrimitiveBreakdown } from '#mesh/types.js';
+import { getGeoSpecResourceScope } from '#runner/resource-scope.js';
+import type { GeoSpecOverlapCacheProfile } from '#runner/profile.js';
 
 /**
- * Options for native component-overlap analysis.
+ * Options for component-overlap analysis.
  *
  * @public
  */
 export type AnalyzeMeshOverlapOptions = {
   subject: GeometrySubject;
   tolerance?: number;
-  nativeAnalyzer?: GeoSpecNativeMeshAnalyzer;
+  pairs?: MeshOverlapPairSelector[];
+};
+
+/**
+ * Component selector used to narrow overlap analysis to named component pairs.
+ *
+ * @public
+ */
+export type MeshOverlapComponentSelector = string | RegExp;
+
+/**
+ * Pair selector used to narrow overlap analysis to named component pairs.
+ *
+ * @public
+ */
+export type MeshOverlapPairSelector = {
+  left: MeshOverlapComponentSelector;
+  right: MeshOverlapComponentSelector;
 };
 
 /**
@@ -37,16 +52,28 @@ export type MeshComponentOverlap = {
 };
 
 /**
- * Successful native overlap analysis.
+ * Successful overlap analysis.
  *
  * @public
  */
 export type MeshOverlapEvidence = {
   componentSource: 'named' | 'connected';
   componentCount: number;
+  selectedPairs?: MeshOverlapSelectedPair[];
   checkedPairs: number;
   tolerance: number;
   overlaps: MeshComponentOverlap[];
+};
+
+/**
+ * One selector-expanded component pair considered by overlap analysis before
+ * AABB pruning.
+ *
+ * @public
+ */
+export type MeshOverlapSelectedPair = {
+  leftLabel: string;
+  rightLabel: string;
 };
 
 /**
@@ -58,165 +85,278 @@ export type AnalyzeMeshOverlapResult =
   | { success: true; evidence: MeshOverlapEvidence; diagnostics: GeometryDiagnostic[] }
   | { success: false; diagnostics: GeometryDiagnostic[] };
 
-type ComponentPartition = {
-  source: 'named' | 'connected';
-  componentIds: Int32Array<ArrayBuffer>;
-  components: GeoSpecNativeMeshComponent[];
+type AabbPair = {
+  left: MeshComponentRecord;
+  right: MeshComponentRecord;
+};
+
+type PairSelectionResult =
+  | { success: true; pairs: AabbPair[]; selectedPairs?: MeshOverlapSelectedPair[] }
+  | { success: false; diagnostics: GeometryDiagnostic[] };
+
+type PreparedManifoldComponent = {
+  component: MeshComponentRecord;
+  merged: boolean;
+  manifold?: ManifoldSolid;
+  status?: unknown;
+  error?: {
+    message: string;
+    code?: string;
+  };
+};
+
+type CachedPairVolume = {
+  volume: number;
+  witnessPoint?: Vec3;
+};
+
+type MeshOverlapCache = {
+  wasm: ManifoldToplevel;
+  preparedComponents: Map<number, PreparedManifoldComponent>;
+  pairVolumes: Map<string, CachedPairVolume>;
+  invalidDiagnosticsByComponentSet: Map<string, GeometryDiagnostic[]>;
+  profile?: GeoSpecOverlapCacheProfile;
+  disposed: boolean;
+  dispose(): void;
+};
+
+type MeshOverlapCacheStats = {
+  preparedComponents: number;
+  pairVolumes: number;
+  invalidDiagnosticSets: number;
+  disposed: boolean;
 };
 
 const defaultOverlapTolerance = 0.1;
+let manifoldModulePromise: Promise<ManifoldToplevel> | undefined;
+const meshOverlapCacheSymbol = Symbol.for('tau.geospec.meshOverlapCache');
 
-const toNativeTriangleSoup = (triangles: readonly MeshTriangle[]): GeoSpecNativeTriangleSoup => {
-  const buffer = new Float64Array(triangles.length * 9);
-  let offset = 0;
-  for (const triangle of triangles) {
-    buffer[offset++] = triangle.a[0];
-    buffer[offset++] = triangle.a[1];
-    buffer[offset++] = triangle.a[2];
-    buffer[offset++] = triangle.b[0];
-    buffer[offset++] = triangle.b[1];
-    buffer[offset++] = triangle.b[2];
-    buffer[offset++] = triangle.c[0];
-    buffer[offset++] = triangle.c[1];
-    buffer[offset++] = triangle.c[2];
-  }
-  return { triangles: buffer, triangleCount: triangles.length };
+type MeshOverlapCachedSubject = GeometrySubject & {
+  [meshOverlapCacheSymbol]?: MeshOverlapCache;
 };
 
-const primitiveColorMap = (subject: GeometrySubject): Map<string, string> => {
-  const colors = new Map<string, string>();
-  const primitives = subject.mesh.stats.boundingBox?.primitives ?? [];
-  for (const primitive of primitives) {
-    if (primitive.color) {
-      colors.set(primitive.name, primitive.color);
-    }
-  }
-  return colors;
+const loadManifold = async (): Promise<ManifoldToplevel> => {
+  manifoldModulePromise ??= (async () => {
+    const wasm = await initManifold();
+    wasm.setup();
+    return wasm;
+  })();
+  return manifoldModulePromise;
 };
 
-const namedPartition = (
-  triangles: readonly MeshTriangle[],
-  colors: ReadonlyMap<string, string>,
-): ComponentPartition | undefined => {
-  const labelToId = new Map<string, number>();
-  const componentIds = new Int32Array(triangles.length);
-  const triangleCounts: number[] = [];
+const disposeMeshOverlapCache = (cache: MeshOverlapCache): void => {
+  if (cache.disposed) {
+    return;
+  }
+  cache.disposed = true;
+  if (cache.profile) {
+    cache.profile.cacheDisposals += 1;
+  }
+  disposePrepared([...cache.preparedComponents.values()]);
+  cache.preparedComponents.clear();
+  cache.pairVolumes.clear();
+  cache.invalidDiagnosticsByComponentSet.clear();
+};
 
-  for (const [index, triangle] of triangles.entries()) {
-    const label = triangle.primitive.trim();
-    if (!label) {
-      return undefined;
-    }
-    let id = labelToId.get(label);
-    if (id === undefined) {
-      id = labelToId.size;
-      labelToId.set(label, id);
-      triangleCounts[id] = 0;
-    }
-    componentIds[index] = id;
-    triangleCounts[id] = (triangleCounts[id] ?? 0) + 1;
+const getOrCreateMeshOverlapCache = (options: {
+  subject: GeometrySubject;
+  wasm: ManifoldToplevel;
+  profile?: GeoSpecOverlapCacheProfile;
+}): { cache: MeshOverlapCache; created: boolean } => {
+  const cachedSubject = options.subject as MeshOverlapCachedSubject;
+  const existing = cachedSubject[meshOverlapCacheSymbol];
+  if (existing && !existing.disposed) {
+    return { cache: existing, created: false };
   }
 
-  if (labelToId.size < 2) {
+  const cache: MeshOverlapCache = {
+    wasm: options.wasm,
+    preparedComponents: new Map(),
+    pairVolumes: new Map(),
+    invalidDiagnosticsByComponentSet: new Map(),
+    ...(options.profile ? { profile: options.profile } : {}),
+    disposed: false,
+    dispose(): void {
+      disposeMeshOverlapCache(cache);
+      if ((options.subject as MeshOverlapCachedSubject)[meshOverlapCacheSymbol] === cache) {
+        (options.subject as MeshOverlapCachedSubject)[meshOverlapCacheSymbol] = undefined;
+      }
+    },
+  };
+  if (options.profile) {
+    options.profile.cacheCreations += 1;
+  }
+  cachedSubject[meshOverlapCacheSymbol] = cache;
+  return { cache, created: true };
+};
+
+/**
+ * Inspect internal mesh-overlap cache state for tests and opt-in benchmarks.
+ *
+ * @internal
+ */
+export const getMeshOverlapCacheStats = (subject: GeometrySubject): MeshOverlapCacheStats | undefined => {
+  const cache = (subject as MeshOverlapCachedSubject)[meshOverlapCacheSymbol];
+  if (!cache) {
     return undefined;
   }
-
-  const components: GeoSpecNativeMeshComponent[] = [...labelToId.entries()].map(([label, id]) => ({
-    id,
-    label,
-    color: colors.get(label),
-    triangleCount: triangleCounts[id] ?? 0,
-  }));
-  return { source: 'named', componentIds, components };
-};
-
-const connectedPartition = (
-  triangles: readonly MeshTriangle[],
-  colors: ReadonlyMap<string, string>,
-): ComponentPartition | undefined => {
-  const positions: Array<[number, number, number]> = [];
-  for (const triangle of triangles) {
-    positions.push([...triangle.a], [...triangle.b], [...triangle.c]);
-  }
-  const welded = weldPositions(positions);
-  const parent = new Int32Array(triangles.length);
-  for (let index = 0; index < triangles.length; index++) {
-    parent[index] = index;
-  }
-  const find = (value: number): number => {
-    let current = value;
-    while (parent[current] !== current) {
-      parent[current] = parent[parent[current]!]!;
-      current = parent[current]!;
-    }
-    return current;
+  return {
+    preparedComponents: cache.preparedComponents.size,
+    pairVolumes: cache.pairVolumes.size,
+    invalidDiagnosticSets: cache.invalidDiagnosticsByComponentSet.size,
+    disposed: cache.disposed,
   };
-  const union = (left: number, right: number): void => {
-    const leftRoot = find(left);
-    const rightRoot = find(right);
-    if (leftRoot !== rightRoot) {
-      parent[leftRoot] = rightRoot;
-    }
-  };
-
-  const canonicalToTriangles = new Map<number, number[]>();
-  for (let triangleIndex = 0; triangleIndex < triangles.length; triangleIndex++) {
-    for (let corner = 0; corner < 3; corner++) {
-      const canonical = welded[triangleIndex * 3 + corner]!;
-      const list = canonicalToTriangles.get(canonical) ?? [];
-      list.push(triangleIndex);
-      canonicalToTriangles.set(canonical, list);
-    }
-  }
-  for (const list of canonicalToTriangles.values()) {
-    for (let index = 1; index < list.length; index++) {
-      union(list[0]!, list[index]!);
-    }
-  }
-
-  const rootToId = new Map<number, number>();
-  const componentIds = new Int32Array(triangles.length);
-  const triangleCounts: number[] = [];
-  const labels: string[] = [];
-  for (let triangleIndex = 0; triangleIndex < triangles.length; triangleIndex++) {
-    const root = find(triangleIndex);
-    let id = rootToId.get(root);
-    if (id === undefined) {
-      id = rootToId.size;
-      rootToId.set(root, id);
-      triangleCounts[id] = 0;
-      labels[id] = `connected-component-${id}`;
-    }
-    componentIds[triangleIndex] = id;
-    triangleCounts[id] = (triangleCounts[id] ?? 0) + 1;
-  }
-
-  if (rootToId.size < 2) {
-    return undefined;
-  }
-
-  const components: GeoSpecNativeMeshComponent[] = labels.map((label, id) => ({
-    id,
-    label,
-    color: colors.get(label),
-    triangleCount: triangleCounts[id] ?? 0,
-  }));
-  return { source: 'connected', componentIds, components };
 };
 
-const partitionComponents = (subject: GeometrySubject): ComponentPartition | undefined => {
-  const { triangles } = subject.mesh.stats.meshQuality;
-  const colors = primitiveColorMap(subject);
-  return namedPartition(triangles, colors) ?? connectedPartition(triangles, colors);
+const aabbCenter = (component: MeshComponentRecord): Vec3 => [
+  (component.aabb.min[0] + component.aabb.max[0]) / 2,
+  (component.aabb.min[1] + component.aabb.max[1]) / 2,
+  (component.aabb.min[2] + component.aabb.max[2]) / 2,
+];
+
+const intersectionAabbCenter = (left: MeshComponentRecord, right: MeshComponentRecord): Vec3 => [
+  (Math.max(left.aabb.min[0], right.aabb.min[0]) + Math.min(left.aabb.max[0], right.aabb.max[0])) / 2,
+  (Math.max(left.aabb.min[1], right.aabb.min[1]) + Math.min(left.aabb.max[1], right.aabb.max[1])) / 2,
+  (Math.max(left.aabb.min[2], right.aabb.min[2]) + Math.min(left.aabb.max[2], right.aabb.max[2])) / 2,
+];
+
+const aabbsOverlap = (left: MeshComponentRecord, right: MeshComponentRecord, tolerance: number): boolean =>
+  left.aabb.min[0] <= right.aabb.max[0] + tolerance &&
+  left.aabb.max[0] + tolerance >= right.aabb.min[0] &&
+  left.aabb.min[1] <= right.aabb.max[1] + tolerance &&
+  left.aabb.max[1] + tolerance >= right.aabb.min[1] &&
+  left.aabb.min[2] <= right.aabb.max[2] + tolerance &&
+  left.aabb.max[2] + tolerance >= right.aabb.min[2];
+
+const aabbCandidatePairs = (components: readonly MeshComponentRecord[], tolerance: number): AabbPair[] => {
+  const pairs: AabbPair[] = [];
+  const sorted = [...components].sort((left, right) => left.aabb.min[0] - right.aabb.min[0]);
+  for (let leftIndex = 0; leftIndex < sorted.length; leftIndex++) {
+    const left = sorted[leftIndex]!;
+    for (let rightIndex = leftIndex + 1; rightIndex < sorted.length; rightIndex++) {
+      const right = sorted[rightIndex]!;
+      if (right.aabb.min[0] > left.aabb.max[0] + tolerance) {
+        break;
+      }
+      if (aabbsOverlap(left, right, tolerance)) {
+        pairs.push({ left, right });
+      }
+    }
+  }
+  return pairs;
 };
 
-const nativeUnavailableDiagnostic = (): GeometryDiagnostic => ({
-  code: 'GEOSPEC_NATIVE_OVERLAP_UNAVAILABLE',
+const aabbFilteredPairs = (pairs: readonly AabbPair[], tolerance: number): AabbPair[] =>
+  pairs.filter((pair) => aabbsOverlap(pair.left, pair.right, tolerance));
+
+const invalidToleranceDiagnostic = (tolerance: unknown): GeometryDiagnostic => ({
+  code: 'GEOSPEC_INVALID_EXPECTATION',
   severity: 'error',
-  message: 'Component-overlap analysis requires the native GeoSpec OpenCascade mesh analyzer.',
-  suggestion:
-    'Use the bundled geospec/native/opencascade/single build or pass a GeoSpec native analyzer that implements analyzeMeshOverlap.',
+  message: 'analyzeMeshOverlap received an invalid tolerance: expected a non-negative finite number.',
+  suggestion: 'Use analyzeMeshOverlap({ subject, tolerance: 0.1 }).',
+  details: { tolerance },
 });
+
+const selectorLabel = (selector: MeshOverlapComponentSelector): string =>
+  typeof selector === 'string' ? selector : selector.toString();
+
+const selectorMatches = (selector: MeshOverlapComponentSelector, label: string): boolean =>
+  typeof selector === 'string'
+    ? label === selector
+    : (() => {
+        selector.lastIndex = 0;
+        const matched = selector.test(label);
+        selector.lastIndex = 0;
+        return matched;
+      })();
+
+const selectorUnmatchedDiagnostic = (options: {
+  selector: MeshOverlapComponentSelector;
+  side: 'left' | 'right';
+  pairIndex: number;
+  availableLabels: readonly string[];
+}): GeometryDiagnostic => ({
+  code: 'GEOSPEC_COMPONENT_PAIR_SELECTOR_UNMATCHED',
+  severity: 'error',
+  message: `Component overlap pair selector ${options.pairIndex} matched no ${options.side} component labels.`,
+  suggestion:
+    'Use exact component names from the exported assembly, or a RegExp that matches the intended component labels.',
+  details: {
+    pairIndex: options.pairIndex,
+    side: options.side,
+    selector: selectorLabel(options.selector),
+    availableLabels: options.availableLabels,
+  },
+});
+
+const pairKey = (left: MeshComponentRecord, right: MeshComponentRecord): string => {
+  const low = Math.min(left.id, right.id);
+  const high = Math.max(left.id, right.id);
+  return `${low}:${high}`;
+};
+
+const selectComponentPairs = (
+  components: readonly MeshComponentRecord[],
+  selectors: readonly MeshOverlapPairSelector[] | undefined,
+): PairSelectionResult => {
+  if (!selectors || selectors.length === 0) {
+    return { success: true, pairs: [] };
+  }
+
+  const availableLabels = components.map((component) => component.label);
+  const diagnostics: GeometryDiagnostic[] = [];
+  const pairsByKey = new Map<string, AabbPair>();
+
+  for (const [pairIndex, selector] of selectors.entries()) {
+    const leftMatches = components.filter((component) => selectorMatches(selector.left, component.label));
+    const rightMatches = components.filter((component) => selectorMatches(selector.right, component.label));
+    if (leftMatches.length === 0) {
+      diagnostics.push(
+        selectorUnmatchedDiagnostic({
+          selector: selector.left,
+          side: 'left',
+          pairIndex,
+          availableLabels,
+        }),
+      );
+    }
+    if (rightMatches.length === 0) {
+      diagnostics.push(
+        selectorUnmatchedDiagnostic({
+          selector: selector.right,
+          side: 'right',
+          pairIndex,
+          availableLabels,
+        }),
+      );
+    }
+    for (const left of leftMatches) {
+      for (const right of rightMatches) {
+        if (left.id === right.id) {
+          continue;
+        }
+        const key = pairKey(left, right);
+        if (!pairsByKey.has(key)) {
+          pairsByKey.set(key, { left, right });
+        }
+      }
+    }
+  }
+
+  if (diagnostics.length > 0) {
+    return { success: false, diagnostics };
+  }
+
+  const pairs = [...pairsByKey.values()];
+  return {
+    success: true,
+    pairs,
+    selectedPairs: pairs.map((pair) => ({
+      leftLabel: pair.left.label,
+      rightLabel: pair.right.label,
+    })),
+  };
+};
 
 const partitionInconclusiveDiagnostic = (subject: GeometrySubject): GeometryDiagnostic => ({
   code: 'GEOSPEC_COMPONENT_PARTITION_INCONCLUSIVE',
@@ -233,56 +373,245 @@ const partitionInconclusiveDiagnostic = (subject: GeometrySubject): GeometryDiag
   },
 });
 
-const overlapAnalysisFailedDiagnostic = (
-  diagnostics: ReadonlyArray<{ code: string; message: string; details?: unknown }>,
-): GeometryDiagnostic => ({
-  code: 'GEOSPEC_COMPONENT_OVERLAP_ANALYSIS_FAILED',
+const manifoldUnavailableDiagnostic = (error: unknown): GeometryDiagnostic => ({
+  code: 'GEOSPEC_MANIFOLD_BACKEND_UNAVAILABLE',
   severity: 'error',
-  message: 'Native component-overlap analysis failed before producing a reliable verdict.',
-  suggestion: 'Check that every candidate component is a closed solid mesh and retry with valid geometry evidence.',
-  details: { nativeDiagnostics: diagnostics },
+  message: error instanceof Error ? error.message : String(error),
+  suggestion:
+    'Ensure the manifold-3d WASM package is available; GeoSpec does not fall back to OCCT or JavaScript triangle overlap for mesh-solid volume checks.',
+  details: error,
 });
 
-const componentById = (components: readonly GeoSpecNativeMeshComponent[]): Map<number, GeoSpecNativeMeshComponent> =>
-  new Map(components.map((component) => [component.id, component]));
-
-const toVec3 = (value: [number, number, number] | undefined): Vec3 | undefined =>
-  value === undefined ? undefined : [value[0], value[1], value[2]];
-
-const enrichOverlaps = (
-  nativeOverlaps: readonly GeoSpecNativeMeshOverlap[],
-  components: readonly GeoSpecNativeMeshComponent[],
-): MeshComponentOverlap[] => {
-  const byId = componentById(components);
-  return nativeOverlaps.map((overlap) => {
-    const left = byId.get(overlap.leftComponentId);
-    const right = byId.get(overlap.rightComponentId);
+const componentTrianglesToManifold = (options: {
+  wasm: ManifoldToplevel;
+  record: MeshAnalysisRecord;
+  component: MeshComponentRecord;
+}): PreparedManifoldComponent => {
+  const vertProperties = new Float32Array(options.component.triangleCount * 9);
+  let offset = 0;
+  for (const triangleIndex of options.component.triangleIndices) {
+    const triangleOffset = triangleIndex * 3;
+    for (let corner = 0; corner < 3; corner++) {
+      const vertexIndex = options.record.triangleIndices[triangleOffset + corner]!;
+      const positionOffset = vertexIndex * 3;
+      vertProperties[offset++] = options.record.positions[positionOffset]!;
+      vertProperties[offset++] = options.record.positions[positionOffset + 1]!;
+      vertProperties[offset++] = options.record.positions[positionOffset + 2]!;
+    }
+  }
+  const triVerts = new Uint32Array(vertProperties.length / 3);
+  for (let index = 0; index < triVerts.length; index++) {
+    triVerts[index] = index;
+  }
+  const mesh = new options.wasm.Mesh({ numProp: 3, vertProperties, triVerts });
+  const merged = mesh.merge();
+  try {
+    const manifold = new options.wasm.Manifold(mesh);
     return {
-      leftComponentId: overlap.leftComponentId,
-      rightComponentId: overlap.rightComponentId,
-      leftLabel: left?.label ?? `component-${overlap.leftComponentId}`,
-      rightLabel: right?.label ?? `component-${overlap.rightComponentId}`,
-      leftColor: left?.color,
-      rightColor: right?.color,
-      intersectionVolume: overlap.intersectionVolume,
-      witnessPoint: toVec3(overlap.witnessPoint),
-      penetration: 'positive-volume',
+      component: options.component,
+      merged,
+      manifold,
+      status: manifold.status(),
     };
-  });
+  } catch (error) {
+    return {
+      component: options.component,
+      merged,
+      error: {
+        message: error instanceof Error ? error.message : String(error),
+        code: typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : undefined,
+      },
+    };
+  }
 };
 
-const resolveNativeAnalyzer = async (
-  provided: GeoSpecNativeMeshAnalyzer | undefined,
-): Promise<GeoSpecNativeMeshAnalyzer | undefined> => {
-  if (provided) {
-    return provided;
+const baseComponentLabel = (label: string): string => label.split('#')[0] ?? label;
+
+const findWatertightBreakdown = (
+  perPrimitive: readonly WatertightPrimitiveBreakdown[],
+  label: string,
+): WatertightPrimitiveBreakdown | undefined => {
+  const exact = perPrimitive.find((primitive) => primitive.name === label);
+  if (exact) {
+    return exact;
   }
-  try {
-    const module_ = await import('geospec/native/opencascade/single');
-    const factory = module_.default as (options?: unknown) => Promise<unknown>;
-    return createOpenCascadeMeshAnalyzer((await factory()) as Parameters<typeof createOpenCascadeMeshAnalyzer>[0]);
-  } catch {
+  const baseLabel = baseComponentLabel(label);
+  return perPrimitive.find(
+    (primitive) => primitive.name === baseLabel || baseComponentLabel(primitive.name) === baseLabel,
+  );
+};
+
+const diagnosticFacetKind = (diagnostic: GeometryDiagnostic): string | undefined => {
+  const { details } = diagnostic;
+  if (typeof details !== 'object' || details === null || !('facet' in details)) {
     return undefined;
+  }
+  const { facet } = details as { facet?: unknown };
+  if (typeof facet !== 'object' || facet === null || !('kind' in facet)) {
+    return undefined;
+  }
+  const { kind } = facet as { kind?: unknown };
+  return typeof kind === 'string' ? kind : undefined;
+};
+
+const invalidComponentSuggestion = (subject: GeometrySubject): string =>
+  subject.diagnostics.some(
+    (diagnostic) => diagnostic.code === 'GEOMETRY_INVALID' || diagnosticFacetKind(diagnostic) === 'source-validity',
+  )
+    ? 'Fix the source part reported by runtime diagnostics so it exports as a closed oriented 2-manifold mesh before running positive-volume overlap checks.'
+    : 'Repair the source CAD so this part exports as a closed oriented 2-manifold mesh before running positive-volume overlap checks.';
+
+const invalidComponentDiagnostics = (options: {
+  components: readonly PreparedManifoldComponent[];
+  subject: GeometrySubject;
+}): GeometryDiagnostic[] => {
+  const watertight = options.subject.mesh.stats.analyseWatertight();
+  const sourceDiagnostics =
+    options.subject.diagnostics.length > 0
+      ? options.subject.diagnostics.map((diagnostic) => ({
+          code: diagnostic.code,
+          severity: diagnostic.severity,
+          message: diagnostic.message,
+          details: diagnostic.details,
+        }))
+      : undefined;
+
+  return options.components
+    .filter((component) => !component.manifold)
+    .map((component) => {
+      const primitiveWatertight = findWatertightBreakdown(watertight.perPrimitive, component.component.label);
+      return {
+        code: 'GEOSPEC_MANIFOLD_COMPONENT_INVALID',
+        severity: 'error',
+        message: `Manifold rejected component '${component.component.label}' as ${component.error?.code ?? 'invalid'}.`,
+        suggestion: invalidComponentSuggestion(options.subject),
+        spatial: {
+          min: component.component.aabb.min,
+          max: component.component.aabb.max,
+          center: aabbCenter(component.component),
+        },
+        details: {
+          label: component.component.label,
+          triangleCount: component.component.triangleCount,
+          merged: component.merged,
+          error: component.error,
+          watertight: {
+            global: {
+              watertight: watertight.watertight,
+              irregularEdges: watertight.irregularEdges,
+              openBoundaryEdges: watertight.openBoundaryEdges,
+              totalEdges: watertight.totalEdges,
+              irregularEdgeFraction: watertight.irregularEdgeFraction,
+            },
+            primitive: primitiveWatertight,
+          },
+          sourceDiagnostics,
+        },
+      };
+    });
+};
+
+const volumeWitness = (manifold: ManifoldSolid, fallback: Vec3): Vec3 => {
+  try {
+    const box = manifold.boundingBox();
+    return [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2];
+  } catch {
+    return fallback;
+  }
+};
+
+const disposePrepared = (components: readonly PreparedManifoldComponent[]): void => {
+  for (const component of components) {
+    component.manifold?.delete();
+  }
+};
+
+const prepareManifoldComponent = (options: {
+  cache: MeshOverlapCache;
+  record: MeshAnalysisRecord;
+  component: MeshComponentRecord;
+}): PreparedManifoldComponent => {
+  const cached = options.cache.preparedComponents.get(options.component.id);
+  if (cached) {
+    if (options.cache.profile) {
+      options.cache.profile.preparedComponentHits += 1;
+    }
+    return cached;
+  }
+  if (options.cache.profile) {
+    options.cache.profile.preparedComponentMisses += 1;
+  }
+  const prepared = componentTrianglesToManifold({
+    wasm: options.cache.wasm,
+    record: options.record,
+    component: options.component,
+  });
+  options.cache.preparedComponents.set(options.component.id, prepared);
+  return prepared;
+};
+
+const componentSetKey = (components: readonly PreparedManifoldComponent[]): string =>
+  components
+    .map((component) => component.component.id)
+    .sort((left, right) => left - right)
+    .join(':');
+
+const invalidDiagnosticsForComponents = (options: {
+  cache: MeshOverlapCache;
+  components: readonly PreparedManifoldComponent[];
+  subject: GeometrySubject;
+}): GeometryDiagnostic[] => {
+  const key = componentSetKey(options.components);
+  const cached = options.cache.invalidDiagnosticsByComponentSet.get(key);
+  if (cached) {
+    if (options.cache.profile) {
+      options.cache.profile.invalidDiagnosticHits += 1;
+    }
+    return cached;
+  }
+  if (options.cache.profile) {
+    options.cache.profile.invalidDiagnosticMisses += 1;
+  }
+  const diagnostics = invalidComponentDiagnostics({
+    components: options.components,
+    subject: options.subject,
+  });
+  options.cache.invalidDiagnosticsByComponentSet.set(key, diagnostics);
+  return diagnostics;
+};
+
+const exactPairVolume = (options: {
+  cache: MeshOverlapCache;
+  left: PreparedManifoldComponent;
+  right: PreparedManifoldComponent;
+  fallback: Vec3;
+}): CachedPairVolume | undefined => {
+  const key = pairKey(options.left.component, options.right.component);
+  const cached = options.cache.pairVolumes.get(key);
+  if (cached) {
+    if (options.cache.profile) {
+      options.cache.profile.pairVolumeHits += 1;
+    }
+    return cached;
+  }
+  if (options.cache.profile) {
+    options.cache.profile.pairVolumeMisses += 1;
+  }
+  if (!options.left.manifold || !options.right.manifold) {
+    return undefined;
+  }
+
+  const intersection = options.cache.wasm.Manifold.intersection(options.left.manifold, options.right.manifold);
+  try {
+    const volume = intersection.volume();
+    const result: CachedPairVolume = {
+      volume,
+      ...(volume > 1e-12 ? { witnessPoint: volumeWitness(intersection, options.fallback) } : {}),
+    };
+    options.cache.pairVolumes.set(key, result);
+    return result;
+  } finally {
+    intersection.delete();
   }
 };
 
@@ -290,77 +619,130 @@ const resolveNativeAnalyzer = async (
  * Analyze whether separate mesh components physically occupy the same solid
  * volume.
  *
- * The geometric verdict is native-only: GeoSpec does not fall back to coarse
- * bounding-volume checks or JavaScript triangle-pair approximation.
+ * The production path is canonical: component records, AABB candidate pruning,
+ * and Manifold WASM exact intersection volume. Invalid/non-manifold evidence
+ * is reported as diagnostics rather than routed through a fallback backend.
  *
- * @param options - Subject, optional tolerance, and optional native analyzer.
+ * @param options - Subject and optional tolerance.
  * @returns Typed overlap evidence or diagnostics.
  * @public
  */
 export const analyzeMeshOverlap = async (options: AnalyzeMeshOverlapOptions): Promise<AnalyzeMeshOverlapResult> => {
   const tolerance = options.tolerance ?? defaultOverlapTolerance;
   if (!Number.isFinite(tolerance) || tolerance < 0) {
-    return {
-      success: false,
-      diagnostics: [
-        {
-          code: 'GEOSPEC_INVALID_EXPECTATION',
-          severity: 'error',
-          message: 'analyzeMeshOverlap received an invalid tolerance: expected a non-negative finite number.',
-          suggestion: 'Use analyzeMeshOverlap({ subject, tolerance: 0.1 }).',
-          details: { tolerance },
-        },
-      ],
-    };
+    return { success: false, diagnostics: [invalidToleranceDiagnostic(tolerance)] };
   }
 
-  const partition = partitionComponents(options.subject);
+  const record = getMeshAnalysisRecord(options.subject.mesh.stats);
+  const partition = record.getComponentPartition();
   if (!partition) {
     return { success: false, diagnostics: [partitionInconclusiveDiagnostic(options.subject)] };
   }
 
-  const nativeAnalyzer = await resolveNativeAnalyzer(options.nativeAnalyzer);
-  if (!nativeAnalyzer?.analyzeMeshOverlap) {
-    return { success: false, diagnostics: [nativeUnavailableDiagnostic()] };
+  const pairSelection = selectComponentPairs(partition.components, options.pairs);
+  if (!pairSelection.success) {
+    return { success: false, diagnostics: pairSelection.diagnostics };
   }
-
-  try {
-    const native = nativeAnalyzer.analyzeMeshOverlap({
-      subject: toNativeTriangleSoup(options.subject.mesh.stats.meshQuality.triangles),
-      componentIds: partition.componentIds,
-      components: partition.components,
-      tolerance,
-    });
-    if (!native.success) {
-      return {
-        success: false,
-        diagnostics: [overlapAnalysisFailedDiagnostic(native.diagnostics ?? [])],
-      };
-    }
-    const evidence: MeshOverlapEvidence = {
-      componentSource: partition.source,
-      componentCount: native.componentCount,
-      checkedPairs: native.checkedPairs,
-      tolerance,
-      overlaps: enrichOverlaps(native.overlaps, partition.components),
-    };
+  const pairs = options.pairs
+    ? aabbFilteredPairs(pairSelection.pairs, tolerance)
+    : aabbCandidatePairs(partition.components, tolerance);
+  if (pairs.length === 0) {
     return {
       success: true,
-      evidence,
+      evidence: {
+        componentSource: partition.source,
+        componentCount: partition.components.length,
+        ...(pairSelection.selectedPairs ? { selectedPairs: pairSelection.selectedPairs } : {}),
+        checkedPairs: 0,
+        tolerance,
+        overlaps: [],
+      },
       diagnostics: [],
     };
+  }
+
+  let wasm: ManifoldToplevel;
+  try {
+    wasm = await loadManifold();
   } catch (error) {
+    return { success: false, diagnostics: [manifoldUnavailableDiagnostic(error)] };
+  }
+
+  const scope = getGeoSpecResourceScope(options.subject);
+  const { cache, created } = getOrCreateMeshOverlapCache({
+    subject: options.subject,
+    wasm,
+    profile: scope?.profile?.overlap,
+  });
+  if (created && scope) {
+    scope.register(() => {
+      cache.dispose();
+    });
+  }
+
+  const componentsById = new Map<number, MeshComponentRecord>();
+  for (const pair of pairs) {
+    componentsById.set(pair.left.id, pair.left);
+    componentsById.set(pair.right.id, pair.right);
+  }
+  const prepared = [...componentsById.values()].map((component) =>
+    prepareManifoldComponent({ cache, record, component }),
+  );
+  try {
+    const invalidDiagnostics = invalidDiagnosticsForComponents({
+      cache,
+      components: prepared,
+      subject: options.subject,
+    });
+    if (invalidDiagnostics.length > 0) {
+      return { success: false, diagnostics: invalidDiagnostics };
+    }
+
+    const preparedById = new Map(prepared.map((component) => [component.component.id, component]));
+    const volumeEpsilon = Math.max(tolerance * tolerance * tolerance, 1e-12);
+    const overlaps: MeshComponentOverlap[] = [];
+    for (const pair of pairs) {
+      const left = preparedById.get(pair.left.id)?.manifold;
+      const right = preparedById.get(pair.right.id)?.manifold;
+      if (!left || !right) {
+        continue;
+      }
+      const volume = exactPairVolume({
+        cache,
+        left: preparedById.get(pair.left.id)!,
+        right: preparedById.get(pair.right.id)!,
+        fallback: intersectionAabbCenter(pair.left, pair.right),
+      });
+      if (volume && volume.volume > volumeEpsilon) {
+        overlaps.push({
+          leftComponentId: pair.left.id,
+          rightComponentId: pair.right.id,
+          leftLabel: pair.left.label,
+          rightLabel: pair.right.label,
+          leftColor: pair.left.color,
+          rightColor: pair.right.color,
+          intersectionVolume: volume.volume,
+          ...(volume.witnessPoint ? { witnessPoint: volume.witnessPoint } : {}),
+          penetration: 'positive-volume',
+        });
+      }
+    }
+
     return {
-      success: false,
-      diagnostics: [
-        {
-          code: 'GEOSPEC_COMPONENT_OVERLAP_ANALYSIS_FAILED',
-          severity: 'error',
-          message: error instanceof Error ? error.message : String(error),
-          suggestion: 'Check the native GeoSpec OpenCascade mesh analyzer and the supplied mesh buffers.',
-          details: error,
-        },
-      ],
+      success: true,
+      evidence: {
+        componentSource: partition.source,
+        componentCount: partition.components.length,
+        ...(pairSelection.selectedPairs ? { selectedPairs: pairSelection.selectedPairs } : {}),
+        checkedPairs: pairs.length,
+        tolerance,
+        overlaps,
+      },
+      diagnostics: [],
     };
+  } finally {
+    if (created && !scope) {
+      cache.dispose();
+    }
   }
 };

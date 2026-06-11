@@ -1,8 +1,18 @@
 import { Accessor, Document, WebIO } from '@gltf-transform/core';
 import { describe, expect, it, vi } from 'vitest';
 import { GeoSpecModelLoadError, createModelLoader, loadModel, parameterGroups, params } from '#model/index.js';
-import type { GeometryDiagnostic } from '#mesh/types.js';
+import type { GeoSpecModelLoader, GeoSpecRuntimeClient, GeoSpecRuntimeSourceAdapter } from '#model/index.js';
+import type { GeometryDiagnostic, GeometrySubject } from '#mesh/types.js';
+import {
+  createCachedModelLoader,
+  createModelLoadCacheKey,
+  createModelLoadCacheStats,
+} from '#runner/model-load-cache.js';
 import { runGeoSpecModule } from '#runner/index.js';
+import { openscad } from '@taucad/openscad';
+import { createNodeClient } from '@taucad/runtime/node';
+import { presets } from '@taucad/runtime/presets';
+import { defineRuntime } from '@taucad/runtime/worker';
 import type { VmFileSystem } from '@taucad/vm';
 
 const replicadBoxCode = `
@@ -22,6 +32,32 @@ difference() {
   cube([50, 50, 50], center = true);
   cylinder(h = 60, r = 10, center = true);
 }
+`;
+const jscadCubeCutoutCode = `
+  import { primitives, booleans } from '@jscad/modeling';
+  import type { geometries } from '@jscad/modeling';
+
+  export const defaultParams = {
+    cubeSize: 50,
+    cylinderRadius: 10,
+    cylinderHeight: 60,
+  };
+
+  export default function main(p = defaultParams): geometries.geom3.Geom3 {
+    const cube = primitives.cuboid({
+      size: [p.cubeSize, p.cubeSize, p.cubeSize],
+      center: [0, 0, p.cubeSize / 2],
+    });
+
+    const cylinder = primitives.cylinder({
+      radius: p.cylinderRadius,
+      height: p.cylinderHeight,
+      center: [0, 0, p.cubeSize / 2],
+      segments: 64,
+    });
+
+    return booleans.subtract(cube, cylinder);
+  }
 `;
 
 class MemoryFileSystem implements VmFileSystem {
@@ -74,7 +110,152 @@ const createTriangleGlb = async (): Promise<Uint8Array<ArrayBuffer>> => {
   return new WebIO().writeBinary(document);
 };
 
+const coerceRuntimeClient = (runtime: unknown): GeoSpecRuntimeClient => runtime as GeoSpecRuntimeClient;
+
+const runtimeMock = (runtime: Record<string, unknown>): GeoSpecRuntimeClient => {
+  const mergedRuntime = {
+    connect: vi.fn(async () => undefined),
+    terminate: vi.fn(),
+    ...runtime,
+  };
+  return coerceRuntimeClient(mergedRuntime);
+};
+
+const createOpenScadSourceAdapter = (): GeoSpecRuntimeSourceAdapter => ({
+  id: 'openscad',
+  extensions: ['scad'],
+  async createRuntime({ projectPath }) {
+    const baseRuntime = presets.all();
+    const runtime = defineRuntime({
+      ...baseRuntime,
+      kernels: [openscad(), ...baseRuntime.kernels],
+    });
+    return createNodeClient(projectPath, { runtime }) as Promise<GeoSpecRuntimeClient>;
+  },
+});
+
+const createMockGeometrySubject = (name: string): GeometrySubject => ({
+  kind: 'geometry-subject',
+  mesh: {
+    format: 'mesh-buffer',
+    stats: {
+      vertexCount: 0,
+      meshCount: 0,
+      triangleCount: 0,
+      connectedComponents: () => 0,
+      analyseConnectedComponents: () => ({ count: 0, clusters: [], gaps: [] }),
+      watertight: true,
+      analyseWatertight: () => ({
+        watertight: true,
+        irregularEdges: 0,
+        openBoundaryEdges: 0,
+        totalEdges: 0,
+        irregularEdgeFraction: 0,
+        perPrimitive: [],
+      }),
+      meshQuality: {
+        triangleCount: 0,
+        nonFiniteVertices: [],
+        degenerateTriangles: [],
+        duplicateFaces: [],
+        triangles: [],
+        surfaceArea: 0,
+        signedVolume: 0,
+        centerOfMass: [0, 0, 0],
+      },
+    },
+  },
+  provenance: {
+    source: { kind: 'mesh-buffer', format: 'mesh-buffer', name },
+    unit: 'mm',
+    loader: 'in-memory',
+  },
+  capabilities: [],
+  diagnostics: [],
+});
+
 describe('loadModel', () => {
+  it('should create order-stable deterministic cache keys and reject non-deterministic source loads', () => {
+    const mainFile = 'main.ts';
+    expect(
+      createModelLoadCacheKey({
+        format: 'glb',
+        file: mainFile,
+        parameters: { depth: 20, width: 10 },
+      }),
+    ).toBe(
+      createModelLoadCacheKey({
+        parameters: { width: 10, depth: 20 },
+        file: mainFile,
+        format: 'glb',
+      }),
+    );
+    expect(createModelLoadCacheKey({ file: mainFile, format: 'glb' })).not.toBe(
+      createModelLoadCacheKey({ file: mainFile, format: 'step' }),
+    );
+    expect(createModelLoadCacheKey({ code: { [mainFile]: 'export default () => 1' }, file: mainFile })).not.toBe(
+      createModelLoadCacheKey({ code: { [mainFile]: 'export default () => 2' }, file: mainFile }),
+    );
+    expect(
+      createModelLoadCacheKey({
+        source: { format: 'mesh-buffer', positions: [0, 0, 0] },
+        format: 'mesh-buffer',
+      }),
+    ).toBeUndefined();
+    expect(createModelLoadCacheKey({ file: mainFile, runtime: () => undefined })).toBeUndefined();
+  });
+
+  it('should cache deterministic loader promises while bypassing raw source loads', async () => {
+    const stats = createModelLoadCacheStats();
+    const modelLoader = vi.fn(async (options: Parameters<GeoSpecModelLoader>[0]) =>
+      createMockGeometrySubject('source' in options ? 'source' : options.file),
+    );
+    const cached = createCachedModelLoader(modelLoader, { stats });
+    if (!cached) {
+      throw new Error('Expected cached loader');
+    }
+
+    const first = await cached({ file: 'main.ts', format: 'glb' });
+    const second = await cached({ format: 'glb', file: 'main.ts' });
+    const sourceOptions = {
+      source: { format: 'mesh-buffer', positions: [0, 0, 0] },
+      format: 'mesh-buffer',
+    } satisfies Parameters<GeoSpecModelLoader>[0];
+    await cached(sourceOptions);
+    await cached(sourceOptions);
+
+    expect(first).toBe(second);
+    expect(modelLoader).toHaveBeenCalledTimes(3);
+    expect(stats).toEqual({
+      hits: 1,
+      misses: 1,
+      bypasses: 2,
+      failures: 0,
+    });
+  });
+
+  it('should fan out identical loader failures from the shared cache utility', async () => {
+    const stats = createModelLoadCacheStats();
+    const loadError = new Error('render exploded once');
+    const modelLoader = vi.fn(async () => {
+      throw loadError;
+    });
+    const cached = createCachedModelLoader(modelLoader as GeoSpecModelLoader, { stats });
+    if (!cached) {
+      throw new Error('Expected cached loader');
+    }
+
+    await expect(cached({ file: 'main.ts', format: 'glb' })).rejects.toBe(loadError);
+    await expect(cached({ format: 'glb', file: 'main.ts' })).rejects.toBe(loadError);
+    expect(modelLoader).toHaveBeenCalledTimes(1);
+    expect(stats).toEqual({
+      hits: 1,
+      misses: 1,
+      bypasses: 0,
+      failures: 1,
+    });
+  });
+
   it('should load direct mesh-buffer sources as geometry subjects', async () => {
     const subject = await loadModel({
       source: {
@@ -101,7 +282,6 @@ describe('loadModel', () => {
     const subject = await loadModel({
       code: { [mainFile]: replicadBoxCode },
       file: mainFile,
-      kernel: 'replicad',
       format: 'glb',
       parameters: { width: 10 },
     });
@@ -117,29 +297,65 @@ describe('loadModel', () => {
     expect(Math.abs(subject.mesh.stats.meshQuality.signedVolume)).toBeGreaterThan(0);
   });
 
-  it(
-    'should load OpenSCAD source files through the optional runtime as millimetre mesh evidence',
-    { timeout: 120_000 },
-    async () => {
-      const subject = await loadModel({
+  it('should load JSCAD cube cutout through runtime import inference', { timeout: 60_000 }, async () => {
+    const subject = await loadModel({
+      code: { [mainFile]: jscadCubeCutoutCode },
+      file: mainFile,
+      format: 'glb',
+    });
+
+    expect(subject.kind).toBe('geometry-subject');
+    expect(subject.provenance.unit).toBe('mm');
+    expect(subject.mesh.stats.boundingBox?.size[0]).toBeCloseTo(50, 1);
+    expect(subject.mesh.stats.boundingBox?.size[1]).toBeCloseTo(50, 1);
+    expect(subject.mesh.stats.boundingBox?.size[2]).toBeCloseTo(50, 1);
+    expect(subject.mesh.stats.boundingBox?.center[0]).toBeCloseTo(0, 1);
+    expect(subject.mesh.stats.boundingBox?.center[1]).toBeCloseTo(0, 1);
+    expect(subject.mesh.stats.boundingBox?.center[2]).toBeCloseTo(25, 1);
+    expect(subject.mesh.stats.watertight).toBe(true);
+    expect(subject.mesh.stats.connectedComponents(0.5)).toBe(1);
+  });
+
+  it('should load adapter-backed source files as millimetre mesh evidence', { timeout: 120_000 }, async () => {
+    const subject = await loadModel({
+      code: { [openscadFile]: openscadCubeCutoutCode },
+      file: openscadFile,
+      sourceAdapters: [createOpenScadSourceAdapter()],
+    });
+
+    expect(subject.kind).toBe('geometry-subject');
+    expect(subject.provenance.source.format).toBe('glb');
+    expect(subject.provenance.unit).toBe('mm');
+    expect(subject.mesh.stats.boundingBox?.size[0]).toBeCloseTo(50, 1);
+    expect(subject.mesh.stats.boundingBox?.size[1]).toBeCloseTo(50, 1);
+    expect(subject.mesh.stats.boundingBox?.size[2]).toBeCloseTo(50, 1);
+    expect(subject.mesh.stats.boundingBox?.center[0]).toBeCloseTo(0, 1);
+    expect(subject.mesh.stats.boundingBox?.center[1]).toBeCloseTo(0, 1);
+    expect(subject.mesh.stats.boundingBox?.center[2]).toBeCloseTo(0, 1);
+    expect(subject.mesh.stats.watertight).toBe(true);
+    expect(subject.mesh.stats.connectedComponents(0.1)).toBe(1);
+  });
+
+  it('should report a generic source-adapter diagnostic for unsupported runtime-backed source files', async () => {
+    await expect(
+      loadModel({
         code: { [openscadFile]: openscadCubeCutoutCode },
         file: openscadFile,
-        kernel: 'openscad',
-      });
-
-      expect(subject.kind).toBe('geometry-subject');
-      expect(subject.provenance.source.format).toBe('glb');
-      expect(subject.provenance.unit).toBe('mm');
-      expect(subject.mesh.stats.boundingBox?.size[0]).toBeCloseTo(50, 1);
-      expect(subject.mesh.stats.boundingBox?.size[1]).toBeCloseTo(50, 1);
-      expect(subject.mesh.stats.boundingBox?.size[2]).toBeCloseTo(50, 1);
-      expect(subject.mesh.stats.boundingBox?.center[0]).toBeCloseTo(0, 1);
-      expect(subject.mesh.stats.boundingBox?.center[1]).toBeCloseTo(0, 1);
-      expect(subject.mesh.stats.boundingBox?.center[2]).toBeCloseTo(0, 1);
-      expect(subject.mesh.stats.watertight).toBe(true);
-      expect(subject.mesh.stats.connectedComponents(0.1)).toBe(1);
-    },
-  );
+      }),
+    ).rejects.toMatchObject({
+      name: 'GeoSpecModelLoadError',
+      diagnostics: [
+        expect.objectContaining({
+          code: 'GEOSPEC_RUNTIME_SOURCE_ADAPTER_UNAVAILABLE',
+          severity: 'error',
+          details: {
+            file: openscadFile,
+            extension: 'scad',
+          },
+        }),
+      ],
+    });
+  });
 
   it('should request canonical z-up millimeter exports from runtime route metadata', async () => {
     const bytes = await createTriangleGlb();
@@ -148,7 +364,7 @@ describe('loadModel', () => {
       data: { bytes, name: 'model.glb' },
       issues: [],
     }));
-    const runtime = {
+    const runtime = runtimeMock({
       export: exportMock,
       bestRouteFor: vi.fn(() => ({
         kernelId: 'replicad',
@@ -166,7 +382,7 @@ describe('loadModel', () => {
           unit: { length: 'meter' },
         },
       })),
-    };
+    });
 
     const subject = await loadModel({
       file: mainFile,
@@ -203,9 +419,9 @@ describe('loadModel', () => {
 
     const subject = await loadModel({
       file: mainFile,
-      runtime: {
+      runtime: runtimeMock({
         export: exportMock,
-      },
+      }),
     });
 
     expect(exportMock).toHaveBeenCalledWith('glb', { file: mainFile, parameters: undefined });
@@ -219,9 +435,111 @@ describe('loadModel', () => {
     });
   });
 
+  it('should preserve successful runtime export warnings as subject diagnostics', async () => {
+    const bytes = await createTriangleGlb();
+    const runtimeIssue = {
+      code: 'GEOMETRY_INVALID',
+      severity: 'warning',
+      message: "JSCAD part 'Housing' is not a closed oriented solid: non-manifold edges 164.",
+      details: {
+        producer: {
+          kernelId: 'jscad',
+          validator: 'geom3.validate',
+        },
+        geometry: {
+          partName: 'Housing',
+          topology: {
+            aabb: {
+              min: [0, 0, 0],
+              max: [10, 20, 0],
+              center: [5, 10, 0],
+            },
+          },
+          hints: ['Use one valid extrusion.'],
+        },
+      },
+    };
+
+    const subject = await loadModel({
+      file: mainFile,
+      runtime: runtimeMock({
+        export: vi.fn(async () => ({
+          success: true,
+          data: { bytes, name: 'model.glb' },
+          issues: [runtimeIssue],
+        })),
+      }),
+    });
+
+    expect(subject.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'GEOMETRY_INVALID',
+        severity: 'warning',
+        message: "JSCAD part 'Housing' is not a closed oriented solid: non-manifold edges 164.",
+        spatial: {
+          min: [0, 0, 0],
+          max: [10, 20, 0],
+          center: [5, 10, 0],
+        },
+        details: {
+          file: mainFile,
+          format: 'glb',
+          issueIndex: 0,
+          facet: {
+            kind: 'source-validity',
+            valid: false,
+            partName: 'Housing',
+            partIndex: undefined,
+            topology: runtimeIssue.details.geometry.topology,
+            hints: ['Use one valid extrusion.'],
+          },
+          issue: runtimeIssue,
+        },
+      }),
+    ]);
+  });
+
+  it('should preserve runtime export issues as structured model-load diagnostics', async () => {
+    const runtimeIssue = {
+      code: 'UNKNOWN',
+      message: "Cannot destructure property 'geom2' of 'jscadModeling.geometries' as it is undefined.",
+      type: 'kernel',
+      severity: 'error',
+      details: { kernelId: 'jscad' },
+    };
+
+    await expect(
+      loadModel({
+        file: mainFile,
+        runtime: runtimeMock({
+          export: vi.fn(async () => ({
+            success: false,
+            issues: [runtimeIssue],
+          })),
+        }),
+      }),
+    ).rejects.toMatchObject({
+      name: 'GeoSpecModelLoadError',
+      diagnostics: [
+        {
+          code: 'MODEL_EXPORT_FAILED',
+          severity: 'error',
+          message: 'Tau runtime did not produce geometry bytes for this model.',
+          suggestion:
+            'Inspect the runtime export diagnostics, kernel import/export support, and model code identified by those diagnostics.',
+          details: {
+            file: mainFile,
+            format: 'glb',
+            issues: [runtimeIssue],
+          },
+        },
+      ],
+    });
+  });
+
   it('should report unsupported canonical exports when route-aware mesh routes lack unit intent', async () => {
     const exportMock = vi.fn();
-    const runtime = {
+    const runtime = runtimeMock({
       export: exportMock,
       bestRouteFor: vi.fn(() => ({
         kernelId: 'legacy',
@@ -230,7 +548,7 @@ describe('loadModel', () => {
         fidelity: 'mesh',
         schema: { properties: { coordinateSystem: {} } },
       })),
-    };
+    });
 
     let thrown: unknown;
     try {
@@ -263,7 +581,7 @@ describe('loadModel', () => {
 
   it('should reject mesh-fidelity STEP transcodes for exact BRep evidence', async () => {
     const exportMock = vi.fn();
-    const runtime = {
+    const runtime = runtimeMock({
       export: exportMock,
       bestRouteFor: vi.fn(() => ({
         kernelId: 'replicad',
@@ -274,7 +592,7 @@ describe('loadModel', () => {
         schema: { properties: {} },
         defaults: {},
       })),
-    };
+    });
 
     let thrown: unknown;
     try {
@@ -297,61 +615,216 @@ describe('loadModel', () => {
     expect(exportMock).not.toHaveBeenCalled();
   });
 
-  it('should run OpenSCAD GeoSpec modules without treating .scad as a mesh file', { timeout: 120_000 }, async () => {
+  it(
+    'should run source-adapter GeoSpec modules without treating adapter files as mesh files',
+    { timeout: 120_000 },
+    async () => {
+      const filesystem = new MemoryFileSystem();
+      filesystem.setText(
+        '/project/main.geospec.ts',
+        [
+          "import { describe, expectGeo, it } from 'geospec';",
+          "import { loadModel } from 'geospec/model';",
+          "describe('cube with cylinder cutout', () => {",
+          "  it('should have bounding box approximately 50mm cubic', async () => {",
+          "    const model = await loadModel({ file: 'main.scad' });",
+          '    expectGeo(model).toHaveBoundingBox({ size: { x: 50, y: 50, z: 50 }, tolerance: 1 });',
+          '  });',
+          "  it('should be centered at origin', async () => {",
+          "    const model = await loadModel({ file: 'main.scad' });",
+          '    expectGeo(model).toHaveBoundingBox({ center: { x: 0, y: 0, z: 0 }, tolerance: 0.5 });',
+          '  });',
+          "  it('should be a single watertight solid', async () => {",
+          "    const model = await loadModel({ file: 'main.scad' });",
+          '    expectGeo(model).toBeWatertight();',
+          '  });',
+          "  it('should be one connected component', async () => {",
+          "    const model = await loadModel({ file: 'main.scad' });",
+          '    expectGeo(model).toHaveConnectedComponents({ count: 1 });',
+          '  });',
+          '});',
+        ].join('\n'),
+      );
+
+      let subjectPromise: Promise<Awaited<ReturnType<typeof loadModel>>> | undefined;
+      const result = await runGeoSpecModule({
+        filesystem,
+        projectPath: '/project',
+        entryPath: '/project/main.geospec.ts',
+        modelLoader: async (input) => {
+          if ('source' in input) {
+            return loadModel(input);
+          }
+          if ('code' in input) {
+            return loadModel(input);
+          }
+          subjectPromise ??= loadModel({
+            code: { [openscadFile]: openscadCubeCutoutCode },
+            file: openscadFile,
+            format: input.format,
+            parameters: input.parameters,
+            sourceAdapters: [createOpenScadSourceAdapter()],
+          });
+          return subjectPromise;
+        },
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.tests.map((test) => test.status)).toEqual(['passed', 'passed', 'passed', 'passed']);
+      }
+    },
+  );
+
+  it('should dedupe identical loadModel calls inside one GeoSpec run', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText(
       '/project/main.geospec.ts',
       [
-        "import { describe, expectGeo, it } from 'geospec';",
+        "import { describe, it } from 'geospec';",
         "import { loadModel } from 'geospec/model';",
-        "describe('cube with cylinder cutout', () => {",
-        "  it('should have bounding box approximately 50mm cubic', async () => {",
-        "    const model = await loadModel({ file: 'main.scad' });",
-        '    expectGeo(model).toHaveBoundingBox({ size: { x: 50, y: 50, z: 50 }, tolerance: 1 });',
-        '  });',
-        "  it('should be centered at origin', async () => {",
-        "    const model = await loadModel({ file: 'main.scad' });",
-        '    expectGeo(model).toHaveBoundingBox({ center: { x: 0, y: 0, z: 0 }, tolerance: 0.5 });',
-        '  });',
-        "  it('should be a single watertight solid', async () => {",
-        "    const model = await loadModel({ file: 'main.scad' });",
-        '    expectGeo(model).toBeWatertight();',
-        '  });',
-        "  it('should be one connected component', async () => {",
-        "    const model = await loadModel({ file: 'main.scad' });",
-        '    expectGeo(model).toHaveConnectedComponents({ count: 1 });',
+        "describe('shared load path', () => {",
+        "  it('uses the first model', async () => { await loadModel({ file: 'main.ts', format: 'glb' }); });",
+        "  it('uses the same model again', async () => { await loadModel({ format: 'glb', file: 'main.ts' }); });",
+        "  it('shares in-flight loads', async () => {",
+        '    await Promise.all([',
+        "      loadModel({ file: 'main.ts', format: 'glb' }),",
+        "      loadModel({ format: 'glb', file: 'main.ts' }),",
+        '    ]);',
         '  });',
         '});',
       ].join('\n'),
     );
+    const modelLoader = vi.fn(async () => createMockGeometrySubject('deduped'));
 
-    let subjectPromise: Promise<Awaited<ReturnType<typeof loadModel>>> | undefined;
     const result = await runGeoSpecModule({
       filesystem,
       projectPath: '/project',
       entryPath: '/project/main.geospec.ts',
-      modelLoader: async (input) => {
-        if ('source' in input) {
-          return loadModel(input);
-        }
-        if ('code' in input) {
-          return loadModel(input);
-        }
-        subjectPromise ??= loadModel({
-          code: { [openscadFile]: openscadCubeCutoutCode },
-          file: openscadFile,
-          kernel: 'openscad',
-          format: input.format,
-          parameters: input.parameters,
-        });
-        return subjectPromise;
-      },
+      modelLoader,
     });
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.tests.map((test) => test.status)).toEqual(['passed', 'passed', 'passed', 'passed']);
+      expect(result.tests.map((test) => test.status)).toEqual(['passed', 'passed', 'passed']);
     }
+    expect(modelLoader).toHaveBeenCalledTimes(1);
+  });
+
+  it('should give per-test loadModel calls the same cache behavior as a module-level promise', async () => {
+    const styles = [
+      {
+        name: 'per-test',
+        lines: [
+          "import { describe, it } from 'geospec';",
+          "import { loadModel } from 'geospec/model';",
+          "describe('per-test direct loads', () => {",
+          "  it('loads in the first test', async () => { await loadModel({ file: 'main.ts', format: 'glb' }); });",
+          "  it('loads in the second test', async () => { await loadModel({ format: 'glb', file: 'main.ts' }); });",
+          "  it('loads in the third test', async () => { await loadModel({ file: 'main.ts', format: 'glb' }); });",
+          '});',
+        ],
+      },
+      {
+        name: 'module-promise',
+        lines: [
+          "import { describe, it } from 'geospec';",
+          "import { loadModel } from 'geospec/model';",
+          "const sharedModel = loadModel({ file: 'main.ts', format: 'glb' });",
+          "describe('module-level promise loads', () => {",
+          "  it('uses the first model', async () => { await sharedModel; });",
+          "  it('uses the second model', async () => { await sharedModel; });",
+          "  it('uses the third model', async () => { await sharedModel; });",
+          '});',
+        ],
+      },
+    ];
+
+    await Promise.all(
+      styles.map(async (style) => {
+        const filesystem = new MemoryFileSystem();
+        filesystem.setText('/project/main.geospec.ts', style.lines.join('\n'));
+        const modelLoader = vi.fn(async () => createMockGeometrySubject(style.name));
+
+        const result = await runGeoSpecModule({
+          filesystem,
+          projectPath: '/project',
+          entryPath: '/project/main.geospec.ts',
+          modelLoader,
+        });
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.tests.map((test) => test.status)).toEqual(['passed', 'passed', 'passed']);
+        }
+        expect(modelLoader, style.name).toHaveBeenCalledTimes(1);
+      }),
+    );
+  });
+
+  it('should keep distinct loadModel parameter sets as separate run-scoped cache entries', async () => {
+    const filesystem = new MemoryFileSystem();
+    filesystem.setText(
+      '/project/main.geospec.ts',
+      [
+        "import { describe, it } from 'geospec';",
+        "import { loadModel } from 'geospec/model';",
+        "describe('parameter cache boundary', () => {",
+        "  it('loads the wide variant', async () => { await loadModel({ file: 'main.ts', format: 'glb', parameters: { width: 10 } }); });",
+        "  it('loads the narrow variant', async () => { await loadModel({ file: 'main.ts', format: 'glb', parameters: { width: 20 } }); });",
+        "  it('reuses the wide variant', async () => { await loadModel({ format: 'glb', parameters: { width: 10 }, file: 'main.ts' }); });",
+        '});',
+      ].join('\n'),
+    );
+    const modelLoader = vi.fn(async (_options: Parameters<GeoSpecModelLoader>[0]) =>
+      createMockGeometrySubject('variant'),
+    );
+
+    const result = await runGeoSpecModule({
+      filesystem,
+      projectPath: '/project',
+      entryPath: '/project/main.geospec.ts',
+      modelLoader,
+    });
+
+    expect(result.success).toBe(true);
+    expect(modelLoader).toHaveBeenCalledTimes(2);
+    expect(
+      modelLoader.mock.calls.map(([options]) => ('parameters' in options ? options.parameters : undefined)),
+    ).toEqual([{ width: 10 }, { width: 20 }]);
+  });
+
+  it('should fan out identical loadModel failures from the run-scoped cache', async () => {
+    const filesystem = new MemoryFileSystem();
+    filesystem.setText(
+      '/project/main.geospec.ts',
+      [
+        "import { describe, it } from 'geospec';",
+        "import { loadModel } from 'geospec/model';",
+        "describe('cached load failures', () => {",
+        "  it('fails the first load', async () => { await loadModel({ file: 'main.ts', format: 'glb' }); });",
+        "  it('fails the second load with the same rejection', async () => { await loadModel({ format: 'glb', file: 'main.ts' }); });",
+        '});',
+      ].join('\n'),
+    );
+    const loadError = new Error('render failed once');
+    const modelLoader = vi.fn(async () => {
+      throw loadError;
+    });
+
+    const result = await runGeoSpecModule({
+      filesystem,
+      projectPath: '/project',
+      entryPath: '/project/main.geospec.ts',
+      modelLoader,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.passed).toBe(false);
+      expect(result.tests.map((test) => test.status)).toEqual(['failed', 'failed']);
+    }
+    expect(modelLoader).toHaveBeenCalledTimes(1);
   });
 
   it('should throw typed diagnostics for invalid STEP sources', async () => {
@@ -376,7 +849,6 @@ describe('loadModel', () => {
     const subject = await loadModel({
       code: { [mainFile]: replicadBoxCode },
       file: mainFile,
-      kernel: 'replicad',
       format: 'step',
       parameters: { width: 10 },
     });
@@ -531,13 +1003,13 @@ describe('loadModel', () => {
 
   it('should reject runtime-backed unit and scale workarounds with structured diagnostics', async () => {
     const bytes = await createTriangleGlb();
-    const runtime = {
+    const runtime = runtimeMock({
       export: vi.fn(async () => ({
         success: true,
         data: { bytes, name: 'model.glb' },
         issues: [],
       })),
-    };
+    });
 
     await expect(
       loadModel({

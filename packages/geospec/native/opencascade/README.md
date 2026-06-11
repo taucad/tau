@@ -16,7 +16,6 @@ The generated module exposes:
 - `GeoSpecStepStreamReader.readText(...)`
 - `GeoSpecStepStreamReader.readFile(...)`
 - `GeoSpecMeshMetrics.chamferDistanceFromTrianglePointers(...)`
-- `GeoSpecMeshMetrics.componentOverlapFromTrianglePointers(...)`
 - `_malloc`, `_free`
 - `HEAP32`, `HEAPF64`, `FS`
 
@@ -35,21 +34,22 @@ const subject = await loadStep({ source: stepBytes });
 For native sampled mesh-distance checks, pass the initialized module to:
 
 ```ts
-import { createOpenCascadeMeshAnalyzer } from 'geospec/mesh';
+import { createOpenCascadeMeshBackend } from 'geospec/mesh';
 import initOpenCascade from 'geospec/native/opencascade/single';
 
 const oc = await initOpenCascade();
-const nativeAnalyzer = createOpenCascadeMeshAnalyzer(oc);
+const backend = createOpenCascadeMeshBackend(oc);
 ```
 
-GeoSpec uses that analyzer for large sampled mesh-distance checks. Without it,
-the JavaScript fallback is deliberately bounded and reports a diagnostic when
-the requested comparison would require too many triangle-pair visits.
+GeoSpec uses that backend for sampled mesh-distance checks. Without a native
+backend, distance matchers report a structured native-unavailable diagnostic;
+production code does not run a JavaScript triangle-distance fallback.
 
 Component-overlap checks are stricter: there is no JavaScript verdict fallback.
-`toHaveNoComponentOverlap({ tolerance })` and `analyzeMeshOverlap(...)` use the
-native C++ wrapper to build faceted OpenCascade solids, run Boolean common, and
-measure positive common volume. Tangent contact and correctly meshed gears pass
-because zero-volume contact is not overlap. If the native wrapper is unavailable
-or component solids cannot be certified, GeoSpec reports a structured diagnostic
-instead of producing a weaker JavaScript result.
+`toHaveNoComponentOverlap({ tolerance, pairs })` and `analyzeMeshOverlap(...)`
+use GeoSpec mesh records, optional pair selectors, cheap AABB candidate
+pruning, and Manifold WASM exact intersection volume. Tangent contact and
+correctly meshed gears pass because zero-volume contact is not overlap. If
+components are non-manifold or cannot be certified as mesh solids, GeoSpec
+reports structured diagnostics instead of falling back to OpenCascade mesh
+booleans or JavaScript triangle overlap.

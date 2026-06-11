@@ -225,9 +225,10 @@ describe('runGeoSpecCli', () => {
     expect(stderr).toEqual(['No matching *.geospec.ts or *.geospec.js files found.']);
   });
 
-  it('should run OpenSCAD source-file GeoSpec tests from Node', { timeout: 120_000 }, async () => {
+  it('should report source-adapter diagnostics for OpenSCAD source files in generic CLI core', async () => {
     const projectPath = await createTemporaryProject();
     const stdout: string[] = [];
+    const stderr: string[] = [];
     await writeFile(
       join(projectPath, 'main.scad'),
       [
@@ -259,18 +260,22 @@ describe('runGeoSpecCli', () => {
     );
 
     const exitCode = await runGeoSpecCli({
-      argv: ['run', '.', '--test-timeout', '120000'],
+      argv: ['run', '.'],
       cwd: projectPath,
-      stderr() {
-        return undefined;
+      stderr(message) {
+        stderr.push(message);
       },
       stdout(message) {
         stdout.push(message);
       },
     });
 
-    expect(exitCode).toBe(0);
-    expect(stdout).toEqual(['1 passed, 0 failed']);
+    expect(exitCode).toBe(1);
+    expect(stderr).toEqual([
+      'FAIL main.geospec.ts OpenSCAD cube cutout > should test the source file directly',
+      '  GeoSpec model loading has no runtime source adapter for .scad files.',
+    ]);
+    expect(stdout).toEqual(['0 passed, 1 failed']);
   });
 
   it('should run Replicad source-file GeoSpec tests from Node with CLI filters', { timeout: 120_000 }, async () => {
@@ -321,6 +326,71 @@ describe('runGeoSpecCli', () => {
     expect(stdout).toEqual(['1 passed, 0 failed']);
   });
 
+  it(
+    'should run JSCAD source-file GeoSpec tests from Node through runtime inference',
+    { timeout: 120_000 },
+    async () => {
+      const projectPath = await createTemporaryProject();
+      const stdout: string[] = [];
+      await writeFile(
+        join(projectPath, 'main.ts'),
+        [
+          "import { primitives, booleans } from '@jscad/modeling';",
+          "import type { geometries } from '@jscad/modeling';",
+          '',
+          'export const defaultParams = {',
+          '  cubeSize: 50,',
+          '  cylinderRadius: 10,',
+          '  cylinderHeight: 60,',
+          '};',
+          '',
+          'export default function main(p = defaultParams): geometries.geom3.Geom3 {',
+          '  const cube = primitives.cuboid({ size: [p.cubeSize, p.cubeSize, p.cubeSize], center: [0, 0, p.cubeSize / 2] });',
+          '  const cylinder = primitives.cylinder({ radius: p.cylinderRadius, height: p.cylinderHeight, center: [0, 0, p.cubeSize / 2], segments: 64 });',
+          '  return booleans.subtract(cube, cylinder);',
+          '}',
+        ].join('\n'),
+        'utf8',
+      );
+      await writeFile(
+        join(projectPath, 'main.geospec.ts'),
+        [
+          "import { describe, expectGeo, it } from 'geospec';",
+          "import { loadModel } from 'geospec/model';",
+          "describe('JSCAD cube cutout', () => {",
+          "  it('should have the expected bounds', async () => {",
+          "    const model = await loadModel({ file: 'main.ts' });",
+          '    expectGeo(model).toHaveBoundingBox({ size: { x: 50, y: 50, z: 50 }, center: { x: 0, y: 0, z: 25 }, tolerance: 1 });',
+          '  });',
+          "  it('should be watertight', async () => {",
+          "    const model = await loadModel({ file: 'main.ts' });",
+          '    expectGeo(model).toBeWatertight();',
+          '  });',
+          "  it('should be one connected component', async () => {",
+          "    const model = await loadModel({ file: 'main.ts' });",
+          '    expectGeo(model).toHaveConnectedComponents({ count: 1 });',
+          '  });',
+          '});',
+        ].join('\n'),
+        'utf8',
+      );
+
+      const exitCode = await runGeoSpecCli({
+        argv: ['run', '.', '--test-timeout', '120000'],
+        cwd: projectPath,
+        stderr() {
+          return undefined;
+        },
+        stdout(message) {
+          stdout.push(message);
+        },
+      });
+
+      expect(exitCode).toBe(0);
+      expect(stdout).toEqual(['3 passed, 0 failed']);
+    },
+  );
+
   it('should print structured GeoSpec failures from Node', async () => {
     const projectPath = await createTemporaryProject();
     const stderr: string[] = [];
@@ -355,6 +425,59 @@ describe('runGeoSpecCli', () => {
       '  toBeWatertight requires a GeoSpec GeometrySubject loaded from geometry evidence.',
     ]);
     expect(stdout).toEqual(['0 passed, 1 failed']);
+  });
+
+  it('should include structured failed-test diagnostics in JSON output', async () => {
+    const projectPath = await createTemporaryProject();
+    const stdout: string[] = [];
+    await writeFile(
+      join(projectPath, 'box.geospec.ts'),
+      [
+        "import { describe, expectGeo, it } from 'geospec';",
+        "describe('box', () => {",
+        "  it('should fail unsupported subjects with diagnostics', () => {",
+        "    expectGeo({ kind: 'box' }).toBeWatertight();",
+        '  });',
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const exitCode = await runGeoSpecCli({
+      argv: ['run', '.', '--json'],
+      cwd: projectPath,
+      stderr() {
+        return undefined;
+      },
+      stdout(message) {
+        stdout.push(message);
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join('\n'))).toEqual(
+      expect.objectContaining({
+        success: false,
+        files: [
+          expect.objectContaining({
+            file: 'box.geospec.ts',
+            success: false,
+            tests: [
+              expect.objectContaining({
+                status: 'failed',
+                diagnostics: [
+                  expect.objectContaining({
+                    code: 'UNSUPPORTED_GEOMETRY_SUBJECT',
+                    severity: 'error',
+                    message: 'toBeWatertight requires a GeoSpec GeometrySubject loaded from geometry evidence.',
+                  }),
+                ],
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
   });
 
   it('should include discovered files with repeatable Vitest-style include globs', async () => {

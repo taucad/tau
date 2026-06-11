@@ -808,21 +808,79 @@ const evaluateWatertight = (subject: unknown): GeometryDiagnostic[] => {
 
 const validateComponentOverlapExpectation = (expected: unknown): GeometryDiagnostic[] => {
   const matcher = 'toHaveNoComponentOverlap';
-  const accepted = '{ tolerance?: number }';
+  const accepted = '{ tolerance?: number; pairs?: Array<{ left: string | RegExp; right: string | RegExp }> }';
   const normalized = expected ?? {};
   const objectDiagnostics = validateObjectExpectation({
     matcher,
     expected: normalized,
-    allowed: ['tolerance'],
+    allowed: ['tolerance', 'pairs'],
     accepted,
   });
   if (!isRecord(normalized)) {
     return objectDiagnostics;
   }
-  return [
+  const diagnostics: GeometryDiagnostic[] = [
     ...objectDiagnostics,
     ...validateFiniteNumberField({ matcher, expected: normalized, field: 'tolerance', accepted }),
   ];
+  const { pairs } = normalized as { pairs?: unknown };
+  if (pairs === undefined) {
+    return diagnostics;
+  }
+  if (Array.isArray(pairs)) {
+    return [
+      ...diagnostics,
+      ...pairs.flatMap((pair, index) => validateComponentOverlapPairExpectation({ matcher, accepted, pair, index })),
+    ];
+  }
+  return [
+    ...diagnostics,
+    invalidExpectationDiagnostic({
+      matcher,
+      path: '$.pairs',
+      message: "expected 'pairs' to be an array.",
+      expected: pairs,
+      accepted,
+    }),
+  ];
+};
+
+const isComponentOverlapSelector = (selector: unknown): boolean =>
+  typeof selector === 'string' || Object.prototype.toString.call(selector) === '[object RegExp]';
+
+const validateComponentOverlapPairExpectation = (options: {
+  matcher: string;
+  accepted: string;
+  pair: unknown;
+  index: number;
+}): GeometryDiagnostic[] => {
+  const path = `$.pairs[${options.index}]`;
+  const diagnostics = validateObjectExpectation({
+    matcher: options.matcher,
+    expected: options.pair,
+    allowed: ['left', 'right'],
+    required: ['left', 'right'],
+    accepted: options.accepted,
+  });
+  if (!isRecord(options.pair)) {
+    return diagnostics;
+  }
+  for (const side of ['left', 'right'] as const) {
+    const selector = options.pair[side];
+    if (isComponentOverlapSelector(selector)) {
+      continue;
+    }
+    diagnostics.push(
+      invalidExpectationDiagnostic({
+        matcher: options.matcher,
+        path: `${path}.${side}`,
+        message: `expected '${side}' to be a string or RegExp component selector.`,
+        expected: selector,
+        accepted: options.accepted,
+      }),
+    );
+  }
+  return diagnostics;
 };
 
 const evaluateComponentOverlap = async (
@@ -836,6 +894,7 @@ const evaluateComponentOverlap = async (
   const analysis = await analyzeMeshOverlap({
     subject,
     tolerance: expected.tolerance ?? defaultComponentOverlapTolerance,
+    ...(expected.pairs ? { pairs: expected.pairs } : {}),
   });
   if (!analysis.success) {
     return analysis.diagnostics;
@@ -1059,11 +1118,11 @@ const evaluateCenterOfMass = (subject: unknown, expected: GeoSpecCenterOfMassExp
   ];
 };
 
-const evaluateChamferDistance = (
+const evaluateChamferDistance = async (
   subject: unknown,
   reference: unknown,
   expected: GeoSpecChamferDistanceExpectation,
-): GeometryDiagnostic[] => {
+): Promise<GeometryDiagnostic[]> => {
   if (!isGeometrySubject(subject)) {
     return [unsupportedSubjectDiagnostic('toHaveChamferDistanceTo')];
   }
@@ -1071,7 +1130,7 @@ const evaluateChamferDistance = (
     return [unsupportedSubjectDiagnostic('toHaveChamferDistanceTo reference')];
   }
 
-  const result = analyzeChamferDistance({
+  const result = await analyzeChamferDistance({
     actual: subject.mesh.stats.meshQuality.triangles,
     expected: reference.mesh.stats.meshQuality.triangles,
     samples: expected.samples ?? defaultChamferSamples,
@@ -1120,14 +1179,14 @@ const evaluateChamferDistance = (
   ];
 };
 
-const evaluateDistanceSummary = (options: {
+const evaluateDistanceSummary = async (options: {
   subject: unknown;
   reference: unknown;
   expected: GeoSpecMinimumDistanceExpectation;
   metric: 'min' | 'max';
   matcher: string;
   code: string;
-}): GeometryDiagnostic[] => {
+}): Promise<GeometryDiagnostic[]> => {
   const { code, expected, matcher, metric, reference, subject } = options;
   if (!isGeometrySubject(subject)) {
     return [unsupportedSubjectDiagnostic(matcher)];
@@ -1135,7 +1194,7 @@ const evaluateDistanceSummary = (options: {
   if (!isGeometrySubject(reference)) {
     return [unsupportedSubjectDiagnostic(`${matcher} reference`)];
   }
-  const result = analyzeChamferDistance({
+  const result = await analyzeChamferDistance({
     actual: subject.mesh.stats.meshQuality.triangles,
     expected: reference.mesh.stats.meshQuality.triangles,
     samples: expected.samples ?? defaultChamferSamples,
@@ -1941,7 +2000,11 @@ export const createCollector = (): GeoSpecCollector => {
           activeTest.assertions.push(assertion);
           const accepted =
             '{ mean?: number | { lessThan?: number }, max?: number | { lessThan?: number }, p95?: number | { lessThan?: number }, samples?: number, seed?: number }';
-          return recordValidatedAssertion(assertion, validateChamferDistanceExpectation(expected, accepted), () =>
+          const validationDiagnostics = validateChamferDistanceExpectation(expected, accepted);
+          if (validationDiagnostics.length > 0) {
+            return recordAssertion(assertion, validationDiagnostics);
+          }
+          return recordAsyncAssertion(activeTest, assertion, async () =>
             evaluateChamferDistance(subject, reference, expected),
           );
         },
@@ -1955,18 +2018,23 @@ export const createCollector = (): GeoSpecCollector => {
           activeTest.assertions.push(assertion);
           const accepted =
             '{ value: number | { lessThanOrEqual?: number }, samples?: number, seed?: number, tolerance?: number }';
-          return recordValidatedAssertion(
-            assertion,
-            validateMinimumDistanceExpectation('toHaveHausdorffDistanceTo', expected, accepted),
-            () =>
-              evaluateDistanceSummary({
-                subject,
-                reference,
-                expected,
-                metric: 'max',
-                matcher: 'toHaveHausdorffDistanceTo',
-                code: 'HAUSDORFF_DISTANCE_MISMATCH',
-              }),
+          const validationDiagnostics = validateMinimumDistanceExpectation(
+            'toHaveHausdorffDistanceTo',
+            expected,
+            accepted,
+          );
+          if (validationDiagnostics.length > 0) {
+            return recordAssertion(assertion, validationDiagnostics);
+          }
+          return recordAsyncAssertion(activeTest, assertion, async () =>
+            evaluateDistanceSummary({
+              subject,
+              reference,
+              expected,
+              metric: 'max',
+              matcher: 'toHaveHausdorffDistanceTo',
+              code: 'HAUSDORFF_DISTANCE_MISMATCH',
+            }),
           );
         },
 
@@ -1979,18 +2047,23 @@ export const createCollector = (): GeoSpecCollector => {
           activeTest.assertions.push(assertion);
           const accepted =
             '{ value: number | { greaterThanOrEqual?: number }, samples?: number, seed?: number, tolerance?: number }';
-          return recordValidatedAssertion(
-            assertion,
-            validateMinimumDistanceExpectation('toHaveMinimumDistanceTo', expected, accepted),
-            () =>
-              evaluateDistanceSummary({
-                subject,
-                reference,
-                expected,
-                metric: 'min',
-                matcher: 'toHaveMinimumDistanceTo',
-                code: 'MINIMUM_DISTANCE_MISMATCH',
-              }),
+          const validationDiagnostics = validateMinimumDistanceExpectation(
+            'toHaveMinimumDistanceTo',
+            expected,
+            accepted,
+          );
+          if (validationDiagnostics.length > 0) {
+            return recordAssertion(assertion, validationDiagnostics);
+          }
+          return recordAsyncAssertion(activeTest, assertion, async () =>
+            evaluateDistanceSummary({
+              subject,
+              reference,
+              expected,
+              metric: 'min',
+              matcher: 'toHaveMinimumDistanceTo',
+              code: 'MINIMUM_DISTANCE_MISMATCH',
+            }),
           );
         },
 

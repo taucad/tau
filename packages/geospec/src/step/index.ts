@@ -7,6 +7,8 @@
 export { createStepLoader, loadStep } from '#step/load-step.js';
 export type {
   CreateStepLoaderOptions,
+  GeoSpecNativeStepBackend,
+  GeoSpecNativeStepBackendFactory,
   GeoSpecNativeStepReadResult,
   GeoSpecOpenCascadeStepModule,
   GeoSpecStepLoader,

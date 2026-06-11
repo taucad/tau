@@ -10,9 +10,8 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/geospec"
   },
-  "main": "./dist/cjs/index.cjs",
+  "main": "./dist/esm/index.js",
   "types": "./dist/esm/index.d.ts",
-  "module": "./dist/esm/index.js",
   "bin": {
     "geospec": "./dist/esm/cli.js"
   },
@@ -50,140 +49,75 @@
     },
     "exports": {
       ".": {
-        "require": {
-          "types": "./dist/cjs/index.d.cts",
-          "default": "./dist/cjs/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/index.d.ts",
-          "default": "./dist/esm/index.js"
-        }
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "default": "./dist/esm/index.js"
       },
       "./brep": {
-        "require": {
-          "types": "./dist/cjs/brep/index.d.cts",
-          "default": "./dist/cjs/brep/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/brep/index.d.ts",
-          "default": "./dist/esm/brep/index.js"
-        }
+        "types": "./dist/esm/brep/index.d.ts",
+        "import": "./dist/esm/brep/index.js",
+        "default": "./dist/esm/brep/index.js"
       },
       "./config": {
-        "require": {
-          "types": "./dist/cjs/config/index.d.cts",
-          "default": "./dist/cjs/config/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/config/index.d.ts",
-          "default": "./dist/esm/config/index.js"
-        }
+        "types": "./dist/esm/config/index.d.ts",
+        "import": "./dist/esm/config/index.js",
+        "default": "./dist/esm/config/index.js"
       },
       "./mesh": {
-        "require": {
-          "types": "./dist/cjs/mesh/index.d.cts",
-          "default": "./dist/cjs/mesh/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/mesh/index.d.ts",
-          "default": "./dist/esm/mesh/index.js"
-        }
+        "types": "./dist/esm/mesh/index.d.ts",
+        "import": "./dist/esm/mesh/index.js",
+        "default": "./dist/esm/mesh/index.js"
       },
       "./model": {
-        "require": {
-          "types": "./dist/cjs/model/index.d.cts",
-          "default": "./dist/cjs/model/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/model/index.d.ts",
-          "default": "./dist/esm/model/index.js"
-        }
+        "types": "./dist/esm/model/index.d.ts",
+        "import": "./dist/esm/model/index.js",
+        "default": "./dist/esm/model/index.js"
       },
       "./runner": {
-        "require": {
-          "types": "./dist/cjs/runner/index.d.cts",
-          "default": "./dist/cjs/runner/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/runner/index.d.ts",
-          "default": "./dist/esm/runner/index.js"
-        }
+        "types": "./dist/esm/runner/index.d.ts",
+        "import": "./dist/esm/runner/index.js",
+        "default": "./dist/esm/runner/index.js"
       },
       "./runner/node": {
-        "require": {
-          "types": "./dist/cjs/runner/node/index.d.cts",
-          "default": "./dist/cjs/runner/node/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/runner/node/index.d.ts",
-          "default": "./dist/esm/runner/node/index.js"
-        }
+        "types": "./dist/esm/runner/node/index.d.ts",
+        "import": "./dist/esm/runner/node/index.js",
+        "default": "./dist/esm/runner/node/index.js"
       },
       "./runner/web": {
-        "require": {
-          "types": "./dist/cjs/runner/web/index.d.cts",
-          "default": "./dist/cjs/runner/web/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/runner/web/index.d.ts",
-          "default": "./dist/esm/runner/web/index.js"
-        }
+        "types": "./dist/esm/runner/web/index.d.ts",
+        "import": "./dist/esm/runner/web/index.js",
+        "default": "./dist/esm/runner/web/index.js"
       },
       "./runner/worker": {
-        "require": {
-          "types": "./dist/cjs/runner/worker/index.d.cts",
-          "default": "./dist/cjs/runner/worker/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/runner/worker/index.d.ts",
-          "default": "./dist/esm/runner/worker/index.js"
-        }
+        "types": "./dist/esm/runner/worker/index.d.ts",
+        "import": "./dist/esm/runner/worker/index.js",
+        "default": "./dist/esm/runner/worker/index.js"
       },
       "./step": {
-        "require": {
-          "types": "./dist/cjs/step/index.d.cts",
-          "default": "./dist/cjs/step/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/step/index.d.ts",
-          "default": "./dist/esm/step/index.js"
-        }
+        "types": "./dist/esm/step/index.d.ts",
+        "import": "./dist/esm/step/index.js",
+        "default": "./dist/esm/step/index.js"
       },
       "./native/opencascade/single": {
-        "import": {
-          "types": "./native/opencascade/geospec_opencascade_single.d.ts",
-          "default": "./native/opencascade/geospec_opencascade_single.js"
-        }
+        "types": "./dist/esm/native/opencascade/geospec_opencascade_single.d.ts",
+        "import": "./dist/esm/native/opencascade/geospec_opencascade_single.js",
+        "default": "./dist/esm/native/opencascade/geospec_opencascade_single.js"
       }
     }
   },
   "imports": {
+    "#experiments/*.js": "./experiments/*.ts",
+    "#experiments/*": "./experiments/*",
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
   "dependencies": {
     "@gltf-transform/core": "^4.3.0",
-    "@gltf-transform/functions": "^4.3.0",
-    "@taucad/vm": "workspace:*"
-  },
-  "peerDependencies": {
-    "@taucad/openscad": ">=0.1.0-beta.0",
-    "@taucad/runtime": ">=0.1.0-beta.1",
-    "replicad": ">=0.23.0"
-  },
-  "peerDependenciesMeta": {
-    "@taucad/openscad": {
-      "optional": true
-    },
-    "@taucad/runtime": {
-      "optional": true
-    },
-    "replicad": {
-      "optional": true
-    }
+    "@taucad/runtime": "workspace:*",
+    "@taucad/vm": "workspace:*",
+    "manifold-3d": "catalog:"
   },
   "devDependencies": {
-    "@taucad/openscad": "workspace:*",
-    "@taucad/runtime": "workspace:*"
+    "@taucad/openscad": "workspace:*"
   }
 }

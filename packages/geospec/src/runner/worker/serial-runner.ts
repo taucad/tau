@@ -1,4 +1,6 @@
 import { runGeoSpecModule } from '#runner/run-geospec-module.js';
+import { createCachedModelLoader } from '#runner/model-load-cache.js';
+import { createGeoSpecResourceScope } from '#runner/resource-scope.js';
 import type {
   GeoSpecRunner,
   GeoSpecRunnerEvent,
@@ -73,41 +75,54 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
       let selectedTests = 0;
       const fileResults: GeoSpecRunnerResult['files'] = [];
       const issues: VmIssue[] = [];
+      const resourceScope = createGeoSpecResourceScope({ profile: options.internalProfile?.resourceScope });
+      const modelLoader = createCachedModelLoader(options.modelLoader, {
+        stats: options.internalProfile?.aggregateModelLoadCache,
+        onLoadResolved: (subject) => {
+          resourceScope.trackSubject(subject);
+        },
+      });
 
-      for (const file of files) {
-        const abortReason = getAbortReason();
-        if (abortReason !== undefined) {
-          const issue = createRunnerAbortedIssue(abortReason);
-          issues.push(issue);
-          failed += 1;
-          emit({ type: 'abort', reason: abortReason });
-          break;
+      try {
+        for (const file of files) {
+          const abortReason = getAbortReason();
+          if (abortReason !== undefined) {
+            const issue = createRunnerAbortedIssue(abortReason);
+            issues.push(issue);
+            failed += 1;
+            emit({ type: 'abort', reason: abortReason });
+            break;
+          }
+
+          emit({ type: 'file-start', file });
+          // oxlint-disable-next-line no-await-in-loop -- CAD tests run serially for deterministic evidence and bounded runtime pressure.
+          const result = await runGeoSpecModule({
+            filesystem: options.filesystem,
+            projectPath: options.projectPath,
+            entryPath: file,
+            testNamePattern: runOptions.testNamePattern,
+            testTimeout: runOptions.testTimeout,
+            ...(modelLoader ? { modelLoader } : {}),
+            ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
+            ...(options.builtinModules ? { builtinModules: options.builtinModules } : {}),
+            resourceScope,
+            ...(options.internalProfile ? { internalProfile: options.internalProfile } : {}),
+          });
+          emit({ type: 'file-complete', file, result });
+          fileResults.push({ file, result });
+
+          if (!result.success) {
+            failed += 1;
+            continue;
+          }
+
+          selectedTests += result.tests.length;
+          const counts = countRunnerTests(result.tests);
+          passed += counts.passed;
+          failed += counts.failed;
         }
-
-        emit({ type: 'file-start', file });
-        // oxlint-disable-next-line no-await-in-loop -- CAD tests run serially for deterministic evidence and bounded runtime pressure.
-        const result = await runGeoSpecModule({
-          filesystem: options.filesystem,
-          projectPath: options.projectPath,
-          entryPath: file,
-          testNamePattern: runOptions.testNamePattern,
-          testTimeout: runOptions.testTimeout,
-          ...(options.modelLoader ? { modelLoader: options.modelLoader } : {}),
-          ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
-          ...(options.builtinModules ? { builtinModules: options.builtinModules } : {}),
-        });
-        emit({ type: 'file-complete', file, result });
-        fileResults.push({ file, result });
-
-        if (!result.success) {
-          failed += 1;
-          continue;
-        }
-
-        selectedTests += result.tests.length;
-        const counts = countRunnerTests(result.tests);
-        passed += counts.passed;
-        failed += counts.failed;
+      } finally {
+        await resourceScope.dispose();
       }
 
       if (selectedTests === 0 && failed === 0) {

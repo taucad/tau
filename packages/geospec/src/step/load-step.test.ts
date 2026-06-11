@@ -2,7 +2,11 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { loadStep } from '#step/index.js';
-import type { GeoSpecNativeStepReadResult, GeoSpecOpenCascadeStepModule } from '#step/types.js';
+import type {
+  GeoSpecNativeStepBackend,
+  GeoSpecNativeStepReadResult,
+  GeoSpecOpenCascadeStepModule,
+} from '#step/types.js';
 
 const cubeStepPath = join(import.meta.dirname, '../../../runtime/src/kernels/replicad/__fixtures__/cube.step');
 const trianglePayload = {
@@ -46,7 +50,7 @@ describe('loadStep', () => {
     },
   );
 
-  it('should fail when no GeoSpec OpenCascade STEP reader is available', async () => {
+  it('should fail when no native STEP reader is available', async () => {
     const bytes = await readFile(cubeStepPath);
 
     await expect(
@@ -54,7 +58,25 @@ describe('loadStep', () => {
         source: new Uint8Array(bytes),
         openCascade: {},
       }),
-    ).rejects.toThrow('GeoSpec OpenCascade STEP reader is unavailable');
+    ).rejects.toThrow('GeoSpec native STEP reader is unavailable');
+  });
+
+  it('should load STEP evidence through the backend-neutral nativeStepBackend option', async () => {
+    const reader = {
+      readText: vi.fn(() => createResult(trianglePayload)),
+    };
+    const stepStreamReaderKey = 'GeoSpecStepStreamReader';
+    const nativeStepBackend = { [stepStreamReaderKey]: reader } satisfies GeoSpecNativeStepBackend;
+
+    const subject = await loadStep({
+      source: new TextEncoder().encode('ISO-10303-21; HEADER; ENDSEC; END-ISO-10303-21;'),
+      nativeStepBackend,
+    });
+
+    expect(reader.readText).toHaveBeenCalledOnce();
+    expect(subject.provenance.loader).toBe('opencascade-step');
+    expect(subject.brep?.validity).toEqual({ valid: true });
+    expect(subject.mesh.stats.triangleCount).toBe(1);
   });
 
   it('should report native parse diagnostics without using another importer', async () => {
@@ -118,5 +140,38 @@ describe('loadStep', () => {
     expect(readFileNative).toHaveBeenCalledOnce();
     expect(writeFile).toHaveBeenCalledOnce();
     expect(unlink).toHaveBeenCalledOnce();
+  });
+
+  it('should preserve BRep evidence without advertising mesh capabilities when mesh loading is disabled', async () => {
+    let parsedOptions: unknown;
+    const reader = {
+      readText: vi.fn((_data: string, optionsJson: string) => {
+        parsedOptions = JSON.parse(optionsJson);
+        return createResult({
+          brep: {
+            validity: { valid: true },
+            cylindricalFaces: [{ radius: 5, axis: 'z' }],
+          },
+          step: {
+            schema: 'AP242',
+          },
+          diagnostics: [],
+        });
+      }),
+    };
+    const openCascade: GeoSpecOpenCascadeStepModule = {};
+    openCascade.GeoSpecStepStreamReader = reader;
+
+    const subject = await loadStep({
+      source: new TextEncoder().encode('ISO-10303-21; HEADER; ENDSEC; END-ISO-10303-21;'),
+      openCascade,
+      mesh: false,
+    });
+
+    expect(parsedOptions).toMatchObject({ mesh: false });
+    expect(subject.mesh.stats.triangleCount).toBe(0);
+    expect(subject.capabilities).toContainEqual({ kind: 'brep', feature: 'cylindrical-faces' });
+    expect(subject.capabilities).toContainEqual({ kind: 'step', feature: 'schema' });
+    expect(subject.capabilities).not.toContainEqual({ kind: 'mesh', feature: 'component-overlap' });
   });
 });

@@ -1,70 +1,62 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { clearCollectorGlobals, createCollector, installCollector } from '#runner/collector.js';
-import type { GeometrySubject, MeshTriangle } from '#mesh/types.js';
-import type { GeoSpecOpenCascadeMeshModule } from '#mesh/native.js';
+import type { GeometrySubject, MeshTriangle, Vec3 } from '#mesh/types.js';
 import type { GeoSpecComponentOverlapExpectation } from '#runner/types.js';
 
-/* eslint-disable @typescript-eslint/naming-convention -- OpenCascade.js embind module keys are generated API names. */
+const boxPositions = [
+  0, 0, 0, 10, 20, 0, 10, 0, 0, 0, 0, 0, 0, 20, 0, 10, 20, 0, 0, 0, 30, 10, 0, 30, 10, 20, 30, 0, 0, 30, 10, 20, 30, 0,
+  20, 30, 0, 0, 0, 10, 0, 0, 10, 0, 30, 0, 0, 0, 10, 0, 30, 0, 0, 30, 0, 20, 0, 10, 20, 30, 10, 20, 0, 0, 20, 0, 0, 20,
+  30, 10, 20, 30, 0, 0, 0, 0, 0, 30, 0, 20, 30, 0, 0, 0, 0, 20, 30, 0, 20, 0, 10, 0, 0, 10, 20, 0, 10, 20, 30, 10, 0, 0,
+  10, 20, 30, 10, 0, 30,
+];
 
-let nativeEvidenceJson = JSON.stringify({
-  success: true,
-  componentCount: 2,
-  checkedPairs: 1,
-  overlaps: [],
-});
+const shiftBox = (x: number): number[] => boxPositions.map((value, index) => (index % 3 === 0 ? value + x : value));
 
-vi.mock('geospec/native/opencascade/single', () => ({
-  default: async () => {
-    const heapF64 = new Float64Array(1024);
-    const heap32 = new Int32Array(heapF64.buffer);
-    let nextPointer = 0;
-    return {
-      HEAP32: heap32,
-      HEAPF64: heapF64,
-      _malloc(bytes: number) {
-        const pointer = nextPointer;
-        nextPointer += bytes;
-        return pointer;
-      },
-      _free() {
-        return undefined;
-      },
-      GeoSpecMeshMetrics: {
-        chamferDistanceFromTrianglePointers() {
-          throw new Error('distance analyzer should not run for component overlap');
-        },
-        componentOverlapFromTrianglePointers() {
-          return {
-            success: true,
-            evidenceJson: () => nativeEvidenceJson,
-            delete() {
-              return undefined;
-            },
-          };
-        },
-      },
-    } satisfies GeoSpecOpenCascadeMeshModule;
-  },
-}));
+const center = (a: Vec3, b: Vec3, c: Vec3): [number, number, number] => [
+  (a[0] + b[0] + c[0]) / 3,
+  (a[1] + b[1] + c[1]) / 3,
+  (a[2] + b[2] + c[2]) / 3,
+];
 
-const triangle = (primitive: string, triangleIndex: number, x: number): MeshTriangle => ({
-  primitive,
-  triangleIndex,
-  a: [x, 0, 0],
-  b: [x + 1, 0, 0],
-  c: [x, 1, 0],
-  center: [x + 1 / 3, 1 / 3, 0],
-  area: 0.5,
-});
+const area = (a: Vec3, b: Vec3, c: Vec3): number => {
+  const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+  return (
+    Math.hypot(
+      ab[1]! * ac[2]! - ab[2]! * ac[1]!,
+      ab[2]! * ac[0]! - ab[0]! * ac[2]!,
+      ab[0]! * ac[1]! - ab[1]! * ac[0]!,
+    ) / 2
+  );
+};
 
-const subject = (): GeometrySubject => ({
+const trianglesFromFlat = (primitive: string, values: readonly number[], startIndex = 0): MeshTriangle[] => {
+  const triangles: MeshTriangle[] = [];
+  for (let offset = 0; offset + 8 < values.length; offset += 9) {
+    const a: [number, number, number] = [values[offset]!, values[offset + 1]!, values[offset + 2]!];
+    const b: [number, number, number] = [values[offset + 3]!, values[offset + 4]!, values[offset + 5]!];
+    const c: [number, number, number] = [values[offset + 6]!, values[offset + 7]!, values[offset + 8]!];
+    triangles.push({
+      primitive,
+      triangleIndex: startIndex + triangles.length,
+      a,
+      b,
+      c,
+      center: center(a, b, c),
+      area: area(a, b, c),
+    });
+  }
+  return triangles;
+};
+
+const subjectFromTriangles = (triangles: MeshTriangle[]): GeometrySubject => ({
   kind: 'geometry-subject',
   mesh: {
     format: 'mesh-buffer',
     stats: {
-      vertexCount: 6,
-      meshCount: 1,
-      triangleCount: 2,
+      vertexCount: triangles.length * 3,
+      meshCount: new Set(triangles.map((triangle) => triangle.primitive)).size,
+      triangleCount: triangles.length,
       connectedComponents: () => 2,
       analyseConnectedComponents: () => ({ count: 2, clusters: [], gaps: [] }),
       watertight: true,
@@ -76,21 +68,13 @@ const subject = (): GeometrySubject => ({
         irregularEdgeFraction: 0,
         perPrimitive: [],
       }),
-      boundingBox: {
-        size: [5, 1, 0],
-        center: [2.5, 0.5, 0],
-        primitives: [
-          { name: 'sun#0', color: '#ffcc00', vertices: 3, aabb: { min: [0, 0, 0], max: [1, 1, 0] } },
-          { name: 'ring#0', color: '#223344', vertices: 3, aabb: { min: [4, 0, 0], max: [5, 1, 0] } },
-        ],
-      },
       meshQuality: {
-        triangleCount: 2,
+        triangleCount: triangles.length,
         nonFiniteVertices: [],
         degenerateTriangles: [],
         duplicateFaces: [],
-        triangles: [triangle('sun#0', 0, 0), triangle('ring#0', 1, 4)],
-        surfaceArea: 1,
+        triangles,
+        surfaceArea: triangles.reduce((sum, triangle) => sum + triangle.area, 0),
         signedVolume: 1,
         centerOfMass: [0, 0, 0],
       },
@@ -106,12 +90,26 @@ const subject = (): GeometrySubject => ({
   diagnostics: [],
 });
 
+const subject = (x: number): GeometrySubject =>
+  subjectFromTriangles([
+    ...trianglesFromFlat('left-box#0', boxPositions),
+    ...trianglesFromFlat('right-box#0', shiftBox(x), 12),
+  ]);
+
+const pairFilteredSubject = (): GeometrySubject =>
+  subjectFromTriangles([
+    ...trianglesFromFlat('ring#0', boxPositions),
+    ...trianglesFromFlat('planet#0', shiftBox(20), 12),
+    ...trianglesFromFlat('carrier#0', shiftBox(50), 24),
+    ...trianglesFromFlat('shaft#0', shiftBox(59), 36),
+  ]);
+
 const runOneAssertion = async (callback: (collector: ReturnType<typeof createCollector>) => void | Promise<void>) => {
   const collector = createCollector();
   installCollector(collector);
   try {
     collector.it('should evaluate component overlap', async () => callback(collector));
-    await collector.waitForCompletion(1000);
+    await collector.waitForCompletion(10_000);
     return collector.tests[0]!;
   } finally {
     clearCollectorGlobals();
@@ -119,16 +117,9 @@ const runOneAssertion = async (callback: (collector: ReturnType<typeof createCol
 };
 
 describe('component overlap matcher', () => {
-  it('should pass when native analysis reports no positive-volume overlaps', async () => {
-    nativeEvidenceJson = JSON.stringify({
-      success: true,
-      componentCount: 2,
-      checkedPairs: 1,
-      overlaps: [],
-    });
-
+  it('should pass when exact-volume analysis reports no positive-volume overlaps', async () => {
     const test = await runOneAssertion((collector) => {
-      collector.expectGeo(subject()).toHaveNoComponentOverlap({ tolerance: 0.1 });
+      collector.expectGeo(subject(15)).toHaveNoComponentOverlap({ tolerance: 0.001 });
     });
 
     expect(test.status).toBe('passed');
@@ -141,23 +132,9 @@ describe('component overlap matcher', () => {
     ]);
   });
 
-  it('should fail with structured diagnostics when native analysis finds overlap volume', async () => {
-    nativeEvidenceJson = JSON.stringify({
-      success: true,
-      componentCount: 2,
-      checkedPairs: 1,
-      overlaps: [
-        {
-          leftComponentId: 0,
-          rightComponentId: 1,
-          intersectionVolume: 2.5,
-          witnessPoint: [1, 2, 3],
-        },
-      ],
-    });
-
+  it('should fail with structured diagnostics when exact-volume analysis finds overlap volume', async () => {
     const test = await runOneAssertion((collector) => {
-      collector.expectGeo(subject()).toHaveNoComponentOverlap({ tolerance: 0.1 });
+      collector.expectGeo(subject(9)).toHaveNoComponentOverlap({ tolerance: 0.001 });
     });
 
     expect(test.status).toBe('failed');
@@ -168,21 +145,17 @@ describe('component overlap matcher', () => {
         {
           code: 'GEOSPEC_COMPONENT_OVERLAP_DETECTED',
           severity: 'error',
-          spatial: { center: [1, 2, 3] },
           details: {
             componentSource: 'named',
             componentCount: 2,
             checkedPairs: 1,
-            tolerance: 0.1,
+            tolerance: 0.001,
             unit: 'mm',
             parameters: { gearCount: 4 },
             overlaps: [
               {
-                leftLabel: 'sun#0',
-                rightLabel: 'ring#0',
-                leftColor: '#ffcc00',
-                rightColor: '#223344',
-                intersectionVolume: 2.5,
+                leftLabel: 'left-box#0',
+                rightLabel: 'right-box#0',
                 penetration: 'positive-volume',
               },
             ],
@@ -190,16 +163,20 @@ describe('component overlap matcher', () => {
         },
       ],
     });
+    const details = test.assertions[0]?.diagnostics?.[0]?.details;
+    const overlaps =
+      typeof details === 'object' && details !== null && 'overlaps' in details ? details.overlaps : undefined;
+    expect(Array.isArray(overlaps) ? typeof overlaps[0]?.intersectionVolume : 'missing').toBe('number');
   });
 
-  it('should reject unsupported public option fields before native analysis', async () => {
+  it('should reject unsupported public option fields before analysis', async () => {
     const invalidExpectation = {
       tolerance: 0.1,
       components: 'auto',
     } as unknown as GeoSpecComponentOverlapExpectation;
 
     const test = await runOneAssertion((collector) => {
-      collector.expectGeo(subject()).toHaveNoComponentOverlap(invalidExpectation);
+      collector.expectGeo(subject(15)).toHaveNoComponentOverlap(invalidExpectation);
     });
 
     expect(test.status).toBe('failed');
@@ -213,6 +190,81 @@ describe('component overlap matcher', () => {
       field: 'components',
     });
   });
-});
 
-/* eslint-enable @typescript-eslint/naming-convention -- Return to normal naming checks after generated OpenCascade.js test doubles. */
+  it('should restrict overlap checks to selected component pairs', async () => {
+    const filtered = await runOneAssertion((collector) => {
+      collector.expectGeo(pairFilteredSubject()).toHaveNoComponentOverlap({
+        tolerance: 0.001,
+        pairs: [{ left: 'ring#0', right: /planet/ }],
+      });
+    });
+
+    expect(filtered.status).toBe('passed');
+
+    const global = await runOneAssertion((collector) => {
+      collector.expectGeo(pairFilteredSubject()).toHaveNoComponentOverlap({ tolerance: 0.001 });
+    });
+
+    expect(global.status).toBe('failed');
+    expect(global.assertions[0]).toMatchObject({
+      kind: 'componentOverlap',
+      passed: false,
+      diagnostics: [
+        {
+          code: 'GEOSPEC_COMPONENT_OVERLAP_DETECTED',
+          details: {
+            overlaps: [
+              {
+                leftLabel: 'carrier#0',
+                rightLabel: 'shaft#0',
+                penetration: 'positive-volume',
+              },
+            ],
+          },
+        },
+      ],
+    });
+  });
+
+  it('should report structured diagnostics for unmatched component pair selectors', async () => {
+    const test = await runOneAssertion((collector) => {
+      collector.expectGeo(pairFilteredSubject()).toHaveNoComponentOverlap({
+        tolerance: 0.001,
+        pairs: [{ left: 'missing#0', right: /planet/ }],
+      });
+    });
+
+    expect(test.status).toBe('failed');
+    expect(test.assertions[0]).toMatchObject({
+      kind: 'componentOverlap',
+      passed: false,
+      diagnostics: [
+        {
+          code: 'GEOSPEC_COMPONENT_PAIR_SELECTOR_UNMATCHED',
+          severity: 'error',
+          details: {
+            pairIndex: 0,
+            side: 'left',
+            selector: 'missing#0',
+            availableLabels: ['ring#0', 'planet#0', 'carrier#0', 'shaft#0'],
+          },
+        },
+      ],
+    });
+  });
+
+  it('should reject malformed component pair selectors before analysis', async () => {
+    const invalidExpectation = {
+      pairs: [{ left: 1, right: 'right-box#0' }],
+    } as unknown as GeoSpecComponentOverlapExpectation;
+
+    const test = await runOneAssertion((collector) => {
+      collector.expectGeo(subject(15)).toHaveNoComponentOverlap(invalidExpectation);
+    });
+
+    expect(test.status).toBe('failed');
+    const diagnostic = test.assertions[0]?.diagnostics?.[0];
+    expect(diagnostic?.code).toBe('GEOSPEC_INVALID_EXPECTATION');
+    expect(diagnostic?.message).toContain("expected 'left' to be a string or RegExp component selector");
+  });
+});

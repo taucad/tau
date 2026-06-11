@@ -2,10 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { resolveRuntimeExportIntent } from '#model/export-intent.js';
 import type { GeoSpecRuntimeClient } from '#model/types.js';
 
-const createRuntime = (bestRouteFor?: GeoSpecRuntimeClient & { bestRouteFor?: unknown }) => ({
-  export: vi.fn(),
-  ...bestRouteFor,
-});
+const createRuntime = (runtime?: Record<string, unknown>): GeoSpecRuntimeClient =>
+  ({
+    export: vi.fn(),
+    ...runtime,
+  }) as unknown as GeoSpecRuntimeClient;
 
 describe('resolveRuntimeExportIntent', () => {
   it('should request canonical mesh options from route-aware runtimes', () => {
@@ -20,7 +21,7 @@ describe('resolveRuntimeExportIntent', () => {
       })),
     });
 
-    const intent = resolveRuntimeExportIntent({ runtime, format: 'glb', kernel: 'replicad' });
+    const intent = resolveRuntimeExportIntent({ runtime, format: 'glb' });
 
     expect(intent).toEqual({
       options: {
@@ -49,7 +50,7 @@ describe('resolveRuntimeExportIntent', () => {
         },
       },
     });
-    expect(runtime.bestRouteFor).toHaveBeenCalledWith('glb', 'replicad');
+    expect(runtime.bestRouteFor).toHaveBeenCalledWith('glb');
   });
 
   it('should treat custom runtimes without route metadata as canonical millimeter runtimes', () => {
@@ -81,7 +82,7 @@ describe('resolveRuntimeExportIntent', () => {
       export: vi.fn(),
       bestRouteFor: vi.fn(() => undefined),
       routesFor: vi.fn(() => []),
-    } as GeoSpecRuntimeClient & { bestRouteFor: () => undefined; routesFor: () => unknown[] });
+    });
 
     const intent = resolveRuntimeExportIntent({ runtime, format: 'glb' });
 
@@ -119,7 +120,7 @@ describe('resolveRuntimeExportIntent', () => {
       })),
     });
 
-    const intent = resolveRuntimeExportIntent({ runtime, format: 'glb', kernel: 'legacy' });
+    const intent = resolveRuntimeExportIntent({ runtime, format: 'glb' });
 
     expect(intent).toMatchObject({ success: false });
     if (!('success' in intent)) {
@@ -148,7 +149,7 @@ describe('resolveRuntimeExportIntent', () => {
       })),
     });
 
-    const intent = resolveRuntimeExportIntent({ runtime, format: 'step', kernel: 'replicad' });
+    const intent = resolveRuntimeExportIntent({ runtime, format: 'step' });
 
     expect(intent).toMatchObject({ success: false });
     if (!('success' in intent)) {
@@ -157,6 +158,8 @@ describe('resolveRuntimeExportIntent', () => {
     expect(intent.diagnostics[0]).toMatchObject({
       code: 'GEOSPEC_DIRECT_STEP_ROUTE_REQUIRED',
       severity: 'error',
+      suggestion:
+        'Request a runtime export route that preserves exact STEP/BRep evidence, or load mesh evidence with GLB/glTF when exact BRep assertions are not required.',
     });
   });
 
@@ -172,7 +175,7 @@ describe('resolveRuntimeExportIntent', () => {
       })),
     });
 
-    const intent = resolveRuntimeExportIntent({ runtime, format: 'step', kernel: 'opencascade' });
+    const intent = resolveRuntimeExportIntent({ runtime, format: 'step' });
 
     expect(intent).toEqual({
       options: { coordinateSystem: 'z-up' },

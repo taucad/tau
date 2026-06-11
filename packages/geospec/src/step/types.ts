@@ -63,6 +63,23 @@ export type GeoSpecOpenCascadeStepModule = {
 };
 
 /**
+ * Backend-neutral native STEP reader module consumed by {@link loadStep}.
+ *
+ * OpenCascade is the current implementation and provenance source, but callers
+ * can use this option name without coupling tests to that backend identity.
+ *
+ * @public
+ */
+export type GeoSpecNativeStepBackend = GeoSpecOpenCascadeStepModule;
+
+/**
+ * Lazy native STEP backend factory.
+ *
+ * @public
+ */
+export type GeoSpecNativeStepBackendFactory = () => Promise<GeoSpecNativeStepBackend>;
+
+/**
  * Options for loading STEP/XDE/BRep evidence.
  *
  * @public
@@ -76,6 +93,7 @@ export type LoadStepOptions = {
   meshAngularToleranceDegrees?: number;
   maxBytes?: number;
   signal?: AbortSignal;
+  nativeStepBackend?: GeoSpecNativeStepBackend | GeoSpecNativeStepBackendFactory;
   openCascade?: GeoSpecOpenCascadeStepModule | (() => Promise<GeoSpecOpenCascadeStepModule>);
   onProgress?: (event: StepLoadProgressEvent) => void;
   parameters?: Record<string, unknown>;

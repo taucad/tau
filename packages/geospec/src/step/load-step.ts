@@ -9,6 +9,7 @@ import type {
 } from '#mesh/types.js';
 import type {
   CreateStepLoaderOptions,
+  GeoSpecNativeStepBackend,
   GeoSpecNativeStepReadResult,
   GeoSpecOpenCascadeStepModule,
   GeoSpecStepLoader,
@@ -304,14 +305,16 @@ const readNativeStep = async (options: {
   }
 };
 
-const resolveOpenCascade = async (
-  openCascade: LoadStepOptions['openCascade'],
-): Promise<GeoSpecOpenCascadeStepModule | undefined> => {
-  if (typeof openCascade === 'function') {
-    return openCascade();
+const resolveNativeStepBackend = async (options: {
+  nativeStepBackend?: LoadStepOptions['nativeStepBackend'];
+  openCascade?: LoadStepOptions['openCascade'];
+}): Promise<GeoSpecNativeStepBackend | undefined> => {
+  const backend = options.nativeStepBackend ?? options.openCascade;
+  if (typeof backend === 'function') {
+    return backend();
   }
-  if (openCascade) {
-    return openCascade;
+  if (backend) {
+    return backend;
   }
   try {
     const module_ = await import('geospec/native/opencascade/single');
@@ -322,7 +325,7 @@ const resolveOpenCascade = async (
   }
 };
 
-const meshStepCapabilities: GeometryCapability[] = [
+const meshCapabilities: GeometryCapability[] = [
   { kind: 'mesh', feature: 'triangles' },
   { kind: 'mesh', feature: 'bounding-box' },
   { kind: 'mesh', feature: 'connected-components' },
@@ -332,6 +335,9 @@ const meshStepCapabilities: GeometryCapability[] = [
   { kind: 'mesh', feature: 'center-of-mass' },
   { kind: 'mesh', feature: 'distance' },
   { kind: 'mesh', feature: 'component-overlap' },
+];
+
+const stepEvidenceCapabilities: GeometryCapability[] = [
   { kind: 'step', feature: 'schema' },
   { kind: 'step', feature: 'units' },
   { kind: 'step', feature: 'product-structure' },
@@ -352,8 +358,11 @@ const brepCapabilities: GeometryCapability[] = [
   { kind: 'brep', feature: 'wall-thickness' },
 ];
 
-const stepCapabilities = (brep: BrepEvidence | undefined): GeometryCapability[] =>
-  brep ? [...meshStepCapabilities, ...brepCapabilities] : [...meshStepCapabilities];
+const stepCapabilities = (options: { brep: BrepEvidence | undefined; hasMesh: boolean }): GeometryCapability[] => [
+  ...(options.hasMesh ? meshCapabilities : []),
+  ...stepEvidenceCapabilities,
+  ...(options.brep ? brepCapabilities : []),
+];
 
 const axisIndices = { x: 0, y: 1, z: 2 } as const;
 
@@ -481,6 +490,7 @@ const buildStepSubject = async (options: {
 }): Promise<GeometrySubject> => {
   const unit = options.loadOptions.unit ?? 'mm';
   const triangles = options.payload.triangles ?? [];
+  const hasMesh = triangles.length > 0;
   const meshBuffer = trianglesToMeshBuffer(triangles);
   const meshResult = await loadMesh({
     source: {
@@ -496,6 +506,7 @@ const buildStepSubject = async (options: {
     throw new Error(meshResult.diagnostics.map((diagnostic) => diagnostic.message).join('\n'));
   }
   const brep = normalizeBrepEvidence(options.payload.brep);
+  const payloadStepCapabilities = options.payload.step?.capabilities ?? [];
   const step: StepEvidence = {
     schema: extractStepSchema(options.bytes.text),
     unit,
@@ -506,17 +517,13 @@ const buildStepSubject = async (options: {
       {
         feature: 'color',
         supported: Boolean(
-          options.payload.step?.capabilities.some(
-            (capability) => capability.feature === 'color' && capability.supported,
-          ),
+          payloadStepCapabilities.some((capability) => capability.feature === 'color' && capability.supported),
         ),
       },
       {
         feature: 'material',
         supported: Boolean(
-          options.payload.step?.capabilities.some(
-            (capability) => capability.feature === 'material' && capability.supported,
-          ),
+          payloadStepCapabilities.some((capability) => capability.feature === 'material' && capability.supported),
         ),
       },
       {
@@ -537,7 +544,7 @@ const buildStepSubject = async (options: {
       contentHash: await hashBytes(options.bytes.bytes),
       parameters: options.loadOptions.parameters,
     },
-    capabilities: stepCapabilities(brep),
+    capabilities: stepCapabilities({ brep, hasMesh }),
     diagnostics: [...(options.payload.diagnostics ?? [])],
   };
 };
@@ -553,11 +560,14 @@ export const loadStep = async (options: LoadStepOptions): Promise<GeometrySubjec
   options.onProgress?.({ phase: 'read-source', bytesRead: 0 });
   const bytes = await readStepSource(options);
   options.onProgress?.({ phase: 'parse-step', bytesRead: bytes.bytes.byteLength });
-  const module = await resolveOpenCascade(options.openCascade);
+  const module = await resolveNativeStepBackend({
+    nativeStepBackend: options.nativeStepBackend,
+    openCascade: options.openCascade,
+  });
   const native = module ? await readNativeStep({ bytes, loadOptions: options, module }) : undefined;
   if (!native) {
     throw new Error(
-      'GeoSpec OpenCascade STEP reader is unavailable. Use geospec/native/opencascade/single or pass an openCascade module with GeoSpecStepStreamReader.',
+      'GeoSpec native STEP reader is unavailable. Use geospec/native/opencascade/single or pass a nativeStepBackend module with GeoSpecStepStreamReader.',
     );
   }
   options.onProgress?.({ phase: 'mesh-brep', bytesRead: bytes.bytes.byteLength });
@@ -574,4 +584,9 @@ export const loadStep = async (options: LoadStepOptions): Promise<GeometrySubjec
 export const createStepLoader =
   (defaults: CreateStepLoaderOptions = {}): GeoSpecStepLoader =>
   async (options: LoadStepOptions): Promise<GeometrySubject> =>
-    loadStep({ ...defaults, ...options, openCascade: options.openCascade ?? defaults.openCascade });
+    loadStep({
+      ...defaults,
+      ...options,
+      nativeStepBackend: options.nativeStepBackend ?? defaults.nativeStepBackend,
+      openCascade: options.openCascade ?? defaults.openCascade,
+    });

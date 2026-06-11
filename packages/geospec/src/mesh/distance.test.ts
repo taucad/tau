@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeChamferDistance } from '#mesh/distance.js';
-import { createOpenCascadeMeshAnalyzer } from '#mesh/native.js';
+import { createOpenCascadeMeshBackend } from '#mesh/native.js';
 import type { MeshTriangle } from '#mesh/types.js';
 import type { GeoSpecOpenCascadeMeshModule } from '#mesh/native.js';
 
@@ -15,12 +15,13 @@ const triangle = (x = 0): MeshTriangle => ({
 });
 
 describe('mesh distance analysis', () => {
-  it('should fail with a diagnostic when the JavaScript fallback exceeds its pair budget', () => {
-    const result = analyzeChamferDistance({
+  it('should fail with a diagnostic when the native sampling budget is exceeded', async () => {
+    const result = await analyzeChamferDistance({
       actual: [triangle(0), triangle(2)],
       expected: [triangle(10), triangle(12)],
       samples: 8,
-      maxNaiveTrianglePairs: 4,
+      maxDistanceSamples: 4,
+      resolveDefaultBackend: false,
     });
 
     expect(result.success).toBe(false);
@@ -31,25 +32,40 @@ describe('mesh distance analysis', () => {
       code: 'GEOSPEC_DISTANCE_BUDGET_EXCEEDED',
       severity: 'error',
       details: {
-        estimatedTrianglePairs: 16,
-        maxNaiveTrianglePairs: 4,
-        nativeAvailable: false,
+        requestedSamples: 8,
+        maxDistanceSamples: 4,
       },
     });
     const suggestion = result.diagnostics[0]?.suggestion ?? '';
     expect(suggestion).not.toMatch(/simpler|simplify/i);
-    const normalizedSuggestion = suggestion.toLowerCase();
-    expect(normalizedSuggestion).toContain('native geospec opencascade c++ metrics analyzer');
-    expect(normalizedSuggestion).toContain('test precision budget');
+    expect(suggestion.toLowerCase()).toContain('test precision budget');
   });
 
-  it('should use a native analyzer when one is provided for a pair-budgeted case', () => {
-    const result = analyzeChamferDistance({
+  it('should fail explicitly when native distance analysis is unavailable', async () => {
+    const result = await analyzeChamferDistance({
+      actual: [triangle(0)],
+      expected: [triangle(2)],
+      samples: 4,
+      resolveDefaultBackend: false,
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      diagnostics: [
+        {
+          code: 'GEOSPEC_NATIVE_DISTANCE_UNAVAILABLE',
+          severity: 'error',
+        },
+      ],
+    });
+  });
+
+  it('should use a native analyzer when one is provided', async () => {
+    const result = await analyzeChamferDistance({
       actual: [triangle(0), triangle(2)],
       expected: [triangle(10), triangle(12)],
       samples: 8,
-      maxNaiveTrianglePairs: 4,
-      nativeAnalyzer: {
+      backend: {
         analyzeChamferDistance(options) {
           expect(options.actual.triangleCount).toBe(2);
           expect(options.expected.triangleCount).toBe(2);
@@ -65,14 +81,24 @@ describe('mesh distance analysis', () => {
     });
   });
 
-  it('should report exactly the requested JavaScript fallback sample count', () => {
-    for (const samples of [1, 2, 3, 5, 11]) {
-      const result = analyzeChamferDistance({
-        actual: [triangle(0), triangle(1)],
-        expected: [triangle(0), triangle(1)],
-        samples,
-      });
+  it('should report exactly the requested native sample count', async () => {
+    const results = await Promise.all(
+      [1, 2, 3, 5, 11].map(async (samples) => {
+        const result = await analyzeChamferDistance({
+          actual: [triangle(0), triangle(1)],
+          expected: [triangle(0), triangle(1)],
+          samples,
+          backend: {
+            analyzeChamferDistance(options) {
+              return { min: 0, mean: 0, max: 0, p50: 0, p95: 0, p99: 0, rms: 0, samples: options.samples };
+            },
+          },
+        });
+        return { result, samples };
+      }),
+    );
 
+    for (const { result, samples } of results) {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.stats.samples).toBe(samples);
@@ -95,7 +121,6 @@ describe('mesh distance analysis', () => {
       freedPointers.push(pointer);
     };
     module.HEAPF64 = heap;
-    module.HEAP32 = new Int32Array(heap.buffer);
     module.GeoSpecMeshMetrics = {
       chamferDistanceFromTrianglePointers(...args) {
         const [actualPointer, actualTriangleCount, expectedPointer, expectedTriangleCount, samples] = args;
@@ -122,13 +147,10 @@ describe('mesh distance analysis', () => {
           },
         };
       },
-      componentOverlapFromTrianglePointers() {
-        throw new Error('native overlap should not be called for distance analysis');
-      },
     };
 
-    const analyzer = createOpenCascadeMeshAnalyzer(module);
-    const stats = analyzer.analyzeChamferDistance?.({
+    const backend = createOpenCascadeMeshBackend(module);
+    const stats = backend.analyzeChamferDistance({
       actual: { triangles: new Float64Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), triangleCount: 1 },
       expected: { triangles: new Float64Array([2, 0, 0, 3, 0, 0, 2, 1, 0]), triangleCount: 1 },
       samples: 4,
@@ -157,94 +179,20 @@ describe('mesh distance analysis', () => {
     };
     module._free = () => undefined;
     module.HEAPF64 = new Float64Array(64);
-    module.HEAP32 = new Int32Array(module.HEAPF64.buffer);
     module.GeoSpecMeshMetrics = {
       chamferDistanceFromTrianglePointers() {
         throw new Error('native distance should not be called for invalid triangle buffers');
       },
-      componentOverlapFromTrianglePointers() {
-        throw new Error('native overlap should not be called for invalid triangle buffers');
-      },
     };
 
-    const analyzer = createOpenCascadeMeshAnalyzer(module);
+    const backend = createOpenCascadeMeshBackend(module);
 
     expect(() =>
-      analyzer.analyzeChamferDistance?.({
+      backend.analyzeChamferDistance({
         actual: { triangles: new Float64Array([0, 0, 0]), triangleCount: 1 },
         expected: { triangles: new Float64Array(9), triangleCount: 1 },
         samples: 1,
       }),
     ).toThrow('actual.triangles length (3) must equal triangleCount * 9 (9).');
-  });
-
-  it('should adapt OpenCascade.js component buffers into native overlap analysis', () => {
-    const heap = new Float64Array(128);
-    const heap32 = new Int32Array(heap.buffer);
-    const freedPointers: number[] = [];
-    let deletedResult = false;
-    let nextPointer = 0;
-    const module = Object.create(null) as GeoSpecOpenCascadeMeshModule;
-    module._malloc = (bytes: number): number => {
-      const pointer = nextPointer;
-      nextPointer += bytes;
-      return pointer;
-    };
-    module._free = (pointer: number): void => {
-      freedPointers.push(pointer);
-    };
-    module.HEAPF64 = heap;
-    module.HEAP32 = heap32;
-    module.GeoSpecMeshMetrics = {
-      chamferDistanceFromTrianglePointers() {
-        throw new Error('native distance should not be called for overlap analysis');
-      },
-      componentOverlapFromTrianglePointers(...args) {
-        const [trianglePointer, triangleCount, componentIdPointer, componentCount, tolerance] = args;
-        expect(triangleCount).toBe(2);
-        expect(componentCount).toBe(2);
-        expect(tolerance).toBe(0.1);
-        expect(heap.slice(trianglePointer / 8, trianglePointer / 8 + 18)).toEqual(
-          new Float64Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 2, 1, 0]),
-        );
-        expect(heap32.slice(componentIdPointer / 4, componentIdPointer / 4 + 2)).toEqual(new Int32Array([0, 1]));
-        return {
-          success: true,
-          evidenceJson: () =>
-            JSON.stringify({
-              success: true,
-              componentCount: 2,
-              checkedPairs: 1,
-              overlaps: [{ leftComponentId: 0, rightComponentId: 1, intersectionVolume: 2 }],
-            }),
-          delete() {
-            deletedResult = true;
-          },
-        };
-      },
-    };
-
-    const analyzer = createOpenCascadeMeshAnalyzer(module);
-    const result = analyzer.analyzeMeshOverlap?.({
-      subject: {
-        triangles: new Float64Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 2, 1, 0]),
-        triangleCount: 2,
-      },
-      componentIds: new Int32Array([0, 1]),
-      components: [
-        { id: 0, label: 'left', triangleCount: 1 },
-        { id: 1, label: 'right', triangleCount: 1 },
-      ],
-      tolerance: 0.1,
-    });
-
-    expect(result).toEqual({
-      success: true,
-      componentCount: 2,
-      checkedPairs: 1,
-      overlaps: [{ leftComponentId: 0, rightComponentId: 1, intersectionVolume: 2 }],
-    });
-    expect(deletedResult).toBe(true);
-    expect(freedPointers).toEqual([144, 0]);
   });
 });

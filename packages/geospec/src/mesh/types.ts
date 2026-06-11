@@ -1,3 +1,5 @@
+import type { KernelIssueCode } from '@taucad/runtime/types';
+
 /**
  * Numeric 3D vector.
  *
@@ -141,7 +143,7 @@ export type GeometryCapability =
  * @public
  */
 export type GeometryDiagnostic = {
-  code: string;
+  code: KernelIssueCode | (string & {});
   severity: 'error' | 'warning' | 'info';
   message: string;
   suggestion?: string;

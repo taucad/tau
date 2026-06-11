@@ -5,22 +5,24 @@ import type {
   GeometryExportIntent,
   GeometrySubject,
   MeshFileFormat,
+  Vec3,
 } from '#mesh/types.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
 import { resolveRuntimeExportIntent } from '#model/export-intent.js';
+import type { RuntimeBackedModelFormat } from '#model/export-intent.js';
+import { resolveRuntimeForModelLoad } from '#model/runtime.js';
 import { loadStep } from '#step/load-step.js';
 import type { StepSource } from '#step/types.js';
 import type {
   CreateModelLoaderOptions,
   GeoSpecModelFormat,
   GeoSpecModelLoader,
-  GeoSpecRuntimeClient,
   LoadModelCodeOptions,
   LoadModelFileOptions,
   LoadModelOptions,
   LoadModelSourceOptions,
 } from '#model/types.js';
-import type { KernelPlugin } from '@taucad/runtime';
+import type { KernelIssue } from '@taucad/runtime/types';
 
 type ModelLoadSuccess = {
   success: true;
@@ -35,22 +37,14 @@ type ModelLoadFailure = {
 
 type ModelLoadResult = ModelLoadSuccess | ModelLoadFailure;
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
 const isSourceOptions = (options: LoadModelOptions): options is LoadModelSourceOptions => 'source' in options;
 
 const isCodeOptions = (options: LoadModelOptions): options is LoadModelCodeOptions => 'code' in options;
 
 const meshFormats = new Set<GeoSpecModelFormat>(['glb', 'gltf', 'mesh-buffer']);
 const stepFormats = new Set<GeoSpecModelFormat>(['step', 'stp']);
-const openscadExtensions = new Set(['scad']);
-const optionalOpenScadPackage = '@taucad/openscad';
-
-const getFileExtension = (file: string | undefined): string | undefined => {
-  const match = file?.toLowerCase().match(/\.([a-z0-9]+)$/u);
-  return match?.[1];
-};
-
-const requiresOpenScadRuntime = (options: { file?: string; kernel?: LoadModelCodeOptions['kernel'] }): boolean =>
-  options.kernel === 'openscad' || openscadExtensions.has(getFileExtension(options.file) ?? '');
 
 const unsupportedFormat = (format: GeoSpecModelFormat): ModelLoadFailure => ({
   success: false,
@@ -75,90 +69,6 @@ const stepLoadFailure = (error: unknown): ModelLoadFailure => ({
     },
   ],
 });
-
-type OpenScadModule = {
-  openscad?: unknown;
-};
-
-function resolveOpenScadFactory(module: OpenScadModule): () => KernelPlugin {
-  if (typeof module.openscad !== 'function') {
-    throw new TypeError('Expected @taucad/openscad to export an openscad() kernel factory.');
-  }
-
-  return module.openscad as () => KernelPlugin;
-}
-
-const resolveRuntime = async (options: {
-  runtime?: GeoSpecRuntimeClient | (() => Promise<GeoSpecRuntimeClient>);
-  projectPath?: string;
-  file?: string;
-  kernel?: LoadModelCodeOptions['kernel'];
-}): Promise<{ runtime: GeoSpecRuntimeClient; ownsRuntime: boolean } | ModelLoadFailure> => {
-  try {
-    if (typeof options.runtime === 'function') {
-      return { runtime: await options.runtime(), ownsRuntime: false };
-    }
-    if (options.runtime) {
-      return { runtime: options.runtime, ownsRuntime: false };
-    }
-
-    const runtimeModule = await import('@taucad/runtime/node');
-    if (requiresOpenScadRuntime({ file: options.file, kernel: options.kernel })) {
-      try {
-        const [{ presets }, { defineRuntime }, openScadModule] = await Promise.all([
-          import('@taucad/runtime/presets'),
-          import('@taucad/runtime/worker'),
-          import(optionalOpenScadPackage) as Promise<OpenScadModule>,
-        ]);
-        const baseRuntime = presets.all();
-        const openscad = resolveOpenScadFactory(openScadModule);
-        const runtime = defineRuntime({
-          ...baseRuntime,
-          kernels: [openscad(), ...baseRuntime.kernels],
-        });
-        return {
-          runtime: await runtimeModule.createNodeClient(options.projectPath, { runtime }),
-          ownsRuntime: true,
-        };
-      } catch (error) {
-        return {
-          success: false,
-          diagnostics: [
-            {
-              code: 'OPENSCAD_KERNEL_UNAVAILABLE',
-              severity: 'error',
-              message:
-                'GeoSpec cannot load OpenSCAD models because the optional @taucad/openscad kernel is unavailable.',
-              suggestion:
-                'Install @taucad/openscad or pass a Tau runtime client configured with openscad() when testing .scad files.',
-              details: error,
-            },
-          ],
-        };
-      }
-    }
-
-    return {
-      runtime: await runtimeModule.createNodeClient(options.projectPath),
-      ownsRuntime: true,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      diagnostics: [
-        {
-          code: 'RUNTIME_UNAVAILABLE',
-          severity: 'error',
-          message: error instanceof Error ? error.message : String(error),
-          suggestion: options.runtime
-            ? 'Check the runtime factory passed to geospec/model and retry with a working runtime client.'
-            : 'Install @taucad/runtime or pass an explicit runtime client when using geospec/model outside the Tau Node runner.',
-          details: error,
-        },
-      ],
-    };
-  }
-};
 
 const getParameters = (options: LoadModelOptions): Record<string, unknown> | undefined =>
   options.parameters ?? ('parameterSource' in options ? options.parameterSource?.values : undefined);
@@ -192,6 +102,99 @@ const validateRuntimeBackedOptions = (
   };
 };
 
+const runtimeExportFailureSuggestion =
+  'Inspect the runtime export diagnostics, kernel import/export support, and model code identified by those diagnostics.';
+
+const errorDetails = (error: unknown): unknown =>
+  error instanceof Error
+    ? {
+        name: error.name,
+        message: error.message,
+      }
+    : error;
+
+const vec3FromUnknown = (value: unknown): Vec3 | undefined => {
+  if (
+    !Array.isArray(value) ||
+    value.length < 3 ||
+    typeof value[0] !== 'number' ||
+    typeof value[1] !== 'number' ||
+    typeof value[2] !== 'number'
+  ) {
+    return undefined;
+  }
+  return [value[0], value[1], value[2]];
+};
+
+const runtimeIssueGeometryDetails = (issue: KernelIssue): Record<string, unknown> | undefined => {
+  if (!isRecord(issue.details)) {
+    return undefined;
+  }
+  return isRecord(issue.details['geometry']) ? issue.details['geometry'] : undefined;
+};
+
+const runtimeIssueSpatial = (issue: KernelIssue): GeometryDiagnostic['spatial'] | undefined => {
+  const geometry = runtimeIssueGeometryDetails(issue);
+  if (!geometry || !isRecord(geometry['topology'])) {
+    return undefined;
+  }
+  const { topology } = geometry;
+  if (!isRecord(topology['aabb'])) {
+    return undefined;
+  }
+  const { min, max, center } = topology['aabb'];
+  const minVector = vec3FromUnknown(min);
+  const maxVector = vec3FromUnknown(max);
+  const centerVector = vec3FromUnknown(center);
+  if (minVector && maxVector && centerVector) {
+    return {
+      min: minVector,
+      max: maxVector,
+      center: centerVector,
+    };
+  }
+  return undefined;
+};
+
+const runtimeIssueFacet = (issue: KernelIssue): Record<string, unknown> | undefined => {
+  const geometry = runtimeIssueGeometryDetails(issue);
+  if (issue.code === 'GEOMETRY_INVALID') {
+    return {
+      kind: 'source-validity',
+      valid: false,
+      partName: typeof geometry?.['partName'] === 'string' ? geometry['partName'] : undefined,
+      partIndex: typeof geometry?.['partIndex'] === 'number' ? geometry['partIndex'] : undefined,
+      topology: geometry?.['topology'],
+      hints: geometry?.['hints'],
+    };
+  }
+  return undefined;
+};
+
+const runtimeIssueDiagnostics = (options: {
+  issues: readonly KernelIssue[] | undefined;
+  file?: string;
+  format: GeoSpecModelFormat;
+}): GeometryDiagnostic[] =>
+  (options.issues ?? []).map((issue, issueIndex) => {
+    const spatial = runtimeIssueSpatial(issue);
+    const facet = runtimeIssueFacet(issue);
+    return {
+      code: issue.code,
+      severity: issue.severity,
+      message: issue.message,
+      suggestion: runtimeExportFailureSuggestion,
+      ...(spatial ? { spatial } : {}),
+      details: {
+        file: options.file,
+        format: options.format,
+        issueIndex,
+        ...(facet ? { facet } : {}),
+        issue,
+      },
+    };
+  });
+
 const exportWithRuntime = async (
   options: LoadModelCodeOptions | LoadModelFileOptions,
 ): Promise<
@@ -201,22 +204,27 @@ const exportWithRuntime = async (
       name?: string;
       sourceUnit: GeoSpecUnit;
       exportIntent: GeometryExportIntent;
+      diagnostics: GeometryDiagnostic[];
     }
   | ModelLoadFailure
 > => {
-  const runtimeResult = await resolveRuntime({
+  const runtimeResult = await resolveRuntimeForModelLoad({
     runtime: options.runtime,
+    sourceAdapters: options.sourceAdapters,
     projectPath: options.projectPath,
     file: options.file,
-    kernel: isCodeOptions(options) ? options.kernel : undefined,
   });
-  if ('success' in runtimeResult) {
+  if (!runtimeResult.success) {
     return runtimeResult;
   }
 
   const format = options.format ?? 'glb';
+  if (format === 'mesh-buffer') {
+    return unsupportedFormat(format);
+  }
+  const runtimeFormat = format satisfies RuntimeBackedModelFormat;
   try {
-    await runtimeResult.runtime.connect?.();
+    await runtimeResult.runtime.connect();
   } catch (error) {
     return {
       success: false,
@@ -234,8 +242,7 @@ const exportWithRuntime = async (
 
   const exportIntent = resolveRuntimeExportIntent({
     runtime: runtimeResult.runtime,
-    format,
-    kernel: isCodeOptions(options) ? options.kernel : undefined,
+    format: runtimeFormat,
   });
   if ('success' in exportIntent) {
     return exportIntent;
@@ -248,8 +255,8 @@ const exportWithRuntime = async (
     : { file: options.file, parameters, ...exportOptions };
 
   try {
-    const exported = await runtimeResult.runtime.export(format, input);
-    if (!exported.success || !exported.data) {
+    const exported = await runtimeResult.runtime.export(runtimeFormat, input);
+    if (!exported.success) {
       return {
         success: false,
         diagnostics: [
@@ -257,9 +264,12 @@ const exportWithRuntime = async (
             code: 'MODEL_EXPORT_FAILED',
             severity: 'error',
             message: 'Tau runtime did not produce geometry bytes for this model.',
-            suggestion:
-              'Check that the selected file exports top-level geometry and that the requested export format is supported.',
-            details: exported.issues,
+            suggestion: runtimeExportFailureSuggestion,
+            details: {
+              file: options.file,
+              format,
+              issues: exported.issues,
+            },
           },
         ],
       };
@@ -270,6 +280,11 @@ const exportWithRuntime = async (
       name: exported.data.name,
       sourceUnit: exportIntent.sourceUnit,
       exportIntent: exportIntent.provenance,
+      diagnostics: runtimeIssueDiagnostics({
+        issues: exported.issues,
+        file: options.file,
+        format,
+      }),
     };
   } catch (error) {
     return {
@@ -279,13 +294,18 @@ const exportWithRuntime = async (
           code: 'MODEL_EXPORT_FAILED',
           severity: 'error',
           message: error instanceof Error ? error.message : String(error),
-          suggestion: 'Check model code, parameters, kernel availability, and runtime export support.',
+          suggestion: runtimeExportFailureSuggestion,
+          details: {
+            file: options.file,
+            format,
+            error: errorDetails(error),
+          },
         },
       ],
     };
   } finally {
     if (runtimeResult.ownsRuntime) {
-      runtimeResult.runtime.terminate?.();
+      runtimeResult.runtime.terminate();
     }
   }
 };
@@ -308,6 +328,7 @@ const loadModelResult = async <Code extends Record<string, string> = Record<stri
           parameters,
           path: options.path,
           name: options.name,
+          nativeStepBackend: options.nativeStepBackend,
           openCascade: options.openCascade,
           streaming: options.stepStreaming,
           mesh: options.mesh,
@@ -347,6 +368,7 @@ const loadModelResult = async <Code extends Record<string, string> = Record<stri
         unit: 'mm',
         parameters,
         name: exported.name ?? options.file,
+        nativeStepBackend: options.nativeStepBackend,
         openCascade: options.openCascade,
         streaming: options.stepStreaming,
         mesh: options.mesh,
@@ -357,6 +379,7 @@ const loadModelResult = async <Code extends Record<string, string> = Record<stri
         success: true,
         subject: {
           ...subject,
+          diagnostics: [...subject.diagnostics, ...exported.diagnostics],
           provenance: {
             ...subject.provenance,
             exportIntent: exported.exportIntent,
@@ -382,6 +405,7 @@ const loadModelResult = async <Code extends Record<string, string> = Record<stri
         success: true,
         subject: {
           ...loaded.subject,
+          diagnostics: [...loaded.subject.diagnostics, ...exported.diagnostics],
           provenance: {
             ...loaded.subject.provenance,
             exportIntent: exported.exportIntent,
@@ -396,7 +420,7 @@ const loadModelResult = async <Code extends Record<string, string> = Record<stri
  * Load a CAD model into GeoSpec evidence.
  *
  * Direct geometry sources are parsed immediately. Code and project files are
- * exported through the optional `@taucad/runtime` integration on this subpath.
+ * exported through the required `@taucad/runtime` integration on this subpath.
  *
  * @param options - Source, code, or file model load options.
  * @returns A GeoSpec geometry subject ready for `expectGeo`.
@@ -429,5 +453,7 @@ export const createModelLoader =
       ...defaults,
       ...options,
       runtime: 'runtime' in options ? options.runtime : defaults.runtime,
+      sourceAdapters: 'sourceAdapters' in options ? options.sourceAdapters : defaults.sourceAdapters,
       projectPath: 'projectPath' in options ? options.projectPath : defaults.projectPath,
+      nativeStepBackend: 'nativeStepBackend' in options ? options.nativeStepBackend : defaults.nativeStepBackend,
     } as LoadModelOptions<Code>);

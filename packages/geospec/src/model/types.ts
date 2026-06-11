@@ -1,6 +1,13 @@
 import type { GeometrySubject, GeoSpecUnit, MeshFileFormat } from '#mesh/types.js';
 import type { MeshSource } from '#mesh/load-mesh.js';
-import type { GeoSpecOpenCascadeStepModule, StepSource, StepStreamingMode } from '#step/types.js';
+import type {
+  GeoSpecNativeStepBackend,
+  GeoSpecNativeStepBackendFactory,
+  GeoSpecOpenCascadeStepModule,
+  StepSource,
+  StepStreamingMode,
+} from '#step/types.js';
+import type { RuntimeClient } from '@taucad/runtime/client';
 
 /**
  * Geometry formats accepted by {@link import('./load-model.js').loadModel}.
@@ -10,41 +17,32 @@ import type { GeoSpecOpenCascadeStepModule, StepSource, StepStreamingMode } from
 export type GeoSpecModelFormat = MeshFileFormat | 'step' | 'stp';
 
 /**
- * Minimal runtime client shape consumed by `geospec/model`.
+ * Runtime client consumed by `geospec/model`.
+ *
+ * GeoSpec is built on `@taucad/runtime`; this alias intentionally preserves the
+ * runtime client contract instead of maintaining a parallel structural copy.
  *
  * @public
  */
-export type GeoSpecRuntimeClient = {
-  /**
-   * Connect the runtime and populate capabilities before route metadata is read.
-   *
-   * Custom runtime clients may omit this when they already return canonical
-   * Z-up millimeter geometry bytes from `export`.
-   */
-  connect?(): Promise<void>;
-  /**
-   * Export a rendered model to geometry bytes.
-   *
-   * @param format - Output geometry format such as `glb`.
-   * @param input - Runtime model export input.
-   * @returns Runtime export result with geometry bytes on success.
-   */
-  export(
-    format: string,
-    input: unknown,
-  ): Promise<{
-    success: boolean;
-    data?: {
-      bytes: Uint8Array<ArrayBuffer>;
-      name?: string;
-      mimeType?: string;
-    };
-    issues?: unknown[];
-  }>;
-  /**
-   * Release runtime resources when this loader owns the runtime client.
-   */
-  terminate?(): void;
+export type GeoSpecRuntimeClient = RuntimeClient;
+
+/**
+ * Lazy runtime factory consumed by `geospec/model`.
+ *
+ * @public
+ */
+export type GeoSpecRuntimeClientFactory = () => Promise<GeoSpecRuntimeClient>;
+
+/**
+ * Explicit source adapter for formats whose runtime setup is not part of the
+ * generic Tau runtime preset.
+ *
+ * @public
+ */
+export type GeoSpecRuntimeSourceAdapter = {
+  id: string;
+  extensions: readonly string[];
+  createRuntime(options: { projectPath?: string; file?: string }): Promise<GeoSpecRuntimeClient>;
 };
 
 /**
@@ -139,6 +137,8 @@ export type LoadModelSourceOptions = {
   meshLinearTolerance?: number;
   /** Angular tolerance in degrees used while meshing exact BRep evidence. */
   meshAngularToleranceDegrees?: number;
+  /** Backend-neutral native STEP reader module or factory. */
+  nativeStepBackend?: GeoSpecNativeStepBackend | GeoSpecNativeStepBackendFactory;
 };
 
 /**
@@ -151,8 +151,6 @@ export type LoadModelCodeOptions<Code extends Record<string, string> = Record<st
   code: Code;
   /** Entry file to render from {@link code}. */
   file: keyof Code & string;
-  /** CAD kernel hint used by runtime integrations that support explicit kernel selection. */
-  kernel?: 'replicad' | 'opencascade' | 'jscad' | 'manifold' | 'openscad' | 'kcl' | 'auto' | (string & {});
   /** Geometry format to export. Defaults to `glb`. */
   format?: GeoSpecModelFormat;
   /** Explicit parameters passed to the runtime. */
@@ -160,7 +158,9 @@ export type LoadModelCodeOptions<Code extends Record<string, string> = Record<st
   /** Parameter group provenance used when `parameters` is omitted. */
   parameterSource?: GeoSpecParameterGroup;
   /** Runtime client or lazy runtime factory. */
-  runtime?: GeoSpecRuntimeClient | (() => Promise<GeoSpecRuntimeClient>);
+  runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
+  /** Source-specific runtime adapters, e.g. host-provided GPL-isolated kernels. */
+  sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
   /** Project root used by runtime integrations. */
   projectPath?: string;
   /** OpenCascade.js module or factory used when loading STEP/BRep evidence. */
@@ -173,6 +173,8 @@ export type LoadModelCodeOptions<Code extends Record<string, string> = Record<st
   meshLinearTolerance?: number;
   /** Angular tolerance in degrees used while meshing exact BRep evidence. */
   meshAngularToleranceDegrees?: number;
+  /** Backend-neutral native STEP reader module or factory. */
+  nativeStepBackend?: GeoSpecNativeStepBackend | GeoSpecNativeStepBackendFactory;
 };
 
 /**
@@ -192,7 +194,9 @@ export type LoadModelFileOptions = {
   /** Parameter group provenance used when `parameters` is omitted. */
   parameterSource?: GeoSpecParameterGroup;
   /** Runtime client or lazy runtime factory. */
-  runtime?: GeoSpecRuntimeClient | (() => Promise<GeoSpecRuntimeClient>);
+  runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
+  /** Source-specific runtime adapters, e.g. host-provided GPL-isolated kernels. */
+  sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
   /** OpenCascade.js module or factory used when loading STEP/BRep evidence. */
   openCascade?: GeoSpecOpenCascadeStepModule | (() => Promise<GeoSpecOpenCascadeStepModule>);
   /** STEP reader strategy used for STEP exports. */
@@ -203,6 +207,8 @@ export type LoadModelFileOptions = {
   meshLinearTolerance?: number;
   /** Angular tolerance in degrees used while meshing exact BRep evidence. */
   meshAngularToleranceDegrees?: number;
+  /** Backend-neutral native STEP reader module or factory. */
+  nativeStepBackend?: GeoSpecNativeStepBackend | GeoSpecNativeStepBackendFactory;
 };
 
 /**
@@ -234,7 +240,9 @@ export type CreateModelLoaderOptions = {
   /** Geometry format to export when an individual call does not specify one. */
   format?: GeoSpecModelFormat;
   /** Runtime client or lazy runtime factory. */
-  runtime?: GeoSpecRuntimeClient | (() => Promise<GeoSpecRuntimeClient>);
+  runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
+  /** Source-specific runtime adapters, e.g. host-provided GPL-isolated kernels. */
+  sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
   /** Project root used by runtime integrations. */
   projectPath?: string;
   /** OpenCascade.js module or factory used when loading STEP/BRep evidence. */
@@ -247,4 +255,6 @@ export type CreateModelLoaderOptions = {
   meshLinearTolerance?: number;
   /** Angular tolerance in degrees used while meshing exact BRep evidence. */
   meshAngularToleranceDegrees?: number;
+  /** Backend-neutral native STEP reader module or factory. */
+  nativeStepBackend?: GeoSpecNativeStepBackend | GeoSpecNativeStepBackendFactory;
 };

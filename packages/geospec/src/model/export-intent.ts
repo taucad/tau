@@ -1,8 +1,11 @@
 import type { GeoSpecUnit, GeometryDiagnostic, GeometryExportIntent } from '#mesh/types.js';
 import type { GeoSpecModelFormat, GeoSpecRuntimeClient } from '#model/types.js';
+import type { ExportRoute } from '@taucad/runtime/types';
 
-/** Minimal route metadata needed to decide whether a runtime export can honor GeoSpec evidence requirements. */
-export type GeoSpecExportRoute = {
+export type RuntimeBackedModelFormat = Exclude<GeoSpecModelFormat, 'mesh-buffer'>;
+
+/** Runtime route metadata used to decide whether a runtime export can honor GeoSpec evidence requirements. */
+export type GeoSpecExportRoute = Partial<ExportRoute> & {
   kernelId?: string;
   sourceFormat?: string;
   targetFormat?: string;
@@ -37,7 +40,7 @@ const stepFormats = new Set<GeoSpecModelFormat>(['step', 'stp']);
 const hasRuntimeRoutes = (runtime: GeoSpecRuntimeClient): runtime is RuntimeClientWithRoutes =>
   typeof (runtime as { bestRouteFor?: unknown }).bestRouteFor === 'function';
 
-const hasAnyRouteMetadata = (runtime: GeoSpecRuntimeClient, format: GeoSpecModelFormat): boolean => {
+const hasAnyRouteMetadata = (runtime: GeoSpecRuntimeClient, format: RuntimeBackedModelFormat): boolean => {
   const { capabilities } = runtime as { capabilities?: { routes?: readonly unknown[] } };
   if ((capabilities?.routes?.length ?? 0) > 0) {
     return true;
@@ -52,14 +55,14 @@ const hasSchemaProperty = (route: GeoSpecExportRoute | undefined, property: stri
 
 const isDirectRoute = (route: GeoSpecExportRoute): boolean => route.transcoderId === undefined;
 
-const requestedMeshIntent = (format: GeoSpecModelFormat): GeometryExportIntent['requested'] => ({
+const requestedMeshIntent = (format: RuntimeBackedModelFormat): GeometryExportIntent['requested'] => ({
   format: format as GeometryExportIntent['requested']['format'],
   coordinateSystem: 'z-up',
   unit: { length: 'millimeter' },
 });
 
 const canonicalMeshIntent = (options: {
-  format: GeoSpecModelFormat;
+  format: RuntimeBackedModelFormat;
   exportOptions: Record<string, unknown>;
 }): RuntimeExportIntent => {
   const requested = requestedMeshIntent(options.format);
@@ -91,7 +94,7 @@ const routeToProvenance = (route: GeoSpecExportRoute | undefined): GeometryExpor
     : undefined;
 
 const canonicalUnsupported = (options: {
-  format: GeoSpecModelFormat;
+  format: RuntimeBackedModelFormat;
   route?: GeoSpecExportRoute;
   missing: string[];
 }): RuntimeExportIntentFailure => ({
@@ -114,14 +117,11 @@ const canonicalUnsupported = (options: {
 
 export const resolveRuntimeExportIntent = (options: {
   runtime: GeoSpecRuntimeClient;
-  format: GeoSpecModelFormat;
-  kernel?: string;
+  format: RuntimeBackedModelFormat;
 }): RuntimeExportIntent | RuntimeExportIntentFailure => {
   const { runtime, format } = options;
   const routeAware = hasRuntimeRoutes(runtime);
-  const route = routeAware
-    ? runtime.bestRouteFor(format, options.kernel && options.kernel !== 'auto' ? options.kernel : undefined)
-    : undefined;
+  const route = routeAware ? runtime.bestRouteFor(format) : undefined;
 
   if (stepFormats.has(format)) {
     if (route && (!isDirectRoute(route) || route.fidelity !== 'brep')) {
@@ -132,7 +132,8 @@ export const resolveRuntimeExportIntent = (options: {
             code: 'GEOSPEC_DIRECT_STEP_ROUTE_REQUIRED',
             severity: 'error',
             message: 'GeoSpec exact BRep evidence requires a direct STEP/BRep runtime export route.',
-            suggestion: 'Use a BRep-capable kernel with a direct STEP route or load mesh evidence with GLB/glTF.',
+            suggestion:
+              'Request a runtime export route that preserves exact STEP/BRep evidence, or load mesh evidence with GLB/glTF when exact BRep assertions are not required.',
             details: {
               route: routeToProvenance(route),
             },

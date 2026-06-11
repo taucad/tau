@@ -1,6 +1,8 @@
 import type { BuiltinModule, BundleResult, VmFileSystem, VmIssue } from '@taucad/vm';
 import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
 import type { GeoSpecModelLoader } from '#model/index.js';
+import type { GeoSpecRunProfile } from '#runner/profile.js';
+import type { GeoSpecResourceScope } from '#runner/resource-scope.js';
 import type { GeoSpecStepLoader } from '#step/index.js';
 
 /**
@@ -41,16 +43,37 @@ export type GeoSpecConnectedComponentsExpectation = {
 };
 
 /**
+ * Component selector used by pair-filtered component-overlap checks.
+ *
+ * @public
+ */
+export type GeoSpecComponentSelector = string | RegExp;
+
+/**
+ * A pair-specific overlap check accepted by
+ * `expectGeo(...).toHaveNoComponentOverlap(...)`.
+ *
+ * @public
+ */
+export type GeoSpecComponentOverlapPairExpectation = {
+  left: GeoSpecComponentSelector;
+  right: GeoSpecComponentSelector;
+};
+
+/**
  * Component-overlap expectation accepted by
  * `expectGeo(...).toHaveNoComponentOverlap(...)`.
  *
  * GeoSpec checks for positive solid intersection volume between assembly
  * components. Tangent contact and correctly meshed gears are allowed.
+ * `pairs` narrows the check to specific component-label pairs while preserving
+ * exact positive-volume evidence for every selected pair.
  *
  * @public
  */
 export type GeoSpecComponentOverlapExpectation = {
   tolerance?: number;
+  pairs?: GeoSpecComponentOverlapPairExpectation[];
 };
 
 /**
@@ -456,6 +479,10 @@ export type RunGeoSpecModuleOptions = {
   stepLoader?: GeoSpecStepLoader;
   /** Additional in-memory modules made available to the VM. */
   builtinModules?: Record<string, BuiltinModule>;
+  /** Internal resource scope shared by aggregate runners. */
+  resourceScope?: GeoSpecResourceScope;
+  /** Internal profile counters used by opt-in benchmark tooling. */
+  internalProfile?: GeoSpecRunProfile;
 };
 
 /**

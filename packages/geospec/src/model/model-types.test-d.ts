@@ -1,7 +1,14 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type { GeometrySubject } from '#mesh/types.js';
-import type { LoadModelCodeOptions, LoadModelFileOptions } from '#model/types.js';
+import type {
+  GeoSpecRuntimeClient,
+  GeoSpecRuntimeClientFactory,
+  GeoSpecRuntimeSourceAdapter,
+  LoadModelCodeOptions,
+  LoadModelFileOptions,
+} from '#model/types.js';
 import { activeParams, createModelLoader, loadModel, parameterGroups, params } from '#model/index.js';
+import type { RuntimeClient } from '@taucad/runtime/client';
 
 const parameterEntry = {
   activeGroup: 'wide',
@@ -53,5 +60,38 @@ describe('geospec/model public types', () => {
 
     // @ts-expect-error -- shared defaults cannot override the runtime-backed unit contract.
     createModelLoader({ unit: 'mm' });
+  });
+
+  it('should keep kernel selection out of loadModel authoring options', () => {
+    void loadModel({
+      file: 'main.ts',
+      // @ts-expect-error -- GeoSpec relies on Tau runtime kernel inference.
+      kernel: 'jscad',
+    });
+
+    const code = Object.fromEntries([['main.ts', 'export default function main() {}']]) as Record<'main.ts', string>;
+    const invalidCodeOptions: LoadModelCodeOptions<Record<'main.ts', string>> = {
+      code,
+      file: 'main.ts',
+      // @ts-expect-error -- code-backed model loads do not accept public kernel hints.
+      kernel: 'jscad',
+    };
+    void invalidCodeOptions;
+  });
+
+  it('should use Tau runtime client types directly for runtime-backed loads', () => {
+    expectTypeOf<GeoSpecRuntimeClient>().toEqualTypeOf<RuntimeClient>();
+    expectTypeOf<LoadModelFileOptions['runtime']>().toEqualTypeOf<
+      RuntimeClient | GeoSpecRuntimeClientFactory | undefined
+    >();
+
+    const adapter: GeoSpecRuntimeSourceAdapter = {
+      id: 'custom-source',
+      extensions: ['cad'],
+      async createRuntime() {
+        throw new Error('type-only fixture');
+      },
+    };
+    createModelLoader({ sourceAdapters: [adapter] });
   });
 });

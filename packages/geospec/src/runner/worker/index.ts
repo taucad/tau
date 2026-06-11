@@ -1,4 +1,5 @@
 import type { GeoSpecRunResult, RunGeoSpecModuleOptions } from '#runner/types.js';
+import type { GeoSpecRunProfile } from '#runner/profile.js';
 import type { VmFileSystem, VmIssue } from '@taucad/vm';
 
 /**
@@ -78,6 +79,8 @@ export type GeoSpecRunnerOptions = {
   builtinModules?: RunGeoSpecModuleOptions['builtinModules'];
   /** Observe lifecycle events without receiving raw worker or port primitives. */
   onEvent?: (event: GeoSpecRunnerEvent) => void;
+  /** Internal profile counters used by opt-in benchmark tooling. */
+  internalProfile?: GeoSpecRunProfile;
 };
 
 /**

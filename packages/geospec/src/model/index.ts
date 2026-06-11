@@ -16,6 +16,8 @@ export type {
   GeoSpecParameterOptions,
   GeoSpecParameters,
   GeoSpecRuntimeClient,
+  GeoSpecRuntimeClientFactory,
+  GeoSpecRuntimeSourceAdapter,
   LoadModelCodeOptions,
   LoadModelFileOptions,
   LoadModelOptions,

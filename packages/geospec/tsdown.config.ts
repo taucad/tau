@@ -2,6 +2,7 @@ import { defineConfig } from 'tsdown';
 import type { Options } from 'tsdown';
 
 const nativeOpenCascadeArtifacts = [
+  'geospec_opencascade_single.d.ts',
   'geospec_opencascade_single.wasm',
   'geospec_opencascade_single.build-manifest.json',
   'geospec_opencascade_single.provenance.json',
@@ -27,19 +28,11 @@ const baseConfig: Options = {
     'src/step/index.ts',
   ],
   sourcemap: false,
-  clean: true,
+  clean: ['dist'],
   dts: true,
   minify: true,
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
-};
-
-const cjsConfig: Options = {
-  ...baseConfig,
-  format: 'cjs',
-  outDir: 'dist/cjs',
-  dts: true,
-  copy: nativeOpenCascadeCopyEntries('dist/cjs'),
 };
 
 const esmConfig: Options = {
@@ -62,4 +55,4 @@ const esmConfig: Options = {
   copy: nativeOpenCascadeCopyEntries('dist/esm'),
 };
 
-export default defineConfig([esmConfig, cjsConfig]);
+export default defineConfig(esmConfig);

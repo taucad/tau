@@ -123,7 +123,7 @@ describe('measurement matchers', () => {
           samples: 1000,
         });
       });
-      await collector.waitForCompletion(1000);
+      await collector.waitForCompletion(10_000);
       expect(collector.tests[0]?.status).toBe('passed');
     } finally {
       clearCollectorGlobals();

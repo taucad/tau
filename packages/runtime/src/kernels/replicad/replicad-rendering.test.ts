@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { cadMaterialDefaults } from '@taucad/types/constants';
-import replicadKernel from '#kernels/replicad/replicad.kernel.js';
+import { replicad as replicadKernel } from '#kernels/replicad/replicad.kernel.js';
 import {
   colorParityCases,
   expectLinearBaseColor,

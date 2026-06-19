@@ -9,8 +9,7 @@
  *
  * 1. Forwards typed RPC calls (`initialize`, `export`) and notifies
  *    (`openFile`, `updateParameters`, `setOptions`, `fileChanged`,
- *    `configureMiddleware`, `cleanup`, `abort`,
- *    `stage-and-render`) onto the transport's channel.
+ *    `cleanup`, `abort`, `stage-and-render`) onto the transport's channel.
  * 2. Wires `on*` notify subscriptions onto the channel.
  * 3. Enforces the wall-clock render timeout (cooperative abort
  *    triggered via `transport.abort('timeout')`).
@@ -26,23 +25,22 @@
 
 import type { FileExtension, Geometry, GeometryFile, LogEntry } from '@taucad/types';
 import type { Channel } from '@taucad/rpc';
+import { Topic } from '@taucad/events';
 import type {
   ExportGeometryResult,
   GetParametersResult,
   HashedGeometryResult,
   KernelIssue,
-  MiddlewareRegistrations,
-  BundlerRegistrations,
   CapabilitiesManifest,
 } from '#types/runtime.types.js';
 import type {
   AbortReason,
   GeometryTransport,
   HashedGeometryResultTransport,
+  RuntimeExportModelArgs,
   RenderPhase,
   RuntimeProtocol,
   TelemetryEntry,
-  TranscoderModuleEntry,
   WorkerState,
 } from '#types/runtime-protocol.types.js';
 import type { RuntimeTransportClient } from '#transport/runtime-transport.types.js';
@@ -103,7 +101,7 @@ export class RenderTimeoutError extends Error {
   public constructor(renderTimeout: number) {
     super(
       `Render timed out after ${renderTimeout / 1000} seconds. ` +
-        'Increase the timeout in viewer settings or simplify the model geometry.',
+        'Inspect recent model changes, kernel diagnostics, and parameter values; fix the render blocker or increase the render timeout for legitimately long operations.',
     );
     this.name = 'RenderTimeoutError';
   }
@@ -143,6 +141,10 @@ export type RuntimeWorkerClientOptions = {
   transport: RuntimeTransportClient;
 };
 
+export type RuntimeWorkerClientInitializeOptions = {
+  readonly config?: unknown;
+};
+
 /**
  * Main-thread orchestrator over a {@link RuntimeTransportClient}.
  *
@@ -168,7 +170,9 @@ export type RuntimeWorkerClientOptions = {
 export class RuntimeWorkerClient {
   private readonly transport: RuntimeTransportClient;
   private channel: Channel<RuntimeProtocol> | undefined;
-  private readonly pendingSubscriptions: Array<(channel: Channel<RuntimeProtocol>) => void> = [];
+  private readonly pendingSubscriptions = new Topic<Channel<RuntimeProtocol>>({
+    name: 'runtime-worker-client.pending-subscriptions',
+  });
 
   private localAbortGeneration = 0;
   private lastReportedState: WorkerState | undefined;
@@ -189,15 +193,10 @@ export class RuntimeWorkerClient {
 
   /**
    * Open the transport and send the `initialize` RPC. The transport's
-   * own `client(opts)` factory pre-allocated every SAB; we forward the
-   * caller's plugin / module config verbatim.
+   * own `client(opts)` factory pre-allocated every SAB; runtime composition
+   * lives entirely inside the worker/host runtime definition.
    */
-  public async initialize(input: {
-    options: Record<string, unknown>;
-    middlewareEntries: MiddlewareRegistrations;
-    bundlerEntries?: BundlerRegistrations;
-    transcoderModules?: TranscoderModuleEntry[];
-  }): Promise<void> {
+  public async initialize(options: RuntimeWorkerClientInitializeOptions = {}): Promise<void> {
     this.ensureNotTerminated();
     const { channel } = await this.transport.open();
     this.channel = channel;
@@ -213,12 +212,7 @@ export class RuntimeWorkerClient {
      * consumers can attach handlers eagerly without missing the first
      * frame. */
     this.flushPendingSubscriptions();
-    const result = await this.transport.initialize({
-      options: input.options,
-      middlewareEntries: input.middlewareEntries,
-      bundlerEntries: input.bundlerEntries,
-      transcoderModules: input.transcoderModules,
-    });
+    const result = await this.transport.initialize(options.config === undefined ? {} : { config: options.config });
     this._capabilities = result.capabilities;
   }
 
@@ -305,13 +299,6 @@ export class RuntimeWorkerClient {
     this.channel!.notify('fileChanged', { paths });
   }
 
-  /** Reconfigure middleware on the worker. */
-  public configureMiddleware(entries: MiddlewareRegistrations): void {
-    this.ensureNotTerminated();
-    this.ensureChannel();
-    this.channel!.notify('configureMiddleware', { entries });
-  }
-
   /**
    * Send the `export` RPC and return the result.
    *
@@ -325,6 +312,17 @@ export class RuntimeWorkerClient {
       format,
       ...(options === undefined ? {} : { options }),
     });
+  }
+
+  /**
+   * Export geometry for an exact request without mutating the autonomous preview render state.
+   *
+   * @param request - source file, parameters, render options, export format, and optional staged source bytes
+   */
+  public async exportModel(request: RuntimeExportModelArgs): Promise<ExportGeometryResult> {
+    this.ensureNotTerminated();
+    this.ensureChannel();
+    return this.channel!.call('exportModel', request);
   }
 
   /** Cleanup any worker-side state without tearing down the channel. */
@@ -510,17 +508,13 @@ export class RuntimeWorkerClient {
     /* Subscribed before initialize(): record a pending wiring.
      * `initialize()` flushes the queue once the channel is live. */
     let wired: Unsubscribe | undefined;
-    const pending = (channel: Channel<RuntimeProtocol>): void => {
+    const unsubscribePending = this.pendingSubscriptions.subscribe((channel) => {
       wired = customWire ? customWire(channel) : channel.onNotify(name, handler);
       this.disposers.push(wired);
-    };
-    this.pendingSubscriptions.push(pending);
+    });
     return () => {
       wired?.();
-      const index = this.pendingSubscriptions.indexOf(pending);
-      if (index !== -1) {
-        this.pendingSubscriptions.splice(index, 1);
-      }
+      unsubscribePending();
     };
   }
 
@@ -528,10 +522,8 @@ export class RuntimeWorkerClient {
     if (!this.channel) {
       return;
     }
-    for (const pending of this.pendingSubscriptions) {
-      pending(this.channel);
-    }
-    this.pendingSubscriptions.length = 0;
+    this.pendingSubscriptions.emit(this.channel);
+    this.pendingSubscriptions.dispose();
   }
 
   private ensureChannel(): void {

@@ -45,6 +45,14 @@ export {
 export { streamChunkSize, bufferToStream } from '#backend/stream-utils.js';
 export type { FileReadStreamOptions as StreamFileReadOptions } from '#backend/stream-utils.js';
 export { CrossTabCoordinator, isNavigatorLocksSupported } from '#cross-tab-coordinator.js';
+export {
+  countTextLines,
+  fileMetadataFields,
+  fileStatFromBytes,
+  getFileContentMetadata,
+  headSniffByteLength,
+  seemsBinary,
+} from '#content-metadata.js';
 
 export { MountTable } from '#mount-table.js';
 export type { MountConfig, MountConfigCommon, MountEntry, MountResolution, WorkspaceScope } from '#mount-table.js';

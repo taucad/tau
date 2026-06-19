@@ -12,6 +12,7 @@ export const AttributeKey = {
   WS_CLOSE_REASON: 'ws.close.reason',
   GEN_AI_TOOL_NAME: 'gen_ai.tool.name',
   GEN_AI_TOOL_STATUS: 'gen_ai.tool.status',
+  GEN_AI_TOOL_INPUT_REPAIR_KIND: 'gen_ai.tool_input.repair_kind',
   GEN_AI_TOKEN_TYPE: 'gen_ai.token.type',
   GEN_AI_REQUEST_MODEL: 'gen_ai.request.model',
   REDIS_ROLE: 'redis.role',
@@ -32,6 +33,10 @@ export const AttributeKey = {
   GEN_AI_PROMPT_SECTION_NAME: 'gen_ai.prompt.section.name',
   GEN_AI_PROMPT_SECTION_CACHE_BREAK: 'gen_ai.prompt.section.cache_break',
   GEN_AI_INTERRUPT_RECOVERY_OUTCOME: 'gen_ai.agent.interrupt_recovery.outcome',
+  GEN_AI_CONTEXT_BUDGET_COMPONENT: 'gen_ai.context_budget.component',
+  GEN_AI_CONTEXT_BUDGET_KIND: 'gen_ai.context_budget.kind',
+  GEN_AI_CONTEXT_BUDGET_TRIGGER_REASON: 'gen_ai.context_budget.trigger_reason',
+  GEN_AI_CONTEXT_COMPACTION_STATUS: 'gen_ai.context_compaction.status',
 } as const;
 
 /**
@@ -110,6 +115,39 @@ export const GenAiSafeguardHelped = {
 export const GenAiInterruptRecoveryOutcome = {
   EMITTED: 'emitted',
   ALREADY_FIRED: 'already_fired',
+} as const;
+
+/**
+ * Budgeting mode used for context-window decisions.
+ *
+ * `estimated` is the only active mode today; exact provider-native counting is
+ * reserved for a future TokenBudgetService implementation slot.
+ * @public
+ */
+export const GenAiContextBudgetKind = {
+  ESTIMATED: 'estimated',
+} as const;
+
+/**
+ * Trigger reason for a context compaction decision.
+ * @public
+ */
+export const GenAiContextBudgetTriggerReason = {
+  NONE: 'none',
+  ESTIMATE: 'estimate',
+  PREVIOUS_USAGE: 'previous_usage',
+  OVERFLOW: 'overflow',
+} as const;
+
+/**
+ * Outcome/status emitted by the compaction pipeline.
+ * @public
+ */
+export const GenAiContextCompactionStatus = {
+  SKIPPED: 'skipped',
+  COMPACTED: 'compacted',
+  FAILED: 'failed',
+  OVERFLOW_RETRY_SUCCEEDED: 'overflow_retry_succeeded',
 } as const;
 
 /**

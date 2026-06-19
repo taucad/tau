@@ -24,18 +24,20 @@
  * Custom worker entries can compose the same primitives directly:
  *
  * ```typescript
- * import { KernelRuntimeWorker } from '@taucad/runtime/worker-internals';
+ * import { createRuntimeWorker, defineRuntime } from '@taucad/runtime/worker';
  * import { nodeWorkerHost } from '@taucad/runtime/transport/node';
  *
- * const worker = new KernelRuntimeWorker();
+ * const runtime = defineRuntime({});
+ * const worker = createRuntimeWorker({ runtime });
  * await nodeWorkerHost({ worker }).open();
  * ```
  *
  * @public
  */
 
-import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { nodeWorkerHost } from '#transport/node-worker-host.js';
+import { createRuntimeWorker, defineRuntime } from '#worker/index.js';
 
-const worker = new KernelRuntimeWorker();
+const runtime = defineRuntime({});
+const worker = createRuntimeWorker({ runtime });
 await nodeWorkerHost({ worker }).open();

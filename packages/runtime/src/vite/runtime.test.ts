@@ -39,19 +39,25 @@ const resolveConfig = (plugin: Plugin): Record<string, unknown> => {
 };
 
 describe('runtime (vite plugin)', () => {
-  it('should return the cross-origin-isolation plugin first followed by the invariants plugin', () => {
+  it('should return cross-origin isolation, TS module URL, and invariants plugins in order', () => {
     const plugins = runtime();
 
-    expect(plugins).toHaveLength(2);
-    expect(plugins[0]?.name).toBe('taucad-runtime:cross-origin-isolation');
-    expect(plugins[1]?.name).toBe('taucad-runtime:invariants');
+    expect(plugins.map((plugin) => plugin.name)).toEqual([
+      'taucad-runtime:cross-origin-isolation',
+      'vite:ts-module-url-build',
+      'vite:ts-module-url-serve',
+      'taucad-runtime:invariants',
+    ]);
   });
 
   it('should omit the cross-origin-isolation plugin when crossOriginIsolation: false', () => {
     const plugins = runtime({ crossOriginIsolation: false });
 
-    expect(plugins).toHaveLength(1);
-    expect(plugins[0]?.name).toBe('taucad-runtime:invariants');
+    expect(plugins.map((plugin) => plugin.name)).toEqual([
+      'vite:ts-module-url-build',
+      'vite:ts-module-url-serve',
+      'taucad-runtime:invariants',
+    ]);
   });
 
   it('should mark the invariants plugin with enforce: "pre" so it runs before user plugins', () => {

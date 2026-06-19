@@ -3,13 +3,30 @@
     // OpenCascade WASM files for Replicad kernel.
     // - single: pthread-free build, default for COOP/COEP-less environments.
     // - multi: pthread build, picked by default when SharedArrayBuffer is usable.
+    // Keep JS glue, WASM binaries, and declarations version-coherent.
+    {
+      "from": "./node_modules/replicad-opencascadejs/dist/replicad_single.js",
+      "to": "src/kernels/replicad/wasm/replicad_single.js"
+    },
     {
       "from": "./node_modules/replicad-opencascadejs/dist/replicad_single.wasm",
       "to": "src/kernels/replicad/wasm/replicad_single.wasm"
     },
     {
+      "from": "./node_modules/replicad-opencascadejs/dist/replicad_single.d.ts",
+      "to": "src/kernels/replicad/wasm/replicad_single.d.ts"
+    },
+    {
+      "from": "./node_modules/replicad-opencascadejs/dist/replicad_multi.js",
+      "to": "src/kernels/replicad/wasm/replicad_multi.js"
+    },
+    {
       "from": "./node_modules/replicad-opencascadejs/dist/replicad_multi.wasm",
       "to": "src/kernels/replicad/wasm/replicad_multi.wasm"
+    },
+    {
+      "from": "./node_modules/replicad-opencascadejs/dist/replicad_multi.d.ts",
+      "to": "src/kernels/replicad/wasm/replicad_multi.d.ts"
     },
     // KCL WASM file for Zoo kernel
     {

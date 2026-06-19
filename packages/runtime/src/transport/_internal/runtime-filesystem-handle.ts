@@ -18,10 +18,8 @@
  * @internal
  */
 
-import { safeDispose } from '@taucad/utils/dispose';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
-import { filesystemBridgeConnectMessageType } from '#framework/runtime-framework.constants.js';
 
 /**
  * Internal discriminated filesystem handle. The transport plane reads this
@@ -52,33 +50,6 @@ export type RuntimeFileSystemHandle =
       readonly port: MessagePort;
       readonly dispose?: () => void;
     };
-
-/**
- * Internal factory: bridge a `Worker` that already serves the FS bridge
- * protocol. Eagerly opens a `MessageChannel`, posts `port1` to the
- * worker, and stores `port2` on the returned handle. The accompanying
- * `dispose` closes the host-side port and signals the worker to tear down
- * its bridge server.
- *
- * @internal
- */
-export const channelHandleFromWorker = (worker: Worker): RuntimeFileSystemHandle => {
-  const channel = new MessageChannel();
-  worker.postMessage({ type: filesystemBridgeConnectMessageType, port: channel.port1 }, [channel.port1]);
-  const rawPort = channel.port2;
-  return {
-    kind: 'channel',
-    port: rawPort,
-    dispose() {
-      safeDispose(() => {
-        rawPort.postMessage({ type: 'disconnect' });
-      });
-      safeDispose(() => {
-        rawPort.close();
-      });
-    },
-  };
-};
 
 /* Module-private symbol — not exported, so external callers cannot
  * forge or extract a `RuntimeFileSystem` payload outside the runtime
@@ -135,7 +106,7 @@ export const hasRuntimeFileSystemHandle = (value: unknown): value is RuntimeFile
  * when no handle was supplied.
  *
  * Throws {@link TypeError} when the opaque value is a channel-bridged
- * filesystem (`fromChannelFs`) — those must be wired via
+ * filesystem (`fromFileSystemBridge`) — those must be wired via
  * `memoryHandle.fileSystemPort`, not passed to
  * {@link createWorkerDispatcher}'s `inlineFileSystem`.
  *

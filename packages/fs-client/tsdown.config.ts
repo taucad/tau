@@ -18,18 +18,11 @@ const baseConfig: Options = {
     'src/react/use-directory-listing.ts',
   ],
   sourcemap: false,
-  clean: true,
+  clean: ['dist'],
   dts: true,
   minify: true,
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
-};
-
-const cjsConfig: Options = {
-  ...baseConfig,
-  format: 'cjs',
-  outDir: 'dist/cjs',
-  dts: false,
 };
 
 const esmConfig: Options = {
@@ -38,4 +31,4 @@ const esmConfig: Options = {
   outDir: 'dist/esm',
 };
 
-export default defineConfig([esmConfig, cjsConfig]);
+export default defineConfig(esmConfig);

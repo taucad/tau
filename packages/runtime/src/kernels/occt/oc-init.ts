@@ -57,18 +57,28 @@ const noop = (): void => {};
  * for single-threaded builds the second argument is harmless.
  *
  * @template Instance - the concrete OpenCascade instance type for the kernel
- * @param wasmUrl - absolute URL to the `.wasm` binary for streaming fetch
+ * @param wasmUrl - absolute URL to the `.wasm` binary for streaming fetch.
+ *   When omitted, the Emscripten glue resolves its own bundled WASM via
+ *   `locateFile`/`new URL(...)`; this avoids duplicating package-owned WASM
+ *   assets in framework bundlers that already follow the glue import graph.
  * @param bindingsFactory - the Emscripten module factory (default export of the JS glue)
  * @param options - optional callbacks for stdout/stderr and tracing instrumentation
  * @returns the fully initialised OpenCascade instance
  * @public
  */
 export async function initOcct<Instance>(
-  wasmUrl: string,
+  wasmUrl: string | undefined,
   bindingsFactory: OcctModuleFactory<Instance>,
   options?: InitOcctOptions,
 ): Promise<Instance> {
   const { tracer } = options ?? {};
+  if (!wasmUrl) {
+    return bindingsFactory({
+      print: options?.print ?? noop,
+      printErr: options?.printErr ?? noop,
+    });
+  }
+
   const compiledModule = await compileWasmStreaming(wasmUrl, tracer);
 
   const instantiateSpan = tracer?.startSpan('wasm.emscripten-init');

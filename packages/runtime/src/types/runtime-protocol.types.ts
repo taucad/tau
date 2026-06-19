@@ -2,7 +2,8 @@
  * Kernel Worker Protocol Types
  *
  * Defines the typed `@taucad/rpc` {@link RuntimeProtocol} contract
- * carried by every runtime transport. Calls (`initialize`, `export`)
+ * carried by every runtime transport. Calls (`initialize`, `export`,
+ * `exportModel`)
  * are correlated by the channel envelope; notifies cover the
  * autonomous client→worker commands and worker→client events.
  */
@@ -14,8 +15,6 @@ import type {
   ExportGeometryResult,
   KernelIssue,
   KernelResult,
-  MiddlewareRegistrations,
-  BundlerRegistrations,
   CapabilitiesManifest,
 } from '#types/runtime.types.js';
 
@@ -63,16 +62,6 @@ export type GeometryTransport = GeometryResponseTransport & { readonly hash: str
  * @internal
  */
 export type HashedGeometryResultTransport = KernelResult<GeometryTransport[]>;
-
-/**
- * Entry describing a transcoder module to load during worker initialization.
- * @internal
- */
-export type TranscoderModuleEntry = {
-  id: string;
-  moduleUrl: string;
-  options?: Record<string, unknown>;
-};
 
 /**
  * Caller-owned `SharedArrayBuffer` that backs file-content caching across
@@ -207,10 +196,7 @@ export type AbortReason = 'superseded' | 'timeout';
  * @internal
  */
 export type RuntimeInitializeArgs = {
-  options: Record<string, unknown>;
-  middlewareEntries: MiddlewareRegistrations;
-  bundlerEntries?: BundlerRegistrations;
-  transcoderModules?: TranscoderModuleEntry[];
+  config?: unknown;
   memoryHandle?: InitializeMemoryHandle;
 };
 
@@ -242,6 +228,24 @@ export type RuntimeHelloPayload = {
 export type RuntimeExportArgs = {
   readonly format: FileExtension;
   readonly options?: Record<string, unknown>;
+};
+
+/**
+ * Args for the request-scoped `exportModel` request.
+ *
+ * Unlike `export`, this call owns its render input. It may stage inline
+ * source files first, then exports the exact `file + parameters + options`
+ * request without mutating the autonomous preview render state.
+ *
+ * @internal
+ */
+export type RuntimeExportModelArgs = {
+  readonly stage?: Record<string, Uint8Array<ArrayBuffer>>;
+  readonly file: GeometryFile;
+  readonly parameters: Record<string, unknown>;
+  readonly options?: Record<string, unknown>;
+  readonly format: FileExtension;
+  readonly exportOptions?: Record<string, unknown>;
 };
 
 /**
@@ -325,7 +329,7 @@ export type RuntimeStateChangedArgs = {
 };
 
 /**
- * Client → worker fire-and-forget command names. These 8 command names
+ * Client → worker fire-and-forget command names. These 7 command names
  * drive every C→W interaction in the kernel runtime protocol. A
  * companion type-level guard in `runtime-protocol.runtime.test.ts`
  * fails closed if a command is added/removed without updating both
@@ -338,7 +342,6 @@ export const runtimeProtocolClientNotifyNames = [
   'updateParameters',
   'setOptions',
   'fileChanged',
-  'configureMiddleware',
   'cleanup',
   'abort',
 ] as const;
@@ -365,7 +368,7 @@ export const runtimeProtocolWorkerNotifyNames = [
 ] as const;
 
 /**
- * Combined notify name inventory — exactly 18 keys (8 C→W + 10 W→C).
+ * Combined notify name inventory — exactly 17 keys (7 C→W + 10 W→C).
  * @internal
  */
 export const runtimeProtocolNotifyNames = [
@@ -374,27 +377,28 @@ export const runtimeProtocolNotifyNames = [
 ] as const;
 
 /**
- * Request/response call name inventory — exactly two calls
- * (`initialize`, `export`). The legacy `render` call is deleted; the
+ * Request/response call name inventory — exactly three calls
+ * (`initialize`, `export`, `exportModel`). The legacy `render` call is deleted; the
  * autonomous `openFile` notify + `geometryComputed` correlation by
  * `rgen` replaces it (R18, mirrors LSP `didOpen` + diagnostics).
  * @internal
  */
-export const runtimeProtocolCallNames = ['initialize', 'export'] as const;
+export const runtimeProtocolCallNames = ['initialize', 'export', 'exportModel'] as const;
 
 /**
  * Typed `@taucad/rpc` protocol contract for the kernel runtime worker.
  *
- * - `calls`: request/response RPCs. Exactly two: `initialize` (one-shot
- *   bootstrap) and `export` (one-shot export of current geometry into a
- *   downstream format). The legacy `render` call is gone — production
+ * - `calls`: request/response RPCs. `initialize` bootstraps the worker,
+ *   `export` exports current settled geometry, and `exportModel` exports
+ *   an exact request-scoped model without mutating preview state. The legacy
+ *   `render` call is gone — production
  *   drives renders autonomously via the `openFile` notify and consumes
  *   `geometryComputed` notifies correlated by `rgen` (R18, mirrors LSP
  *   `didOpen` + diagnostics).
- * - `notifies`: bidirectional fire-and-forget — exactly 18 keys total.
- *   8 client→worker commands (`openFile`, `stage-and-render`,
- *   `updateParameters`, `setOptions`, `fileChanged`,
- *   `configureMiddleware`, `cleanup`, `abort`) plus 10 worker→client
+ * - `notifies`: bidirectional fire-and-forget — exactly 17 keys total.
+ *   7 client→worker commands (`openFile`, `stage-and-render`,
+ *   `updateParameters`, `setOptions`, `fileChanged`, `cleanup`, `abort`)
+ *   plus 10 worker→client
  *   autonomous events (`parametersResolved`, `geometryComputed`,
  *   `errorEvent`, `progress`, `activeKernelChanged`, `stateChanged`,
  *   `log`, `logBatch`, `telemetry`, `capabilitiesUpdated`).
@@ -423,6 +427,10 @@ export type RuntimeProtocol = {
       readonly args: RuntimeExportArgs;
       readonly result: ExportGeometryResult;
     };
+    readonly exportModel: {
+      readonly args: RuntimeExportModelArgs;
+      readonly result: ExportGeometryResult;
+    };
   };
   readonly notifies: {
     readonly openFile: { readonly args: RuntimeOpenFileArgs };
@@ -435,9 +443,6 @@ export type RuntimeProtocol = {
     };
     readonly fileChanged: {
       readonly args: { readonly paths: readonly string[] };
-    };
-    readonly configureMiddleware: {
-      readonly args: { readonly entries: MiddlewareRegistrations };
     };
     readonly cleanup: { readonly args: undefined };
     readonly abort: { readonly args: { readonly reason: AbortReasonCode } };

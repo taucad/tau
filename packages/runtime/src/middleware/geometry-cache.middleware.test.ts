@@ -3,13 +3,18 @@
  * Tests the wrap-style hook with onion model execution.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { encode as msgpackEncode } from '@msgpack/msgpack';
-import type { CreateGeometryResult, KernelIssue } from '#types/runtime.types.js';
-import type { CreateGeometryHandler, KernelMiddlewareRuntime } from '#types/runtime-middleware.types.js';
+import type { CreateGeometryResult, ExportGeometryResult, KernelIssue } from '#types/runtime.types.js';
+import type {
+  CreateGeometryHandler,
+  ExportGeometryHandler,
+  KernelMiddlewareRuntime,
+} from '#types/runtime-middleware.types.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
-import type { CreateGeometryInput } from '#types/runtime-kernel.types.js';
-import { geometryCacheMiddleware, geometryMemoryCache } from '#middleware/geometry-cache.middleware.js';
+import type { CreateGeometryInput, ExportGeometryRequest } from '#types/runtime-kernel.types.js';
+import { exportMemoryCache, geometryCache, geometryMemoryCache } from '#middleware/geometry-cache.middleware.js';
+import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import {
   createMockRuntime,
   createMockInput,
@@ -20,7 +25,7 @@ import {
 } from '#testing/kernel-testing.utils.js';
 
 /**
- * Create serialized cache content (MessagePack binary format, v3).
+ * Create serialized cache content (MessagePack binary format, v4).
  * Mirrors the CacheEntry structure: stores the full KernelSuccessResult.
  */
 function createSerializedCacheContent(
@@ -28,10 +33,28 @@ function createSerializedCacheContent(
   issues: KernelIssue[] = [],
 ): Uint8Array<ArrayBuffer> {
   return msgpackEncode({
-    version: 3,
+    version: 4,
     result: {
       success: true,
       data: [{ format: 'gltf', content }],
+      issues,
+    },
+  });
+}
+
+/**
+ * Create serialized export cache content (MessagePack binary format, v1).
+ */
+function createSerializedExportCacheContent(
+  bytes: Uint8Array<ArrayBuffer>,
+  issues: KernelIssue[] = [],
+): Uint8Array<ArrayBuffer> {
+  return msgpackEncode({
+    version: 1,
+    kind: 'export',
+    result: {
+      success: true,
+      data: [{ bytes, name: 'cached.step', mimeType: 'application/step' }],
       issues,
     },
   });
@@ -81,9 +104,51 @@ function createCacheTestContext(options?: {
   };
 }
 
+function createExportCacheTestContext(options?: {
+  cacheExists?: boolean;
+  serializedContent?: Uint8Array<ArrayBuffer>;
+  dependencyHash?: string;
+  cacheOptions?: GeometryCacheOptions;
+}): {
+  input: ExportGeometryRequest;
+  runtime: KernelMiddlewareRuntime<Record<string, never>, GeometryCacheOptions> &
+    ReturnType<typeof createMockRuntime<Record<string, never>, GeometryCacheOptions>>;
+} {
+  const runtime = createMockRuntime<Record<string, never>, GeometryCacheOptions>({
+    filesystemOverrides: {
+      existsResult: options?.cacheExists ?? false,
+      readFileResult: options?.serializedContent ?? new Uint8Array(),
+    },
+    dependencies: createMockDependencies(),
+    dependencyHash: options?.dependencyHash ?? 'e'.repeat(64),
+    options: options?.cacheOptions ?? {
+      maxEntries: 100,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    },
+    projectRootPath: '/projects/export-test',
+    basePath: '/projects/export-test',
+  });
+
+  return {
+    input: {
+      format: 'step',
+      options: {},
+    },
+    runtime,
+  };
+}
+
 describe('geometryCacheMiddleware', () => {
+  const resolveGeometryCacheMiddleware = async () => resolveRuntimePluginDefinition('middleware', geometryCache());
+  let geometryCacheMiddleware: Awaited<ReturnType<typeof resolveGeometryCacheMiddleware>>;
+
+  beforeAll(async () => {
+    geometryCacheMiddleware = await resolveGeometryCacheMiddleware();
+  });
+
   beforeEach(() => {
     geometryMemoryCache.clear();
+    exportMemoryCache.clear();
   });
 
   describe('wrapCreateGeometry', () => {
@@ -616,7 +681,7 @@ describe('geometryCacheMiddleware', () => {
   });
 
   describe('L1 cache storage', () => {
-    it('should store result directly in L1 without cloning', async () => {
+    it('should store a defensive copy in L1 on fresh compute', async () => {
       const originalContent = new Uint8Array([1, 2, 3]);
       const handlerResult = createGltfSuccessResult(originalContent);
       const { input, runtime } = createCacheTestContext({ cacheExists: false });
@@ -628,8 +693,10 @@ describe('geometryCacheMiddleware', () => {
       const cached = geometryMemoryCache.get(runtime.dependencyHash);
       expect(cached).toBeDefined();
       if (cached?.success && cached.data[0]?.format === 'gltf') {
-        expect(cached.data[0].content.buffer).toBe(originalContent.buffer);
+        expect(cached.data[0].content.buffer).not.toBe(originalContent.buffer);
         expect(cached.data[0].content).toEqual(originalContent);
+        originalContent[0] = 99;
+        expect(cached.data[0].content).toEqual(new Uint8Array([1, 2, 3]));
       }
     });
   });
@@ -714,32 +781,37 @@ describe('geometryCacheMiddleware', () => {
     });
   });
 
-  it('should store result directly in L1 without cloning on fresh compute', async () => {
+  it('should return a fresh L1 copy after the first result buffer is transferred', async () => {
     const { input, runtime } = createCacheTestContext({ cacheExists: false });
     const content = new Uint8Array([1, 2, 3]);
     const handlerResult = createGltfSuccessResult(content);
     const handler = createMockCreateGeometryHandler(handlerResult);
 
     const { wrapCreateGeometry } = geometryCacheMiddleware;
-    await wrapCreateGeometry!(input, handler, runtime);
+    const first = await wrapCreateGeometry!(input, handler, runtime);
+    if (first.success && first.data[0]?.format === 'gltf') {
+      structuredClone(first.data[0].content, { transfer: [first.data[0].content.buffer] });
+    }
 
-    const cached = geometryMemoryCache.get(runtime.dependencyHash);
-    expect(cached).toBeDefined();
-    expect(cached?.success).toBe(true);
-    if (cached?.success && cached.data[0]?.format === 'gltf') {
-      expect(cached.data[0].content.buffer).toBe(content.buffer);
+    const second = await wrapCreateGeometry!(input, handler, runtime);
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(second.success).toBe(true);
+    if (second.success && second.data[0]?.format === 'gltf') {
+      expect(second.data[0].content).toEqual(new Uint8Array([1, 2, 3]));
+      expect(second.data[0].content.buffer).not.toBe(content.buffer);
     }
   });
 
-  describe('serializedHandle storage', () => {
-    it('should store serializedHandle in cache entry when present in result', async () => {
+  describe('serializedNativeHandle storage', () => {
+    it('should store serializedNativeHandle in cache entry when present in result', async () => {
       const { input, runtime } = createCacheTestContext({ cacheExists: false });
-      const serializedHandle = { brep: 'BREP_DATA', meta: { name: 'part' } };
+      const serializedNativeHandle = { brep: 'BREP_DATA', meta: { name: 'part' } };
       const handlerResult: CreateGeometryResult = {
         success: true,
         data: [{ format: 'gltf', content: new Uint8Array([1, 2, 3]) }],
         issues: [],
-        serializedHandle,
+        serializedNativeHandle,
       };
       const handler = createMockCreateGeometryHandler(handlerResult);
 
@@ -748,18 +820,18 @@ describe('geometryCacheMiddleware', () => {
 
       const cached = geometryMemoryCache.get(runtime.dependencyHash);
       expect(cached).toBeDefined();
-      expect(cached?.serializedHandle).toEqual(serializedHandle);
+      expect(cached?.serializedNativeHandle).toEqual(serializedNativeHandle);
     });
 
-    it('should restore serializedHandle from L2 cache on cache hit', async () => {
-      const serializedHandle = { brep: 'CACHED_BREP' };
+    it('should restore serializedNativeHandle from L2 cache on cache hit', async () => {
+      const serializedNativeHandle = { brep: 'CACHED_BREP' };
       const cacheData = msgpackEncode({
-        version: 3,
+        version: 4,
         result: {
           success: true,
           data: [{ format: 'gltf', content: new Uint8Array([4, 5, 6]) }],
           issues: [],
-          serializedHandle,
+          serializedNativeHandle,
         },
       });
 
@@ -779,12 +851,41 @@ describe('geometryCacheMiddleware', () => {
 
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.serializedHandle).toEqual(serializedHandle);
+        expect(result.serializedNativeHandle).toEqual(serializedNativeHandle);
       }
       expect(handler).not.toHaveBeenCalled();
     });
 
-    it('should omit serializedHandle when result has none', async () => {
+    it('should ignore legacy v3 entries that use the retired snapshot shape', async () => {
+      const legacyCacheData = msgpackEncode({
+        version: 3,
+        result: {
+          success: true,
+          data: [{ format: 'gltf', content: new Uint8Array([4, 5, 6]) }],
+          issues: [],
+          serializedNativeHandle: { brep: 'LEGACY_BREP' },
+        },
+      });
+      const handlerResult = createGltfSuccessResult(new Uint8Array([7, 8, 9]));
+      const runtime = createMockRuntime<Record<string, never>, GeometryCacheOptions>({
+        filesystemOverrides: {
+          readFileResult: legacyCacheData,
+        },
+        dependencies: createMockDependencies(),
+        dependencyHash: 'b'.repeat(64),
+        options: { maxEntries: 100, maxAge: 7 * 24 * 60 * 60 * 1000 },
+      });
+      const input = createMockInput();
+      const handler = createMockCreateGeometryHandler(handlerResult);
+
+      const { wrapCreateGeometry } = geometryCacheMiddleware;
+      const result = await wrapCreateGeometry!(input, handler, runtime);
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(result).toEqual(handlerResult);
+    });
+
+    it('should omit serializedNativeHandle when result has none', async () => {
       const { input, runtime } = createCacheTestContext({ cacheExists: false });
       const handlerResult = createGltfSuccessResult(new Uint8Array([1, 2, 3]));
       const handler = createMockCreateGeometryHandler(handlerResult);
@@ -794,7 +895,216 @@ describe('geometryCacheMiddleware', () => {
 
       const cached = geometryMemoryCache.get(runtime.dependencyHash);
       expect(cached).toBeDefined();
-      expect(cached?.serializedHandle).toBeUndefined();
+      expect(cached?.serializedNativeHandle).toBeUndefined();
+    });
+  });
+
+  describe('wrapExportGeometry', () => {
+    const createExportSuccess = (bytes: Uint8Array<ArrayBuffer>, issues: KernelIssue[] = []): ExportGeometryResult => ({
+      success: true,
+      data: [{ bytes, name: 'model.step', mimeType: 'application/step' }],
+      issues,
+    });
+
+    it('should return cached export result from L2 and not call handler', async () => {
+      const cachedBytes = new Uint8Array([1, 2, 3, 4]);
+      const { input, runtime } = createExportCacheTestContext({
+        cacheExists: true,
+        serializedContent: createSerializedExportCacheContent(cachedBytes),
+      });
+      const handler: ExportGeometryHandler = vi.fn();
+
+      const result = await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data[0]?.bytes).toEqual(cachedBytes);
+      }
+    });
+
+    it('should return cached export result from L1 without filesystem access', async () => {
+      const handlerResult = createExportSuccess(new Uint8Array([5, 6, 7]));
+      const { input, runtime } = createExportCacheTestContext({ cacheExists: false });
+      const handler: ExportGeometryHandler = vi.fn().mockResolvedValue(handlerResult);
+
+      await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
+      runtime.filesystem.mocks.readFile.mockClear();
+      runtime.filesystem.mocks.writeFile.mockClear();
+
+      const result = await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(runtime.filesystem.mocks.readFile).not.toHaveBeenCalled();
+      expect(runtime.filesystem.mocks.writeFile).not.toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data[0]?.bytes).toEqual(new Uint8Array([5, 6, 7]));
+      }
+    });
+
+    it('should write successful export results under the export cache namespace', async () => {
+      const dependencyHash = 'f'.repeat(64);
+      const handlerResult = createExportSuccess(new Uint8Array([9, 8, 7]));
+      const { input, runtime } = createExportCacheTestContext({
+        cacheExists: false,
+        dependencyHash,
+      });
+      const handler: ExportGeometryHandler = vi.fn().mockResolvedValue(handlerResult);
+
+      await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
+
+      expect(runtime.filesystem.mocks.writeFile).toHaveBeenCalledWith(
+        expect.stringContaining(`/export-${dependencyHash}.bin`),
+        expect.any(Uint8Array),
+      );
+    });
+
+    it('should preserve export issues on cache hit', async () => {
+      const cachedIssues: KernelIssue[] = [
+        {
+          message: 'export used fallback tessellation',
+          code: 'UNKNOWN',
+          severity: 'warning',
+          type: 'unknown',
+        },
+      ];
+      const { input, runtime } = createExportCacheTestContext({
+        cacheExists: true,
+        serializedContent: createSerializedExportCacheContent(new Uint8Array([1, 2]), cachedIssues),
+      });
+      const handler: ExportGeometryHandler = vi.fn();
+
+      const result = await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.issues).toEqual(cachedIssues);
+      }
+    });
+
+    it('should clone cached export bytes after the returned buffer is transferred', async () => {
+      const originalBytes = new Uint8Array([1, 2, 3]);
+      const handlerResult = createExportSuccess(originalBytes);
+      const { input, runtime } = createExportCacheTestContext({ cacheExists: false });
+      const handler: ExportGeometryHandler = vi.fn().mockResolvedValue(handlerResult);
+
+      const first = await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
+      if (first.success) {
+        structuredClone(first.data[0]!.bytes, { transfer: [first.data[0]!.bytes.buffer] });
+      }
+
+      const second = await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(second.success).toBe(true);
+      if (second.success) {
+        expect(second.data[0]?.bytes).toEqual(new Uint8Array([1, 2, 3]));
+        expect(second.data[0]?.bytes.buffer).not.toBe(originalBytes.buffer);
+      }
+    });
+
+    it('should treat corrupt export cache entries as misses', async () => {
+      const handlerResult = createExportSuccess(new Uint8Array([4, 5, 6]));
+      const { input, runtime } = createExportCacheTestContext({
+        cacheExists: true,
+        serializedContent: new Uint8Array([255, 0, 255]),
+      });
+      const handler: ExportGeometryHandler = vi.fn().mockResolvedValue(handlerResult);
+
+      const result = await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(result).toBe(handlerResult);
+    });
+
+    it('should treat wrong-kind export cache entries as misses', async () => {
+      const handlerResult = createExportSuccess(new Uint8Array([4, 5, 6]));
+      const wrongKind = msgpackEncode({
+        version: 1,
+        kind: 'geometry',
+        result: {
+          success: true,
+          data: [{ bytes: new Uint8Array([1]), name: 'bad.step', mimeType: 'model/step' }],
+          issues: [],
+        },
+      });
+      const { input, runtime } = createExportCacheTestContext({
+        cacheExists: true,
+        serializedContent: wrongKind,
+      });
+      const handler: ExportGeometryHandler = vi.fn().mockResolvedValue(handlerResult);
+
+      const result = await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(result).toBe(handlerResult);
+    });
+
+    it('should not cache failed export results', async () => {
+      const failedResult: ExportGeometryResult = {
+        success: false,
+        issues: [{ message: 'export failed', code: 'UNKNOWN', severity: 'error', type: 'unknown' }],
+      };
+      const { input, runtime } = createExportCacheTestContext({ cacheExists: false });
+      const handler: ExportGeometryHandler = vi.fn().mockResolvedValue(failedResult);
+
+      await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
+
+      expect(runtime.filesystem.mocks.writeFile).not.toHaveBeenCalled();
+      expect(exportMemoryCache.size).toBe(0);
+    });
+
+    it('should not cache empty successful export results', async () => {
+      const emptyResult: ExportGeometryResult = {
+        success: true,
+        data: [],
+        issues: [],
+      };
+      const { input, runtime } = createExportCacheTestContext({ cacheExists: false });
+      const handler: ExportGeometryHandler = vi.fn().mockResolvedValue(emptyResult);
+
+      await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
+
+      expect(runtime.filesystem.mocks.writeFile).not.toHaveBeenCalled();
+      expect(exportMemoryCache.size).toBe(0);
+    });
+
+    it('should tolerate export cache read errors as misses', async () => {
+      const handlerResult = createExportSuccess(new Uint8Array([1]));
+      const { input, runtime } = createExportCacheTestContext({ cacheExists: true });
+      runtime.filesystem.mocks.readFile.mockRejectedValue(new Error('read failed'));
+      const handler: ExportGeometryHandler = vi.fn().mockResolvedValue(handlerResult);
+
+      const result = await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(result).toBe(handlerResult);
+      expect(runtime.logger.debug).toHaveBeenCalledWith(expect.stringContaining('Export cache miss'));
+    });
+
+    it('should tolerate export cache write errors', async () => {
+      const handlerResult = createExportSuccess(new Uint8Array([1]));
+      const { input, runtime } = createExportCacheTestContext({ cacheExists: false });
+      runtime.filesystem.mocks.writeFile.mockRejectedValue(new Error('write failed'));
+      const handler: ExportGeometryHandler = vi.fn().mockResolvedValue(handlerResult);
+
+      const result = await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
+
+      expect(result).toBe(handlerResult);
+      expect(runtime.logger.warn).toHaveBeenCalledWith(expect.stringContaining('Export cache write error'));
+    });
+
+    it('should tolerate export cache cleanup errors', async () => {
+      const handlerResult = createExportSuccess(new Uint8Array([1]));
+      const { input, runtime } = createExportCacheTestContext({ cacheExists: false });
+      runtime.filesystem.mocks.readdirStat.mockRejectedValue(new Error('cleanup failed'));
+      const handler: ExportGeometryHandler = vi.fn().mockResolvedValue(handlerResult);
+
+      const result = await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
+
+      expect(result.success).toBe(true);
+      expect(runtime.filesystem.mocks.writeFile).toHaveBeenCalled();
     });
   });
 });

@@ -14,7 +14,7 @@ import { wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem
 /**
  * Create an opaque {@link RuntimeFileSystem} backed by Node.js
  * `fs.promises`. Pass the result to
- * `inProcessTransport({ fileSystem })`,
+ * `inProcessTransport({ runtime, fileSystem })`,
  * `nodeWorkerTransport({ fileSystem })`, or `webWorkerTransport({ fileSystem })`.
  *
  * @param basePath - Root path for all filesystem operations.
@@ -25,13 +25,14 @@ import { wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem
  * import { createRuntimeClient } from '@taucad/runtime';
  * import { inProcessTransport } from '@taucad/runtime/transport/in-process';
  * import { fromNodeFs } from '@taucad/runtime/filesystem/node';
+ * import { defineRuntime } from '@taucad/runtime/worker';
  * import { replicad } from '@taucad/runtime/kernels';
  * import { esbuild } from '@taucad/runtime/bundler';
  *
+ * const runtime = defineRuntime({ kernels: [replicad()], bundlers: [esbuild()] });
  * const client = createRuntimeClient({
- *   kernels: [replicad()],
- *   bundlers: [esbuild()],
  *   transport: inProcessTransport({
+ *     runtime,
  *     fileSystem: fromNodeFs('/path/to/project'),
  *   }),
  * });

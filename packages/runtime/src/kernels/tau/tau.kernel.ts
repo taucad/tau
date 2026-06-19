@@ -8,6 +8,7 @@
  */
 
 import { importToGlb } from '@taucad/converter';
+import { supportedImportFormats } from '@taucad/converter/formats';
 import type { SupportedImportFormat, FileResolver } from '@taucad/converter';
 import { defineKernel } from '#types/runtime-kernel.types.js';
 import { tauExportSchemas } from '#kernels/tau/tau.schemas.js';
@@ -16,6 +17,8 @@ import { resolveToRelative } from '#kernels/kernel-module-helpers.js';
 import type { KernelIssue } from '#types/runtime.types.js';
 import { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { createExportFile } from '@taucad/types/constants';
+import { normalizeGltfGeometryNames } from '#utils/gltf-geometry-name-normalizer.js';
+import { stripTauGltfMetadata } from '#utils/gltf-topology-metadata.js';
 
 function getFileExtension(filename: string): string {
   const lastDotIndex = filename.lastIndexOf('.');
@@ -82,7 +85,9 @@ async function createDirectoryResolver(filesystem: KernelFileSystem, directory: 
 }
 
 /** @public */
-export default defineKernel({
+export const tau = defineKernel({
+  id: 'tau',
+  extensions: [...supportedImportFormats],
   name: 'TauKernel',
   version: '1.0.0',
   exportSchemas: tauExportSchemas,
@@ -122,12 +127,21 @@ export default defineKernel({
       const resolver = await createDirectoryResolver(filesystem, directory);
 
       const glbData = await importToGlb([{ name: filename, bytes: data }], format as SupportedImportFormat, resolver);
+      const isGltfFamily = format === 'glb' || format === 'gltf';
+      const normalizedGlbData = await normalizeGltfGeometryNames(glbData, {
+        format: 'glb',
+        rewriteLegacyGeneratedShapeNames: !isGltfFamily,
+        materialNamePolicy: 'clear-generated',
+        materialNameSource: isGltfFamily ? 'imported' : 'external-generated',
+        sceneNamePolicy: 'clear-generated',
+        sceneNameSource: isGltfFamily ? 'imported' : 'external-generated',
+      });
 
       logger.log(`Successfully converted ${formattedFormat} to GLB`);
 
       return {
-        geometry: [{ format: 'gltf', content: glbData }],
-        nativeHandle: glbData,
+        geometry: [{ format: 'gltf', content: normalizedGlbData }],
+        nativeHandle: normalizedGlbData,
       };
     } catch (error) {
       logger.error('Error converting file', { data: error });
@@ -166,7 +180,8 @@ export default defineKernel({
       case 'glb':
       case 'gltf': {
         logger.log('Exporting geometry', { data: { format } });
-        const file = createExportFile(format, `model.${format}`, nativeHandle);
+        const cleanExport = await stripTauGltfMetadata(nativeHandle, { format: 'glb' });
+        const file = createExportFile(format, `model.${format}`, cleanExport);
         logger.log('Successfully exported geometry');
         return createKernelSuccess([file]);
       }
@@ -183,6 +198,14 @@ export default defineKernel({
         ]);
       }
     }
+  },
+
+  serializeNativeHandle({ nativeHandle }) {
+    return new Uint8Array(nativeHandle);
+  },
+
+  deserializeNativeHandle({ serializedNativeHandle }) {
+    return new Uint8Array(serializedNativeHandle);
   },
 });
 

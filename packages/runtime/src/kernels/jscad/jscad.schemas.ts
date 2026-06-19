@@ -1,18 +1,18 @@
 /**
  * JSCAD kernel Zod schemas — single source of truth.
  *
- * Consumed by `jscad.plugin.ts` (type inference) and `jscad.kernel.ts` (runtime validation).
+ * Consumed by `jscad.kernel.ts` for plugin type inference and runtime validation.
  *
  * @public
  */
 
-import { z } from 'zod';
+import type { z } from 'zod';
+import { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
 
 /**
  * JSCAD per-format export schemas.
- * Empty — JSCAD controls meshing internally.
  * @public
  */
 export const jscadExportSchemas = {
-  glb: z.object({}),
+  glb: coordinateSystemSchema.extend(unitSchema.shape),
 } as const satisfies Record<string, z.ZodType>;

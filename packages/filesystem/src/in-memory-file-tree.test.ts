@@ -1,6 +1,21 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { InMemoryFileTree } from '#in-memory-file-tree.js';
 
+type BuildEntry = Parameters<InMemoryFileTree['build']>[0][number];
+
+const textFile = (
+  path: string,
+  size: number,
+  metadata: number | { mtimeMs: number; lineCount?: number },
+): BuildEntry => ({
+  path,
+  type: 'file',
+  size,
+  mtimeMs: typeof metadata === 'number' ? metadata : metadata.mtimeMs,
+  contentKind: 'text',
+  lineCount: typeof metadata === 'number' ? 1 : (metadata.lineCount ?? 1),
+});
+
 /** Paths in these tests are relative to the virtual tree root (same convention as WorkspaceFileService after scan-root normalization). */
 describe('InMemoryFileTree', () => {
   let tree: InMemoryFileTree;
@@ -12,9 +27,9 @@ describe('InMemoryFileTree', () => {
   describe('build', () => {
     it('should build tree from flat file entries', () => {
       tree.build([
-        { path: 'src/main.ts', type: 'file', size: 100, mtimeMs: 1000 },
-        { path: 'src/utils/helper.ts', type: 'file', size: 50, mtimeMs: 2000 },
-        { path: 'README.md', type: 'file', size: 200, mtimeMs: 3000 },
+        textFile('src/main.ts', 100, { mtimeMs: 1000, lineCount: 8 }),
+        textFile('src/utils/helper.ts', 50, { mtimeMs: 2000, lineCount: 4 }),
+        textFile('README.md', 200, { mtimeMs: 3000, lineCount: 12 }),
       ]);
 
       expect(tree.isBuilt).toBe(true);
@@ -39,12 +54,13 @@ describe('InMemoryFileTree', () => {
     });
 
     it('should return file metadata', () => {
-      tree.build([{ path: 'test.txt', type: 'file', size: 42, mtimeMs: 5000 }]);
+      tree.build([textFile('test.txt', 42, { mtimeMs: 5000, lineCount: 3 })]);
       const node = tree.stat('/test.txt');
       expect(node).toBeDefined();
       expect(node?.type).toBe('file');
       expect(node?.size).toBe(42);
       expect(node?.mtimeMs).toBe(5000);
+      expect(node).toEqual(expect.objectContaining({ contentKind: 'text', lineCount: 3 }));
     });
 
     it('should return undefined for non-existent path', () => {
@@ -56,9 +72,9 @@ describe('InMemoryFileTree', () => {
   describe('getDirectoryStat', () => {
     it('should return flat list of all files under a directory', () => {
       tree.build([
-        { path: 'src/main.ts', type: 'file', size: 100, mtimeMs: 1000 },
-        { path: 'src/lib/utils.ts', type: 'file', size: 50, mtimeMs: 2000 },
-        { path: 'README.md', type: 'file', size: 200, mtimeMs: 3000 },
+        textFile('src/main.ts', 100, 1000),
+        textFile('src/lib/utils.ts', 50, 2000),
+        textFile('README.md', 200, 3000),
       ]);
 
       const stats = tree.getDirectoryStat('/');
@@ -69,10 +85,7 @@ describe('InMemoryFileTree', () => {
     });
 
     it('should return stats relative to the base path', () => {
-      tree.build([
-        { path: 'src/main.ts', type: 'file', size: 100, mtimeMs: 1000 },
-        { path: 'src/lib/utils.ts', type: 'file', size: 50, mtimeMs: 2000 },
-      ]);
+      tree.build([textFile('src/main.ts', 100, 1000), textFile('src/lib/utils.ts', 50, 2000)]);
 
       const stats = tree.getDirectoryStat('/src');
       expect(stats).toHaveLength(2);
@@ -91,7 +104,7 @@ describe('InMemoryFileTree', () => {
     it('should add a file and create intermediate directories', () => {
       tree.build([]);
 
-      tree.addFile('/src/main.ts', 100, 1000);
+      tree.addFile('/src/main.ts', { size: 100, mtimeMs: 1000, contentKind: 'text', lineCount: 5 });
 
       expect(tree.stat('/src')).toBeDefined();
       expect(tree.stat('/src')?.type).toBe('dir');
@@ -99,7 +112,7 @@ describe('InMemoryFileTree', () => {
     });
 
     it('should remove a file', () => {
-      tree.build([{ path: 'test.txt', type: 'file', size: 42, mtimeMs: 1000 }]);
+      tree.build([textFile('test.txt', 42, 1000)]);
 
       tree.removeFile('/test.txt');
 
@@ -107,7 +120,7 @@ describe('InMemoryFileTree', () => {
     });
 
     it('should not remove a directory via removeFile', () => {
-      tree.build([{ path: 'src/main.ts', type: 'file', size: 100, mtimeMs: 1000 }]);
+      tree.build([textFile('src/main.ts', 100, 1000)]);
 
       tree.removeFile('/src');
 
@@ -125,10 +138,7 @@ describe('InMemoryFileTree', () => {
     });
 
     it('should remove a directory and all contents', () => {
-      tree.build([
-        { path: 'src/main.ts', type: 'file', size: 100, mtimeMs: 1000 },
-        { path: 'src/lib/utils.ts', type: 'file', size: 50, mtimeMs: 2000 },
-      ]);
+      tree.build([textFile('src/main.ts', 100, 1000), textFile('src/lib/utils.ts', 50, 2000)]);
 
       tree.removeDirectory('/src');
 
@@ -136,19 +146,17 @@ describe('InMemoryFileTree', () => {
     });
 
     it('should rename a file', () => {
-      tree.build([{ path: 'old.txt', type: 'file', size: 42, mtimeMs: 1000 }]);
+      tree.build([textFile('old.txt', 42, { mtimeMs: 1000, lineCount: 6 })]);
 
       tree.rename('/old.txt', '/new.txt');
 
       expect(tree.stat('/old.txt')).toBeUndefined();
       expect(tree.stat('/new.txt')?.size).toBe(42);
+      expect(tree.stat('/new.txt')).toEqual(expect.objectContaining({ contentKind: 'text', lineCount: 6 }));
     });
 
     it('should rename a directory with all contents', () => {
-      tree.build([
-        { path: 'old/main.ts', type: 'file', size: 100, mtimeMs: 1000 },
-        { path: 'old/lib/utils.ts', type: 'file', size: 50, mtimeMs: 2000 },
-      ]);
+      tree.build([textFile('old/main.ts', 100, 1000), textFile('old/lib/utils.ts', 50, 2000)]);
 
       tree.rename('/old', '/new');
 
@@ -161,7 +169,7 @@ describe('InMemoryFileTree', () => {
 
   describe('clear', () => {
     it('should reset tree to empty state', () => {
-      tree.build([{ path: 'test.txt', type: 'file', size: 42, mtimeMs: 1000 }]);
+      tree.build([textFile('test.txt', 42, 1000)]);
 
       tree.clear();
 
@@ -173,11 +181,11 @@ describe('InMemoryFileTree', () => {
   describe('searchFiles', () => {
     beforeEach(() => {
       tree.build([
-        { path: 'src/main.ts', type: 'file', size: 100, mtimeMs: 1000 },
-        { path: 'src/utils/helper.ts', type: 'file', size: 50, mtimeMs: 2000 },
-        { path: 'src/utils/math.ts', type: 'file', size: 60, mtimeMs: 3000 },
-        { path: 'README.md', type: 'file', size: 200, mtimeMs: 4000 },
-        { path: 'docs/guide.md', type: 'file', size: 300, mtimeMs: 5000 },
+        textFile('src/main.ts', 100, 1000),
+        textFile('src/utils/helper.ts', 50, 2000),
+        textFile('src/utils/math.ts', 60, 3000),
+        textFile('README.md', 200, 4000),
+        textFile('docs/guide.md', 300, 5000),
       ]);
     });
 
@@ -234,15 +242,10 @@ describe('InMemoryFileTree', () => {
 
   describe('performance', () => {
     it('should handle getDirectoryStat for 6000+ entries under 20ms', () => {
-      const entries: Array<{ path: string; type: 'file' | 'dir'; size: number; mtimeMs: number }> = [];
+      const entries: BuildEntry[] = [];
       for (let i = 0; i < 6265; i++) {
         const directory = `dir${Math.floor(i / 100)}`;
-        entries.push({
-          path: `${directory}/file${i}.ts`,
-          type: 'file',
-          size: Math.floor(Math.random() * 10_000),
-          mtimeMs: Date.now(),
-        });
+        entries.push(textFile(`${directory}/file${i}.ts`, Math.floor(Math.random() * 10_000), Date.now()));
       }
       tree.build(entries);
 

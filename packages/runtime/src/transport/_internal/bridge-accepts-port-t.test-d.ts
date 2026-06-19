@@ -4,11 +4,7 @@
 import type { Port } from '@taucad/rpc';
 import { describe, expectTypeOf, it } from 'vitest';
 
-import type {
-  createBridgeCall,
-  createBridgeProxy,
-  createBridgeServer,
-} from '#transport/_internal/runtime-filesystem-bridge.js';
+import type { createBridgeCall, createBridgeProxy, createBridgeServer } from '@taucad/rpc/bridge';
 
 describe('filesystem bridge primitive port typing', () => {
   it('createBridgeServer second parameter is Port<unknown>', () => {

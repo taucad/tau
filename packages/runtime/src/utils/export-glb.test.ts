@@ -103,6 +103,14 @@ describe('createGlb', () => {
     const meshes = document.getRoot().listMeshes();
 
     expect(meshes).toHaveLength(1);
+    expect(document.getRoot().listNodes()[0]!.getName()).toBe('Shape 1');
+    expect(meshes[0]!.getName()).toBe('Shape 1');
+    expect(
+      document
+        .getRoot()
+        .listMaterials()
+        .map((material) => material.getName()),
+    ).toEqual(['']);
     const primitives = meshes[0]!.listPrimitives();
     expect(primitives).toHaveLength(1);
 
@@ -123,6 +131,7 @@ describe('createGlb', () => {
     const glb = createGlb(twoColorMesh);
     const document = await new NodeIO().readBinary(glb);
     const materials = document.getRoot().listMaterials();
+    expect(materials.map((material) => material.getName())).toEqual(['', '']);
 
     const alphaModes = materials.map((m) => m.getAlphaMode());
     expect(alphaModes).toContain('OPAQUE');
@@ -201,10 +210,23 @@ describe('createGlb', () => {
     const document = await new NodeIO().readBinary(glb);
     const meshes = document.getRoot().listMeshes();
 
-    expect(meshes).toHaveLength(2);
+    expect(
+      document
+        .getRoot()
+        .listNodes()
+        .map((node) => node.getName()),
+    ).toEqual(['Shape 1']);
+    expect(meshes).toHaveLength(1);
 
-    const linesMesh = meshes[1]!;
-    const linePrimitive = linesMesh.listPrimitives()[0]!;
+    const primitives = meshes[0]!.listPrimitives();
+    expect(primitives.map((primitive) => primitive.getMode())).toEqual([4, 1]);
+    expect(
+      document
+        .getRoot()
+        .listMaterials()
+        .map((material) => material.getName()),
+    ).toEqual(['', '']);
+    const linePrimitive = primitives[1]!;
     expect(linePrimitive.getMode()).toBe(1);
   });
 

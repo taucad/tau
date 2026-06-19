@@ -1,4 +1,4 @@
-import type { FileStat, FileStatEntry, FileSystemBackend } from '@taucad/types';
+import type { FileContentMetadata, FileStat, FileStatEntry, FileSystemBackend } from '@taucad/types';
 import type {
   ChangeEvent,
   FileSystemProvider,
@@ -22,6 +22,7 @@ import type { FileSystemService } from '#file-system-service.js';
 import { tagEventOrigin } from '#event-origin-registry.js';
 import { parentDirectory, joinPath, normalizePath } from '@taucad/utils/path';
 import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
+import { fileMetadataFields, getFileContentMetadata } from '#content-metadata.js';
 
 /** Milliseconds. */
 const kernelCoalescingWindow = 75;
@@ -387,11 +388,14 @@ export class WorkspaceFileService {
       this._resourceQueue.queueFor(path, async () => {
         const { provider, path: resolvedPath, backend: resolvedBackend } = this._resolveProvider(path);
         await this._ensureParentDir(provider, resolvedPath);
-        await provider.writeFile(resolvedPath, data);
+        const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+        await provider.writeFile(resolvedPath, bytes);
 
         this._filePool?.invalidate(path);
-        const size = typeof data === 'string' ? new TextEncoder().encode(data).byteLength : data.byteLength;
-        this._inMemoryTreeAddFile(path, size);
+        this._inMemoryTreeAddFile(path, {
+          size: bytes.byteLength,
+          ...getFileContentMetadata(bytes),
+        });
         this._emitChangeEvent(
           {
             type: 'fileWritten',
@@ -426,12 +430,12 @@ export class WorkspaceFileService {
         this._resourceQueue.queueFor(path, async () => {
           const { provider, path: resolvedPath } = this._resolveProvider(path);
           await this._ensureParentDir(provider, resolvedPath);
-          await provider.writeFile(resolvedPath, file.content);
-          const size =
-            typeof file.content === 'string'
-              ? new TextEncoder().encode(file.content).byteLength
-              : file.content.byteLength;
-          this._inMemoryTreeAddFile(path, size);
+          const bytes = typeof file.content === 'string' ? new TextEncoder().encode(file.content) : file.content;
+          await provider.writeFile(resolvedPath, bytes);
+          this._inMemoryTreeAddFile(path, {
+            size: bytes.byteLength,
+            ...getFileContentMetadata(bytes),
+          });
         }),
       ),
     );
@@ -615,8 +619,10 @@ export class WorkspaceFileService {
   /**
    * Remove a directory. Pass `{ scope }` to target the standalone
    * provider for an explicit workspace scope instead of the mount
-   * table. Pass `{ scope, recursive: true }` for a recursive walk
-   * (mount-routed recursive removal is not supported and throws).
+   * table. Pass `{ recursive: true }` to recursively remove a subtree.
+   * Mount-routed recursive removal is allowed only when the subtree does
+   * not contain another mount point; crossing mount boundaries would make
+   * a single delete affect multiple providers.
    *
    * @param path    - Absolute directory path.
    * @param options - Optional `{ scope, recursive }` discriminator.
@@ -633,9 +639,7 @@ export class WorkspaceFileService {
 
       if (options?.recursive === true) {
         if (options.scope === undefined) {
-          throw new Error(
-            '[WorkspaceFileService] rmdir({ recursive: true }) without an explicit scope is not supported.',
-          );
+          this._assertNoDescendantMounts(path);
         }
         await this._rmdirRecursive(provider, resolvedPath);
       } else {
@@ -940,8 +944,10 @@ export class WorkspaceFileService {
       await this._ensureParentDir(destination.provider, destination.path);
       await destination.provider.writeFile(destination.path, data);
 
-      const size = data.byteLength;
-      this._inMemoryTreeAddFile(destinationPath, size);
+      this._inMemoryTreeAddFile(destinationPath, {
+        size: data.byteLength,
+        ...getFileContentMetadata(data),
+      });
       this._emitChangeEvent(
         {
           type: 'fileCopied',
@@ -979,7 +985,10 @@ export class WorkspaceFileService {
         await this._ensureParentDir(destination.provider, destination.path);
         // oxlint-disable-next-line no-await-in-loop -- Sequential writes required
         await destination.provider.writeFile(destination.path, content);
-        this._inMemoryTreeAddFile(destinationFile, content.byteLength);
+        this._inMemoryTreeAddFile(destinationFile, {
+          size: content.byteLength,
+          ...getFileContentMetadata(content),
+        });
       }
 
       const destinationResolution = this._resolveProvider(destinationPath);
@@ -1053,12 +1062,22 @@ export class WorkspaceFileService {
     if (provider.readdirWithStats) {
       const statsEntries = await provider.readdirWithStats(resolvedPath);
       for (const entry of statsEntries) {
-        entryMap.set(entry.name, {
-          name: entry.name,
-          type: entry.type,
-          size: entry.size,
-          mtimeMs: entry.mtimeMs,
-        });
+        if (entry.type === 'dir') {
+          entryMap.set(entry.name, {
+            name: entry.name,
+            type: 'dir',
+            size: entry.size,
+            mtimeMs: entry.mtimeMs,
+          });
+        } else {
+          entryMap.set(entry.name, {
+            name: entry.name,
+            type: 'file',
+            size: entry.size,
+            mtimeMs: entry.mtimeMs,
+            ...fileMetadataFields(entry),
+          });
+        }
       }
     } else {
       const entries = await provider.readdir(resolvedPath);
@@ -1067,12 +1086,22 @@ export class WorkspaceFileService {
         try {
           // oxlint-disable-next-line no-await-in-loop -- Sequential stat required for tree building
           const stat = await provider.stat(fullPath);
-          entryMap.set(entry, {
-            name: entry,
-            type: stat.type,
-            size: stat.size,
-            mtimeMs: stat.mtimeMs,
-          });
+          if (stat.type === 'dir') {
+            entryMap.set(entry, {
+              name: entry,
+              type: 'dir',
+              size: stat.size,
+              mtimeMs: stat.mtimeMs,
+            });
+          } else {
+            entryMap.set(entry, {
+              name: entry,
+              type: 'file',
+              size: stat.size,
+              mtimeMs: stat.mtimeMs,
+              ...fileMetadataFields(stat),
+            });
+          }
         } catch {
           // Skip entries that can't be stat'd (deleted between readdir and stat)
         }
@@ -1123,12 +1152,22 @@ export class WorkspaceFileService {
 
     this._directoryStatRoot = normalizedPath;
     this._inMemoryTree.build(
-      fileStats.map((f) => ({
-        path: f.path,
-        type: 'file',
-        size: f.size,
-        mtimeMs: f.mtimeMs,
-      })),
+      fileStats.map((f) =>
+        f.type === 'dir'
+          ? {
+              path: f.path,
+              type: 'dir',
+              size: f.size,
+              mtimeMs: f.mtimeMs,
+            }
+          : {
+              path: f.path,
+              type: 'file',
+              size: f.size,
+              mtimeMs: f.mtimeMs,
+              ...fileMetadataFields(f),
+            },
+      ),
     );
 
     return fileStats;
@@ -1193,7 +1232,13 @@ export class WorkspaceFileService {
         if (entry.type === 'dir') {
           nodes.push({ id: fullPath, name: entry.name, size: entry.size, mtimeMs: entry.mtimeMs, children: [] });
         } else {
-          nodes.push({ id: fullPath, name: entry.name, size: entry.size, mtimeMs: entry.mtimeMs });
+          nodes.push({
+            id: fullPath,
+            name: entry.name,
+            size: entry.size,
+            mtimeMs: entry.mtimeMs,
+            ...fileMetadataFields(entry),
+          });
         }
       }
     } else {
@@ -1403,7 +1448,13 @@ export class WorkspaceFileService {
       const stat = await provider.stat(fullPath);
       return stat.type === 'dir'
         ? { id: fullPath, name, size: stat.size, mtimeMs: stat.mtimeMs, children: [] }
-        : { id: fullPath, name, size: stat.size, mtimeMs: stat.mtimeMs };
+        : {
+            id: fullPath,
+            name,
+            size: stat.size,
+            mtimeMs: stat.mtimeMs,
+            ...fileMetadataFields(stat),
+          };
     } catch {
       return undefined;
     }
@@ -1444,6 +1495,7 @@ export class WorkspaceFileService {
               type: 'file',
               size: entry.size,
               mtimeMs: entry.mtimeMs,
+              ...fileMetadataFields(entry),
             });
           } else {
             // oxlint-disable-next-line no-await-in-loop -- Sequential stat required for recursive tree walk
@@ -1470,6 +1522,7 @@ export class WorkspaceFileService {
               type: 'file',
               size: stat.size,
               mtimeMs: stat.mtimeMs,
+              ...fileMetadataFields(stat),
             });
           } else {
             // oxlint-disable-next-line no-await-in-loop -- Sequential stat required for recursive tree walk
@@ -1483,10 +1536,10 @@ export class WorkspaceFileService {
     return fileStats;
   }
 
-  private _inMemoryTreeAddFile(absolutePath: string, size: number): void {
+  private _inMemoryTreeAddFile(absolutePath: string, metadata: { size: number } & FileContentMetadata): void {
     const treeRelativePath = this._toTreeRelative(normalizePath(absolutePath));
     if (treeRelativePath !== undefined) {
-      this._inMemoryTree.addFile(treeRelativePath, size);
+      this._inMemoryTree.addFile(treeRelativePath, metadata);
     }
   }
 
@@ -1525,7 +1578,13 @@ export class WorkspaceFileService {
       if (entry.type === 'dir') {
         nodes.push({ id: entry.name, name: entry.name, size: entry.size, mtimeMs: entry.mtimeMs, children: [] });
       } else {
-        nodes.push({ id: entry.name, name: entry.name, size: entry.size, mtimeMs: entry.mtimeMs });
+        nodes.push({
+          id: entry.name,
+          name: entry.name,
+          size: entry.size,
+          mtimeMs: entry.mtimeMs,
+          ...fileMetadataFields(entry),
+        });
       }
     }
     return nodes.sort((a, b) => {
@@ -1572,6 +1631,21 @@ export class WorkspaceFileService {
     }
     const resolution = this._mountTable.resolve(path);
     return { provider: resolution.provider, path: resolution.path, backend: resolution.backend };
+  }
+
+  private _assertNoDescendantMounts(path: string): void {
+    const normalized = normalizePath(path);
+    const prefix = normalized === '/' ? '/' : `${normalized}/`;
+    for (const mount of this._mountTable.listMounts()) {
+      if (mount.prefix === '/' || mount.prefix === normalized) {
+        continue;
+      }
+      if (normalized === '/' || mount.prefix.startsWith(prefix)) {
+        throw new Error(
+          `[WorkspaceFileService] rmdir({ recursive: true }) would cross mount boundary at '${mount.prefix}'.`,
+        );
+      }
+    }
   }
 
   private async _ensureParentDir(

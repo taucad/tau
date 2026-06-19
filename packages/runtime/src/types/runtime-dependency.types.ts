@@ -72,6 +72,53 @@ export type ParameterDependency = {
 };
 
 /**
+ * A render option dependency representing user-provided kernel render options.
+ * Used to invalidate geometry and export caches when render settings change.
+ * @public
+ */
+export type RenderOptionsDependency = {
+  type: 'render-options';
+  /** Zod-validated render options object -- serialized in the final dependency hash pass */
+  options: Record<string, unknown>;
+};
+
+/**
+ * A kernel dependency representing the selected kernel for the active file.
+ * Used to invalidate caches when two kernels can handle the same source path.
+ * @public
+ */
+export type KernelDependency = {
+  type: 'kernel';
+  /** Selected kernel identifier */
+  id: string;
+  /** Selected kernel semantic version */
+  version: string;
+};
+
+/**
+ * An export dependency representing the target file format and export options.
+ * Used to invalidate export caches when format-specific settings change.
+ * @public
+ */
+export type ExportDependency = {
+  type: 'export';
+  /** Export file format identifier */
+  format: string;
+  /** Zod-validated export options object -- serialized in the final dependency hash pass */
+  options: Record<string, unknown>;
+  /** Selected export route identity and validated route options. */
+  route?: {
+    kind: 'direct' | 'transcoded';
+    kernelId?: string;
+    sourceFormat?: string;
+    targetFormat: string;
+    transcoderId?: string;
+    sourceOptions?: Record<string, unknown>;
+    edgeOptions?: Record<string, unknown>;
+  };
+};
+
+/**
  * An asset dependency representing a bundled asset (font, WASM, etc.).
  * Used to invalidate cache when assets change between deployments.
  * @public
@@ -96,4 +143,7 @@ export type Dependency =
   | FrameworkDependency
   | OptionDependency
   | ParameterDependency
+  | RenderOptionsDependency
+  | KernelDependency
+  | ExportDependency
   | AssetDependency;

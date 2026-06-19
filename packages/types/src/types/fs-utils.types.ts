@@ -15,9 +15,18 @@ export type NativeStats = {
  * Eliminates the repeated `isDirectory() ? 'dir' : 'file'` pattern.
  */
 export function toFileStat(stats: NativeStats): FileStat {
+  if (stats.isDirectory()) {
+    return {
+      type: 'dir',
+      size: stats.size,
+      mtimeMs: stats.mtimeMs,
+    };
+  }
+
   return {
-    type: stats.isDirectory() ? 'dir' : 'file',
+    type: 'file',
     size: stats.size,
     mtimeMs: stats.mtimeMs,
+    contentKind: 'binary',
   };
 }

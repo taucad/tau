@@ -2,16 +2,10 @@
  * Web-worker transport — client factory.
  *
  * Owns the consumer-facing client handle, the `Worker` constructor
- * lookup, the SAB pool allocator, the FS bridge plumbing, and the
- * single `new URL('../worker/web.js', import.meta.url)` literal that
- * tells the bundler to emit the bundled worker entry chunk.
- *
- * Per `docs/research/runtime-transport-authoring-simplification.md` (R1):
- * the chunk-emit literal lives **here**, in a file the worker entry
- * never reaches. The host file (`web-worker-host.ts`) is bundled into
- * the worker entry chunk and must remain free of `new URL` literals
- * so Rolldown's chunk planner has no static path back to the
- * chunk-emitter.
+ * lookup, the SAB pool allocator, and the FS bridge plumbing.
+ * Application code owns the worker module URL so framework bundlers
+ * can see the native `new Worker(new URL(...), { type: 'module' })`
+ * expression in the app graph.
  *
  * @public
  */
@@ -35,24 +29,12 @@ import type { GeometryTransport, RuntimeInitializeResult, RuntimeProtocol } from
 import { allocatePools } from '#transport/_internal/sab-pools.js';
 import { triggerAbort } from '#transport/_internal/abort-channel.js';
 import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
-import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
+import {
+  RuntimeFileSystemBridgeConsumedError,
+  buildFileSystemBridge,
+} from '#transport/_internal/file-system-bridge.js';
 import { webWorkerId } from '#transport/_internal/web-worker-id.js';
 import type { WebWorkerId } from '#transport/_internal/web-worker-id.js';
-
-/**
- * Default URL of the bundled web-worker entry. Resolved at module-load
- * via `new URL('../worker/web.js', import.meta.url)` so consumers no
- * longer have to write a `new URL('@taucad/runtime/worker/web', ...)`
- * literal at every callsite.
- *
- * The relative `.js` reference is the form `tsModuleUrlBuildPlugin`
- * handles via its synchronous fast path. Hoisting the URL into the
- * runtime package keeps the only `new URL(...)` instance in source we
- * control.
- *
- * @internal
- */
-const defaultWebWorkerUrl = new URL('../worker/web.js', import.meta.url);
 
 /**
  * Subset of the DOM `Worker` surface the transport depends on. Tests
@@ -75,14 +57,23 @@ export type WebWorkerLike = {
  */
 export type WebWorkerClientOptions = {
   /**
-   * URL of the worker module entry. Optional — when omitted the
-   * transport defaults to the bundled
-   * `@taucad/runtime/worker/web` entry. Override only when hosting a
-   * custom worker module that composes `KernelRuntimeWorker` with
-   * `webWorkerHost` directly.
+   * URL of the worker module entry. Must resolve to a `type: 'module'`
+   * worker that composes `createRuntimeWorker({ runtime })` with
+   * `webWorkerHost(...)`. Required unless `createWorker` is supplied.
    */
   readonly url?: string | URL;
+  /**
+   * Override for the global `Worker` constructor — primary use is
+   * unit-test injection of a fake worker.
+   */
   readonly workerCtor?: typeof Worker;
+  /**
+   * Create an app-owned worker instance. Use this in frameworks whose bundler
+   * requires the native worker expression at the app callsite, for example
+   * `new Worker(new URL('./runtime.worker.ts', import.meta.url), { type:
+   * 'module' })` in Next/Turbopack.
+   */
+  readonly createWorker?: () => WebWorkerLike;
   readonly sharedMemory?: { readonly geometry?: { readonly bytes: number } };
   readonly fileSystem?: RuntimeFileSystem;
   readonly filePoolBuffer?: SharedArrayBuffer;
@@ -166,8 +157,9 @@ export const webWorkerClientDescribe = (options: WebWorkerClientOptions): Transp
 export const webWorkerClient = (
   options: WebWorkerClientOptions,
 ): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, WebWorkerId> => {
-  const ctor: typeof Worker | undefined = options.workerCtor ?? (typeof Worker === 'function' ? Worker : undefined);
-  if (typeof ctor !== 'function') {
+  const workerCtor: typeof Worker | undefined =
+    options.workerCtor ?? (typeof Worker === 'function' ? Worker : undefined);
+  if (typeof options.createWorker !== 'function' && typeof workerCtor !== 'function') {
     throw new TypeError('webWorkerTransport: requires a `Worker` constructor (browser context or `workerCtor` option)');
   }
   if (options.fileSystem !== undefined && !isRuntimeFileSystem(options.fileSystem)) {
@@ -185,6 +177,7 @@ export const webWorkerClient = (
   };
 
   let bridge: ReturnType<typeof buildFileSystemBridge>;
+  let bridgeConsumedByFailedInitialize = false;
   let openPromise: Promise<TransportClientReady> | undefined;
   let worker: WebWorkerLike | undefined;
   let port: Port<unknown> | undefined;
@@ -205,9 +198,18 @@ export const webWorkerClient = (
         throw new Error('webWorkerTransport: client closed before open()');
       }
       void ensurePools();
-      const resolvedUrl = options.url ?? defaultWebWorkerUrl;
-      const url = typeof resolvedUrl === 'string' ? resolvedUrl : resolvedUrl.href;
-      worker = Reflect.construct(ctor, [url, { type: 'module' }]) as WebWorkerLike;
+      if (typeof options.createWorker === 'function') {
+        worker = options.createWorker();
+      } else {
+        if (typeof workerCtor !== 'function') {
+          throw new TypeError('webWorkerTransport: requires a `Worker` constructor');
+        }
+        if (!options.url) {
+          throw new TypeError('webWorkerTransport: requires `createWorker` or an explicit worker `url`');
+        }
+        const url = typeof options.url === 'string' ? options.url : options.url.href;
+        worker = Reflect.construct(workerCtor, [url, { type: 'module' }]) as WebWorkerLike;
+      }
       port = wrapWorkerAsPort(worker, `web-worker:${webWorkerId}`);
       channel = createChannelClient<RuntimeProtocol>({
         port,
@@ -239,6 +241,9 @@ export const webWorkerClient = (
       if (!channel) {
         throw new Error('webWorkerTransport: channel unavailable after open()');
       }
+      if (bridgeConsumedByFailedInitialize && bridge?.kind === 'channel') {
+        throw new RuntimeFileSystemBridgeConsumedError('webWorkerTransport');
+      }
       bridge ??= buildFileSystemBridge(options.fileSystem);
       const pooled = ensurePools();
       const memoryHandle: RuntimeInitializeMemoryHandle = {
@@ -249,7 +254,26 @@ export const webWorkerClient = (
       };
       const transferables: Transferable[] = bridge ? [bridge.port] : [];
       const args = { ...input, memoryHandle };
-      return channel.call('initialize', transferables.length > 0 ? { value: args, transferables } : args);
+      try {
+        const result = await channel.call(
+          'initialize',
+          transferables.length > 0 ? { value: args, transferables } : args,
+        );
+        bridgeConsumedByFailedInitialize = false;
+        return result;
+      } catch (error) {
+        if (bridge?.kind === 'inline') {
+          try {
+            bridge.dispose();
+          } finally {
+            bridge = undefined;
+            bridgeConsumedByFailedInitialize = false;
+          }
+        } else if (bridge?.kind === 'channel') {
+          bridgeConsumedByFailedInitialize = true;
+        }
+        throw error;
+      }
     },
     abort(reason): void {
       if (!channel) {

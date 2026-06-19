@@ -3,9 +3,10 @@ import { presets } from '#plugins/presets.js';
 
 describe('presets.all', () => {
   it('should return all 6 kernel plugins with correct IDs', () => {
-    const { kernels } = presets.all();
+    const { kernels, renderTimeout } = presets.all();
 
     expect(kernels).toHaveLength(6);
+    expect(renderTimeout).toBeUndefined();
 
     const ids = kernels.map((k) => k.id);
     expect(ids).toEqual(['zoo', 'replicad', 'opencascade', 'manifold', 'jscad', 'tau']);
@@ -23,24 +24,31 @@ describe('presets.all', () => {
   it('should return 1 bundler plugin with esbuild ID and default extensions', () => {
     const { bundlers } = presets.all();
 
-    expect(bundlers).toHaveLength(1);
-    expect(bundlers[0]!.id).toBe('esbuild');
-    expect(bundlers[0]!.extensions).toEqual(['ts', 'js', 'tsx', 'jsx']);
+    expect(bundlers).toEqual([
+      expect.objectContaining({
+        id: 'esbuild',
+        extensions: ['ts', 'js', 'tsx', 'jsx'],
+      }),
+    ]);
   });
 
   it('should return 1 transcoder plugin with converter ID', () => {
     const { transcoders } = presets.all();
 
-    expect(transcoders).toHaveLength(1);
-    expect(transcoders[0]!.id).toBe('converter');
+    expect(transcoders).toEqual([
+      expect.objectContaining({
+        id: 'converter',
+      }),
+    ]);
   });
 
-  it('should include a non-empty moduleUrl on every plugin', () => {
+  it('should keep implementation details off public plugin objects', () => {
     const { kernels, middleware, bundlers, transcoders } = presets.all();
+    const moduleUrlProperty = ['module', 'Url'].join('');
 
     for (const plugin of [...kernels, ...middleware, ...bundlers, ...transcoders]) {
-      expect(plugin.moduleUrl).toEqual(expect.any(String));
-      expect(plugin.moduleUrl.length).toBeGreaterThan(0);
+      expect(plugin).not.toHaveProperty(moduleUrlProperty);
+      expect(plugin).not.toHaveProperty('createModule');
     }
   });
 

@@ -3,18 +3,18 @@
  * JSCAD rendering / color tests.
  *
  * Locks in the linear-space `baseColorFactor` contract for the JSCAD kernel.
- * `colorize()` emits sRGB-encoded `[0..1]` tuples; `buildNodeFromJscadShape`
+ * `colorize()` emits sRGB-encoded `[0..1]` tuples; the JSCAD GLB adapter
  * applies sRGB→linear before writing `baseColorFactor`. See
  * docs/policy/color-space-policy.md.
  */
 import { describe, expect, it } from 'vitest';
-import jscadKernel from '#kernels/jscad/jscad.kernel.js';
+import { jscad as jscadKernel } from '#kernels/jscad/jscad.kernel.js';
 import {
   colorParityCases,
   expectLinearBaseColor,
-  getAllMaterialBaseColors,
   getMaterialAlphaMode,
   getMaterialBaseColor,
+  getTrianglePrimitiveBaseColors,
 } from '#testing/color-testing.utils.js';
 import { assertSuccess, createGeometryFile, createTestWorker } from '#testing/kernel-testing.utils.js';
 import type { CreateGeometryResult } from '#types/runtime.types.js';
@@ -78,7 +78,7 @@ export default function main() {
     })) as CreateGeometryResult;
     assertSuccess(result, 'jscad multi-color createGeometry');
 
-    const baseColors = await getAllMaterialBaseColors(result);
+    const baseColors = await getTrianglePrimitiveBaseColors(result);
     expect(baseColors.length).toBeGreaterThanOrEqual(3);
     expectLinearBaseColor(baseColors[0]!, '#FF0000');
     expectLinearBaseColor(baseColors[1]!, '#00FF00');

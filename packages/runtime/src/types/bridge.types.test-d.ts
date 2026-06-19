@@ -12,7 +12,7 @@ import { assertType, describe, expectTypeOf, it } from 'vitest';
 import type { Port } from '@taucad/rpc';
 
 import type { StringKeyedObject } from '#types/bridge.types.js';
-import { createBridgeServer } from '#transport/_internal/runtime-filesystem-bridge.js';
+import { createBridgeServer } from '@taucad/rpc/bridge';
 
 // =============================================================================
 // StringKeyedObject constraint

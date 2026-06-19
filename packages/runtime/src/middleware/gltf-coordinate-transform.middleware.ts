@@ -41,7 +41,8 @@ async function transformGltfGeometry(geometry: GeometryGltf): Promise<GeometryGl
  * - Exports bypass the middleware and return valid GLTF files
  * @public
  */
-export const gltfCoordinateTransformMiddleware = defineMiddleware({
+export const gltfCoordinateTransform = defineMiddleware({
+  id: 'gltfCoordinateTransform',
   name: 'GltfCoordinateTransform',
 
   async wrapCreateGeometry(input, handler, { logger }) {

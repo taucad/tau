@@ -17,11 +17,11 @@ import { z } from 'zod';
 import type { GeometryFile } from '@taucad/types';
 import type { CodeInput, ExportResult, FileInput, RenderOutcome, RuntimeClient } from '#client/runtime-client.js';
 import { createRuntimeClient } from '#client/runtime-client.js';
-import { createKernelPlugin } from '#plugins/plugin-helpers.js';
 import type { KernelPlugin } from '#plugins/plugin-types.js';
+import { defineKernel } from '#types/runtime-kernel.types.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
-const stubTransport = inProcessTransport({ fileSystem: fromMemoryFs() });
+import { defineRuntime } from '#worker/runtime-definition.js';
 
 // =============================================================================
 // CodeInput<T> -- single-key inline mode
@@ -331,15 +331,33 @@ describe('RuntimeClient.openFile() typed options', () => {
     tessellation: z.object({ linearTolerance: z.number(), angularTolerance: z.number() }),
   });
 
-  const kernel = createKernelPlugin({
+  const kernel = defineKernel({
     id: 'k1',
-    moduleUrl: 'k1.js',
     extensions: ['ts'],
+    name: 'TestKernel',
+    version: '1.0.0',
     renderSchema: tessSchema,
+    async initialize() {
+      return {};
+    },
+    async getDependencies() {
+      return { resolved: [], unresolved: [] };
+    },
+    async getParameters() {
+      return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+    },
+    async createGeometry() {
+      return { geometry: [], nativeHandle: {} };
+    },
+    async exportGeometry() {
+      return { success: true, data: [], issues: [] };
+    },
   });
+  const runtime = defineRuntime({ kernels: [kernel()] });
+  const transport = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
 
   it('should accept valid open-file options on CodeInput', () => {
-    const client = createRuntimeClient({ transport: stubTransport, kernels: [kernel()] });
+    const client = createRuntimeClient({ transport });
     void client.openFile({
       code: { 'main.ts': 'const x = 1;' },
       options: { tessellation: { linearTolerance: 0.1, angularTolerance: 10 } },
@@ -347,7 +365,7 @@ describe('RuntimeClient.openFile() typed options', () => {
   });
 
   it('should accept valid open-file options on FileInput', () => {
-    const client = createRuntimeClient({ transport: stubTransport, kernels: [kernel()] });
+    const client = createRuntimeClient({ transport });
     void client.openFile({
       file: 'main.ts',
       options: { tessellation: { linearTolerance: 0.1, angularTolerance: 10 } },

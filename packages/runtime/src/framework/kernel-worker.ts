@@ -1,6 +1,6 @@
 import deepmerge from 'deepmerge';
 import { logLevels, lookupExportFidelity } from '@taucad/types/constants';
-import { joinPath } from '@taucad/utils/path';
+import { joinPath, parentDirectory } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
 import type { FileExtension, GeometryFile, OnWorkerLog } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
@@ -11,8 +11,6 @@ import type {
   ExportGeometryResult,
   GetParametersResult,
   KernelIssue,
-  MiddlewareRegistrations,
-  BundlerRegistration,
   CapabilitiesManifest,
   ExportRoute,
 } from '#types/runtime.types.js';
@@ -27,6 +25,8 @@ import type {
   GetDependenciesInput,
   GetDependenciesResult,
   ExportGeometryInput,
+  ExportGeometryRequest,
+  KernelExportGeometryInput,
 } from '#types/runtime-kernel.types.js';
 import type {
   KernelMiddlewareRuntime,
@@ -48,15 +48,21 @@ import type {
   FrameworkDependency,
   OptionDependency,
   ParameterDependency,
+  RenderOptionsDependency,
+  KernelDependency,
+  ExportDependency,
   AssetDependency,
 } from '#types/runtime-dependency.types.js';
-import type { TelemetryEntry, RenderPhase, WorkerState, TranscoderModuleEntry } from '#types/runtime-protocol.types.js';
+import type {
+  TelemetryEntry,
+  RenderPhase,
+  RuntimeExportModelArgs,
+  WorkerState,
+} from '#types/runtime-protocol.types.js';
 import { signalSlot, abortReason as abortReasonEnum } from '#types/runtime-protocol.types.js';
 import type { TranscoderDefinition, TranscoderEdge, TranscoderRuntime } from '#types/runtime-transcoder.types.js';
 import { isRenderAbortedError, RenderAbortedError } from '#framework/runtime-worker-client.js';
 import { setAbortContext, clearAbortContext } from '#framework/cooperative-abort.js';
-import type { FileSystemProxy } from '#transport/_internal/runtime-filesystem-bridge.js';
-import { createBridgeProxy, wrapWorkerFilesystemBridgePort } from '#transport/_internal/runtime-filesystem-bridge.js';
 import { createRuntimeFileSystem } from '#filesystem/create-runtime-filesystem.js';
 import { toJSONSchema } from 'zod';
 import type { z } from 'zod';
@@ -69,7 +75,24 @@ import { WorkerTelemetryCollector } from '#framework/worker-telemetry.js';
 import type { KernelMiddleware } from '#middleware/runtime-middleware.js';
 import { createMiddlewareRuntime } from '#middleware/runtime-middleware.js';
 import { clearExecuteCache } from '#bundler/esbuild-core.js';
+import type { BundlerPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
+import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
+import { createWorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
+import type { WorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
+import type { WatchEvent } from '@taucad/filesystem';
 const tauVersion = '0.1.0';
+
+type FileSystemProxy = WorkerFileSystemProxy;
+
+type TranscoderPluginEntry = TranscoderPlugin<Record<string, unknown>> &
+  RuntimePluginDefinitionCarrier<TranscoderDefinition>;
+
+export type KernelWorkerOptions = {
+  readonly middleware?: readonly MiddlewarePlugin[];
+  readonly bundlers?: readonly BundlerPlugin[];
+  readonly transcoders?: readonly TranscoderPluginEntry[];
+};
 
 type LoadedTranscoder = {
   id: string;
@@ -77,6 +100,27 @@ type LoadedTranscoder = {
   context: unknown;
   edges: readonly TranscoderEdge[];
 };
+
+export type LastSettledRenderIdentity = {
+  file: GeometryFile;
+  projectRootPath: string;
+  selectedKernelId: string | undefined;
+  parameters: Record<string, unknown>;
+  renderOptions: Record<string, unknown>;
+  dependencies: Dependency[];
+  dependencyHash: string;
+};
+
+type ExportRequestPlan =
+  | {
+      success: true;
+      input: ExportGeometryRequest;
+      dependency: ExportDependency;
+    }
+  | {
+      success: false;
+      result: ExportGeometryResult;
+    };
 
 /* TR16 fast-path adapter — wraps an inline `RuntimeFileSystemBase` as a
  * `FileSystemProxy` so the kernel-worker boundary remains uniform whether
@@ -127,7 +171,7 @@ function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
 export type ResolvedMiddleware = {
   middleware: KernelMiddleware;
   options: Record<string, unknown>;
-  url: string;
+  id: string;
   enabled: boolean;
 };
 
@@ -257,16 +301,23 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   protected nativeHandle: unknown;
 
   /**
-   * Serialized form of nativeHandle from the last successful createGeometry call.
-   * Populated by kernel `serializeHandle` hooks or auto-detected for Tier 1 types.
-   * Used by `ensureNativeHandle` to restore the handle without re-running createGeometry.
-   *
-   * Same opportunistic-cache contract applies as `nativeHandle` above.
+   * Durable native-handle snapshot from the last successful createGeometry call.
+   * Populated only by explicit kernel `serializeNativeHandle` hooks and restored
+   * only by the matching `deserializeNativeHandle` hook.
    */
-  protected lastSerializedHandle: unknown;
+  protected lastSerializedNativeHandle: unknown;
 
   /** Fully initialized bundlers keyed by file extension. Shared context across extensions of the same bundler. */
   protected loadedBundlers = new Map<string, { definition: BundlerDefinition; ctx: unknown }>();
+
+  /** Worker-owned runtime middleware plugins. */
+  protected middlewarePlugins: readonly MiddlewarePlugin[];
+
+  /** Worker-owned runtime bundler plugins. */
+  protected bundlerPlugins: readonly BundlerPlugin[];
+
+  /** Worker-owned runtime transcoder plugins. */
+  protected transcoderPlugins: readonly TranscoderPluginEntry[];
 
   /**
    * Human-readable identifier for this worker, used in log output and error diagnostics
@@ -344,13 +395,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /**
    * Dynamically loaded middleware instances with their resolved configs.
-   * Populated during initialize() and updated via configureMiddleware().
+   * Populated during initialize() from the worker-owned runtime definition.
    */
   private resolvedMiddleware: ResolvedMiddleware[] = [];
 
   /**
-   * Cache of already-imported middleware modules keyed by URL.
-   * Prevents redundant network requests when reconfiguring middleware.
+   * Cache of already-imported middleware modules keyed by plugin id.
+   * Prevents duplicate resolution across setup paths and test helpers.
    */
   private readonly middlewareModuleCache = new Map<string, KernelMiddleware>();
 
@@ -444,6 +495,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Last merged parameters passed to createGeometry (defaults + user overrides). */
   private lastRenderParameters: Record<string, unknown> = {};
 
+  /** Exact dependency identity for the last successful geometry render. */
+  private lastSettledRenderIdentity: LastSettledRenderIdentity | undefined;
+
   /** Current render options for autonomous render loop. */
   private currentRenderOptions: Record<string, unknown> | undefined;
 
@@ -472,6 +526,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** In-flight bundler initializations to coalesce concurrent callers for the same extension */
   private readonly bundlerInitInProgress = new Map<string, Promise<{ definition: BundlerDefinition; ctx: unknown }>>();
 
+  public constructor(options: KernelWorkerOptions = {}) {
+    this.middlewarePlugins = options.middleware ?? [];
+    this.bundlerPlugins = options.bundlers ?? [];
+    this.transcoderPlugins = options.transcoders ?? [];
+    this.onLog = () => {
+      throw new Error('onLog must be initialized before use');
+    };
+  }
+
   /**
    * Unified filesystem interface for kernel workers.
    * Provides three path resolution contexts:
@@ -491,50 +554,24 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * Logger interface for kernel workers.
-   * Provides convenience methods that automatically inject the component name.
-   *
-   * @returns the kernel logger interface
-   * @throws Error if accessed before initialize() completes
-   */
-  protected get logger(): RuntimeLogger {
-    if (!this._logger) {
-      throw new Error('logger not available - initialize must complete first');
-    }
-
-    return this._logger;
-  }
-
-  /**
-   * The constructor for the worker.
-   */
-  public constructor() {
-    this.onLog = () => {
-      throw new Error('onLog must be initialized before use');
-    };
-  }
-
-  /**
    * Entry point for initializing the worker. This is called once when the worker is created.
    * Handles common initialization logic and then calls the protected initialize method.
    *
-   * @param input - Initialization input containing callbacks, transferables, options, and middleware entries
+   * @param input - Initialization input containing callbacks and transport-owned transferables
    * @param input.callbacks - Object containing callback functions (proxied)
    * @param input.callbacks.onLog - The function to call when a log is emitted
    * @param input.transferables - Object containing transferable resources like MessagePorts
    * @param input.transferables.fileSystemPort - Optional MessagePort for direct communication with file-manager worker
-   * @param input.options - The options passed to the worker, specific to the kernel provider
-   * @param input.middlewareEntries - Ordered array of middleware registrations to load dynamically
    */
   public async initialize(input: {
     callbacks: { onLog: OnWorkerLog };
     transferables: { fileSystemPort?: MessagePort; inlineFileSystem?: RuntimeFileSystemBase };
-    options: Options;
-    middlewareEntries: MiddlewareRegistrations;
-    transcoderModules?: TranscoderModuleEntry[];
+    options?: Options;
+    config?: unknown;
   }): Promise<void> {
     this.onLog = input.callbacks.onLog;
-    this.options = input.options;
+    const defaultOptions: Record<string, unknown> = {};
+    this.options = (input.options ?? defaultOptions) as Options;
 
     // Create logger (depends on onLog being set)
     this._logger = this.createLogger();
@@ -556,22 +593,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       this.fileSystem = adaptInlineFileSystem(input.transferables.inlineFileSystem);
       this._filesystem = this.createFileSystem();
     } else if (input.transferables.fileSystemPort) {
-      this.fileSystem = createBridgeProxy<RuntimeFileSystemBase>(
-        wrapWorkerFilesystemBridgePort(input.transferables.fileSystemPort),
-        {
-          filePool: this._filePool,
-        },
-      );
+      this.fileSystem = createWorkerFileSystemProxy(input.transferables.fileSystemPort, {
+        filePool: this._filePool,
+      });
       this._filesystem = this.createFileSystem();
     }
 
     const bootstrapSpan = this.tracer.startSpan('kernel.bootstrap');
     try {
-      await this.loadMiddleware(input.middlewareEntries);
-
-      if (input.transcoderModules && input.transcoderModules.length > 0) {
-        await this.loadTranscoders(input.transcoderModules);
-      }
+      await this.loadBundlers(this.bundlerPlugins);
+      await this.loadMiddleware(this.middlewarePlugins);
+      await this.loadTranscoders(this.transcoderPlugins);
 
       const initSpan = this.tracer.startSpan('kernel.init', {
         kernel: this.constructor.name,
@@ -797,8 +829,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.assetHashCache.clear();
     this.middlewareWatchPaths.clear();
     this.nativeHandle = undefined;
-    this.lastSerializedHandle = undefined;
+    this.lastSerializedNativeHandle = undefined;
     this.lastRenderParameters = {};
+    this.lastSettledRenderIdentity = undefined;
     this.currentFile = undefined;
     this.telemetryCollector?.dispose();
     this.telemetryCollector = undefined;
@@ -857,6 +890,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             filesystem: this.filesystem,
             dependencies,
             dependencyHash,
+            projectRootPath: this.getProjectRootPath(),
+            basePath: this.getProjectRootPath(),
             stateSchema: middleware.stateSchema,
             options: middlewareOptions,
             logger: this.getMiddlewareLogger(middleware.name),
@@ -964,6 +999,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     });
     const dependencies = await this.computeDependencies({
       parameters: entry.parameters,
+      renderOptions: renderOptionsResult.options,
       resolvedMiddleware: resolvedArray,
     });
     const dependencyHash = this.computeDependencyHash(dependencies);
@@ -980,6 +1016,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             filesystem: this.filesystem,
             dependencies,
             dependencyHash,
+            projectRootPath: this.getProjectRootPath(),
+            basePath: this.getProjectRootPath(),
             stateSchema: middleware.stateSchema,
             options: middlewareOptions,
             logger: this.getMiddlewareLogger(middleware.name),
@@ -1035,8 +1073,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     const internalResult = await chain(input);
 
-    if (internalResult.success && internalResult.serializedHandle !== undefined) {
-      this.lastSerializedHandle = internalResult.serializedHandle;
+    if (internalResult.success) {
+      this.lastSerializedNativeHandle = internalResult.serializedNativeHandle;
+      this.lastSettledRenderIdentity = {
+        file: entry.file,
+        projectRootPath: this.getProjectRootPath(),
+        selectedKernelId: this.getActiveKernelId(),
+        parameters: entry.parameters,
+        renderOptions: renderOptionsResult.options,
+        dependencies,
+        dependencyHash,
+      };
     }
 
     this.onProgress?.('postProcessing');
@@ -1076,142 +1123,125 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       format,
     });
 
-    await this.ensureNativeHandle();
-
-    const activeKernelId = this.getActiveKernelId();
-    const zodSchemas = activeKernelId ? this.kernelExportZodSchemasMap.get(activeKernelId) : undefined;
-    const formatZodSchema = zodSchemas?.[format];
-    let validatedOptions: Record<string, unknown> = options ?? {};
-
-    if (formatZodSchema) {
-      const parseResult = formatZodSchema.safeParse(options ?? {});
-      if (!parseResult.success) {
-        exportSpan.end();
-        return {
-          success: false,
-          issues: parseResult.error.issues.map((issue) => ({
-            message: `Export option validation failed: ${issue.path.join('.')} — ${issue.message}`,
-            code: 'RUNTIME',
-            type: 'runtime',
-            severity: 'error',
-          })),
-        } satisfies ExportGeometryResult;
-      }
-      validatedOptions = parseResult.data as Record<string, unknown>;
-    } else if (zodSchemas && options && Object.keys(options).length > 0) {
-      const hasTranscoderRoute = this._capabilitiesManifest.routes.some(
-        (r) => r.targetFormat === format && r.transcoderId,
-      );
-      if (!hasTranscoderRoute) {
-        const declared = Object.keys(zodSchemas).join(', ');
-        exportSpan.end();
-        return {
-          success: false,
-          issues: [
-            {
-              message: `No export schema for format "${format}" — options cannot be validated. Declared formats: ${declared}. Register the format schema or use a transcoder.`,
-              code: 'KERNEL_CAPABILITY_MISSING',
-              type: 'runtime',
-              severity: 'error',
-            },
-          ],
-        } satisfies ExportGeometryResult;
-      }
+    const plan = this.createExportRequestPlan(format, options);
+    if (!plan.success) {
+      exportSpan.end();
+      return plan.result;
     }
-
-    const input: ExportGeometryInput = {
-      format,
-      options: validatedOptions,
-      nativeHandle: this.nativeHandle,
-    };
 
     const resolvedArray = this.getMiddleware();
     const activeMiddleware = resolvedArray.filter(
       ({ middleware, enabled }) => enabled && middleware.wrapExportGeometry,
     );
 
-    let result: ExportGeometryResult;
-
-    if (activeMiddleware.length === 0) {
-      const computeSpan = this.tracer.startSpan('kernel.export-compute');
-      result = await this.executeExportWithRoute(input, this.createRuntime());
-      computeSpan.end();
-    } else {
-      const depsSpan = this.tracer.startSpan('kernel.resolve-deps', {
-        phase: 'resolvingDeps',
-      });
-      const dependencies = await this.computeDependencies({
-        resolvedMiddleware: resolvedArray,
-      });
-      const dependencyHash = this.computeDependencyHash(dependencies);
-      depsSpan.end();
-
-      const runtimes = new Map<string, KernelMiddlewareRuntime>();
-      for (const { middleware, options: middlewareOptions } of activeMiddleware) {
-        runtimes.set(
-          middleware.name,
-          createMiddlewareRuntime({
-            onLog: this.onLog,
-            middlewareName: middleware.name,
-            filesystem: this.filesystem,
-            dependencies,
-            dependencyHash,
-            stateSchema: middleware.stateSchema,
-            options: middlewareOptions,
-            logger: this.getMiddlewareLogger(middleware.name),
-            registerWatchPath: this.handleRegisterWatchPath,
-          }),
-        );
-      }
-
-      const { tracer } = this;
-      let chain: ExportGeometryHandler = named('kernelHandler', async (handlerInput: ExportGeometryInput) => {
-        const computeSpan = tracer.startSpan('kernel.export-compute');
-        const exportResult = await this.executeExportWithRoute(handlerInput, this.createRuntime());
-        computeSpan.end();
-        return exportResult;
-      });
-
-      for (let index = activeMiddleware.length - 1; index >= 0; index--) {
-        const { middleware } = activeMiddleware[index]!;
-        const inner = chain;
-        const runtime = runtimes.get(middleware.name)!;
-        const middlewareName = middleware.name;
-        const wrapHook = middleware.wrapExportGeometry!;
-
-        chain = named(`middleware(${middlewareName})`, async (handlerInput: ExportGeometryInput) => {
-          const span = tracer.startSpan(`middleware.wrap(${middlewareName})`, {
-            middleware: middlewareName,
+    const result =
+      activeMiddleware.length === 0
+        ? await this.executeExportRequest(plan.input, this.lastSettledRenderIdentity)
+        : await this.runExportMiddlewarePipeline({
+            input: plan.input,
+            renderIdentity: this.lastSettledRenderIdentity,
+            exportDependency: plan.dependency,
+            activeMiddleware,
           });
-          try {
-            const chainResult = await wrapHook(handlerInput, inner, runtime);
-            span.end();
-            return chainResult;
-          } catch (error) {
-            span.end();
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            this.logger.error('Middleware failed', {
-              data: { name: middlewareName, error: errorMessage },
-            });
-            return createKernelError([
-              {
-                message: `Middleware error in ${middlewareName}: ${errorMessage}`,
-                code: 'MIDDLEWARE_FAILED',
-                type: 'kernel',
-                severity: 'error',
-              },
-            ]);
-          }
-        });
-      }
-
-      result = await chain(input);
-    }
 
     exportSpan.end();
 
     return result;
   }
+
+  /**
+   * Export an exact render request without publishing it to the autonomous preview loop.
+   *
+   * @param request - Request-scoped render/export input from the runtime protocol.
+   * @returns Exported files or structured runtime issues.
+   */
+  public async exportModel(request: RuntimeExportModelArgs): Promise<ExportGeometryResult> {
+    const exportSpan = this.tracer.startSpan('kernel.export-model', {
+      format: request.format,
+      file: request.file.filename,
+    });
+
+    try {
+      if (request.stage) {
+        await this.stageFiles(request.stage);
+      }
+
+      this.renderDependencyCache = undefined;
+      this.setBasePath(request.file);
+
+      const parametersResult = await this.getParameters(request.file);
+      let mergedParameters = request.parameters;
+      if (parametersResult.success) {
+        const extracted = parametersResult.data as {
+          defaultParameters?: Record<string, unknown>;
+        };
+        if (extracted.defaultParameters) {
+          mergedParameters = deepmerge(extracted.defaultParameters, request.parameters);
+        }
+      }
+
+      const renderOptionsResult = this.validateRenderOptions(request.options);
+      if (!renderOptionsResult.success) {
+        return createKernelError(renderOptionsResult.issues);
+      }
+
+      const resolvedArray = this.getMiddleware();
+      const dependencies = await this.computeDependencies({
+        parameters: mergedParameters,
+        renderOptions: renderOptionsResult.options,
+        resolvedMiddleware: resolvedArray,
+      });
+      const renderIdentity: LastSettledRenderIdentity = {
+        file: request.file,
+        projectRootPath: this.getProjectRootPath(),
+        selectedKernelId: this.getActiveKernelId(),
+        parameters: mergedParameters,
+        renderOptions: renderOptionsResult.options,
+        dependencies,
+        dependencyHash: this.computeDependencyHash(dependencies),
+      };
+
+      const plan = this.createExportRequestPlan(request.format, request.exportOptions);
+      if (!plan.success) {
+        return plan.result;
+      }
+
+      const activeMiddleware = resolvedArray.filter(
+        ({ middleware, enabled }) => enabled && middleware.wrapExportGeometry,
+      );
+      const renderExactRequest = async (handlerInput: ExportGeometryRequest): Promise<ExportGeometryResult> => {
+        if (!this.isCurrentRenderIdentity(renderIdentity)) {
+          this.nativeHandle = undefined;
+          this.lastSerializedNativeHandle = undefined;
+          const renderResult = await this.createGeometry({
+            file: request.file,
+            parameters: mergedParameters,
+            options: renderOptionsResult.options,
+          });
+          if (!renderResult.success) {
+            return { success: false, issues: renderResult.issues };
+          }
+        }
+        return this.executeExportRequest(handlerInput, this.lastSettledRenderIdentity ?? renderIdentity);
+      };
+
+      if (activeMiddleware.length === 0) {
+        return await renderExactRequest(plan.input);
+      }
+
+      return await this.runExportMiddlewarePipeline({
+        input: plan.input,
+        renderIdentity,
+        exportDependency: plan.dependency,
+        activeMiddleware,
+        onCacheMiss: renderExactRequest,
+      });
+    } finally {
+      this._updateWatchSetFromCaches();
+      exportSpan.end();
+    }
+  }
+
   /**
    * Get the resolved middleware array for this worker.
    * Override in subclasses to customize middleware (e.g., for testing).
@@ -1220,19 +1250,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   public getMiddleware(): ResolvedMiddleware[] {
     return this.resolvedMiddleware;
-  }
-
-  /**
-   * Reconfigure middleware at runtime without re-importing already loaded modules.
-   * New URLs are imported, removed URLs are dropped, existing URLs get config updates.
-   *
-   * @param entries - New middleware configuration to apply
-   */
-  public async configureMiddleware(entries: MiddlewareRegistrations): Promise<void> {
-    await this.loadMiddleware(entries);
-    this.logger.debug('Middleware reconfigured', {
-      data: { count: this.resolvedMiddleware.length },
-    });
   }
 
   /**
@@ -1351,7 +1368,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         recursive: false,
         excludes: ['.tau/cache/**'],
       },
-      (event) => {
+      (event: WatchEvent) => {
         const changedPaths: string[] = [];
         if ('path' in event) {
           changedPaths.push(event.path);
@@ -1391,29 +1408,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * Load the bundler definition from its URL (or use a preloaded one).
+   * Load the bundler definition from its worker-owned plugin implementation.
    * Context initialization is deferred until first use via ensureBundlerContext(),
    * because the project path is not known until setBasePath() runs.
    *
-   * @param bundlerEntry - Bundler registration with module URL and extensions
+   * @param bundlerEntry - Bundler registration with extensions and options
    * @param preloadedDefinition - Optional pre-loaded definition (bypasses dynamic import; used in tests)
    */
   public async ensureLoadedBundler(
-    bundlerEntry: BundlerRegistration,
+    bundlerEntry: BundlerPlugin,
     preloadedDefinition?: BundlerDefinition,
   ): Promise<void> {
     const initSpan = this.tracer.startSpan('kernel.bundler-init');
 
     try {
-      let definition: BundlerDefinition;
-      if (preloadedDefinition) {
-        definition = preloadedDefinition;
-      } else {
-        const module_: Record<string, unknown> = (await import(
-          /* @vite-ignore */ bundlerEntry.bundlerModuleUrl
-        )) as Record<string, unknown>;
-        definition = (module_['default'] ?? module_) as BundlerDefinition;
-      }
+      const definition = preloadedDefinition ?? (await resolveRuntimePluginDefinition('bundler', bundlerEntry));
 
       const { extensions } = bundlerEntry;
       for (const extension of extensions) {
@@ -1428,6 +1437,27 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     } finally {
       initSpan.end();
     }
+  }
+
+  protected configureRuntimePlugins(options: KernelWorkerOptions): void {
+    this.middlewarePlugins = options.middleware ?? [];
+    this.bundlerPlugins = options.bundlers ?? [];
+    this.transcoderPlugins = options.transcoders ?? [];
+  }
+
+  /**
+   * Logger interface for kernel workers.
+   * Provides convenience methods that automatically inject the component name.
+   *
+   * @returns the kernel logger interface
+   * @throws Error if accessed before initialize() completes
+   */
+  protected get logger(): RuntimeLogger {
+    if (!this._logger) {
+      throw new Error('logger not available - initialize must complete first');
+    }
+
+    return this._logger;
   }
 
   /**
@@ -1450,26 +1480,27 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * Resolution order:
    * 1. No-op if nativeHandle is already set
-   * 2. Deserialize from lastSerializedHandle (fast path — avoids re-running createGeometry)
-   * 3. Re-run createGeometry as a fallback to materialize the handle
+   * 2. Re-run createGeometry as a fallback to materialize the handle
+   *
+   * Subclasses may restore a declared durable native-handle snapshot before
+   * falling back to this reheat path.
    */
-  protected async ensureNativeHandle(): Promise<void> {
+  protected async ensureNativeHandle(
+    runtime: KernelRuntime,
+    renderIdentity?: LastSettledRenderIdentity,
+  ): Promise<void> {
     if (this.nativeHandle !== undefined && this.nativeHandle !== null) {
       return;
     }
 
-    if (this.lastSerializedHandle !== undefined && this.lastSerializedHandle !== null) {
-      this.logger.debug('Restoring nativeHandle from serialized cache');
-      this.nativeHandle = this.lastSerializedHandle;
+    const identity = renderIdentity ?? this.lastSettledRenderIdentity;
+    const file = identity?.file ?? this.currentFile;
+    if (!file) {
       return;
     }
 
-    if (!this.currentFile) {
-      return;
-    }
-
-    const reheatParameters =
-      Object.keys(this.lastRenderParameters).length > 0 ? this.lastRenderParameters : this.currentParameters;
+    this.setBasePath(file);
+    const reheatParameters = identity?.parameters ?? this.lastRenderParameters;
     this.logger.debug('Export reheat: re-running createGeometry to populate nativeHandle', {
       data: {
         filePath: this.activeFileAbsolutePath,
@@ -1478,7 +1509,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       },
     });
     const reheatSpan = this.tracer.startSpan('kernel.export-reheat');
-    const reheatRenderOptions = this.validateRenderOptions(this.currentRenderOptions);
+    const reheatRenderOptions = identity
+      ? ({ success: true, options: identity.renderOptions } as const)
+      : this.validateRenderOptions(this.currentRenderOptions);
     if (!reheatRenderOptions.success) {
       reheatSpan.end();
       this.logger.warn('Export reheat skipped: render option validation failed', {
@@ -1494,7 +1527,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           parameters: reheatParameters,
           options: reheatRenderOptions.options,
         },
-        this.createRuntime(),
+        runtime,
       );
       this.logger.debug('Export reheat completed', {
         data: {
@@ -1716,6 +1749,346 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @returns The active kernel ID, or undefined if no kernel is selected
    */
   protected abstract getActiveKernelId(): string | undefined;
+
+  /**
+   * Get the version of the currently active kernel. Used in dependency hashes so
+   * durable geometry/export cache entries are invalidated when kernel behavior changes.
+   *
+   * @returns The active kernel version, or undefined if no kernel is selected
+   */
+  protected abstract getActiveKernelVersion(): string | undefined;
+
+  private async stageFiles(stage: Record<string, Uint8Array<ArrayBuffer>>): Promise<void> {
+    for (const [path, bytes] of Object.entries(stage)) {
+      const absolutePath = path.startsWith('/') ? path : `/${path}`;
+      const directory = parentDirectory(absolutePath);
+      if (directory && directory !== '/') {
+        // oxlint-disable-next-line no-await-in-loop -- staging must preserve filesystem order for deterministic tests
+        await this.filesystem.mkdir(directory, { recursive: true });
+      }
+      // oxlint-disable-next-line no-await-in-loop -- staging must complete before dependency resolution
+      await this.filesystem.writeFile(absolutePath, bytes);
+    }
+  }
+
+  private createExportRequestPlan(format: FileExtension, options?: Record<string, unknown>): ExportRequestPlan {
+    const rawOptions = options ?? {};
+    const activeKernelId = this.getActiveKernelId();
+    const zodSchemas = activeKernelId ? this.kernelExportZodSchemasMap.get(activeKernelId) : undefined;
+    const formatZodSchema = zodSchemas?.[format];
+
+    if (formatZodSchema) {
+      const parseResult = formatZodSchema.safeParse(rawOptions);
+      if (!parseResult.success) {
+        return {
+          success: false,
+          result: {
+            success: false,
+            issues: parseResult.error.issues.map((issue) => ({
+              message: `Export option validation failed: ${issue.path.join('.')} — ${issue.message}`,
+              code: 'RUNTIME',
+              type: 'runtime',
+              severity: 'error',
+            })),
+          },
+        };
+      }
+      const validatedOptions = parseResult.data as Record<string, unknown>;
+      return {
+        success: true,
+        input: { format, options: validatedOptions },
+        dependency: {
+          type: 'export',
+          format,
+          options: validatedOptions,
+          route: {
+            kind: 'direct',
+            kernelId: activeKernelId,
+            targetFormat: format,
+          },
+        },
+      };
+    }
+
+    const transcoderRoute = this._capabilitiesManifest.routes.find(
+      (route) =>
+        route.targetFormat === format && route.transcoderId && (!activeKernelId || route.kernelId === activeKernelId),
+    );
+    if (zodSchemas && !transcoderRoute && Object.keys(rawOptions).length > 0) {
+      const declared = Object.keys(zodSchemas).join(', ');
+      return {
+        success: false,
+        result: {
+          success: false,
+          issues: [
+            {
+              message: `No export schema for format "${format}" — options cannot be validated. Declared formats: ${declared}. Register the format schema or use a transcoder.`,
+              code: 'KERNEL_CAPABILITY_MISSING',
+              type: 'runtime',
+              severity: 'error',
+            },
+          ],
+        },
+      };
+    }
+
+    let sourceOptions = rawOptions;
+    let edgeOptions = rawOptions;
+    if (transcoderRoute) {
+      const sourceZodSchema = zodSchemas?.[transcoderRoute.sourceFormat];
+      if (sourceZodSchema) {
+        const parseResult = sourceZodSchema.safeParse(rawOptions);
+        if (parseResult.success) {
+          sourceOptions = parseResult.data as Record<string, unknown>;
+        }
+      }
+
+      const transcoder = this.loadedTranscoders.get(transcoderRoute.transcoderId!);
+      const matchingEdge = transcoder?.edges.find(
+        (edge) => edge.from === transcoderRoute.sourceFormat && edge.to === format,
+      );
+      if (matchingEdge?.optionsSchema) {
+        const edgeParseResult = matchingEdge.optionsSchema.safeParse(rawOptions);
+        if (!edgeParseResult.success) {
+          return {
+            success: false,
+            result: createKernelError(
+              edgeParseResult.error.issues.map((issue) => ({
+                message: `Transcoder edge option validation failed (${transcoderRoute.sourceFormat} → ${format}): ${issue.path.join('.')} — ${issue.message}`,
+                code: 'RUNTIME',
+                severity: 'error',
+              })),
+            ),
+          };
+        }
+        edgeOptions = edgeParseResult.data as Record<string, unknown>;
+      }
+    }
+
+    return {
+      success: true,
+      input: { format, options: rawOptions },
+      dependency: {
+        type: 'export',
+        format,
+        options: rawOptions,
+        route: transcoderRoute
+          ? {
+              kind: 'transcoded',
+              kernelId: transcoderRoute.kernelId,
+              sourceFormat: transcoderRoute.sourceFormat,
+              targetFormat: transcoderRoute.targetFormat,
+              transcoderId: transcoderRoute.transcoderId,
+              sourceOptions,
+              edgeOptions,
+            }
+          : {
+              kind: 'direct',
+              kernelId: activeKernelId,
+              targetFormat: format,
+            },
+      },
+    };
+  }
+
+  private async runExportMiddlewarePipeline(options: {
+    input: ExportGeometryRequest;
+    renderIdentity: LastSettledRenderIdentity | undefined;
+    exportDependency: ExportDependency;
+    activeMiddleware: ResolvedMiddleware[];
+    onCacheMiss?: (input: ExportGeometryRequest) => Promise<ExportGeometryResult>;
+  }): Promise<ExportGeometryResult> {
+    if (!options.renderIdentity) {
+      return this.createExportRenderIdentityMissingResult();
+    }
+
+    const depsSpan = this.tracer.startSpan('kernel.resolve-deps', {
+      phase: 'resolvingDeps',
+    });
+    const dependencies: Dependency[] = [...options.renderIdentity.dependencies, options.exportDependency];
+    const dependencyHash = this.computeDependencyHash(dependencies);
+    depsSpan.end();
+
+    const runtimes = new Map<string, KernelMiddlewareRuntime>();
+    for (const { middleware, options: middlewareOptions } of options.activeMiddleware) {
+      runtimes.set(
+        middleware.name,
+        createMiddlewareRuntime({
+          onLog: this.onLog,
+          middlewareName: middleware.name,
+          filesystem: this.filesystem,
+          dependencies,
+          dependencyHash,
+          projectRootPath: options.renderIdentity.projectRootPath,
+          basePath: options.renderIdentity.projectRootPath,
+          stateSchema: middleware.stateSchema,
+          options: middlewareOptions,
+          logger: this.getMiddlewareLogger(middleware.name),
+          registerWatchPath: this.handleRegisterWatchPath,
+        }),
+      );
+    }
+
+    const { tracer } = this;
+    let chain: ExportGeometryHandler = named('kernelHandler', async (handlerInput: ExportGeometryRequest) => {
+      const computeSpan = tracer.startSpan('kernel.export-compute');
+      const exportResult = options.onCacheMiss
+        ? await options.onCacheMiss(handlerInput)
+        : await this.executeExportRequest(handlerInput, options.renderIdentity);
+      computeSpan.end();
+      return exportResult;
+    });
+
+    for (let index = options.activeMiddleware.length - 1; index >= 0; index--) {
+      const { middleware } = options.activeMiddleware[index]!;
+      const inner = chain;
+      const runtime = runtimes.get(middleware.name)!;
+      const middlewareName = middleware.name;
+      const wrapHook = middleware.wrapExportGeometry!;
+
+      chain = named(`middleware(${middlewareName})`, async (handlerInput: ExportGeometryRequest) => {
+        const span = tracer.startSpan(`middleware.wrap(${middlewareName})`, {
+          middleware: middlewareName,
+        });
+        try {
+          const chainResult = await wrapHook(handlerInput, inner, runtime);
+          span.end();
+          return chainResult;
+        } catch (error) {
+          span.end();
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          this.logger.error('Middleware failed', {
+            data: { name: middlewareName, error: errorMessage },
+          });
+          return createKernelError([
+            {
+              message: `Middleware error in ${middlewareName}: ${errorMessage}`,
+              code: 'MIDDLEWARE_FAILED',
+              type: 'kernel',
+              severity: 'error',
+            },
+          ]);
+        }
+      });
+    }
+
+    return chain(options.input);
+  }
+
+  private async executeExportRequest(
+    input: ExportGeometryRequest,
+    renderIdentity: LastSettledRenderIdentity | undefined,
+  ): Promise<ExportGeometryResult> {
+    const runtime = this.createRuntime();
+    const routeAvailability = this.checkExportRouteAvailability(input.format);
+    if (!routeAvailability.success) {
+      return routeAvailability.result;
+    }
+
+    const nativeInput = await this.prepareNativeExportInput(input, renderIdentity, runtime);
+    if (!nativeInput.success) {
+      return nativeInput.result;
+    }
+
+    const computeSpan = this.tracer.startSpan('kernel.export-compute');
+    const result = await this.executeExportWithRoute(nativeInput.input, runtime);
+    computeSpan.end();
+    return result;
+  }
+
+  private async prepareNativeExportInput(
+    input: ExportGeometryRequest,
+    renderIdentity: LastSettledRenderIdentity | undefined,
+    runtime: KernelRuntime,
+  ): Promise<{ success: true; input: KernelExportGeometryInput } | { success: false; result: ExportGeometryResult }> {
+    if (!this.getActiveKernelId()) {
+      return {
+        success: true,
+        input: {
+          ...input,
+          nativeHandle: this.nativeHandle,
+        },
+      };
+    }
+
+    await this.ensureNativeHandle(runtime, renderIdentity);
+    if (this.nativeHandle === undefined || this.nativeHandle === null) {
+      return {
+        success: false,
+        result: createKernelError([
+          {
+            message:
+              'Export could not materialize the kernel-native geometry handle for the requested render identity.',
+            code: 'RUNTIME_EXPORT_NATIVE_HANDLE_MISSING',
+            type: 'runtime',
+            severity: 'error',
+          },
+        ]),
+      };
+    }
+
+    return {
+      success: true,
+      input: {
+        ...input,
+        nativeHandle: this.nativeHandle,
+      },
+    };
+  }
+
+  private checkExportRouteAvailability(
+    format: FileExtension,
+  ): { success: true } | { success: false; result: ExportGeometryResult } {
+    const activeKernelId = this.getActiveKernelId();
+    if (!activeKernelId) {
+      return { success: true };
+    }
+
+    const zodSchemas = this.kernelExportZodSchemasMap.get(activeKernelId);
+    const kernelFormats = zodSchemas ? (Object.keys(zodSchemas) as FileExtension[]) : undefined;
+    if (kernelFormats?.includes(format)) {
+      return { success: true };
+    }
+
+    const hasTranscoderRoute = this._capabilitiesManifest.routes.some(
+      (route) => route.targetFormat === format && route.transcoderId && route.kernelId === activeKernelId,
+    );
+    if (hasTranscoderRoute) {
+      return { success: true };
+    }
+
+    const nativeFormats = kernelFormats?.join(', ') ?? 'none';
+    return {
+      success: false,
+      result: {
+        success: false,
+        issues: [
+          {
+            message: `No export route found for format "${format}" from kernel "${activeKernelId}". Native formats: ${nativeFormats}. Register a transcoder that supports this conversion.`,
+            code: 'KERNEL_CAPABILITY_MISSING',
+            type: 'runtime',
+            severity: 'error',
+          },
+        ],
+      },
+    };
+  }
+
+  private createExportRenderIdentityMissingResult(): ExportGeometryResult {
+    return createKernelError([
+      {
+        message:
+          'Export cache lookup requires a settled render identity. Render the model first or use request-scoped export with file and parameters.',
+        code: 'RUNTIME_EXPORT_RENDER_IDENTITY_MISSING',
+        type: 'runtime',
+        severity: 'error',
+      },
+    ]);
+  }
+
+  private isCurrentRenderIdentity(identity: LastSettledRenderIdentity): boolean {
+    return this.lastSettledRenderIdentity?.dependencyHash === identity.dependencyHash;
+  }
 
   /**
    * Get the absolute path of the active file.
@@ -1991,33 +2364,32 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * Load middleware modules from URLs and resolve their configs.
-   * Uses a module cache to avoid redundant network requests when reconfiguring.
+   * Load middleware definitions from worker-owned plugin implementations and resolve their configs.
    *
-   * @param middlewareEntries - Ordered array of middleware entries
+   * @param middlewarePlugins - Ordered array of middleware plugins
    */
-  private async loadMiddleware(middlewareEntries: MiddlewareRegistrations): Promise<void> {
+  private async loadMiddleware(middlewarePlugins: readonly MiddlewarePlugin[]): Promise<void> {
     const middlewareSpan = this.tracer.startSpan('kernel.load-middleware', {
-      count: middlewareEntries.length,
+      count: middlewarePlugins.length,
     });
 
     try {
       const resolved: ResolvedMiddleware[] = [];
 
-      for (const entry of middlewareEntries) {
+      for (const entry of middlewarePlugins) {
         // oxlint-disable-next-line no-await-in-loop -- Middleware must be loaded sequentially to preserve order
-        const middleware = await this.importMiddlewareModule(entry.url);
+        const middleware = await this.importMiddlewareModule(entry);
 
         const resolvedOptions = middleware.optionsSchema
           ? (middleware.optionsSchema.parse(entry.options ?? {}) as Record<string, unknown>)
           : {};
 
-        const enabled = entry.enabled ?? middleware.enabled ?? true;
+        const enabled = middleware.enabled ?? true;
 
         resolved.push({
           middleware,
           options: resolvedOptions,
-          url: entry.url,
+          id: entry.id,
           enabled,
         });
       }
@@ -2029,13 +2401,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * Load and initialize transcoder modules from their entry descriptors.
-   * Each transcoder is dynamically imported, validated, initialized with its options,
-   * and its edges are discovered for manifest building.
+   * Load and initialize transcoders from worker-owned plugin implementations.
    *
-   * @param entries - Transcoder module entries with id, URL, and options
+   * @param entries - Transcoder plugins with id and options
    */
-  private async loadTranscoders(entries: TranscoderModuleEntry[]): Promise<void> {
+  // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- variance: accepts any transcoder plugin generic
+  private async loadTranscoders(entries: readonly TranscoderPluginEntry[]): Promise<void> {
     const transcoderSpan = this.tracer.startSpan('kernel.load-transcoders', {
       count: entries.length,
     });
@@ -2053,11 +2424,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
         try {
           // oxlint-disable-next-line no-await-in-loop -- Sequential to preserve init order
-          const module_: Record<string, unknown> = (await import(/* @vite-ignore */ entry.moduleUrl)) as Record<
-            string,
-            unknown
-          >;
-          const definition = (module_['default'] ?? module_) as TranscoderDefinition;
+          const definition = await resolveRuntimePluginDefinition('transcoder', entry);
 
           const rawOptions = entry.options ?? {};
           const validatedOptions = definition.optionsSchema ? definition.optionsSchema.parse(rawOptions) : rawOptions;
@@ -2201,7 +2568,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   // oxlint-disable-next-line complexity -- Multi-step route planner with fallback
   private async executeExportWithRoute(
-    input: ExportGeometryInput,
+    input: KernelExportGeometryInput,
     runtime: KernelRuntime,
   ): Promise<ExportGeometryResult> {
     const activeKernelId = this.getActiveKernelId();
@@ -2243,7 +2610,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
       }
 
-      const sourceInput: ExportGeometryInput = {
+      const sourceInput: KernelExportGeometryInput = {
         ...input,
         format: route.sourceFormat,
         options: resolvedSourceOptions,
@@ -2308,42 +2675,26 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /**
    * Import a middleware module, using the cache to avoid redundant imports.
    *
-   * @param url - import specifier pointing to the middleware module's entry point
+   * @param entries - registered bundler entries
    * @returns The middleware instance
    */
-  private async importMiddlewareModule(url: string): Promise<KernelMiddleware> {
-    const cached = this.middlewareModuleCache.get(url);
+  private async loadBundlers(entries: readonly BundlerPlugin[]): Promise<void> {
+    for (const entry of entries) {
+      // oxlint-disable-next-line no-await-in-loop -- Bundler registration order should remain deterministic
+      await this.ensureLoadedBundler(entry);
+    }
+  }
+
+  private async importMiddlewareModule(entry: MiddlewarePlugin): Promise<KernelMiddleware> {
+    const cached = this.middlewareModuleCache.get(entry.id);
     if (cached) {
       return cached;
     }
 
-    const module_: Record<string, unknown> = (await import(/* @vite-ignore */ url)) as Record<string, unknown>;
-    const middleware = this.resolveMiddlewareExport(module_);
+    const middleware = await resolveRuntimePluginDefinition('middleware', entry);
 
-    this.middlewareModuleCache.set(url, middleware);
+    this.middlewareModuleCache.set(entry.id, middleware);
     return middleware;
-  }
-
-  /**
-   * Resolve the middleware export from a dynamically imported module.
-   * Checks for a default export first, then looks for the first export
-   * that has a `name` property (duck-typed as KernelMiddleware).
-   *
-   * @param module_ - The imported module
-   * @returns The resolved middleware instance
-   */
-  private resolveMiddlewareExport(module_: Record<string, unknown>): KernelMiddleware {
-    if (module_['default'] && typeof module_['default'] === 'object' && 'name' in module_['default']) {
-      return module_['default'] as KernelMiddleware;
-    }
-
-    for (const value of Object.values(module_)) {
-      if (typeof value === 'object' && value !== null && 'name' in value) {
-        return value as KernelMiddleware;
-      }
-    }
-
-    throw new Error('Middleware module does not export a valid KernelMiddleware');
   }
 
   /**
@@ -2410,6 +2761,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   private async computeDependencies(input: {
     parameters?: Record<string, unknown>;
+    renderOptions?: Record<string, unknown>;
     resolvedMiddleware?: ResolvedMiddleware[];
   }): Promise<Dependency[]> {
     // Use cached base deps within a render cycle (file discovery + hashing is expensive)
@@ -2422,16 +2774,25 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       this.renderDependencyCache = { hash: '', dependencies: baseDeps };
     }
 
-    if (input.parameters === undefined) {
-      return baseDeps;
+    const runtimeDeps: Dependency[] = [...baseDeps];
+
+    if (input.parameters !== undefined) {
+      const parameterDep: ParameterDependency = {
+        type: 'parameter',
+        parameters: input.parameters,
+      };
+      runtimeDeps.push(parameterDep);
     }
 
-    // Add parameter dependency for geometry computation
-    const parameterDep: ParameterDependency = {
-      type: 'parameter',
-      parameters: input.parameters,
-    };
-    return [...baseDeps, parameterDep];
+    if (input.renderOptions !== undefined) {
+      const renderOptionsDep: RenderOptionsDependency = {
+        type: 'render-options',
+        options: input.renderOptions,
+      };
+      runtimeDeps.push(renderOptionsDep);
+    }
+
+    return runtimeDeps;
   }
 
   /**
@@ -2460,13 +2821,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const readSpan = this.tracer.startSpan('deps.read', {
         fileCount: uncachedPaths.length,
       });
-      const contentMap = await this.filesystem.readFiles(uncachedPaths);
+      const contentMap: Record<string, Uint8Array<ArrayBuffer>> = await this.filesystem.readFiles(uncachedPaths);
       readSpan.end();
 
       const hashSpan = this.tracer.startSpan('deps.hash', {
         fileCount: uncachedPaths.length,
       });
-      for (const [path, content] of Object.entries(contentMap)) {
+      for (const path of Object.keys(contentMap)) {
+        const content = contentMap[path];
+        if (content === undefined) {
+          continue;
+        }
         this.fileHashCache.set(path, this.hashContent(content));
         this.fileContentCache.set(path, content);
       }
@@ -2533,6 +2898,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       version: tauVersion,
     };
 
+    const activeKernelId = this.getActiveKernelId();
+    const activeKernelVersion = this.getActiveKernelVersion();
+    const kernelDeps: KernelDependency[] =
+      activeKernelId && activeKernelVersion
+        ? [{ type: 'kernel', id: activeKernelId, version: activeKernelVersion }]
+        : [];
+
     // 5. Options dependencies (options are stable between renders, no sort needed)
     const optionDeps: OptionDependency[] = Object.entries(this.options).map(([key, value]) => ({
       type: 'option',
@@ -2548,7 +2920,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       contentHash: this.hashAssetUrl(urlOrVersion),
     }));
 
-    return [...fileDeps, ...middlewareDeps, frameworkDep, ...optionDeps, ...assetDeps];
+    return [...fileDeps, ...middlewareDeps, ...kernelDeps, frameworkDep, ...optionDeps, ...assetDeps];
   }
 
   /**

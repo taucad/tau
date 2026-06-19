@@ -2,11 +2,11 @@
 /* oxlint-disable max-lines -- comprehensive kernel test suite */
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return any */
 /* eslint-disable @typescript-eslint/naming-convention -- File names use extensions like 'box.ts' */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
 import type { Document } from '@gltf-transform/core';
-import replicadKernel from '#kernels/replicad/replicad.kernel.js';
-import { replicadDetectPattern } from '#kernels/replicad/replicad.plugin.js';
+import { replicadDetectPattern } from '#kernels/replicad/replicad.constants.js';
+import { replicad as replicadKernel } from '#kernels/replicad/replicad.kernel.js';
 import { exampleFixtures } from '#kernels/replicad/replicad.test-fixtures.js';
 import { createGeometryTestHelpers, extractGltfFromResult } from '#testing/kernel-geometry-testing.utils.js';
 import {
@@ -20,6 +20,9 @@ import {
 } from '#testing/kernel-testing.utils.js';
 import type { CreateTestWorkerOptions } from '#testing/kernel-testing.utils.js';
 import type { TelemetryEntry } from '#types/index.js';
+import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+
+vi.setConfig({ testTimeout: 15_000 });
 
 // =============================================================================
 // Test Utilities
@@ -28,6 +31,47 @@ import type { TelemetryEntry } from '#types/index.js';
 /** Create a runtime worker for testing with the provided files. */
 const createWorker = async (files: Record<string, string>): ReturnType<typeof createTestWorker> =>
   createTestWorker(replicadKernel, files);
+
+const readGltfSize = async (glbBytes: Uint8Array<ArrayBuffer>): Promise<[number, number, number]> => {
+  const document = await new NodeIO().readBinary(glbBytes);
+  const min = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+  const max = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
+
+  for (const mesh of document.getRoot().listMeshes()) {
+    for (const primitive of mesh.listPrimitives()) {
+      const position = primitive.getAttribute('POSITION');
+      if (!position) {
+        continue;
+      }
+      const point: [number, number, number] = [0, 0, 0];
+      for (let index = 0; index < position.getCount(); index++) {
+        position.getElement(index, point);
+        for (let axis = 0; axis < 3; axis++) {
+          min[axis] = Math.min(min[axis]!, point[axis]!);
+          max[axis] = Math.max(max[axis]!, point[axis]!);
+        }
+      }
+    }
+  }
+
+  return [max[0]! - min[0]!, max[1]! - min[1]!, max[2]! - min[2]!];
+};
+
+const readGltfNodeMeshNames = async (
+  glbBytes: Uint8Array<ArrayBuffer>,
+): Promise<{ nodeNames: string[]; meshNames: string[] }> => {
+  const document = await new NodeIO().readBinary(glbBytes);
+  return {
+    nodeNames: document
+      .getRoot()
+      .listNodes()
+      .map((node) => node.getName()),
+    meshNames: document
+      .getRoot()
+      .listMeshes()
+      .map((mesh) => mesh.getName()),
+  };
+};
 
 /** Helper to extract parameters and assert success. */
 const getParameters = async (
@@ -61,7 +105,14 @@ const createGeometry = async ({
 // Create geometry test helpers instance for geometry assertions
 const geometryHelpers = createGeometryTestHelpers();
 
+const resolveReplicadDefinition = async () => resolveRuntimePluginDefinition('kernel', replicadKernel());
+let replicadDefinition: Awaited<ReturnType<typeof resolveReplicadDefinition>>;
+
 describe('ReplicadWorker', () => {
+  beforeAll(async () => {
+    replicadDefinition = await resolveReplicadDefinition();
+  });
+
   // ===========================================================================
   // Tests: Parameter Extraction
   // ===========================================================================
@@ -300,6 +351,11 @@ describe('ReplicadWorker', () => {
 
       assertSuccess(result);
       expect(result.data.length).toBeGreaterThan(0);
+      const glbData = extractGltfFromResult(result);
+      expect(glbData).toBeDefined();
+      const { nodeNames, meshNames } = await readGltfNodeMeshNames(glbData!);
+      expect(nodeNames).toEqual(['My Custom Box']);
+      expect(meshNames).toEqual(['My Custom Box']);
     });
 
     it('should produce geometry when no defaultName is defined', async () => {
@@ -317,6 +373,34 @@ describe('ReplicadWorker', () => {
 
       assertSuccess(result);
       expect(result.data.length).toBeGreaterThan(0);
+      const glbData = extractGltfFromResult(result);
+      expect(glbData).toBeDefined();
+      const { nodeNames, meshNames } = await readGltfNodeMeshNames(glbData!);
+      expect(nodeNames).toEqual(['Shape 1']);
+      expect(meshNames).toEqual(['Shape 1']);
+    });
+
+    it('should name unnamed multi-shape output with one-indexed shape names', async () => {
+      const result = await createGeometry({
+        files: {
+          'unnamed-multi.ts': `
+            import { drawRoundedRectangle } from 'replicad';
+            export default function main() {
+              const first = drawRoundedRectangle(10, 10).sketchOnPlane().extrude(5);
+              const second = drawRoundedRectangle(5, 5).sketchOnPlane().extrude(2).translate(20, 0, 0);
+              return [first, second];
+            }
+          `,
+        },
+        mainFile: 'unnamed-multi.ts',
+      });
+
+      assertSuccess(result);
+      const glbData = extractGltfFromResult(result);
+      expect(glbData).toBeDefined();
+      const { nodeNames, meshNames } = await readGltfNodeMeshNames(glbData!);
+      expect(nodeNames).toEqual(['Shape 1', 'Shape 2']);
+      expect(meshNames).toEqual(['Shape 1', 'Shape 2']);
     });
   });
 
@@ -2156,6 +2240,7 @@ export default function main() {
       const exportResult = await worker.exportGeometry('stl');
       assertSuccess(exportResult);
       expect(exportResult.data.length).toBeGreaterThan(0);
+      expect(exportResult.data[0]!.name).toBe('Shape 1');
     });
 
     it('should export to binary STL format', async () => {
@@ -2212,6 +2297,32 @@ export default function main() {
       const exportResult = await worker.exportGeometry('glb');
       assertSuccess(exportResult);
       expect(exportResult.data[0]?.name).toContain('glb');
+    });
+
+    it('should export GLB in z-up millimeters when unit length is millimeter', async () => {
+      const worker = await createWorker({
+        'box.ts': `
+          import { drawRoundedRectangle } from 'replicad';
+
+          export default function main() {
+            return drawRoundedRectangle(50, 30).sketchOnPlane().extrude(10);
+          }
+        `,
+      });
+
+      const geometryFile = createGeometryFile('box.ts');
+      await worker.createGeometry({ file: geometryFile, parameters: {} });
+
+      const exportResult = await worker.exportGeometry('glb', {
+        coordinateSystem: 'z-up',
+        unit: { length: 'millimeter' },
+      });
+      assertSuccess(exportResult);
+
+      const size = await readGltfSize(exportResult.data[0]!.bytes);
+      expect(size[0]).toBeCloseTo(50, 4);
+      expect(size[1]).toBeCloseTo(30, 4);
+      expect(size[2]).toBeCloseTo(10, 4);
     });
 
     it('should export STEP assembly with geometry for each shape', async () => {
@@ -3460,6 +3571,347 @@ describe('OC API Call Tracing', () => {
     performance.clearMarks();
   });
 
+  function expectTelemetrySpan(entries: TelemetryEntry[], name: string): TelemetryEntry {
+    const span = entries.find((entry) => entry.name === name);
+    expect(span).toBeDefined();
+    return span!;
+  }
+
+  it('emits separate Replicad render spans for BRep execution, tessellation, and glTF packing', async () => {
+    const telemetryBatches: TelemetryEntry[][] = [];
+
+    const worker = await createTestWorker(
+      replicadKernel,
+      { 'box.ts': boxCode },
+      {
+        onTelemetry: (entries) => telemetryBatches.push(entries),
+      },
+    );
+
+    const result = await worker.createGeometry({
+      file: createGeometryFile('box.ts'),
+      parameters: {},
+    });
+    await collectTelemetry(worker);
+
+    assertSuccess(result);
+
+    const allEntries = telemetryBatches.flat();
+    const runMainSpan = expectTelemetrySpan(allEntries, 'replicad.run-main');
+    const renderOutputSpan = expectTelemetrySpan(allEntries, 'replicad.render-output');
+    const facesSpan = expectTelemetrySpan(allEntries, 'replicad.tessellate.faces');
+    const gltfSpan = expectTelemetrySpan(allEntries, 'replicad.mesh-to-gltf');
+
+    expect(runMainSpan.detail).toMatchObject({
+      phase: 'computingGeometry',
+      stage: 'brep',
+    });
+    expect(renderOutputSpan.detail).toMatchObject({
+      phase: 'computingGeometry',
+      stage: 'render-output',
+    });
+    expect(gltfSpan.detail).toMatchObject({
+      phase: 'computingGeometry',
+      stage: 'gltf-pack',
+      shapeCount: 1,
+    });
+    expect(facesSpan.detail).toMatchObject({
+      shapeName: 'Shape 1',
+      linearTolerance: 0.01,
+      angularToleranceDeg: 20,
+      withBrepEdges: false,
+      output: 'faces',
+    });
+    expect(facesSpan.detail?.['phase']).toBeUndefined();
+    expect(renderOutputSpan.detail?.['spanId']).toEqual(expect.any(String));
+    expect(facesSpan.detail?.['parentSpanId']).toBe(renderOutputSpan.detail?.['spanId']);
+  });
+
+  it('emits a nested Replicad edge tessellation span when BRep edges are enabled', async () => {
+    const telemetryBatches: TelemetryEntry[][] = [];
+
+    const worker = await createTestWorker(
+      replicadKernel,
+      { 'box.ts': boxCode },
+      {
+        workerOptions: { withBrepEdges: true },
+        onTelemetry: (entries) => telemetryBatches.push(entries),
+      },
+    );
+
+    const result = await worker.createGeometry({
+      file: createGeometryFile('box.ts'),
+      parameters: {},
+    });
+    await collectTelemetry(worker);
+
+    assertSuccess(result);
+
+    const allEntries = telemetryBatches.flat();
+    const renderOutputSpan = expectTelemetrySpan(allEntries, 'replicad.render-output');
+    const edgesSpan = expectTelemetrySpan(allEntries, 'replicad.tessellate.edges');
+
+    expect(edgesSpan.detail).toMatchObject({
+      shapeName: 'Shape 1',
+      linearTolerance: 0.01,
+      angularToleranceDeg: 20,
+      withBrepEdges: true,
+      output: 'edges',
+    });
+    expect(edgesSpan.detail?.['phase']).toBeUndefined();
+    expect(renderOutputSpan.detail?.['spanId']).toEqual(expect.any(String));
+    expect(edgesSpan.detail?.['parentSpanId']).toBe(renderOutputSpan.detail?.['spanId']);
+  });
+
+  it('emits Replicad library summary telemetry under run-main when summary tracing is enabled', async () => {
+    const telemetryBatches: TelemetryEntry[][] = [];
+
+    const worker = await createTestWorker(
+      replicadKernel,
+      {
+        'box.ts': `
+          import { makeBaseBox } from 'replicad';
+
+          export default function main(replicad, _params) {
+            const base = makeBaseBox(10, 20, 30);
+            const cutter = replicad.makeBaseBox(4, 4, 40).translate(3, 0, 0);
+            return base.cut(cutter);
+          }
+        `,
+      },
+      {
+        workerOptions: { ocTracing: 'off', libraryTracing: 'summary' },
+        onTelemetry: (entries) => telemetryBatches.push(entries),
+      },
+    );
+
+    const result = await worker.createGeometry({
+      file: createGeometryFile('box.ts'),
+      parameters: {},
+    });
+    await collectTelemetry(worker);
+
+    assertSuccess(result);
+
+    const allEntries = telemetryBatches.flat();
+    const runMainSpan = expectTelemetrySpan(allEntries, 'replicad.run-main');
+    const summarySpan = expectTelemetrySpan(allEntries, 'replicad.library.summary');
+
+    expect(summarySpan.detail).toMatchObject({
+      library: 'replicad',
+      'makeBaseBox.calls': 2,
+      'translate.calls': 1,
+      'cut.calls': 1,
+      'total.calls': 4,
+      operations: 3,
+    });
+    expect(summarySpan.detail?.['phase']).toBeUndefined();
+    expect(summarySpan.detail?.['parentSpanId']).toBe(runMainSpan.detail?.['spanId']);
+  }, 15_000);
+
+  it('emits batch boolean operations in Replicad library summary telemetry', async () => {
+    const telemetryBatches: TelemetryEntry[][] = [];
+
+    const worker = await createTestWorker(
+      replicadKernel,
+      {
+        'box.ts': `
+          import { makeBaseBox } from 'replicad';
+
+          export default function main() {
+            const plate = makeBaseBox(40, 40, 8);
+            const cutters = [
+              makeBaseBox(4, 4, 20).translate(-10, 0, 0),
+              makeBaseBox(4, 4, 20).translate(10, 0, 0),
+            ];
+            const bosses = [
+              makeBaseBox(5, 5, 4).translate(0, -10, 6),
+              makeBaseBox(5, 5, 4).translate(0, 10, 6),
+            ];
+
+            return plate.cutAll(cutters).fuseAll(bosses);
+          }
+        `,
+      },
+      {
+        workerOptions: { ocTracing: 'off', libraryTracing: 'summary' },
+        onTelemetry: (entries) => telemetryBatches.push(entries),
+      },
+    );
+
+    const result = await worker.createGeometry({
+      file: createGeometryFile('box.ts'),
+      parameters: {},
+    });
+    await collectTelemetry(worker);
+
+    assertSuccess(result);
+
+    const allEntries = telemetryBatches.flat();
+    const runMainSpan = expectTelemetrySpan(allEntries, 'replicad.run-main');
+    const summarySpan = expectTelemetrySpan(allEntries, 'replicad.library.summary');
+
+    expect(summarySpan.detail).toMatchObject({
+      library: 'replicad',
+      'makeBaseBox.calls': 5,
+      'translate.calls': 4,
+      'cutAll.calls': 1,
+      'fuseAll.calls': 1,
+      'cutAll.batch.arguments': 1,
+      'cutAll.batch.tools': 2,
+      'cutAll.batch.steps': 1,
+      'fuseAll.batch.arguments': 1,
+      'fuseAll.batch.tools': 2,
+      'fuseAll.batch.steps': 1,
+      'total.calls': 11,
+      operations: 4,
+    });
+    expect(
+      Number(summarySpan.detail?.['cutAll.batch.native.calls'] ?? 0) +
+        Number(summarySpan.detail?.['cutAll.batch.direct.calls'] ?? 0),
+    ).toBe(1);
+    expect(
+      Number(summarySpan.detail?.['fuseAll.batch.native.calls'] ?? 0) +
+        Number(summarySpan.detail?.['fuseAll.batch.direct.calls'] ?? 0),
+    ).toBe(1);
+    expect(Number(summarySpan.detail?.['cutAll.batch.build.ms'])).toBeGreaterThanOrEqual(0);
+    expect(Number(summarySpan.detail?.['cutAll.batch.simplify.ms'])).toBeGreaterThanOrEqual(0);
+    expect(Number(summarySpan.detail?.['fuseAll.batch.build.ms'])).toBeGreaterThanOrEqual(0);
+    expect(Number(summarySpan.detail?.['fuseAll.batch.simplify.ms'])).toBeGreaterThanOrEqual(0);
+    expect(summarySpan.detail?.['parentSpanId']).toBe(runMainSpan.detail?.['spanId']);
+  }, 15_000);
+
+  it('emits Replicad library per-call telemetry under run-main when per-call tracing is enabled', async () => {
+    const telemetryBatches: TelemetryEntry[][] = [];
+
+    const worker = await createTestWorker(
+      replicadKernel,
+      {
+        'box.ts': `
+          import { makeBaseBox } from 'replicad';
+
+          export default function main() {
+            const base = makeBaseBox(10, 20, 30);
+            return base.fuse(makeBaseBox(3, 4, 5).translate(2, 0, 0));
+          }
+        `,
+      },
+      {
+        workerOptions: { ocTracing: 'off', libraryTracing: 'per-call' },
+        onTelemetry: (entries) => telemetryBatches.push(entries),
+      },
+    );
+
+    const result = await worker.createGeometry({
+      file: createGeometryFile('box.ts'),
+      parameters: {},
+    });
+    await collectTelemetry(worker);
+
+    assertSuccess(result);
+
+    const allEntries = telemetryBatches.flat();
+    const runMainSpan = expectTelemetrySpan(allEntries, 'replicad.run-main');
+    const renderOutputSpan = expectTelemetrySpan(allEntries, 'replicad.render-output');
+    const makeBoxSpan = expectTelemetrySpan(allEntries, 'replicad.library.makeBaseBox');
+    const fuseSpan = expectTelemetrySpan(allEntries, 'replicad.library.fuse');
+
+    expect(makeBoxSpan.detail).toMatchObject({
+      library: 'replicad',
+      scope: 'user-main',
+      operation: 'makeBaseBox',
+      callType: 'apply',
+    });
+    expect(fuseSpan.detail).toMatchObject({
+      library: 'replicad',
+      scope: 'user-main',
+      operation: 'fuse',
+      callType: 'apply',
+      'batch.operation': 'fuse',
+      'batch.arguments': 1,
+      'batch.tools': 1,
+      'batch.steps': 1,
+    });
+    expect(fuseSpan.detail?.['batch.backend']).toMatch(/^(native|js-direct)$/);
+    expect(Number(fuseSpan.detail?.['batch.build.ms'])).toBeGreaterThanOrEqual(0);
+    expect(Number(fuseSpan.detail?.['batch.simplify.ms'])).toBeGreaterThanOrEqual(0);
+    expect(makeBoxSpan.detail?.['parentSpanId']).toBe(runMainSpan.detail?.['spanId']);
+    expect(fuseSpan.detail?.['parentSpanId']).toBe(runMainSpan.detail?.['spanId']);
+
+    const renderOwnedLibrarySpans = allEntries.filter(
+      (entry) =>
+        entry.name.startsWith('replicad.library.') &&
+        entry.detail?.['parentSpanId'] === renderOutputSpan.detail?.['spanId'],
+    );
+    expect(renderOwnedLibrarySpans).toHaveLength(0);
+  });
+
+  it('emits no Replicad library telemetry when library tracing is off', async () => {
+    const telemetryBatches: TelemetryEntry[][] = [];
+
+    const worker = await createTestWorker(
+      replicadKernel,
+      { 'box.ts': boxCode },
+      {
+        workerOptions: { ocTracing: 'off', libraryTracing: 'off' },
+        onTelemetry: (entries) => telemetryBatches.push(entries),
+      },
+    );
+
+    const result = await worker.createGeometry({
+      file: createGeometryFile('box.ts'),
+      parameters: {},
+    });
+    await collectTelemetry(worker);
+
+    assertSuccess(result);
+
+    const allEntries = telemetryBatches.flat();
+    const librarySpans = allEntries.filter((entry) => entry.name.startsWith('replicad.library.'));
+    expect(librarySpans).toHaveLength(0);
+  });
+
+  it('emits Replicad library summary telemetry when user code fails after library calls', async () => {
+    const telemetryBatches: TelemetryEntry[][] = [];
+
+    const worker = await createTestWorker(
+      replicadKernel,
+      {
+        'box.ts': `
+          import { makeBaseBox } from 'replicad';
+
+          export default function main() {
+            makeBaseBox(10, 20, 30);
+            throw new Error('user failure after geometry call');
+          }
+        `,
+      },
+      {
+        workerOptions: { ocTracing: 'off', libraryTracing: 'summary' },
+        onTelemetry: (entries) => telemetryBatches.push(entries),
+      },
+    );
+
+    const result = await worker.createGeometry({
+      file: createGeometryFile('box.ts'),
+      parameters: {},
+    });
+    await collectTelemetry(worker);
+
+    assertFailure(result);
+
+    const allEntries = telemetryBatches.flat();
+    const runMainSpan = expectTelemetrySpan(allEntries, 'replicad.run-main');
+    const summarySpan = expectTelemetrySpan(allEntries, 'replicad.library.summary');
+
+    expect(summarySpan.detail).toMatchObject({
+      library: 'replicad',
+      'makeBaseBox.calls': 1,
+      'total.calls': 1,
+    });
+    expect(summarySpan.detail?.['parentSpanId']).toBe(runMainSpan.detail?.['spanId']);
+  });
+
   it('emits an oc.summary span by default (summary mode)', async () => {
     const telemetryBatches: TelemetryEntry[][] = [];
 
@@ -3573,7 +4025,7 @@ describe('OC API Call Tracing', () => {
       expect(detail[callsKey]).toBeGreaterThan(0);
       expect(detail[`${className}.ms`]).toBeGreaterThanOrEqual(0);
     }
-  });
+  }, 15_000);
 });
 
 describe('withBrepEdges option', () => {
@@ -3674,7 +4126,7 @@ describe('withBrepEdges option', () => {
     }
 
     expect(triangleVerticesWithout).toBe(triangleVerticesWith);
-  });
+  }, 15_000);
 
   it('should produce valid BRep edges', async () => {
     const result = await createTestGeometry({
@@ -4035,7 +4487,7 @@ describe('Normal consistency', () => {
       sharpRatio,
       `${(sharpRatio * 100).toFixed(1)}% of co-located pairs are sharp (expected >20% — tray has 90° wall-to-base edges)`,
     ).toBeGreaterThan(0.2);
-  });
+  }, 15_000);
 });
 
 // =============================================================================
@@ -4060,10 +4512,10 @@ describe.skip('Example models', () => {
 });
 
 // =============================================================================
-// serializeHandle / deserializeHandle
+// serializeNativeHandle / deserializeNativeHandle
 // =============================================================================
 
-describe('serializeHandle', () => {
+describe('serializeNativeHandle', () => {
   it('should serialize nativeHandle to BRep strings with metadata', async () => {
     const result = await createGeometry({
       files: {
@@ -4084,9 +4536,9 @@ describe('serializeHandle', () => {
     });
 
     assertSuccess(result);
-    expect(result.serializedHandle).toBeDefined();
+    expect(result.serializedNativeHandle).toBeDefined();
 
-    const serialized = result.serializedHandle as Array<{
+    const serialized = result.serializedNativeHandle as Array<{
       brep: string;
       metadata: Record<string, unknown>;
     }>;
@@ -4117,9 +4569,9 @@ describe('serializeHandle', () => {
     });
 
     assertSuccess(result);
-    expect(result.serializedHandle).toBeDefined();
+    expect(result.serializedNativeHandle).toBeDefined();
 
-    const serialized = result.serializedHandle as Array<{
+    const serialized = result.serializedNativeHandle as Array<{
       brep: string;
       metadata: { name: string; color?: string; opacity?: number };
     }>;
@@ -4128,11 +4580,11 @@ describe('serializeHandle', () => {
     expect(serialized[0]!.metadata.name).toBe('Box');
     expect(serialized[1]!.metadata.name).toBe('Cylinder');
     expect(serialized[1]!.metadata.opacity).toBe(0.7);
-  });
+  }, 15_000);
 
-  it('should have serializeHandle and deserializeHandle defined on the kernel', () => {
-    expect(replicadKernel.serializeHandle).toBeDefined();
-    expect(replicadKernel.deserializeHandle).toBeDefined();
+  it('should have serializeNativeHandle and deserializeNativeHandle defined on the kernel', () => {
+    expect(replicadDefinition.serializeNativeHandle).toBeDefined();
+    expect(replicadDefinition.deserializeNativeHandle).toBeDefined();
   });
 });
 

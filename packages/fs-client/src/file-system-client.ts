@@ -109,8 +109,9 @@ export type FileSystemClient = {
   unlink(path: string, options?: { scope?: WorkspaceScope }): Promise<void>;
   /**
    * Remove a directory. Pass `{ scope }` to target the standalone
-   * provider; pass `{ scope, recursive: true }` for a recursive walk
-   * (mount-routed recursive removal is not supported and throws).
+   * provider; pass `{ recursive: true }` for a recursive walk. Mount-
+   * routed recursive removal is rejected if the subtree would cross into
+   * a nested mount point.
    */
   rmdir(path: string, options?: { scope?: WorkspaceScope; recursive?: boolean }): Promise<void>;
   exists(path: string): Promise<boolean>;

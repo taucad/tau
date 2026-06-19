@@ -1,12 +1,13 @@
 /**
  * Manifold kernel Zod schemas — single source of truth.
  *
- * Consumed by `manifold.plugin.ts` (type inference) and `manifold.kernel.ts` (runtime validation).
+ * Consumed by `manifold.kernel.ts` for plugin type inference and runtime validation.
  *
  * @public
  */
 
 import { z } from 'zod';
+import { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
 
 /**
  * Manifold kernel initialization options schema.
@@ -18,9 +19,8 @@ export const manifoldOptionsSchema = z.object({
 
 /**
  * Manifold per-format export schemas.
- * Empty — Manifold controls meshing internally.
  * @public
  */
 export const manifoldExportSchemas = {
-  glb: z.object({}),
+  glb: coordinateSystemSchema.extend(unitSchema.shape),
 } as const satisfies Record<string, z.ZodType>;

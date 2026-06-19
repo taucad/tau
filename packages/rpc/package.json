@@ -9,9 +9,8 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/rpc"
   },
-  "main": "./dist/cjs/index.cjs",
-  "types": "./dist/cjs/index.d.cts",
-  "module": "./dist/esm/index.js",
+  "main": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
   "files": [
     "dist",
     "README.md"
@@ -23,24 +22,29 @@
   "author": "Richard Fontein",
   "license": "MIT",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./bridge": "./src/bridge/index.ts"
   },
   "publishConfig": {
     "access": "public",
     "exports": {
       ".": {
-        "require": {
-          "types": "./dist/cjs/index.d.cts",
-          "default": "./dist/cjs/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/index.d.ts",
-          "default": "./dist/esm/index.js"
-        }
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "default": "./dist/esm/index.js"
+      },
+      "./bridge": {
+        "types": "./dist/esm/bridge/index.d.ts",
+        "import": "./dist/esm/bridge/index.js",
+        "default": "./dist/esm/bridge/index.js"
       }
     }
   },
   "imports": {
+    "#*.js": "./src/*.ts",
     "#*": "./src/*"
+  },
+  "dependencies": {
+    "@taucad/utils": "workspace:*"
   }
 }

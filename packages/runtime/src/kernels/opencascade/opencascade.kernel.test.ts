@@ -1,19 +1,124 @@
 // @vitest-environment node
-/* oxlint-disable eslint(new-cap) -- OpenCascade API uses PascalCase method names */
+/* oxlint-disable new-cap -- OpenCascade API uses PascalCase method names */
 /* eslint-disable @typescript-eslint/naming-convention -- File names use extensions like 'box.ts' */
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return any */
-import { describe, it, expect, beforeAll } from 'vitest';
-import opencascadeKernel from '#kernels/opencascade/opencascade.kernel.js';
+import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
+import { NodeIO } from '@gltf-transform/core';
+import { opencascade as opencascadeKernel } from '#kernels/opencascade/opencascade.kernel.js';
 import { getModuleRegistry } from '#kernels/kernel-module-helpers.js';
 import type { OpenCascadeInstance } from '#kernels/opencascade/wasm/opencascade_full.js';
 import { assertFailure, assertSuccess, createGeometryFile, createTestWorker } from '#testing/kernel-testing.utils.js';
 import { createGeometryTestHelpers } from '#testing/kernel-geometry-testing.utils.js';
+import type { KernelDefinition } from '#types/runtime-kernel.types.js';
 
 // =============================================================================
 // Test Utilities
 // =============================================================================
 
 const geometryHelpers = createGeometryTestHelpers();
+
+type OpenCascadeSnapshotForTest = {
+  kind: 'opencascade-native-handle';
+  version: 1;
+  format: 'brep-ascii';
+  occtFormatVersion: 'TopTools_FormatVersion_CURRENT';
+  entries: Array<{
+    brep: Uint8Array<ArrayBuffer>;
+    metadata: Record<string, unknown>;
+  }>;
+};
+
+type RuntimeWorkerInternalsForTest = {
+  loadedKernels: Map<string, { definition: KernelDefinition }>;
+  nativeHandle: unknown;
+  lastSerializedNativeHandle: unknown;
+};
+
+function expectOpenCascadeSnapshot(value: unknown): OpenCascadeSnapshotForTest {
+  expect(value).toEqual(
+    expect.objectContaining({
+      kind: 'opencascade-native-handle',
+      version: 1,
+      format: 'brep-ascii',
+      occtFormatVersion: 'TopTools_FormatVersion_CURRENT',
+      entries: expect.any(Array),
+    }),
+  );
+
+  const snapshot = value as OpenCascadeSnapshotForTest;
+  expect(snapshot.entries.length).toBeGreaterThan(0);
+  for (const entry of snapshot.entries) {
+    expect(entry.brep).toBeInstanceOf(Uint8Array);
+    expect(entry.brep.byteLength).toBeGreaterThan(0);
+    expect(entry.metadata).toEqual(expect.any(Object));
+  }
+  return snapshot;
+}
+
+function getWorkerInternals(worker: Awaited<ReturnType<typeof createTestWorker>>): RuntimeWorkerInternalsForTest {
+  return worker as unknown as RuntimeWorkerInternalsForTest;
+}
+
+function getLoadedOpenCascadeDefinition(worker: Awaited<ReturnType<typeof createTestWorker>>): KernelDefinition {
+  const loadedKernel = getWorkerInternals(worker).loadedKernels.get('opencascade');
+  expect(loadedKernel, 'expected OpenCascade kernel to be loaded').toBeDefined();
+  return loadedKernel!.definition;
+}
+
+async function readGltfSize(glbBytes: Uint8Array<ArrayBuffer>): Promise<[number, number, number]> {
+  const document = await new NodeIO().readBinary(glbBytes);
+  const min = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+  const max = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  for (const mesh of document.getRoot().listMeshes()) {
+    for (const primitive of mesh.listPrimitives()) {
+      const position = primitive.getAttribute('POSITION');
+      if (!position) {
+        continue;
+      }
+      const point: [number, number, number] = [0, 0, 0];
+      for (let index = 0; index < position.getCount(); index++) {
+        position.getElement(index, point);
+        for (let axis = 0; axis < 3; axis++) {
+          min[axis] = Math.min(min[axis]!, point[axis]!);
+          max[axis] = Math.max(max[axis]!, point[axis]!);
+        }
+      }
+    }
+  }
+  return [max[0]! - min[0]!, max[1]! - min[1]!, max[2]! - min[2]!];
+}
+
+async function readGltfNodeMeshNames(
+  glbBytes: Uint8Array<ArrayBuffer>,
+): Promise<{ nodeNames: string[]; meshNames: string[] }> {
+  const document = await new NodeIO().readBinary(glbBytes);
+  return {
+    nodeNames: document
+      .getRoot()
+      .listNodes()
+      .map((node) => node.getName()),
+    meshNames: document
+      .getRoot()
+      .listMeshes()
+      .map((mesh) => mesh.getName()),
+  };
+}
+
+async function readGltfMaterialNames(glbBytes: Uint8Array<ArrayBuffer>): Promise<string[]> {
+  const document = await new NodeIO().readBinary(glbBytes);
+  return document
+    .getRoot()
+    .listMaterials()
+    .map((material) => material.getName());
+}
+
+function extractGltfBytes(result: {
+  data: Array<{ format: string; content: Uint8Array<ArrayBuffer> }>;
+}): Uint8Array<ArrayBuffer> {
+  const gltf = result.data.find((geometry) => geometry.format === 'gltf');
+  expect(gltf).toBeDefined();
+  return gltf!.content;
+}
 
 function assertStepRoundTripVolumeMm3(stepBytes: Uint8Array<ArrayBuffer>, expectedMm3: number): void {
   const oc = getModuleRegistry().get('opencascade.js') as unknown as OpenCascadeInstance | undefined;
@@ -42,6 +147,10 @@ function assertStepRoundTripVolumeMm3(stepBytes: Uint8Array<ArrayBuffer>, expect
   progress.delete();
   reader.delete();
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 // =============================================================================
 // All tests share a single worker to avoid Embind type registry conflicts
@@ -87,6 +196,12 @@ import { BRepPrimAPI_MakeBox } from 'opencascade.js';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 10, 10);
   return [{ shape: box.Shape(), name: 'MyBox', color: '#ff0000' }];
+}`,
+      'named-pbr.ts': `
+import { BRepPrimAPI_MakeBox } from 'opencascade.js';
+export default function main() {
+  const box = new BRepPrimAPI_MakeBox(10, 10, 10);
+  return [{ shape: box.Shape(), name: 'PbrBox', color: '#ff0000', metalness: 0.2, roughness: 0.7, density: 1.25 }];
 }`,
       'parameterized.ts': `
 import { BRepPrimAPI_MakeBox } from 'opencascade.js';
@@ -255,6 +370,9 @@ export default function main() {
       expect(result.data).toBeDefined();
       expect(Array.isArray(result.data)).toBe(true);
       await geometryHelpers.expectValidGltf(result);
+      const { nodeNames, meshNames } = await readGltfNodeMeshNames(extractGltfBytes(result));
+      expect(nodeNames).toEqual(['Shape 1']);
+      expect(meshNames).toEqual(['Shape 1']);
     });
 
     it('should handle parameterized geometry', async () => {
@@ -267,12 +385,58 @@ export default function main() {
       const geometryFile = createGeometryFile('multi.ts');
       const result = await worker.createGeometry({ file: geometryFile, parameters: {} });
       assertSuccess(result, 'multi-shape createGeometry');
+      const { nodeNames, meshNames } = await readGltfNodeMeshNames(extractGltfBytes(result));
+      expect(nodeNames).toEqual(['Shape 1', 'Shape 2']);
+      expect(meshNames).toEqual(['Shape 1', 'Shape 2']);
     });
 
     it('should handle named shape entries', async () => {
       const geometryFile = createGeometryFile('named.ts');
       const result = await worker.createGeometry({ file: geometryFile, parameters: {} });
       assertSuccess(result, 'named shapes createGeometry');
+    });
+
+    it('should keep shape labels out of generated GLB material names', async () => {
+      const geometryFile = createGeometryFile('named-pbr.ts');
+      const result = await worker.createGeometry({ file: geometryFile, parameters: {} });
+      assertSuccess(result, 'named PBR shape createGeometry');
+
+      const gltfBytes = extractGltfBytes(result);
+      const { nodeNames, meshNames } = await readGltfNodeMeshNames(gltfBytes);
+      expect(nodeNames).toEqual(['PbrBox']);
+      expect(meshNames).toEqual(['PbrBox']);
+      expect(await readGltfMaterialNames(gltfBytes)).toEqual(['']);
+    });
+
+    it('should serialize native handles as versioned geometry-only BRep snapshots', async () => {
+      const oc = getModuleRegistry().get('opencascade.js') as unknown as OpenCascadeInstance | undefined;
+      expect(oc, 'expected worker to have registered opencascade.js module').toBeDefined();
+      const cascade = oc!;
+      const writeSpy = vi.spyOn(cascade.BRepTools, 'Write');
+
+      const geometryFile = createGeometryFile('named-pbr.ts');
+      const result = await worker.createGeometry({ file: geometryFile, parameters: {} });
+      assertSuccess(result, 'named PBR shape createGeometry for native-handle snapshot');
+
+      const snapshot = expectOpenCascadeSnapshot(result.serializedNativeHandle);
+      expect(snapshot.entries).toHaveLength(1);
+      expect(snapshot.entries[0]!.metadata).toEqual(
+        expect.objectContaining({
+          name: 'PbrBox',
+          color: '#ff0000',
+          metalness: 0.2,
+          roughness: 0.7,
+          density: 1.25,
+        }),
+      );
+      expect(writeSpy).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.any(String),
+        false,
+        false,
+        cascade.TopTools_FormatVersion.TopTools_FormatVersion_CURRENT,
+        expect.any(Object),
+      );
     });
 
     it('should return success with no issues when main returns undefined (empty body)', async () => {
@@ -325,6 +489,7 @@ export default function main() {
       const exportResult = await worker.exportGeometry('stl');
       assertSuccess(exportResult, 'STL export');
       expect(exportResult.data.length).toBeGreaterThan(0);
+      expect(exportResult.data[0]?.name).toBe('Shape 1');
       expect(exportResult.data[0]?.bytes).toBeInstanceOf(Uint8Array);
     });
 
@@ -374,6 +539,97 @@ export default function main() {
       expect(stepContent).toContain('MANIFOLD_SOLID_BREP');
       expect(stepContent).toContain('SmallBox');
       expect(stepContent).toContain('LargeBox');
+    });
+
+    it('should export STEP with non-shape material labels', async () => {
+      const geometryFile = createGeometryFile('named-pbr.ts');
+      const createResult = await worker.createGeometry({ file: geometryFile, parameters: {} });
+      assertSuccess(createResult, 'createGeometry for PBR STEP export');
+
+      const exportResult = await worker.exportGeometry('step');
+      assertSuccess(exportResult, 'PBR STEP export');
+
+      const stepContent = new TextDecoder().decode(exportResult.data[0]!.bytes);
+      expect(stepContent).toContain('PbrBox');
+      expect(stepContent).toContain('tau-material');
+    });
+
+    it('should export STEP from a restored serialized native handle without reheating', async () => {
+      const geometryFile = createGeometryFile('named-pbr.ts');
+      const createResult = await worker.createGeometry({ file: geometryFile, parameters: {} });
+      assertSuccess(createResult, 'createGeometry for restored STEP export');
+      expectOpenCascadeSnapshot(createResult.serializedNativeHandle);
+
+      const definition = getLoadedOpenCascadeDefinition(worker);
+      const createGeometrySpy = vi.spyOn(definition, 'createGeometry');
+      const internals = getWorkerInternals(worker);
+      internals.nativeHandle = undefined;
+
+      const exportResult = await worker.exportGeometry('step');
+
+      assertSuccess(exportResult, 'STEP export from restored native handle');
+      expect(createGeometrySpy).not.toHaveBeenCalled();
+      const stepContent = new TextDecoder().decode(exportResult.data[0]!.bytes);
+      expect(stepContent).toContain('PbrBox');
+      expect(stepContent).toContain('tau-material');
+    });
+
+    it('should export GLB and STL from a restored serialized native handle with export options', async () => {
+      const geometryFile = createGeometryFile('box.ts');
+      const createResult = await worker.createGeometry({ file: geometryFile, parameters: {} });
+      assertSuccess(createResult, 'createGeometry for restored GLB/STL export');
+      expectOpenCascadeSnapshot(createResult.serializedNativeHandle);
+
+      const definition = getLoadedOpenCascadeDefinition(worker);
+      const createGeometrySpy = vi.spyOn(definition, 'createGeometry');
+      const internals = getWorkerInternals(worker);
+
+      internals.nativeHandle = undefined;
+      const glbResult = await worker.exportGeometry('glb', {
+        coordinateSystem: 'z-up',
+        unit: { length: 'millimeter' },
+        tessellation: { linearTolerance: 0.5, angularTolerance: 15 },
+      });
+      assertSuccess(glbResult, 'GLB export from restored native handle');
+      const size = await readGltfSize(glbResult.data[0]!.bytes);
+      expect(size[0]).toBeCloseTo(10, 4);
+      expect(size[1]).toBeCloseTo(20, 4);
+      expect(size[2]).toBeCloseTo(30, 4);
+
+      internals.nativeHandle = undefined;
+      const stlResult = await worker.exportGeometry('stl', {
+        binary: true,
+        tessellation: { linearTolerance: 0.5, angularTolerance: 15 },
+      });
+      assertSuccess(stlResult, 'STL export from restored native handle');
+      expect(stlResult.data[0]?.name).toBe('Shape 1');
+      expect(stlResult.data[0]?.bytes).toBeInstanceOf(Uint8Array);
+      expect(createGeometrySpy).not.toHaveBeenCalled();
+    });
+
+    it('should reheat when a cached OpenCascade native-handle snapshot is corrupt', async () => {
+      const geometryFile = createGeometryFile('box.ts');
+      const createResult = await worker.createGeometry({ file: geometryFile, parameters: {} });
+      assertSuccess(createResult, 'createGeometry before corrupt snapshot fallback');
+
+      const definition = getLoadedOpenCascadeDefinition(worker);
+      const createGeometrySpy = vi.spyOn(definition, 'createGeometry');
+      const internals = getWorkerInternals(worker);
+      internals.nativeHandle = undefined;
+      internals.lastSerializedNativeHandle = {
+        kind: 'opencascade-native-handle',
+        version: 1,
+        format: 'brep-ascii',
+        occtFormatVersion: 'TopTools_FormatVersion_CURRENT',
+        entries: [{ brep: new Uint8Array([0, 1, 2, 3]), metadata: { name: 'Shape 1' } }],
+      };
+
+      const exportResult = await worker.exportGeometry('step');
+
+      assertSuccess(exportResult, 'STEP export after corrupt native-handle snapshot fallback');
+      expect(createGeometrySpy).toHaveBeenCalledOnce();
+      const stepContent = new TextDecoder().decode(exportResult.data[0]!.bytes);
+      expect(stepContent).toContain('MANIFOLD_SOLID_BREP');
     });
 
     it('should round-trip STEP export/import preserving box volume', async () => {
@@ -465,6 +721,22 @@ export default function main() {
       const yUpBytes = yUpExport.data[0]!.bytes;
       const zUpBytes = zUpExport.data[0]!.bytes;
       expect(yUpBytes).not.toEqual(zUpBytes);
+    });
+
+    it('should export GLB in z-up millimeters when unit length is millimeter', async () => {
+      const geometryFile = createGeometryFile('box.ts');
+      await worker.createGeometry({ file: geometryFile, parameters: {} });
+
+      const exportResult = await worker.exportGeometry('glb', {
+        coordinateSystem: 'z-up',
+        unit: { length: 'millimeter' },
+      });
+
+      assertSuccess(exportResult, 'z-up millimeter GLB export');
+      const size = await readGltfSize(exportResult.data[0]!.bytes);
+      expect(size[0]).toBeCloseTo(10, 4);
+      expect(size[1]).toBeCloseTo(20, 4);
+      expect(size[2]).toBeCloseTo(30, 4);
     });
 
     // -- Boolean operations --

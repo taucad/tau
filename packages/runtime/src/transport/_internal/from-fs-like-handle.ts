@@ -22,20 +22,19 @@ import { toFileStat } from '@taucad/types/constants';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import type { RuntimeFileSystemHandle } from '#transport/_internal/runtime-filesystem-handle.js';
 
-/* oxlint-disable @protontech/enforce-uint8array-arraybuffer/enforce-uint8array-arraybuffer -- BrowserFS/memfs returns Buffer<ArrayBufferLike>, we must accept the wider type */
 /**
  * Minimal interface for any fs-compatible object with a `promises` namespace.
  * Matches the shape of `fs` from BrowserFS, memfs, and similar
  * libraries without importing them directly.
- * Uses `ArrayBufferLike` to accept both `ArrayBuffer` and `SharedArrayBuffer`
- * (BrowserFS returns `Buffer<ArrayBufferLike>`).
+ * Uses `ArrayBuffer`-backed bytes at the runtime boundary so transfer ownership
+ * remains explicit and does not accidentally include shared memory.
  * @public
  */
 export type FsLike = {
   promises: {
     readFile(path: string, encoding: 'utf8'): Promise<string>;
-    readFile(path: string): Promise<Uint8Array>;
-    writeFile(path: string, data: Uint8Array | string): Promise<void>;
+    readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+    writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
     mkdir(path: string, options?: { recursive?: boolean }): Promise<string | undefined | void>;
     readdir(path: string): Promise<string[]>;
     unlink(path: string): Promise<void>;
@@ -45,7 +44,6 @@ export type FsLike = {
     lstat(path: string): Promise<NativeStats>;
   };
 };
-/* oxlint-enable @protontech/enforce-uint8array-arraybuffer/enforce-uint8array-arraybuffer -- re-enable after FsLike type */
 
 /**
  * Internal: produce the discriminated `inline`-arm handle backing the

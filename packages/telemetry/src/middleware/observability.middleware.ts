@@ -1,4 +1,4 @@
-import { defineMiddleware } from '@taucad/runtime/middleware/runtime-middleware';
+import { defineMiddleware } from '@taucad/runtime/middleware';
 import { z } from 'zod';
 import { IngestEntryName } from '#ingest.js';
 import { reportToApi } from '#middleware/utils/report-to-api.js';
@@ -18,6 +18,7 @@ import { reportToApi } from '#middleware/utils/report-to-api.js';
  * @public
  */
 export const observabilityMiddleware = defineMiddleware({
+  id: 'observability',
   name: 'Observability',
   version: '2',
   optionsSchema: z.object({ reportUrl: z.string().optional().default('') }),

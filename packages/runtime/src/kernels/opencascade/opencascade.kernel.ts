@@ -1,4 +1,4 @@
-/* oxlint-disable eslint(new-cap) -- OpenCascade API uses PascalCase method names */
+/* oxlint-disable new-cap -- OpenCascade API uses PascalCase method names */
 /**
  * OpenCascade Kernel Module
  *
@@ -33,21 +33,17 @@ import { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.
 import { initOcct } from '#kernels/occt/oc-init.js';
 import type { OcctModuleFactory } from '#kernels/occt/oc-init.js';
 import { detectMultiThreadSupport, activateOccParallelism } from '#kernels/occt/oc-threading.js';
-import { meshShapesToGltf, parseHexColor } from '#kernels/opencascade/opencascade-mesh.js';
+import { createIncrementalMesh, meshShapesToGltf, parseHexColor } from '#kernels/opencascade/opencascade-mesh.js';
 import type { ShapeEntry } from '#kernels/opencascade/opencascade.types.js';
 import { formatOcRuntimeError } from '#kernels/occt/oc-error-formatter.js';
 import { runOcMain } from '#kernels/occt/oc-run-main.js';
 import { wrapOcForExceptions, wrapOcWithTracing } from '#kernels/occt/oc-tracing.js';
 import type { OcTracingSummary } from '#kernels/occt/oc-tracing.js';
 import type { KernelIssue } from '#types/runtime.types.js';
+import { opencascadeDetectPattern } from '#kernels/opencascade/opencascade.constants.js';
+import { resolveShapeName, uniqueShapeName } from '#utils/shape-names.js';
 
 import type { OpenCascadeInstance, TopoDS_Shape } from '#kernels/opencascade/wasm/opencascade_full.js';
-
-// WASM URLs using the universal pattern for browsers and bundlers. Static
-// string literals so bundlers detect and copy the assets at build time.
-// @see https://web.dev/articles/bundling-non-js-resources#universal_pattern_for_browsers_and_bundlers
-const fullWasmUrl = new URL('wasm/opencascade_full.wasm', import.meta.url).href;
-const multiWasmUrl = new URL('wasm/opencascade_full_multi.wasm', import.meta.url).href;
 
 // =============================================================================
 // Types
@@ -77,10 +73,9 @@ export type OpenCascadeOptions = {
    * - `'auto'` -- pick `'multi'` when `SharedArrayBuffer` is usable, otherwise fall back to `'full'`.
    * - `OpenCascadeWasmConfig` -- custom WASM/JS URLs for runtime injection.
    *
-   * Defaults to `'full'`: the multi-threaded WASM binary is served from a local asset copy
-   * that is populated by the runtime `copy-assets` step. Until that asset ships, `'auto'`
-   * would still resolve to the (unavailable) `'multi'` binary in Node, so `'full'` stays the
-   * default and `'multi'`/`'auto'` are opt-in.
+   * Defaults to `'full'`. Built-in variants let the OCJS glue module resolve
+   * its adjacent WASM, so framework bundlers have a single owner for each
+   * binary. Custom config keeps the explicit `wasmUrl` override path.
    *
    * @default 'full'
    */
@@ -95,7 +90,23 @@ export type OpenCascadeOptions = {
 
 type OpenCascadeContext = {
   oc: OpenCascadeInstance;
+  isParallelMeshing: boolean;
   tracingSummary?: OcTracingSummary;
+};
+
+type OpenCascadeSerializedShapeMetadata = Omit<ShapeEntry, 'shape'>;
+
+type OpenCascadeSerializedShapeEntry = {
+  brep: Uint8Array<ArrayBuffer>;
+  metadata: OpenCascadeSerializedShapeMetadata;
+};
+
+type OpenCascadeSerializedNativeHandle = {
+  kind: 'opencascade-native-handle';
+  version: 1;
+  format: 'brep-ascii';
+  occtFormatVersion: 'TopTools_FormatVersion_CURRENT';
+  entries: OpenCascadeSerializedShapeEntry[];
 };
 
 // =============================================================================
@@ -109,22 +120,23 @@ type OpenCascadeWasmVariant = 'full' | 'multi';
 type OpenCascadeModuleFactory = OcctModuleFactory<OpenCascadeInstance>;
 
 type ResolvedWasm = {
-  wasmUrl: string;
+  wasmUrl?: string;
   bindingsFactory: OpenCascadeModuleFactory;
   variant: OpenCascadeWasmVariant | 'custom';
 };
+
+let nativeHandleSnapshotCounter = 0;
 
 /**
  * Resolve the WASM option into a concrete URL and loaded bindings factory.
  *
  * - **`'auto'`**: pick `'multi'` when `SharedArrayBuffer` + cross-origin isolation
  *   are available, otherwise fall back to `'full'`.
- * - **`'full'`** / **`'multi'`**: pin the variant explicitly. The multi build's
- *   bindings load from the published `opencascade.js/multi` subpath (static
- *   specifier so bundlers can code-split it); the matching pthread `.wasm` is
- *   served from the local asset copy (`wasm/opencascade_full_multi.wasm`)
- *   populated by the runtime `copy-assets` step — mirroring how the
- *   single-threaded build and the Replicad kernel resolve their binaries.
+ * - **`'full'`** / **`'multi'`**: pin the variant explicitly. Static-string
+ *   `import()` lets bundlers code-split the selected glue module. The
+ *   Emscripten glue owns its adjacent `.wasm` URL; this prevents framework
+ *   bundlers from emitting a duplicate asset from both the kernel module and
+ *   the OCJS glue module.
  * - **Custom config** (`{ wasmUrl, wasmBindingsUrl }`): variable `import()` with
  *   `@vite-ignore` to bypass bundler analysis. Works in Node for any module format.
  *
@@ -138,7 +150,11 @@ async function resolveWasm(
 ): Promise<ResolvedWasm> {
   if (typeof wasm !== 'string') {
     // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- dynamic import() with variable URL returns any
-    const module_: Record<string, unknown> = await import(/* @vite-ignore */ wasm.wasmBindingsUrl);
+    const module_: Record<string, unknown> = await import(
+      /* webpackIgnore: true */
+      /* @vite-ignore */
+      wasm.wasmBindingsUrl
+    );
     return {
       wasmUrl: wasm.wasmUrl,
       bindingsFactory: (module_['default'] ?? module_) as OpenCascadeModuleFactory,
@@ -158,7 +174,6 @@ async function resolveWasm(
   if (variant === 'multi') {
     const moduleExports = await import('opencascade.js/multi');
     return {
-      wasmUrl: multiWasmUrl,
       bindingsFactory: moduleExports.default,
       variant: 'multi',
     };
@@ -166,7 +181,6 @@ async function resolveWasm(
 
   const moduleExports = await import('#kernels/opencascade/wasm/opencascade_full.js');
   return {
-    wasmUrl: fullWasmUrl,
     bindingsFactory: moduleExports.default,
     variant: 'full',
   };
@@ -213,6 +227,14 @@ function normalizeShapes(value: unknown): ShapeEntry[] {
     return [];
   }
 
+  const normalizeEntries = (entries: ShapeEntry[]): ShapeEntry[] => {
+    const usedNames = new Map<string, number>();
+    return entries.map((entry, index) => ({
+      ...entry,
+      name: uniqueShapeName(resolveShapeName({ index, name: entry.name, source: 'authored' }), usedNames),
+    }));
+  };
+
   if (Array.isArray(value)) {
     const entries: ShapeEntry[] = [];
     for (const item of value) {
@@ -222,15 +244,122 @@ function normalizeShapes(value: unknown): ShapeEntry[] {
       }
     }
 
-    return entries;
+    return normalizeEntries(entries);
   }
 
   const entry = shapeEntryFromKernelReturnItem(value);
-  return entry ? [entry] : [];
+  return entry ? normalizeEntries([entry]) : [];
 }
 
 function isOpenCascadeShape(value: unknown): value is TopoDS_Shape {
-  return isRecordObject(value) && typeof value['IsNull'] === 'function' && typeof value['delete'] === 'function';
+  return isRecordObject(value) && typeof value['IsNull'] === 'function';
+}
+
+function createSnapshotTemporaryPath(index: number): string {
+  nativeHandleSnapshotCounter += 1;
+  return `/tmp/tau_opencascade_native_handle_${nativeHandleSnapshotCounter}_${index}.brep`;
+}
+
+function unlinkIfExists(oc: OpenCascadeInstance, filePath: string): void {
+  try {
+    oc.FS.unlink(filePath);
+  } catch {
+    // Best-effort MEMFS cleanup; missing temp files are harmless.
+  }
+}
+
+function serializeShapeEntry(
+  oc: OpenCascadeInstance,
+  entry: ShapeEntry,
+  index: number,
+): OpenCascadeSerializedShapeEntry {
+  const filePath = createSnapshotTemporaryPath(index);
+  const progress = new oc.Message_ProgressRange();
+
+  try {
+    const ok = oc.BRepTools.Write(
+      entry.shape,
+      filePath,
+      false,
+      false,
+      oc.TopTools_FormatVersion.TopTools_FormatVersion_CURRENT,
+      progress,
+    );
+    if (!ok) {
+      throw new Error(`OpenCascade native-handle snapshot write failed for shape ${index}.`);
+    }
+
+    const rawData = oc.FS.readFile(filePath) as Uint8Array<ArrayBuffer>;
+    const brep = new Uint8Array(rawData);
+    return {
+      brep,
+      metadata: {
+        name: entry.name,
+        color: entry.color,
+        opacity: entry.opacity,
+        metalness: entry.metalness,
+        roughness: entry.roughness,
+        density: entry.density,
+      },
+    };
+  } finally {
+    progress.delete();
+    unlinkIfExists(oc, filePath);
+  }
+}
+
+function deserializeShapeEntry(
+  oc: OpenCascadeInstance,
+  entry: OpenCascadeSerializedShapeEntry,
+  index: number,
+): ShapeEntry {
+  const filePath = createSnapshotTemporaryPath(index);
+  const shape = new oc.TopoDS_Shape();
+  const builder = new oc.BRep_Builder();
+  const progress = new oc.Message_ProgressRange();
+  let ownsShape = true;
+
+  try {
+    oc.FS.writeFile(filePath, entry.brep);
+    const ok = oc.BRepTools.Read(shape, filePath, builder, progress);
+    if (!ok || shape.IsNull()) {
+      throw new Error(`OpenCascade native-handle snapshot read failed for shape ${index}.`);
+    }
+
+    ownsShape = false;
+    return {
+      shape,
+      ...entry.metadata,
+    };
+  } catch (error) {
+    if (ownsShape) {
+      shape.delete();
+    }
+    throw error;
+  } finally {
+    progress.delete();
+    builder.delete();
+    unlinkIfExists(oc, filePath);
+  }
+}
+
+function assertSerializedNativeHandle(
+  serializedNativeHandle: unknown,
+): asserts serializedNativeHandle is OpenCascadeSerializedNativeHandle {
+  if (!isRecordObject(serializedNativeHandle)) {
+    throw new Error('Invalid OpenCascade native-handle snapshot: expected an object.');
+  }
+
+  const { kind, version, format, occtFormatVersion, entries } = serializedNativeHandle;
+  if (kind !== 'opencascade-native-handle' || version !== 1) {
+    throw new Error(`Unsupported OpenCascade native-handle snapshot schema: ${String(kind)}/${String(version)}`);
+  }
+
+  if (format !== 'brep-ascii' || occtFormatVersion !== 'TopTools_FormatVersion_CURRENT' || !Array.isArray(entries)) {
+    throw new Error(
+      `Unsupported OpenCascade native-handle snapshot format: ${String(format)}/${String(occtFormatVersion)}`,
+    );
+  }
 }
 
 /**
@@ -286,7 +415,7 @@ function exportOpencascadeStepAssembly(
       pbrMat.IsDefined = true;
       const visMat = new oc.XCAFDoc_VisMaterial();
       visMat.SetPbrMaterial(pbrMat);
-      const matName = new oc.TCollection_AsciiString(entry.name ?? 'material');
+      const matName = new oc.TCollection_AsciiString('tau-material');
       const visMatLabel = visTool.AddMaterial(visMat, matName);
       visTool.SetShapeMaterial(label, visMatLabel);
       matName.delete();
@@ -298,7 +427,7 @@ function exportOpencascadeStepAssembly(
 
     if (entry.density !== undefined) {
       const matTool = oc.XCAFDoc_DocumentTool.MaterialTool(mainLabel);
-      const materialName = new oc.TCollection_HAsciiString(entry.name ?? 'material');
+      const materialName = new oc.TCollection_HAsciiString('tau-material');
       const description = new oc.TCollection_HAsciiString('');
       const densityName = new oc.TCollection_HAsciiString('g/cm3');
       const densityValueType = new oc.TCollection_HAsciiString('POSITIVE_RATIO_MEASURE');
@@ -360,9 +489,13 @@ function exportOpencascadeStepAssembly(
 // =============================================================================
 
 /** @public */
-export default defineKernel({
+export const opencascade = defineKernel({
+  id: 'opencascade',
+  extensions: ['ts', 'js'],
+  detectImport: opencascadeDetectPattern,
+  builtinModuleNames: ['opencascade.js'],
   name: 'OpenCascadeKernel',
-  version: '1.0.0',
+  version: '1.1.0',
   optionsSchema: opencascadeOptionsSchema,
   renderSchema: opencascadeRenderSchema,
   exportSchemas: opencascadeExportSchemas,
@@ -405,7 +538,7 @@ export default defineKernel({
     registerOcModule(oc, runtime);
     logger.debug('OpenCascade kernel initialized');
 
-    return { oc, tracingSummary } satisfies OpenCascadeContext;
+    return { oc, isParallelMeshing: resolved.variant === 'multi', tracingSummary } satisfies OpenCascadeContext;
   },
 
   async getDependencies({ filePath }, runtime) {
@@ -512,6 +645,7 @@ export default defineKernel({
       const gltfData = await meshShapesToGltf(context.oc, shapeEntries, {
         linearTolerance,
         angularTolerance: angularTolerance * (Math.PI / 180),
+        inParallel: context.isParallelMeshing,
       });
       meshSpan.end();
 
@@ -539,12 +673,14 @@ export default defineKernel({
       case 'glb':
       case 'gltf': {
         const { linearTolerance, angularTolerance } = options.tessellation;
-        const { coordinateSystem } = options;
+        const { coordinateSystem, unit } = options;
 
         const gltfData = await meshShapesToGltf(context.oc, nativeHandle, {
           linearTolerance,
           angularTolerance: angularTolerance * (Math.PI / 180),
+          inParallel: context.isParallelMeshing,
           coordinateSystem,
+          unit,
         });
 
         return createKernelSuccess([
@@ -588,7 +724,11 @@ export default defineKernel({
           }
 
           oc.BRepTools.Clean(exportShape, false);
-          const mesh = new oc.BRepMesh_IncrementalMesh(exportShape, linearTolerance, false, angularToleranceRad, false);
+          const mesh = createIncrementalMesh(oc, exportShape, {
+            linearTolerance,
+            angularTolerance: angularToleranceRad,
+            inParallel: context.isParallelMeshing,
+          });
           const filePath = `/tmp/export_${Date.now()}.stl`;
           const writer = new oc.StlAPI_Writer();
           const progress = new oc.Message_ProgressRange();
@@ -599,7 +739,10 @@ export default defineKernel({
           mesh.delete();
           progress.delete();
           writer.delete();
-          return createExportFile('stl', entry.name ?? 'Geometry', data);
+          if (!entry.name) {
+            throw new Error('OpenCascade ShapeEntry names must be normalized before STL export.');
+          }
+          return createExportFile('stl', entry.name, data);
         });
 
         return createKernelSuccess(results);
@@ -617,6 +760,21 @@ export default defineKernel({
         ]);
       }
     }
+  },
+
+  serializeNativeHandle({ nativeHandle }, _runtime, context): OpenCascadeSerializedNativeHandle {
+    return {
+      kind: 'opencascade-native-handle',
+      version: 1,
+      format: 'brep-ascii',
+      occtFormatVersion: 'TopTools_FormatVersion_CURRENT',
+      entries: nativeHandle.map((entry, index) => serializeShapeEntry(context.oc, entry, index)),
+    };
+  },
+
+  deserializeNativeHandle({ serializedNativeHandle }, _runtime, context) {
+    assertSerializedNativeHandle(serializedNativeHandle);
+    return serializedNativeHandle.entries.map((entry, index) => deserializeShapeEntry(context.oc, entry, index));
   },
 });
 

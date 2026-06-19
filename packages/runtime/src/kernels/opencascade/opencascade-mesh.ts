@@ -1,4 +1,4 @@
-/* oxlint-disable eslint(new-cap) -- OpenCascade API uses PascalCase method names */
+/* oxlint-disable new-cap -- OpenCascade API uses PascalCase method names */
 /**
  * OpenCascade shape meshing and native GLB export via RWGltf_CafWriter.
  *
@@ -11,11 +11,16 @@ import { cadMaterialDefaults } from '@taucad/types/constants';
 import type { OpenCascadeInstance } from '#kernels/opencascade/wasm/opencascade_full.js';
 import type { ShapeEntry } from '#kernels/opencascade/opencascade.types.js';
 import { srgbToLinear } from '#utils/color-space.js';
+import { normalizeGltfGeometryNames } from '#utils/gltf-geometry-name-normalizer.js';
 
 type MeshOptions = {
   linearTolerance: number;
   angularTolerance: number;
+  inParallel?: boolean;
   coordinateSystem?: 'y-up' | 'z-up';
+  unit?: {
+    length?: 'meter' | 'millimeter';
+  };
 };
 
 /**
@@ -24,6 +29,8 @@ type MeshOptions = {
  * then propagate mesh names to parent nodes when nodes are anonymous — mirrors
  * the invariants `analyzeGlb` relies on for per-part feedback.
  *
+ * @param glb - Source GLB bytes emitted by OpenCascade.
+ * @param entries - Shape entries whose names should be projected onto meshes.
  * @returns The tagged GLB.
  */
 const tagGlbMeshAndNodesFromShapeEntries = async (
@@ -53,6 +60,14 @@ const tagGlbMeshAndNodesFromShapeEntries = async (
   return io.writeBinary(document);
 };
 
+const requireShapeEntryName = (entry: ShapeEntry): string => {
+  if (!entry.name) {
+    throw new Error('OpenCascade ShapeEntry names must be normalized before GLB export.');
+  }
+
+  return entry.name;
+};
+
 /**
  * Parse a hex color string into an RGB tuple.
  *
@@ -66,6 +81,20 @@ export function parseHexColor(hex: string): [number, number, number] {
   const g = Number.parseInt(clean.slice(2, 4), 16) / 255;
   const b = Number.parseInt(clean.slice(4, 6), 16) / 255;
   return [r, g, b];
+}
+
+export function createIncrementalMesh(
+  oc: OpenCascadeInstance,
+  shape: ShapeEntry['shape'],
+  options: Pick<MeshOptions, 'linearTolerance' | 'angularTolerance' | 'inParallel'>,
+): { delete(): void } {
+  return new oc.BRepMesh_IncrementalMesh(
+    shape,
+    options.linearTolerance,
+    false,
+    options.angularTolerance,
+    options.inParallel ?? false,
+  );
 }
 
 /**
@@ -92,25 +121,19 @@ export async function meshShapesToGltf(
 
   const labels: Array<{ delete(): void }> = [];
 
-  for (const [shapeIndex, entry] of shapes.entries()) {
+  for (const entry of shapes) {
     if (entry.shape.IsNull()) {
       continue;
     }
 
     oc.BRepTools.Clean(entry.shape, false);
-    const mesh = new oc.BRepMesh_IncrementalMesh(
-      entry.shape,
-      options.linearTolerance,
-      false,
-      options.angularTolerance,
-      false,
-    );
+    const mesh = createIncrementalMesh(oc, entry.shape, options);
 
     const label = shapeTool.NewShape();
     labels.push(label);
     shapeTool.SetShape(label, entry.shape);
 
-    const shapeLabelName = new oc.TCollection_ExtendedString(entry.name ?? `Shape_${shapeIndex}`);
+    const shapeLabelName = new oc.TCollection_ExtendedString(requireShapeEntryName(entry));
     oc.TDataStd_Name.Set(label, shapeLabelName);
     shapeLabelName.delete();
 
@@ -143,7 +166,7 @@ export async function meshShapesToGltf(
       pbrMat.IsDefined = true;
       const visMat = new oc.XCAFDoc_VisMaterial();
       visMat.SetPbrMaterial(pbrMat);
-      const matName = new oc.TCollection_AsciiString(entry.name ?? 'material');
+      const matName = new oc.TCollection_AsciiString('tau-material');
       const visMatLabel = visTool.AddMaterial(visMat, matName);
       visTool.SetShapeMaterial(label, visMatLabel);
       matName.delete();
@@ -163,7 +186,7 @@ export async function meshShapesToGltf(
   const converter = new oc.RWMesh_CoordinateSystemConverter();
   converter.SetInputLengthUnit(0.001);
   converter.SetInputCoordinateSystem(oc.RWMesh_CoordinateSystem.RWMesh_CoordinateSystem_Zup);
-  converter.SetOutputLengthUnit(1);
+  converter.SetOutputLengthUnit(options.unit?.length === 'millimeter' ? 0.001 : 1);
   const outputSystem =
     options.coordinateSystem === 'z-up'
       ? oc.RWMesh_CoordinateSystem.RWMesh_CoordinateSystem_Zup
@@ -206,5 +229,11 @@ export async function meshShapesToGltf(
   documentName.delete();
   document.delete();
 
-  return tagGlbMeshAndNodesFromShapeEntries(result, shapes);
+  const tagged = await tagGlbMeshAndNodesFromShapeEntries(result, shapes);
+  return normalizeGltfGeometryNames(tagged, {
+    format: 'glb',
+    materialNamePolicy: 'clear-all',
+    sceneNamePolicy: 'clear-generated',
+    sceneNameSource: 'external-generated',
+  });
 }

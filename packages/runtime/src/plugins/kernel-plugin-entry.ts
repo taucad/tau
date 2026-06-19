@@ -4,9 +4,9 @@
  *
  * Out-of-tree kernels (e.g. `@taucad/openscad`) consume this entry instead
  * of reaching into the runtime's `#`-prefixed internals. The surface is
- * intentionally minimal: defineKernel, the lifecycle types it touches,
- * the plugin-registration helper, and a couple of pure helpers that every
- * existing first-party kernel already depends on.
+ * intentionally minimal: defineKernel, the lifecycle types it touches, and
+ * a couple of pure helpers that every existing first-party kernel already
+ * depends on.
  *
  * @module
  * @public
@@ -24,6 +24,7 @@ export type {
   InitializeInput,
   KernelDefinition,
   KernelFileSystem,
+  KernelPluginFactory,
   KernelRuntime,
   RuntimeFileSystemBase,
   RuntimeLogger,
@@ -46,9 +47,10 @@ export type {
 } from '#types/runtime.types.js';
 
 export type { KernelPlugin } from '#plugins/plugin-types.js';
-export { createKernelPlugin } from '#plugins/plugin-helpers.js';
 export { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
 export { loadBinaryFile, resolveToRelative } from '#kernels/kernel-module-helpers.js';
 export { convertOffToGltf } from '#utils/off-to-gltf.js';
-export { coordinateSystemSchema } from '#types/export-option-schemas.js';
-export type { CoordinateSystemOptions } from '#types/export-option-schemas.js';
+export { canonicalizeOffWithManifold, convertOffToManifoldGltf } from '#utils/off-manifold-canonicalizer.js';
+export type { ConvertOffToManifoldGltfOptions } from '#utils/off-manifold-canonicalizer.js';
+export { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
+export type { CoordinateSystemOptions, UnitOptions } from '#types/export-option-schemas.js';

@@ -4,8 +4,9 @@ import { mock } from 'vitest-mock-extended';
 import { exportFromGlb } from '@taucad/converter';
 import type { ExportFile } from '@taucad/types';
 import type { TranscoderRuntime } from '#types/runtime-transcoder.types.js';
-import converterTranscoder from '#transcoders/converter/converter.transcoder.js';
+import { converterTranscoder } from '#transcoders/converter/converter.transcoder.js';
 import { converterEdgeSchemas, converterExportOptions } from '#transcoders/converter/converter-export-options.js';
+import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 
 vi.mock('@taucad/converter', () => ({
   exportFromGlb: vi.fn(),
@@ -17,12 +18,15 @@ const createRuntime = (): TranscoderRuntime =>
   });
 
 describe('converter transcoder', () => {
+  const resolveConverterDefinition = async () => resolveRuntimePluginDefinition('transcoder', converterTranscoder());
+  let converterDefinition: Awaited<ReturnType<typeof resolveConverterDefinition>>;
   let context: Record<string, never>;
   let runtime: TranscoderRuntime;
 
   beforeEach(async () => {
     runtime = createRuntime();
-    context = await converterTranscoder.initialize({}, runtime);
+    converterDefinition = await resolveConverterDefinition();
+    context = (await converterDefinition.initialize({}, runtime)) as Record<string, never>;
   });
 
   afterEach(() => {
@@ -37,12 +41,12 @@ describe('converter transcoder', () => {
 
   describe('edges', () => {
     it('should declare a non-empty list of edges as a static property', () => {
-      expect(Array.isArray(converterTranscoder.edges)).toBe(true);
-      expect(converterTranscoder.edges.length).toBeGreaterThan(0);
+      expect(Array.isArray(converterDefinition.edges)).toBe(true);
+      expect(converterDefinition.edges.length).toBeGreaterThan(0);
     });
 
     it('should declare every edge as a glb→<format> mesh conversion (excluding glb→glb)', () => {
-      for (const edge of converterTranscoder.edges) {
+      for (const edge of converterDefinition.edges) {
         expect(edge.from).toBe('glb');
         expect(edge.to).not.toBe('glb');
         expect(edge.fidelity).toBe('mesh');
@@ -50,21 +54,21 @@ describe('converter transcoder', () => {
     });
 
     it('should attach optionsSchema to the 3mf edge', () => {
-      const threeMfEdge = converterTranscoder.edges.find((edge) => edge.to === '3mf');
+      const threeMfEdge = converterDefinition.edges.find((edge) => edge.to === '3mf');
 
       expect(threeMfEdge).toBeDefined();
       expect(threeMfEdge!.optionsSchema).toBeDefined();
     });
 
     it('should not attach optionsSchema to non-3mf edges', () => {
-      const stlEdge = converterTranscoder.edges.find((edge) => edge.to === 'stl');
+      const stlEdge = converterDefinition.edges.find((edge) => edge.to === 'stl');
 
       expect(stlEdge).toBeDefined();
       expect('optionsSchema' in stlEdge!).toBe(false);
     });
 
     it('should include common export formats', () => {
-      const toFormats = converterTranscoder.edges.map((edge) => edge.to);
+      const toFormats = converterDefinition.edges.map((edge) => edge.to);
 
       expect(toFormats).toContain('stl');
       expect(toFormats).toContain('step');
@@ -82,7 +86,7 @@ describe('converter transcoder', () => {
     // future change adds a target to one source without adding it to the other.
 
     it('should declare a runtime edge for every key in converterEdgeSchemas', () => {
-      const runtimeTargets = new Set(converterTranscoder.edges.map((edge) => edge.to));
+      const runtimeTargets = new Set(converterDefinition.edges.map((edge) => edge.to));
 
       for (const target of Object.keys(converterEdgeSchemas)) {
         expect(runtimeTargets).toContain(target);
@@ -92,13 +96,13 @@ describe('converter transcoder', () => {
     it('should expose an entry in converterEdgeSchemas for every runtime edge', () => {
       const schemaTargets = new Set(Object.keys(converterEdgeSchemas));
 
-      for (const edge of converterTranscoder.edges) {
+      for (const edge of converterDefinition.edges) {
         expect(schemaTargets).toContain(edge.to);
       }
     });
 
     it('should share the same Zod instance between converterEdgeSchemas[3mf] and the runtime 3mf edge optionsSchema', () => {
-      const threeMfEdge = converterTranscoder.edges.find((edge) => edge.to === '3mf');
+      const threeMfEdge = converterDefinition.edges.find((edge) => edge.to === '3mf');
 
       expect(threeMfEdge).toBeDefined();
       expect(threeMfEdge!.optionsSchema).toBe(converterExportOptions['3mf'].schema);
@@ -114,7 +118,7 @@ describe('converter transcoder', () => {
       ];
       vi.mocked(exportFromGlb).mockResolvedValue(outputFiles);
 
-      const result = await converterTranscoder.transcode(
+      const result = await converterDefinition.transcode(
         {
           from: 'glb',
           to: 'stl',
@@ -139,7 +143,7 @@ describe('converter transcoder', () => {
       ];
       vi.mocked(exportFromGlb).mockResolvedValue(outputFiles);
 
-      const result = await converterTranscoder.transcode(
+      const result = await converterDefinition.transcode(
         {
           from: 'glb',
           to: '3mf',
@@ -161,7 +165,7 @@ describe('converter transcoder', () => {
       const inputBytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
       vi.mocked(exportFromGlb).mockResolvedValue([]);
 
-      await converterTranscoder.transcode(
+      await converterDefinition.transcode(
         {
           from: 'glb',
           to: '3mf',
@@ -182,7 +186,7 @@ describe('converter transcoder', () => {
       const inputBytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
       vi.mocked(exportFromGlb).mockResolvedValue([]);
 
-      await converterTranscoder.transcode(
+      await converterDefinition.transcode(
         {
           from: 'glb',
           to: '3mf',
@@ -199,7 +203,7 @@ describe('converter transcoder', () => {
     it('should return error result when exportFromGlb throws', async () => {
       vi.mocked(exportFromGlb).mockRejectedValue(new Error('conversion failed'));
 
-      const result = await converterTranscoder.transcode(
+      const result = await converterDefinition.transcode(
         {
           from: 'glb',
           to: 'stl',
@@ -217,7 +221,7 @@ describe('converter transcoder', () => {
     });
 
     it('should return error result when no input files are provided', async () => {
-      const result = await converterTranscoder.transcode(
+      const result = await converterDefinition.transcode(
         {
           from: 'glb',
           to: 'stl',
@@ -237,7 +241,7 @@ describe('converter transcoder', () => {
 
   describe('cleanup', () => {
     it('should clean up without error', async () => {
-      await expect(converterTranscoder.cleanup(context)).resolves.toBeUndefined();
+      await expect(converterDefinition.cleanup(context)).resolves.toBeUndefined();
     });
   });
 });

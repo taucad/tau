@@ -7,6 +7,7 @@ export type * from '#types/file.types.js';
 export type * from '#types/filesystem.types.js';
 export type * from '#types/fs-utils.types.js';
 export type * from '#types/graphics.types.js';
+export type * from '#types/geometry-component.types.js';
 export type * from '#types/id.types.js';
 export type * from '#types/json-value.types.js';
 export type * from '#types/logger.types.js';

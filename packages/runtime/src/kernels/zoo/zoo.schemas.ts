@@ -1,12 +1,25 @@
 /**
  * Zoo (KCL) kernel Zod schemas — single source of truth.
  *
- * Consumed by `zoo.plugin.ts` (type inference) and `zoo.kernel.ts` (runtime validation).
+ * Consumed by `zoo.kernel.ts` for plugin type inference and runtime validation.
  *
  * @public
  */
 
 import { z } from 'zod';
+import { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
+
+const stlUnitSchema = z.object({
+  unit: z
+    .object({
+      length: z
+        .enum(['meter', 'millimeter'])
+        .default('millimeter')
+        .describe('Output length unit for geometry coordinates'),
+    })
+    .default({ length: 'millimeter' })
+    .describe('Output unit convention'),
+});
 
 /**
  * Zoo (KCL) kernel initialization options schema.
@@ -21,10 +34,13 @@ export const zooOptionsSchema = z.object({
  * @public
  */
 export const zooExportSchemas = {
-  stl: z.object({
-    binary: z.boolean().default(true).describe('Binary STL format'),
-  }),
-  step: z.object({}),
-  glb: z.object({}),
-  gltf: z.object({}),
+  stl: z
+    .object({
+      binary: z.boolean().default(true).describe('Binary STL format'),
+    })
+    .extend(coordinateSystemSchema.shape)
+    .extend(stlUnitSchema.shape),
+  step: coordinateSystemSchema,
+  glb: coordinateSystemSchema.extend(unitSchema.shape),
+  gltf: coordinateSystemSchema.extend(unitSchema.shape),
 } as const satisfies Record<string, z.ZodType>;

@@ -73,6 +73,7 @@ export type {
   TransportId,
   TransportProtocol,
   TransportBindingsExtra,
+  RuntimeFromTransport,
   TransportClientOptions,
   TransportHostOptions,
 } from '#transport/transport-projections.js';

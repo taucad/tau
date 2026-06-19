@@ -16,10 +16,7 @@
  * @public
  */
 
-import { collectWireTransferables } from '#transport/_internal/wire-transferables.js';
 import type {
-  EncodedFileBytes,
-  EncodedGeometry,
   HostInitializeBindings,
   RuntimeInitializeMemoryHandle,
   RuntimeTransportHost,
@@ -27,9 +24,9 @@ import type {
 } from '#transport/runtime-transport.types.js';
 import { createWorkerDispatcher } from '#transport/_internal/runtime-worker-dispatcher.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
-import { adoptHostAbort } from '#transport/_internal/abort-channel.js';
 import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 import { createWorkerHostBindings } from '#transport/_internal/worker-host-bindings.js';
+import { encodeFileAsOwnedTransfer, encodeGeometryAsOwnedTransfer } from '#transport/_internal/owned-transfer-bytes.js';
 import { acquireNodeParentPort } from '#transport/_internal/node-parent-port.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
@@ -87,40 +84,13 @@ export const nodeWorkerHost = (
       };
     },
     adoptInitialize(handle: RuntimeInitializeMemoryHandle): HostInitializeBindings {
-      const abortSurface = adoptHostAbort(handle.signalBuffer);
-      const geomTier: 'pool' | 'transfer' = handle.geometryPoolBuffer ? 'pool' : 'transfer';
-      const fileTier: 'pool' | 'transfer' = handle.filePoolBuffer ? 'pool' : 'transfer';
-      return {
-        abort: { signal: abortSurface.controller.signal, strategy: abortSurface.strategy },
-        geometryDelivery: {
-          publish(geometry): EncodedGeometry {
-            const transferables = collectWireTransferables(geometry);
-            return { value: geometry, transferables, tier: geomTier };
-          },
-          tier: geomTier,
-        },
-        fileDelivery: {
-          publish(file): EncodedFileBytes {
-            return {
-              value: file,
-              transferables: file.buffer instanceof ArrayBuffer ? [file.buffer] : [],
-              tier: fileTier,
-            };
-          },
-          tier: fileTier,
-        },
-      };
+      return createWorkerHostBindings(handle);
     },
-    encodeGeometry(geometry): EncodedGeometry {
-      const transferables = collectWireTransferables(geometry);
-      return { value: geometry, transferables, tier: 'transfer' };
+    encodeGeometry(geometry) {
+      return encodeGeometryAsOwnedTransfer(geometry);
     },
-    encodeFile(file): EncodedFileBytes {
-      return {
-        value: file,
-        transferables: file.buffer instanceof ArrayBuffer ? [file.buffer] : [],
-        tier: 'transfer',
-      };
+    encodeFile(file) {
+      return encodeFileAsOwnedTransfer(file);
     },
     async close(reason?: string): Promise<void> {
       if (isClosed) {

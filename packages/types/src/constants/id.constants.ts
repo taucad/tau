@@ -29,6 +29,10 @@ export const idPrefix = {
    */
   publicationViewer: 'pvv',
   /**
+   * A private-publication exact-email access grant.
+   */
+  publicationAccess: 'pva',
+  /**
    * Opaque blob record identifiers stored locally when keyed independently from SHA (`blob_ref` is keyed by SHA — placeholder prefix).
    */
   blobRef: 'blob',

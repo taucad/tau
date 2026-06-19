@@ -21,6 +21,7 @@
 
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import type { RuntimeFileSystemHandle } from '#transport/_internal/runtime-filesystem-handle.js';
+import { fileStatFromBytes } from '@taucad/filesystem';
 
 function enoent(message: string): Error {
   const error = new Error(message);
@@ -141,8 +142,8 @@ function buildMemoryFsBase(seedFiles: Record<string, string> | undefined): Runti
     async stat(filePath) {
       if (store.has(filePath)) {
         const content = store.get(filePath)!;
-        const size = typeof content === 'string' ? encoder.encode(content).byteLength : content.byteLength;
-        return { type: 'file', size, mtimeMs: Date.now() };
+        const bytes = typeof content === 'string' ? encoder.encode(content) : content;
+        return fileStatFromBytes(bytes, Date.now());
       }
 
       if (directories.has(filePath)) {
@@ -169,8 +170,8 @@ function buildMemoryFsBase(seedFiles: Record<string, string> | undefined): Runti
     async lstat(filePath) {
       if (store.has(filePath)) {
         const content = store.get(filePath)!;
-        const size = typeof content === 'string' ? encoder.encode(content).byteLength : content.byteLength;
-        return { type: 'file', size, mtimeMs: Date.now() };
+        const bytes = typeof content === 'string' ? encoder.encode(content) : content;
+        return fileStatFromBytes(bytes, Date.now());
       }
 
       if (directories.has(filePath)) {

@@ -1,4 +1,5 @@
-import type { FileStatEntry } from '@taucad/types';
+import type { FileContentMetadata, FileStat, FileStatEntry } from '@taucad/types';
+import { fileMetadataFields } from '#content-metadata.js';
 
 const defaultSearchMaxResults = 100;
 
@@ -6,12 +7,19 @@ const defaultSearchMaxResults = 100;
  * Node in the in-memory file tree.
  * @public
  */
-export type TreeNode = {
-  type: 'file' | 'dir';
-  size: number;
-  mtimeMs: number;
-  children?: Map<string, TreeNode>;
-};
+export type TreeNode =
+  | ({
+      type: 'file';
+      size: number;
+      mtimeMs: number;
+      children?: undefined;
+    } & FileContentMetadata)
+  | {
+      type: 'dir';
+      size: number;
+      mtimeMs: number;
+      children: Map<string, TreeNode>;
+    };
 
 /**
  * In-memory file tree for O(1) metadata queries.
@@ -43,7 +51,7 @@ export class InMemoryFileTree {
    *
    * @param entries - Flat file entries with relative paths and metadata.
    */
-  public build(entries: Array<{ path: string; type: 'file' | 'dir'; size: number; mtimeMs: number }>): void {
+  public build(entries: Array<{ path: string } & FileStat>): void {
     this._root = { type: 'dir', size: 0, mtimeMs: 0, children: new Map() };
 
     for (const entry of entries) {
@@ -74,6 +82,7 @@ export class InMemoryFileTree {
           type: 'file',
           size: entry.size,
           mtimeMs: entry.mtimeMs,
+          ...fileMetadataFields(entry),
         });
       }
     }
@@ -131,10 +140,9 @@ export class InMemoryFileTree {
    * Register a file write. Creates intermediate directories as needed.
    *
    * @param path - Absolute file path.
-   * @param size - File size in bytes.
-   * @param mtimeMs - Modification time.
+   * @param metadata - File byte size, optional modification time, and required content metadata.
    */
-  public addFile(path: string, size: number, mtimeMs: number = Date.now()): void {
+  public addFile(path: string, metadata: { size: number; mtimeMs?: number } & FileContentMetadata): void {
     const segments = path.split('/').filter(Boolean);
     if (segments.length === 0) {
       return;
@@ -148,7 +156,12 @@ export class InMemoryFileTree {
     }
 
     const name = segments.at(-1)!;
-    parent.children.set(name, { type: 'file', size, mtimeMs });
+    parent.children.set(name, {
+      type: 'file',
+      size: metadata.size,
+      mtimeMs: metadata.mtimeMs ?? Date.now(),
+      ...fileMetadataFields(metadata),
+    });
   }
 
   /**
@@ -311,9 +324,16 @@ export class InMemoryFileTree {
       const path = prefix ? `${prefix}/${name}` : name;
       if (child.type === 'file') {
         if (path.toLowerCase().includes(lowerQuery)) {
-          results.push({ path, name, type: 'file', size: child.size, mtimeMs: child.mtimeMs });
+          results.push({
+            path,
+            name,
+            type: 'file',
+            size: child.size,
+            mtimeMs: child.mtimeMs,
+            ...fileMetadataFields(child),
+          });
         }
-      } else if (child.children) {
+      } else {
         if (includeDirectories && path.toLowerCase().includes(lowerQuery)) {
           results.push({ path, name, type: 'dir', size: 0, mtimeMs: child.mtimeMs });
         }
@@ -336,8 +356,9 @@ export class InMemoryFileTree {
           type: 'file',
           size: child.size,
           mtimeMs: child.mtimeMs,
+          ...fileMetadataFields(child),
         });
-      } else if (child.children) {
+      } else {
         this._collectStats(child, relativePath, results);
       }
     }

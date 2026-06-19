@@ -103,11 +103,10 @@ describe('ChangeEventBus', () => {
   it('should not skip sibling handlers when one self-unsubscribes during emit', () => {
     const bus = new ChangeEventBus();
     const sibling = vi.fn();
-    let unsubscribeSelf: (() => void) | undefined;
-
-    unsubscribeSelf = bus.subscribe(() => {
-      unsubscribeSelf?.();
+    const unsubscribeSelf = bus.subscribe(() => {
+      unsubscribeSelf();
     });
+
     bus.subscribe(sibling);
 
     bus.emit(fileWrittenEvent('/self-unsub.txt'));

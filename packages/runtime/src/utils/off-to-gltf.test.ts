@@ -23,18 +23,21 @@ describe('convertOffToGltf', () => {
 0.5 1 0
 3 0 1 2 0 0 255 127
 `;
-      const glbBuffer = await convertOffToGltf(offContent, 'glb');
+      const glbBuffer = await convertOffToGltf(offContent, { format: 'glb' });
       const document = await parseGlb(glbBuffer);
 
       // Get the mesh and check material color
       const meshes = document.getRoot().listMeshes();
       expect(meshes).toHaveLength(1);
+      expect(document.getRoot().listNodes()[0]!.getName()).toBe('Shape 1');
+      expect(meshes[0]!.getName()).toBe('Shape 1');
 
       const materials = document.getRoot().listMaterials();
       expect(materials).toHaveLength(1);
 
       // Color should be on the material's baseColorFactor (linear), not vertex colors
       const material = materials[0]!;
+      expect(material.getName()).toBe('');
       const baseColor = material.getBaseColorFactor();
       expect(baseColor[0]).toBeCloseTo(0, 2); // R
       expect(baseColor[1]).toBeCloseTo(0, 2); // G
@@ -55,7 +58,7 @@ describe('convertOffToGltf', () => {
 0.5 1 0
 3 0 1 2 255 0 0 128
 `;
-      const glbBuffer = await convertOffToGltf(offContent, 'glb');
+      const glbBuffer = await convertOffToGltf(offContent, { format: 'glb' });
       const document = await parseGlb(glbBuffer);
 
       const materials = document.getRoot().listMaterials();
@@ -63,6 +66,7 @@ describe('convertOffToGltf', () => {
 
       const material = materials[0]!;
       expect(material.getAlphaMode()).toBe('BLEND');
+      expect(material.getName()).toBe('');
     });
 
     it('should set material alpha mode to OPAQUE for fully opaque faces', async () => {
@@ -73,7 +77,7 @@ describe('convertOffToGltf', () => {
 0.5 1 0
 3 0 1 2 255 0 0 255
 `;
-      const glbBuffer = await convertOffToGltf(offContent, 'glb');
+      const glbBuffer = await convertOffToGltf(offContent, { format: 'glb' });
       const document = await parseGlb(glbBuffer);
 
       const materials = document.getRoot().listMaterials();
@@ -81,6 +85,7 @@ describe('convertOffToGltf', () => {
 
       const material = materials[0]!;
       expect(material.getAlphaMode()).toBe('OPAQUE');
+      expect(material.getName()).toBe('');
     });
 
     it('should create separate materials for opaque and transparent faces', async () => {
@@ -95,12 +100,13 @@ describe('convertOffToGltf', () => {
 3 0 1 2 255 0 0 255
 3 3 4 5 0 255 0 128
 `;
-      const glbBuffer = await convertOffToGltf(offContent, 'glb');
+      const glbBuffer = await convertOffToGltf(offContent, { format: 'glb' });
       const document = await parseGlb(glbBuffer);
 
       // Should have 2 materials - one for each unique color
       const materials = document.getRoot().listMaterials();
       expect(materials).toHaveLength(2);
+      expect(materials.map((material) => material.getName())).toEqual(['', '']);
 
       // Find materials by their alpha mode
       const opaqueMaterials = materials.filter((mat) => mat.getAlphaMode() === 'OPAQUE');
@@ -127,7 +133,7 @@ describe('convertOffToGltf', () => {
 0.5 1 0
 3 0 1 2 255 128 64
 `;
-      const glbBuffer = await convertOffToGltf(offContent, 'glb');
+      const glbBuffer = await convertOffToGltf(offContent, { format: 'glb' });
       const document = await parseGlb(glbBuffer);
 
       // Color should be on material
@@ -155,7 +161,7 @@ describe('convertOffToGltf', () => {
 0.5 1 0
 3 0 1 2 153 204 242 127
 `;
-      const glbBuffer = await convertOffToGltf(offContent, 'glb');
+      const glbBuffer = await convertOffToGltf(offContent, { format: 'glb' });
       const document = await parseGlb(glbBuffer);
 
       const materials = document.getRoot().listMaterials();
@@ -182,7 +188,7 @@ describe('convertOffToGltf', () => {
 0.5 1 0
 3 0 1 2 255 0 0 255
 `;
-    const gltfBytes = await convertOffToGltf(offContent, 'gltf');
+    const gltfBytes = await convertOffToGltf(offContent, { format: 'gltf' });
     const json = JSON.parse(new TextDecoder().decode(gltfBytes)) as {
       asset: unknown;
       meshes: unknown[];
@@ -193,5 +199,24 @@ describe('convertOffToGltf', () => {
     expect(json.meshes).toBeDefined();
     expect(json.buffers).toBeDefined();
     expect(json.buffers[0]!.uri).toMatch(/^data:application\/octet-stream;base64,/);
+  });
+
+  it('should export z-up millimeter coordinates when requested', async () => {
+    const offContent = `OFF 3 1 0
+0 0 0
+50 0 0
+0 50 0
+3 0 1 2 255 0 0 255
+`;
+    const glbBuffer = await convertOffToGltf(offContent, {
+      format: 'glb',
+      coordinateSystem: 'z-up',
+      unit: { length: 'millimeter' },
+    });
+    const document = await parseGlb(glbBuffer);
+    const position = document.getRoot().listMeshes()[0]!.listPrimitives()[0]!.getAttribute('POSITION')!;
+
+    expect(position.getElement(1, [0, 0, 0])).toEqual([50, 0, 0]);
+    expect(position.getElement(2, [0, 0, 0])).toEqual([0, 50, 0]);
   });
 });

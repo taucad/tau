@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { transformVerticesGltf, transformVertexArray } from '#framework/common.js';
+import {
+  createVertexTransform,
+  transformNormalArray,
+  transformVerticesGltf,
+  transformVertexArray,
+} from '#framework/common.js';
 
 describe('transformVerticesGltf', () => {
   it('should transform z-up millimeters to y-up meters correctly', () => {
@@ -85,5 +90,34 @@ describe('transformVertexArray', () => {
     expect(result[1]).toBeCloseTo(3, 5);
     expect(result[2]).toBeCloseTo(-2, 5);
     expect(result[3]).toBe(0);
+  });
+});
+
+describe('createVertexTransform', () => {
+  it('should keep z-up millimeter coordinates unscaled for canonical GeoSpec exports', () => {
+    const transform = createVertexTransform({ coordinateSystem: 'z-up', unit: { length: 'millimeter' } });
+
+    expect(transform([50, 25, 10])).toEqual([50, 25, 10]);
+  });
+
+  it('should transform to y-up millimeters without applying meter scale', () => {
+    const transform = createVertexTransform({ coordinateSystem: 'y-up', unit: { length: 'millimeter' } });
+
+    expect(transform([50, 25, 10])).toEqual([50, 10, -25]);
+  });
+
+  it('should transform flat vertex arrays using requested coordinate and length units', () => {
+    const result = transformVertexArray([50, 25, 10], {
+      coordinateSystem: 'z-up',
+      unit: { length: 'millimeter' },
+    });
+
+    expect([...result]).toEqual([50, 25, 10]);
+  });
+
+  it('should rotate normals without scaling them', () => {
+    const result = transformNormalArray([0, 0, 1], { coordinateSystem: 'y-up' });
+
+    expect([...result]).toEqual([0, 1, 0]);
   });
 });

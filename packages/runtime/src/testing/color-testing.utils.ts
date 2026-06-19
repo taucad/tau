@@ -4,11 +4,18 @@
  */
 
 import { NodeIO } from '@gltf-transform/core';
+import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { expect } from 'vitest';
 import type { GeometryResponse } from '@taucad/types';
 import { srgbHexToLinearTuple } from '#utils/color-space.js';
 import { extractGltfFromResult } from '#testing/kernel-geometry-testing.utils.js';
 import type { CreateGeometryResult } from '#types/runtime.types.js';
+
+const primitiveModeTriangles = 4;
+
+function createNodeIo(): NodeIO {
+  return new NodeIO().registerExtensions([KHRMaterialsUnlit]);
+}
 
 function listAllGlbBuffers(result: CreateGeometryResult): Array<Uint8Array<ArrayBuffer>> {
   if (!result.success) {
@@ -77,7 +84,7 @@ export async function getMaterialBaseColor(
   if (!glb) {
     throw new Error('No GLB data found in result');
   }
-  const document = await new NodeIO().readBinary(glb);
+  const document = await createNodeIo().readBinary(glb);
   const materials = document.getRoot().listMaterials();
   const material = materials[materialIndex];
   if (!material) {
@@ -88,8 +95,8 @@ export async function getMaterialBaseColor(
 
 /**
  * List every material's `baseColorFactor` in writer order, **across all GLB
- * responses** in the result. Some kernels (e.g. JSCAD) emit one GLB per shape,
- * so a multi-shape input produces multiple GLBs, each with their own materials.
+ * responses** in the result. Kernels may emit aggregate multi-node GLBs or
+ * several GLB responses depending on their native assembly/export model.
  *
  * @param result - kernel `createGeometry` result with one or more GLB responses
  * @returns an array of linear RGBA tuples (one per material across all GLBs)
@@ -102,12 +109,49 @@ export async function getAllMaterialBaseColors(
   if (buffers.length === 0) {
     throw new Error('No GLB data found in result');
   }
-  const io = new NodeIO();
+  const io = createNodeIo();
   const documents = await Promise.all(buffers.map(async (glb) => io.readBinary(glb)));
   const baseColors: Array<[number, number, number, number]> = [];
   for (const document of documents) {
     for (const material of document.getRoot().listMaterials()) {
       baseColors.push(material.getBaseColorFactor() as [number, number, number, number]);
+    }
+  }
+  return baseColors;
+}
+
+/**
+ * List `baseColorFactor` values referenced by TRIANGLES primitives in writer
+ * order. Kernels may emit owner-local LINES primitives with their own edge
+ * material; surface color parity tests should assert the materials actually
+ * used by surface primitives.
+ *
+ * @param result - kernel `createGeometry` result with one or more GLB responses
+ * @returns an array of linear RGBA tuples used by surface triangle primitives
+ * @public
+ */
+export async function getTrianglePrimitiveBaseColors(
+  result: CreateGeometryResult,
+): Promise<Array<[number, number, number, number]>> {
+  const buffers = listAllGlbBuffers(result);
+  if (buffers.length === 0) {
+    throw new Error('No GLB data found in result');
+  }
+  const io = createNodeIo();
+  const documents = await Promise.all(buffers.map(async (glb) => io.readBinary(glb)));
+  const baseColors: Array<[number, number, number, number]> = [];
+  for (const document of documents) {
+    for (const mesh of document.getRoot().listMeshes()) {
+      for (const primitive of mesh.listPrimitives()) {
+        if (primitive.getMode() !== primitiveModeTriangles) {
+          continue;
+        }
+        const material = primitive.getMaterial();
+        if (!material) {
+          continue;
+        }
+        baseColors.push(material.getBaseColorFactor() as [number, number, number, number]);
+      }
     }
   }
   return baseColors;
@@ -126,7 +170,7 @@ export async function getMaterialAlphaMode(result: CreateGeometryResult, materia
   if (!glb) {
     throw new Error('No GLB data found in result');
   }
-  const document = await new NodeIO().readBinary(glb);
+  const document = await createNodeIo().readBinary(glb);
   const materials = document.getRoot().listMaterials();
   const material = materials[materialIndex];
   if (!material) {

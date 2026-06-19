@@ -25,3 +25,25 @@ export const coordinateSystemSchema = z.object({
  * @public
  */
 export type CoordinateSystemOptions = z.infer<typeof coordinateSystemSchema>;
+
+/**
+ * Unit convention fragment for export formats that support output-unit
+ * transformation. The nested shape leaves room for future unit dimensions
+ * without overloading a single scalar string.
+ * Compose into per-format schemas via `.extend()`.
+ * @public
+ */
+export const unitSchema = z.object({
+  unit: z
+    .object({
+      length: z.enum(['meter', 'millimeter']).default('meter').describe('Output length unit for geometry coordinates'),
+    })
+    .default({ length: 'meter' })
+    .describe('Output unit convention'),
+});
+
+/**
+ * Inferred type for export unit options.
+ * @public
+ */
+export type UnitOptions = z.infer<typeof unitSchema>;

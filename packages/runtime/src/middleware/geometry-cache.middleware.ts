@@ -18,12 +18,12 @@
  */
 
 import { encode as msgpackEncode, decode as msgpackDecode } from '@msgpack/msgpack';
-import type { GeometryResponse } from '@taucad/types';
+import type { ExportFile, GeometryResponse } from '@taucad/types';
 import { z } from 'zod';
 import { LruMap } from '@taucad/utils/cache';
 import { joinPath } from '@taucad/utils/path';
 import type { KernelFileSystem } from '#types/runtime-kernel.types.js';
-import type { KernelSuccessResult } from '#types/runtime.types.js';
+import type { ExportGeometryResult, KernelSuccessResult } from '#types/runtime.types.js';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
 
 /**
@@ -36,13 +36,27 @@ import { defineMiddleware } from '#middleware/runtime-middleware.js';
 export const geometryMemoryCache = new LruMap<KernelSuccessResult<GeometryResponse[]>>({ maxEntries: 20 });
 
 /**
+ * In-memory L1 cache for export results.
+ * Export files are cloned on read/write so transferred buffers cannot poison
+ * subsequent cache hits.
+ * @public
+ */
+export const exportMemoryCache = new LruMap<KernelSuccessResult<ExportFile[]>>({ maxEntries: 20 });
+
+/**
  * Cache entry structure for MessagePack serialization.
  * Stores the full KernelSuccessResult so that all fields (geometries, issues,
  * and any future additions) are persisted implicitly.
  */
 type CacheEntry = {
-  version: 3;
+  version: 4;
   result: KernelSuccessResult<GeometryResponse[]>;
+};
+
+type ExportCacheEntry = {
+  version: 1;
+  kind: 'export';
+  result: KernelSuccessResult<ExportFile[]>;
 };
 
 /**
@@ -54,7 +68,7 @@ type CacheEntry = {
  * @returns Binary MessagePack-encoded data
  */
 function serializeResult(result: KernelSuccessResult<GeometryResponse[]>): Uint8Array<ArrayBuffer> {
-  const entry: CacheEntry = { version: 3, result };
+  const entry: CacheEntry = { version: 4, result };
   return msgpackEncode(entry);
 }
 
@@ -73,7 +87,7 @@ function deserializeResult(data: Uint8Array<ArrayBuffer>): KernelSuccessResult<G
     typeof decoded !== 'object' ||
     decoded === null ||
     !('version' in decoded) ||
-    decoded.version !== 3 ||
+    decoded.version !== 4 ||
     !('result' in decoded)
   ) {
     throw new Error('Invalid or incompatible cache format');
@@ -92,6 +106,60 @@ function deserializeResult(data: Uint8Array<ArrayBuffer>): KernelSuccessResult<G
   return entry.result;
 }
 
+function serializeExportResult(result: KernelSuccessResult<ExportFile[]>): Uint8Array<ArrayBuffer> {
+  const entry: ExportCacheEntry = { version: 1, kind: 'export', result };
+  return msgpackEncode(entry);
+}
+
+function deserializeExportResult(data: Uint8Array<ArrayBuffer>): KernelSuccessResult<ExportFile[]> {
+  const decoded: unknown = msgpackDecode(data);
+
+  if (
+    typeof decoded !== 'object' ||
+    decoded === null ||
+    !('version' in decoded) ||
+    decoded.version !== 1 ||
+    !('kind' in decoded) ||
+    decoded.kind !== 'export' ||
+    !('result' in decoded)
+  ) {
+    throw new Error('Invalid or incompatible export cache format');
+  }
+
+  const entry = decoded as ExportCacheEntry;
+  for (const file of entry.result.data) {
+    file.bytes = new Uint8Array(file.bytes);
+  }
+  return entry.result;
+}
+
+function cloneGeometry(geometry: GeometryResponse): GeometryResponse {
+  if (geometry.format !== 'gltf') {
+    return geometry;
+  }
+  return { ...geometry, content: new Uint8Array(geometry.content) };
+}
+
+function cloneSuccessResult(result: KernelSuccessResult<GeometryResponse[]>): KernelSuccessResult<GeometryResponse[]> {
+  return {
+    ...result,
+    data: result.data.map((geometry) => cloneGeometry(geometry)),
+    issues: [...result.issues],
+  };
+}
+
+function cloneExportFile(file: ExportFile): ExportFile {
+  return { ...file, bytes: new Uint8Array(file.bytes) };
+}
+
+function cloneExportSuccessResult(result: KernelSuccessResult<ExportFile[]>): KernelSuccessResult<ExportFile[]> {
+  return {
+    ...result,
+    data: result.data.map((file) => cloneExportFile(file)),
+    issues: [...result.issues],
+  };
+}
+
 /**
  * Get the cache file path for a given cache key.
  * Uses .bin extension for MessagePack binary storage.
@@ -102,6 +170,10 @@ function deserializeResult(data: Uint8Array<ArrayBuffer>): KernelSuccessResult<G
  */
 function getCachePath(basePath: string, cacheKey: string): string {
   return joinPath(basePath, '.tau/cache/geometry', `${cacheKey}.bin`);
+}
+
+function getExportCachePath(basePath: string, cacheKey: string): string {
+  return joinPath(basePath, '.tau/cache/geometry', `export-${cacheKey}.bin`);
 }
 
 /**
@@ -192,17 +264,17 @@ async function cleanupOldCacheEntries({
 /**
  * Geometry cache middleware.
  *
- * Caches createGeometry results based on all dependencies (files, middleware, framework, options).
+ * Caches createGeometry and exportGeometry results based on all dependencies
+ * (files, middleware, framework, parameters, render options, export format/options).
  * Uses wrap-style hook with onion model execution:
  * - Check cache before calling handler()
  * - Write to cache after handler() returns (on cache miss)
  * - Short-circuited results still flow through upstream middleware
  *
- * Export operations are not cached - they are delegated to kernel workers
- * which handle format-specific conversion (e.g., GLTF JSON vs GLB binary).
  * @public
  */
-export const geometryCacheMiddleware = defineMiddleware({
+export const geometryCache = defineMiddleware({
+  id: 'geometryCache',
   name: 'GeometryCache',
   version: '1.0.0',
 
@@ -220,7 +292,7 @@ export const geometryCacheMiddleware = defineMiddleware({
     const memoryCached = geometryMemoryCache.get(cacheKey);
     if (memoryCached) {
       logger.debug(`Geometry memory cache hit for ${cacheKey}`);
-      return memoryCached;
+      return cloneSuccessResult(memoryCached);
     }
 
     // L2: Filesystem cache
@@ -230,7 +302,7 @@ export const geometryCacheMiddleware = defineMiddleware({
       logger.debug(`Cache hit for ${cacheKey}`);
 
       const result = deserializeResult(cachedData);
-      geometryMemoryCache.set(cacheKey, result);
+      geometryMemoryCache.set(cacheKey, cloneSuccessResult(result));
       return result;
     } catch (error) {
       logger.debug(`Cache miss for ${cacheKey}: ${String(error)}`);
@@ -244,7 +316,7 @@ export const geometryCacheMiddleware = defineMiddleware({
       if (hasVideoStreamGeometry(result.data)) {
         logger.debug(`Skipping cache for ${cacheKey}: contains webrtc geometry`);
       } else {
-        geometryMemoryCache.set(cacheKey, result);
+        geometryMemoryCache.set(cacheKey, cloneSuccessResult(result));
 
         try {
           const cacheDirectory = getCacheDirectory(basePath);
@@ -263,6 +335,53 @@ export const geometryCacheMiddleware = defineMiddleware({
         } catch (error) {
           logger.warn(`Cache write error for ${cacheKey}: ${String(error)}`);
         }
+      }
+    }
+
+    return result;
+  },
+
+  async wrapExportGeometry(input, handler, { logger, filesystem, dependencyHash, options, projectRootPath }) {
+    const cacheKey = dependencyHash;
+
+    const memoryCached = exportMemoryCache.get(cacheKey);
+    if (memoryCached) {
+      logger.debug(`Export memory cache hit for ${cacheKey}`);
+      return cloneExportSuccessResult(memoryCached);
+    }
+
+    const cachePath = getExportCachePath(projectRootPath, cacheKey);
+    try {
+      const cachedData = await filesystem.readFile(cachePath);
+      logger.debug(`Export cache hit for ${cacheKey}`);
+
+      const result = deserializeExportResult(cachedData);
+      exportMemoryCache.set(cacheKey, cloneExportSuccessResult(result));
+      return result;
+    } catch (error) {
+      logger.debug(`Export cache miss for ${cacheKey}: ${String(error)}`);
+    }
+
+    const result: ExportGeometryResult = await handler(input);
+    if (result.success && result.data.length > 0) {
+      exportMemoryCache.set(cacheKey, cloneExportSuccessResult(result));
+
+      try {
+        const cacheDirectory = getCacheDirectory(projectRootPath);
+        await filesystem.ensureDir(cacheDirectory);
+
+        const serialized = serializeExportResult(result);
+        await filesystem.writeFile(cachePath, serialized);
+        logger.debug(`Cached ${result.data.length} exports at ${cacheKey}`);
+
+        await cleanupOldCacheEntries({
+          filesystem,
+          cacheDirectory,
+          maxAge: options.maxAge,
+          maxEntries: options.maxEntries,
+        });
+      } catch (error) {
+        logger.warn(`Export cache write error for ${cacheKey}: ${String(error)}`);
       }
     }
 

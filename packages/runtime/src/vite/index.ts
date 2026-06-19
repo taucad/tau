@@ -15,6 +15,7 @@
  */
 
 import type { Plugin, PreviewServer, ViteDevServer } from 'vite';
+import { tsModuleUrlPlugin } from '#vite/ts-module-url.vite-plugin.js';
 
 /*
  * The WASM asset-inline callback is duplicated here from `runtime-invariants.ts`
@@ -100,6 +101,8 @@ export type RuntimePluginOptions = {
  * - prevents `.wasm` assets from being inlined as base64 (kills V8 caching
  *   and breaks Worker bootstrap)
  * - forces `worker.format: 'es'` so workers preserve `import.meta.url`
+ * - bundles TypeScript files referenced via `new URL(..., import.meta.url)`
+ *   as module chunks instead of raw `.ts` assets
  *
  * Any consumer that needs to override these invariants should compose their
  * own plugin set; this helper exists to remove the gap between "install
@@ -137,5 +140,6 @@ export function runtime(options: RuntimePluginOptions = {}): Plugin[] {
     }),
   };
 
-  return includeCoi ? [crossOriginIsolation(), invariants] : [invariants];
+  const plugins = [...tsModuleUrlPlugin(), invariants];
+  return includeCoi ? [crossOriginIsolation(), ...plugins] : plugins;
 }

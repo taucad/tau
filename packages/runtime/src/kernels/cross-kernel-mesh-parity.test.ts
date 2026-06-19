@@ -18,8 +18,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
-import replicadKernel from '#kernels/replicad/replicad.kernel.js';
-import opencascadeKernel from '#kernels/opencascade/opencascade.kernel.js';
+import { replicad as replicadKernel } from '#kernels/replicad/replicad.kernel.js';
+import { opencascade as opencascadeKernel } from '#kernels/opencascade/opencascade.kernel.js';
 import { assertSuccess, createGeometryFile, createTestWorker } from '#testing/kernel-testing.utils.js';
 import { extractGltfFromResult } from '#testing/kernel-geometry-testing.utils.js';
 import { colorParityCases, expectLinearBaseColor } from '#testing/color-testing.utils.js';

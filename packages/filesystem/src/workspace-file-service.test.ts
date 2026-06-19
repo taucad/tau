@@ -1013,7 +1013,10 @@ describe('WorkspaceFileService', () => {
         readdir: vi.fn().mockResolvedValue(['zebra.txt', 'alpha', 'beta.txt', 'alpha-dir']),
         stat: vi.fn().mockImplementation(async (path: string) => {
           const directories = new Set(['/alpha', '/alpha-dir']);
-          return { type: directories.has(path) ? 'dir' : 'file', size: 10, mtimeMs: 1 };
+          if (directories.has(path)) {
+            return { type: 'dir', size: 10, mtimeMs: 1 };
+          }
+          return { type: 'file', size: 10, mtimeMs: 1, contentKind: 'text', lineCount: 1 };
         }),
         readdirWithStats: undefined,
       });
@@ -1024,8 +1027,8 @@ describe('WorkspaceFileService', () => {
       expect(nodes).toEqual([
         { id: '/alpha', name: 'alpha', size: 10, mtimeMs: 1, children: [] },
         { id: '/alpha-dir', name: 'alpha-dir', size: 10, mtimeMs: 1, children: [] },
-        { id: '/beta.txt', name: 'beta.txt', size: 10, mtimeMs: 1 },
-        { id: '/zebra.txt', name: 'zebra.txt', size: 10, mtimeMs: 1 },
+        { id: '/beta.txt', name: 'beta.txt', size: 10, mtimeMs: 1, contentKind: 'text', lineCount: 1 },
+        { id: '/zebra.txt', name: 'zebra.txt', size: 10, mtimeMs: 1, contentKind: 'text', lineCount: 1 },
       ]);
     });
 
@@ -1055,7 +1058,7 @@ describe('WorkspaceFileService', () => {
         readdir: vi.fn().mockResolvedValue(['good.txt', 'bad.txt']),
         stat: vi.fn().mockImplementation(async (path: string) => {
           if (path === '/good.txt') {
-            return { type: 'file', size: 5, mtimeMs: 1 };
+            return { type: 'file', size: 5, mtimeMs: 1, contentKind: 'text', lineCount: 1 };
           }
           throw new Error('stat failed');
         }),
@@ -1064,13 +1067,15 @@ describe('WorkspaceFileService', () => {
       vi.spyOn(providerRegistry, 'getStandaloneProvider').mockResolvedValue(mockProvider);
 
       const nodes = await service.readShallowDirectory('/', { scope: { backend: 'indexeddb' } });
-      expect(nodes).toEqual([{ id: '/good.txt', name: 'good.txt', size: 5, mtimeMs: 1 }]);
+      expect(nodes).toEqual([
+        { id: '/good.txt', name: 'good.txt', size: 5, mtimeMs: 1, contentKind: 'text', lineCount: 1 },
+      ]);
     });
 
     it('should build correct paths when root is /', async () => {
       const mockProvider = mock<FileSystemProvider>({
         readdir: vi.fn().mockResolvedValue(['file.txt']),
-        stat: vi.fn().mockResolvedValue({ type: 'file', size: 1, mtimeMs: 1 }),
+        stat: vi.fn().mockResolvedValue({ type: 'file', size: 1, mtimeMs: 1, contentKind: 'text', lineCount: 1 }),
         readdirWithStats: undefined,
       });
       vi.spyOn(providerRegistry, 'getStandaloneProvider').mockResolvedValue(mockProvider);
@@ -1083,7 +1088,7 @@ describe('WorkspaceFileService', () => {
     it('should build correct paths for nested directories', async () => {
       const mockProvider = mock<FileSystemProvider>({
         readdir: vi.fn().mockResolvedValue(['child.txt']),
-        stat: vi.fn().mockResolvedValue({ type: 'file', size: 1, mtimeMs: 1 }),
+        stat: vi.fn().mockResolvedValue({ type: 'file', size: 1, mtimeMs: 1, contentKind: 'text', lineCount: 1 }),
         readdirWithStats: undefined,
       });
       vi.spyOn(providerRegistry, 'getStandaloneProvider').mockResolvedValue(mockProvider);

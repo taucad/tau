@@ -106,7 +106,7 @@ describe('convertRawIssuesToKernelIssues', () => {
     const result = convertRawIssuesToKernelIssues(raw, 'main.ts');
     expect(result).toEqual([
       {
-        code: 'RUNTIME',
+        code: 'UNKNOWN',
         message: 'syntax error',
         severity: 'error',
         type: 'runtime',
@@ -126,6 +126,19 @@ describe('convertRawIssuesToKernelIssues', () => {
     const raw = [{ message: 'error', severity: 'error', location }];
     const result = convertRawIssuesToKernelIssues(raw, 'main.ts');
     expect(result[0]!.location).toEqual(location);
+  });
+
+  it('should validate issue codes without legacy alias rewriting', () => {
+    const legacyGeometryCode = `JSCAD_${'GEOMETRY'}_INVALID`;
+    const result = convertRawIssuesToKernelIssues(
+      [
+        { message: 'generic geometry issue', severity: 'warning', code: 'GEOMETRY_INVALID' },
+        { message: 'legacy provider-specific issue', severity: 'warning', code: legacyGeometryCode },
+      ],
+      'main.ts',
+    );
+
+    expect(result.map((issue) => issue.code)).toEqual(['GEOMETRY_INVALID', 'UNKNOWN']);
   });
 });
 

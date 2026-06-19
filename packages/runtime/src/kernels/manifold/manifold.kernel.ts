@@ -16,10 +16,9 @@ import type { KernelRuntime } from '#types/runtime-kernel.types.js';
 import { defineKernel } from '#types/runtime-kernel.types.js';
 import { manifoldOptionsSchema, manifoldExportSchemas } from '#kernels/manifold/manifold.schemas.js';
 import {
-  KERNEL_MODULES_KEY,
-  getModuleRegistry,
   isRecordObject,
   extractDefaultParameters,
+  registerKernelModule,
   resolveToRelative,
   enrichIssueLocation,
 } from '#kernels/kernel-module-helpers.js';
@@ -27,6 +26,8 @@ import type { RuntimeModuleExports } from '#kernels/kernel-module-helpers.js';
 import { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { initManifoldWasm } from '#kernels/manifold/init-manifold.js';
 import { parseStackTrace, resolveSourcePath, deriveLocationFromFrames } from '#framework/error-enrichment.js';
+import { transformGltfExportBytes } from '#utils/gltf-export-transform.js';
+import { normalizeGltfGeometryNames } from '#utils/gltf-geometry-name-normalizer.js';
 
 // =============================================================================
 // Types
@@ -38,18 +39,18 @@ type CleanupModule = {
 
 const manifoldModuleVersion = '3.3.2';
 
+/**
+ * Canonical regex for detecting manifold-3d usage in source code.
+ *
+ * Branches: ESM import, CJS require, dynamic import().
+ * @public
+ */
+export const manifoldDetectPattern =
+  /import\s+.*from\s+["']manifold-3d(?:\/[^"']*)?["']|require\s*\(\s*["']manifold-3d(?:\/[^"']*)?["']\s*\)|import\s*\(\s*["']manifold-3d(?:\/[^"']*)?["']\s*\)/;
+
 // =============================================================================
 // Module registration helpers
 // =============================================================================
-
-function generateModuleShim(name: string, exports: Record<string, unknown>): string {
-  const registry = getModuleRegistry();
-  registry.set(name, exports);
-
-  const exportNames = Object.keys(exports).filter((key) => /^[$_a-z][\w$]*$/i.test(key) && key !== 'default');
-  const namedExports = exportNames.map((key) => `export const ${key} = __mod.${key};`).join('\n');
-  return `const __mod = globalThis.${KERNEL_MODULES_KEY}.get('${name}');\n${namedExports}\nexport default __mod;\n`;
-}
 
 async function registerManifoldModules(runtime: KernelRuntime): Promise<Record<string, unknown>> {
   const [rootImport, manifoldCadImport, gltfNodeImport] = await Promise.all([
@@ -74,14 +75,16 @@ async function registerManifoldModules(runtime: KernelRuntime): Promise<Record<s
     resetGLTFNodes: gltfNodeModule['resetGLTFNodes'],
   };
 
-  runtime.bundler.registerModule('manifold-3d', {
-    code: generateModuleShim('manifold-3d', manifoldRoot),
+  registerKernelModule(runtime, {
+    name: 'manifold-3d',
+    exports: manifoldRoot,
     version: manifoldModuleVersion,
     globalName: 'manifold3d',
   });
 
-  runtime.bundler.registerModule('manifold-3d/manifoldCAD', {
-    code: generateModuleShim('manifold-3d/manifoldCAD', patchedManifoldCad),
+  registerKernelModule(runtime, {
+    name: 'manifold-3d/manifoldCAD',
+    exports: patchedManifoldCad,
     version: manifoldModuleVersion,
     globalName: 'manifoldCAD',
   });
@@ -205,7 +208,11 @@ export type ManifoldOptions = {
 // =============================================================================
 
 /** @public */
-export default defineKernel({
+export const manifold = defineKernel({
+  id: 'manifold',
+  extensions: ['ts', 'js'],
+  detectImport: manifoldDetectPattern,
+  builtinModuleNames: ['manifold-3d', 'manifold-3d/manifoldCAD'],
   name: 'ManifoldKernel',
   version: '1.0.0',
   optionsSchema: manifoldOptionsSchema,
@@ -308,13 +315,20 @@ export default defineKernel({
       });
       return {
         geometry: [],
-        nativeHandle: undefined,
+        nativeHandle: { glb: new Uint8Array() },
         issues: [],
       };
     }
 
     try {
-      const glb = await createGlbFromManifoldOutput(model);
+      const glb = await normalizeGltfGeometryNames(await createGlbFromManifoldOutput(model), {
+        format: 'glb',
+        rewriteLegacyGeneratedShapeNames: true,
+        materialNamePolicy: 'clear-generated',
+        materialNameSource: 'external-generated',
+        sceneNamePolicy: 'clear-generated',
+        sceneNameSource: 'external-generated',
+      });
       return {
         geometry: [{ format: 'gltf', content: glb }],
         nativeHandle: { glb },
@@ -344,9 +358,9 @@ export default defineKernel({
   },
 
   async exportGeometry(input) {
-    const { format, nativeHandle } = input;
+    const { format, nativeHandle, options } = input;
 
-    if (!nativeHandle) {
+    if (nativeHandle.glb.length === 0) {
       return createKernelError([
         {
           message: 'No geometry available for export.',
@@ -360,7 +374,20 @@ export default defineKernel({
     switch (format) {
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- exhaustive switch
       case 'glb': {
-        return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(nativeHandle.glb))]);
+        const transformedGlb = await transformGltfExportBytes(nativeHandle.glb, {
+          format: 'glb',
+          coordinateSystem: options.coordinateSystem,
+          unit: options.unit,
+        });
+        const glb = await normalizeGltfGeometryNames(transformedGlb, {
+          format: 'glb',
+          rewriteLegacyGeneratedShapeNames: true,
+          materialNamePolicy: 'clear-generated',
+          materialNameSource: 'external-generated',
+          sceneNamePolicy: 'clear-generated',
+          sceneNameSource: 'external-generated',
+        });
+        return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(glb))]);
       }
 
       default: {
@@ -379,6 +406,14 @@ export default defineKernel({
 
   async cleanup() {
     await cleanupManifoldRuntime();
+  },
+
+  serializeNativeHandle({ nativeHandle }) {
+    return { glb: new Uint8Array(nativeHandle.glb) };
+  },
+
+  deserializeNativeHandle({ serializedNativeHandle }) {
+    return { glb: new Uint8Array(serializedNativeHandle.glb) };
   },
 });
 

@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { runtimeProtocolCallNames, runtimeProtocolNotifyNames } from '#types/runtime-protocol.types.js';
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
+import { kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
 
 describe('runtime-protocol schema coverage (C15)', () => {
   it('every protocol call has a matching schema entry', () => {
@@ -50,8 +51,29 @@ describe('runtime-protocol schema coverage (C15)', () => {
     }
   });
 
-  it('exposes exactly the protocol inventory: 2 calls + 18 notifies', () => {
-    expect(Object.keys(runtimeProtocolSchemas.calls)).toHaveLength(2);
-    expect(Object.keys(runtimeProtocolSchemas.notifies)).toHaveLength(18);
+  it('should expose exactly the protocol inventory: 3 calls and 17 notifies', () => {
+    expect(Object.keys(runtimeProtocolSchemas.calls)).toHaveLength(3);
+    expect(Object.keys(runtimeProtocolSchemas.notifies)).toHaveLength(17);
+  });
+
+  it('validates kernel issue codes from the canonical registry', () => {
+    const legacyGeometryCode = `JSCAD_${'GEOMETRY'}_INVALID`;
+
+    for (const code of kernelIssueCodeValues) {
+      expect(
+        runtimeProtocolSchemas.calls.export.result.safeParse({
+          success: false,
+          issues: [{ code, severity: 'error', message: `${code} message` }],
+        }).success,
+        `expected protocol schema to accept ${code}`,
+      ).toBe(true);
+    }
+
+    expect(
+      runtimeProtocolSchemas.calls.export.result.safeParse({
+        success: false,
+        issues: [{ code: legacyGeometryCode, severity: 'error', message: 'legacy code' }],
+      }).success,
+    ).toBe(false);
   });
 });

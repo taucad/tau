@@ -42,9 +42,9 @@ function createSingleTriangleInput(): GlbInput {
 function createMultiNodeInput(): GlbInput {
   return {
     nodes: [
-      { name: 'Shape_0', primitives: [createTrianglePrimitive({ color: [1, 0, 0, 1] })] },
-      { name: 'Shape_1', primitives: [createTrianglePrimitive({ color: [0, 0, 1, 1] })] },
-      { name: 'Shape_2', primitives: [createTrianglePrimitive({ color: [0, 1, 0, 1] })] },
+      { name: 'Writer Node 1', primitives: [createTrianglePrimitive({ color: [1, 0, 0, 1] })] },
+      { name: 'Writer Node 2', primitives: [createTrianglePrimitive({ color: [0, 0, 1, 1] })] },
+      { name: 'Writer Node 3', primitives: [createTrianglePrimitive({ color: [0, 1, 0, 1] })] },
     ],
   };
 }
@@ -71,6 +71,13 @@ function createLinesInput(): GlbInput {
       },
     ],
   };
+}
+
+function readGlbJson(glb: Uint8Array<ArrayBuffer>) {
+  const view = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+  const jsonChunkLength = view.getUint32(12, true);
+  const jsonBytes = glb.slice(20, 20 + jsonChunkLength);
+  return JSON.parse(new TextDecoder().decode(jsonBytes).trim()) as Record<string, unknown>;
 }
 
 // =============================================================================
@@ -289,9 +296,9 @@ describe('writeGlb', () => {
     const nodes = document.getRoot().listNodes();
 
     expect(nodes).toHaveLength(3);
-    expect(nodes[0]!.getName()).toBe('Shape_0');
-    expect(nodes[1]!.getName()).toBe('Shape_1');
-    expect(nodes[2]!.getName()).toBe('Shape_2');
+    expect(nodes[0]!.getName()).toBe('Writer Node 1');
+    expect(nodes[1]!.getName()).toBe('Writer Node 2');
+    expect(nodes[2]!.getName()).toBe('Writer Node 3');
   });
 
   it('should produce empty scene for input with no nodes', async () => {
@@ -442,6 +449,86 @@ describe('writeGlb', () => {
     expect(meshes[0]!.listPrimitives()[0]!.getMode()).toBe(4);
     expect(meshes[1]!.listPrimitives()[0]!.getMode()).toBe(1);
   });
+
+  it('should preserve node, primitive, and material extras and extensions', () => {
+    const nodeExtension = 'TAU_test_node';
+    const primitiveExtension = 'TAU_test_primitive';
+    const materialExtension = 'TAU_test_material';
+    const input: GlbInput = {
+      nodes: [
+        {
+          name: 'Annotated',
+          extras: { componentId: 'component:annotated' },
+          extensions: { [nodeExtension]: { enabled: true } },
+          primitives: [
+            {
+              ...createTrianglePrimitive(),
+              extras: { primitiveId: 'primitive:face' },
+              extensions: { [primitiveExtension]: { faceId: 42 } },
+              material: {
+                ...createTrianglePrimitive().material,
+                extras: { materialId: 'material:gray' },
+                extensions: { [materialExtension]: { coating: 'matcap' } },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const json = readGlbJson(writeGlb(input)) as {
+      nodes: Array<{ extras?: unknown; extensions?: unknown }>;
+      meshes: Array<{ primitives: Array<{ extras?: unknown; extensions?: unknown }> }>;
+      materials: Array<{ extras?: unknown; extensions?: unknown }>;
+    };
+
+    expect(json.nodes[0]!.extras).toEqual({ componentId: 'component:annotated' });
+    expect(json.nodes[0]!.extensions).toEqual({ [nodeExtension]: { enabled: true } });
+    expect(json.meshes[0]!.primitives[0]!.extras).toEqual({ primitiveId: 'primitive:face' });
+    expect(json.meshes[0]!.primitives[0]!.extensions).toEqual({ [primitiveExtension]: { faceId: 42 } });
+    expect(json.materials[0]!.extras).toEqual({ materialId: 'material:gray' });
+    expect(json.materials[0]!.extensions).toEqual({ [materialExtension]: { coating: 'matcap' } });
+  });
+
+  it('should resolve keyed extra bufferViews into root extensions', () => {
+    const topologyExtension = 'TAU_cad_topology';
+    const input: GlbInput = {
+      nodes: [{ name: 'Triangle', primitives: [createTrianglePrimitive()] }],
+      extensionsUsed: [topologyExtension],
+      extensionsRequired: [topologyExtension],
+      extraBufferViews: [
+        {
+          key: 'topology',
+          data: new TextEncoder().encode(JSON.stringify({ components: ['component:triangle'] })),
+        },
+      ],
+      extensions: (bufferViews) => {
+        const topologyBufferView = bufferViews['topology'];
+        if (topologyBufferView === undefined) {
+          throw new Error('Expected topology buffer view to be materialized.');
+        }
+
+        return {
+          [topologyExtension]: {
+            schemaVersion: 1,
+            topologyBufferView,
+          },
+        };
+      },
+    };
+
+    const json = readGlbJson(writeGlb(input)) as {
+      bufferViews: Array<{ target?: number }>;
+      extensions: Record<typeof topologyExtension, { topologyBufferView: number }>;
+      extensionsUsed: string[];
+      extensionsRequired: string[];
+    };
+
+    expect(json.extensionsUsed).toEqual([topologyExtension]);
+    expect(json.extensionsRequired).toEqual([topologyExtension]);
+    expect(json.extensions[topologyExtension].topologyBufferView).toBe(json.bufferViews.length - 1);
+    expect(json.bufferViews.at(-1)!.target).toBeUndefined();
+  });
 });
 
 describe('writeGltfJson', () => {
@@ -485,6 +572,33 @@ describe('writeGltfJson', () => {
 
     expect(json.nodes).toHaveLength(3);
     expect(json.scenes[0]!.nodes).toEqual([0, 1, 2]);
-    expect(json.nodes[0]!.name).toBe('Shape_0');
+    expect(json.nodes[0]!.name).toBe('Writer Node 1');
+  });
+
+  it('should include extensions and extra bufferViews in JSON glTF output', () => {
+    const topologyExtension = 'TAU_cad_topology';
+    const gltfBytes = writeGltfJson({
+      nodes: [{ name: 'Triangle', primitives: [createTrianglePrimitive()] }],
+      extensionsUsed: [topologyExtension],
+      extraBufferViews: [{ key: 'topology', data: new Uint8Array([1, 2, 3, 4]) }],
+      extensions: (bufferViews) => {
+        const topologyBufferView = bufferViews['topology'];
+        if (topologyBufferView === undefined) {
+          throw new Error('Expected topology buffer view to be materialized.');
+        }
+
+        return {
+          [topologyExtension]: { topologyBufferView },
+        };
+      },
+    });
+    const json = JSON.parse(new TextDecoder().decode(gltfBytes)) as {
+      bufferViews: unknown[];
+      extensionsUsed: string[];
+      extensions: Record<typeof topologyExtension, { topologyBufferView: number }>;
+    };
+
+    expect(json.extensionsUsed).toEqual([topologyExtension]);
+    expect(json.extensions[topologyExtension].topologyBufferView).toBe(json.bufferViews.length - 1);
   });
 });

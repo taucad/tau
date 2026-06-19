@@ -12,5 +12,40 @@
     }
   },
   "include": ["src/**/*.ts", "package.json"],
-  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"]
+  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"],
+  "references": [
+    {
+      "path": "../vm/tsconfig.lib.json"
+    },
+    {
+      "path": "../utils/tsconfig.lib.json"
+    },
+    {
+      "path": "../types/tsconfig.lib.json"
+    },
+    {
+      "path": "../rpc/tsconfig.lib.json"
+    },
+    {
+      "path": "../memory/tsconfig.lib.json"
+    },
+    {
+      "path": "../json-schema/tsconfig.lib.json"
+    },
+    {
+      "path": "../filesystem/tsconfig.lib.json"
+    },
+    {
+      "path": "../events/tsconfig.lib.json"
+    },
+    {
+      "path": "../gltf-extensions/tsconfig.lib.json"
+    },
+    {
+      "path": "../converter/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/tau-examples/tsconfig.lib.json"
+    }
+  ]
 }

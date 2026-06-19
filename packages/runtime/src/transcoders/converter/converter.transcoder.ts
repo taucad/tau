@@ -39,7 +39,8 @@ const edges = [
   { from: 'glb', to: 'x3d', fidelity: 'mesh' },
 ] as const;
 
-export default defineTranscoder({
+export const converterTranscoder = defineTranscoder({
+  id: 'converter',
   name: 'ConverterTranscoder',
   version: '1.0.0',
   edges,

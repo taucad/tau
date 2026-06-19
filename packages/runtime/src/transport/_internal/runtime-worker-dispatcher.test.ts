@@ -59,13 +59,15 @@ function createMockWorker(overrides?: Partial<KernelWorker> & { geometryPool?: S
     exportGeometry: vi
       .fn<() => Promise<{ success: true; data: unknown[] }>>()
       .mockResolvedValue({ success: true, data: [] }),
+    exportModel: vi
+      .fn<() => Promise<{ success: true; data: unknown[] }>>()
+      .mockResolvedValue({ success: true, data: [] }),
     cleanup: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     notifyFileChanged: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     handleOpenFile: vi.fn(),
     handleStageAndOpenFile: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     handleUpdateParameters: vi.fn(),
     handleSetOptions: vi.fn(),
-    configureMiddleware: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     ensureLoadedBundler: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     setTelemetrySend: vi.fn(),
     flushTelemetry: vi.fn(),
@@ -119,27 +121,9 @@ describe('createWorkerDispatcher', () => {
       const worker = createMockWorker({ capabilitiesManifest: manifest });
       fixture = await buildFixture(worker);
 
-      const result = await fixture.client.call('initialize', { options: {}, middlewareEntries: [] });
+      const result = await fixture.client.call('initialize', {});
 
       expect(result).toEqual({ capabilities: manifest });
-    });
-
-    it('forwards transcoderModules and bundlerEntries through `initialize`', async () => {
-      const worker = createMockWorker();
-      fixture = await buildFixture(worker);
-
-      const transcoderModules = [{ id: 'converter', moduleUrl: 'test://converter' }];
-      const bundlerEntries = [{ bundlerModuleUrl: 'test://esbuild', extensions: ['ts'] }];
-
-      await fixture.client.call('initialize', {
-        options: {},
-        middlewareEntries: [],
-        transcoderModules,
-        bundlerEntries,
-      });
-
-      expect(worker.initialize).toHaveBeenCalledWith(expect.objectContaining({ transcoderModules }));
-      expect(worker.ensureLoadedBundler).toHaveBeenCalledWith(bundlerEntries[0]);
     });
 
     it('rejects `initialize` when worker.initialize throws', async () => {
@@ -148,9 +132,7 @@ describe('createWorkerDispatcher', () => {
       });
       fixture = await buildFixture(worker);
 
-      await expect(fixture.client.call('initialize', { options: {}, middlewareEntries: [] })).rejects.toThrow(
-        'WASM load failed',
-      );
+      await expect(fixture.client.call('initialize', {})).rejects.toThrow('WASM load failed');
     });
 
     it('settles `export` with the worker export result', async () => {
@@ -173,6 +155,40 @@ describe('createWorkerDispatcher', () => {
       // detached source buffer doesn't blow up the structural equality check.
       expect(data[0]?.bytes).toEqual(expectedSnapshot);
       expect(data[0]?.mimeType).toBe('model/stl');
+      expect(worker.flushTelemetry).toHaveBeenCalledOnce();
+    });
+
+    it('should settle `exportModel` with the worker request-scoped export result', async () => {
+      const exportBytes = new Uint8Array([8, 7, 6]);
+      const expectedSnapshot = new Uint8Array(exportBytes);
+      const exportModel = vi.fn().mockResolvedValue({
+        success: true,
+        data: [{ bytes: exportBytes, mimeType: 'model/gltf-binary' }],
+        issues: [],
+      });
+      const worker = createMockWorker({ exportModel });
+      fixture = await buildFixture(worker);
+
+      const result = await fixture.client.call('exportModel', {
+        file: { path: '/', filename: 'main.ts' },
+        parameters: { height: 10 },
+        options: { quality: 'fine' },
+        format: 'glb',
+        exportOptions: { binary: true },
+      });
+
+      expect(exportModel).toHaveBeenCalledWith({
+        file: { path: '/', filename: 'main.ts' },
+        parameters: { height: 10 },
+        options: { quality: 'fine' },
+        format: 'glb',
+        exportOptions: { binary: true },
+      });
+      expect(result).toMatchObject({ success: true });
+      const data = (result as { data: Array<{ bytes: Uint8Array; mimeType: string }> }).data;
+      expect(data[0]?.bytes).toEqual(expectedSnapshot);
+      expect(data[0]?.mimeType).toBe('model/gltf-binary');
+      expect(worker.flushTelemetry).toHaveBeenCalledOnce();
     });
 
     it('forwards memoryHandle SABs to the worker setters', async () => {
@@ -184,8 +200,6 @@ describe('createWorkerDispatcher', () => {
       const fileBuffer = new SharedArrayBuffer(8192);
 
       await fixture.client.call('initialize', {
-        options: {},
-        middlewareEntries: [],
         memoryHandle: {
           signalBuffer,
           geometryPoolBuffer: geometryBuffer,
@@ -275,16 +289,6 @@ describe('createWorkerDispatcher', () => {
 
       expect(worker.cleanup).toHaveBeenCalledTimes(1);
     });
-
-    it('routes `configureMiddleware` notify to worker.configureMiddleware', async () => {
-      const worker = createMockWorker();
-      fixture = await buildFixture(worker);
-
-      fixture.client.notify('configureMiddleware', { entries: [] });
-      await flushMicrotasks();
-
-      expect(worker.configureMiddleware).toHaveBeenCalledWith([]);
-    });
   });
 
   describe('autonomous worker → client notifies', () => {
@@ -325,7 +329,7 @@ describe('createWorkerDispatcher', () => {
         seen.push(args as { result: unknown });
       });
 
-      await fixture.client.call('initialize', { options: {}, middlewareEntries: [] });
+      await fixture.client.call('initialize', {});
 
       onGeometryComputed!(
         {
@@ -380,7 +384,7 @@ describe('createWorkerDispatcher', () => {
       });
 
       // Wire callbacks via initialize.
-      await fixture.client.call('initialize', { options: {}, middlewareEntries: [] });
+      await fixture.client.call('initialize', {});
 
       // Drive the autonomous-event surface as the kernel worker would for rgen=1.
       onParametersResolved!({ success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] }, 1);
@@ -436,7 +440,7 @@ describe('createWorkerDispatcher', () => {
       fixture.client.onNotify('activeKernelChanged', (args) => kernels.push(args as { kernelId: string | undefined }));
       fixture.client.onNotify('capabilitiesUpdated', (args) => caps.push(args as { capabilities: unknown }));
 
-      await fixture.client.call('initialize', { options: {}, middlewareEntries: [] });
+      await fixture.client.call('initialize', {});
 
       onStateChanged!('rendering');
       onActiveKernelChanged!('replicad');
@@ -465,12 +469,12 @@ describe('createWorkerDispatcher', () => {
       const seen: Array<{ issues: unknown[] }> = [];
       fixture.client.onNotify('errorEvent', (args) => seen.push(args as { issues: unknown[] }));
 
-      await fixture.client.call('initialize', { options: {}, middlewareEntries: [] });
+      await fixture.client.call('initialize', {});
 
       onError!([{ message: 'boom', code: 'KERNEL', type: 'kernel', severity: 'error' }]);
       await flushMicrotasks();
 
-      expect(seen).toEqual([{ issues: [{ message: 'boom', code: 'KERNEL', type: 'kernel', severity: 'error' }] }]);
+      expect(seen).toEqual([{ issues: [{ message: 'boom', code: 'UNKNOWN', type: 'kernel', severity: 'error' }] }]);
     });
   });
 
@@ -509,7 +513,7 @@ describe('createWorkerDispatcher', () => {
       };
       fixture.client.onNotify('geometryComputed', listener);
 
-      await fixture.client.call('initialize', { options: {}, middlewareEntries: [] });
+      await fixture.client.call('initialize', {});
 
       return {
         seen,
@@ -719,9 +723,7 @@ describe('createWorkerDispatcher', () => {
       });
       fixture = await buildFixture(worker);
 
-      await expect(fixture.client.call('initialize', { options: {}, middlewareEntries: [] })).rejects.toThrow(
-        /crossOriginIsolated/,
-      );
+      await expect(fixture.client.call('initialize', {})).rejects.toThrow(/crossOriginIsolated/);
     });
 
     it('surfaces autonomous render rejections as `errorEvent` notifies', async () => {
@@ -742,13 +744,14 @@ describe('createWorkerDispatcher', () => {
         seen.push(args);
       });
 
-      await fixture.client.call('initialize', { options: {}, middlewareEntries: [] });
+      await fixture.client.call('initialize', {});
 
       onError!([{ message: 'WASM worker crash', code: 'KERNEL', type: 'kernel', severity: 'error' }], 7);
       await flushMicrotasks();
 
       expect(seen).toHaveLength(1);
       expect(seen[0]!.issues[0]!.message).toBe('WASM worker crash');
+      expect(seen[0]!.issues[0]).toMatchObject({ code: 'UNKNOWN' });
       expect(seen[0]!.rgen).toBe(7);
     });
 
@@ -771,7 +774,7 @@ describe('createWorkerDispatcher', () => {
       const worker = createMockWorker();
       fixture = await buildFixture(worker);
 
-      await fixture.client.call('initialize', { options: {}, middlewareEntries: [] });
+      await fixture.client.call('initialize', {});
 
       const currentCount = process.listenerCount('unhandledRejection');
       expect(currentCount).toBeLessThanOrEqual(originalListenerCount + 1);
@@ -789,9 +792,7 @@ describe('createWorkerDispatcher', () => {
       });
       fixture = await buildFixture(worker);
 
-      await expect(fixture.client.call('initialize', { options: {}, middlewareEntries: [] })).rejects.toThrow(
-        /plain string rejection/,
-      );
+      await expect(fixture.client.call('initialize', {})).rejects.toThrow(/plain string rejection/);
     });
   });
 

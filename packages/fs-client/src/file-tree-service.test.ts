@@ -3,14 +3,73 @@ import { mock } from 'vitest-mock-extended';
 import { FileTreeService } from '#file-tree-service.js';
 import type { FileSystemClient } from '#file-system-client.js';
 import type { FileTreeNode } from '@taucad/filesystem';
+import type { FileEntry, FileStat } from '@taucad/types';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
 import { DirectoryListingErrorCode, DirectoryListingFailedError } from '#directory-listing.js';
 import { WorkspacePathResolver } from '#workspace-path-resolver.js';
 import { headlessVisibilityProvider } from '#visibility-provider.js';
+import type { FileContentService, ContentChangeEvent } from '#file-content-service.js';
 
 const workspaceRoot = '/projects/abc';
 
-function createTreeHarness(overrides?: { proxy?: FileSystemClient; workspaceRoot?: string }): {
+const textStat = (size = 0, mtimeMs = 0, lineCount = 1): FileStat => ({
+  type: 'file',
+  size,
+  mtimeMs,
+  contentKind: 'text',
+  lineCount,
+});
+
+const textNode = (
+  id: string,
+  options?: { name?: string; size?: number; mtimeMs?: number; lineCount?: number },
+): FileTreeNode => ({
+  id,
+  name: options?.name ?? id,
+  size: options?.size ?? 0,
+  mtimeMs: options?.mtimeMs ?? 0,
+  contentKind: 'text',
+  lineCount: options?.lineCount ?? 1,
+});
+
+const textEntry = (path: string): FileEntry => ({
+  path,
+  name: path,
+  type: 'file',
+  size: 0,
+  mtimeMs: 1,
+  isLoaded: false,
+  contentKind: 'text',
+  lineCount: 1,
+});
+
+const directoryEntry = (path: string): FileEntry => ({
+  path,
+  name: path.split('/').pop() ?? path,
+  type: 'dir',
+  size: 0,
+  mtimeMs: 1,
+  isLoaded: false,
+});
+
+function connectContentService(tree: FileTreeService): (event: ContentChangeEvent) => void {
+  let listener: ((event: ContentChangeEvent) => void) | undefined;
+  tree.connectToContentService({
+    onDidContentChange(handler: (event: ContentChangeEvent) => void) {
+      listener = handler;
+      return vi.fn();
+    },
+  } as unknown as FileContentService);
+  return (event) => {
+    listener?.(event);
+  };
+}
+
+function createTreeHarness(overrides?: {
+  proxy?: FileSystemClient;
+  workspaceRoot?: string;
+  initialEntries?: FileEntry[];
+}): {
   tree: FileTreeService;
   proxy: FileSystemClient;
   disposeChannel: () => void;
@@ -24,7 +83,7 @@ function createTreeHarness(overrides?: { proxy?: FileSystemClient; workspaceRoot
     mock<FileSystemClient>({
       readDirectory: vi.fn().mockResolvedValue([]),
       readdir: vi.fn().mockResolvedValue([]),
-      stat: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
+      stat: vi.fn().mockResolvedValue(textStat()),
       getDirectoryStat: vi.fn().mockResolvedValue([]),
     });
   const tree = new FileTreeService({
@@ -32,6 +91,7 @@ function createTreeHarness(overrides?: { proxy?: FileSystemClient; workspaceRoot
     paths,
     channel,
     visibility: headlessVisibilityProvider,
+    initialEntries: overrides?.initialEntries,
   });
   return {
     tree,
@@ -135,7 +195,7 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     const proxy = mock<FileSystemClient>({
       readDirectory: vi.fn(),
       readdir: vi.fn().mockResolvedValue([]),
-      stat: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
+      stat: vi.fn().mockResolvedValue(textStat()),
       getDirectoryStat: vi.fn().mockResolvedValue([]),
     });
     const tree = new FileTreeService({
@@ -145,11 +205,11 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
       visibility: headlessVisibilityProvider,
       refreshDebounce: 10,
     });
-    vi.mocked(proxy.readDirectory).mockResolvedValue([{ id: 'a.ts', name: 'a.ts', size: 1, mtimeMs: 0 }]);
+    vi.mocked(proxy.readDirectory).mockResolvedValue([textNode('a.ts', { size: 1 })]);
     await tree.listDirectory('');
     const ref1 = tree.getTreeSnapshot().get('a.ts');
     expect(ref1).toBeDefined();
-    vi.mocked(proxy.readDirectory).mockResolvedValue([{ id: 'a.ts', name: 'a.ts', size: 1, mtimeMs: 0 }]);
+    vi.mocked(proxy.readDirectory).mockResolvedValue([textNode('a.ts', { size: 1 })]);
     tree.scheduleRefresh('');
     await vi.advanceTimersByTimeAsync(50);
     const ref2 = tree.getTreeSnapshot().get('a.ts');
@@ -163,19 +223,16 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
       proxy: mock<FileSystemClient>({
         readDirectory: vi.fn(),
         readdir: vi.fn().mockResolvedValue([]),
-        stat: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
+        stat: vi.fn().mockResolvedValue(textStat()),
         getDirectoryStat: vi.fn().mockResolvedValue([]),
       }),
     });
-    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([
-      { id: 'gone.ts', name: 'gone.ts', size: 0, mtimeMs: 0 },
-      { id: 'stay.ts', name: 'stay.ts', size: 0, mtimeMs: 0 },
-    ]);
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([textNode('gone.ts'), textNode('stay.ts')]);
     await tree.listDirectory('');
     expect(tree.getTreeSnapshot().has('gone.ts')).toBe(true);
-    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([{ id: 'stay.ts', name: 'stay.ts', size: 0, mtimeMs: 0 }]);
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([textNode('stay.ts')]);
     tree.reset(workspaceRoot);
-    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([{ id: 'stay.ts', name: 'stay.ts', size: 0, mtimeMs: 0 }]);
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([textNode('stay.ts')]);
     await tree.listDirectory('');
     const snap = tree.getTreeSnapshot();
     expect(snap.has('gone.ts')).toBe(false);
@@ -192,7 +249,7 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
       paths,
       channel,
       visibility: headlessVisibilityProvider,
-      initialEntries: [{ path: 'x', name: 'x', type: 'file', size: 0, mtimeMs: 1, isLoaded: false }],
+      initialEntries: [textEntry('x')],
     });
     expect(tree.hasChildrenLoaded('')).toBe(true);
     const root = tree.getTreeSnapshot().get('');
@@ -215,6 +272,45 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     expect(tree.hasChildrenLoaded('')).toBe(false);
     channel.dispose();
   });
+
+  it('should apply directoryCreated content events to resolved parents', () => {
+    const { tree, disposeChannel } = createTreeHarness({ initialEntries: [textEntry('main.ts')] });
+    const emit = connectContentService(tree);
+
+    emit({ type: 'directoryCreated', path: 'newdir' });
+
+    const entry = tree.getTreeSnapshot().get('newdir');
+    expect(entry?.type).toBe('dir');
+    disposeChannel();
+  });
+
+  it('should drop directory descendants on directoryDeleted content events', () => {
+    const { tree, disposeChannel } = createTreeHarness({
+      initialEntries: [directoryEntry('old'), textEntry('old/file.ts')],
+    });
+    const emit = connectContentService(tree);
+
+    emit({ type: 'directoryDeleted', path: 'old' });
+
+    expect(tree.getTreeSnapshot().has('old')).toBe(false);
+    expect(tree.getTreeSnapshot().has('old/file.ts')).toBe(false);
+    disposeChannel();
+  });
+
+  it('should rekey directory descendants on directoryRenamed content events', () => {
+    const { tree, disposeChannel } = createTreeHarness({
+      initialEntries: [directoryEntry('old'), textEntry('old/file.ts')],
+    });
+    const emit = connectContentService(tree);
+
+    emit({ type: 'directoryRenamed', oldPath: 'old', newPath: 'new' });
+
+    expect(tree.getTreeSnapshot().has('old')).toBe(false);
+    expect(tree.getTreeSnapshot().has('old/file.ts')).toBe(false);
+    expect(tree.getTreeSnapshot().has('new')).toBe(true);
+    expect(tree.getTreeSnapshot().has('new/file.ts')).toBe(true);
+    disposeChannel();
+  });
 });
 
 describe('FileTreeService listDirectory / subscribePath', () => {
@@ -227,7 +323,7 @@ describe('FileTreeService listDirectory / subscribePath', () => {
       proxy: mock<FileSystemClient>({
         readDirectory: vi.fn().mockRejectedValue(Object.assign(new Error('enoent'), { code: 'ENOENT' })),
         readdir: vi.fn().mockResolvedValue([]),
-        stat: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
+        stat: vi.fn().mockResolvedValue(textStat()),
         getDirectoryStat: vi.fn().mockResolvedValue([]),
       }),
     });
@@ -242,10 +338,10 @@ describe('FileTreeService listDirectory / subscribePath', () => {
       proxy: mock<FileSystemClient>({
         readDirectory: vi
           .fn()
-          .mockResolvedValueOnce([{ id: 'a.ts', name: 'a.ts', size: 1, mtimeMs: 0 }])
+          .mockResolvedValueOnce([textNode('a.ts', { size: 1 })])
           .mockResolvedValue([]),
         readdir: vi.fn().mockResolvedValue([]),
-        stat: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
+        stat: vi.fn().mockResolvedValue(textStat()),
         getDirectoryStat: vi.fn().mockResolvedValue([]),
       }),
     });
@@ -262,12 +358,12 @@ describe('FileTreeService listDirectory / subscribePath', () => {
         readDirectory: vi
           .fn()
           .mockResolvedValueOnce([
-            { id: 'doc.ts', name: 'doc.ts', size: 42, mtimeMs: 1_700_000_000_000 },
+            textNode('doc.ts', { size: 42, mtimeMs: 1_700_000_000_000, lineCount: 3 }),
             { id: 'sub', name: 'sub', size: 0, mtimeMs: 2, children: [] },
           ])
           .mockResolvedValue([]),
         readdir: vi.fn().mockResolvedValue([]),
-        stat: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
+        stat: vi.fn().mockResolvedValue(textStat()),
         getDirectoryStat: vi.fn().mockResolvedValue([]),
       }),
     });
@@ -291,13 +387,13 @@ describe('FileTreeService listDirectory / subscribePath', () => {
       proxy: mock<FileSystemClient>({
         readDirectory: vi.fn().mockReturnValue(readPromise),
         readdir: vi.fn().mockResolvedValue([]),
-        stat: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
+        stat: vi.fn().mockResolvedValue(textStat()),
         getDirectoryStat: vi.fn().mockResolvedValue([]),
       }),
     });
     const first = tree.listDirectory('');
     const second = tree.listDirectory('');
-    resolveRead([{ id: 'x', name: 'x', size: 0, mtimeMs: 0 }]);
+    resolveRead([textNode('x')]);
     const [a, b] = await Promise.all([first, second]);
     expect(a).toEqual(b);
     expect(vi.mocked(proxy.readDirectory)).toHaveBeenCalledTimes(1);
@@ -309,13 +405,13 @@ describe('FileTreeService listDirectory / subscribePath', () => {
       proxy: mock<FileSystemClient>({
         readDirectory: vi.fn(),
         readdir: vi.fn().mockResolvedValue([]),
-        stat: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
+        stat: vi.fn().mockResolvedValue(textStat()),
         getDirectoryStat: vi.fn().mockResolvedValue([]),
       }),
     });
     const callback = vi.fn();
     tree.subscribePath('', callback);
-    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([{ id: 'n.ts', name: 'n.ts', size: 0, mtimeMs: 0 }]);
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([textNode('n.ts')]);
     await tree.listDirectory('');
     expect(callback).toHaveBeenCalled();
     disposeChannel();

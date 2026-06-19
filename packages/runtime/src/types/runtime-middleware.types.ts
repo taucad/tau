@@ -12,7 +12,7 @@ import type {
   RuntimeLogger,
   KernelFileSystem,
   CreateGeometryInput,
-  ExportGeometryInput,
+  ExportGeometryRequest,
   GetDependenciesInput,
   GetParametersInput,
 } from '#types/runtime-kernel.types.js';
@@ -66,6 +66,10 @@ export type KernelMiddlewareRuntime<
   logger: RuntimeLogger;
   /** Filesystem for all file operations (uses absolute path methods for middleware) */
   filesystem: KernelFileSystem;
+  /** Absolute project root path for cache and middleware-owned files */
+  projectRootPath: string;
+  /** Absolute base path for middleware-owned files. Alias of projectRootPath for current runtime operations. */
+  basePath: string;
   /** Type-safe state for persisting data during the wrap hook execution */
   state: MiddlewareState<State>;
   /** Resolved options (optionsSchema defaults merged with caller overrides) */
@@ -121,7 +125,7 @@ export type CreateGeometryHandler = (input: CreateGeometryInput) => Promise<Crea
  * Runtime is captured in the handler's closure, so middleware only passes input.
  * @public
  */
-export type ExportGeometryHandler = (input: ExportGeometryInput) => Promise<ExportGeometryResult>;
+export type ExportGeometryHandler = (input: ExportGeometryRequest) => Promise<ExportGeometryResult>;
 
 /**
  * Handler function for getParameters.
@@ -156,6 +160,7 @@ export type GetParametersHandler = (input: GetParametersInput) => Promise<GetPar
  * import { defineMiddleware } from '@taucad/runtime/middleware';
  *
  * const loggingMiddleware = defineMiddleware({
+ *   id: 'logging',
  *   name: 'Logging',
  *   async wrapCreateGeometry(input, handler, { logger }) {
  *     logger.debug('Computing geometry...');
@@ -191,7 +196,7 @@ export type WrapExportGeometryHook<
   // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- Default represents z.infer<z.object({})>
   Options extends Record<string, unknown> = {},
 > = (
-  input: ExportGeometryInput,
+  input: ExportGeometryRequest,
   handler: ExportGeometryHandler,
   runtime: KernelMiddlewareRuntime<State, Options>,
 ) => Promise<ExportGeometryResult>;
@@ -235,6 +240,7 @@ export type WrapGetParametersHook<
  * import { defineMiddleware } from '@taucad/runtime/middleware';
  *
  * const parameterResolver = defineMiddleware({
+ *   id: 'parameter-resolver',
  *   name: 'ParameterResolver',
  *   getDependencies({ filePath, basePath }, options) {
  *     const relativePath = filePath.replace(`${basePath}/`, '');

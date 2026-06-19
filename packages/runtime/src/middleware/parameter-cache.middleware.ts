@@ -53,7 +53,8 @@ function getCacheDirectory(basePath: string): string {
  * - Write to cache after handler() returns (on cache miss)
  * @public
  */
-export const parameterCacheMiddleware = defineMiddleware({
+export const parameterCache = defineMiddleware({
+  id: 'parameterCache',
   name: 'ParameterCache',
   version: '1.0.0',
 

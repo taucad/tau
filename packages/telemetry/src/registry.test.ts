@@ -5,7 +5,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(27);
+    expect(metrics).toHaveLength(30);
   });
 
   it('should expose the tool-result offload counter with the canonical OTEL name', () => {
@@ -18,6 +18,12 @@ describe('TauMetrics', () => {
     expect(TauMetrics.genAiAgentSafeguardInterventions.type).toBe('counter');
   });
 
+  it('should expose the tool-input repair counter with the canonical OTEL name', () => {
+    expect(TauMetrics.genAiToolInputRepairs.name).toBe('gen_ai.tool_input.repairs');
+    expect(TauMetrics.genAiToolInputRepairs.type).toBe('counter');
+    expect(TauMetrics.genAiToolInputRepairs.unit).toBe('{repair}');
+  });
+
   it('should expose the interrupt-recovery counter with the canonical OTEL name', () => {
     expect(TauMetrics.genAiInterruptRecoveryReminders.name).toBe('gen_ai.agent.interrupt_recovery.reminders');
     expect(TauMetrics.genAiInterruptRecoveryReminders.type).toBe('counter');
@@ -28,6 +34,13 @@ describe('TauMetrics', () => {
     expect(TauMetrics.genAiPromptSectionSize.type).toBe('histogram');
     expect(TauMetrics.genAiPromptSectionSize.unit).toBe('By');
     expect(TauMetrics.genAiPromptSectionSize.buckets.length).toBeGreaterThan(0);
+  });
+
+  it('should expose context-budget metrics with canonical OTEL names', () => {
+    expect(TauMetrics.genAiContextBudgetTokens.name).toBe('gen_ai.context_budget.tokens');
+    expect(TauMetrics.genAiContextBudgetTokens.type).toBe('histogram');
+    expect(TauMetrics.genAiContextCompactionDecisions.name).toBe('gen_ai.context_compaction.decisions');
+    expect(TauMetrics.genAiContextCompactionDecisions.type).toBe('counter');
   });
 
   it('should use lowercase dot-delimited names for all metrics', () => {

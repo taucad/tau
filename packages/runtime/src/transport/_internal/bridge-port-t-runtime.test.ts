@@ -3,7 +3,7 @@ import type { Port } from '@taucad/rpc';
 
 import { _fromMemoryFsHandle as fromMemoryFS } from '#transport/_internal/from-memory-fs-handle.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
-import { createBridgeProxy, createBridgeServer } from '#transport/_internal/runtime-filesystem-bridge.js';
+import { createBridgeProxy, createBridgeServer } from '@taucad/rpc/bridge';
 
 function makeFs(files?: Record<string, string>): RuntimeFileSystemBase {
   const handle = fromMemoryFS(files);

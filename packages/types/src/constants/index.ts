@@ -3,6 +3,7 @@ export * from '#constants/cad.constants.js';
 export * from '#constants/code.constants.js';
 export * from '#constants/file.constants.js';
 export * from '#constants/filesystem.constants.js';
+export * from '#constants/geometry.constants.js';
 export * from '#constants/id.constants.js';
 export * from '#constants/kernel.constants.js';
 export * from '#constants/logger.constants.js';

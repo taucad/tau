@@ -44,21 +44,14 @@ export class WorkerTelemetryCollector {
   public constructor(send: (entries: TelemetryEntry[]) => void) {
     this.send = send;
     this.observer = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) {
-        this.pending.push({
-          name: entry.name,
-          startTime: entry.startTime,
-          duration: entry.duration,
-          detail: (entry as PerformanceMeasure).detail as Record<string, unknown> | undefined,
-          workerTimeOrigin: performance.timeOrigin,
-        });
-      }
+      this.collectEntries(list.getEntries());
     });
     this.observer.observe({ type: 'measure', buffered: true });
   }
 
   /** Send all pending entries to the main thread. No-op when empty. */
   public flush(): void {
+    this.collectEntries(this.observer.takeRecords());
     if (this.pending.length === 0) {
       return;
     }
@@ -71,6 +64,18 @@ export class WorkerTelemetryCollector {
   public dispose(): void {
     this.observer.disconnect();
     this.flush();
+  }
+
+  private collectEntries(entries: PerformanceEntryList): void {
+    for (const entry of entries) {
+      this.pending.push({
+        name: entry.name,
+        startTime: entry.startTime,
+        duration: entry.duration,
+        detail: (entry as PerformanceMeasure).detail as Record<string, unknown> | undefined,
+        workerTimeOrigin: performance.timeOrigin,
+      });
+    }
   }
 }
 

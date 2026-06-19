@@ -21,6 +21,8 @@
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import type { OcExceptionInstance } from '#kernels/occt/oc-exceptions.js';
 import { OcKernelError } from '#kernels/occt/oc-kernel-error.js';
+import type { WebAssemblyException } from '#kernels/occt/wasm-exception.js';
+import { isWebAssemblyException } from '#kernels/occt/wasm-exception.js';
 import { checkAbort } from '#framework/cooperative-abort.js';
 import { named } from '#framework/named.js';
 
@@ -62,7 +64,7 @@ export type OcTracingResult<T extends OcExceptionInstance> = {
 // =============================================================================
 
 type GenericFunction = (...args: unknown[]) => unknown;
-type ExceptionDecoder = (ex: WebAssembly.Exception) => [string, string];
+type ExceptionDecoder = (ex: WebAssemblyException) => [string, string];
 
 function isCallable(value: unknown): value is GenericFunction {
   return typeof value === 'function';
@@ -154,7 +156,12 @@ type V8ErrorConstructor = {
 
 function getExceptionDecoder(oc: OcExceptionInstance): ExceptionDecoder | undefined {
   const candidate = oc.getExceptionMessage;
-  return typeof candidate === 'function' ? candidate : undefined;
+  if (typeof candidate !== 'function') {
+    return undefined;
+  }
+
+  const decoder = candidate as ExceptionDecoder;
+  return (error) => decoder(error);
 }
 
 /**
@@ -167,12 +174,7 @@ function getExceptionDecoder(oc: OcExceptionInstance): ExceptionDecoder | undefi
  */
 function createRethrowFunction(decoder: ExceptionDecoder | undefined): (error: unknown) => never {
   return function rethrowIfWasmException(error: unknown): never {
-    if (
-      typeof decoder === 'function' &&
-      typeof WebAssembly !== 'undefined' &&
-      typeof WebAssembly.Exception === 'function' &&
-      error instanceof WebAssembly.Exception
-    ) {
+    if (typeof decoder === 'function' && isWebAssemblyException(error)) {
       try {
         const [typeName, rawMessage] = decoder(error);
         const kernelError = new OcKernelError(typeName, rawMessage);

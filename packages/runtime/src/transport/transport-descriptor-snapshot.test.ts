@@ -10,11 +10,14 @@ import { describe, it, expect } from 'vitest';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { webWorkerTransport } from '#transport/web-worker-transport.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
+import { defineRuntime } from '#worker/runtime-definition.js';
 
 describe('transport descriptor snapshot (C6)', () => {
+  const runtime = defineRuntime({});
+
   it('inProcessTransport wiring returns equivalent descriptor snapshots per call', () => {
-    const pluginA = inProcessTransport({ fileSystem: fromMemoryFs() });
-    const pluginB = inProcessTransport({ fileSystem: fromMemoryFs() });
+    const pluginA = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
+    const pluginB = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
     expect(pluginA.describe()).toEqual(pluginB.describe());
     expect(pluginA.describe()).not.toBe(pluginB.describe());
 

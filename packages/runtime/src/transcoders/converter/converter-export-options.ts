@@ -82,11 +82,11 @@ const noEdgeOptions = z.unknown();
  * Per-target edge option schemas for the converter transcoder. Single source of truth
  * shared by:
  *
- * - {@link converterTranscoder} plugin registration ({@link converter.plugin.ts}) — drives
+ * - {@link converterTranscoder} plugin factory ({@link converter.transcoder.ts}) — drives
  *   the compile-time `EdgeMap` phantom that flows into `MergeExportMap` and
  *   `RuntimeClient.export()` typing.
- * - The `defineTranscoder` runtime `edges` tuple ({@link converter.transcoder.ts}) — the
- *   `optionsSchema` field on each non-trivial edge points back to entries here.
+ * - The same `defineTranscoder` runtime `edges` tuple points each non-trivial
+ *   edge's `optionsSchema` back to entries here.
  *
  * Targets without bespoke options reuse {@link noEdgeOptions} so transcoded exports
  * still inherit the kernel source-format options (e.g. GLB tessellation/coordinate-system)

@@ -8,6 +8,8 @@
 import type { z } from 'zod';
 import type { KernelIssue } from '#types/runtime.types.js';
 import type { KernelFileSystem, GetDependenciesResult } from '#types/runtime-kernel.types.js';
+import type { BundlerPlugin } from '#plugins/plugin-types.js';
+import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 
 // =============================================================================
 // Bundler Result Types
@@ -180,6 +182,39 @@ export type BundlerDefinition<Context = unknown, Options extends Record<string, 
   cleanup?(context: Context): Promise<void>;
 };
 
+type BundlerExtensions<Options> = string[] | ((options: Options | undefined) => string[]);
+
+type BundlerDefinitionConfig<Id extends string, Context, Options extends Record<string, unknown>> = {
+  /** Unique identifier for this bundler plugin. */
+  id: Id;
+  /** Human-readable bundler name, used in logs and error messages */
+  name: string;
+  /** Semantic version string for cache-key computation and diagnostics */
+  version: string;
+  /** File extensions handled by this bundler, static or derived from plugin options. */
+  extensions: BundlerExtensions<Options>;
+  /** Initialize the bundler. Receives framework init options plus user-provided options. */
+  initialize(initOptions: BundlerInitOptions, options: Options): Promise<Context>;
+  /** Detect which bare-specifier modules are imported transitively. */
+  detectImports(input: BundleInput, context: Context): Promise<DetectImportsResult>;
+  /** Produce runnable code with all registered modules resolved. */
+  bundle(input: BundleInput, context: Context): Promise<BundleResult>;
+  /** Execute bundled code (tied to this bundler's output format). */
+  execute(code: string, context: Context): Promise<ExecuteResult>;
+  /** Register a builtin module for resolution during bundle(). */
+  registerModule(name: string, builtinModule: BuiltinModule, context: Context): void;
+  /** Optional fast-path dependency resolution without full bundling. */
+  resolveDependencies?(input: BundleInput, context: Context): Promise<GetDependenciesResult>;
+  /** Clean up bundler resources (e.g., esbuild.stop()). */
+  cleanup?(context: Context): Promise<void>;
+};
+
+export type BundlerPluginFactory<Id extends string, Options = undefined> = Options extends undefined
+  ? () => BundlerPlugin<Id>
+  : Partial<Options> extends Options
+    ? (options?: Options) => BundlerPlugin<Id>
+    : (options: Options) => BundlerPlugin<Id>;
+
 /**
  * Define a bundler module with full type inference.
  * Context is inferred from initialize() return type; Options from optionsSchema.
@@ -193,7 +228,8 @@ export type BundlerDefinition<Context = unknown, Options extends Record<string, 
  * ```typescript
  * import { defineBundler } from '@taucad/runtime/bundler';
  *
- * export default defineBundler({
+ * export const myBundler = defineBundler({
+ *   id: 'my-bundler',
  *   name: 'MyBundler',
  *   version: '1.0.0',
  *   extensions: ['ts', 'js'],
@@ -213,8 +249,24 @@ export type BundlerDefinition<Context = unknown, Options extends Record<string, 
  * });
  * ```
  */
-export function defineBundler<Context, Options extends Record<string, unknown> = Record<string, unknown>>(
-  definition: BundlerDefinition<Context, Options>,
-): BundlerDefinition<Context, Options> {
-  return definition;
+export function defineBundler<const Id extends string, Context, OptionsSchema extends z.ZodType = z.ZodType>(
+  definition: BundlerDefinitionConfig<Id, Context, z.output<OptionsSchema> & Record<string, unknown>> & {
+    optionsSchema: OptionsSchema;
+  },
+): BundlerPluginFactory<Id, z.input<OptionsSchema>>;
+export function defineBundler<const Id extends string, Context>(
+  definition: BundlerDefinitionConfig<Id, Context, Record<string, unknown>> & { optionsSchema?: undefined },
+): BundlerPluginFactory<Id>;
+export function defineBundler(
+  definition: BundlerDefinitionConfig<string, unknown, Record<string, unknown>>,
+): BundlerPluginFactory<string, Record<string, unknown>> {
+  const { id, extensions, ...bundlerDefinition } = definition;
+  const factory = ((options?: Record<string, unknown>) => {
+    const resolvedExtensions = typeof extensions === 'function' ? extensions(options) : extensions;
+    return attachRuntimePluginDefinition({ id, extensions: resolvedExtensions, options }, () => ({
+      ...bundlerDefinition,
+      extensions: resolvedExtensions,
+    }));
+  }) as BundlerPluginFactory<string, Record<string, unknown>>;
+  return factory;
 }

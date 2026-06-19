@@ -4,6 +4,7 @@ import { transformVerticesGltf } from '#framework/common.js';
 import { srgbTupleToLinear } from '#utils/color-space.js';
 import { writeGlb, writeGltfJson } from '#utils/glb-writer.js';
 import type { GlbInput, GlbNode, GlbPrimitive } from '#utils/glb-writer.js';
+import { formatShapeName } from '#utils/shape-names.js';
 
 /**
  * Geometry data for a single color group, optimized for glTF primitive creation.
@@ -216,8 +217,6 @@ function groupFacesByColor(
 function colorGroupToPrimitive(geometry: ColorGroupGeometry): GlbPrimitive {
   const { color, positions, indices, normals } = geometry;
 
-  const colorString = `rgba(${Math.round(color[0] * 255)},${Math.round(color[1] * 255)},${Math.round(color[2] * 255)},${color[3].toFixed(2)})`;
-
   // `color` is sRGB-encoded `[0..1]` (e.g. parsed from OpenSCAD OFF integer
   // colors). glTF `baseColorFactor` is linear-space — see
   // docs/policy/color-space-policy.md.
@@ -234,7 +233,6 @@ function colorGroupToPrimitive(geometry: ColorGroupGeometry): GlbPrimitive {
       roughnessFactor: cadMaterialDefaults.roughnessFactor,
       doubleSided: true,
       alphaMode: linearBaseColor[3] < 1 ? 'BLEND' : 'OPAQUE',
-      name: colorString,
     },
   };
 }
@@ -266,7 +264,6 @@ function buildGlbInput(
         roughnessFactor: cadMaterialDefaults.roughnessFactor,
         doubleSided: true,
         alphaMode: 'OPAQUE',
-        name: 'default',
       },
     });
   } else {
@@ -274,8 +271,6 @@ function buildGlbInput(
       primitives.push(colorGroupToPrimitive(colorGroup));
     }
   }
-
-  nodes.push({ primitives });
 
   if (meshData.lines?.positions.length) {
     const originalLinePositions = meshData.lines.positions;
@@ -302,23 +297,21 @@ function buildGlbInput(
       lineIndices[index] = index;
     }
 
-    nodes.push({
-      primitives: [
-        {
-          mode: 1,
-          positions: linePositions,
-          indices: lineIndices,
-          material: {
-            baseColorFactor: [0.141, 0.259, 0.141, 1],
-            metallicFactor: 0,
-            roughnessFactor: 1,
-            doubleSided: true,
-            alphaMode: 'OPAQUE',
-          },
-        },
-      ],
+    primitives.push({
+      mode: 1,
+      positions: linePositions,
+      indices: lineIndices,
+      material: {
+        baseColorFactor: [0.141, 0.259, 0.141, 1],
+        metallicFactor: 0,
+        roughnessFactor: 1,
+        doubleSided: true,
+        alphaMode: 'OPAQUE',
+      },
     });
   }
+
+  nodes.push({ name: formatShapeName(0), primitives });
 
   return { nodes };
 }

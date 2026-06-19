@@ -24,7 +24,9 @@ export type ContentChangeEvent =
   | { type: 'batchWritten'; paths: string[]; source: FileWriteSource }
   | { type: 'directoryCreated'; path: string }
   | { type: 'directoryDeleted'; path: string }
-  | { type: 'directoryRenamed'; oldPath: string; newPath: string };
+  | { type: 'directoryRenamed'; oldPath: string; newPath: string }
+  | { type: 'fileCopied'; sourcePath: string | undefined; targetPath: string }
+  | { type: 'directoryCopied'; sourcePath: string | undefined; targetPath: string };
 
 /**
  * Discriminated outcome of a content resolve.
@@ -148,9 +150,10 @@ export class FileContentService {
   private readonly pathNotifyRegistry = new PathSubscriberRegistry();
   private readonly contentChangeRegistry = new PathSubscriberRegistry<ContentChangeEvent>();
   private readonly orphanedPaths = new Set<string>();
+  // eslint-disable-next-line tau-lint/no-handrolled-fanout -- Holds worker-channel unsubscribe callbacks; event fan-out uses Topic/PathSubscriberRegistry.
+  private readonly unsubscribeChannel: Array<() => void>;
   readonly #orphanTopic = new Topic<OrphanChangeEvent>({ name: 'FileContentService.orphan' });
   readonly #outcomeTopic = new Topic<OutcomeChangeEvent>({ name: 'FileContentService.outcome' });
-  private readonly unsubscribeChannel: Array<() => void>;
 
   public constructor(init: FileContentServiceInit) {
     this.proxy = init.proxy;
@@ -179,6 +182,15 @@ export class FileContentService {
           this.onWorkerFileRenamed(event);
         },
       }),
+      init.channel.onFileCopied({
+        handler: (event) => {
+          this.notifyGlobalSubscribers({
+            type: 'fileCopied',
+            sourcePath: event.sourcePath,
+            targetPath: event.targetPath,
+          });
+        },
+      }),
       init.channel.onDirectoryChanged({
         handler: (event) => {
           this.refreshOpenPathsUnderDirectory(event.path);
@@ -205,6 +217,15 @@ export class FileContentService {
               newPath: event.newPath,
             });
           }
+        },
+      }),
+      init.channel.onDirectoryCopied({
+        handler: (event) => {
+          this.notifyGlobalSubscribers({
+            type: 'directoryCopied',
+            sourcePath: event.sourcePath,
+            targetPath: event.targetPath,
+          });
         },
       }),
       init.channel.onBackendChanged(() => {
@@ -351,8 +372,9 @@ export class FileContentService {
   public async write(path: string, data: Uint8Array<ArrayBuffer>, source: FileWriteSource): Promise<void> {
     const key = this.paths.toWorkspaceRelativeKey('write', path);
     const localCopy = new Uint8Array(data);
+    const wireCopy = new Uint8Array(data);
     const absolutePath = this.paths.toAbsolutePath(key);
-    await this.proxy.writeFile(absolutePath, data);
+    await this.proxy.writeFile(absolutePath, wireCopy);
     this.cache.set(key, localCopy);
     this.setOrphaned(key, false);
     this.publishOutcome(key, { kind: 'text', content: localCopy });
@@ -382,8 +404,9 @@ export class FileContentService {
     for (const [path, file] of Object.entries(files)) {
       const key = this.paths.toWorkspaceRelativeKey('writeFiles', path);
       const localCopy = new Uint8Array(file.content);
+      const wireCopy = new Uint8Array(file.content);
       clones.set(key, localCopy);
-      absoluteFiles[this.paths.toAbsolutePath(key)] = file;
+      absoluteFiles[this.paths.toAbsolutePath(key)] = { content: wireCopy };
       paths.push(key);
     }
 
@@ -620,7 +643,41 @@ export class FileContentService {
   }
 
   /**
-   * Duplicate a file. Reads source via resolveBytes, writes dest via write.
+   * Create a directory through the project-scoped workspace facade.
+   *
+   * `path` **MUST** be workspace-relative; absolute keys that escape the
+   * workspace root throw {@link WorkspaceScopeViolationError} synchronously.
+   *
+   * @param path - Workspace-relative directory path.
+   * @param options - Optional `{ recursive }` for intermediate directories.
+   * @throws {WorkspaceScopeViolationError} When `path` escapes the workspace root.
+   */
+  public async createDirectory(path: string, options?: { recursive?: boolean }): Promise<void> {
+    const key = this.paths.toWorkspaceRelativeKey('createDirectory', path);
+    await this.proxy.mkdir(this.paths.toAbsolutePath(key), options);
+    this.notifyGlobalSubscribers({ type: 'directoryCreated', path: key });
+  }
+
+  /**
+   * Delete a directory through the project-scoped workspace facade.
+   *
+   * `path` **MUST** be workspace-relative; absolute keys that escape the
+   * workspace root throw {@link WorkspaceScopeViolationError} synchronously.
+   *
+   * @param path - Workspace-relative directory path.
+   * @param options - Optional `{ recursive }` for subtree deletion.
+   * @throws {WorkspaceScopeViolationError} When `path` escapes the workspace root.
+   */
+  public async deleteDirectory(path: string, options?: { recursive?: boolean }): Promise<void> {
+    const key = this.paths.toWorkspaceRelativeKey('deleteDirectory', path);
+    await this.proxy.rmdir(this.paths.toAbsolutePath(key), options);
+    this.orphanSubtree(key);
+    this.notifyGlobalSubscribers({ type: 'directoryDeleted', path: key });
+  }
+
+  /**
+   * Duplicate a file. Reads source via resolveBytes, writes dest, and emits a
+   * typed copy fact for downstream participants.
    *
    * Both arguments **MUST** be workspace-relative; absolute keys that escape
    * the workspace root throw {@link WorkspaceScopeViolationError}
@@ -634,27 +691,37 @@ export class FileContentService {
     const sourceKey = this.paths.toWorkspaceRelativeKey('duplicate', sourcePath);
     const destinationKey = this.paths.toWorkspaceRelativeKey('duplicate', destinationPath);
     const data = await this.resolveBytes(sourceKey);
-    await this.write(destinationKey, data, 'user');
+    const localCopy = new Uint8Array(data);
+    const wireCopy = new Uint8Array(data);
+    await this.proxy.writeFile(this.paths.toAbsolutePath(destinationKey), wireCopy);
+    this.cache.set(destinationKey, localCopy);
+    this.setOrphaned(destinationKey, false);
+    this.publishOutcome(destinationKey, { kind: 'text', content: localCopy });
+    this.notifyGlobalSubscribers({ type: 'fileCopied', sourcePath: sourceKey, targetPath: destinationKey });
   }
 
   /**
-   * Copy a directory. Proxy pass-through, no content caching.
-   * Fires batchWritten so FileTreeService refreshes.
+   * Copy a directory. Proxy pass-through, no content caching. Emits a typed
+   * copy fact so FileTreeService and project participants refresh explicitly.
    * @param source - Source directory (worker-resolved path form expected by proxy).
    * @param destination - Destination directory for the copy operation.
    */
   public async copyDirectory(source: string, destination: string): Promise<void> {
-    await this.proxy.copyDirectory(source, destination);
-    this.notifyGlobalSubscribers({ type: 'batchWritten', paths: [], source: 'user' });
+    const sourceKey = this.paths.toWorkspaceRelativeKey('copyDirectory', source);
+    const destinationKey = this.paths.toWorkspaceRelativeKey('copyDirectory', destination);
+    await this.proxy.copyDirectory(this.paths.toAbsolutePath(sourceKey), this.paths.toAbsolutePath(destinationKey));
+    this.notifyGlobalSubscribers({ type: 'directoryCopied', sourcePath: sourceKey, targetPath: destinationKey });
   }
 
   /**
-   * Get a zipped archive of a directory. Proxy pass-through.
-   * @param path - Absolute or workspace-relative path accepted by the worker proxy.
+   * Get a zipped archive of a directory.
+   * @param path - Workspace-relative directory path.
    * @returns Blob containing the archive bytes from the worker.
+   * @throws {WorkspaceScopeViolationError} When `path` escapes the workspace root.
    */
   public async getZippedDirectory(path: string): Promise<Blob> {
-    return this.proxy.getZippedDirectory(path);
+    const key = this.paths.toWorkspaceRelativeKey('getZippedDirectory', path);
+    return this.proxy.getZippedDirectory(this.paths.toAbsolutePath(key));
   }
 
   /**
@@ -806,6 +873,10 @@ export class FileContentService {
   }
 
   private onWorkerDirectoryDeleted(relativeDirectory: string): void {
+    this.orphanSubtree(relativeDirectory);
+  }
+
+  private orphanSubtree(relativeDirectory: string): void {
     const prefix = relativeDirectory === '' ? '' : `${relativeDirectory}/`;
     const affected = new Set<string>();
     for (const path of this.outcomes.keys()) {

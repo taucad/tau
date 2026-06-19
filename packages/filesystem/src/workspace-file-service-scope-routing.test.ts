@@ -92,7 +92,9 @@ describe('WorkspaceFileService — unified scope routing', () => {
       }
       return [];
     });
-    const standaloneStat = vi.fn().mockResolvedValue({ type: 'file', size: 1, mtimeMs: 1 });
+    const standaloneStat = vi
+      .fn()
+      .mockResolvedValue({ type: 'file', size: 1, mtimeMs: 1, contentKind: 'text', lineCount: 1 });
     const standaloneUnlink = vi.fn().mockResolvedValue(undefined);
     const standaloneRmdir = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(providerRegistry, 'getStandaloneProvider').mockResolvedValue(
@@ -115,8 +117,26 @@ describe('WorkspaceFileService — unified scope routing', () => {
     );
   });
 
-  it('rmdir({ recursive: true }) without a scope throws — no production caller exercises this combination', async () => {
-    await expect(service.rmdir('/scope/dir', { recursive: true })).rejects.toThrow(/not supported/);
+  it('rmdir({ recursive: true }) without a scope walks a mount-routed project subtree', async () => {
+    const events: ChangeEvent[] = [];
+    eventBus.subscribe((event) => events.push(event));
+
+    await service.mkdir('/scope/dir', { recursive: true });
+    await service.writeFile('/scope/dir/nested.txt', 'content');
+
+    await service.rmdir('/scope/dir', { recursive: true });
+
+    await expect(service.stat('/scope/dir')).rejects.toThrow(/ENOENT/);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'directoryDeleted', path: '/scope/dir', backend: 'memory' }),
+    );
+  });
+
+  it('rmdir({ recursive: true }) without a scope refuses to cross a nested mount boundary', async () => {
+    await service.mkdir('/scope/dir', { recursive: true });
+    await service.mount('/scope/dir/mounted', { backend: 'memory' });
+
+    await expect(service.rmdir('/scope/dir', { recursive: true })).rejects.toThrow(/cross mount boundary/);
   });
 
   it('getZippedDirectory({ scope }) zips from the standalone provider', async () => {

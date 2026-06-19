@@ -12,6 +12,9 @@ import type {
 } from '#types/runtime-middleware.types.js';
 import type { RuntimeLogger, KernelFileSystem } from '#types/runtime-kernel.types.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
+import type { MiddlewarePlugin } from '#plugins/plugin-types.js';
+import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 
 /**
  * Type alias for an empty Zod object schema.
@@ -46,7 +49,7 @@ export type KernelMiddlewareOptions<
   name: string;
   /** Version of the middleware for cache key computation. Defaults to '1' if not provided. */
   version?: string;
-  /** Whether the middleware is enabled by default. Defaults to `true`. Overridable via MiddlewareRegistration.enabled at registration or runtime. */
+  /** Whether the middleware is enabled by default. Defaults to `true`; plugin options can still tune middleware behavior. */
   enabled?: boolean;
   /** Optional Zod schema for type-safe state. Must be a z.object() schema. */
   stateSchema?: StateSchema;
@@ -96,6 +99,37 @@ export type KernelMiddleware<
   wrapGetParameters?: WrapGetParametersHook<z.infer<StateSchema>, z.infer<OptionsSchema>>;
 };
 
+type MiddlewareDefinitionConfig<
+  Id extends string,
+  StateSchema extends z.ZodObject<z.ZodRawShape>,
+  OptionsSchema extends z.ZodObject<z.ZodRawShape>,
+> = Omit<KernelMiddlewareOptions<StateSchema, OptionsSchema>, 'optionsSchema'> & {
+  /** Unique identifier for this middleware plugin. */
+  id: Id;
+};
+
+type MiddlewarePluginRegistration<
+  Id extends string,
+  StateSchema extends z.ZodObject<z.ZodRawShape>,
+  OptionsSchema extends z.ZodObject<z.ZodRawShape>,
+> = MiddlewarePlugin<Id> & RuntimePluginDefinitionCarrier<KernelMiddleware<StateSchema, OptionsSchema>>;
+
+export type MiddlewarePluginFactory<
+  Id extends string,
+  Options = undefined,
+  StateSchema extends z.ZodObject<z.ZodRawShape> = EmptyZodObject,
+  OptionsSchema extends z.ZodObject<z.ZodRawShape> = EmptyZodObject,
+> = Options extends undefined
+  ? () => MiddlewarePluginRegistration<Id, StateSchema, OptionsSchema>
+  : Partial<Options> extends Options
+    ? (options?: Options) => MiddlewarePluginRegistration<Id, StateSchema, OptionsSchema>
+    : (options: Options) => MiddlewarePluginRegistration<Id, StateSchema, OptionsSchema>;
+
+type MiddlewarePluginFactoryWithoutOptions<
+  Id extends string,
+  StateSchema extends z.ZodObject<z.ZodRawShape> = EmptyZodObject,
+> = () => MiddlewarePluginRegistration<Id, StateSchema, EmptyZodObject>;
+
 /**
  * Creates a kernel middleware instance with wrap-style hooks.
  *
@@ -113,6 +147,7 @@ export type KernelMiddleware<
  * import { defineMiddleware } from '@taucad/runtime/middleware';
  *
  * const loggingMiddleware = defineMiddleware({
+ *   id: 'logging',
  *   name: 'Logging',
  *   async wrapCreateGeometry(input, handler, { logger }) {
  *     logger.debug('Computing geometry...');
@@ -124,20 +159,45 @@ export type KernelMiddleware<
  * ```
  */
 export function defineMiddleware<
+  const Id extends string,
+  StateSchema extends z.ZodObject<z.ZodRawShape> = EmptyZodObject,
+>(
+  options: MiddlewareDefinitionConfig<Id, StateSchema, EmptyZodObject> & { optionsSchema?: undefined },
+): MiddlewarePluginFactoryWithoutOptions<Id, StateSchema>;
+export function defineMiddleware<
+  const Id extends string,
   StateSchema extends z.ZodObject<z.ZodRawShape> = EmptyZodObject,
   OptionsSchema extends z.ZodObject<z.ZodRawShape> = EmptyZodObject,
->(options: KernelMiddlewareOptions<StateSchema, OptionsSchema>): KernelMiddleware<StateSchema, OptionsSchema> {
-  return {
-    name: options.name,
-    version: options.version ?? '1',
-    enabled: options.enabled,
-    stateSchema: options.stateSchema,
-    optionsSchema: options.optionsSchema,
-    getDependencies: options.getDependencies,
-    wrapCreateGeometry: options.wrapCreateGeometry,
-    wrapExportGeometry: options.wrapExportGeometry,
-    wrapGetParameters: options.wrapGetParameters,
+>(
+  options: MiddlewareDefinitionConfig<Id, StateSchema, OptionsSchema> & { optionsSchema: OptionsSchema },
+): MiddlewarePluginFactory<Id, z.input<OptionsSchema>, StateSchema, OptionsSchema>;
+export function defineMiddleware(options: unknown): unknown {
+  const { id, ...middlewareDefinition } = options as MiddlewareDefinitionConfig<
+    string,
+    z.ZodObject<z.ZodRawShape>,
+    z.ZodObject<z.ZodRawShape>
+  > & {
+    optionsSchema?: z.ZodObject<z.ZodRawShape>;
   };
+  const factory = ((pluginOptions?: Record<string, unknown>) =>
+    attachRuntimePluginDefinition(
+      {
+        id,
+        options: pluginOptions,
+      },
+      () => ({
+        name: middlewareDefinition.name,
+        version: middlewareDefinition.version ?? '1',
+        enabled: middlewareDefinition.enabled,
+        stateSchema: middlewareDefinition.stateSchema,
+        optionsSchema: middlewareDefinition.optionsSchema,
+        getDependencies: middlewareDefinition.getDependencies,
+        wrapCreateGeometry: middlewareDefinition.wrapCreateGeometry,
+        wrapExportGeometry: middlewareDefinition.wrapExportGeometry,
+        wrapGetParameters: middlewareDefinition.wrapGetParameters,
+      }),
+    )) as MiddlewarePluginFactory<string, unknown>;
+  return factory;
 }
 
 /**
@@ -247,6 +307,10 @@ export type CreateMiddlewareRuntimeOptions = {
   middlewareName: string;
   /** Filesystem for all file operations */
   filesystem: KernelFileSystem;
+  /** Absolute project root path for cache and middleware-owned files */
+  projectRootPath?: string;
+  /** Absolute base path for middleware-owned files. Defaults to projectRootPath. */
+  basePath?: string;
   /** Array of dependencies for cache key computation */
   dependencies: readonly Dependency[];
   /** Pre-computed SHA-256 hash of all dependencies */
@@ -282,6 +346,8 @@ export function createMiddlewareRuntime<
     onLog,
     middlewareName,
     filesystem,
+    projectRootPath,
+    basePath,
     dependencies,
     dependencyHash,
     stateSchema,
@@ -293,6 +359,8 @@ export function createMiddlewareRuntime<
   return {
     logger: logger ?? createMiddlewareLogger(onLog, middlewareName),
     filesystem,
+    projectRootPath: projectRootPath ?? basePath ?? '',
+    basePath: basePath ?? projectRootPath ?? '',
     state: createMiddlewareState<State>(stateSchema),
     options: (options ?? {}) as Options,
     dependencies,

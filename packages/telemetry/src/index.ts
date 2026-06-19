@@ -10,6 +10,9 @@ export {
   GenAiSafeguardAction,
   GenAiSafeguardHelped,
   GenAiInterruptRecoveryOutcome,
+  GenAiContextBudgetKind,
+  GenAiContextBudgetTriggerReason,
+  GenAiContextCompactionStatus,
   RpcStatus,
 } from '#attributes.js';
 export { IngestEntryName, clientMetricEntrySchema, ingestPayloadSchema } from '#ingest.js';

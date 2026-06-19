@@ -16,6 +16,7 @@ export const codeLanguages = {
   json: 'json',
   jsonl: 'jsonl',
   jsonc: 'jsonc',
+  markdown: 'markdown',
 } as const;
 
 /**
@@ -42,4 +43,13 @@ export const languageFromExtension = {
   json: 'json',
   jsonl: 'jsonl',
   jsonc: 'jsonc',
+  md: 'markdown',
+  mdx: 'markdown',
+  markdown: 'markdown',
+  mdown: 'markdown',
+  mkdn: 'markdown',
+  mkd: 'markdown',
+  mdwn: 'markdown',
+  mdtxt: 'markdown',
+  mdtext: 'markdown',
 } as const;

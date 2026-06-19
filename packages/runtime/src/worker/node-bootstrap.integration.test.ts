@@ -45,7 +45,7 @@ describe('@taucad/runtime/worker/node bootstrap (Node integration)', () => {
        *
        *   - `apps/ui-e2e` Playwright (browser worker bootstrap via
        *     `@taucad/runtime/worker/web`).
-       *   - `examples/electron-tau` Playwright e2e (Electron utility process
+       *   - `examples/electron` Playwright e2e (Electron utility process
        *     hosting `KernelRuntimeWorker` via `electronUtilityTransport`,
        *     which exercises the same `createWorkerDispatcher` +
        *     `installWorkerCrashTrap` wiring).
@@ -56,7 +56,6 @@ describe('@taucad/runtime/worker/node bootstrap (Node integration)', () => {
        * dist/esm output) or using a pre-compiled JS fixture.
        */
       const client = createRuntimeClient({
-        kernels: [],
         transport: nodeWorkerTransport({
           url: fileURLToPath(workerEntryUrl),
           workerCtor: class TsxWorker extends NodeWorker {

@@ -144,24 +144,73 @@ export type IndexedPolyhedron = {
   };
 };
 
+export type OutputCoordinateSystem = 'y-up' | 'z-up';
+
+export type OutputLengthUnit = 'meter' | 'millimeter';
+
+export type GeometryOutputTransformOptions = {
+  coordinateSystem?: OutputCoordinateSystem;
+  unit?: {
+    length?: OutputLengthUnit;
+  };
+};
+
+const normalizeSignedZero = (value: number): number => (value === 0 ? 0 : value);
+
+const lengthScaleFromMillimeters = (unit: OutputLengthUnit | undefined): number =>
+  unit === 'millimeter' ? 1 : 1 / 1000;
+
 /**
- * Transform vertex coordinates from z-up to y-up coordinate system and convert units.
- * Z-up to Y-up transformation: x' = x, y' = z, z' = -y
- * Unit conversion: millimeters to meters (divide by 1000)
+ * Create a vertex transform from CAD source coordinates (Z-up millimeters) to
+ * the requested export coordinate system and length unit.
  *
- * This is used when creating glTF format, which uses y-up coordinates
- * and meter units, from source geometry that uses z-up coordinates and millimeter units.
+ * @param options - Output coordinate and unit convention.
+ * @returns A vertex transform function.
+ */
+export function createVertexTransform(options: GeometryOutputTransformOptions = {}): VertexTransformFunction {
+  const coordinateSystem = options.coordinateSystem ?? 'y-up';
+  const scale = lengthScaleFromMillimeters(options.unit?.length);
+
+  return (vertex) => {
+    const sourceX = vertex[0] * scale;
+    const sourceY = vertex[1] * scale;
+    const sourceZ = vertex[2] * scale;
+
+    if (coordinateSystem === 'z-up') {
+      return [normalizeSignedZero(sourceX), normalizeSignedZero(sourceY), normalizeSignedZero(sourceZ)];
+    }
+
+    return [normalizeSignedZero(sourceX), normalizeSignedZero(sourceZ), normalizeSignedZero(-sourceY)];
+  };
+}
+
+/**
+ * Transform a normal from CAD source coordinates (Z-up) to the requested output
+ * coordinate system. Normals are directions, so units do not apply.
  *
- * @param vertex - xyz position in z-up millimeter space
- * @returns xyz position in y-up meter space
+ * @param normal - Normal vector in source CAD coordinates.
+ * @param coordinateSystem - Requested output coordinate system.
+ * @returns Transformed normal vector.
+ */
+export function transformNormalVector(
+  normal: readonly [number, number, number],
+  coordinateSystem: OutputCoordinateSystem = 'y-up',
+): [number, number, number] {
+  if (coordinateSystem === 'z-up') {
+    return [normalizeSignedZero(normal[0]), normalizeSignedZero(normal[1]), normalizeSignedZero(normal[2])];
+  }
+
+  return [normalizeSignedZero(normal[0]), normalizeSignedZero(normal[2]), normalizeSignedZero(-normal[1])];
+}
+
+/**
+ * Transform vertex coordinates from z-up millimeters to y-up meters.
+ *
+ * @param vertex - xyz position in z-up millimeter space.
+ * @returns xyz position in y-up meter space.
  */
 export function transformVerticesGltf(vertex: readonly [number, number, number]): [number, number, number] {
-  const x = vertex[0] / 1000;
-  const y = vertex[2] / 1000;
-  const z = -vertex[1] / 1000;
-
-  // Normalize -0 to 0 to avoid JavaScript signed zero quirks
-  return [x === 0 ? 0 : x, y === 0 ? 0 : y, z === 0 ? 0 : z];
+  return createVertexTransform({ coordinateSystem: 'y-up', unit: { length: 'meter' } })(vertex);
 }
 
 /**
@@ -172,11 +221,7 @@ export function transformVerticesGltf(vertex: readonly [number, number, number])
  * @returns xyz position in meter space
  */
 export function transformVerticesZup(vertex: readonly [number, number, number]): [number, number, number] {
-  const x = vertex[0] / 1000;
-  const y = vertex[1] / 1000;
-  const z = vertex[2] / 1000;
-
-  return [x === 0 ? 0 : x, y === 0 ? 0 : y, z === 0 ? 0 : z];
+  return createVertexTransform({ coordinateSystem: 'z-up', unit: { length: 'meter' } })(vertex);
 }
 
 /** Vertex transform function signature for coordinate system selection. */
@@ -194,8 +239,12 @@ export type VertexTransformFunction = (vertex: readonly [number, number, number]
  * @param vertices - Flat array of vertex positions [x1, y1, z1, x2, y2, z2, ...]
  * @returns Float32Array with transformed positions
  */
-export function transformVertexArray(vertices: number[]): Float32Array<ArrayBuffer> {
+export function transformVertexArray(
+  vertices: number[],
+  options: GeometryOutputTransformOptions = {},
+): Float32Array<ArrayBuffer> {
   const transformedVertices = new Float32Array(vertices.length);
+  const transform = createVertexTransform(options);
 
   for (let index = 0; index < vertices.length; index += 3) {
     const x = vertices[index];
@@ -207,7 +256,7 @@ export function transformVertexArray(vertices: number[]): Float32Array<ArrayBuff
     }
 
     const vertex: [number, number, number] = [x, y, z];
-    const transformed = transformVerticesGltf(vertex);
+    const transformed = transform(vertex);
 
     transformedVertices[index] = transformed[0];
     transformedVertices[index + 1] = transformed[1];
@@ -225,19 +274,21 @@ export function transformVertexArray(vertices: number[]): Float32Array<ArrayBuff
  * @param normals - Flat array of normal components [x1, y1, z1, x2, y2, z2, ...]
  * @returns Float32Array with transformed normals
  */
-export function transformNormalArray(normals: number[]): Float32Array<ArrayBuffer> {
+export function transformNormalArray(
+  normals: number[],
+  options: Pick<GeometryOutputTransformOptions, 'coordinateSystem'> = {},
+): Float32Array<ArrayBuffer> {
   const transformedNormals = new Float32Array(normals.length);
+  const coordinateSystem = options.coordinateSystem ?? 'y-up';
 
   for (let index = 0; index < normals.length; index += 3) {
     const x = normals[index] ?? 0;
     const y = normals[index + 1] ?? 0;
     const z = normals[index + 2] ?? 0;
-
-    // Apply rotation only (no scaling for direction vectors)
-    // Z-up to Y-up: x' = x, y' = z, z' = -y
-    transformedNormals[index] = x;
-    transformedNormals[index + 1] = z;
-    transformedNormals[index + 2] = -y;
+    const transformed = transformNormalVector([x, y, z], coordinateSystem);
+    transformedNormals[index] = transformed[0];
+    transformedNormals[index + 1] = transformed[1];
+    transformedNormals[index + 2] = transformed[2];
   }
 
   return transformedNormals;

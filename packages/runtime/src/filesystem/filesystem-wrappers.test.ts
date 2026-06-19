@@ -6,11 +6,16 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { Port } from '@taucad/rpc';
+import { createBridgeProxy } from '@taucad/rpc/bridge';
+import {
+  createFileSystemBridge,
+  exposeFileSystem,
+  filesystemBridgeConnectMessageType,
+  waitForWorkerReady,
+  workerReadyMessageType,
+} from '@taucad/fs-bridge';
 import { _fromMemoryFsHandle as fromMemoryFS } from '#transport/_internal/from-memory-fs-handle.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
-import { createBridgeProxy } from '#transport/_internal/runtime-filesystem-bridge.js';
-import { workerReadyMessageType } from '#framework/runtime-framework.constants.js';
-import { exposeFileSystem, createFileSystemBridge, waitForWorkerReady } from '#filesystem/filesystem-bridge.js';
 
 /**
  * Unwrap the discriminated `inline` `RuntimeFileSystemHandle` so the
@@ -53,7 +58,7 @@ describe('filesystem high-level wrappers', () => {
 
       self.dispatchEvent(
         new MessageEvent('message', {
-          data: { type: 'connect', port: channel.port1 },
+          data: { type: filesystemBridgeConnectMessageType, port: channel.port1 },
         }),
       );
 
@@ -80,7 +85,7 @@ describe('filesystem high-level wrappers', () => {
 
       self.dispatchEvent(
         new MessageEvent('message', {
-          data: { type: 'connect', port: channel.port1 },
+          data: { type: filesystemBridgeConnectMessageType, port: channel.port1 },
         }),
       );
 
@@ -102,7 +107,7 @@ describe('filesystem high-level wrappers', () => {
       // Post a message after cleanup -- no server should be set up
       self.dispatchEvent(
         new MessageEvent('message', {
-          data: { type: 'connect', port: channel.port1 },
+          data: { type: filesystemBridgeConnectMessageType, port: channel.port1 },
         }),
       );
 
@@ -125,7 +130,7 @@ describe('filesystem high-level wrappers', () => {
       // Default type should be ignored
       self.dispatchEvent(
         new MessageEvent('message', {
-          data: { type: 'connect', port: channel.port1 },
+          data: { type: filesystemBridgeConnectMessageType, port: channel.port1 },
         }),
       );
 
@@ -217,7 +222,7 @@ describe('filesystem high-level wrappers', () => {
         { type: string; port: MessagePort },
         MessagePort[],
       ];
-      expect(message.type).toBe('connect');
+      expect(message.type).toBe(filesystemBridgeConnectMessageType);
       expect(message.port).toBeInstanceOf(MessagePort);
       expect(transferables).toHaveLength(1);
       expect(transferables[0]).toBe(message.port);

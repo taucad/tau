@@ -1,13 +1,16 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import manifoldKernel from '#kernels/manifold/manifold.kernel.js';
+import { NodeIO } from '@gltf-transform/core';
+import { manifold as manifoldKernel } from '#kernels/manifold/manifold.kernel.js';
 import { createGeometryTestHelpers } from '#testing/kernel-geometry-testing.utils.js';
 import {
   createGeometryFile,
+  createMockKernelRuntime,
   createTestWorker,
   createTestGeometry,
   getTestParameters,
 } from '#testing/kernel-testing.utils.js';
+import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- test fixture filenames include extensions */
 
@@ -35,6 +38,33 @@ const createGeometry = async (
   });
 
 const geometryHelpers = createGeometryTestHelpers();
+
+const readGltfNodeMeshNames = async (
+  glbBytes: Uint8Array<ArrayBuffer>,
+): Promise<{ nodeNames: string[]; meshNames: string[] }> => {
+  const document = await new NodeIO().readBinary(glbBytes);
+  const semanticNodes = document
+    .getRoot()
+    .listNodes()
+    .filter((node) =>
+      node
+        .getMesh()
+        ?.listPrimitives()
+        .some((primitive) => primitive.getMode() !== 1),
+    );
+  return {
+    nodeNames: semanticNodes.map((node) => node.getName()),
+    meshNames: semanticNodes.map((node) => node.getMesh()!.getName()),
+  };
+};
+
+const extractGltfBytes = (result: {
+  data: Array<{ format: string; content: Uint8Array<ArrayBuffer> }>;
+}): Uint8Array<ArrayBuffer> => {
+  const geometry = result.data.find((entry) => entry.format === 'gltf');
+  expect(geometry).toBeDefined();
+  return geometry!.content;
+};
 
 describe('ManifoldWorker', () => {
   describe('getParameters', () => {
@@ -125,6 +155,11 @@ describe('ManifoldWorker', () => {
       await geometryHelpers.expectValidGltf(result);
       await geometryHelpers.expectMeshCount(result, 1);
       await geometryHelpers.expectBoundingBoxSize(result, [0.01, 0.01, 0.01], 0.0005);
+      if (result.success) {
+        const { nodeNames, meshNames } = await readGltfNodeMeshNames(extractGltfBytes(result));
+        expect(nodeNames).toEqual(['Shape 1']);
+        expect(meshNames).toEqual(['Shape 1']);
+      }
     });
 
     it('should compute geometry using runtime parameters', async () => {
@@ -333,6 +368,9 @@ describe('ManifoldWorker', () => {
       expect(exportResult.success).toBe(true);
       if (exportResult.success) {
         expect(exportResult.data[0]?.bytes).toBeInstanceOf(Uint8Array);
+        const { nodeNames, meshNames } = await readGltfNodeMeshNames(exportResult.data[0]!.bytes);
+        expect(nodeNames).toEqual(['Shape 1']);
+        expect(meshNames).toEqual(['Shape 1']);
       }
     });
 
@@ -392,6 +430,23 @@ describe('ManifoldWorker', () => {
       });
       const exportResult = await worker.exportGeometry('step');
       expect(exportResult.success).toBe(false);
+    });
+  });
+
+  describe('native-handle snapshots', () => {
+    it('should round-trip GLB bytes through the durable native-handle hooks', async () => {
+      const definition = await resolveRuntimePluginDefinition('kernel', manifoldKernel());
+      expect(definition.serializeNativeHandle).toBeDefined();
+      expect(definition.deserializeNativeHandle).toBeDefined();
+
+      const nativeHandle = { glb: new Uint8Array([0x67, 0x6c, 0x54, 0x46]) };
+      const runtime = createMockKernelRuntime();
+      const serializedNativeHandle = definition.serializeNativeHandle({ nativeHandle }, runtime, {});
+      const restored = definition.deserializeNativeHandle({ serializedNativeHandle }, runtime, {});
+
+      expect(restored.glb).toEqual(nativeHandle.glb);
+      expect(restored.glb).not.toBe(nativeHandle.glb);
+      expect(serializedNativeHandle.glb).not.toBe(nativeHandle.glb);
     });
   });
 });

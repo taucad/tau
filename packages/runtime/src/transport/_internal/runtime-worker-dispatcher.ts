@@ -8,7 +8,7 @@
  * notifies correlated by `rgen` (mirrors LSP `didOpen` + diagnostics).
  *
  * Client → worker commands (`openFile`, `updateParameters`,
- * `setOptions`, `fileChanged`, `configureMiddleware`, `cleanup`,
+ * `setOptions`, `fileChanged`, `cleanup`,
  * `abort`, `stage-and-render`) ride the bidirectional `nt` notify
  * channel; autonomous worker events (`progress`, `geometryComputed`,
  * `parametersResolved`, `errorEvent`, `stateChanged`,
@@ -42,6 +42,8 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import { createChannelServer } from '@taucad/rpc';
 import type { ChannelServer, ChannelServerHandle, Port, WithTransferables } from '@taucad/rpc';
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
+import type { KernelIssueCode } from '#types/kernel-issue-codes.js';
+import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import type { HashedGeometryResult, ExportGeometryResult } from '#types/runtime.types.js';
 import type {
   GeometryTransport,
@@ -117,14 +119,8 @@ function toTransportResult(
   };
 }
 
-/* Some kernels (notably `@taucad/openscad`) emit `KernelIssue` objects
- * without the required `code` discriminator. The wire-protocol Zod
- * schema treats `code` as a closed enum, so those frames would be
- * silently dropped server-side. Default missing codes to `'RUNTIME'`
- * here so the contract validates without forcing every kernel author
- * to set it explicitly today. */
-function normaliseIssueForWire<T extends { code?: string }>(issue: T): T & { code: string } {
-  return issue.code ? (issue as T & { code: string }) : { ...issue, code: 'RUNTIME' };
+function normaliseIssueForWire<T extends { code?: unknown }>(issue: T): T & { code: KernelIssueCode } {
+  return isKernelIssueCode(issue.code) ? (issue as T & { code: KernelIssueCode }) : { ...issue, code: 'UNKNOWN' };
 }
 
 function extractExportTransferables(
@@ -353,19 +349,10 @@ export function createWorkerDispatcher(
             fileSystemPort: memoryHandle?.fileSystemPort,
             inlineFileSystem: dispatcherOptions?.inlineFileSystem,
           },
-          options: args.options,
-          middlewareEntries: args.middlewareEntries,
-          transcoderModules: args.transcoderModules,
+          config: args.config,
         }),
         trapPromise,
       ]);
-
-      if (args.bundlerEntries) {
-        for (const entry of args.bundlerEntries) {
-          // oxlint-disable-next-line no-await-in-loop -- bundler entries must load sequentially to avoid race conditions
-          await Promise.race([worker.ensureLoadedBundler(entry), trapPromise]);
-        }
-      }
 
       return { capabilities: worker.capabilitiesManifest };
     } finally {
@@ -380,6 +367,19 @@ export function createWorkerDispatcher(
     try {
       return await Promise.race([worker.exportGeometry(args.format, args.options), trapPromise]);
     } finally {
+      worker.flushTelemetry();
+      cleanupTrap();
+    }
+  };
+
+  const handleExportModel: (
+    args: RuntimeProtocol['calls']['exportModel']['args'],
+  ) => Promise<ExportGeometryResult> = async (args) => {
+    const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
+    try {
+      return await Promise.race([worker.exportModel(args), trapPromise]);
+    } finally {
+      worker.flushTelemetry();
       cleanupTrap();
     }
   };
@@ -396,6 +396,16 @@ export function createWorkerDispatcher(
         }
         case 'export': {
           const result = await handleExport(args as RuntimeProtocol['calls']['export']['args']);
+          const transferables: Transferable[] = [];
+          extractExportTransferables(result, encodeFile, transferables);
+          const envelope: WithTransferables<unknown> = {
+            value: result,
+            transferables,
+          };
+          return envelope as unknown as CallResult;
+        }
+        case 'exportModel': {
+          const result = await handleExportModel(args as RuntimeProtocol['calls']['exportModel']['args']);
           const transferables: Transferable[] = [];
           extractExportTransferables(result, encodeFile, transferables);
           const envelope: WithTransferables<unknown> = {
@@ -445,14 +455,6 @@ export function createWorkerDispatcher(
           const a = args as RuntimeProtocol['notifies']['fileChanged']['args'];
           // oxlint-disable-next-line promise/prefer-await-to-then -- intentional fire-and-forget routing inside synchronous notify handler
           worker.notifyFileChanged(a.paths).catch((error: unknown) => {
-            notify('errorEvent', { issues: errorToIssues(error) });
-          });
-          break;
-        }
-        case 'configureMiddleware': {
-          const a = args as RuntimeProtocol['notifies']['configureMiddleware']['args'];
-          // oxlint-disable-next-line promise/prefer-await-to-then -- intentional fire-and-forget routing inside synchronous notify handler
-          worker.configureMiddleware(a.entries).catch((error: unknown) => {
             notify('errorEvent', { issues: errorToIssues(error) });
           });
           break;

@@ -39,13 +39,12 @@ describe('WorkerTelemetryCollector', () => {
 
     collector.flush();
 
-    if (send.mock.calls.length > 0) {
-      const entries = send.mock.calls[0]![0] as TelemetryEntry[];
-      expect(entries.length).toBeGreaterThan(0);
-      const testEntry = entries.find((entry) => entry.name === 'test.measure');
-      expect(testEntry).toBeDefined();
-      expect(testEntry!.workerTimeOrigin).toBe(performance.timeOrigin);
-    }
+    expect(send).toHaveBeenCalledOnce();
+    const entries = send.mock.calls[0]![0] as TelemetryEntry[];
+    expect(entries.length).toBeGreaterThan(0);
+    const testEntry = entries.find((entry) => entry.name === 'test.measure');
+    expect(testEntry).toBeDefined();
+    expect(testEntry!.workerTimeOrigin).toBe(performance.timeOrigin);
 
     collector.dispose();
     performance.clearMarks('test-start');

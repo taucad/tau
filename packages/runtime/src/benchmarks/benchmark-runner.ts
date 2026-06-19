@@ -14,7 +14,8 @@ import { createRuntimeClient } from '#index.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { replicad } from '#plugins/kernel-factories.js';
-import { esbuild } from '#plugins/bundler-factories.js';
+import { esbuild } from '#plugins/bundler-entry.js';
+import { defineRuntime } from '#worker/runtime-definition.js';
 import type { BenchmarkCase } from '#benchmarks/benchmark-suite.js';
 import type { CpuProfile, CpuProfiler } from '#benchmarks/cpu-profiler.js';
 import type { ProfileAnalysis } from '#benchmarks/profile-analyzer.js';
@@ -22,6 +23,17 @@ import type { ProfileAnalysis } from '#benchmarks/profile-analyzer.js';
 // =============================================================================
 // Types
 // =============================================================================
+
+type TraceSummary = Record<
+  string,
+  {
+    calls: number;
+    totalMs: number;
+    errors?: number;
+    metrics?: Record<string, number>;
+  }
+>;
+type BenchmarkOperation = 'export' | 'render';
 
 /** Result of a single benchmark case. */
 export type BenchmarkResult = {
@@ -35,7 +47,8 @@ export type BenchmarkResult = {
   p99: number;
   stddev: number;
   telemetry: TelemetryEntry[][];
-  ocSummary?: Record<string, { calls: number; totalMs: number }>;
+  ocSummary?: TraceSummary;
+  librarySummary?: TraceSummary;
   cpuProfile?: CpuProfile;
   profileAnalysis?: ProfileAnalysis;
 };
@@ -76,6 +89,9 @@ export type BenchmarkRunResult = {
 export type BenchmarkRunnerOptions = {
   iterations: number;
   ocTracing?: 'off' | 'summary' | 'per-call';
+  libraryTracing?: 'off' | 'summary' | 'per-call';
+  /** Operation to time. Defaults to `'export'` for historical benchmark compatibility. */
+  operation?: BenchmarkOperation;
   /** WASM variant or custom config. Defaults to `'auto'` (multi when supported, else single). */
   wasm?: 'auto' | 'single' | 'multi' | { wasmUrl: string; wasmBindingsUrl: string };
   onProgress?: (completed: number, total: number, caseName: string) => void;
@@ -130,16 +146,14 @@ function computeStats(timings: number[]): {
 // OC Summary Extraction
 // =============================================================================
 
-function extractOcSummary(
-  telemetryBatches: TelemetryEntry[][],
-): Record<string, { calls: number; totalMs: number }> | undefined {
+function extractOcSummary(telemetryBatches: TelemetryEntry[][]): TraceSummary | undefined {
   const allEntries = telemetryBatches.flat();
   const summarySpan = allEntries.find((entry) => entry.name === 'oc.summary');
   if (!summarySpan?.detail) {
     return undefined;
   }
 
-  const result: Record<string, { calls: number; totalMs: number }> = {};
+  const result: TraceSummary = {};
   const { detail } = summarySpan;
 
   const classKeys = Object.keys(detail).filter((key) => key.endsWith('.calls'));
@@ -153,6 +167,54 @@ function extractOcSummary(
     result[className] = {
       calls: detail[callsKey] as number,
       totalMs: typeof msValue === 'number' ? msValue : 0,
+    };
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function extractLibrarySummary(telemetryBatches: TelemetryEntry[][]): TraceSummary | undefined {
+  const allEntries = telemetryBatches.flat();
+  const summarySpan = allEntries.find((entry) => entry.name === 'replicad.library.summary');
+  if (!summarySpan?.detail) {
+    return undefined;
+  }
+
+  const result: TraceSummary = {};
+  const { detail } = summarySpan;
+
+  const operationKeys = Object.keys(detail).filter((key) => {
+    if (!key.endsWith('.calls')) {
+      return false;
+    }
+
+    const operation = key.replace('.calls', '');
+    return operation !== 'total' && typeof detail[`${operation}.ms`] === 'number';
+  });
+  for (const callsKey of operationKeys) {
+    const operation = callsKey.replace('.calls', '');
+    const msValue = detail[`${operation}.ms`];
+    const errorsValue = detail[`${operation}.errors`];
+    const metrics: Record<string, number> = {};
+    const operationPrefix = `${operation}.`;
+    for (const [key, value] of Object.entries(detail)) {
+      if (!key.startsWith(operationPrefix) || typeof value !== 'number') {
+        continue;
+      }
+
+      const metricName = key.slice(operationPrefix.length);
+      if (metricName === 'calls' || metricName === 'ms' || metricName === 'errors') {
+        continue;
+      }
+
+      metrics[metricName] = value;
+    }
+
+    result[operation] = {
+      calls: detail[callsKey] as number,
+      totalMs: typeof msValue === 'number' ? msValue : 0,
+      errors: typeof errorsValue === 'number' ? errorsValue : undefined,
+      metrics: Object.keys(metrics).length > 0 ? metrics : undefined,
     };
   }
 
@@ -180,6 +242,8 @@ export async function runBenchmarks(
   const {
     iterations,
     ocTracing = 'summary',
+    libraryTracing = 'off',
+    operation = 'export',
     wasm = 'auto',
     onProgress,
     onIterationProgress,
@@ -202,13 +266,15 @@ export async function runBenchmarks(
       absoluteFiles[`${basePath}/${filename}`] = content;
     }
 
-    const kernelOptions = { ocTracing, wasm };
+    const kernelOptions = { ocTracing, libraryTracing, wasm };
 
     const fileSystem = fromMemoryFs(absoluteFiles);
-    const transport = inProcessTransport({ fileSystem });
-    const client = createRuntimeClient({
+    const runtime = defineRuntime({
       kernels: [replicad(kernelOptions)],
       bundlers: [esbuild()],
+    });
+    const transport = inProcessTransport({ runtime, fileSystem });
+    const client = createRuntimeClient({
       transport,
     });
 
@@ -251,10 +317,26 @@ export async function runBenchmarks(
       }
 
       const start = performance.now();
-      const exportResult = await client.export('glb', {
-        file: { filename: benchCase.mainFile, path: basePath },
-        parameters: {},
-      });
+      let failureMessage: string | undefined;
+      if (operation === 'render') {
+        const renderResult = await client.openFile({
+          file: `${basePath}/${benchCase.mainFile}`,
+          parameters: {},
+        });
+        if (renderResult.superseded) {
+          failureMessage = 'render was unexpectedly superseded';
+        } else if (!renderResult.geometry.success) {
+          failureMessage = renderResult.geometry.issues.map((issue) => issue.message).join('; ');
+        }
+      } else {
+        const exportResult = await client.export('glb', {
+          file: { filename: benchCase.mainFile, path: basePath },
+          parameters: {},
+        });
+        if (!exportResult.success) {
+          failureMessage = exportResult.issues.map((issue) => issue.message).join('; ');
+        }
+      }
       const elapsed = performance.now() - start;
       onIterationProgress?.({
         caseName: benchCase.name,
@@ -264,9 +346,8 @@ export async function runBenchmarks(
         elapsed,
       });
 
-      if (!exportResult.success) {
-        const messages = exportResult.issues.map((issue) => issue.message).join('; ');
-        throw new Error(`Benchmark "${benchCase.name}" export failed (iteration ${iter}): ${messages}`);
+      if (failureMessage) {
+        throw new Error(`Benchmark "${benchCase.name}" ${operation} failed (iteration ${iter}): ${failureMessage}`);
       }
 
       if (iter < warmupRuns) {
@@ -290,6 +371,7 @@ export async function runBenchmarks(
 
     const stats = computeStats(timings);
     const ocSummary = extractOcSummary(allTelemetry);
+    const librarySummary = extractLibrarySummary(allTelemetry);
 
     results.push({
       name: benchCase.name,
@@ -299,6 +381,7 @@ export async function runBenchmarks(
       ...stats,
       telemetry: allTelemetry,
       ocSummary,
+      librarySummary,
       cpuProfile: cpuProfileResult,
       profileAnalysis,
     });

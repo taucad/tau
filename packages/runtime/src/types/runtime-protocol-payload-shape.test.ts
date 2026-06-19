@@ -13,6 +13,25 @@ import { describe, it, expect } from 'vitest';
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 
 describe('runtime-protocol payload-shape coverage (C18)', () => {
+  describe('initialize call', () => {
+    it('should accept an arbitrary runtime boot config payload', () => {
+      expect(() =>
+        runtimeProtocolSchemas.calls.initialize.args.parse({
+          config: { endpoint: 'https://api.example.test', retries: 2 },
+        }),
+      ).not.toThrow();
+    });
+
+    it('should reject unrelated initialize fields', () => {
+      expect(() =>
+        runtimeProtocolSchemas.calls.initialize.args.parse({
+          config: {},
+          unexpected: true,
+        }),
+      ).toThrow();
+    });
+  });
+
   describe('cleanup notify', () => {
     it('should accept the `null` wire payload produced by the channel layer', () => {
       // `runtime-worker-client.ts` calls `this.channel.notify('cleanup')`

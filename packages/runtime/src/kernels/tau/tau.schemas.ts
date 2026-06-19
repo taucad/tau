@@ -1,7 +1,7 @@
 /**
  * Tau converter kernel Zod schemas — single source of truth.
  *
- * Consumed by `tau.plugin.ts` (type inference) and `tau.kernel.ts` (runtime validation).
+ * Consumed by `tau.kernel.ts` for plugin type inference and runtime validation.
  *
  * @public
  */

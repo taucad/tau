@@ -10,30 +10,28 @@
  * - resolveDependencies: fast-path dependency resolution via metafile
  */
 
-import type { KernelIssue, KernelIssueCode, KernelIssueType } from '#types/runtime.types.js';
+import type { KernelIssueCode } from '#types/kernel-issue-codes.js';
+import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
+import type { KernelIssue, KernelIssueType } from '#types/runtime.types.js';
 import type { BundleResult, ExecuteResult } from '#types/runtime-bundler.types.js';
 import { defineBundler } from '#types/runtime-bundler.types.js';
 import { createEsbuildModuleVm } from '@taucad/vm';
-import type { BundleResult as VmBundleResult, ModuleVm, VmExecuteResult, VmIssue } from '@taucad/vm';
+import type { BundleResult as VmBundleResult, VmExecuteResult, VmIssue } from '@taucad/vm';
+import { z } from 'zod';
 
 const autoExportNames = ['main', 'defaultParams', 'getParameterDefinitions'];
 
-const kernelIssueCodes = new Set<KernelIssueCode>([
-  'RENDER_TIMEOUT',
-  'RENDER_ABORTED',
-  'KERNEL_BINDING_FAILED',
-  'KERNEL_CAPABILITY_MISSING',
-  'BUNDLER_FAILED',
-  'MIDDLEWARE_FAILED',
-  'RUNTIME',
-  'UNKNOWN',
-]);
+export const esbuildOptionsSchema = z.object({
+  extensions: z.array(z.string()).optional(),
+});
+
+export type EsbuildOptions = z.input<typeof esbuildOptionsSchema>;
 
 const kernelIssueTypes = new Set<KernelIssueType>(['compilation', 'runtime', 'kernel', 'connection', 'unknown']);
 
 const toKernelIssueCode = (code: string): KernelIssueCode => {
-  if (kernelIssueCodes.has(code as KernelIssueCode)) {
-    return code as KernelIssueCode;
+  if (isKernelIssueCode(code)) {
+    return code;
   }
 
   return 'UNKNOWN';
@@ -80,10 +78,12 @@ const toExecuteResult = (result: VmExecuteResult): ExecuteResult => {
 };
 
 /** @public */
-export default defineBundler<{ vm: ModuleVm }>({
+export const esbuild = defineBundler({
+  id: 'esbuild',
   name: 'EsbuildBundler',
   version: '1.0.0',
-  extensions: ['ts', 'js', 'tsx', 'jsx'],
+  optionsSchema: esbuildOptionsSchema,
+  extensions: (options) => options?.extensions ?? ['ts', 'js', 'tsx', 'jsx'],
 
   async initialize({ filesystem, projectPath }, _options) {
     const vm = await createEsbuildModuleVm({

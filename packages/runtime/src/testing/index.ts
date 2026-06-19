@@ -23,6 +23,8 @@ export {
   MockKernelWorker,
 } from '#testing/kernel-testing.utils.js';
 
+export { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+
 export {
   validateGlbData,
   getInspectReport,
@@ -42,6 +44,7 @@ export {
   getAllMaterialBaseColors,
   getMaterialAlphaMode,
   getMaterialBaseColor,
+  getTrianglePrimitiveBaseColors,
 } from '#testing/color-testing.utils.js';
 
 export type { ColorParityCase } from '#testing/color-testing.utils.js';

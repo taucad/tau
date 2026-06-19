@@ -37,7 +37,6 @@ const createMockKernelWorker = (): KernelWorker => {
     handleStageAndOpenFile: vi.fn().mockResolvedValue(undefined),
     handleUpdateParameters: vi.fn(),
     handleSetOptions: vi.fn(),
-    configureMiddleware: vi.fn().mockResolvedValue(undefined),
     ensureLoadedBundler: vi.fn().mockResolvedValue(undefined),
     setTelemetrySend: vi.fn(),
     flushTelemetry: vi.fn(),

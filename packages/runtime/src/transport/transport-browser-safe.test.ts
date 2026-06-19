@@ -29,6 +29,7 @@ import * as runtimeTransport from '#transport/index.js';
 import * as runtimeTransportInProcess from '#transport/in-process.js';
 import * as runtimeTransportWeb from '#transport/web.js';
 import * as runtimeTransportNode from '#transport/node.js';
+import { defineRuntime } from '#worker/runtime-definition.js';
 
 const concreteTransportNames = ['inProcessTransport', 'webWorkerTransport', 'nodeWorkerTransport'] as const;
 
@@ -52,9 +53,10 @@ describe('transport subpath-isolation contract', () => {
   });
 
   it('exposes `inProcessTransport` via the cross-env `@taucad/runtime/transport/in-process` subpath', () => {
+    const runtime = defineRuntime({});
     expect('inProcessTransport' in runtimeTransportInProcess).toBe(true);
     expect(typeof runtimeTransportInProcess.inProcessTransport).toBe('function');
-    expect(runtimeTransportInProcess.inProcessTransport({}).id).toBe('in-process');
+    expect(runtimeTransportInProcess.inProcessTransport({ runtime }).id).toBe('in-process');
   });
 
   it('exposes `webWorkerTransport` via the browser-only `@taucad/runtime/transport/web` subpath', () => {

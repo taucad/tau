@@ -1,15 +1,28 @@
 // @vitest-environment node
 /* oxlint-disable max-lines -- comprehensive kernel test suite */
+/* oxlint-disable @typescript-eslint/no-unsafe-assignment -- Vitest asymmetric matchers are typed as any in structured assertions. */
 /* eslint-disable @typescript-eslint/naming-convention -- File names use extensions like 'box.ts' */
-import { describe, it, expect } from 'vitest';
-import jscadKernel from '#kernels/jscad/jscad.kernel.js';
-import { createGeometryTestHelpers } from '#testing/kernel-geometry-testing.utils.js';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { encode as msgpackEncode, decode as msgpackDecode } from '@msgpack/msgpack';
+import { NodeIO } from '@gltf-transform/core';
+import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { jscad as jscadKernel } from '#kernels/jscad/jscad.kernel.js';
+import { resolveJscadModeling } from '#kernels/jscad/jscad-modeling.js';
+import { jscadToGltf } from '#kernels/jscad/jscad-to-gltf.js';
+import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import { createGeometryTestHelpers, extractGltfFromResult } from '#testing/kernel-geometry-testing.utils.js';
 import {
   createGeometryFile,
+  createMockKernelRuntime,
   createTestWorker,
   createTestGeometry,
   getTestParameters,
 } from '#testing/kernel-testing.utils.js';
+import { geometryMemoryCache, exportMemoryCache } from '#middleware/geometry-cache.middleware.js';
+import { createNodeClient } from '#node.js';
 
 // =============================================================================
 // Test Utilities
@@ -38,8 +51,93 @@ const createGeometry = async (
 
 // Create geometry test helpers instance for geometry assertions
 const geometryHelpers = createGeometryTestHelpers();
+const primitiveModeTriangles = 4;
+const primitiveModeLines = 1;
+
+const createNodeIo = (): NodeIO => new NodeIO().registerExtensions([KHRMaterialsUnlit]);
+
+const resolveJscadDefinition = async () => resolveRuntimePluginDefinition('kernel', jscadKernel());
+let jscadDefinition: Awaited<ReturnType<typeof resolveJscadDefinition>>;
+
+const readNodeMeshNames = async (
+  glb: Uint8Array<ArrayBuffer>,
+): Promise<{ nodeNames: Array<string | undefined>; meshNames: Array<string | undefined> }> => {
+  const document = await createNodeIo().readBinary(glb);
+  return {
+    nodeNames: document
+      .getRoot()
+      .listNodes()
+      .map((node) => node.getName()),
+    meshNames: document
+      .getRoot()
+      .listMeshes()
+      .map((mesh) => mesh.getName()),
+  };
+};
+
+const readPrimitiveModes = async (glb: Uint8Array<ArrayBuffer>): Promise<number[][]> => {
+  const document = await createNodeIo().readBinary(glb);
+  return document
+    .getRoot()
+    .listMeshes()
+    .map((mesh) => mesh.listPrimitives().map((primitive) => primitive.getMode()));
+};
+
+const readNodeMeshNamesFromResult = async (
+  result: Awaited<ReturnType<typeof createGeometry>>,
+): Promise<{ nodeNames: Array<string | undefined>; meshNames: Array<string | undefined> }> => {
+  const glb = extractGltfFromResult(result);
+  expect(glb).toBeDefined();
+  return readNodeMeshNames(glb!);
+};
+
+const jscadCubeCutoutSource = `
+  import { primitives, booleans } from '@jscad/modeling';
+
+  export const defaultParams = {
+    cubeSize: 50,
+    cylinderRadius: 10,
+    cylinderHeight: 60,
+  };
+
+  export default function main(p = defaultParams) {
+    const params = { ...defaultParams, ...p };
+    const cube = primitives.cuboid({
+      size: [params.cubeSize, params.cubeSize, params.cubeSize],
+      center: [0, 0, params.cubeSize / 2],
+    });
+    const cylinder = primitives.cylinder({
+      radius: params.cylinderRadius,
+      height: params.cylinderHeight,
+      center: [0, 0, params.cubeSize / 2],
+      segments: 64,
+    });
+    return booleans.subtract(cube, cylinder);
+  }
+`;
+
+const jscadGlbExportOptions = {
+  coordinateSystem: 'z-up',
+  unit: { length: 'millimeter' },
+} as const;
 
 describe('JscadWorker', () => {
+  beforeAll(async () => {
+    jscadDefinition = await resolveJscadDefinition();
+  });
+
+  describe('modeling import resolution', () => {
+    it('should resolve the Node ESM package import shape through default', async () => {
+      const module = await import('@jscad/modeling');
+      const modeling = resolveJscadModeling(module);
+
+      expect(modeling.geometries.geom3).toBeDefined();
+      expect(modeling.geometries.geom2).toBeDefined();
+      expect(modeling.geometries.path2).toBeDefined();
+      expect(modeling.modifiers.generalize).toBeTypeOf('function');
+    });
+  });
+
   // ===========================================================================
   // Tests: Parameter Extraction
   // ===========================================================================
@@ -347,9 +445,16 @@ describe('JscadWorker', () => {
               import { primitives, transforms } from '@jscad/modeling';
 
               export default function main() {
-                const cube1 = primitives.cube({ size: 10 });
-                const cube2 = transforms.translate([20, 0, 0], primitives.cube({ size: 10 }));
-                return [cube1, cube2];
+                const housing = Object.assign(primitives.cube({ size: 10 }), { name: 'Housing' });
+                const sunGear = Object.assign(
+                  transforms.translate([20, 0, 0], primitives.cube({ size: 10 })),
+                  { name: 'Sun Gear' },
+                );
+                const planetGear = Object.assign(
+                  transforms.translate([40, 0, 0], primitives.cube({ size: 10 })),
+                  { name: 'Planet Gear' },
+                );
+                return [housing, [sunGear, planetGear]];
               }
             `,
           },
@@ -357,9 +462,25 @@ describe('JscadWorker', () => {
         );
 
         expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data).toHaveLength(1);
+        }
 
-        // JSCAD may merge multiple shapes - just verify valid GLTF is produced
         await geometryHelpers.expectValidGltf(result);
+        await geometryHelpers.expectMeshCount(result, 3);
+
+        const { nodeNames, meshNames } = await readNodeMeshNamesFromResult(result);
+        expect(nodeNames).toEqual(['Housing', 'Sun Gear', 'Planet Gear']);
+        expect(meshNames).toEqual(nodeNames);
+
+        const glb = extractGltfFromResult(result);
+        expect(glb).toBeDefined();
+        const primitiveModes = await readPrimitiveModes(glb!);
+        expect(primitiveModes).toEqual([
+          [primitiveModeTriangles, primitiveModeLines],
+          [primitiveModeTriangles, primitiveModeLines],
+          [primitiveModeTriangles, primitiveModeLines],
+        ]);
       });
     });
 
@@ -547,6 +668,191 @@ module.exports = { main, getParameterDefinitions }
 
         expect(result.success).toBe(true);
         await geometryHelpers.expectValidGltf(result);
+      });
+
+      it('should keep unnamed multi-part assemblies quiet while preserving fallback names', async () => {
+        const result = await createGeometry(
+          {
+            'unnamed.ts': `
+              import { primitives, transforms } from '@jscad/modeling';
+
+              export default function main() {
+                return [
+                  primitives.cube({ size: 10 }),
+                  transforms.translate([20, 0, 0], primitives.cube({ size: 8 })),
+                ];
+              }
+            `,
+          },
+          'unnamed.ts',
+        );
+
+        expect(result.success).toBe(true);
+        if (!result.success) {
+          return;
+        }
+        expect(result.issues).toEqual([]);
+        const { nodeNames, meshNames } = await readNodeMeshNamesFromResult(result);
+        expect(nodeNames).toEqual(['Shape 1', 'Shape 2']);
+        expect(meshNames).toEqual(['Shape 1', 'Shape 2']);
+      });
+
+      it('should warn when JSCAD native validation finds non-manifold 3D mesh CSG', async () => {
+        const result = await createGeometry(
+          {
+            'invalid-union.ts': `
+              import { primitives, booleans, transforms } from '@jscad/modeling';
+
+              export default function main() {
+                const body = primitives.cylinder({ radius: 20, height: 5, segments: 64 });
+                const ear = transforms.translate(
+                  [22, 0, 0],
+                  primitives.cylinder({ radius: 8, height: 5, segments: 32 }),
+                );
+                return Object.assign(booleans.union(body, ear), { name: 'Housing' });
+              }
+            `,
+          },
+          'invalid-union.ts',
+        );
+
+        expect(result.success).toBe(true);
+        if (!result.success) {
+          return;
+        }
+        expect(result.data).toHaveLength(1);
+        const invalidIssue = result.issues.find((issue) => issue.code === 'GEOMETRY_INVALID');
+        expect(invalidIssue).toBeDefined();
+        if (!invalidIssue) {
+          return;
+        }
+        expect(invalidIssue).toEqual(
+          expect.objectContaining({
+            code: 'GEOMETRY_INVALID',
+            severity: 'warning',
+            message: expect.stringContaining("JSCAD part 'Housing' is not a closed oriented solid: non-manifold edges"),
+            details: expect.objectContaining({
+              producer: {
+                kernelId: 'jscad',
+                validator: 'geom3.validate',
+              },
+              geometry: expect.objectContaining({
+                partName: 'Housing',
+                partIndex: 0,
+                polygonCount: 90,
+                nativeValidation: {
+                  valid: false,
+                  message: expect.stringContaining('non-manifold edges'),
+                },
+                topology: expect.objectContaining({
+                  nonManifoldEdges: expect.any(Number),
+                  totalEdges: expect.any(Number),
+                  aabb: expect.objectContaining({
+                    min: expect.any(Array),
+                    max: expect.any(Array),
+                    center: expect.any(Array),
+                  }),
+                }),
+                hints: [expect.stringContaining('prefer 2D profile composition followed by one extrudeLinear()')],
+              }),
+            }),
+          }),
+        );
+        const invalidIssueDetails = invalidIssue.details as { geometry: { topology: { irregularEdges: number } } };
+        expect(invalidIssueDetails.geometry.topology.irregularEdges).toBeGreaterThan(0);
+      });
+
+      it('should not warn for the equivalent 2D profile composed before one extrusion', async () => {
+        const result = await createGeometry(
+          {
+            'valid-profile.ts': `
+              import { primitives, booleans, transforms, extrusions } from '@jscad/modeling';
+
+              export default function main() {
+                const profile = booleans.union(
+                  primitives.circle({ radius: 20, segments: 64 }),
+                  transforms.translate([22, 0, 0], primitives.circle({ radius: 8, segments: 32 })),
+                );
+                return Object.assign(extrusions.extrudeLinear({ height: 5 }, profile), { name: 'Housing' });
+              }
+            `,
+          },
+          'valid-profile.ts',
+        );
+
+        expect(result.success).toBe(true);
+        if (!result.success) {
+          return;
+        }
+        expect(result.issues.filter((issue) => issue.code === 'GEOMETRY_INVALID')).toEqual([]);
+        await geometryHelpers.expectValidGltf(result);
+      });
+
+      it('should report minimized planetary-style invalid part diagnostics by name', async () => {
+        const result = await createGeometry(
+          {
+            'planetary-minimized.ts': `
+              import { primitives, booleans, transforms, extrusions } from '@jscad/modeling';
+
+              const named = (shape, name) => Object.assign(shape, { name });
+
+              export default function main() {
+                const invalidHousing = named(
+                  booleans.union(
+                    primitives.cylinder({ radius: 20, height: 5, segments: 64 }),
+                    transforms.translate([22, 0, 0], primitives.cylinder({ radius: 8, height: 5, segments: 32 })),
+                  ),
+                  'Invalid Housing',
+                );
+                const validHousing = named(
+                  extrusions.extrudeLinear(
+                    { height: 5 },
+                    booleans.union(
+                      primitives.circle({ radius: 20, segments: 64 }),
+                      transforms.translate([22, 0, 0], primitives.circle({ radius: 8, segments: 32 })),
+                    ),
+                  ),
+                  'Valid Housing',
+                );
+                const invalidBoltSocket = named(
+                  booleans.subtract(
+                    primitives.cylinder({ radius: 10, height: 8, segments: 32 }),
+                    primitives.cylinder({ radius: 5, height: 8, segments: 32 }),
+                    transforms.translate([7, 0, 0], primitives.cylinder({ radius: 4, height: 8, segments: 16 })),
+                  ),
+                  'Bolt Socket',
+                );
+                return [invalidHousing, validHousing, invalidBoltSocket];
+              }
+            `,
+          },
+          'planetary-minimized.ts',
+        );
+
+        expect(result.success).toBe(true);
+        if (!result.success) {
+          return;
+        }
+        const invalidIssues = result.issues.filter((issue) => issue.code === 'GEOMETRY_INVALID');
+        expect(
+          invalidIssues.map((issue) => (issue.details as { geometry: { partName: string } }).geometry.partName),
+        ).toEqual(['Invalid Housing', 'Bolt Socket']);
+        expect(invalidIssues).toEqual([
+          expect.objectContaining({
+            details: expect.objectContaining({
+              geometry: expect.objectContaining({
+                hints: [expect.stringContaining('3D mesh CSG with overlapping, touching, or contained primitives')],
+              }),
+            }),
+          }),
+          expect.objectContaining({
+            details: expect.objectContaining({
+              geometry: expect.objectContaining({
+                hints: [expect.stringContaining('3D mesh CSG with overlapping, touching, or contained primitives')],
+              }),
+            }),
+          }),
+        ]);
       });
     });
 
@@ -832,7 +1138,6 @@ module.exports = { main, getParameterDefinitions }
                 context: 'user',
               },
             ],
-            // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining returns any
             location: expect.objectContaining({
               fileName: 'undefined_func.ts',
               startLineNumber: 5,
@@ -872,7 +1177,6 @@ module.exports = { main, getParameterDefinitions }
                 context: 'user',
               },
             ],
-            // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining returns any
             location: expect.objectContaining({
               fileName: 'runtime_error.ts',
               startLineNumber: 5,
@@ -956,19 +1260,23 @@ module.exports = { main, getParameterDefinitions }
       }
     });
 
-    it('should export to GLB format', async () => {
-      // Use a different filename to avoid potential test isolation issues
+    it('should export the full named assembly to GLB format', async () => {
       const worker = await createWorker({
-        'glb_cube.ts': `
-          import { primitives } from '@jscad/modeling';
+        'glb_assembly.ts': `
+          import { primitives, transforms } from '@jscad/modeling';
 
           export default function main() {
-            return primitives.cube({ size: 10 });
+            const base = Object.assign(primitives.cube({ size: 10 }), { name: 'Base' });
+            const cap = Object.assign(
+              transforms.translate([20, 0, 0], primitives.cube({ size: 6 })),
+              { name: 'Cap' },
+            );
+            return [base, cap];
           }
         `,
       });
 
-      const geometryFile = createGeometryFile('glb_cube.ts');
+      const geometryFile = createGeometryFile('glb_assembly.ts');
       const createResult = await worker.createGeometry({
         file: geometryFile,
         parameters: {},
@@ -978,8 +1286,58 @@ module.exports = { main, getParameterDefinitions }
       const exportResult = await worker.exportGeometry('glb');
       expect(exportResult.success).toBe(true);
       if (exportResult.success) {
-        expect(exportResult.data.length).toBeGreaterThan(0);
+        expect(exportResult.data).toHaveLength(1);
+        const exportedGlb = exportResult.data[0]!.bytes;
+        const { nodeNames, meshNames } = await readNodeMeshNames(exportedGlb);
+        expect(nodeNames).toEqual(['Base', 'Cap']);
+        expect(meshNames).toEqual(nodeNames);
       }
+    });
+
+    it('should preserve JSCAD invalid-geometry warnings during direct GLB export', async () => {
+      const worker = await createWorker({
+        'invalid-export.ts': `
+          import { primitives, booleans, transforms } from '@jscad/modeling';
+
+          export default function main() {
+            const body = primitives.cylinder({ radius: 20, height: 5, segments: 64 });
+            const ear = transforms.translate(
+              [22, 0, 0],
+              primitives.cylinder({ radius: 8, height: 5, segments: 32 }),
+            );
+            return Object.assign(booleans.union(body, ear), { name: 'Housing' });
+          }
+        `,
+      });
+
+      const geometryFile = createGeometryFile('invalid-export.ts');
+      const createResult = await worker.createGeometry({
+        file: geometryFile,
+        parameters: {},
+      });
+      expect(createResult.success).toBe(true);
+
+      const exportResult = await worker.exportGeometry('glb');
+      expect(exportResult.success).toBe(true);
+      if (!exportResult.success) {
+        return;
+      }
+      expect(exportResult.data[0]?.bytes.byteLength).toBeGreaterThan(0);
+      expect(exportResult.issues).toEqual([
+        expect.objectContaining({
+          code: 'GEOMETRY_INVALID',
+          severity: 'warning',
+          details: expect.objectContaining({
+            geometry: expect.objectContaining({
+              partName: 'Housing',
+              nativeValidation: {
+                valid: false,
+                message: expect.stringContaining('non-manifold edges'),
+              },
+            }),
+          }),
+        }),
+      ]);
     });
 
     it('should return error when no geometry computed', async () => {
@@ -1644,10 +2002,10 @@ module.exports = { main, getParameterDefinitions }
 });
 
 // =============================================================================
-// serializeHandle / deserializeHandle
+// serializeNativeHandle / deserializeNativeHandle
 // =============================================================================
 
-describe('serializeHandle', () => {
+describe('serializeNativeHandle', () => {
   it('should serialize nativeHandle to compact binary arrays', async () => {
     const result = await createGeometry(
       {
@@ -1664,12 +2022,159 @@ describe('serializeHandle', () => {
       return;
     }
 
-    expect(result.serializedHandle).toBeDefined();
-    const serialized = result.serializedHandle as Array<{ type: string; data: Float32Array }>;
+    expect(result.serializedNativeHandle).toBeDefined();
+    const serialized = result.serializedNativeHandle as Array<{ type: string; data: Float32Array; name?: string }>;
     expect(serialized).toHaveLength(1);
     expect(serialized[0]!.type).toBe('geom3');
+    expect(serialized[0]!.name).toBe('Shape 1');
     expect(serialized[0]!.data).toBeInstanceOf(Float32Array);
     expect(serialized[0]!.data.length).toBeGreaterThan(0);
+  });
+
+  it('should deserialize serialized handles using the normalized package import shape', async () => {
+    const result = await createGeometry(
+      {
+        'cutout.ts': jscadCubeCutoutSource,
+      },
+      'cutout.ts',
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    const { deserializeNativeHandle } = jscadDefinition;
+    expect(deserializeNativeHandle).toBeDefined();
+    if (!deserializeNativeHandle) {
+      return;
+    }
+
+    const restored = deserializeNativeHandle(
+      { serializedNativeHandle: result.serializedNativeHandle },
+      createMockKernelRuntime(),
+      { modulesRegistered: true },
+    );
+    const glb = jscadToGltf(restored, {
+      coordinateSystem: 'z-up',
+      unit: { length: 'millimeter' },
+    });
+
+    const { nodeNames } = await readNodeMeshNames(glb);
+    expect(nodeNames).toEqual(['Shape 1']);
+  });
+
+  it('should deserialize MessagePack-decoded compact binary handles and export GLB bytes', async () => {
+    const result = await createGeometry({ 'cutout.ts': jscadCubeCutoutSource }, 'cutout.ts');
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    const { deserializeNativeHandle, exportGeometry } = jscadDefinition;
+    expect(deserializeNativeHandle).toBeDefined();
+    if (!deserializeNativeHandle) {
+      return;
+    }
+
+    const decodedSerializedNativeHandle = msgpackDecode(msgpackEncode(result.serializedNativeHandle));
+    const decodedEntry = (decodedSerializedNativeHandle as Array<{ data: unknown }>)[0];
+    expect(decodedEntry?.data).not.toBeInstanceOf(Float32Array);
+    expect(ArrayBuffer.isView(decodedEntry?.data)).toBe(true);
+
+    const restoredHandle = deserializeNativeHandle(
+      { serializedNativeHandle: decodedSerializedNativeHandle },
+      createMockKernelRuntime(),
+      { modulesRegistered: true },
+    );
+    const exportResult = await exportGeometry(
+      {
+        format: 'glb',
+        nativeHandle: restoredHandle,
+        options: jscadGlbExportOptions,
+      },
+      createMockKernelRuntime(),
+      { modulesRegistered: true },
+    );
+
+    expect(exportResult.success).toBe(true);
+    if (!exportResult.success) {
+      return;
+    }
+    expect(exportResult.data).toHaveLength(1);
+    expect(exportResult.data[0]?.name).toBe('model.glb');
+    expect(exportResult.data[0]?.bytes.byteLength).toBeGreaterThan(0);
+  });
+
+  it('should reject malformed serialized compact binary with precise errors', () => {
+    const { deserializeNativeHandle } = jscadDefinition;
+    expect(deserializeNativeHandle).toBeDefined();
+    if (!deserializeNativeHandle) {
+      return;
+    }
+    const deserializeInvalidHandle = (data: unknown): void => {
+      deserializeNativeHandle({ serializedNativeHandle: data }, createMockKernelRuntime(), { modulesRegistered: true });
+    };
+
+    expect(() => {
+      deserializeInvalidHandle([{ type: 'geom3', data: new Uint8Array([1, 2, 3]) }]);
+    }).toThrow(
+      'Invalid JSCAD serialized handle compact binary at entry 0 (geom3): byte length 3 is not divisible by 4.',
+    );
+    expect(() => {
+      deserializeInvalidHandle([{ type: 'sphere', data: new Uint8Array([0, 0, 0, 0]) }]);
+    }).toThrow('Invalid JSCAD serialized handle entry 0: unsupported type "sphere"; expected geom2, geom3, or path2.');
+    expect(() => {
+      deserializeInvalidHandle([{ type: 'geom3', data: 'not-binary' }]);
+    }).toThrow(
+      'Invalid JSCAD serialized handle compact binary at entry 0 (geom3): expected Float32Array, ArrayBuffer, or ArrayBuffer view; got string.',
+    );
+  });
+
+  it('should export from L2 create cache after MessagePack restoration when export cache is absent', async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), 'tau-jscad-create-cache-export-'));
+    const cacheDirectory = join(projectPath, '.tau', 'cache', 'geometry');
+    const exportRequest = {
+      file: 'main.ts',
+      ...jscadGlbExportOptions,
+    };
+
+    try {
+      await writeFile(join(projectPath, 'main.ts'), jscadCubeCutoutSource);
+      await writeFile(join(projectPath, 'package.json'), '{"type":"module"}\n');
+      geometryMemoryCache.clear();
+      exportMemoryCache.clear();
+
+      const coldClient = await createNodeClient(projectPath);
+      const coldExport = await coldClient.export('glb', exportRequest);
+      coldClient.terminate();
+      expect(coldExport.success).toBe(true);
+      if (!coldExport.success) {
+        return;
+      }
+      expect(coldExport.data.bytes.byteLength).toBeGreaterThan(0);
+
+      geometryMemoryCache.clear();
+      exportMemoryCache.clear();
+      const cacheEntries = await readdir(cacheDirectory);
+      const exportCacheEntries = cacheEntries.filter((entry) => entry.startsWith('export-'));
+      expect(exportCacheEntries.length).toBeGreaterThan(0);
+      await Promise.all(exportCacheEntries.map(async (entry) => rm(join(cacheDirectory, entry), { force: true })));
+
+      const restoredClient = await createNodeClient(projectPath);
+      const restoredExport = await restoredClient.export('glb', exportRequest);
+      restoredClient.terminate();
+
+      expect(restoredExport.success).toBe(true);
+      if (!restoredExport.success) {
+        return;
+      }
+      expect(restoredExport.data.name).toBe('model.glb');
+      expect(restoredExport.data.bytes.byteLength).toBeGreaterThan(0);
+    } finally {
+      geometryMemoryCache.clear();
+      exportMemoryCache.clear();
+      await rm(projectPath, { recursive: true, force: true });
+    }
   });
 
   it('should serialize multiple shapes', async () => {
@@ -1677,7 +2182,12 @@ describe('serializeHandle', () => {
       {
         'shapes.ts': `
           const { cuboid, sphere } = require('@jscad/modeling').primitives;
-          module.exports = { main: () => [cuboid({ size: [10, 10, 10] }), sphere({ radius: 5 })] };
+          module.exports = {
+            main: () => [
+              Object.assign(cuboid({ size: [10, 10, 10] }), { name: 'Box' }),
+              Object.assign(sphere({ radius: 5 }), { name: 'Ball' }),
+            ],
+          };
         `,
       },
       'shapes.ts',
@@ -1688,16 +2198,62 @@ describe('serializeHandle', () => {
       return;
     }
 
-    expect(result.serializedHandle).toBeDefined();
-    const serialized = result.serializedHandle as Array<{ type: string; data: Float32Array }>;
+    expect(result.serializedNativeHandle).toBeDefined();
+    const serialized = result.serializedNativeHandle as Array<{ type: string; data: Float32Array; name?: string }>;
     expect(serialized).toHaveLength(2);
     expect(serialized[0]!.type).toBe('geom3');
+    expect(serialized[0]!.name).toBe('Box');
     expect(serialized[1]!.type).toBe('geom3');
+    expect(serialized[1]!.name).toBe('Ball');
   });
 
-  it('should have serializeHandle and deserializeHandle defined on the kernel', () => {
-    expect(jscadKernel.serializeHandle).toBeDefined();
-    expect(jscadKernel.deserializeHandle).toBeDefined();
+  it('should preserve serialized part names after handle deserialization for GLB output', async () => {
+    const result = await createGeometry(
+      {
+        'assembly.ts': `
+          const { cuboid } = require('@jscad/modeling').primitives;
+          const { translate } = require('@jscad/modeling').transforms;
+          module.exports = {
+            main: () => [
+              Object.assign(cuboid({ size: [10, 10, 10] }), { name: 'Housing' }),
+              Object.assign(translate([20, 0, 0], cuboid({ size: [6, 6, 6] })), { name: 'Carrier' }),
+            ],
+          };
+        `,
+      },
+      'assembly.ts',
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+
+    expect(result.serializedNativeHandle).toBeDefined();
+    const { deserializeNativeHandle } = jscadDefinition;
+    expect(deserializeNativeHandle).toBeDefined();
+    if (!deserializeNativeHandle) {
+      return;
+    }
+
+    const restoredHandle = deserializeNativeHandle(
+      { serializedNativeHandle: result.serializedNativeHandle },
+      createMockKernelRuntime(),
+      { modulesRegistered: true },
+    );
+
+    const glb = jscadToGltf(restoredHandle, {
+      coordinateSystem: 'z-up',
+      unit: { length: 'millimeter' },
+    });
+    const { nodeNames, meshNames } = await readNodeMeshNames(glb);
+    expect(nodeNames).toEqual(['Housing', 'Carrier']);
+    expect(meshNames).toEqual(nodeNames);
+  });
+
+  it('should have serializeNativeHandle and deserializeNativeHandle defined on the kernel', () => {
+    expect(jscadDefinition.serializeNativeHandle).toBeDefined();
+    expect(jscadDefinition.deserializeNativeHandle).toBeDefined();
   });
 });
 

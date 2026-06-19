@@ -81,13 +81,12 @@ describe('WorkerChangeChannel', () => {
     const listen = vi.fn().mockReturnValue(vi.fn());
     const { channel, wire } = createTestChannel(listen);
     const sibling = vi.fn();
-    let unsubscribeSelf: (() => void) | undefined;
-
-    unsubscribeSelf = channel.onFileWritten({
+    const unsubscribeSelf = channel.onFileWritten({
       handler: () => {
-        unsubscribeSelf?.();
+        unsubscribeSelf();
       },
     });
+
     channel.onFileWritten({ handler: sibling });
 
     wire({ type: 'fileWritten', path: '/project/a.ts', backend: 'indexeddb' });

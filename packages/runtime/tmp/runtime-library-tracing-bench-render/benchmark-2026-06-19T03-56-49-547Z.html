@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kernel Benchmark Report</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #1f2937;
+        background: #f9fafb;
+        padding: 2rem;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 1.75rem;
+        margin-bottom: 0.5rem;
+      }
+      h2 {
+        font-size: 1.25rem;
+        margin: 2rem 0 1rem;
+        border-bottom: 1px solid #e5e7eb;
+        padding-bottom: 0.5rem;
+      }
+      .meta {
+        color: #6b7280;
+        font-size: 0.875rem;
+        margin-bottom: 1.5rem;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 1.5rem;
+        font-size: 0.875rem;
+      }
+      th,
+      td {
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid #e5e7eb;
+      }
+      th {
+        background: #f3f4f6;
+        font-weight: 600;
+        color: #374151;
+      }
+      tr:hover {
+        background: #f9fafb;
+      }
+      .cat-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 9999px;
+        color: white;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        margin-right: 6px;
+      }
+      .chart-container {
+        margin: 1.5rem 0;
+        overflow-x: auto;
+      }
+      details {
+        margin: 0.75rem 0;
+      }
+      summary {
+        cursor: pointer;
+        padding: 0.5rem;
+        background: #f3f4f6;
+        border-radius: 6px;
+        font-size: 0.875rem;
+      }
+      summary:hover {
+        background: #e5e7eb;
+      }
+      .oc-table {
+        margin-top: 0.5rem;
+      }
+      .oc-table td,
+      .oc-table th {
+        padding: 0.35rem 0.5rem;
+      }
+      code {
+        background: #f3f4f6;
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-size: 0.8rem;
+      }
+      .prov-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .prov-card {
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+      }
+      .prov-card-label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #6b7280;
+        margin-bottom: 0.25rem;
+        font-weight: 600;
+      }
+      .prov-card-value {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #1f2937;
+      }
+      .prov-card-highlight {
+        color: #3b82f6;
+      }
+      .footer {
+        margin-top: 3rem;
+        color: #9ca3af;
+        font-size: 0.75rem;
+        border-top: 1px solid #e5e7eb;
+        padding-top: 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Kernel Benchmark Report</h1>
+    <p class="meta">Generated 2026-06-19T03:56:49.547Z &bull; Total duration: 73255.87ms</p>
+
+    <h2>Summary</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Operation</th>
+          <th>Mean</th>
+          <th>Median</th>
+          <th>P95</th>
+          <th>P99</th>
+          <th>Stddev</th>
+          <th>Iterations</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="cat-badge" style="background: #ec4899">stress</span> v8-engine-block</td>
+          <td>17575.77ms</td>
+          <td>17575.77ms</td>
+          <td>17575.77ms</td>
+          <td>17575.77ms</td>
+          <td>0µs</td>
+          <td>1</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Timing Distribution</h2>
+    <div class="chart-container">
+      <svg xmlns="http://www.w3.org/2000/svg" width="760" height="56" viewBox="0 0 760 56">
+        <text x="172" y="29" text-anchor="end" font-size="12" fill="#374151">v8-engine-block</text>
+        <rect x="180" y="10" width="500" height="28" fill="#EC4899" rx="3" />
+        <text x="686" y="29" font-size="11" fill="#6B7280">17575.77ms</text>
+      </svg>
+    </div>
+
+    <h2>Replicad Library Tracing</h2>
+    <details>
+      <summary><strong>v8-engine-block</strong> (13 operations)</summary>
+      <table class="oc-table">
+        <thead>
+          <tr>
+            <th>Replicad Operation</th>
+            <th>Calls</th>
+            <th>Total</th>
+            <th>Avg/Call</th>
+            <th>Errors</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>cut</code></td>
+            <td>307</td>
+            <td>14105.84ms</td>
+            <td>45.95ms</td>
+            <td>0</td>
+          </tr>
+          <tr>
+            <td><code>fuse</code></td>
+            <td>167</td>
+            <td>1668.89ms</td>
+            <td>9.99ms</td>
+            <td>0</td>
+          </tr>
+          <tr>
+            <td><code>intersect</code></td>
+            <td>9</td>
+            <td>68.99ms</td>
+            <td>7.67ms</td>
+            <td>0</td>
+          </tr>
+          <tr>
+            <td><code>rotate</code></td>
+            <td>166</td>
+            <td>30.93ms</td>
+            <td>186µs</td>
+            <td>0</td>
+          </tr>
+          <tr>
+            <td><code>makeCylinder</code></td>
+            <td>317</td>
+            <td>24.67ms</td>
+            <td>78µs</td>
+            <td>0</td>
+          </tr>
+          <tr>
+            <td><code>translate</code></td>
+            <td>88</td>
+            <td>16.33ms</td>
+            <td>186µs</td>
+            <td>0</td>
+          </tr>
+          <tr>
+            <td><code>makeBox</code></td>
+            <td>152</td>
+            <td>14.45ms</td>
+            <td>95µs</td>
+            <td>0</td>
+          </tr>
+          <tr>
+            <td><code>extrude</code></td>
+            <td>24</td>
+            <td>10.80ms</td>
+            <td>450µs</td>
+            <td>0</td>
+          </tr>
+          <tr>
+            <td><code>sketchOnPlane</code></td>
+            <td>24</td>
+            <td>8.53ms</td>
+            <td>355µs</td>
+            <td>0</td>
+          </tr>
+          <tr>
+            <td><code>drawRectangle</code></td>
+            <td>16</td>
+            <td>3.49ms</td>
+            <td>218µs</td>
+            <td>0</td>
+          </tr>
+          <tr>
+            <td><code>drawCircle</code></td>
+            <td>40</td>
+            <td>2.45ms</td>
+            <td>61µs</td>
+            <td>0</td>
+          </tr>
+          <tr>
+            <td><code>drawPolysides</code></td>
+            <td>8</td>
+            <td>1.14ms</td>
+            <td>142µs</td>
+            <td>0</td>
+          </tr>
+          <tr>
+            <td><code>makeSphere</code></td>
+            <td>8</td>
+            <td>223µs</td>
+            <td>28µs</td>
+            <td>0</td>
+          </tr>
+        </tbody>
+      </table>
+    </details>
+
+    <div class="footer">
+      Generated by Tau Kernel Benchmarking CLI &bull; 1 benchmarks &bull; 2026-06-19T03:56:49.547Z
+    </div>
+  </body>
+</html>

@@ -1,7 +1,7 @@
 /**
  * Replicad kernel Zod schemas — single source of truth.
  *
- * Consumed by `replicad.plugin.ts` (type inference) and `replicad.kernel.ts` (runtime validation).
+ * Consumed by `replicad.kernel.ts` for plugin type inference and runtime validation.
  *
  * OCCT tessellation and mesh export fragments are duplicated here (same defaults as the OpenCascade
  * kernel) so each kernel’s plugin and schema module stay self-contained.
@@ -10,16 +10,16 @@
  */
 
 import { z } from 'zod';
-import { coordinateSystemSchema } from '#types/export-option-schemas.js';
+import { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
 
-/** OCCT tessellation fragment for render options (coarse defaults for preview). */
+/** OCCT tessellation fragment for render options. */
 const occtRenderOptionSchema = z.object({
   tessellation: z
     .object({
-      linearTolerance: z.number().positive().default(0.1).describe('Linear tolerance (distance) for tessellation'),
-      angularTolerance: z.number().positive().default(30).describe('Angular tolerance (degrees) for tessellation'),
+      linearTolerance: z.number().positive().default(0.01).describe('Linear tolerance (distance) for tessellation'),
+      angularTolerance: z.number().positive().default(20).describe('Angular tolerance (degrees) for tessellation'),
     })
-    .default({ linearTolerance: 0.1, angularTolerance: 30 })
+    .default({ linearTolerance: 0.01, angularTolerance: 20 })
     .describe('Tessellation quality for preview rendering'),
 });
 
@@ -28,9 +28,9 @@ const occtExportTessellationSchema = z.object({
   tessellation: z
     .object({
       linearTolerance: z.number().positive().default(0.01).describe('Linear tolerance (distance) for tessellation'),
-      angularTolerance: z.number().positive().default(30).describe('Angular tolerance (degrees) for tessellation'),
+      angularTolerance: z.number().positive().default(20).describe('Angular tolerance (degrees) for tessellation'),
     })
-    .default({ linearTolerance: 0.01, angularTolerance: 30 })
+    .default({ linearTolerance: 0.01, angularTolerance: 20 })
     .describe('Tessellation quality for mesh-based exports'),
 });
 
@@ -41,10 +41,10 @@ const occtStlExportSchema = z
   .extend(coordinateSystemSchema.shape);
 
 /** Zod schema for OCCT-based GLB export options. */
-const occtGlbExportSchema = occtExportTessellationSchema.extend(coordinateSystemSchema.shape);
+const occtGlbExportSchema = occtExportTessellationSchema.extend(coordinateSystemSchema.shape).extend(unitSchema.shape);
 
 /** Zod schema for OCCT-based GLTF export options. */
-const occtGltfExportSchema = occtExportTessellationSchema.extend(coordinateSystemSchema.shape);
+const occtGltfExportSchema = occtExportTessellationSchema.extend(coordinateSystemSchema.shape).extend(unitSchema.shape);
 
 /**
  * Custom WASM configuration for injecting non-standard builds at runtime.
@@ -65,12 +65,13 @@ export const replicadOptionsSchema = z.object({
     .optional()
     .default('auto'),
   ocTracing: z.enum(['off', 'summary', 'per-call']).optional().default('summary'),
+  libraryTracing: z.enum(['off', 'summary', 'per-call']).optional().default('off'),
   withBrepEdges: z.boolean().optional().default(false),
   withSourceMapping: z.boolean().optional().default(false),
 });
 
 /**
- * Replicad render option schema (coarse tessellation for preview).
+ * Replicad render option schema.
  * @public
  */
 export const replicadRenderSchema = occtRenderOptionSchema;

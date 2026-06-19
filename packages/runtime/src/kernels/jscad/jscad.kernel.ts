@@ -15,10 +15,12 @@ import type { KernelRuntime } from '#types/runtime-kernel.types.js';
 import { defineKernel } from '#types/runtime-kernel.types.js';
 import { jscadExportSchemas } from '#kernels/jscad/jscad.schemas.js';
 import {
-  KERNEL_MODULES_KEY,
+  createKernelModuleShim,
+  createKernelModuleRegistryExpression,
   getModuleRegistry,
   isRecordObject,
   extractDefaultParameters,
+  registerKernelModule,
   resolveToRelative,
   enrichIssueLocation,
 } from '#kernels/kernel-module-helpers.js';
@@ -26,6 +28,11 @@ import type { KernelIssue } from '#types/runtime.types.js';
 import { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { parseStackTrace, resolveSourcePath, deriveLocationFromFrames } from '#framework/error-enrichment.js';
 import { jscadToGltf } from '#kernels/jscad/jscad-to-gltf.js';
+import { collectJscadPartIssues } from '#kernels/jscad/jscad-diagnostics.js';
+import { resolveJscadModeling } from '#kernels/jscad/jscad-modeling.js';
+import { assignJscadPartName, isRenderableJscadPart, normalizeJscadParts } from '#kernels/jscad/jscad-parts.js';
+import type { JscadPartDescriptor } from '#kernels/jscad/jscad-parts.js';
+import { resolveShapeName } from '#utils/shape-names.js';
 
 import type { JscadParameterDefinition } from '#kernels/jscad/jscad.schema.js';
 import {
@@ -42,6 +49,92 @@ type JscadModuleExports = {
   defaultParams?: Record<string, unknown>;
   default?: (...args: unknown[]) => unknown;
   main?: (...args: unknown[]) => unknown;
+};
+
+type JscadSerializedNativeHandleEntry = {
+  type: 'geom2' | 'geom3' | 'path2';
+  data: Float32Array;
+  name?: string;
+};
+
+type JscadSerializedNativeHandleType = JscadSerializedNativeHandleEntry['type'];
+
+const jscadSerializedNativeHandleTypes = new Set<JscadSerializedNativeHandleType>(['geom2', 'geom3', 'path2']);
+
+const isArrayBuffer = (value: unknown): value is ArrayBuffer => value instanceof ArrayBuffer;
+
+const describeSerializedPayload = (value: unknown): string => {
+  if (value === null) {
+    return 'null';
+  }
+  if (value === undefined) {
+    return 'undefined';
+  }
+  if (ArrayBuffer.isView(value)) {
+    return value.constructor.name;
+  }
+  if (isArrayBuffer(value)) {
+    return 'ArrayBuffer';
+  }
+  return typeof value;
+};
+
+const parseSerializedNativeHandleEntry = (
+  entry: unknown,
+  index: number,
+): { type: JscadSerializedNativeHandleType; data: unknown; name?: string } => {
+  if (!isRecordObject(entry)) {
+    throw new TypeError(`Invalid JSCAD serialized handle entry ${index}: expected an object.`);
+  }
+
+  const { type, data, name } = entry;
+  if (typeof type !== 'string' || !jscadSerializedNativeHandleTypes.has(type as JscadSerializedNativeHandleType)) {
+    throw new TypeError(
+      `Invalid JSCAD serialized handle entry ${index}: unsupported type ${JSON.stringify(type)}; expected geom2, geom3, or path2.`,
+    );
+  }
+
+  return {
+    type: type as JscadSerializedNativeHandleType,
+    data,
+    ...(typeof name === 'string' ? { name } : {}),
+  };
+};
+
+const normalizeCompactBinaryData = (options: {
+  data: unknown;
+  index: number;
+  type: JscadSerializedNativeHandleType;
+}): Float32Array => {
+  const { data, index, type } = options;
+  if (data instanceof Float32Array) {
+    return data;
+  }
+
+  let bytes: Uint8Array<ArrayBuffer> | undefined;
+  if (isArrayBuffer(data)) {
+    bytes = new Uint8Array(data);
+  } else if (ArrayBuffer.isView(data)) {
+    const viewBytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    bytes = new Uint8Array(viewBytes.byteLength);
+    bytes.set(viewBytes);
+  }
+
+  if (!bytes) {
+    throw new TypeError(
+      `Invalid JSCAD serialized handle compact binary at entry ${index} (${type}): expected Float32Array, ArrayBuffer, or ArrayBuffer view; got ${describeSerializedPayload(data)}.`,
+    );
+  }
+
+  if (bytes.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {
+    throw new TypeError(
+      `Invalid JSCAD serialized handle compact binary at entry ${index} (${type}): byte length ${bytes.byteLength} is not divisible by ${Float32Array.BYTES_PER_ELEMENT}.`,
+    );
+  }
+
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return new Float32Array(copy.buffer);
 };
 
 // =============================================================================
@@ -65,28 +158,24 @@ const jscadSubmodules = [
   'utils',
 ] as const;
 
+/**
+ * Canonical regex for detecting @jscad/modeling usage in source code.
+ *
+ * Branches: ESM import, CJS require.
+ * @public
+ */
+export const jscadDetectPattern =
+  /import\s+.*from\s+["']@jscad\/modeling(\/[^"']*)?["']|require\s*\(\s*["']@jscad\/modeling(\/[^"']*)?["']\s*\)/;
+
 // =============================================================================
 // Module registration helpers
 // =============================================================================
 
-function generateModuleShim(name: string, exports: Record<string, unknown>): string {
-  const registry = getModuleRegistry();
-  registry.set(name, exports);
-
-  const exportNames = Object.keys(exports).filter((key) => /^[$_a-z][\w$]*$/i.test(key) && key !== 'default');
-  const namedExports = exportNames.map((key) => `export const ${key} = __mod.${key};`).join('\n');
-  return `const __mod = globalThis.${KERNEL_MODULES_KEY}.get('${name}');\n${namedExports}\nexport default __mod;\n`;
-}
-
 function registerJscadModules(runtime: KernelRuntime): void {
-  const rawImport = jscadModeling as Record<string, unknown>;
-  const exports = (rawImport['default'] ?? rawImport) as Record<string, unknown>;
-  const registry = getModuleRegistry();
-  registry.set('@jscad/modeling', exports);
-
-  const rootCode = generateModuleShim('@jscad/modeling', exports);
-  runtime.bundler.registerModule('@jscad/modeling', {
-    code: rootCode,
+  const exports = resolveJscadModeling(jscadModeling) as unknown as Record<string, unknown>;
+  registerKernelModule(runtime, {
+    name: '@jscad/modeling',
+    exports,
     version: '2.12.6',
     globalName: 'jscadModeling',
   });
@@ -96,11 +185,11 @@ function registerJscadModules(runtime: KernelRuntime): void {
     const submoduleExports = exports[subpath];
     if (submoduleExports && typeof submoduleExports === 'object') {
       const subRecord = submoduleExports as Record<string, unknown>;
-      const subExportNames = Object.keys(subRecord).filter((key) => /^[$_a-z][\w$]*$/i.test(key));
-      const subNamed = subExportNames.map((key) => `export const ${key} = __mod.${key};`).join('\n');
-      const subCode = `const __mod = globalThis.${KERNEL_MODULES_KEY}.get('@jscad/modeling').${subpath};\n${subNamed}\nexport default __mod;\n`;
       runtime.bundler.registerModule(submoduleName, {
-        code: subCode,
+        code: createKernelModuleShim({
+          moduleExpression: `${createKernelModuleRegistryExpression('@jscad/modeling')}.${subpath}`,
+          exports: subRecord,
+        }),
         version: '2.12.6',
       });
     }
@@ -149,7 +238,11 @@ function resolveModule(module: unknown): JscadModuleExports {
 // =============================================================================
 
 /** @public */
-export default defineKernel({
+export const jscad = defineKernel({
+  id: 'jscad',
+  extensions: ['ts', 'js'],
+  detectImport: jscadDetectPattern,
+  builtinModuleNames: ['@jscad/modeling'],
   name: 'JscadKernel',
   version: '1.0.0',
   exportSchemas: jscadExportSchemas,
@@ -261,63 +354,82 @@ export default defineKernel({
       };
     }
 
-    const shapesArray = Array.isArray(shapes) ? shapes : [shapes];
-    const filteredShapes = shapesArray.filter(Boolean);
+    const parts = normalizeJscadParts(shapes);
+    const issues = collectJscadPartIssues(parts);
 
-    if (filteredShapes.length === 0) {
-      return { geometry: [], nativeHandle: [] };
+    if (parts.length === 0) {
+      return { geometry: [], nativeHandle: [], issues };
     }
 
     const geometries: GeometryResponse[] = [];
-    const results = await Promise.allSettled(filteredShapes.map(async (shape) => jscadToGltf(shape)));
-
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        geometries.push({ format: 'gltf', content: result.value });
-      } else {
-        logger.warn('Failed to convert shape to GLTF', { data: result.reason });
+    const renderableParts = parts.filter((part) => isRenderableJscadPart(part));
+    if (renderableParts.length > 0) {
+      try {
+        geometries.push({ format: 'gltf', content: jscadToGltf(renderableParts) });
+      } catch (error) {
+        logger.warn('Failed to convert JSCAD assembly to GLTF', { data: error });
       }
     }
 
-    return { geometry: geometries, nativeHandle: filteredShapes };
+    return { geometry: geometries, nativeHandle: parts, issues };
   },
 
-  serializeHandle(nativeHandle) {
-    const { geom2, geom3, path2 } = jscadModeling.geometries;
-    return nativeHandle.map((shape) => {
+  serializeNativeHandle({ nativeHandle }) {
+    const { geom2, geom3, path2 } = resolveJscadModeling(jscadModeling).geometries;
+    const parts = normalizeJscadParts(nativeHandle);
+    return parts.map((part): JscadSerializedNativeHandleEntry => {
+      const { shape } = part;
       if (geom3.isA(shape)) {
-        return { type: 'geom3', data: geom3.toCompactBinary(shape) } as const;
+        return { type: 'geom3', data: geom3.toCompactBinary(shape), name: part.name };
       }
       if (geom2.isA(shape)) {
-        return { type: 'geom2', data: geom2.toCompactBinary(shape) } as const;
+        return { type: 'geom2', data: geom2.toCompactBinary(shape), name: part.name };
       }
       if (path2.isA(shape)) {
-        return { type: 'path2', data: path2.toCompactBinary(shape) } as const;
+        return { type: 'path2', data: path2.toCompactBinary(shape), name: part.name };
       }
-      // oxlint-disable-next-line @typescript-eslint/no-unsafe-argument -- JSCAD geometry types are untyped (any[]); fallback to geom3 is safe
-      return { type: 'geom3', data: geom3.toCompactBinary(shape) } as const;
+      throw new Error(`Unsupported JSCAD geometry type for serialized handle at index ${part.index}.`);
     });
   },
 
-  deserializeHandle(data) {
-    const { geom2, geom3, path2 } = jscadModeling.geometries;
-    return data.map((entry) => {
+  deserializeNativeHandle({ serializedNativeHandle }) {
+    const { geom2, geom3, path2 } = resolveJscadModeling(jscadModeling).geometries;
+    if (!Array.isArray(serializedNativeHandle)) {
+      throw new TypeError('Invalid JSCAD serialized handle: expected an array of compact-binary entries.');
+    }
+
+    return (serializedNativeHandle as readonly unknown[]).map((rawEntry, index): JscadPartDescriptor => {
+      const entry = parseSerializedNativeHandleEntry(rawEntry, index);
+      const compactBinary = normalizeCompactBinaryData({ data: entry.data, index, type: entry.type });
+      const name = resolveShapeName({ index, name: entry.name, source: 'authored' });
+      let shape: unknown;
       switch (entry.type) {
         case 'geom2': {
-          return geom2.fromCompactBinary(entry.data);
+          shape = geom2.fromCompactBinary(compactBinary);
+          break;
         }
         case 'path2': {
-          return path2.fromCompactBinary(entry.data);
+          shape = path2.fromCompactBinary(compactBinary);
+          break;
         }
-        default: {
-          return geom3.fromCompactBinary(entry.data);
+        case 'geom3': {
+          shape = geom3.fromCompactBinary(compactBinary);
+          break;
         }
       }
+
+      assignJscadPartName(shape, name);
+      return {
+        shape,
+        name,
+        index,
+        sourceName: name,
+      };
     });
   },
 
   async exportGeometry(input, _runtime, _context) {
-    const { format, nativeHandle } = input;
+    const { format, nativeHandle, options } = input;
 
     if (nativeHandle.length === 0) {
       return createKernelError([
@@ -333,12 +445,13 @@ export default defineKernel({
     switch (format) {
       // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- exhaustive switch for future format expansion
       case 'glb': {
-        const gltfResults = await Promise.all(nativeHandle.map(async (shape) => jscadToGltf(shape)));
-        const gltfData = gltfResults[0];
-        if (!gltfData) {
+        const { coordinateSystem, unit } = options;
+        const renderableParts = nativeHandle.filter((part) => isRenderableJscadPart(part));
+        const issues = collectJscadPartIssues(nativeHandle);
+        if (renderableParts.length === 0) {
           return createKernelError([
             {
-              message: 'Failed to generate GLB from computed geometry',
+              message: 'No renderable JSCAD geometry available for GLB export.',
               code: 'RUNTIME',
               type: 'runtime',
               severity: 'error',
@@ -346,7 +459,8 @@ export default defineKernel({
           ]);
         }
 
-        return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(gltfData))]);
+        const gltfData = jscadToGltf(renderableParts, { coordinateSystem, unit });
+        return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(gltfData))], issues);
       }
 
       default: {

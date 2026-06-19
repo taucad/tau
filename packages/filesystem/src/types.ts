@@ -9,7 +9,7 @@
  * - FileTreeNode: tree representation for /files route
  */
 
-import type { FileStat, FileStatEntry } from '@taucad/types';
+import type { FileContentMetadata, FileStat, FileStatEntry } from '@taucad/types';
 
 // oxlint-disable-next-line no-barrel-files/no-barrel-files -- re-export for internal consumers that import from #types.js
 export type { ChangeEvent, FileStat, FileStatEntry } from '@taucad/types';
@@ -71,26 +71,43 @@ export type FileReadStreamOptions = {
  * Also used by the `/files` route to display all backends side-by-side.
  * @public
  */
-export type FileTreeNode = {
-  id: string;
-  name: string;
-  /** File byte length; directories use `0` when unknown. */
-  size: number;
-  /** Milliseconds since Unix epoch (provider stat). */
-  mtimeMs: number;
-  children?: FileTreeNode[];
-};
+export type FileTreeNode =
+  | {
+      id: string;
+      name: string;
+      /** Directories use `0` when unknown. */
+      size: number;
+      /** Milliseconds since Unix epoch (provider stat). */
+      mtimeMs: number;
+      children: FileTreeNode[];
+    }
+  | ({
+      id: string;
+      name: string;
+      /** File byte length. */
+      size: number;
+      /** Milliseconds since Unix epoch (provider stat). */
+      mtimeMs: number;
+      children?: never;
+    } & FileContentMetadata);
 
 /**
  * Directory listing row with stat metadata (worker readDirectory aggregation).
  * @public
  */
-export type TreeEntry = {
-  name: string;
-  type: 'file' | 'dir';
-  size: number;
-  mtimeMs: number;
-};
+export type TreeEntry =
+  | {
+      name: string;
+      type: 'dir';
+      size: number;
+      mtimeMs: number;
+    }
+  | ({
+      name: string;
+      type: 'file';
+      size: number;
+      mtimeMs: number;
+    } & FileContentMetadata);
 
 // =============================================================================
 // Watch API types

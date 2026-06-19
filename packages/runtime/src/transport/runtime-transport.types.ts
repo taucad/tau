@@ -22,6 +22,7 @@
 
 import type { Channel, ChannelServerHandle, RpcProtocol } from '@taucad/rpc';
 import type { Geometry } from '@taucad/types';
+import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 import type {
   AbortReason,
   GeometryGltfTransport,
@@ -44,6 +45,8 @@ declare const __transportId: unique symbol;
 declare const __transportProtocol: unique symbol;
 /** Phantom: bindings extra carried by the transport host bindings. */
 declare const __transportBindingsExtra: unique symbol;
+/** Phantom: worker/host-owned runtime definition carried by same-isolate transports. */
+declare const __transportRuntime: unique symbol;
 
 /* ============================================================ *
  * Transport descriptor                                          *
@@ -379,12 +382,14 @@ export type RuntimeTransportHost<
  * @template Protocol      - RPC protocol carried over the wire.
  * @template BindingsExtra - Transport-specific host-binding extensions.
  * @template Id            - Literal transport id.
+ * @template Runtime       - Runtime definition owned by this transport topology, when applicable.
  * @public
  */
 export type TransportPlugin<
   Protocol extends RpcProtocol = RuntimeProtocol,
   BindingsExtra extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
   Id extends string = string,
+  Runtime extends AnyRuntimeDefinition | undefined = undefined,
 > = {
   readonly id: Id;
 
@@ -394,6 +399,8 @@ export type TransportPlugin<
   readonly [__transportProtocol]?: Protocol;
   /** @internal */
   readonly [__transportBindingsExtra]?: BindingsExtra;
+  /** @internal */
+  readonly [__transportRuntime]?: Runtime;
 
   /** Pure diagnostic snapshot — never allocates SAB, spawns workers, or opens wires. */
   describe(): TransportDescriptor<Id>;
@@ -414,7 +421,9 @@ export type TransportPlugin<
  * @internal
  */
 export type TransportIdPhantomSlot = typeof __transportId;
-/** */
+/** @internal */
 export type TransportProtocolPhantomSlot = typeof __transportProtocol;
-/** */
+/** @internal */
 export type TransportBindingsExtraPhantomSlot = typeof __transportBindingsExtra;
+/** @internal */
+export type TransportRuntimePhantomSlot = typeof __transportRuntime;

@@ -1,0 +1,84 @@
+{
+  "timestamp": "2026-06-19T03:56:49.547Z",
+  "results": [
+    {
+      "name": "v8-engine-block",
+      "category": "stress",
+      "iterations": 1,
+      "timings": [17575.766916],
+      "mean": 17575.766916,
+      "median": 17575.766916,
+      "p95": 17575.766916,
+      "p99": 17575.766916,
+      "stddev": 0,
+      "librarySummary": {
+        "makeCylinder": {
+          "calls": 317,
+          "totalMs": 24.668511000054423,
+          "errors": 0
+        },
+        "fuse": {
+          "calls": 167,
+          "totalMs": 1668.8875359999802,
+          "errors": 0
+        },
+        "drawCircle": {
+          "calls": 40,
+          "totalMs": 2.4535020000257646,
+          "errors": 0
+        },
+        "translate": {
+          "calls": 88,
+          "totalMs": 16.332492999979877,
+          "errors": 0
+        },
+        "drawRectangle": {
+          "calls": 16,
+          "totalMs": 3.4894969999877503,
+          "errors": 0
+        },
+        "rotate": {
+          "calls": 166,
+          "totalMs": 30.92737300002773,
+          "errors": 0
+        },
+        "sketchOnPlane": {
+          "calls": 24,
+          "totalMs": 8.528376000002027,
+          "errors": 0
+        },
+        "extrude": {
+          "calls": 24,
+          "totalMs": 10.801667000050656,
+          "errors": 0
+        },
+        "cut": {
+          "calls": 307,
+          "totalMs": 14105.843880000088,
+          "errors": 0
+        },
+        "makeBox": {
+          "calls": 152,
+          "totalMs": 14.449590000018361,
+          "errors": 0
+        },
+        "intersect": {
+          "calls": 9,
+          "totalMs": 68.99316499998531,
+          "errors": 0
+        },
+        "makeSphere": {
+          "calls": 8,
+          "totalMs": 0.2227500000008149,
+          "errors": 0
+        },
+        "drawPolysides": {
+          "calls": 8,
+          "totalMs": 1.1392510000005132,
+          "errors": 0
+        }
+      }
+    }
+  ],
+  "totalDurationMs": 73255.87125
+}

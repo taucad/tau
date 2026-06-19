@@ -9,6 +9,8 @@ import {
 } from '#kernels/occt/oc-exceptions.js';
 import type { OcExceptionInstance } from '#kernels/occt/oc-exceptions.js';
 import { OcKernelError } from '#kernels/occt/oc-kernel-error.js';
+import type { WebAssemblyException } from '#kernels/occt/wasm-exception.js';
+import { getWebAssemblyExceptionConstructor } from '#kernels/occt/wasm-exception.js';
 import type { KernelStackFrame } from '#types/runtime.types.js';
 
 const emptyOcInstance = {} as unknown as OcExceptionInstance;
@@ -248,7 +250,12 @@ describe('formatRuntimeErrorWithOc', () => {
   });
 
   it('should produce a descriptive kernel error for undecodable WebAssembly.Exception', () => {
-    const fakeException = Object.create(WebAssembly.Exception.prototype) as unknown as WebAssembly.Exception;
+    const exceptionConstructor = getWebAssemblyExceptionConstructor();
+    if (!exceptionConstructor) {
+      throw new Error('Expected WebAssembly.Exception constructor for this test');
+    }
+    const exceptionPrototype = exceptionConstructor.prototype as Record<string, unknown>;
+    const fakeException = Object.create(exceptionPrototype) as WebAssemblyException;
     const helpers = createMockOcFormatArgs();
 
     const result = formatRuntimeErrorWithOc({

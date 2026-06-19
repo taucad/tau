@@ -1,9 +1,45 @@
-import { geometries, maths } from '@jscad/modeling';
+import * as jscadModelingImport from '@jscad/modeling';
+import type { geometries as JscadGeometries, maths as JscadMaths } from '@jscad/modeling';
 import { cadMaterialDefaults } from '@taucad/types/constants';
 import { transformNormalArray, transformVertexArray } from '#framework/common.js';
+import type { GeometryOutputTransformOptions } from '#framework/common.js';
 import { srgbTupleToLinear } from '#utils/color-space.js';
 import { writeGlb } from '#utils/glb-writer.js';
 import type { GlbInput, GlbNode, GlbPrimitive } from '#utils/glb-writer.js';
+import { getRenderableJscadParts } from '#kernels/jscad/jscad-parts.js';
+import type { JscadPartDescriptor } from '#kernels/jscad/jscad-parts.js';
+import { resolveJscadModeling } from '#kernels/jscad/jscad-modeling.js';
+
+type JscadVec3 = JscadMaths.vec3.Vec3;
+type JscadGeom3 = JscadGeometries.geom3.Geom3;
+type JscadPolygon = { vertices: JscadVec3[] };
+type Vertex3 = [number, number, number];
+export type JscadMeshTriangle = {
+  index0: number;
+  index1: number;
+  index2: number;
+  normal: Vertex3;
+};
+export type JscadMeshData = {
+  vertices: number[];
+  normals: number[];
+  indices: number[];
+  triangles: JscadMeshTriangle[];
+};
+type EdgeData = {
+  index0: number;
+  index1: number;
+  normal: Vertex3;
+};
+
+const { geometries, modifiers } = resolveJscadModeling(jscadModelingImport);
+
+const primitiveModeTriangles = 4;
+const primitiveModeLines = 1;
+const jscadEdgeThresholdDegrees = 30;
+const hashPrecisionMultiplier = 10_000_000;
+const degreesToRadians = Math.PI / 180;
+const khrMaterialsUnlitExtension = 'KHR_materials_unlit';
 
 /**
  * Type guard to check if a shape has a color property
@@ -43,96 +79,111 @@ function extractColorFromShape(shape: unknown): [number, number, number, number]
   return [r, g, b, a];
 }
 
+function getShapeType(shape: unknown): string {
+  if (shape === null) {
+    return 'null';
+  }
+  if (shape === undefined) {
+    return 'undefined';
+  }
+  if (typeof shape === 'object') {
+    const ctorName = (shape as Record<string, unknown>).constructor.name;
+    return ctorName ? String(ctorName) : 'Object';
+  }
+
+  return typeof shape;
+}
+
+function createShapeConversionError(shape: unknown, shapeIndex: number, error: unknown): Error {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  return new Error(
+    `Failed to convert shape at index ${shapeIndex} to GLTF polygon. Shape type: ${getShapeType(shape)}. ${errorMessage}`,
+  );
+}
+
+export function normalizeJscadShapeForRenderMesh(shape: unknown, shapeIndex: number): JscadGeom3 {
+  try {
+    const exportSource = geometries.geom3.clone(shape as JscadGeom3);
+    return modifiers.generalize({ snap: true, triangulate: true }, exportSource) as JscadGeom3;
+  } catch (error) {
+    throw createShapeConversionError(shape, shapeIndex, error);
+  }
+}
+
+function getRenderablePolygons(shape: unknown, shapeIndex: number): JscadPolygon[] {
+  const normalizedShape = normalizeJscadShapeForRenderMesh(shape, shapeIndex);
+  try {
+    return geometries.geom3.toPolygons(normalizedShape) as JscadPolygon[];
+  } catch (error) {
+    throw createShapeConversionError(shape, shapeIndex, error);
+  }
+}
+
+function computeTriangleNormal(v1: JscadVec3, v2: JscadVec3, v3: JscadVec3): Vertex3 {
+  const edge1X = v2[0] - v1[0];
+  const edge1Y = v2[1] - v1[1];
+  const edge1Z = v2[2] - v1[2];
+
+  const edge2X = v3[0] - v1[0];
+  const edge2Y = v3[1] - v1[1];
+  const edge2Z = v3[2] - v1[2];
+
+  let normalX = edge1Y * edge2Z - edge1Z * edge2Y;
+  let normalY = edge1Z * edge2X - edge1X * edge2Z;
+  let normalZ = edge1X * edge2Y - edge1Y * edge2X;
+
+  const length = Math.hypot(normalX, normalY, normalZ);
+  if (length > 0) {
+    normalX /= length;
+    normalY /= length;
+    normalZ /= length;
+  }
+
+  return [normalX, normalY, normalZ];
+}
+
+function dot(a: Vertex3, b: Vertex3): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function hashVertex(vertex: Vertex3): string {
+  return `${Math.round(vertex[0] * hashPrecisionMultiplier)},${Math.round(vertex[1] * hashPrecisionMultiplier)},${Math.round(vertex[2] * hashPrecisionMultiplier)}`;
+}
+
 /**
- * Extract triangulated mesh data from JSCAD shapes
+ * Extract normalized surface and topology data from a JSCAD shape.
  *
- * Processes JSCAD geometries (geom3 objects) and converts them into WebGL-compatible
- * mesh data with vertex positions, surface normals, and triangle indices. This function
- * handles multiple shapes and performs polygon extraction and triangulation.
- *
- * Key operations:
- * 1. Extracts polygons from each JSCAD geom3 object using geometries.geom3.toPolygons()
- * 2. Calculates smooth surface normals using cross products of polygon edges
- * 3. Triangulates polygons using fan triangulation (simple and fast method)
- * 4. Flattens data into Float32Array-compatible formats for GPU rendering
- *
- * The function throws an error if any shape cannot be converted to a geom3 polygon.
- * Polygons with fewer than 3 vertices are skipped as they cannot form triangles.
- * All three vertices of each triangle share the same normal (flat shading).
+ * Tau uses an export-only JSCAD normalization path that mirrors upstream
+ * serializers: clone the source geometry, then run
+ * `generalize({ snap: true, triangulate: true })`. GLB surfaces and
+ * owner-local edge lines are derived from that normalized evidence without
+ * mutating the original native shape.
  *
  * @internal
  *
- * @param shapes - Array of JSCAD geometry objects (typically geom3 type)
+ * @param shape - JSCAD geometry object
+ * @param shapeIndex - index used for error context
  * @returns Object containing flattened mesh data:
- *          - vertices: Flat array of x,y,z coordinates [x1,y1,z1,x2,y2,z2,...]
- *          - normals: Flat array of normal vectors (one per vertex) [nx1,ny1,nz1,...]
- *          - indices: Triangle indices pointing into vertex array [v0,v1,v2,v3,v4,v5,...]
+ *          - vertices: flat x,y,z coordinates
+ *          - normals: flat normal vectors
+ *          - indices: triangle indices
+ *          - triangles: triangle metadata for topology edge extraction
  *
  * @see {@link jscadToGltf} — the public API that orchestrates these helpers
- *
- * @example <caption>Extracting flat mesh data</caption>
- * ```typescript
- * const { vertices, normals, indices } = extractMeshDataFromJscadShapes(shapes);
- * // vertices: flat XYZ coordinates [x1,y1,z1,x2,y2,z2,...]
- * // normals: normalized direction vectors per vertex
- * // indices: triangle vertex indices [0,1,2,3,4,5,...]
- * ```
  */
-function extractMeshDataFromJscadShapes(shapes: unknown[]): {
-  vertices: number[];
-  normals: number[];
-  indices: number[];
-} {
-  const allPolygons: Array<{ vertices: maths.vec3.Vec3[] }> = [];
-  for (const [index, singleShape] of shapes.entries()) {
-    try {
-      const polygons = geometries.geom3.toPolygons(singleShape as geometries.geom3.Geom3);
-      allPolygons.push(...polygons);
-    } catch (error) {
-      let shapeType: string;
-      if (singleShape === null) {
-        shapeType = 'null';
-      } else if (singleShape === undefined) {
-        shapeType = 'undefined';
-      } else if (typeof singleShape === 'object') {
-        const ctorName = (singleShape as Record<string, unknown>).constructor.name;
-        shapeType = ctorName ? String(ctorName) : 'Object';
-      } else {
-        shapeType = typeof singleShape;
-      }
-
-      const errorMessage = error instanceof Error ? error.message : String(error);
-
-      throw new Error(
-        `Failed to convert shape at index ${index} to GLTF polygon. Shape type: ${shapeType}. ${errorMessage}`,
-      );
-    }
-  }
-
+export function extractMeshDataFromJscadShape(shape: unknown, shapeIndex: number): JscadMeshData {
+  const polygons = getRenderablePolygons(shape, shapeIndex);
   const vertices: number[] = [];
   const normals: number[] = [];
   const indices: number[] = [];
+  const triangles: JscadMeshTriangle[] = [];
   let vertexIndex = 0;
 
-  for (const polygon of allPolygons) {
+  for (const polygon of polygons) {
     const polyVertices = polygon.vertices;
     if (polyVertices.length < 3) {
       continue;
     }
-
-    const v1 = polyVertices[0];
-    const v2 = polyVertices[1];
-    const v3 = polyVertices[2];
-
-    if (!v1 || !v2 || !v3) {
-      continue;
-    }
-
-    const edge1 = maths.vec3.subtract(maths.vec3.create(), v2, v1);
-    const edge2 = maths.vec3.subtract(maths.vec3.create(), v3, v1);
-
-    const normal = maths.vec3.cross(maths.vec3.create(), edge1, edge2);
-    maths.vec3.normalize(normal, normal);
 
     const firstVertex = polyVertices[0];
     if (!firstVertex) {
@@ -148,48 +199,144 @@ function extractMeshDataFromJscadShapes(shapes: unknown[]): {
         continue;
       }
 
+      const normal = computeTriangleNormal(vert1, vert2, vert3);
+      const hash0 = hashVertex([vert1[0], vert1[1], vert1[2]]);
+      const hash1 = hashVertex([vert2[0], vert2[1], vert2[2]]);
+      const hash2 = hashVertex([vert3[0], vert3[1], vert3[2]]);
+      if (hash0 === hash1 || hash1 === hash2 || hash2 === hash0) {
+        continue;
+      }
+
       vertices.push(vert1[0], vert1[1], vert1[2], vert2[0], vert2[1], vert2[2], vert3[0], vert3[1], vert3[2]);
       normals.push(normal[0], normal[1], normal[2], normal[0], normal[1], normal[2], normal[0], normal[1], normal[2]);
       indices.push(vertexIndex, vertexIndex + 1, vertexIndex + 2);
+      triangles.push({
+        index0: vertexIndex,
+        index1: vertexIndex + 1,
+        index2: vertexIndex + 2,
+        normal,
+      });
       vertexIndex += 3;
     }
   }
 
-  return { vertices, normals, indices };
+  return { vertices, normals, indices, triangles };
+}
+
+function getVertex(vertices: number[], index: number): Vertex3 {
+  const offset = index * 3;
+  return [vertices[offset] ?? 0, vertices[offset + 1] ?? 0, vertices[offset + 2] ?? 0];
+}
+
+function addLineEdge(edgeVertices: number[], vertices: number[], edge: EdgeData): void {
+  const [x0, y0, z0] = getVertex(vertices, edge.index0);
+  const [x1, y1, z1] = getVertex(vertices, edge.index1);
+  edgeVertices.push(x0, y0, z0, x1, y1, z1);
 }
 
 /**
- * Build a GlbNode from a single JSCAD shape.
+ * Extract JSCAD-owned edge lines from normalized triangle topology.
  *
- * @param shape - the JSCAD geometry object
- * @param shapeIndex - index for naming
+ * This mirrors the fallback detector's boundary/sharp-edge semantics, but it
+ * runs on JSCAD's upstream serializer-style export topology before middleware
+ * fallback ever sees triangle soup. Coplanar internal segments introduced by
+ * triangulation are suppressed by the dihedral classifier, while T-junctions
+ * are split by JSCAD's `generalize({ triangulate: true })` path.
+ *
+ * @param meshData - normalized triangle data for one JSCAD part
+ * @param thresholdDegrees - minimum dihedral angle to treat as a visible edge
+ * @returns flattened line endpoint positions
+ */
+function extractTopologyEdgePositions(meshData: JscadMeshData, thresholdDegrees = jscadEdgeThresholdDegrees): number[] {
+  const thresholdCos = Math.cos(thresholdDegrees * degreesToRadians);
+  const edgeData = new Map<string, EdgeData | undefined>();
+  const edgeVertices: number[] = [];
+
+  for (const triangle of meshData.triangles) {
+    const a = getVertex(meshData.vertices, triangle.index0);
+    const b = getVertex(meshData.vertices, triangle.index1);
+    const c = getVertex(meshData.vertices, triangle.index2);
+    const hashA = hashVertex(a);
+    const hashB = hashVertex(b);
+    const hashC = hashVertex(c);
+
+    if (hashA === hashB || hashB === hashC || hashC === hashA) {
+      continue;
+    }
+
+    const edges = [
+      { hash: `${hashA}_${hashB}`, reverseHash: `${hashB}_${hashA}`, index0: triangle.index0, index1: triangle.index1 },
+      { hash: `${hashB}_${hashC}`, reverseHash: `${hashC}_${hashB}`, index0: triangle.index1, index1: triangle.index2 },
+      { hash: `${hashC}_${hashA}`, reverseHash: `${hashA}_${hashC}`, index0: triangle.index2, index1: triangle.index0 },
+    ];
+
+    for (const edge of edges) {
+      const existingEdge = edgeData.get(edge.reverseHash);
+      if (existingEdge !== undefined) {
+        if (dot(triangle.normal, existingEdge.normal) <= thresholdCos) {
+          addLineEdge(edgeVertices, meshData.vertices, existingEdge);
+        }
+        edgeData.set(edge.reverseHash, undefined);
+      } else if (!edgeData.has(edge.hash)) {
+        edgeData.set(edge.hash, {
+          index0: edge.index0,
+          index1: edge.index1,
+          normal: triangle.normal,
+        });
+      }
+    }
+  }
+
+  for (const edge of edgeData.values()) {
+    if (edge !== undefined) {
+      addLineEdge(edgeVertices, meshData.vertices, edge);
+    }
+  }
+
+  return edgeVertices;
+}
+
+function createSequentialIndices(vertexCount: number): Uint32Array<ArrayBuffer> {
+  const indices = new Uint32Array(vertexCount);
+  for (let index = 0; index < indices.length; index++) {
+    indices[index] = index;
+  }
+
+  return indices;
+}
+
+/**
+ * Build a GlbNode from a single normalized JSCAD part.
+ *
+ * @param part - the normalized JSCAD part descriptor
+ * @param transformOptions - coordinate-system and unit conversion options
  * @returns the GlbNode, or undefined if no renderable geometry
  */
-function buildNodeFromJscadShape(shape: unknown, shapeIndex: number): GlbNode | undefined {
+function buildNodeFromJscadPart(
+  part: JscadPartDescriptor,
+  transformOptions: GeometryOutputTransformOptions,
+): GlbNode | undefined {
+  const { shape } = part;
   const color = extractColorFromShape(shape);
-  const { vertices, normals, indices } = extractMeshDataFromJscadShapes([shape]);
+  const meshData = extractMeshDataFromJscadShape(shape, part.index);
+  const { vertices, normals, indices } = meshData;
 
   if (vertices.length === 0 || indices.length === 0) {
     return undefined;
   }
 
-  const positions = transformVertexArray(vertices);
-  const normalsArray = transformNormalArray(normals);
+  const positions = transformVertexArray(vertices, transformOptions);
+  const normalsArray = transformNormalArray(normals, transformOptions);
   const indicesArray = new Uint32Array(indices);
 
   const baseColor: [number, number, number, number] = color ?? [0.8, 0.8, 0.8, 1];
-
-  let materialName = 'default';
-  if (color) {
-    materialName = `rgba(${Math.round(color[0] * 255)},${Math.round(color[1] * 255)},${Math.round(color[2] * 255)},${color[3].toFixed(2)})`;
-  }
 
   // JSCAD `colorize()` produces sRGB-encoded `[0..1]` tuples. glTF
   // `baseColorFactor` is linear-space — see docs/policy/color-space-policy.md.
   const linearBaseColor = srgbTupleToLinear(baseColor);
 
   const primitive: GlbPrimitive = {
-    mode: 4,
+    mode: primitiveModeTriangles,
     positions,
     normals: normalsArray,
     indices: indicesArray,
@@ -199,13 +346,33 @@ function buildNodeFromJscadShape(shape: unknown, shapeIndex: number): GlbNode | 
       roughnessFactor: cadMaterialDefaults.roughnessFactor,
       doubleSided: true,
       alphaMode: linearBaseColor[3] < 1 ? 'BLEND' : 'OPAQUE',
-      name: materialName,
     },
   };
 
+  const primitives: GlbPrimitive[] = [primitive];
+  const edgeVertices = extractTopologyEdgePositions(meshData);
+  if (edgeVertices.length > 0) {
+    const linePositions = transformVertexArray(edgeVertices, transformOptions);
+    primitives.push({
+      mode: primitiveModeLines,
+      positions: linePositions,
+      indices: createSequentialIndices(linePositions.length / 3),
+      material: {
+        baseColorFactor: [0, 0, 0, 1],
+        metallicFactor: 0,
+        roughnessFactor: 1,
+        doubleSided: true,
+        alphaMode: 'OPAQUE',
+        extensions: {
+          [khrMaterialsUnlitExtension]: {},
+        },
+      },
+    });
+  }
+
   return {
-    name: `JSCAD_Shape_${shapeIndex}`,
-    primitives: [primitive],
+    name: part.name,
+    primitives,
   };
 }
 
@@ -220,11 +387,12 @@ function buildNodeFromJscadShape(shape: unknown, shapeIndex: number): GlbNode | 
  * This is the primary integration point between the JSCAD CAD engine and the 3D viewer.
  *
  * Conversion pipeline:
- * 1. Normalizes input to array format (single shape -> [shape])
- * 2. Creates separate mesh/node for each shape to preserve individual geometry
- * 3. Applies coordinate transformation (Z-up/mm to Y-up/meters)
- * 4. Creates glTF document with mesh data extraction, triangulation, normals, and colors
- * 5. Serializes to GLB (binary glTF) format for efficient transmission and storage
+ * 1. Normalizes JSCAD output using upstream flattening semantics and geometry filtering
+ * 2. Builds export-only normalized evidence with JSCAD's triangle-export convention
+ * 3. Creates a named mesh/node for each renderable part to preserve assembly structure
+ * 4. Applies coordinate transformation (Z-up/mm to Y-up/meters)
+ * 5. Creates GLB primitives with surface triangles, owner-local edge lines, normals, and colors
+ * 6. Serializes to GLB (binary glTF) format for efficient transmission and storage
  *
  * Color support:
  * - Automatically detects and preserves colors applied via colorize() from @jscad/modeling
@@ -233,7 +401,7 @@ function buildNodeFromJscadShape(shape: unknown, shapeIndex: number): GlbNode | 
  * - Colors are defined as [R, G, B, A] arrays with values 0-1
  *
  * The function handles:
- * - Single shapes or arrays of shapes
+ * - Single shapes, arrays, nested arrays, or normalized part descriptors
  * - Colored and non-colored shapes (defaults to light gray)
  * - Empty geometry (returns valid GLB with empty scene)
  * - Throws error for invalid or unconvertible shapes
@@ -248,6 +416,7 @@ function buildNodeFromJscadShape(shape: unknown, shapeIndex: number): GlbNode | 
  *               - Array of geometry objects
  *               - Any shape produced by @jscad/modeling functions
  *               - Shapes created with colorize() will preserve their colors
+ * @param transformOptions - coordinate-system and unit conversion options
  * @returns GLB binary (binary glTF format)
  *
  * @throws {Error} If any shape cannot be converted to GLTF polygon
@@ -262,17 +431,26 @@ function buildNodeFromJscadShape(shape: unknown, shapeIndex: number): GlbNode | 
  * const coloredGlb = jscadToGltf([redSphere, blueCube]);
  * ```
  */
-export function jscadToGltf(shape: unknown): Uint8Array<ArrayBuffer> {
-  const shapes = Array.isArray(shape) ? shape : [shape];
+export function jscadToGltf(
+  shape: unknown,
+  transformOptions: GeometryOutputTransformOptions = {},
+): Uint8Array<ArrayBuffer> {
+  const parts = getRenderableJscadParts(shape);
 
   const nodes: GlbNode[] = [];
-  for (const [index, singleShape] of shapes.entries()) {
-    const node = buildNodeFromJscadShape(singleShape, index);
+  for (const part of parts) {
+    const node = buildNodeFromJscadPart(part, transformOptions);
     if (node) {
       nodes.push(node);
     }
   }
 
-  const input: GlbInput = { nodes };
+  const hasLinePrimitives = nodes.some((node) =>
+    node.primitives.some((primitive) => primitive.mode === primitiveModeLines),
+  );
+  const input: GlbInput = {
+    nodes,
+    ...(hasLinePrimitives ? { extensionsUsed: [khrMaterialsUnlitExtension] } : {}),
+  };
   return writeGlb(input);
 }

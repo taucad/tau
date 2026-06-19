@@ -1,6 +1,8 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import { NodeIO } from '@gltf-transform/core';
 import { importToGlb } from '@taucad/converter';
+import type { GeometryGltf, GeometryResponse } from '@taucad/types';
 import type {
   KernelRuntime,
   GetDependenciesInput,
@@ -8,7 +10,10 @@ import type {
   CreateGeometryInput,
 } from '#types/runtime-kernel.types.js';
 import { createMockKernelRuntime } from '#testing/kernel-testing.utils.js';
-import tauKernel from '#kernels/tau/tau.kernel.js';
+import { tau as tauKernel } from '#kernels/tau/tau.kernel.js';
+import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import { writeGlb } from '#utils/glb-writer.js';
+import type { GlbPrimitive } from '#utils/glb-writer.js';
 
 vi.mock('@taucad/converter', () => ({
   importToGlb: vi.fn(),
@@ -16,14 +21,96 @@ vi.mock('@taucad/converter', () => ({
 
 const stepBytes = new Uint8Array([0x53, 0x54, 0x45, 0x50]);
 
+const createTrianglePrimitive = (): GlbPrimitive => ({
+  mode: 4,
+  positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+  normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+  indices: new Uint32Array([0, 1, 2]),
+  material: {
+    baseColorFactor: [1, 1, 1, 1],
+    metallicFactor: 0,
+    roughnessFactor: 1,
+    doubleSided: true,
+    alphaMode: 'OPAQUE',
+  },
+});
+
+const createNamedGlb = async (
+  options: { nodeName?: string; materialName?: string; sceneName?: string } = {},
+): Promise<Uint8Array<ArrayBuffer>> => {
+  const primitive = createTrianglePrimitive();
+  const glb = writeGlb({
+    nodes: [
+      {
+        ...(options.nodeName ? { name: options.nodeName } : {}),
+        primitives: [
+          {
+            ...primitive,
+            material: {
+              ...primitive.material,
+              ...(options.materialName ? { name: options.materialName } : {}),
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  if (!options.sceneName) {
+    return glb;
+  }
+
+  const io = new NodeIO();
+  const document = await io.readBinary(glb);
+  document.getRoot().listScenes()[0]!.setName(options.sceneName);
+  return io.writeBinary(document);
+};
+
+const readNodeMeshNames = async (
+  glbBytes: Uint8Array<ArrayBuffer>,
+): Promise<{ nodeNames: string[]; meshNames: string[]; materialNames: string[]; sceneNames: string[] }> => {
+  const document = await new NodeIO().readBinary(glbBytes);
+  return {
+    nodeNames: document
+      .getRoot()
+      .listNodes()
+      .map((node) => node.getName()),
+    meshNames: document
+      .getRoot()
+      .listMeshes()
+      .map((mesh) => mesh.getName()),
+    materialNames: document
+      .getRoot()
+      .listMaterials()
+      .map((material) => material.getName()),
+    sceneNames: document
+      .getRoot()
+      .listScenes()
+      .map((scene) => scene.getName()),
+  };
+};
+
+const findGltfGeometryContent = (geometries: GeometryResponse[]): Uint8Array<ArrayBuffer> => {
+  const gltfGeometry = geometries.find((geometry): geometry is GeometryGltf => geometry.format === 'gltf');
+  expect(gltfGeometry).toBeDefined();
+  return gltfGeometry!.content;
+};
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe('TauKernel', () => {
+  const resolveTauDefinition = async () => resolveRuntimePluginDefinition('kernel', tauKernel());
+  let tauDefinition: Awaited<ReturnType<typeof resolveTauDefinition>>;
+
+  beforeAll(async () => {
+    tauDefinition = await resolveTauDefinition();
+  });
+
   describe('getDependencies', () => {
     it('should return array containing the input filePath', async () => {
-      const result = await tauKernel.getDependencies(
+      const result = await tauDefinition.getDependencies(
         mock<GetDependenciesInput>({ filePath: '/models/part.step' }),
         mock<KernelRuntime>(),
         {},
@@ -34,7 +121,7 @@ describe('TauKernel', () => {
 
   describe('getParameters', () => {
     it('should return empty default parameters and empty JSON schema', async () => {
-      const result = await tauKernel.getParameters(mock<GetParametersInput>(), mock<KernelRuntime>(), {});
+      const result = await tauDefinition.getParameters(mock<GetParametersInput>(), mock<KernelRuntime>(), {});
       expect(result).toEqual({
         success: true,
         data: {
@@ -52,21 +139,26 @@ describe('TauKernel', () => {
 
   describe('initialize', () => {
     it('should resolve with empty config', async () => {
-      const result = await tauKernel.initialize({}, mock<KernelRuntime>());
+      const result = await tauDefinition.initialize({}, mock<KernelRuntime>());
       expect(result).toEqual({});
     });
   });
 
   describe('createGeometry', () => {
     it('should call importToGlb with file content and return geometry with gltf format', async () => {
-      const glbData = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
+      const converterMaterialName = ['Material', 'Default'].join('_');
+      const glbData = await createNamedGlb({
+        nodeName: 'Geometry',
+        materialName: converterMaterialName,
+        sceneName: 'Scene',
+      });
       vi.mocked(importToGlb).mockResolvedValue(glbData);
 
       const runtime = createMockKernelRuntime({
         filesystemOverrides: { readFileResult: stepBytes },
       });
 
-      const result = await tauKernel.createGeometry(
+      const result = await tauDefinition.createGeometry(
         mock<CreateGeometryInput>({ filePath: '/models/part.step', basePath: '/models', options: {} }),
         runtime,
         {},
@@ -80,10 +172,40 @@ describe('TauKernel', () => {
         /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.any() matcher */
         expect.objectContaining({ exists: expect.any(Function), readFile: expect.any(Function) }),
       );
-      expect(result).toEqual({
-        geometry: [{ format: 'gltf', content: glbData }],
-        nativeHandle: glbData,
+      const gltfContent = findGltfGeometryContent(result.geometry);
+      const { nodeNames, meshNames, materialNames, sceneNames } = await readNodeMeshNames(gltfContent);
+      expect(nodeNames).toEqual(['Shape 1']);
+      expect(meshNames).toEqual(['Shape 1']);
+      expect(materialNames).toEqual(['']);
+      expect(sceneNames).toEqual(['']);
+      expect(result.nativeHandle).toEqual(gltfContent);
+    });
+
+    it('should preserve nonblank names for imported glTF-family files', async () => {
+      const authoredMaterialName = ['Material', 'Default'].join('_');
+      const glbData = await createNamedGlb({
+        nodeName: 'Shape_0',
+        materialName: authoredMaterialName,
+        sceneName: 'Scene',
       });
+      vi.mocked(importToGlb).mockResolvedValue(glbData);
+
+      const runtime = createMockKernelRuntime({
+        filesystemOverrides: { readFileResult: glbData },
+      });
+
+      const result = await tauDefinition.createGeometry(
+        mock<CreateGeometryInput>({ filePath: '/models/part.glb', basePath: '/models', options: {} }),
+        runtime,
+        {},
+      );
+
+      const gltfContent = findGltfGeometryContent(result.geometry);
+      const { nodeNames, meshNames, materialNames, sceneNames } = await readNodeMeshNames(gltfContent);
+      expect(nodeNames).toEqual(['Shape_0']);
+      expect(meshNames).toEqual(['Shape_0']);
+      expect(materialNames).toEqual([authoredMaterialName]);
+      expect(sceneNames).toEqual(['Scene']);
     });
 
     it('should throw with structured issues when importToGlb fails', async () => {
@@ -94,7 +216,7 @@ describe('TauKernel', () => {
       });
 
       try {
-        await tauKernel.createGeometry(
+        await tauDefinition.createGeometry(
           mock<CreateGeometryInput>({ filePath: '/models/part.step', basePath: '/models', options: {} }),
           runtime,
           {},
@@ -114,7 +236,7 @@ describe('TauKernel', () => {
       const runtime = createMockKernelRuntime();
       const nativeHandle = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
 
-      const result = await tauKernel.exportGeometry({ format: 'glb', options: {}, nativeHandle }, runtime, {});
+      const result = await tauDefinition.exportGeometry({ format: 'glb', options: {}, nativeHandle }, runtime, {});
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -129,7 +251,7 @@ describe('TauKernel', () => {
       const runtime = createMockKernelRuntime();
       const nativeHandle = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
 
-      const result = await tauKernel.exportGeometry({ format: 'gltf', options: {}, nativeHandle }, runtime, {});
+      const result = await tauDefinition.exportGeometry({ format: 'gltf', options: {}, nativeHandle }, runtime, {});
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -142,7 +264,11 @@ describe('TauKernel', () => {
       const runtime = createMockKernelRuntime();
       const nativeHandle = new Uint8Array([1, 2, 3]);
 
-      const result = await tauKernel.exportGeometry({ format: 'stl' as 'glb', options: {}, nativeHandle }, runtime, {});
+      const result = await tauDefinition.exportGeometry(
+        { format: 'stl' as 'glb', options: {}, nativeHandle },
+        runtime,
+        {},
+      );
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -153,7 +279,7 @@ describe('TauKernel', () => {
     it('should return error result when nativeHandle is empty', async () => {
       const runtime = createMockKernelRuntime();
 
-      const result = await tauKernel.exportGeometry(
+      const result = await tauDefinition.exportGeometry(
         { format: 'glb', options: {}, nativeHandle: new Uint8Array(0) },
         runtime,
         {},
@@ -163,6 +289,22 @@ describe('TauKernel', () => {
       if (!result.success) {
         expect(result.issues[0]!.message).toContain('No geometry available');
       }
+    });
+  });
+
+  describe('native-handle snapshots', () => {
+    it('should round-trip GLB bytes through the durable native-handle hooks', () => {
+      expect(tauDefinition.serializeNativeHandle).toBeDefined();
+      expect(tauDefinition.deserializeNativeHandle).toBeDefined();
+
+      const nativeHandle = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
+      const runtime = createMockKernelRuntime();
+      const serializedNativeHandle = tauDefinition.serializeNativeHandle({ nativeHandle }, runtime, {});
+      const restored = tauDefinition.deserializeNativeHandle({ serializedNativeHandle }, runtime, {});
+
+      expect(restored).toEqual(nativeHandle);
+      expect(restored).not.toBe(nativeHandle);
+      expect(serializedNativeHandle).not.toBe(nativeHandle);
     });
   });
 });

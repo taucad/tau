@@ -43,6 +43,7 @@ describe('runtime-worker middleware onion chain', () => {
    */
   function createTrackingMiddleware(name: string, executionOrder: string[]) {
     return defineMiddleware({
+      id: name,
       name,
       async wrapCreateGeometry(request, handler) {
         executionOrder.push(`${name}-before`);
@@ -99,6 +100,7 @@ describe('runtime-worker middleware onion chain', () => {
 
       // Middleware without wrap hook
       const middleware2 = defineMiddleware({
+        id: 'NoHookMiddleware',
         name: 'NoHookMiddleware',
       });
 
@@ -136,6 +138,7 @@ describe('runtime-worker middleware onion chain', () => {
 
       // Cache middleware that short-circuits
       const cacheMiddleware = defineMiddleware({
+        id: 'CacheMiddleware',
         name: 'CacheMiddleware',
         async wrapCreateGeometry(_request, _handler) {
           executionOrder.push('cache-check');
@@ -185,6 +188,7 @@ describe('runtime-worker middleware onion chain', () => {
 
       // Outer middleware (transform) - wraps everything
       const transformMiddleware = defineMiddleware({
+        id: 'TransformMiddleware',
         name: 'TransformMiddleware',
         async wrapCreateGeometry(request, handler) {
           executionOrder.push('transform-before');
@@ -210,6 +214,7 @@ describe('runtime-worker middleware onion chain', () => {
 
       // Inner middleware (cache) - short-circuits
       const cacheMiddleware = defineMiddleware({
+        id: 'CacheMiddleware',
         name: 'CacheMiddleware',
         async wrapCreateGeometry(_request, _handler) {
           executionOrder.push('cache-hit');
@@ -265,6 +270,7 @@ describe('runtime-worker middleware onion chain', () => {
       let capturedState: Partial<TestState> = {};
 
       const statefulMiddleware = defineMiddleware({
+        id: 'StatefulMiddleware',
         name: 'StatefulMiddleware',
         stateSchema,
         async wrapCreateGeometry(input, handler, { state }) {
@@ -306,6 +312,7 @@ describe('runtime-worker middleware onion chain', () => {
       const capturedStates: Record<string, string | undefined> = {};
 
       const middleware1 = defineMiddleware({
+        id: 'Middleware1',
         name: 'Middleware1',
         stateSchema,
         async wrapCreateGeometry(input, handler, { state }) {
@@ -317,6 +324,7 @@ describe('runtime-worker middleware onion chain', () => {
       });
 
       const middleware2 = defineMiddleware({
+        id: 'Middleware2',
         name: 'Middleware2',
         stateSchema,
         async wrapCreateGeometry(input, handler, { state }) {
@@ -344,6 +352,7 @@ describe('runtime-worker middleware onion chain', () => {
   describe('result transformation', () => {
     it('should allow multiple middleware to transform results', async () => {
       const middleware1 = defineMiddleware({
+        id: 'AddSuffix1',
         name: 'AddSuffix1',
         async wrapCreateGeometry(request, handler) {
           const result = await handler(request);
@@ -361,6 +370,7 @@ describe('runtime-worker middleware onion chain', () => {
       });
 
       const middleware2 = defineMiddleware({
+        id: 'AddSuffix2',
         name: 'AddSuffix2',
         async wrapCreateGeometry(request, handler) {
           const result = await handler(request);
@@ -439,6 +449,7 @@ describe('runtime-worker middleware onion chain', () => {
       const executionOrder: string[] = [];
 
       const disabledMiddleware = defineMiddleware({
+        id: 'DisabledByDefault',
         name: 'DisabledByDefault',
         enabled: false,
         async wrapCreateGeometry(request, handler) {
@@ -471,6 +482,7 @@ describe('runtime-worker middleware onion chain', () => {
       const executionOrder: string[] = [];
 
       const disabledMiddleware = defineMiddleware({
+        id: 'DisabledByDefault',
         name: 'DisabledByDefault',
         enabled: false,
         async wrapCreateGeometry(request, handler) {
@@ -504,6 +516,7 @@ describe('runtime-worker middleware onion chain', () => {
   describe('error handling', () => {
     it('should propagate errors from main operation', async () => {
       const middleware = defineMiddleware({
+        id: 'PassthroughMiddleware',
         name: 'PassthroughMiddleware',
         async wrapCreateGeometry(request, handler) {
           return handler(request);
@@ -528,6 +541,7 @@ describe('runtime-worker middleware onion chain', () => {
 
     it('should catch errors from middleware and return error result', async () => {
       const middleware = defineMiddleware({
+        id: 'ErrorMiddleware',
         name: 'ErrorMiddleware',
         async wrapCreateGeometry(_request, _handler) {
           throw new Error('Middleware error');

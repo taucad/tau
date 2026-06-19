@@ -12,6 +12,7 @@
 
 import type { GeometryGltf } from '@taucad/types';
 import type { CompilationIssue as CompilationError } from '@taucad/kcl-wasm-lib/bindings/CompilationIssue';
+import type { System } from '@taucad/kcl-wasm-lib/bindings/ModelingCmd';
 import { asBuffer } from '@taucad/utils/file';
 import { joinPath } from '@taucad/utils/path';
 import { createExportFile } from '@taucad/types/constants';
@@ -28,6 +29,9 @@ import { convertKclErrorToKernelIssue, mapErrorToKclError } from '#kernels/zoo/e
 import { getErrorPosition } from '#kernels/zoo/source-range-utils.js';
 import { FileSystemManager } from '#kernels/zoo/filesystem-manager.js';
 import { discoverKclDependencies } from '#kernels/zoo/kcl-import-resolver.js';
+import { transformGltfExportBytes } from '#utils/gltf-export-transform.js';
+import { normalizeGltfGeometryNames } from '#utils/gltf-geometry-name-normalizer.js';
+import { enrichZooGltfTopology } from '#utils/zoo-gltf-topology.js';
 
 // =============================================================================
 // Types
@@ -37,6 +41,30 @@ type ZooContext = {
   baseUrl: string;
   kclUtils: KclUtilities | undefined;
   fileSystemManager: FileSystemManager | undefined;
+};
+
+type ZooNativeHandle = {
+  kind: 'zoo-live-engine-session';
+  hasGeometry: boolean;
+};
+
+const createZooNativeHandle = (hasGeometry: boolean): ZooNativeHandle => ({
+  kind: 'zoo-live-engine-session',
+  hasGeometry,
+});
+
+const mapCoordinateSystemToKclCoords = (coordinateSystem: 'y-up' | 'z-up' | undefined): System => {
+  if (coordinateSystem === 'y-up') {
+    return {
+      forward: { axis: 'z', direction: 'negative' },
+      up: { axis: 'y', direction: 'positive' },
+    };
+  }
+
+  return {
+    forward: { axis: 'y', direction: 'negative' },
+    up: { axis: 'z', direction: 'positive' },
+  };
 };
 
 // =============================================================================
@@ -142,9 +170,11 @@ export type ZooOptions = {
 // =============================================================================
 
 /** @public */
-export default defineKernel({
+export const zoo = defineKernel({
+  id: 'zoo',
+  extensions: ['kcl'],
   name: 'ZooKernel',
-  version: '1.0.0',
+  version: '1.2.0',
   exportSchemas: zooExportSchemas,
   optionsSchema: zooOptionsSchema,
 
@@ -211,7 +241,7 @@ export default defineKernel({
     try {
       const trimmedCode = code.trim();
       if (trimmedCode === '') {
-        return { geometry: [], nativeHandle: new Uint8Array(0) };
+        return { geometry: [], nativeHandle: createZooNativeHandle(false) };
       }
 
       const utilities = await getKclUtilitiesWithEngine(context);
@@ -238,7 +268,7 @@ export default defineKernel({
         storage: 'binary',
       });
       if (exportResult.length === 0) {
-        return { geometry: [], nativeHandle: new Uint8Array(0) };
+        return { geometry: [], nativeHandle: createZooNativeHandle(false) };
       }
 
       const gltf = exportResult[0];
@@ -246,8 +276,17 @@ export default defineKernel({
         throw new KclBuildError([{ message: 'No GLTF file in export result', code: 'RUNTIME', severity: 'error' }]);
       }
 
-      const geometry: GeometryGltf = { format: 'gltf', content: gltf.contents };
-      return { geometry: [geometry], nativeHandle: gltf.contents };
+      const normalizedGltf = await normalizeGltfGeometryNames(gltf.contents, {
+        format: 'glb',
+        rewriteLegacyGeneratedShapeNames: true,
+        materialNamePolicy: 'clear-generated',
+        materialNameSource: 'external-generated',
+        sceneNamePolicy: 'clear-generated',
+        sceneNameSource: 'external-generated',
+      });
+      const enrichedGltf = await enrichZooGltfTopology(normalizedGltf, { format: 'glb' });
+      const geometry: GeometryGltf = { format: 'gltf', content: enrichedGltf };
+      return { geometry: [geometry], nativeHandle: createZooNativeHandle(true) };
     } catch (error) {
       if (error instanceof KclBuildError) {
         throw error;
@@ -262,7 +301,7 @@ export default defineKernel({
   async exportGeometry(input, { logger }, context) {
     const { format, nativeHandle, options } = input;
 
-    if (nativeHandle.length === 0) {
+    if (!nativeHandle.hasGeometry) {
       return createKernelError([
         {
           message: 'No geometry available for export. Please build geometries before exporting.',
@@ -277,11 +316,12 @@ export default defineKernel({
 
       switch (format) {
         case 'stl': {
-          const { binary } = options;
+          const { binary, coordinateSystem, unit } = options;
           const stlResult = await utilities.exportFromMemory({
             type: 'stl',
             storage: binary ? 'binary' : 'ascii',
-            units: 'mm',
+            coords: mapCoordinateSystemToKclCoords(coordinateSystem),
+            units: unit.length === 'meter' ? 'm' : 'mm',
           });
           if (stlResult.length === 0 || !stlResult[0]) {
             return createKernelError([
@@ -292,7 +332,11 @@ export default defineKernel({
         }
 
         case 'step': {
-          const stepResult = await utilities.exportFromMemory({ type: 'step' });
+          const { coordinateSystem } = options;
+          const stepResult = await utilities.exportFromMemory({
+            type: 'step',
+            coords: mapCoordinateSystemToKclCoords(coordinateSystem),
+          });
           if (stepResult.length === 0 || !stepResult[0]) {
             return createKernelError([
               { message: 'No STEP data received from KCL export', code: 'RUNTIME', severity: 'error' },
@@ -302,16 +346,31 @@ export default defineKernel({
         }
 
         case 'glb': {
+          const { coordinateSystem, unit } = options;
           const glbResult = await utilities.exportFromMemory({ type: 'gltf', storage: 'binary' });
           if (glbResult.length === 0 || !glbResult[0]) {
             return createKernelError([
               { message: 'No GLB data received from KCL export', code: 'RUNTIME', severity: 'error' },
             ]);
           }
-          return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(glbResult[0].contents))]);
+          const transformedGlb = await transformGltfExportBytes(glbResult[0].contents, {
+            format: 'glb',
+            coordinateSystem,
+            unit,
+          });
+          const glb = await normalizeGltfGeometryNames(transformedGlb, {
+            format: 'glb',
+            rewriteLegacyGeneratedShapeNames: true,
+            materialNamePolicy: 'clear-generated',
+            materialNameSource: 'external-generated',
+            sceneNamePolicy: 'clear-generated',
+            sceneNameSource: 'external-generated',
+          });
+          return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(glb))]);
         }
 
         case 'gltf': {
+          const { coordinateSystem, unit } = options;
           const gltfResult = await utilities.exportFromMemory({
             type: 'gltf',
             storage: 'embedded',
@@ -322,7 +381,20 @@ export default defineKernel({
               { message: 'No GLTF data received from KCL export', code: 'RUNTIME', severity: 'error' },
             ]);
           }
-          return createKernelSuccess([createExportFile('gltf', 'model.gltf', asBuffer(gltfResult[0].contents))]);
+          const transformedGltf = await transformGltfExportBytes(gltfResult[0].contents, {
+            format: 'gltf',
+            coordinateSystem,
+            unit,
+          });
+          const gltf = await normalizeGltfGeometryNames(transformedGltf, {
+            format: 'gltf',
+            rewriteLegacyGeneratedShapeNames: true,
+            materialNamePolicy: 'clear-generated',
+            materialNameSource: 'external-generated',
+            sceneNamePolicy: 'clear-generated',
+            sceneNameSource: 'external-generated',
+          });
+          return createKernelSuccess([createExportFile('gltf', 'model.gltf', asBuffer(gltf))]);
         }
 
         default: {
@@ -341,6 +413,14 @@ export default defineKernel({
       logKernelIssues(kclErrorResult.issues, logger);
       return kclErrorResult;
     }
+  },
+
+  isNativeHandleValid({ nativeHandle }, _runtime, context) {
+    if (!nativeHandle.hasGeometry) {
+      return true;
+    }
+
+    return context.kclUtils?.canExportFromMemory === true;
   },
 
   async cleanup(context) {

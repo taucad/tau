@@ -11,6 +11,7 @@
 import type { FileReadStreamOptions, FileStat, ProviderCapabilities } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import { streamChunkSize } from '#backend/stream-utils.js';
+import { fileStatFromBytes } from '#content-metadata.js';
 
 const handleCacheMaxEntries = 10_000;
 
@@ -104,7 +105,9 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       } else {
         // oxlint-disable-next-line no-await-in-loop -- Sequential within single directory iteration
         const file = await handle.getFile();
-        result.push({ name, type: 'file', size: file.size, mtimeMs: file.lastModified });
+        // oxlint-disable-next-line no-await-in-loop -- Metadata classification requires exact file bytes
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        result.push({ name, ...fileStatFromBytes(bytes, file.lastModified) });
       }
     }
     return result;
@@ -129,7 +132,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     try {
       const fileHandle = await parentHandle.getFileHandle(name);
       const file = await fileHandle.getFile();
-      return { type: 'file', size: file.size, mtimeMs: file.lastModified };
+      return fileStatFromBytes(new Uint8Array(await file.arrayBuffer()), file.lastModified);
     } catch {
       try {
         await parentHandle.getDirectoryHandle(name);

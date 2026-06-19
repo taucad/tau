@@ -104,7 +104,7 @@ export const lruCache = (options: LruCacheOptions): FileContentCache => {
  * The cache adapts {@link FileContentCache.get} onto `pool.resolveCopy()` so
  * callers receive a defensive copy; `pool.resolve()` is still available for
  * downstream consumers that explicitly opt into the SAB-view fast-path
- * (see `runtime-filesystem-bridge.ts`).
+ * (see `@taucad/fs-bridge`).
  *
  * @param buffer - Pre-allocated `SharedArrayBuffer` backing the pool.
  * @returns A `SharedPool`-backed {@link FileContentCache}.

@@ -28,8 +28,6 @@ import type {
   KernelErrorResult,
   GetParametersResult,
   ExportGeometryResult,
-  MiddlewareRegistrations,
-  BundlerRegistrations,
 } from '#types/runtime.types.js';
 import type { TelemetryEntry } from '#types/runtime-protocol.types.js';
 import type {
@@ -53,16 +51,29 @@ import type {
   GetParametersHandler,
 } from '#types/runtime-middleware.types.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
-import type { KernelMiddleware } from '#middleware/runtime-middleware.js';
+import type { KernelMiddleware, MiddlewarePluginFactory } from '#middleware/runtime-middleware.js';
+import type { BundlerPlugin, KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
+import {
+  attachRuntimePluginDefinition,
+  resolveRuntimePluginDefinition,
+  runtimePluginDefinitionSymbol,
+} from '#plugins/plugin-runtime-definition.js';
+import { defineRuntime } from '#worker/runtime-definition.js';
 import { z } from 'zod';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import type { ResolvedMiddleware } from '#framework/kernel-worker.js';
 import { KernelWorker } from '#framework/kernel-worker.js';
-import { createBridgePort } from '#transport/_internal/runtime-filesystem-bridge.js';
+import { createBridgePort } from '@taucad/rpc/bridge';
 import { _fromMemoryFsHandle as fromMemoryFS } from '#transport/_internal/from-memory-fs-handle.js';
 
 let _testFileSystemHandle: ReturnType<typeof fromMemoryFS> | undefined;
 let _testFileSystemBase: RuntimeFileSystemBase | undefined;
+
+export type TestKernelInput = AnyKernelDefinition | ((options?: Record<string, unknown>) => KernelPlugin);
+
+function isKernelFactory(input: TestKernelInput): input is (options?: Record<string, unknown>) => KernelPlugin {
+  return typeof input === 'function';
+}
 
 // =============================================================================
 // Test Filesystem Utilities
@@ -100,7 +111,7 @@ function unwrapTestFs(): RuntimeFileSystemBase {
  * `RuntimeFileSystemBase` contract, not the runtime-API handle.
  *
  * Use {@link getTestFileSystemHandle} when binding the same in-memory FS
- * to a runtime client (e.g., `client.connect({ fileSystem: getTestFileSystemHandle() })`)
+ * to a runtime transport (e.g., `webWorkerTransport({ fileSystem: getTestFileSystemHandle() })`)
  * so both call sites share one storage instance.
  *
  * @returns The shared in-memory test filesystem implementation.
@@ -112,7 +123,7 @@ export function getTestFileSystem(): RuntimeFileSystemBase {
 
 /**
  * Get the shared test filesystem as the discriminated `RuntimeFileSystemHandle`
- * handle accepted by `client.connect({ fileSystem })`. Backed by the same
+ * handle accepted by runtime transports. Backed by the same
  * cached instance as {@link getTestFileSystem} so direct mutation and
  * runtime-bound access stay coherent.
  *
@@ -172,8 +183,8 @@ export type InitializeWorkerOptions = {
   onLog?: OnWorkerLog;
   /** Worker-specific options passed to initialize (e.g., ReplicadWorker: { withBrepEdges: true }) */
   workerOptions?: Record<string, unknown>;
-  /** Middleware configuration (defaults to empty array for tests that bypass dynamic loading) */
-  middlewareEntries?: MiddlewareRegistrations;
+  /** Runtime boot config passed through the initialize envelope. */
+  config?: unknown;
   /** Telemetry callback -- receives batched performance entries from the worker */
   onTelemetry?: (entries: TelemetryEntry[]) => void;
 };
@@ -212,7 +223,7 @@ export async function initializeWorkerForTesting<T extends KernelWorker>(
     },
     transferables: { fileSystemPort: port },
     options: options?.workerOptions ?? {},
-    middlewareEntries: options?.middlewareEntries ?? [],
+    config: options?.config,
   });
 
   return worker;
@@ -448,6 +459,8 @@ export function createMockRuntime<
   filesystemOverrides?: MockFileSystemOptions;
   dependencies?: readonly Dependency[];
   dependencyHash?: string;
+  projectRootPath?: string;
+  basePath?: string;
   options?: Options;
 }): KernelMiddlewareRuntime<State, Options> & {
   logger: ReturnType<typeof createMockLogger>;
@@ -460,6 +473,8 @@ export function createMockRuntime<
     state: createMockState<State>(),
 
     options: (mockOptions?.options ?? {}) as Options,
+    projectRootPath: mockOptions?.projectRootPath ?? mockOptions?.basePath ?? '/projects/test-build',
+    basePath: mockOptions?.basePath ?? mockOptions?.projectRootPath ?? '/projects/test-build',
     dependencies: mockOptions?.dependencies ?? [],
     dependencyHash: mockOptions?.dependencyHash ?? defaultMockDependencyHash,
     registerWatchPath: vi.fn(),
@@ -628,8 +643,10 @@ export type CreateTestWorkerOptions = {
   detectImport?: string;
   /** Builtin module names this kernel provides (e.g., ['replicad']) */
   builtinModuleNames?: string[];
-  /** Bundler config to load (enables detectImports-based transitive detection in tests) */
-  bundlerEntries?: BundlerRegistrations;
+  /** Bundler plugins to load (enables detectImports-based transitive detection in tests) */
+  bundlers?: readonly BundlerPlugin[];
+  /** Middleware plugins to register for the test worker */
+  middleware?: readonly MiddlewarePlugin[];
   /** Pre-loaded bundler definition (bypasses dynamic import; auto-loaded for JS/TS kernels if not provided) */
   bundlerDefinition?: BundlerDefinition;
   /** Skip automatic bundler loading for JS/TS kernels (default: false) */
@@ -669,16 +686,6 @@ function inferExtensions(definition: AnyKernelDefinition): string[] {
 }
 
 /**
- * Infer an import-detection regex from the kernel name.
- *
- * @param _definition - the kernel definition (unused — detection is handled at the plugin layer)
- * @returns undefined — detection is always handled at the plugin layer
- */
-function inferDetectImport(_definition: AnyKernelDefinition): string | undefined {
-  return undefined;
-}
-
-/**
  * Create and initialize a KernelRuntimeWorker with a single kernel definition.
  * Seeds the filesystem with provided files before creating the worker.
  * Uses the production runtime worker path (defineKernel modules).
@@ -690,7 +697,7 @@ function inferDetectImport(_definition: AnyKernelDefinition): string | undefined
  * @public
  */
 export async function createTestWorker(
-  definition: AnyKernelDefinition,
+  definition: TestKernelInput,
   files: Record<string, string>,
   options?: CreateTestWorkerOptions,
 ): Promise<KernelRuntimeWorker> {
@@ -703,25 +710,35 @@ export async function createTestWorker(
 
   await seedTestFileSystem(absoluteFiles);
 
-  const worker = new KernelRuntimeWorker();
-  const extensions = options?.extensions ?? inferExtensions(definition);
-  const detectImport = options?.detectImport ?? inferDetectImport(definition);
+  let factoryKernel: KernelPlugin | undefined;
+  let kernelDefinition: AnyKernelDefinition;
+  if (isKernelFactory(definition)) {
+    factoryKernel = definition(options?.workerOptions);
+    kernelDefinition = await resolveRuntimePluginDefinition('kernel', factoryKernel);
+  } else {
+    kernelDefinition = definition;
+  }
+  const kernel = attachRuntimePluginDefinition(
+    {
+      id: factoryKernel?.id ?? kernelDefinition.name,
+      extensions: options?.extensions ?? factoryKernel?.extensions ?? inferExtensions(kernelDefinition),
+      ...(options?.detectImport ? { detectImport: new RegExp(options.detectImport) } : {}),
+      ...(options?.builtinModuleNames ? { builtinModuleNames: options.builtinModuleNames } : {}),
+      options: options?.workerOptions,
+    },
+    () => kernelDefinition,
+  );
+  const extensions = options?.extensions ?? kernel.extensions;
+  const runtime = defineRuntime({
+    kernels: [kernel],
+    middleware: options?.middleware ?? [],
+    bundlers: options?.bundlers ?? [],
+  });
+  const worker = new KernelRuntimeWorker({ runtime });
 
   await initializeWorkerForTesting(worker, {
     onTelemetry: options?.onTelemetry,
-    workerOptions: {
-      kernelModules: [
-        {
-          id: definition.name,
-          moduleUrl: 'test://inline',
-          extensions,
-          detectImport,
-          builtinModuleNames: options?.builtinModuleNames,
-          options: options?.workerOptions,
-          definition,
-        },
-      ],
-    },
+    workerOptions: options?.workerOptions,
   });
 
   // Auto-load bundler for JS/TS kernels (needed for bundle/execute/resolveDependencies).
@@ -730,22 +747,23 @@ export async function createTestWorker(
   const needsBundler =
     !options?.skipBundler && extensions.some((extension) => ['ts', 'js', 'tsx', 'jsx'].includes(extension));
   if (needsBundler) {
-    const bundlerDefinition =
-      options?.bundlerDefinition ??
-      (
-        (await import('#bundler/esbuild.bundler.js')) as {
-          default: BundlerDefinition;
-        }
-      ).default;
-    const dummyConfig = {
-      bundlerModuleUrl: 'test://esbuild',
-      extensions: ['ts', 'js', 'tsx', 'jsx'],
-    };
+    let bundlerDefinition = options?.bundlerDefinition;
+    const dummyConfig = bundlerDefinition
+      ? attachRuntimePluginDefinition(
+          { id: 'esbuild', extensions: ['ts', 'js', 'tsx', 'jsx'] },
+          () => bundlerDefinition!,
+        )
+      : (
+          (await import('#bundler/esbuild.bundler.js')) as {
+            esbuild: () => BundlerPlugin;
+          }
+        ).esbuild();
+    bundlerDefinition ??= await resolveRuntimePluginDefinition('bundler', dummyConfig);
     await worker.ensureLoadedBundler(dummyConfig, bundlerDefinition);
   }
 
-  if (options?.bundlerEntries) {
-    for (const entry of options.bundlerEntries) {
+  if (options?.bundlers) {
+    for (const entry of options.bundlers) {
       await worker.ensureLoadedBundler(entry);
     }
   }
@@ -763,7 +781,7 @@ export async function createTestWorker(
  * @public
  */
 export async function getTestParameters(
-  definition: AnyKernelDefinition,
+  definition: TestKernelInput,
   files: Record<string, string>,
   mainFile: string,
 ): Promise<{
@@ -797,7 +815,7 @@ export async function getTestParameters(
  * @public
  */
 export async function createTestGeometry(input: {
-  definition: AnyKernelDefinition;
+  definition: TestKernelInput;
   files: Record<string, string>;
   mainFile: string;
   parameters?: Record<string, unknown>;
@@ -929,7 +947,7 @@ export function createMockRuntimeClient(): RuntimeClient {
  */
 export type MockKernelWorkerOptions = {
   /** Middleware array to use (overrides default middleware) */
-  middleware: KernelMiddleware[];
+  middleware: Array<KernelMiddleware | MiddlewarePlugin | MiddlewarePluginFactory<string, unknown>>;
   /** Resolved configs parallel to the middleware array (defaults to empty objects) */
   middlewareConfigs?: Array<Record<string, unknown>>;
   /** Per-middleware enabled overrides (defaults to middleware.enabled ?? true) */
@@ -948,7 +966,31 @@ export type MockKernelWorkerOptions = {
   renderZodSchema?: z.ZodType;
   /** Pre-set the nativeHandle on construction (simulates prior createGeometry) */
   nativeHandle?: unknown;
+  /** Worker-owned transcoder plugins to load during initialize. */
+  transcoders?: readonly TranscoderPlugin[];
 };
+
+function normalizeTestMiddleware(
+  entry: KernelMiddleware | MiddlewarePlugin | MiddlewarePluginFactory<string, unknown>,
+): KernelMiddleware {
+  const plugin = typeof entry === 'function' ? entry() : entry;
+  if ('name' in plugin) {
+    return plugin;
+  }
+
+  const load = (
+    plugin as { readonly [runtimePluginDefinitionSymbol]?: () => KernelMiddleware | Promise<KernelMiddleware> }
+  )[runtimePluginDefinitionSymbol];
+  if (!load) {
+    throw new Error(`Test middleware '${plugin.id}' is missing a worker-owned definition.`);
+  }
+
+  const middleware = load();
+  if (middleware instanceof Promise) {
+    throw new TypeError(`Test middleware '${plugin.id}' resolved asynchronously; use KernelRuntimeWorker instead.`);
+  }
+  return middleware;
+}
 
 /**
  * Mock concrete implementation of KernelWorker for testing.
@@ -968,13 +1010,16 @@ export class MockKernelWorker extends KernelWorker {
   private readonly mockExportResult: ExportGeometryResult;
 
   public constructor(options: MockKernelWorkerOptions) {
-    super();
-    this.testResolvedMiddleware = options.middleware.map((middleware, index) => ({
-      middleware,
-      options: options.middlewareConfigs?.[index] ?? {},
-      url: `mock://${middleware.name}`,
-      enabled: options.middlewareEnabled?.[index] ?? middleware.enabled ?? true,
-    }));
+    super({ transcoders: options.transcoders ?? [] });
+    this.testResolvedMiddleware = options.middleware.map((middlewareEntry, index) => {
+      const middleware = normalizeTestMiddleware(middlewareEntry);
+      return {
+        middleware,
+        options: options.middlewareConfigs?.[index] ?? {},
+        id: middleware.name,
+        enabled: options.middlewareEnabled?.[index] ?? middleware.enabled ?? true,
+      };
+    });
     this.mockComputeResult =
       options.computeResult ?? createSuccessResult([{ format: 'gltf', content: new Uint8Array([1, 2, 3]) }]);
     this.mockExportResult = options.exportResult ?? {
@@ -1019,14 +1064,16 @@ export class MockKernelWorker extends KernelWorker {
    *
    * @param filename - the filename to use for the mock geometry file
    * @param parameters - the parameters to pass to createGeometry
+   * @param options - the render options to pass to createGeometry
    * @returns the hashed geometry result
    */
   public async runCreateGeometry(
     filename = 'test.kcl',
     parameters: Record<string, unknown> = {},
+    options?: Record<string, unknown>,
   ): Promise<HashedGeometryResult> {
     const mockFile = createGeometryFile(filename);
-    return this.createGeometry({ file: mockFile, parameters });
+    return this.createGeometry({ file: mockFile, parameters, options });
   }
 
   /**
@@ -1072,6 +1119,7 @@ export class MockKernelWorker extends KernelWorker {
     _runtime: KernelRuntime,
   ): Promise<CreateGeometryResult> {
     this.createGeometryCalls++;
+    this.nativeHandle ??= { kind: 'mock-native-handle' };
     return this.mockComputeResult;
   }
 
@@ -1092,6 +1140,10 @@ export class MockKernelWorker extends KernelWorker {
 
   protected override getActiveKernelId(): string | undefined {
     return 'mock-kernel';
+  }
+
+  protected override getActiveKernelVersion(): string | undefined {
+    return '1.0.0';
   }
 }
 

@@ -34,20 +34,24 @@ export class RuntimeTracer implements RuntimeSpanTracer {
     this.activeSpanId = id;
 
     return {
-      end: () => {
+      end: (endAttributes?: SpanAttributes) => {
         if (spanEpoch !== this.epoch) {
           return;
         }
 
+        const mergedAttributes = {
+          ...attributes,
+          ...endAttributes,
+        };
         const detail: Record<string, unknown> = {
           spanId: id,
           parentSpanId: parentId,
-          ...attributes,
+          ...mergedAttributes,
           devtools: {
             dataType: 'track-entry',
             track: 'Kernel Pipeline',
             trackGroup: 'Tau',
-            properties: Object.entries(attributes ?? {}).map(([k, v]) => [k, String(v)]),
+            properties: Object.entries(mergedAttributes).map(([k, v]) => [k, String(v)]),
           },
         };
 

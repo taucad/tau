@@ -14,7 +14,7 @@
  * docs/policy/color-space-policy.md.
  */
 import { describe, expect, it } from 'vitest';
-import opencascadeKernel from '#kernels/opencascade/opencascade.kernel.js';
+import { opencascade as opencascadeKernel } from '#kernels/opencascade/opencascade.kernel.js';
 import {
   colorParityCases,
   expectLinearBaseColor,

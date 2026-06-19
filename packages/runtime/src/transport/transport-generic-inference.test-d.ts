@@ -16,9 +16,13 @@ import type {
   TransportId,
   TransportProtocol,
   TransportBindingsExtra,
+  RuntimeFromTransport,
   TransportClientOptions,
 } from '#transport/transport-projections.js';
+import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
+import { inProcessTransport } from '#transport/in-process-transport.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import { defineRuntime } from '#worker/runtime-definition.js';
 
 const stubClient = (): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<string, unknown>>, 'web-worker'> =>
   ({ id: 'web-worker' }) as unknown as RuntimeTransportClient<
@@ -79,5 +83,20 @@ describe('transport callable generic inference end-to-end (C12)', () => {
     assertType<C>({ workerScript: '/w.js', name: 'foo' });
     /* @ts-expect-error -- workerScript missing */
     assertType<C>({ name: 'oops' });
+  });
+
+  it('RuntimeFromTransport is undefined for worker-backed transports', () => {
+    type R = RuntimeFromTransport<ReturnType<typeof bundledTransport>>;
+    assertType<undefined>(undefined as unknown as R);
+  });
+
+  it('RuntimeFromTransport projects in-process runtime definitions', () => {
+    const runtime = defineRuntime({});
+    const transport = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
+    type R = RuntimeFromTransport<typeof transport>;
+    assertType<typeof runtime>(undefined as unknown as R);
+
+    // @ts-expect-error -- same-isolate transports own host creation and must receive a runtime.
+    inProcessTransport({ fileSystem: fromMemoryFs() });
   });
 });

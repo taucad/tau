@@ -17,7 +17,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as url from 'node:url';
 import { describe, it } from 'vitest';
-import replicadKernel from '#kernels/replicad/replicad.kernel.js';
+import { replicad as replicadKernel } from '#kernels/replicad/replicad.kernel.js';
 import { createGeometryTestHelpers } from '#testing/kernel-geometry-testing.utils.js';
 import { assertSuccess, createGeometryFile, createTestWorker } from '#testing/kernel-testing.utils.js';
 

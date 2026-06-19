@@ -1,17 +1,29 @@
+import type { FileContentMetadata } from '@taucad/types';
+
 /**
  * Typed directory listing surface for {@link FileTreeService.listDirectory}.
  *
  * @public
  */
-export type ListedDirectoryEntry = {
-  name: string;
-  path: string;
-  isFolder: boolean;
-  /** File size in bytes, or `0` for directories. */
-  size: number;
-  /** Last-modified timestamp in milliseconds since the Unix epoch. */
-  mtimeMs: number;
-};
+export type ListedDirectoryEntry =
+  | {
+      name: string;
+      path: string;
+      isFolder: true;
+      /** Directories use `0` when unknown. */
+      size: number;
+      /** Last-modified timestamp in milliseconds since the Unix epoch. */
+      mtimeMs: number;
+    }
+  | ({
+      name: string;
+      path: string;
+      isFolder: false;
+      /** File size in bytes. */
+      size: number;
+      /** Last-modified timestamp in milliseconds since the Unix epoch. */
+      mtimeMs: number;
+    } & FileContentMetadata);
 
 /**
  * Discriminated snapshot for reactive directory listing consumers (see {@link useDirectoryListing}).

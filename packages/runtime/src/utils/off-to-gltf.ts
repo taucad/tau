@@ -1,24 +1,28 @@
 import { parseOff } from '#utils/import-off.js';
 import { createGlb, createGltf } from '#utils/export-glb.js';
-import { transformVerticesGltf, transformVerticesZup } from '#framework/common.js';
+import { createVertexTransform } from '#framework/common.js';
+import type { GeometryOutputTransformOptions } from '#framework/common.js';
+
+export type ConvertOffToGltfOptions = GeometryOutputTransformOptions & {
+  format?: 'glb' | 'gltf';
+};
 
 /**
  * Converts OFF format data to a glTF/GLB file with configurable coordinate system.
  *
  * @param offContent - the OFF file content as a string
- * @param format - output format: `'glb'` for binary glTF, `'gltf'` for JSON glTF
- * @param coordinateSystem - output coordinate convention: `'y-up'` (glTF spec default) or `'z-up'`
+ * @param options - Output format, coordinate convention, and unit convention.
  * @returns the encoded glTF/GLB as a byte array
  *
  * @public
  */
 export async function convertOffToGltf(
   offContent: string,
-  format: 'glb' | 'gltf' = 'glb',
-  coordinateSystem: 'y-up' | 'z-up' = 'z-up',
+  options: ConvertOffToGltfOptions = {},
 ): Promise<Uint8Array<ArrayBuffer>> {
   const offData = parseOff(offContent);
-  const transform = coordinateSystem === 'y-up' ? transformVerticesGltf : transformVerticesZup;
+  const format = options.format ?? 'glb';
+  const transform = createVertexTransform(options);
 
   if (format === 'gltf') {
     return createGltf(offData, transform);

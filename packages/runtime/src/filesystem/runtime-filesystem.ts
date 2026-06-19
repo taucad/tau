@@ -8,7 +8,7 @@
  * never from the public surface.
  *
  * Construct with one of the bundled `fromX` factories ({@link fromMemoryFs},
- * {@link fromFsLike}, {@link fromChannelFs}) or one of the subpath-exported
+ * {@link fromFsLike}, {@link fromFileSystemBridge}) or one of the subpath-exported
  * factories (`fromNodeFs` from `@taucad/runtime/filesystem/node`,
  * `fromBrowserFs` from `@taucad/runtime/filesystem/browser`).
  *
@@ -18,11 +18,8 @@
 import { _fromMemoryFsHandle } from '#transport/_internal/from-memory-fs-handle.js';
 import { _fromFsLikeHandle } from '#transport/_internal/from-fs-like-handle.js';
 import type { FsLike } from '#transport/_internal/from-fs-like-handle.js';
-import {
-  channelHandleFromWorker,
-  hasRuntimeFileSystemHandle,
-  wrapAsRuntimeFileSystem,
-} from '#transport/_internal/runtime-filesystem-handle.js';
+import { hasRuntimeFileSystemHandle, wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
+import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 
 declare const __runtimeFileSystemBrand: unique symbol;
 
@@ -96,22 +93,18 @@ export const fromFsLike = (fsLike: FsLike, rootPath?: string): RuntimeFileSystem
   wrapAsRuntimeFileSystem(_fromFsLikeHandle(fsLike, rootPath));
 
 /**
- * Create an opaque {@link RuntimeFileSystem} bridged to a remote
- * `Worker` exposing `FileSystemProvider` over `postMessage`. The
- * worker becomes the FS authority; calls dispatch through a
- * MessagePort created on first use.
+ * Create an opaque {@link RuntimeFileSystem} bridged to a remote filesystem
+ * authority through a filesystem bridge connection.
  *
- * Renamed from `fromWorkerOpaque` (R7) per v6 Appendix A — the v6 spec
- * names the channel-bridged factory `fromChannelFs` to reflect that it
- * wraps any FS-bridge channel (a Worker is one of several channel
- * sources; future host-process / iframe / Electron utility transports
- * supply their own pre-wired bridge channel).
- *
- * @param worker - Browser/Node `Worker` instance whose host hosts the FS.
+ * @param connection - Filesystem bridge connection opened by `@taucad/fs-bridge`.
  * @public
  */
-export const fromChannelFs = (worker: Worker): RuntimeFileSystem =>
-  wrapAsRuntimeFileSystem(channelHandleFromWorker(worker));
+export const fromFileSystemBridge = (connection: FileSystemBridgeConnection): RuntimeFileSystem =>
+  wrapAsRuntimeFileSystem({
+    kind: 'channel',
+    port: connection.port,
+    dispose: connection.dispose,
+  });
 
 /* Re-export `FsLike` from this module so the `@taucad/runtime/filesystem`
  * subpath barrel exposes both the type and the factory next to

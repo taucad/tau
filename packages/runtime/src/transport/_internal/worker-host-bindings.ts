@@ -21,6 +21,7 @@ import type {
   RuntimeInitializeMemoryHandle,
 } from '#transport/runtime-transport.types.js';
 import { adoptHostAbort } from '#transport/_internal/abort-channel.js';
+import { encodeFileAsOwnedTransfer, encodeGeometryAsOwnedTransfer } from '#transport/_internal/owned-transfer-bytes.js';
 
 /**
  * Construct {@link HostInitializeBindings} from an inbound memory
@@ -72,17 +73,7 @@ export const createWorkerHostBindings = (handle: RuntimeInitializeMemoryHandle):
         };
       }
     }
-    /* Transferable fallback: detach the bytes buffer so the consumer
-     * receives a structurally-identical Uint8Array view without a copy. */
-    return {
-      value: {
-        format: 'gltf',
-        content: { delivery: 'inline', bytes: geometry.content },
-        hash: geometry.hash,
-      },
-      transferables: [geometry.content.buffer],
-      tier: 'transfer',
-    };
+    return encodeGeometryAsOwnedTransfer(geometry);
   };
 
   const publishFile = (file: Uint8Array<ArrayBuffer>): EncodedFileBytes => {
@@ -95,11 +86,7 @@ export const createWorkerHostBindings = (handle: RuntimeInitializeMemoryHandle):
         return { value: { delivery: 'pooled', key: hash }, transferables: [], tier: 'pool' };
       }
     }
-    return {
-      value: { delivery: 'inline', bytes: file },
-      transferables: file.buffer instanceof ArrayBuffer ? [file.buffer] : [],
-      tier: 'transfer',
-    };
+    return encodeFileAsOwnedTransfer(file);
   };
 
   return {

@@ -14,6 +14,18 @@
         "cwd": "{projectRoot}"
       }
     },
+    "benchmark-replicad-tessellation": {
+      "command": "tsx --require ./scripts/cjs-compat.cjs scripts/benchmark-replicad-tessellation.mts",
+      "options": {
+        "cwd": "{projectRoot}"
+      }
+    },
+    "benchmark-opencascade-brep-surfaces": {
+      "command": "tsx --require ./scripts/cjs-compat.cjs scripts/benchmark-opencascade-brep-surfaces.mts",
+      "options": {
+        "cwd": "{projectRoot}"
+      }
+    },
     "wasm-inspect": {
       "command": "tsx scripts/wasm-inspect.mts",
       "options": {

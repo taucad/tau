@@ -69,6 +69,8 @@ const { values } = parseArgs({
     'wasm-variant': { type: 'string', default: 'auto' },
     ocProfile: { type: 'boolean', default: false },
     noTracing: { type: 'boolean', default: false },
+    libraryTracing: { type: 'string', default: 'off' },
+    operation: { type: 'string', default: 'export' },
     cpuProfile: { type: 'boolean', default: false },
     profileInterval: { type: 'string', default: '100' },
     help: { type: 'boolean', short: 'h', default: false },
@@ -95,6 +97,8 @@ ${c.dim}Options:${c.reset}
       ${c.cyan}--wasm-variant${c.reset} <v>  WASM variant: auto (default) | single | multi
       ${c.cyan}--ocProfile${c.reset}         Use per-call OC tracing for deep profiling
       ${c.cyan}--noTracing${c.reset}         Disable OC tracing entirely for pure timing
+      ${c.cyan}--libraryTracing${c.reset} <v> Replicad library tracing: off (default) | summary | per-call
+      ${c.cyan}--operation${c.reset} <v>     Operation to time: export (default) | render
       ${c.cyan}--cpuProfile${c.reset}        Enable V8 CPU profiling for per-function timing breakdown
       ${c.cyan}--profileInterval${c.reset} <us>  CPU profiler sampling interval in microseconds (default: 100)
   ${c.cyan}-h${c.reset}, ${c.cyan}--help${c.reset}              Show this help message
@@ -350,6 +354,8 @@ async function runSuite(): Promise<void> {
   }
 
   const ocTracing = values.noTracing ? 'off' : values.ocProfile ? 'per-call' : 'summary';
+  const libraryTracing = resolveLibraryTracingOption();
+  const operation = resolveOperationOption();
 
   const provenance = loadProvenance();
   const wasmOption = resolveWasmOption();
@@ -365,6 +371,8 @@ async function runSuite(): Promise<void> {
   label('Benchmarks', `${cases.length}`);
   label('Iterations', `${iterations}`);
   label('Tracing', ocTracing);
+  label('Library Tracing', libraryTracing);
+  label('Operation', operation);
   label('WASM', typeof wasmOption === 'string' ? wasmOption : 'custom');
   if (typeof wasmOption === 'string' && wasmOption === 'auto') {
     label('Auto', 'kernel will pick multi when SAB available, else single');
@@ -378,6 +386,8 @@ async function runSuite(): Promise<void> {
   const result = await runBenchmarks(cases, {
     iterations,
     ocTracing,
+    libraryTracing,
+    operation,
     wasm: wasmOption,
     onProgress: onBenchmarkProgress,
     onIterationProgress: onBenchmarkIterationProgress,
@@ -397,6 +407,26 @@ async function runSuite(): Promise<void> {
   }
 
   printSummaryTable(result);
+}
+
+function resolveLibraryTracingOption(): 'off' | 'summary' | 'per-call' {
+  const raw = values.libraryTracing;
+  if (raw === 'off' || raw === 'summary' || raw === 'per-call') {
+    return raw;
+  }
+
+  console.error(`${c.red}Invalid --libraryTracing: ${raw} (expected: off | summary | per-call)${c.reset}`);
+  process.exit(1);
+}
+
+function resolveOperationOption(): 'export' | 'render' {
+  const raw = values.operation;
+  if (raw === 'export' || raw === 'render') {
+    return raw;
+  }
+
+  console.error(`${c.red}Invalid --operation: ${raw} (expected: export | render)${c.reset}`);
+  process.exit(1);
 }
 
 function runComparison(beforePath: string, afterPath: string): void {

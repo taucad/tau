@@ -20,18 +20,17 @@ import {
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 
 describe('RuntimeProtocol — runtime inventory guard (R20)', () => {
-  it('exposes exactly two calls — initialize + export (R18)', () => {
-    expect([...runtimeProtocolCallNames]).toEqual(['initialize', 'export']);
+  it('should expose exactly three calls for initialization, current export, and request-scoped export', () => {
+    expect([...runtimeProtocolCallNames]).toEqual(['initialize', 'export', 'exportModel']);
   });
 
-  it('exposes exactly 8 client → worker notify commands', () => {
+  it('exposes exactly 7 client → worker notify commands', () => {
     expect([...runtimeProtocolClientNotifyNames]).toEqual([
       'openFile',
       'stage-and-render',
       'updateParameters',
       'setOptions',
       'fileChanged',
-      'configureMiddleware',
       'cleanup',
       'abort',
     ]);
@@ -52,8 +51,8 @@ describe('RuntimeProtocol — runtime inventory guard (R20)', () => {
     ]);
   });
 
-  it('exposes exactly 18 notify keys (8 client commands + 10 worker events)', () => {
-    expect(runtimeProtocolNotifyNames).toHaveLength(18);
+  it('exposes exactly 17 notify keys (7 client commands + 10 worker events)', () => {
+    expect(runtimeProtocolNotifyNames).toHaveLength(17);
     expect(runtimeProtocolNotifyNames).toHaveLength(
       runtimeProtocolClientNotifyNames.length + runtimeProtocolWorkerNotifyNames.length,
     );

@@ -83,6 +83,32 @@ describe('RuntimeTracer', () => {
       );
     });
 
+    it('should merge end-time attributes into measure detail', () => {
+      const tracer = new RuntimeTracer();
+      const span = tracer.startSpan('op', { file: 'main.ts', count: 42 });
+      span.end({ count: 43, result: 'ok' });
+
+      expect(measureSpy).toHaveBeenCalledWith(
+        'op',
+        expect.objectContaining({
+          // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining returns any
+          detail: expect.objectContaining({
+            file: 'main.ts',
+            count: 43,
+            result: 'ok',
+            // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining returns any
+            devtools: expect.objectContaining({
+              properties: [
+                ['file', 'main.ts'],
+                ['count', '43'],
+                ['result', 'ok'],
+              ],
+            }),
+          }),
+        }),
+      );
+    });
+
     it('should work across multiple reset cycles', () => {
       const tracer = new RuntimeTracer();
 

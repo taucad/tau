@@ -1,8 +1,12 @@
 /**
- * Edge detection algorithm for triangle meshes.
+ * Fallback edge detection algorithm for triangle meshes.
  *
  * This module ports the Three.js EdgesGeometry algorithm to work with raw typed arrays,
  * enabling edge detection to run in web workers without Three.js dependencies.
+ * Kernels that can provide owner-local topology should emit `LINES` primitives before
+ * middleware runs; this detector is only fallback inference for GLBs that contain
+ * triangle-soup surfaces without owner-local edges. It is not a topology repair
+ * stage.
  *
  * The algorithm uses dihedral angle thresholding to identify sharp edges:
  * - For each edge shared by two triangles, compute the angle between face normals
@@ -129,11 +133,12 @@ function dot(a: Vertex3, b: Vertex3): number {
 }
 
 /**
- * Detect edges in a triangle mesh using dihedral angle thresholding.
+ * Detect fallback edges in a triangle mesh using dihedral angle thresholding.
  *
  * This algorithm identifies "sharp" edges where the angle between adjacent face normals
  * exceeds the specified threshold. Boundary edges (with only one adjacent face) are
- * always included.
+ * always included. It intentionally does not repair T-junctions or infer kernel-native
+ * topology; callers with better topology should emit their own line primitives.
  *
  * The algorithm runs in O(n) time where n is the number of triangles, using hash-based
  * edge matching for efficient lookup.

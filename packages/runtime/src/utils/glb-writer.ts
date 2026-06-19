@@ -11,6 +11,7 @@
  */
 
 import { packageName, packageVersion } from '#utils/package-info.js';
+import type { JSONObject } from '@taucad/types';
 
 // =============================================================================
 // Types
@@ -28,6 +29,8 @@ export type GlbMaterial = {
   doubleSided: boolean;
   alphaMode: 'OPAQUE' | 'BLEND';
   name?: string;
+  extras?: JSONObject;
+  extensions?: Record<string, JSONObject>;
 };
 
 /**
@@ -42,6 +45,8 @@ export type GlbPrimitive = {
   normals?: Float32Array;
   indices: Uint32Array;
   material: GlbMaterial;
+  extras?: JSONObject;
+  extensions?: Record<string, JSONObject>;
 };
 
 /**
@@ -52,7 +57,19 @@ export type GlbPrimitive = {
 export type GlbNode = {
   name?: string;
   primitives: GlbPrimitive[];
+  extras?: JSONObject;
+  extensions?: Record<string, JSONObject>;
 };
+
+export type GlbExtraBufferView = {
+  key: string;
+  data: Uint8Array<ArrayBuffer>;
+  target?: number;
+};
+
+export type GlbInputExtensions =
+  | Record<string, JSONObject>
+  | ((extraBufferViews: Record<string, number>) => Record<string, JSONObject>);
 
 /**
  * Input for the GLB writer describing the full scene.
@@ -61,6 +78,11 @@ export type GlbNode = {
  */
 export type GlbInput = {
   nodes: GlbNode[];
+  extras?: JSONObject;
+  extensions?: GlbInputExtensions;
+  extensionsUsed?: string[];
+  extensionsRequired?: string[];
+  extraBufferViews?: GlbExtraBufferView[];
 };
 
 // =============================================================================
@@ -127,15 +149,22 @@ function alignTo4(value: number): number {
 }
 
 type GltfJson = {
-  asset: { version: string; generator: string };
+  asset: { version: string; generator: string; extras?: JSONObject };
   scene: number;
   scenes: Array<{ nodes: number[] }>;
-  nodes: Array<{ mesh: number; name?: string }>;
-  meshes: Array<{ primitives: GltfJsonPrimitive[]; name?: string }>;
+  nodes: Array<{ mesh: number; name?: string; extras?: JSONObject; extensions?: Record<string, JSONObject> }>;
+  meshes: Array<{
+    primitives: GltfJsonPrimitive[];
+    name?: string;
+  }>;
   accessors: GltfJsonAccessor[];
   bufferViews: GltfJsonBufferView[];
   buffers: Array<{ byteLength: number; uri?: string }>;
   materials: GltfJsonMaterial[];
+  extras?: JSONObject;
+  extensions?: Record<string, JSONObject>;
+  extensionsUsed?: string[];
+  extensionsRequired?: string[];
 };
 
 type GltfJsonPrimitive = {
@@ -143,6 +172,8 @@ type GltfJsonPrimitive = {
   mode: number;
   material: number;
   indices: number;
+  extras?: JSONObject;
+  extensions?: Record<string, JSONObject>;
 };
 
 type GltfJsonAccessor = {
@@ -159,7 +190,7 @@ type GltfJsonBufferView = {
   buffer: number;
   byteOffset: number;
   byteLength: number;
-  target: number;
+  target?: number;
 };
 
 type GltfJsonMaterial = {
@@ -171,6 +202,8 @@ type GltfJsonMaterial = {
   };
   alphaMode?: string;
   name?: string;
+  extras?: JSONObject;
+  extensions?: Record<string, JSONObject>;
 };
 
 type BufferEntry = {
@@ -203,7 +236,7 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
    * @returns index into the materials array
    */
   function getOrCreateMaterial(mat: GlbMaterial): number {
-    const key = `${mat.baseColorFactor.join(',')}|${mat.metallicFactor}|${mat.roughnessFactor}|${mat.doubleSided}|${mat.alphaMode}|${mat.name ?? ''}`;
+    const key = `${mat.baseColorFactor.join(',')}|${mat.metallicFactor}|${mat.roughnessFactor}|${mat.doubleSided}|${mat.alphaMode}|${mat.name ?? ''}|${JSON.stringify(mat.extras ?? {})}|${JSON.stringify(mat.extensions ?? {})}`;
     const existing = materialCache.get(key);
     if (existing !== undefined) {
       return existing;
@@ -228,6 +261,12 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
     if (mat.name) {
       materialJson.name = mat.name;
     }
+    if (mat.extras) {
+      materialJson.extras = mat.extras;
+    }
+    if (mat.extensions) {
+      materialJson.extensions = mat.extensions;
+    }
 
     const index = materials.length;
     materials.push(materialJson);
@@ -242,19 +281,22 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
    * @param target - buffer view target (ARRAY_BUFFER or ELEMENT_ARRAY_BUFFER)
    * @returns index of the new bufferView
    */
-  function addBufferView(data: Float32Array | Uint32Array, target: number): number {
+  function addBufferView(data: Float32Array | Uint32Array | Uint8Array<ArrayBuffer>, target?: number): number {
     const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
     const aligned = alignTo4(bytes.byteLength);
     const padded = new Uint8Array(aligned);
     padded.set(bytes);
 
     const viewIndex = bufferViews.length;
-    bufferViews.push({
+    const bufferView: GltfJsonBufferView = {
       buffer: 0,
       byteOffset: currentByteOffset,
       byteLength: bytes.byteLength,
-      target,
-    });
+    };
+    if (target !== undefined) {
+      bufferView.target = target;
+    }
+    bufferViews.push(bufferView);
 
     bufferEntries.push({ data: padded, byteOffset: currentByteOffset });
     currentByteOffset += aligned;
@@ -311,6 +353,8 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
         mode: primitive.mode,
         material: materialIndex,
         indices: indexAccessorIndex,
+        ...(primitive.extras ? { extras: primitive.extras } : {}),
+        ...(primitive.extensions ? { extensions: primitive.extensions } : {}),
       });
     }
 
@@ -326,9 +370,20 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
       if (node.name) {
         nodeJson.name = node.name;
       }
+      if (node.extras) {
+        nodeJson.extras = node.extras;
+      }
+      if (node.extensions) {
+        nodeJson.extensions = node.extensions;
+      }
       nodes.push(nodeJson);
       sceneNodes.push(nodeIndex);
     }
+  }
+
+  const extraBufferViewIndices: Record<string, number> = {};
+  for (const extraBufferView of input.extraBufferViews ?? []) {
+    extraBufferViewIndices[extraBufferView.key] = addBufferView(extraBufferView.data, extraBufferView.target);
   }
 
   const totalBinSize = currentByteOffset;
@@ -338,7 +393,11 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
   }
 
   const json: GltfJson = {
-    asset: { version: '2.0', generator: `${packageName}@${packageVersion}` },
+    asset: {
+      version: '2.0',
+      generator: `${packageName}@${packageVersion}`,
+      ...(input.extras ? { extras: input.extras } : {}),
+    },
     scene: 0,
     scenes: [{ nodes: sceneNodes }],
     nodes,
@@ -348,6 +407,19 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
     buffers: [{ byteLength: totalBinSize }],
     materials,
   };
+
+  if (input.extensions) {
+    json.extensions =
+      typeof input.extensions === 'function' ? input.extensions(extraBufferViewIndices) : input.extensions;
+  }
+
+  if (input.extensionsUsed && input.extensionsUsed.length > 0) {
+    json.extensionsUsed = [...new Set(input.extensionsUsed)];
+  }
+
+  if (input.extensionsRequired && input.extensionsRequired.length > 0) {
+    json.extensionsRequired = [...new Set(input.extensionsRequired)];
+  }
 
   return { json, binBuffer };
 }

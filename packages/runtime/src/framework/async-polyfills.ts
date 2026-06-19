@@ -10,6 +10,12 @@
 
 import { waitAsyncPollInterval } from '#framework/runtime-framework.constants.js';
 
+type SchedulerGlobal = typeof globalThis & {
+  scheduler?: {
+    yield?: () => Promise<void> | void;
+  };
+};
+
 /**
  * Wait for a slot in a SharedArrayBuffer to change from an expected value.
  *
@@ -41,10 +47,10 @@ export async function waitForSlotChange(view: Int32Array, slot: number, expected
  * falls back to `setTimeout(0)` which defers to the next macrotask.
  */
 export async function cooperativeYield(): Promise<void> {
-  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- scheduler may be undefined in Node.js / older browsers
-  const schedulerYield = globalThis.scheduler?.yield;
+  const { scheduler } = globalThis as Pick<SchedulerGlobal, 'scheduler'>;
+  const schedulerYield = scheduler?.yield;
   if (typeof schedulerYield === 'function') {
-    await globalThis.scheduler.yield();
+    await schedulerYield.call(scheduler);
   } else {
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0);

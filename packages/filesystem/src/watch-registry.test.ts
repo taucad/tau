@@ -548,11 +548,10 @@ describe('WatchRegistry', () => {
   describe('Topic-backed handler dispatch', () => {
     it('should not skip sibling handlers when one self-unsubscribes during delivery', () => {
       const sibling = vi.fn();
-      let unsubscribeSelf: (() => void) | undefined;
-
-      unsubscribeSelf = registry.watch({ paths: ['/src'] }, () => {
-        unsubscribeSelf?.();
+      const unsubscribeSelf = registry.watch({ paths: ['/src'] }, () => {
+        unsubscribeSelf();
       });
+
       registry.watch({ paths: ['/src'] }, sibling);
 
       emitAndFlush(written('/src/file.txt'));

@@ -1,6 +1,6 @@
-import type { FileEntry, FileStatEntry, FileStat } from '@taucad/types';
+import type { FileContentMetadata, FileEntry, FileStatEntry, FileStat } from '@taucad/types';
 import type { FileTreeNode } from '@taucad/filesystem';
-import { FileSystemObserverBridge } from '@taucad/filesystem';
+import { FileSystemObserverBridge, getFileContentMetadata } from '@taucad/filesystem';
 import { Topic } from '@taucad/events';
 import type { FileContentService, ContentChangeEvent } from '#file-content-service.js';
 import type { FileSystemClient } from '#file-system-client.js';
@@ -28,6 +28,14 @@ const watchIntervalFocused = 2000;
 /** Milliseconds. */
 const watchIntervalBlurred = 10_000;
 
+type FileTreeFileNode = Extract<FileTreeNode, { contentKind: FileContentMetadata['contentKind'] }>;
+type CachedFileEntry = Extract<FileEntry, { type: 'file' }>;
+
+const isFileTreeFileNode = (entry: FileTreeNode): entry is FileTreeFileNode => entry.children === undefined;
+
+const fileMetadataFields = (metadata: FileContentMetadata): FileContentMetadata =>
+  metadata.contentKind === 'text' ? { contentKind: 'text', lineCount: metadata.lineCount } : { contentKind: 'binary' };
+
 /**
  * Lightweight file listing entry for search / complete-tree snapshots.
  *
@@ -36,7 +44,7 @@ const watchIntervalBlurred = 10_000;
 export type FileItem = {
   path: string;
   size: number;
-};
+} & FileContentMetadata;
 
 type FileTreeServiceInit = {
   proxy: FileSystemClient;
@@ -82,7 +90,6 @@ export class FileTreeService {
   private readonly proxy: FileSystemClient;
   private readonly paths: WorkspacePathResolver;
   private readonly visibility: VisibilityProvider;
-  readonly #treeTopic = new Topic<void>({ name: 'FileTreeService.tree' });
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private pendingRefreshPath = '';
   private pollingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -98,7 +105,9 @@ export class FileTreeService {
   private readonly _listingPathSubscribers = new PathSubscriberRegistry<void>();
   private readonly _listingGuard = new RefreshGenerationGuard();
   private readonly _inFlightDirectoryList = new Map<string, Promise<void>>();
+  // eslint-disable-next-line tau-lint/no-handrolled-fanout -- Holds worker-channel unsubscribe callbacks; event fan-out uses Topic/PathSubscriberRegistry.
   private readonly unsubscribeChannel: Array<() => void>;
+  readonly #treeTopic = new Topic<void>({ name: 'FileTreeService.tree' });
 
   public constructor(init: FileTreeServiceInit) {
     this.proxy = init.proxy;
@@ -196,7 +205,11 @@ export class FileTreeService {
   public getCachedFileItems(): FileItem[] {
     this._cachedCompleteTree ??= [...this._tree.values()]
       .filter((entry) => entry.type === 'file')
-      .map((entry) => ({ path: entry.path, size: entry.size }));
+      .map((entry) => ({
+        path: entry.path,
+        size: entry.size,
+        ...fileMetadataFields(entry),
+      }));
     return this._cachedCompleteTree;
   }
 
@@ -214,13 +227,26 @@ export class FileTreeService {
     try {
       const absolutePath = this.paths.toAbsoluteWorkspacePath(path);
       const stat = await this.proxy.stat(absolutePath);
+      const name = path.split('/').pop() ?? path;
+      if (stat.type === 'dir') {
+        return {
+          path,
+          name,
+          type: 'dir',
+          size: stat.size,
+          mtimeMs: stat.mtimeMs,
+          isLoaded: false,
+          isDirectoryResolved: false,
+        };
+      }
       return {
         path,
-        name: path.split('/').pop() ?? path,
-        type: stat.type,
+        name,
+        type: 'file',
         size: stat.size,
         mtimeMs: stat.mtimeMs,
         isLoaded: false,
+        ...fileMetadataFields(stat),
       };
     } catch {
       return undefined;
@@ -622,7 +648,7 @@ export class FileTreeService {
   private handleFileWrittenRelative(relativePath: string): void {
     const parentPath = this.paths.parentOf(relativePath);
     if (this.isDirectoryResolvedKey(parentPath)) {
-      this.optimisticAdd(relativePath, 0);
+      this.scheduleRefresh(parentPath);
     }
   }
 
@@ -644,7 +670,7 @@ export class FileTreeService {
     if (newRelative !== undefined) {
       const parentPath = this.paths.parentOf(newRelative);
       if (this.isDirectoryResolvedKey(parentPath)) {
-        this.optimisticAdd(newRelative, 0);
+        this.scheduleRefresh(parentPath);
       }
     }
   }
@@ -753,10 +779,12 @@ export class FileTreeService {
   private handleContentChange(event: ContentChangeEvent): void {
     switch (event.type) {
       case 'written': {
+        const metadata = { size: event.data.byteLength, ...getFileContentMetadata(event.data) };
         if (event.source === 'editor') {
+          this.updateFileMetadata(event.path, metadata);
           return;
         }
-        this.optimisticAdd(event.path, event.data.byteLength);
+        this.optimisticAdd(event.path, metadata);
         this.scheduleRefreshForParent(event.path);
         break;
       }
@@ -780,17 +808,65 @@ export class FileTreeService {
         }
         break;
       }
+      case 'fileCopied': {
+        this.scheduleRefreshForParent(event.targetPath);
+        break;
+      }
+      case 'directoryCopied': {
+        this.scheduleRefreshForParent(event.targetPath);
+        break;
+      }
+      case 'directoryCreated': {
+        this.handleDirectoryCreatedRelative(event.path);
+        break;
+      }
+      case 'directoryDeleted': {
+        this.handleDirectoryDeletedRelative(event.path);
+        break;
+      }
+      case 'directoryRenamed': {
+        this.renameSubtree(event.oldPath, event.newPath);
+        break;
+      }
       case 'read': {
         break;
       }
     }
   }
 
-  private optimisticAdd(path: string, size: number): void {
+  private optimisticAdd(path: string, metadata: { size: number } & FileContentMetadata): void {
     const parts = path.split('/');
     const name = parts.at(-1) ?? path;
     const newTree = new Map(this._tree);
-    newTree.set(path, { path, name, type: 'file', size, mtimeMs: Date.now(), isLoaded: false });
+    newTree.set(path, {
+      path,
+      name,
+      type: 'file',
+      size: metadata.size,
+      mtimeMs: Date.now(),
+      isLoaded: false,
+      ...fileMetadataFields(metadata),
+    });
+    this._tree = newTree;
+    this.notifyTreeSubscribers();
+    this._listingPathSubscribers.notifyPath(this.paths.parentOf(path), undefined);
+  }
+
+  private updateFileMetadata(path: string, metadata: { size: number } & FileContentMetadata): void {
+    const entry = this._tree.get(path);
+    if (entry?.type !== 'file') {
+      return;
+    }
+    const newTree = new Map(this._tree);
+    newTree.set(path, {
+      path: entry.path,
+      name: entry.name,
+      type: 'file',
+      size: metadata.size,
+      mtimeMs: Date.now(),
+      isLoaded: entry.isLoaded,
+      ...fileMetadataFields(metadata),
+    });
     this._tree = newTree;
     this.notifyTreeSubscribers();
     this._listingPathSubscribers.notifyPath(this.paths.parentOf(path), undefined);
@@ -913,25 +989,33 @@ export class FileTreeService {
     for (const [entryPath, entry] of this._tree) {
       if (prefix === '') {
         if (entryPath !== '' && !entryPath.includes('/')) {
-          out.push({
-            name: entry.name,
-            path: entryPath,
-            isFolder: entry.type === 'dir',
-            size: entry.size,
-            mtimeMs: entry.mtimeMs,
-          });
+          out.push(this.toListedDirectoryEntry(entryPath, entry));
         }
       } else if (entryPath.startsWith(prefix) && !entryPath.slice(prefix.length).includes('/')) {
-        out.push({
-          name: entry.name,
-          path: entryPath,
-          isFolder: entry.type === 'dir',
-          size: entry.size,
-          mtimeMs: entry.mtimeMs,
-        });
+        out.push(this.toListedDirectoryEntry(entryPath, entry));
       }
     }
     return out.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private toListedDirectoryEntry(path: string, entry: FileEntry): ListedDirectoryEntry {
+    if (entry.type === 'dir') {
+      return {
+        name: entry.name,
+        path,
+        isFolder: true,
+        size: entry.size,
+        mtimeMs: entry.mtimeMs,
+      };
+    }
+    return {
+      name: entry.name,
+      path,
+      isFolder: false,
+      size: entry.size,
+      mtimeMs: entry.mtimeMs,
+      ...fileMetadataFields(entry),
+    };
   }
 
   private applyResolvedDirectoryRow(newTree: Map<string, FileEntry>, directoryKey: string): void {
@@ -997,33 +1081,39 @@ export class FileTreeService {
 
     for (const entry of entries) {
       const entryPath = prefix ? `${prefix}${entry.name}` : entry.name;
-      const inferredType: 'file' | 'dir' = entry.children === undefined ? 'file' : 'dir';
       const existing = newTree.get(entryPath);
-      if (existing === undefined) {
-        newTree.set(entryPath, {
-          path: entryPath,
-          name: entry.name,
-          type: inferredType,
-          size: entry.size,
-          mtimeMs: entry.mtimeMs,
-          isLoaded: false,
-        });
+      if (isFileTreeFileNode(entry)) {
+        const nextFile = this.toFileEntry(entryPath, entry, existing?.isLoaded ?? false);
+        if (existing === undefined) {
+          newTree.set(entryPath, nextFile);
+          continue;
+        }
+        if (existing.type === 'file') {
+          if (this.hasFileEntryChanged(existing, nextFile)) {
+            newTree.set(entryPath, { ...nextFile, isLoaded: existing.isLoaded });
+          }
+          continue;
+        }
+        newTree.set(entryPath, nextFile);
         continue;
       }
-      if (existing.type === inferredType) {
-        if (existing.size !== entry.size || existing.mtimeMs !== entry.mtimeMs) {
-          newTree.set(entryPath, { ...existing, size: entry.size, mtimeMs: entry.mtimeMs });
+
+      const nextDirectory = this.toDirectoryEntry(entryPath, entry, existing);
+      if (existing === undefined) {
+        newTree.set(entryPath, nextDirectory);
+        continue;
+      }
+      if (existing.type === 'dir') {
+        if (
+          existing.size !== nextDirectory.size ||
+          existing.mtimeMs !== nextDirectory.mtimeMs ||
+          existing.isDirectoryResolved !== nextDirectory.isDirectoryResolved
+        ) {
+          newTree.set(entryPath, nextDirectory);
         }
         continue;
       }
-      newTree.set(entryPath, {
-        ...existing,
-        type: inferredType,
-        name: entry.name,
-        size: entry.size,
-        mtimeMs: entry.mtimeMs,
-        isDirectoryResolved: inferredType === 'dir' ? existing.isDirectoryResolved : undefined,
-      });
+      newTree.set(entryPath, nextDirectory);
     }
 
     this.applyResolvedDirectoryRow(newTree, directoryKey);
@@ -1031,5 +1121,42 @@ export class FileTreeService {
     this._tree = newTree;
     this._listingPathSubscribers.notifyPath(directoryKey, undefined);
     this.notifyTreeSubscribers();
+  }
+
+  private toFileEntry(path: string, entry: FileTreeFileNode, isLoaded: boolean): CachedFileEntry {
+    return {
+      path,
+      name: entry.name,
+      type: 'file',
+      size: entry.size,
+      mtimeMs: entry.mtimeMs,
+      isLoaded,
+      ...fileMetadataFields(entry),
+    };
+  }
+
+  private toDirectoryEntry(
+    path: string,
+    entry: Exclude<FileTreeNode, FileTreeFileNode>,
+    existing?: FileEntry,
+  ): FileEntry {
+    return {
+      path,
+      name: entry.name,
+      type: 'dir',
+      size: entry.size,
+      mtimeMs: entry.mtimeMs,
+      isLoaded: existing?.type === 'dir' ? existing.isLoaded : false,
+      isDirectoryResolved: existing?.type === 'dir' ? existing.isDirectoryResolved : false,
+    };
+  }
+
+  private hasFileEntryChanged(current: CachedFileEntry, next: CachedFileEntry): boolean {
+    return (
+      current.size !== next.size ||
+      current.mtimeMs !== next.mtimeMs ||
+      current.contentKind !== next.contentKind ||
+      (current.contentKind === 'text' && next.contentKind === 'text' && current.lineCount !== next.lineCount)
+    );
   }
 }

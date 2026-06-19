@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as TaucadVm from '@taucad/vm';
 import type { ModuleVm } from '@taucad/vm';
 import { createEsbuildModuleVm } from '@taucad/vm';
-import esbuildBundler from '#bundler/esbuild.bundler.js';
+import { esbuild as esbuildBundler } from '#bundler/esbuild.bundler.js';
 import { createMockFileSystem } from '#testing/kernel-testing.utils.js';
+import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 
 vi.mock('@taucad/vm', async (importOriginal) => {
   const actual = await importOriginal<typeof TaucadVm>();
@@ -23,8 +24,12 @@ const createMockVm = (): ModuleVm => ({
 });
 
 describe('Esbuild runtime adapter', () => {
-  beforeEach(() => {
+  const resolveEsbuildDefinition = async () => resolveRuntimePluginDefinition('bundler', esbuildBundler());
+  let esbuildDefinition: Awaited<ReturnType<typeof resolveEsbuildDefinition>>;
+
+  beforeEach(async () => {
     vi.mocked(createEsbuildModuleVm).mockReset();
+    esbuildDefinition = await resolveEsbuildDefinition();
   });
 
   it('should initialize a VM with runtime filesystem and CAD auto-exports', async () => {
@@ -32,7 +37,9 @@ describe('Esbuild runtime adapter', () => {
     const vm = createMockVm();
     vi.mocked(createEsbuildModuleVm).mockResolvedValue(vm);
 
-    const context = await esbuildBundler.initialize({ filesystem, projectPath: '/project' }, {});
+    const context = (await esbuildDefinition.initialize({ filesystem, projectPath: '/project' }, {})) as {
+      vm: ModuleVm;
+    };
 
     expect(context.vm).toBe(vm);
     expect(createEsbuildModuleVm).toHaveBeenCalledWith({
@@ -50,7 +57,7 @@ describe('Esbuild runtime adapter', () => {
       dependencies: ['/project/model.test.ts'],
     });
 
-    const result = await esbuildBundler.detectImports({ entryPath: '/project/model.test.ts' }, { vm });
+    const result = await esbuildDefinition.detectImports({ entryPath: '/project/model.test.ts' }, { vm });
 
     expect(vm.detectImports).toHaveBeenCalledWith('/project/model.test.ts');
     expect(result).toEqual({
@@ -81,7 +88,7 @@ describe('Esbuild runtime adapter', () => {
       ],
     });
 
-    const result = await esbuildBundler.bundle({ entryPath: '/project/model.ts' }, { vm });
+    const result = await esbuildDefinition.bundle({ entryPath: '/project/model.ts' }, { vm });
 
     expect(vm.bundle).toHaveBeenCalledWith('/project/model.ts');
     expect(result).toEqual({
@@ -121,7 +128,7 @@ describe('Esbuild runtime adapter', () => {
       ],
     });
 
-    const result = await esbuildBundler.execute('throw new Error("boom");', { vm });
+    const result = await esbuildDefinition.execute('throw new Error("boom");', { vm });
 
     expect(vm.execute).toHaveBeenCalledWith('throw new Error("boom");');
     expect(result).toEqual({
@@ -152,7 +159,7 @@ describe('Esbuild runtime adapter', () => {
       ],
     });
 
-    const result = await esbuildBundler.execute('throw new Error("custom");', { vm });
+    const result = await esbuildDefinition.execute('throw new Error("custom");', { vm });
 
     expect(result).toEqual({
       success: false,
@@ -171,7 +178,7 @@ describe('Esbuild runtime adapter', () => {
   it('should register builtin modules and cleanup through the VM', async () => {
     const vm = createMockVm();
 
-    esbuildBundler.registerModule(
+    esbuildDefinition.registerModule(
       'geospec',
       {
         code: 'export const describe = () => {};',
@@ -180,7 +187,7 @@ describe('Esbuild runtime adapter', () => {
       },
       { vm },
     );
-    await esbuildBundler.cleanup?.({ vm });
+    await esbuildDefinition.cleanup?.({ vm });
 
     expect(vm.registerModule).toHaveBeenCalledWith('geospec', {
       code: 'export const describe = () => {};',
@@ -197,7 +204,7 @@ describe('Esbuild runtime adapter', () => {
       unresolved: ['/project/missing.ts'],
     });
 
-    const result = await esbuildBundler.resolveDependencies?.({ entryPath: '/project/main.ts' }, { vm });
+    const result = await esbuildDefinition.resolveDependencies?.({ entryPath: '/project/main.ts' }, { vm });
 
     expect(vm.resolveDependencies).toHaveBeenCalledWith('/project/main.ts');
     expect(result).toEqual({

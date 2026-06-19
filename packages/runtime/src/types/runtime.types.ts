@@ -23,6 +23,7 @@ import type {
   TranscoderPlugin,
 } from '#plugins/plugin-types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport.types.js';
+import type { KernelIssueCode } from '#types/kernel-issue-codes.js';
 
 // =============================================================================
 // Error Types
@@ -77,36 +78,6 @@ export type KernelIssueType = 'compilation' | 'runtime' | 'kernel' | 'connection
 export type IssueSeverity = 'error' | 'warning' | 'info';
 
 /**
- * Discriminator codes for {@link KernelIssue.code}. Consumers use these
- * verbatim instead of regex-matching `issue.message` to classify failures.
- *
- * @public
- *
- * @remarks
- * - `RENDER_TIMEOUT` — render loop exceeded `setRenderTimeout`.
- * - `RENDER_ABORTED` — cooperative abort fired (supersession or explicit).
- * - `KERNEL_BINDING_FAILED` — `kernelClass()` constructor threw inside the
- *   worker (e.g. WASM init failure). Routed through `RuntimeConnectionError`
- *   with `causeKind: 'kernel-binding'`.
- * - `KERNEL_CAPABILITY_MISSING` — kernel reports it cannot service the
- *   requested format/route.
- * - `BUNDLER_FAILED` — the active bundler rejected the source.
- * - `MIDDLEWARE_FAILED` — a middleware stage threw.
- * - `RUNTIME` — generic runtime failure inside user code (default fallback
- *   for legacy callsites; tests assert it is rare).
- * - `UNKNOWN` — issue source code did not declare a discriminator.
- */
-export type KernelIssueCode =
-  | 'RENDER_TIMEOUT'
-  | 'RENDER_ABORTED'
-  | 'KERNEL_BINDING_FAILED'
-  | 'KERNEL_CAPABILITY_MISSING'
-  | 'BUNDLER_FAILED'
-  | 'MIDDLEWARE_FAILED'
-  | 'RUNTIME'
-  | 'UNKNOWN';
-
-/**
  * Diagnostic produced by a kernel operation — displayed in the editor's
  * problem panel and used for error markers. The `code` discriminator is
  * the canonical classification surface; consumers must never inspect
@@ -125,6 +96,7 @@ export type KernelIssue = {
   location?: ErrorLocation;
   stack?: string;
   stackFrames?: KernelStackFrame[];
+  details?: unknown;
   type?: KernelIssueType;
   severity: IssueSeverity;
 };
@@ -141,7 +113,7 @@ export type KernelSuccessResult<T> = {
   success: true;
   data: T;
   issues: KernelIssue[];
-  serializedHandle?: unknown;
+  serializedNativeHandle?: unknown;
 };
 
 /**
@@ -344,8 +316,8 @@ export type ExportGeometryResult = KernelResult<ExportFile[]>;
  */
 // oxlint-disable @typescript-eslint/no-explicit-any -- variance: bag projection over heterogeneous tuples
 export type ExportRoute<
-  Kernels extends readonly KernelPlugin<any, any, any>[] = KernelPlugin[],
-  Transcoders extends readonly TranscoderPlugin<any, any, any>[] = TranscoderPlugin[],
+  Kernels extends ReadonlyArray<KernelPlugin<any, any, any>> = KernelPlugin[],
+  Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any>> = TranscoderPlugin[],
   Format extends KnownTargetFormats<Kernels, Transcoders> = KnownTargetFormats<Kernels, Transcoders>,
   Kernel extends CollectKernelIds<Kernels> = CollectKernelIds<Kernels>,
 > = {
@@ -376,7 +348,7 @@ export type ExportRoute<
  */
 // oxlint-disable @typescript-eslint/no-explicit-any -- variance: bag projection over heterogeneous tuples
 export type KernelRenderSchema<
-  Kernels extends readonly KernelPlugin<any, any, any>[] = KernelPlugin[],
+  Kernels extends ReadonlyArray<KernelPlugin<any, any, any>> = KernelPlugin[],
   Kernel extends CollectKernelIds<Kernels> = CollectKernelIds<Kernels>,
 > = {
   schema: JSONSchema7;
@@ -403,8 +375,8 @@ export type KernelRenderSchema<
  */
 // oxlint-disable @typescript-eslint/no-explicit-any -- variance: bag projection over heterogeneous tuples
 export type CapabilitiesManifest<
-  Kernels extends readonly KernelPlugin<any, any, any>[] = KernelPlugin[],
-  Transcoders extends readonly TranscoderPlugin<any, any, any>[] = TranscoderPlugin[],
+  Kernels extends ReadonlyArray<KernelPlugin<any, any, any>> = KernelPlugin[],
+  Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any>> = TranscoderPlugin[],
 > = {
   routes: ReadonlyArray<ExportRoute<Kernels, Transcoders>>;
   // Inline the per-kernel schema shape (rather than referencing
@@ -459,8 +431,8 @@ export type TransportCapabilities = {
  */
 // oxlint-disable @typescript-eslint/no-explicit-any -- variance: bag projection over heterogeneous tuples
 export type RuntimeCapabilities<
-  Kernels extends readonly KernelPlugin<any, any, any>[] = KernelPlugin[],
-  Transcoders extends readonly TranscoderPlugin<any, any, any>[] = TranscoderPlugin[],
+  Kernels extends ReadonlyArray<KernelPlugin<any, any, any>> = KernelPlugin[],
+  Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any>> = TranscoderPlugin[],
 > = CapabilitiesManifest<Kernels, Transcoders> & {
   readonly autonomousRenderLoop: boolean;
   readonly transport: TransportCapabilities;

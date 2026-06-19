@@ -1,5 +1,6 @@
 import type { Models } from '@kittycad/lib';
 import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
+import { Topic } from '@taucad/events';
 import { binaryToUuid } from '#kernels/zoo/binary.utils.js';
 import { KclError, KclAuthError, KclConnectionError } from '#kernels/zoo/kcl-errors.js';
 import { createZooLogger } from '#kernels/zoo/zoo-logs.js';
@@ -21,6 +22,11 @@ export type WebSocketResponse = Models['WebSocketResponse_type'];
  * @public
  */
 export type ZooTransportMessageHandler = (raw: Uint8Array<ArrayBuffer>, decoded: WebSocketResponse) => void;
+
+type ZooTransportMessageEvent = {
+  readonly raw: Uint8Array<ArrayBuffer>;
+  readonly decoded: WebSocketResponse;
+};
 
 type InitializationContext = {
   resolve: (value: void) => void;
@@ -59,8 +65,18 @@ export class ZooWebSocketTransport {
   private readonly pendingEngineMessages: Array<{ raw: Uint8Array<ArrayBuffer>; decoded: WebSocketResponse }> = [];
   private readonly baseUrl: string;
   private initializationContext: InitializationContext | undefined;
-  private readonly messageHandlers = new Set<ZooTransportMessageHandler>();
-  private readonly socketClosedHandlers = new Set<() => void>();
+  private readonly messageTopic = new Topic<ZooTransportMessageEvent>({
+    name: 'zoo-websocket.message',
+    onError: (error) => {
+      log.warn('Zoo websocket message handler threw', { error });
+    },
+  });
+  private readonly socketClosedTopic = new Topic<void>({
+    name: 'zoo-websocket.socket-closed',
+    onError: (error) => {
+      log.warn('Zoo websocket close handler threw', { error });
+    },
+  });
 
   public constructor(optionsReadonly: { baseUrl: string }) {
     this.baseUrl = optionsReadonly.baseUrl;
@@ -82,10 +98,9 @@ export class ZooWebSocketTransport {
    * @returns Unsubscribe function.
    */
   public onMessage(handler: ZooTransportMessageHandler): () => void {
-    this.messageHandlers.add(handler);
-    return () => {
-      this.messageHandlers.delete(handler);
-    };
+    return this.messageTopic.subscribe(({ raw, decoded }) => {
+      handler(raw, decoded);
+    });
   }
 
   /**
@@ -95,10 +110,7 @@ export class ZooWebSocketTransport {
    * @returns Unsubscribe function.
    */
   public onSocketClosed(handler: () => void): () => void {
-    this.socketClosedHandlers.add(handler);
-    return () => {
-      this.socketClosedHandlers.delete(handler);
-    };
+    return this.socketClosedTopic.subscribe(handler);
   }
 
   /**
@@ -187,8 +199,8 @@ export class ZooWebSocketTransport {
 
     this.isConnected = false;
     this.pendingEngineMessages.length = 0;
-    this.messageHandlers.clear();
-    this.socketClosedHandlers.clear();
+    this.messageTopic.dispose();
+    this.socketClosedTopic.dispose();
   }
 
   private detachWebSocket(): void {
@@ -210,9 +222,7 @@ export class ZooWebSocketTransport {
   }
 
   private dispatchToHandlers(raw: Uint8Array<ArrayBuffer>, decoded: WebSocketResponse): void {
-    for (const handler of this.messageHandlers) {
-      handler(raw, decoded);
-    }
+    this.messageTopic.emit({ raw, decoded });
   }
 
   private flushPendingEngineMessages(): void {
@@ -247,10 +257,7 @@ export class ZooWebSocketTransport {
     }
 
     this.detachWebSocket();
-    const socketClosedHandlers = [...this.socketClosedHandlers];
-    for (const handler of socketClosedHandlers) {
-      handler();
-    }
+    this.socketClosedTopic.emit();
   };
 
   private createConnectionError(code: number, reason: string): KclError {

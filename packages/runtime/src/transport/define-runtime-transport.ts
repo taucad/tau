@@ -10,7 +10,7 @@
  * exports such as {@link webWorkerHost}.
  *
  * Three overloads — no schemas, client-only schema, and both
- * schemas — mirror the `createKernelPlugin` overload pattern that
+ * schemas — mirror the one-call plugin factory overload pattern that
  * handles TypeScript's partial-inference limitation.
  *
  * @public

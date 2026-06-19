@@ -3,6 +3,8 @@ import type { SetRequired } from 'type-fest';
 import type { GeometrySvg } from '@taucad/types';
 import { normalizeColor } from '#kernels/replicad/utils/normalize-color.js';
 import type { GeometryReplicad } from '#kernels/replicad/replicad.types.js';
+import { resolveShapeName, uniqueShapeName } from '#utils/shape-names.js';
+import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 
 type Tessellation = {
   linearTolerance: number;
@@ -12,6 +14,27 @@ type Tessellation = {
 type Meshable = SetRequired<AnyShape, 'mesh' | 'meshEdges'>;
 
 type Svgable = SetRequired<Drawing, 'toSVGPaths' | 'toSVGViewBox'>;
+
+type RenderTelemetry = {
+  tracer?: RuntimeSpanTracer;
+};
+
+type RenderOptions = {
+  tessellation?: Tessellation;
+  withBrepEdges?: boolean;
+} & RenderTelemetry;
+
+type RenderMeshOptions = {
+  tessellation: Tessellation;
+  withBrepEdges: boolean;
+} & RenderTelemetry;
+
+type SpanOperation<T> = {
+  tracer?: RuntimeSpanTracer;
+  name: string;
+  attributes: Record<string, string | number | boolean>;
+  operation: () => T;
+};
 
 /**
  * A shape with optional display and material metadata for rendering.
@@ -52,9 +75,11 @@ export type InputShape = {
   density?: number;
 };
 
-type SvgShapeConfiguration = InputShape & { shape: Svgable };
+type NamedInputShape = InputShape & { name: string };
 
-type MeshableConfiguration = InputShape & { shape: Meshable };
+type SvgShapeConfiguration = NamedInputShape & { shape: Svgable };
+
+type MeshableConfiguration = NamedInputShape & { shape: Meshable };
 
 /** Union of all valid return types from a Replicad model's main function. */
 export type MainResultShapes = AnyShape | AnyShape[] | InputShape | InputShape[] | undefined;
@@ -85,9 +110,26 @@ const isInputShape = (shape: unknown): shape is InputShape => {
   return typeof shape === 'object' && shape !== null && Boolean((shape as InputShape).shape);
 };
 
+function resolveReplicadShapeNames(shapes: InputShape[], defaultName?: string): Array<InputShape & { name: string }> {
+  const usedNames = new Map<string, number>();
+  return shapes.map((inputShape, index) => {
+    const { name, ...rest } = inputShape;
+    const resolvedName = resolveShapeName({
+      index,
+      name: name ?? defaultName,
+      source: 'authored',
+    });
+
+    return {
+      name: uniqueShapeName(resolvedName, usedNames),
+      ...rest,
+    };
+  });
+}
+
 function createBasicShapeConfig(
   inputShapes: MainResultShapes,
-  baseName = 'AnyShape',
+  defaultName?: string,
 ): Array<InputShape & { name: string }> {
   // We accept a single shape or an array of shapes
   const raw: Array<AnyShape | InputShape | undefined> = Array.isArray(inputShapes) ? inputShapes : [inputShapes];
@@ -96,26 +138,17 @@ function createBasicShapeConfig(
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime values can be nullish despite types
   const shapes = raw.filter((shape): shape is AnyShape | InputShape => shape !== null && shape !== undefined);
 
-  return shapes
-    .map((inputShape) => {
-      if (isInputShape(inputShape)) {
-        return inputShape;
-      }
+  const shapeConfigs = shapes.map((inputShape) => {
+    if (isInputShape(inputShape)) {
+      return inputShape;
+    }
 
-      return {
-        shape: inputShape,
-      };
-    })
-    .map((inputShape, index_) => {
-      // We accept unamed shapes
-      const { name, ...rest } = inputShape;
-      const index = shapes.length > 1 ? ` ${index_}` : '';
+    return {
+      shape: inputShape,
+    };
+  });
 
-      return {
-        name: name ?? `${baseName} ${index}`,
-        ...rest,
-      };
-    });
+  return resolveReplicadShapeNames(shapeConfigs, defaultName);
 }
 
 function normalizeColorAndOpacity<T extends InputShape>(shape: T): InputShape {
@@ -135,7 +168,7 @@ function normalizeColorAndOpacity<T extends InputShape>(shape: T): InputShape {
 }
 
 function renderSvg(shapeConfig: SvgShapeConfiguration): GeometrySvg {
-  const { name = 'Shape', shape, color, strokeType, opacity } = shapeConfig;
+  const { name, shape, color, strokeType, opacity } = shapeConfig;
   return {
     format: 'svg',
     name,
@@ -148,12 +181,22 @@ function renderSvg(shapeConfig: SvgShapeConfiguration): GeometrySvg {
 }
 
 const defaultPreviewTessellation: Tessellation = {
-  linearTolerance: 0.1,
-  angularTolerance: 30,
+  linearTolerance: 0.01,
+  angularTolerance: 20,
 };
 
-function renderMesh(shapeConfig: MeshableConfiguration, tessellation: Tessellation, withBrepEdges: boolean) {
-  const { name = 'Shape', shape, color, opacity, metalness, roughness } = shapeConfig;
+function withSpan<T>({ tracer, name, attributes, operation }: SpanOperation<T>): T {
+  const span = tracer?.startSpan(name, attributes);
+  try {
+    return operation();
+  } finally {
+    span?.end();
+  }
+}
+
+function renderMesh(shapeConfig: MeshableConfiguration, options: RenderMeshOptions) {
+  const { name, shape, color, opacity, metalness, roughness } = shapeConfig;
+  const { tessellation, withBrepEdges, tracer } = options;
   const geometry: GeometryReplicad = {
     format: 'replicad',
     name,
@@ -174,16 +217,40 @@ function renderMesh(shapeConfig: MeshableConfiguration, tessellation: Tessellati
   };
 
   const angularToleranceRad = tessellation.angularTolerance * (Math.PI / 180);
+  const tessellationAttributes = {
+    shapeName: name,
+    linearTolerance: tessellation.linearTolerance,
+    angularToleranceDeg: tessellation.angularTolerance,
+    withBrepEdges,
+  };
 
-  geometry.faces = shape.mesh({
-    tolerance: tessellation.linearTolerance,
-    angularTolerance: angularToleranceRad,
+  geometry.faces = withSpan({
+    tracer,
+    name: 'replicad.tessellate.faces',
+    attributes: {
+      ...tessellationAttributes,
+      output: 'faces',
+    },
+    operation: () =>
+      shape.mesh({
+        tolerance: tessellation.linearTolerance,
+        angularTolerance: angularToleranceRad,
+      }),
   });
 
   if (withBrepEdges) {
-    geometry.edges = shape.meshEdges({
-      tolerance: tessellation.linearTolerance,
-      angularTolerance: angularToleranceRad,
+    geometry.edges = withSpan({
+      tracer,
+      name: 'replicad.tessellate.edges',
+      attributes: {
+        ...tessellationAttributes,
+        output: 'edges',
+      },
+      operation: () =>
+        shape.meshEdges({
+          tolerance: tessellation.linearTolerance,
+          angularTolerance: angularToleranceRad,
+        }),
     });
   }
 
@@ -194,14 +261,12 @@ function renderMesh(shapeConfig: MeshableConfiguration, tessellation: Tessellati
  * Renders an array of input shapes into geometry representations.
  *
  * @param shapes - The shapes to render with optional color/name metadata
- * @param tessellation - Tessellation quality settings (defaults to preview quality)
- * @param withBrepEdges - Whether to include BRep edge lines in the output
+ * @param options - Tessellation, BRep edge, and telemetry options
  * @returns An array of SVG or Replicad geometry objects
  */
 export function render(
-  shapes: InputShape[],
-  tessellation: Tessellation = defaultPreviewTessellation,
-  withBrepEdges = false,
+  shapes: NamedInputShape[],
+  { tessellation = defaultPreviewTessellation, withBrepEdges = false, tracer }: RenderOptions = {},
 ): Array<GeometrySvg | GeometryReplicad> {
   return shapes.map((shapeConfig) => {
     if (hasSvgableShape(shapeConfig)) {
@@ -209,7 +274,7 @@ export function render(
     }
 
     if (hasMeshableShape(shapeConfig)) {
-      return renderMesh(shapeConfig, tessellation, withBrepEdges);
+      return renderMesh(shapeConfig, { tessellation, withBrepEdges, tracer });
     }
 
     throw new Error('Invalid shape');
@@ -225,19 +290,21 @@ export function render(
 export function renderOutput({
   shapes,
   beforeRender,
-  defaultName = 'AnyShape',
+  defaultName,
   tessellation,
   withBrepEdges = false,
+  tracer,
 }: {
   shapes: MainResultShapes;
   beforeRender?: (shapes: InputShape[]) => InputShape[];
   defaultName?: string;
   tessellation?: Tessellation;
   withBrepEdges?: boolean;
+  tracer?: RuntimeSpanTracer;
 }): Array<GeometrySvg | GeometryReplicad> {
   const baseShape = createBasicShapeConfig(shapes, defaultName).map((element) => normalizeColorAndOpacity(element));
 
-  const config = beforeRender ? beforeRender(baseShape) : baseShape;
+  const config = resolveReplicadShapeNames(beforeRender ? beforeRender(baseShape) : baseShape);
 
-  return render(config, tessellation, withBrepEdges);
+  return render(config, { tessellation, withBrepEdges, tracer });
 }

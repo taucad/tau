@@ -5,7 +5,7 @@
  * package's public surface.
  *
  *  1. **`RuntimeClient` member allowlist** — introspect the canonical
- *     `RuntimeClient` type literal in `packages/runtime/src/client/runtime-client.ts`.
+ *     `RuntimeClient` type literal in `packages/runtime/src/client/runtime-client-core.ts`.
  *     CI fails on drift: an unknown member appearing (regression — a removed
  *     legacy verb came back) or a required member disappearing (accidental
  *     deletion).
@@ -29,7 +29,7 @@ import { dirname, resolve } from 'node:path';
 import * as ts from 'typescript';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const runtimeClientPath = resolve(here, '..', 'src', 'client', 'runtime-client.ts');
+const runtimeClientPath = resolve(here, '..', 'src', 'client', 'runtime-client-core.ts');
 const packageBarrelPath = resolve(here, '..', 'src', 'index.ts');
 
 /**
@@ -87,7 +87,7 @@ sourceFile.forEachChild((node) => {
 });
 
 if (!runtimeClientType) {
-  console.error('FAIL: could not locate exported `RuntimeClient` type alias in runtime-client.ts');
+  console.error('FAIL: could not locate exported `RuntimeClient` type alias in runtime-client-core.ts');
   process.exit(1);
 }
 
@@ -145,7 +145,6 @@ for (const required of allowedMembers) {
 const allowedBarrelExports: ReadonlySet<string> = new Set([
   // Client + factory
   'createRuntimeClient',
-  'createRuntimeClientOptions',
   'RuntimeClient',
   'RuntimeClientOptions',
   'CodeInput',
@@ -155,10 +154,13 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'RuntimeLifecycleState',
   'RuntimeConnectionCause',
   'RuntimeTerminatedCause',
+  'RuntimeFromTransport',
 
   // Lifecycle errors + guards
   'NoRenderOutcomeError',
   'isNoRenderOutcomeError',
+  'SelfRenderExportSupersededError',
+  'isSelfRenderExportSupersededError',
   'RuntimeNotConnectedError',
   'isRuntimeNotConnectedError',
   'RuntimeConnectionError',
@@ -193,14 +195,11 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'MergeExportMap',
   'RenderOptionsFor',
 
-  // Plugin factory helpers
-  'createKernelPlugin',
-  'createMiddlewarePlugin',
-  'createBundlerPlugin',
-  'createTranscoderPlugin',
-
-  // Presets
-  'presets',
+  // Plugin authoring helpers
+  'defineKernel',
+  'defineMiddleware',
+  'defineBundler',
+  'defineTranscoder',
 
   // Filesystem (browser-safe opaque RuntimeFileSystem + factories)
   'RuntimeFileSystem',
@@ -208,7 +207,7 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'fromMemoryFs',
   'fromFsLike',
   'fromBrowserFs',
-  'fromChannelFs',
+  'fromFileSystemBridge',
   'isRuntimeFileSystem',
 
   // Transport author API only. Concrete transports are intentionally
@@ -222,7 +221,7 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   // See `transport-browser-safe.test.ts` for the runtime-level
   // contract pin.
   'defineRuntimeTransport',
-  'RuntimeTransportPlugin',
+  'TransportPlugin',
   'RuntimeTransportClient',
   'RuntimeTransportHost',
   'TransportClientReady',

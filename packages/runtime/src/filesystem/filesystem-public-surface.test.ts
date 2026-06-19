@@ -2,11 +2,10 @@
  * Phase 5 / R16 — `@taucad/runtime/filesystem` public surface.
  *
  * The filesystem barrel must expose ONLY the consumer-facing opaque
- * `RuntimeFileSystem` value, the bundled `fromX` factories, and the
- * `createRuntimeFileSystem` enhancer. Bridge primitives (transport
- * author's tools) are quarantined to the dedicated
- * `@taucad/runtime/transport-internals` subpath so the public FS
- * surface stays opaque per the v6 architecture.
+ * `RuntimeFileSystem` value and the bundled `fromX` factories. Generic
+ * bridge primitives live in `@taucad/rpc/bridge`, while filesystem bridge
+ * adapters live in `@taucad/fs-bridge`, so the runtime public FS surface
+ * stays opaque.
  *
  * This test pins the surface — it MUST fail if a bridge primitive ever
  * leaks back onto the public filesystem barrel.
@@ -24,6 +23,9 @@ const forbiddenNames = [
   'extractTransferables',
   'exposeFileSystem',
   'createFileSystemBridge',
+  'openFileSystemBridge',
+  'createFileSystemBridgeProxy',
+  'filesystemBridgeConnectMessageType',
   'waitForWorkerReady',
   'workerReadyMessageType',
 ] as const;

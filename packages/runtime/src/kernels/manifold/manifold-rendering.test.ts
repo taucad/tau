@@ -10,7 +10,7 @@
  * See docs/policy/color-space-policy.md for sRGB↔linear handling.
  */
 import { describe, expect, it } from 'vitest';
-import manifoldKernel from '#kernels/manifold/manifold.kernel.js';
+import { manifold as manifoldKernel } from '#kernels/manifold/manifold.kernel.js';
 import { expectLinearBaseColor, getAllMaterialBaseColors, getMaterialBaseColor } from '#testing/color-testing.utils.js';
 import { assertSuccess, createGeometryFile, createTestWorker } from '#testing/kernel-testing.utils.js';
 import type { CreateGeometryResult } from '#types/runtime.types.js';

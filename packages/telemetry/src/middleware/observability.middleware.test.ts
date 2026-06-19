@@ -1,9 +1,14 @@
 /* oxlint-disable typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return `any` */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createMockRuntime, createMockInput, createMockCreateGeometryHandler } from '@taucad/runtime/testing';
+import {
+  createMockRuntime,
+  createMockInput,
+  createMockCreateGeometryHandler,
+  resolveRuntimePluginDefinition,
+} from '@taucad/runtime/testing';
 import type { ExportGeometryInput, ExportGeometryResult } from '@taucad/runtime/types';
 import { IngestEntryName } from '#ingest.js';
-import { observabilityMiddleware } from '#middleware/observability.middleware.js';
+import { observability } from '#middleware.js';
 import type { FileExtension } from '@taucad/types';
 
 vi.mock('#middleware/utils/report-to-api.js', () => ({
@@ -31,12 +36,15 @@ const createMockExportHandler = (result?: ExportGeometryResult) =>
   );
 
 const reportUrlForMeasurements = 'https://api.test/ingest';
+const resolveObservabilityMiddleware = async () => resolveRuntimePluginDefinition('middleware', observability());
 
 describe('observabilityMiddleware', () => {
   let measureSpy: ReturnType<typeof vi.spyOn>;
   let reportToApiMock: ReturnType<typeof vi.fn>;
+  let observabilityMiddleware: Awaited<ReturnType<typeof resolveObservabilityMiddleware>>;
 
   beforeEach(async () => {
+    observabilityMiddleware = await resolveObservabilityMiddleware();
     measureSpy = vi.spyOn(performance, 'measure').mockReturnValue({
       name: '',
       entryType: 'measure',

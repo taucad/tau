@@ -13,6 +13,8 @@ import type { ExportFidelity, ExportFile, FileExtension } from '@taucad/types';
 import type { KernelResult } from '#types/runtime.types.js';
 import type { RuntimeLogger } from '#types/runtime-kernel.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
+import type { TranscoderPlugin } from '#plugins/plugin-types.js';
+import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 
 // =============================================================================
 // Transcoder Edge and Input Types
@@ -137,6 +139,45 @@ export type TranscoderDefinition<
   cleanup(context: Context): Promise<void>;
 };
 
+type TranscoderDefinitionConfig<
+  Id extends string,
+  Context,
+  Options extends Record<string, unknown>,
+  Edges extends readonly TranscoderEdge[],
+> = {
+  /** Unique identifier for this transcoder plugin. */
+  id: Id;
+  /** Human-readable transcoder name, used in logs and error messages */
+  name: string;
+  /** Semantic version string for diagnostics */
+  version: string;
+  /** Statically declared format conversion edges. */
+  edges: Edges;
+  /** Initialize transcoder with typed options */
+  initialize(options: Options, runtime: TranscoderRuntime): Promise<Context>;
+  /** Execute the format conversion */
+  transcode(input: TranscodeInput<Edges>, runtime: TranscoderRuntime, context: Context): Promise<TranscodeResult>;
+  /** Tear down transcoder resources */
+  cleanup(context: Context): Promise<void>;
+};
+
+type EdgeOptionMap<Edges extends readonly TranscoderEdge[]> = {
+  [Edge in Edges[number] as Edge['to'] & string]: ResolveEdgeOptions<Edge>;
+};
+
+type SourceFormat<Edges extends readonly TranscoderEdge[]> = Edges[number]['from'] & string;
+
+export type TranscoderPluginFactory<
+  Id extends string,
+  EdgeMap extends Record<string, unknown>,
+  From extends string,
+  Options = undefined,
+> = Options extends undefined
+  ? () => TranscoderPlugin<EdgeMap, From, Id>
+  : Partial<Options> extends Options
+    ? (options?: Options) => TranscoderPlugin<EdgeMap, From, Id>
+    : (options: Options) => TranscoderPlugin<EdgeMap, From, Id>;
+
 /**
  * Define a transcoder module with full type inference.
  * All type parameters are inferred automatically -- no explicit type arguments needed.
@@ -153,7 +194,8 @@ export type TranscoderDefinition<
  * ```typescript
  * import { defineTranscoder } from '@taucad/runtime';
  *
- * export default defineTranscoder({
+ * export const myTranscoder = defineTranscoder({
+ *   id: 'my-transcoder',
  *   name: 'MyTranscoder',
  *   version: '1.0.0',
  *   edges: [
@@ -172,9 +214,34 @@ export type TranscoderDefinition<
  * ```
  */
 export function defineTranscoder<
+  const Id extends string,
   Context,
-  Options extends Record<string, unknown> = Record<string, unknown>,
+  OptionsSchema extends z.ZodType = z.ZodType,
   const Edges extends readonly TranscoderEdge[] = readonly TranscoderEdge[],
->(definition: TranscoderDefinition<Context, Options, Edges>): TranscoderDefinition<Context, Options, Edges> {
-  return definition;
+>(
+  definition: TranscoderDefinitionConfig<Id, Context, z.output<OptionsSchema> & Record<string, unknown>, Edges> & {
+    optionsSchema: OptionsSchema;
+  },
+): TranscoderPluginFactory<Id, EdgeOptionMap<Edges>, SourceFormat<Edges>, z.input<OptionsSchema>>;
+export function defineTranscoder<
+  const Id extends string,
+  Context,
+  const Edges extends readonly TranscoderEdge[] = readonly TranscoderEdge[],
+>(
+  definition: TranscoderDefinitionConfig<Id, Context, Record<string, unknown>, Edges> & {
+    optionsSchema?: undefined;
+  },
+): TranscoderPluginFactory<Id, EdgeOptionMap<Edges>, SourceFormat<Edges>>;
+export function defineTranscoder(
+  definition: TranscoderDefinitionConfig<string, unknown, Record<string, unknown>, readonly TranscoderEdge[]>,
+): TranscoderPluginFactory<string, Record<string, unknown>, string, Record<string, unknown>> {
+  const { id, ...transcoderDefinition } = definition;
+  const factory = ((options?: Record<string, unknown>) =>
+    attachRuntimePluginDefinition({ id, options }, () => transcoderDefinition)) as TranscoderPluginFactory<
+    string,
+    Record<string, unknown>,
+    string,
+    Record<string, unknown>
+  >;
+  return factory;
 }

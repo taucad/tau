@@ -312,6 +312,15 @@ export class KclUtilities {
   }
 
   /**
+   * Whether the current engine session has an executed program available for in-memory export.
+   *
+   * @returns true when exportFromMemory can run without re-executing KCL
+   */
+  public get canExportFromMemory(): boolean {
+    return this.isEngineInitialized && this.hasExecutedProgram;
+  }
+
+  /**
    * Default modeling planes (xy / yz / xz ids) from the last {@link clearProgram} bust result.
    *
    * @returns last normalized default planes, or undefined before the first successful bust

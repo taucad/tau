@@ -1,0 +1,109 @@
+import { describe, expect, it, vi } from 'vitest';
+
+type Handler = (...args: unknown[]) => void;
+type HeadersReceivedHandler = (
+  details: { responseHeaders?: Record<string, string[]> },
+  callback: (result: unknown) => void,
+) => void;
+
+const listeners = new Map<string, Handler>();
+const existingHeaderName = 'Existing';
+const messageChannelMainExportName = 'MessageChannelMain';
+const tauElectronDebugEnvName = 'TAU_ELECTRON_DEBUG';
+const liveUtilities: Array<{
+  readonly kill: ReturnType<typeof vi.fn>;
+  readonly on: ReturnType<typeof vi.fn>;
+  readonly postMessage: ReturnType<typeof vi.fn>;
+}> = [];
+const headerHandlers: HeadersReceivedHandler[] = [];
+
+vi.mock('electron', () => {
+  class MessageChannelMain {
+    public readonly port1 = { id: 'renderer-port' };
+    public readonly port2 = { id: 'utility-port' };
+  }
+
+  return {
+    ipcMain: {
+      on: vi.fn((channel: string, handler: Handler) => {
+        listeners.set(channel, handler);
+      }),
+      off: vi.fn((channel: string, handler: Handler) => {
+        if (listeners.get(channel) === handler) {
+          listeners.delete(channel);
+        }
+      }),
+    },
+    [messageChannelMainExportName]: MessageChannelMain,
+    session: {
+      defaultSession: {
+        webRequest: {
+          onHeadersReceived: vi.fn((handler: HeadersReceivedHandler) => {
+            headerHandlers.push(handler);
+          }),
+        },
+      },
+    },
+    utilityProcess: {
+      fork: vi.fn(() => {
+        const utility = {
+          kill: vi.fn(),
+          on: vi.fn(),
+          postMessage: vi.fn(),
+        };
+        liveUtilities.push(utility);
+        return utility;
+      }),
+    },
+  };
+});
+
+describe('Electron main runtime helpers', () => {
+  it('installs cross-origin isolation headers while preserving existing headers', async () => {
+    const { installElectronRuntimeHeaders } = await import('#electron/main.js');
+
+    installElectronRuntimeHeaders();
+
+    const result: unknown[] = [];
+    headerHandlers[0]?.({ responseHeaders: { [existingHeaderName]: ['kept'] } }, (value) => result.push(value));
+
+    expect(result).toEqual([
+      {
+        responseHeaders: {
+          [existingHeaderName]: ['kept'],
+          'Cross-Origin-Embedder-Policy': ['require-corp'],
+          'Cross-Origin-Opener-Policy': ['same-origin'],
+        },
+      },
+    ]);
+  });
+
+  it('registers the IPC bridge, relays ports, and tears down utility processes', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const senderOnce = vi.fn();
+    const postMessage = vi.fn();
+
+    const handle = registerElectronRuntimeMain({
+      env: { [tauElectronDebugEnvName]: '1' },
+      serviceName: 'tau-kernel-host',
+      utilityEntry: '/dist/main/kernel-host.js',
+    });
+
+    listeners.get('taucad:connect-runtime')?.({
+      sender: { once: senderOnce },
+      senderFrame: { postMessage },
+    });
+
+    expect(liveUtilities[0]?.postMessage).toHaveBeenCalledWith({ taucadRuntime: true }, [{ id: 'utility-port' }]);
+    expect(postMessage).toHaveBeenCalledWith('taucad:connect-runtime:port', undefined, [{ id: 'renderer-port' }]);
+    expect(senderOnce).toHaveBeenCalledWith('destroyed', expect.any(Function));
+
+    const [, destroyedHandler] = senderOnce.mock.calls[0] as ['destroyed', () => void];
+    destroyedHandler();
+    expect(liveUtilities[0]?.kill).toHaveBeenCalledTimes(1);
+
+    handle.dispose();
+    expect(listeners.has('taucad:connect-runtime')).toBe(false);
+    expect(liveUtilities[0]?.kill).toHaveBeenCalledTimes(2);
+  });
+});

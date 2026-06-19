@@ -7,7 +7,7 @@
  *   - {@link lruCache} — cross-process, in-memory copy via `LruMap`.
  *
  * Both implementations satisfy the same {@link FileContentCache} contract so
- * the runtime-filesystem-bridge can substitute either without any caller-side
+ * the filesystem bridge can substitute either without any caller-side
  * branches. Broadcast invalidation (OQ12 v1) is exercised separately via
  * {@link FileContentCache.invalidate} / {@link FileContentCache.clear}; the
  * downstream `listen('fileChange')` wiring is tested at the bridge layer.

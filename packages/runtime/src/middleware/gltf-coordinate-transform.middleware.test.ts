@@ -3,10 +3,11 @@
  * Tests the wrap-style hook with onion model execution.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { Document, NodeIO, Accessor } from '@gltf-transform/core';
 import type { GeometryGltf, GeometrySvg } from '@taucad/types';
-import { gltfCoordinateTransformMiddleware } from '#middleware/gltf-coordinate-transform.middleware.js';
+import { gltfCoordinateTransform } from '#middleware/gltf-coordinate-transform.middleware.js';
+import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import {
   createMockRuntime,
   createMockInput,
@@ -112,6 +113,14 @@ function createTransformContext() {
 }
 
 describe('gltfCoordinateTransformMiddleware', () => {
+  const resolveGltfCoordinateTransformMiddleware = async () =>
+    resolveRuntimePluginDefinition('middleware', gltfCoordinateTransform());
+  let gltfCoordinateTransformMiddleware: Awaited<ReturnType<typeof resolveGltfCoordinateTransformMiddleware>>;
+
+  beforeAll(async () => {
+    gltfCoordinateTransformMiddleware = await resolveGltfCoordinateTransformMiddleware();
+  });
+
   describe('wrapCreateGeometry', () => {
     describe('successful results with GLTF geometries', () => {
       it('should call handler and transform result', async () => {

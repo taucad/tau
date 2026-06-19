@@ -7,6 +7,7 @@
 
 import type { FileStat, ProviderCapabilities } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
+import { fileStatFromBytes } from '#content-metadata.js';
 
 /**
  * Non-persistent, in-memory filesystem provider.
@@ -108,12 +109,7 @@ export class MemoryProvider extends AbstractFileSystemProvider {
         });
       } else {
         const data = this._files.get(fullPath);
-        result.push({
-          name,
-          type: 'file',
-          size: data?.byteLength ?? 0,
-          mtimeMs: this._mtimes.get(fullPath) ?? Date.now(),
-        });
+        result.push({ name, ...fileStatFromBytes(data ?? new Uint8Array(), this._mtimes.get(fullPath) ?? Date.now()) });
       }
     }
     return result;
@@ -131,7 +127,7 @@ export class MemoryProvider extends AbstractFileSystemProvider {
     }
     const data = this._files.get(path);
     if (data) {
-      return { type: 'file', size: data.byteLength, mtimeMs: this._mtimes.get(path) ?? Date.now() };
+      return fileStatFromBytes(data, this._mtimes.get(path) ?? Date.now());
     }
     throw this._enoent(path);
   }

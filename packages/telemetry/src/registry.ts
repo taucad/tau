@@ -132,6 +132,18 @@ export const TauMetrics = {
     }),
   }),
 
+  genAiToolInputRepairs: defineCounter({
+    name: 'gen_ai.tool_input.repairs',
+    unit: '{repair}',
+    description: 'Tool input compatibility repairs applied before strict schema validation',
+    attributes: z.object({
+      'gen_ai.tool.name': z.string().optional(),
+      'gen_ai.tool_input.repair_kind': z.string().optional(),
+      'gen_ai.request.model': z.string().optional(),
+      'gen_ai.provider.name': z.string().optional(),
+    }),
+  }),
+
   genAiAgentIterations: defineHistogram({
     name: 'gen_ai.agent.iterations',
     unit: '{iteration}',
@@ -234,6 +246,43 @@ export const TauMetrics = {
     attributes: z.object({
       'gen_ai.prompt.section.name': z.string().optional(),
       'gen_ai.prompt.section.cache_break': z.string().optional(),
+      'gen_ai.request.model': z.string().optional(),
+      'gen_ai.provider.name': z.string().optional(),
+    }),
+  }),
+
+  /**
+   * Context-budget estimator output by component. Recorded before provider
+   * dispatch and before any content leaves the process; attributes intentionally
+   * describe shape/outcome only, never prompt text.
+   */
+  genAiContextBudgetTokens: defineHistogram({
+    name: 'gen_ai.context_budget.tokens',
+    unit: '{token}',
+    description: 'Estimated model-call context budget by payload component',
+    buckets: [1, 4, 16, 64, 256, 1024, 4096, 16_384, 65_536, 262_144, 1_048_576, 4_194_304],
+    attributes: z.object({
+      'gen_ai.context_budget.component': z.string().optional(),
+      'gen_ai.context_budget.kind': z.string().optional(),
+      'gen_ai.context_budget.trigger_reason': z.string().optional(),
+      'gen_ai.request.model': z.string().optional(),
+      'gen_ai.provider.name': z.string().optional(),
+    }),
+  }),
+
+  /**
+   * Context-compaction decision counter. Emits one decision per model-call
+   * budget evaluation so production can distinguish skipped, compacted,
+   * failed, and overflow-retry outcomes.
+   */
+  genAiContextCompactionDecisions: defineCounter({
+    name: 'gen_ai.context_compaction.decisions',
+    unit: '{decision}',
+    description: 'Context-compaction decisions by trigger reason and outcome',
+    attributes: z.object({
+      'gen_ai.context_budget.kind': z.string().optional(),
+      'gen_ai.context_budget.trigger_reason': z.string().optional(),
+      'gen_ai.context_compaction.status': z.string().optional(),
       'gen_ai.request.model': z.string().optional(),
       'gen_ai.provider.name': z.string().optional(),
     }),

@@ -9,7 +9,15 @@ import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 
+type WebWorkerLike = {
+  postMessage(value: unknown, transfer?: readonly Transferable[]): void;
+  addEventListener(type: 'message', listener: (event: { data: unknown }) => void): void;
+  removeEventListener(type: 'message', listener: (event: { data: unknown }) => void): void;
+  terminate(): void;
+};
+
 const workerCtorSchema = z.custom<typeof Worker>((value) => typeof value === 'function');
+const createWorkerSchema = z.custom<() => WebWorkerLike>((value) => typeof value === 'function');
 
 const runtimeFileSystemSchema = z.custom<RuntimeFileSystem>(
   (value) => value === undefined || isRuntimeFileSystem(value),
@@ -24,9 +32,7 @@ export const webWorkerClientOptionsSchema = z
     /**
      * URL of the worker module entry. Must resolve to a `type:
      * 'module'` worker that boots the runtime worker dispatcher.
-     * Optional — when omitted the transport defaults to the bundled
-     * `@taucad/runtime/worker/web` entry; override only when hosting
-     * a custom worker module.
+     * Required unless `createWorker` is supplied.
      */
     url: z.union([z.string(), z.instanceof(URL)]).optional(),
     /**
@@ -34,6 +40,13 @@ export const webWorkerClientOptionsSchema = z
      * unit-test injection of a fake worker.
      */
     workerCtor: workerCtorSchema.optional(),
+    /**
+     * Factory for an app-owned worker instance. This is the right escape hatch
+     * for frameworks such as Next/Turbopack that only compile module workers
+     * when they see the native `new Worker(new URL(...), { type: 'module' })`
+     * expression in application code.
+     */
+    createWorker: createWorkerSchema.optional(),
     /**
      * Optional shared-memory pool descriptor. When set the transport
      * advertises `pool` delivery on the descriptor; SAB allocation
@@ -59,7 +72,11 @@ export const webWorkerClientOptionsSchema = z
      */
     filePoolBuffer: sharedArrayBufferSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => value.url !== undefined || typeof value.createWorker === 'function', {
+    message: 'webWorkerTransport requires `createWorker` or an explicit worker `url`',
+    path: ['createWorker'],
+  });
 
 /**
  * Worker-side `KernelWorker` instance the host wires its

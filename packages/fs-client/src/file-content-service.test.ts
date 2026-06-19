@@ -15,6 +15,8 @@ function createMockProxy(overrides?: Partial<FileSystemClient>): FileSystemClien
     readFile: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
     writeFile: vi.fn().mockResolvedValue(undefined),
     writeFiles: vi.fn().mockResolvedValue(undefined),
+    mkdir: vi.fn().mockResolvedValue(undefined),
+    rmdir: vi.fn().mockResolvedValue(undefined),
     rename: vi.fn().mockResolvedValue(undefined),
     unlink: vi.fn().mockResolvedValue(undefined),
     copyDirectory: vi.fn().mockResolvedValue(undefined),
@@ -180,7 +182,11 @@ describe('FileContentService', () => {
 
     await service.write('main.ts', original, 'machine');
 
-    expect(proxy.writeFile).toHaveBeenCalledWith('/project/main.ts', original);
+    expect(proxy.writeFile).toHaveBeenCalledOnce();
+    const [_path, sent] = vi.mocked(proxy.writeFile).mock.calls[0] as [string, Uint8Array<ArrayBuffer>];
+    expect(sent).toEqual(new Uint8Array([1, 2, 3]));
+    expect(sent).not.toBe(original);
+    expect(sent.buffer).not.toBe(original.buffer);
 
     const cached = service.peek('main.ts');
     expect(cached).toBeDefined();
@@ -253,6 +259,15 @@ describe('FileContentService', () => {
     await service.writeFiles({ [filePathA]: { content: file1 }, [filePathB]: { content: file2 } }, 'machine');
 
     expect(proxy.writeFiles).toHaveBeenCalledOnce();
+    const written = vi.mocked(proxy.writeFiles).mock.calls[0]![0];
+    const sentA = written['/project/a.ts']?.content;
+    const sentB = written['/project/b.ts']?.content;
+    expect(sentA).toEqual(new Uint8Array([1, 2]));
+    expect(sentB).toEqual(new Uint8Array([3, 4]));
+    expect(sentA).not.toBe(file1);
+    expect(sentB).not.toBe(file2);
+    expect(sentA?.buffer).not.toBe(file1.buffer);
+    expect(sentB?.buffer).not.toBe(file2.buffer);
 
     const cachedA = service.peek('a.ts');
     const cachedB = service.peek('b.ts');
@@ -282,9 +297,34 @@ describe('FileContentService', () => {
   });
 
   it('should call proxy.copyDirectory for copyDirectory', async () => {
+    const events: ContentChangeEvent[] = [];
+    service.onDidContentChange((event) => {
+      events.push(event);
+    });
+
     await service.copyDirectory('/src', '/dest');
 
-    expect(proxy.copyDirectory).toHaveBeenCalledWith('/src', '/dest');
+    expect(proxy.copyDirectory).toHaveBeenCalledWith('/project/src', '/project/dest');
+    expect(events).toContainEqual({ type: 'directoryCopied', sourcePath: 'src', targetPath: 'dest' });
+  });
+
+  it('should duplicate a file and emit a fileCopied event with the target path', async () => {
+    const events: ContentChangeEvent[] = [];
+    service.onDidContentChange((event) => {
+      events.push(event);
+    });
+    const source = new Uint8Array([9, 8, 7]);
+    service.populateText('src/main.ts', source);
+
+    await service.duplicate('src/main.ts', 'src/main-copy.ts');
+
+    expect(proxy.writeFile).toHaveBeenCalledOnce();
+    const [path, sent] = vi.mocked(proxy.writeFile).mock.calls[0] as [string, Uint8Array<ArrayBuffer>];
+    expect(path).toBe('/project/src/main-copy.ts');
+    expect(sent).toEqual(source);
+    expect(sent).not.toBe(source);
+    expect(events).toContainEqual({ type: 'fileCopied', sourcePath: 'src/main.ts', targetPath: 'src/main-copy.ts' });
+    expect(service.peek('src/main-copy.ts')).toEqual(source);
   });
 
   it('should call proxy.getZippedDirectory for getZippedDirectory', async () => {
@@ -1218,6 +1258,26 @@ describe('FileContentService', () => {
       harness.disposeChannel();
     });
 
+    it('createDirectory rejects foreign-absolute keys with WorkspaceScopeViolationError before touching the proxy', async () => {
+      const harness = createHarness({ workspaceRoot: '/' });
+
+      await expect(harness.service.createDirectory('/projects/x/new-dir', { recursive: true })).rejects.toBeInstanceOf(
+        WorkspaceScopeViolationError,
+      );
+      expect(harness.proxy.mkdir).not.toHaveBeenCalled();
+      harness.disposeChannel();
+    });
+
+    it('deleteDirectory rejects foreign-absolute keys with WorkspaceScopeViolationError before touching the proxy', async () => {
+      const harness = createHarness({ workspaceRoot: '/' });
+
+      await expect(harness.service.deleteDirectory('/projects/x/old-dir', { recursive: true })).rejects.toBeInstanceOf(
+        WorkspaceScopeViolationError,
+      );
+      expect(harness.proxy.rmdir).not.toHaveBeenCalled();
+      harness.disposeChannel();
+    });
+
     it('rename rejects foreign-absolute keys with WorkspaceScopeViolationError before touching the proxy', async () => {
       const harness = createHarness({ workspaceRoot: '/projects/abc' });
 
@@ -1281,6 +1341,48 @@ describe('FileContentService', () => {
       // Cache is keyed by the normalized workspace-relative form.
       expect(harness.service.has('main.ts')).toBe(true);
       expect(harness.service.has('/projects/abc/main.ts')).toBe(false);
+      harness.disposeChannel();
+    });
+
+    it('createDirectory normalizes absolute-but-in-scope keys to workspace-relative directoryCreated events', async () => {
+      const harness = createHarness({ workspaceRoot: '/projects/abc' });
+      const events: ContentChangeEvent[] = [];
+      harness.service.onDidContentChange((event) => {
+        events.push(event);
+      });
+
+      await harness.service.createDirectory('/projects/abc/src/new-dir', { recursive: true });
+
+      expect(harness.proxy.mkdir).toHaveBeenCalledWith('/projects/abc/src/new-dir', { recursive: true });
+      const created = events.find((event) => event.type === 'directoryCreated');
+      expect(created).toEqual({ type: 'directoryCreated', path: 'src/new-dir' });
+      harness.disposeChannel();
+    });
+
+    it('deleteDirectory normalizes absolute-but-in-scope keys to workspace-relative directoryDeleted events', async () => {
+      const harness = createHarness({ workspaceRoot: '/projects/abc' });
+      const events: ContentChangeEvent[] = [];
+      harness.service.onDidContentChange((event) => {
+        events.push(event);
+      });
+
+      await harness.service.deleteDirectory('/projects/abc/src/old-dir', { recursive: true });
+
+      expect(harness.proxy.rmdir).toHaveBeenCalledWith('/projects/abc/src/old-dir', { recursive: true });
+      const deleted = events.find((event) => event.type === 'directoryDeleted');
+      expect(deleted).toEqual({ type: 'directoryDeleted', path: 'src/old-dir' });
+      harness.disposeChannel();
+    });
+
+    it('getZippedDirectory resolves workspace-relative keys before proxying', async () => {
+      const harness = createHarness({ workspaceRoot: '/projects/abc' });
+      const blob = new Blob();
+      vi.mocked(harness.proxy.getZippedDirectory).mockResolvedValue(blob);
+
+      const result = await harness.service.getZippedDirectory('src/assets');
+
+      expect(result).toBe(blob);
+      expect(harness.proxy.getZippedDirectory).toHaveBeenCalledWith('/projects/abc/src/assets');
       harness.disposeChannel();
     });
 

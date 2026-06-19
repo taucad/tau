@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import type { FileStat, ProviderCapabilities } from '#types.js';
+import { fileStatFromBytes } from '#content-metadata.js';
 
 const encoder = new TextEncoder();
 
@@ -57,7 +58,7 @@ class TestProvider extends AbstractFileSystemProvider {
     }
     const data = this._files.get(path);
     if (data) {
-      return { type: 'file', size: data.byteLength, mtimeMs: Date.now() };
+      return fileStatFromBytes(data, Date.now());
     }
     const error = new Error(`ENOENT: no such file or directory '${path}'`);
     (error as NodeJS.ErrnoException).code = 'ENOENT';

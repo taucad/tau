@@ -1,7 +1,7 @@
 /**
  * Regression test for the runtime's bundling contract:
  *
- * Every `package.json#publishConfig.exports.<subpath>.import.default` chunk
+ * Every `package.json#publishConfig.exports.<subpath>.default` chunk
  * (e.g. `./dist/esm/middleware/parameter-cache.middleware.js`) must have a
  * matching `tsdown.config.ts` entry (e.g. `src/middleware/parameter-cache.middleware.ts`)
  * so the build emits a real file at that path.
@@ -20,13 +20,18 @@ import { describe, it, expect } from 'vitest';
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 type ExportConditions = {
-  readonly require?: { readonly types?: string; readonly default?: string };
-  readonly import?: { readonly types?: string; readonly default?: string };
+  readonly types?: string;
+  readonly import?: string;
+  readonly default?: string;
+  readonly require?: unknown;
 };
 
 type PublishExports = Readonly<Record<string, ExportConditions>>;
 
 type RuntimePackage = {
+  readonly main?: string;
+  readonly module?: string;
+  readonly types?: string;
   readonly publishConfig?: { readonly exports?: PublishExports };
 };
 
@@ -61,6 +66,12 @@ describe('runtime publishConfig.exports → tsdown entries', () => {
     expect(packageJson.publishConfig?.exports).toBeDefined();
   });
 
+  it('should advertise an ESM-only package entry point', () => {
+    expect(packageJson.main).toBe('./dist/esm/index.js');
+    expect(packageJson.types).toBe('./dist/esm/index.d.ts');
+    expect(packageJson.module).toBeUndefined();
+  });
+
   const exportsMap = packageJson.publishConfig?.exports ?? {};
   const subpaths = Object.keys(exportsMap);
 
@@ -73,24 +84,18 @@ describe('runtime publishConfig.exports → tsdown entries', () => {
     if (!conditions) {
       throw new Error(`Missing export conditions for ${subpath}`);
     }
-    const importDefault = conditions.import?.default;
-    expect(importDefault, `${subpath} must declare an "import.default" target`).toMatch(/^\.\/dist\/esm\/.+\.js$/);
-    if (!importDefault) {
+    expect(conditions.require, `${subpath} must not declare a CommonJS "require" branch`).toBeUndefined();
+    expect(conditions.types, `${subpath} must declare an ESM declaration target`).toMatch(/^\.\/dist\/esm\/.+\.d\.ts$/);
+    expect(conditions.import, `${subpath} must declare an ESM "import" target`).toMatch(/^\.\/dist\/esm\/.+\.js$/);
+    expect(conditions.default, `${subpath} must declare an ESM "default" target`).toMatch(/^\.\/dist\/esm\/.+\.js$/);
+    expect(conditions.import, `${subpath} import/default targets should stay aligned`).toBe(conditions.default);
+    if (!conditions.default) {
       return;
     }
 
-    const expectedEntry = distributionEsmToSourceEntry(importDefault);
-    expect(tsdownEntries, `${subpath} → ${importDefault} requires tsdown entry "${expectedEntry}"`).toContain(
+    const expectedEntry = distributionEsmToSourceEntry(conditions.default);
+    expect(tsdownEntries, `${subpath} → ${conditions.default} requires tsdown entry "${expectedEntry}"`).toContain(
       expectedEntry,
     );
-  });
-
-  it.each(subpaths)('subpath "%s" should map to a tsdown CJS entry', (subpath) => {
-    const conditions = exportsMap[subpath];
-    if (!conditions) {
-      throw new Error(`Missing export conditions for ${subpath}`);
-    }
-    const requireDefault = conditions.require?.default;
-    expect(requireDefault, `${subpath} must declare a "require.default" target`).toMatch(/^\.\/dist\/cjs\/.+\.cjs$/);
   });
 });

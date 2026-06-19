@@ -1,8 +1,9 @@
 // @vitest-environment node
 /* oxlint-disable eslint(new-cap) -- OpenCascade API uses PascalCase method names */
+/* eslint-disable new-cap -- OpenCascade embind exposes PascalCase factory functions. */
 /* eslint-disable @typescript-eslint/naming-convention -- OCCT C++ classes/methods use PascalCase; fixture filenames use extensions */
 import { describe, it, expect, beforeAll } from 'vitest';
-import opencascadeKernel from '#kernels/opencascade/opencascade.kernel.js';
+import { opencascade as opencascadeKernel } from '#kernels/opencascade/opencascade.kernel.js';
 import { getModuleRegistry } from '#kernels/kernel-module-helpers.js';
 import { assertSuccess, createGeometryFile, createTestWorker } from '#testing/kernel-testing.utils.js';
 import { createGeometryTestHelpers } from '#testing/kernel-geometry-testing.utils.js';
@@ -14,17 +15,9 @@ import { createGeometryTestHelpers } from '#testing/kernel-geometry-testing.util
 // RED-STATE TDD — these tests intentionally FAIL today.
 //
 // The `wasm: 'multi'` option resolves the pthread bindings from the published
-// `opencascade.js/multi` subpath (already installed) but the matching pthread
-// WASM binary from the LOCAL asset copy:
-//
-//   new URL('wasm/opencascade_full_multi.wasm', import.meta.url)
-//
-// That file is produced by the runtime `copy-assets` step, which only copies it
-// once the multi-threaded OCJS artifact is repacked + reinstalled into
-// `@taucad/runtime` (owned by a separate orchestrator). While the local
-// `opencascade_full_multi.wasm` is absent, `compileWasmStreaming` fails inside
-// `initOcct`, so worker construction throws in `beforeAll` and every test here
-// errors.
+// `opencascade.js/multi` subpath. The OCJS glue module now owns its adjacent
+// WASM asset URL so framework bundlers emit a single copy instead of seeing a
+// second `@taucad/runtime`-owned static URL.
 //
 // The assertions below describe the REAL multi-threaded behaviour, so once the
 // asset ships they go green with no further code changes: the kernel boots the

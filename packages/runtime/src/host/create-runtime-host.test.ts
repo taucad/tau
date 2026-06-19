@@ -93,19 +93,13 @@ describe('createRuntimeHost', () => {
     expect(transport.close).toHaveBeenCalledTimes(1);
   });
 
-  it('accepts optional kernels / bundlers / transcoders / middleware / cache without throwing', () => {
+  it('rejects executable capability arrays on the host config type', () => {
     const transport = createRecordingHost();
-    expect(() => {
-      const host = createRuntimeHost({
-        transport,
-        kernels: [],
-        bundlers: [],
-        transcoders: [],
-        middleware: [],
-        cache: undefined,
-      });
-      host.dispose();
-    }).not.toThrow();
+    createRuntimeHost({
+      transport,
+      // @ts-expect-error -- executable capabilities are declared in `defineRuntime`, not on host config.
+      kernels: [],
+    }).dispose();
   });
 });
 

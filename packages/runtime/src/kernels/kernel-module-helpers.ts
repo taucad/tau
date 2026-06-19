@@ -8,6 +8,8 @@
  */
 
 import type { KernelIssue } from '#types/runtime.types.js';
+import type { KernelRuntime } from '#types/runtime-kernel.types.js';
+import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isNode, resolveFileUrl } from '#framework/environment.js';
 import { asBuffer } from '@taucad/utils/file';
 
@@ -53,6 +55,62 @@ export function getModuleRegistry(): Map<string, Record<string, unknown>> {
   return registry;
 }
 
+export type KernelModuleShimOptions = {
+  moduleExpression: string;
+  exports: Record<string, unknown>;
+  exportPrefix?: string;
+};
+
+export type RegisterKernelModuleOptions = {
+  name: string;
+  exports: Record<string, unknown>;
+  version: string;
+  globalName?: string;
+  exportPrefix?: string;
+};
+
+/** Builds an ESM shim that exposes a registry-backed built-in kernel module. */
+export function createKernelModuleShim({
+  moduleExpression,
+  exports,
+  exportPrefix = '__kernel_export',
+}: KernelModuleShimOptions): string {
+  const exportNames = Object.keys(exports).filter((key) => key !== 'default' && isValidJavaScriptIdentifier(key));
+  const namedExports = exportNames
+    .map((key, index) => {
+      const localName = `${exportPrefix}_${index}`;
+      return `const ${localName} = __mod[${JSON.stringify(key)}];\nexport { ${localName} as ${key} };`;
+    })
+    .join('\n');
+
+  return `const __mod = ${moduleExpression};\n${namedExports}\nexport default __mod;\n`;
+}
+
+/** Builds the JavaScript expression used by shims to read a module from the global registry. */
+export function createKernelModuleRegistryExpression(name: string): string {
+  return `globalThis.${KERNEL_MODULES_KEY}.get(${JSON.stringify(name)})`;
+}
+
+/** Registers a registry-backed built-in module with the runtime bundler. */
+export function registerKernelModule(runtime: KernelRuntime, options: RegisterKernelModuleOptions): void {
+  const registry = getModuleRegistry();
+  registry.set(options.name, options.exports);
+
+  runtime.bundler.registerModule(options.name, {
+    code: createKernelModuleShim({
+      moduleExpression: createKernelModuleRegistryExpression(options.name),
+      exports: options.exports,
+      exportPrefix: options.exportPrefix,
+    }),
+    version: options.version,
+    globalName: options.globalName,
+  });
+}
+
+function isValidJavaScriptIdentifier(value: string): boolean {
+  return /^[$_a-z][\w$]*$/i.test(value);
+}
+
 /**
  * Extract `defaultParams` or `defaultParameters` from an executed module.
  * @public
@@ -87,13 +145,13 @@ export function resolveToRelative(absolutePath: string, basePath: string): strin
  * @public
  */
 export function convertRawIssuesToKernelIssues(
-  issues: Array<{ message: string; severity: string; location?: unknown; code?: KernelIssue['code'] }>,
+  issues: Array<{ message: string; severity: string; location?: unknown; code?: unknown }>,
   fallbackFileName: string,
 ): KernelIssue[] {
   return issues.map((issue) => ({
     ...issue,
     message: issue.message,
-    code: issue.code ?? 'RUNTIME',
+    code: isKernelIssueCode(issue.code) ? issue.code : 'UNKNOWN',
     type: 'runtime',
     severity: issue.severity === 'warning' ? 'warning' : 'error',
     location: (issue.location as KernelIssue['location']) ?? {

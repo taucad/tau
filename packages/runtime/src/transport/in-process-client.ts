@@ -32,6 +32,7 @@ import { allocatePools } from '#transport/_internal/sab-pools.js';
 import type { AllocatedPools } from '#transport/_internal/sab-pools.js';
 import { triggerAbort } from '#transport/_internal/abort-channel.js';
 import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
+import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 
 /** Canonical id literal for bundled in-process transport. */
 export const inProcessId = 'in-process';
@@ -39,7 +40,21 @@ export const inProcessId = 'in-process';
 /**
  *
  */
-export type InProcessClientOptions = z.input<typeof inProcessClientOptionsSchema>;
+type InProcessClientSchemaOptions = z.input<typeof inProcessClientOptionsSchema>;
+
+/**
+ * Consumer options for {@link inProcessTransport}. The same-isolate transport
+ * owns host creation, so the worker-owned runtime definition is required here
+ * rather than on `createRuntimeClient`.
+ *
+ * @public
+ */
+export type InProcessClientOptions<Runtime extends AnyRuntimeDefinition = AnyRuntimeDefinition> = Omit<
+  InProcessClientSchemaOptions,
+  'runtime'
+> & {
+  readonly runtime: Runtime;
+};
 
 /**
  * Pure diagnostic snapshot for {@link InProcessClientOptions} — never
@@ -47,7 +62,9 @@ export type InProcessClientOptions = z.input<typeof inProcessClientOptionsSchema
  *
  * @public
  */
-export const inProcessClientDescribe = (options: InProcessClientOptions): TransportDescriptor<typeof inProcessId> => {
+export const inProcessClientDescribe = (
+  options: InProcessClientSchemaOptions,
+): TransportDescriptor<typeof inProcessId> => {
   const sabAvailable = typeof SharedArrayBuffer === 'function';
   return {
     id: inProcessId,
@@ -68,9 +85,9 @@ export const inProcessClientDescribe = (options: InProcessClientOptions): Transp
  * @public
  */
 export const inProcessClient = (
-  options: InProcessClientOptions,
+  options: InProcessClientSchemaOptions,
 ): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, typeof inProcessId> => {
-  const { fileSystem } = options;
+  const { fileSystem, runtime } = options as InProcessClientSchemaOptions & { readonly runtime?: AnyRuntimeDefinition };
   if (fileSystem !== undefined && !isRuntimeFileSystem(fileSystem)) {
     throw new TypeError('inProcessTransport: `fileSystem` must be produced by a `fromX` factory');
   }
@@ -175,7 +192,10 @@ export const inProcessClient = (
         import('#framework/kernel-runtime-worker.js'),
         import('#transport/_internal/runtime-worker-dispatcher.js'),
       ]);
-      const worker = new kernelWorkerModule.KernelRuntimeWorker();
+      if (!runtime) {
+        throw new Error('inProcessTransport: `runtime` is required so the in-process host can own executable modules');
+      }
+      const worker = new kernelWorkerModule.KernelRuntimeWorker({ runtime });
       createWorkerDispatcher(worker, hostPort, {
         inlineFileSystem,
         encodeGeometry,

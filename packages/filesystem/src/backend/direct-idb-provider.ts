@@ -7,8 +7,10 @@
  * path set on init (~26ms for 10k entries vs ~12s ZenFS full scan).
  */
 
+import type { FileContentMetadata } from '@taucad/types';
 import type { FileStat, ProviderCapabilities } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
+import { getFileContentMetadata } from '#content-metadata.js';
 
 const storeName = 'files';
 const dbVersion = 1;
@@ -51,6 +53,8 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
   private readonly _mtimes = new Map<string, number>();
   /** Cached file sizes populated on write/read to avoid loading full content for stat. */
   private readonly _fileSizes = new Map<string, number>();
+  /** Cached file content metadata populated on write/read to avoid repeated classification. */
+  private readonly _fileMetadata = new Map<string, FileContentMetadata>();
 
   /** Pending writes accumulated for the next batched IDB transaction. */
   private readonly _writeBatch: Array<{ path: string; data: Uint8Array<ArrayBuffer> }> = [];
@@ -95,6 +99,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     this._paths.add(path);
     this._mtimes.set(path, Date.now());
     this._fileSizes.set(path, bytes.byteLength);
+    this._fileMetadata.set(path, getFileContentMetadata(bytes));
 
     this._writeBatch.push({ path, data: bytes });
     await this._throttledFlush();
@@ -148,7 +153,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     const names = await this.readdir(path);
     const prefix = path === '/' ? '/' : `${path}/`;
     const result: Array<{ name: string } & FileStat> = [];
-    const unknownSizePaths: Array<{ index: number; fullPath: string }> = [];
+    const uncachedMetadataPaths: Array<{ index: number; fullPath: string }> = [];
 
     for (const name of names) {
       const fullPath = `${prefix}${name}`;
@@ -161,37 +166,50 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
         });
       } else {
         const cachedSize = this._fileSizes.get(fullPath);
-        if (cachedSize === undefined) {
-          unknownSizePaths.push({ index: result.length, fullPath });
-          result.push({
-            name,
-            type: 'file',
-            size: 0,
-            mtimeMs: this._mtimes.get(fullPath) ?? Date.now(),
-          });
-        } else {
+        const cachedMetadata = this._fileMetadata.get(fullPath);
+        if (cachedSize !== undefined && cachedMetadata !== undefined) {
           result.push({
             name,
             type: 'file',
             size: cachedSize,
             mtimeMs: this._mtimes.get(fullPath) ?? Date.now(),
+            ...cachedMetadata,
+          });
+        } else {
+          uncachedMetadataPaths.push({ index: result.length, fullPath });
+          result.push({
+            name,
+            type: 'file',
+            size: 0,
+            mtimeMs: this._mtimes.get(fullPath) ?? Date.now(),
+            contentKind: 'text',
+            lineCount: 1,
           });
         }
       }
     }
 
-    if (unknownSizePaths.length > 0 && this._db) {
+    if (uncachedMetadataPaths.length > 0 && this._db) {
       await new Promise<void>((resolve, reject) => {
         const tx = this._db!.transaction(storeName, 'readonly');
-        let remaining = unknownSizePaths.length;
+        let remaining = uncachedMetadataPaths.length;
 
         const store = tx.objectStore(storeName);
         const bindRequest = (request: IDBRequest, entryFullPath: string, entryIndex: number) => {
           request.addEventListener('success', () => {
             const data = request.result as Uint8Array<ArrayBuffer> | undefined;
-            const size = data?.byteLength ?? 0;
-            this._fileSizes.set(entryFullPath, size);
-            result[entryIndex] = { ...result[entryIndex]!, size };
+            const bytes = data ?? new Uint8Array();
+            const metadata = getFileContentMetadata(bytes);
+            const mtimeMs = this._mtimes.get(entryFullPath) ?? Date.now();
+            this._fileSizes.set(entryFullPath, bytes.byteLength);
+            this._fileMetadata.set(entryFullPath, metadata);
+            result[entryIndex] = {
+              name: result[entryIndex]!.name,
+              type: 'file',
+              size: bytes.byteLength,
+              mtimeMs,
+              ...metadata,
+            };
             remaining--;
             if (remaining === 0) {
               resolve();
@@ -201,7 +219,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
             reject(request.error ?? new Error(`IDB get failed for '${entryFullPath}'`));
           });
         };
-        for (const { index, fullPath } of unknownSizePaths) {
+        for (const { index, fullPath } of uncachedMetadataPaths) {
           bindRequest(store.get(fullPath), fullPath, index);
         }
       });
@@ -222,13 +240,16 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     }
     if (this._paths.has(path)) {
       const cachedSize = this._fileSizes.get(path);
-      if (cachedSize !== undefined) {
-        return { type: 'file', size: cachedSize, mtimeMs: this._mtimes.get(path) ?? Date.now() };
+      const cachedMetadata = this._fileMetadata.get(path);
+      if (cachedSize !== undefined && cachedMetadata !== undefined) {
+        return { type: 'file', size: cachedSize, mtimeMs: this._mtimes.get(path) ?? Date.now(), ...cachedMetadata };
       }
       const data = await this._idbGet(path);
-      const size = data?.byteLength ?? 0;
-      this._fileSizes.set(path, size);
-      return { type: 'file', size, mtimeMs: this._mtimes.get(path) ?? Date.now() };
+      const bytes = data ?? new Uint8Array();
+      const metadata = getFileContentMetadata(bytes);
+      this._fileSizes.set(path, bytes.byteLength);
+      this._fileMetadata.set(path, metadata);
+      return { type: 'file', size: bytes.byteLength, mtimeMs: this._mtimes.get(path) ?? Date.now(), ...metadata };
     }
     throw this._enoent(path);
   }
@@ -247,6 +268,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     this._paths.delete(path);
     this._mtimes.delete(path);
     this._fileSizes.delete(path);
+    this._fileMetadata.delete(path);
   }
 
   /**
@@ -295,9 +317,14 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     this._mtimes.delete(from);
     this._mtimes.set(to, mtime);
     const size = this._fileSizes.get(from);
+    const metadata = this._fileMetadata.get(from);
     this._fileSizes.delete(from);
+    this._fileMetadata.delete(from);
     if (size !== undefined) {
       this._fileSizes.set(to, size);
+    }
+    if (metadata !== undefined) {
+      this._fileMetadata.set(to, metadata);
     }
   }
 
@@ -366,9 +393,14 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       this._mtimes.delete(oldPath);
       this._mtimes.set(newPath, mtime);
       const size = this._fileSizes.get(oldPath);
+      const metadata = this._fileMetadata.get(oldPath);
       this._fileSizes.delete(oldPath);
+      this._fileMetadata.delete(oldPath);
       if (size !== undefined) {
         this._fileSizes.set(newPath, size);
+      }
+      if (metadata !== undefined) {
+        this._fileMetadata.set(newPath, metadata);
       }
     }
     for (const directory of directoriesToMove) {
@@ -404,6 +436,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
         this._paths.add(path);
         this._mtimes.set(path, now);
         this._fileSizes.set(path, content.byteLength);
+        this._fileMetadata.set(path, getFileContentMetadata(content));
       }
 
       tx.addEventListener('complete', () => {
@@ -435,6 +468,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       throw this._enoent(path);
     }
     this._fileSizes.set(path, data.byteLength);
+    this._fileMetadata.set(path, getFileContentMetadata(data));
     return data;
   }
 

@@ -8,6 +8,9 @@ import {
   GenAiSafeguardAction,
   GenAiSafeguardHelped,
   GenAiInterruptRecoveryOutcome,
+  GenAiContextBudgetKind,
+  GenAiContextBudgetTriggerReason,
+  GenAiContextCompactionStatus,
 } from '#attributes.js';
 
 describe('AttributeKey', () => {
@@ -92,5 +95,38 @@ describe('GenAiInterruptRecoveryOutcome', () => {
   it('should define emitted and already_fired values', () => {
     expect(GenAiInterruptRecoveryOutcome.EMITTED).toBe('emitted');
     expect(GenAiInterruptRecoveryOutcome.ALREADY_FIRED).toBe('already_fired');
+  });
+});
+
+describe('context-budget attribute keys', () => {
+  it('should expose budget and compaction keys under gen_ai.context_*', () => {
+    expect(AttributeKey.GEN_AI_CONTEXT_BUDGET_COMPONENT).toBe('gen_ai.context_budget.component');
+    expect(AttributeKey.GEN_AI_CONTEXT_BUDGET_KIND).toBe('gen_ai.context_budget.kind');
+    expect(AttributeKey.GEN_AI_CONTEXT_BUDGET_TRIGGER_REASON).toBe('gen_ai.context_budget.trigger_reason');
+    expect(AttributeKey.GEN_AI_CONTEXT_COMPACTION_STATUS).toBe('gen_ai.context_compaction.status');
+  });
+});
+
+describe('GenAiContextBudgetKind', () => {
+  it('should define the active estimate-backed budget kind', () => {
+    expect(GenAiContextBudgetKind.ESTIMATED).toBe('estimated');
+  });
+});
+
+describe('GenAiContextBudgetTriggerReason', () => {
+  it('should define compaction trigger reasons', () => {
+    expect(GenAiContextBudgetTriggerReason.NONE).toBe('none');
+    expect(GenAiContextBudgetTriggerReason.ESTIMATE).toBe('estimate');
+    expect(GenAiContextBudgetTriggerReason.PREVIOUS_USAGE).toBe('previous_usage');
+    expect(GenAiContextBudgetTriggerReason.OVERFLOW).toBe('overflow');
+  });
+});
+
+describe('GenAiContextCompactionStatus', () => {
+  it('should define compaction outcomes', () => {
+    expect(GenAiContextCompactionStatus.SKIPPED).toBe('skipped');
+    expect(GenAiContextCompactionStatus.COMPACTED).toBe('compacted');
+    expect(GenAiContextCompactionStatus.FAILED).toBe('failed');
+    expect(GenAiContextCompactionStatus.OVERFLOW_RETRY_SUCCEEDED).toBe('overflow_retry_succeeded');
   });
 });

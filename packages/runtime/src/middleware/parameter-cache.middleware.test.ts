@@ -3,10 +3,11 @@
  * Tests the wrap-style hook with onion model execution.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
 import type { GetParametersResult } from '#types/runtime.types.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
-import { parameterCacheMiddleware, parameterMemoryCache } from '#middleware/parameter-cache.middleware.js';
+import { parameterCache, parameterMemoryCache } from '#middleware/parameter-cache.middleware.js';
+import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import {
   createMockRuntime,
   createMockInput,
@@ -87,6 +88,13 @@ function createCacheContext(options?: {
 }
 
 describe('parameterCacheMiddleware', () => {
+  const resolveParameterCacheMiddleware = async () => resolveRuntimePluginDefinition('middleware', parameterCache());
+  let parameterCacheMiddleware: Awaited<ReturnType<typeof resolveParameterCacheMiddleware>>;
+
+  beforeAll(async () => {
+    parameterCacheMiddleware = await resolveParameterCacheMiddleware();
+  });
+
   beforeEach(() => {
     parameterMemoryCache.clear();
   });

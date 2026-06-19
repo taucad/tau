@@ -3,13 +3,13 @@
 /**
  * Consumer-facing kernel plugin factory functions.
  *
- * Each kernel owns its registration metadata in a co-located `*.plugin.ts` file.
- * This module re-exports all kernel factories for public consumption.
+ * Each kernel implementation owns its registration metadata directly through
+ * `defineKernel(...)`; this entry re-exports the callable factories.
  */
 
-export { replicad } from '#kernels/replicad/replicad.plugin.js';
-export { opencascade } from '#kernels/opencascade/opencascade.plugin.js';
-export { zoo } from '#kernels/zoo/zoo.plugin.js';
-export { jscad } from '#kernels/jscad/jscad.plugin.js';
-export { manifold } from '#kernels/manifold/manifold.plugin.js';
-export { tau } from '#kernels/tau/tau.plugin.js';
+export { replicad } from '#kernels/replicad/replicad.kernel.js';
+export { opencascade } from '#kernels/opencascade/opencascade.kernel.js';
+export { zoo } from '#kernels/zoo/zoo.kernel.js';
+export { jscad } from '#kernels/jscad/jscad.kernel.js';
+export { manifold } from '#kernels/manifold/manifold.kernel.js';
+export { tau } from '#kernels/tau/tau.kernel.js';

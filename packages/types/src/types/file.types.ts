@@ -11,17 +11,58 @@ export type GeometryFile = {
 };
 
 /**
+ * File content classification used by model-visible filesystem metadata.
+ *
+ * @public
+ */
+export type FileContentKind = 'text' | 'binary';
+
+/**
+ * Required metadata for text files.
+ *
+ * @public
+ */
+export type TextFileContentMetadata = {
+  readonly contentKind: 'text';
+  readonly lineCount: number;
+};
+
+/**
+ * Required metadata for binary files.
+ *
+ * @public
+ */
+export type BinaryFileContentMetadata = {
+  readonly contentKind: 'binary';
+  readonly lineCount?: never;
+};
+
+/**
+ * Required file content metadata.
+ *
+ * @public
+ */
+export type FileContentMetadata = TextFileContentMetadata | BinaryFileContentMetadata;
+
+/**
  * Base file tree entry for API transfer and serialization.
  * Represents files and directories in a file tree snapshot.
  *
  * @public
  */
-export type FileTreeEntry = {
-  path: string;
-  name: string;
-  type: 'file' | 'dir';
-  size: number;
-};
+export type FileTreeEntry =
+  | {
+      path: string;
+      name: string;
+      type: 'dir';
+      size: number;
+    }
+  | ({
+      path: string;
+      name: string;
+      type: 'file';
+      size: number;
+    } & FileContentMetadata);
 
 /**
  * File or directory entry in the filesystem with client-side loading state.
@@ -46,11 +87,17 @@ export type FileEntry = FileTreeEntry & {
  *
  * @public
  */
-export type FileStat = {
-  readonly type: 'file' | 'dir';
-  readonly size: number;
-  readonly mtimeMs: number;
-};
+export type FileStat =
+  | {
+      readonly type: 'dir';
+      readonly size: number;
+      readonly mtimeMs: number;
+    }
+  | ({
+      readonly type: 'file';
+      readonly size: number;
+      readonly mtimeMs: number;
+    } & FileContentMetadata);
 
 /**
  * Stat result with path and name for directory listings.

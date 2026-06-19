@@ -20,19 +20,27 @@
  *
  * See docs/policy/color-space-policy.md for sRGB↔linear handling.
  */
-import { describe, expect, it } from 'vitest';
-import zooKernel from '#kernels/zoo/zoo.kernel.js';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { zoo as zooKernel } from '#kernels/zoo/zoo.kernel.js';
+import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 
 describe('Zoo / KCL — color rendering observation', () => {
+  const resolveZooDefinition = async () => resolveRuntimePluginDefinition('kernel', zooKernel());
+  let zooDefinition: Awaited<ReturnType<typeof resolveZooDefinition>>;
+
+  beforeAll(async () => {
+    zooDefinition = await resolveZooDefinition();
+  });
+
   it('exposes a kernel definition with at least one export schema', () => {
-    expect(zooKernel.name).toBe('ZooKernel');
-    expect(zooKernel.exportSchemas).toBeTruthy();
-    const formats = Object.keys(zooKernel.exportSchemas ?? {});
+    expect(zooDefinition.name).toBe('ZooKernel');
+    expect(zooDefinition.exportSchemas).toBeTruthy();
+    const formats = Object.keys(zooDefinition.exportSchemas ?? {});
     expect(formats.length).toBeGreaterThan(0);
   });
 
   it('declares glb as a supported export format (color-bearing)', () => {
-    const formats = Object.keys(zooKernel.exportSchemas ?? {});
+    const formats = Object.keys(zooDefinition.exportSchemas ?? {});
     expect(formats).toContain('glb');
   });
 });

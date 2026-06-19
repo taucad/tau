@@ -1,7 +1,12 @@
 // @vitest-environment node
-import { describe, it, expect } from 'vitest';
-import zooKernel from '#kernels/zoo/zoo.kernel.js';
-import { createTestWorker, createGeometryFile } from '#testing/kernel-testing.utils.js';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import type { JSONDocument } from '@gltf-transform/core';
+import { NodeIO } from '@gltf-transform/core';
+import { zoo as zooKernel } from '#kernels/zoo/zoo.kernel.js';
+import { createMockKernelRuntime, createTestWorker, createGeometryFile } from '#testing/kernel-testing.utils.js';
+import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import { writeGlb, writeGltfJson } from '#utils/glb-writer.js';
+import type { GlbPrimitive } from '#utils/glb-writer.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- File names use extensions like 'main.kcl' */
 
@@ -21,6 +26,109 @@ async function createWorker(files: Record<string, string>): ReturnType<typeof cr
 
   return worker;
 }
+
+const createTrianglePrimitive = (materialName?: string): GlbPrimitive => ({
+  mode: 4,
+  positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+  normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+  indices: new Uint32Array([0, 1, 2]),
+  material: {
+    baseColorFactor: [1, 1, 1, 1],
+    metallicFactor: 0,
+    roughnessFactor: 1,
+    doubleSided: true,
+    alphaMode: 'OPAQUE',
+    ...(materialName ? { name: materialName } : {}),
+  },
+});
+
+const createNamedGlb = async (
+  name: string,
+  options: { materialName?: string; sceneName?: string } = {},
+): Promise<Uint8Array<ArrayBuffer>> => {
+  const glb = writeGlb({ nodes: [{ name, primitives: [createTrianglePrimitive(options.materialName)] }] });
+  if (!options.sceneName) {
+    return glb;
+  }
+
+  const io = new NodeIO();
+  const document = await io.readBinary(glb);
+  document.getRoot().listScenes()[0]!.setName(options.sceneName);
+  return io.writeBinary(document);
+};
+
+const createNamedGltf = (
+  name: string,
+  options: { materialName?: string; sceneName?: string } = {},
+): Uint8Array<ArrayBuffer> => {
+  const bytes = writeGltfJson({ nodes: [{ name, primitives: [createTrianglePrimitive(options.materialName)] }] });
+  if (!options.sceneName) {
+    return bytes;
+  }
+
+  const json = JSON.parse(new TextDecoder().decode(bytes)) as JSONDocument['json'];
+  const scenes = json.scenes ?? [];
+  if (scenes[0]) {
+    scenes[0].name = options.sceneName;
+  }
+  return new TextEncoder().encode(JSON.stringify(json));
+};
+
+const readGlbNodeNames = async (glbBytes: Uint8Array<ArrayBuffer>): Promise<string[]> => {
+  const document = await new NodeIO().readBinary(glbBytes);
+  return document
+    .getRoot()
+    .listNodes()
+    .map((node) => node.getName());
+};
+
+const readGlbMaterialAndSceneNames = async (
+  glbBytes: Uint8Array<ArrayBuffer>,
+): Promise<{ materialNames: string[]; sceneNames: string[] }> => {
+  const document = await new NodeIO().readBinary(glbBytes);
+  return {
+    materialNames: document
+      .getRoot()
+      .listMaterials()
+      .map((material) => material.getName()),
+    sceneNames: document
+      .getRoot()
+      .listScenes()
+      .map((scene) => scene.getName()),
+  };
+};
+
+const readGltfNodeNames = async (gltfBytes: Uint8Array<ArrayBuffer>): Promise<string[]> => {
+  const json = JSON.parse(new TextDecoder().decode(gltfBytes)) as JSONDocument['json'];
+  const document = await new NodeIO().readJSON({
+    json,
+    resources: {},
+  });
+  return document
+    .getRoot()
+    .listNodes()
+    .map((node) => node.getName());
+};
+
+const readGltfMaterialAndSceneNames = async (
+  gltfBytes: Uint8Array<ArrayBuffer>,
+): Promise<{ materialNames: string[]; sceneNames: string[] }> => {
+  const json = JSON.parse(new TextDecoder().decode(gltfBytes)) as JSONDocument['json'];
+  const document = await new NodeIO().readJSON({
+    json,
+    resources: {},
+  });
+  return {
+    materialNames: document
+      .getRoot()
+      .listMaterials()
+      .map((material) => material.getName()),
+    sceneNames: document
+      .getRoot()
+      .listScenes()
+      .map((scene) => scene.getName()),
+  };
+};
 
 /**
  * Helper to extract parameters and assert success.
@@ -60,6 +168,13 @@ async function getParametersWithError(
 }
 
 describe('ZooWorker', () => {
+  const resolveZooDefinition = async () => resolveRuntimePluginDefinition('kernel', zooKernel());
+  let zooDefinition: Awaited<ReturnType<typeof resolveZooDefinition>>;
+
+  beforeAll(async () => {
+    zooDefinition = await resolveZooDefinition();
+  });
+
   // ===========================================================================
   // Tests: Parameter Extraction - Single File Projects
   // ===========================================================================
@@ -754,6 +869,150 @@ cone = startSketchOn(XZ)
           },
         ]);
       });
+    });
+  });
+
+  describe('exportGeometry', () => {
+    it('should use live engine-session native handles instead of durable snapshots', async () => {
+      expect(zooDefinition.serializeNativeHandle).toBeUndefined();
+      expect(zooDefinition.deserializeNativeHandle).toBeUndefined();
+      expect(zooDefinition.isNativeHandleValid).toBeDefined();
+
+      const context: Parameters<typeof zooDefinition.createGeometry>[2] = {
+        baseUrl: 'ws://fake.example/modeling-commands',
+        fileSystemManager: undefined,
+        kclUtils: undefined,
+      };
+      const result = await zooDefinition.createGeometry(
+        {
+          filePath: '/projects/test/main.kcl',
+          basePath: '/projects/test',
+          parameters: {},
+          options: {},
+        },
+        createMockKernelRuntime({ filesystemOverrides: { readFileResult: '' } }),
+        context,
+      );
+
+      expect(result).toEqual({
+        geometry: [],
+        nativeHandle: { kind: 'zoo-live-engine-session', hasGeometry: false },
+      });
+    });
+
+    it('should invalidate geometry handles when the KCL engine no longer has an executed program', async () => {
+      const { isNativeHandleValid } = zooDefinition;
+      expect(isNativeHandleValid).toBeDefined();
+      if (!isNativeHandleValid) {
+        throw new Error('Zoo kernel must declare live-handle validity');
+      }
+
+      type ZooValidityContext = Parameters<typeof isNativeHandleValid>[2];
+      const runtime = createMockKernelRuntime();
+      const liveHandle = { kind: 'zoo-live-engine-session', hasGeometry: true } as const;
+      const emptyHandle = { kind: 'zoo-live-engine-session', hasGeometry: false } as const;
+
+      await expect(
+        Promise.resolve(
+          isNativeHandleValid({ nativeHandle: liveHandle }, runtime, {
+            baseUrl: 'ws://fake.example/modeling-commands',
+            fileSystemManager: undefined,
+            kclUtils: { canExportFromMemory: false },
+          } as ZooValidityContext),
+        ),
+      ).resolves.toBe(false);
+
+      await expect(
+        Promise.resolve(
+          isNativeHandleValid({ nativeHandle: liveHandle }, runtime, {
+            baseUrl: 'ws://fake.example/modeling-commands',
+            fileSystemManager: undefined,
+            kclUtils: { canExportFromMemory: true },
+          } as ZooValidityContext),
+        ),
+      ).resolves.toBe(true);
+
+      await expect(
+        Promise.resolve(
+          isNativeHandleValid({ nativeHandle: emptyHandle }, runtime, {
+            baseUrl: 'ws://fake.example/modeling-commands',
+            fileSystemManager: undefined,
+            kclUtils: undefined,
+          } as ZooValidityContext),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    it('should normalize generated GLB names from the KCL engine', async () => {
+      const engineMaterialName = ['Material', 'Default'].join('_');
+      const exportFromMemory = vi
+        .fn()
+        .mockResolvedValue([
+          { contents: await createNamedGlb('Mesh', { materialName: engineMaterialName, sceneName: 'Scene' }) },
+        ]);
+      const context: Parameters<typeof zooDefinition.exportGeometry>[2] = {
+        baseUrl: 'ws://fake.example/modeling-commands',
+        fileSystemManager: undefined,
+        kclUtils: {
+          initializeEngine: vi.fn().mockResolvedValue(undefined),
+          exportFromMemory,
+        },
+      };
+
+      const result = await zooDefinition.exportGeometry(
+        {
+          format: 'glb',
+          nativeHandle: { kind: 'zoo-live-engine-session', hasGeometry: true },
+          options: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
+        },
+        createMockKernelRuntime(),
+        context,
+      );
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(await readGlbNodeNames(result.data[0]!.bytes)).toEqual(['Shape 1']);
+        expect(await readGlbMaterialAndSceneNames(result.data[0]!.bytes)).toEqual({
+          materialNames: [''],
+          sceneNames: [''],
+        });
+      }
+    });
+
+    it('should normalize generated embedded glTF names from the KCL engine', async () => {
+      const engineMaterialName = ['Material', 'Default'].join('_');
+      const exportFromMemory = vi
+        .fn()
+        .mockResolvedValue([
+          { contents: createNamedGltf('Geometry', { materialName: engineMaterialName, sceneName: 'Scene' }) },
+        ]);
+      const context: Parameters<typeof zooDefinition.exportGeometry>[2] = {
+        baseUrl: 'ws://fake.example/modeling-commands',
+        fileSystemManager: undefined,
+        kclUtils: {
+          initializeEngine: vi.fn().mockResolvedValue(undefined),
+          exportFromMemory,
+        },
+      };
+
+      const result = await zooDefinition.exportGeometry(
+        {
+          format: 'gltf',
+          nativeHandle: { kind: 'zoo-live-engine-session', hasGeometry: true },
+          options: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
+        },
+        createMockKernelRuntime(),
+        context,
+      );
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(await readGltfNodeNames(result.data[0]!.bytes)).toEqual(['Shape 1']);
+        expect(await readGltfMaterialAndSceneNames(result.data[0]!.bytes)).toEqual({
+          materialNames: [''],
+          sceneNames: [''],
+        });
+      }
     });
   });
 });

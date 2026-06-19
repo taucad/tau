@@ -1,29 +1,78 @@
-import { cadMaterialDefaults } from '@taucad/types/constants';
+import { cadMaterialDefaults, tauCadTopologyExtension } from '@taucad/types/constants';
 import { normalizeColor } from '#kernels/replicad/utils/normalize-color.js';
 import { transformNormalArray, transformVertexArray } from '#framework/common.js';
+import type { GeometryOutputTransformOptions } from '#framework/common.js';
 import type { GeometryReplicad } from '#kernels/replicad/replicad.types.js';
 import type { RuntimeLogger } from '#types/runtime-kernel.types.js';
 import { srgbHexToLinearTuple } from '#utils/color-space.js';
+import { formatComponentId, formatNodeSelector, formatPrimitiveSelector } from '#utils/geometry-names.js';
 import { writeGlb, writeGltfJson } from '#utils/glb-writer.js';
 import type { GlbInput, GlbNode, GlbPrimitive } from '#utils/glb-writer.js';
+import { resolveShapeName } from '#utils/shape-names.js';
+import type { JSONObject } from '@taucad/types';
+
+type ReplicadTopologyComponent = {
+  id: string;
+  name: string;
+  kind: 'part';
+  selector: string;
+  nodeIndex: number;
+  faceGroups: GeometryReplicad['faces']['faceGroups'];
+  edgeGroups: GeometryReplicad['edges']['edgeGroups'];
+  capabilities: {
+    exports: Array<{ fidelity: 'mesh' | 'brep'; formats: string[]; available: boolean }>;
+    hasPreciseTopology: boolean;
+  };
+};
+
+type ReplicadNodeBuildResult = {
+  node: GlbNode;
+  component: Omit<ReplicadTopologyComponent, 'nodeIndex'>;
+};
+
+type ReplicadGltfOptions = GeometryOutputTransformOptions & {
+  geometries: GeometryReplicad[];
+  format?: 'glb' | 'gltf';
+  includeTauTopology?: boolean;
+  logger?: RuntimeLogger;
+};
+
+type BuildNodeFromReplicadGeometryOptions = {
+  geometry: GeometryReplicad;
+  nodeIndex: number;
+  transformOptions: GeometryOutputTransformOptions;
+  includeTauTopology: boolean;
+};
 
 /**
  * Build a GlbNode from a single replicad geometry (surface + optional edge lines).
  *
- * @param geometry - the replicad geometry with face, edge, and color data
- * @param geometryIndex - fallback index for unnamed geometries
- * @returns the GlbNode, or undefined if the geometry has no renderable data
+ * @param options - Geometry and conversion options for one output node.
+ * @returns The GlbNode, or undefined if the geometry has no renderable data.
  */
-function buildNodeFromReplicadGeometry(geometry: GeometryReplicad, geometryIndex: number): GlbNode | undefined {
+function buildNodeFromReplicadGeometry({
+  geometry,
+  nodeIndex,
+  transformOptions,
+  includeTauTopology,
+}: BuildNodeFromReplicadGeometryOptions): ReplicadNodeBuildResult | undefined {
   const primitives: GlbPrimitive[] = [];
   const { faces, edges } = geometry;
+  const nodeName = resolveShapeName({ index: nodeIndex, name: geometry.name, source: 'generated' });
+  const componentId = formatComponentId(nodeIndex);
+  const selector = formatNodeSelector(nodeIndex);
 
   if (faces.vertices.length > 0 && faces.triangles.length > 0) {
-    const positions = transformVertexArray(faces.vertices);
-    const normals = transformNormalArray(faces.normals);
+    const positions = transformVertexArray(faces.vertices, transformOptions);
+    const normals = transformNormalArray(faces.normals, transformOptions);
     const indices = new Uint32Array(faces.triangles);
 
-    let baseColor: [number, number, number, number] = [...cadMaterialDefaults.baseColorFactor];
+    let baseColor: [number, number, number, number] = [
+      cadMaterialDefaults.baseColorFactor[0],
+      cadMaterialDefaults.baseColorFactor[1],
+      cadMaterialDefaults.baseColorFactor[2],
+      cadMaterialDefaults.baseColorFactor[3],
+    ];
     if (geometry.color) {
       try {
         const normalizedColor = normalizeColor(geometry.color);
@@ -40,36 +89,53 @@ function buildNodeFromReplicadGeometry(geometry: GeometryReplicad, geometryIndex
       positions,
       normals,
       indices,
+      ...(includeTauTopology
+        ? {
+            extras: {
+              tauComponentId: componentId,
+              tauComponentKind: 'body',
+              tauComponentSelector: formatPrimitiveSelector(nodeIndex, 'surface'),
+              faceGroups: geometry.faces.faceGroups,
+            },
+          }
+        : {}),
       material: {
         baseColorFactor: baseColor,
         metallicFactor: geometry.metalness ?? cadMaterialDefaults.metalnessFactor,
         roughnessFactor: geometry.roughness ?? cadMaterialDefaults.roughnessFactor,
         doubleSided: true,
         alphaMode: baseColor[3] < 1 ? 'BLEND' : 'OPAQUE',
-        name: geometry.color ?? 'default',
       },
     });
   }
 
   if (edges.lines.length > 0) {
-    const linePositions = transformVertexArray(edges.lines);
+    const linePositions = transformVertexArray(edges.lines, transformOptions);
     const lineIndices = new Uint32Array(linePositions.length / 3);
     for (let index = 0; index < lineIndices.length; index++) {
       lineIndices[index] = index;
     }
 
-    const nodeName = geometry.name || `Shape_${geometryIndex}`;
     primitives.push({
       mode: 1,
       positions: linePositions,
       indices: lineIndices,
+      ...(includeTauTopology
+        ? {
+            extras: {
+              tauComponentId: componentId,
+              tauComponentKind: 'line',
+              tauComponentSelector: formatPrimitiveSelector(nodeIndex, 'edges'),
+              edgeGroups: geometry.edges.edgeGroups,
+            },
+          }
+        : {}),
       material: {
         baseColorFactor: [0.141, 0.259, 0.141, 1],
         metallicFactor: 0,
         roughnessFactor: 1,
         doubleSided: true,
         alphaMode: 'OPAQUE',
-        name: `outline-${nodeName}`,
       },
     });
   }
@@ -79,8 +145,34 @@ function buildNodeFromReplicadGeometry(geometry: GeometryReplicad, geometryIndex
   }
 
   return {
-    name: geometry.name || `Shape_${geometryIndex}`,
-    primitives,
+    node: {
+      name: nodeName,
+      ...(includeTauTopology
+        ? {
+            extras: {
+              tauComponentId: componentId,
+              tauComponentKind: 'part',
+              tauComponentSelector: selector,
+            },
+          }
+        : {}),
+      primitives,
+    },
+    component: {
+      id: componentId,
+      name: nodeName,
+      kind: 'part',
+      selector,
+      faceGroups: geometry.faces.faceGroups,
+      edgeGroups: geometry.edges.edgeGroups,
+      capabilities: {
+        exports: [
+          { fidelity: 'mesh', formats: ['glb', 'stl'], available: true },
+          { fidelity: 'brep', formats: ['step', 'stp', 'iges', 'igs', 'brep', 'dxf'], available: true },
+        ],
+        hasPreciseTopology: true,
+      },
+    },
   };
 }
 
@@ -97,27 +189,66 @@ function buildNodeFromReplicadGeometry(geometry: GeometryReplicad, geometryIndex
  * When `logger` is supplied, emits a debug log with the produced GLB byte
  * length and node count.
  *
- * @param geometries - Array of Shape3D objects from replicad
- * @param format - Output format: 'glb' for binary, 'gltf' for JSON
- * @param logger - Optional kernel logger; when present, a debug line with
- *   `byteLength` and `nodeCount` is emitted for every conversion
+ * @param options - Conversion inputs and output transform intent.
  * @returns GLTF blob
  */
-export function convertReplicadGeometriesToGltf(
-  geometries: GeometryReplicad[],
-  format: 'glb' | 'gltf' = 'glb',
-  logger?: RuntimeLogger,
-): Uint8Array<ArrayBuffer> {
+export function convertReplicadGeometriesToGltf(options: ReplicadGltfOptions): Uint8Array<ArrayBuffer> {
+  const {
+    geometries,
+    format = 'glb',
+    logger,
+    includeTauTopology = true,
+    coordinateSystem = 'y-up',
+    unit = { length: 'meter' },
+  } = options;
+  const transformOptions: GeometryOutputTransformOptions = { coordinateSystem, unit };
   const nodes: GlbNode[] = [];
+  const topologyComponents: ReplicadTopologyComponent[] = [];
 
-  for (const [index, geometry] of geometries.entries()) {
-    const node = buildNodeFromReplicadGeometry(geometry, index);
-    if (node) {
-      nodes.push(node);
+  for (const geometry of geometries) {
+    const result = buildNodeFromReplicadGeometry({
+      geometry,
+      nodeIndex: nodes.length,
+      transformOptions,
+      includeTauTopology,
+    });
+    if (result) {
+      const nodeIndex = nodes.length;
+      nodes.push(result.node);
+      if (includeTauTopology) {
+        topologyComponents.push({ ...result.component, nodeIndex });
+      }
     }
   }
 
-  const input: GlbInput = { nodes };
+  const topologyPayload = {
+    schemaVersion: 1,
+    components: topologyComponents,
+  };
+  const topologyData = new TextEncoder().encode(JSON.stringify(topologyPayload));
+  const input: GlbInput = {
+    nodes,
+    ...(topologyComponents.length > 0
+      ? {
+          extensionsUsed: [tauCadTopologyExtension],
+          extraBufferViews: [{ key: 'topology', data: topologyData }],
+          extensions: (bufferViews): Record<string, JSONObject> => {
+            const topologyBufferView = bufferViews['topology'];
+            if (topologyBufferView === undefined) {
+              throw new Error('Missing topology buffer view for TAU_cad_topology extension.');
+            }
+
+            return {
+              [tauCadTopologyExtension]: {
+                schemaVersion: 1,
+                encoding: 'application/json',
+                topologyBufferView,
+              },
+            };
+          },
+        }
+      : {}),
+  };
 
   const output = format === 'gltf' ? writeGltfJson(input) : writeGlb(input);
 

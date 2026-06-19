@@ -16,6 +16,7 @@
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
+import { fileStatFromBytes } from '@taucad/filesystem';
 
 const enoent = (path: string): Error => {
   const error = new Error(`ENOENT: no such file or directory: ${path}`);
@@ -59,13 +60,12 @@ const getDirectory = async (
  * import { createRuntimeClient } from '@taucad/runtime';
  * import { webWorkerTransport } from '@taucad/runtime/transport/web';
  * import { fromBrowserFs } from '@taucad/runtime/filesystem';
- * import { replicad } from '@taucad/runtime/kernels';
  *
  * declare const window: { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> };
  * const root = await window.showDirectoryPicker();
  * const client = createRuntimeClient({
- *   kernels: [replicad()],
  *   transport: webWorkerTransport({
+ *     createWorker: () => new Worker(new URL('./runtime.worker.js', import.meta.url), { type: 'module' }),
  *     fileSystem: fromBrowserFs(root),
  *   }),
  * });
@@ -163,7 +163,7 @@ function buildBrowserFsBase(root: FileSystemDirectoryHandle): RuntimeFileSystemB
       try {
         const fileHandle = await directory.getFileHandle(last, { create: false });
         const file = await fileHandle.getFile();
-        return { type: 'file', size: file.size, mtimeMs: file.lastModified };
+        return fileStatFromBytes(new Uint8Array(await file.arrayBuffer()), file.lastModified);
       } catch {
         try {
           await directory.getDirectoryHandle(last, { create: false });

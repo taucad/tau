@@ -19,7 +19,9 @@ import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { nodeWorkerHost } from '#transport/node-worker-host.js';
+import type { WebWorkerClientOptions } from '#transport/web-worker-client.js';
 import { webWorkerHost } from '#transport/web-worker-host.js';
+import { defineRuntime } from '#worker/runtime-definition.js';
 
 /** Surface stub for `KernelWorker` — only used to satisfy host typing in conformance assertions. */
 const makeStubKernelWorker = (): KernelWorker => {
@@ -33,7 +35,6 @@ const makeStubKernelWorker = (): KernelWorker => {
     handleStageAndOpenFile: vi.fn().mockResolvedValue(undefined),
     handleUpdateParameters: vi.fn(),
     handleSetOptions: vi.fn(),
-    configureMiddleware: vi.fn().mockResolvedValue(undefined),
     ensureLoadedBundler: vi.fn().mockResolvedValue(undefined),
     setTelemetrySend: vi.fn(),
     flushTelemetry: vi.fn(),
@@ -51,9 +52,11 @@ const makeStubKernelWorker = (): KernelWorker => {
  * ============================================================ */
 
 describe('transport conformance — in-process (C2)', () => {
+  const runtime = defineRuntime({});
+
   it('callable exposes TransportPlugin surface with literal id', () => {
     expect(typeof inProcessTransport).toBe('function');
-    const plugin = inProcessTransport({ fileSystem: fromMemoryFs() });
+    const plugin = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
     expect(plugin.id).toBe('in-process');
     expect(typeof plugin.describe).toBe('function');
     expect(typeof plugin.materialize).toBe('function');
@@ -62,6 +65,7 @@ describe('transport conformance — in-process (C2)', () => {
   it('materialise() returns the v6 fat client handle surface', () => {
     const mainEntry = '/main.ts';
     const plugin = inProcessTransport({
+      runtime,
       fileSystem: fromMemoryFs({ [mainEntry]: 'export default () => true;' }),
     });
     const client = plugin.materialize();
@@ -77,7 +81,7 @@ describe('transport conformance — in-process (C2)', () => {
   });
 
   it('describe() advertises in-isolate FS, pool delivery, and SAB abort', () => {
-    const plugin = inProcessTransport({ fileSystem: fromMemoryFs() });
+    const plugin = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
     const descriptor = plugin.describe();
     expect(descriptor.id).toBe('in-process');
     expect(descriptor.wire).toBe('in-process');
@@ -88,7 +92,7 @@ describe('transport conformance — in-process (C2)', () => {
   });
 
   it('materialised client.open() resolves a typed channel + hello frame', async () => {
-    const plugin = inProcessTransport({ fileSystem: fromMemoryFs() });
+    const plugin = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
     const client = plugin.materialize();
     const ready = await client.open();
     expect(ready.channel).toBeDefined();
@@ -102,7 +106,7 @@ describe('transport conformance — in-process (C2)', () => {
   });
 
   it('client.open() is idempotent (second call resolves the same channel)', async () => {
-    const client = inProcessTransport({ fileSystem: fromMemoryFs() }).materialize();
+    const client = inProcessTransport({ runtime, fileSystem: fromMemoryFs() }).materialize();
     const a = await client.open();
     const b = await client.open();
     expect(b.channel).toBe(a.channel);
@@ -110,7 +114,7 @@ describe('transport conformance — in-process (C2)', () => {
   });
 
   it('client.close() resolves the closed Promise', async () => {
-    const client = inProcessTransport({ fileSystem: fromMemoryFs() }).materialize();
+    const client = inProcessTransport({ runtime, fileSystem: fromMemoryFs() }).materialize();
     await client.open();
     let resolved = false;
     const waiter = (async (): Promise<void> => {
@@ -131,7 +135,7 @@ describe('transport conformance — in-process (C2)', () => {
    * call frame is rejected at the channel layer with a typed
    * `WireValidationError` rather than reaching the kernel impl. */
   it('rejects malformed call args with a WireValidationError at the wire boundary', async () => {
-    const client = inProcessTransport({ fileSystem: fromMemoryFs() }).materialize();
+    const client = inProcessTransport({ runtime, fileSystem: fromMemoryFs() }).materialize();
     try {
       const ready = await client.open();
       await ready.channel.ready;
@@ -264,31 +268,14 @@ describe('transport conformance — web-worker (C2)', () => {
     expect(() => webWorkerTransport({ url: 'about:blank' }).materialize()).toThrow(/Worker.*constructor/);
   });
 
-  /* Default-URL contract (build-stall avoidance).
-   *
-   * Hoisting the worker URL out of every consumer was the v6 ergonomic goal
-   * of this transport. With a built-in default the consumer no longer needs
-   * to write `new URL('@taucad/runtime/worker/web', import.meta.url)` —
-   * which was the singular bare-specifier callsite that drove the
-   * `tsModuleUrlBuildPlugin` resolve regression. The default URL is built
-   * inside the runtime package using a relative `.js` reference, which the
-   * plugin handles via its sync fast path (no async `context.resolve`,
-   * no deadlock surface).
-   */
-  it('materialise() does not require an explicit `url` (defaults to bundled worker subpath)', async () => {
+  it('requires `createWorker` or an explicit worker `url`', async () => {
     const { webWorkerTransport } = await import('#transport/web-worker-transport.js');
     const fake = makeFakeWorkerCtor();
     try {
-      const client = webWorkerTransport({ workerCtor: fake.workerCtor }).materialize();
-      await client.open();
-      expect(fake.urls).toHaveLength(1);
-      const constructed = fake.urls[0]!;
-      const href = typeof constructed === 'string' ? constructed : constructed.href;
-      /* Default points at the canonical web-worker subpath module. The
-       * plugin/Vite layer rewrites `web.js` to the emitted chunk URL, but
-       * the literal source the runtime ships is the unrewritten relative
-       * path under `worker/`. Both representations contain `worker/web`. */
-      expect(href).toMatch(/worker\/web(\.[\da-z]+)?\.js/);
+      const options = { workerCtor: fake.workerCtor } as unknown as WebWorkerClientOptions;
+      const client = webWorkerTransport(options).materialize();
+      await expect(client.open()).rejects.toThrow(/createWorker.*worker `url`/);
+      expect(fake.urls).toEqual([]);
       await client.close();
     } finally {
       fake.dispose();
@@ -305,6 +292,25 @@ describe('transport conformance — web-worker (C2)', () => {
       }).materialize();
       await client.open();
       expect(fake.urls).toEqual(['about:blank']);
+      await client.close();
+    } finally {
+      fake.dispose();
+    }
+  });
+
+  it('honours app-owned createWorker over URL construction', async () => {
+    const { webWorkerTransport } = await import('#transport/web-worker-transport.js');
+    const fake = makeFakeWorkerCtor();
+    try {
+      const client = webWorkerTransport({
+        url: 'about:blank',
+        workerCtor: fake.workerCtor,
+        createWorker: () =>
+          Reflect.construct(fake.workerCtor, ['app-owned-worker.js', { type: 'module' }]) as unknown as FakeWorker,
+      }).materialize();
+      await client.open();
+      expect(fake.urls).toEqual(['app-owned-worker.js']);
+      expect(fake.created).toHaveLength(1);
       await client.close();
     } finally {
       fake.dispose();

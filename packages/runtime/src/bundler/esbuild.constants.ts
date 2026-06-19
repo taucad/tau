@@ -5,7 +5,7 @@ import {
   httpFetchTimeout as vmHttpFetchTimeout,
   nodeExecFilePrefix as vmNodeExecFilePrefix,
   vfsNamespacePrefix as vmVfsNamespacePrefix,
-} from '@taucad/vm/internal';
+} from '@taucad/vm/constants';
 
 export const esbuildNamespace = { ...vmEsbuildNamespace };
 export const vfsNamespacePrefix = `${vmVfsNamespacePrefix}`;

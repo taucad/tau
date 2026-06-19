@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [nxViteTsPaths() as any],
   test: {
     environment: 'node',
+    maxWorkers: 4,
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],

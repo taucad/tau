@@ -53,4 +53,16 @@ describe('runtime protocol schemas in constrained browser environments', () => {
       expect(runtimeProtocolSchemas.calls.initialize.args).toBeDefined();
     });
   });
+
+  it('should reject file-system ports when MessagePort is unavailable', async () => {
+    await withGlobalOverride('MessagePort', undefined, async () => {
+      const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+
+      expect(
+        runtimeInitializeMemoryHandleSchema.safeParse({
+          fileSystemPort: {},
+        }).success,
+      ).toBe(false);
+    });
+  });
 });

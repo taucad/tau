@@ -14,6 +14,8 @@
 
 import type { KernelIssue, KernelStackFrame, ErrorLocation } from '#types/runtime.types.js';
 import { OcKernelError, formatOcExceptionMessage } from '#kernels/occt/oc-kernel-error.js';
+import type { WebAssemblyException } from '#kernels/occt/wasm-exception.js';
+import { isWebAssemblyException } from '#kernels/occt/wasm-exception.js';
 
 // =============================================================================
 // Structural OC instance type
@@ -42,7 +44,7 @@ export type OcjsExceptionApi = {
  */
 export type OcExceptionInstance = {
   OCJS: OcjsExceptionApi;
-  getExceptionMessage?(ex: WebAssembly.Exception): [string, string];
+  getExceptionMessage?: unknown;
 };
 
 // =============================================================================
@@ -130,20 +132,6 @@ export function extractWasmException(error: unknown): WasmExceptionInfo | undefi
 }
 
 /**
- * Check if an error is a native WebAssembly.Exception (from -fwasm-exceptions).
- *
- * @param error - the value to check
- * @returns whether the value is a WebAssembly.Exception instance
- */
-function isWebAssemblyException(error: unknown): error is WebAssembly.Exception {
-  return (
-    typeof WebAssembly !== 'undefined' &&
-    typeof WebAssembly.Exception === 'function' &&
-    error instanceof WebAssembly.Exception
-  );
-}
-
-/**
  * Decode a WebAssembly.Exception using the Emscripten helper `getExceptionMessage`.
  * Returns the formatted message, or undefined if decoding fails.
  *
@@ -152,15 +140,17 @@ function isWebAssemblyException(error: unknown): error is WebAssembly.Exception 
  * @returns the decoded message, or undefined if decoding fails
  */
 function decodeWebAssemblyException(
-  error: WebAssembly.Exception,
+  error: WebAssemblyException,
   ocInstance: OcExceptionInstance,
 ): { message: string } | undefined {
-  if (typeof ocInstance.getExceptionMessage !== 'function') {
+  const { getExceptionMessage } = ocInstance;
+  if (typeof getExceptionMessage !== 'function') {
     return undefined;
   }
 
   try {
-    const [typeName, rawMessage] = ocInstance.getExceptionMessage(error);
+    const decoder = getExceptionMessage as (ex: WebAssemblyException) => [string, string];
+    const [typeName, rawMessage] = decoder(error);
     return { message: formatOcExceptionMessage(typeName, rawMessage) };
   } catch {
     return undefined;

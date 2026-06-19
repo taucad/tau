@@ -19,6 +19,7 @@ import { z } from 'zod';
 import { fileExtensions } from '@taucad/types/constants';
 import type { FileExtension } from '@taucad/types';
 import type { WireProtocolSchemas } from '#types/wire-protocol-schemas.types.js';
+import { kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
 
 // ---------- Primitives ----------
 
@@ -36,46 +37,14 @@ const geometryFileSchema = z
   })
   .catchall(z.unknown());
 
-const middlewareRegistrationSchema = z
-  .object({
-    url: z.string(),
-    enabled: z.boolean().optional(),
-    options: z.record(z.string(), z.unknown()).optional(),
-  })
-  .strict();
-
-const bundlerRegistrationSchema = z
-  .object({
-    bundlerModuleUrl: z.string(),
-    extensions: z.array(z.string()),
-    options: z.record(z.string(), z.unknown()).optional(),
-  })
-  .strict();
-
-const transcoderModuleEntrySchema = z
-  .object({
-    id: z.string(),
-    moduleUrl: z.string(),
-    options: z.record(z.string(), z.unknown()).optional(),
-  })
-  .strict();
-
-const kernelIssueCodeSchema = z.enum([
-  'RENDER_TIMEOUT',
-  'RENDER_ABORTED',
-  'KERNEL_BINDING_FAILED',
-  'KERNEL_CAPABILITY_MISSING',
-  'BUNDLER_FAILED',
-  'MIDDLEWARE_FAILED',
-  'RUNTIME',
-  'UNKNOWN',
-]);
+const kernelIssueCodeSchema = z.enum(kernelIssueCodeValues);
 
 const kernelIssueSchema = z
   .object({
     message: z.string(),
     code: kernelIssueCodeSchema,
     severity: z.enum(['error', 'warning', 'info']),
+    details: z.unknown().optional(),
   })
   .catchall(z.unknown());
 
@@ -85,7 +54,7 @@ const kernelResultSchema = z.union([
       success: z.literal(true),
       data: z.unknown(),
       issues: z.array(kernelIssueSchema),
-      serializedHandle: z.unknown().optional(),
+      serializedNativeHandle: z.unknown().optional(),
     })
     .strict(),
   z
@@ -109,7 +78,7 @@ const exportGeometryResultSchema = z.union([
       success: z.literal(true),
       data: z.array(exportFileSchema),
       issues: z.array(kernelIssueSchema),
-      serializedHandle: z.unknown().optional(),
+      serializedNativeHandle: z.unknown().optional(),
     })
     .strict(),
   z
@@ -129,7 +98,7 @@ const getParametersResultSchema = z.union([
         jsonSchema: z.unknown(),
       }),
       issues: z.array(kernelIssueSchema),
-      serializedHandle: z.unknown().optional(),
+      serializedNativeHandle: z.unknown().optional(),
     })
     .strict(),
   z
@@ -185,10 +154,7 @@ export const runtimeInitializeMemoryHandleSchema = z
 
 export const runtimeInitializeArgsSchema = z
   .object({
-    options: z.record(z.string(), z.unknown()),
-    middlewareEntries: z.array(middlewareRegistrationSchema),
-    bundlerEntries: z.array(bundlerRegistrationSchema).optional(),
-    transcoderModules: z.array(transcoderModuleEntrySchema).optional(),
+    config: z.unknown().optional(),
     memoryHandle: runtimeInitializeMemoryHandleSchema.optional(),
   })
   .strict();
@@ -209,6 +175,17 @@ export const runtimeExportArgsSchema = z
   .strict();
 
 export const runtimeExportResultSchema = exportGeometryResultSchema;
+
+export const runtimeExportModelArgsSchema = z
+  .object({
+    stage: z.record(z.string(), z.instanceof(Uint8Array)).optional(),
+    file: geometryFileSchema,
+    parameters: z.record(z.string(), z.unknown()),
+    options: z.record(z.string(), z.unknown()).optional(),
+    format: fileExtensionSchema,
+    exportOptions: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
 
 // ---------- Notifies (consumer → host) ----------
 
@@ -244,12 +221,6 @@ export const runtimeSetOptionsArgsSchema = z
 export const runtimeFileChangedArgsSchema = z
   .object({
     paths: z.array(z.string()),
-  })
-  .strict();
-
-export const runtimeConfigureMiddlewareArgsSchema = z
-  .object({
-    entries: z.array(middlewareRegistrationSchema),
   })
   .strict();
 
@@ -363,6 +334,7 @@ export const runtimeProtocolSchemas = {
   calls: {
     initialize: { args: runtimeInitializeArgsSchema, result: runtimeInitializeResultSchema },
     export: { args: runtimeExportArgsSchema, result: runtimeExportResultSchema },
+    exportModel: { args: runtimeExportModelArgsSchema, result: runtimeExportResultSchema },
   },
   notifies: {
     // Consumer → host
@@ -371,7 +343,6 @@ export const runtimeProtocolSchemas = {
     updateParameters: runtimeUpdateParametersArgsSchema,
     setOptions: runtimeSetOptionsArgsSchema,
     fileChanged: runtimeFileChangedArgsSchema,
-    configureMiddleware: runtimeConfigureMiddlewareArgsSchema,
     cleanup: runtimeCleanupArgsSchema,
     abort: runtimeAbortArgsSchema,
 

@@ -23,26 +23,30 @@
  *
  * @public
  *
- * @example <caption>Defaulted bundled worker (recommended)</caption>
+ * @example <caption>App-owned worker</caption>
  * ```typescript
+ * import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
  * import { createRuntimeClient } from '@taucad/runtime';
  * import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
- * import { replicad } from '@taucad/runtime/kernels';
  *
- * const client = createRuntimeClient({
- *   kernels: [replicad()],
- *   transport: nodeWorkerTransport({}),
+ * declare const runtime: AnyRuntimeDefinition;
+ *
+ * const client = createRuntimeClient<typeof runtime>({
+ *   transport: nodeWorkerTransport({
+ *     url: new URL('./runtime.worker.js', import.meta.url),
+ *   }),
  * });
  * ```
  *
  * @example <caption>Custom worker module — pass an explicit URL</caption>
  * ```typescript
+ * import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
  * import { createRuntimeClient } from '@taucad/runtime';
  * import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
- * import { replicad } from '@taucad/runtime/kernels';
  *
- * const client = createRuntimeClient({
- *   kernels: [replicad()],
+ * declare const runtime: AnyRuntimeDefinition;
+ *
+ * const client = createRuntimeClient<typeof runtime>({
  *   transport: nodeWorkerTransport({
  *     url: new URL('./custom-worker.ts', import.meta.url),
  *   }),

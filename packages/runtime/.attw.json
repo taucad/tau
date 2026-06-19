@@ -1,4 +1,4 @@
 {
-  "profile": "node16",
+  "profile": "esm-only",
   "ignoreRules": ["false-export-default"]
 }

@@ -12,7 +12,7 @@
  * @public
  */
 export type SpanHandle = {
-  end(): void;
+  end(attributes?: Record<string, string | number | boolean>): void;
 };
 
 /**

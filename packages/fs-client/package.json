@@ -40,138 +40,74 @@
     "access": "public",
     "exports": {
       "./workspace-path-resolver": {
-        "require": {
-          "types": "./dist/cjs/workspace-path-resolver.d.cts",
-          "default": "./dist/cjs/workspace-path-resolver.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/workspace-path-resolver.d.ts",
-          "default": "./dist/esm/workspace-path-resolver.js"
-        }
+        "types": "./dist/esm/workspace-path-resolver.d.ts",
+        "import": "./dist/esm/workspace-path-resolver.js",
+        "default": "./dist/esm/workspace-path-resolver.js"
       },
       "./path-subscriber-registry": {
-        "require": {
-          "types": "./dist/cjs/path-subscriber-registry.d.cts",
-          "default": "./dist/cjs/path-subscriber-registry.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/path-subscriber-registry.d.ts",
-          "default": "./dist/esm/path-subscriber-registry.js"
-        }
+        "types": "./dist/esm/path-subscriber-registry.d.ts",
+        "import": "./dist/esm/path-subscriber-registry.js",
+        "default": "./dist/esm/path-subscriber-registry.js"
       },
       "./visibility-provider": {
-        "require": {
-          "types": "./dist/cjs/visibility-provider.d.cts",
-          "default": "./dist/cjs/visibility-provider.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/visibility-provider.d.ts",
-          "default": "./dist/esm/visibility-provider.js"
-        }
+        "types": "./dist/esm/visibility-provider.d.ts",
+        "import": "./dist/esm/visibility-provider.js",
+        "default": "./dist/esm/visibility-provider.js"
       },
       "./refresh-generation-guard": {
-        "require": {
-          "types": "./dist/cjs/refresh-generation-guard.d.cts",
-          "default": "./dist/cjs/refresh-generation-guard.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/refresh-generation-guard.d.ts",
-          "default": "./dist/esm/refresh-generation-guard.js"
-        }
+        "types": "./dist/esm/refresh-generation-guard.d.ts",
+        "import": "./dist/esm/refresh-generation-guard.js",
+        "default": "./dist/esm/refresh-generation-guard.js"
       },
       "./worker-change-channel": {
-        "require": {
-          "types": "./dist/cjs/worker-change-channel.d.cts",
-          "default": "./dist/cjs/worker-change-channel.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/worker-change-channel.d.ts",
-          "default": "./dist/esm/worker-change-channel.js"
-        }
+        "types": "./dist/esm/worker-change-channel.d.ts",
+        "import": "./dist/esm/worker-change-channel.js",
+        "default": "./dist/esm/worker-change-channel.js"
       },
       "./file-write-source": {
-        "require": {
-          "types": "./dist/cjs/file-write-source.d.cts",
-          "default": "./dist/cjs/file-write-source.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/file-write-source.d.ts",
-          "default": "./dist/esm/file-write-source.js"
-        }
+        "types": "./dist/esm/file-write-source.d.ts",
+        "import": "./dist/esm/file-write-source.js",
+        "default": "./dist/esm/file-write-source.js"
       },
       "./file-system-client": {
-        "require": {
-          "types": "./dist/cjs/file-system-client.d.cts",
-          "default": "./dist/cjs/file-system-client.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/file-system-client.d.ts",
-          "default": "./dist/esm/file-system-client.js"
-        }
+        "types": "./dist/esm/file-system-client.d.ts",
+        "import": "./dist/esm/file-system-client.js",
+        "default": "./dist/esm/file-system-client.js"
       },
       "./file-content-errors": {
-        "require": {
-          "types": "./dist/cjs/file-content-errors.d.cts",
-          "default": "./dist/cjs/file-content-errors.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/file-content-errors.d.ts",
-          "default": "./dist/esm/file-content-errors.js"
-        }
+        "types": "./dist/esm/file-content-errors.d.ts",
+        "import": "./dist/esm/file-content-errors.js",
+        "default": "./dist/esm/file-content-errors.js"
       },
       "./seems-binary": {
-        "require": {
-          "types": "./dist/cjs/seems-binary.d.cts",
-          "default": "./dist/cjs/seems-binary.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/seems-binary.d.ts",
-          "default": "./dist/esm/seems-binary.js"
-        }
+        "types": "./dist/esm/seems-binary.d.ts",
+        "import": "./dist/esm/seems-binary.js",
+        "default": "./dist/esm/seems-binary.js"
       },
       "./file-content-service": {
-        "require": {
-          "types": "./dist/cjs/file-content-service.d.cts",
-          "default": "./dist/cjs/file-content-service.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/file-content-service.d.ts",
-          "default": "./dist/esm/file-content-service.js"
-        }
+        "types": "./dist/esm/file-content-service.d.ts",
+        "import": "./dist/esm/file-content-service.js",
+        "default": "./dist/esm/file-content-service.js"
       },
       "./file-tree-service": {
-        "require": {
-          "types": "./dist/cjs/file-tree-service.d.cts",
-          "default": "./dist/cjs/file-tree-service.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/file-tree-service.d.ts",
-          "default": "./dist/esm/file-tree-service.js"
-        }
+        "types": "./dist/esm/file-tree-service.d.ts",
+        "import": "./dist/esm/file-tree-service.js",
+        "default": "./dist/esm/file-tree-service.js"
       },
       "./directory-listing": {
-        "require": {
-          "types": "./dist/cjs/directory-listing.d.cts",
-          "default": "./dist/cjs/directory-listing.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/directory-listing.d.ts",
-          "default": "./dist/esm/directory-listing.js"
-        }
+        "types": "./dist/esm/directory-listing.d.ts",
+        "import": "./dist/esm/directory-listing.js",
+        "default": "./dist/esm/directory-listing.js"
       },
       "./react/use-directory-listing": {
-        "require": {
-          "types": "./dist/cjs/react/use-directory-listing.d.cts",
-          "default": "./dist/cjs/react/use-directory-listing.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/react/use-directory-listing.d.ts",
-          "default": "./dist/esm/react/use-directory-listing.js"
-        }
+        "types": "./dist/esm/react/use-directory-listing.d.ts",
+        "import": "./dist/esm/react/use-directory-listing.js",
+        "default": "./dist/esm/react/use-directory-listing.js"
       }
     }
   },
   "imports": {
+    "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
   "peerDependencies": {

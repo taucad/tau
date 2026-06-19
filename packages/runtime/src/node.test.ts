@@ -63,6 +63,31 @@ describe('createNodeClient', () => {
     client.terminate();
   });
 
+  it('should export direct OpenCascade source through the Node client', { timeout: 60_000 }, async () => {
+    const client = await createNodeClient();
+
+    const result = await client.export('glb', {
+      code: {
+        'main.ts': `
+          import { BRepPrimAPI_MakeBox } from 'opencascade.js';
+
+          export default function main() {
+            return new BRepPrimAPI_MakeBox(10, 20, 30).Shape();
+          }
+        `,
+      },
+      file: 'main.ts',
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.bytes.byteLength).toBeGreaterThan(0);
+      expect(result.data.mimeType).toBe('model/gltf-binary');
+    }
+
+    client.terminate();
+  });
+
   it('settles repeated identical exports', { timeout: 10_000 }, async () => {
     const client = await createNodeClient();
     const input = {
@@ -79,7 +104,8 @@ describe('createNodeClient', () => {
 
     const withSettlementLimit = async <T>(promise: Promise<T>): Promise<T> => {
       let settlementTimer: ReturnType<typeof setTimeout> | undefined;
-      const limit = new Promise<never>((_, reject) => {
+      const limit = new Promise<never>((resolve, reject) => {
+        void resolve;
         settlementTimer = setTimeout(() => {
           reject(new Error('Repeated identical export did not settle'));
         }, 2000);

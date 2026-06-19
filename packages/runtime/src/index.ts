@@ -1,7 +1,6 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- public API re-export */
 // Client
 export { createRuntimeClient } from '#client/runtime-client.js';
-export { createRuntimeClientOptions } from '#client/runtime-client-options.js';
 export {
   RenderTimeoutError,
   isRenderTimeoutError,
@@ -15,6 +14,8 @@ export {
 export {
   NoRenderOutcomeError,
   isNoRenderOutcomeError,
+  SelfRenderExportSupersededError,
+  isSelfRenderExportSupersededError,
   RuntimeNotConnectedError,
   isRuntimeNotConnectedError,
   RuntimeConnectionError,
@@ -53,21 +54,16 @@ export type {
   RenderOptionsFor,
 } from '#plugins/plugin-types.js';
 
-// Plugin factory helpers
-export {
-  createKernelPlugin,
-  createMiddlewarePlugin,
-  createBundlerPlugin,
-  createTranscoderPlugin,
-} from '#plugins/plugin-helpers.js';
-
-// Presets
-export { presets } from '#plugins/presets.js';
+// Plugin authoring helpers
+export { defineKernel } from '#types/runtime-kernel.types.js';
+export { defineMiddleware } from '#middleware/runtime-middleware.js';
+export { defineBundler } from '#types/runtime-bundler.types.js';
+export { defineTranscoder } from '#types/runtime-transcoder.types.js';
 
 // Filesystem factories (browser-safe; `fromNodeFs` is at `@taucad/runtime/filesystem/node`).
 // Consumers always work with the opaque `RuntimeFileSystem`; transports
 // bridge it internally.
-export { fromMemoryFs, fromFsLike, fromChannelFs, isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
+export { fromMemoryFs, fromFsLike, fromFileSystemBridge, isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 export type { FsLike, RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 export { fromBrowserFs } from '#filesystem/from-browser-fs.js';
 
@@ -91,6 +87,7 @@ export { fromBrowserFs } from '#filesystem/from-browser-fs.js';
 // their graph.
 export type {
   TransportPlugin,
+  RuntimeFromTransport,
   RuntimeTransportClient,
   RuntimeTransportHost,
   TransportClientReady,

@@ -850,6 +850,184 @@ const buildMultiPrimitiveGlb = (): Uint8Array<ArrayBuffer> => {
 };
 
 /**
+ * Build a named two-node GLB that mirrors Tau's JSCAD assembly contract:
+ * one glTF node/mesh per semantic part.
+ */
+const buildNamedMultiNodeGlb = (): Uint8Array<ArrayBuffer> => {
+  const triangleA = {
+    positions: [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+    ] as const,
+    min: [0, 0, 0] as const,
+    max: [1, 1, 0] as const,
+  };
+  const triangleB = {
+    positions: [
+      [2, 0, 0],
+      [3, 0, 0],
+      [2, 1, 0],
+    ] as const,
+    min: [2, 0, 0] as const,
+    max: [3, 1, 0] as const,
+  };
+
+  const positionsBytesPerMesh = 3 * 3 * 4;
+  const indicesBytesPerMesh = 3 * 4;
+  const bufferLength = (positionsBytesPerMesh + indicesBytesPerMesh) * 2;
+  const binary = new ArrayBuffer(bufferLength);
+  const f32 = new Float32Array(binary);
+  const u32 = new Uint32Array(binary);
+
+  let cursor = 0;
+  for (const tri of [triangleA, triangleB]) {
+    for (const [x, y, z] of tri.positions) {
+      f32[cursor] = x;
+      f32[cursor + 1] = y;
+      f32[cursor + 2] = z;
+      cursor += 3;
+    }
+  }
+
+  const indexStartU32 = (positionsBytesPerMesh * 2) / 4;
+  u32[indexStartU32] = 0;
+  u32[indexStartU32 + 1] = 1;
+  u32[indexStartU32 + 2] = 2;
+  u32[indexStartU32 + 3] = 0;
+  u32[indexStartU32 + 4] = 1;
+  u32[indexStartU32 + 5] = 2;
+
+  const json = {
+    asset: { version: '2.0', generator: 'tau-named-parts-regression' },
+    scene: 0,
+    scenes: [{ nodes: [0, 1] }],
+    nodes: [
+      { name: 'Housing', mesh: 0 },
+      { name: 'Sun Gear', mesh: 1 },
+    ],
+    meshes: [
+      {
+        name: 'Housing',
+        primitives: [
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- POSITION is the glTF 2.0 attribute name mandated by the spec.
+          { attributes: { POSITION: 0 }, indices: 1, material: 0, mode: 4 },
+        ],
+      },
+      {
+        name: 'Sun Gear',
+        primitives: [
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- POSITION is the glTF 2.0 attribute name mandated by the spec.
+          { attributes: { POSITION: 2 }, indices: 3, material: 1, mode: 4 },
+        ],
+      },
+    ],
+    materials: [
+      {
+        name: 'Housing Material',
+        pbrMetallicRoughness: { baseColorFactor: [0.5, 0.5, 0.5, 1], metallicFactor: 0, roughnessFactor: 1 },
+      },
+      {
+        name: 'Sun Material',
+        pbrMetallicRoughness: { baseColorFactor: [1, 0.75, 0, 1], metallicFactor: 0, roughnessFactor: 1 },
+      },
+    ],
+    accessors: [
+      {
+        bufferView: 0,
+        componentType: 5126,
+        count: 3,
+        type: 'VEC3',
+        min: [...triangleA.min],
+        max: [...triangleA.max],
+      },
+      { bufferView: 1, componentType: 5125, count: 3, type: 'SCALAR' },
+      {
+        bufferView: 2,
+        componentType: 5126,
+        count: 3,
+        type: 'VEC3',
+        min: [...triangleB.min],
+        max: [...triangleB.max],
+      },
+      { bufferView: 3, componentType: 5125, count: 3, type: 'SCALAR' },
+    ],
+    bufferViews: [
+      { buffer: 0, byteOffset: 0, byteLength: positionsBytesPerMesh, target: 34_962 },
+      {
+        buffer: 0,
+        byteOffset: positionsBytesPerMesh * 2,
+        byteLength: indicesBytesPerMesh,
+        target: 34_963,
+      },
+      {
+        buffer: 0,
+        byteOffset: positionsBytesPerMesh,
+        byteLength: positionsBytesPerMesh,
+        target: 34_962,
+      },
+      {
+        buffer: 0,
+        byteOffset: positionsBytesPerMesh * 2 + indicesBytesPerMesh,
+        byteLength: indicesBytesPerMesh,
+        target: 34_963,
+      },
+    ],
+    buffers: [{ byteLength: bufferLength }],
+  };
+
+  const jsonText = JSON.stringify(json);
+  const jsonBytes = Buffer.from(jsonText, 'utf8');
+  const jsonPadding = (4 - (jsonBytes.length % 4)) % 4;
+  const jsonChunkLength = jsonBytes.length + jsonPadding;
+  const binaryPadding = (4 - (binary.byteLength % 4)) % 4;
+  const binaryChunkLength = binary.byteLength + binaryPadding;
+  const totalLength = 12 + 8 + jsonChunkLength + 8 + binaryChunkLength;
+  const out = Buffer.alloc(totalLength);
+
+  out.writeUInt32LE(0x46_54_6c_67, 0);
+  out.writeUInt32LE(2, 4);
+  out.writeUInt32LE(totalLength, 8);
+  out.writeUInt32LE(jsonChunkLength, 12);
+  out.writeUInt32LE(0x4e_4f_53_4a, 16);
+  jsonBytes.copy(out, 20);
+  out.fill(0x20, 20 + jsonBytes.length, 20 + jsonChunkLength);
+
+  const binChunkOffset = 20 + jsonChunkLength;
+  out.writeUInt32LE(binaryChunkLength, binChunkOffset);
+  out.writeUInt32LE(0x00_4e_49_42, binChunkOffset + 4);
+  Buffer.from(binary).copy(out, binChunkOffset + 8);
+
+  return new Uint8Array(out.buffer, out.byteOffset, out.byteLength);
+};
+
+type ThreeMfObject = {
+  id?: string;
+  name?: string;
+  type?: string;
+};
+
+const parseXmlAttributes = (tag: string): ThreeMfObject => {
+  const attributes: ThreeMfObject = {};
+  const attributeRegex = /([:A-Z_a-z][\w.:-]*)="([^"]*)"/g;
+  let match: RegExpExecArray | undefined = attributeRegex.exec(tag) ?? undefined;
+  while (match !== undefined) {
+    const key = match[1];
+    const value = match[2];
+    if ((key === 'id' || key === 'name' || key === 'type') && value !== undefined) {
+      attributes[key] = value;
+    }
+    match = attributeRegex.exec(tag) ?? undefined;
+  }
+  return attributes;
+};
+
+const readModelObjects = (xml: string): ThreeMfObject[] =>
+  (xml.match(/<object\b[^>]*>/g) ?? [])
+    .map((tag) => parseXmlAttributes(tag))
+    .filter((object) => object.type === 'model');
+
+/**
  * Parse vertex elements from a 3MF model XML and return the maximum number of
  * fractional digits seen across any x/y/z attribute.
  */
@@ -877,8 +1055,20 @@ describe('3MF rendering artifact regressions', () => {
     const files = await exportFiles(multiPrimGlb, '3mf');
     const xml = extract3mfModelXml(files[0]!.bytes);
 
-    const objectMatches = xml.match(/<object\b[^>]*\stype="model"/g) ?? [];
-    expect(objectMatches.length).toBeGreaterThanOrEqual(2);
+    const objects = readModelObjects(xml);
+    expect(objects.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('preserves named glTF assembly nodes as separate 3MF model objects', async () => {
+    const namedAssemblyGlb = buildNamedMultiNodeGlb();
+    const files = await exportFiles(namedAssemblyGlb, '3mf');
+    const xml = extract3mfModelXml(files[0]!.bytes);
+
+    const objects = readModelObjects(xml);
+    const objectNames = objects.map((object) => object.name);
+
+    expect(objects.length).toBeGreaterThanOrEqual(2);
+    expect(objectNames).toEqual(expect.arrayContaining(['Housing', 'Sun Gear']));
   });
 
   it('emits at least 9 fractional digits for vertex coordinates by default', async () => {

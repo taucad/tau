@@ -73,7 +73,11 @@ export class OcctLoader extends BaseLoader<OcctImportResult, OcctOptions> {
 
     // Create new glTF document using gltf-transform
     const document = new Document();
-    const scene = document.createScene(parseResult.root.name || 'Scene');
+    const scene = document.createScene();
+    const rootName = parseResult.root.name.trim();
+    if (rootName) {
+      scene.setName(rootName);
+    }
     const buffer = document.createBuffer();
 
     // Process each mesh from the OCCT result
@@ -105,8 +109,7 @@ export class OcctLoader extends BaseLoader<OcctImportResult, OcctOptions> {
           .setBaseColorFactor([red, green, blue, 1])
           .setRoughnessFactor(cadMaterialDefaults.roughnessFactor)
           .setMetallicFactor(cadMaterialDefaults.metalnessFactor)
-          .setDoubleSided(true)
-          .setName(`Material_${meshData.name || 'Default'}`);
+          .setDoubleSided(true);
         primitive.setMaterial(material);
       } else {
         const material = document
@@ -114,8 +117,7 @@ export class OcctLoader extends BaseLoader<OcctImportResult, OcctOptions> {
           .setBaseColorFactor([...cadMaterialDefaults.baseColorFactor])
           .setRoughnessFactor(cadMaterialDefaults.roughnessFactor)
           .setMetallicFactor(cadMaterialDefaults.metalnessFactor)
-          .setDoubleSided(true)
-          .setName('Material_Default');
+          .setDoubleSided(true);
         primitive.setMaterial(material);
       }
 
@@ -125,10 +127,10 @@ export class OcctLoader extends BaseLoader<OcctImportResult, OcctOptions> {
         mesh.setName(meshData.name);
       }
 
-      const node = document
-        .createNode()
-        .setMesh(mesh)
-        .setName(meshData.name || 'Mesh');
+      const node = document.createNode().setMesh(mesh);
+      if (meshData.name) {
+        node.setName(meshData.name);
+      }
 
       scene.addChild(node);
     }

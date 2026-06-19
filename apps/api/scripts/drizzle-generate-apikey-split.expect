@@ -1,0 +1,25 @@
+#!/usr/bin/expect -f
+# Non-interactive drizzle-kit generate: select "rename column" for reference_id.
+set timeout 180
+set cwd [file dirname [file dirname [info script]]]
+cd $cwd
+set env(DATABASE_URL) {postgresql://dev_user:dev_password@localhost:5432/tau_dev}
+spawn pnpm exec drizzle-kit generate --name apikey_split
+expect {
+  -re "Is reference_id column.* created or renamed" {
+    # Select the second option (rename column) with arrow-down then Enter
+    send "\033\[B\r"
+    exp_continue
+  }
+  -re "Is .* created or renamed" {
+    send "\r"
+    exp_continue
+  }
+  -re "Is .* deleted or renamed" {
+    send "\r"
+    exp_continue
+  }
+  eof
+}
+catch wait result
+exit [lindex $result 3]

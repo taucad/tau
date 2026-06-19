@@ -3,6 +3,7 @@ import type { AgentMiddleware } from 'langchain';
 import { ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod';
+import { countTextLines } from '@taucad/filesystem';
 import { TauRpcBackendFactory } from '#api/chat/tau-rpc-backend.js';
 import { MetricsService } from '#telemetry/metrics.js';
 
@@ -77,8 +78,9 @@ function headTruncateAtNewline(content: string, budget: number): string {
 function buildEnvelope(options: { toolName: string; persistedPath: string; rawContent: string }): string {
   const preview = headTruncateAtNewline(options.rawContent, envelopePreviewBudget);
   const truncatedChars = options.rawContent.length - preview.length;
+  const lineCount = countTextLines(options.rawContent);
   const header =
-    `Tool ${options.toolName} output persisted (${options.rawContent.length} chars) to ${options.persistedPath}. ` +
+    `Tool ${options.toolName} output persisted (${options.rawContent.length} chars, ${lineCount} lines) to ${options.persistedPath}. ` +
     (truncatedChars > 0
       ? `Re-read narrower ranges via read_file ${options.persistedPath} offset=<line> limit=<lines> ` +
         `(showing head ${preview.length} chars; ${truncatedChars} chars omitted).`

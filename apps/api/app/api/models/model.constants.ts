@@ -17,13 +17,57 @@ export function isModelListEntryEnabled(entry: ModelListEntry): boolean {
 
 export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListEntry>> = {
   anthropic: {
+    'claude-fable-5': {
+      enabled: false,
+      id: 'anthropic-claude-fable-5',
+      name: 'Fable 5',
+      slug: 'claude-fable-5',
+      recommended: true,
+      description:
+        "Anthropic's most capable widely released model for the hardest long-horizon agentic CAD design work.",
+      provider: {
+        id: 'anthropic',
+        name: 'Anthropic',
+      },
+      model: 'claude-fable-5',
+      support: {
+        toolChoice: false,
+      },
+      details: {
+        family: 'claude',
+        families: ['claude'],
+        contextWindow: 200_000, // Provider supports larger windows; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-01',
+        cost: {
+          inputTokens: 10,
+          outputTokens: 50,
+          cacheReadTokens: 1,
+          cacheWriteTokens: 12.5,
+        },
+      },
+      configuration: {
+        streaming: true,
+        maxTokens: 120_000,
+        // @ts-expect-error: FIXME - some models use camelCase
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
+        max_tokens: 120_000,
+        thinking: {
+          type: 'adaptive',
+          display: 'summarized',
+        },
+        outputConfig: {
+          effort: 'high',
+        },
+      },
+    },
     'claude-4.8-opus': {
       id: 'anthropic-claude-opus-4.8',
       name: 'Opus 4.8',
       slug: 'claude-opus-4.8',
       recommended: true,
       description:
-        "Anthropic's most powerful model with adaptive reasoning and 1M context, great for designing complex multi-part assemblies.",
+        "Anthropic's most powerful long-context capable model with adaptive reasoning, great for designing complex multi-part assemblies.",
       provider: {
         id: 'anthropic',
         name: 'Anthropic',
@@ -35,7 +79,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       details: {
         family: 'claude',
         families: ['claude'],
-        contextWindow: 300_000, // Maximum is 1M, but we reduce to 300K to keep costs down
+        contextWindow: 200_000, // Provider supports larger windows; Tau caps effective chat budget for cost and compaction reliability.
         maxTokens: 128_000,
         knowledgeCutoff: '2026-01',
         cost: {
@@ -149,7 +193,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       slug: 'gpt-5.5',
       recommended: true,
       description:
-        "OpenAI's frontier model with agentic reasoning and a 1M+ context window, strong at planning multi-part assemblies and verifying its own work.",
+        "OpenAI's frontier long-context capable model, strong at planning multi-part assemblies and verifying its own work.",
       provider: {
         id: 'openai',
         name: 'OpenAI',
@@ -158,7 +202,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       details: {
         family: 'gpt',
         families: ['GPT-5.5'],
-        contextWindow: 1_050_000,
+        contextWindow: 200_000,
         maxTokens: 128_000,
         knowledgeCutoff: '2025-12',
         cost: {
@@ -192,7 +236,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       details: {
         family: 'gpt',
         families: ['GPT-5.3'],
-        contextWindow: 400_000,
+        contextWindow: 200_000,
         maxTokens: 128_000,
         knowledgeCutoff: '2025-08',
         cost: {
@@ -216,7 +260,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       name: 'GPT-4.1',
       slug: 'gpt-4.1',
       recommended: true,
-      description: 'Reliable and cost-effective generalist with a 1M context window, good for everyday design tasks.',
+      description: 'Reliable and cost-effective long-context capable generalist, good for everyday design tasks.',
       provider: {
         id: 'openai',
         name: 'OpenAI',
@@ -225,7 +269,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       details: {
         family: 'gpt',
         families: ['GPT-4.1'],
-        contextWindow: 1_047_576,
+        contextWindow: 200_000,
         maxTokens: 32_768,
         knowledgeCutoff: '2024-06',
         cost: {
@@ -256,7 +300,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       details: {
         family: 'gemini',
         families: ['gemini'],
-        contextWindow: 1_048_576,
+        contextWindow: 200_000,
         maxTokens: 65_536,
         knowledgeCutoff: '2025-01',
         cost: {
@@ -287,7 +331,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       details: {
         family: 'gemini',
         families: ['gemini'],
-        contextWindow: 1_048_576,
+        contextWindow: 200_000,
         maxTokens: 65_536,
         knowledgeCutoff: '2025-01',
         cost: {
@@ -384,7 +428,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       details: {
         family: 'glm',
         families: ['glm'],
-        contextWindow: 202_752,
+        contextWindow: 200_000,
         maxTokens: 128_000,
         cost: {
           inputTokens: 1.4,
@@ -402,7 +446,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       id: 'together-qwen-3.5-397b',
       name: 'Qwen 3.5 397B',
       slug: 'qwen-3.5-397b',
-      description: 'Near-linear attention with 262K context and native multimodal, strong for large CAD projects.',
+      description: 'Long-context capable native multimodal model, strong for large CAD projects.',
       provider: {
         id: 'together',
         name: 'Together AI',
@@ -414,7 +458,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       details: {
         family: 'qwen',
         families: ['qwen'],
-        contextWindow: 262_144,
+        contextWindow: 200_000,
         maxTokens: 64_000,
         cost: {
           inputTokens: 0.6,
@@ -432,7 +476,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       id: 'together-llama-4-maverick',
       name: 'Llama 4 Maverick',
       slug: 'llama-4-maverick',
-      description: 'Strong general-purpose and coding model with 1M context window and massive ecosystem support.',
+      description: 'Strong long-context capable general-purpose and coding model with massive ecosystem support.',
       provider: {
         id: 'together',
         name: 'Together AI',
@@ -444,7 +488,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       details: {
         family: 'llama',
         families: ['llama'],
-        contextWindow: 1_048_576,
+        contextWindow: 200_000,
         maxTokens: 64_000,
         knowledgeCutoff: '2024-08',
         cost: {
@@ -456,6 +500,109 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
+      },
+    },
+  },
+
+  morph: {
+    'qwen-3.5-397b': {
+      enabled: false,
+      id: 'morph-qwen-3.5-397b',
+      name: 'Qwen 3.5 397B',
+      slug: 'qwen-3.5-397b',
+      recommended: true,
+      description: 'Strong long-context capable open coder with vision, good for large multi-file CAD projects.',
+      provider: {
+        id: 'morph',
+        name: 'Morph',
+      },
+      model: 'morph-qwen35-397b',
+      support: {
+        toolChoice: false,
+      },
+      details: {
+        family: 'qwen',
+        families: ['qwen'],
+        contextWindow: 200_000,
+        maxTokens: 65_536,
+        cost: {
+          inputTokens: 0.478,
+          outputTokens: 3.5,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        reasoning: {
+          effort: 'medium',
+        },
+      },
+    },
+    'minimax-m2.7': {
+      id: 'morph-minimax-m2.7',
+      name: 'MiniMax M2.7',
+      slug: 'minimax-m2.7',
+      recommended: true,
+      description: 'Cost-efficient open coder for everyday design work and long agentic tool loops.',
+      provider: {
+        id: 'morph',
+        name: 'Morph',
+      },
+      model: 'morph-minimax27-230b',
+      support: {
+        toolChoice: false,
+      },
+      details: {
+        family: 'minimax',
+        families: ['minimax'],
+        contextWindow: 200_000,
+        maxTokens: 65_536,
+        cost: {
+          inputTokens: 0.279,
+          outputTokens: 1.2,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        reasoning: {
+          effort: 'medium',
+        },
+      },
+    },
+    'deepseek-v4-flash': {
+      enabled: false,
+      id: 'morph-deepseek-v4-flash',
+      name: 'DeepSeek V4 Flash',
+      slug: 'deepseek-v4-flash',
+      description: 'Long-context capable open coder (beta), capped by Tau for cost and compaction reliability.',
+      provider: {
+        id: 'morph',
+        name: 'Morph',
+      },
+      model: 'morph-dsv4flash',
+      support: {
+        toolChoice: false,
+      },
+      details: {
+        family: 'deepseek',
+        families: ['deepseek'],
+        contextWindow: 200_000,
+        maxTokens: 65_536,
+        cost: {
+          inputTokens: 0.3,
+          outputTokens: 0.4,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        reasoning: {
+          effort: 'medium',
+        },
       },
     },
   },

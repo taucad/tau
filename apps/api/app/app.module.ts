@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod';
 import { DatabaseModule } from '#database/database.module.js';
+import { StorageModule } from '#storage/storage.module.js';
 import { AuthModule } from '#auth/auth.module.js';
 import { getEnvironment } from '#config/environment.config.js';
 import { ApiModule } from '#api/api.module.js';
@@ -21,6 +22,7 @@ import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
     RedisModule, // @Global() — makes RedisService available everywhere
     AuthModule.forRootAsync(),
     ConfigModule.forRoot({ validate: getEnvironment, isGlobal: true }),
+    StorageModule,
     LoggerModule,
   ],
   controllers: [],

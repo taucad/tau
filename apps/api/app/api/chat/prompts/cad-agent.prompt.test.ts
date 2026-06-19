@@ -19,6 +19,19 @@ const bannedSimplificationGuidancePatterns = [
   /too complex to verify/i,
 ] as const;
 
+const extractSection = (prompt: string, name: string): string => {
+  const startTag = `<${name}>`;
+  const endTag = `</${name}>`;
+  const start = prompt.indexOf(startTag);
+  const end = prompt.indexOf(endTag);
+  if (start === -1 || end === -1) {
+    throw new Error(`Missing <${name}> section`);
+  }
+  return prompt.slice(start, end + endTag.length);
+};
+
+const countOccurrences = (text: string, needle: string): number => text.split(needle).length - 1;
+
 describe('getCadSystemPrompt', () => {
   // ===================================================================
   // Anti-gold-plating rules
@@ -165,6 +178,14 @@ describe('getCadSystemPrompt', () => {
       expect(result.static).toContain('<code_standards>');
     });
 
+    it('should place <display_names> in static section only', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      expect(result.static).toContain('<display_names>');
+      expect(result.static).toContain('</display_names>');
+      expect(result.dynamic).not.toContain('<display_names>');
+      expect(result.dynamic).not.toContain('</display_names>');
+    });
+
     it('should place <canonical_example> in static section', async () => {
       const result = await getCadSystemPrompt('openscad');
       expect(result.static).toContain('<canonical_example>');
@@ -296,6 +317,8 @@ describe('getCadSystemPrompt', () => {
         '</visual_inspection>',
         '<code_standards>',
         '</code_standards>',
+        '<display_names>',
+        '</display_names>',
         '<topology_hints>',
         '</topology_hints>',
         '<error_handling>',
@@ -512,12 +535,21 @@ describe('getCadSystemPrompt', () => {
       expect(result.static).toContain('ShapeConfig[]');
     });
 
+    it('should use Title Case labels in the Replicad multi-shape example', async () => {
+      const result = await getCadSystemPrompt('replicad', 'agent', true);
+      const block = extractSection(result.static, 'multi_shape_pattern');
+      const legacyWheelLeftLabel = `name: '${['Wheel', 'Left'].join('')}'`;
+      const legacyWheelRightLabel = `name: '${['Wheel', 'Right'].join('')}'`;
+
+      expect(block).toContain("name: 'Wheel Left'");
+      expect(block).toContain("name: 'Wheel Right'");
+      expect(block).not.toContain(legacyWheelLeftLabel);
+      expect(block).not.toContain(legacyWheelRightLabel);
+    });
+
     it('should explicitly note that connectedComponents:1 is appropriate when ShapeConfig parts touch', async () => {
       const result = await getCadSystemPrompt('replicad', 'agent', true);
-      const block = result.static.slice(
-        result.static.indexOf('<multi_shape_pattern>'),
-        result.static.indexOf('</multi_shape_pattern>'),
-      );
+      const block = extractSection(result.static, 'multi_shape_pattern');
       expect(block).toContain('connectedComponents');
       expect(block).toMatch(/touch/i);
       expect(block).toMatch(/count":\s*1|count: 1/);
@@ -603,6 +635,46 @@ describe('getCadSystemPrompt', () => {
       );
       expect(block).not.toContain('lib/');
       expect(block).toMatch(/import\s+\w+\s+from\s+"[^"]+\.kcl"/);
+    });
+  });
+
+  // ===================================================================
+  // Display-name casing contract
+  // ===================================================================
+
+  describe('<display_names> display-label casing contract', () => {
+    it('should define Title Case examples and non-examples for authored display labels', async () => {
+      const result = await getCadSystemPrompt('replicad', 'agent', true);
+      const block = extractSection(result.static, 'display_names');
+
+      expect(block).toContain('Title Case words with spaces');
+      expect(block).toContain('Valve Cover Left');
+      expect(block).toContain('Bank Angle');
+      expect(block).toContain('Shape 1');
+      expect(block).toContain('ValveCover_L');
+      expect(block).toContain('wheelLeft');
+      expect(block).toContain('bank_angle');
+      expect(block).toContain('BankAngle');
+    });
+
+    it('should scope Title Case to display labels and preserve kernel-native code identifiers', async () => {
+      const replicad = await getCadSystemPrompt('replicad', 'agent', true);
+      const openscad = await getCadSystemPrompt('openscad', 'agent', true);
+      const zoo = await getCadSystemPrompt('zoo', 'agent', true);
+
+      expect(extractSection(replicad.static, 'display_names')).toContain('Keep code identifiers idiomatic');
+      expect(extractSection(replicad.static, 'code_standards')).toContain('Use camelCase for variables');
+      expect(extractSection(zoo.static, 'code_standards')).toContain('Use camelCase for variables');
+      expect(extractSection(openscad.static, 'code_standards')).toContain('Use snake_case for variables');
+    });
+
+    it('should carry the display-label rule once in the CAD static prompt and never in dynamic context', async () => {
+      const result = await getCadSystemPrompt('replicad', 'agent', true);
+
+      expect(countOccurrences(result.static, '<display_names>')).toBe(1);
+      expect(countOccurrences(result.static, '</display_names>')).toBe(1);
+      expect(countOccurrences(result.static, 'Title Case words with spaces')).toBe(1);
+      expect(result.dynamic).not.toContain('Title Case words with spaces');
     });
   });
 
@@ -956,6 +1028,10 @@ describe('getCadSystemPrompt', () => {
         const block = extractBlock(result.static);
         expect(block).toMatch(/segment count, not curve form/i);
         expect(block).toMatch(/extrudeRotate/);
+        expect(block).toContain('compose the 2D profile');
+        expect(block).toContain('call `extrudeLinear` once');
+        expect(block).toMatch(/non-manifold `geom3`/i);
+        expect(block).toMatch(/named\(shape, 'Part Name'\)/);
       });
 
       it('openscad should prefer $fa/$fs over $fn and warn on hull/minkowski misuse', async () => {
@@ -1388,6 +1464,7 @@ describe('getCadSystemPrompt', () => {
       expect(block).not.toContain('test.json');
       expect(block).not.toMatch(/loadModel\([^)]*(?:scale|sourceUnit|coordinateSystem)/);
       expect(block).not.toMatch(/loadModel\([^)]*unit\s*:/);
+      expect(block).not.toMatch(/loadModel\([^)]*kernel\s*:/);
     });
   });
 
@@ -1440,6 +1517,7 @@ describe('getCadSystemPrompt', () => {
       expect(names).toContain('workflow');
       expect(names).toContain('constraints');
       expect(names).toContain('tone');
+      expect(names).toContain('display_names');
     });
 
     it('should tag dynamic sections with cacheBreak: true and static ones with cacheBreak: false', async () => {
@@ -1453,10 +1531,12 @@ describe('getCadSystemPrompt', () => {
 
       const calls = onSectionResolved.mock.calls.map(([resolved]) => resolved as { name: string; cacheBreak: boolean });
       const role = calls.find((c) => c.name === 'role');
+      const displayNames = calls.find((c) => c.name === 'display_names');
       const environment = calls.find((c) => c.name === 'environment');
       const transcriptPath = calls.find((c) => c.name === 'transcript_path');
 
       expect(role?.cacheBreak).toBe(false);
+      expect(displayNames?.cacheBreak).toBe(false);
       expect(environment?.cacheBreak).toBe(true);
       expect(transcriptPath?.cacheBreak).toBe(true);
     });

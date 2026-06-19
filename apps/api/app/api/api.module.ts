@@ -12,6 +12,7 @@ import { TestApiModule } from '#api/test-api/test-api.module.js';
 import { ToolModule } from '#api/tools/tool.module.js';
 import { TelemetryIngestModule } from '#api/telemetry/telemetry.module.js';
 import { WebSocketModule } from '#api/websocket/websocket.module.js';
+import { PublicationsModule } from '#api/publications/publications.module.js';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { WebSocketModule } from '#api/websocket/websocket.module.js';
     ModelModule,
     PrivacyModule,
     ProviderModule,
+    PublicationsModule,
     TelemetryIngestModule,
     ToolModule,
 

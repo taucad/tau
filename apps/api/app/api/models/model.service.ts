@@ -10,6 +10,8 @@ import { ProviderService } from '#api/providers/provider.service.js';
 import type { Model, ModelSupport } from '#api/models/model.schema.js';
 import { isModelListEntryEnabled, modelList, modelListEntryToModel } from '#api/models/model.constants.js';
 import { Span } from '#telemetry/tracer.service.js';
+import type { ProviderDiagnosticsContext, ProviderDiagnosticsLogger } from '#api/chat/utils/provider-diagnostics.js';
+import { createProviderDiagnosticsContext } from '#api/chat/utils/provider-diagnostics.js';
 
 export type CloudProviderId = Exclude<ProviderId, 'ollama'>;
 
@@ -24,7 +26,10 @@ export class ModelService implements OnModuleInit {
   ) {}
 
   @Span()
-  public buildModel(modelId: string): { model: BaseChatModel; support?: ModelSupport } {
+  public buildModel(
+    modelId: string,
+    options: { providerDiagnosticsContext?: ProviderDiagnosticsContext } = {},
+  ): { model: BaseChatModel; support?: ModelSupport } {
     const modelConfig = this.models.find((model) => model.id === modelId);
 
     if (!modelConfig) {
@@ -33,16 +38,34 @@ export class ModelService implements OnModuleInit {
 
     const provider = this.providerService.getProvider(modelConfig.provider.id);
 
-    const modelClass = this.providerService.createModelClass(modelConfig.provider.id, {
-      model: modelConfig.model,
-      ...modelConfig.configuration,
-      configuration: provider.configuration,
-    });
+    const modelClass = this.providerService.createModelClass(
+      modelConfig.provider.id,
+      {
+        model: modelConfig.model,
+        ...modelConfig.configuration,
+        configuration: provider.configuration,
+      },
+      {
+        diagnosticsContext: options.providerDiagnosticsContext,
+      },
+    );
 
     return {
       model: modelClass,
       support: modelConfig.support,
     };
+  }
+
+  public createProviderDiagnosticsContext(options: {
+    chatId: string;
+    modelId: string;
+    providerId: ProviderId;
+    logger: ProviderDiagnosticsLogger;
+  }): ProviderDiagnosticsContext {
+    return createProviderDiagnosticsContext({
+      ...options,
+      verbose: this.configService.get('TAU_PROVIDER_DIAGNOSTICS_VERBOSE', { infer: true }) ?? false,
+    });
   }
 
   public async onModuleInit(): Promise<void> {

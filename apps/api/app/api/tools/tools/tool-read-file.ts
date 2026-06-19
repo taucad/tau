@@ -90,7 +90,11 @@ export const readFileTool: ChatTool<
     if (prior && (prior.value as DedupValue).modifiedAt === result.modifiedAt) {
       return {
         content: fileUnchangedMarker.build((prior.value as DedupValue).priorToolCallId),
+        size: result.size,
+        contentKind: 'text',
         totalLines: result.totalLines,
+        ...(result.startLine !== undefined && { startLine: result.startLine }),
+        ...(result.truncated !== undefined && { truncated: result.truncated }),
         modifiedAt: result.modifiedAt,
       };
     }
@@ -99,7 +103,11 @@ export const readFileTool: ChatTool<
   const displayStartLine = result.startLine ?? args.offset ?? 1;
   const output: ReadFileOutput = {
     content: formatReadFileOutputForDisplay(result.content, displayStartLine),
+    size: result.size,
+    contentKind: 'text',
     totalLines: result.totalLines,
+    startLine: displayStartLine,
+    ...(result.truncated !== undefined && { truncated: result.truncated }),
     ...(result.modifiedAt !== undefined && { modifiedAt: result.modifiedAt }),
   };
 

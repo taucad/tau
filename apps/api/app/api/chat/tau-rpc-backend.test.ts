@@ -18,6 +18,30 @@ describe('TauRpcBackend', () => {
   let chatRpcService: ReturnType<typeof mock<ChatRpcService>>;
   let backend: TauRpcBackend;
 
+  type ReadFileSuccess = {
+    success: true;
+    content: string;
+    size: number;
+    contentKind: 'text';
+    totalLines: number;
+    createdAt?: string;
+    modifiedAt?: string;
+  };
+
+  const readFileSuccess = (
+    content: string,
+    totalLines: number,
+    extra?: { createdAt?: string; modifiedAt?: string },
+  ): ReadFileSuccess => ({
+    success: true,
+    content,
+    size: new TextEncoder().encode(content).byteLength,
+    contentKind: 'text',
+    totalLines,
+    ...(extra?.createdAt ? { createdAt: extra.createdAt } : {}),
+    ...(extra?.modifiedAt ? { modifiedAt: extra.modifiedAt } : {}),
+  });
+
   beforeEach(() => {
     chatRpcService = mock<ChatRpcService>();
     backend = new TauRpcBackend(chatRpcService, 'chat-1', 'tool-call-1');
@@ -28,7 +52,14 @@ describe('TauRpcBackend', () => {
       chatRpcService.sendRpcRequest.mockResolvedValue({
         success: true,
         entries: [
-          { name: 'file.ts', type: 'file', size: 100, modifiedAt: '2026-01-15T10:00:00.000Z' },
+          {
+            name: 'file.ts',
+            type: 'file',
+            size: 100,
+            contentKind: 'text',
+            lineCount: 12,
+            modifiedAt: '2026-01-15T10:00:00.000Z',
+          },
           { name: 'subdir', type: 'dir', size: 0 },
         ],
         path: 'src',
@@ -55,22 +86,14 @@ describe('TauRpcBackend', () => {
 
   describe('read', () => {
     it('should return file content', async () => {
-      chatRpcService.sendRpcRequest.mockResolvedValue({
-        success: true,
-        content: 'hello world',
-        totalLines: 1,
-      });
+      chatRpcService.sendRpcRequest.mockResolvedValue(readFileSuccess('hello world', 1));
 
       const content = await backend.read('test.txt');
       expect(content).toBe('hello world');
     });
 
     it('should pass offset and limit parameters', async () => {
-      chatRpcService.sendRpcRequest.mockResolvedValue({
-        success: true,
-        content: 'line 5',
-        totalLines: 10,
-      });
+      chatRpcService.sendRpcRequest.mockResolvedValue(readFileSuccess('line 5', 10));
 
       await backend.read('test.txt', 5, 1);
 
@@ -84,13 +107,12 @@ describe('TauRpcBackend', () => {
 
   describe('readRaw', () => {
     it('should return FileData with content lines and real timestamps', async () => {
-      chatRpcService.sendRpcRequest.mockResolvedValue({
-        success: true,
-        content: 'line1\nline2\nline3',
-        totalLines: 3,
-        createdAt: '2026-01-15T10:00:00.000Z',
-        modifiedAt: '2026-01-20T14:30:00.000Z',
-      });
+      chatRpcService.sendRpcRequest.mockResolvedValue(
+        readFileSuccess('line1\nline2\nline3', 3, {
+          createdAt: '2026-01-15T10:00:00.000Z',
+          modifiedAt: '2026-01-20T14:30:00.000Z',
+        }),
+      );
 
       const fileData = await backend.readRaw('test.txt');
 
@@ -100,13 +122,12 @@ describe('TauRpcBackend', () => {
     });
 
     it('should use readFile RPC directly instead of delegating to read()', async () => {
-      chatRpcService.sendRpcRequest.mockResolvedValue({
-        success: true,
-        content: 'data',
-        totalLines: 1,
-        createdAt: '2026-03-01T00:00:00.000Z',
-        modifiedAt: '2026-03-01T00:00:00.000Z',
-      });
+      chatRpcService.sendRpcRequest.mockResolvedValue(
+        readFileSuccess('data', 1, {
+          createdAt: '2026-03-01T00:00:00.000Z',
+          modifiedAt: '2026-03-01T00:00:00.000Z',
+        }),
+      );
 
       await backend.readRaw('test.txt');
 
@@ -120,11 +141,7 @@ describe('TauRpcBackend', () => {
 
     it('should fall back to current time when timestamps are not provided', async () => {
       const before = new Date().toISOString();
-      chatRpcService.sendRpcRequest.mockResolvedValue({
-        success: true,
-        content: 'data',
-        totalLines: 1,
-      });
+      chatRpcService.sendRpcRequest.mockResolvedValue(readFileSuccess('data', 1));
 
       const fileData = await backend.readRaw('test.txt');
 
@@ -174,8 +191,21 @@ describe('TauRpcBackend', () => {
         success: true,
         files: ['src/a.ts', 'src/b.ts'],
         entries: [
-          { path: 'src/a.ts', isDirectory: false, size: 150, modifiedAt: '2026-01-10T08:00:00.000Z' },
-          { path: 'src/b.ts', isDirectory: false, size: 200, modifiedAt: '2026-02-20T12:00:00.000Z' },
+          {
+            path: 'src/a.ts',
+            isDirectory: false,
+            size: 150,
+            contentKind: 'text',
+            lineCount: 10,
+            modifiedAt: '2026-01-10T08:00:00.000Z',
+          },
+          {
+            path: 'src/b.ts',
+            isDirectory: false,
+            size: 200,
+            contentKind: 'binary',
+            modifiedAt: '2026-02-20T12:00:00.000Z',
+          },
         ],
         totalFiles: 2,
       });
@@ -188,19 +218,18 @@ describe('TauRpcBackend', () => {
       ]);
     });
 
-    it('should fall back to bare file paths when entries are not available', async () => {
+    it('should down-convert rich entries to DeepAgents FileInfo without line counts', async () => {
       chatRpcService.sendRpcRequest.mockResolvedValue({
         success: true,
-        files: ['src/a.ts', 'src/b.ts'],
-        totalFiles: 2,
+        files: ['src/a.ts'],
+        entries: [{ path: 'src/a.ts', isDirectory: false, size: 150, contentKind: 'text', lineCount: 10 }],
+        totalFiles: 1,
       });
 
       const result = await backend.globInfo('**/*.ts', 'src');
 
-      expect(result).toEqual([
-        { path: 'src/a.ts', is_dir: false },
-        { path: 'src/b.ts', is_dir: false },
-      ]);
+      expect(result).toEqual([{ path: 'src/a.ts', is_dir: false, size: 150 }]);
+      expect(result[0]).not.toHaveProperty('lineCount');
     });
   });
 

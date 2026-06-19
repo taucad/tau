@@ -73,6 +73,11 @@ export class MetricsService {
     unit: TauMetrics.genAiToolInvocations.unit,
   });
 
+  public readonly genAiToolInputRepairs = this.apiMeter.createCounter(TauMetrics.genAiToolInputRepairs.name, {
+    description: TauMetrics.genAiToolInputRepairs.description,
+    unit: TauMetrics.genAiToolInputRepairs.unit,
+  });
+
   public readonly genAiAgentIterations = this.apiMeter.createHistogram(TauMetrics.genAiAgentIterations.name, {
     description: TauMetrics.genAiAgentIterations.description,
     unit: TauMetrics.genAiAgentIterations.unit,
@@ -105,6 +110,20 @@ export class MetricsService {
     unit: TauMetrics.genAiPromptSectionSize.unit,
     advice: { explicitBucketBoundaries: [...TauMetrics.genAiPromptSectionSize.buckets] },
   });
+
+  public readonly genAiContextBudgetTokens = this.apiMeter.createHistogram(TauMetrics.genAiContextBudgetTokens.name, {
+    description: TauMetrics.genAiContextBudgetTokens.description,
+    unit: TauMetrics.genAiContextBudgetTokens.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.genAiContextBudgetTokens.buckets] },
+  });
+
+  public readonly genAiContextCompactionDecisions = this.apiMeter.createCounter(
+    TauMetrics.genAiContextCompactionDecisions.name,
+    {
+      description: TauMetrics.genAiContextCompactionDecisions.description,
+      unit: TauMetrics.genAiContextCompactionDecisions.unit,
+    },
+  );
 
   // Infrastructure
   public readonly redisConnectionState = this.apiMeter.createGauge(TauMetrics.redisConnectionState.name, {

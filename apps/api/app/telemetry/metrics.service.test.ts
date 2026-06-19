@@ -60,6 +60,11 @@ describe('MetricsService', () => {
       expect(service.genAiToolInvocations).toBeDefined();
     });
 
+    it('should create genAiToolInputRepairs counter', () => {
+      expect(service.genAiToolInputRepairs).toBeDefined();
+      expect(() => service.genAiToolInputRepairs.add(1)).not.toThrow();
+    });
+
     it('should create genAiAgentIterations histogram', () => {
       expect(service.genAiAgentIterations).toBeDefined();
     });
@@ -67,6 +72,13 @@ describe('MetricsService', () => {
     it('should create genAiPromptSectionSize histogram', () => {
       expect(service.genAiPromptSectionSize).toBeDefined();
       expect(() => service.genAiPromptSectionSize.record(1234)).not.toThrow();
+    });
+
+    it('should create context budget and compaction metrics', () => {
+      expect(service.genAiContextBudgetTokens).toBeDefined();
+      expect(service.genAiContextCompactionDecisions).toBeDefined();
+      expect(() => service.genAiContextBudgetTokens.record(1234)).not.toThrow();
+      expect(() => service.genAiContextCompactionDecisions.add(1)).not.toThrow();
     });
   });
 

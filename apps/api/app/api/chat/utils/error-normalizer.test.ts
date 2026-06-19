@@ -7,6 +7,25 @@ function parseNormalizedError(result: string): ChatError {
   return JSON.parse(result) as ChatError;
 }
 
+const anthropicCreditMessage =
+  'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.';
+
+const statusPrefixedAnthropicCreditErrorText = `400 {"type":"error","error":{"type":"invalid_request_error","message":"${anthropicCreditMessage}"}}`;
+const googleInvalidArgumentByteList = [
+  ...new TextEncoder().encode(
+    JSON.stringify([
+      {
+        error: {
+          code: 400,
+          message: 'Request contains an invalid argument.',
+          errors: [{ message: 'Request contains an invalid argument.', domain: 'global', reason: 'badRequest' }],
+          status: 'INVALID_ARGUMENT',
+        },
+      },
+    ]),
+  ),
+].join(',');
+
 describe('normalizeError', () => {
   describe('generic errors', () => {
     it('should handle plain string error', () => {
@@ -141,6 +160,17 @@ describe('normalizeError', () => {
 
       expect(result.category).toBe('tool_error');
       expect(result.httpStatus).toBe(400);
+    });
+
+    it('should decode Google byte-list invalid argument errors', () => {
+      const result = parseNormalizedError(
+        normalizeError(new Error(`Google request failed with status code 400: ${googleInvalidArgumentByteList}`)),
+      );
+
+      expect(result.category).toBe('tool_error');
+      expect(result.httpStatus).toBe(400);
+      expect(result.code).toBe('INVALID_ARGUMENT');
+      expect(result.message).toBe('Request contains an invalid argument.');
     });
 
     it('should detect 401 status as auth', () => {
@@ -282,6 +312,31 @@ describe('normalizeError', () => {
       expect(result.message).toContain('Rate limit exceeded');
     });
 
+    it('should classify nested billing message as credits even when LangChain wrapper is a tool error', () => {
+      const error = Object.assign(new Error(statusPrefixedAnthropicCreditErrorText), {
+        status: 400,
+        lc_error_code: 'INVALID_TOOL_RESULTS',
+        requestID: 'req_credit_lc',
+        error: {
+          type: 'error',
+          error: {
+            type: 'invalid_request_error',
+            message: anthropicCreditMessage,
+          },
+          request_id: 'req_credit_lc',
+        },
+      });
+
+      const result = parseNormalizedError(normalizeError(error));
+
+      expect(result.category).toBe('credits');
+      expect(result.title).toBe('Credit Limit Reached');
+      expect(result.message).toBe(anthropicCreditMessage);
+      expect(result.code).toBe('INVALID_TOOL_RESULTS');
+      expect(result.httpStatus).toBe(400);
+      expect(result.requestId).toBe('req_credit_lc');
+    });
+
     it('should fall back to raw message if nested error structure is missing', () => {
       const error = Object.assign(new Error('400 some error'), {
         status: 400,
@@ -305,6 +360,35 @@ describe('normalizeError', () => {
       expect(result.httpStatus).toBe(400);
       expect(result.message).toBe('Bad request');
       expect(result.code).toBe('invalid_request_error');
+    });
+
+    it('should classify status-prefixed Anthropic billing error as credits', () => {
+      const error = new Error(statusPrefixedAnthropicCreditErrorText);
+
+      const result = parseNormalizedError(normalizeError(error));
+
+      expect(result.category).toBe('credits');
+      expect(result.title).toBe('Credit Limit Reached');
+      expect(result.message).toBe(anthropicCreditMessage);
+      expect(result.code).toBe('invalid_request_error');
+      expect(result.httpStatus).toBe(400);
+      expect(result.raw).toBe(statusPrefixedAnthropicCreditErrorText);
+    });
+
+    it('should classify status-wrapped Anthropic billing SDK error as credits', () => {
+      const error = Object.assign(new Error(statusPrefixedAnthropicCreditErrorText), {
+        status: 400,
+        requestID: 'req_credit_status',
+      });
+
+      const result = parseNormalizedError(normalizeError(error));
+
+      expect(result.category).toBe('credits');
+      expect(result.title).toBe('Credit Limit Reached');
+      expect(result.message).toBe(anthropicCreditMessage);
+      expect(result.code).toBe('invalid_request_error');
+      expect(result.httpStatus).toBe(400);
+      expect(result.requestId).toBe('req_credit_status');
     });
 
     it('should parse pure JSON Anthropic error format', () => {

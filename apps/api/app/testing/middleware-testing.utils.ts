@@ -24,7 +24,7 @@ type WrapToolCallMiddleware = { wrapToolCall?: (...args: never[]) => unknown };
  */
 export const invokeWrapModelCall = async <M extends WrapModelCallMiddleware>(
   middleware: M,
-  request: { messages: BaseMessage[]; state?: Record<string, unknown> },
+  request: { messages: BaseMessage[]; state?: Record<string, unknown>; [key: string]: unknown },
   handler: ReturnType<typeof vi.fn>,
 ): Promise<unknown> => {
   const { wrapModelCall } = middleware;

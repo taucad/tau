@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
  * Co-located test for `scripts/src/smoke-cors.sh`.
  *
  * The script is post-deploy plumbing — it will be wired into
- * `.github/workflows/deploy.yml` and `.github/workflows/prod-deploy-ui.yml`.
+ * `.github/workflows/deploy.yml` (staging + Fly prod) post-deploy gates.
  * Without a test, the failure path (the only path that matters when chasing
  * a CORS misconfiguration) is unverified and the script could rot
  * silently. Per `docs/policy/testing-policy.md` §1: "if you remove the

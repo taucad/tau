@@ -33,9 +33,72 @@ describe('KernelConfig.topLevelExportExample', () => {
       expect(config.topLevelExportExample).toMatch(/Shape3D/);
     });
 
+    it('replicad multi-shape example should use Title Case display labels while keeping code identifiers idiomatic', () => {
+      const config = getKernelConfig('replicad');
+      const legacyWheelLeftLabel = `name: '${['Wheel', 'Left'].join('')}'`;
+      const legacyWheelRightLabel = `name: '${['Wheel', 'Right'].join('')}'`;
+
+      expect(config.codeStandards).toContain('Use camelCase for variables');
+      expect(config.multiShapeExample).toContain('const wheelL');
+      expect(config.multiShapeExample).toContain('const wheelR');
+      expect(config.multiShapeExample).toContain("name: 'Wheel Left'");
+      expect(config.multiShapeExample).toContain("name: 'Wheel Right'");
+      expect(config.multiShapeExample).not.toContain(legacyWheelLeftLabel);
+      expect(config.multiShapeExample).not.toContain(legacyWheelRightLabel);
+    });
+
+    it('replicad guidance should promote batch boolean APIs', () => {
+      const config = getKernelConfig('replicad');
+      expect(config.topologyHints).toContain('shape.fuseAll([...])');
+      expect(config.topologyHints).toContain('shape.cutAll([...])');
+      expect(config.topologyHints).toContain('shape.intersectAll([...])');
+    });
+
+    it('replicad guidance should promote BRep-native construction before booleans', () => {
+      const config = getKernelConfig('replicad');
+
+      expect(config.topologyHints).toContain('CompoundSketch');
+      expect(config.topologyHints).toContain('revolve');
+      expect(config.topologyHints).toContain('separate named `ShapeConfig`');
+      expect(config.topologyHints).toContain('build one prototype then `.clone()` before transforming repeated parts');
+    });
+
+    it('replicad guidance should not expose internal boolean implementation knobs', () => {
+      const config = getKernelConfig('replicad');
+      const corpus = [config.codeStandards, config.topologyHints].join('\n');
+
+      expect(corpus).toContain('optimisation?: BooleanOptimisation');
+      expect(corpus).not.toContain('nonDestructive?:');
+      expect(corpus).not.toContain('simplify?:');
+      expect(corpus).not.toContain('simplifyAngularTolerance?:');
+      expect(corpus).not.toContain('fuzzyValue?:');
+      expect(corpus).not.toContain('runParallel?:');
+      expect(corpus).not.toContain('useOBB?:');
+    });
+
     it('jscad example should mention Geom3', () => {
       const config = getKernelConfig('jscad');
       expect(config.topLevelExportExample).toMatch(/Geom3/);
+    });
+
+    it('jscad canonical example should name returned geometry parts', () => {
+      const config = getKernelConfig('jscad');
+      expect(config.canonicalExample).toContain('const named =');
+      expect(config.canonicalExample).toContain(
+        "return named(colorize([0.2, 0.55, 0.85, 1], plate), 'Mounting Plate');",
+      );
+      expect(config.canonicalExample).toContain('mountingPlateProfile');
+      expect(config.canonicalExample).toContain('extrudeLinear({ height: p.thickness }, profile)');
+      expect(config.canonicalExample).not.toContain('involuteGearProfile');
+      expect(config.canonicalExample).not.toContain('rootCircle2D');
+      expect(config.canonicalExample).not.toContain('union(rootCircle2D, allTeeth)');
+    });
+
+    it('jscad multi-file example should name returned geometry parts', () => {
+      const config = getKernelConfig('jscad');
+      const libFile = config.multiFileExample?.files.find((file) => file.path === 'lib/widget.ts');
+      expect(libFile?.content).toContain('const named =');
+      expect(libFile?.content).toContain("named(primitives.cube({ size: 10 }), 'Widget')");
     });
 
     it('manifold example should mention Manifold', () => {
@@ -51,6 +114,12 @@ describe('KernelConfig.topLevelExportExample', () => {
     it('zoo (KCL) example should mention extrude', () => {
       const config = getKernelConfig('zoo');
       expect(config.topLevelExportExample).toMatch(/extrude/i);
+    });
+
+    it('kernel code standards should preserve language-specific code casing guidance', () => {
+      expect(getKernelConfig('replicad').codeStandards).toContain('Use camelCase for variables');
+      expect(getKernelConfig('zoo').codeStandards).toContain('Use camelCase for variables');
+      expect(getKernelConfig('openscad').codeStandards).toContain('Use snake_case for variables');
     });
   });
 });
@@ -203,6 +272,17 @@ describe('KernelConfig.topologyHints', () => {
       const { topologyHints } = getKernelConfig('jscad');
       expect(topologyHints).toMatch(/segment count, not curve form/i);
       expect(topologyHints).toMatch(/extrudeRotate/);
+      expect(topologyHints).toContain('compose the 2D profile');
+      expect(topologyHints).toContain('call `extrudeLinear` once');
+      expect(topologyHints).toMatch(/non-manifold `geom3`/i);
+      expect(topologyHints).toMatch(/named\(shape, 'Part Name'\)/);
+    });
+
+    it('jscad should include the 3D mesh CSG manifold failure mode inventory', () => {
+      const { commonErrorPatterns } = getKernelConfig('jscad');
+      expect(commonErrorPatterns).toContain('3D mesh CSG');
+      expect(commonErrorPatterns).toContain('overlapping/touching/contained primitives');
+      expect(commonErrorPatterns).toMatch(/non-manifold geom3s/i);
     });
 
     it('openscad should prefer $fa/$fs and warn on hull/minkowski misuse and render() overuse', () => {

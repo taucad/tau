@@ -46,11 +46,12 @@ export class FileEditService {
   public async applyFileEdit(request: FileEditRequest): Promise<FileEditResult> {
     try {
       const { originalContent, codeEdit, targetFile, instructions } = request;
+      const instruction = instructions ?? 'Apply the code edit';
 
       const result = await this.morph.fastApply.applyEdit({
         originalCode: originalContent,
         codeEdit,
-        instructions: instructions ?? 'Apply the code edit',
+        instruction,
         filepath: targetFile,
       });
 

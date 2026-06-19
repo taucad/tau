@@ -33,6 +33,32 @@ function hasNonEmptyTextContent(message: AIMessage): boolean {
   return false;
 }
 
+function removeProviderVisibleLegacyToolMetadata(
+  additionalKwargs: AIMessage['additional_kwargs'] | undefined,
+): AIMessage['additional_kwargs'] {
+  if (!additionalKwargs) {
+    return {};
+  }
+
+  const next: Record<string, unknown> = { ...additionalKwargs };
+  delete next['tool_calls'];
+  delete next['function_call'];
+  return next as AIMessage['additional_kwargs'];
+}
+
+function isReplaySafeToolCall(toolCall: NonNullable<AIMessage['tool_calls']>[number]): boolean {
+  return (
+    typeof toolCall.id === 'string' &&
+    toolCall.id.trim().length > 0 &&
+    typeof toolCall.name === 'string' &&
+    toolCall.name.trim().length > 0
+  );
+}
+
+function replaySafeToolCalls(message: AIMessage): AIMessage['tool_calls'] {
+  return message.tool_calls?.filter(isReplaySafeToolCall);
+}
+
 /**
  * Ensures an AIMessage has at least one non-empty text content block.
  *
@@ -61,13 +87,14 @@ function ensureTextContent(message: AIMessage): AIMessage {
 
   // Skip messages with tool_calls — tool_use blocks count as valid content
   // and reconstructing these messages can break tool_use/tool_result pairing
-  if (message.tool_calls && message.tool_calls.length > 0) {
+  const safeToolCalls = replaySafeToolCalls(message);
+  if (safeToolCalls && safeToolCalls.length > 0) {
     return message;
   }
 
   const { content } = message;
 
-  const { additional_kwargs: additionalKwargs } = message;
+  const additionalKwargs = removeProviderVisibleLegacyToolMetadata(message.additional_kwargs);
 
   // Array content with no text blocks (e.g., only reasoning/thinking blocks)
   // → append a placeholder text block to satisfy the API
@@ -76,7 +103,9 @@ function ensureTextContent(message: AIMessage): AIMessage {
       content: [...content, { type: 'text', text: interruptedPlaceholder }],
       id: message.id,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      tool_calls: message.tool_calls,
+      tool_calls: safeToolCalls,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+      invalid_tool_calls: message.invalid_tool_calls,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
       additional_kwargs: additionalKwargs,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
@@ -91,7 +120,9 @@ function ensureTextContent(message: AIMessage): AIMessage {
     content: [{ type: 'text', text: interruptedPlaceholder }],
     id: message.id,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    tool_calls: message.tool_calls,
+    tool_calls: safeToolCalls,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+    invalid_tool_calls: message.invalid_tool_calls,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
     additional_kwargs: additionalKwargs,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case

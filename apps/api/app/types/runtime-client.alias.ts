@@ -1,11 +1,10 @@
 /**
  * App-level alias for the runtime client used across the API.
  *
- * The API does not statically know which kernels and transcoders it consumes
- * at module load (configured via runtime client options at startup), so this
- * alias intentionally points to the wide-default erasure form
+ * The API does not statically know every runtime definition consumed by callers
+ * at module load, so this alias intentionally points to the wide-default erasure form
  * `RuntimeClient<KernelPlugin[], TranscoderPlugin[]>`, matching how the
- * app accepts any plugin configuration configured at runtime.
+ * app accepts transport-owned runtime definitions from different call sites.
  */
 
 import type { KernelPlugin, RuntimeClient, TranscoderPlugin } from '@taucad/runtime';

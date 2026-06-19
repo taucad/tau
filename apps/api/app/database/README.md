@@ -55,7 +55,7 @@ export class YourService {
 Make sure you have the following environment variable set:
 
 ```bash
-DATABASE_URL=postgresql://username:password@localhost:5432/database_name
+DATABASE_URL=postgresql://db_user:password@localhost:5432/database_name
 ```
 
 ## Migration

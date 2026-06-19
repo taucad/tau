@@ -4,6 +4,7 @@ import { Resend } from 'resend';
 import type { Environment } from '#config/environment.config.js';
 import type { EmailMessage } from '#email/email.types.js';
 import { renderEmailTemplate, subjectForEmailTemplate } from '#email/email-templates.js';
+import { assertEmailTemplateUrlAllowed } from '#email/email-link-builder.js';
 
 @Injectable()
 export class EmailService {
@@ -16,8 +17,13 @@ export class EmailService {
   }
 
   public async send(message: EmailMessage): Promise<void> {
-    const rendered = await renderEmailTemplate(message.template);
     const templateKind = message.template.kind;
+    assertEmailTemplateUrlAllowed({
+      template: message.template,
+      frontendURL: this.configService.get('TAU_FRONTEND_URL', { infer: true }),
+    });
+
+    const rendered = await renderEmailTemplate(message.template);
     const subject = message.subject || subjectForEmailTemplate(message.template);
 
     if (!this.resend) {

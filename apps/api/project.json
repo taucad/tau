@@ -37,6 +37,16 @@
       },
       "parallelism": true
     },
+    "start": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "command": "node apps/api/dist/main.js",
+        "cwd": ".",
+        "forwardAllArgs": false
+      },
+      "parallelism": true
+    },
     "auth-schema-generate": {
       "executor": "nx:run-commands",
       "options": {

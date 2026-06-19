@@ -17,6 +17,7 @@ vi.mock('resend', () => ({
 const createService = (resendApiKey: string): EmailService => {
   const values: Record<string, string> = {
     RESEND_API_KEY: resendApiKey,
+    TAU_FRONTEND_URL: 'https://tau.new',
     TAU_EMAIL_FROM: 'Tau <identity@tau.new>',
     TAU_EMAIL_REPLY_TO: 'identity@tau.new',
   };
@@ -37,7 +38,7 @@ describe('EmailService delivery gate', () => {
 
     await service.sendMagicLink({
       email: 'user@example.com',
-      url: 'https://tau.new/auth/callback?token=secret',
+      url: 'https://tau.new/auth/magic-link/verify?token=secret&redirectTo=%2F',
     });
 
     expect(resendConstructorMock).not.toHaveBeenCalled();
@@ -50,7 +51,7 @@ describe('EmailService delivery gate', () => {
 
     await service.sendMagicLink({
       email: 'user@example.com',
-      url: 'https://tau.new/auth/callback?token=secret',
+      url: 'https://tau.new/auth/magic-link/verify?token=secret&redirectTo=%2F',
     });
 
     expect(resendConstructorMock).toHaveBeenCalledWith('re_test_key');
@@ -62,5 +63,31 @@ describe('EmailService delivery gate', () => {
         subject: 'Sign in to Tau',
       }),
     );
+  });
+
+  it('rejects backend auth URLs before rendering or sending', async () => {
+    const service = createService('re_test_key');
+
+    await expect(
+      service.sendResetPassword({
+        email: 'user@example.com',
+        url: 'https://api.tau.new/v1/auth/reset-password/token',
+      }),
+    ).rejects.toThrow(/origin/u);
+
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects frontend URLs on the wrong email template path before sending', async () => {
+    const service = createService('re_test_key');
+
+    await expect(
+      service.sendVerification({
+        email: 'user@example.com',
+        url: 'https://tau.new/v1/auth/verify-email?token=secret',
+      }),
+    ).rejects.toThrow(/path/u);
+
+    expect(sendMock).not.toHaveBeenCalled();
   });
 });

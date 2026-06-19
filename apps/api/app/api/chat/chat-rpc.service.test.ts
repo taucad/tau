@@ -7,19 +7,27 @@ import { MetricsService } from '#telemetry/metrics.js';
 const mockMetricsService = new MetricsService();
 
 let requestIdCounter = 0;
+const chatModuleMock = vi.hoisted(() => {
+  const readFileResultSafeParse = vi.fn(() => ({ success: true, data: { content: 'hello' } }));
+
+  return {
+    readFileResultSafeParse,
+    rpcSchemasRegistry: {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Tool name uses snake_case
+      read_file: {
+        inputSchema: { safeParse: vi.fn(() => ({ success: true, data: {} })) },
+        resultSchema: { safeParse: readFileResultSafeParse },
+      },
+    },
+  };
+});
 
 vi.mock('@taucad/utils/id', () => ({
   generatePrefixedId: vi.fn(() => `req_test_${String(++requestIdCounter)}`),
 }));
 
 vi.mock('@taucad/chat', () => ({
-  rpcSchemasRegistry: {
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- Tool name uses snake_case
-    read_file: {
-      inputSchema: { safeParse: vi.fn(() => ({ success: true, data: {} })) },
-      resultSchema: { safeParse: vi.fn(() => ({ success: true, data: { content: 'hello' } })) },
-    },
-  },
+  rpcSchemasRegistry: chatModuleMock.rpcSchemasRegistry,
 }));
 
 const defaultUserId = 'user_owner';
@@ -37,6 +45,16 @@ function createMockSocket(id: string, connected = true): Socket {
 function getEmitWithAck(socket: Socket): ReturnType<typeof vi.fn> {
   // oxlint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return -- accessing private mock property
   return (socket as any)._emitWithAck;
+}
+
+function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (reason?: unknown) => void } {
+  let fulfill!: (value: T) => void;
+  let fail!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolve, reject) => {
+    fulfill = resolve;
+    fail = reject;
+  });
+  return { promise, resolve: fulfill, reject: fail };
 }
 
 describe('ChatRpcService', () => {
@@ -201,6 +219,40 @@ describe('ChatRpcService', () => {
       });
 
       expect(result).toEqual({ content: 'hello' });
+    });
+
+    it('should return OUTPUT_VALIDATION_FAILED with raw output when client result is malformed', async () => {
+      chatModuleMock.readFileResultSafeParse.mockReturnValueOnce({
+        success: false,
+        error: { issues: [{ path: ['content'], message: 'Required' }] },
+      });
+      const socket = createMockSocket('s1');
+      service.registerConnection('chat_1', socket, defaultUserId);
+      const rawOutput = { wrong: 'shape' };
+
+      const ack = getEmitWithAck(socket);
+      ack.mockResolvedValueOnce({
+        type: 'rpc_response',
+        rpcName: 'read_file',
+        requestId: 'req_test_1',
+        toolCallId: 'call_1',
+        result: rawOutput,
+      });
+
+      const result = await service.sendRpcRequest({
+        chatId: 'chat_1',
+        toolCallId: 'call_1',
+        rpcName: 'read_file',
+        args: { targetFile: 'a.txt' },
+      });
+
+      expect(result).toMatchObject({
+        errorCode: 'OUTPUT_VALIDATION_FAILED',
+        rpcName: 'read_file',
+        validationErrors: [{ path: 'content', message: 'Required' }],
+        rawOutput,
+      });
+      expect(result.message).toContain('returned invalid result');
     });
   });
 
@@ -511,6 +563,89 @@ describe('ChatRpcService', () => {
         errorCode: 'CLIENT_DISCONNECTED',
         rpcName: 'read_file',
       });
+    });
+
+    it('should resolve in-flight RPCs immediately when abort signal fires', async () => {
+      const socket = createMockSocket('s1');
+      service.registerConnection('chat_1', socket, defaultUserId);
+
+      const controller = new AbortController();
+      service.registerAbortSignal('chat_1', controller.signal);
+
+      const ack = getEmitWithAck(socket);
+      const ackDeferred = createDeferred<unknown>();
+      ack.mockReturnValueOnce(ackDeferred.promise);
+
+      const resultPromise = service.sendRpcRequest({
+        chatId: 'chat_1',
+        toolCallId: 'call_1',
+        rpcName: 'read_file',
+        args: { targetFile: 'a.txt' },
+      });
+
+      expect(ack).toHaveBeenCalledWith('rpc_request', expect.objectContaining({ rpcName: 'read_file' }));
+
+      controller.abort();
+
+      await expect(resultPromise).resolves.toMatchObject({
+        errorCode: 'CLIENT_DISCONNECTED',
+        message: 'Chat request was cancelled.',
+        rpcName: 'read_file',
+      });
+
+      ackDeferred.resolve({
+        type: 'rpc_response',
+        rpcName: 'read_file',
+        requestId: 'req_test_1',
+        toolCallId: 'call_1',
+        result: { content: 'late success' },
+      });
+      await Promise.resolve();
+    });
+
+    it('should decrement active RPC metrics once when late ack arrives after abort', async () => {
+      const activeCallsAdd = vi.fn();
+      const localService = new ChatRpcService({
+        rpcActiveCalls: { add: activeCallsAdd },
+        rpcCallDuration: { record: vi.fn() },
+        wsMessageSize: { record: vi.fn() },
+      } as unknown as MetricsService);
+      const socket = createMockSocket('s1');
+      localService.registerConnection('chat_1', socket, defaultUserId);
+
+      const controller = new AbortController();
+      localService.registerAbortSignal('chat_1', controller.signal);
+
+      const ack = getEmitWithAck(socket);
+      const ackDeferred = createDeferred<unknown>();
+      ack.mockReturnValueOnce(ackDeferred.promise);
+
+      const resultPromise = localService.sendRpcRequest({
+        chatId: 'chat_1',
+        toolCallId: 'call_1',
+        rpcName: 'read_file',
+        args: { targetFile: 'a.txt' },
+      });
+
+      controller.abort();
+      await expect(resultPromise).resolves.toMatchObject({ errorCode: 'CLIENT_DISCONNECTED' });
+
+      const decrementCallsBeforeLateAck = activeCallsAdd.mock.calls.filter(([delta]) => delta === -1);
+      expect(decrementCallsBeforeLateAck).toHaveLength(1);
+
+      ackDeferred.resolve({
+        type: 'rpc_response',
+        rpcName: 'read_file',
+        requestId: 'req_test_1',
+        toolCallId: 'call_1',
+        result: { content: 'late success' },
+      });
+      await Promise.resolve();
+
+      const decrementCallsAfterLateAck = activeCallsAdd.mock.calls.filter(([delta]) => delta === -1);
+      expect(decrementCallsAfterLateAck).toHaveLength(1);
+
+      localService.onModuleDestroy();
     });
 
     it('should remove old abort listener when re-registering so it does not fire', async () => {
@@ -870,6 +1005,39 @@ describe('ChatRpcService', () => {
       expect(ack2).toHaveBeenCalledWith('rpc_request', expect.objectContaining({ rpcName: 'read_file' }));
 
       service2.onModuleDestroy();
+    });
+
+    it('should resolve pending RPCs as disconnected on destroy', async () => {
+      const socket = createMockSocket('s1');
+      service.registerConnection('chat_1', socket, defaultUserId);
+
+      const ack = getEmitWithAck(socket);
+      const ackDeferred = createDeferred<unknown>();
+      ack.mockReturnValueOnce(ackDeferred.promise);
+
+      const resultPromise = service.sendRpcRequest({
+        chatId: 'chat_1',
+        toolCallId: 'call_1',
+        rpcName: 'read_file',
+        args: { targetFile: 'a.txt' },
+      });
+
+      service.onModuleDestroy();
+
+      await expect(resultPromise).resolves.toMatchObject({
+        errorCode: 'CLIENT_DISCONNECTED',
+        message: 'RPC service shut down before RPC execution completed.',
+        rpcName: 'read_file',
+      });
+
+      ackDeferred.resolve({
+        type: 'rpc_response',
+        rpcName: 'read_file',
+        requestId: 'req_test_1',
+        toolCallId: 'call_1',
+        result: { content: 'late success' },
+      });
+      await Promise.resolve();
     });
 
     it('should not crash when called with no pending state', () => {

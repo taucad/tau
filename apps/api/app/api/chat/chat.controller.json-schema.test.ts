@@ -149,20 +149,64 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                       "description": {
                         "type": "string",
                       },
+                      "enabled": {
+                        "type": "boolean",
+                      },
+                      "fingerprint": {
+                        "type": "string",
+                      },
                       "name": {
                         "type": "string",
                       },
                       "path": {
                         "type": "string",
                       },
+                      "resourceUri": {
+                        "type": "string",
+                      },
+                      "shadowedSources": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "fingerprint": {
+                              "type": "string",
+                            },
+                            "path": {
+                              "type": "string",
+                            },
+                            "resourceUri": {
+                              "type": "string",
+                            },
+                            "skillPath": {
+                              "type": "string",
+                            },
+                            "source": {
+                              "type": "string",
+                            },
+                          },
+                          "required": [
+                            "source",
+                          ],
+                          "type": "object",
+                        },
+                        "type": "array",
+                      },
+                      "skillPath": {
+                        "type": "string",
+                      },
                       "source": {
+                        "type": "string",
+                      },
+                      "version": {
+                        "type": "string",
+                      },
+                      "whenToUse": {
                         "type": "string",
                       },
                     },
                     "required": [
                       "name",
                       "description",
-                      "path",
                     ],
                     "type": "object",
                   },
@@ -200,68 +244,269 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
               "additionalProperties": false,
               "properties": {
                 "activeFile": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "name": {
-                      "type": "string",
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "contentKind": {
+                          "const": "text",
+                          "type": "string",
+                        },
+                        "lineCount": {
+                          "maximum": 9007199254740991,
+                          "minimum": 1,
+                          "type": "integer",
+                        },
+                        "name": {
+                          "type": "string",
+                        },
+                        "path": {
+                          "type": "string",
+                        },
+                        "size": {
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer",
+                        },
+                      },
+                      "required": [
+                        "path",
+                        "name",
+                        "size",
+                        "contentKind",
+                        "lineCount",
+                      ],
+                      "type": "object",
                     },
-                    "path": {
-                      "type": "string",
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "contentKind": {
+                          "const": "binary",
+                          "type": "string",
+                        },
+                        "name": {
+                          "type": "string",
+                        },
+                        "path": {
+                          "type": "string",
+                        },
+                        "size": {
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer",
+                        },
+                      },
+                      "required": [
+                        "path",
+                        "name",
+                        "size",
+                        "contentKind",
+                      ],
+                      "type": "object",
                     },
-                  },
-                  "required": [
-                    "path",
-                    "name",
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                        },
+                        "path": {
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "path",
+                        "name",
+                      ],
+                      "type": "object",
+                    },
                   ],
-                  "type": "object",
                 },
                 "fileTree": {
                   "items": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "name": {
-                        "type": "string",
-                      },
-                      "path": {
-                        "type": "string",
-                      },
-                      "size": {
-                        "type": "number",
-                      },
-                      "type": {
-                        "enum": [
-                          "file",
-                          "dir",
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                          },
+                          "path": {
+                            "type": "string",
+                          },
+                          "size": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer",
+                          },
+                          "type": {
+                            "const": "dir",
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "path",
+                          "name",
+                          "size",
+                          "type",
                         ],
-                        "type": "string",
+                        "type": "object",
                       },
-                    },
-                    "required": [
-                      "path",
-                      "name",
-                      "type",
-                      "size",
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "contentKind": {
+                            "const": "text",
+                            "type": "string",
+                          },
+                          "lineCount": {
+                            "maximum": 9007199254740991,
+                            "minimum": 1,
+                            "type": "integer",
+                          },
+                          "name": {
+                            "type": "string",
+                          },
+                          "path": {
+                            "type": "string",
+                          },
+                          "size": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer",
+                          },
+                          "type": {
+                            "const": "file",
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "path",
+                          "name",
+                          "size",
+                          "type",
+                          "contentKind",
+                          "lineCount",
+                        ],
+                        "type": "object",
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "contentKind": {
+                            "const": "binary",
+                            "type": "string",
+                          },
+                          "name": {
+                            "type": "string",
+                          },
+                          "path": {
+                            "type": "string",
+                          },
+                          "size": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer",
+                          },
+                          "type": {
+                            "const": "file",
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "path",
+                          "name",
+                          "size",
+                          "type",
+                          "contentKind",
+                        ],
+                        "type": "object",
+                      },
                     ],
-                    "type": "object",
                   },
                   "type": "array",
                 },
                 "openFiles": {
                   "items": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "name": {
-                        "type": "string",
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "contentKind": {
+                            "const": "text",
+                            "type": "string",
+                          },
+                          "lineCount": {
+                            "maximum": 9007199254740991,
+                            "minimum": 1,
+                            "type": "integer",
+                          },
+                          "name": {
+                            "type": "string",
+                          },
+                          "path": {
+                            "type": "string",
+                          },
+                          "size": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer",
+                          },
+                        },
+                        "required": [
+                          "path",
+                          "name",
+                          "size",
+                          "contentKind",
+                          "lineCount",
+                        ],
+                        "type": "object",
                       },
-                      "path": {
-                        "type": "string",
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "contentKind": {
+                            "const": "binary",
+                            "type": "string",
+                          },
+                          "name": {
+                            "type": "string",
+                          },
+                          "path": {
+                            "type": "string",
+                          },
+                          "size": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer",
+                          },
+                        },
+                        "required": [
+                          "path",
+                          "name",
+                          "size",
+                          "contentKind",
+                        ],
+                        "type": "object",
                       },
-                    },
-                    "required": [
-                      "path",
-                      "name",
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                          },
+                          "path": {
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "path",
+                          "name",
+                        ],
+                        "type": "object",
+                      },
                     ],
-                    "type": "object",
                   },
                   "type": "array",
                 },
@@ -288,7 +533,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                       "web_search",
                       "web_browser",
                       "test_model",
-                      "edit_tests",
+                      "use_skill",
                       "read_file",
                       "edit_file",
                       "list_directory",

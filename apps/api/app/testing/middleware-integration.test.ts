@@ -76,6 +76,40 @@ class ScriptedGeoSpecLoopModel extends BaseChatModel {
   }
 }
 
+class RecordingCompactionModel extends BaseChatModel {
+  public readonly calls: BaseMessage[][] = [];
+
+  public constructor() {
+    super({});
+  }
+
+  public override _llmType(): string {
+    return 'recording-compaction-model';
+  }
+
+  public override _combineLLMOutput(): Record<string, unknown> {
+    return {};
+  }
+
+  public override bindTools(): this {
+    return this;
+  }
+
+  public override async _generate(
+    messages: BaseMessage[],
+    _options: this['ParsedCallOptions'],
+    _runManager?: CallbackManagerForLLMRun,
+  ): Promise<ChatResult> {
+    this.calls.push(messages);
+    const message = new AIMessage({
+      content: `recorded turn ${this.calls.length}`,
+      usage_metadata: { input_tokens: 100, output_tokens: 5, total_tokens: 105 },
+      response_metadata: { model: 'recording-compaction-model' },
+    });
+    return { generations: [{ text: message.content as string, message }] };
+  }
+}
+
 const scriptedModelService = {
   buildModel() {
     return { model: new ScriptedGeoSpecLoopModel() };
@@ -227,20 +261,20 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
     it('should emit data-context-compaction when context exceeds threshold', async () => {
       const threadId = `test-compaction-${Date.now()}`;
 
-      const longContent = 'A'.repeat(100_000);
+      const longContent = 'A'.repeat(9000);
       const messages = [];
 
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < 40; i++) {
         messages.push({
           id: `msg_user_${i}`,
           role: 'user',
-          parts: [{ type: 'text', text: `Turn ${i}: ${longContent.slice(0, 5000)}` }],
+          parts: [{ type: 'text', text: `Turn ${i}: ${longContent}` }],
           metadata: { model: modelId, kernel: 'replicad' },
         });
         messages.push({
           id: `msg_assistant_${i}`,
           role: 'assistant',
-          parts: [{ type: 'text', text: `Response ${i}: ${longContent.slice(0, 5000)}` }],
+          parts: [{ type: 'text', text: `Response ${i}: ${longContent}` }],
           metadata: { model: modelId, kernel: 'replicad' },
         });
       }
@@ -265,17 +299,20 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
 
       const compactionData = extractContextCompactionData(chunks);
 
-      if (compactionData.length > 0) {
-        const first = compactionData[0]!;
-        expect(first).toHaveProperty('tokensBeforeCompaction');
-        expect(first).toHaveProperty('tokensAfterCompaction');
-        expect(first).toHaveProperty('compressionRatio');
-        expect(first).toHaveProperty('messagesEvicted');
+      expect(compactionData.length, 'Expected context compaction data to be emitted').toBeGreaterThan(0);
+      const first = compactionData[0]!;
+      expect(first).toHaveProperty('tokensBeforeCompaction');
+      expect(first).toHaveProperty('tokensAfterCompaction');
+      expect(first).toHaveProperty('compressionRatio');
+      expect(first).toHaveProperty('messagesEvicted');
+      expect(first).toMatchObject({
+        status: expect.stringMatching(/^(compacted|failed)$/) as unknown as string,
+        budgetKind: 'estimated',
+      });
 
-        const transcriptPath = `.tau/transcripts/${threadId}.jsonl`;
-        const transcriptExists = await testApp.memFs.exists(transcriptPath);
-        expect(transcriptExists, `Expected transcript at ${transcriptPath}`).toBe(true);
-      }
+      const transcriptPath = `.tau/transcripts/${threadId}.jsonl`;
+      const transcriptExists = await testApp.memFs.exists(transcriptPath);
+      expect(transcriptExists, `Expected transcript at ${transcriptPath}`).toBe(true);
     }, 120_000);
 
     // ===========================================================================
@@ -456,3 +493,140 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
     }, 180_000);
   },
 );
+
+describe('Middleware Integration: deterministic compaction state rewrite', () => {
+  let testApp: TestApp;
+  let recordingModel: RecordingCompactionModel;
+
+  beforeAll(async () => {
+    recordingModel = new RecordingCompactionModel();
+    testApp = await createTestApp({
+      modelService: {
+        ...scriptedModelService,
+        buildModel() {
+          return { model: recordingModel };
+        },
+        getContextWindow() {
+          return 1000;
+        },
+      },
+      compactionService: {
+        async compact() {
+          return {
+            compactedMessages: [new AIMessage('[Compacted conversation history]\nSummary without raw evicted text')],
+            stats: {
+              tokensBeforeCompaction: 2000,
+              tokensAfterCompaction: 25,
+              compressionRatio: 0.0125,
+              messagesEvicted: 4,
+            },
+          };
+        },
+      },
+    });
+  }, 30_000);
+
+  afterAll(async () => {
+    await testApp.app.close();
+  });
+
+  it('does not resend evicted raw strings on the turn after compaction', async () => {
+    const threadId = `test-deterministic-compaction-${Date.now()}`;
+    const evictedText = `EVICT_ME_${Date.now()} ${'A'.repeat(8000)}`;
+
+    const firstResponse = await fetch(`${testApp.baseUrl}/v1/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: threadId,
+        messages: [
+          {
+            id: 'msg_evicted_user',
+            role: 'user',
+            parts: [{ type: 'text', text: evictedText }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_assistant',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'old assistant without sentinel' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_user_2',
+            role: 'user',
+            parts: [{ type: 'text', text: 'more old context without sentinel' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_assistant_2',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'more old assistant context without sentinel' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_recent_user',
+            role: 'user',
+            parts: [{ type: 'text', text: 'recent question' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+        ],
+        agent: buildCadAgent(modelId, 'replicad'),
+      }),
+    });
+
+    expect(firstResponse.ok, `HTTP ${firstResponse.status}: ${firstResponse.statusText}`).toBe(true);
+    const firstChunks = await collectStreamChunks(firstResponse);
+    expectNoErrors(firstChunks);
+    const compactionData = extractContextCompactionData(firstChunks);
+    expect(compactionData.length, 'Expected first turn to compact').toBeGreaterThan(0);
+    const compaction = compactionData[0]!;
+    expect(compaction['status']).toBe('compacted');
+
+    const secondResponse = await fetch(`${testApp.baseUrl}/v1/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: threadId,
+        messages: [
+          {
+            id: 'msg_evicted_user',
+            role: 'user',
+            parts: [{ type: 'text', text: evictedText }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_assistant_after_compaction',
+            role: 'assistant',
+            parts: [
+              { type: 'text', text: 'recorded turn 1' },
+              { type: 'data-context-compaction', id: compaction['id'], data: compaction },
+            ],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_followup',
+            role: 'user',
+            parts: [{ type: 'text', text: 'continue without old raw context' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+        ],
+        agent: buildCadAgent(modelId, 'replicad'),
+      }),
+    });
+
+    expect(secondResponse.ok, `HTTP ${secondResponse.status}: ${secondResponse.statusText}`).toBe(true);
+    const secondChunks = await collectStreamChunks(secondResponse);
+    expectNoErrors(secondChunks);
+
+    const secondProviderPayload = recordingModel.calls[1] ?? [];
+    expect(providerPayloadText(secondProviderPayload)).not.toContain(evictedText);
+    expect(providerPayloadText(secondProviderPayload)).toContain('Summary without raw evicted text');
+  }, 60_000);
+});
+
+function providerPayloadText(messages: readonly BaseMessage[]): string {
+  return messages
+    .map((message) => (typeof message.content === 'string' ? message.content : JSON.stringify(message.content)))
+    .join('\n');
+}

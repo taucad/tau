@@ -71,7 +71,12 @@ describe('createTestModelToolDefinition', () => {
       expect(description).toContain("{ testNamePattern: '^(?!.*no meshing interference).*' }");
       expect(description).toContain("{ exclude: ['**/*.slow.geospec.ts'] }");
       expect(description).not.toContain('files[0]');
+      expect(description).not.toContain('Do not use bracket-key syntax');
       expect(description).not.toContain('excludeTestNamePattern');
+    });
+
+    it('should not imply an empty zero-test result is successful', () => {
+      expect(description).toContain('Empty failures with total > 0 means all selected tests passed.');
     });
 
     it('should stay within the context-engineering word budget', () => {

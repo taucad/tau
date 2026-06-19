@@ -13,6 +13,8 @@ import { ChatCerebras } from '@langchain/cerebras';
 import type { ChatCerebrasInput } from '@langchain/cerebras';
 import type { Environment } from '#config/environment.config.ts';
 import type { ProviderId, Provider } from '#api/providers/provider.schema.js';
+import type { ProviderDiagnosticsContext } from '#api/chat/utils/provider-diagnostics.js';
+import { createGoogleProviderDiagnosticsFetch } from '#api/chat/utils/provider-diagnostics.js';
 
 // Type for mapping provider IDs to their option types
 type ProviderOptionsMap = {
@@ -22,11 +24,24 @@ type ProviderOptionsMap = {
   vertexai: ChatVertexAIInput & { model: string };
   cerebras: ChatCerebrasInput;
   together: ChatOpenAIFields;
+  morph: ChatOpenAIFields & {
+    model: string;
+    configuration?: Provider['configuration'];
+    streaming?: boolean;
+    reasoning?: {
+      effort?: 'low' | 'medium' | 'high';
+      summary?: 'auto' | 'concise' | 'detailed';
+    };
+  };
+};
+
+type ProviderRuntimeOptions = {
+  diagnosticsContext?: ProviderDiagnosticsContext;
 };
 
 // Enhanced type that includes the createClass method
 type ProviderType<T extends ProviderId> = Provider & {
-  createClass: (options: ProviderOptionsMap[T]) => BaseChatModel;
+  createClass: (options: ProviderOptionsMap[T], runtimeOptions?: ProviderRuntimeOptions) => BaseChatModel;
 };
 
 @Injectable()
@@ -38,10 +53,14 @@ export class ProviderService {
     return providers[providerId];
   }
 
-  public createModelClass<T extends ProviderId>(providerId: T, options: ProviderOptionsMap[T]): BaseChatModel {
+  public createModelClass<T extends ProviderId>(
+    providerId: T,
+    options: ProviderOptionsMap[T],
+    runtimeOptions?: ProviderRuntimeOptions,
+  ): BaseChatModel {
     const providers = this.getProviders();
     const provider = providers[providerId];
-    return provider.createClass(options);
+    return provider.createClass(options, runtimeOptions);
   }
 
   private getProviders(): {
@@ -109,8 +128,14 @@ export class ProviderService {
         },
         inputTokensIncludesCacheReadTokens: true,
         inputTokensIncludesCacheWriteTokens: false,
-        createClass(options) {
+        createClass(options, runtimeOptions) {
           const credentials = configService.get('GOOGLE_VERTEX_AI_CREDENTIALS', { infer: true });
+          const diagnosticsFetch = runtimeOptions?.diagnosticsContext
+            ? createGoogleProviderDiagnosticsFetch({
+                baseFetch: globalThis.fetch,
+                context: runtimeOptions.diagnosticsContext,
+              })
+            : globalThis.fetch;
 
           return new ChatVertexAI({
             ...options,
@@ -122,6 +147,13 @@ export class ProviderService {
             authOptions: {
               credentials,
               projectId: credentials.project_id,
+              clientOptions: {
+                transporterOptions: {
+                  // Gaxios defaults to node-fetch in Node; node-fetch emits an unhandled
+                  // request-body Readable error when aborted before/during a POST.
+                  fetchImplementation: diagnosticsFetch,
+                },
+              },
             },
           });
         },
@@ -142,6 +174,21 @@ export class ProviderService {
         configuration: {
           apiKey: configService.get('TOGETHER_API_KEY', { infer: true }),
           baseURL: 'https://api.together.xyz/v1',
+        },
+        inputTokensIncludesCacheReadTokens: false,
+        inputTokensIncludesCacheWriteTokens: false,
+        createClass: (options) =>
+          new ChatOpenAI({
+            outputVersion: 'v1',
+            ...options,
+          }),
+      },
+      morph: {
+        provider: 'morph',
+        otelProviderName: 'morph',
+        configuration: {
+          apiKey: configService.get('MORPH_API_KEY', { infer: true }),
+          baseURL: 'https://api.morphllm.com/v1',
         },
         inputTokensIncludesCacheReadTokens: false,
         inputTokensIncludesCacheWriteTokens: false,

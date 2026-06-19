@@ -1,6 +1,7 @@
 // oxlint-disable max-params -- deepagents API.
 /* eslint-disable @typescript-eslint/naming-convention -- Langchain uses snake_case naming convention */
 import { Injectable } from '@nestjs/common';
+// oxlint-disable-next-line typescript/no-deprecated -- DeepAgents boundary adapter intentionally implements this compatibility protocol.
 import type { BackendProtocol, WriteResult, EditResult, FileInfo, GrepMatch, FileData } from 'deepagents';
 import { rpcName } from '@taucad/chat/constants';
 import type { RpcExecutionError, RpcValidationError } from '@taucad/chat';
@@ -45,6 +46,7 @@ export class TauRpcBackendFactory {
  * Delegates all file operations to the browser virtual filesystem via RPC.
  * Returns `filesUpdate: null` (external storage — not stored in LangGraph state).
  */
+// oxlint-disable-next-line typescript/no-deprecated -- DeepAgents compatibility boundary; rich Tau metadata stays outside this adapter.
 export class TauRpcBackend implements BackendProtocol {
   public constructor(
     private readonly chatRpcService: ChatRpcService,
@@ -130,18 +132,11 @@ export class TauRpcBackend implements BackendProtocol {
 
     const data = unwrapRpcResult(result);
 
-    if (data.entries?.length) {
-      return data.entries.map((entry) => ({
-        path: entry.path,
-        is_dir: entry.isDirectory ?? false,
-        size: entry.size,
-        ...(entry.modifiedAt ? { modified_at: entry.modifiedAt } : {}),
-      }));
-    }
-
-    return data.files.map((file) => ({
-      path: file,
-      is_dir: false,
+    return data.entries.map((entry) => ({
+      path: entry.path,
+      is_dir: entry.isDirectory ?? false,
+      size: entry.size,
+      ...(entry.modifiedAt ? { modified_at: entry.modifiedAt } : {}),
     }));
   }
 

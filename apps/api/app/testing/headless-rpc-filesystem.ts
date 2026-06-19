@@ -1,5 +1,5 @@
 import type { RuntimeFileSystemBase } from '@taucad/runtime';
-import type { RpcFileSystem, RpcFileStat } from '@taucad/chat/rpc';
+import type { RpcDirectoryEntry, RpcFileSystem, RpcFileStat } from '@taucad/chat/rpc';
 
 /**
  * Adapts a `RuntimeFileSystemBase` (e.g. the value returned by
@@ -19,25 +19,42 @@ export function createHeadlessRpcFileSystem(fs: RuntimeFileSystemBase): RpcFileS
     async deleteFile(path: string): Promise<void> {
       await fs.unlink(path);
     },
-    async readdir(
-      path: string,
-    ): Promise<Array<{ name: string; type: 'file' | 'dir'; size: number; modifiedAt?: string }>> {
+    async readdir(path: string): Promise<RpcDirectoryEntry[]> {
       const names = await fs.readdir(path);
-      const entries: Array<{ name: string; type: 'file' | 'dir'; size: number; modifiedAt?: string }> = [];
+      const entries: RpcDirectoryEntry[] = [];
 
       for (const name of names) {
         const fullPath = path ? `${path}/${name}` : name;
         try {
           // oxlint-disable-next-line no-await-in-loop -- sequential stat calls
           const info = await fs.stat(fullPath);
-          entries.push({
-            name,
-            type: info.type,
-            size: info.size,
-            modifiedAt: new Date(info.mtimeMs).toISOString(),
-          });
+          if (info.type === 'dir') {
+            entries.push({
+              name,
+              type: 'dir',
+              size: info.size,
+              modifiedAt: new Date(info.mtimeMs).toISOString(),
+            });
+          } else if (info.contentKind === 'text') {
+            entries.push({
+              name,
+              type: 'file',
+              size: info.size,
+              contentKind: 'text',
+              lineCount: info.lineCount,
+              modifiedAt: new Date(info.mtimeMs).toISOString(),
+            });
+          } else {
+            entries.push({
+              name,
+              type: 'file',
+              size: info.size,
+              contentKind: 'binary',
+              modifiedAt: new Date(info.mtimeMs).toISOString(),
+            });
+          }
         } catch {
-          entries.push({ name, type: 'file', size: 0 });
+          entries.push({ name, type: 'file', size: 0, contentKind: 'binary' });
         }
       }
 
@@ -85,12 +102,30 @@ export function createHeadlessRpcFileSystem(fs: RuntimeFileSystemBase): RpcFileS
     async stat(path: string): Promise<RpcFileStat> {
       const info = await fs.stat(path);
       const isoDate = new Date(info.mtimeMs).toISOString();
-      return {
-        size: info.size,
-        isDirectory: info.type === 'dir',
-        createdAt: isoDate,
-        modifiedAt: isoDate,
-      };
+      if (info.type === 'dir') {
+        return {
+          size: info.size,
+          isDirectory: true,
+          createdAt: isoDate,
+          modifiedAt: isoDate,
+        };
+      }
+      return info.contentKind === 'text'
+        ? {
+            size: info.size,
+            isDirectory: false,
+            createdAt: isoDate,
+            modifiedAt: isoDate,
+            contentKind: 'text',
+            lineCount: info.lineCount,
+          }
+        : {
+            size: info.size,
+            isDirectory: false,
+            createdAt: isoDate,
+            modifiedAt: isoDate,
+            contentKind: 'binary',
+          };
     },
   };
 }

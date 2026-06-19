@@ -11,6 +11,8 @@ import { CheckpointerService } from '#api/chat/checkpointer.service.js';
 import { StoreService } from '#api/chat/store.service.js';
 import { CompactionService } from '#api/chat/compaction.service.js';
 import { TauRpcBackendFactory } from '#api/chat/tau-rpc-backend.js';
+import { TokenBudgetService } from '#api/chat/token-budget.service.js';
+import { ProviderRequestRecorder } from '#api/chat/utils/provider-request-recorder.js';
 
 @Module({
   imports: [ModelModule, ToolModule, FileEditModule, AnalysisModule],
@@ -22,8 +24,10 @@ import { TauRpcBackendFactory } from '#api/chat/tau-rpc-backend.js';
     ChatRpcService,
     ChatRpcGateway,
     CompactionService,
+    TokenBudgetService,
     TauRpcBackendFactory,
+    ProviderRequestRecorder,
   ],
-  exports: [ChatService, ChatRpcService, StoreService],
+  exports: [ChatService, ChatRpcService, StoreService, ProviderRequestRecorder],
 })
 export class ChatModule {}

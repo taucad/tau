@@ -292,6 +292,79 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
       expect(out.tool_calls).toEqual(populatedToolCalls);
     });
 
+    it('strips v1 tool_call blocks for vertexai without LangChain constructor re-adding them', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('vertexai');
+      const aiMessage = new AIMessage({
+        content: [
+          { type: 'text', text: 'Reading the file.' },
+          { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: { targetFile: 'main.ts' } },
+        ],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        response_metadata: { output_version: 'v1', model_provider: 'anthropic' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: populatedToolCalls,
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      expect(out.content).toEqual([{ type: 'text', text: 'Reading the file.' }]);
+      expect(out.tool_calls).toEqual(populatedToolCalls);
+      expect(out.response_metadata.output_version).toBeUndefined();
+    });
+
+    it('drops v1 output metadata during vertexai legacy cleanup so constructor tool blocks stay stripped', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('vertexai');
+      const aiMessage = new AIMessage({
+        content: [],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        response_metadata: { model_provider: 'anthropic' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: populatedToolCalls,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        additional_kwargs: {
+          custom: 'kept',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI-compatible legacy metadata uses snake_case
+          function_call: { name: 'read_file', arguments: '{"targetFile":"legacy.ts"}' },
+        },
+      });
+      (aiMessage.response_metadata as Record<string, unknown>)['output_version'] = 'v1';
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      expect(out.content).toEqual([]);
+      expect(out.tool_calls).toEqual(populatedToolCalls);
+      expect(out.additional_kwargs).toEqual({ custom: 'kept' });
+      expect(out.response_metadata.output_version).toBeUndefined();
+    });
+
+    it('normalizes checkpoint-style plain AI messages for vertexai', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('vertexai');
+      const aiMessage = {
+        type: 'ai',
+        content: [
+          { type: 'text', text: 'Reading the file.' },
+          { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: { targetFile: 'main.ts' } },
+        ],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        response_metadata: { output_version: 'v1', model_provider: 'anthropic' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: populatedToolCalls,
+      } as unknown as BaseMessage;
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      expect(AIMessage.isInstance(out)).toBe(true);
+      expect(out.content).toEqual([{ type: 'text', text: 'Reading the file.' }]);
+      expect(out.tool_calls).toEqual(populatedToolCalls);
+      expect(out.response_metadata.output_version).toBeUndefined();
+    });
+
     it('maps thinking and strips tool_use for vertexai in one pass (mixed reasoning + tool)', async () => {
       const middleware = createCrossProviderContentNormalizerMiddleware('vertexai');
       const aiMessage = new AIMessage({
@@ -338,6 +411,171 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
       });
     });
 
+    it('dedupes repeated native tool_use ids for anthropic target', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('anthropic');
+      const healedArgs = { targetFile: 'main.ts' };
+      const aiMessage = new AIMessage({
+        content: [
+          { type: 'text', text: 'Reading.' },
+          { type: 'tool_use', id: 'call_read_1', name: 'read_file', input: '' },
+          { type: 'tool_use', id: 'call_read_1', name: 'read_file', input: { stale: true } },
+          { type: 'tool_use', id: 'call_read_2', name: 'read_file', input: { targetFile: 'other.ts' } },
+        ],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: [
+          { id: 'call_read_1', name: 'read_file', args: healedArgs, type: 'tool_call' },
+          { id: 'call_read_2', name: 'read_file', args: { targetFile: 'other.ts' }, type: 'tool_call' },
+        ],
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      const toolBlocks = (out.content as Array<{ type: string; id?: string; input?: unknown }>).filter(
+        (block) => block.type === 'tool_use',
+      );
+      expect(toolBlocks).toEqual([
+        { type: 'tool_use', id: 'call_read_1', name: 'read_file', input: healedArgs },
+        { type: 'tool_use', id: 'call_read_2', name: 'read_file', input: { targetFile: 'other.ts' } },
+      ]);
+      expect(out.tool_calls).toEqual(aiMessage.tool_calls);
+    });
+
+    it('dedupes repeated v1 tool_call ids for anthropic target', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('anthropic');
+      const healedArgs = { targetFile: 'main.ts' };
+      const aiMessage = new AIMessage({
+        content: [
+          { type: 'text', text: 'Reading.' },
+          { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: '' },
+          { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: { stale: true } },
+        ],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        response_metadata: { output_version: 'v1', model_provider: 'anthropic' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: [{ id: 'call_read_1', name: 'read_file', args: healedArgs, type: 'tool_call' }],
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      const toolBlocks = (out.content as Array<{ type: string; id?: string; args?: unknown }>).filter(
+        (block) => block.type === 'tool_call',
+      );
+      expect(toolBlocks).toEqual([{ type: 'tool_call', id: 'call_read_1', name: 'read_file', args: healedArgs }]);
+      expect(out.response_metadata.output_version).toBe('v1');
+      expect(out.tool_calls).toEqual(aiMessage.tool_calls);
+    });
+
+    it('dedupes v1 tool_call_chunk when the finalized tool_call for the same id is present', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('anthropic');
+      const healedArgs = { targetFile: 'main.ts' };
+      const aiMessage = new AIMessage({
+        content: [
+          { type: 'reasoning', reasoning: 'I need to inspect a file.' },
+          { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: '' },
+          { type: 'tool_call_chunk', id: 'call_read_1', name: 'read_file', args: '{"targetFile":"main.ts"}' },
+        ],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        response_metadata: { output_version: 'v1', model_provider: 'anthropic' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: [{ id: 'call_read_1', name: 'read_file', args: healedArgs, type: 'tool_call' }],
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      expect(out.content).toEqual([
+        { type: 'reasoning', reasoning: 'I need to inspect a file.' },
+        { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: healedArgs },
+      ]);
+      expect(
+        (out.content as Array<{ type: string; id?: string }>).filter(
+          (block) => (block.type === 'tool_call' || block.type === 'tool_call_chunk') && block.id === 'call_read_1',
+        ),
+      ).toHaveLength(1);
+    });
+
+    it('canonicalizes native tool_use blocks in v1 anthropic replay so the constructor cannot re-add tool_call duplicates', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('anthropic');
+      const healedArgs = { targetFile: 'main.ts' };
+      const aiMessage = new AIMessage({
+        content: [
+          { type: 'text', text: 'Reading.' },
+          { type: 'tool_use', id: 'call_read_1', name: 'read_file', input: '' },
+        ],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        response_metadata: { output_version: 'v1', model_provider: 'anthropic' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: [{ id: 'call_read_1', name: 'read_file', args: healedArgs, type: 'tool_call' }],
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      expect(out.content).toEqual([
+        { type: 'text', text: 'Reading.' },
+        { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: healedArgs },
+      ]);
+      expect(
+        (out.content as Array<{ type: string; id?: string }>).filter(
+          (block) => (block.type === 'tool_use' || block.type === 'tool_call') && block.id === 'call_read_1',
+        ),
+      ).toHaveLength(1);
+      expect(out.response_metadata.output_version).toBe('v1');
+      expect(out.tool_calls).toEqual(aiMessage.tool_calls);
+    });
+
+    it('normalizes checkpoint-style plain AI messages for anthropic duplicate tool_call ids', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('anthropic');
+      const healedArgs = { targetFile: 'main.ts' };
+      const aiMessage = {
+        type: 'ai',
+        content: [
+          { type: 'text', text: 'Reading.' },
+          { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: '' },
+          { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: { stale: true } },
+        ],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        response_metadata: { output_version: 'v1', model_provider: 'anthropic' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: [{ id: 'call_read_1', name: 'read_file', args: healedArgs, type: 'tool_call' }],
+      } as unknown as BaseMessage;
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      const toolBlocks = (out.content as Array<{ type: string; id?: string; args?: unknown }>).filter(
+        (block) => block.type === 'tool_call',
+      );
+      expect(AIMessage.isInstance(out)).toBe(true);
+      expect(toolBlocks).toEqual([{ type: 'tool_call', id: 'call_read_1', name: 'read_file', args: healedArgs }]);
+      expect(out.response_metadata.output_version).toBe('v1');
+    });
+
+    it('leaves duplicate tool_use ids untouched for non-anthropic targets', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('openai');
+      const duplicateContent = [
+        { type: 'tool_use', id: 'call_read_1', name: 'read_file', input: { targetFile: 'main.ts' } },
+        { type: 'tool_use', id: 'call_read_1', name: 'read_file', input: { targetFile: 'main.ts' } },
+      ];
+      const aiMessage = new AIMessage({
+        content: duplicateContent,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: [{ id: 'call_read_1', name: 'read_file', args: { targetFile: 'main.ts' }, type: 'tool_call' }],
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      expect((request.messages[0] as AIMessage).content).toEqual(duplicateContent);
+    });
+
     it('leaves non-empty tool_call args unchanged for anthropic target (idempotent)', async () => {
       const middleware = createCrossProviderContentNormalizerMiddleware('anthropic');
       const args = { targetFile: 'main.ts' };
@@ -351,6 +589,28 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
 
       const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
       expect(request.messages[0]).toBe(aiMessage);
+    });
+
+    it('heals empty tool_call args from tool_calls for morph target', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('morph');
+      const healedArgs = { targetFile: 'main.ts' };
+      const aiMessage = new AIMessage({
+        content: [{ type: 'tool_call', id: 'call_read_1', name: 'read_file', args: '' }],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: [{ id: 'call_read_1', name: 'read_file', args: healedArgs, type: 'tool_call' }],
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      const block = (out.content as Array<{ type: string; args: unknown }>)[0];
+      expect(block).toEqual({
+        type: 'tool_call',
+        id: 'call_read_1',
+        name: 'read_file',
+        args: healedArgs,
+      });
     });
 
     it('rewrites V1 assistant text blocks to output_text items and keeps output_version for openai target', async () => {
@@ -532,6 +792,146 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
       expect(out.content).toEqual([
         { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: { targetFile: 'main.ts' } },
       ]);
+    });
+
+    it('canonicalizes replay-safe legacy additional_kwargs.tool_calls for vertexai', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('vertexai');
+      const aiMessage = new AIMessage({
+        content: [],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        additional_kwargs: {
+          custom: 'kept',
+          signatures: ['sig'],
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI-compatible legacy metadata uses snake_case
+          tool_calls: [
+            {
+              id: 'call_legacy_read',
+              type: 'function',
+              function: { name: 'read_file', arguments: '{"targetFile":"main.ts"}' },
+            },
+          ],
+        },
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      expect(out.tool_calls).toEqual([
+        { id: 'call_legacy_read', name: 'read_file', args: { targetFile: 'main.ts' }, type: 'tool_call' },
+      ]);
+      expect(out.additional_kwargs).toEqual({ custom: 'kept', signatures: ['sig'] });
+    });
+
+    it('canonicalizes legacy additional_kwargs.tool_calls for vertexai when content is scalar text', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('vertexai');
+      const aiMessage = new AIMessage({
+        content: 'Reading the file.',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        additional_kwargs: {
+          custom: 'kept',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI-compatible legacy metadata uses snake_case
+          tool_calls: [
+            {
+              id: 'call_legacy_read',
+              type: 'function',
+              function: { name: 'read_file', arguments: '{"targetFile":"main.ts"}' },
+            },
+          ],
+        },
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      expect(out.content).toBe('Reading the file.');
+      expect(out.tool_calls).toEqual([
+        { id: 'call_legacy_read', name: 'read_file', args: { targetFile: 'main.ts' }, type: 'tool_call' },
+      ]);
+      expect(out.additional_kwargs).toEqual({ custom: 'kept' });
+    });
+
+    it('drops nameless legacy additional_kwargs.tool_calls for vertexai instead of replaying them', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('vertexai');
+      const aiMessage = new AIMessage({
+        content: [],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: [],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        additional_kwargs: {
+          custom: 'kept',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI-compatible legacy metadata uses snake_case
+          tool_calls: [
+            {
+              id: '218421',
+              type: 'function',
+              function: { name: '', arguments: '{}' },
+            },
+          ],
+        },
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      expect(out.tool_calls ?? []).toEqual([]);
+      expect(out.additional_kwargs).toEqual({ custom: 'kept' });
+    });
+
+    it('drops malformed legacy tool args for vertexai when no canonical tool_calls exist', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('vertexai');
+      const aiMessage = new AIMessage({
+        content: [],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        additional_kwargs: {
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI-compatible legacy metadata uses snake_case
+          tool_calls: [
+            {
+              id: 'call_bad_args',
+              type: 'function',
+              function: { name: 'read_file', arguments: '{"limit":40}{"targetFile":"main.ts"}' },
+            },
+          ],
+        },
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      expect(out.tool_calls ?? []).toEqual([]);
+      expect(out.additional_kwargs).toEqual({});
+    });
+
+    it('keeps canonical tool_calls authoritative and drops divergent legacy metadata for vertexai', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('vertexai');
+      const aiMessage = new AIMessage({
+        content: [],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: [{ id: 'call_canonical', name: 'read_file', args: { targetFile: 'main.ts' }, type: 'tool_call' }],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        additional_kwargs: {
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI-compatible legacy metadata uses snake_case
+          tool_calls: [
+            {
+              id: 'call_legacy',
+              type: 'function',
+              function: { name: '', arguments: '{}' },
+            },
+          ],
+        },
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      expect(out.tool_calls).toEqual([
+        { id: 'call_canonical', name: 'read_file', args: { targetFile: 'main.ts' }, type: 'tool_call' },
+      ]);
+      expect(out.additional_kwargs).toEqual({});
     });
 
     it.each(['anthropic', 'vertexai', 'openai', 'together', 'cerebras', 'ollama'] as const)(

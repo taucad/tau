@@ -6,6 +6,7 @@
 import { errorCategory } from '@taucad/types/constants';
 import type { ErrorCategory, ChatError } from '@taucad/types';
 import { httpStatusToCategory, errorCategoryTitles } from '@taucad/chat/utils';
+import { decodeProviderErrorBody } from '#api/chat/utils/provider-error-decoder.js';
 
 /**
  * LangChain error codes that may be present on wrapped errors.
@@ -269,12 +270,14 @@ function detectPatternCategory(message: string): ErrorCategory | undefined {
  * 1. LangChain/LangGraph error codes (lc_error_code property)
  * 2. HTTP status codes (SDK error classes)
  * 3. JSON parsing from error message
- * 4. Pattern matching on message text
- * 5. Generic fallback
+ * 4. Billing pattern override on extracted provider message
+ * 5. Generic-only pattern matching on message text
+ * 6. Generic fallback
  */
 // oxlint-disable-next-line eslint/complexity -- multi-layer error normalization requires sequential checks
 export function normalizeError(error: unknown): string {
   const rawMessage = error instanceof Error ? error.message : String(error);
+  const decodedProviderError = decodeProviderErrorBody(rawMessage);
   let category: ErrorCategory = errorCategory.generic;
   let code: string | undefined;
   let httpStatus: number | undefined;
@@ -307,6 +310,13 @@ export function normalizeError(error: unknown): string {
     }
   }
 
+  if (decodedProviderError.httpStatus && !httpStatus) {
+    httpStatus = decodedProviderError.httpStatus;
+    if (category === errorCategory.generic) {
+      category = httpStatusToCategory(decodedProviderError.httpStatus);
+    }
+  }
+
   // Extract request ID
   requestId = extractRequestId(error);
 
@@ -315,6 +325,14 @@ export function normalizeError(error: unknown): string {
   const nestedMessage = extractNestedAnthropicMessage(error);
   if (nestedMessage) {
     message = nestedMessage;
+  }
+
+  if (decodedProviderError.providerMessage && category !== errorCategory.cancelled) {
+    message = decodedProviderError.providerMessage;
+  }
+
+  if (decodedProviderError.providerCode !== undefined) {
+    code ??= String(decodedProviderError.providerCode);
   }
 
   // 3. Try to parse JSON from message (for additional metadata like HTTP status)
@@ -383,12 +401,14 @@ export function normalizeError(error: unknown): string {
     }
   }
 
-  // 4. Pattern matching on message text
-  if (category === errorCategory.generic) {
-    const patternCategory = detectPatternCategory(message);
-    if (patternCategory) {
-      category = patternCategory;
-    }
+  // 4. Pattern matching on final provider-facing message text. Billing
+  // signals are more specific than wrapper categories like HTTP 400 or
+  // Anthropic invalid_request_error, but explicit cancellation still wins.
+  const patternCategory = detectPatternCategory(message);
+  if (patternCategory === errorCategory.credits && category !== errorCategory.cancelled) {
+    category = errorCategory.credits;
+  } else if (category === errorCategory.generic && patternCategory) {
+    category = patternCategory;
   }
 
   // Build the normalized error

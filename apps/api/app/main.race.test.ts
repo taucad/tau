@@ -11,12 +11,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
  * non-atomic `if (!app.isInitialized)` guard (upstream:
  * axe-me/vite-plugin-node#33, open since 2022).
  *
- * The fix in `apps/api/app/main.ts` is to eagerly `await app.init()` during
- * bootstrap so the handler always sees `isInitialized === true` on the very
- * first request and never re-runs the routing-registration code paths. These
- * tests verify the invariant the fix relies on: once an `init()` resolves,
- * any subsequent call — sequential or concurrent — is a no-op that cannot
- * re-register routes on the underlying Fastify instance.
+ * The dev server fix serializes initialization in Tau's custom
+ * vite-plugin-node adapter. These tests verify the underlying Nest/Fastify
+ * invariant the adapter relies on: a cold app cannot be initialized
+ * concurrently, but any calls after the first completed init are no-ops that
+ * cannot re-register routes.
  */
 
 @Controller({ path: 'race', version: '1' })
@@ -56,7 +55,7 @@ describe('Nest bootstrap init race', () => {
     await app.init();
     await app.getHttpAdapter().getInstance().ready();
 
-    expect(app.isInitialized).toBe(true);
+    expect((app as unknown as { isInitialized: boolean }).isInitialized).toBe(true);
   });
 
   it('does not re-register routes on a sequential second init()', async () => {
@@ -94,6 +93,29 @@ describe('Nest bootstrap init race', () => {
 
     expect(response.statusCode).toBe(201);
     expect(response.json()).toEqual({ ok: true });
+  });
+
+  it('survives concurrent cold requests when initialization is explicitly serialized', async () => {
+    const coldApp = await createApp();
+    let initPromise: Promise<NestFastifyApplication> | undefined;
+
+    const initializeOnce = async () => {
+      initPromise ??= (async () => {
+        await coldApp.init();
+        await coldApp.getHttpAdapter().getInstance().ready();
+        return coldApp;
+      })();
+
+      return initPromise;
+    };
+
+    try {
+      const racers = Array.from({ length: 16 }, async () => initializeOnce());
+
+      await expect(Promise.all(racers)).resolves.toHaveLength(16);
+    } finally {
+      await coldApp.close();
+    }
   });
 
   it('reproduces the upstream race: concurrent init() calls on a cold app crash with FST_ERR_DUPLICATED_ROUTE', async () => {

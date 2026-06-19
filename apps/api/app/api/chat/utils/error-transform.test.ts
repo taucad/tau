@@ -10,6 +10,11 @@ function parseNormalizedError(jsonString: string): ChatError {
   return JSON.parse(jsonString) as ChatError;
 }
 
+const anthropicCreditMessage =
+  'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.';
+
+const statusPrefixedAnthropicCreditErrorText = `400 {"type":"error","error":{"type":"invalid_request_error","message":"${anthropicCreditMessage}"}}`;
+
 /**
  * Helper to read all chunks from a reader.
  */
@@ -247,6 +252,23 @@ describe('createErrorTransform', () => {
       expect(normalizedError.category).toBe('tool_error');
       expect(normalizedError.httpStatus).toBe(400);
       expect(normalizedError.message).toBe('Bad request');
+    });
+
+    it('should classify status-prefixed Anthropic billing error text as credits', async () => {
+      const errorChunk: UIMessageChunk = {
+        type: 'error',
+        errorText: statusPrefixedAnthropicCreditErrorText,
+      };
+
+      const results = await processChunks([errorChunk]);
+      const result = results[0] as { type: 'error'; errorText: string };
+      const normalizedError = parseNormalizedError(result.errorText);
+
+      expect(normalizedError.category).toBe('credits');
+      expect(normalizedError.title).toBe('Credit Limit Reached');
+      expect(normalizedError.message).toBe(anthropicCreditMessage);
+      expect(normalizedError.code).toBe('invalid_request_error');
+      expect(normalizedError.httpStatus).toBe(400);
     });
 
     it('should parse pure JSON Anthropic error format', async () => {

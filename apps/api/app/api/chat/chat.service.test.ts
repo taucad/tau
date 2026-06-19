@@ -10,9 +10,11 @@ import { StoreService } from '#api/chat/store.service.js';
 import { CompactionService } from '#api/chat/compaction.service.js';
 import { TauRpcBackendFactory } from '#api/chat/tau-rpc-backend.js';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
+import { TokenBudgetService } from '#api/chat/token-budget.service.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { newlineTrimmerMiddleware } from '#api/chat/middleware/newline-trimmer.middleware.js';
 import { latexDelimiterMiddleware } from '#api/chat/middleware/latex-delimiter.middleware.js';
+import type { EagerToolDispatchHandler } from '#api/chat/eager-dispatch/eager-tool-dispatch.handler.js';
 
 // Mock other dependencies
 vi.mock('ai', () => ({
@@ -53,9 +55,17 @@ describe('ChatService', () => {
 
   const mockModelService = {
     buildModel: vi.fn(() => ({ model: 'mock-model' })),
+    createProviderDiagnosticsContext: vi.fn((options: Record<string, unknown>) => ({
+      ...options,
+      verbose: false,
+      nextProviderAttemptId: vi.fn(() => 1),
+      setLatestModelCallSummary: vi.fn(),
+      getLatestModelCallSummary: vi.fn(),
+    })),
     getContextWindow: vi.fn(() => 200_000),
     getProviderId: vi.fn(() => 'openai'),
     getKnowledgeCutoff: vi.fn(() => '2025-08'),
+    getOtelProviderName: vi.fn(() => 'openai'),
   };
 
   const mockToolService = {
@@ -81,6 +91,7 @@ describe('ChatService', () => {
         { provide: ToolService, useValue: mockToolService },
         { provide: MetricsService, useValue: new MetricsService() },
         { provide: CompactionService, useValue: { compact: vi.fn() } },
+        { provide: TokenBudgetService, useValue: new TokenBudgetService() },
         { provide: TauRpcBackendFactory, useValue: { create: vi.fn() } },
         { provide: ChatRpcService, useValue: mockChatRpcService },
       ],
@@ -192,7 +203,25 @@ describe('ChatService', () => {
       });
 
       // Assert
-      expect(mockModelService.buildModel).toHaveBeenCalledWith('claude-3-opus');
+      type BuildModelCall = [
+        string,
+        {
+          providerDiagnosticsContext: {
+            chatId: string;
+            modelId: string;
+            providerId: string;
+          };
+        },
+      ];
+      const buildModelCalls = mockModelService.buildModel.mock.calls as unknown as BuildModelCall[];
+      const buildModelCall = buildModelCalls.at(-1);
+
+      expect(buildModelCall?.[0]).toBe('claude-3-opus');
+      expect(buildModelCall?.[1].providerDiagnosticsContext).toMatchObject({
+        chatId: 'test-chat-1',
+        modelId: 'claude-3-opus',
+        providerId: 'openai',
+      });
     });
 
     it('should get tools with provided tool selection', async () => {
@@ -232,7 +261,7 @@ describe('ChatService', () => {
       expect(mockModelService.getProviderId).toHaveBeenCalledWith('model-1');
     });
 
-    it('orders CrossProviderContentNormalizer before MessageContentSanitizer', async () => {
+    it('orders CrossProviderContentNormalizer after Compaction and before ProviderDiagnostics', async () => {
       await service.createAgent({
         chatId: 'test-chat-order',
         modelId: 'model-1',
@@ -248,10 +277,45 @@ describe('ChatService', () => {
         middleware.findIndex((m) => (m as { name?: string } | undefined)?.name === name);
 
       const normalizerIndex = indexByName('CrossProviderContentNormalizer');
-      const sanitizerIndex = indexByName('MessageContentSanitizer');
+      const compactionIndex = indexByName('Compaction');
+      const providerDiagnosticsIndex = indexByName('ProviderDiagnostics');
 
       expect(normalizerIndex).toBeGreaterThanOrEqual(0);
-      expect(sanitizerIndex).toBeGreaterThan(normalizerIndex);
+      expect(compactionIndex).toBeGreaterThanOrEqual(0);
+      expect(providerDiagnosticsIndex).toBeGreaterThanOrEqual(0);
+      expect(normalizerIndex).toBeGreaterThan(compactionIndex);
+      expect(providerDiagnosticsIndex).toBeGreaterThan(normalizerIndex);
+    });
+
+    it('should run ToolInputCompatibility after ToolErrorHandler and before eager dispatch/offloading', async () => {
+      await service.createAgent({
+        chatId: 'test-chat-tool-compatibility',
+        modelId: 'model-1',
+        kernel: 'openscad',
+        mode: 'agent',
+        tools: { choice: 'auto', testingEnabled: true },
+        eagerDispatchHandler: {
+          entries: new Map(),
+          setWriter: vi.fn(),
+          bindTools: vi.fn(),
+        } as unknown as EagerToolDispatchHandler,
+      });
+
+      const createAgentMock = vi.mocked(createAgent);
+      const middleware = createAgentMock.mock.calls.at(-1)?.[0]?.middleware ?? [];
+
+      const indexByName = (name: string): number =>
+        middleware.findIndex((m) => (m as { name?: string } | undefined)?.name === name);
+
+      const toolErrorIndex = indexByName('ToolErrorHandler');
+      const compatibilityIndex = indexByName('ToolInputCompatibility');
+      const eagerWriterIndex = indexByName('EagerWriterCapture');
+      const toolOffloadingIndex = indexByName('ToolOffloading');
+
+      expect(toolErrorIndex).toBeGreaterThanOrEqual(0);
+      expect(compatibilityIndex).toBeGreaterThan(toolErrorIndex);
+      expect(eagerWriterIndex).toBeGreaterThan(compatibilityIndex);
+      expect(toolOffloadingIndex).toBeGreaterThan(compatibilityIndex);
     });
 
     it('throws when getProviderId returns undefined', async () => {
@@ -291,11 +355,12 @@ describe('ChatService', () => {
       expect(latexMiddlewareIndex).toBeGreaterThan(newlineMiddlewareIndex);
     });
 
-    // The token-usage-context middleware must run AFTER compaction (so the
-    // reported counts reflect the post-compaction message set) and BEFORE
-    // agent-safeguards (so its <system-reminder> joins the cacheable prefix
-    // together with the safeguard nudges, per the cache-safety contract).
-    it('should run TokenUsageContext after Compaction and before AgentSafeguards', async () => {
+    // Most provider-visible request mutators run before Compaction so the
+    // budget decision is made against the same effective LangChain ModelRequest
+    // that will be dispatched to the provider. CrossProviderContentNormalizer is
+    // the exception: it runs after Compaction as the final provider payload
+    // sanitizer because compaction may rebuild AIMessages.
+    it('should run effective-payload middleware before Compaction', async () => {
       await service.createAgent({
         chatId: 'test-chat-token-usage',
         modelId: 'model-1',
@@ -314,16 +379,25 @@ describe('ChatService', () => {
       const compactionIndex = indexByName('Compaction');
       const tokenUsageIndex = indexByName('TokenUsageContext');
       const safeguardsIndex = indexByName('AgentSafeguards');
+      const clientContextIndex = indexByName('ClientContext');
+      const recentSkillsIndex = indexByName('RecentSkills');
+      const promptCachingIndex = indexByName('PromptCaching');
+      const providerDiagnosticsIndex = indexByName('ProviderDiagnostics');
 
       expect(compactionIndex).toBeGreaterThanOrEqual(0);
-      expect(tokenUsageIndex).toBeGreaterThan(compactionIndex);
+      expect(tokenUsageIndex).toBeLessThan(compactionIndex);
       expect(safeguardsIndex).toBeGreaterThan(tokenUsageIndex);
+      expect(safeguardsIndex).toBeLessThan(compactionIndex);
+      expect(clientContextIndex).toBeLessThan(compactionIndex);
+      expect(recentSkillsIndex).toBeLessThan(compactionIndex);
+      expect(promptCachingIndex).toBeLessThan(compactionIndex);
+      expect(providerDiagnosticsIndex).toBeGreaterThan(compactionIndex);
     });
 
     // T1.10: InterruptRecovery is wired into the canonical pipeline immediately
     // after AgentSafeguards (so doom-loop detection runs first) and before
-    // CrossProviderContentNormalizer / MessageContentSanitizer (so the
-    // injected `<system-reminder>` HumanMessage joins the cacheable prefix).
+    // the final provider normalization pass (so the injected `<system-reminder>`
+    // HumanMessage joins the cacheable prefix before payload-specific cleanup).
     it('should run InterruptRecovery after AgentSafeguards and before CrossProviderContentNormalizer', async () => {
       await service.createAgent({
         chatId: 'test-chat-interrupt-recovery',

@@ -1,9 +1,10 @@
 import { createMiddleware } from 'langchain';
 import type { AgentMiddleware } from 'langchain';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage } from '@langchain/core/messages';
 import type { BaseMessage, UsageMetadata } from '@langchain/core/messages';
 import { z } from 'zod';
 import type { ModelService } from '#api/models/model.service.js';
+import { createTauInternalHumanMessage } from '#api/chat/utils/tau-internal-message.js';
 
 const tokenUsageContextSchema = z.object({
   modelId: z.string(),
@@ -124,7 +125,12 @@ export const createTokenUsageContextMiddleware = (): AgentMiddleware =>
       }
 
       const reminderBody = formatTokenUsageReminder(used, total);
-      const reminder = new HumanMessage(reminderBody);
+      const reminder = createTauInternalHumanMessage({
+        id: `tau:token-usage:${used}:${total}`,
+        content: reminderBody,
+        kind: 'token-usage',
+        metadata: { pruning: 'preserve-until-compaction', revision: `${used}:${total}` },
+      });
       const messages = [reminder, ...request.messages];
 
       return handler({ ...request, messages });

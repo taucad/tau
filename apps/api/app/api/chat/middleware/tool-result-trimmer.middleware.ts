@@ -59,6 +59,79 @@ function hasDefined<K extends string>(object: unknown, key: K): boolean {
   return isObject(object) && object[key] !== undefined;
 }
 
+const kernelIssueDetailsMaxChars = 6000;
+const geometryInvalidDetailKeys = [
+  'partName',
+  'partIndex',
+  'sourceName',
+  'nativeValidation',
+  'exportValidation',
+  'topology',
+  'hints',
+] as const;
+
+function estimateJsonLength(value: unknown): number {
+  try {
+    return JSON.stringify(value).length;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function assignIfPresent(target: Record<string, unknown>, key: string, value: unknown): void {
+  if (value === undefined) {
+    return;
+  }
+
+  target[key] = value;
+}
+
+function pickPresentFields(
+  source: Record<string, unknown>,
+  keys: readonly string[],
+): Record<string, unknown> | undefined {
+  const picked: Record<string, unknown> = {};
+
+  for (const key of keys) {
+    assignIfPresent(picked, key, source[key]);
+  }
+
+  if (Object.keys(picked).length === 0) {
+    return undefined;
+  }
+
+  return picked;
+}
+
+function trimKernelIssueDetails(issue: { code: string; details?: unknown }): unknown | undefined {
+  const { code, details } = issue;
+  if (details === undefined) {
+    return undefined;
+  }
+
+  if (estimateJsonLength(details) <= kernelIssueDetailsMaxChars) {
+    return details;
+  }
+
+  if (code !== 'GEOMETRY_INVALID' || !isObject(details)) {
+    return { _trimmed: true, reason: `details exceeded ${kernelIssueDetailsMaxChars} characters` };
+  }
+
+  const { geometry, producer } = details;
+  const trimmedDetails: Record<string, unknown> = {
+    _trimmed: true,
+  };
+  const trimmedGeometry = isObject(geometry) ? pickPresentFields(geometry, geometryInvalidDetailKeys) : undefined;
+  assignIfPresent(trimmedDetails, 'producer', producer);
+  assignIfPresent(trimmedDetails, 'geometry', trimmedGeometry);
+
+  if (estimateJsonLength(trimmedDetails) <= kernelIssueDetailsMaxChars) {
+    return trimmedDetails;
+  }
+
+  return { _trimmed: true, reason: `details exceeded ${kernelIssueDetailsMaxChars} characters` };
+}
+
 /**
  * Checks if content has the shape of TestModelOutput.
  * Unique: has failures array + total count (no other tool has this combination).
@@ -289,10 +362,6 @@ const toolResultTrimmers: Record<string, (result: unknown) => unknown> = {
   }),
 
   /**
-   * Trims get_kernel_result by removing verbose stack traces.
-   * The message and location are sufficient for debugging.
-   */
-  /**
    * Trims screenshot results by stripping base64 dataUrl from each image.
    * Older screenshots don't need the full image data — only view names are kept.
    */
@@ -318,16 +387,25 @@ const toolResultTrimmers: Record<string, (result: unknown) => unknown> = {
       status: result.status,
       ...(result.kernelIssues
         ? {
-            kernelIssues: result.kernelIssues.map((issue) => ({
-              code: issue.code,
-              message: issue.message,
-              ...(issue.location ? { location: issue.location } : {}),
-              severity: issue.severity,
-              ...(issue.type ? { type: issue.type } : {}),
-              // Keep stack and stackFrames - important for LLM to debug error origins
-              ...(issue.stack ? { stack: issue.stack } : {}),
-              ...(issue.stackFrames ? { stackFrames: issue.stackFrames } : {}),
-            })),
+            kernelIssues: result.kernelIssues.map((issue) => {
+              const details = trimKernelIssueDetails(issue);
+              const trimmedIssue = {
+                code: issue.code,
+                message: issue.message,
+                ...(issue.location ? { location: issue.location } : {}),
+                severity: issue.severity,
+                ...(issue.type ? { type: issue.type } : {}),
+                // Keep stack and stackFrames - important for LLM to debug error origins
+                ...(issue.stack ? { stack: issue.stack } : {}),
+                ...(issue.stackFrames ? { stackFrames: issue.stackFrames } : {}),
+              };
+
+              if (details === undefined) {
+                return trimmedIssue;
+              }
+
+              return { ...trimmedIssue, details };
+            }),
           }
         : {}),
     };

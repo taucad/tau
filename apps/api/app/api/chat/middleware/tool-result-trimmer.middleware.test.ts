@@ -610,6 +610,96 @@ describe('toolResultTrimmerMiddleware', () => {
       });
     });
 
+    it('should preserve bounded GEOMETRY_INVALID details for agent repair evidence', async () => {
+      const output: GetKernelResultOutput = {
+        status: 'ready',
+        kernelIssues: [
+          {
+            message: "JSCAD part 'Planet Carrier' is not a closed oriented solid.",
+            code: 'GEOMETRY_INVALID',
+            severity: 'warning',
+            type: 'kernel',
+            details: {
+              producer: { kernelId: 'jscad', validator: 'geom3.validate' },
+              geometry: {
+                partName: 'Planet Carrier',
+                topology: { openBoundaryEdges: 236 },
+                hints: ['Prefer 2D profile composition followed by one extrusion.'],
+              },
+            },
+          },
+        ],
+      };
+      const toolMessage = new ToolMessage({
+        content: JSON.stringify(output),
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_call_id: 'call_kernel_details',
+        name: toolName.getKernelResult,
+      });
+
+      await callWrapModelCall({ messages: [toolMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [TestRequest];
+      const trimmedMessage = request.messages[0] as ToolMessage;
+      const parsed = JSON.parse(trimmedMessage.content as string) as GetKernelResultOutput;
+
+      expect(parsed.kernelIssues?.[0]?.details).toEqual(output.kernelIssues?.[0]?.details);
+    });
+
+    it('should bound oversized GEOMETRY_INVALID details while retaining topology and hints', async () => {
+      const output: GetKernelResultOutput = {
+        status: 'ready',
+        kernelIssues: [
+          {
+            message: "JSCAD part 'Planet Carrier' is not a closed oriented solid.",
+            code: 'GEOMETRY_INVALID',
+            severity: 'warning',
+            type: 'kernel',
+            details: {
+              producer: { kernelId: 'jscad', validator: 'geom3.validate' },
+              geometry: {
+                partName: 'Planet Carrier',
+                partIndex: 3,
+                topology: { openBoundaryEdges: 236 },
+                hints: ['Prefer 2D profile composition followed by one extrusion.'],
+                rawMeshDump: 'x'.repeat(7000),
+              },
+            },
+          },
+        ],
+      };
+      const toolMessage = new ToolMessage({
+        content: JSON.stringify(output),
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_call_id: 'call_kernel_large_details',
+        name: toolName.getKernelResult,
+      });
+
+      await callWrapModelCall({ messages: [toolMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [TestRequest];
+      const trimmedMessage = request.messages[0] as ToolMessage;
+      const parsed = JSON.parse(trimmedMessage.content as string) as GetKernelResultOutput;
+      const details = parsed.kernelIssues?.[0]?.details as {
+        producer?: unknown;
+        geometry?: Record<string, unknown>;
+        _trimmed?: boolean;
+      };
+
+      expect(JSON.stringify(details).length).toBeLessThan(6000);
+      expect(details).toMatchObject({
+        producer: { kernelId: 'jscad', validator: 'geom3.validate' },
+        geometry: {
+          partName: 'Planet Carrier',
+          partIndex: 3,
+          topology: { openBoundaryEdges: 236 },
+          hints: ['Prefer 2D profile composition followed by one extrusion.'],
+        },
+        _trimmed: true,
+      });
+      expect(details.geometry?.['rawMeshDump']).toBeUndefined();
+    });
+
     it('should handle kernel result with ready status and no issues', async () => {
       const output: GetKernelResultOutput = { status: 'ready' };
       const toolMessage = new ToolMessage({

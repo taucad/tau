@@ -27,6 +27,7 @@
     "geospec": "workspace:*"
   },
   "imports": {
+    "#*.js": "./app/*.ts",
     "#*": "./app/*"
   },
   "files": [

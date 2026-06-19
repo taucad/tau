@@ -29,9 +29,11 @@ import { MetricsService } from '#telemetry/metrics.js';
 import { TracerService } from '#telemetry/tracer.service.js';
 import { CompactionService } from '#api/chat/compaction.service.js';
 import { TauRpcBackendFactory } from '#api/chat/tau-rpc-backend.js';
+import { TokenBudgetService } from '#api/chat/token-budget.service.js';
 import { HeadlessChatRpcService } from '#testing/headless-chat-rpc.service.js';
 import { createHeadlessRpcFileSystem } from '#testing/headless-rpc-filesystem.js';
 import { createHeadlessRuntimeClient } from '#testing/headless-runtime-client.js';
+import { ProviderRequestRecorder } from '#api/chat/utils/provider-request-recorder.js';
 
 /**
  * In-memory checkpointer service that replaces the PostgreSQL-backed one.
@@ -98,7 +100,9 @@ const mockAuthInstance = {
     CheckpointerService,
     StoreService,
     CompactionService,
+    TokenBudgetService,
     TauRpcBackendFactory,
+    ProviderRequestRecorder,
     { provide: authInstanceKey, useValue: mockAuthInstance },
     { provide: APP_PIPE, useClass: ZodValidationPipe },
   ],
@@ -110,6 +114,7 @@ export type TestApp = {
   baseUrl: string;
   memFs: RuntimeFileSystemBase;
   headlessRpc: HeadlessChatRpcService;
+  providerRequestRecorder: ProviderRequestRecorder;
 };
 
 /**
@@ -132,6 +137,7 @@ export type CreateTestAppOptions = {
     | 'getProviderId'
     | 'normalizeUsageTokens'
   >;
+  compactionService?: Pick<CompactionService, 'compact'>;
 };
 
 /**
@@ -160,6 +166,9 @@ export async function createTestApp(options: CreateTestAppOptions = {}): Promise
   if (options.modelService) {
     builder = builder.overrideProvider(ModelService).useValue(options.modelService);
   }
+  if (options.compactionService) {
+    builder = builder.overrideProvider(CompactionService).useValue(options.compactionService);
+  }
 
   const moduleRef = await builder.compile();
 
@@ -178,6 +187,7 @@ export async function createTestApp(options: CreateTestAppOptions = {}): Promise
 
   const memFs = getTestFileSystem();
   const headlessRpc: HeadlessChatRpcService = moduleRef.get(ChatRpcService);
+  const providerRequestRecorder = moduleRef.get(ProviderRequestRecorder);
 
   const dispatcher = createRpcDispatcher({
     fileSystem: createHeadlessRpcFileSystem(createRuntimeFileSystem(memFs)),
@@ -187,5 +197,5 @@ export async function createTestApp(options: CreateTestAppOptions = {}): Promise
   });
   headlessRpc.setDispatcher(dispatcher);
 
-  return { app, baseUrl, memFs, headlessRpc };
+  return { app, baseUrl, memFs, headlessRpc, providerRequestRecorder };
 }

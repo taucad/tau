@@ -49,9 +49,8 @@ export default function main(p = defaultParams): Shape3D {
     .rotate(p.spoutAngle, [0, 0, p.bodyHeight], [0, 1, 0]);
 
   let wateringCan = body
-    .fuse(filler)
+    .fuseAll([filler, spout])
     .fillet(p.filletRadius, (edgeFinder) => edgeFinder.inPlane('XY', p.bodyHeight))
-    .fuse(spout)
     .fillet(10, (edgeFinder) => edgeFinder.inBox([20, 20, p.bodyHeight], [-20, -20, 120]));
 
   const spoutOpening = [

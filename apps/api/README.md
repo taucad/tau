@@ -93,6 +93,9 @@ pnpm nx serve api
 ```bash
 # Build for production
 pnpm nx build api
+
+# Start the existing build output without rebuilding
+pnpm nx start api
 ```
 
 ### Deployment

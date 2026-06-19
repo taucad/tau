@@ -59,32 +59,51 @@ describe('formatSkillsLocations', () => {
   });
 
   it('should format a single source with higher priority suffix', () => {
-    const result = formatSkillsLocations(['.tau/skills/']);
+    const result = formatSkillsLocations(['.agents/skills/']);
     expect(result).toContain('**Skills Skills**');
-    expect(result).toContain('`.tau/skills/`');
+    expect(result).toContain('`.agents/skills/`');
     expect(result).toContain('(higher priority)');
   });
 });
 
 describe('formatSkillsList', () => {
-  it('should format skill entries with name, description, and read path', () => {
+  it('should format skill entries with name, description, and use_skill activation', () => {
     const skills = [
-      { name: 'cad-expert', description: 'CAD modeling help', path: '.tau/skills/cad-expert' },
-      { name: 'testing', description: 'Test writing support', path: '.tau/skills/testing' },
+      { name: 'cad-expert', description: 'CAD modeling help', path: '.agents/skills/cad-expert' },
+      { name: 'testing', description: 'Test writing support', path: '.agents/skills/testing' },
     ];
 
-    const result = formatSkillsList(skills, ['.tau/skills/']);
+    const result = formatSkillsList(skills, ['.agents/skills/']);
 
     expect(result).toContain('- **cad-expert**: CAD modeling help');
-    expect(result).toContain('→ Read `.tau/skills/cad-expert/SKILL.md` for full instructions');
+    expect(result).toContain('→ Activate with `use_skill({ skillName: "cad-expert" })` before applying');
     expect(result).toContain('- **testing**: Test writing support');
-    expect(result).toContain('→ Read `.tau/skills/testing/SKILL.md` for full instructions');
+    expect(result).toContain('→ Activate with `use_skill({ skillName: "testing" })` before applying');
+    expect(result).not.toContain('read_file');
   });
 
   it('should return placeholder when no skills available', () => {
-    const result = formatSkillsList([], ['.tau/skills/']);
+    const result = formatSkillsList([], ['.agents/skills/']);
     expect(result).toContain('No skills available yet');
-    expect(result).toContain('`.tau/skills/`');
+    expect(result).toContain('`.agents/skills/`');
+  });
+
+  it('should include system create-skill entries with use_skill activation guidance', () => {
+    const result = formatSkillsList(
+      [
+        {
+          name: 'create-skill',
+          description: 'Create or update Tau agent skills',
+          path: '.agents/skills/create-skill',
+          source: 'system',
+        },
+      ],
+      ['.agents/skills/'],
+    );
+
+    expect(result).toContain('- **create-skill**: Create or update Tau agent skills');
+    expect(result).toContain('use_skill({ skillName: "create-skill" })');
+    expect(result).not.toContain('read_file');
   });
 });
 
@@ -105,12 +124,14 @@ describe('formatMemoryContents', () => {
 
 describe('formatSkillsPrompt', () => {
   it('should produce a complete skills system prompt section', () => {
-    const skills = [{ name: 'my-skill', description: 'Does things', path: '.tau/skills/my-skill' }];
-    const result = formatSkillsPrompt(skills, ['.tau/skills/']);
+    const skills = [{ name: 'my-skill', description: 'Does things', path: '.agents/skills/my-skill' }];
+    const result = formatSkillsPrompt(skills, ['.agents/skills/']);
 
     expect(result).toContain('## Skills System');
     expect(result).toContain('- **my-skill**: Does things');
     expect(result).toContain('Progressive Disclosure');
+    expect(result).toContain('use_skill');
+    expect(result).not.toContain('read_file');
   });
 });
 
@@ -168,7 +189,7 @@ describe('createClientContextMiddleware', () => {
 
   it('should insert skills as Block 2 between static and dynamic blocks', async () => {
     const payload: ContextPayload = {
-      skills: [{ name: 'test-skill', description: 'For testing', path: '.tau/skills/test-skill' }],
+      skills: [{ name: 'test-skill', description: 'For testing', path: '.agents/skills/test-skill' }],
     };
     const middleware = createClientContextMiddleware(payload);
     const wrapModelCall = resolveMiddlewareHook(middleware.wrapModelCall);
@@ -186,7 +207,7 @@ describe('createClientContextMiddleware', () => {
 
   it('should add workspace cache_control to skills block (Block 2)', async () => {
     const payload: ContextPayload = {
-      skills: [{ name: 'test-skill', description: 'For testing', path: '.tau/skills/test-skill' }],
+      skills: [{ name: 'test-skill', description: 'For testing', path: '.agents/skills/test-skill' }],
     };
     const middleware = createClientContextMiddleware(payload);
     const wrapModelCall = resolveMiddlewareHook(middleware.wrapModelCall);
@@ -292,7 +313,7 @@ describe('createClientContextMiddleware', () => {
   it('should handle both skills and memory together', async () => {
     const agentsKey = '.tau/AGENTS.md';
     const payload: ContextPayload = {
-      skills: [{ name: 'dual', description: 'Both present', path: '.tau/skills/dual' }],
+      skills: [{ name: 'dual', description: 'Both present', path: '.agents/skills/dual' }],
       memory: { [agentsKey]: 'Memory content' },
     };
     const middleware = createClientContextMiddleware(payload);

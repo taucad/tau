@@ -107,6 +107,9 @@ export const providerEnvForModelId = (modelId: string): string | undefined => {
     case 'together': {
       return 'TOGETHER_API_KEY';
     }
+    case 'morph': {
+      return 'MORPH_API_KEY';
+    }
     default: {
       return undefined;
     }

@@ -27,6 +27,7 @@
 // EVAL(topology-hints-per-kernel): pending benchmark — new per-kernel <topology_hints> static section sourced from KernelConfig.topologyHints (slotted after <code_standards>), mapping the global geometry-fidelity principle to each kernel's actual primitive vocabulary (Replicad: drawSplineCurve/drawArc; OCCT: Geom2dAPI_PointsToBSpline/GC_MakeArcOfCircle; KCL: tangentialArc/bezierCurve; Manifold/JSCAD: segment-count heuristic; OpenSCAD: $fa/$fs adaptive tessellation). Resolves the B-rep-vs-mesh kernel divide per docs/research/code-cad-topology-best-practices.md Kernel Capability Matrix.
 // EVAL(decompose-design-brief): pending benchmark — strengthens workflow step 0 from generic component enumeration to a mini design brief for multi-component / real-world / reference-based / high-fidelity / spec requests. Validates fewer dropped named features and better assembly-tree recall on Orion, gearbox, hydraulic hinge, and architectural facade fixtures.
 // EVAL(geospec-coverage-floor): pending benchmark — adds explicit GeoSpec coverage floor: whole-model bounding box plus physical properties is never sufficient for high-fidelity assemblies; tests must cover major components/named features and disclose unsupported coverage. Validates that agents no longer stop after basic geometric tests on hyper-real assembly prompts.
+// EVAL(display-name-title-case): pending benchmark — adds <display_names> as the single CAD-prompt source of truth for agent-authored visible labels. Validates fewer PascalCase/snake_case part labels in generated model code while preserving kernel-native code identifier casing.
 
 import type { KernelProvider } from '@taucad/runtime';
 import { toolName } from '@taucad/chat/constants';
@@ -255,6 +256,14 @@ Length limits: keep text between tool calls to <=25 words. Keep final responses 
     compute: () => `<code_standards>
 ${config.codeStandards}
 </code_standards>`,
+  });
+
+  registry.register({
+    name: 'display_names',
+    cacheBreak: false,
+    compute: () => `<display_names>
+For user-visible CAD labels you author, use Title Case words with spaces: \`Valve Cover Left\`, \`Bank Angle\`, \`Shape 1\`. This applies to part names, named geometry units, parameter titles/captions, and group labels. Keep code identifiers idiomatic for the active kernel (\`camelCase\`, \`snake_case\`, etc.) and let the UI derive labels from identifiers when no explicit label is needed. Do not author display labels like \`ValveCover_L\`, \`wheelLeft\`, \`bank_angle\`, or \`BankAngle\`.
+</display_names>`,
   });
 
   registry.register({

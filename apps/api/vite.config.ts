@@ -8,11 +8,28 @@ import { VitePluginNode as vitePluginNode } from 'vite-plugin-node';
 import { oxcRuntimeEsm } from '@taucad/vite/oxc-runtime-esm';
 import { tsModuleUrlServePlugin } from '@taucad/vite/ts-module-url';
 import { corsBaseConfiguration } from '#constants/cors.constant.js';
+import { createApiDevViteNodeLifecycle } from '#api-dev-vite-node-lifecycle.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(({ mode }) => {
   const isTest = mode === 'test';
+  const apiDevPlugins = isTest
+    ? []
+    : (() => {
+        const apiDevLifecycle = createApiDevViteNodeLifecycle();
+
+        return [
+          apiDevLifecycle.plugin,
+          vitePluginNode({
+            adapter: apiDevLifecycle.adapter,
+            appPath: './app/main.ts',
+            outputFormat: 'module',
+            exportName: 'viteNodeApp',
+            initAppOnBoot: false,
+          }),
+        ];
+      })();
 
   return {
     root: __dirname,
@@ -48,17 +65,7 @@ export default defineConfig(({ mode }) => {
           },
         ],
       }),
-      ...(isTest
-        ? []
-        : [
-            vitePluginNode({
-              adapter: 'nest',
-              appPath: './app/main.ts',
-              outputFormat: 'module',
-              exportName: 'viteNodeApp',
-              initAppOnBoot: true,
-            }),
-          ]),
+      ...apiDevPlugins,
     ],
     optimizeDeps: {
       // Vite does not work well with optionnal dependencies,

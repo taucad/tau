@@ -1,8 +1,9 @@
 import type { ToolRuntime } from '@langchain/core/tools';
 import { tool } from '@langchain/core/tools';
-import { testModelInputSchema } from '@taucad/chat';
 import { assertRpcSuccess } from '@taucad/chat/utils';
-import type { ChatTool, TestModelInput } from '@taucad/chat';
+import type { ChatTool } from '@taucad/chat';
+import { testModelInputSchema } from '@taucad/chat/schemas/tools/test-model';
+import type { TestModelInput } from '@taucad/chat/schemas/tools/test-model';
 import type { KernelProvider } from '@taucad/runtime';
 import type { TestModelOutput } from '@taucad/testing';
 import { rpcName, toolName } from '@taucad/chat/constants';
@@ -30,7 +31,7 @@ Filter examples:
 - Skip one known failing check: { testNamePattern: '^(?!.*no meshing interference).*' }
 - Skip slow files: { exclude: ['**/*.slow.geospec.ts'] }
 
-Returns compact pass/fail rows tagged by targetFile. Empty failures means all selected tests passed.
+Returns compact pass/fail rows tagged by targetFile. Empty failures with total > 0 means all selected tests passed.
 
 When NOT to use:
 - NOT as a substitute for \`get_kernel_result\` when you only need compile status; \`test_model\` measures geometry against requirements.`,

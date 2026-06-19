@@ -568,7 +568,7 @@ describe('GeoSpec headless API harness integration', () => {
     expect(result.total).toBe(1);
     expect(result.failures).toEqual([
       expect.objectContaining({
-        id: 'no_matching_geospec_tests',
+        id: 'NO_MATCHING_GEOSPEC_TESTS',
         requirement: 'At least one selected GeoSpec test must run',
         targetFile: 'main.geospec.ts',
       }),

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createMiddleware } from 'langchain';
 import type { AgentMiddleware } from 'langchain';
-import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { toolName } from '@taucad/chat/constants';
@@ -10,6 +10,7 @@ import type { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 import type { ModelService } from '#api/models/model.service.js';
 import type { MetricsService } from '#telemetry/metrics.js';
 import { appendTranscriptLine } from '#api/chat/middleware/transcript.middleware.js';
+import { createTauInternalHumanMessage } from '#api/chat/utils/tau-internal-message.js';
 
 // =============================================================================
 // Public types
@@ -923,8 +924,14 @@ export const createAgentSafeguardsMiddleware = (
           };
         }
 
-        const nudge = new HumanMessage({
+        const nudge = createTauInternalHumanMessage({
+          id: `tau:safeguard:${detection.signature}`,
           content: `<system-reminder>\n${detection.reminder}\n</system-reminder>`,
+          kind: 'safeguard',
+          metadata: {
+            anchorId: detection.signature,
+            pruning: 'preserve-until-compaction',
+          },
         });
 
         return {

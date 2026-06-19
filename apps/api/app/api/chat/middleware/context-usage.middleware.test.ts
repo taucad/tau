@@ -13,10 +13,11 @@ describe('createContextUsageMiddleware', () => {
     getOtelProviderName: vi.fn(),
   };
 
-  const createRuntime = (overrides?: { writer?: ReturnType<typeof vi.fn> }) => ({
+  const createRuntime = (overrides?: { writer?: ReturnType<typeof vi.fn>; context?: Record<string, unknown> }) => ({
     context: {
       modelId: 'anthropic-claude-haiku-4.5',
       modelService: mockModelService,
+      ...overrides?.context,
     },
     writer: overrides?.writer ?? vi.fn(),
   });
@@ -52,6 +53,7 @@ describe('createContextUsageMiddleware', () => {
     expect(emitted['percentUsed']).toBe(25);
     expect(emitted['modelId']).toBe('anthropic-claude-haiku-4.5');
     expect(emitted['id']).toMatch(/^data_/);
+    expect(emitted['compactionScheduleStatus']).toBe('none');
   });
 
   it('should cap percentage at 100', () => {
@@ -144,5 +146,73 @@ describe('createContextUsageMiddleware', () => {
     resolveMiddlewareHook(middleware.afterModel)(state, runtime);
 
     expect(writer.mock.calls[0]![0].percentUsed).toBe(33.3);
+  });
+
+  it('should include latest budget and compaction cursor metadata when available', () => {
+    mockModelService.getContextWindow.mockReturnValue(200_000);
+    const writer = vi.fn();
+    const runtime = createRuntime({
+      writer,
+      context: {
+        lastContextBudget: {
+          budgetKind: 'estimated',
+          shouldCompact: true,
+          triggerReason: 'previous_usage',
+          estimatedInputTokens: 180_000,
+          rawEstimatedInputTokens: 170_000,
+          contextWindow: 200_000,
+          triggerThreshold: 170_000,
+          calibrationMultiplier: 1,
+          components: [{ name: 'total', tokens: 180_000 }],
+        },
+        lastCompactionId: 'dat_compaction',
+        lastCompactionStatus: 'compacted',
+      },
+    });
+
+    const middleware = createContextUsageMiddleware();
+    const state = {
+      messages: [
+        new AIMessage({
+          content: 'x',
+          usage_metadata: { input_tokens: 100_000, output_tokens: 0, total_tokens: 100_000 },
+        }),
+      ],
+    };
+
+    resolveMiddlewareHook(middleware.afterModel)(state, runtime);
+
+    expect(writer.mock.calls[0]![0]).toMatchObject({
+      budgetKind: 'estimated',
+      triggerReason: 'previous_usage',
+      triggerThreshold: 170_000,
+      lastCompactionId: 'dat_compaction',
+      lastCompactionStatus: 'compacted',
+    });
+  });
+
+  it('should emit scheduled-next-turn compaction metadata when provider usage crosses threshold', () => {
+    mockModelService.getContextWindow.mockReturnValue(200_000);
+    const writer = vi.fn();
+    const runtime = createRuntime({ writer });
+
+    const middleware = createContextUsageMiddleware();
+    const state = {
+      messages: [
+        new AIMessage({
+          content: 'x',
+          usage_metadata: { input_tokens: 180_000, output_tokens: 0, total_tokens: 180_000 },
+        }),
+      ],
+    };
+
+    resolveMiddlewareHook(middleware.afterModel)(state, runtime);
+
+    expect(writer.mock.calls[0]![0]).toMatchObject({
+      triggerThreshold: 170_000,
+      compactionScheduleStatus: 'scheduled_next_turn',
+      scheduledTriggerReason: 'previous_usage',
+      scheduledInputTokens: 180_000,
+    });
   });
 });

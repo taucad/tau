@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { openai } from '@ai-sdk/openai';
 import { createAgent } from 'langchain';
 import type { ReactAgent } from 'langchain';
@@ -19,8 +19,9 @@ import { createLlmTimingMiddleware } from '#api/chat/middleware/llm-timing.middl
 import { createAgentIterationsMiddleware } from '#api/chat/middleware/agent-iterations.middleware.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { AttributeKey } from '@taucad/telemetry';
-import { messageLoggingMiddleware } from '#api/chat/middleware/message-logging.middleware.js';
 import { toolErrorHandlerMiddleware } from '#api/chat/middleware/tool-error-handler.middleware.js';
+import { createToolInputCompatibilityMiddleware } from '#api/chat/middleware/tool-input-compatibility.middleware.js';
+import { createProviderDiagnosticsMiddleware } from '#api/chat/middleware/provider-diagnostics.middleware.js';
 import { createCachedSystemMessage } from '#api/chat/utils/create-cached-system-message.js';
 import { ToolService } from '#api/tools/tool.service.js';
 import { projectNameGenerationSystemPrompt } from '#api/chat/prompts/cad-name.prompt.js';
@@ -44,11 +45,16 @@ import { StoreService } from '#api/chat/store.service.js';
 import { CompactionService } from '#api/chat/compaction.service.js';
 import { TauRpcBackendFactory } from '#api/chat/tau-rpc-backend.js';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
+import { TokenBudgetService } from '#api/chat/token-budget.service.js';
 import { createClientContextMiddleware } from '#api/chat/middleware/client-context.middleware.js';
+import { createRecentSkillsMiddleware } from '#api/chat/middleware/recent-skills.middleware.js';
 import { Span } from '#telemetry/tracer.service.js';
+import type { ProviderDiagnosticsLogger } from '#api/chat/utils/provider-diagnostics.js';
 
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
+
   public constructor(
     private readonly modelService: ModelService,
     private readonly toolService: ToolService,
@@ -58,6 +64,7 @@ export class ChatService {
     private readonly compactionService: CompactionService,
     private readonly rpcBackendFactory: TauRpcBackendFactory,
     private readonly chatRpcService: ChatRpcService,
+    private readonly tokenBudgetService: TokenBudgetService,
   ) {}
 
   @Span()
@@ -87,31 +94,40 @@ export class ChatService {
     const checkpointer = this.checkpointerService.getCheckpointer();
     const store = this.storeService.getStore();
 
-    const { model } = this.modelService.buildModel(modelId);
-
     const providerId = this.modelService.getProviderId(modelId);
     if (!providerId) {
       throw new Error(`Could not resolve provider for model ${modelId}`);
     }
+    const providerDiagnosticsContext = this.modelService.createProviderDiagnosticsContext({
+      chatId,
+      modelId,
+      providerId,
+      logger: this.createProviderDiagnosticsLogger(),
+    });
+
+    const { model } = this.modelService.buildModel(modelId, {
+      providerDiagnosticsContext,
+    });
 
     // Combine all tools into a single array for the unified agent
     const allTools = [
       // CAD tools (testing tools conditionally included)
-      ...(testingEnabled ? [tools.test_model] : []),
-      tools.get_kernel_result,
-      tools.export_geometry,
-      tools.screenshot,
+      ...(testingEnabled ? [tools['test_model']] : []),
+      tools['get_kernel_result'],
+      tools['export_geometry'],
+      tools['screenshot'],
       // Filesystem tools
-      tools.edit_file,
-      tools.read_file,
-      tools.list_directory,
-      tools.create_file,
-      tools.delete_file,
-      tools.grep,
-      tools.glob_search,
+      tools['edit_file'],
+      tools['use_skill'],
+      tools['read_file'],
+      tools['list_directory'],
+      tools['create_file'],
+      tools['delete_file'],
+      tools['grep'],
+      tools['glob_search'],
       // Research tools
-      tools.web_search,
-      tools.web_browser,
+      tools['web_search'],
+      tools['web_browser'],
     ].filter((tool) => tool !== undefined);
 
     // ==========================================================================
@@ -162,6 +178,7 @@ export class ChatService {
         // --- Metrics and error handling ---
         createToolMetricsMiddleware(this.metricsService),
         toolErrorHandlerMiddleware,
+        createToolInputCompatibilityMiddleware(this.metricsService),
 
         ...(eagerDispatchHandler
           ? [createWriterCaptureMiddleware(eagerDispatchHandler), createEagerDispatchMiddleware(eagerDispatchHandler)]
@@ -172,20 +189,14 @@ export class ChatService {
         createToolResultBudgetMiddleware(this.rpcBackendFactory, this.metricsService),
         toolResultTrimmerMiddleware,
 
-        // --- Context compaction ---
-        createCompactionMiddleware(this.compactionService, this.rpcBackendFactory, this.chatRpcService),
-
         // --- Token-usage context ---
-        // Inserted AFTER compaction so the reported "used" count reflects the
-        // post-compaction message set, and BEFORE agent-safeguards / prompt
-        // caching so the injected <system-reminder> joins the cacheable prefix
-        // (see the cache-safety contract in token-usage-context.middleware.ts).
+        // Inserted before compaction so the budget decision sees the same
+        // reminder block that will be sent to the provider.
         createTokenUsageContextMiddleware(),
 
         // --- Agent loop safeguards (doom-loop detection) ---
-        // Inserted AFTER compaction so detectors see the post-compaction message
-        // tail, and BEFORE messageContentSanitizer / promptCaching so that
-        // injected <system-reminder> nudges become part of the cacheable prefix
+        // Inserted before compaction so safeguard nudges are counted and can be
+        // compacted with the rest of the effective provider payload.
         // (see docs/research/agent-loop-safeguards.md, "Cache-Safety Contract").
         createAgentSafeguardsMiddleware(this.metricsService, this.chatRpcService),
 
@@ -198,16 +209,36 @@ export class ChatService {
         createInterruptRecoveryMiddleware(this.metricsService),
 
         // --- Message processing ---
-        createCrossProviderContentNormalizerMiddleware(providerId),
         messageContentSanitizerMiddleware,
         newlineTrimmerMiddleware,
         latexDelimiterMiddleware,
 
-        // --- Prompt caching (must follow compaction) ---
+        // --- Client-side context injection (skills catalog + AGENTS.md memory) ---
+        createClientContextMiddleware(contextPayload),
+
+        // --- Recent skills and prompt caching ---
+        // These mutate the effective ModelRequest, so compaction evaluates them
+        // before deciding whether the provider-facing payload needs rewriting.
+        createRecentSkillsMiddleware(),
         createPromptCachingMiddleware(providerId),
 
+        // --- Context compaction ---
+        createCompactionMiddleware({
+          compactionService: this.compactionService,
+          rpcBackendFactory: this.rpcBackendFactory,
+          tokenBudgetService: this.tokenBudgetService,
+          metricsService: this.metricsService,
+          providerId,
+        }),
+
+        // --- Final provider payload normalization ---
+        // Runs after compaction because LangChain rebuilds AIMessages when it
+        // rewrites history, and those constructors can reintroduce provider-
+        // incompatible tool-call content blocks.
+        createCrossProviderContentNormalizerMiddleware(providerId),
+
         // --- Logging and observability ---
-        messageLoggingMiddleware,
+        createProviderDiagnosticsMiddleware(providerDiagnosticsContext),
         createLlmTimingMiddleware(this.metricsService),
         createAgentIterationsMiddleware(this.metricsService),
         createUsageTrackingMiddleware(this.metricsService),
@@ -215,9 +246,6 @@ export class ChatService {
 
         // --- Transcript (captures final state) ---
         createTranscriptMiddleware(this.chatRpcService),
-
-        // --- Client-side context injection (skills catalog + AGENTS.md memory) ---
-        createClientContextMiddleware(contextPayload),
       ],
     });
 
@@ -242,5 +270,16 @@ export class ChatService {
       messages: coreMessages,
       system: commitMessageGenerationSystemPrompt,
     });
+  }
+
+  private createProviderDiagnosticsLogger(): ProviderDiagnosticsLogger {
+    return {
+      debug: (payload: Record<string, unknown>, message: string) => {
+        this.logger.debug(payload, message);
+      },
+      error: (payload: Record<string, unknown>, message: string) => {
+        this.logger.error(payload, message);
+      },
+    };
   }
 }

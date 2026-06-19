@@ -25,6 +25,37 @@ export const rpcExecutionTimeout = 60_000;
  *  Milliseconds. */
 export const abortCleanupDelay = 5000;
 
+type PendingRpcRequest = {
+  rpcName: string;
+  resolve: (error: RpcExecutionError) => void;
+};
+
+type PendingRpcRegistration = {
+  abortPromise: Promise<RpcExecutionError>;
+  unregister: () => void;
+};
+
+type RpcName = Extract<keyof RpcSchemasRegistry, string>;
+
+type RpcSocketOutcome<T extends RpcName> =
+  | { type: 'response'; response: RpcResponseFor<T> }
+  | { type: 'socket-error'; error: unknown };
+
+type RpcAbortOutcome = {
+  type: 'aborted';
+  error: RpcExecutionError;
+};
+
+type ValidationIssue = {
+  path: Array<string | number | symbol>;
+  message: string;
+};
+
+const summarizeValidationIssue = (issue: ValidationIssue): { path: string; message: string } => ({
+  path: issue.path.map(String).join('.'),
+  message: issue.message,
+});
+
 /**
  * Service for managing Socket.IO-based RPC execution.
  * Handles:
@@ -59,6 +90,9 @@ export class ChatRpcService implements OnModuleDestroy {
 
   /** Track active abort signal listeners per chatId for cleanup on re-registration */
   private readonly activeAbortListeners = new Map<string, { signal: AbortSignal; listener: () => void }>();
+
+  /** In-flight RPC requests waiting on socket.io emitWithAck, grouped by chatId. */
+  private readonly pendingRpcRequests = new Map<string, Map<string, PendingRpcRequest>>();
 
   public constructor(private readonly metrics: MetricsService) {}
 
@@ -173,16 +207,14 @@ export class ChatRpcService implements OnModuleDestroy {
     this.abortedChats.delete(chatId);
 
     if (signal.aborted) {
-      this.abortedChats.add(chatId);
-      this.scheduleAbortCleanup(chatId);
+      this.markChatAborted(chatId);
       return;
     }
 
     const onAbort = (): void => {
-      this.abortedChats.add(chatId);
       signal.removeEventListener('abort', onAbort);
       this.activeAbortListeners.delete(chatId);
-      this.scheduleAbortCleanup(chatId);
+      this.markChatAborted(chatId);
     };
 
     signal.addEventListener('abort', onAbort);
@@ -206,6 +238,7 @@ export class ChatRpcService implements OnModuleDestroy {
 
     this.abortCleanupTimers.clear();
     this.abortedChats.clear();
+    this.resolveAllPendingRpcRequests('RPC service shut down before RPC execution completed.');
 
     for (const { signal, listener } of this.activeAbortListeners.values()) {
       signal.removeEventListener('abort', listener);
@@ -233,7 +266,7 @@ export class ChatRpcService implements OnModuleDestroy {
    * @param request.args - The input arguments (type-checked against RPC's input schema)
    * @returns The validated result (type-checked against RPC's result schema) or an RPC error object
    */
-  public async sendRpcRequest<T extends keyof RpcSchemasRegistry>(request: {
+  public async sendRpcRequest<T extends RpcName>(request: {
     chatId: string;
     toolCallId: string;
     rpcName: T;
@@ -285,46 +318,28 @@ export class ChatRpcService implements OnModuleDestroy {
       [AttributeKey.RPC_METHOD]: rpcName,
     });
 
-    try {
-      const response = (await socket
-        .timeout(rpcExecutionTimeout)
-        .emitWithAck('rpc_request', rpcRequest)) as RpcResponseFor<T>;
+    const pendingRequest = this.registerPendingRpcRequest(chatId, requestId, String(rpcName));
 
-      const inboundSize = estimateJsonSize(response);
-      this.metrics.wsMessageSize.record(inboundSize, {
-        [AttributeKey.WS_DIRECTION]: 'in',
-        [AttributeKey.RPC_METHOD]: rpcName,
-      });
+    if (this.abortedChats.has(chatId)) {
+      pendingRequest.unregister();
+      const abortError = this.createClientDisconnectedError(rpcName, 'Chat request was cancelled.');
+      this.recordRpcDuration(startTime, rpcName, { status: 'error', errorType: abortError.errorCode });
+      return abortError;
+    }
 
-      if ('error' in response) {
-        this.recordRpcDuration(startTime, rpcName, { status: 'error' });
-        return { errorCode: 'UNHANDLED_CLIENT_ERROR', message: response.error, rpcName };
-      }
+    const socketOutcomePromise = this.emitRpcRequest(socket, rpcRequest);
+    const abortOutcomePromise = this.createAbortOutcome(pendingRequest.abortPromise);
 
-      if (response.rpcName !== rpcName) {
-        this.recordRpcDuration(startTime, rpcName, { status: 'error' });
-        const validationError: RpcValidationError = {
-          errorCode: 'OUTPUT_VALIDATION_FAILED',
-          message: `RPC response rpcName mismatch: expected ${String(rpcName)}, received ${String(response.rpcName)}.`,
-          rpcName,
-          validationErrors: [{ path: 'rpcName', message: 'Mismatched rpcName on wire' }],
-          rawOutput: response,
-        };
-        this.logger.warn(`RPC protocol mismatch for ${requestId}:`, validationError.validationErrors);
-        return validationError;
-      }
+    const outcome = await Promise.race([socketOutcomePromise, abortOutcomePromise]);
+    pendingRequest.unregister();
 
-      const validated = this.validateRpcResult(rpcName, response.result);
+    if (outcome.type === 'aborted') {
+      this.recordRpcDuration(startTime, rpcName, { status: 'error', errorType: outcome.error.errorCode });
+      this.logger.warn(`RPC call ${requestId} cancelled for chat ${chatId}: ${outcome.error.errorCode}`);
+      return outcome.error;
+    }
 
-      if (validated.success) {
-        this.recordRpcDuration(startTime, rpcName, { status: 'ok' });
-        this.logger.debug(`Resolved RPC call ${requestId} for ${rpcName}`);
-        return validated.data;
-      }
-
-      this.recordRpcDuration(startTime, rpcName, { status: 'error' });
-      return validated.error;
-    } catch {
+    if (outcome.type === 'socket-error') {
       const errorCode = socket.connected ? 'TIMEOUT' : 'CLIENT_DISCONNECTED';
       const message = socket.connected
         ? `RPC execution timed out after ${rpcExecutionTimeout / 1000} seconds. The client may be disconnected or unresponsive.`
@@ -334,6 +349,43 @@ export class ChatRpcService implements OnModuleDestroy {
       this.logger.warn(`RPC call ${requestId} failed for chat ${chatId}: ${errorCode}`);
       return { errorCode, message, rpcName };
     }
+
+    const { response } = outcome;
+
+    const inboundSize = estimateJsonSize(response);
+    this.metrics.wsMessageSize.record(inboundSize, {
+      [AttributeKey.WS_DIRECTION]: 'in',
+      [AttributeKey.RPC_METHOD]: rpcName,
+    });
+
+    if ('error' in response) {
+      this.recordRpcDuration(startTime, rpcName, { status: 'error' });
+      return { errorCode: 'UNHANDLED_CLIENT_ERROR', message: response.error, rpcName };
+    }
+
+    if (response.rpcName !== rpcName) {
+      this.recordRpcDuration(startTime, rpcName, { status: 'error' });
+      const validationError: RpcValidationError = {
+        errorCode: 'OUTPUT_VALIDATION_FAILED',
+        message: `RPC response rpcName mismatch: expected ${String(rpcName)}, received ${String(response.rpcName)}.`,
+        rpcName,
+        validationErrors: [{ path: 'rpcName', message: 'Mismatched rpcName on wire' }],
+        rawOutput: response,
+      };
+      this.logger.warn(`RPC protocol mismatch for ${requestId}:`, validationError.validationErrors);
+      return validationError;
+    }
+
+    const validated = this.validateRpcResult(rpcName, response.result);
+
+    if (validated.success) {
+      this.recordRpcDuration(startTime, rpcName, { status: 'ok' });
+      this.logger.debug(`Resolved RPC call ${requestId} for ${rpcName}`);
+      return validated.data;
+    }
+
+    this.recordRpcDuration(startTime, rpcName, { status: 'error' });
+    return validated.error;
   }
 
   /**
@@ -349,8 +401,8 @@ export class ChatRpcService implements OnModuleDestroy {
    * Returns undefined if no sockets are connected.
    *
    * Note: We intentionally return only ONE socket for RPC requests because:
-   * 1. RPC requests expect exactly one response - the pendingRequests map tracks
-   *    a single promise per requestId. Broadcasting to all sockets would cause
+   * 1. RPC requests expect exactly one response - each requestId is tracked as
+   *    one pending emitWithAck promise. Broadcasting to all sockets would cause
    *    multiple responses, with only the first being processed.
    * 2. Tool execution should happen once, not duplicated across every open tab.
    *
@@ -373,7 +425,7 @@ export class ChatRpcService implements OnModuleDestroy {
    * Validate RPC input against its Zod schema.
    * Returns the validated data if successful, or an RpcValidationError if validation fails.
    */
-  private validateRpcInput<T extends keyof RpcSchemasRegistry>(
+  private validateRpcInput<T extends RpcName>(
     rpcName: T,
     input: unknown,
   ): { success: true; data: RpcInput<T> } | { success: false; error: RpcValidationError } {
@@ -389,10 +441,7 @@ export class ChatRpcService implements OnModuleDestroy {
       errorCode: 'INPUT_VALIDATION_FAILED',
       message: `RPC "${rpcName}" received invalid input. The provided arguments don't match the expected schema.`,
       rpcName,
-      validationErrors: parseResult.error.issues.map((issue) => ({
-        path: issue.path.join('.'),
-        message: issue.message,
-      })),
+      validationErrors: parseResult.error.issues.map(summarizeValidationIssue),
       rawOutput: input,
     };
 
@@ -403,7 +452,7 @@ export class ChatRpcService implements OnModuleDestroy {
    * Validate RPC result against its Zod schema.
    * Returns the validated data if successful, or an RpcValidationError if validation fails.
    */
-  private validateRpcResult<T extends keyof RpcSchemasRegistry>(
+  private validateRpcResult<T extends RpcName>(
     rpcName: T,
     result: unknown,
   ): { success: true; data: RpcResult<T> } | { success: false; error: RpcValidationError } {
@@ -419,10 +468,7 @@ export class ChatRpcService implements OnModuleDestroy {
       errorCode: 'OUTPUT_VALIDATION_FAILED',
       message: `RPC "${rpcName}" returned invalid result. The client may have returned malformed data.`,
       rpcName,
-      validationErrors: parseResult.error.issues.map((issue) => ({
-        path: issue.path.join('.'),
-        message: issue.message,
-      })),
+      validationErrors: parseResult.error.issues.map(summarizeValidationIssue),
       rawOutput: result,
     };
 
@@ -471,6 +517,93 @@ export class ChatRpcService implements OnModuleDestroy {
     if (existingTimer) {
       clearTimeout(existingTimer);
       this.abortCleanupTimers.delete(chatId);
+    }
+  }
+
+  private markChatAborted(chatId: string): void {
+    this.abortedChats.add(chatId);
+    this.resolvePendingRpcRequests(chatId, 'Chat request was cancelled.');
+    this.scheduleAbortCleanup(chatId);
+  }
+
+  private createClientDisconnectedError<T extends RpcName>(rpcName: T, message: string): RpcExecutionError {
+    return { errorCode: 'CLIENT_DISCONNECTED', message, rpcName };
+  }
+
+  private registerPendingRpcRequest(chatId: string, requestId: string, rpcName: string): PendingRpcRegistration {
+    let resolveAbort!: (error: RpcExecutionError) => void;
+    const abortPromise = new Promise<RpcExecutionError>((resolve) => {
+      resolveAbort = resolve;
+    });
+
+    const request: PendingRpcRequest = { rpcName, resolve: resolveAbort };
+    let requests = this.pendingRpcRequests.get(chatId);
+    if (!requests) {
+      requests = new Map<string, PendingRpcRequest>();
+      this.pendingRpcRequests.set(chatId, requests);
+    }
+    requests.set(requestId, request);
+
+    return {
+      abortPromise,
+      unregister: () => {
+        const requestsForChat = this.pendingRpcRequests.get(chatId);
+        if (!requestsForChat) {
+          return;
+        }
+
+        requestsForChat.delete(requestId);
+        if (requestsForChat.size === 0) {
+          this.pendingRpcRequests.delete(chatId);
+        }
+      },
+    };
+  }
+
+  private resolvePendingRpcRequests(chatId: string, message: string): void {
+    const requests = this.pendingRpcRequests.get(chatId);
+    if (!requests) {
+      return;
+    }
+
+    this.pendingRpcRequests.delete(chatId);
+
+    for (const request of requests.values()) {
+      request.resolve({
+        errorCode: 'CLIENT_DISCONNECTED',
+        message,
+        rpcName: request.rpcName,
+      });
+    }
+  }
+
+  private resolveAllPendingRpcRequests(message: string): void {
+    const chatIds: string[] = [];
+    for (const chatId of this.pendingRpcRequests.keys()) {
+      chatIds.push(chatId);
+    }
+
+    for (const chatId of chatIds) {
+      this.resolvePendingRpcRequests(chatId, message);
+    }
+  }
+
+  private async createAbortOutcome(abortPromise: Promise<RpcExecutionError>): Promise<RpcAbortOutcome> {
+    const error = await abortPromise;
+    return { type: 'aborted', error };
+  }
+
+  private async emitRpcRequest<T extends RpcName>(
+    socket: Socket,
+    rpcRequest: RpcRequest<T>,
+  ): Promise<RpcSocketOutcome<T>> {
+    try {
+      const response = (await socket
+        .timeout(rpcExecutionTimeout)
+        .emitWithAck('rpc_request', rpcRequest)) as RpcResponseFor<T>;
+      return { type: 'response', response };
+    } catch (error) {
+      return { type: 'socket-error', error };
     }
   }
 }

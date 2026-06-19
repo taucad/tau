@@ -48,6 +48,7 @@ const providerKeyMap: Record<string, string> = {
   vertexai: 'GOOGLE_VERTEX_AI_CREDENTIALS',
   together: 'TOGETHER_API_KEY',
   cerebras: 'CEREBRAS_API_KEY',
+  morph: 'MORPH_API_KEY',
 };
 
 function hasApiKey(providerId: string): boolean {

@@ -5,11 +5,13 @@ import { TerminusModule } from '@nestjs/terminus';
 import { HealthController } from '#api/health/health.controller.js';
 import { RedisHealthIndicator } from '#api/health/redis-health.indicator.js';
 import { DatabaseHealthIndicator } from '#api/health/database-health.indicator.js';
+import { S3HealthIndicator } from '#api/health/s3-health.indicator.js';
 
 describe('HealthController', () => {
   let controller: HealthController;
   let redisHealth: RedisHealthIndicator;
   let databaseHealth: DatabaseHealthIndicator;
+  let s3Health: S3HealthIndicator;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -26,12 +28,19 @@ describe('HealthController', () => {
             isHealthy: vi.fn().mockResolvedValue({ database: { status: 'up', responseTimeMs: 2 } }),
           },
         },
+        {
+          provide: S3HealthIndicator,
+          useValue: {
+            isHealthy: vi.fn().mockResolvedValue({ s3: { status: 'up', responseTimeMs: 3 } }),
+          },
+        },
       ],
     }).compile();
 
     controller = module.get(HealthController);
     redisHealth = module.get(RedisHealthIndicator);
     databaseHealth = module.get(DatabaseHealthIndicator);
+    s3Health = module.get(S3HealthIndicator);
   });
 
   describe('GET /health/live', () => {
@@ -48,6 +57,7 @@ describe('HealthController', () => {
       expect(result.status).toBe('ok');
       expect(result.details).toHaveProperty('redis');
       expect(result.details).toHaveProperty('database');
+      expect(result.details).toHaveProperty('s3');
       expect(result.details).toHaveProperty('memory_heap');
     });
 
@@ -62,6 +72,14 @@ describe('HealthController', () => {
     it('should return error status when database is down', async () => {
       vi.spyOn(databaseHealth, 'isHealthy').mockResolvedValue({
         database: { status: 'down', message: 'Connection refused' },
+      });
+
+      await expect(controller.checkReady()).rejects.toThrow();
+    });
+
+    it('should return error status when S3 is down', async () => {
+      vi.spyOn(s3Health, 'isHealthy').mockResolvedValue({
+        s3: { status: 'down', message: 'Access denied' },
       });
 
       await expect(controller.checkReady()).rejects.toThrow();

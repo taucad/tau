@@ -12,7 +12,7 @@ const createConfig = () => {
     sendResetPassword: vi.fn().mockResolvedValue(undefined),
     sendVerification: vi.fn().mockResolvedValue(undefined),
   } satisfies Pick<EmailService, 'sendMagicLink' | 'sendResetPassword' | 'sendVerification'>;
-  const databaseService = { database: {} } satisfies Pick<DatabaseService, 'database'>;
+  const databaseService = { database: {} } as unknown as DatabaseService;
   const configService = {
     get: vi.fn((key: string) => {
       const values = new Map([
@@ -30,10 +30,10 @@ const createConfig = () => {
   const authService = undefined as unknown as AuthService;
 
   const config = getBetterAuthConfig({
-    databaseService: databaseService as DatabaseService,
-    configService: configService as ConfigService<Environment, true>,
+    databaseService,
+    configService: configService as unknown as ConfigService<Environment, true>,
     authService,
-    emailService: emailService as EmailService,
+    emailService: emailService as unknown as EmailService,
   });
 
   return { config, emailService };
@@ -72,38 +72,46 @@ const sendVerificationEmail = async (
 };
 
 describe('getBetterAuthConfig email callbacks', () => {
-  it('routes magic-link emails through EmailService without exposing tokens to logs', async () => {
+  it('routes magic-link emails through the frontend verifier without exposing backend auth URLs', async () => {
     const { config, emailService } = createConfig();
-    const magicPlugin = config.plugins?.[1] as { options: { sendMagicLink: (args: unknown) => Promise<void> } };
+    const magicPlugin = config.plugins?.[1] as unknown as {
+      options: { sendMagicLink: (args: unknown) => Promise<void> };
+    };
 
     await magicPlugin.options.sendMagicLink({
       email: 'user@example.com',
-      url: 'https://tau.new/callback?token=secret',
+      url: 'http://localhost:4000/v1/auth/magic-link/verify?token=secret&callbackURL=%2Fv%2Fpub_123',
       token: 'secret',
     });
 
     expect(emailService.sendMagicLink).toHaveBeenCalledWith({
       email: 'user@example.com',
-      url: 'https://tau.new/callback?token=secret',
+      url: 'http://localhost:3000/auth/magic-link/verify?token=secret&redirectTo=%2Fv%2Fpub_123',
     });
+    const sentUrl = vi.mocked(emailService.sendMagicLink).mock.calls[0]?.[0].url;
+    expect(sentUrl).not.toContain('localhost:4000');
+    expect(sentUrl).not.toContain('/v1/auth');
   });
 
-  it('routes reset-password emails through EmailService', async () => {
+  it('routes reset-password emails through the frontend reset page without exposing backend auth URLs', async () => {
     const { config, emailService } = createConfig();
 
     await sendResetPassword(config, {
       user: { email: 'user@example.com' },
-      url: 'https://tau.new/reset?token=secret',
+      url: 'http://localhost:4000/v1/auth/reset-password/secret',
       token: 'secret',
     });
 
     expect(emailService.sendResetPassword).toHaveBeenCalledWith({
       email: 'user@example.com',
-      url: 'https://tau.new/reset?token=secret',
+      url: 'http://localhost:3000/auth/reset-password?token=secret',
     });
+    const sentUrl = vi.mocked(emailService.sendResetPassword).mock.calls[0]?.[0].url;
+    expect(sentUrl).not.toContain('localhost:4000');
+    expect(sentUrl).not.toContain('/v1/auth');
   });
 
-  it('routes verification emails through the frontend verify page', async () => {
+  it('routes verification emails through the frontend verify page without exposing backend auth URLs', async () => {
     const { config, emailService } = createConfig();
 
     await sendVerificationEmail(config, {
@@ -116,6 +124,9 @@ describe('getBetterAuthConfig email callbacks', () => {
       email: 'user@example.com',
       url: 'http://localhost:3000/auth/verify-email?token=secret&redirectTo=%2Fv%2Fpub_123',
     });
+    const sentUrl = vi.mocked(emailService.sendVerification).mock.calls[0]?.[0].url;
+    expect(sentUrl).not.toContain('localhost:4000');
+    expect(sentUrl).not.toContain('/v1/auth');
   });
 
   it('normalizes frontend callback URLs and rejects external verification redirects', async () => {

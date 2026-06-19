@@ -1,50 +1,80 @@
 import { createMiddleware } from 'langchain';
 import type { AgentMiddleware } from 'langchain';
-import { AIMessage, ToolMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage, ToolMessage, HumanMessage, RemoveMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { ContextOverflowError } from '@langchain/core/errors';
+import { Command, REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
 import type { BaseStore } from '@langchain/langgraph';
 import { z } from 'zod';
+import {
+  AttributeKey,
+  GenAiContextCompactionStatus,
+  GenAiContextBudgetTriggerReason,
+  GenAiContextBudgetKind,
+} from '@taucad/telemetry';
 import { clearReadDedupForChat } from '#api/chat/clear-recent-reads.js';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { CompactionService } from '#api/chat/compaction.service.js';
 import { TauRpcBackendFactory } from '#api/chat/tau-rpc-backend.js';
 import { ModelService } from '#api/models/model.service.js';
-import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
-import { appendTranscriptLine } from '#api/chat/middleware/transcript.middleware.js';
+import { appendCompactionTranscriptCommit } from '#api/chat/middleware/compaction-transcript.js';
+import { loadRecentSkillsMessage, replaceRecentSkillsMessage } from '#api/chat/middleware/recent-skills.middleware.js';
 import {
-  isImageBlock,
-  IMAGE_TOKEN_ESTIMATE,
   extractTextFromContent,
   countImageBlocks,
+  isImageBlock,
   stripImageBlocks,
 } from '#api/chat/utils/image-block.utils.js';
-
-/** Default fraction of maxInputTokens that triggers compaction. */
-// eslint-disable-next-line @typescript-eslint/naming-convention -- Domain constant
-const DEFAULT_TRIGGER_FRACTION = 0.85;
-
-/** Characters per token for approximate token counting. */
-// eslint-disable-next-line @typescript-eslint/naming-convention -- Domain constant
-const CHARS_PER_TOKEN = 4;
+import type { MetricsService } from '#telemetry/metrics.js';
+import type { TokenBudgetDecision } from '#api/chat/token-budget.service.js';
+import {
+  DEFAULT_CONTEXT_COMPACTION_TRIGGER_FRACTION,
+  FALLBACK_CONTEXT_WINDOW,
+  TokenBudgetService,
+} from '#api/chat/token-budget.service.js';
+import { withTauInternalMetadata } from '#api/chat/utils/tau-internal-message.js';
 
 /** Max character length for tool arguments before truncation in old messages. */
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Domain constant
 const MAX_ARG_LENGTH = 2000;
-
-/** Multiplier self-calibration increment on ContextOverflowError. */
-// eslint-disable-next-line @typescript-eslint/naming-convention -- Domain constant
-const CALIBRATION_INCREMENT = 0.15;
-
-// eslint-disable-next-line @typescript-eslint/naming-convention -- Domain constant
-const FALLBACK_CONTEXT_WINDOW = 200_000;
 
 const compactionContextSchema = z.object({
   chatId: z.string(),
   modelId: z.string(),
   modelService: z.custom<ModelService>(),
 });
+
+const compactionStateSchema = z.object({
+  _lastProviderInputTokens: z.number().optional(),
+  _lastProviderUsageModelId: z.string().optional(),
+  _lastProviderContextWindow: z.number().optional(),
+  _lastProviderTriggerThreshold: z.number().optional(),
+  _lastProviderUsageTimestamp: z.string().optional(),
+});
+
+type MutableCompactionContext = z.infer<typeof compactionContextSchema> & {
+  skillContentRestoreNeeded?: boolean;
+  lastContextBudget?: TokenBudgetDecision;
+  lastCompactionId?: string;
+  lastCompactionStatus?: ContextCompactionStatus;
+};
+
+type MutableCompactionState = z.infer<typeof compactionStateSchema>;
+
+type ContextCompactionStatus =
+  | typeof GenAiContextCompactionStatus.SKIPPED
+  | typeof GenAiContextCompactionStatus.COMPACTED
+  | typeof GenAiContextCompactionStatus.FAILED
+  | typeof GenAiContextCompactionStatus.OVERFLOW_RETRY_SUCCEEDED;
+
+export type CreateCompactionMiddlewareOptions = {
+  compactionService: CompactionService;
+  rpcBackendFactory: TauRpcBackendFactory;
+  tokenBudgetService: TokenBudgetService;
+  metricsService: MetricsService;
+  providerId?: string;
+};
 
 /**
  * Checks whether a message is a tool result, using both instanceof and
@@ -144,53 +174,6 @@ function addContinuityInstructions(messages: BaseMessage[]): BaseMessage[] {
   });
 }
 
-export function estimateMessageTokens(messages: BaseMessage[]): number {
-  let totalTokens = 0;
-  for (const message of messages) {
-    if (typeof message.content === 'string') {
-      totalTokens += Math.ceil(message.content.length / CHARS_PER_TOKEN);
-    } else if (Array.isArray(message.content)) {
-      for (const block of message.content as Array<Record<string, unknown>>) {
-        if (isImageBlock(block)) {
-          totalTokens += IMAGE_TOKEN_ESTIMATE;
-        } else {
-          const text = (block['text'] ?? block['reasoning'] ?? '') as string;
-          totalTokens += Math.ceil(text.length / CHARS_PER_TOKEN);
-        }
-      }
-    }
-  }
-  return totalTokens;
-}
-
-/**
- * Serializes evicted messages into JSONL transcript lines.
- * Image blocks are replaced with `[user attached image]` markers.
- */
-function serializeEvictedMessages(evictedMessages: BaseMessage[], timestamp: string): string[] {
-  const lines: string[] = [];
-
-  for (const m of evictedMessages) {
-    const role = m.type === 'human' ? 'user' : m.type === 'ai' ? 'assistant' : m.type;
-
-    if (typeof m.content === 'string') {
-      lines.push(JSON.stringify({ role, content: m.content, timestamp }));
-    } else if (Array.isArray(m.content)) {
-      for (const block of m.content as Array<Record<string, unknown>>) {
-        if (isImageBlock(block)) {
-          lines.push(JSON.stringify({ role, type: 'image', content: '[user attached image]', timestamp }));
-        } else if (block['type'] === 'reasoning' && block['reasoning']) {
-          lines.push(JSON.stringify({ role, type: 'thinking', content: block['reasoning'], timestamp }));
-        } else if (block['type'] === 'text' && block['text']) {
-          lines.push(JSON.stringify({ role, content: block['text'], timestamp }));
-        }
-      }
-    }
-  }
-
-  return lines;
-}
-
 /** Default media limit per request (Anthropic API limit). */
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Domain constant
 const DEFAULT_MEDIA_LIMIT = 100;
@@ -238,6 +221,244 @@ export function stripExcessMedia(messages: BaseMessage[], limit = DEFAULT_MEDIA_
   });
 }
 
+type CompactionStats = {
+  tokensBeforeCompaction: number;
+  tokensAfterCompaction: number;
+  compressionRatio: number;
+  messagesEvicted: number;
+};
+
+function providerNameForMetrics(options: {
+  modelService: ModelService;
+  modelId: string;
+  providerId?: string | undefined;
+}): string | undefined {
+  return options.modelService.getOtelProviderName(options.modelId) ?? options.providerId;
+}
+
+function budgetAttributes(options: {
+  decision: TokenBudgetDecision;
+  modelId: string;
+  providerName?: string | undefined;
+  component?: string | undefined;
+}): Record<string, string> {
+  return {
+    [AttributeKey.GEN_AI_CONTEXT_BUDGET_KIND]: options.decision.budgetKind,
+    [AttributeKey.GEN_AI_CONTEXT_BUDGET_TRIGGER_REASON]: options.decision.triggerReason,
+    [AttributeKey.GEN_AI_REQUEST_MODEL]: options.modelId,
+    ...(options.providerName ? { [AttributeKey.GEN_AI_PROVIDER_NAME]: options.providerName } : {}),
+    ...(options.component ? { [AttributeKey.GEN_AI_CONTEXT_BUDGET_COMPONENT]: options.component } : {}),
+  };
+}
+
+function recordBudgetMetrics(options: {
+  metricsService: MetricsService;
+  decision: TokenBudgetDecision;
+  modelId: string;
+  providerName?: string | undefined;
+}): void {
+  for (const component of options.decision.components) {
+    options.metricsService.genAiContextBudgetTokens.record(
+      component.tokens,
+      budgetAttributes({ ...options, component: component.name }),
+    );
+  }
+}
+
+function recordCompactionDecision(options: {
+  metricsService: MetricsService;
+  decision: TokenBudgetDecision;
+  modelId: string;
+  providerName?: string | undefined;
+  status: ContextCompactionStatus;
+  triggerReason?: TokenBudgetDecision['triggerReason'] | typeof GenAiContextBudgetTriggerReason.OVERFLOW;
+}): void {
+  options.metricsService.genAiContextCompactionDecisions.add(1, {
+    [AttributeKey.GEN_AI_CONTEXT_BUDGET_KIND]: options.decision.budgetKind,
+    [AttributeKey.GEN_AI_CONTEXT_BUDGET_TRIGGER_REASON]: options.triggerReason ?? options.decision.triggerReason,
+    [AttributeKey.GEN_AI_CONTEXT_COMPACTION_STATUS]: options.status,
+    [AttributeKey.GEN_AI_REQUEST_MODEL]: options.modelId,
+    ...(options.providerName ? { [AttributeKey.GEN_AI_PROVIDER_NAME]: options.providerName } : {}),
+  });
+}
+
+function emitCompactionData(options: {
+  writer: ((chunk: Record<string, unknown>) => void) | undefined;
+  compactionId: string;
+  status: ContextCompactionStatus;
+  triggerReason: TokenBudgetDecision['triggerReason'] | typeof GenAiContextBudgetTriggerReason.OVERFLOW;
+  decision: TokenBudgetDecision;
+  stats: CompactionStats;
+  transcriptFilePath?: string | undefined;
+}): void {
+  if (!options.writer) {
+    return;
+  }
+
+  options.writer({
+    type: 'context-compaction',
+    id: options.compactionId,
+    compactionId: options.compactionId,
+    status: options.status,
+    triggerReason: options.triggerReason,
+    budgetKind: GenAiContextBudgetKind.ESTIMATED,
+    estimatedInputTokens: options.decision.estimatedInputTokens,
+    contextWindow: options.decision.contextWindow,
+    triggerThreshold: options.decision.triggerThreshold,
+    ...options.stats,
+    transcriptFilePath: options.transcriptFilePath ?? null,
+  });
+}
+
+function stampCompactedMessages(messages: BaseMessage[], compactionId: string): BaseMessage[] {
+  return messages.map((message, index) => {
+    const existingAdditionalKwargs =
+      (message as { additional_kwargs?: Record<string, unknown> }).additional_kwargs ?? {};
+    const existingId = (message as { id?: string }).id;
+    return cloneMessageWithMetadata(message, {
+      id: existingId ?? `${compactionId}-summary-${index}`,
+      additionalKwargs: withTauInternalMetadata(
+        {
+          ...existingAdditionalKwargs,
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain metadata is snake_case.
+          lc_source: 'compaction',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain metadata is snake_case.
+          compaction_id: compactionId,
+        },
+        {
+          kind: 'compaction-summary',
+          anchorId: compactionId,
+          revision: String(index),
+          pruning: 'preserve-until-compaction',
+        },
+      ),
+    });
+  });
+}
+
+function cloneMessageWithMetadata(
+  message: BaseMessage,
+  metadata: { id: string; additionalKwargs: Record<string, unknown> },
+): BaseMessage {
+  if (message instanceof HumanMessage) {
+    return new HumanMessage({
+      id: metadata.id,
+      content: message.content,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain metadata is snake_case.
+      additional_kwargs: metadata.additionalKwargs,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain metadata is snake_case.
+      response_metadata: message.response_metadata,
+    });
+  }
+
+  if (message instanceof AIMessage) {
+    return new AIMessage({
+      id: metadata.id,
+      content: message.content,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API is snake_case.
+      tool_calls: message.tool_calls,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain metadata is snake_case.
+      additional_kwargs: metadata.additionalKwargs,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain metadata is snake_case.
+      response_metadata: message.response_metadata,
+    });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Constructor name is PascalCase by convention.
+  const MessageType = message.constructor as new (fields: {
+    id?: string;
+    content: BaseMessage['content'];
+    additional_kwargs?: Record<string, unknown>;
+    response_metadata?: Record<string, unknown>;
+  }) => BaseMessage;
+  return new MessageType({
+    id: metadata.id,
+    content: message.content,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain metadata is snake_case.
+    additional_kwargs: metadata.additionalKwargs,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain metadata is snake_case.
+    response_metadata: message.response_metadata,
+  });
+}
+
+function currentUserQuery(messages: BaseMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message instanceof HumanMessage) {
+      return extractTextFromContent(message.content);
+    }
+  }
+  return '';
+}
+
+function recordObservedUsageFromResponse(options: {
+  tokenBudgetService: TokenBudgetService;
+  modelId: string;
+  providerId?: string | undefined;
+  response: unknown;
+  decision: TokenBudgetDecision;
+}): void {
+  const usage =
+    typeof options.response === 'object' && options.response !== null
+      ? (options.response as { usage_metadata?: { input_tokens?: number } }).usage_metadata
+      : undefined;
+  options.tokenBudgetService.recordObservedUsage({
+    modelId: options.modelId,
+    providerId: options.providerId,
+    actualInputTokens: usage?.input_tokens,
+    estimatedInputTokens: options.decision.estimatedInputTokens,
+  });
+}
+
+function previousUsageForModel(state: MutableCompactionState, modelId: string): number | undefined {
+  if (state._lastProviderUsageModelId !== modelId) {
+    return undefined;
+  }
+  return state._lastProviderInputTokens;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function compactionStatsFromBudget(options: {
+  beforeTokens: number;
+  afterTokens: number;
+  messagesEvicted: number;
+}): CompactionStats {
+  const tokensBeforeCompaction = options.beforeTokens;
+  const tokensAfterCompaction = options.afterTokens;
+  return {
+    tokensBeforeCompaction,
+    tokensAfterCompaction,
+    compressionRatio: tokensBeforeCompaction > 0 ? tokensAfterCompaction / tokensBeforeCompaction : 1,
+    messagesEvicted: options.messagesEvicted,
+  };
+}
+
+function lastAiMessageUsage(state: { messages?: unknown[] }): number | undefined {
+  const lastMessage = state.messages?.at(-1);
+  if (!(lastMessage instanceof AIMessage)) {
+    return undefined;
+  }
+  const usageMetadata = lastMessage.usage_metadata as { input_tokens?: unknown } | undefined;
+  const inputTokens = usageMetadata?.input_tokens;
+  return typeof inputTokens === 'number' ? inputTokens : undefined;
+}
+
+async function restoreRecentSkillContent(options: {
+  store?: BaseStore | undefined;
+  chatId: string;
+  messages: readonly BaseMessage[];
+}): Promise<BaseMessage[]> {
+  const recentSkillsMessage = await loadRecentSkillsMessage({
+    store: options.store,
+    chatId: options.chatId,
+    includeContent: true,
+  });
+  return replaceRecentSkillsMessage(options.messages, recentSkillsMessage);
+}
+
 /**
  * Creates middleware that compacts conversation context.
  *
@@ -249,124 +470,190 @@ export function stripExcessMedia(messages: BaseMessage[], limit = DEFAULT_MEDIA_
  * Emits a `data-context-compaction` SSE part via `writer()` when compaction fires.
  * Offloads pre-compaction messages to browser FS for conversation history preservation.
  */
-export const createCompactionMiddleware = (
-  compactionService: CompactionService,
-  rpcBackendFactory: TauRpcBackendFactory,
-  chatRpcService: ChatRpcService,
-): AgentMiddleware => {
-  let tokenEstimationMultiplier = 1;
-
+export const createCompactionMiddleware = (options: CreateCompactionMiddlewareOptions): AgentMiddleware => {
   return createMiddleware({
     name: 'Compaction',
+    stateSchema: compactionStateSchema,
     contextSchema: compactionContextSchema,
+
+    afterModel(state, runtime) {
+      const inputTokens = lastAiMessageUsage(state as { messages?: unknown[] });
+      if (inputTokens === undefined) {
+        return;
+      }
+
+      const { modelId, modelService } = runtime.context as MutableCompactionContext;
+      const contextWindow = modelService.getContextWindow(modelId) ?? FALLBACK_CONTEXT_WINDOW;
+      return {
+        _lastProviderInputTokens: inputTokens,
+        _lastProviderUsageModelId: modelId,
+        _lastProviderContextWindow: contextWindow,
+        _lastProviderTriggerThreshold: Math.floor(contextWindow * DEFAULT_CONTEXT_COMPACTION_TRIGGER_FRACTION),
+        _lastProviderUsageTimestamp: new Date().toISOString(),
+      };
+    },
 
     async wrapModelCall(request, handler) {
       const { messages } = request;
       const { context, writer } = request.runtime;
       const { store } = request.runtime as { store?: BaseStore };
-      const { chatId, modelId, modelService } = context;
+      const mutableContext = context as MutableCompactionContext;
+      const requestState = request.state as unknown;
+      const mutableState = isRecord(requestState) ? (requestState as MutableCompactionState) : {};
+      const { chatId, modelId, modelService } = mutableContext;
+      const providerName = providerNameForMetrics({ modelService, modelId, providerId: options.providerId });
+      const contextWindow = modelService.getContextWindow(modelId) ?? FALLBACK_CONTEXT_WINDOW;
+      const previousUsageInputTokens = previousUsageForModel(mutableState, modelId);
+      const budgetDecision = options.tokenBudgetService.evaluateModelRequest({
+        request,
+        modelId,
+        providerId: options.providerId,
+        contextWindow,
+        previousUsageInputTokens,
+      });
 
-      const maxInputTokens = modelService.getContextWindow(modelId) ?? FALLBACK_CONTEXT_WINDOW;
-      const triggerThreshold = Math.floor(maxInputTokens * DEFAULT_TRIGGER_FRACTION);
-      const estimatedTokens = Math.ceil(estimateMessageTokens(messages) * tokenEstimationMultiplier);
+      mutableContext.lastContextBudget = budgetDecision;
+      recordBudgetMetrics({ metricsService: options.metricsService, decision: budgetDecision, modelId, providerName });
 
       let processedMessages = messages;
-      // Tracks whether the current model call summarised the message tail.
-      // When true, dedup pointers in the auxiliary store referencing
-      // now-evicted ToolMessages are cleared as a side effect so the next
-      // read_file call cannot route to a stale fileUnchangedMarker.
-      let compactionHappened = false;
+      let rewriteOnSuccess = false;
+      let activeCompactionId: string | undefined;
+      let activeCompactionStatus: ContextCompactionStatus | undefined;
 
-      if (estimatedTokens > triggerThreshold && messages.length > 2) {
-        // Tier 1: Truncate tool args in old messages
+      if (budgetDecision.shouldCompact && messages.length > 2) {
         processedMessages = truncateToolArgs(messages);
+        const postTruncateRequest = { ...request, messages: processedMessages };
+        const postTruncateDecision = options.tokenBudgetService.evaluateModelRequest({
+          request: postTruncateRequest,
+          modelId,
+          providerId: options.providerId,
+          contextWindow,
+          previousUsageInputTokens,
+        });
+        mutableContext.lastContextBudget = postTruncateDecision;
+        recordBudgetMetrics({
+          metricsService: options.metricsService,
+          decision: postTruncateDecision,
+          modelId,
+          providerName,
+        });
 
-        // Tier 2: Proactive Morph compaction
-        const reEstimated = Math.ceil(estimateMessageTokens(processedMessages) * tokenEstimationMultiplier);
-
-        if (reEstimated > triggerThreshold) {
+        if (postTruncateDecision.shouldCompact) {
           const targetKeep = Math.max(4, Math.floor(messages.length * 0.1));
           const keep = findSafeCutoffPoint(processedMessages, targetKeep);
           const evictedMessages = processedMessages.slice(0, processedMessages.length - keep);
           const recentMessages = processedMessages.slice(processedMessages.length - keep);
 
           if (evictedMessages.length === 0) {
-            // Nothing to evict — targetKeep >= messages.length.
-            // Pass through to the model without compaction.
-            return handler({ ...request, messages: processedMessages });
-          }
-
-          // Extract text-only parts from the last user query for query-conditioned compression
-          let lastQuery = '';
-          for (let i = recentMessages.length - 1; i >= 0; i--) {
-            const message = recentMessages[i];
-            if (message instanceof HumanMessage) {
-              lastQuery = extractTextFromContent(message.content);
-              break;
-            }
-          }
-
-          // Offload evicted messages to unified transcript
-          const transcriptFilePath = `.tau/transcripts/${chatId}.jsonl`;
-          try {
-            const backend = rpcBackendFactory.create(chatId, 'compaction-offload');
-            const timestamp = new Date().toISOString();
-            const lines = serializeEvictedMessages(evictedMessages, timestamp);
-
-            if (lines.length > 0) {
-              await backend.append(transcriptFilePath, lines.join('\n') + '\n');
-            }
-          } catch {
-            // Non-blocking: continue even if offloading fails
-          }
-
-          try {
-            const { compactedMessages, stats } = await compactionService.compact({
-              messages: evictedMessages,
-              query: lastQuery,
+            recordCompactionDecision({
+              metricsService: options.metricsService,
+              decision: postTruncateDecision,
+              modelId,
+              providerName,
+              status: GenAiContextCompactionStatus.SKIPPED,
             });
+          } else {
+            const compactionId = generatePrefixedId(idPrefix.data);
 
-            processedMessages = [...addContinuityInstructions(compactedMessages), ...recentMessages];
-            compactionHappened = true;
+            try {
+              const { compactedMessages, stats } = await options.compactionService.compact({
+                messages: evictedMessages,
+                query: currentUserQuery(recentMessages),
+              });
 
-            if (writer) {
-              writer({
-                type: 'context-compaction',
-                id: generatePrefixedId(idPrefix.data),
-                ...stats,
+              const compactedPayload = [
+                ...stampCompactedMessages(addContinuityInstructions(compactedMessages), compactionId),
+                ...recentMessages,
+              ];
+              processedMessages = await restoreRecentSkillContent({
+                store,
+                chatId,
+                messages: compactedPayload,
+              });
+              const transcriptFilePath = await appendCompactionTranscriptCommit({
+                chatId,
+                rpcBackendFactory: options.rpcBackendFactory,
+                compactionId,
+                status: GenAiContextCompactionStatus.COMPACTED,
+                triggerReason: postTruncateDecision.triggerReason,
+                evictedMessages,
+                messagesEvicted: stats.messagesEvicted,
+                tokensBeforeCompaction: stats.tokensBeforeCompaction,
+                tokensAfterCompaction: stats.tokensAfterCompaction,
+              });
+              rewriteOnSuccess = true;
+              activeCompactionId = compactionId;
+              activeCompactionStatus = GenAiContextCompactionStatus.COMPACTED;
+              mutableContext.skillContentRestoreNeeded = true;
+              mutableContext.lastCompactionId = compactionId;
+              mutableContext.lastCompactionStatus = activeCompactionStatus;
+
+              emitCompactionData({
+                writer,
+                compactionId,
+                status: activeCompactionStatus,
+                triggerReason: postTruncateDecision.triggerReason,
+                decision: postTruncateDecision,
+                stats,
                 transcriptFilePath,
               });
-            }
-
-            void appendTranscriptLine(chatRpcService, chatId, {
-              role: 'compaction',
-              messagesEvicted: stats.messagesEvicted,
-              tokensBeforeCompaction: stats.tokensBeforeCompaction,
-              tokensAfterCompaction: stats.tokensAfterCompaction,
-              timestamp: new Date().toISOString(),
-            });
-          } catch (compactionError) {
-            // If Morph API fails, fall back to keeping truncated args
-            processedMessages = [...truncateToolArgs(evictedMessages), ...recentMessages];
-            // Truncated args still leave the original ToolMessage tail intact,
-            // so dedup pointers remain valid; do NOT set compactionHappened.
-            const errorMessage =
-              compactionError instanceof Error ? compactionError.message : 'Unknown compaction error';
-            if (writer) {
-              writer({
-                type: 'context-compaction',
-                id: generatePrefixedId(idPrefix.data),
-                tokensBeforeCompaction: estimatedTokens,
-                tokensAfterCompaction: estimatedTokens,
-                compressionRatio: 1,
-                messagesEvicted: 0,
-                transcriptFilePath: null,
+              recordCompactionDecision({
+                metricsService: options.metricsService,
+                decision: postTruncateDecision,
+                modelId,
+                providerName,
+                status: activeCompactionStatus,
               });
+            } catch (compactionError) {
+              processedMessages = [...truncateToolArgs(evictedMessages), ...recentMessages];
+              activeCompactionId = compactionId;
+              activeCompactionStatus = GenAiContextCompactionStatus.FAILED;
+              mutableContext.lastCompactionId = compactionId;
+              mutableContext.lastCompactionStatus = activeCompactionStatus;
+
+              const errorMessage =
+                compactionError instanceof Error ? compactionError.message : 'Unknown compaction error';
+              const fallbackStats = compactionStatsFromBudget({
+                beforeTokens: postTruncateDecision.estimatedInputTokens,
+                afterTokens: postTruncateDecision.estimatedInputTokens,
+                messagesEvicted: 0,
+              });
+              emitCompactionData({
+                writer,
+                compactionId,
+                status: activeCompactionStatus,
+                triggerReason: postTruncateDecision.triggerReason,
+                decision: postTruncateDecision,
+                stats: fallbackStats,
+                transcriptFilePath: undefined,
+              });
+              recordCompactionDecision({
+                metricsService: options.metricsService,
+                decision: postTruncateDecision,
+                modelId,
+                providerName,
+                status: activeCompactionStatus,
+              });
+              console.warn(`Morph compaction failed, using truncated fallback: ${errorMessage}`);
             }
-            // Log but don't throw — let the model call proceed with truncated messages
-            console.warn(`Morph compaction failed, using truncated fallback: ${errorMessage}`);
           }
+        } else {
+          recordCompactionDecision({
+            metricsService: options.metricsService,
+            decision: postTruncateDecision,
+            modelId,
+            providerName,
+            status: GenAiContextCompactionStatus.SKIPPED,
+          });
         }
+      } else {
+        recordCompactionDecision({
+          metricsService: options.metricsService,
+          decision: budgetDecision,
+          modelId,
+          providerName,
+          status: GenAiContextCompactionStatus.SKIPPED,
+        });
       }
 
       processedMessages = stripExcessMedia(processedMessages);
@@ -376,27 +663,109 @@ export const createCompactionMiddleware = (
           ...request,
           messages: processedMessages,
         });
-        if (compactionHappened) {
+        recordObservedUsageFromResponse({
+          tokenBudgetService: options.tokenBudgetService,
+          modelId,
+          providerId: options.providerId,
+          response,
+          decision: mutableContext.lastContextBudget,
+        });
+        if (rewriteOnSuccess && activeCompactionId && activeCompactionStatus) {
           await clearReadDedupForChat(store, chatId);
+          return new Command({
+            update: {
+              messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES }), ...processedMessages, response],
+            },
+          });
         }
         return response;
       } catch (error) {
-        // Tier 3: Emergency re-compaction on ContextOverflowError
         if (error instanceof ContextOverflowError) {
-          tokenEstimationMultiplier += CALIBRATION_INCREMENT;
+          options.tokenBudgetService.recordOverflow({ modelId, providerId: options.providerId });
 
           const emergencyKeep = Math.max(2, Math.floor(processedMessages.length * 0.05));
           const keep = findSafeCutoffPoint(processedMessages, emergencyKeep);
-          const emergencyMessages = stripImageBlocks(processedMessages.slice(processedMessages.length - keep));
+          const emergencyEvictedMessages = processedMessages.slice(0, processedMessages.length - keep);
+          const emergencyMessages = await restoreRecentSkillContent({
+            store,
+            chatId,
+            messages: stripImageBlocks(processedMessages.slice(processedMessages.length - keep)),
+          });
+          const compactionId = generatePrefixedId(idPrefix.data);
+          const emergencyDecision = options.tokenBudgetService.evaluateModelRequest({
+            request: { ...request, messages: emergencyMessages },
+            modelId,
+            providerId: options.providerId,
+            contextWindow,
+            previousUsageInputTokens,
+          });
+          const emergencyStats = compactionStatsFromBudget({
+            beforeTokens: budgetDecision.estimatedInputTokens,
+            afterTokens: emergencyDecision.estimatedInputTokens,
+            messagesEvicted: emergencyEvictedMessages.length,
+          });
 
-          // Emergency re-compaction also evicts ToolMessages, so the same
-          // dedup-pointer reset rule applies.
+          mutableContext.skillContentRestoreNeeded = true;
+          mutableContext.lastCompactionId = compactionId;
+          let overflowCommitSucceeded = false;
+          let transcriptFilePath: string | undefined;
+          let overflowStatus: ContextCompactionStatus;
+          try {
+            transcriptFilePath = await appendCompactionTranscriptCommit({
+              chatId,
+              rpcBackendFactory: options.rpcBackendFactory,
+              compactionId,
+              status: GenAiContextCompactionStatus.OVERFLOW_RETRY_SUCCEEDED,
+              triggerReason: GenAiContextBudgetTriggerReason.OVERFLOW,
+              evictedMessages: emergencyEvictedMessages,
+              messagesEvicted: emergencyStats.messagesEvicted,
+              tokensBeforeCompaction: emergencyStats.tokensBeforeCompaction,
+              tokensAfterCompaction: emergencyStats.tokensAfterCompaction,
+            });
+            overflowCommitSucceeded = true;
+            overflowStatus = GenAiContextCompactionStatus.OVERFLOW_RETRY_SUCCEEDED;
+          } catch {
+            overflowStatus = GenAiContextCompactionStatus.FAILED;
+          }
+          mutableContext.lastCompactionStatus = overflowStatus;
+          emitCompactionData({
+            writer,
+            compactionId,
+            status: overflowStatus,
+            triggerReason: GenAiContextBudgetTriggerReason.OVERFLOW,
+            decision: budgetDecision,
+            stats: emergencyStats,
+            transcriptFilePath,
+          });
+          recordCompactionDecision({
+            metricsService: options.metricsService,
+            decision: budgetDecision,
+            modelId,
+            providerName,
+            status: overflowStatus,
+            triggerReason: GenAiContextBudgetTriggerReason.OVERFLOW,
+          });
+
           const emergencyResponse = await handler({
             ...request,
             messages: emergencyMessages,
           });
+          recordObservedUsageFromResponse({
+            tokenBudgetService: options.tokenBudgetService,
+            modelId,
+            providerId: options.providerId,
+            response: emergencyResponse,
+            decision: budgetDecision,
+          });
+          if (!overflowCommitSucceeded) {
+            return emergencyResponse;
+          }
           await clearReadDedupForChat(store, chatId);
-          return emergencyResponse;
+          return new Command({
+            update: {
+              messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES }), ...emergencyMessages, emergencyResponse],
+            },
+          });
         }
 
         throw error;

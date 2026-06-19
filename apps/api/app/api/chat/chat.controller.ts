@@ -1,13 +1,13 @@
 import { Body, Controller, Logger, Post, Res, UseFilters, UseGuards } from '@nestjs/common';
-import { toBaseMessages, toUIMessageStream } from '@ai-sdk/langchain';
+import { toUIMessageStream } from '@ai-sdk/langchain';
 import { convertToModelMessages, createUIMessageStreamResponse } from 'ai';
 import type { UIMessageChunk } from 'ai';
 import type { FastifyReply } from 'fastify';
-import type { MyUIMessage, ToolSelection, ChatSnapshot, ContextPayload } from '@taucad/chat';
+import type { AIMessageChunk, BaseMessage } from '@langchain/core/messages';
+import type { ToolSelection, ChatSnapshot, ContextPayload } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
 import type { KernelProvider } from '@taucad/runtime';
 import { ChatService } from '#api/chat/chat.service.js';
-import { CheckpointerService } from '#api/chat/checkpointer.service.js';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 import { ModelService } from '#api/models/model.service.js';
 import { FileEditService } from '#api/file-edit/file-edit.service.js';
@@ -15,7 +15,7 @@ import { GeometryAnalysisService } from '#api/analysis/geometry-analysis.service
 import { AuthGuard } from '#auth/auth.guard.js';
 import { CreateChatDto } from '#api/chat/chat.dto.js';
 import { sendSimpleModelStream } from '#api/chat/utils/simple-model-stream.js';
-import { injectSnapshotContext } from '#api/chat/utils/inject-snapshot-context.js';
+import { buildSnapshotContextText } from '#api/chat/utils/snapshot-context.js';
 import { createStaticToolTransform } from '#api/chat/utils/static-tool-transform.js';
 import { createErrorTransform } from '#api/chat/utils/error-transform.js';
 import { createToolOutputTransform } from '#api/chat/utils/tool-output-transform.js';
@@ -23,6 +23,7 @@ import { createNewlineTrimTransform } from '#api/chat/utils/newline-trim-transfo
 import { createReasoningTimingTransform } from '#api/chat/utils/reasoning-timing-transform.js';
 import { createLatexDelimiterTransform } from '#api/chat/utils/latex-delimiter-transform.js';
 import { createTauEagerToolUiTransform } from '#api/chat/utils/tau-eager-tool-ui-transform.js';
+import { assertSupportedApprovalReplay } from '#api/chat/utils/assert-supported-approval-replay.js';
 import { EagerToolDispatchHandler } from '#api/chat/eager-dispatch/eager-tool-dispatch.handler.js';
 import { ChatExceptionFilter } from '#api/chat/chat-exception.filter.js';
 import { ChatAbortError, isChatAbortError, registerChatAbort } from '#api/chat/utils/chat-abort.js';
@@ -31,9 +32,14 @@ import { Span } from '#telemetry/tracer.service.js';
 import { AttributeKey } from '@taucad/telemetry';
 import { TtftCallbackHandler } from '#api/chat/middleware/ttft-callback.handler.js';
 import { validateImageParts } from '#api/chat/utils/validate-image-parts.js';
-import { mergeCheckpointTail } from '#api/chat/utils/merge-checkpoint-tail.js';
+import { logProviderStreamErrors } from '#api/chat/utils/provider-stream-error-log.js';
+import { toBaseMessagesWithIds } from '#api/chat/utils/to-base-messages-with-ids.js';
+import { reconcileThreadMessages } from '#api/chat/utils/reconcile-thread-messages.js';
+import type { ChatGraphStateApi, LangGraphRunnableConfig } from '#api/chat/utils/reconcile-thread-messages.js';
+import { ProviderRequestRecorder } from '#api/chat/utils/provider-request-recorder.js';
+import { createTauInternalHumanMessage } from '#api/chat/utils/tau-internal-message.js';
 
-type LangChainMessages = Awaited<ReturnType<typeof toBaseMessages>>;
+type LangChainMessages = Awaited<ReturnType<typeof toBaseMessagesWithIds>>;
 
 type ChatRequestConfig = {
   modelId: string;
@@ -60,7 +66,7 @@ export class ChatController {
     private readonly fileEditService: FileEditService,
     private readonly geometryAnalysisService: GeometryAnalysisService,
     private readonly metricsService: MetricsService,
-    private readonly checkpointerService: CheckpointerService,
+    private readonly providerRequestRecorder: ProviderRequestRecorder,
   ) {}
 
   @Post()
@@ -81,13 +87,13 @@ export class ChatController {
       }
       case 'cad': {
         const { agent } = body;
-        const langchainMessages = await this.prepareMessages(body.id, body.messages, agent.snapshot);
 
         return this.streamAgentResponse({
           chatId: body.id,
-          messages: langchainMessages,
+          uiMessages: body.messages,
           modelId: agent.model,
           kernel: agent.kernel,
+          snapshot: agent.snapshot,
           mode: agent.mode,
           tools: { choice: agent.toolChoice, testingEnabled: agent.testingEnabled },
           contextPayload: agent.contextPayload,
@@ -104,15 +110,16 @@ export class ChatController {
   @Span()
   private async streamAgentResponse(options: {
     chatId: string;
-    messages: LangChainMessages;
+    uiMessages: CreateChatDto['messages'];
     modelId: string;
     kernel: KernelProvider;
+    snapshot: ChatSnapshot | undefined;
     mode: ChatMode;
     tools: ChatRequestConfig['tools'];
     contextPayload: ContextPayload | undefined;
     response: FastifyReply;
   }): Promise<void> {
-    const { chatId, messages, modelId, kernel, mode, tools, contextPayload, response } = options;
+    const { chatId, uiMessages, modelId, kernel, snapshot, mode, tools, contextPayload, response } = options;
 
     // Abort the request if the client disconnects.
     // Listen on response.raw (ServerResponse) — for SSE, the response stream
@@ -162,20 +169,38 @@ export class ChatController {
       });
 
       const ttftHandler = new TtftCallbackHandler(this.metricsService, this.modelService, modelId);
+      const providerId = this.modelService.getProviderId(modelId);
+      const runnableConfig: LangGraphRunnableConfig = {
+        configurable: {
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- LangGraph API requires snake_case
+          thread_id: chatId,
+          chatRpcService: this.chatRpcService,
+          fileEditService: this.fileEditService,
+          geometryAnalysisService: this.geometryAnalysisService,
+        },
+      };
+      const clientMessages = await this.prepareClientMessages(uiMessages);
+      const reconciled = await reconcileThreadMessages({
+        graph: agent.graph as unknown as ChatGraphStateApi,
+        runnableConfig,
+        clientMessages,
+      });
+      const snapshotContextMessage = this.createSnapshotContextMessage({ chatId, snapshot });
+      const streamInputMessages = snapshotContextMessage
+        ? [...reconciled.streamInputMessages, snapshotContextMessage]
+        : reconciled.streamInputMessages;
 
       const stream = await agent.graph.stream(
-        { messages },
+        { messages: streamInputMessages },
         {
+          ...reconciled.runnableConfig,
           configurable: {
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- LangGraph API requires snake_case
-            thread_id: chatId,
-            chatRpcService: this.chatRpcService,
-            fileEditService: this.fileEditService,
-            geometryAnalysisService: this.geometryAnalysisService,
+            ...runnableConfig.configurable,
+            ...reconciled.runnableConfig.configurable,
           },
           signal: abortController.signal,
           streamMode: ['values', 'messages', 'custom'],
-          callbacks: [ttftHandler, eagerHandler],
+          callbacks: [ttftHandler, eagerHandler, this.providerRequestRecorder],
           context: {
             chatId,
             modelId,
@@ -192,7 +217,13 @@ export class ChatController {
       void response.header('x-vercel-ai-ui-message-stream', 'v1');
       void response.header('x-accel-buffering', 'no');
 
-      const uiMessageStream = toUIMessageStream(stream)
+      const loggedStream = logProviderStreamErrors({
+        abortSignal: abortController.signal,
+        context: { chatId, modelId, providerId },
+        logger: this.logger,
+        stream,
+      });
+      const uiMessageStream = toUIMessageStream(loggedStream as AsyncIterable<AIMessageChunk>)
         // Stamp reasoning-start / reasoning-end with server-side timestamps
         // BEFORE any other transform that could mutate or wrap chunks. The
         // hot path (reasoning-delta) is a synchronous identity pass-through
@@ -217,9 +248,9 @@ export class ChatController {
 
       throw new Error('Failed to create UI message stream response');
     } catch (error) {
-      // When the client disconnects, we abort with a branded ChatAbortError
-      // reason. Check signal.reason for our brand — this is a definitive match
-      // regardless of what error LangGraph/node-fetch actually throws.
+      // When the client disconnects, we abort with a branded, abort-shaped
+      // ChatAbortError reason. The private brand identifies Tau's intentional
+      // cancellation even though the public error name is the platform shape.
       if (abortController.signal.aborted && isChatAbortError(abortController.signal.reason)) {
         this.logger.debug(`Chat ${chatId} was cancelled by client`);
         return;
@@ -232,51 +263,39 @@ export class ChatController {
   }
 
   /**
-   * Injects snapshot context into messages and converts to LangChain format.
+   * Converts client-visible UI messages to LangChain messages while preserving
+   * stable UI ids for LangGraph's message reducer.
    */
-  private async prepareMessages(
-    chatId: string,
-    messages: CreateChatDto['messages'],
-    snapshot: ChatSnapshot | undefined,
-  ): Promise<LangChainMessages> {
+  private async prepareClientMessages(messages: CreateChatDto['messages']): Promise<LangChainMessages> {
     validateImageParts(messages);
+    assertSupportedApprovalReplay(messages);
+    return toBaseMessagesWithIds(messages);
+  }
 
-    const messagesWithContext = snapshot ? injectSnapshotContext(messages, snapshot) : messages;
-
-    if (snapshot) {
-      const contextTypes = [
-        snapshot.fileTree ? 'fileTree' : undefined,
-        snapshot.activeFile ? 'activeFile' : undefined,
-        snapshot.openFiles ? 'openFiles' : undefined,
-      ]
-        .filter(Boolean)
-        .join(', ');
-      this.logger.debug(`Injecting snapshot context into last message: ${contextTypes}`);
+  private createSnapshotContextMessage(input: {
+    readonly chatId: string;
+    readonly snapshot: ChatSnapshot | undefined;
+  }): BaseMessage | undefined {
+    const content = input.snapshot ? buildSnapshotContextText(input.snapshot) : undefined;
+    if (!content) {
+      return undefined;
     }
 
-    let mergedMessages = messagesWithContext as unknown as MyUIMessage[];
+    const contextTypes = [
+      input.snapshot?.fileTree ? 'fileTree' : undefined,
+      input.snapshot?.activeFile ? 'activeFile' : undefined,
+      input.snapshot?.openFiles ? 'openFiles' : undefined,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    this.logger.debug(`Adding snapshot context message: ${contextTypes}`);
 
-    try {
-      const tuple = await this.checkpointerService.getCheckpointer().getTuple({
-        configurable: {
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- LangGraph API requires snake_case
-          thread_id: chatId,
-        },
-      });
-
-      if (tuple) {
-        const channelValues = tuple.checkpoint.channel_values as { messages?: unknown[] } | undefined;
-        mergedMessages = mergeCheckpointTail({
-          requestMessages: mergedMessages,
-          checkpointMessages: channelValues?.messages,
-        });
-      }
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Checkpoint merge skipped for thread ${chatId}: ${reason}`);
-    }
-
-    return toBaseMessages(mergedMessages);
+    return createTauInternalHumanMessage({
+      content,
+      id: `tau:snapshot-context:${input.chatId}`,
+      kind: 'snapshot-context',
+      metadata: { anchorId: input.chatId, pruning: 'replace-by-id' },
+    });
   }
 
   private createSseEventCountTransform(): TransformStream<UIMessageChunk, UIMessageChunk> {

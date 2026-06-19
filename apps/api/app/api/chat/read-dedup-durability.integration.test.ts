@@ -90,6 +90,8 @@ const buildChatRpcService = (modifiedAt: string): ChatRpcConfigurable['chatRpcSe
   chatRpcService.sendRpcRequest.mockResolvedValue({
     success: true,
     content: 'export const value = 1;',
+    size: new TextEncoder().encode('export const value = 1;').byteLength,
+    contentKind: 'text' as const,
     totalLines: 1,
     startLine: 1,
     modifiedAt,

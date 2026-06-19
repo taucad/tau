@@ -12,6 +12,8 @@
 
 import { createOpenSCAD } from 'openscad-wasm-prebuilt';
 import type { OpenSCAD } from 'openscad-wasm-prebuilt';
+import createManifoldModule from 'manifold-3d';
+import type { ManifoldToplevel } from 'manifold-3d';
 import { jsonDefault } from 'json-schema-default';
 import type { z } from 'zod';
 import type { JSONSchema7 } from '@taucad/json-schema';
@@ -19,9 +21,15 @@ import type { GeometryGltf, LogLevel } from '@taucad/types';
 import { logLevels, createExportFile } from '@taucad/types/constants';
 import { asBuffer } from '@taucad/utils/file';
 import { joinPath, joinRelativePath } from '@taucad/utils/path';
-import type { KernelIssue, KernelFileSystem, KernelPluginFactory, RuntimeLogger } from '@taucad/runtime/kernel';
+import type {
+  KernelIssue,
+  KernelFileSystem,
+  KernelPluginFactory,
+  KernelRuntime,
+  RuntimeLogger,
+} from '@taucad/runtime/kernel';
 import {
-  convertOffToGltf,
+  convertOffToManifoldGltf,
   createKernelError,
   createKernelSuccess,
   defineKernel,
@@ -43,6 +51,7 @@ const geistBoldUrl = new URL('fonts/Geist-Bold.ttf', import.meta.url).href;
 
 type OpenScadContext = {
   fontCache: Map<string, Uint8Array<ArrayBuffer>>;
+  manifoldModulePromise?: Promise<ManifoldToplevel>;
   lastFilePath?: string;
   lastBasePath?: string;
   lastParameters?: Record<string, unknown>;
@@ -205,6 +214,32 @@ async function createInstance(options: {
   });
 
   return instance.getInstance();
+}
+
+async function getManifoldModule(
+  context: OpenScadContext,
+  runtime: Pick<KernelRuntime, 'logger' | 'tracer'>,
+): Promise<ManifoldToplevel> {
+  if (context.manifoldModulePromise) {
+    return context.manifoldModulePromise;
+  }
+
+  const span = runtime.tracer.startSpan('openscad.manifold-init');
+  context.manifoldModulePromise = (async () => {
+    try {
+      const module = await createManifoldModule();
+      module.setup();
+      return module;
+    } catch (error) {
+      context.manifoldModulePromise = undefined;
+      runtime.logger.error('Failed to initialize Manifold canonicalizer', { data: error });
+      throw error;
+    } finally {
+      span.end();
+    }
+  })();
+
+  return context.manifoldModulePromise;
 }
 
 // =============================================================================
@@ -686,10 +721,12 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
       const convertSpan = tracer.startSpan('openscad.convert-geometry', {
         phase: 'computingGeometry',
       });
-      const gltfBlob = await convertOffToGltf(offData, {
+      const manifoldModule = await getManifoldModule(context, { logger, tracer });
+      const gltfBlob = await convertOffToManifoldGltf(offData, {
         format: 'glb',
         coordinateSystem: 'y-up',
         unit: { length: 'meter' },
+        manifoldModule,
       });
       convertSpan.end();
 
@@ -752,15 +789,26 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
     }
 
     const { coordinateSystem, unit } = options;
+    const manifoldModule = await getManifoldModule(context, runtime);
 
     switch (format) {
       case 'glb': {
-        const glbData = await convertOffToGltf(offData, { format: 'glb', coordinateSystem, unit });
+        const glbData = await convertOffToManifoldGltf(offData, {
+          format: 'glb',
+          coordinateSystem,
+          unit,
+          manifoldModule,
+        });
         return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(glbData))]);
       }
 
       case 'gltf': {
-        const gltfData = await convertOffToGltf(offData, { format: 'gltf', coordinateSystem, unit });
+        const gltfData = await convertOffToManifoldGltf(offData, {
+          format: 'gltf',
+          coordinateSystem,
+          unit,
+          manifoldModule,
+        });
         return createKernelSuccess([createExportFile('gltf', 'model.gltf', asBuffer(gltfData))]);
       }
 
@@ -775,6 +823,17 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
         ]);
       }
     }
+  },
+
+  serializeNativeHandle({ nativeHandle }) {
+    return nativeHandle;
+  },
+
+  deserializeNativeHandle({ serializedNativeHandle }) {
+    if (typeof serializedNativeHandle !== 'string') {
+      throw new TypeError('OpenSCAD native-handle snapshot must be an OFF string.');
+    }
+    return serializedNativeHandle;
   },
 });
 

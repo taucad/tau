@@ -73,6 +73,22 @@ async function createGeometryAndGetOffData(
 // Create geometry test helpers instance for geometry assertions
 const geometryHelpers = createGeometryTestHelpers();
 
+const readGltfNodeMeshNames = async (
+  glbBytes: Uint8Array<ArrayBuffer>,
+): Promise<{ nodeNames: string[]; meshNames: string[] }> => {
+  const document = await new NodeIO().readBinary(glbBytes);
+  return {
+    nodeNames: document
+      .getRoot()
+      .listNodes()
+      .map((node) => node.getName()),
+    meshNames: document
+      .getRoot()
+      .listMeshes()
+      .map((mesh) => mesh.getName()),
+  };
+};
+
 /**
  * Parse OFF face lines and count color components.
  */
@@ -113,6 +129,24 @@ describe('OpenSCAD Kernel', () => {
   it('should expose the named kernel factory without a module default export', () => {
     expect(openscadKernelModule.openscad).toEqual(expect.any(Function));
     expect(Object.hasOwn(openscadKernelModule, 'default')).toBe(false);
+  });
+
+  it('should serialize OFF native handles and restore them for export', async () => {
+    const worker = await createWorker({ 'cube.scad': 'cube([10, 10, 10]);' });
+    const result = await worker.createGeometry({
+      file: createGeometryFile('cube.scad'),
+      parameters: {},
+    });
+    const offData = (worker as unknown as { nativeHandle?: unknown }).nativeHandle;
+
+    expect(result.success).toBe(true);
+    expect(offData).toEqual(expect.any(String));
+    expect(result.serializedNativeHandle).toEqual(offData);
+
+    (worker as unknown as { nativeHandle?: unknown }).nativeHandle = undefined;
+    const exportResult = await worker.exportGeometry('glb');
+
+    expect(exportResult.success).toBe(true);
   });
 
   describe('getParameters', () => {
@@ -975,6 +1009,11 @@ describe('OpenSCAD Kernel', () => {
         await geometryHelpers.expectValidGltf(result);
         await geometryHelpers.expectMeshCount(result, 1);
         await geometryHelpers.expectBoundingBoxSize(result, [0.02, 0.01, 0.015], 0.001);
+        const glbData = extractGltfFromResult(result);
+        expect(glbData).toBeDefined();
+        const { nodeNames, meshNames } = await readGltfNodeMeshNames(glbData!);
+        expect(nodeNames).toEqual(['Shape 1']);
+        expect(meshNames).toEqual(['Shape 1']);
       });
 
       it('should produce valid GLTF for a sphere with correct dimensions', async () => {
@@ -2291,6 +2330,9 @@ describe('Export', () => {
     assertSuccess(exportResult);
     expect(exportResult.data.length).toBeGreaterThan(0);
     expect(exportResult.data[0]?.bytes).toBeInstanceOf(Uint8Array);
+    const { nodeNames, meshNames } = await readGltfNodeMeshNames(exportResult.data[0]!.bytes);
+    expect(nodeNames).toEqual(['Shape 1']);
+    expect(meshNames).toEqual(['Shape 1']);
   });
 
   it('should export GLTF successfully', async () => {

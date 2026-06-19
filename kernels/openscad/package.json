@@ -9,9 +9,8 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "kernels/openscad"
   },
-  "main": "./dist/cjs/index.cjs",
-  "types": "./dist/cjs/index.d.cts",
-  "module": "./dist/esm/index.js",
+  "main": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
   "files": [
     "dist",
     "README.md",
@@ -34,28 +33,19 @@
     "access": "public",
     "exports": {
       ".": {
-        "require": {
-          "types": "./dist/cjs/index.d.cts",
-          "default": "./dist/cjs/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/index.d.ts",
-          "default": "./dist/esm/index.js"
-        }
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "default": "./dist/esm/index.js"
       },
       "./kernel": {
-        "require": {
-          "types": "./dist/cjs/openscad.kernel.d.cts",
-          "default": "./dist/cjs/openscad.kernel.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/openscad.kernel.d.ts",
-          "default": "./dist/esm/openscad.kernel.js"
-        }
+        "types": "./dist/esm/openscad.kernel.d.ts",
+        "import": "./dist/esm/openscad.kernel.js",
+        "default": "./dist/esm/openscad.kernel.js"
       }
     }
   },
   "imports": {
+    "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
   "dependencies": {
@@ -64,6 +54,7 @@
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "json-schema-default": "catalog:",
+    "manifold-3d": "catalog:",
     "openscad-wasm-prebuilt": "catalog:"
   },
   "devDependencies": {

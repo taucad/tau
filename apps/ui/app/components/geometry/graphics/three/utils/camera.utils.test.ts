@@ -10,6 +10,7 @@ import {
   calculateFovDistanceCompensation,
   tanEpsilon,
 } from '#components/geometry/graphics/three/utils/math.utils.js';
+import type { CameraControlSurface } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,54 @@ function defaultPerspective(
     farPlaneRadiusMultiplier: 5,
     ...overrides,
   };
+}
+
+class TestCameraControls {
+  public enabled = true;
+
+  public readonly target: THREE.Vector3;
+
+  public readonly setLookAt = vi.fn((...args: [number, number, number, number, number, number, boolean?]) => {
+    const [positionX, positionY, positionZ, targetX, targetY, targetZ] = args;
+    this.camera.position.set(positionX, positionY, positionZ);
+    this.target.set(targetX, targetY, targetZ);
+    this.distance = this.camera.position.distanceTo(this.target);
+    this.camera.lookAt(this.target);
+  });
+
+  // oxlint-disable-next-line @typescript-eslint/parameter-properties -- `erasableSyntaxOnly` forbids constructor parameter properties in Vitest specs
+  private readonly camera: THREE.PerspectiveCamera;
+
+  private distance: number;
+
+  public constructor(camera: THREE.PerspectiveCamera, target = new THREE.Vector3(0, 0, 0)) {
+    this.camera = camera;
+    this.target = target.clone();
+    this.distance = camera.position.distanceTo(this.target);
+  }
+
+  public getTarget(target: THREE.Vector3): THREE.Vector3 {
+    return target.copy(this.target);
+  }
+
+  public getDistance(): number {
+    return this.distance;
+  }
+
+  public update(): void {
+    const direction = this.camera.position.clone().sub(this.target);
+    if (direction.lengthSq() < tanEpsilon) {
+      return;
+    }
+
+    this.camera.position.copy(this.target).add(direction.normalize().multiplyScalar(this.distance));
+    this.camera.lookAt(this.target);
+  }
+}
+
+function projectedScaleAtTarget(camera: THREE.PerspectiveCamera, target: THREE.Vector3): number {
+  const distance = camera.position.distanceTo(target);
+  return camera.zoom / (distance * Math.tan(THREE.MathUtils.DEG2RAD * camera.fov * 0.5));
 }
 
 // ── computeViewFittingZoom ──────────────────────────────────────────────────
@@ -357,6 +406,54 @@ describe('updateCameraFov', () => {
     expect(camera.position.length()).toBeCloseTo(expectedDistance, 5);
   });
 
+  it('should maintain projected size after CameraControls updates the next frame', () => {
+    const camera = createTestCamera(54, 100);
+    const target = new THREE.Vector3(0, 0, 0);
+    const controls = new TestCameraControls(camera, target);
+    const invalidate = vi.fn();
+    const scaleBefore = projectedScaleAtTarget(camera, target);
+
+    updateCameraFov({
+      camera,
+      cameraFovAngle: 2,
+      invalidate,
+      controls,
+    });
+    controls.update();
+
+    expect(projectedScaleAtTarget(camera, target)).toBeCloseTo(scaleBefore, 8);
+  });
+
+  it('should compensate distance relative to an off-origin CameraControls target', () => {
+    const target = new THREE.Vector3(100, 50, -20);
+    const camera = createTestCamera(54, 100);
+    camera.position.copy(target).add(new THREE.Vector3(0, 0, 100));
+    camera.lookAt(target);
+    const controls = new TestCameraControls(camera, target);
+    const invalidate = vi.fn();
+    const oldDistance = camera.position.distanceTo(target);
+    const oldFov = camera.fov;
+    const directionBefore = camera.position.clone().sub(target).normalize();
+    const scaleBefore = projectedScaleAtTarget(camera, target);
+
+    updateCameraFov({
+      camera,
+      cameraFovAngle: 30,
+      invalidate,
+      controls,
+    });
+
+    const expectedDistance = calculateFovDistanceCompensation(oldFov, camera.fov, oldDistance);
+    const directionAfter = camera.position.clone().sub(target).normalize();
+
+    expect(camera.position.distanceTo(target)).toBeCloseTo(expectedDistance, 5);
+    expect(directionAfter.x).toBeCloseTo(directionBefore.x, 10);
+    expect(directionAfter.y).toBeCloseTo(directionBefore.y, 10);
+    expect(directionAfter.z).toBeCloseTo(directionBefore.z, 10);
+    expect(projectedScaleAtTarget(camera, target)).toBeCloseTo(scaleBefore, 8);
+    expect(camera.position.length()).not.toBeCloseTo(expectedDistance, 5);
+  });
+
   it('should preserve camera direction after FOV change', () => {
     const camera = createTestCamera(54, 10);
     camera.position.set(3, 4, 5);
@@ -524,6 +621,40 @@ describe('resetCamera', () => {
     expect(controls.target.y).toBeCloseTo(center.y);
     expect(controls.target.z).toBeCloseTo(center.z);
     expect(controls.update).toHaveBeenCalledOnce();
+  });
+
+  it('should sync CameraControls up before setLookAt during reset', () => {
+    const camera = createTestCamera();
+    camera.up.set(1, 0, 0);
+    const center = new THREE.Vector3(10, 20, 30);
+    const invalidate = vi.fn();
+    const setSceneRadius = vi.fn();
+    const calls: string[] = [];
+    const controls = {
+      getTarget: (target: THREE.Vector3): THREE.Vector3 => target.copy(center),
+      updateCameraUp: vi.fn(() => {
+        calls.push('updateCameraUp');
+      }),
+      setLookAt: vi.fn(() => {
+        calls.push('setLookAt');
+      }),
+    } satisfies CameraControlSurface;
+
+    resetCamera({
+      camera,
+      geometryRadius: 100,
+      geometryCenter: center,
+      rotation: defaultRotation,
+      perspective: defaultPerspective(),
+      setSceneRadius,
+      invalidate,
+      cameraFovAngle: 60,
+      controls,
+    });
+
+    expect(controls.updateCameraUp).toHaveBeenCalledOnce();
+    expect(controls.setLookAt).toHaveBeenCalledOnce();
+    expect(calls).toEqual(['updateCameraUp', 'setLookAt']);
   });
 
   it('should increase distance for portrait viewport aspect', () => {

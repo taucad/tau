@@ -3,9 +3,11 @@ import { createPortal } from 'react-dom';
 import { Extension } from '@tiptap/core';
 import { Suggestion } from '@tiptap/suggestion';
 import { PluginKey } from '@tiptap/pm/state';
-import { Zap, BookOpen } from 'lucide-react';
+import type { EditorState } from '@tiptap/pm/state';
+import { Blocks, Zap } from 'lucide-react';
 import { cn } from '#utils/ui.utils.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
+import { menuContentVariants, menuItemVariants } from '#components/ui/menu.variants.js';
 import type {
   SlashCommandItem,
   SuggestionPopupState,
@@ -14,59 +16,7 @@ import type {
 
 const slashCommandPluginKey = new PluginKey('slashCommand');
 
-export const defaultSkills: SlashCommandItem[] = [
-  {
-    id: 'create-policy',
-    label: '/create-policy',
-    description: 'Create or update policy documents',
-    fullDescription:
-      'Create or update policy documents in docs/policy/. Use when writing a new policy, updating an existing policy, reviewing policy structure, or when the user mentions policy docs, coding standards, or architectural decisions that should be documented as policy.',
-    group: 'Skills',
-  },
-  {
-    id: 'create-research',
-    label: '/create-research',
-    description: 'Create or update research documents',
-    fullDescription:
-      'Create or update research documents in docs/research/. Use when investigating a bug root cause, auditing code or configuration, comparing libraries or approaches, designing architecture, evaluating migration paths, or when the user mentions research, investigation, audit, analysis, or deep dive.',
-    group: 'Skills',
-  },
-  {
-    id: 'create-skill',
-    label: '/create-skill',
-    description: 'Create a new agent skill',
-    fullDescription:
-      'Guides users through creating effective Agent Skills for Cursor. Use when you want to create, write, or author a new skill, or asks about skill structure, best practices, or SKILL.md format.',
-    group: 'Skills',
-  },
-  {
-    id: 'repos',
-    label: '/repos',
-    description: 'Investigate dependency source code',
-    fullDescription:
-      'Investigate dependency source code and manage external repos via repos.yaml. Use when investigating how a library works internally, exploring dependency source, reading upstream code, debugging third-party behavior, adding a new dependency to track, or contributing to upstream forks.',
-    group: 'Skills',
-  },
-  {
-    id: 'adding-tools',
-    label: '/adding-tools',
-    description: 'Add new tools to the AI chat',
-    fullDescription:
-      'Add new tools to the AI chat system. Use when adding a chat tool, creating tool schemas, wiring backend tool handlers, or building tool UI components.',
-    group: 'Skills',
-  },
-  {
-    id: 'new-kernel',
-    label: '/new-kernel',
-    description: 'Add a new CAD kernel',
-    fullDescription:
-      'Add a new first-party CAD kernel to the @taucad/runtime plugin system. Use when adding a kernel, integrating a new CAD engine, implementing defineKernel, or wiring kernel factories, exports, presets, and UI catalog entries.',
-    group: 'Skills',
-  },
-];
-
-const defaultCommands: SlashCommandItem[] = [
-  { id: 'plan', label: '/plan', description: 'Switch to Plan mode', group: 'Commands' },
+export const defaultCommands: SlashCommandItem[] = [
   { id: 'compress', label: '/compress', description: 'Compress conversation context', group: 'Commands' },
 ];
 
@@ -75,6 +25,22 @@ export type SlashCommandOptions = {
   renderCallbacks: SuggestionRenderCallbacks<SlashCommandItem>;
   onCommand?: (item: SlashCommandItem) => void;
 };
+
+export function shouldAllowSlashCommandTrigger({
+  state,
+  range,
+}: {
+  readonly state: EditorState;
+  readonly range: { readonly from: number };
+}): boolean {
+  const $from = state.doc.resolve(range.from);
+  if ($from.parentOffset === 0) {
+    return true;
+  }
+
+  const previousCharacter = state.doc.textBetween(range.from - 1, range.from, '\n', '\0');
+  return /\s/.test(previousCharacter);
+}
 
 export const SlashCommand = Extension.create<SlashCommandOptions>({
   name: 'slashCommand',
@@ -94,7 +60,7 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
     const { getItems, renderCallbacks, onCommand } = this.options;
 
     const defaultGetItems = (query: string): SlashCommandItem[] => {
-      const all = [...defaultSkills, ...defaultCommands];
+      const all = [...defaultCommands];
       if (!query) {
         return all;
       }
@@ -111,7 +77,8 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
         editor: this.editor,
         char: '/',
         items: ({ query }) => itemsFunction(query),
-        startOfLine: true,
+        allowedPrefixes: null,
+        allow: ({ state, range }) => shouldAllowSlashCommandTrigger({ state, range }),
         command: ({ editor, range, props }) => {
           const item = props as SlashCommandItem;
           if (item.group === 'Commands') {
@@ -167,9 +134,16 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
 // --- Dropdown UI Component ---
 
 const groupIcons: Record<string, React.ComponentType<{ className?: string }>> = {
-  Skills: BookOpen,
+  Skills: Blocks,
   Commands: Zap,
 };
+
+function titleFromCommandId(commandId: string): string {
+  return commandId
+    .split('-')
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(' ');
+}
 
 function SkillItemButton({
   item,
@@ -191,11 +165,8 @@ function SkillItemButton({
     <button
       ref={buttonRef}
       type='button'
-      className={cn(
-        'flex w-full flex-col gap-0.5 rounded-sm px-2 py-1.5 text-left',
-        'hover:bg-accent hover:text-accent-foreground',
-        isSelected && 'bg-accent text-accent-foreground',
-      )}
+      data-selected={isSelected}
+      className={cn(menuItemVariants({ highlight: 'selected' }), 'h-7 w-full gap-2 px-2.25 text-left font-normal')}
       onClick={() => {
         onSelect(globalIndex);
       }}
@@ -203,8 +174,10 @@ function SkillItemButton({
         onHover(globalIndex);
       }}
     >
-      <span className='text-sm font-medium'>{item.label}</span>
-      <span className='text-xs text-muted-foreground'>{item.description}</span>
+      <Blocks className='size-3.5 shrink-0' />
+      <span className='shrink-0 text-foreground'>{item.title ?? titleFromCommandId(item.id)}</span>
+      <span className='min-w-0 flex-1 truncate text-muted-foreground'>{item.description}</span>
+      <span className='ml-2 shrink-0 text-muted-foreground'>{item.source ?? item.group}</span>
     </button>
   );
 
@@ -218,8 +191,8 @@ function SkillItemButton({
       <HoverCardContent side='right' align='start' sideOffset={12} alignOffset={-4} className='w-72'>
         <div className='space-y-2'>
           <div className='flex items-center gap-2'>
-            <BookOpen className='size-4 shrink-0 text-muted-foreground' />
-            <h4 className='text-sm font-semibold'>{item.label}</h4>
+            <Blocks className='size-4 shrink-0 text-muted-foreground' />
+            <h4 className='text-sm font-semibold'>{item.title ?? titleFromCommandId(item.id)}</h4>
           </div>
           <p className='text-sm text-muted-foreground'>{item.fullDescription}</p>
         </div>
@@ -305,7 +278,8 @@ export const SlashCommandDropdown = memo(function SlashCommandDropdown({
   return createPortal(
     <div
       className={cn(
-        'fixed z-50 max-h-64 w-72 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md',
+        menuContentVariants(),
+        'fixed max-h-64 w-[min(44rem,calc(100vw-2rem))] overflow-y-auto border scroll-shadows-y',
       )}
       style={{
         left: rect.left,
@@ -320,7 +294,7 @@ export const SlashCommandDropdown = memo(function SlashCommandDropdown({
           const GroupIcon = groupIcons[groupName] ?? Zap;
           return (
             <div key={groupName}>
-              <div className='flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-muted-foreground'>
+              <div className='flex items-center gap-1.5 px-2.25 py-1 text-xs font-medium text-muted-foreground'>
                 <GroupIcon className='size-3 shrink-0' />
                 {groupName}
               </div>

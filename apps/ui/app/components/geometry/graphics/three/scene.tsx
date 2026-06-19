@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
 import { Stage } from '#components/geometry/graphics/three/stage.js';
 import { Controls } from '#components/geometry/graphics/three/controls.js';
+import { ViewportGizmoInteractionLockProvider } from '#components/geometry/graphics/three/controls/viewport-gizmo-interaction-lock.js';
 import { UpDirectionHandler } from '#components/geometry/graphics/three/up-direction-handler.js';
 
 type SceneProperties = {
@@ -32,17 +33,19 @@ export function Scene({
   return (
     <>
       <UpDirectionHandler upDirection={upDirection} />
-      <Controls
-        enableGizmo={enableGizmo}
-        enableDamping={enableDamping}
-        enableZoom={enableZoom}
-        enablePan={enablePan}
-        zoomSpeed={zoomSpeed}
-        gizmoContainer={gizmoContainer}
-      />
-      <Stage stageOptions={stageOptions} enableCentering={enableCentering}>
-        {children}
-      </Stage>
+      <ViewportGizmoInteractionLockProvider>
+        <Controls
+          enableGizmo={enableGizmo}
+          enableDamping={enableDamping}
+          enableZoom={enableZoom}
+          enablePan={enablePan}
+          zoomSpeed={zoomSpeed}
+          gizmoContainer={gizmoContainer}
+        />
+        <Stage stageOptions={stageOptions} enableCentering={enableCentering}>
+          {children}
+        </Stage>
+      </ViewportGizmoInteractionLockProvider>
     </>
   );
 }

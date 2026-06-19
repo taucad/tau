@@ -9,9 +9,14 @@ icon: 'lucide:blocks text-blue'
 A multi-kernel CAD runtime for browser and Node.js. Run multiple CAD engines from a single, unified API with middleware support, automatic kernel selection, autonomous rendering, and Web Worker isolation.
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 
 const result = await client.export('step', {
   code: {
@@ -32,12 +37,18 @@ Or configure individual plugins for tree-shaking:
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { replicad } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient({
+const runtime = defineRuntime({
   kernels: [replicad()],
   bundlers: [esbuild()],
+});
+
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
 });
 ```
 

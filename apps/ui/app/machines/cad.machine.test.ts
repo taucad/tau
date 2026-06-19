@@ -2,17 +2,26 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
-import type { RuntimeClientOptions, KernelIssue, TelemetryEntry } from '@taucad/runtime';
+import type { KernelIssue, TelemetryEntry } from '@taucad/runtime';
 import { createMockRuntimeClient } from '@taucad/runtime/testing';
 import type { Geometry, GeometryFile } from '@taucad/types';
+import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import type { CadContext } from '#machines/cad.machine.js';
-import type { AppRuntimeClient, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
+import type { AppRuntimeClient, KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
 const noop = () => {
   /* No-op */
 };
+
+const createKernelOptionsFactory = (): LazyKernelOptionsFactory => async () => () =>
+  mock<ReturnType<KernelOptionsFactory>>({
+    config: {
+      tauApiUrl: 'https://api.test',
+      tauWebSocketUrl: 'wss://api.test',
+    },
+  });
 
 // ---------------------------------------------------------------------------
 // Factory helpers
@@ -27,7 +36,7 @@ function createTestActor(options?: {
   connectError?: Error;
   shouldInitializeKernelOnStart?: boolean;
 }) {
-  const mockClient = createMockRuntimeClient();
+  const mockClient = createMockRuntimeClient() as AppRuntimeClient;
   const cleanups: Array<() => void> = [];
 
   const connectWork =
@@ -48,7 +57,7 @@ function createTestActor(options?: {
     },
   });
 
-  const kernelOptionsFactory: LazyKernelOptionsFactory = async () => () => mock<RuntimeClientOptions>();
+  const kernelOptionsFactory = createKernelOptionsFactory();
 
   const actor = createActor(machine, {
     input: {
@@ -121,7 +130,7 @@ describe('cadMachine', () => {
 
     it('should buffer initializeModel during connecting and forward on connect', async () => {
       let resolveConnect!: () => void;
-      const mockClient = createMockRuntimeClient();
+      const mockClient = createMockRuntimeClient() as AppRuntimeClient;
 
       const { actor } = createTestActor({
         connectResult: async () =>
@@ -565,7 +574,7 @@ describe('cadMachine', () => {
     }
 
     it('should reconnect on setFile from error state', async () => {
-      const mockClient = createMockRuntimeClient();
+      const mockClient = createMockRuntimeClient() as AppRuntimeClient;
       let connectAttempt = 0;
 
       const { actor } = createTestActor({
@@ -591,7 +600,7 @@ describe('cadMachine', () => {
     });
 
     it('should reconnect on initializeModel from error state', async () => {
-      const mockClient = createMockRuntimeClient();
+      const mockClient = createMockRuntimeClient() as AppRuntimeClient;
       let connectAttempt = 0;
 
       const { actor } = createTestActor({
@@ -622,7 +631,7 @@ describe('cadMachine', () => {
     });
 
     it('should stay in error on setParameters and only update context', async () => {
-      const mockClient = createMockRuntimeClient();
+      const mockClient = createMockRuntimeClient() as AppRuntimeClient;
       let connectAttempt = 0;
 
       const { actor } = createTestActor({
@@ -740,7 +749,7 @@ describe('cadMachine', () => {
     });
 
     it('should handle export failure', async () => {
-      const mockClient = createMockRuntimeClient();
+      const mockClient = createMockRuntimeClient() as AppRuntimeClient;
       vi.mocked(mockClient.export).mockResolvedValue({
         success: false,
         issues: [{ message: 'Export failed', code: 'RUNTIME', type: 'runtime', severity: 'error' }],
@@ -764,7 +773,7 @@ describe('cadMachine', () => {
     });
 
     it('should handle export exception', async () => {
-      const mockClient = createMockRuntimeClient();
+      const mockClient = createMockRuntimeClient() as AppRuntimeClient;
       vi.mocked(mockClient.export).mockRejectedValue(new Error('Network error'));
 
       const { actor } = await startAndConnect({
@@ -796,7 +805,7 @@ describe('cadMachine', () => {
     it('should store event cleanups from connect result', async () => {
       const cleanup1 = vi.fn();
       const cleanup2 = vi.fn();
-      const mockClient = createMockRuntimeClient();
+      const mockClient = createMockRuntimeClient() as AppRuntimeClient;
 
       const { actor } = await startAndConnect({
         connectResult: async () => {
@@ -897,7 +906,7 @@ describe('cadMachine', () => {
     });
 
     it('should handle error recovery: error -> setFile -> reconnect -> idle -> rendering -> idle', async () => {
-      const mockClient = createMockRuntimeClient();
+      const mockClient = createMockRuntimeClient() as AppRuntimeClient;
 
       const { actor } = createTestActor({
         connectResult: async () => {
@@ -964,7 +973,7 @@ describe('cadMachine', () => {
     });
 
     it('should apply stored renderTimeout on kernel connection via setOptions', async () => {
-      const mockClient = createMockRuntimeClient();
+      const mockClient = createMockRuntimeClient() as AppRuntimeClient;
       let resolveConnect!: () => void;
       const connectGate = new Promise<void>((resolve) => {
         resolveConnect = resolve;
@@ -989,9 +998,9 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
-    it('should default renderTimeout to 30_000ms (30 seconds)', async () => {
+    it('should default renderTimeout to 60_000ms (60 seconds)', async () => {
       const { actor } = await startAndConnect();
-      expect(actor.getSnapshot().context.renderTimeout).toBe(30_000);
+      expect(actor.getSnapshot().context.renderTimeout).toBe(defaultRenderTimeout);
       actor.stop();
     });
   });
@@ -1081,7 +1090,7 @@ describe('cadMachine', () => {
 
     it('should buffer setFile during connecting and forward as openFile on connect', async () => {
       let resolveConnect!: () => void;
-      const mockClient = createMockRuntimeClient();
+      const mockClient = createMockRuntimeClient() as AppRuntimeClient;
 
       const { actor } = createTestActor({
         connectResult: async () =>

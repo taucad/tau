@@ -29,12 +29,13 @@ export const useCadAgentConfig = (): CadAgentConfigInput => {
   const {
     model: { modelId },
     kernel: { kernelId },
+    session,
   } = useChatComposer();
   const mode = useChatSelector((state) => state.draftMode as ChatMode);
   const toolChoice = useChatSelector((state) => state.draftToolChoice as ToolSelection);
   const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
   const snapshot = useChatSnapshot();
-  const contextPayload = useContextPayload();
+  const contextPayload = useContextPayload(session?.activeChatId ?? 'composer');
 
   return {
     profile: 'cad',

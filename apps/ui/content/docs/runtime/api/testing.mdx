@@ -55,11 +55,11 @@ Use the testing API when writing unit tests for custom kernels, middleware, or k
 ```typescript
 import { describe, it, expect } from 'vitest';
 import { createTestWorker, clearTestFileSystem, extractGltfFromResult, validateGlbData } from '@taucad/runtime/testing';
-import replicadDefinition from '@taucad/runtime/kernels/replicad';
+import { replicad } from '@taucad/runtime/kernels/replicad';
 
 describe('kernel test', () => {
   it('renders geometry', async () => {
-    const worker = await createTestWorker(replicadDefinition, {
+    const worker = await createTestWorker(replicad, {
       '/projects/test/main.ts': 'export default () => null',
     });
     const result = await worker.createGeometry({

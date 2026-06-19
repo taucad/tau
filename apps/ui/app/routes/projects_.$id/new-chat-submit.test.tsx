@@ -51,6 +51,8 @@ const harness = vi.hoisted(() => ({
   setMessageEdit: vi.fn().mockResolvedValue(undefined),
   clearMessageEdit: vi.fn().mockResolvedValue(undefined),
   getChat: vi.fn().mockResolvedValue(undefined),
+  consumeChatStartupRequest: vi.fn().mockResolvedValue(undefined),
+  commitCancelledDraftRestore: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@ai-sdk/react', () => ({
@@ -147,6 +149,8 @@ describe('new chat submit regression', () => {
     harness.setMessageEdit.mockReset().mockResolvedValue(undefined);
     harness.clearMessageEdit.mockReset().mockResolvedValue(undefined);
     harness.getChat.mockReset().mockResolvedValue(undefined);
+    harness.consumeChatStartupRequest.mockReset().mockResolvedValue(undefined);
+    harness.commitCancelledDraftRestore.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -160,6 +164,8 @@ describe('new chat submit regression', () => {
       patchChat: harness.patchChat,
       setMessageEdit: harness.setMessageEdit,
       clearMessageEdit: harness.clearMessageEdit,
+      consumeChatStartupRequest: harness.consumeChatStartupRequest,
+      commitCancelledDraftRestore: harness.commitCancelledDraftRestore,
     });
 
     // Pre-acquire the "previous focused chat" — this mirrors the route having
@@ -222,6 +228,8 @@ describe('new chat submit regression', () => {
       patchChat: harness.patchChat,
       setMessageEdit: harness.setMessageEdit,
       clearMessageEdit: harness.clearMessageEdit,
+      consumeChatStartupRequest: harness.consumeChatStartupRequest,
+      commitCancelledDraftRestore: harness.commitCancelledDraftRestore,
     });
 
     store.acquire('chat_old');

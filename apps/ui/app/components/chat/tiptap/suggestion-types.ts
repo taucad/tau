@@ -23,9 +23,11 @@ export type ContextSuggestionItem = {
 export type SlashCommandItem = {
   id: string;
   label: string;
+  title?: string;
   description: string;
   fullDescription?: string;
   group: string;
+  source?: string;
 };
 
 export type SuggestionPopupState<I> = {

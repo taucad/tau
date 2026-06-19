@@ -1,7 +1,7 @@
 import { memo, useEffect } from 'react';
 import { useActorRef } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Box } from 'lucide-react';
 import type { Geometry } from '@taucad/types';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
 import { Loader } from '#components/ui/loader.js';
@@ -10,7 +10,7 @@ import { graphicsMachine } from '#machines/graphics.machine.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import { cn } from '#utils/ui.utils.js';
 import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
-import type { RenderStatus } from '@taucad/react';
+import type { RuntimeStatus } from '@taucad/react';
 
 /**
  * Visual rendering settings for the model viewer.
@@ -30,9 +30,20 @@ export type ModelViewerGraphicsOptions = {
 /**
  * Props for the `ModelViewer` component.
  */
+/** User-facing copy when a render completes with zero geometry primitives. */
+export const emptyGeometryMessage = 'This model produced no geometry.';
+
+export type ModelViewerState = 'loading' | 'ready' | 'empty';
+
 export type ModelViewerProps = {
-  /** Geometries to display. Empty array shows a loading state. */
+  /** Geometries to display. Empty array shows a loading state unless `viewerState` overrides. */
   readonly geometries: Geometry[];
+  /**
+   * Lifecycle hint from the surrounding pipeline. Defaults to `'loading'` when
+   * geometries are empty and `'ready'` otherwise — preserves behaviour for
+   * direct callers (e.g. hero viewer) that have no settled-render signal.
+   */
+  readonly viewerState?: ModelViewerState;
   /**
    * External graphics actor ref. When provided, ModelViewer uses it instead of
    * creating its own `graphicsMachine`. Use this when the parent manages the
@@ -56,8 +67,18 @@ type ModelViewerCoreProps = Omit<ModelViewerProps, 'graphicsRef'> & {
  * Core viewer that renders geometries using a provided `graphicsRef`.
  * Always receives a concrete graphics actor -- never creates its own.
  */
+const EmptyGeometryPanel = ({ className }: { readonly className?: string }): React.JSX.Element => (
+  <div role='status' aria-label='Empty model' className={cn('flex size-full items-center justify-center', className)}>
+    <div className='flex max-w-sm flex-col items-center gap-3 px-4 text-center text-muted-foreground'>
+      <Box className='size-10 opacity-60' strokeWidth={1.5} aria-hidden />
+      <p className='text-sm'>{emptyGeometryMessage}</p>
+    </div>
+  </div>
+);
+
 const ModelViewerCore = memo(function ModelViewerCore({
   geometries,
+  viewerState,
   graphicsRef,
   className,
   enablePan,
@@ -71,6 +92,8 @@ const ModelViewerCore = memo(function ModelViewerCore({
       graphicsRef.send({ type: 'updateGeometries', geometries, units: { length: 'mm' } });
     }
   }, [geometries, graphicsRef]);
+
+  const effectiveState: ModelViewerState = viewerState ?? (geometries.length === 0 ? 'loading' : 'ready');
 
   if (error) {
     return (
@@ -87,7 +110,11 @@ const ModelViewerCore = memo(function ModelViewerCore({
     );
   }
 
-  if (geometries.length === 0) {
+  if (effectiveState === 'empty') {
+    return <EmptyGeometryPanel className={className} />;
+  }
+
+  if (effectiveState === 'loading') {
     return (
       <div
         role='status'
@@ -160,7 +187,7 @@ const ModelViewerWithOwnGraphics = memo(function ModelViewerWithOwnGraphics(
  *
  * @example
  * ```typescript
- * const { geometries } = useRender({
+ * const { geometries } = useRuntime({
  *   clientOptions: options,
  *   code: { 'main.ts': modelCode },
  * });
@@ -178,11 +205,11 @@ export const ModelViewer = memo(function ModelViewer(props: ModelViewerProps): R
 });
 
 /**
- * Props for the `RenderStatusOverlay` component.
+ * Props for the `RuntimeStatusOverlay` component.
  */
-export type RenderStatusOverlayProps = {
+export type RuntimeStatusOverlayProps = {
   /** Current render status. Only shows overlay when `'loading'`. */
-  readonly status: RenderStatus;
+  readonly status: RuntimeStatus;
   readonly className?: string;
 };
 
@@ -195,7 +222,7 @@ export type RenderStatusOverlayProps = {
  * @param props - Status and optional className
  * @returns Overlay element or nothing
  */
-export function RenderStatusOverlay({ status, className }: RenderStatusOverlayProps): React.ReactNode {
+export function RuntimeStatusOverlay({ status, className }: RuntimeStatusOverlayProps): React.ReactNode {
   if (status !== 'loading') {
     return undefined;
   }

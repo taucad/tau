@@ -15,6 +15,7 @@ import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { FileManagerNotReadyError } from '#filesystem/workspace-errors.js';
+import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 
 type FileManagerSnapshot = SnapshotFrom<typeof fileManagerMachine>;
 
@@ -250,24 +251,21 @@ type FileManagerContextType = {
    */
   canRename: (source: string, newName: string) => Promise<true | WorkspaceMutationError>;
   /**
-   * Preflight create (`'file'` for `writeFile`, `'directory'` for `mkdir`).
+   * Preflight create (`'file'` for `writeFile`, `'directory'` for `createDirectory`).
    */
   canCreate: (path: string, kind: 'file' | 'directory') => Promise<true | WorkspaceMutationError>;
   /**
-   * Preflight delete (`unlink` for files, `rmdir` for directories).
+   * Preflight delete (`deleteFile` for files, `deleteDirectory` for directories).
    */
   canDelete: (path: string) => Promise<true | WorkspaceMutationError>;
   /**
-   * Create a directory through the worker mount. Pass `{ recursive: true }`
-   * to create intermediate directories.
+   * Create a directory through the project-scoped content facade.
    */
-  mkdir: (path: string, options?: { recursive?: boolean }) => Promise<void>;
+  createDirectory: (path: string, options?: { recursive?: boolean }) => Promise<void>;
   /**
-   * Remove a directory through the worker mount. Pass `{ recursive: true }`
-   * to drop a non-empty subtree (mount-routed; no scope required for the
-   * default workspace).
+   * Remove a directory through the project-scoped content facade.
    */
-  rmdir: (path: string, options?: { recursive?: boolean }) => Promise<void>;
+  deleteDirectory: (path: string, options?: { recursive?: boolean }) => Promise<void>;
   duplicateFile: (sourcePath: string, destinationPath: string) => Promise<void>;
   deleteFile: (path: string, options: DeleteFileOptions) => Promise<void>;
   stat: (path: string) => Promise<FileStat>;
@@ -316,6 +314,12 @@ type FileManagerContextType = {
    * (`projectId === undefined`).
    */
   bindProjectToWorkspace: (workspaceId: string) => Promise<void>;
+  /**
+   * Open a generic filesystem bridge connection owned by the File Manager.
+   * Consumers pass the connection through their own worker/runtime boundary
+   * without inspecting the File Manager worker directly.
+   */
+  openFileSystemBridge: () => FileSystemBridgeConnection;
 };
 
 const FileManagerContext = createContext<FileManagerContextType | undefined>(undefined);
@@ -482,6 +486,16 @@ export function FileManagerProvider({
     return waitForFileManagerServices(fileManagerRef);
   }, [fileManagerRef]);
 
+  const openFileSystemBridge = useCallback((): FileSystemBridgeConnection => {
+    const opener = fileManagerRef.getSnapshot().context.openFileSystemBridge;
+    if (!opener) {
+      throw new FileManagerNotReadyError('proxy-timeout', {
+        cause: new Error('File Manager filesystem bridge is not ready.'),
+      });
+    }
+    return opener();
+  }, [fileManagerRef]);
+
   const writeFile = useCallback(
     async (path: string, data: Uint8Array<ArrayBuffer>, options: WriteFileOptions): Promise<void> => {
       const { contentService } = await whenServicesReady();
@@ -575,20 +589,20 @@ export function FileManagerProvider({
     [whenServicesReady],
   );
 
-  const mkdir = useCallback(
+  const createDirectory = useCallback(
     async (path: string, options?: { recursive?: boolean }): Promise<void> => {
-      const proxy = await getReadiedProxy();
-      await proxy.mkdir(path, options);
+      const { contentService } = await whenServicesReady();
+      await contentService.createDirectory(path, options);
     },
-    [getReadiedProxy],
+    [whenServicesReady],
   );
 
-  const rmdir = useCallback(
+  const deleteDirectory = useCallback(
     async (path: string, options?: { recursive?: boolean }): Promise<void> => {
-      const proxy = await getReadiedProxy();
-      await proxy.rmdir(path, options);
+      const { contentService } = await whenServicesReady();
+      await contentService.deleteDirectory(path, options);
     },
-    [getReadiedProxy],
+    [whenServicesReady],
   );
 
   const duplicateFile = useCallback(
@@ -747,8 +761,8 @@ export function FileManagerProvider({
       canRename,
       canCreate,
       canDelete,
-      mkdir,
-      rmdir,
+      createDirectory,
+      deleteDirectory,
       duplicateFile,
       deleteFile,
       stat,
@@ -763,6 +777,7 @@ export function FileManagerProvider({
       activeWorkspaceId,
       unavailableReason,
       bindProjectToWorkspace,
+      openFileSystemBridge,
     }),
     [
       fileManagerRef,
@@ -780,8 +795,8 @@ export function FileManagerProvider({
       canRename,
       canCreate,
       canDelete,
-      mkdir,
-      rmdir,
+      createDirectory,
+      deleteDirectory,
       duplicateFile,
       deleteFile,
       stat,
@@ -796,6 +811,7 @@ export function FileManagerProvider({
       activeWorkspaceId,
       unavailableReason,
       bindProjectToWorkspace,
+      openFileSystemBridge,
     ],
   );
 
@@ -854,10 +870,30 @@ export function useFileTree(): FileTreeEntry[] | undefined {
     return undefined;
   }
 
-  return [...tree.values()].map(({ path, name, type, size }) => ({
-    path,
-    name,
-    type,
-    size,
-  }));
+  return [...tree.values()].map((entry): FileTreeEntry => {
+    if (entry.type === 'dir') {
+      return {
+        path: entry.path,
+        name: entry.name,
+        type: 'dir',
+        size: entry.size,
+      };
+    }
+    return entry.contentKind === 'text'
+      ? {
+          path: entry.path,
+          name: entry.name,
+          type: 'file',
+          size: entry.size,
+          contentKind: 'text',
+          lineCount: entry.lineCount,
+        }
+      : {
+          path: entry.path,
+          name: entry.name,
+          type: 'file',
+          size: entry.size,
+          contentKind: 'binary',
+        };
+  });
 }

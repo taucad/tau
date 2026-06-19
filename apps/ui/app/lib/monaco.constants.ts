@@ -4,15 +4,19 @@
  * Centralized constants for Monaco language IDs, file extensions, and URI prefixes.
  * Follows pattern from @packages/types/src/constants/code.constants.ts
  */
+import type { CodeLanguage } from '@taucad/types';
+import { languageFromExtension } from '@taucad/types/constants';
 
 export const monacoLanguages = {
   typescript: 'typescript',
   typescriptreact: 'typescriptreact',
   javascript: 'javascript',
   javascriptreact: 'javascriptreact',
+  bash: 'bash',
   json: 'json',
   jsonl: 'jsonl',
   jsonc: 'jsonc',
+  markdown: 'markdown',
   kcl: 'kcl',
   openscad: 'openscad',
   stepfile: 'stepfile',
@@ -23,29 +27,37 @@ export const monacoLanguages = {
 
 export type MonacoLanguage = (typeof monacoLanguages)[keyof typeof monacoLanguages];
 
-export const extensionToMonacoLanguage: Record<string, MonacoLanguage> = {
-  ts: 'typescript',
-  tsx: 'typescriptreact',
-  js: 'javascript',
-  jsx: 'javascriptreact',
-  mts: 'typescript',
+export const codeLanguageToMonacoLanguage = {
+  bash: monacoLanguages.bash,
+  javascript: monacoLanguages.javascript,
+  jsx: monacoLanguages.javascriptreact,
+  json: monacoLanguages.json,
+  jsonc: monacoLanguages.jsonc,
+  jsonl: monacoLanguages.jsonl,
+  kcl: monacoLanguages.kcl,
+  markdown: monacoLanguages.markdown,
+  openscad: monacoLanguages.openscad,
+  stepfile: monacoLanguages.stepfile,
+  stl: monacoLanguages.stl,
+  sysml: monacoLanguages.sysml,
+  tsx: monacoLanguages.typescriptreact,
+  typescript: monacoLanguages.typescript,
+  usd: monacoLanguages.usd,
+} as const satisfies Record<CodeLanguage, MonacoLanguage>;
+
+const uiOnlyExtensionToCodeLanguage = {
+  cjs: 'javascript',
   mjs: 'javascript',
-  json: 'json',
-  jsonl: 'jsonl',
-  jsonc: 'jsonc',
-  kcl: 'kcl',
-  scad: 'openscad',
-  step: 'stepfile',
-  stp: 'stepfile',
-  p21: 'stepfile',
-  stl: 'stl',
-  usd: 'usd',
-  sysml: 'sysml',
-  kerml: 'sysml',
-  usda: 'usd',
-  usdc: 'usd',
-  usdz: 'usd',
-};
+  cts: 'typescript',
+  mts: 'typescript',
+  bash: 'bash',
+} as const satisfies Record<string, CodeLanguage>;
+
+export const extensionToMonacoLanguage = Object.fromEntries(
+  [...Object.entries(languageFromExtension), ...Object.entries(uiOnlyExtensionToCodeLanguage)].map(
+    ([extension, language]) => [extension, codeLanguageToMonacoLanguage[language]],
+  ),
+) as Record<string, MonacoLanguage>;
 
 export const jsLikeExtensions = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.mjs'] as const;
 export type JsLikeExtension = (typeof jsLikeExtensions)[number];
@@ -63,6 +75,6 @@ export function isJsLikeFile(path: string): boolean {
  */
 export function getMonacoLanguage(path: string): MonacoLanguage | undefined {
   // oxlint-disable-next-line unicorn-js/prevent-abbreviations -- ext is conventional abbreviation for extension
-  const ext = path.split('.').pop();
+  const ext = path.split('.').pop()?.toLowerCase();
   return ext ? extensionToMonacoLanguage[ext] : undefined;
 }

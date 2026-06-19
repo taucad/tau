@@ -1,7 +1,6 @@
 import { createRuntimeClient } from '@taucad/runtime';
-import { fromFsLike } from '@taucad/runtime/filesystem';
-import type { FsLike } from '@taucad/runtime/filesystem';
-import { createBridgeProxy, wrapMessagePort } from '@taucad/runtime/transport-internals';
+import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
+import { createFileSystemBridgeProxy } from '@taucad/fs-bridge';
 import type { FileStat } from '@taucad/types';
 import { discoverGeoSpecFiles } from 'geospec/runner';
 import type { GeoSpecDiscoveryFileSystem } from 'geospec/runner';
@@ -114,57 +113,6 @@ function createDiscoveryFileSystem(
   };
 }
 
-const toNativeStats = (stat: FileStat): Awaited<ReturnType<FsLike['promises']['stat']>> => ({
-  size: stat.size,
-  mtimeMs: stat.mtimeMs,
-  isDirectory: () => stat.type === 'dir',
-});
-
-function createRuntimeFsLike(proxy: ProjectFileSystemBridge, projectRootPath: string): FsLike {
-  function readFile(path: string, encoding: 'utf8'): Promise<string>;
-  function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
-  async function readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
-    const bridgePath = toBridgePath(path, projectRootPath);
-    if (encoding === 'utf8') {
-      return proxy.readFile(bridgePath, 'utf8');
-    }
-    const bytes = await proxy.readFile(bridgePath);
-    const copy = new Uint8Array(bytes.byteLength);
-    copy.set(bytes);
-    return copy;
-  }
-
-  return {
-    promises: {
-      readFile,
-      async writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {
-        await proxy.writeFile(toBridgePath(path, projectRootPath), data);
-      },
-      async mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
-        await proxy.mkdir(toBridgePath(path, projectRootPath), options);
-      },
-      async readdir(path: string): Promise<string[]> {
-        return proxy.readdir(toBridgePath(path, projectRootPath));
-      },
-      async unlink(path: string): Promise<void> {
-        await proxy.unlink(toBridgePath(path, projectRootPath));
-      },
-      async rmdir(path: string): Promise<void> {
-        await proxy.rmdir(toBridgePath(path, projectRootPath));
-      },
-      async rename(oldPath: string, newPath: string): Promise<void> {
-        await proxy.rename(toBridgePath(oldPath, projectRootPath), toBridgePath(newPath, projectRootPath));
-      },
-      async stat(path: string) {
-        return toNativeStats(await proxy.stat(toBridgePath(path, projectRootPath)));
-      },
-      async lstat(path: string) {
-        return toNativeStats(await proxy.lstat(toBridgePath(path, projectRootPath)));
-      },
-    },
-  };
-}
-
 const hasGeoSpecSelectionFilters = (args: GeoSpecRunnerWorkerRunRequest['args']): boolean =>
   Boolean(
     (args.files !== undefined && args.files.length > 0) ||
@@ -174,9 +122,12 @@ const hasGeoSpecSelectionFilters = (args: GeoSpecRunnerWorkerRunRequest['args'])
   );
 
 const createProjectFileSystemProxy = (port: MessagePort): ProjectFileSystemBridge => {
-  const wrappedPort = wrapMessagePort<unknown>(port, { label: 'geospec-vm-fs' });
-  wrappedPort.start?.();
-  return createBridgeProxy<ProjectFileSystemBridge>(wrappedPort);
+  return createFileSystemBridgeProxy<ProjectFileSystemBridge>({
+    port,
+    dispose: () => {
+      port.close();
+    },
+  });
 };
 
 const formatRuntimeConfigError = (error: unknown): string => {
@@ -218,6 +169,7 @@ type WorkerSession = {
   sessionId: string;
   projectRootPath: string;
   vmFileSystem: ProjectFileSystemBridge;
+  runtimeFileSystemPort: MessagePort;
   runtimeClient: ReturnType<typeof createRuntimeClient>;
   runner: ReturnType<typeof createGeoSpecWebRunner>;
   modelState: WorkerModelState;
@@ -254,7 +206,11 @@ const disposeSession = async (): Promise<void> => {
     try {
       activeSession.runtimeClient.terminate();
     } finally {
-      activeSession.vmFileSystem.dispose();
+      try {
+        activeSession.runtimeFileSystemPort.close();
+      } finally {
+        activeSession.vmFileSystem.dispose();
+      }
     }
   }
 };
@@ -269,6 +225,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
   }
 
   let vmFileSystem: ProjectFileSystemBridge | undefined;
+  let runtimeFileSystemPort: MessagePort | undefined;
   let runtimeClient: ReturnType<typeof createRuntimeClient> | undefined;
   let runner: ReturnType<typeof createGeoSpecWebRunner> | undefined;
   try {
@@ -279,7 +236,13 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
 
     const projectRootPath = normalizeProjectRootPath(request.projectRootPath);
     vmFileSystem = createProjectFileSystemProxy(request.vmFileSystemPort);
-    const runtimeFileSystem = fromFsLike(createRuntimeFsLike(vmFileSystem, projectRootPath), '/');
+    runtimeFileSystemPort = request.runtimeFileSystemPort;
+    const runtimeFileSystem = fromFileSystemBridge({
+      port: runtimeFileSystemPort,
+      dispose: () => {
+        runtimeFileSystemPort?.close();
+      },
+    });
     runtimeClient = createRuntimeClient(
       createDefaultKernelOptions({
         fileSystem: runtimeFileSystem,
@@ -338,6 +301,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       sessionId: request.sessionId,
       projectRootPath,
       vmFileSystem,
+      runtimeFileSystemPort,
       runtimeClient,
       runner,
       modelState,
@@ -351,7 +315,11 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       try {
         runtimeClient?.terminate();
       } finally {
-        vmFileSystem?.dispose();
+        try {
+          runtimeFileSystemPort?.close();
+        } finally {
+          vmFileSystem?.dispose();
+        }
       }
     }
     postError(request.requestId, error instanceof Error ? error.message : 'GeoSpec worker failed to initialize.');

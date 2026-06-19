@@ -6,6 +6,9 @@ import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 
+type FileFileEntry = Extract<FileEntry, { type: 'file' }>;
+type DirectoryFileEntry = Extract<FileEntry, { type: 'dir' }>;
+
 vi.mock('#components/files/file-link.js', () => ({
   FileLink: ({ children, path }: { children: React.ReactNode; path: string }) => (
     <a data-testid='file-link' data-path={path}>
@@ -22,14 +25,46 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 
 function createEntry(path: string, partial: Partial<FileEntry> = {}): FileEntry {
+  const name = partial.name ?? path.split('/').pop()!;
+  const size = partial.size ?? 0;
+  const isLoaded = partial.isLoaded ?? true;
+  const mtimeMs = partial.mtimeMs ?? 0;
+
+  if (partial.type === 'dir') {
+    const dirPartial = partial as Partial<DirectoryFileEntry>;
+    return {
+      path,
+      name,
+      type: 'dir',
+      size,
+      isLoaded,
+      mtimeMs,
+      isDirectoryResolved: dirPartial.isDirectoryResolved,
+    };
+  }
+
+  const filePartial = partial as Partial<FileFileEntry>;
+  if (filePartial.contentKind === 'binary') {
+    return {
+      path,
+      name,
+      type: 'file',
+      size,
+      isLoaded,
+      mtimeMs,
+      contentKind: 'binary',
+    };
+  }
+
   return {
     path,
-    name: partial.name ?? path.split('/').pop()!,
-    type: partial.type ?? 'file',
-    size: 0,
-    isLoaded: true,
-    mtimeMs: 0,
-    ...partial,
+    name,
+    type: 'file',
+    size,
+    isLoaded,
+    mtimeMs,
+    contentKind: 'text',
+    lineCount: filePartial.lineCount ?? 1,
   };
 }
 

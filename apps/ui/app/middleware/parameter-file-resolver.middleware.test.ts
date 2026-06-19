@@ -1,7 +1,12 @@
 // @vitest-environment node
-import { describe, it, expect, vi } from 'vitest';
-import { createMockRuntime, createMockInput, createMockCreateGeometryHandler } from '@taucad/runtime/testing';
-import { parameterFileResolverMiddleware } from '#middleware/parameter-file-resolver.middleware.js';
+import { beforeAll, describe, it, expect, vi } from 'vitest';
+import {
+  createMockRuntime,
+  createMockInput,
+  createMockCreateGeometryHandler,
+  resolveRuntimePluginDefinition,
+} from '@taucad/runtime/testing';
+import { parameterFileResolver } from '#middleware/parameter-file-resolver.middleware.js';
 import { parametersDirectory } from '#utils/parameter-config.utils.js';
 
 type ParameterFileOptions = { parametersDir: string; watchDebounce: number };
@@ -26,7 +31,7 @@ function createTestContext(options?: {
     input: createMockInput({
       filePath: '/projects/test/main.ts',
       basePath: '/projects/test',
-      parameters: { width: 10 },
+      parameters: {},
       ...options?.input,
     }),
     handler: createMockCreateGeometryHandler(),
@@ -38,6 +43,15 @@ function makeEntry(entry: { activeGroup: string; groups: Record<string, unknown>
 }
 
 describe('parameterFileResolverMiddleware', () => {
+  let parameterFileResolverMiddleware: Awaited<ReturnType<typeof resolveParameterFileResolverMiddleware>>;
+
+  const resolveParameterFileResolverMiddleware = async () =>
+    resolveRuntimePluginDefinition('middleware', parameterFileResolver());
+
+  beforeAll(async () => {
+    parameterFileResolverMiddleware = await resolveParameterFileResolverMiddleware();
+  });
+
   it('should have correct name', () => {
     expect(parameterFileResolverMiddleware.name).toBe('parameter-file-resolver');
   });
@@ -129,7 +143,7 @@ describe('parameterFileResolverMiddleware', () => {
     );
   });
 
-  it('should override specific parameters while preserving others', async () => {
+  it('should apply active-group values over existing input parameters', async () => {
     const { input, handler, runtime } = createTestContext({
       readFileResult: makeEntry({
         activeGroup: 'default',
@@ -147,8 +161,26 @@ describe('parameterFileResolverMiddleware', () => {
     );
   });
 
+  it('should fill missing input parameters from active-group values', async () => {
+    const { input, handler, runtime } = createTestContext({
+      readFileResult: makeEntry({
+        activeGroup: 'wide',
+        groups: { wide: { values: { width: 99, depth: 40 } } },
+      }),
+      input: { parameters: { height: 20 } },
+    });
+
+    await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
+
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parameters: { height: 20, width: 99, depth: 40 },
+      }),
+    );
+  });
+
   describe('nested parameter deep merge', () => {
-    it('should deep-merge nested object overrides with input parameters', async () => {
+    it('should deep-merge active-group values into nested input parameters', async () => {
       const { input, handler, runtime } = createTestContext({
         readFileResult: makeEntry({
           activeGroup: 'default',
@@ -171,7 +203,7 @@ describe('parameterFileResolverMiddleware', () => {
       });
     });
 
-    it('should deep-merge multiple nested groups without losing sibling properties', async () => {
+    it('should deep-merge multiple active-group objects into nested input parameters', async () => {
       const { input, handler, runtime } = createTestContext({
         readFileResult: makeEntry({
           activeGroup: 'default',

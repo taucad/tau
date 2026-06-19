@@ -4,6 +4,11 @@ import {
   calculateFovDistanceCompensation,
   tanEpsilon,
 } from '#components/geometry/graphics/three/utils/math.utils.js';
+import {
+  resolveControlsTarget,
+  syncCameraControlsUp,
+  syncControlsLookAt,
+} from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
 
 /**
  * Calculates a 3D position from spherical coordinates.
@@ -180,10 +185,12 @@ export function updateCameraFov({
   camera,
   cameraFovAngle,
   invalidate,
+  controls,
 }: {
   camera: THREE.Camera;
   cameraFovAngle: number;
   invalidate: () => void;
+  controls?: unknown;
 }): void {
   if (!(camera instanceof THREE.PerspectiveCamera)) {
     console.error('updateCameraFov requires PerspectiveCamera');
@@ -199,17 +206,22 @@ export function updateCameraFov({
 
   // Adjust camera distance to maintain perceived size.
   // This keeps objects the same apparent size when FOV changes.
-  if (camera.position.lengthSq() >= tanEpsilon) {
-    const currentDistance = camera.position.length();
+  const target = resolveControlsTarget({ camera, controls });
+  const offset = camera.position.clone().sub(target);
+
+  if (offset.lengthSq() >= tanEpsilon) {
+    const currentDistance = offset.length();
     const newDistance = calculateFovDistanceCompensation(oldFov, newFov, currentDistance);
 
     if (newDistance !== currentDistance) {
-      const direction = camera.position.clone().normalize();
-      camera.position.copy(direction.multiplyScalar(newDistance));
+      const direction = offset.normalize();
+      camera.position.copy(target).add(direction.multiplyScalar(newDistance));
+      camera.lookAt(target);
     }
   }
 
   camera.updateProjectionMatrix();
+  syncControlsLookAt({ camera, controls, target, transition: false });
   invalidate();
 }
 
@@ -250,7 +262,7 @@ export function resetCamera({
   invalidate: () => void;
   enableConfiguredAngles?: boolean;
   cameraFovAngle: number;
-  controls?: { target: THREE.Vector3; update: () => void } | undefined;
+  controls?: unknown;
   /**
    * The viewport width / height ratio. When the viewport is in portrait
    * orientation (aspect < 1), the camera distance is increased so the model
@@ -329,11 +341,10 @@ export function resetCamera({
   // Aim the camera at the geometry center
   camera.lookAt(geometryCenter);
 
-  // Update orbit controls target so the user orbits around the geometry center
-  if (controls) {
-    controls.target.copy(geometryCenter);
-    controls.update();
-  }
+  // Sync controls after the camera up vector and look-at target are settled so
+  // CameraControls stores the same target-relative spherical state the camera shows.
+  syncCameraControlsUp({ camera, controls, up: camera.up });
+  syncControlsLookAt({ camera, controls, target: geometryCenter, transition: false });
 
   // Update the scene radius
   setSceneRadius(geometryRadius);

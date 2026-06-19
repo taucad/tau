@@ -25,6 +25,14 @@ const draftMessage = (text: string): MyUIMessage => ({
   parts: [{ type: 'text', text }],
 });
 
+const startupRequest = (messageId: string, id = 'req_startup_test'): NonNullable<Chat['startupRequest']> => ({
+  id,
+  kind: 'regenerate-tail',
+  messageId,
+  source: 'homepage-initial-message',
+  createdAt: 1,
+});
+
 const sampleError = (title: string): ChatError => ({
   category: errorCategory.generic,
   title,
@@ -169,18 +177,121 @@ describe('IndexedDbStorageProvider', () => {
       expect(stored?.messages).toEqual([userMessage('full')]);
     });
 
-    it('should bump updatedAt by default and respect noUpdatedAt: true', async () => {
+    it('should bump updatedAt for material changes and return undefined for no-op updates', async () => {
       const provider = new IndexedDbStorageProvider();
       const chat = await freshChat(provider);
 
-      // Wait a tick so Date.now() can advance past the createChat timestamp
       await sleep(2);
 
       const bumped = await provider.updateChat(chat.id, { name: 'bump' });
       expect(bumped?.updatedAt).toBeGreaterThan(chat.updatedAt);
 
-      const preserved = await provider.updateChat(chat.id, { name: 'no-bump' }, { noUpdatedAt: true });
-      expect(preserved?.updatedAt).toBe(bumped?.updatedAt);
+      await sleep(2);
+      const noChange = await provider.updateChat(chat.id, { name: 'bump' });
+      const stored = await provider.getChat(chat.id);
+      expect(noChange).toBeUndefined();
+      expect(stored?.updatedAt).toBe(bumped?.updatedAt);
+    });
+  });
+
+  describe('chat startup and cancelled-draft atomic mutations', () => {
+    it('should consume a matching startup request exactly once', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const message = userMessage('initial');
+      const request = startupRequest(message.id);
+      const chat = await provider.createChat('resource_test', {
+        name: 'Startup Chat',
+        messages: [message],
+        startupRequest: request,
+      });
+
+      const consumed = await provider.consumeChatStartupRequest(chat.id, request.id);
+      const storedAfterConsume = await provider.getChat(chat.id);
+      const staleConsume = await provider.consumeChatStartupRequest(chat.id, request.id);
+
+      expect(consumed?.startupRequest).toBeUndefined();
+      expect(storedAfterConsume?.startupRequest).toBeUndefined();
+      expect(staleConsume).toBeUndefined();
+    });
+
+    it('should no-op when the startup request id is stale', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const message = userMessage('initial');
+      const request = startupRequest(message.id);
+      const chat = await provider.createChat('resource_test', {
+        name: 'Startup Chat',
+        messages: [message],
+        startupRequest: request,
+      });
+
+      const result = await provider.consumeChatStartupRequest(chat.id, 'req_stale');
+      const stored = await provider.getChat(chat.id);
+
+      expect(result).toBeUndefined();
+      expect(stored?.startupRequest).toEqual(request);
+      expect(stored?.updatedAt).toBe(chat.updatedAt);
+    });
+
+    it('should commit restored messages, draft, and startup cleanup together', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const message = userMessage('cancelled');
+      const request = startupRequest(message.id);
+      const chat = await provider.createChat('resource_test', {
+        name: 'Cancelled Startup',
+        messages: [message],
+        startupRequest: request,
+      });
+      const draft = draftMessage('cancelled');
+      await sleep(2);
+
+      const restored = await provider.commitCancelledDraftRestore(chat.id, {
+        messages: [],
+        draft,
+        clearStartupRequestId: request.id,
+      });
+      const stored = await provider.getChat(chat.id);
+
+      expect(restored?.messages).toEqual([]);
+      expect(restored?.draft).toEqual(draft);
+      expect(restored?.startupRequest).toBeUndefined();
+      expect(stored?.messages).toEqual([]);
+      expect(stored?.draft).toEqual(draft);
+      expect(stored?.startupRequest).toBeUndefined();
+      expect(restored?.updatedAt).toBeGreaterThan(chat.updatedAt);
+    });
+
+    it('should preserve disjoint writers when cancelled restore races another field', async () => {
+      const iterations = 100;
+      const provider = new IndexedDbStorageProvider();
+      const chat = await freshChat(provider);
+
+      /* oxlint-disable no-await-in-loop -- race-detection: each iteration must settle before the next */
+      for (let i = 0; i < iterations; i++) {
+        const text = `cancelled-${i}`;
+        const message = userMessage(text);
+        const request = startupRequest(message.id, `req_restore_${i}`);
+        const draft = draftMessage(text);
+
+        await provider.patchChat(chat.id, 'messages', [message]);
+        await provider.patchChat(chat.id, 'draft', undefined);
+        await provider.patchChat(chat.id, 'startupRequest', request);
+
+        await Promise.all([
+          provider.patchChat(chat.id, 'activeModel', `model-${i}`),
+          provider.commitCancelledDraftRestore(chat.id, {
+            messages: [],
+            draft,
+            clearStartupRequestId: request.id,
+          }),
+        ]);
+
+        const final = await provider.getChat(chat.id);
+        expect(final?.activeModel).toBe(`model-${i}`);
+        expect(final?.messages).toEqual([]);
+        expect(final?.draft).toEqual(draft);
+        expect(final?.startupRequest).toBeUndefined();
+      }
+      /* oxlint-enable no-await-in-loop */
     });
   });
 
@@ -235,6 +346,18 @@ describe('IndexedDbStorageProvider', () => {
         expect(final?.description).toBe(description);
       }
       /* oxlint-enable no-await-in-loop */
+    });
+
+    it('should return undefined and preserve updatedAt when updateProject is a no-op', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const project = await freshProject(provider);
+      await sleep(2);
+
+      const result = await provider.updateProject(project.id, { name: project.name });
+      const stored = await provider.getProject(project.id);
+
+      expect(result).toBeUndefined();
+      expect(stored?.updatedAt).toBe(project.updatedAt);
     });
   });
 
@@ -305,7 +428,21 @@ describe('IndexedDbStorageProvider', () => {
       expect(proj?.updatedAt).toBeGreaterThanOrEqual(chat.updatedAt);
     });
 
-    it('should bump project on updateChat by default and not when noUpdatedAt', async () => {
+    it('should not bump project when navigation repair creates an empty chat', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const project = await freshProject(provider);
+      const before = project.updatedAt;
+      await sleep(2);
+
+      const chat = await provider.createNavigationRepairChat(project.id);
+      const proj = await provider.getProject(project.id);
+
+      expect(chat.updatedAt).toBeGreaterThan(before);
+      expect(chat.startupRequest).toBeUndefined();
+      expect(proj?.updatedAt).toBe(before);
+    });
+
+    it('should bump project on material updateChat and preserve it for no-op updateChat', async () => {
       const provider = new IndexedDbStorageProvider();
       const project = await freshProject(provider);
       const chat = await provider.createChat(project.id, { name: 'A', messages: [] });
@@ -318,10 +455,13 @@ describe('IndexedDbStorageProvider', () => {
       expect(projAfterBump?.updatedAt).toBeGreaterThan(afterCreate);
       expect(projAfterBump?.updatedAt).toBeGreaterThanOrEqual(bumped!.updatedAt);
 
-      const frozen = await provider.updateChat(chat.id, { name: 'C' }, { noUpdatedAt: true });
+      await sleep(2);
+      const frozen = await provider.updateChat(chat.id, { name: 'B' });
       const projAfterNoBump = await provider.getProject(project.id);
+      const stored = await provider.getChat(chat.id);
+      expect(frozen).toBeUndefined();
       expect(projAfterNoBump?.updatedAt).toBe(projAfterBump?.updatedAt);
-      expect(frozen?.updatedAt).toBe(bumped?.updatedAt);
+      expect(stored?.updatedAt).toBe(bumped?.updatedAt);
     });
 
     it('should bump project on patchChat', async () => {
@@ -343,9 +483,41 @@ describe('IndexedDbStorageProvider', () => {
       const p0 = (await provider.getProject(project.id))!.updatedAt;
       await sleep(2);
 
-      await provider.clearMessageEdit(chat.id, 'nonexistent');
+      const result = await provider.clearMessageEdit(chat.id, 'nonexistent');
       const p1 = (await provider.getProject(project.id))!.updatedAt;
+      expect(result).toBeUndefined();
       expect(p1).toBe(p0);
+    });
+
+    it('should preserve chat and project timestamps when generated chat name is applied', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const project = await freshProject(provider);
+      const chat = await provider.createNavigationRepairChat(project.id);
+      await sleep(2);
+
+      const result = await provider.applyGeneratedChatName(chat.id, 'Generated Bracket');
+      const storedProject = await provider.getProject(project.id);
+
+      expect(result?.name).toBe('Generated Bracket');
+      expect(result?.updatedAt).toBe(chat.updatedAt);
+      expect(storedProject?.updatedAt).toBe(project.updatedAt);
+    });
+
+    it('should not apply generated chat names to user-named chats', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const project = await freshProject(provider);
+      const chat = await provider.createChat(project.id, { name: 'Manual Name', messages: [] });
+      const projectAfterCreate = await provider.getProject(project.id);
+      await sleep(2);
+
+      const result = await provider.applyGeneratedChatName(chat.id, 'Generated Name');
+      const storedChat = await provider.getChat(chat.id);
+      const storedProject = await provider.getProject(project.id);
+
+      expect(result).toBeUndefined();
+      expect(storedChat?.name).toBe('Manual Name');
+      expect(storedChat?.updatedAt).toBe(chat.updatedAt);
+      expect(storedProject?.updatedAt).toBe(projectAfterCreate?.updatedAt);
     });
 
     it('should bump project on softDeleteChat', async () => {
@@ -410,6 +582,18 @@ describe('IndexedDbStorageProvider', () => {
       expect(result?.updatedAt).toBeGreaterThan(chat.updatedAt);
     });
 
+    it('should return undefined and preserve updatedAt when the field value is unchanged', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const chat = await freshChat(provider);
+      await sleep(2);
+
+      const result = await provider.patchChat(chat.id, 'name', chat.name);
+      const stored = await provider.getChat(chat.id);
+
+      expect(result).toBeUndefined();
+      expect(stored?.updatedAt).toBe(chat.updatedAt);
+    });
+
     it('should return undefined when chat does not exist', async () => {
       const provider = new IndexedDbStorageProvider();
       const result = await provider.patchChat('chat_missing', 'name', 'Whatever');
@@ -469,6 +653,20 @@ describe('IndexedDbStorageProvider', () => {
       expect(result?.messageEdits?.['msg-1']?.parts[0]).toEqual({ type: 'text', text: 'edit-1' });
     });
 
+    it('should return undefined and preserve updatedAt when setting the same message edit', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const chat = await freshChat(provider);
+      const draft = draftMessage('edit-1');
+      const first = await provider.setMessageEdit(chat.id, 'msg-1', draft);
+      await sleep(2);
+
+      const result = await provider.setMessageEdit(chat.id, 'msg-1', structuredClone(draft));
+      const stored = await provider.getChat(chat.id);
+
+      expect(result).toBeUndefined();
+      expect(stored?.updatedAt).toBe(first?.updatedAt);
+    });
+
     it('should replace only the named entry, leaving siblings untouched', async () => {
       const provider = new IndexedDbStorageProvider();
       const chat = await provider.createChat('resource_test', {
@@ -515,7 +713,7 @@ describe('IndexedDbStorageProvider', () => {
 
       const result = await provider.clearMessageEdit(chat.id, 'msg-never-existed');
 
-      expect(result?.updatedAt).toBe(chat.updatedAt);
+      expect(result).toBeUndefined();
     });
 
     it('should preserve disjoint message-edit writes when concurrent setMessageEdit calls race', async () => {
@@ -654,6 +852,39 @@ describe('IndexedDbStorageProvider', () => {
 
       expect(copy.activeModel).toBeUndefined();
       expect(copy.activeKernel).toBeUndefined();
+    });
+
+    it('should not copy one-shot startup intent into the duplicated chat', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const message = userMessage('initial');
+      const original = await provider.createChat('resource_test', {
+        name: 'Original',
+        messages: [message],
+        startupRequest: startupRequest(message.id),
+      });
+
+      const copy = await provider.duplicateChat(original.id);
+
+      expect(copy.messages).toEqual(original.messages);
+      expect(copy.startupRequest).toBeUndefined();
+    });
+
+    it('should not copy one-shot startup intent when duplicating all resource chats', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const sourceProject = await freshProject(provider);
+      const targetProject = await freshProject(provider);
+      const message = userMessage('initial');
+      const original = await provider.createChat(sourceProject.id, {
+        name: 'Original',
+        messages: [message],
+        startupRequest: startupRequest(message.id),
+      });
+
+      const mapping = await provider.duplicateResourceChats(sourceProject.id, targetProject.id);
+      const copiedChat = await provider.getChat(mapping[original.id]!);
+
+      expect(copiedChat?.messages).toEqual(original.messages);
+      expect(copiedChat?.startupRequest).toBeUndefined();
     });
   });
 

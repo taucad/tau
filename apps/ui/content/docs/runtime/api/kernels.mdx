@@ -6,7 +6,7 @@ icon: lucide:cog
 
 # Kernel Factories
 
-Use kernel factories when registering CAD engines with `createRuntimeClient`. Each factory returns a `KernelPlugin` that the client uses for kernel selection and worker loading.
+Use kernel factories when registering CAD engines with `defineRuntime`. Each factory returns a `KernelPlugin` that the worker uses for kernel selection and loading.
 
 ## Types
 
@@ -37,14 +37,15 @@ Use kernel factories when registering CAD engines with `createRuntimeClient`. Ea
 ## Usage
 
 ```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { replicad, opencascade, manifold, jscad, zoo, tau } from '@taucad/runtime/kernels';
 import { openscad } from '@taucad/openscad';
 import { esbuild } from '@taucad/runtime/bundler';
 
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
+const runtime = defineRuntime({
   kernels: [
     replicad({ withBrepEdges: true }),
     opencascade(),
@@ -55,6 +56,10 @@ const client = createRuntimeClient({
     tau(),
   ],
   bundlers: [esbuild()],
+});
+
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 ```
 

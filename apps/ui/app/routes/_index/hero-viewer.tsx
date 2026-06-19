@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Download, Check, ChevronDown, ArrowUpRight } from 'lucide-react';
-import { createRuntimeClientOptions } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { openscad } from '@taucad/openscad';
@@ -12,9 +12,9 @@ import { downloadBlob } from '@taucad/utils/file';
 import { deriveExportFormatOptions } from '#routes/_index/hero-viewer.utils.js';
 import type { ExportFormatOption } from '#routes/_index/hero-viewer.utils.js';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
-import { ModelViewer, RenderStatusOverlay } from '#components/model-viewer.js';
+import { ModelViewer, RuntimeStatusOverlay } from '#components/model-viewer.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { useRender } from '@taucad/react';
+import { useRuntime } from '@taucad/react';
 import { Button } from '#components/ui/button.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
@@ -31,13 +31,16 @@ const heroCode = { [heroMainFile]: qrcodeScad };
 
 const heroUnits: Units = { length: { symbol: 'mm', factor: 1 } };
 
-const heroKernelClientOptions = createRuntimeClientOptions({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
+const heroRuntime = defineRuntime({
   kernels: [openscad()],
   middleware: [parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()],
   bundlers: [esbuild()],
   transcoders: [converterTranscoder()],
 });
+const heroKernelClientOptions = {
+  runtime: heroRuntime,
+  transport: inProcessTransport({ runtime: heroRuntime, fileSystem: fromMemoryFs() }),
+};
 
 export function HeroViewer(): React.JSX.Element {
   const navigate = useNavigate();
@@ -52,7 +55,7 @@ export function HeroViewer(): React.JSX.Element {
     [currentParams],
   );
 
-  const { geometries, status, defaultParameters, jsonSchema, exportGeometry, capabilities } = useRender({
+  const { geometries, status, defaultParameters, jsonSchema, exportGeometry, capabilities } = useRuntime({
     clientOptions: heroKernelClientOptions,
     code: heroCode,
     parameters: renderParams,
@@ -160,7 +163,7 @@ export function HeroViewer(): React.JSX.Element {
 
       <div className='flex flex-col overflow-hidden rounded-xl border bg-sidebar md:h-[700px] md:flex-row'>
         <div className='relative h-[300px] md:h-full md:flex-1'>
-          <RenderStatusOverlay status={status} className='top-auto right-4 bottom-4' />
+          <RuntimeStatusOverlay status={status} className='top-auto right-4 bottom-4' />
 
           <Button
             variant='outline'

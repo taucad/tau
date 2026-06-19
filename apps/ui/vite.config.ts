@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +11,7 @@ import { visualizer } from 'rollup-plugin-visualizer';
 import mdx from 'fumadocs-mdx/vite';
 import svgSpriteWrapper from 'vite-svg-sprite-wrapper';
 import { defineConfig } from 'vite';
+import type { Plugin } from 'vite';
 // oxlint-disable-next-line no-restricted-imports, import/extensions -- allowed for Fumadocs; .js for ESM
 import * as MdxConfig from './app/lib/fumadocs/source.config.js';
 import { runtime } from '@taucad/runtime/vite';
@@ -18,6 +20,47 @@ import { base64Loader } from '@taucad/vite/base64-loader';
 import { optimizeDepsFromCache } from '@taucad/vite/optimize-deps-from-cache';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const testScriptsAlias = '#scripts';
+
+const createUiSourceAliasPlugin = (): Plugin => ({
+  name: 'tau-ui-source-alias',
+  enforce: 'pre',
+  resolveId(source, importer) {
+    if (!source.startsWith('#')) {
+      return null;
+    }
+
+    const uiRoot = `${path.resolve(__dirname)}${path.sep}`;
+    if (importer !== undefined && !path.resolve(importer).startsWith(uiRoot)) {
+      return null;
+    }
+
+    const [specifier, query] = source.split('?', 2);
+    if (specifier === undefined) {
+      return null;
+    }
+
+    const appPath = path.resolve(__dirname, 'app', specifier.slice(1));
+    const candidatePaths = [appPath];
+    if (specifier.endsWith('.js')) {
+      const sourceBasePath = appPath.slice(0, -'.js'.length);
+      candidatePaths.push(
+        `${sourceBasePath}.ts`,
+        `${sourceBasePath}.tsx`,
+        `${sourceBasePath}.js`,
+        `${sourceBasePath}.jsx`,
+      );
+    }
+
+    for (const candidatePath of candidatePaths) {
+      if (existsSync(candidatePath)) {
+        return query === undefined ? candidatePath : `${candidatePath}?${query}`;
+      }
+    }
+
+    return null;
+  },
+});
 
 // Sprite generation can slow down the build time, so we disable it by default.
 // Enable it when adding a new icon to regenerate the sprite.
@@ -31,6 +74,8 @@ export default defineConfig(({ mode }) => {
     root: __dirname,
     cacheDir: '../../node_modules/.vite/apps/ui',
     plugins: [
+      createUiSourceAliasPlugin(),
+
       // Pre-bundle all deps known from the previous dev session's cache,
       // eliminating cascading "new dependencies optimized → reloading" on cold start.
       optimizeDepsFromCache(),
@@ -100,8 +145,15 @@ export default defineConfig(({ mode }) => {
     worker: {
       // Workers need their own plugins.
       // https://vite.dev/config/worker-options.html#worker-plugins
-      plugins: () => [nxViteTsPaths()],
+      plugins: () => [createUiSourceAliasPlugin(), nxViteTsPaths()],
       format: 'es',
+    },
+    resolve: {
+      alias: isTest
+        ? {
+            [testScriptsAlias]: path.resolve(__dirname, 'scripts'),
+          }
+        : {},
     },
 
     /*

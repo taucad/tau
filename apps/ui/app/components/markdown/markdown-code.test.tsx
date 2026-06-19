@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { extractLanguageFromClassName, MarkdownCode } from '#components/markdown/markdown-code.js';
+import { MarkdownCode } from '#components/markdown/markdown-code.js';
+import { extractLanguageFromClassName } from '#lib/code-language-resolution.js';
 
 // Mock the CollapsibleCodeBlock component
 vi.mock('#components/ui/collapsible-code-block.js', () => ({
@@ -78,6 +79,12 @@ describe('extractLanguageFromClassName', () => {
 
   it('handles language names with numbers', () => {
     expect(extractLanguageFromClassName('language-c99')).toBe('c99');
+  });
+
+  it('handles language names with punctuation', () => {
+    expect(extractLanguageFromClassName('language-c++')).toBe('c++');
+    expect(extractLanguageFromClassName('language-shell-session')).toBe('shell-session');
+    expect(extractLanguageFromClassName('language-objective-c')).toBe('objective-c');
   });
 });
 

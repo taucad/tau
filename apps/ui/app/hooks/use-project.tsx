@@ -17,6 +17,7 @@ import type { logMachine } from '#machines/logs.machine.js';
 import { inspect } from '#machines/inspector.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
+import type { StorageProvider } from '#types/storage.types.js';
 import { defaultKernelOptions } from '#constants/kernel-options.presets.js';
 import { joinPath } from '@taucad/utils/path';
 import {
@@ -50,6 +51,7 @@ type ProjectContextType = {
   renameParameterGroup: (filePath: string, oldName: string, newName: string) => void;
   parameterEntries: Map<string, FileParameterEntry>;
   updateName: (name: string) => void;
+  applyGeneratedProjectName: (name: string) => void;
   updateDescription: (description: string) => void;
   updateTags: (tags: string[]) => void;
   updateThumbnail: (thumbnail: string) => void;
@@ -58,6 +60,43 @@ type ProjectContextType = {
 };
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
+
+type FocusedChatWorker = Pick<StorageProvider, 'getChatsForResource' | 'createNavigationRepairChat'>;
+
+export async function ensureFocusedChatForProject({
+  projectId,
+  candidateFocusedChatId,
+  worker,
+  onCreatedChat,
+}: {
+  readonly projectId: string;
+  readonly candidateFocusedChatId: string | undefined;
+  readonly worker: FocusedChatWorker;
+  readonly onCreatedChat?: () => void;
+}): Promise<{ type: 'focusedChatEnsured'; focusedChatId: string }> {
+  const chats = await worker.getChatsForResource(projectId);
+
+  if (candidateFocusedChatId !== undefined) {
+    const match = chats.find((chat) => chat.id === candidateFocusedChatId);
+    if (match) {
+      return { type: 'focusedChatEnsured', focusedChatId: match.id };
+    }
+  }
+
+  if (chats.length > 0) {
+    let mostRecent = chats[0]!;
+    for (const candidate of chats) {
+      if (candidate.updatedAt > mostRecent.updatedAt) {
+        mostRecent = candidate;
+      }
+    }
+    return { type: 'focusedChatEnsured', focusedChatId: mostRecent.id };
+  }
+
+  const created = await worker.createNavigationRepairChat(projectId);
+  onCreatedChat?.();
+  return { type: 'focusedChatEnsured', focusedChatId: created.id };
+}
 
 export function ProjectProvider({
   children,
@@ -191,38 +230,17 @@ export function ProjectProvider({
           await worker.updateEditorState(input.editorState);
         }),
         ensureFocusedChatActor: fromSafeAsync(async ({ input }) => {
-          // Establishes the focused-chat invariant by consulting the
-          // worker's live chat list. Heuristic:
-          //   1. Use `candidateFocusedChatId` if it points to an
-          //      extant (non-soft-deleted) chat.
-          //   2. Otherwise pick the most-recently-updated extant chat.
-          //   3. Otherwise create a fresh empty chat and adopt it
-          //      (zero-chats project, or post-delete-of-last-chat).
           const worker = await getReadiedWorker();
-          const chats = await worker.getChatsForResource(input.projectId);
-
-          if (input.candidateFocusedChatId !== undefined) {
-            const match = chats.find((c) => c.id === input.candidateFocusedChatId);
-            if (match) {
-              return { type: 'focusedChatEnsured', focusedChatId: match.id };
-            }
-          }
-
-          if (chats.length > 0) {
-            let mostRecent = chats[0]!;
-            for (const candidate of chats) {
-              if (candidate.updatedAt > mostRecent.updatedAt) {
-                mostRecent = candidate;
-              }
-            }
-            return { type: 'focusedChatEnsured', focusedChatId: mostRecent.id };
-          }
-
-          const created = await worker.createChat(input.projectId, { name: 'New chat', messages: [] });
-          // Surface the new chat through TanStack Query so `useChats`
-          // refetches and the history selector picks it up immediately.
-          void queryClient.invalidateQueries({ queryKey: ['chats', input.projectId] });
-          return { type: 'focusedChatEnsured', focusedChatId: created.id };
+          return ensureFocusedChatForProject({
+            projectId: input.projectId,
+            candidateFocusedChatId: input.candidateFocusedChatId,
+            worker,
+            onCreatedChat: () => {
+              // Surface the new chat through TanStack Query so `useChats`
+              // refetches and the history selector picks it up immediately.
+              void queryClient.invalidateQueries({ queryKey: ['chats', input.projectId] });
+            },
+          });
         }),
       },
     }),
@@ -355,6 +373,13 @@ export function ProjectProvider({
     [actorRef],
   );
 
+  const applyGeneratedProjectName = useCallback(
+    (name: string) => {
+      actorRef.send({ type: 'applyGeneratedProjectName', name });
+    },
+    [actorRef],
+  );
+
   const updateDescription = useCallback(
     (description: string) => {
       actorRef.send({ type: 'updateDescription', description });
@@ -411,6 +436,7 @@ export function ProjectProvider({
       deleteParameterGroup,
       renameParameterGroup,
       updateName,
+      applyGeneratedProjectName,
       updateDescription,
       updateTags,
       updateThumbnail,
@@ -434,6 +460,7 @@ export function ProjectProvider({
     deleteParameterGroup,
     renameParameterGroup,
     updateName,
+    applyGeneratedProjectName,
     updateDescription,
     updateTags,
     updateThumbnail,

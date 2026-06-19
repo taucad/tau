@@ -1,10 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
+import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import type { GraphicsViewSettings, PinnedMeasurement } from '#constants/editor.constants.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
+import { useModelInteractionRef } from '#hooks/use-graphics.js';
+import { serializeModelComponentDisplayState } from '#machines/model-interaction.machine.js';
 /**
  * Synchronises persistable graphics settings from the per-view GraphicsMachine
  * (and render timeout from the CadMachine) back to the EditorMachine's
@@ -49,12 +52,18 @@ export function useViewSettingsSync({
   const cameraFovAngle = useSelector(graphicsRef, (s) => s.context.cameraFovAngle);
   const environmentPreset = useSelector(graphicsRef, (s) => s.context.environmentPreset);
   const graphicsBackendPreference = useSelector(graphicsRef, (s) => s.context.graphicsBackendPreference);
+  const modelInteractionRef = useModelInteractionRef();
+  const displayRevision = useSelector(modelInteractionRef, (s) => s.context.displayRevision);
+  const componentDisplay = useMemo(
+    () => serializeModelComponentDisplayState(modelInteractionRef.getSnapshot().context),
+    [modelInteractionRef, displayRevision],
+  );
 
   // Pinned measurements for persistence
   const measurements = useSelector(graphicsRef, (s) => s.context.measurements);
 
   // Render timeout lives on the cad machine (per-file), not the graphics machine (per-view)
-  const renderTimeout = useSelector(cadRef, (s) => s?.context.renderTimeout ?? 30_000);
+  const renderTimeout = useSelector(cadRef, (s) => s?.context.renderTimeout ?? defaultRenderTimeout);
 
   useEffect(() => {
     // Extract pinned measurements for persistence
@@ -81,8 +90,9 @@ export function useViewSettingsSync({
       environmentPreset,
       graphicsBackend: graphicsBackendPreference,
       pinnedMeasurements,
+      componentDisplay,
       renderTimeout,
-      schemaVersion: 4,
+      schemaVersion: 5,
     };
 
     // Skip the very first emission to avoid overwriting restored state
@@ -121,6 +131,7 @@ export function useViewSettingsSync({
     environmentPreset,
     graphicsBackendPreference,
     measurements,
+    componentDisplay,
     renderTimeout,
   ]);
 }

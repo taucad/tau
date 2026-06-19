@@ -1,17 +1,19 @@
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
+import type { FileExtension } from '@taucad/types';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
-import type { FileExtension } from '@taucad/types';
 import { Button } from '#components/ui/button.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
 import { cn } from '#utils/ui.utils.js';
 import { ExportFormatGrid } from '#components/files/export-format-grid.js';
+import type { ExportFormatLayout } from '#components/files/export-format-grid.js';
 import { useExportToDisk } from '#components/files/use-export-to-disk.js';
 import { deriveAvailableFormats } from '#routes/projects_.$id/export-formats.utils.js';
+import type { FormatEntry } from '#routes/projects_.$id/export-formats.utils.js';
 import { sortGeometryUnitEntries } from '#routes/projects_.$id/geometry-unit.utils.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 
@@ -57,6 +59,15 @@ export type ExportSelectorProps = {
    * close menus, show downstream UI, or extend the workflow.
    */
   readonly onExport?: (entryFile: string, format: FileExtension) => void;
+  /** `grid` (default) or vertical `list` for compact menus. */
+  readonly layout?: ExportFormatLayout;
+  /**
+   * When true, picking a format only invokes `onFormatSelect` — no download.
+   * Used by chat-tool export pickers where download is a separate control.
+   */
+  readonly isSelectOnly?: boolean;
+  readonly selectedFormat?: FileExtension;
+  readonly onFormatSelect?: (format: FileExtension) => void;
   /** Trigger element when `variant === 'popover'`. */
   readonly children?: ReactNode;
   readonly className?: string;
@@ -78,6 +89,27 @@ function getCuGroupedItems(entries: GeometryUnitEntry[]): Array<{ name: string; 
 }
 
 const getCuValue = (entry: GeometryUnitEntry): string => entry.entryFile;
+
+export const getExportFormatValue = (entry: FormatEntry): string => entry.format;
+
+/** Shared combobox row label for export format options. */
+export function ExportFormatComboboxLabel({
+  item,
+  selectedItem,
+}: {
+  readonly item: FormatEntry;
+  readonly selectedItem: FormatEntry | undefined;
+}): React.JSX.Element {
+  return (
+    <span className='flex w-full items-center justify-between gap-2 uppercase'>
+      <span className='flex min-w-0 items-center gap-2'>
+        <FileExtensionIcon filename={`file.${item.format}`} className='size-3.5 shrink-0' />
+        <span>{item.format}</span>
+      </span>
+      {selectedItem?.format === item.format ? <Check className='size-3.5 shrink-0' /> : null}
+    </span>
+  );
+}
 
 function GeometryUnitPicker({
   entries,
@@ -154,6 +186,10 @@ function ExportSelectorBody({
   selectedActor,
   filenameBase,
   onExport,
+  layout,
+  isSelectOnly,
+  selectedFormat,
+  onFormatSelect,
 }: {
   readonly entries: GeometryUnitEntry[];
   readonly selectedEntryFile: string;
@@ -162,6 +198,10 @@ function ExportSelectorBody({
   readonly selectedActor: ActorRefFrom<typeof cadMachine> | undefined;
   readonly filenameBase: string;
   readonly onExport?: (entryFile: string, format: FileExtension) => void;
+  readonly layout: ExportFormatLayout;
+  readonly isSelectOnly: boolean;
+  readonly selectedFormat?: FileExtension;
+  readonly onFormatSelect?: (format: FileExtension) => void;
 }): React.JSX.Element {
   const capabilities = useSelector(selectedActor, (state) => state?.context.capabilities);
   const activeKernelId = useSelector(selectedActor, (state) => state?.context.activeKernelId);
@@ -176,13 +216,18 @@ function ExportSelectorBody({
 
   const handleSelectFormat = useCallback(
     async (format: FileExtension) => {
+      if (isSelectOnly) {
+        onFormatSelect?.(format);
+        return;
+      }
+
       if (!selectedActor) {
         return;
       }
       await exportToDisk(selectedActor, format);
       onExport?.(selectedEntryFile, format);
     },
-    [selectedActor, exportToDisk, onExport, selectedEntryFile],
+    [isSelectOnly, onFormatSelect, selectedActor, exportToDisk, onExport, selectedEntryFile],
   );
 
   return (
@@ -194,7 +239,13 @@ function ExportSelectorBody({
         onSelect={onEntryFileChange}
       />
       {availableFormats.length > 0 ? (
-        <ExportFormatGrid formats={availableFormats} isExporting={isExporting} onSelectFormat={handleSelectFormat} />
+        <ExportFormatGrid
+          formats={availableFormats}
+          isExporting={isSelectOnly ? false : isExporting}
+          layout={layout}
+          selectedFormat={selectedFormat}
+          onSelectFormat={handleSelectFormat}
+        />
       ) : (
         <p className='text-xs text-muted-foreground'>No export formats available. The kernel is still initializing.</p>
       )}
@@ -226,6 +277,10 @@ export function ExportSelector({
   defaultEntryFile,
   variant = 'inline',
   onExport,
+  layout = 'grid',
+  isSelectOnly = false,
+  selectedFormat,
+  onFormatSelect,
   children,
   className,
 }: ExportSelectorProps): React.JSX.Element {
@@ -263,6 +318,10 @@ export function ExportSelector({
       selectedActor={selectedActor}
       filenameBase={filenameBase}
       onExport={onExport}
+      layout={layout}
+      isSelectOnly={isSelectOnly}
+      selectedFormat={selectedFormat}
+      onFormatSelect={onFormatSelect}
     />
   );
 

@@ -56,6 +56,30 @@ describe('ChatMessageContextCompaction', () => {
     expect(screen.getByText('15')).toBeInTheDocument();
   });
 
+  it('should render failed compaction distinctly', async () => {
+    render(<ChatMessageContextCompaction data={createCompactionData({ status: 'failed', compressionRatio: 1 })} />);
+
+    const badge = screen.getByText('Compaction failed');
+    await userEvent.hover(badge);
+
+    expect(await screen.findByText('Context compaction failed')).toBeInTheDocument();
+    expect(screen.getByText(/0%/)).toBeInTheDocument();
+  });
+
+  it('should render overflow retry distinctly', async () => {
+    render(
+      <ChatMessageContextCompaction
+        data={createCompactionData({ status: 'overflow_retry_succeeded', triggerReason: 'overflow' })}
+      />,
+    );
+
+    const badge = screen.getByText('Trimmed');
+    await userEvent.hover(badge);
+
+    expect(await screen.findByText('Overflow retry')).toBeInTheDocument();
+    expect(screen.getByText('Provider overflow')).toBeInTheDocument();
+  });
+
   it('should show transcript file path when present', async () => {
     render(
       <ChatMessageContextCompaction

@@ -112,12 +112,11 @@ describe('reversedDepthTransparentSort', () => {
     });
   });
 
-  describe('section-view label scenario (regression guard)', () => {
-    it('should sort the inverse selector before the forward selector under reversed-Z', () => {
-      // The forward selector ("Top") sits `labelDepth*scale` closer to the camera than the
-      // inverse selector ("Bottom") under reversed-Z, so its clip-z is LARGER. Both share
-      // the same groupOrder + renderOrder, so the sort falls through to z. We want the
-      // inverse to draw FIRST and the forward to draw LAST (overdraws under depthTest:false).
+  describe('transparent overlay scenario (regression guard)', () => {
+    it('should sort the farther transparent overlay before the nearer overlay under reversed-Z', () => {
+      // Under reversed-Z, the nearer overlay has larger clip-z. Both overlays share
+      // groupOrder + renderOrder, so the sort falls through to z. We want the farther
+      // overlay to draw FIRST and the nearer overlay to draw LAST for depthTest:false blending.
       const forwardCloser = makeItem({ id: 1, z: 5 });
       const inverseFarther = makeItem({ id: 2, z: 1 });
 

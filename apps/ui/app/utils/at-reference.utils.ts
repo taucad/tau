@@ -189,7 +189,15 @@ export function resolveSlashCommand(
 
 export type PastedContentSegment =
   | { type: 'text'; value: string }
-  | { type: 'chip'; id: string; label: string; chipType: ChipType; path?: string };
+  | {
+      type: 'chip';
+      id: string;
+      label: string;
+      chipType: ChipType;
+      path?: string;
+      referenceToken?: string;
+      geometryReference?: string;
+    };
 
 export type BuildPastedContentOptions = {
   fileTree: Map<string, FileEntry>;

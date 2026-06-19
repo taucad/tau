@@ -18,10 +18,11 @@ import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
 import { ContextChip } from '#components/chat/context-chip.js';
 import { ChatActivityGroup } from '#components/chat/chat-activity-group.js';
 import { ChatActivitySection } from '#components/chat/chat-activity-section.js';
-import { defaultSkills } from '#components/chat/tiptap/slash-command-suggestion.js';
+import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
 import { ChatMessageReasoning } from '#routes/projects_.$id/chat-message-reasoning.js';
 import { ChatMessageDataUsage } from '#routes/projects_.$id/chat-message-data-usage.js';
 import { ChatMessageContextCompaction } from '#routes/projects_.$id/chat-message-context-compaction.js';
+import { ChatMessageToolUseSkill } from '#routes/projects_.$id/chat-message-tool-use-skill.js';
 import { ChatMessageText } from '#routes/projects_.$id/chat-message-text.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.js';
 import { CopyButton } from '#components/copy-button.js';
@@ -54,13 +55,11 @@ import { ChatMessageToolScreenshot } from '#routes/projects_.$id/chat-message-to
 import { ChatMessageToolExportGeometry } from '#routes/projects_.$id/chat-message-tool-export-geometry.js';
 import { ChatMessagePartUnknown } from '#routes/projects_.$id/chat-message-tool-unknown.js';
 import { ChatMessageToolTransfer } from '#routes/projects_.$id/chat-message-tool-transfer.js';
-import { ChatMessageFile } from '#routes/projects_.$id/chat-message-file.js';
+import { ChatMessageFileAttachments } from '#routes/projects_.$id/chat-message-file.js';
 import { ChatMessagePlanning } from '#routes/projects_.$id/chat-message-planning.js';
 import { ChatStreamingStopButton } from '#components/chat/chat-textarea-submit-button.js';
 import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-types.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
-
-const knownSkillIds = new Set(defaultSkills.map((s) => s.id));
 
 /**
  * Split a line into chunks of `maxLen` characters without breaking `@path` or `/command` references.
@@ -121,7 +120,13 @@ function segmentKey(segment: ReturnType<typeof parseInlineReferences>[number], i
   return `text-${index}`;
 }
 
-function TextWithAtReferences({ text }: { readonly text: string }): React.JSX.Element {
+function TextWithAtReferences({
+  text,
+  knownSkillIds,
+}: {
+  readonly text: string;
+  readonly knownSkillIds: ReadonlySet<string>;
+}): React.JSX.Element {
   const segments = parseInlineReferences(text);
   const hasReferences = segments.some((s) => s.type !== 'text');
 
@@ -192,11 +197,29 @@ function renderAssistantPart(
     }
 
     case 'source-url': {
-      throw new Error('Source URL rendering is not implemented');
+      return (
+        <a
+          key={`${messageId}-message-part-${index}`}
+          href={part.url}
+          target='_blank'
+          rel='noreferrer'
+          className='block max-w-full truncate text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground'
+        >
+          {part.title ?? part.url}
+        </a>
+      );
     }
 
     case 'source-document': {
-      throw new Error('Source document rendering is not implemented');
+      return (
+        <div
+          key={`${messageId}-message-part-${index}`}
+          className='flex max-w-full flex-col gap-0.5 text-xs text-muted-foreground'
+        >
+          <span className='truncate font-medium'>{part.title}</span>
+          <span className='truncate'>{part.filename ?? part.mediaType}</span>
+        </div>
+      );
     }
 
     case 'tool-web_search': {
@@ -259,6 +282,10 @@ function renderAssistantPart(
 
     case 'data-context-compaction': {
       return <ChatMessageContextCompaction key={`${messageId}-compaction-${index}`} data={part.data} />;
+    }
+
+    case 'tool-use_skill': {
+      return <ChatMessageToolUseSkill key={part.toolCallId} part={part} />;
     }
 
     default: {
@@ -411,6 +438,8 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
   const userMessageCollapseRowThreshold = 8;
   const userMessageCollapseCharacterThreshold = 900;
 
+  const skillsCatalog = useSkillsCatalog();
+  const knownSkillIds = useMemo(() => new Set(skillsCatalog.map((skill) => skill.name)), [skillsCatalog]);
   const message = useChatSelector((state) => state.messagesById.get(messageId));
   const displayMessage = useChatSelector((state) => state.messageEdits[messageId] ?? state.messagesById.get(messageId));
   const fileParts = useChatSelector(
@@ -586,13 +615,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
             )}
             onClick={handleEditClick}
           >
-            {fileParts.length > 0 ? (
-              <div className='flex flex-row gap-2'>
-                {fileParts.map((part) => (
-                  <ChatMessageFile key={part.url} part={part} />
-                ))}
-              </div>
-            ) : null}
+            {fileParts.length > 0 ? <ChatMessageFileAttachments parts={fileParts} /> : null}
             {shouldRenderCollapsedUserRows ? (
               <div className='flex flex-col gap-1 pr-1'>
                 {collapsedUserRowsWithStableKeys.map(({ keyPrefix, row }) => (
@@ -600,7 +623,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                     key={`${keyPrefix}:${row.slice(0, 120)}`}
                     className='text-sm leading-relaxed wrap-break-word whitespace-pre-wrap text-foreground/90'
                   >
-                    <TextWithAtReferences text={row} />
+                    <TextWithAtReferences text={row} knownSkillIds={knownSkillIds} />
                   </p>
                 ))}
               </div>

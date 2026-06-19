@@ -21,6 +21,8 @@ import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-t
 import { takeScreenshotGroup } from '#components/chat/tiptap/context-suggestion.utils.js';
 import { captureViewScreenshot } from '#components/chat/capture-view-screenshot.utils.js';
 import { buildScreenshotOverlayForPath, resolveScreenshotOverlay } from '#machines/resolve-screenshot-overlay.js';
+import { useChatContextInsertion } from '#components/chat/chat-context-insertion.js';
+import type { ChatContextReference } from '#components/chat/chat-context-insertion.js';
 
 /**
  * Main chat textarea component that conditionally renders either the
@@ -49,10 +51,21 @@ export const ChatTextarea = memo(function ({
   // chips into the platform-appropriate sink (Tiptap node insert vs `@<path>`
   // text append).
   const addContextChipsRef = useRef<((paths: string[]) => void) | undefined>(undefined);
+  const addContextReferencesRef = useRef<((references: ChatContextReference[]) => void) | undefined>(undefined);
+  const { registerContextReferenceInserter } = useChatContextInsertion();
 
   const handleAddContextChips = useCallback((paths: string[]): void => {
     addContextChipsRef.current?.(paths);
   }, []);
+
+  useEffect(() => {
+    registerContextReferenceInserter((references) => {
+      addContextReferencesRef.current?.(references);
+    });
+    return () => {
+      registerContextReferenceInserter(undefined);
+    };
+  }, [registerContextReferenceInserter]);
 
   // Forward declaration — the actual screenshot-on-drop callback is defined
   // below (it depends on `projectContextRef`, `screenshotQualityRef` and the
@@ -363,8 +376,19 @@ export const ChatTextarea = memo(function ({
       const needsLeadingSpace = inputTextRefForChips.current.length > 0 && !inputTextRefForChips.current.endsWith(' ');
       handleAddTextRef.current(`${needsLeadingSpace ? ' ' : ''}${segment} `);
     };
+    addContextReferencesRef.current = (references: ChatContextReference[]): void => {
+      if (references.length === 0) {
+        return;
+      }
+      const segment = references
+        .map((reference) => reference.referenceToken ?? `@${reference.path ?? reference.label}`)
+        .join(' ');
+      const needsLeadingSpace = inputTextRefForChips.current.length > 0 && !inputTextRefForChips.current.endsWith(' ');
+      handleAddTextRef.current(`${needsLeadingSpace ? ' ' : ''}${segment} `);
+    };
     return () => {
       addContextChipsRef.current = undefined;
+      addContextReferencesRef.current = undefined;
     };
   }, [isMobile]);
 
@@ -406,6 +430,7 @@ export const ChatTextarea = memo(function ({
           handleDragOver={logic.handleDragOver}
           handleDragLeave={logic.handleDragLeave}
           handleDrop={logic.handleDrop}
+          handlePaste={logic.handlePaste}
           handleFileSelect={logic.handleFileSelect}
           handleFileChange={logic.handleFileChange}
           handleTextChange={logic.handleTextChange}
@@ -453,12 +478,14 @@ export const ChatTextarea = memo(function ({
         containerReference={logic.containerReference}
         focusEditorRef={focusEditorRef}
         addContextChipsRef={addContextChipsRef}
+        addContextReferencesRef={addContextReferencesRef}
         // Handlers
         handleSubmit={logic.handleSubmit}
         handleCancelClick={logic.handleCancelClick}
         handleDragOver={logic.handleDragOver}
         handleDragLeave={logic.handleDragLeave}
         handleDrop={logic.handleDrop}
+        handlePaste={logic.handlePaste}
         handleFileSelect={logic.handleFileSelect}
         handleFileChange={logic.handleFileChange}
         handleAddImage={logic.handleAddImage}

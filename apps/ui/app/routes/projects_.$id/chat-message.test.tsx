@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import type { MyUIMessage } from '@taucad/chat';
+import type { MyUIMessage, SkillMetadata } from '@taucad/chat';
 import { ChatMessage } from '#routes/projects_.$id/chat-message.js';
 
-const { mockMessagesById, mockMessageOrder, mockStatus } = vi.hoisted(() => ({
+const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog } = vi.hoisted(() => ({
   mockMessagesById: new Map<string, MyUIMessage>(),
   mockMessageOrder: [] as string[],
   mockStatus: { value: 'ready' as 'ready' | 'streaming' | 'submitted' | 'error' },
+  mockSkillsCatalog: [] as SkillMetadata[],
 }));
 
 const getMockChatSelectorState = (): {
@@ -70,6 +71,10 @@ vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
   }),
 }));
 
+vi.mock('#hooks/use-skills-catalog.js', () => ({
+  useSkillsCatalog: () => mockSkillsCatalog,
+}));
+
 vi.mock('#routes/projects_.$id/chat-message-planning.js', () => ({
   ChatMessagePlanning({ messageId, className }: { readonly messageId: string; readonly className?: string }) {
     return (
@@ -92,6 +97,20 @@ vi.mock('#routes/projects_.$id/chat-message-data-usage.js', () => ({
   },
 }));
 
+vi.mock('#routes/projects_.$id/chat-message-tool-use-skill.js', () => ({
+  ChatMessageToolUseSkill({
+    part,
+  }: {
+    readonly part: { output?: { skillName: string; skillPath?: string; resourceUri?: string } };
+  }) {
+    return (
+      <div data-testid='chat-message-tool-use-skill'>
+        {part.output?.skillName} {part.output?.skillPath ?? part.output?.resourceUri}
+      </div>
+    );
+  },
+}));
+
 vi.mock('#routes/projects_.$id/chat-message-context-compaction.js', () => ({
   ChatMessageContextCompaction() {
     return <div data-testid='chat-message-context-compaction' />;
@@ -105,8 +124,8 @@ vi.mock('#routes/projects_.$id/chat-message-text.js', () => ({
 }));
 
 vi.mock('#routes/projects_.$id/chat-message-file.js', () => ({
-  ChatMessageFile() {
-    return <div data-testid='chat-message-file' />;
+  ChatMessageFileAttachments() {
+    return <div data-testid='chat-message-file-attachments' />;
   },
 }));
 
@@ -121,9 +140,6 @@ vi.mock('#routes/projects_.$id/chat-message-tool-edit-file.js', () => ({
 }));
 vi.mock('#routes/projects_.$id/chat-message-tool-test-model.js', () => ({
   ChatMessageToolTestModel: () => <div data-testid='tool-test-model' />,
-}));
-vi.mock('#routes/projects_.$id/chat-message-tool-edit-tests.js', () => ({
-  ChatMessageToolEditTests: () => <div data-testid='tool-edit-tests' />,
 }));
 vi.mock('#routes/projects_.$id/chat-message-tool-read-file.js', () => ({
   ChatMessageToolReadFile: () => <div data-testid='tool-read-file' />,
@@ -259,6 +275,7 @@ afterEach(() => {
   mockMessagesById.clear();
   mockMessageOrder.length = 0;
   mockStatus.value = 'ready';
+  mockSkillsCatalog.length = 0;
 });
 
 describe('ChatMessage column wrapper layout', () => {
@@ -325,6 +342,125 @@ describe('ChatMessage column wrapper layout', () => {
     const rowsWrap = innerBubble.querySelector('.flex.flex-col.gap-1');
     expect(rowsWrap).not.toBeNull();
     expect(rowsWrap!.querySelectorAll('p').length).toBeGreaterThan(0);
+  });
+});
+
+describe('ChatMessage use_skill tool rendering', () => {
+  it('should render tool-use_skill directly as the skill usage row', () => {
+    const message: MyUIMessage = {
+      id: 'msg-1',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-use_skill',
+          toolCallId: 'tc-use-skill',
+          state: 'output-available',
+          input: { skillName: 'woodworking' },
+          output: {
+            skillName: 'woodworking',
+            resourceUri: 'file:.agents/skills/woodworking/SKILL.md',
+            skillPath: '.agents/skills/woodworking/SKILL.md',
+            baseDirectory: '.agents/skills/woodworking',
+            source: 'user',
+            frontmatter: {},
+            content: '# Woodworking',
+            supportingFiles: [],
+          },
+        },
+      ],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId='msg-1' />);
+
+    expect(screen.getByTestId('chat-message-tool-use-skill')).toHaveTextContent('woodworking');
+    expect(screen.queryByTestId('tool-unknown')).toBeNull();
+  });
+});
+
+describe('ChatMessage source part rendering', () => {
+  it('should render source-url parts without throwing', () => {
+    const message: MyUIMessage = {
+      id: 'msg-source-url',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'source-url',
+          sourceId: 'source-1',
+          url: 'https://example.com/source',
+          title: 'External reference',
+        },
+      ],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId='msg-source-url' />);
+
+    const link = screen.getByRole('link', { name: 'External reference' });
+    expect(link).toHaveAttribute('href', 'https://example.com/source');
+  });
+
+  it('should render source-document parts without throwing', () => {
+    const message: MyUIMessage = {
+      id: 'msg-source-document',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'source-document',
+          sourceId: 'source-2',
+          mediaType: 'application/pdf',
+          title: 'Design brief',
+          filename: 'brief.pdf',
+        },
+      ],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId='msg-source-document' />);
+
+    expect(screen.getByRole('article')).toHaveTextContent('Design brief');
+    expect(screen.getByRole('article')).toHaveTextContent('brief.pdf');
+  });
+});
+
+describe('ChatMessage slash command rendering', () => {
+  const longMessageWith = (line: string): string =>
+    [line, ...Array.from({ length: 10 }, (_, index) => `filler line ${index}`)].join('\n');
+
+  it('should render /create-skill as a skill chip when rehydrating message text', () => {
+    mockSkillsCatalog.push({
+      name: 'create-skill',
+      description: 'Create or update a skill',
+      resourceUri: 'system:skills/create-skill/SKILL.md',
+      source: 'system',
+      version: '1.0.0',
+      fingerprint: 'test-create-skill',
+      enabled: true,
+      shadowedSources: [],
+    });
+    setMessages([userMessage('msg-1', longMessageWith('Use /create-skill now'))]);
+
+    render(<ChatMessage messageId='msg-1' />);
+
+    expect(screen.getByTestId('context-chip')).toBeInTheDocument();
+  });
+
+  it('should render /plan text without turning it into a skill chip', () => {
+    setMessages([userMessage('msg-1', longMessageWith('Please do /plan later'))]);
+
+    render(<ChatMessage messageId='msg-1' />);
+
+    expect(screen.getByRole('article')).toHaveTextContent('Please do /plan later');
+    expect(screen.queryByTestId('context-chip')).toBeNull();
+  });
+
+  it('should render unknown slash text without turning it into a skill chip', () => {
+    setMessages([userMessage('msg-1', longMessageWith('Please do /nonsense later'))]);
+
+    render(<ChatMessage messageId='msg-1' />);
+
+    expect(screen.getByRole('article')).toHaveTextContent('Please do /nonsense later');
+    expect(screen.queryByTestId('context-chip')).toBeNull();
   });
 });
 

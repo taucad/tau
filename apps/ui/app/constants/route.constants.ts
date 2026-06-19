@@ -7,6 +7,7 @@ import {
   Import,
   Map,
   PieChart,
+  Plug,
   Settings,
   Shuffle,
   UsersRound,
@@ -73,6 +74,11 @@ export const navRoutes: {
     //   url: '/workflows',
     //   icon: Workflow,
     // },
+    {
+      title: 'Plugins',
+      url: '/plugins',
+      icon: Plug,
+    },
     {
       title: 'Usage',
       url: '/usage',

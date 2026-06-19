@@ -1,12 +1,12 @@
 ---
 title: Plugin System
-description: How defineKernel, defineMiddleware, and defineBundler create an extensible runtime.
+description: How defineKernel, defineMiddleware, defineBundler, and defineTranscoder create an extensible runtime.
 icon: lucide:puzzle
 ---
 
 # Plugin System
 
-The @taucad/runtime is extensible through a plugin system. Instead of inheritance hierarchies or configuration files, three plugin types compose via factory functions. This design keeps the core small, enables tree-shaking, and makes the extension surface explicit.
+The @taucad/runtime is extensible through a plugin system. Instead of inheritance hierarchies or configuration files, four plugin types compose via factory functions. This design keeps the core small, enables tree-shaking, and makes the extension surface explicit.
 
 ## Context and Motivation
 
@@ -14,7 +14,7 @@ CAD runtimes must support multiple engines (Replicad, OpenCASCADE, Manifold, Ope
 
 ## How It Works
 
-Three plugin types exist: [`KernelPlugin`](../api/kernels), [`MiddlewarePlugin`](../api/middleware), and [`BundlerPlugin`](../api/bundler). Each is a plain object returned by a factory function. The factory pattern allows options validation and lazy URL resolution.
+Four plugin types exist: [`KernelPlugin`](../api/kernels), [`MiddlewarePlugin`](../api/middleware), [`BundlerPlugin`](../api/bundler), and `TranscoderPlugin`. Each is a plain metadata object returned by a named factory function. Tau-owned plugin modules export these factories by name only; CAD user source files may still use kernel-specific default entrypoints such as `export default function main(...)`. Executable implementations stay in the worker-owned runtime definition.
 
 ```mermaid
 flowchart LR
@@ -30,16 +30,21 @@ flowchart LR
         BP["BundlerPlugin"]
     end
 
+    subgraph Worker["defineRuntime"]
+        RT["RuntimeDefinition"]
+    end
+
     subgraph Client["createRuntimeClient"]
-        KC["RuntimeClient"]
+        KC["RuntimeClient + transport"]
     end
 
     KF --> KP
     MF --> MP
     BF --> BP
-    KP --> KC
-    MP --> KC
-    BP --> KC
+    KP --> RT
+    MP --> RT
+    BP --> RT
+    RT --> KC
 ```
 
 ### KernelPlugin
@@ -47,7 +52,6 @@ flowchart LR
 A [KernelPlugin](../api/kernels) describes a CAD engine. Factory functions like `replicad()`, `opencascade()`, `manifold()`, `jscad()`, `zoo()`, and `tau()` from `@taucad/runtime/kernels` -- plus `openscad()` from the separately-published `@taucad/openscad` package -- return a registration object:
 
 - `id` -- Unique identifier (e.g., `'replicad'`)
-- `moduleUrl` -- URL of the `defineKernel` module (resolved via `import.meta.url`)
 - `extensions` -- File extensions this kernel handles (`['ts', 'js']`, `['scad']`, or `['*']` for catch-all)
 - `detectImport` -- Optional regex for content-based selection (e.g., `import.*from\s+['"]replicad['"]`)
 - `builtinModuleNames` -- Module names for bundler-assisted transitive import detection
@@ -60,7 +64,6 @@ The factory accepts options and merges them into the plugin. For example, `repli
 A [MiddlewarePlugin](../api/middleware) describes an interceptor. Factory functions like `geometryCache()` and `parameterCache()` return:
 
 - `id` -- Unique identifier
-- `moduleUrl` -- URL of the `defineMiddleware` module
 - `options` -- Middleware-specific options
 
 Middleware order matters: first registered is the outermost layer in the onion model. See [Middleware Model](./middleware-model) for details.
@@ -70,7 +73,6 @@ Middleware order matters: first registered is the outermost layer in the onion m
 A [BundlerPlugin](../api/bundler) describes a bundler for specific file extensions. The built-in `esbuild()` handles `['ts', 'js', 'tsx', 'jsx']`:
 
 - `id` -- Unique identifier
-- `moduleUrl` -- URL of the `defineBundler` module
 - `extensions` -- File extensions this bundler handles
 - `options` -- Bundler-specific options (e.g., esbuild target)
 
@@ -78,36 +80,41 @@ Multiple bundlers can be registered; the framework routes by extension. A kernel
 
 ### Presets for Zero-Config Setup
 
-The `presets.all()` function returns a `PresetOptions` object containing all built-in kernels, middleware, and bundlers:
+The `presets.all()` function returns a runtime definition containing all built-in kernels, middleware, bundlers, and transcoders:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 ```
 
-`PresetOptions` has `{ kernels, middleware, bundlers }` which can be spread into [`createRuntimeClient`](../api/client) alongside other options like `fileSystem`.
+Presets are imported from `@taucad/runtime/presets` instead of the package root so browser clients can opt into a small, transport-only import graph.
 
-### Composition in createRuntimeClient
+### Composition in defineRuntime
 
-When you call `createRuntimeClient({ kernels, middleware, bundlers })`, the client does not instantiate plugins immediately. It stores the plugin objects and passes them to the worker during `initialize()`. The worker then:
+When you call `defineRuntime({ kernels, middleware, bundlers })` in a worker or host process, the runtime definition owns executable modules. The client never sends plugin arrays over the wire. During initialization, the worker:
 
-1. Loads kernel modules from `moduleUrl` and registers them in [`KernelRuntimeWorker`](./worker-model)
+1. Loads kernel definitions from the worker-owned plugin registrations and registers them in [`KernelRuntimeWorker`](./worker-model)
 2. Loads middleware modules and builds the onion chain
 3. Loads bundler modules and registers them by extension
 
-Plugins are plain data; no class instances cross the main-thread/worker boundary. Only URLs and options are serialized.
+Plugins remain plain metadata on the public surface; executable definitions are attached internally by factory helpers and stay on the worker side.
 
 ## The Factory Function Pattern
 
 Each plugin type uses a factory rather than a constructor or static method. Benefits:
 
 - **Options validation** -- Factories can validate and default options before returning the plugin. Zod schemas (when used) run at factory call time.
-- **URL resolution** -- `import.meta.url` is resolved in the factory's module context, so each plugin knows its own script location.
+- **Worker ownership** -- factory helpers keep executable definitions out of the client wire payload.
 - **Immutability** -- The returned object is a snapshot. Callers cannot mutate shared state.
 - **Tree-shaking** -- Unused plugins are never imported; the factory is the single entry point.
 
-Under the hood, factories are built with `createKernelPlugin`, `createMiddlewarePlugin`, and `createBundlerPlugin` helpers that handle URL resolution and options merging.
+Under the hood, `defineKernel`, `defineMiddleware`, `defineBundler`, and `defineTranscoder` return callable factories and attach implementation definitions behind a non-enumerable runtime slot. That hidden slot is an internal detail; plugin authors use the one-call `define*` helpers.
 
 ## Why Zod Schemas for Validation
 
@@ -121,8 +128,8 @@ The framework calls `optionsSchema.parse(rawOptions)` before passing options to 
 
 ## Key Relationships
 
-- **Plugins and Client**: The client aggregates plugins and forwards them to the worker. The client does not interpret plugin contents.
-- **Plugins and Worker**: The worker dynamically imports modules from `moduleUrl` and instantiates them. Kernel definitions implement `KernelDefinition`; middleware implements wrap hooks via `defineMiddleware`; bundlers implement `BundlerDefinition`.
+- **Plugins and Client**: The client connects to a runtime with a transport. It may import `typeof runtime` for type inference, but it does not own executable plugin arrays.
+- **Plugins and Worker**: The worker owns `defineRuntime(...)`. Kernel definitions implement `KernelDefinition`; middleware implements wrap hooks via `defineMiddleware`; bundlers implement `BundlerDefinition`.
 - **Plugins and Selection**: Kernel plugins drive [kernel selection](./kernel-selection). Extension lists, `detectImport`, and `builtinModuleNames` determine which kernel runs for a given file.
 
 ## Implications

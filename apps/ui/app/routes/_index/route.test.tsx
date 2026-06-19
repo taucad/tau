@@ -264,9 +264,9 @@ describe('ChatStart', () => {
     );
   });
 
-  // `Chat.activeModel` is seeded so pending-tail hydration auto-regenerate runs
-  // with the picker model; the agent payload comes from `useCadChatClient` /
-  // `latestAgentBody` — not message metadata.
+  // `Chat.activeModel` is seeded so the startup-request hydration run uses
+  // the picker model; the agent payload comes from `useCadChatClient` /
+  // `latestAgentBody` -- not message metadata.
   it('should pass kernel, cookie/chat-scoped model id as activeModel, and minimal initialMessage to createProject', async () => {
     mockCreateProject.mockResolvedValue({ id: 'project_123' });
 

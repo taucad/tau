@@ -11,6 +11,15 @@ export type CreateInitialProjectResult = {
   files: Record<string, File>;
 };
 
+const defaultPackageJsonText = JSON.stringify(
+  {
+    type: 'module',
+    imports: Object.fromEntries([['#params/*.json', './.tau/parameters/*.json']]),
+  },
+  null,
+  2,
+);
+
 export function createInitialProject(options: CreateInitialProjectOptions): CreateInitialProjectResult {
   const { projectName, mainFileName, emptyCodeContent } = options;
 
@@ -31,9 +40,10 @@ export function createInitialProject(options: CreateInitialProjectOptions): Crea
     },
   };
 
-  const files: Record<string, File> = {
-    [mainFileName]: { content: emptyCodeContent },
-  };
+  const files = Object.fromEntries([
+    [mainFileName, { content: new Uint8Array(emptyCodeContent) }],
+    ['package.json', { content: new TextEncoder().encode(defaultPackageJsonText) }],
+  ]) as Record<string, File>;
 
   return { projectData, files };
 }

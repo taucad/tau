@@ -27,6 +27,14 @@
         "command": "node --import @oxc-node/core/register scripts/check-ssr-bundle-budget.mts"
       }
     },
+    "bench-section-cap-boolean-backends": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "node --import @oxc-node/core/register scripts/bench-section-cap-boolean-backends.mts"
+      }
+    },
     "bootstrap-https-certs": {
       "executor": "nx:run-commands",
       "cache": true,

@@ -348,7 +348,12 @@ export default function ProjectsNew(): React.JSX.Element {
                         kernel === option.id && 'bg-primary/5',
                       )}
                     >
-                      <div className='flex items-start gap-3 p-4'>
+                      <div
+                        className='flex cursor-pointer items-start gap-3 p-4'
+                        onClick={() => {
+                          setSelectedKernel(option.id);
+                        }}
+                      >
                         <RadioGroupItem value={option.id} id={`mobile-${option.id}`} className='mt-1' />
                         <div className='min-w-0 flex-1'>
                           <AccordionTrigger
@@ -405,6 +410,9 @@ export default function ProjectsNew(): React.JSX.Element {
                           'flex h-auto cursor-pointer items-start justify-start gap-3 border-b border-border p-4 text-left transition-all last:border-b-0 hover:bg-primary/5',
                           kernel === option.id && 'bg-primary/5 hover:bg-primary/10',
                         )}
+                        onClick={() => {
+                          setSelectedKernel(option.id);
+                        }}
                       >
                         <RadioGroupItem value={option.id} id={option.id} className='mt-1' />
                         <SvgIcon id={option.id} className='mt-0.5 size-6 shrink-0' />

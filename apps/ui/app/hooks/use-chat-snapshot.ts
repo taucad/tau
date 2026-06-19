@@ -12,7 +12,7 @@ import { cookieName } from '#constants/cookie.constants.js';
  * This provides the LLM with awareness of what the user is currently working on.
  *
  * The snapshot includes:
- * - fileTree: Complete project file tree via `getCachedFileItems()` (memoized, invalidated on tree change)
+ * - fileTree: Cached/partial project file tree via `getCachedFileItems()` (memoized, invalidated on tree change)
  * - activeFile: The file currently being rendered by the CAD engine
  * - openFiles: The files currently open in editor tabs
  *
@@ -35,12 +35,25 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
     const sync = (): void => {
       const items = treeService.getCachedFileItems();
       setFileTree(
-        items.map((item) => ({
-          path: item.path,
-          name: item.path.split('/').pop() ?? item.path,
-          type: 'file',
-          size: item.size,
-        })),
+        items.map((item): FileTreeEntry => {
+          const name = item.path.split('/').pop() ?? item.path;
+          return item.contentKind === 'text'
+            ? {
+                path: item.path,
+                name,
+                type: 'file',
+                size: item.size,
+                contentKind: 'text',
+                lineCount: item.lineCount,
+              }
+            : {
+                path: item.path,
+                name,
+                type: 'file',
+                size: item.size,
+                contentKind: 'binary',
+              };
+        }),
       );
     };
 
@@ -75,23 +88,41 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
 
   return useMemo((): ChatSnapshot | undefined => {
     const snapshot: ChatSnapshot = {};
+    const fileByPath = new Map((fileTree ?? []).map((entry): [string, FileTreeEntry] => [entry.path, entry]));
+    const enrichFileReference = (path: string, fallbackName: string): NonNullable<ChatSnapshot['activeFile']> => {
+      const entry = fileByPath.get(path);
+      if (entry?.type !== 'file') {
+        return { path, name: fallbackName };
+      }
+      return entry.contentKind === 'text'
+        ? {
+            path,
+            name: fallbackName,
+            size: entry.size,
+            contentKind: 'text',
+            lineCount: entry.lineCount,
+          }
+        : {
+            path,
+            name: fallbackName,
+            size: entry.size,
+            contentKind: 'binary',
+          };
+    };
 
     if (includeFileSystem && fileTree) {
       snapshot.fileTree = fileTree;
     }
 
     if (includeActiveFile && editorState.activeFilePath) {
-      snapshot.activeFile = {
-        path: editorState.activeFilePath,
-        name: editorState.activeFilePath.split('/').pop() ?? editorState.activeFilePath,
-      };
+      snapshot.activeFile = enrichFileReference(
+        editorState.activeFilePath,
+        editorState.activeFilePath.split('/').pop() ?? editorState.activeFilePath,
+      );
     }
 
     if (includeOpenFiles && editorState.openFiles.length > 0) {
-      snapshot.openFiles = editorState.openFiles.map((file) => ({
-        path: file.path,
-        name: file.name,
-      }));
+      snapshot.openFiles = editorState.openFiles.map((file) => enrichFileReference(file.path, file.name));
     }
 
     if (Object.keys(snapshot).length === 0) {

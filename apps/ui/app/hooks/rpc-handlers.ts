@@ -33,8 +33,9 @@ import type {
   RpcGraphicsClient,
   RpcGeoSpecClient,
   RpcGraphicsExportGeometryResult,
+  RpcDirectoryEntry,
 } from '@taucad/chat/rpc';
-import type { FileExtension, GeometryComponentKind, ScreenshotTargetRequest } from '@taucad/types';
+import type { FileExtension, FileStat } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { DirectoryListingFailedError, DirectoryListingErrorCode } from '@taucad/fs-client/directory-listing';
@@ -50,47 +51,6 @@ import { createSkillResolver } from '#lib/skill-resolver.js';
 
 /** Source of file write operations */
 type FileWriteSource = 'editor' | 'user' | 'machine';
-
-const geometryComponentKinds = new Set<GeometryComponentKind>([
-  'model',
-  'assembly',
-  'part',
-  'body',
-  'face',
-  'edge',
-  'vertex',
-  'mesh',
-  'line',
-  'material',
-  'unknown',
-]);
-
-function normalizeGeometryComponentKind(kind: string): GeometryComponentKind {
-  return geometryComponentKinds.has(kind as GeometryComponentKind) ? (kind as GeometryComponentKind) : 'unknown';
-}
-
-function normalizeScreenshotTargetRequest(
-  target: CaptureScreenshotRpcInput['target'],
-): ScreenshotTargetRequest | undefined {
-  if (target === undefined) {
-    return undefined;
-  }
-
-  return {
-    ...(target.filePath === undefined ? {} : { filePath: target.filePath }),
-    ...(target.componentId === undefined ? {} : { componentId: target.componentId }),
-    ...(target.bounds === undefined ? {} : { bounds: target.bounds }),
-    ...(target.padding === undefined ? {} : { padding: target.padding }),
-    ...(target.component === undefined
-      ? {}
-      : {
-          component: {
-            ...target.component,
-            kind: normalizeGeometryComponentKind(target.component.kind),
-          },
-        }),
-  };
-}
 
 /**
  * Resolves the per-viewer-panel graphics actor displaying a given source file.
@@ -140,7 +100,7 @@ export type RpcHandlerDependencies = {
     readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
     writeFile: (path: string, data: Uint8Array<ArrayBuffer>, options: { source: FileWriteSource }) => Promise<void>;
     deleteFile: (path: string, options: { source: FileWriteSource }) => Promise<void>;
-    stat: (path: string) => Promise<{ type: 'file' | 'dir'; size: number; mtimeMs: number }>;
+    stat: (path: string) => Promise<FileStat>;
     whenServicesReady: () => Promise<{ treeService: RpcHandlerTreeService }>;
   };
   /**
@@ -186,23 +146,30 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
     async deleteFile(path: string): Promise<void> {
       await fileManager.deleteFile(path, { source: 'machine' });
     },
-    async readdir(path: string): Promise<
-      Array<{
-        name: string;
-        type: 'file' | 'dir';
-        size: number;
-        modifiedAt?: string;
-      }>
-    > {
+    async readdir(path: string): Promise<RpcDirectoryEntry[]> {
       const { treeService } = await fileManager.whenServicesReady();
       try {
         const entries = await treeService.listDirectory(path);
-        return entries.map((entry) => ({
-          name: entry.name,
-          type: entry.isFolder ? 'dir' : 'file',
-          size: entry.size,
-          ...(entry.mtimeMs > 0 ? { modifiedAt: new Date(entry.mtimeMs).toISOString() } : {}),
-        }));
+        return entries.map((entry) => {
+          const modifiedAt = entry.mtimeMs > 0 ? new Date(entry.mtimeMs).toISOString() : undefined;
+          if (entry.isFolder) {
+            return {
+              name: entry.name,
+              type: 'dir' as const,
+              size: entry.size,
+              ...(modifiedAt ? { modifiedAt } : {}),
+            };
+          }
+          return {
+            name: entry.name,
+            type: 'file' as const,
+            size: entry.size,
+            ...(entry.contentKind === 'text'
+              ? { contentKind: 'text' as const, lineCount: entry.lineCount }
+              : { contentKind: 'binary' as const }),
+            ...(modifiedAt ? { modifiedAt } : {}),
+          };
+        });
       } catch (error) {
         if (error instanceof DirectoryListingFailedError) {
           const mappedError = new Error(error.message) as Error & { code?: string };
@@ -262,12 +229,30 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
     async stat(path: string): Promise<RpcFileStat> {
       const s = await fileManager.stat(path);
       const isoDate = new Date(s.mtimeMs).toISOString();
-      return {
-        size: s.size,
-        isDirectory: s.type === 'dir',
-        createdAt: isoDate,
-        modifiedAt: isoDate,
-      };
+      if (s.type === 'dir') {
+        return {
+          size: s.size,
+          isDirectory: true,
+          createdAt: isoDate,
+          modifiedAt: isoDate,
+        };
+      }
+      return s.contentKind === 'text'
+        ? {
+            size: s.size,
+            isDirectory: false,
+            createdAt: isoDate,
+            modifiedAt: isoDate,
+            contentKind: 'text',
+            lineCount: s.lineCount,
+          }
+        : {
+            size: s.size,
+            isDirectory: false,
+            createdAt: isoDate,
+            modifiedAt: isoDate,
+            contentKind: 'binary',
+          };
     },
   };
 }
@@ -498,13 +483,7 @@ function createBrowserGraphicsClient(
 
     async captureScreenshot({
       targetFile,
-      target,
-      camera,
-      display,
-    }: Pick<
-      CaptureScreenshotRpcInput,
-      'targetFile' | 'target' | 'camera' | 'display'
-    >): Promise<CaptureScreenshotRpcResult> {
+    }: Pick<CaptureScreenshotRpcInput, 'targetFile'>): Promise<CaptureScreenshotRpcResult> {
       const graphicsRef = resolveGraphicsForFile(targetFile);
       if (!graphicsRef) {
         return {
@@ -515,7 +494,6 @@ function createBrowserGraphicsClient(
       }
 
       try {
-        const screenshotTarget = normalizeScreenshotTargetRequest(target);
         const source = await new Promise<string>((resolve, reject) => {
           const screenshotActor = createActor(screenshotRequestMachine, {
             input: { graphicsRef },
@@ -530,9 +508,6 @@ function createBrowserGraphicsClient(
                 isPreview: true,
               },
               cameraAngles: [orthographicViews[0]!],
-              target: screenshotTarget,
-              camera,
-              display,
               aspectRatio: 1,
               maxResolution: 800,
               zoomLevel: 1.2,
@@ -570,13 +545,7 @@ function createBrowserGraphicsClient(
 
     async captureObservations({
       targetFile,
-      target,
-      camera,
-      display,
-    }: Pick<
-      CaptureObservationsRpcInput,
-      'targetFile' | 'target' | 'camera' | 'display'
-    >): Promise<CaptureObservationsRpcResult> {
+    }: Pick<CaptureObservationsRpcInput, 'targetFile'>): Promise<CaptureObservationsRpcResult> {
       const graphicsRef = resolveGraphicsForFile(targetFile);
       if (!graphicsRef) {
         return {
@@ -587,7 +556,6 @@ function createBrowserGraphicsClient(
       }
 
       try {
-        const screenshotTarget = normalizeScreenshotTargetRequest(target);
         const viewAngles = orthographicViews.slice(0, 6);
 
         const compositeDataUrl = await new Promise<string>((resolve, reject) => {
@@ -604,9 +572,6 @@ function createBrowserGraphicsClient(
                 isPreview: true,
               },
               cameraAngles: viewAngles,
-              target: screenshotTarget,
-              camera,
-              display,
               overlay: buildScreenshotOverlayForPath(targetFile),
               aspectRatio: 1,
               maxResolution: 800,

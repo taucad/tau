@@ -36,7 +36,6 @@ const globPart = (state?: string) => toolPart('tool-glob_search', state);
 const editFilePart = (state?: string) => toolPart('tool-edit_file', state);
 const createFilePart = (state?: string) => toolPart('tool-create_file', state);
 const deleteFilePart = (state?: string) => toolPart('tool-delete_file', state);
-const editTestsPart = (state?: string) => toolPart('tool-edit_tests', state);
 const exportGeometryPart = (state?: string) => toolPart('tool-export_geometry', state);
 const webSearchPart = (state?: string) => toolPart('tool-web_search', state);
 const webBrowserPart = (state?: string) => toolPart('tool-web_browser', state);
@@ -162,6 +161,12 @@ describe('classifyActivityPart', () => {
     expect(classifyActivityPart(part)).toBe('skip');
   });
 
+  it('should classify use_skill tool parts as visible data singletons', () => {
+    const useSkillToolPart = { type: 'tool-use_skill', state: 'output-available' } as unknown as Part;
+
+    expect(classifyActivityPart(useSkillToolPart)).toBe('data');
+  });
+
   it('should classify web_search and web_browser into research category', () => {
     expect(classifyActivityPart(webSearchPart())).toBe('research');
     expect(classifyActivityPart(webBrowserPart())).toBe('research');
@@ -174,11 +179,10 @@ describe('classifyActivityPart', () => {
     expect(classifyActivityPart(globPart())).toBe('research');
   });
 
-  it('should classify edit_file, create_file, delete_file, edit_tests, export_geometry into write category', () => {
+  it('should classify edit_file, create_file, delete_file, export_geometry into write category', () => {
     expect(classifyActivityPart(editFilePart())).toBe('write');
     expect(classifyActivityPart(createFilePart())).toBe('write');
     expect(classifyActivityPart(deleteFilePart())).toBe('write');
-    expect(classifyActivityPart(editTestsPart())).toBe('write');
     expect(classifyActivityPart(exportGeometryPart())).toBe('write');
   });
 
@@ -251,6 +255,15 @@ describe('groupAssistantParts', () => {
 
       expect(groups).toHaveLength(1);
       expect(groups[0]!.kind).toBe('singleton');
+    });
+
+    it('should pass use_skill tool parts as visible singletons', () => {
+      const parts: Parts = [{ type: 'tool-use_skill', state: 'output-available' } as unknown as Part];
+      const groups = groupAssistantParts(parts);
+
+      expect(groups).toHaveLength(1);
+      expect(groups[0]!.kind).toBe('singleton');
+      expect(groups[0]!.category).toBe('data');
     });
 
     it('should pass transfer tools as singletons', () => {

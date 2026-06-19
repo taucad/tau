@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { Geometry } from '@taucad/types';
-import { ModelViewer, RenderStatusOverlay } from '#components/model-viewer.js';
+import { ModelViewer, RuntimeStatusOverlay, emptyGeometryMessage } from '#components/model-viewer.js';
 import type { ModelViewerProps } from '#components/model-viewer.js';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
@@ -62,6 +62,28 @@ describe('ModelViewer', () => {
 
       expect(screen.getByTestId('loader')).toBeInTheDocument();
       expect(screen.getByRole('status')).toHaveAttribute('aria-label', 'Loading preview');
+    });
+
+    it('should render empty-geometry hint when viewerState is empty', () => {
+      render(<ModelViewer geometries={[]} viewerState='empty' />);
+
+      expect(screen.queryByTestId('loader')).not.toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveAttribute('aria-label', 'Empty model');
+      expect(screen.getByText(emptyGeometryMessage)).toBeInTheDocument();
+    });
+
+    it('should default to loading when geometries are empty and viewerState is omitted', () => {
+      render(<ModelViewer geometries={[]} />);
+
+      expect(screen.getByTestId('loader')).toBeInTheDocument();
+      expect(screen.queryByText(emptyGeometryMessage)).not.toBeInTheDocument();
+    });
+
+    it('should show loading when viewerState is loading even with geometries present', () => {
+      render(<ModelViewer geometries={testGeometries} viewerState='loading' />);
+
+      expect(screen.getByTestId('loader')).toBeInTheDocument();
+      expect(screen.queryByTestId('cad-viewer')).not.toBeInTheDocument();
     });
 
     it('should render CadViewer when geometries are provided', () => {
@@ -203,28 +225,28 @@ describe('ModelViewer', () => {
   });
 });
 
-describe('RenderStatusOverlay', () => {
+describe('RuntimeStatusOverlay', () => {
   it('should render status overlay when status is loading', () => {
-    render(<RenderStatusOverlay status='loading' />);
+    render(<RuntimeStatusOverlay status='loading' />);
 
     expect(screen.getByRole('status')).toBeInTheDocument();
     expect(screen.getByText('loading...')).toBeInTheDocument();
   });
 
   it('should render nothing when status is idle', () => {
-    const { container } = render(<RenderStatusOverlay status='idle' />);
+    const { container } = render(<RuntimeStatusOverlay status='idle' />);
 
     expect(container.innerHTML).toBe('');
   });
 
   it('should render nothing when status is success', () => {
-    const { container } = render(<RenderStatusOverlay status='success' />);
+    const { container } = render(<RuntimeStatusOverlay status='success' />);
 
     expect(container.innerHTML).toBe('');
   });
 
   it('should apply custom className to the overlay', () => {
-    render(<RenderStatusOverlay status='loading' className='custom-position' />);
+    render(<RuntimeStatusOverlay status='loading' className='custom-position' />);
 
     expect(screen.getByRole('status')).toHaveClass('custom-position');
   });

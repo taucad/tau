@@ -37,7 +37,13 @@ describe('ContextChip', () => {
   it('should render skill icon for skill chipType', () => {
     const { container } = render(<ContextChip label='/create-policy' chipType='skill' />);
 
-    expect(container.querySelector('[class*="lucide-book-open"]')).toBeInTheDocument();
+    expect(container.querySelector('[class*="lucide-blocks"]')).toBeInTheDocument();
+  });
+
+  it('should render geometry icon for geometry chipType', () => {
+    const { container } = render(<ContextChip label='Sun Gear' chipType='geometry' />);
+
+    expect(container.querySelector('[class*="lucide-box"]')).toBeInTheDocument();
   });
 
   describe('onRemove behavior', () => {

@@ -136,6 +136,8 @@ function createStubDeps(): StubDeps {
   return {
     getChat: vi.fn<ChatSessionDeps['getChat']>().mockResolvedValue(undefined),
     patchChat: vi.fn<ChatSessionDeps['patchChat']>().mockResolvedValue(undefined),
+    consumeChatStartupRequest: vi.fn<ChatSessionDeps['consumeChatStartupRequest']>().mockResolvedValue(undefined),
+    commitCancelledDraftRestore: vi.fn<ChatSessionDeps['commitCancelledDraftRestore']>().mockResolvedValue(undefined),
     setMessageEdit: vi.fn<ChatSessionDeps['setMessageEdit']>().mockResolvedValue(undefined),
     clearMessageEdit: vi.fn<ChatSessionDeps['clearMessageEdit']>().mockResolvedValue(undefined),
   };
@@ -671,7 +673,7 @@ describe('ChatSessionStore', () => {
   });
 
   describe('empty-cancel draft restore', () => {
-    it('lifts the cancelled user message back into the draft, truncates chat.messages, and persists the trimmed transcript', async () => {
+    it('lifts the cancelled user message back into the draft, truncates chat.messages, and atomically persists transcript plus draft', async () => {
       vi.useFakeTimers();
       try {
         const chatId = 'chat_restore_empty_cancel';
@@ -734,13 +736,17 @@ describe('ChatSessionStore', () => {
         expect(draftSnapshot.context.draftText).toBe('help me iterate on this');
         expect(draftSnapshot.context.draftImages).toEqual(['data:image/png;base64,AAA']);
 
-        // Flush the debounced persist of the truncated transcript.
-        await vi.advanceTimersByTimeAsync(100);
-        await vi.runOnlyPendingTimersAsync();
+        await Promise.resolve();
 
-        const messagesPersistCalls = deps.patchChat.mock.calls.filter(([, key]) => key === 'messages');
-        expect(messagesPersistCalls.length).toBeGreaterThanOrEqual(1);
-        expect(messagesPersistCalls.at(-1)?.[2]).toEqual([priorUser, priorAssistant]);
+        expect(deps.commitCancelledDraftRestore).toHaveBeenCalledTimes(1);
+        const [restoreChatId, restoreInput] = deps.commitCancelledDraftRestore.mock.calls[0]!;
+        expect(restoreChatId).toBe(chatId);
+        expect(restoreInput.messages).toEqual([priorUser, priorAssistant]);
+        expect(restoreInput.draft.id).toBe('draft');
+        expect(restoreInput.draft.role).toBe('user');
+        expect(restoreInput.draft.parts).toEqual(cancelledUser.parts);
+        expect(restoreInput.draft.metadata?.status).toBe('pending');
+        expect(deps.patchChat.mock.calls.some(([, key]) => key === 'messages')).toBe(false);
 
         store.release(chatId);
       } finally {
@@ -807,6 +813,95 @@ describe('ChatSessionStore', () => {
         vi.useRealTimers();
       }
     });
+
+    it('persists empty-cancel restore across immediate release and reacquire without replaying the startup request', async () => {
+      const chatId = 'chat_release_reacquire_after_empty_cancel';
+      const cancelledUser: MyUIMessage = {
+        id: 'msg_initial_prompt',
+        role: 'user',
+        parts: [{ type: 'text', text: 'make a planetary gear' }],
+        metadata: { createdAt: 1, status: 'pending' },
+      };
+      const emptyAssistant: MyUIMessage = {
+        id: 'msg_empty_assistant',
+        role: 'assistant',
+        parts: [],
+        metadata: { createdAt: 2, status: 'pending' },
+      };
+      let storedChat: ChatEntity = {
+        id: chatId,
+        resourceId: 'resource_release_reacquire',
+        name: 'Initial design',
+        messages: [cancelledUser],
+        startupRequest: {
+          id: 'req_initial_prompt',
+          kind: 'regenerate-tail',
+          messageId: cancelledUser.id,
+          source: 'homepage-initial-message',
+          createdAt: 0,
+        },
+        createdAt: 0,
+        updatedAt: 0,
+      };
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async () => storedChat);
+      deps.consumeChatStartupRequest.mockImplementation(async () => {
+        storedChat = { ...storedChat, startupRequest: undefined };
+        return storedChat;
+      });
+      deps.commitCancelledDraftRestore.mockImplementation(async (_chatId, input) => {
+        storedChat = {
+          ...storedChat,
+          messages: input.messages,
+          draft: input.draft,
+          startupRequest:
+            input.clearStartupRequestId && storedChat.startupRequest?.id === input.clearStartupRequestId
+              ? undefined
+              : storedChat.startupRequest,
+        };
+        return storedChat;
+      });
+      store.setDependencies(deps);
+
+      const firstSession = store.acquire(chatId);
+      store.setLatestAgentBody(chatId, { agent: { profile: 'cad', model: 'cad-default', kernel: 'replicad' } });
+
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const firstFake = harness.created.find((entry) => entry.id === chatId)!;
+      expect(firstFake.regenerate).toHaveBeenCalledTimes(1);
+
+      firstFake.messages = [cancelledUser, emptyAssistant];
+      firstSession.persistenceActorRef.send({ type: 'stopRequest' });
+      firstSession.persistenceActorRef.send({
+        type: 'requestFinished',
+        messages: [...firstFake.messages],
+        isAbort: true,
+        isError: false,
+        isDisconnect: false,
+      });
+
+      store.release(chatId);
+      await Promise.resolve();
+
+      expect(storedChat.messages).toEqual([]);
+      expect(storedChat.draft?.parts).toEqual(cancelledUser.parts);
+
+      const secondSession = store.acquire(chatId);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const secondFake = harness.created.at(-1)!;
+      expect(secondFake.id).toBe(chatId);
+      expect(secondFake.regenerate).not.toHaveBeenCalled();
+      expect(secondFake.messages).toEqual([]);
+      expect(secondSession.draftActorRef.getSnapshot().context.draftText).toBe('make a planetary gear');
+
+      store.release(chatId);
+    });
   });
 
   describe('hydration on acquire', () => {
@@ -834,53 +929,47 @@ describe('ChatSessionStore', () => {
       expect(deps.getChat).toHaveBeenCalledWith('chat_a');
     });
 
-    /**
-     * Phase D / t20 regression coverage.
-     *
-     * A persisted chat with a pending-tail user message that carries legacy
-     * `metadata.kernel`/`metadata.model`/`metadata.testingEnabled` still
-     * exists for any chat row written before the blueprint cut. Hydration
-     * MUST NOT read that metadata onto the wire body — the auto-regenerate
-     * must use whatever `useCadChatClient` published into
-     * `setLatestAgentBody`, and the resulting body must parse cleanly
-     * through the shared `chatTurnRequestSchema`. Without this guard, a
-     * homepage-seeded chat reloaded after the schema cut would 400 on the
-     * first turn because the persisted metadata path is no longer
-     * read-through.
-     */
-    it('hydration auto-regenerate on a legacy pending-tail uses latestAgentBody (NOT persisted message metadata) and produces a wire body that parses through chatTurnRequestSchema', async () => {
+    it('consumes a matching startup request before hydration regenerate and uses latestAgentBody for the wire body', async () => {
       const store = new ChatSessionStore();
       const deps = createStubDeps();
       store.setDependencies(deps);
 
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- minimal MyUIMessage shape for test
-      const legacyPendingUserMessage: MyUIMessage = {
-        id: 'msg_legacy_pending',
+      const legacyStartupMetadata: NonNullable<MyUIMessage['metadata']> & Record<string, unknown> = {
+        createdAt: 1_700_000_000_000,
+        status: 'pending',
+        // Legacy extra fields must never become wire config; they remain
+        // display metadata only.
+        model: 'legacy-stale-model',
+        kernel: 'replicad',
+        mode: 'agent',
+        toolChoice: 'auto',
+        testingEnabled: false,
+      };
+      const startupUserMessage: MyUIMessage = {
+        id: 'msg_startup_pending',
         role: 'user',
-        parts: [{ type: 'text', text: 'pre-blueprint prompt' }],
-        metadata: {
-          // Legacy fields previously stamped onto the persisted user message
-          // by `createMessage({ metadata: { kernel, model, mode, ... } })`.
-          // None of these should reach the wire body in the new architecture.
-          createdAt: 1_700_000_000_000,
-          status: 'pending',
-          model: 'legacy-stale-model',
-          kernel: 'replicad',
-          mode: 'agent',
-          toolChoice: 'auto',
-          testingEnabled: false,
-        },
-      } as MyUIMessage;
+        parts: [{ type: 'text', text: 'homepage prompt' }],
+        metadata: legacyStartupMetadata,
+      };
 
-      const legacyChat: ChatEntity = {
-        id: 'chat_legacy_hydration',
-        resourceId: 'resource_legacy',
-        name: 'Legacy chat',
-        messages: [legacyPendingUserMessage],
+      const startupChat: ChatEntity = {
+        id: 'chat_startup_hydration',
+        resourceId: 'resource_startup',
+        name: 'Startup chat',
+        messages: [startupUserMessage],
+        startupRequest: {
+          id: 'req_startup',
+          kind: 'regenerate-tail',
+          messageId: startupUserMessage.id,
+          source: 'homepage-initial-message',
+          createdAt: 1_700_000_000_000,
+        },
         createdAt: 1_700_000_000_000,
         updatedAt: 1_700_000_000_000,
       };
-      deps.getChat.mockResolvedValue(legacyChat);
+      const consumedChat = { ...startupChat, startupRequest: undefined };
+      deps.getChat.mockResolvedValue(startupChat);
+      deps.consumeChatStartupRequest.mockResolvedValue(consumedChat);
 
       // Publish the *current* agent body before acquiring — mirrors what
       // `useCadChatClient`'s mount effect does for the active chat.
@@ -894,22 +983,24 @@ describe('ChatSessionStore', () => {
           testingEnabled: true,
         },
       };
-      store.acquire('chat_legacy_hydration');
-      store.setLatestAgentBody('chat_legacy_hydration', liveBody);
+      store.acquire('chat_startup_hydration');
+      store.setLatestAgentBody('chat_startup_hydration', liveBody);
 
-      // Allow hydration → auto-regenerate dispatch → microtask deferral to drain.
+      // Allow hydration → startup consume → regenerate dispatch → microtask deferral to drain.
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
 
-      const fake = harness.created.find((entry) => entry.id === 'chat_legacy_hydration')!;
+      expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith('chat_startup_hydration', 'req_startup');
+
+      const fake = harness.created.find((entry) => entry.id === 'chat_startup_hydration')!;
       expect(fake.regenerate).toHaveBeenCalledTimes(1);
       const dispatchedOptions = fake.regenerate.mock.calls[0]![0] as { body?: Record<string, unknown> } | undefined;
       expect(dispatchedOptions?.body).toBe(liveBody);
 
       const wireBody = {
-        id: 'chat_legacy_hydration',
-        messages: legacyChat.messages,
+        id: 'chat_startup_hydration',
+        messages: startupChat.messages,
         ...dispatchedOptions?.body,
       };
       const parsed = chatTurnRequestSchema.parse(wireBody);
@@ -920,7 +1011,112 @@ describe('ChatSessionStore', () => {
         testingEnabled: true,
       });
 
-      store.release('chat_legacy_hydration');
+      store.release('chat_startup_hydration');
+    });
+
+    it('restores a plain pending user tail to draft on hydration without regenerating', async () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      store.setDependencies(deps);
+
+      const pendingUserMessage: MyUIMessage = {
+        id: 'msg_orphan_pending',
+        role: 'user',
+        parts: [{ type: 'text', text: 'do not auto run' }],
+        metadata: { createdAt: 1, status: 'pending' },
+      };
+      const orphanChat: ChatEntity = {
+        id: 'chat_orphan_pending',
+        resourceId: 'resource_orphan',
+        name: 'Orphan pending',
+        messages: [pendingUserMessage],
+        createdAt: 0,
+        updatedAt: 0,
+      };
+      const restoredChat: ChatEntity = {
+        ...orphanChat,
+        messages: [],
+        draft: {
+          id: 'draft',
+          role: 'user',
+          parts: pendingUserMessage.parts,
+          metadata: { createdAt: 2, status: 'pending' },
+        },
+      };
+      deps.getChat.mockResolvedValue(orphanChat);
+      deps.commitCancelledDraftRestore.mockResolvedValue(restoredChat);
+
+      const session = store.acquire('chat_orphan_pending');
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const fake = harness.created.find((entry) => entry.id === 'chat_orphan_pending')!;
+      expect(fake.regenerate).not.toHaveBeenCalled();
+      expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
+      const [restoreChatId, restoreInput] = deps.commitCancelledDraftRestore.mock.calls[0]!;
+      expect(restoreChatId).toBe('chat_orphan_pending');
+      expect(restoreInput.messages).toEqual([]);
+      expect(restoreInput.draft.id).toBe('draft');
+      expect(restoreInput.draft.role).toBe('user');
+      expect(restoreInput.draft.parts).toEqual(pendingUserMessage.parts);
+      expect(restoreInput.clearStartupRequestId).toBeUndefined();
+      expect(fake.messages).toEqual([]);
+      expect(session.draftActorRef.getSnapshot().context.draftText).toBe('do not auto run');
+
+      store.release('chat_orphan_pending');
+    });
+
+    it('trims an empty assistant placeholder when healing an orphan pending tail', async () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      store.setDependencies(deps);
+
+      const priorAssistant: MyUIMessage = {
+        id: 'msg_prior_assistant',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'prior' }],
+        metadata: { createdAt: 0, status: 'success' },
+      };
+      const pendingUserMessage: MyUIMessage = {
+        id: 'msg_orphan_pending_with_placeholder',
+        role: 'user',
+        parts: [{ type: 'text', text: 'recover me' }],
+        metadata: { createdAt: 1, status: 'pending' },
+      };
+      const emptyAssistant: MyUIMessage = {
+        id: 'msg_empty_assistant',
+        role: 'assistant',
+        parts: [],
+        metadata: { createdAt: 2, status: 'pending' },
+      };
+      const orphanChat: ChatEntity = {
+        id: 'chat_orphan_placeholder',
+        resourceId: 'resource_orphan',
+        name: 'Orphan placeholder',
+        messages: [priorAssistant, pendingUserMessage, emptyAssistant],
+        createdAt: 0,
+        updatedAt: 0,
+      };
+      deps.getChat.mockResolvedValue(orphanChat);
+
+      const session = store.acquire('chat_orphan_placeholder');
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const fake = harness.created.find((entry) => entry.id === 'chat_orphan_placeholder')!;
+      expect(fake.regenerate).not.toHaveBeenCalled();
+      const [restoreChatId, restoreInput] = deps.commitCancelledDraftRestore.mock.calls[0]!;
+      expect(restoreChatId).toBe('chat_orphan_placeholder');
+      expect(restoreInput.messages).toEqual([priorAssistant]);
+      expect(restoreInput.draft.id).toBe('draft');
+      expect(restoreInput.draft.parts).toEqual(pendingUserMessage.parts);
+      expect(restoreInput.clearStartupRequestId).toBeUndefined();
+      expect(fake.messages).toEqual([priorAssistant]);
+      expect(session.draftActorRef.getSnapshot().context.draftText).toBe('recover me');
+
+      store.release('chat_orphan_placeholder');
     });
   });
 
@@ -1085,14 +1281,14 @@ describe('ChatSessionStore', () => {
   });
 
   // ===========================================================================
-  // Hydration auto-regenerate (R10/t17)
+  // Body fallback for request dispatch (R10/t17)
   //
-  // The legacy pending-tail hydration regenerate now flows through the same
-  // `dispatchRequest` listener; without an explicit `request.body` it falls
+  // Startup-request hydration and continue requests flow through the same
+  // `dispatchRequest` listener; without an explicit `request.body` they fall
   // back to `session.latestAgentBody` published by `useCadChatClient` so the
-  // very first turn of a homepage-seeded chat still carries an `agent` block.
+  // wire body still carries an `agent` block.
   // ===========================================================================
-  describe('hydration auto-regenerate (R10/t17)', () => {
+  describe('request body fallback (R10/t17)', () => {
     it('falls back to latestAgentBody when no explicit body is supplied on regenerate', async () => {
       const store = createStore();
       const session = store.acquire('chat_hydration_regen');
@@ -1256,6 +1452,108 @@ describe('ChatSessionStore', () => {
       expect(fake.sendMessage).not.toHaveBeenCalled();
 
       // Drain the microtask: chat.sendMessage(B) now fires.
+      await Promise.resolve();
+      expect(fake.sendMessage).toHaveBeenCalledTimes(1);
+      expect(fake.sendMessage).toHaveBeenCalledWith(pendingMessage);
+    });
+
+    it('should finalize static and dynamic in-progress tool parts before dispatching a preempting follow-up', async () => {
+      const store = createStore();
+      const session = store.acquire('chat_preempt_tools');
+      const fake = harness.created.find((entry) => entry.id === 'chat_preempt_tools')!;
+
+      const interruptedMessages: MyUIMessage[] = [
+        {
+          id: 'msg_user_A',
+          role: 'user',
+          parts: [{ type: 'text', text: 'first turn' }],
+          metadata: { createdAt: 0 },
+        } as MyUIMessage,
+        {
+          id: 'msg_assistant_A',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-edit_file',
+              toolCallId: 'tc_edit',
+              state: 'input-available',
+              input: {},
+            },
+            {
+              type: 'dynamic-tool',
+              toolName: 'provider_native_search',
+              toolCallId: 'tc_dynamic',
+              state: 'input-streaming',
+              input: ['partial', { nested: true }],
+            },
+          ],
+          metadata: { createdAt: 1 },
+        } as MyUIMessage,
+      ];
+      fake.messages = interruptedMessages;
+
+      const pendingMessage: MyUIMessage = {
+        id: 'msg_user_B',
+        role: 'user',
+        parts: [{ type: 'text', text: 'preempting follow-up' }],
+        metadata: { createdAt: 2, status: 'pending' },
+      } as MyUIMessage;
+
+      session.persistenceActorRef.send({
+        type: 'startRequest',
+        request: { kind: 'send', message: interruptedMessages[0]! },
+      });
+      await Promise.resolve();
+      fake.sendMessage.mockClear();
+
+      session.persistenceActorRef.send({
+        type: 'startRequest',
+        request: { kind: 'send', message: pendingMessage },
+      });
+      session.persistenceActorRef.send({
+        type: 'requestFinished',
+        messages: interruptedMessages,
+        isAbort: true,
+        isError: false,
+        isDisconnect: false,
+      });
+
+      expect(fake.messages).not.toBe(interruptedMessages);
+      const assistant = fake.messages.at(-1);
+      if (assistant?.role !== 'assistant') {
+        throw new Error('expected finalized assistant tail');
+      }
+      const [staticTool, dynamicTool] = assistant.parts;
+      expect(staticTool).toMatchObject({
+        type: 'tool-edit_file',
+        toolCallId: 'tc_edit',
+        state: 'output-error',
+      });
+      expect(dynamicTool).toMatchObject({
+        type: 'dynamic-tool',
+        toolName: 'provider_native_search',
+        toolCallId: 'tc_dynamic',
+        state: 'output-error',
+        input: ['partial', { nested: true }],
+      });
+      if (!staticTool || !('errorText' in staticTool) || typeof staticTool.errorText !== 'string') {
+        throw new Error('expected finalized static tool errorText');
+      }
+      if (!dynamicTool || !('errorText' in dynamicTool) || typeof dynamicTool.errorText !== 'string') {
+        throw new Error('expected finalized dynamic tool errorText');
+      }
+      expect(JSON.parse(staticTool.errorText) as Record<string, unknown>).toMatchObject({
+        errorCode: 'USER_INTERRUPTED',
+        toolName: 'edit_file',
+        toolCallId: 'tc_edit',
+      });
+      expect(JSON.parse(dynamicTool.errorText) as Record<string, unknown>).toMatchObject({
+        errorCode: 'USER_INTERRUPTED',
+        toolName: 'provider_native_search',
+        toolCallId: 'tc_dynamic',
+      });
+      expect(fake.sendMessage).not.toHaveBeenCalled();
+
       await Promise.resolve();
       expect(fake.sendMessage).toHaveBeenCalledTimes(1);
       expect(fake.sendMessage).toHaveBeenCalledWith(pendingMessage);

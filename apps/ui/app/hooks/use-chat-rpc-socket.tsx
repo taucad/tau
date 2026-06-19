@@ -23,8 +23,33 @@ import type { RpcHandlerDependencies } from '#hooks/rpc-handlers.js';
 import { useProject, useResolveGraphicsForFile } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useImageQuality } from '#hooks/use-image-quality.js';
+import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
+import type { GeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
+import { ENV } from '#environment.config.js';
+import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
+import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
+import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 
 type RpcHandlerDepsBase = Omit<RpcHandlerDependencies, 'chatId'>;
+
+type GeoSpecClientCache = {
+  openFileSystemBridge: () => FileSystemBridgeConnection;
+  projectRootPath: string;
+  runtimeConfig: UiRuntimeConfigInput;
+  filePoolBuffer: SharedArrayBuffer | undefined;
+  client: GeoSpecWorkerRpcClient;
+};
+
+const isSameGeoSpecClientCache = (
+  cache: GeoSpecClientCache | undefined,
+  input: Omit<GeoSpecClientCache, 'client'>,
+): boolean =>
+  cache !== undefined &&
+  cache.openFileSystemBridge === input.openFileSystemBridge &&
+  cache.projectRootPath === input.projectRootPath &&
+  cache.filePoolBuffer === input.filePoolBuffer &&
+  cache.runtimeConfig.tauApiUrl === input.runtimeConfig.tauApiUrl &&
+  cache.runtimeConfig.tauWebSocketUrl === input.runtimeConfig.tauWebSocketUrl;
 
 // -----------------------------------------------------------------------------
 // Context
@@ -143,12 +168,48 @@ export function useChatRpcConnection(options: UseChatRpcConnectionOptions): UseC
   // Store dependencies in a ref so handler always uses current values
   // without causing effect re-runs when deps change
   const depsRef = useRef<RpcHandlerDepsBase | undefined>(undefined);
+  const geoSpecClientRef = useRef<GeoSpecClientCache | undefined>(undefined);
   depsRef.current = {
     fileManager,
     resolveGraphicsForFile,
     projectRef,
     screenshotQuality,
+    createGeoSpecClient() {
+      const snapshot = fileManager.fileManagerRef.getSnapshot();
+      if (!snapshot.context.openFileSystemBridge) {
+        throw new Error('File manager filesystem bridge not available for GeoSpec tests.');
+      }
+
+      const runtimeConfig = createUiRuntimeConfig(ENV);
+      const cacheInput = {
+        openFileSystemBridge: fileManager.openFileSystemBridge,
+        projectRootPath: snapshot.context.rootDirectory,
+        filePoolBuffer: snapshot.context.filePoolBuffer,
+        runtimeConfig,
+      };
+      const cachedGeoSpecClient = geoSpecClientRef.current;
+      if (cachedGeoSpecClient && isSameGeoSpecClientCache(cachedGeoSpecClient, cacheInput)) {
+        return cachedGeoSpecClient.client;
+      }
+
+      void cachedGeoSpecClient?.client.close();
+      const client = createGeoSpecWorkerRpcClient({
+        openFileSystemBridge: cacheInput.openFileSystemBridge,
+        projectRootPath: snapshot.context.rootDirectory,
+        filePoolBuffer: snapshot.context.filePoolBuffer,
+        runtimeConfig,
+      });
+      geoSpecClientRef.current = { ...cacheInput, client };
+      return client;
+    },
   };
+
+  useEffect(() => {
+    return () => {
+      void geoSpecClientRef.current?.client.close();
+      geoSpecClientRef.current = undefined;
+    };
+  }, []);
 
   // Create stable RPC request handler that reads deps from ref
   const handleRpcRequest: RpcRequestHandler = useCallback(

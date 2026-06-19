@@ -40,7 +40,14 @@ export function ChatHistorySelector({
   readonly closeButton?: ReactNode;
 }): ReactNode {
   const { projectRef, editorRef, projectId, setFocusedChatId } = useProject();
-  const { chats, createChat, updateChatName, deleteChat, isLoading: isChatsLoading } = useChats(projectId);
+  const {
+    chats,
+    createChat,
+    updateChatName,
+    applyGeneratedChatName,
+    deleteChat,
+    isLoading: isChatsLoading,
+  } = useChats(projectId);
 
   // Connection status for visual indicator
   const { status: connectionStatus, error: connectionError } = useChatRpcStatus();
@@ -76,19 +83,12 @@ export function ChatHistorySelector({
 
   const projectNameClient = useProjectNameClient();
 
-  const handleUpdateChatName = useCallback(
-    async (chatId: string, name: string) => {
-      await updateChatName(chatId, name);
-    },
-    [updateChatName],
-  );
-
   const generateAndApplyChatName = useCallback(
     async (chatId: string, promptText: string): Promise<void> => {
       try {
         const generatedName = await projectNameClient.generate(promptText);
         if (generatedName.trim().length > 0) {
-          await handleUpdateChatName(chatId, generatedName.trim());
+          await applyGeneratedChatName(chatId, generatedName.trim());
         }
       } catch (error) {
         console.error('Failed to generate chat name:', error);
@@ -96,7 +96,7 @@ export function ChatHistorySelector({
         setIsGeneratingName(false);
       }
     },
-    [projectNameClient, handleUpdateChatName],
+    [projectNameClient, applyGeneratedChatName],
   );
 
   // Generate a name for new chats when the active chat has its first user
@@ -137,7 +137,7 @@ export function ChatHistorySelector({
 
   const handleSaveRename = (): void => {
     if (chatToRename && newChatName.trim()) {
-      void handleUpdateChatName(chatToRename, newChatName.trim());
+      void updateChatName(chatToRename, newChatName.trim());
       setIsRenameDialogOpen(false);
       setChatToRename(undefined);
     }

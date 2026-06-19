@@ -62,15 +62,16 @@ Use Replicad when you need:
 - Professional mechanical design
 
 ```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { replicad } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
 
+const runtime = defineRuntime({ kernels: [replicad()], bundlers: [esbuild()] });
 const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [replicad()],
-  bundlers: [esbuild()],
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 ```
 
@@ -83,15 +84,16 @@ Use OpenCASCADE when you need:
 - Advanced geometry construction beyond Replicad's API
 
 ```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { opencascade } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
 
+const runtime = defineRuntime({ kernels: [opencascade()], bundlers: [esbuild()] });
 const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [opencascade()],
-  bundlers: [esbuild()],
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 ```
 
@@ -106,13 +108,15 @@ Use OpenSCAD when you have:
 > **Note:** OpenSCAD ships as the standalone `@taucad/openscad` package (GPL-2.0-or-later) so it stays isolated from the MIT-licensed runtime. Install it explicitly: `pnpm add @taucad/openscad`.
 
 ```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { openscad } from '@taucad/openscad';
 
+const runtime = defineRuntime({ kernels: [openscad()] });
 const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [openscad()],
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 ```
 
@@ -125,15 +129,15 @@ Use Manifold when you need:
 - Browser-friendly WASM performance with robust topology
 
 ```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { manifold } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
 
+const runtime = defineRuntime({ kernels: [manifold()] });
 const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [manifold()],
-  bundlers: [esbuild()],
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 ```
 
@@ -146,17 +150,42 @@ Use JSCAD when you need:
 - No STEP or STL export (glTF/GLB only)
 
 ```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { jscad } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
 
+const runtime = defineRuntime({ kernels: [jscad()], bundlers: [esbuild()] });
 const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [jscad()],
-  bundlers: [esbuild()],
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 ```
+
+For named JSCAD parts, return a geometry array from `main()` and assign `.name` on each final geometry object. Tau writes one GLB scene with one named node/mesh per returned part, so those names flow into the viewer explorer and mesh exports such as 3MF.
+
+```typescript
+import { booleans, primitives, transforms } from '@jscad/modeling';
+
+const named = <T extends object>(name: string, shape: T): T & { name: string } => Object.assign(shape, { name });
+
+export default function main() {
+  const housing = named('Housing', primitives.cuboid({ size: [40, 40, 8] }));
+  const sunGear = named('Sun Gear', transforms.translate([0, 0, 8], primitives.cylinder({ radius: 8, height: 6 })));
+
+  const disconnectedPlanets = booleans.union(
+    transforms.translate([18, 0, 8], primitives.cylinder({ radius: 5, height: 6 })),
+    transforms.translate([-18, 0, 8], primitives.cylinder({ radius: 5, height: 6 })),
+  );
+  const splitPieces = booleans.scission(disconnectedPlanets);
+  const planets = splitPieces.map((piece, index) => named(`Planet Gear ${index + 1}`, piece));
+
+  return [housing, sunGear, planets];
+}
+```
+
+Use `booleans.scission()` only when a single disconnected `geom3` should intentionally become separate parts. Tau does not infer part names from JavaScript variables or automatically split topology into semantic components.
 
 #### Zoo (KCL)
 
@@ -167,13 +196,17 @@ Use Zoo when you need:
 - KCL language with remote engine
 
 ```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { zoo } from '@taucad/runtime/kernels';
 
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
+const runtime = defineRuntime({
   kernels: [zoo({ baseUrl: 'wss://your-zoo-server/v1/kernels/zoo' })],
+});
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 ```
 
@@ -186,39 +219,50 @@ Use Tau when you need:
 - A catch-all fallback for file formats not handled by other kernels
 
 ```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { tau } from '@taucad/runtime/kernels';
 
+const runtime = defineRuntime({ kernels: [tau()] });
 const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [tau()],
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 ```
 
 ### 6. Register Multiple Kernels
 
-Register multiple kernels in a single client. The framework selects the kernel automatically based on file extension and import detection:
+Register multiple kernels in a single runtime definition. The framework selects the kernel automatically based on file extension and import detection:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 ```
 
 Or configure kernels individually for tree-shaking:
 
 ```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { replicad, opencascade, manifold, jscad, tau } from '@taucad/runtime/kernels';
 import { openscad } from '@taucad/openscad';
 import { esbuild } from '@taucad/runtime/bundler';
 
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
+const runtime = defineRuntime({
   kernels: [replicad(), opencascade(), manifold(), openscad(), jscad(), tau()],
   bundlers: [esbuild()],
+});
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 ```
 
@@ -226,7 +270,7 @@ Kernel selection order follows the order in the `kernels` array. The first kerne
 
 ## Variations
 
-- **presets.all()**: Returns `{ kernels, middleware, bundlers }` with all built-in plugins. Pass directly to [`createRuntimeClient`](../api/client).
+- **presets.all()**: Returns a runtime definition with all built-in plugins. Pass it as `runtime` to [`createRuntimeClient`](../api/client).
 - **Replicad options**: Pass `{ wasm: 'single-exceptions' }` to `replicad()` for detailed OpenCASCADE error messages during development.
 - **OpenCASCADE options**: Pass `{ wasm: 'full' }` to `opencascade()` for the full WASM build.
 - **Manifold options**: `manifold()` currently has no runtime options; behavior is controlled by your model code.

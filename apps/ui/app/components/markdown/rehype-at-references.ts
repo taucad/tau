@@ -1,9 +1,7 @@
 import type { Root, Element, ElementContent, RootContent } from 'hast';
 import { parseInlineReferences } from '#utils/at-reference.utils.js';
-import { defaultSkills } from '#components/chat/tiptap/slash-command-suggestion.js';
 
 const skipParentTags = new Set(['code', 'pre', 'a']);
-const knownSkillIds = new Set(defaultSkills.map((s) => s.id));
 
 /**
  * Rehype plugin that transforms `@path` and `/command` text patterns into
@@ -54,13 +52,6 @@ function visitTextNodes(children: Array<RootContent | ElementContent>, parentTag
           tagName: 'mark',
           properties: { 'data-at-reference': segment.path },
           children: [{ type: 'text', value: `@${segment.path}` }],
-        } satisfies Element);
-      } else if (knownSkillIds.has(segment.commandId)) {
-        replacementNodes.push({
-          type: 'element',
-          tagName: 'mark',
-          properties: { 'data-slash-command': segment.commandId },
-          children: [{ type: 'text', value: `/${segment.commandId}` }],
         } satisfies Element);
       } else {
         replacementNodes.push({ type: 'text', value: `/${segment.commandId}` });

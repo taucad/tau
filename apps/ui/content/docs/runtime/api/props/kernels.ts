@@ -15,7 +15,4 @@ import type { KernelPlugin as _KernelPlugin } from '@taucad/runtime';
  * The actual type includes a phantom generic for compile-time export schema
  * type safety, which is omitted here for documentation clarity.
  */
-export type KernelPlugin = Pick<
-  _KernelPlugin,
-  'id' | 'moduleUrl' | 'extensions' | 'detectImport' | 'builtinModuleNames' | 'options'
->;
+export type KernelPlugin = Pick<_KernelPlugin, 'id' | 'extensions' | 'detectImport' | 'builtinModuleNames' | 'options'>;

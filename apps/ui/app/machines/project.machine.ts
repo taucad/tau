@@ -2,7 +2,9 @@ import { assign, assertEvent, setup, emit, enqueueActions } from 'xstate';
 import type { ActorRefFrom, AnyStateMachine } from 'xstate';
 import { produce } from 'immer';
 import type { FileParameterEntry, Project } from '@taucad/types';
+import { normalizePath } from '@taucad/utils/path';
 import { isBrowser } from '#constants/browser.constants.js';
+import { defaultProjectName } from '#constants/project-names.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { GraphicsViewSettings } from '#constants/editor.constants.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
@@ -93,12 +95,43 @@ const projectActors = {
   logs: logMachine,
 } as const;
 
+export type ProjectFileActivityOperation =
+  | 'written'
+  | 'batchWritten'
+  | 'directoryCreated'
+  | 'fileCopied'
+  | 'directoryCopied'
+  | 'renamed'
+  | 'directoryRenamed'
+  | 'deleted'
+  | 'directoryDeleted';
+
+export function isProjectContentActivityPath(projectRelativePath: string): boolean {
+  const normalized = normalizePath(projectRelativePath).replace(/^\/+/, '');
+  if (normalized === '' || normalized === '.') {
+    return false;
+  }
+
+  const firstSegment = normalized.split('/').find((segment) => segment.length > 0);
+  if (firstSegment === undefined) {
+    return false;
+  }
+
+  return firstSegment !== '.tau' && firstSegment !== '.cache' && firstSegment !== 'node_modules';
+}
+
+const getGeneratedProjectNameCandidate = (name: string): string | undefined => {
+  const trimmed = name.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
 /**
  * Project Machine Events
  */
 type ProjectEventInternal =
   | { type: 'loadProject'; projectId: string }
   | { type: 'updateName'; name: string }
+  | { type: 'applyGeneratedProjectName'; name: string }
   | { type: 'updateDescription'; description: string }
   | { type: 'updateTags'; tags: string[] }
   | { type: 'updateThumbnail'; thumbnail: string }
@@ -132,6 +165,7 @@ type ProjectEventInternal =
   | { type: 'fileMoved'; oldPath: string; newPath: string }
   | { type: 'fileDeleted'; path: string }
   | { type: 'directoryDeleted'; path: string }
+  | { type: 'projectFileActivity'; operation: ProjectFileActivityOperation; paths: readonly string[] }
   | { type: 'flushNow' };
 
 type ProjectEvent =
@@ -215,13 +249,27 @@ export const projectMachine = setup({
     }),
     updateName: assign(({ context, event }) => {
       assertEvent(event, 'updateName');
-      if (!context.project) {
+      if (!context.project || context.project.name === event.name) {
         return {};
       }
 
       return produce(context, (draft) => {
         draft.project!.name = event.name;
         draft.project!.updatedAt = Date.now();
+      });
+    }),
+    applyGeneratedProjectName: assign(({ context, event }) => {
+      assertEvent(event, 'applyGeneratedProjectName');
+      const candidate = getGeneratedProjectNameCandidate(event.name);
+      if (!context.project || context.project.name !== defaultProjectName || candidate === undefined) {
+        return {};
+      }
+      if (candidate === context.project.name) {
+        return {};
+      }
+
+      return produce(context, (draft) => {
+        draft.project!.name = candidate;
       });
     }),
     updateDescription: assign(({ context, event }) => {
@@ -533,7 +581,7 @@ export const projectMachine = setup({
         path === oldPath ? newPath : path.startsWith(`${oldPath}/`) ? `${newPath}${path.slice(oldPath.length)}` : path;
 
       enqueue.assign(({ context }) => {
-        // parameterEntries: Map<filePath, entry>
+        // ParameterEntries: Map<filePath, entry>
         const newEntries = new Map(context.parameterEntries);
         let mutatedEntries = false;
         for (const [key, value] of context.parameterEntries) {
@@ -544,7 +592,7 @@ export const projectMachine = setup({
           }
         }
 
-        // geometryUnits: Map<entryFile, ActorRef>
+        // GeometryUnits: Map<entryFile, ActorRef>
         const newUnits = new Map(context.geometryUnits);
         let mutatedUnits = false;
         for (const [key, value] of context.geometryUnits) {
@@ -570,16 +618,27 @@ export const projectMachine = setup({
 
       // If the mechanical main file was renamed, persist the updated
       // `assets.mechanical.main` pointer so reload picks the new path.
+      // Recency is stamped separately by `projectFileActivity`, so this
+      // mechanical metadata rewrite does not decide project activity itself.
       if (matches(context.project?.assets.mechanical?.main ?? '')) {
         enqueue.assign(({ context }) =>
           produce(context, (draft) => {
             if (draft.project?.assets.mechanical) {
               draft.project.assets.mechanical.main = rewrite(draft.project.assets.mechanical.main);
-              draft.project.updatedAt = Date.now();
             }
           }),
         );
       }
+    }),
+    applyProjectFileActivity: assign(({ context, event }) => {
+      assertEvent(event, 'projectFileActivity');
+      if (!context.project || !event.paths.some(isProjectContentActivityPath)) {
+        return {};
+      }
+
+      return produce(context, (draft) => {
+        draft.project!.updatedAt = Date.now();
+      });
     }),
     applyFileDeleted: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'fileDeleted');
@@ -658,6 +717,7 @@ export const projectMachine = setup({
             environmentPreset: settings.environmentPreset,
             pinnedMeasurements: settings.pinnedMeasurements,
             graphicsBackendPreference: settings.graphicsBackend ?? 'webgl',
+            componentDisplay: settings.componentDisplay,
           },
         });
 
@@ -717,6 +777,24 @@ export const projectMachine = setup({
     isProjectIdChanging({ context, event }) {
       assertEvent(event, 'loadProject');
       return context.projectId !== event.projectId;
+    },
+    shouldUpdateProjectName({ context, event }) {
+      assertEvent(event, 'updateName');
+      return Boolean(context.project && context.project.name !== event.name);
+    },
+    shouldApplyGeneratedProjectName({ context, event }) {
+      assertEvent(event, 'applyGeneratedProjectName');
+      const candidate = getGeneratedProjectNameCandidate(event.name);
+      return Boolean(
+        context.project &&
+        context.project.name === defaultProjectName &&
+        candidate !== undefined &&
+        candidate !== context.project.name,
+      );
+    },
+    hasVisibleProjectFileActivity({ context, event }) {
+      assertEvent(event, 'projectFileActivity');
+      return Boolean(context.project && event.paths.some(isProjectContentActivityPath));
     },
     hasParameterEntries({ context }) {
       return context.parameterEntries.size > 0;
@@ -850,7 +928,12 @@ export const projectMachine = setup({
               },
             ],
             updateName: {
+              guard: 'shouldUpdateProjectName',
               actions: ['updateName'],
+            },
+            applyGeneratedProjectName: {
+              guard: 'shouldApplyGeneratedProjectName',
+              actions: ['applyGeneratedProjectName'],
             },
             updateDescription: {
               actions: ['updateDescription'],
@@ -915,6 +998,10 @@ export const projectMachine = setup({
             directoryDeleted: {
               actions: 'applyDirectoryDeleted',
             },
+            projectFileActivity: {
+              guard: 'hasVisibleProjectFileActivity',
+              actions: 'applyProjectFileActivity',
+            },
           },
         },
         storing: {
@@ -923,6 +1010,11 @@ export const projectMachine = setup({
             idle: {
               on: {
                 updateName: {
+                  guard: 'shouldUpdateProjectName',
+                  target: 'writing',
+                },
+                applyGeneratedProjectName: {
+                  guard: 'shouldApplyGeneratedProjectName',
                   target: 'writing',
                 },
                 updateDescription: {
@@ -938,6 +1030,10 @@ export const projectMachine = setup({
                   target: 'writing',
                 },
                 setMainFile: {
+                  target: 'writing',
+                },
+                projectFileActivity: {
+                  guard: 'hasVisibleProjectFileActivity',
                   target: 'writing',
                 },
               },
@@ -948,6 +1044,12 @@ export const projectMachine = setup({
               },
               on: {
                 updateName: {
+                  guard: 'shouldUpdateProjectName',
+                  target: 'pending',
+                  reenter: true,
+                },
+                applyGeneratedProjectName: {
+                  guard: 'shouldApplyGeneratedProjectName',
                   target: 'pending',
                   reenter: true,
                 },
@@ -968,6 +1070,11 @@ export const projectMachine = setup({
                   reenter: true,
                 },
                 setMainFile: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                projectFileActivity: {
+                  guard: 'hasVisibleProjectFileActivity',
                   target: 'pending',
                   reenter: true,
                 },
@@ -991,6 +1098,11 @@ export const projectMachine = setup({
               },
               on: {
                 updateName: {
+                  guard: 'shouldUpdateProjectName',
+                  target: 'pending',
+                },
+                applyGeneratedProjectName: {
+                  guard: 'shouldApplyGeneratedProjectName',
                   target: 'pending',
                 },
                 updateDescription: {
@@ -1006,6 +1118,10 @@ export const projectMachine = setup({
                   target: 'pending',
                 },
                 setMainFile: {
+                  target: 'pending',
+                },
+                projectFileActivity: {
+                  guard: 'hasVisibleProjectFileActivity',
                   target: 'pending',
                 },
               },

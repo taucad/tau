@@ -32,6 +32,8 @@ const harness = vi.hoisted(() => ({
   setMessageEdit: vi.fn(),
   clearMessageEdit: vi.fn(),
   getChat: vi.fn(),
+  consumeChatStartupRequest: vi.fn(),
+  commitCancelledDraftRestore: vi.fn(),
   toastError: vi.fn(),
   resize: vi.fn<(image: string) => Promise<string>>(),
   setSelectedModelId: vi.fn(),
@@ -120,6 +122,8 @@ vi.mock('#hooks/use-project-manager.js', () => ({
     setMessageEdit: harness.setMessageEdit,
     clearMessageEdit: harness.clearMessageEdit,
     getChat: harness.getChat,
+    consumeChatStartupRequest: harness.consumeChatStartupRequest,
+    commitCancelledDraftRestore: harness.commitCancelledDraftRestore,
   }),
 }));
 
@@ -232,6 +236,8 @@ beforeEach(() => {
   harness.setMessageEdit.mockReset().mockResolvedValue(undefined);
   harness.clearMessageEdit.mockReset().mockResolvedValue(undefined);
   harness.getChat.mockReset().mockResolvedValue(undefined);
+  harness.consumeChatStartupRequest.mockReset().mockResolvedValue(undefined);
+  harness.commitCancelledDraftRestore.mockReset().mockResolvedValue(undefined);
   harness.toastError.mockReset();
   harness.resize.mockReset().mockImplementation(async (image: string) => image);
   harness.setSelectedModelId.mockReset();

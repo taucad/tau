@@ -48,9 +48,11 @@ vi.mock('#machines/file-manager.worker.js?worker', () => ({
 const mockMount = vi.fn<(prefix: string, config: unknown) => Promise<void>>();
 const mockUnmount = vi.fn<(prefix: string) => void>();
 const mockInvalidateStandaloneProvider = vi.fn<(backend: string, workspaceId?: string) => void>();
-const mockProxyMkdir = vi.fn<(path: string, options?: { recursive?: boolean }) => Promise<void>>(async () => {});
-const mockProxyRmdir = vi.fn<(path: string, options?: { recursive?: boolean }) => Promise<void>>(async () => {});
-const mockProxyWriteFile = vi.fn<(path: string, data: unknown, options?: unknown) => Promise<void>>(async () => {});
+const mockProxyMkdir = vi.fn<(path: string, options?: { recursive?: boolean }) => Promise<void>>(async () => undefined);
+const mockProxyRmdir = vi.fn<(path: string, options?: { recursive?: boolean }) => Promise<void>>(async () => undefined);
+const mockProxyWriteFile = vi.fn<(path: string, data: unknown, options?: unknown) => Promise<void>>(
+  async () => undefined,
+);
 const mockWaitForWorkerReady = vi.fn<() => Promise<void>>();
 const mockCreateFileSystemBridge = vi.fn(() => ({
   port: {
@@ -60,11 +62,16 @@ const mockCreateFileSystemBridge = vi.fn(() => ({
   },
   dispose: vi.fn(),
 }));
+const mockOpenFileSystemBridge = vi.fn(() => ({
+  port: new MessageChannel().port1,
+  dispose: vi.fn(),
+}));
 
-vi.mock('@taucad/runtime/transport-internals', () => ({
+vi.mock('@taucad/fs-bridge', () => ({
   createFileSystemBridge: () => mockCreateFileSystemBridge(),
+  openFileSystemBridge: () => mockOpenFileSystemBridge(),
   waitForWorkerReady: async () => mockWaitForWorkerReady(),
-  createBridgeProxy: vi.fn(() => ({
+  createFileSystemBridgeProxy: vi.fn(() => ({
     mount: mockMount,
     unmount: mockUnmount,
     invalidateStandaloneProvider: mockInvalidateStandaloneProvider,
@@ -378,25 +385,25 @@ describe('FileManagerProvider — client + workspace facades', () => {
     expect(mockInvalidateStandaloneProvider).toHaveBeenCalledExactlyOnceWith('webaccess', 'wsp_x');
   });
 
-  it('routes mkdir through the worker proxy without writing any .gitkeep placeholder', async () => {
+  it('routes createDirectory through the project content facade with an absolute project path', async () => {
     const { result } = renderProvider();
 
     await act(async () => {
-      await result.current.mkdir('newfolder', { recursive: true });
+      await result.current.createDirectory('newfolder', { recursive: true });
     });
 
-    expect(mockProxyMkdir).toHaveBeenCalledExactlyOnceWith('newfolder', { recursive: true });
+    expect(mockProxyMkdir).toHaveBeenCalledExactlyOnceWith('/projects/root/newfolder', { recursive: true });
     expect(mockProxyWriteFile).not.toHaveBeenCalled();
   });
 
-  it('routes rmdir through the worker proxy with recursive: true and does not call unlink per file', async () => {
+  it('routes deleteDirectory through the project content facade with an absolute project path', async () => {
     const { result } = renderProvider();
 
     await act(async () => {
-      await result.current.rmdir('subtree', { recursive: true });
+      await result.current.deleteDirectory('subtree', { recursive: true });
     });
 
-    expect(mockProxyRmdir).toHaveBeenCalledExactlyOnceWith('subtree', { recursive: true });
+    expect(mockProxyRmdir).toHaveBeenCalledExactlyOnceWith('/projects/root/subtree', { recursive: true });
   });
 
   it('does not expose the deleted scoped suffix or top-level admin callbacks on the context value', () => {
@@ -407,6 +414,8 @@ describe('FileManagerProvider — client + workspace facades', () => {
     expect(value).not.toHaveProperty('deleteFileScoped');
     expect(value).not.toHaveProperty('deleteDirectoryScoped');
     expect(value).not.toHaveProperty('getZippedDirectoryScoped');
+    expect(value).not.toHaveProperty('mkdir');
+    expect(value).not.toHaveProperty('rmdir');
     expect(value).not.toHaveProperty('mount');
     expect(value).not.toHaveProperty('unmount');
     expect(value).not.toHaveProperty('invalidateStandaloneProvider');

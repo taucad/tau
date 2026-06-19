@@ -190,11 +190,17 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
     const callArgs = mockCreateChat.mock.calls[0]?.[0] as {
       activeModel?: string;
       activeKernel?: string;
-      messages?: Array<{ metadata?: Record<string, unknown> }>;
+      messages?: Array<{ id: string; metadata?: Record<string, unknown> }>;
+      startupRequest?: { id: string; kind: string; messageId: string; source: string; createdAt: number };
     };
     expect(callArgs.activeModel).toBe('chat-local-model');
     expect(callArgs.activeKernel).toBe('manifold');
     expect(callArgs.messages?.[0]?.metadata?.['status']).toBe('pending');
+    expect(callArgs.startupRequest?.id).toMatch(/^req_/);
+    expect(callArgs.startupRequest?.kind).toBe('regenerate-tail');
+    expect(callArgs.startupRequest?.messageId).toBe(callArgs.messages?.[0]?.id);
+    expect(callArgs.startupRequest?.source).toBe('fix-with-ai-new-chat');
+    expect(typeof callArgs.startupRequest?.createdAt).toBe('number');
   });
 });
 

@@ -13,6 +13,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     getChat,
     createChat: createChatInManager,
     updateChat: updateChatInManager,
+    applyGeneratedChatName: applyGeneratedChatNameInManager,
     patchChat: patchChatInManager,
     setMessageEdit: setMessageEditInManager,
     clearMessageEdit: clearMessageEditInManager,
@@ -44,16 +45,12 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
   );
 
   const updateChat = useCallback(
-    async (
-      chatId: string,
-      update: PartialDeep<Chat>,
-      updateOptions?: {
-        noUpdatedAt?: boolean;
-      },
-    ): Promise<Chat | undefined> => {
-      const updatedChat = await updateChatInManager(chatId, update, updateOptions);
-      void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
-      void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+    async (chatId: string, update: PartialDeep<Chat>): Promise<Chat | undefined> => {
+      const updatedChat = await updateChatInManager(chatId, update);
+      if (updatedChat) {
+        void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+        void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+      }
       return updatedChat;
     },
     [updateChatInManager, resourceId, queryClient],
@@ -80,18 +77,34 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
   const updateChatName = useCallback(
     async (chatId: string, name: string): Promise<Chat | undefined> => {
       const updatedChat = await patchChatInManager(chatId, 'name', name);
-      void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
-      void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+      if (updatedChat) {
+        void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+        void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+      }
       return updatedChat;
     },
     [patchChatInManager, resourceId, queryClient],
   );
 
+  const applyGeneratedChatName = useCallback(
+    async (chatId: string, name: string): Promise<Chat | undefined> => {
+      const updatedChat = await applyGeneratedChatNameInManager(chatId, name);
+      if (updatedChat) {
+        void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+        void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+      }
+      return updatedChat;
+    },
+    [applyGeneratedChatNameInManager, resourceId, queryClient],
+  );
+
   const patchChat = useCallback(
     async <K extends keyof Chat>(chatId: string, key: K, value: Chat[K]): Promise<Chat | undefined> => {
       const updatedChat = await patchChatInManager(chatId, key, value);
-      void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
-      void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+      if (updatedChat) {
+        void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+        void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+      }
       return updatedChat;
     },
     [patchChatInManager, resourceId, queryClient],
@@ -104,8 +117,10 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
       draft: NonNullable<Chat['messageEdits']>[string],
     ): Promise<Chat | undefined> => {
       const updatedChat = await setMessageEditInManager(chatId, messageId, draft);
-      void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
-      void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+      if (updatedChat) {
+        void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+        void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+      }
       return updatedChat;
     },
     [setMessageEditInManager, resourceId, queryClient],
@@ -114,8 +129,10 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
   const clearMessageEdit = useCallback(
     async (chatId: string, messageId: string): Promise<Chat | undefined> => {
       const updatedChat = await clearMessageEditInManager(chatId, messageId);
-      void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
-      void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+      if (updatedChat) {
+        void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+        void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+      }
       return updatedChat;
     },
     [clearMessageEditInManager, resourceId, queryClient],
@@ -139,6 +156,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     createChat,
     updateChat,
     patchChat,
+    applyGeneratedChatName,
     setMessageEdit,
     clearMessageEdit,
     softDeleteChat,

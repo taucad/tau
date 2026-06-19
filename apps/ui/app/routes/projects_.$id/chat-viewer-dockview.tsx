@@ -31,6 +31,10 @@ type ViewerPanelParameters = {
   entryFile: string | undefined;
 };
 
+function getDragDataTransfer(event: DragEvent | PointerEvent): DataTransfer | undefined {
+  return 'dataTransfer' in event ? (event.dataTransfer ?? undefined) : undefined;
+}
+
 /**
  * Viewer panel component rendered inside each Dockview panel.
  */
@@ -151,6 +155,7 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
         return {
           ...validated,
           pinnedMeasurements: undefined,
+          componentDisplay: undefined,
         };
       }
     }
@@ -234,8 +239,9 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
 
     const disposable = api.onWillDragPanel((event) => {
       const entryFile = (event.panel.params as ViewerPanelParameters | undefined)?.entryFile;
+      const dataTransfer = getDragDataTransfer(event.nativeEvent);
       if (entryFile) {
-        event.nativeEvent.dataTransfer?.setData(tauViewerPanelDragMime, JSON.stringify({ entryFile }));
+        dataTransfer?.setData(tauViewerPanelDragMime, JSON.stringify({ entryFile }));
       }
     });
 
@@ -251,7 +257,7 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
     }
 
     const disposable = api.onUnhandledDragOverEvent((event) => {
-      const types = event.nativeEvent.dataTransfer?.types;
+      const types = getDragDataTransfer(event.nativeEvent)?.types;
 
       if (types?.includes(tauFileDragMime)) {
         event.accept();
@@ -436,8 +442,10 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
   // Handle external file drops and cross-dockview editor panel drops
   const onDidDrop = useCallback(
     (event: DockviewDidDropEvent) => {
+      const dataTransfer = getDragDataTransfer(event.nativeEvent);
+
       // Handle editor panel drag → create a viewer for that file
-      const editorData = event.nativeEvent.dataTransfer?.getData(tauEditorPanelDragMime);
+      const editorData = dataTransfer?.getData(tauEditorPanelDragMime);
       if (editorData) {
         try {
           const { filePath: droppedFile } = JSON.parse(editorData) as {
@@ -480,7 +488,7 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
       }
 
       // Handle file tree drags
-      const data = event.nativeEvent.dataTransfer?.getData(tauFileDragMime);
+      const data = dataTransfer?.getData(tauFileDragMime);
       if (!data) {
         return;
       }

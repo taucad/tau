@@ -24,6 +24,9 @@ export const panelMinSizeViewer = 416;
 /** Mobile drawer snap points for the projects interface */
 export const mobileDrawerSnapPoints: Array<number | string> = [0.7, 1];
 
+/** Default render timeout. Milliseconds. */
+export const defaultRenderTimeout = 60_000;
+
 /**
  * All panel identifiers - single source of truth for panel IDs.
  * Includes both toggleable panels and the always-visible viewer.
@@ -103,6 +106,17 @@ export type GraphicsBackendPreference = 'webgl' | 'webgpu';
 /** Resolved active backend passed to THREE renderers (matches preference 1:1; `webgpu` falls back to `webgl` when unsupported). */
 export type ResolvedGraphicsBackend = 'webgl' | 'webgpu';
 
+export type PersistedModelComponentDisplayUnitState = {
+  hiddenComponentIds?: string[];
+  isolatedComponentIds?: string[];
+  opacityByComponentId?: Record<string, number>;
+};
+
+export type PersistedModelComponentDisplayState = {
+  schemaVersion: 1;
+  unitsById: Record<string, PersistedModelComponentDisplayUnitState>;
+};
+
 export type GraphicsViewSettings = {
   enableSurfaces: boolean;
   enableLines: boolean;
@@ -124,13 +138,20 @@ export type GraphicsViewSettings = {
    */
   graphicsBackend?: GraphicsBackendPreference;
   /**
+   * Persisted per-component display state for geometry explorer controls.
+   * Keyed by deterministic model-interaction unit id, then canonical
+   * `GeometryComponentNode.id`.
+   */
+  componentDisplay?: PersistedModelComponentDisplayState;
+  /**
    * Settings schema version. Absent / `1` = legacy seconds-based renderTimeout
    * persisted before the milliseconds-only migration; values are multiplied
    * by 1000 on parse. `2` = milliseconds-only + no graphics backend column.
    * `3` = adds persisted `graphicsBackend` with `'auto' | 'webgl' | 'webgpu'`.
    * `4` = drops `'auto'`; persisted `'auto'` migrates to `'webgl'`.
+   * `5` = adds optional per-component display state.
    */
-  schemaVersion?: 2 | 3 | 4;
+  schemaVersion?: 2 | 3 | 4 | 5;
 };
 
 // ============================================================================
@@ -145,6 +166,17 @@ const pinnedMeasurementSchema = z.object({
   endPoint: vector3Schema,
   distance: z.number(),
   name: z.string().optional(),
+});
+
+const componentDisplayUnitSchema = z.object({
+  hiddenComponentIds: z.array(z.string()).optional(),
+  isolatedComponentIds: z.array(z.string()).optional(),
+  opacityByComponentId: z.record(z.string(), z.number()).optional(),
+});
+
+export const componentDisplayStateSchema = z.object({
+  schemaVersion: z.literal(1),
+  unitsById: z.record(z.string(), componentDisplayUnitSchema),
 });
 
 export const graphicsViewSettingsSchema = z.object({
@@ -162,14 +194,44 @@ export const graphicsViewSettingsSchema = z.object({
   environmentPreset: z.enum(['studio', 'performance']),
   pinnedMeasurements: z.array(pinnedMeasurementSchema).optional(),
   graphicsBackend: z.enum(['auto', 'webgl', 'webgpu']).optional(),
+  componentDisplay: componentDisplayStateSchema.optional(),
   /**
    * Settings schema version. Absent / `1` = legacy seconds-based renderTimeout;
    * `2` = milliseconds-only contract.
    * `3` = adds persisted `graphicsBackend` with `'auto' | 'webgl' | 'webgpu'`.
    * `4` = drops `'auto'`; persisted `'auto'` migrates to `'webgl'`.
+   * `5` = adds optional per-component display state.
    */
-  schemaVersion: z.union([z.literal(2), z.literal(3), z.literal(4)]).optional(),
+  schemaVersion: z.union([z.literal(2), z.literal(3), z.literal(4), z.literal(5)]).optional(),
 });
+
+export function isComponentDisplayStateEmpty(
+  componentDisplay: PersistedModelComponentDisplayState | undefined,
+): boolean {
+  if (!componentDisplay) {
+    return true;
+  }
+
+  for (const unit of Object.values(componentDisplay.unitsById)) {
+    if ((unit.hiddenComponentIds?.length ?? 0) > 0) {
+      return false;
+    }
+    if ((unit.isolatedComponentIds?.length ?? 0) > 0) {
+      return false;
+    }
+    if (Object.keys(unit.opacityByComponentId ?? {}).length > 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export function omitEmptyComponentDisplayState(
+  componentDisplay: PersistedModelComponentDisplayState | undefined,
+): PersistedModelComponentDisplayState | undefined {
+  return isComponentDisplayStateEmpty(componentDisplay) ? undefined : componentDisplay;
+}
 
 /**
  * Safely parse persisted graphics view settings.
@@ -188,11 +250,21 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
   }
 
   const parsed = result.data;
+  if (parsed.schemaVersion === 5) {
+    const persistedBackend = parsed.graphicsBackend;
+    return {
+      ...parsed,
+      componentDisplay: omitEmptyComponentDisplayState(parsed.componentDisplay),
+      graphicsBackend: persistedBackend === 'webgpu' ? 'webgpu' : 'webgl',
+    };
+  }
+
   if (parsed.schemaVersion === 4) {
     const persistedBackend = parsed.graphicsBackend;
     return {
       ...parsed,
       graphicsBackend: persistedBackend === 'webgpu' ? 'webgpu' : 'webgl',
+      schemaVersion: 5,
     };
   }
 
@@ -200,7 +272,7 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
     return {
       ...parsed,
       graphicsBackend: parsed.graphicsBackend === 'webgpu' ? 'webgpu' : 'webgl',
-      schemaVersion: 4,
+      schemaVersion: 5,
     };
   }
 
@@ -208,7 +280,7 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
     return {
       ...parsed,
       graphicsBackend: 'webgl',
-      schemaVersion: 4,
+      schemaVersion: 5,
     };
   }
 
@@ -216,7 +288,7 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
     ...parsed,
     renderTimeout: parsed.renderTimeout * 1000,
     graphicsBackend: 'webgl',
-    schemaVersion: 4,
+    schemaVersion: 5,
   };
 }
 
@@ -234,10 +306,10 @@ export const defaultGraphicsSettings: GraphicsViewSettings = {
   enablePostProcessing: false,
   upDirection: 'z',
   cameraFovAngle: 60,
-  renderTimeout: 30_000,
+  renderTimeout: defaultRenderTimeout,
   environmentPreset: 'performance',
   graphicsBackend: 'webgl',
-  schemaVersion: 4,
+  schemaVersion: 5,
 };
 
 // ============================================================================

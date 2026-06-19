@@ -45,7 +45,7 @@ export function useCameraReset(parameters: ResetCameraParameters): (options?: {
   const { camera, controls, invalidate, size } = useThree();
   const viewportAspect = size.width > 0 && size.height > 0 ? size.width / size.height : 1;
   const cameraCapabilityActor = useCameraCapability();
-  const isRegistered = useRef(false);
+  const resetCameraRef = useRef<(options?: { enableConfiguredAngles?: boolean }) => void>(() => undefined);
 
   // Store viewportAspect in a ref so the resetCamera callback remains stable
   // during resize. The aspect is read lazily when reset is actually called,
@@ -80,7 +80,7 @@ export function useCameraReset(parameters: ResetCameraParameters): (options?: {
         invalidate,
         enableConfiguredAngles: options?.enableConfiguredAngles,
         cameraFovAngle,
-        controls: (controls ?? undefined) as { target: THREE.Vector3; update: () => void } | undefined,
+        controls: controls ?? undefined,
         viewportAspect: viewportAspectRef.current,
       });
     },
@@ -98,13 +98,18 @@ export function useCameraReset(parameters: ResetCameraParameters): (options?: {
     ],
   );
 
-  // Register the reset function with the camera capability actor only once
+  resetCameraRef.current = resetCamera;
+
+  // Register a stable wrapper so the camera capability always reaches the latest
+  // camera/controls captures without retaining stale R3F instances after remounts.
   useEffect(() => {
-    if (!isRegistered.current) {
-      cameraCapabilityActor.send({ type: 'registerReset', reset: resetCamera });
-      isRegistered.current = true;
-    }
-  }, [resetCamera, cameraCapabilityActor]);
+    cameraCapabilityActor.send({
+      type: 'registerReset',
+      reset: (options?: { enableConfiguredAngles?: boolean }) => {
+        resetCameraRef.current(options);
+      },
+    });
+  }, [cameraCapabilityActor]);
 
   // Return the reset function for direct use if needed
   return resetCamera;

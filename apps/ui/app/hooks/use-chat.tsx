@@ -497,9 +497,8 @@ export type ChatActions = DraftActions & {
   /**
    * Resume an interrupted stream WITHOUT re-running the trailing user
    * message or slicing any assistant parts that already landed. Use this
-   * for the network-error banner's primary CTA -- `regenerate()` would
-   * destroy partial assistant content and is the wrong tool for transient
-   * transport failures.
+   * for resumable recovery banners such as network drops and account-state
+   * interruptions -- `regenerate()` would destroy partial assistant content.
    */
   continueChat: () => void;
   stop: () => void;

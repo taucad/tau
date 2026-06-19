@@ -9,12 +9,25 @@ type ControlsProto = {
   enabled: boolean;
 };
 
+function isTransformControlsDomElement(value: unknown): value is HTMLElement {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'addEventListener' in value &&
+    typeof value.addEventListener === 'function' &&
+    'removeEventListener' in value &&
+    typeof value.removeEventListener === 'function' &&
+    'ownerDocument' in value
+  );
+}
+
 export type TransformControlsProps = Omit<ThreeElement<typeof TransformControlsImpl>, 'ref' | 'args'> &
   Omit<ThreeElements['group'], 'ref'> & {
     readonly object?: THREE.Object3D | React.RefObject<THREE.Object3D>;
     // oxlint-disable-next-line react-js/boolean-prop-naming -- third-party component prop
     readonly enabled?: boolean;
     readonly axis?: string | undefined;
+    readonly highlightAxis?: string | undefined;
     readonly domElement?: HTMLElement;
     readonly mode?: 'translate' | 'rotate' | 'scale';
     readonly translationSnap?: number | undefined;
@@ -33,6 +46,7 @@ export type TransformControlsProps = Omit<ThreeElement<typeof TransformControlsI
     readonly onChange?: (event?: THREE.Event) => void;
     readonly onPointerDown?: (event?: THREE.Event) => void;
     readonly onPointerUp?: (event?: THREE.Event) => void;
+    readonly onAxisChange?: (axis: string | undefined, event?: THREE.Event) => void;
     readonly onObjectChange?: (event?: THREE.Event) => void;
     readonly makeDefault?: boolean;
   };
@@ -46,6 +60,7 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
         onChange,
         onPointerDown,
         onPointerUp,
+        onAxisChange,
         onObjectChange,
         object,
         makeDefault,
@@ -53,6 +68,7 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
         // Transform
         enabled,
         axis,
+        highlightAxis,
         mode,
         translationSnap,
         rotationSnap,
@@ -75,7 +91,8 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
       const get = useThree((state) => state.get);
       const set = useThree((state) => state.set);
       const explCamera = camera ?? defaultCamera;
-      const explDomElement = (domElement ?? events.connected ?? gl.domElement) as HTMLElement;
+      const explDomElement =
+        domElement ?? (isTransformControlsDomElement(events.connected) ? events.connected : gl.domElement);
       const controls = React.useMemo(
         () => new TransformControlsImpl(explCamera, explDomElement),
         [explCamera, explDomElement],
@@ -116,6 +133,9 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
       const onChangeRef = React.useRef<((event?: THREE.Event) => void) | undefined>(undefined);
       const onPointerDownRef = React.useRef<((event?: THREE.Event) => void) | undefined>(undefined);
       const onPointerUpRef = React.useRef<((event?: THREE.Event) => void) | undefined>(undefined);
+      const onAxisChangeRef = React.useRef<((axis: string | undefined, event?: THREE.Event) => void) | undefined>(
+        undefined,
+      );
       const onObjectChangeRef = React.useRef<((event?: THREE.Event) => void) | undefined>(undefined);
 
       React.useLayoutEffect(() => {
@@ -128,8 +148,15 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
         onPointerUpRef.current = onPointerUp;
       }, [onPointerUp]);
       React.useLayoutEffect(() => {
+        onAxisChangeRef.current = onAxisChange;
+      }, [onAxisChange]);
+      React.useLayoutEffect(() => {
         onObjectChangeRef.current = onObjectChange;
       }, [onObjectChange]);
+
+      React.useLayoutEffect(() => {
+        (controls as TransformControlsImpl & { highlightAxis: string | undefined }).highlightAxis = highlightAxis;
+      }, [controls, highlightAxis]);
 
       React.useEffect(() => {
         const onChange = (event: THREE.Event) => {
@@ -139,6 +166,7 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
 
         const onPointerDown = (event: THREE.Event) => onPointerDownRef.current?.(event);
         const onPointerUp = (event: THREE.Event) => onPointerUpRef.current?.(event);
+        const onAxisChange = (event: THREE.Event & { value?: string }) => onAxisChangeRef.current?.(event.value, event);
         const onObjectChange = (event: THREE.Event) => onObjectChangeRef.current?.(event);
 
         // @ts-expect-error -- newly added events
@@ -147,6 +175,8 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
         controls.addEventListener('pointerDown', onPointerDown);
         // @ts-expect-error -- newly added events
         controls.addEventListener('pointerUp', onPointerUp);
+        // @ts-expect-error -- newly added events
+        controls.addEventListener('axis-changed', onAxisChange);
         // @ts-expect-error -- newly added events
         controls.addEventListener('objectChange', onObjectChange);
 
@@ -157,6 +187,8 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
           controls.removeEventListener('pointerDown', onPointerDown);
           // @ts-expect-error -- newly added events
           controls.removeEventListener('pointerUp', onPointerUp);
+          // @ts-expect-error -- newly added events
+          controls.removeEventListener('axis-changed', onAxisChange);
           // @ts-expect-error -- newly added events
           controls.removeEventListener('objectChange', onObjectChange);
         };
@@ -183,6 +215,7 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
             object={controls}
             enabled={enabled}
             axis={axis}
+            highlightAxis={highlightAxis}
             mode={mode}
             translationSnap={translationSnap}
             rotationSnap={rotationSnap}

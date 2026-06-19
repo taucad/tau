@@ -135,10 +135,26 @@ vi.mock('#components/files/directory-link.js', () => ({
 
 type ListDirectoryInvocation = ToolInvocation<typeof toolName.listDirectory>;
 type ListDirectoryOutputAvailable = Extract<ListDirectoryInvocation, { state: 'output-available' }>;
+type ListDirectoryEntry = ListDirectoryOutputAvailable['output']['entries'][number];
+
+const textEntry = (name: string, size: number, lineCount: number): ListDirectoryEntry => ({
+  name,
+  type: 'file',
+  size,
+  contentKind: 'text',
+  lineCount,
+});
+
+const binaryEntry = (name: string, size: number): ListDirectoryEntry => ({
+  name,
+  type: 'file',
+  size,
+  contentKind: 'binary',
+});
 
 const buildOutputPart = (overrides: {
   readonly path: string;
-  readonly entries: ReadonlyArray<{ readonly name: string; readonly type: 'file' | 'dir'; readonly size: number }>;
+  readonly entries: readonly ListDirectoryEntry[];
 }): ListDirectoryOutputAvailable => ({
   toolCallId: 'tc_1',
   state: 'output-available',
@@ -160,8 +176,8 @@ describe('ChatMessageToolListDirectory — mixed listing dual-rendering contract
       path: '',
       entries: [
         { name: '.tau', type: 'dir', size: 1 },
-        { name: 'main.ts', type: 'file', size: 100 },
-        { name: 'test.json', type: 'file', size: 50 },
+        textEntry('main.ts', 1024, 100),
+        binaryEntry('preview.glb', 1_363_149),
       ],
     });
 
@@ -171,10 +187,12 @@ describe('ChatMessageToolListDirectory — mixed listing dual-rendering contract
     expect(directoryLinks.map((node) => node.dataset['path'])).toEqual(['.tau']);
 
     const fileLinks = screen.getAllByTestId('file-link');
-    expect(fileLinks.map((node) => node.dataset['path'])).toEqual(['main.ts', 'test.json']);
+    expect(fileLinks.map((node) => node.dataset['path'])).toEqual(['main.ts', 'preview.glb']);
 
     const fileExtensionIcons = screen.getAllByTestId('file-extension-icon');
-    expect(fileExtensionIcons.map((node) => node.dataset['filename'])).toEqual(['main.ts', 'test.json']);
+    expect(fileExtensionIcons.map((node) => node.dataset['filename'])).toEqual(['main.ts', 'preview.glb']);
+    expect(screen.getByText(/100 lines, 1KB/)).toBeInTheDocument();
+    expect(screen.getByText(/binary, 1.3MB/)).toBeInTheDocument();
 
     const items = screen.getAllByTestId('chat-tool-card-list-item');
     expect(items[0]?.dataset['iconKind']).toBe('component');
@@ -188,7 +206,7 @@ describe('ChatMessageToolListDirectory — mixed listing dual-rendering contract
 
     const part = buildOutputPart({
       path: 'src/utils',
-      entries: [{ name: 'helpers.ts', type: 'file', size: 100 }],
+      entries: [textEntry('helpers.ts', 100, 3)],
     });
 
     render(<ChatMessageToolListDirectory part={part} />);
@@ -236,7 +254,7 @@ describe('ChatMessageToolListDirectory — mixed listing dual-rendering contract
   it('renders the header path as a DirectoryLink for non-root listings', () => {
     const part = buildOutputPart({
       path: 'src/utils',
-      entries: [{ name: 'a.ts', type: 'file', size: 1 }],
+      entries: [textEntry('a.ts', 1, 1)],
     });
 
     render(<ChatMessageToolListDirectory part={part} />);
@@ -250,7 +268,7 @@ describe('ChatMessageToolListDirectory — mixed listing dual-rendering contract
   it('renders the header path as plain text for root (empty path) listings', () => {
     const part = buildOutputPart({
       path: '',
-      entries: [{ name: 'a.ts', type: 'file', size: 1 }],
+      entries: [textEntry('a.ts', 1, 1)],
     });
 
     render(<ChatMessageToolListDirectory part={part} />);
@@ -263,10 +281,7 @@ describe('ChatMessageToolListDirectory — mixed listing dual-rendering contract
   it('joins root paths as basenames and nested paths with slash', () => {
     const rootPart = buildOutputPart({
       path: '',
-      entries: [
-        { name: 'foo', type: 'dir', size: 0 },
-        { name: 'bar.ts', type: 'file', size: 0 },
-      ],
+      entries: [{ name: 'foo', type: 'dir', size: 0 }, textEntry('bar.ts', 0, 1)],
     });
 
     const { unmount } = render(<ChatMessageToolListDirectory part={rootPart} />);
@@ -278,10 +293,7 @@ describe('ChatMessageToolListDirectory — mixed listing dual-rendering contract
 
     const nestedPart = buildOutputPart({
       path: 'a/b',
-      entries: [
-        { name: 'c', type: 'dir', size: 0 },
-        { name: 'd.ts', type: 'file', size: 0 },
-      ],
+      entries: [{ name: 'c', type: 'dir', size: 0 }, textEntry('d.ts', 0, 1)],
     });
 
     render(<ChatMessageToolListDirectory part={nestedPart} />);

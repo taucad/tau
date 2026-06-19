@@ -1,11 +1,10 @@
-import type { LanguageInput } from 'shiki';
+/* oxlint-disable no-restricted-imports, import/extensions -- Fumadocs source config is imported by Vite config before app # aliases are active. */
 import { defineConfig, defineDocs } from 'fumadocs-mdx/config';
 import { remarkAutoTypeTable, createGenerator } from 'fumadocs-typescript';
 import { remarkMdxMermaid } from 'fumadocs-core/mdx-plugins';
-import kclLang from '#lib/kcl-language/kcl-shiki-precompiled.js';
-import openscadLang from '#lib/openscad-language/openscad-shiki-precompiled.js';
-import { llmStringifyMdx } from '#lib/fumadocs/llm-stringify-mdx.js';
-import { remarkResolveRelativeLinks } from '#lib/fumadocs/remark-resolve-relative-links.js';
+import { tauCustomShikiLanguages } from '../shiki-custom-languages.js';
+import { llmStringifyMdx } from './llm-stringify-mdx.js';
+import { remarkResolveRelativeLinks } from './remark-resolve-relative-links.js';
 
 const generator = createGenerator({
   tsconfigPath: '../../tsconfig.docs.json',
@@ -35,8 +34,7 @@ export default defineConfig({
       },
       defaultColor: false,
       inline: 'tailing-curly-colon',
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- precompiled Shiki grammars are compatible at runtime but don't match LanguageInput type
-      langs: [...kclLang, ...openscadLang] as unknown as LanguageInput[],
+      langs: tauCustomShikiLanguages,
     },
   },
 });

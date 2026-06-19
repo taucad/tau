@@ -99,9 +99,14 @@ Dependencies represent what a kernel's geometry depends on. The `Dependency` uni
 The discriminated `KernelResult` shape arrives both from `client.export(format, input)` (Promise resolution) and from `client.on('geometry', handler)` (autonomous loop). Narrow on `result.success` and use `result.data` / `result.issues` accordingly:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 const result = await client.export('glb', {
   code: { 'main.ts': 'export default () => null' },
   file: 'main.ts',

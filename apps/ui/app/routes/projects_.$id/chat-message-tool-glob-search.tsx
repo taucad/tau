@@ -14,6 +14,7 @@ import {
 import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
 import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
+import { formatToolFileMetadata } from '#routes/projects_.$id/chat-tool-file-metadata.js';
 
 export function ChatMessageToolGlobSearch({
   part,
@@ -45,7 +46,7 @@ export function ChatMessageToolGlobSearch({
     case 'output-available': {
       const { input, output } = part;
       const { pattern } = input;
-      const { files, totalFiles } = output;
+      const { entries, totalFiles } = output;
 
       return (
         <ChatToolCard variant='minimal' status='ready' isDefaultOpen={false}>
@@ -61,18 +62,21 @@ export function ChatMessageToolGlobSearch({
           </ChatToolCardHeader>
           <ChatToolCardContent>
             <ChatToolCardList maxHeight='max-h-32'>
-              {files.length === 0 ? (
+              {entries.length === 0 ? (
                 <ChatToolCardListItem className='text-muted-foreground/70 italic'>No files found</ChatToolCardListItem>
               ) : (
                 <>
-                  {files.slice(0, 10).map((file) => (
-                    <ChatToolCardListItem key={file} icon={File}>
-                      <span className='font-mono'>{file}</span>
+                  {entries.slice(0, 10).map((entry) => (
+                    <ChatToolCardListItem key={entry.path} icon={File}>
+                      <span className='font-mono'>{entry.path}</span>
+                      {entry.isDirectory === true ? undefined : (
+                        <span className='ml-1 text-muted-foreground/70'> ({formatToolFileMetadata(entry)})</span>
+                      )}
                     </ChatToolCardListItem>
                   ))}
-                  {files.length > 10 ? (
+                  {entries.length > 10 ? (
                     <ChatToolCardListItem className='text-muted-foreground/70 italic'>
-                      ... {files.length - 10} more files
+                      ... {entries.length - 10} more files
                     </ChatToolCardListItem>
                   ) : undefined}
                 </>

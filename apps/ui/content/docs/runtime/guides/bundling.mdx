@@ -48,11 +48,11 @@ This pattern is recognised by Vite, Rolldown, Webpack 5, Parcel 2, and esbuild a
 
 The runtime enforces this invariant via the workspace `tau-lint/static-import-meta-url` rule, scoped to `packages/runtime/src/**` and `kernels/openscad/src/**`. Consumers do not need to enable the rule themselves.
 
-## Dynamic plugin loading
+## Worker-owned plugin loading
 
-Kernels, middleware, and transcoders are loaded by `await import(moduleUrl)` against URLs produced by the same `new URL` pattern. Each plugin therefore needs its own chunk in the consumer bundle.
+Kernels, middleware, and transcoders are declared in a worker-owned `defineRuntime(...)` entry. Client code imports only the runtime type when it needs compile-time narrowing, while the worker entry value-imports the executable plugin factories.
 
-The runtime's `tsdown.config.ts` already declares one entry per plugin module, so each one ships as a discrete file in the published `dist/`. The Vite/Rolldown plugins exclude `@taucad/runtime` from pre-bundling so the published chunks reach your build untouched and `import.meta.url` continues to point at the correct asset directory at runtime.
+The runtime's package exports still publish built-in kernel, middleware, bundler, and transcoder implementation subpaths. Applications should reference those implementations through plugin factories in their worker entry rather than sending implementation URLs from the client.
 
 ## Common failure modes
 

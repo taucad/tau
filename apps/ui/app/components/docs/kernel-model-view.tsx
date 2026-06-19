@@ -3,25 +3,28 @@ import { Scene, PerspectiveCamera, AmbientLight, DirectionalLight, Box3, Vector3
 import type { Group } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { createRuntimeClientOptions } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { replicad } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
 import { Loader } from '#components/ui/loader.js';
 import { useSharedRenderer } from '#components/docs/shared-renderer.js';
-import { useRender } from '@taucad/react';
+import { useRuntime } from '@taucad/react';
 import { cn } from '#utils/ui.utils.js';
 import { gltfCoordinateTransform } from '@taucad/runtime/middleware';
 
 const gltfLoader = new GLTFLoader();
 
-const kernelModelViewClientOptions = createRuntimeClientOptions({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
+const kernelModelViewRuntime = defineRuntime({
   kernels: [replicad()],
   bundlers: [esbuild()],
   middleware: [gltfCoordinateTransform()],
 });
+const kernelModelViewClientOptions = {
+  runtime: kernelModelViewRuntime,
+  transport: inProcessTransport({ runtime: kernelModelViewRuntime, fileSystem: fromMemoryFs() }),
+};
 
 type KernelModelViewProps = {
   readonly code: string;
@@ -29,11 +32,11 @@ type KernelModelViewProps = {
 };
 
 /**
- * Renders a Replicad model using `useRender` and the shared Three.js renderer.
+ * Renders a Replicad model using `useRuntime` and the shared Three.js renderer.
  *
  * Lifecycle:
  * 1. Lazily starts rendering when the component enters the viewport
- * 2. `useRender` produces GLTF geometry via an in-memory RuntimeClient
+ * 2. `useRuntime` produces GLTF geometry via an in-memory RuntimeClient
  * 3. Loads GLTF into a Three.js scene
  * 4. Uses OrbitControls on the visible canvas for interaction
  * 5. Delegates actual WebGL rendering to the SharedRenderer
@@ -53,7 +56,7 @@ export function KernelModelView({ code, className }: KernelModelViewProps): Reac
   // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key
   const renderCode = useMemo(() => ({ 'main.ts': code }), [code]);
 
-  const { geometries, status, error } = useRender({
+  const { geometries, status, error } = useRuntime({
     clientOptions: kernelModelViewClientOptions,
     code: renderCode,
     enabled: isVisible,

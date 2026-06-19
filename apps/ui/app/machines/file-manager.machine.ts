@@ -1,5 +1,6 @@
 import { assign, assertEvent, setup, enqueueActions } from 'xstate';
 import type { FileEntry, FileSystemBackend } from '@taucad/types';
+import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import { safeDispose } from '@taucad/utils/dispose';
 import FileManagerWorker from '#machines/file-manager.worker.js?worker';
 import { getProjectFileSystemConfig, getWorkspace, checkHandlePermission } from '#filesystem/handle-store.js';
@@ -45,6 +46,7 @@ type FileManagerContext = {
   worker: Worker | undefined;
   proxy: (FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void }) | undefined;
   bridgeDispose?: () => void;
+  openFileSystemBridge?: () => FileSystemBridgeConnection;
   filePoolBuffer: SharedArrayBuffer | undefined;
   contentService: FileContentService | undefined;
   treeService: FileTreeService | undefined;
@@ -90,6 +92,7 @@ type WorkerConnectedEvent = {
   worker: Worker;
   proxy: FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void };
   bridgeDispose: () => void;
+  openFileSystemBridge: () => FileSystemBridgeConnection;
   filePoolBuffer: SharedArrayBuffer | undefined;
 };
 
@@ -133,8 +136,8 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     context.treeService?.dispose();
     context.workerChangeChannel?.dispose();
 
-    const { createBridgeProxy, createFileSystemBridge, waitForWorkerReady } =
-      await import('@taucad/runtime/transport-internals');
+    const { createFileSystemBridge, createFileSystemBridgeProxy, openFileSystemBridge, waitForWorkerReady } =
+      await import('@taucad/fs-bridge');
 
     if (context.worker && !context.sharedWorker) {
       safeDispose(() => context.worker?.terminate());
@@ -159,11 +162,14 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     // Suppress unhandled-rejection warnings if `crashSignal` never wins the race.
     // The handler is intentionally inert because errors are already reported
     // via `console.error` inside `reportAndMaybeReject`.
-    const noop = (): void => {
-      /* Swallowed by design — see comment above. */
+    const suppressUnhandledCrashSignal = async (): Promise<void> => {
+      try {
+        await crashSignal;
+      } catch {
+        /* Swallowed by design — see comment above. */
+      }
     };
-    // oxlint-disable-next-line eslint-plugin-promise(prefer-await-to-then) -- attaching a catch handler to a Promise we may never await
-    crashSignal.catch(noop);
+    void suppressUnhandledCrashSignal();
 
     const reportAndMaybeReject = (formatted: ReturnType<typeof formatWorkerError>): void => {
       const error = toWorkerError(formatted);
@@ -228,12 +234,14 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
       }
     }
 
-    const { port, dispose: bridgeDispose } = createFileSystemBridge(worker);
+    const bridge = createFileSystemBridge(worker);
+    const { dispose: bridgeDispose } = bridge;
     console.debug(`[FileManager] bridge created, port transferred +${(performance.now() - initT0).toFixed(1)}ms`);
-    const proxy = createBridgeProxy<FileManagerProtocol>(port);
+    const proxy = createFileSystemBridgeProxy<FileManagerProtocol>(bridge);
     console.debug(`[FileManager] proxy created +${(performance.now() - initT0).toFixed(1)}ms`);
+    const openBridge = (): FileSystemBridgeConnection => openFileSystemBridge(worker);
 
-    return { type: 'workerConnected', worker, proxy, bridgeDispose, filePoolBuffer };
+    return { type: 'workerConnected', worker, proxy, bridgeDispose, openFileSystemBridge: openBridge, filePoolBuffer };
   },
 );
 
@@ -315,14 +323,38 @@ const initializeServicesActor = fromSafeAsync<
     const absolutePath = normalizePath(rootPath);
     const rootNodes = await proxy.readDirectory(absolutePath);
     for (const node of rootNodes) {
-      initialEntries.push({
-        path: node.name,
-        name: node.name,
-        type: node.children === undefined ? 'file' : 'dir',
-        size: node.size,
-        mtimeMs: node.mtimeMs,
-        isLoaded: false,
-      });
+      if (node.children !== undefined) {
+        initialEntries.push({
+          path: node.name,
+          name: node.name,
+          type: 'dir',
+          size: node.size,
+          mtimeMs: node.mtimeMs,
+          isLoaded: false,
+          isDirectoryResolved: false,
+        });
+      } else if (node.contentKind === 'text') {
+        initialEntries.push({
+          path: node.name,
+          name: node.name,
+          type: 'file',
+          size: node.size,
+          mtimeMs: node.mtimeMs,
+          isLoaded: false,
+          contentKind: 'text',
+          lineCount: node.lineCount,
+        });
+      } else {
+        initialEntries.push({
+          path: node.name,
+          name: node.name,
+          type: 'file',
+          size: node.size,
+          mtimeMs: node.mtimeMs,
+          isLoaded: false,
+          contentKind: 'binary',
+        });
+      }
     }
   } catch (error) {
     console.debug('[FileManager] Initial tree hydration failed (empty filesystem?):', error);
@@ -479,6 +511,7 @@ export const fileManagerMachine = setup({
       return {
         proxy: undefined,
         bridgeDispose: undefined,
+        openFileSystemBridge: undefined,
         worker: context.sharedWorker ? context.worker : undefined,
         contentService: undefined,
         treeService: undefined,
@@ -517,6 +550,10 @@ export const fileManagerMachine = setup({
       bridgeDispose({ event }) {
         assertEvent(event, 'workerConnected');
         return event.bridgeDispose;
+      },
+      openFileSystemBridge({ event }) {
+        assertEvent(event, 'workerConnected');
+        return event.openFileSystemBridge;
       },
       filePoolBuffer({ event }) {
         assertEvent(event, 'workerConnected');
@@ -614,6 +651,7 @@ export const fileManagerMachine = setup({
   context: ({ input }) => ({
     worker: undefined,
     proxy: undefined,
+    openFileSystemBridge: undefined,
     // Seed with the parent's SAB when nested so the connect actor's gate
     // observes a non-undefined buffer and skips re-allocation.
     filePoolBuffer: input.sharedFilePoolBuffer,

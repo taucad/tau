@@ -36,7 +36,41 @@ export function stripStableTslNodeJson(value: unknown): unknown {
   return value;
 }
 
+const isJsonPrimitive = (value: unknown): boolean =>
+  value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+
+const stringifyCompactPrimitiveArrays = (value: unknown, depth = 0): string => {
+  const indent = '  '.repeat(depth);
+  const childIndent = '  '.repeat(depth + 1);
+
+  if (Array.isArray(value)) {
+    if (value.every(isJsonPrimitive)) {
+      return `[${value.map((item) => JSON.stringify(item)).join(', ')}]`;
+    }
+
+    return `[\n${value.map((item) => `${childIndent}${stringifyCompactPrimitiveArrays(item, depth + 1)}`).join(',\n')}\n${indent}]`;
+  }
+
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).filter(
+      ([, nested]) => nested !== undefined && typeof nested !== 'function' && typeof nested !== 'symbol',
+    );
+    if (entries.length === 0) {
+      return '{}';
+    }
+
+    return `{\n${entries
+      .map(
+        ([key, nested]) =>
+          `${childIndent}${JSON.stringify(key)}: ${stringifyCompactPrimitiveArrays(nested, depth + 1)}`,
+      )
+      .join(',\n')}\n${indent}}`;
+  }
+
+  return JSON.stringify(value);
+};
+
 /** Stringify `stripStableTslNodeJson(value)` for `.toMatchFileSnapshot()`. */
 export function serialiseStrippedTslGraph(value: unknown): string {
-  return `${JSON.stringify(stripStableTslNodeJson(value), null, 2)}\n`;
+  return `${stringifyCompactPrimitiveArrays(stripStableTslNodeJson(value))}\n`;
 }

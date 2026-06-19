@@ -27,11 +27,14 @@
 import { describe, it, expect, afterEach } from 'vitest';
 
 import { createRuntimeClient } from '@taucad/runtime';
-import type { RuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { replicad, tau } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/runtime/middleware';
+import { converterTranscoder } from '@taucad/runtime/transcoder';
+import { runtime as uiRuntime } from '#runtime/ui-runtime.definition.js';
 
 const hollowBoxSource = `
 import { drawRoundedRectangle } from 'replicad';
@@ -54,8 +57,46 @@ export default function main(p = defaultParams): Shape3D {
 }
 `;
 
+const integrationRuntime = defineRuntime({
+  kernels: [replicad({ withBrepEdges: true }), tau()],
+  middleware: [gltfCoordinateTransform(), gltfEdgeDetection()],
+  bundlers: [esbuild()],
+  transcoders: [converterTranscoder()],
+});
+
+const createIntegrationClient = (fileSystem = fromMemoryFs()) =>
+  createRuntimeClient({
+    transport: inProcessTransport({ runtime: integrationRuntime, fileSystem }),
+  });
+
+const uiRuntimeConfig = {
+  tauApiUrl: 'http://localhost:4000',
+  tauWebSocketUrl: 'ws://localhost:4001',
+};
+
+const uiCylinderSource = `
+import { makeCylinder } from 'replicad';
+
+export const defaultParams = {
+  radius: 10,
+  height: 24,
+};
+
+export default function main(params = defaultParams) {
+  return makeCylinder(params.radius, params.height);
+}
+`;
+
+const createUiRuntimeClient = (fileSystem = fromMemoryFs()) =>
+  createRuntimeClient({
+    transport: inProcessTransport({ runtime: uiRuntime, fileSystem }),
+    config: uiRuntimeConfig,
+  });
+
+type IntegrationClient = ReturnType<typeof createIntegrationClient> | ReturnType<typeof createUiRuntimeClient>;
+
 describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { timeout: 120_000 }, () => {
-  let client: RuntimeClient | undefined;
+  let client: IntegrationClient | undefined;
 
   afterEach(async () => {
     client?.terminate();
@@ -67,11 +108,7 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
       '/projects/proj_hollow_box/main.ts': hollowBoxSource,
     });
 
-    client = createRuntimeClient({
-      kernels: [replicad({ withBrepEdges: true }), tau()],
-      bundlers: [esbuild()],
-      transport: inProcessTransport({ fileSystem }),
-    });
+    client = createIntegrationClient(fileSystem);
 
     await client.connect();
 
@@ -89,11 +126,7 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
   });
 
   it('renders non-empty geometry from inline code (CodeInput control path)', async () => {
-    client = createRuntimeClient({
-      kernels: [replicad({ withBrepEdges: true }), tau()],
-      bundlers: [esbuild()],
-      transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-    });
+    client = createIntegrationClient();
 
     await client.connect();
 
@@ -115,11 +148,7 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
       '/projects/proj_hollow_box/main.ts': hollowBoxSource,
     });
 
-    client = createRuntimeClient({
-      kernels: [replicad({ withBrepEdges: true }), tau()],
-      bundlers: [esbuild()],
-      transport: inProcessTransport({ fileSystem }),
-    });
+    client = createIntegrationClient(fileSystem);
 
     await client.connect();
 
@@ -141,6 +170,42 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
       expect(updated.geometry.success).toBe(true);
       if (updated.geometry.success) {
         expect(updated.geometry.data.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('renders Replicad geometry through the production UI runtime under SAB/COI auto selection', async () => {
+    const previousCrossOriginIsolated = Object.getOwnPropertyDescriptor(globalThis, 'crossOriginIsolated');
+    Object.defineProperty(globalThis, 'crossOriginIsolated', {
+      configurable: true,
+      value: true,
+    });
+
+    const fileSystem = fromMemoryFs({
+      '/projects/proj_ui_replicad/main.ts': uiCylinderSource,
+    });
+
+    client = createUiRuntimeClient(fileSystem);
+
+    try {
+      await client.connect();
+
+      const outcome = await client.openFile({
+        file: { path: '/projects/proj_ui_replicad', filename: 'main.ts' },
+      });
+
+      expect(outcome.superseded).toBe(false);
+      if (!outcome.superseded) {
+        expect(outcome.geometry.success).toBe(true);
+        if (outcome.geometry.success) {
+          expect(outcome.geometry.data.length).toBeGreaterThan(0);
+        }
+      }
+    } finally {
+      if (previousCrossOriginIsolated) {
+        Object.defineProperty(globalThis, 'crossOriginIsolated', previousCrossOriginIsolated);
+      } else {
+        Reflect.deleteProperty(globalThis, 'crossOriginIsolated');
       }
     }
   });

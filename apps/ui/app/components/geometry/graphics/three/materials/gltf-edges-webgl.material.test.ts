@@ -6,8 +6,16 @@ import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { LineMaterial } from 'three/addons';
 import {
   applyFatLineSegments,
+  createGltfFatLineMaterial,
+  createGltfFatLineSegmentsFromPositions,
   createWebGlGltfFatLineMaterial,
+  setGltfFatLineMaterialColor,
+  updateGltfEdgeColor,
 } from '#components/geometry/graphics/three/materials/gltf-edges.js';
+import {
+  gltfEdgeDepthBiasFactor,
+  gltfEdgeDepthBiasReferenceTanHalfFov,
+} from '#components/geometry/graphics/three/materials/edge-depth-bias.js';
 
 /**
  * Build a minimal GLTF-like object with `lineSegmentsCount` `LineSegments` children attached
@@ -46,6 +54,29 @@ function collectFatLineMaterials(scene: Object3D): unknown[] {
  */
 type DepthBiasUniform = { value: number };
 
+type ShaderProbe = {
+  uniforms: Record<string, unknown>;
+  vertexShader: string;
+  fragmentShader: string;
+};
+
+function compileShaderProbe(material: LineMaterial): ShaderProbe {
+  const shader: ShaderProbe = {
+    uniforms: {},
+    vertexShader: `
+      #include <logdepthbuf_pars_vertex>
+      void main() {
+        #include <logdepthbuf_vertex>
+      }
+    `,
+    fragmentShader: '',
+  };
+
+  (material.onBeforeCompile as (shaderProbe: ShaderProbe) => void)(shader);
+
+  return shader;
+}
+
 describe('createWebGlGltfFatLineMaterial', () => {
   describe('R7 — WebGLPrograms cache deduplication', () => {
     /**
@@ -83,8 +114,7 @@ describe('createWebGlGltfFatLineMaterial', () => {
       expect(uniformA).toBeDefined();
       expect(uniformA).toBe(uniformB);
       expect(uniformB).toBe(uniformC);
-      expect(uniformA!.value).toBeGreaterThan(0);
-      expect(uniformA!.value).toBeLessThan(1);
+      expect(uniformA!.value).toBe(gltfEdgeDepthBiasFactor);
     });
 
     /**
@@ -108,6 +138,19 @@ describe('createWebGlGltfFatLineMaterial', () => {
         uniformA.value = originalValue;
       }
     });
+
+    it('injects the shared FOV-adaptive perspective bias into the WebGL shader', () => {
+      const material = createWebGlGltfFatLineMaterial(new Vector2(1024, 768));
+      const shader = compileShaderProbe(material);
+      const sharedUniform = material.userData['depthBiasUniform'] as DepthBiasUniform;
+      const referenceTanHalfFovGlsl = gltfEdgeDepthBiasReferenceTanHalfFov.toPrecision(8);
+
+      expect(shader.uniforms['depthBias']).toBe(sharedUniform);
+      expect(shader.vertexShader).toContain('uniform float depthBias;');
+      expect(shader.vertexShader).toContain('float tanHalfFov = 1.0 / projectionMatrix[1][1];');
+      expect(shader.vertexShader).toContain(`float fovScale = tanHalfFov / ${referenceTanHalfFovGlsl};`);
+      expect(shader.vertexShader).toContain('vFragDepth *= pow(depthBias, fovScale);');
+    });
   });
 
   describe('R1 — material allocation parity with WebGPU path', () => {
@@ -119,13 +162,82 @@ describe('createWebGlGltfFatLineMaterial', () => {
      */
     it('shares a single LineMaterial instance across many LineSegments sources', () => {
       const gltf = makeGltfWithLineSegments(4);
-      applyFatLineSegments(gltf, new Vector2(1024, 768), 'webgl');
+      applyFatLineSegments(gltf, { resolution: new Vector2(1024, 768), backend: 'webgl' });
 
       const materials = collectFatLineMaterials(gltf.scene);
       expect(materials).toHaveLength(4);
       const unique = new Set(materials);
       expect(unique.size).toBe(1);
       expect(materials[0]).toBeInstanceOf(LineMaterial);
+    });
+  });
+
+  describe('raw endpoint fat-line helper', () => {
+    it('should create WebGL LineSegments2 from raw endpoint positions with the shared material', () => {
+      const material = createGltfFatLineMaterial({
+        backend: 'webgl',
+        resolution: new Vector2(1024, 768),
+        edgeColor: 0x11_22_33,
+      });
+      const fatLine = createGltfFatLineSegmentsFromPositions({
+        backend: 'webgl',
+        material,
+        positions: new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0]),
+      });
+
+      expect(fatLine).toBeDefined();
+      expect(fatLine!.type).toBe('LineSegments2');
+      expect((fatLine as { material: unknown }).material).toBe(material);
+      expect(material).toBeInstanceOf(LineMaterial);
+    });
+
+    it('should update the shared WebGL material color without rebuilding geometry', () => {
+      const material = createGltfFatLineMaterial({
+        backend: 'webgl',
+        resolution: new Vector2(1024, 768),
+        edgeColor: 0x11_22_33,
+      });
+      const fatLine = createGltfFatLineSegmentsFromPositions({
+        backend: 'webgl',
+        material,
+        positions: new Float32Array([0, 0, 0, 1, 0, 0]),
+      }) as Object3D & { geometry: unknown };
+      const { geometry } = fatLine;
+
+      setGltfFatLineMaterialColor(material, 0xaa_bb_cc);
+
+      expect((material as LineMaterial).color.getHex()).toBe(0xaa_bb_cc);
+      expect(fatLine.geometry).toBe(geometry);
+    });
+
+    it('should return deduped WebGL materials touched by a scene edge color update', () => {
+      const material = createGltfFatLineMaterial({
+        backend: 'webgl',
+        resolution: new Vector2(1024, 768),
+        edgeColor: 0x11_22_33,
+      });
+      const firstFatLine = createGltfFatLineSegmentsFromPositions({
+        backend: 'webgl',
+        material,
+        positions: new Float32Array([0, 0, 0, 1, 0, 0]),
+      }) as Object3D & { geometry: unknown };
+      const secondFatLine = createGltfFatLineSegmentsFromPositions({
+        backend: 'webgl',
+        material,
+        positions: new Float32Array([1, 0, 0, 1, 1, 0]),
+      }) as Object3D & { geometry: unknown };
+      const scene = new Group();
+      scene.add(firstFatLine, secondFatLine);
+      const firstGeometry = firstFatLine.geometry;
+      const secondGeometry = secondFatLine.geometry;
+
+      const updatedMaterials = updateGltfEdgeColor(scene, 0xaa_bb_cc);
+
+      expect(updatedMaterials.size).toBe(1);
+      expect(updatedMaterials.has(material)).toBe(true);
+      expect((material as LineMaterial).color.getHex()).toBe(0xaa_bb_cc);
+      expect(firstFatLine.geometry).toBe(firstGeometry);
+      expect(secondFatLine.geometry).toBe(secondGeometry);
     });
   });
 });

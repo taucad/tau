@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { RpcDependencies, RpcFileSystem } from '@taucad/chat/rpc';
 import { rpcClientErrorCodeSchema } from '@taucad/chat';
-import type { FileEntry, FileExtension } from '@taucad/types';
+import type { FileEntry, FileExtension, FileStat } from '@taucad/types';
 import type { ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
 import { rpcName } from '@taucad/chat/constants';
 import type { RpcHandlerDependencies, RpcCallInput, ResolveGraphicsForFile } from '#hooks/rpc-handlers.js';
@@ -33,12 +33,23 @@ vi.mock('#services/rpc-ledger.js', () => ({
 }));
 
 const mockWaitFor = vi.fn();
+const xstateMocks = vi.hoisted(() => ({
+  createActor: vi.fn(),
+}));
 vi.mock('xstate', async () => {
   const actual = await vi.importActual('xstate');
   return {
     ...(actual as Record<string, unknown>),
     // oxlint-disable-next-line no-unsafe-return -- mock factory returns untyped
     waitFor: (...args: unknown[]) => mockWaitFor(...args) as unknown,
+    // oxlint-disable-next-line no-unsafe-return -- tests override this for screenshot actor inspection
+    createActor: (...args: unknown[]) => {
+      const actor = xstateMocks.createActor(...args) as unknown;
+      if (actor) {
+        return actor;
+      }
+      return (actual as { createActor: (...args: unknown[]) => unknown }).createActor(...args);
+    },
   };
 });
 
@@ -56,15 +67,54 @@ type FileEntryOptions = {
 };
 
 function createFileEntry(options: FileEntryOptions): FileEntry {
+  if (options.type === 'dir') {
+    return {
+      path: options.path,
+      name: options.name,
+      type: 'dir',
+      size: options.size ?? 100,
+      mtimeMs: 0,
+      isLoaded: false,
+    };
+  }
+
   return {
     path: options.path,
     name: options.name,
-    type: options.type,
+    type: 'file',
     size: options.size ?? 100,
     mtimeMs: 0,
     isLoaded: false,
+    contentKind: 'text',
+    lineCount: 1,
   };
 }
+
+const textFileStat = (size = 0, mtimeMs = Date.now(), lineCount = 1): FileStat => ({
+  type: 'file',
+  size,
+  mtimeMs,
+  contentKind: 'text',
+  lineCount,
+});
+
+const textDirectoryEntry = (
+  name: string,
+  path: string,
+  options: {
+    readonly size: number;
+    readonly mtimeMs: number;
+    readonly lineCount?: number;
+  },
+): ListedDirectoryEntry => ({
+  name,
+  path,
+  isFolder: false,
+  size: options.size,
+  mtimeMs: options.mtimeMs,
+  contentKind: 'text',
+  lineCount: options.lineCount ?? 1,
+});
 
 type FileManagerWriteCall = [string, Uint8Array<ArrayBuffer>, { source: string }];
 
@@ -86,9 +136,7 @@ function createMockFileManager() {
       .fn<(path: string, data: Uint8Array<ArrayBuffer>, options: { source: string }) => Promise<void>>()
       .mockResolvedValue(undefined),
     deleteFile: vi.fn<(path: string, options: { source: string }) => Promise<void>>().mockResolvedValue(undefined),
-    stat: vi
-      .fn<(path: string) => Promise<{ type: 'file' | 'dir'; size: number; mtimeMs: number }>>()
-      .mockResolvedValue({ type: 'file', size: 0, mtimeMs: Date.now() }),
+    stat: vi.fn<(path: string) => Promise<FileStat>>().mockResolvedValue(textFileStat()),
     whenServicesReady: vi.fn<() => Promise<{ treeService: MockTreeService }>>(),
   };
 }
@@ -188,6 +236,7 @@ describe('rpc-handlers', () => {
   beforeEach(() => {
     capturedDeps = undefined;
     mockWaitFor.mockReset();
+    xstateMocks.createActor.mockReset();
     rpcDispatcherMocks.dispatch.mockReset();
     ledgerMocks.recordRpcOutcome.mockReset();
   });
@@ -325,8 +374,8 @@ describe('rpc-handlers', () => {
       it('should surface real size and modifiedAt from the stat-aware tree call', async () => {
         const writtenAt = Date.UTC(2026, 0, 15, 12, 30, 0);
         vi.mocked(lastTreeService!.listDirectory).mockResolvedValueOnce([
-          { name: 'main.ts', path: 'src/main.ts', isFolder: false, size: 1234, mtimeMs: writtenAt },
-          { name: 'utils.ts', path: 'src/utils.ts', isFolder: false, size: 56, mtimeMs: writtenAt },
+          textDirectoryEntry('main.ts', 'src/main.ts', { size: 1234, mtimeMs: writtenAt, lineCount: 12 }),
+          textDirectoryEntry('utils.ts', 'src/utils.ts', { size: 56, mtimeMs: writtenAt, lineCount: 3 }),
           { name: 'lib', path: 'src/lib', isFolder: true, size: 0, mtimeMs: writtenAt },
         ]);
 
@@ -334,20 +383,34 @@ describe('rpc-handlers', () => {
 
         expect(lastTreeService!.listDirectory).toHaveBeenCalledWith('src');
         expect(entries).toEqual([
-          { name: 'main.ts', type: 'file', size: 1234, modifiedAt: new Date(writtenAt).toISOString() },
-          { name: 'utils.ts', type: 'file', size: 56, modifiedAt: new Date(writtenAt).toISOString() },
+          {
+            name: 'main.ts',
+            type: 'file',
+            size: 1234,
+            contentKind: 'text',
+            lineCount: 12,
+            modifiedAt: new Date(writtenAt).toISOString(),
+          },
+          {
+            name: 'utils.ts',
+            type: 'file',
+            size: 56,
+            contentKind: 'text',
+            lineCount: 3,
+            modifiedAt: new Date(writtenAt).toISOString(),
+          },
           { name: 'lib', type: 'dir', size: 0, modifiedAt: new Date(writtenAt).toISOString() },
         ]);
       });
 
       it('should omit modifiedAt when stat fan-out fell back to a zero mtime', async () => {
         vi.mocked(lastTreeService!.listDirectory).mockResolvedValueOnce([
-          { name: 'orphan.ts', path: 'src/orphan.ts', isFolder: false, size: 0, mtimeMs: 0 },
+          textDirectoryEntry('orphan.ts', 'src/orphan.ts', { size: 0, mtimeMs: 0 }),
         ]);
 
         const entries = await fileSystem.readdir('src');
 
-        expect(entries).toEqual([{ name: 'orphan.ts', type: 'file', size: 0 }]);
+        expect(entries).toEqual([{ name: 'orphan.ts', type: 'file', size: 0, contentKind: 'text', lineCount: 1 }]);
       });
 
       it('should return empty array when no entries exist', async () => {
@@ -370,7 +433,7 @@ describe('rpc-handlers', () => {
 
       it('should await whenServicesReady before listing directory entries', async () => {
         vi.mocked(lastTreeService!.listDirectory).mockResolvedValueOnce([
-          { name: 'a.txt', path: 'src/a.txt', isFolder: false, size: 1, mtimeMs: 1 },
+          textDirectoryEntry('a.txt', 'src/a.txt', { size: 1, mtimeMs: 1 }),
         ]);
         let resolveReady!: (value: { treeService: MockTreeService }) => void;
         mockFm.whenServicesReady.mockImplementation(async () => {
@@ -1015,6 +1078,43 @@ describe('rpc-handlers', () => {
         });
 
         expect(resolver).toHaveBeenCalledWith('pen.ts');
+      });
+
+      it('should request captures without request-time target, camera, or display overrides', async () => {
+        const sentEvents: unknown[] = [];
+        const screenshotActor = {
+          start: vi.fn(),
+          stop: vi.fn(),
+          send: vi.fn((event: unknown) => {
+            sentEvents.push(event);
+            (event as { onSuccess: (dataUrls: string[]) => void }).onSuccess(['data:image/webp;base64,AAA']);
+          }),
+        };
+        screenshotActor.start.mockReturnValue(screenshotActor);
+        xstateMocks.createActor.mockReturnValue(screenshotActor);
+        const graphicsRef = { id: 'graphics' } as unknown as NonNullable<ReturnType<ResolveGraphicsForFile>>;
+        const resolver: ResolveGraphicsForFile = vi.fn(() => graphicsRef);
+        const projectRef = createMockProjectRef();
+        const deps = buildDeps({ projectRef, resolveGraphicsForFile: resolver });
+        const graphics = deps.graphics!;
+
+        const result = await graphics.captureScreenshot({ targetFile: 'pen.ts' });
+        const observations = await graphics.captureObservations({ targetFile: 'pen.ts' });
+
+        expect(result.success).toBe(true);
+        expect(observations.success).toBe(true);
+        expect(sentEvents).toHaveLength(2);
+        for (const event of sentEvents) {
+          const { options } = event as { options: Record<string, unknown> };
+          expect(options).toMatchObject({
+            aspectRatio: 1,
+            maxResolution: 800,
+            zoomLevel: 1.2,
+          });
+          expect(options).not.toHaveProperty('target');
+          expect(options).not.toHaveProperty('camera');
+          expect(options).not.toHaveProperty('display');
+        }
       });
     });
   });

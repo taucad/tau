@@ -8,6 +8,8 @@ icon: lucide:cpu
 
 The runtime worker is an **autonomous reactive render service**. It watches file dependencies, debounces changes, renders geometry, and pushes results -- without the main thread telling it when to act. Communication uses MessagePort for commands/events and a transport-owned abort channel (backed by `SharedArrayBuffer` on SAB-capable transports) for instant render abort. This design mirrors the Language Server Protocol pattern: the worker is a "geometry server" and the main thread is a display client.
 
+Executable runtime composition lives in the worker or host process. If those executable plugins need deployment values, the runtime definition declares a Zod `configSchema` and the client supplies an allowlisted boot `config` during initialization. Filesystem remains separate: it is a transport-owned workspace resource, not part of runtime config.
+
 ## Context and Motivation
 
 CAD kernels perform heavy work: WASM-based geometry computation, bundling, tessellation. Running this on the main thread would freeze the UI. Web Workers provide a separate thread with their own event loop. Beyond isolation, the worker owns scheduling decisions: it knows the dependency graph, cache state, and which renders are stale. Pushing this intelligence to the worker eliminates unnecessary main-thread round-trips and enables instant abort of superseded renders.
@@ -82,7 +84,7 @@ The File Manager Worker is the single owner of the virtual filesystem. It accept
 
 **Bridge A (main thread):** The editor and file manager UI use `createFileSystemBridge(fsWorker)` + `createBridgeProxy<FileManagerProtocol>(port)` to write files, read directory trees, and perform file management operations. When a file is written, `FileService` persists it via the active provider and emits a `fileWritten` event on the EventBus.
 
-**Bridge B (kernel worker):** The active [transport](../api/client) owns the kernel-worker bridge end-to-end. Consumers pass an opaque `RuntimeFileSystem` to the transport at construction — `fromChannelFs(fsWorker)` for the worker arm, `fromMemoryFs()`/`fromFsLike()`/`fromNodeFs()`/`fromBrowserFs()` for inline arms — and the transport constructs the `MessagePort` internally, transferring it to the kernel worker as part of `initialize`. The kernel worker creates a `createBridgeProxy<RuntimeFileSystemBase>(port)` for file reads, dependency resolution, and watch subscriptions. Bridge ports are disposed automatically when the runtime client terminates; consumers never call `createFileSystemBridge` themselves.
+**Bridge B (kernel worker):** The active [transport](../api/client) owns the kernel-worker bridge end-to-end. Consumers pass an opaque `RuntimeFileSystem` to the transport at construction — `fromFileSystemBridge(openFileSystemBridge(fsWorker))` for the worker-backed arm, `fromMemoryFs()`/`fromFsLike()`/`fromNodeFs()`/`fromBrowserFs()` for inline arms — and the transport transfers the filesystem `MessagePort` to the kernel worker as part of `initialize`. The kernel worker creates a bridge proxy for file reads, dependency resolution, and watch subscriptions. Bridge connections are disposed with the runtime session that opened them.
 
 This dual-bridge design means editor writes (Bridge A) trigger watch events to the kernel worker (Bridge B) without any main-thread relay. The main thread never sits on the hot path between a file change and a re-render.
 
@@ -178,22 +180,37 @@ The runtime architecture exposes two orthogonal planes — **transport** (the wi
 The host page owns a kernel `Worker` and a file-manager `Worker`. The transport runs the wire in the kernel worker; the runner hosts kernel modules in the same worker; the filesystem lives in the FM worker, accessed over a `MessagePort` bridge.
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import type { runtime } from './runtime.worker';
 import { webWorkerTransport } from '@taucad/runtime/transport/web';
-import { fromChannelFs } from '@taucad/runtime/filesystem';
+import { openFileSystemBridge } from '@taucad/fs-bridge';
+import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 
 const fmWorker = new Worker(new URL('./fm-worker.ts', import.meta.url), { type: 'module' });
+const fsBridge = openFileSystemBridge(fmWorker);
 
-const client = createRuntimeClient({
-  ...presets.all(),
+const client = createRuntimeClient<typeof runtime>({
   transport: webWorkerTransport({
-    fileSystem: fromChannelFs(fmWorker),
+    createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
+    fileSystem: fromFileSystemBridge(fsBridge),
   }),
 });
 await client.connect();
 ```
 
-The transport defaults to its bundled worker entry; pass an explicit `url:` only when hosting a custom worker module that composes `KernelRuntimeWorker` with **`webWorkerHost`** (imported from `@taucad/runtime/transport/web-worker-host` or via the bundled worker entry) directly.
+The worker entry composes `defineRuntime(...)`, `createRuntimeWorker({ runtime })`, and **`webWorkerHost`**.
+
+If the runtime definition is config-backed, the same topology passes boot config on the client:
+
+```typescript
+const client = createRuntimeClient<typeof runtime>({
+  config: () => loadRuntimeConfig(),
+  transport: webWorkerTransport({
+    createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
+    fileSystem: fromFileSystemBridge(fsBridge),
+  }),
+});
+```
 
 ### T2 — In-process Node CLI / tests
 
@@ -203,7 +220,7 @@ A single Node process owns everything. The transport bridges main thread ⇄ in-
 import { createNodeClient } from '@taucad/runtime/node';
 
 const client = await createNodeClient('/path/to/project');
-// under the hood: presets.all() + inProcessTransport({ fileSystem: fromNodeFs('/path/to/project') })
+// under the hood: presets.all() + inProcessTransport({ runtime, fileSystem: fromNodeFs('/path/to/project') })
 ```
 
 ### T3 — Electron renderer + main + worker_thread kernel (Phase 1)
@@ -211,19 +228,19 @@ const client = await createNodeClient('/path/to/project');
 The main process owns the FS authority and a `worker_threads.Worker` kernel host. The renderer is purely a display client — it speaks the kernel protocol over an Electron `MessagePortMain` pair. No kernel code, no FS access, and no bundler ever runs in the renderer.
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import type { runtime } from './runtime';
 import type { TransportPlugin } from '@taucad/runtime/transport';
 
-/** Electron apps supply a wired transport plugin (e.g. app-local `electronUtilityTransport` — see `examples/electron-tau`). */
+/** Electron apps supply a wired transport plugin (e.g. app-local `electronUtilityTransport` — see `examples/electron`). */
 export function createElectronRendererClient(transport: TransportPlugin): ReturnType<typeof createRuntimeClient> {
-  return createRuntimeClient({
-    ...presets.all(),
+  return createRuntimeClient<typeof runtime>({
     transport,
   });
 }
 ```
 
-On the main / utility-process side, pair this with `createRuntimeHost` from `@taucad/runtime/host` and the worker transport host factory that matches your topology (`nodeWorkerHost` wiring lives next to the Node worker entry — follow `examples/electron-tau` for a complete IPC host).
+On the main / utility-process side, pair this with `createRuntimeHost` from `@taucad/runtime/host` and the worker transport host factory that matches your topology (`nodeWorkerHost` wiring lives next to the Node worker entry — follow `examples/electron` for a complete IPC host).
 
 ### T4 — Multi-window Electron (single source of truth)
 

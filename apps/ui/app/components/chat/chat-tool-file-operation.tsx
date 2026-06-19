@@ -1,22 +1,25 @@
 import type { ToolUIPart } from 'ai';
 import type { DiffStatsWithContent } from '@taucad/chat';
-import type { CodeLanguage } from '@taucad/types';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { LoaderCircle, ChevronRight, ChevronDown } from 'lucide-react';
-import { languageFromExtension } from '@taucad/types/constants';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { DiffViewer, getFirstChangedLine } from '#components/code/diff-viewer.js';
 import { FileLink } from '#components/files/file-link.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.js';
 import { cn } from '#utils/ui.utils.js';
-import { getFileExtension } from '#utils/filesystem.utils.js';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { ChangeIndicator } from '#components/chat/change-indicator.js';
+import { OpenRenderButton } from '#components/files/open-render-button.js';
+import { shouldShowOpenRenderButton } from '#components/files/open-render-button.ignore.js';
+import type { ShikiLanguage } from '#lib/code-language-resolution.js';
+import { resolveHighlightLanguageForPath } from '#lib/code-language-resolution.js';
+
+const fileOperationActionLabelClassName = '**:data-[slot=label]:hidden @xs/code:**:data-[slot=label]:flex';
 
 /**
  * Fixed height of the collapsed preview viewport — exactly four `text-xs`
@@ -42,15 +45,10 @@ function getFilename(path: string): string {
 
 /**
  * Get the code language for syntax highlighting based on a filename's extension.
- * Falls back to 'typescript' if the extension is not recognized.
+ * Falls back to plaintext if the extension is not recognized.
  */
-function getLanguageFromFilename(filename: string): CodeLanguage {
-  const extension = getFileExtension(filename);
-  if (extension in languageFromExtension) {
-    return languageFromExtension[extension as keyof typeof languageFromExtension];
-  }
-
-  return 'typescript';
+function getLanguageFromFilename(filename: string): ShikiLanguage {
+  return resolveHighlightLanguageForPath(filename).shikiLanguage;
 }
 
 type FourLineViewportProps = {
@@ -135,10 +133,10 @@ function FourLineViewport({ children }: FourLineViewportProps): React.JSX.Elemen
 
 type CodePreviewProps = {
   readonly content: string;
-  readonly language?: CodeLanguage;
+  readonly language?: ShikiLanguage;
 };
 
-function CodePreview({ content, language = 'typescript' }: CodePreviewProps): React.JSX.Element {
+function CodePreview({ content, language = 'plaintext' }: CodePreviewProps): React.JSX.Element {
   return (
     <FourLineViewport>
       <CodeViewer language={language} text={content} className='overflow-x-auto px-2.5 py-1.5 text-xs' />
@@ -149,13 +147,13 @@ function CodePreview({ content, language = 'typescript' }: CodePreviewProps): Re
 type DiffPreviewProps = {
   readonly originalContent: string;
   readonly modifiedContent: string;
-  readonly language?: CodeLanguage;
+  readonly language?: ShikiLanguage;
 };
 
 export function DiffPreview({
   originalContent,
   modifiedContent,
-  language = 'typescript',
+  language = 'plaintext',
 }: DiffPreviewProps): React.JSX.Element {
   return (
     <FourLineViewport>
@@ -340,6 +338,17 @@ export function CollapsibleFileOperation({
   const filename = getFilename(targetFile);
   const hasPath = targetFile !== filename;
 
+  const showOpenRender = enableFileLink && !isStreaming && targetFile !== '' && shouldShowOpenRenderButton(targetFile);
+
+  const headerActions = showOpenRender ? (
+    <>
+      <OpenRenderButton path={targetFile} size='xs' className={fileOperationActionLabelClassName} />
+      {actions}
+    </>
+  ) : (
+    actions
+  );
+
   // For streaming, show last 4 lines without collapsible
   if (isStreaming && content) {
     const lines = content.split('\n');
@@ -419,7 +428,7 @@ export function CollapsibleFileOperation({
             diffStats={diffStats}
             pendingLabel={pendingLabel}
           />
-          {actions ? (
+          {headerActions ? (
             <div
               className='ml-auto flex shrink-0 items-center gap-1 pr-1 text-muted-foreground opacity-0 group-hover/file-op:opacity-100'
               onClick={(event) => {
@@ -427,7 +436,7 @@ export function CollapsibleFileOperation({
                 event.stopPropagation();
               }}
             >
-              {actions}
+              {headerActions}
             </div>
           ) : undefined}
         </div>

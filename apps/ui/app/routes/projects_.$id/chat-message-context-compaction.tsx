@@ -1,4 +1,5 @@
-import { Archive } from 'lucide-react';
+import { AlertTriangle, Archive, RotateCcw } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { ContextCompactionData } from '@taucad/chat';
 import { FileLink } from '#components/files/file-link.js';
 import {
@@ -12,24 +13,92 @@ import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';
 
+type CompactionView = {
+  icon: LucideIcon;
+  tone?: 'success' | 'warning' | 'destructive';
+  cardStatus: 'ready' | 'warning' | 'error';
+  verb: string;
+  description: string;
+  title: string;
+};
+
+function getCompactionView(data: ContextCompactionData): CompactionView {
+  switch (data.status ?? 'compacted') {
+    case 'failed':
+      return {
+        icon: AlertTriangle,
+        tone: 'warning',
+        cardStatus: 'warning',
+        verb: 'Compaction failed',
+        description: 'chat context',
+        title: 'Context compaction failed',
+      };
+    case 'overflow_retry_succeeded':
+      return {
+        icon: RotateCcw,
+        tone: 'warning',
+        cardStatus: 'warning',
+        verb: 'Trimmed',
+        description: 'chat context after overflow',
+        title: 'Overflow retry',
+      };
+    case 'skipped':
+      return {
+        icon: Archive,
+        cardStatus: 'ready',
+        verb: 'Skipped',
+        description: 'chat context compaction',
+        title: 'Context compaction skipped',
+      };
+    case 'compacted':
+    default:
+      return {
+        icon: Archive,
+        tone: 'success',
+        cardStatus: 'ready',
+        verb: 'Summarized',
+        description: 'chat context',
+        title: 'Context compaction',
+      };
+  }
+}
+
+function formatTriggerReason(reason: ContextCompactionData['triggerReason']): string | undefined {
+  switch (reason) {
+    case 'estimate':
+      return 'Estimated budget';
+    case 'previous_usage':
+      return 'Previous provider usage';
+    case 'overflow':
+      return 'Provider overflow';
+    case 'none':
+    case undefined:
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
 /**
  * Renders a "Chat context summarized." line inline in the message stream,
  * styled consistently with other tool rows (see chat-message-tool-read-file).
  * Shows compression details on hover via HoverCard.
  */
 export function ChatMessageContextCompaction({ data }: { readonly data: ContextCompactionData }): React.JSX.Element {
-  const reductionPercent = ((1 - data.compressionRatio) * 100).toFixed(0);
+  const view = getCompactionView(data);
+  const reductionPercent = Math.max(0, (1 - data.compressionRatio) * 100).toFixed(0);
+  const triggerReason = formatTriggerReason(data.triggerReason);
 
   return (
     <HoverCard openDelay={100} closeDelay={100}>
       <HoverCardTrigger asChild>
         <div className='cursor-help'>
-          <ChatToolCard variant='minimal' status='ready' isCollapsible={false}>
+          <ChatToolCard variant='minimal' status={view.cardStatus} isCollapsible={false}>
             <ChatToolCardHeader>
-              <ChatToolCardIcon icon={Archive} />
+              <ChatToolCardIcon icon={view.icon} tone={view.tone} />
               <ChatToolCardTitle>
-                <ChatToolLabel verb='Summarized'>
-                  <ChatToolDescription>chat context</ChatToolDescription>
+                <ChatToolLabel verb={view.verb}>
+                  <ChatToolDescription>{view.description}</ChatToolDescription>
                 </ChatToolLabel>
               </ChatToolCardTitle>
             </ChatToolCardHeader>
@@ -38,8 +107,20 @@ export function ChatMessageContextCompaction({ data }: { readonly data: ContextC
       </HoverCardTrigger>
       <HoverCardContent className='w-auto p-3'>
         <div className='flex flex-col gap-1.5 text-xs'>
-          <p className='font-medium'>Context compaction</p>
+          <p className='font-medium'>{view.title}</p>
           <div className='grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5'>
+            {triggerReason ? (
+              <>
+                <span className='text-muted-foreground'>Trigger</span>
+                <span>{triggerReason}</span>
+              </>
+            ) : null}
+            {data.estimatedInputTokens ? (
+              <>
+                <span className='text-muted-foreground'>Estimate</span>
+                <span className='font-mono'>{formatNumberAbbreviation(data.estimatedInputTokens)} tokens</span>
+              </>
+            ) : null}
             <span className='text-muted-foreground'>Before</span>
             <span className='font-mono'>{formatNumberAbbreviation(data.tokensBeforeCompaction)} tokens</span>
             <span className='text-muted-foreground'>After</span>

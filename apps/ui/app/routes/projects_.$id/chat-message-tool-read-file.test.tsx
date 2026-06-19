@@ -103,6 +103,8 @@ type ReadFileOutputAvailable = Extract<ReadFileInvocation, { state: 'output-avai
 const buildOutputPart = (overrides: {
   readonly targetFile: string;
   readonly content: string;
+  readonly totalLines?: number;
+  readonly size?: number;
   readonly offset?: number;
   readonly limit?: number;
 }): ReadFileOutputAvailable => ({
@@ -115,7 +117,10 @@ const buildOutputPart = (overrides: {
   },
   output: {
     content: overrides.content,
-    totalLines: overrides.content.split('\n').length,
+    size: overrides.size ?? new TextEncoder().encode(overrides.content).byteLength,
+    contentKind: 'text',
+    totalLines: overrides.totalLines ?? overrides.content.split('\n').length,
+    startLine: overrides.offset ?? 1,
   },
 });
 
@@ -128,6 +133,7 @@ describe('ChatMessageToolReadFile — cached re-read signal', () => {
     const part = buildOutputPart({
       targetFile: 'src/foo.ts',
       content: '   1\tconst x = 1;\n   2\tconst y = 2;\n',
+      totalLines: 2,
     });
 
     render(<ChatMessageToolReadFile part={part} />);
@@ -135,6 +141,24 @@ describe('ChatMessageToolReadFile — cached re-read signal', () => {
     expect(screen.getByTestId('chat-tool-verb').textContent).toBe('Read');
     const description = screen.getByTestId('chat-tool-description');
     expect(description.dataset['classname']).toBe('');
+    expect(description.textContent).toContain('L1-L2');
+    expect(description.textContent).not.toContain('of 2');
+  });
+
+  it('should render the returned line range without the total line count suffix', () => {
+    const part = buildOutputPart({
+      targetFile: 'node_modules/opencascade.js/index.d.ts',
+      content: Array.from({ length: 80 }, (_, index) => `   ${101 + index}\tline ${index}`).join('\n'),
+      totalLines: 226_592,
+      offset: 101,
+      limit: 80,
+    });
+
+    render(<ChatMessageToolReadFile part={part} />);
+
+    expect(screen.getByTestId('chat-tool-description').textContent).toContain('L101-L180');
+    expect(screen.getByTestId('chat-tool-description').textContent).not.toContain('of 226592');
+    expect(screen.getByTestId('file-link').dataset['line']).toBe('101');
   });
 
   it('should render the Re-read, cached verb with a dimmed body when the output content begins with fileUnchangedMarker.prefix', () => {
@@ -142,6 +166,7 @@ describe('ChatMessageToolReadFile — cached re-read signal', () => {
     const part = buildOutputPart({
       targetFile: 'src/foo.ts',
       content: cachedContent,
+      totalLines: 120,
     });
 
     render(<ChatMessageToolReadFile part={part} />);

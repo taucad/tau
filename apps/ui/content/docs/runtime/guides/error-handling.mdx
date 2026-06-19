@@ -48,9 +48,14 @@ The discriminated `KernelResult` shape is what `client.export(format, input)`
 resolves with -- the `success` branch narrows `result.data` for you:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 
 const result = await client.export('glb', {
   code: { 'main.ts': `export default function main() { return null; }` },
@@ -115,14 +120,19 @@ narrows `result.data`. Iterate `issues` on the failure branch to surface
 structured error information back to your UI or CLI:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 const userCode = `
   import { drawCircle } from 'replicad';
   export default () => drawCircle(10).sketchOnPlane('XY').extrude(5);
 `;
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 const result = await client.export('glb', {
   code: { 'main.ts': userCode },
   file: 'main.ts',
@@ -157,12 +167,17 @@ outcome that indicates a newer call took ownership of the worker before this
 one settled. The newer call's settlement carries the authoritative geometry.
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 const code =
   "import { drawCircle } from 'replicad';\nexport default () => drawCircle(10).sketchOnPlane('XY').extrude(5);";
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 const settlement = await client.openFile({ code: { 'main.ts': code }, file: 'main.ts' });
 
 if (settlement.superseded) {
@@ -191,16 +206,20 @@ Branch on `error.code` (or use the realm-safe type guard) — never `Error.messa
 
 > `RuntimeNotConnectedError` is thrown when a `FileInput` command runs against
 > a client whose transport has no filesystem bridge. Pass a filesystem via the
-> transport at construction (`inProcessTransport({ fileSystem })` or `webWorkerTransport({ fileSystem })`). See
+> transport at construction (`inProcessTransport({ runtime, fileSystem })` or `webWorkerTransport({ fileSystem })`). See
 > [Embedding in a Host](./embedding-in-a-host) for host-wiring patterns.
 
 ```typescript
-import { createRuntimeClient, presets, isRenderTimeoutError, isRuntimeTerminatedError } from '@taucad/runtime';
+import { createRuntimeClient, isRenderTimeoutError, isRuntimeTerminatedError } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
 
 const code =
   "import { drawCircle } from 'replicad';\nexport default () => drawCircle(10).sketchOnPlane('XY').extrude(5);";
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 
 try {
   await client.openFile({ code: { 'main.ts': code }, file: 'main.ts' });

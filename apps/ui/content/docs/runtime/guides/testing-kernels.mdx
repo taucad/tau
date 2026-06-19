@@ -55,11 +55,11 @@ import {
 ```typescript
 import { describe, it, expect } from 'vitest';
 import { createTestWorker, createGeometryFile } from '@taucad/runtime/testing';
-import replicadDefinition from '@taucad/runtime/kernels/replicad';
+import { replicad } from '@taucad/runtime/kernels/replicad';
 
 describe('Replicad kernel', () => {
   it('creates geometry from TypeScript', async () => {
-    const worker = await createTestWorker(replicadDefinition, {
+    const worker = await createTestWorker(replicad, {
       'main.ts': `
         import { drawRoundedRectangle } from 'replicad';
         export default function main() {
@@ -86,27 +86,20 @@ describe('Replicad kernel', () => {
 When you need more control over worker initialization (e.g., custom middleware, telemetry):
 
 ```typescript
-import { KernelRuntimeWorker } from '@taucad/runtime/worker-internals';
+import { createRuntimeWorker, defineRuntime } from '@taucad/runtime/worker';
 import { initializeWorkerForTesting, seedTestFileSystem } from '@taucad/runtime/testing';
-import replicadDefinition from '@taucad/runtime/kernels/replicad';
+import { replicad } from '@taucad/runtime/kernels';
 
 await seedTestFileSystem({
   '/projects/test/main.ts': `export default function main() { return null; }`,
 });
 
-const worker = new KernelRuntimeWorker();
+const runtime = defineRuntime({
+  kernels: [replicad()],
+});
+const worker = createRuntimeWorker({ runtime });
 await initializeWorkerForTesting(worker, {
   onLog: ({ message }) => console.log(message),
-  workerOptions: {
-    kernelModules: [
-      {
-        id: replicadDefinition.name,
-        moduleUrl: 'test://replicad',
-        extensions: ['ts'],
-        definition: replicadDefinition,
-      },
-    ],
-  },
 });
 ```
 
@@ -192,10 +185,10 @@ import {
   getGeometryStatsFromInspect,
   getBoundingBoxFromInspect,
 } from '@taucad/runtime/testing';
-import replicadDefinition from '@taucad/runtime/kernels/replicad';
+import { replicad } from '@taucad/runtime/kernels/replicad';
 
 it('produces a valid GLB with the expected geometry', async () => {
-  const worker = await createTestWorker(replicadDefinition, {
+  const worker = await createTestWorker(replicad, {
     'main.ts': `
       import { drawRoundedRectangle } from 'replicad';
       export default function main() {
@@ -231,10 +224,10 @@ it('produces a valid GLB with the expected geometry', async () => {
 ```typescript
 import { it } from 'vitest';
 import { createTestWorker, createGeometryFile, createGeometryTestHelpers } from '@taucad/runtime/testing';
-import replicadDefinition from '@taucad/runtime/kernels/replicad';
+import { replicad } from '@taucad/runtime/kernels/replicad';
 
 it('matches expected mesh, vertex count, and bounding box', async () => {
-  const worker = await createTestWorker(replicadDefinition, {
+  const worker = await createTestWorker(replicad, {
     'main.ts': `
       import { drawRoundedRectangle } from 'replicad';
       export default function main() {

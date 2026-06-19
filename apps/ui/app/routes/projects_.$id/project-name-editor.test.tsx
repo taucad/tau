@@ -4,9 +4,10 @@ import { render, waitFor } from '@testing-library/react';
 import type { MyUIMessage, Chat } from '@taucad/chat';
 import { defaultProjectName } from '#constants/project-names.js';
 
-const { mockGenerate, mockUpdateName, mockGetChat } = vi.hoisted(() => ({
+const { mockGenerate, mockUpdateName, mockApplyGeneratedProjectName, mockGetChat } = vi.hoisted(() => ({
   mockGenerate: vi.fn<(prompt: string) => Promise<string>>(),
   mockUpdateName: vi.fn(),
+  mockApplyGeneratedProjectName: vi.fn(),
   mockGetChat: vi.fn<(chatId: string) => Promise<Chat | undefined>>(),
 }));
 
@@ -32,6 +33,7 @@ vi.mock('#hooks/use-project.js', () => ({
     projectRef: { send: vi.fn() },
     editorRef: { send: vi.fn() },
     updateName: mockUpdateName,
+    applyGeneratedProjectName: mockApplyGeneratedProjectName,
   }),
 }));
 
@@ -107,7 +109,7 @@ describe('ProjectNameEditor — name generation routes through useProjectNameCli
       expect(mockGenerate).toHaveBeenCalledWith('design a bracket');
     });
     await waitFor(() => {
-      expect(mockUpdateName).toHaveBeenCalledWith('Bracket Design');
+      expect(mockApplyGeneratedProjectName).toHaveBeenCalledWith('Bracket Design');
     });
   });
 
@@ -120,7 +122,7 @@ describe('ProjectNameEditor — name generation routes through useProjectNameCli
     await waitFor(() => {
       expect(mockGenerate).toHaveBeenCalledOnce();
     });
-    expect(mockUpdateName).not.toHaveBeenCalled();
+    expect(mockApplyGeneratedProjectName).not.toHaveBeenCalled();
   });
 
   it('logs and recovers when the generator rejects so the editor stays renderable', async () => {
@@ -134,7 +136,7 @@ describe('ProjectNameEditor — name generation routes through useProjectNameCli
       expect(mockGenerate).toHaveBeenCalledOnce();
     });
     expect(consoleError).toHaveBeenCalled();
-    expect(mockUpdateName).not.toHaveBeenCalled();
+    expect(mockApplyGeneratedProjectName).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });
 

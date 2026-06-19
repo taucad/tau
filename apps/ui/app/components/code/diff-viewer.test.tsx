@@ -1,25 +1,13 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeAll } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
-import type { CodeLanguage } from '@taucad/types';
 import { DiffViewer, getDiffLineCount, getFirstChangedLine } from '#components/code/diff-viewer.js';
 import { getHighlighter } from '#lib/shiki.lib.js';
+import { supportedHighlightLanguages } from '#lib/code-language-resolution.js';
 
 vi.mock('#hooks/use-theme.js', () => ({
   useTheme: (): { theme: string } => ({ theme: 'light' }),
 }));
-
-/** Every language registered on the UI Shiki highlighter (see `shiki.lib.ts`). */
-const diffHighlighterLanguages = [
-  'usd',
-  'bash',
-  'json',
-  'stepfile',
-  'stl',
-  'typescript',
-  'openscad',
-  'kcl',
-] as const satisfies readonly CodeLanguage[];
 
 beforeAll(async () => {
   await getHighlighter();
@@ -33,7 +21,7 @@ function expectDiffViewerShikiReady(container: HTMLElement): void {
 
 describe('DiffViewer', () => {
   describe('per-language diff highlighting (no [!code] leak)', () => {
-    it.each(diffHighlighterLanguages)('language %s: diff classes, no notation leak', async (language) => {
+    it.each(supportedHighlightLanguages)('language %s: diff classes, no notation leak', async (language) => {
       const originalContent = 'alpha\nbeta\ngamma';
       const modifiedContent = 'alpha\nX\ngamma';
 
@@ -55,6 +43,20 @@ describe('DiffViewer', () => {
         },
         { timeout: 15_000 },
       );
+    });
+
+    it('falls back to plaintext for unsupported languages without throwing', async () => {
+      const { container } = render(
+        <DiffViewer originalContent='alpha\nbeta' modifiedContent='alpha\npython' language='python' />,
+      );
+
+      await waitFor(() => {
+        expectDiffViewerShikiReady(container);
+      });
+
+      await waitFor(() => {
+        expect(container.innerHTML).toMatch(/class="[^"]*\bdiff\b[^"]*\badd\b/);
+      });
     });
   });
 

@@ -27,6 +27,26 @@ function formatLineRange(offset?: number, limit?: number): string {
   return ` L${startLine}-${endLine}`;
 }
 
+function countDisplayedLines(content: string): number {
+  if (content.length === 0) {
+    return 0;
+  }
+  return content.split('\n').length;
+}
+
+function formatCompletedLineRange(options: {
+  content: string;
+  totalLines: number;
+  startLine?: number;
+  offset?: number;
+  limit?: number;
+}): string {
+  const startLine = options.startLine ?? options.offset ?? 1;
+  const displayedLines = options.limit ?? countDisplayedLines(options.content);
+  const endLine = Math.min(options.totalLines, Math.max(startLine, startLine + displayedLines - 1));
+  return ` L${startLine}-L${endLine}`;
+}
+
 export function ChatMessageToolReadFile({
   part,
 }: {
@@ -59,8 +79,14 @@ export function ChatMessageToolReadFile({
     case 'output-available': {
       const { input } = part;
       const { targetFile } = input;
-      const lineRange = formatLineRange(input.offset, input.limit);
-      const startLine = input.offset ?? 1;
+      const lineRange = formatCompletedLineRange({
+        content: part.output.content,
+        totalLines: part.output.totalLines,
+        startLine: part.output.startLine,
+        offset: input.offset,
+        limit: input.limit,
+      });
+      const startLine = part.output.startLine ?? input.offset ?? 1;
       const isCached = fileUnchangedMarker.matches(part.output.content);
 
       return (

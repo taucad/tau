@@ -2,15 +2,7 @@ import type { ComponentProps } from 'react';
 import { InlineCode } from '#components/code/code-block.js';
 import { extractTextFromChildren } from '#utils/react.utils.js';
 import { CollapsibleCodeBlock } from '#components/ui/collapsible-code-block.js';
-
-/**
- * Extracts the language from a className like "language-typescript".
- * Returns undefined if no language class is found.
- */
-export function extractLanguageFromClassName(className: string | undefined): string | undefined {
-  const match = /language-(\w+)/.exec(className ?? '');
-  return match?.[1];
-}
+import { extractLanguageFromClassName } from '#lib/code-language-resolution.js';
 
 /**
  * Custom code component for markdown rendering.

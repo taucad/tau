@@ -8,9 +8,17 @@ import type { Chat } from '@taucad/chat';
 // message. The flow must route through `useProjectNameClient().generate(...)`
 // — no `metadata.model = 'name-generator'` legacy stamping survives.
 
-const { mockGenerate, mockUpdateChatName, mockCreateChat, mockDeleteChat, mockSetFocusedChatId } = vi.hoisted(() => ({
+const {
+  mockGenerate,
+  mockUpdateChatName,
+  mockApplyGeneratedChatName,
+  mockCreateChat,
+  mockDeleteChat,
+  mockSetFocusedChatId,
+} = vi.hoisted(() => ({
   mockGenerate: vi.fn<(prompt: string) => Promise<string>>(),
   mockUpdateChatName: vi.fn<(chatId: string, name: string) => Promise<void>>(),
+  mockApplyGeneratedChatName: vi.fn<(chatId: string, name: string) => Promise<void>>(),
   mockCreateChat: vi.fn(),
   mockDeleteChat: vi.fn(),
   mockSetFocusedChatId: vi.fn(),
@@ -43,6 +51,7 @@ vi.mock('#hooks/use-chats.js', () => ({
     chats: mockChats,
     createChat: mockCreateChat,
     updateChatName: mockUpdateChatName,
+    applyGeneratedChatName: mockApplyGeneratedChatName,
     deleteChat: mockDeleteChat,
     isLoading: false,
   }),
@@ -143,7 +152,7 @@ describe('ChatHistorySelector — name generation routes through useProjectNameC
       expect(mockGenerate).toHaveBeenCalledWith('design a bracket');
     });
     await waitFor(() => {
-      expect(mockUpdateChatName).toHaveBeenCalledWith('chat_new', 'A Generated Name');
+      expect(mockApplyGeneratedChatName).toHaveBeenCalledWith('chat_new', 'A Generated Name');
     });
   });
 
@@ -166,7 +175,7 @@ describe('ChatHistorySelector — name generation routes through useProjectNameC
     await waitFor(() => {
       expect(mockGenerate).toHaveBeenCalledOnce();
     });
-    expect(mockUpdateChatName).not.toHaveBeenCalled();
+    expect(mockApplyGeneratedChatName).not.toHaveBeenCalled();
   });
 
   it('swallows generator errors so a failed name generation does not crash the chat shell', async () => {
@@ -190,7 +199,7 @@ describe('ChatHistorySelector — name generation routes through useProjectNameC
       expect(mockGenerate).toHaveBeenCalledOnce();
     });
     expect(consoleError).toHaveBeenCalled();
-    expect(mockUpdateChatName).not.toHaveBeenCalled();
+    expect(mockApplyGeneratedChatName).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });
 

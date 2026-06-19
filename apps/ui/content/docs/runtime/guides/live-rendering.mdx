@@ -26,9 +26,14 @@ If your call site never re-renders the same model twice in a row, prefer the one
 `client.on('geometry', handler)` returns an unsubscribe function. The handler is invoked once per render result with a [`HashedGeometryResult`](../api/types) -- a discriminated `KernelResult` whose `success: true` branch carries the array of geometries and whose `success: false` branch carries structured `KernelIssue`s.
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 
 const unsubscribe = client.on('geometry', (result) => {
   if (result.success) {
@@ -54,9 +59,14 @@ Always retain the returned unsubscribe function and call it when your component 
 Supersession is **not** an error. It is the normal outcome whenever a user drags a slider faster than the kernel can re-mesh.
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 
 const modelCode = `
   import { drawRoundedRectangle } from 'replicad';
@@ -90,9 +100,14 @@ Inline `code:` input runs in an in-memory filesystem. For filesystem-backed inpu
 Once a file is open, push parameter changes through `client.updateParameters(...)`. The worker debounces, re-renders, and emits the result on the `geometry` event. The Promise returns the same `RenderOutcome` shape as `openFile`, so a slider drag that fires three updates in 16ms produces two superseded settlements and one settled geometry:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 
 await client.openFile({
   code: {
@@ -123,9 +138,14 @@ await onSliderChange(50, 15);
 Per-render kernel options (e.g. `renderTimeout`, tessellation tolerances when the active kernel exposes them as render options) are replaced via `client.setOptions(...)`. Like `updateParameters`, the call awaits the next render's settlement:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 
 await client.openFile({
   code: {
@@ -135,7 +155,7 @@ await client.openFile({
   file: 'main.ts',
 });
 
-const settlement = await client.setOptions({ renderTimeout: 60 });
+const settlement = await client.setOptions({ renderTimeout: 60_000 });
 if (!settlement.superseded && settlement.geometry.success) {
   console.log('New options applied to the next render');
 }
@@ -148,9 +168,14 @@ Use this when a UI toggle changes how the kernel meshes or times out -- not for 
 Tear down the autonomous loop in two steps: unsubscribe your `geometry` listener, then terminate the client to shut down the worker.
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 const unsubscribe = client.on('geometry', (result) => {
   if (result.success) console.log(`Geometry: ${result.data.length}`);
 });
@@ -166,4 +191,4 @@ client.terminate();
 
 - [API Reference: Client](../api/client) -- Full documentation for `RuntimeClient`, `RenderOutcome`, and the event taxonomy
 - [Handle Errors](./error-handling) -- Typed error guards for `RuntimeNotConnectedError`, `NoRenderOutcomeError`, `RenderTimeoutError`, and friends
-- [Embedding in a Host](./embedding-in-a-host) -- Worker-hosted FS bridges via `fromChannelFs(...)`, externally allocated `filePoolBuffer` SABs, and the transport plugin pattern for hosted environments
+- [Embedding in a Host](./embedding-in-a-host) -- Worker-hosted FS bridges via `openFileSystemBridge(...)` and `fromFileSystemBridge(...)`, externally allocated `filePoolBuffer` SABs, and the transport plugin pattern for hosted environments

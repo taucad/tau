@@ -15,6 +15,8 @@ import {
 import type { SceneLightingConfig } from '#components/geometry/graphics/three/utils/lights.utils.js';
 import { Theme, useTheme } from '#hooks/use-theme.js';
 
+type UpDirection = 'x' | 'y' | 'z';
+
 /** Environment cubemap resolution (px). Higher = sharper specular reflections. */
 const envResolution = 512;
 
@@ -39,7 +41,34 @@ const studioGroundIntensity = 1.5;
 /** Specular highlight panel (upper-right for bottom face) -- creates focused off-center specular on flat faces. */
 const studioBackFillIntensity = 8;
 
-type UpDirection = 'x' | 'y' | 'z';
+// Performance preset fill ────────────────────────────────────────────────────
+// Keep the rig at the same light count while giving underside normals readable fill.
+
+// oxlint-disable-next-line tau-lint/no-hardcoded-color -- Three.js light color
+const performanceHemisphereSkyColor = '#ffffff';
+// oxlint-disable-next-line tau-lint/no-hardcoded-color -- Three.js underside fill light color
+const performanceHemisphereGroundColor = '#777777';
+
+const performanceHemispherePositionByUpDirection: Record<UpDirection, [number, number, number]> = {
+  x: [1, 0, 0],
+  y: [0, 1, 0],
+  z: [0, 0, 1],
+};
+
+const performanceKeyIntensity = 2;
+const performanceFillIntensity = 1.5;
+
+const performanceKeyPositionByUpDirection: Record<UpDirection, [number, number, number]> = {
+  x: [5, -1, -3],
+  y: [-1, 5, -3],
+  z: [-1, -3, 5],
+};
+
+const performanceFillPositionByUpDirection: Record<UpDirection, [number, number, number]> = {
+  x: [-5, 1, 3],
+  y: [1, -5, 3],
+  z: [1, 3, -5],
+};
 
 type LightsProperties = {
   readonly enableMatcap?: boolean;
@@ -126,6 +155,9 @@ export function Lights({
   });
 
   const showEnvironment = useDeferredValue(!enableMatcap && environmentPreset === 'studio');
+  const performanceHemispherePosition = performanceHemispherePositionByUpDirection[upDirection];
+  const performanceKeyPosition = performanceKeyPositionByUpDirection[upDirection];
+  const performanceFillPosition = performanceFillPositionByUpDirection[upDirection];
 
   return (
     <>
@@ -211,10 +243,20 @@ export function Lights({
       {/* Performance preset: minimal lights, no environment (equivalent to legacy setup) */}
       {!enableMatcap && environmentPreset === 'performance' ? (
         <>
-          {/* oxlint-disable-next-line tau-lint/no-hardcoded-color -- Three.js light color */}
-          <hemisphereLight args={['#ffffff', '#444444', themeIntensityScale]} />
-          <directionalLight color='white' intensity={2 * themeIntensityScale} position={[-1, -3, 5]} />
-          <directionalLight color='white' intensity={2 * themeIntensityScale} position={[1, 3, 5]} />
+          <hemisphereLight
+            args={[performanceHemisphereSkyColor, performanceHemisphereGroundColor, themeIntensityScale]}
+            position={performanceHemispherePosition}
+          />
+          <directionalLight
+            color='white'
+            intensity={performanceKeyIntensity * themeIntensityScale}
+            position={performanceKeyPosition}
+          />
+          <directionalLight
+            color='white'
+            intensity={performanceFillIntensity * themeIntensityScale}
+            position={performanceFillPosition}
+          />
         </>
       ) : null}
     </>

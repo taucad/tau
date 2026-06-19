@@ -12,7 +12,7 @@ import { InlineTextEditor } from '#components/inline-text-editor.js';
 const animationDuration = 2000;
 
 export function ProjectNameEditor(): React.JSX.Element {
-  const { projectRef, editorRef, updateName } = useProject();
+  const { projectRef, editorRef, updateName, applyGeneratedProjectName } = useProject();
   const projectName = useSelector(projectRef, (state) => state.context.project?.name) ?? '';
   const isLoading = useSelector(projectRef, (state) => state.context.isLoading);
   const isProjectError = useSelector(projectRef, (state) => state.matches('error'));
@@ -60,7 +60,7 @@ export function ProjectNameEditor(): React.JSX.Element {
             setDisplayName(projectName);
             return;
           }
-          updateName(trimmed);
+          applyGeneratedProjectName(trimmed);
           setDisplayName(trimmed);
           setIsNameAnimating(true);
           setTimeout(() => {

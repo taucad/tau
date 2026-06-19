@@ -29,6 +29,7 @@ import {
 import { cn } from '#utils/ui.utils.js';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
 import { axesColors } from '#constants/color.constants.js';
+import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import type { EnvironmentPreset, GraphicsBackendPreference } from '#constants/editor.constants.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
@@ -51,6 +52,9 @@ const timeoutOptions: TimeoutOption[] = [
   { value: 300_000, label: '5 min' },
   { value: 600_000, label: '10 min' },
 ];
+
+const defaultTimeoutOption =
+  timeoutOptions.find((option) => option.value === defaultRenderTimeout) ?? timeoutOptions[0]!;
 
 const upDirectionOptions: Array<{ value: UpDirection; label: React.ReactNode; ariaLabel: string }> = [
   { value: 'x', label: <span style={{ color: axesColors.x }}>X</span>, ariaLabel: 'X-up' },
@@ -139,7 +143,7 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
   );
 
   const cadRef = useCad();
-  const renderTimeout = useCadSelector((state) => state.context.renderTimeout, 30_000);
+  const renderTimeout = useCadSelector((state) => state.context.renderTimeout, defaultRenderTimeout);
 
   const handleMeshToggle = useCallback(
     (checked: boolean) => {
@@ -233,7 +237,7 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
   );
 
   const currentTimeoutOption = useMemo(
-    () => timeoutOptions.find((option) => option.value === renderTimeout) ?? timeoutOptions[2]!,
+    () => timeoutOptions.find((option) => option.value === renderTimeout) ?? defaultTimeoutOption,
     [renderTimeout],
   );
 

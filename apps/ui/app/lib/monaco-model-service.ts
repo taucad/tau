@@ -291,6 +291,13 @@ export class MonacoModelService {
         }
         break;
       }
+      case 'fileCopied': {
+        const cached = this.contentService?.peek(event.targetPath);
+        if (cached) {
+          this.applyWritten(event.targetPath, cached, 'user');
+        }
+        break;
+      }
       case 'deleted': {
         const uri = this.createUri(event.path);
         this.monaco.editor.getModel(uri)?.dispose();
@@ -339,6 +346,7 @@ export class MonacoModelService {
         break;
       }
       case 'directoryCreated':
+      case 'directoryCopied':
       case 'read': {
         break;
       }

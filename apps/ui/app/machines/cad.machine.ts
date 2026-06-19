@@ -14,6 +14,7 @@ import type {
 import { safeDispose } from '@taucad/utils/dispose';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { LengthSymbol } from '@taucad/units';
+import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { logMachine } from '#machines/logs.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
@@ -110,24 +111,25 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
 
   const snapshot = await waitFor(fileManagerRef, (state) => state.matches('ready'), { signal });
 
-  if (!snapshot.context.worker) {
-    throw new Error('File manager worker not available');
+  if (!snapshot.context.openFileSystemBridge) {
+    throw new Error('File manager filesystem bridge is not available');
   }
 
   signal.throwIfAborted();
 
-  const [{ createRuntimeClient }, { fromChannelFs }] = await Promise.all([
+  const [{ createRuntimeClient }, { fromFileSystemBridge }] = await Promise.all([
     import('@taucad/runtime'),
     import('@taucad/runtime/filesystem'),
   ]);
 
   const resolveKernelOptions = await lazyKernelOptionsFactory();
+  const fileSystemBridge = snapshot.context.openFileSystemBridge();
   const kernelOptions = resolveKernelOptions({
-    fileSystem: fromChannelFs(snapshot.context.worker),
+    fileSystem: fromFileSystemBridge(fileSystemBridge),
     filePoolBuffer: snapshot.context.filePoolBuffer,
   });
   const client = createRuntimeClient(kernelOptions);
-  const cleanups: Array<() => void> = [];
+  const cleanups: Array<() => void> = [fileSystemBridge.dispose];
 
   const teardown = () => {
     for (const cleanup of cleanups) {
@@ -180,7 +182,7 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
     client.on('error', (issues: KernelIssue[]) => {
       machineRef.send({ type: 'kernelIssue', errors: issues });
     }),
-    client.on('capabilities', (capabilities: CapabilitiesManifest) => {
+    client.on('capabilities', (capabilities) => {
       machineRef.send({ type: 'capabilitiesUpdated', capabilities });
     }),
     client.on('activeKernelChanged', (kernelId: string | undefined) => {
@@ -457,7 +459,7 @@ export const cadMachine = setup({
     jsonSchema: undefined,
     renderPhase: undefined,
     telemetryEntries: [],
-    renderTimeout: 30_000,
+    renderTimeout: defaultRenderTimeout,
     kernelClient: undefined,
     capabilities: undefined,
     activeKernelId: undefined,

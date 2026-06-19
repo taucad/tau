@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { ActorBridge } from '#components/geometry/graphics/three/actor-bridge.js';
+import { updateCameraFov } from '#components/geometry/graphics/three/utils/camera.utils.js';
 
 const mockUseThree = vi.fn();
 
@@ -30,6 +31,8 @@ vi.mock('#components/geometry/graphics/three/utils/camera.utils.js', () => ({
   updateCameraFov: vi.fn(),
 }));
 
+const mockUpdateCameraFov = vi.mocked(updateCameraFov);
+
 const baseThree = {
   gl: {},
   scene: {},
@@ -41,6 +44,7 @@ describe('ActorBridge', () => {
   beforeEach(() => {
     mockScreenshotSend.mockClear();
     mockGraphicsSend.mockClear();
+    mockUpdateCameraFov.mockClear();
     mockUseThree.mockReset();
     mockUseThree.mockReturnValue({
       ...baseThree,
@@ -60,13 +64,20 @@ describe('ActorBridge', () => {
   });
 
   it('mounts ControlsListenerBridge when controls is populated', () => {
+    const controls = { addEventListener: vi.fn(), removeEventListener: vi.fn(), getDistance: () => 1 };
     mockUseThree.mockReturnValue({
       ...baseThree,
-      controls: { addEventListener: vi.fn(), removeEventListener: vi.fn(), getDistance: () => 1 },
+      controls,
     });
 
     render(<ActorBridge />);
 
     expect(screen.getByTestId('controls-listener-bridge')).toBeInTheDocument();
+    expect(mockUpdateCameraFov).toHaveBeenCalledWith({
+      camera: baseThree.camera,
+      cameraFovAngle: 50,
+      controls,
+      invalidate: baseThree.invalidate,
+    });
   });
 });

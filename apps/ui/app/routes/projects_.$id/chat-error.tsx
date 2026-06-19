@@ -55,12 +55,11 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
     return null;
   }
 
-  // Pick the recovery action based on whether the underlying failure invalidates
-  // the request itself (auth/credits/rateLimit/toolError -> `regenerate`, the
-  // request payload needs to change) or only invalidates the connection
-  // (network/server/overloaded -> `continueChat`, the partial assistant tail
-  // is still valid). Generic falls through to `regenerate` because we don't
-  // know whether it's safe to resume.
+  // Generic fallback recovery: resumable infrastructure categories use
+  // `continueChat` so partial assistant parts survive; unknown generic errors
+  // fall back to `regenerate`. Specialized components own auth, credits,
+  // rate-limit, and tool-error actions. Credits are account-state interruptions
+  // and resume through `ChatErrorCredits`, not this fallback.
   const isResumableCategory =
     parsedError.category === errorCategory.network ||
     parsedError.category === errorCategory.server ||
@@ -135,7 +134,7 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
     }
 
     case errorCategory.credits: {
-      return <ChatErrorCredits className={cn('min-w-0', className)} />;
+      return <ChatErrorCredits className={cn('min-w-0', className)} description={parsedError.message} />;
     }
 
     case errorCategory.rateLimit: {

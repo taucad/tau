@@ -3,10 +3,11 @@ import { diffLines } from 'diff';
 import type { ShikiTransformer } from 'shiki/types';
 import { addClassToHast } from 'shiki/core';
 import type { HighlighterCore } from 'shiki/core';
-import type { CodeLanguage } from '@taucad/types';
 import { getHighlighter } from '#lib/shiki.lib.js';
 import { cn } from '#utils/ui.utils.js';
 import { useTheme } from '#hooks/use-theme.js';
+import type { HighlightLanguageInput } from '#lib/code-language-resolution.js';
+import { resolveHighlightLanguage } from '#lib/code-language-resolution.js';
 
 /** Number of context lines to show above and below each change group. */
 const contextLines = 1;
@@ -213,7 +214,7 @@ function HiddenLinesSeparator({ count }: HiddenLinesSeparatorProps): React.JSX.E
 type DiffViewerProps = {
   readonly originalContent: string;
   readonly modifiedContent: string;
-  readonly language: CodeLanguage;
+  readonly language?: HighlightLanguageInput;
   readonly className?: string;
 };
 
@@ -243,6 +244,7 @@ export function DiffViewer({
     () => processDiffWithContext(originalContent, modifiedContent),
     [originalContent, modifiedContent],
   );
+  const resolvedLanguage = useMemo(() => resolveHighlightLanguage(language), [language]);
 
   const renderedSegments = useMemo(() => {
     if (!highlighter) {
@@ -257,7 +259,7 @@ export function DiffViewer({
 
       const sourceText = segment.lines.map((line) => line.content).join('\n');
       const html = highlighter.codeToHtml(sourceText, {
-        lang: language,
+        lang: resolvedLanguage.shikiLanguage,
         theme: `github-${theme}`,
         transformers: [buildDiffLineTransformer(segment.lines)],
       });
@@ -290,7 +292,7 @@ export function DiffViewer({
         />
       );
     });
-  }, [segments, language, theme, highlighter]);
+  }, [segments, resolvedLanguage.shikiLanguage, theme, highlighter]);
 
   // Outer container w-max min-w-full ensures all segments extend to longest line across all groups
   return (

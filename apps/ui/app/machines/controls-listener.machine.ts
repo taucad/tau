@@ -1,17 +1,53 @@
 import { setup, sendTo, fromCallback, assertEvent } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import * as THREE from 'three';
-import type { OrbitControls } from 'three/addons';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
+import {
+  getControlsDistance,
+  getControlsListenerEventNames as resolveControlsListenerEventNames,
+  isCameraControls,
+  isClassicTargetControls,
+} from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
+import type { ControlEventListener } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
+
+export type CameraControlsAdapter = {
+  addEventListener: (type: string, listener: ControlEventListener) => void;
+  removeEventListener: (type: string, listener: ControlEventListener) => void;
+  object?: THREE.Camera;
+  camera?: THREE.Camera;
+  target?: THREE.Vector3;
+  getDistance?: () => number;
+  getTarget?: (target: THREE.Vector3, receiveEndValue?: boolean) => THREE.Vector3;
+  distance?: number;
+};
+
+export const getControlsListenerCamera = (controls: CameraControlsAdapter): THREE.Camera | undefined =>
+  controls.object ?? controls.camera;
+
+export const getControlsListenerEventNames = resolveControlsListenerEventNames;
+
+export const getControlsListenerDistance = (controls: CameraControlsAdapter): number => {
+  const camera = getControlsListenerCamera(controls);
+  if (!camera) {
+    return 0;
+  }
+
+  if (isCameraControls(controls) || isClassicTargetControls(controls)) {
+    return getControlsDistance({ camera, controls });
+  }
+
+  return camera.position.length();
+};
 
 type ControlsListenerInput = {
   graphicsActorRef: ActorRefFrom<typeof graphicsMachine>;
-  controls: OrbitControls;
+  controls: CameraControlsAdapter;
 };
 
 type ControlsListenerEvent =
   | { type: 'stopListening' }
   | { type: 'controlsInteractionStart' }
+  | { type: 'controlsInteractionMoved' }
   | {
       type: 'controlsInteractionEnd';
       zoom: number;
@@ -29,6 +65,8 @@ const controlsListenerLogic = fromCallback<ControlsListenerEvent, ControlsListen
     // oxlint-disable-next-line prefer-const -- false positive, it is reassigned in the code
     let originalDistance: number | undefined;
     let isListening = true;
+    let isControlsInteractionActive = false;
+    let hasSentMovementForInteraction = false;
 
     // Add variables to track last values for threshold checking
     let lastZoom = 1;
@@ -36,7 +74,10 @@ const controlsListenerLogic = fromCallback<ControlsListenerEvent, ControlsListen
     let lastFov = 75;
 
     const calculateZoom = (): number => {
-      const distance = controls.getDistance();
+      const distance =
+        typeof controls.getDistance === 'function'
+          ? controls.getDistance()
+          : (controls.distance ?? getControlsListenerDistance(controls));
       if (distance && originalDistance) {
         return originalDistance / distance;
       }
@@ -45,8 +86,11 @@ const controlsListenerLogic = fromCallback<ControlsListenerEvent, ControlsListen
     };
 
     const getCameraProperties = () => {
-      const camera = controls.object;
-      const position = camera.position.length();
+      const camera = controls.object ?? controls.camera;
+      if (!camera) {
+        return { position: 0, fov: 75 };
+      }
+      const position = getControlsListenerDistance(controls);
       const fov = camera instanceof THREE.PerspectiveCamera ? camera.fov : 75;
       return { position, fov };
     };
@@ -85,16 +129,36 @@ const controlsListenerLogic = fromCallback<ControlsListenerEvent, ControlsListen
         return;
       }
 
+      isControlsInteractionActive = true;
+      hasSentMovementForInteraction = false;
       sendBack({ type: 'controlsInteractionStart' });
     };
 
-    const handleControlsChange = () => {
+    const markControlsInteractionMoved = () => {
       if (!isListening) {
         return;
       }
 
+      if (isControlsInteractionActive && !hasSentMovementForInteraction) {
+        hasSentMovementForInteraction = true;
+        sendBack({ type: 'controlsInteractionMoved' });
+      }
+    };
+
+    const handleControlsStateChange = () => {
+      if (!isListening) {
+        return;
+      }
+
+      if (stateChangeEvent === userMoveEvent) {
+        markControlsInteractionMoved();
+      }
+
       // Set original distance on first change if not set
-      originalDistance ??= controls.getDistance();
+      originalDistance ??=
+        typeof controls.getDistance === 'function'
+          ? controls.getDistance()
+          : (controls.distance ?? getControlsListenerDistance(controls));
 
       sendCurrentControlsState();
     };
@@ -104,24 +168,42 @@ const controlsListenerLogic = fromCallback<ControlsListenerEvent, ControlsListen
         return;
       }
 
+      isControlsInteractionActive = false;
+      hasSentMovementForInteraction = false;
       const zoom = calculateZoom();
 
       sendBack({ type: 'controlsInteractionEnd', zoom });
     };
 
+    const {
+      start: startEvent,
+      stateChange: stateChangeEvent,
+      userMove: userMoveEvent,
+      end: endEvent,
+    } = getControlsListenerEventNames(controls);
+
     const removeListeners = () => {
-      controls.removeEventListener('start', handleControlsStart);
-      controls.removeEventListener('change', handleControlsChange);
-      controls.removeEventListener('end', handleControlsEnd);
+      controls.removeEventListener(startEvent, handleControlsStart);
+      controls.removeEventListener(stateChangeEvent, handleControlsStateChange);
+      if (userMoveEvent !== stateChangeEvent) {
+        controls.removeEventListener(userMoveEvent, markControlsInteractionMoved);
+      }
+      controls.removeEventListener(endEvent, handleControlsEnd);
     };
 
     // Add event listeners
-    controls.addEventListener('start', handleControlsStart);
-    controls.addEventListener('change', handleControlsChange);
-    controls.addEventListener('end', handleControlsEnd);
+    controls.addEventListener(startEvent, handleControlsStart);
+    controls.addEventListener(stateChangeEvent, handleControlsStateChange);
+    if (userMoveEvent !== stateChangeEvent) {
+      controls.addEventListener(userMoveEvent, markControlsInteractionMoved);
+    }
+    controls.addEventListener(endEvent, handleControlsEnd);
 
     // Set initial distance and send initial state
-    originalDistance = controls.getDistance();
+    originalDistance =
+      typeof controls.getDistance === 'function'
+        ? controls.getDistance()
+        : (controls.distance ?? getControlsListenerDistance(controls));
 
     // Send initial controls state
     sendCurrentControlsState(true);
@@ -159,6 +241,9 @@ export const controlsListenerMachine = setup({
     forwardZoomUpdate: sendTo('controlsMonitor', ({ event }) => event),
     sendControlsInteractionStart: sendTo(({ context }) => context.graphicsActorRef, {
       type: 'controlsInteractionStart',
+    }),
+    sendControlsInteractionMoved: sendTo(({ context }) => context.graphicsActorRef, {
+      type: 'controlsInteractionMoved',
     }),
     sendControlsInteractionEnd: sendTo(
       ({ context }) => context.graphicsActorRef,
@@ -201,6 +286,9 @@ export const controlsListenerMachine = setup({
       on: {
         controlsInteractionStart: {
           actions: 'sendControlsInteractionStart',
+        },
+        controlsInteractionMoved: {
+          actions: 'sendControlsInteractionMoved',
         },
         controlsInteractionEnd: {
           actions: 'sendControlsInteractionEnd',

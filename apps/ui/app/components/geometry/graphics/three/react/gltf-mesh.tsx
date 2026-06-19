@@ -1,10 +1,30 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { GLTFLoader } from 'three/addons';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
-import type { Camera, Group, Object3D, Material, BufferGeometry, Mesh, Texture } from 'three';
-import { Vector2, Box3 } from 'three';
+import type { Camera, Group, Object3D, Material, Texture, Intersection, Ray } from 'three';
+import {
+  Vector2,
+  Box3,
+  Vector3,
+  Raycaster,
+  PerspectiveCamera,
+  OrthographicCamera,
+  BufferGeometry,
+  BufferAttribute,
+  Matrix4,
+  Mesh,
+  MeshBasicMaterial,
+} from 'three';
 import { useThree } from '@react-three/fiber';
+import type { ThreeEvent } from '@react-three/fiber';
 import { applyMatcap } from '#components/geometry/graphics/three/materials/gltf-matcap.js';
+import {
+  applyModelMaterialAppearance,
+  getOrCaptureModelMaterialAppearance,
+  resolveModelComponentEmphasis,
+  updateCapturedModelMaterialBaseColor,
+} from '#components/geometry/graphics/three/materials/model-component-appearance.js';
+import type { ModelComponentEmphasis } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 import {
   applyFatLineSegments,
   updateGltfEdgeColor,
@@ -17,13 +37,50 @@ import {
 import { Theme, useTheme } from '#hooks/use-theme.js';
 import { darkModeIntensityScale } from '#components/geometry/graphics/three/utils/lights.utils.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
+import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+import { hasSceneTagInHierarchy, sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
+import type { SceneTagKey } from '#components/geometry/graphics/three/utils/scene-tags.js';
+import {
+  getModelComponentId,
+  getModelComponentIdInHierarchy,
+  setModelComponentOwner,
+} from '#components/geometry/graphics/three/utils/model-component-owner.js';
+import { useGraphics, useModelInteractionRef, useModelInteractionSelector } from '#hooks/use-graphics.js';
+import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
+import type { ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
+import {
+  createSectionViewRaycastClipState,
+  useSectionView,
+} from '#components/geometry/graphics/three/use-section-view.js';
+import { raycastFirstVisibleMeshHit } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
+import type { RaycastClipState } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
+import {
+  configureSectionSourceOnlyMaterial,
+  isSectionSourceOnlyObject,
+  markSectionSourceOnlyObject,
+} from '#components/geometry/graphics/three/utils/section-source-only.js';
+import type { GeometryComponentManifest, GeometryComponentNode, GeometryComponentPrimitiveRef } from '@taucad/types';
 
 // Module-scoped GLTFLoader instance. GLTFLoader is stateless and fully reusable,
 // so creating a fresh instance per parse wastes initialization overhead and GC pressure.
 const gltfLoader = new GLTFLoader();
+const modelHitBlockingSceneTags = new Set<SceneTagKey>([sceneTag.sectionViewHelper, sceneTag.measurementUi]);
 
 function isFatLineSegmentsMesh(child: Object3D): boolean {
   return child.type === 'LineSegments2';
+}
+
+function isLineObject(object: Object3D): boolean {
+  return object.type === 'LineSegments' || isFatLineSegmentsMesh(object);
+}
+
+function isSurfaceObject(object: Object3D): object is Mesh {
+  const maybeMesh = object as Object3D & { isMesh?: unknown };
+  return maybeMesh.isMesh === true && !isFatLineSegmentsMesh(object);
+}
+
+function isModelRenderableObject(object: Object3D): boolean {
+  return isSurfaceObject(object) || isLineObject(object);
 }
 
 /**
@@ -239,6 +296,8 @@ type GltfMeshDisplayProperties = {
    * The GLTF file to load.
    */
   readonly gltfFile: Uint8Array<ArrayBuffer>;
+  readonly sourceFile?: string;
+  readonly geometryHash?: string;
   /**
    * Whether to enable matcap material.
    */
@@ -252,6 +311,287 @@ type GltfMeshDisplayProperties = {
    */
   readonly enableLines?: boolean;
 };
+
+type ComponentVisualStateOptions = {
+  readonly componentId: string;
+  readonly hiddenComponentIds: ReadonlySet<string>;
+  readonly isolatedComponentIds: ReadonlySet<string>;
+  readonly focusedComponentId?: string;
+  readonly explicitOpacity?: number;
+};
+
+type ComponentVisualStateWithManifestOptions = ComponentVisualStateOptions & {
+  readonly manifest: GeometryComponentManifest;
+  readonly opacityByComponentId: Record<string, number>;
+};
+
+export type ViewerHoverUpdate = {
+  readonly nextCachedComponentId: string | undefined;
+  readonly shouldSend: boolean;
+  readonly componentId: string | undefined;
+};
+
+export function resolveViewerHoverUpdate({
+  isViewerHoverSuppressed,
+  previousComponentId,
+  nextComponentId,
+}: {
+  readonly isViewerHoverSuppressed: boolean;
+  readonly previousComponentId: string | undefined;
+  readonly nextComponentId: string | undefined;
+}): ViewerHoverUpdate {
+  if (isViewerHoverSuppressed) {
+    return {
+      nextCachedComponentId: undefined,
+      shouldSend: false,
+      componentId: undefined,
+    };
+  }
+
+  if (nextComponentId === previousComponentId) {
+    return {
+      nextCachedComponentId: previousComponentId,
+      shouldSend: false,
+      componentId: undefined,
+    };
+  }
+
+  return {
+    nextCachedComponentId: nextComponentId,
+    shouldSend: true,
+    componentId: nextComponentId,
+  };
+}
+
+export function shouldConsumeGuardedModelPointerClick({
+  suppressNextModelPointerClick,
+  isModelPointerClickSuppressed,
+}: {
+  readonly suppressNextModelPointerClick: boolean;
+  readonly isModelPointerClickSuppressed: boolean;
+}): boolean {
+  return suppressNextModelPointerClick || isModelPointerClickSuppressed;
+}
+
+export type ModelPointerClickAction =
+  | { readonly type: 'allowSceneUi' }
+  | { readonly type: 'consumeModelPointerGuard' }
+  | { readonly type: 'toggleComponentSelection'; readonly componentId: string }
+  | { readonly type: 'clearFocusAndSelection' };
+
+export type ModelPointerClickDispatch =
+  | { readonly type: 'clearModelPointerClickGuard' }
+  | {
+      readonly type: 'toggleModelComponentSelection';
+      readonly unitId: string;
+      readonly componentId: string;
+      readonly source: 'viewer';
+    }
+  | { readonly type: 'clearModelComponentFocus'; readonly unitId: string; readonly source: 'viewer' }
+  | { readonly type: 'clearModelComponentSelection'; readonly unitId: string; readonly source: 'viewer' };
+
+export function resolveModelPointerClickAction({
+  intersections,
+  modelComponentId,
+  suppressNextModelPointerClick,
+  isModelPointerClickSuppressed,
+}: {
+  readonly intersections: ReadonlyArray<Pick<Intersection, 'distance' | 'object'>>;
+  readonly modelComponentId: string | undefined;
+  readonly suppressNextModelPointerClick: boolean;
+  readonly isModelPointerClickSuppressed: boolean;
+}): ModelPointerClickAction {
+  if (hasModelHitBlockingSceneUiHit(intersections)) {
+    return { type: 'allowSceneUi' };
+  }
+
+  if (shouldConsumeGuardedModelPointerClick({ suppressNextModelPointerClick, isModelPointerClickSuppressed })) {
+    return { type: 'consumeModelPointerGuard' };
+  }
+
+  return modelComponentId
+    ? { type: 'toggleComponentSelection', componentId: modelComponentId }
+    : { type: 'clearFocusAndSelection' };
+}
+
+export function resolveModelPointerMissedAction({
+  suppressNextModelPointerClick,
+  isModelPointerClickSuppressed,
+}: {
+  readonly suppressNextModelPointerClick: boolean;
+  readonly isModelPointerClickSuppressed: boolean;
+}): ModelPointerClickAction {
+  return shouldConsumeGuardedModelPointerClick({ suppressNextModelPointerClick, isModelPointerClickSuppressed })
+    ? { type: 'consumeModelPointerGuard' }
+    : { type: 'clearFocusAndSelection' };
+}
+
+export function resolveModelPointerClickDispatches({
+  clickAction,
+  unitId,
+}: {
+  readonly clickAction: Exclude<ModelPointerClickAction, { readonly type: 'allowSceneUi' }>;
+  readonly unitId: string;
+}): readonly ModelPointerClickDispatch[] {
+  if (clickAction.type === 'consumeModelPointerGuard') {
+    return [{ type: 'clearModelPointerClickGuard' }];
+  }
+
+  if (clickAction.type === 'toggleComponentSelection') {
+    return [
+      {
+        type: 'toggleModelComponentSelection',
+        unitId,
+        componentId: clickAction.componentId,
+        source: 'viewer',
+      },
+    ];
+  }
+
+  return [
+    { type: 'clearModelComponentFocus', unitId, source: 'viewer' },
+    { type: 'clearModelComponentSelection', unitId, source: 'viewer' },
+  ];
+}
+
+export function resolveComponentVisualState({
+  componentId,
+  hiddenComponentIds,
+  isolatedComponentIds,
+  focusedComponentId,
+  explicitOpacity,
+}: ComponentVisualStateOptions): { readonly visible: boolean; readonly opacity: number } {
+  const isDimmedByIsolation = isolatedComponentIds.size > 0 && !isolatedComponentIds.has(componentId);
+  const isDimmedByFocus = focusedComponentId !== undefined && focusedComponentId !== componentId;
+
+  return {
+    visible: !hiddenComponentIds.has(componentId),
+    opacity: explicitOpacity ?? (isDimmedByIsolation || isDimmedByFocus ? 0.5 : 1),
+  };
+}
+
+function getComponentAncestorIds(manifest: GeometryComponentManifest, componentId: string): string[] {
+  const ancestors: string[] = [];
+  let current = manifest.nodesById[componentId];
+  const seen = new Set<string>();
+  while (current?.parentId && !seen.has(current.parentId)) {
+    seen.add(current.parentId);
+    ancestors.push(current.parentId);
+    current = manifest.nodesById[current.parentId];
+  }
+  return ancestors;
+}
+
+function hasComponentOrAncestor(
+  manifest: GeometryComponentManifest,
+  componentId: string,
+  componentIds: ReadonlySet<string>,
+): boolean {
+  if (componentIds.has(componentId)) {
+    return true;
+  }
+  return getComponentAncestorIds(manifest, componentId).some((ancestorId) => componentIds.has(ancestorId));
+}
+
+function hasComponentOrDescendant(
+  manifest: GeometryComponentManifest,
+  componentId: string,
+  componentIds: ReadonlySet<string>,
+): boolean {
+  if (componentIds.has(componentId)) {
+    return true;
+  }
+
+  const stack = [...(manifest.nodesById[componentId]?.childIds ?? [])];
+  while (stack.length > 0) {
+    const nextId = stack.pop()!;
+    if (componentIds.has(nextId)) {
+      return true;
+    }
+    stack.push(...(manifest.nodesById[nextId]?.childIds ?? []));
+  }
+  return false;
+}
+
+function resolveInheritedOpacity({
+  manifest,
+  componentId,
+  opacityByComponentId,
+}: {
+  readonly manifest: GeometryComponentManifest;
+  readonly componentId: string;
+  readonly opacityByComponentId: Record<string, number>;
+}): number | undefined {
+  if (opacityByComponentId[componentId] !== undefined) {
+    return opacityByComponentId[componentId];
+  }
+  for (const ancestorId of getComponentAncestorIds(manifest, componentId)) {
+    if (opacityByComponentId[ancestorId] !== undefined) {
+      return opacityByComponentId[ancestorId];
+    }
+  }
+  return undefined;
+}
+
+function resolveComponentVisualStateWithManifest({
+  componentId,
+  manifest,
+  hiddenComponentIds,
+  isolatedComponentIds,
+  focusedComponentId,
+  opacityByComponentId,
+}: ComponentVisualStateWithManifestOptions): { readonly visible: boolean; readonly opacity: number } {
+  const isHidden = hasComponentOrAncestor(manifest, componentId, hiddenComponentIds);
+  const isIncludedByIsolation =
+    isolatedComponentIds.size === 0 ||
+    hasComponentOrAncestor(manifest, componentId, isolatedComponentIds) ||
+    hasComponentOrDescendant(manifest, componentId, isolatedComponentIds);
+  const focusedSet = focusedComponentId ? new Set([focusedComponentId]) : undefined;
+  const isDimmedByFocus =
+    focusedSet !== undefined &&
+    !hasComponentOrAncestor(manifest, componentId, focusedSet) &&
+    !hasComponentOrDescendant(manifest, componentId, focusedSet);
+  const explicitOpacity = resolveInheritedOpacity({ manifest, componentId, opacityByComponentId });
+
+  return {
+    visible: !isHidden && isIncludedByIsolation,
+    opacity: explicitOpacity ?? (!isIncludedByIsolation || isDimmedByFocus ? 0.5 : 1),
+  };
+}
+
+function resolveModelComponentEmphasisWithManifest(
+  unitState: Pick<ModelInteractionUnitState, 'hoveredComponentId' | 'selectedComponentIds' | 'focusedComponentId'>,
+  manifest: GeometryComponentManifest,
+  componentId: string,
+): ModelComponentEmphasis {
+  const focusedSet = unitState.focusedComponentId ? new Set([unitState.focusedComponentId]) : undefined;
+  if (
+    focusedSet &&
+    (hasComponentOrAncestor(manifest, componentId, focusedSet) ||
+      hasComponentOrDescendant(manifest, componentId, focusedSet))
+  ) {
+    return 'focused';
+  }
+
+  const selectedSet = new Set(unitState.selectedComponentIds);
+  if (
+    hasComponentOrAncestor(manifest, componentId, selectedSet) ||
+    hasComponentOrDescendant(manifest, componentId, selectedSet)
+  ) {
+    return 'selected';
+  }
+
+  const hoveredSet = unitState.hoveredComponentId ? new Set([unitState.hoveredComponentId]) : undefined;
+  if (
+    hoveredSet &&
+    (hasComponentOrAncestor(manifest, componentId, hoveredSet) ||
+      hasComponentOrDescendant(manifest, componentId, hoveredSet))
+  ) {
+    return 'hover';
+  }
+
+  return resolveModelComponentEmphasis(unitState, componentId);
+}
 
 /**
  * Update visibility of surfaces and lines based on object type.
@@ -267,13 +607,340 @@ type GltfMeshDisplayProperties = {
 function updateVisibility(scene: Group, enableSurfaces: boolean, enableLines: boolean): void {
   scene.traverse((object) => {
     // Check line types first (LineSegments2 has custom type)
-    if (object.type === 'LineSegments' || isFatLineSegmentsMesh(object)) {
+    if (isLineObject(object)) {
       object.visible = enableLines;
-    } else if ('isMesh' in object && object.isMesh) {
+    } else if (isSurfaceObject(object)) {
       // `isMesh` is true for Mesh, SkinnedMesh, InstancedMesh, etc.
       object.visible = enableSurfaces;
     }
   });
+}
+
+function getObjectComponentId(object: Object3D | undefined): string | undefined {
+  return getModelComponentIdInHierarchy(object);
+}
+
+export function collectModelPickableSurfaceMeshes(root: Object3D): Mesh[] {
+  const meshes: Mesh[] = [];
+
+  root.traverse((object) => {
+    if (!isSurfaceObject(object)) {
+      return;
+    }
+
+    if (isSectionSourceOnlyObject(object)) {
+      return;
+    }
+
+    if (!getObjectComponentId(object)) {
+      return;
+    }
+
+    if (hasSceneTagInHierarchy(object, modelHitBlockingSceneTags)) {
+      return;
+    }
+
+    meshes.push(object);
+  });
+
+  return meshes;
+}
+
+function configureSectionSourceOnlyMaterials(scene: Group): void {
+  scene.traverse((object) => {
+    if (!isSectionSourceOnlyObject(object)) {
+      return;
+    }
+
+    for (const material of getObjectMaterials(object)) {
+      configureSectionSourceOnlyMaterial(material);
+    }
+  });
+}
+
+function getPrimitiveReferences(node: GeometryComponentNode): readonly GeometryComponentPrimitiveRef[] {
+  return Array.isArray(node.primitiveRefs) ? (node.primitiveRefs as readonly GeometryComponentPrimitiveRef[]) : [];
+}
+
+function appendMeshTrianglesToSectionSource({
+  mesh,
+  sceneWorldInverse,
+  positions,
+  indices,
+}: {
+  readonly mesh: Mesh;
+  readonly sceneWorldInverse: Matrix4;
+  readonly positions: number[];
+  readonly indices: number[];
+}): void {
+  const { position } = mesh.geometry.attributes;
+  if (!(position instanceof BufferAttribute)) {
+    return;
+  }
+
+  const localToScene = new Matrix4().multiplyMatrices(sceneWorldInverse, mesh.matrixWorld);
+  const index = mesh.geometry.getIndex();
+  const sourceIndexCount = index?.count ?? position.count;
+  const sourceIndices = index?.array as ArrayLike<number> | undefined;
+  const point = new Vector3();
+  const vertexOffset = positions.length / 3;
+
+  for (let sourceOffset = 0; sourceOffset < sourceIndexCount; sourceOffset++) {
+    const sourceVertexIndex = sourceIndices ? sourceIndices[sourceOffset]! : sourceOffset;
+    point.fromBufferAttribute(position, sourceVertexIndex).applyMatrix4(localToScene);
+    positions.push(point.x, point.y, point.z);
+    indices.push(vertexOffset + sourceOffset);
+  }
+}
+
+function createSectionSourceProxyGeometry(scene: Group, meshes: readonly Mesh[]): BufferGeometry | undefined {
+  if (meshes.length === 0) {
+    return undefined;
+  }
+
+  scene.updateMatrixWorld(true);
+  const sceneWorldInverse = new Matrix4().copy(scene.matrixWorld).invert();
+  const positions: number[] = [];
+  const indices: number[] = [];
+
+  for (const mesh of meshes) {
+    mesh.updateMatrixWorld(true);
+    appendMeshTrianglesToSectionSource({ mesh, sceneWorldInverse, positions, indices });
+  }
+
+  if (positions.length === 0 || indices.length === 0) {
+    return undefined;
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+  geometry.setIndex(new BufferAttribute(new Uint32Array(indices), 1));
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function createInvisibleSectionSourceMaterial(): MeshBasicMaterial {
+  const material = new MeshBasicMaterial();
+  configureSectionSourceOnlyMaterial(material);
+  return material;
+}
+
+function installSectionSourceProxyMeshes(
+  scene: Group,
+  manifest: GeometryComponentManifest,
+  options: { readonly unitId: string },
+): void {
+  const sourceMeshesByComponentId = new Map<string, Mesh[]>();
+  scene.traverse((object) => {
+    if (!isSurfaceObject(object) || isSectionSourceOnlyObject(object)) {
+      return;
+    }
+
+    const componentId = getModelComponentId(object);
+    if (!componentId) {
+      return;
+    }
+
+    const meshes = sourceMeshesByComponentId.get(componentId) ?? [];
+    meshes.push(object);
+    sourceMeshesByComponentId.set(componentId, meshes);
+  });
+
+  for (const componentId of manifest.nodeOrder) {
+    const component = manifest.nodesById[componentId];
+    if (component?.kind !== 'body' || component.childIds.length === 0) {
+      continue;
+    }
+
+    const sourceMeshes = component.childIds.flatMap((childId) => sourceMeshesByComponentId.get(childId) ?? []);
+    if (sourceMeshes.length < 2) {
+      continue;
+    }
+
+    const geometry = createSectionSourceProxyGeometry(scene, sourceMeshes);
+    if (!geometry) {
+      continue;
+    }
+
+    const proxy = new Mesh(geometry, createInvisibleSectionSourceMaterial());
+    proxy.name = `${component.name} section source`;
+    proxy.frustumCulled = false;
+    proxy.renderOrder = -1;
+    markSectionSourceOnlyObject(proxy);
+    setModelComponentOwner(proxy, { unitId: options.unitId, componentId });
+    proxy.userData['tauSectionOwnerComponentId'] = componentId;
+    scene.add(proxy);
+  }
+}
+
+function isWorldVisible(object: Object3D): boolean {
+  let current: Object3D | undefined = object;
+  while (current !== undefined) {
+    if (!current.visible) {
+      return false;
+    }
+    current = current.parent ?? undefined;
+  }
+  return true;
+}
+
+export function hasModelHitBlockingSceneUiHit(
+  intersections: ReadonlyArray<Pick<Intersection, 'distance' | 'object'>>,
+): boolean {
+  for (const intersection of intersections) {
+    if (!Number.isFinite(intersection.distance) || !isWorldVisible(intersection.object)) {
+      continue;
+    }
+
+    if (hasSceneTagInHierarchy(intersection.object, modelHitBlockingSceneTags)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function resolveModelComponentHitFromRay({
+  raycaster,
+  meshes,
+  clipping,
+}: {
+  readonly raycaster: Raycaster;
+  readonly meshes: readonly Mesh[];
+  readonly clipping?: RaycastClipState;
+}): string | undefined {
+  const hit = raycastFirstVisibleMeshHit({ raycaster, meshes, clipping });
+  return getObjectComponentId(hit?.object);
+}
+
+function syncModelRaycasterFromPointerEvent({
+  raycaster,
+  ray,
+  camera,
+}: {
+  readonly raycaster: Raycaster;
+  readonly ray: Ray;
+  readonly camera: Camera;
+}): void {
+  raycaster.ray.copy(ray);
+  raycaster.camera = camera;
+  raycaster.near = 0;
+  raycaster.far =
+    camera instanceof PerspectiveCamera || camera instanceof OrthographicCamera ? camera.far : Number.POSITIVE_INFINITY;
+}
+
+export function annotateSceneComponents(
+  scene: Group,
+  manifest: GeometryComponentManifest,
+  options: { readonly unitId: string },
+): void {
+  const childComponentIds = manifest.nodesById[manifest.rootId]?.childIds ?? [];
+  const primitiveComponentNodes: GeometryComponentNode[] = [];
+  for (const componentId of manifest.nodeOrder) {
+    const node = manifest.nodesById[componentId];
+    if (!node || getPrimitiveReferences(node).length === 0 || node.childIds.length > 0) {
+      continue;
+    }
+    primitiveComponentNodes.push(node);
+  }
+
+  const primitiveComponentIds = primitiveComponentNodes
+    .sort((a, b) => {
+      const aRef = getPrimitiveReferences(a)[0];
+      const bRef = getPrimitiveReferences(b)[0];
+      if (!aRef || !bRef) {
+        return 0;
+      }
+      return (
+        aRef.nodeIndex - bRef.nodeIndex || aRef.meshIndex - bRef.meshIndex || aRef.primitiveIndex - bRef.primitiveIndex
+      );
+    })
+    .map((node) => node.id);
+  let fallbackIndex = 0;
+  let primitiveFallbackIndex = 0;
+
+  const annotateObject = (
+    object: Object3D,
+    inheritedComponentId: string | undefined,
+    previousSiblingRenderableComponentId: string | undefined,
+  ): string | undefined => {
+    const existingComponentId = getModelComponentId(object);
+    if (typeof existingComponentId === 'string') {
+      setModelComponentOwner(object, { unitId: options.unitId, componentId: existingComponentId });
+      for (const child of object.children) {
+        annotateObject(child, existingComponentId, undefined);
+      }
+      return existingComponentId;
+    }
+
+    let componentId = inheritedComponentId;
+
+    if (isModelRenderableObject(object)) {
+      const primitiveComponentId =
+        !isLineObject(object) && primitiveComponentIds.length > 0
+          ? primitiveComponentIds[primitiveFallbackIndex]
+          : undefined;
+      if (primitiveComponentId) {
+        primitiveFallbackIndex += 1;
+        componentId = primitiveComponentId;
+      }
+
+      if (!componentId) {
+        componentId = isLineObject(object) ? previousSiblingRenderableComponentId : undefined;
+        if (!componentId) {
+          componentId = childComponentIds[fallbackIndex];
+          fallbackIndex += componentId ? 1 : 0;
+        }
+      }
+
+      if (componentId) {
+        setModelComponentOwner(object, { unitId: options.unitId, componentId });
+      }
+    }
+
+    let previousChildRenderableComponentId: string | undefined;
+    for (const child of object.children) {
+      const childComponentId = annotateObject(child, componentId, previousChildRenderableComponentId);
+      if (childComponentId && isModelRenderableObject(child)) {
+        previousChildRenderableComponentId = childComponentId;
+      }
+    }
+
+    return componentId;
+  };
+
+  for (const child of scene.children) {
+    annotateObject(child, undefined, undefined);
+  }
+}
+
+function getMaterials(material: Material | Material[]): Material[] {
+  return Array.isArray(material) ? material : [material];
+}
+
+function getObjectMaterials(object: Object3D): Material[] {
+  if (!('material' in object)) {
+    return [];
+  }
+
+  const { material } = object as Object3D & { material?: Material | Material[] };
+  return material ? getMaterials(material) : [];
+}
+
+function seedSceneMaterialAppearances(scene: Group): void {
+  scene.traverse((object) => {
+    for (const material of getObjectMaterials(object)) {
+      getOrCaptureModelMaterialAppearance(material);
+    }
+  });
+}
+
+export function applyGltfEdgeThemeColor(scene: Group, edgeColor: number): void {
+  const updatedMaterials = updateGltfEdgeColor(scene, edgeColor);
+  for (const material of updatedMaterials) {
+    updateCapturedModelMaterialBaseColor(material, edgeColor);
+  }
 }
 
 /**
@@ -300,25 +967,73 @@ function updateVisibility(scene: Group, enableSurfaces: boolean, enableLines: bo
  */
 export function GltfMesh({
   gltfFile,
+  sourceFile,
+  geometryHash,
   enableMatcap = false,
   enableSurfaces = true,
   enableLines = true,
 }: GltfMeshDisplayProperties): React.JSX.Element | undefined {
+  const graphicsActor = useGraphics();
+  const modelInteractionRef = useModelInteractionRef();
   const graphicsBackendThree = useThreeGraphicsBackend();
+  const sectionView = useSectionView();
   // The "base scene" is the parsed GLTF with line segments converted but no material overrides.
   // It serves as the template from which material modes (matcap/original) are derived.
   const [baseScene, setBaseScene] = useState<Group | undefined>(undefined);
   // The rendered scene has material mode applied and is what <primitive> displays.
   const [scene, setScene] = useState<Group | undefined>(undefined);
+  const [componentManifest, setComponentManifest] = useState<GeometryComponentManifest | undefined>(undefined);
   const { size, invalidate, gl, camera } = useThree();
+  const { controls } = useThree();
   const { theme } = useTheme();
+  const activeEdgeColor = theme === Theme.DARK ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
   const matcapTint = theme === Theme.DARK ? darkModeIntensityScale : 1;
+  const unitId = deriveModelInteractionUnitId({ sourceFile, geometryHash });
 
   // Memoize resolution vector to avoid creating new objects on each render
   const resolutionRef = useRef(new Vector2(size.width, size.height));
 
   // Saved clones of the original materials so we can restore them after matcap is toggled off.
   const originalMaterialsRef = useRef<Map<number, Material | Material[]>>(new Map());
+  const lastHoveredComponentIdRef = useRef<string | undefined>(undefined);
+  const lastFocusedComponentIdRef = useRef<string | undefined>(undefined);
+  const modelRaycasterRef = useRef(new Raycaster());
+  const modelPickableMeshesSceneRef = useRef<Group | undefined>(undefined);
+  const modelPickableMeshesRef = useRef<readonly Mesh[]>([]);
+  const modelVisualState = useModelInteractionSelector((state) => {
+    const unit = getModelInteractionUnitState(state.context, unitId);
+    return {
+      manifest: unit.manifest,
+      hoveredComponentId: unit.hoveredComponentId,
+      selectedComponentIds: unit.selectedComponentIds,
+      focusedComponentId: unit.focusedComponentId,
+      hiddenComponentIds: unit.hiddenComponentIds,
+      isolatedComponentIds: unit.isolatedComponentIds,
+      opacityByComponentId: unit.opacityByComponentId,
+      isViewerHoverSuppressed: state.context.isViewerHoverSuppressed,
+      revision: state.context.revision,
+    };
+  });
+  const modelRaycastClipState = useMemo<RaycastClipState | undefined>(() => {
+    return createSectionViewRaycastClipState(sectionView);
+  }, [sectionView.enableMesh, sectionView.isActive, sectionView.plane]);
+
+  const getModelPickableMeshes = useCallback((): readonly Mesh[] => {
+    if (!scene) {
+      modelPickableMeshesSceneRef.current = undefined;
+      modelPickableMeshesRef.current = [];
+      return [];
+    }
+
+    if (modelPickableMeshesSceneRef.current === scene) {
+      return modelPickableMeshesRef.current;
+    }
+
+    const meshes = collectModelPickableSurfaceMeshes(scene);
+    modelPickableMeshesSceneRef.current = scene;
+    modelPickableMeshesRef.current = meshes;
+    return meshes;
+  }, [scene]);
 
   // Update resolution when size changes. Deferred via requestAnimationFrame
   // so that rapid resize events (e.g. dragging a Dockview divider) batch into
@@ -365,9 +1080,21 @@ export function GltfMesh({
 
         probeGltfScene(gltf, gltfFile.byteLength);
 
+        const graphicsOwnedManifest = getModelInteractionUnitState(
+          modelInteractionRef.getSnapshot().context,
+          unitId,
+        ).manifest;
+        const manifest = graphicsOwnedManifest ?? buildGltfComponentManifest(gltfFile, { sourceFile, geometryHash });
+        annotateSceneComponents(gltf.scene, manifest, { unitId });
+        installSectionSourceProxyMeshes(gltf.scene, manifest, { unitId });
+
         // Convert LineSegments to LineSegments2 for fat line rendering
         const edgeColor = theme === Theme.DARK ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
-        applyFatLineSegments(gltf, resolutionRef.current, graphicsBackendThree, edgeColor);
+        applyFatLineSegments(gltf, {
+          resolution: resolutionRef.current,
+          backend: graphicsBackendThree,
+          edgeColor,
+        });
 
         // Save clones of the original materials before any overrides
         disposeSavedMaterials(originalMaterialsRef.current);
@@ -398,6 +1125,7 @@ export function GltfMesh({
         }
 
         setBaseScene(gltf.scene);
+        setComponentManifest(manifest);
         invalidate();
       } catch (error) {
         if (!isCancelled()) {
@@ -415,13 +1143,26 @@ export function GltfMesh({
       return undefined;
     });
     setScene(undefined);
+    setComponentManifest(undefined);
 
     void loadGltf();
 
     return () => {
       cancellation.cancelled = true;
+      graphicsActor.send({ type: 'setHoveredModelComponent', unitId, componentId: undefined, source: 'viewer' });
     };
-  }, [gltfFile, graphicsBackendThree, invalidate, gl, camera]);
+  }, [
+    gltfFile,
+    graphicsBackendThree,
+    invalidate,
+    gl,
+    camera,
+    graphicsActor,
+    modelInteractionRef,
+    sourceFile,
+    geometryHash,
+    unitId,
+  ]);
 
   // Theme-aware edge tint without re-parsing the GLTF binary.
   useEffect(() => {
@@ -429,10 +1170,9 @@ export function GltfMesh({
       return;
     }
 
-    const edgeColor = theme === Theme.DARK ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
-    updateGltfEdgeColor(scene, edgeColor);
+    applyGltfEdgeThemeColor(scene, activeEdgeColor);
     invalidate();
-  }, [scene, theme, invalidate]);
+  }, [scene, activeEdgeColor, invalidate]);
 
   // Cleanup on unmount: dispose base scene and saved materials
   useEffect(
@@ -464,6 +1204,8 @@ export function GltfMesh({
     }
 
     applyMaterials(baseScene);
+    configureSectionSourceOnlyMaterials(baseScene);
+    seedSceneMaterialAppearances(baseScene);
     setScene(baseScene);
     invalidate();
   }, [baseScene, applyMaterials, invalidate]);
@@ -476,9 +1218,244 @@ export function GltfMesh({
     }
   }, [scene, enableSurfaces, enableLines, invalidate]);
 
+  useEffect(() => {
+    if (!scene || !componentManifest) {
+      return;
+    }
+
+    const hidden = new Set(modelVisualState.hiddenComponentIds);
+    const isolated = new Set(modelVisualState.isolatedComponentIds);
+
+    scene.traverse((object) => {
+      const componentId = getObjectComponentId(object);
+      if (!componentId) {
+        return;
+      }
+
+      const isLine = isLineObject(object);
+      const isSurface = isSurfaceObject(object);
+      const globallyVisible = isLine ? enableLines : isSurface ? enableSurfaces : true;
+      const visualState = resolveComponentVisualStateWithManifest({
+        componentId,
+        manifest: componentManifest,
+        hiddenComponentIds: hidden,
+        isolatedComponentIds: isolated,
+        focusedComponentId: modelVisualState.focusedComponentId,
+        explicitOpacity: modelVisualState.opacityByComponentId[componentId],
+        opacityByComponentId: modelVisualState.opacityByComponentId,
+      });
+      object.visible = globallyVisible && visualState.visible;
+
+      const materials = getObjectMaterials(object);
+      if (materials.length === 0) {
+        return;
+      }
+
+      if (isSectionSourceOnlyObject(object)) {
+        for (const material of materials) {
+          configureSectionSourceOnlyMaterial(material);
+        }
+        return;
+      }
+
+      const emphasis = resolveModelComponentEmphasisWithManifest(modelVisualState, componentManifest, componentId);
+      for (const material of materials) {
+        const snapshot = getOrCaptureModelMaterialAppearance(material);
+        applyModelMaterialAppearance(material, snapshot, { opacity: visualState.opacity, emphasis });
+      }
+    });
+
+    invalidate();
+  }, [scene, componentManifest, modelVisualState, activeEdgeColor, enableSurfaces, enableLines, invalidate]);
+
+  useEffect(() => {
+    lastHoveredComponentIdRef.current = modelVisualState.isViewerHoverSuppressed
+      ? undefined
+      : modelVisualState.hoveredComponentId;
+  }, [modelVisualState.hoveredComponentId, modelVisualState.isViewerHoverSuppressed]);
+
+  useEffect(() => {
+    if (!componentManifest || !modelVisualState.focusedComponentId) {
+      lastFocusedComponentIdRef.current = undefined;
+      return;
+    }
+
+    if (lastFocusedComponentIdRef.current === modelVisualState.focusedComponentId) {
+      return;
+    }
+
+    const focusedNode = componentManifest.nodesById[modelVisualState.focusedComponentId];
+    if (!focusedNode?.bounds) {
+      return;
+    }
+
+    lastFocusedComponentIdRef.current = modelVisualState.focusedComponentId;
+    const box = new Box3(new Vector3(...focusedNode.bounds.min), new Vector3(...focusedNode.bounds.max));
+    const cameraControls = controls as
+      | {
+          fitToBox?: (
+            box: Box3,
+            enableTransition: boolean,
+            options?: { paddingLeft?: number; paddingRight?: number; paddingTop?: number; paddingBottom?: number },
+          ) => Promise<unknown>;
+        }
+      | undefined;
+
+    if (typeof cameraControls?.fitToBox === 'function') {
+      void cameraControls.fitToBox(box, true, {
+        paddingLeft: 24,
+        paddingRight: 24,
+        paddingTop: 24,
+        paddingBottom: 24,
+      });
+      invalidate();
+      return;
+    }
+
+    const center = box.getCenter(new Vector3());
+    camera.lookAt(center);
+    invalidate();
+  }, [camera, componentManifest, controls, invalidate, modelVisualState.focusedComponentId]);
+
+  const handlePointerMove = useCallback(
+    (event: ThreeEvent<PointerEvent>) => {
+      if (hasModelHitBlockingSceneUiHit(event.intersections)) {
+        const hoverUpdate = resolveViewerHoverUpdate({
+          isViewerHoverSuppressed: modelVisualState.isViewerHoverSuppressed,
+          previousComponentId: lastHoveredComponentIdRef.current,
+          nextComponentId: undefined,
+        });
+        lastHoveredComponentIdRef.current = hoverUpdate.nextCachedComponentId;
+        if (hoverUpdate.shouldSend) {
+          graphicsActor.send({
+            type: 'setHoveredModelComponent',
+            unitId,
+            componentId: hoverUpdate.componentId,
+            source: 'viewer',
+          });
+        }
+        return;
+      }
+
+      if (modelVisualState.isViewerHoverSuppressed) {
+        lastHoveredComponentIdRef.current = undefined;
+        return;
+      }
+
+      if (graphicsActor.getSnapshot().context.suppressNextModelPointerClick) {
+        graphicsActor.send({ type: 'clearModelPointerClickGuard' });
+      }
+
+      event.stopPropagation();
+      syncModelRaycasterFromPointerEvent({
+        raycaster: modelRaycasterRef.current,
+        ray: event.ray,
+        camera,
+      });
+      const componentId = resolveModelComponentHitFromRay({
+        raycaster: modelRaycasterRef.current,
+        meshes: getModelPickableMeshes(),
+        clipping: modelRaycastClipState,
+      });
+      const hoverUpdate = resolveViewerHoverUpdate({
+        isViewerHoverSuppressed: modelVisualState.isViewerHoverSuppressed,
+        previousComponentId: lastHoveredComponentIdRef.current,
+        nextComponentId: componentId,
+      });
+      lastHoveredComponentIdRef.current = hoverUpdate.nextCachedComponentId;
+      if (hoverUpdate.shouldSend) {
+        graphicsActor.send({
+          type: 'setHoveredModelComponent',
+          unitId,
+          componentId: hoverUpdate.componentId,
+          source: 'viewer',
+        });
+      }
+    },
+    [
+      camera,
+      getModelPickableMeshes,
+      graphicsActor,
+      modelRaycastClipState,
+      modelVisualState.isViewerHoverSuppressed,
+      unitId,
+    ],
+  );
+
+  const handlePointerOut = useCallback(() => {
+    const hoverUpdate = resolveViewerHoverUpdate({
+      isViewerHoverSuppressed: modelVisualState.isViewerHoverSuppressed,
+      previousComponentId: lastHoveredComponentIdRef.current,
+      nextComponentId: undefined,
+    });
+    lastHoveredComponentIdRef.current = hoverUpdate.nextCachedComponentId;
+    if (hoverUpdate.shouldSend) {
+      graphicsActor.send({ type: 'setHoveredModelComponent', unitId, componentId: undefined, source: 'viewer' });
+    }
+  }, [graphicsActor, modelVisualState.isViewerHoverSuppressed, unitId]);
+
+  const handleClick = useCallback(
+    (event: ThreeEvent<MouseEvent>) => {
+      const graphicsContext = graphicsActor.getSnapshot().context;
+      syncModelRaycasterFromPointerEvent({
+        raycaster: modelRaycasterRef.current,
+        ray: event.ray,
+        camera,
+      });
+      const modelComponentId = resolveModelComponentHitFromRay({
+        raycaster: modelRaycasterRef.current,
+        meshes: getModelPickableMeshes(),
+        clipping: modelRaycastClipState,
+      });
+      const clickAction = resolveModelPointerClickAction({
+        intersections: event.intersections,
+        modelComponentId,
+        suppressNextModelPointerClick: graphicsContext.suppressNextModelPointerClick,
+        isModelPointerClickSuppressed: graphicsContext.modelPointerClickSuppressionReasons.length > 0,
+      });
+
+      if (clickAction.type === 'allowSceneUi') {
+        return;
+      }
+
+      event.stopPropagation();
+      for (const dispatchEvent of resolveModelPointerClickDispatches({ clickAction, unitId })) {
+        graphicsActor.send(dispatchEvent);
+      }
+    },
+    [camera, getModelPickableMeshes, graphicsActor, modelRaycastClipState, unitId],
+  );
+
+  const handlePointerMissed = useCallback(() => {
+    lastHoveredComponentIdRef.current = undefined;
+    if (!modelVisualState.isViewerHoverSuppressed) {
+      graphicsActor.send({ type: 'setHoveredModelComponent', unitId, componentId: undefined, source: 'viewer' });
+    }
+
+    const missedAction = resolveModelPointerMissedAction({
+      suppressNextModelPointerClick: graphicsActor.getSnapshot().context.suppressNextModelPointerClick,
+      isModelPointerClickSuppressed: graphicsActor.getSnapshot().context.modelPointerClickSuppressionReasons.length > 0,
+    });
+    if (missedAction.type === 'consumeModelPointerGuard') {
+      graphicsActor.send({ type: 'clearModelPointerClickGuard' });
+      return;
+    }
+
+    graphicsActor.send({ type: 'clearModelComponentFocus', unitId, source: 'viewer' });
+    graphicsActor.send({ type: 'clearModelComponentSelection', unitId, source: 'viewer' });
+  }, [graphicsActor, modelVisualState.isViewerHoverSuppressed, unitId]);
+
   if (!scene) {
     return undefined;
   }
 
-  return <primitive object={scene} />;
+  return (
+    <primitive
+      object={scene}
+      onPointerMove={handlePointerMove}
+      onPointerOut={handlePointerOut}
+      onClick={handleClick}
+      onPointerMissed={handlePointerMissed}
+    />
+  );
 }

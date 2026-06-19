@@ -10,6 +10,18 @@ function textResult(text: string): FileContentResult {
   return { kind: 'text', content: new TextEncoder().encode(text) };
 }
 
+function textFileStatEntry(path: string): FileStatEntry {
+  return {
+    path,
+    name: path.split('/').pop() ?? path,
+    type: 'file',
+    size: 0,
+    mtimeMs: 0,
+    contentKind: 'text',
+    lineCount: 1,
+  };
+}
+
 describe('createWorkspaceFileSystemProvider', () => {
   afterEach(async () => {
     for (const model of monaco.editor.getModels()) {
@@ -77,10 +89,7 @@ describe('createWorkspaceFileSystemProvider', () => {
 
   it('findFiles delegates to searchFiles and maps stat paths to file URIs', async () => {
     const searchFiles = vi.fn(
-      async (): Promise<readonly FileStatEntry[]> => [
-        { path: 'a.ts', name: 'a.ts', type: 'file', size: 0, mtimeMs: 0 },
-        { path: '/b.ts', name: 'b.ts', type: 'file', size: 0, mtimeMs: 0 },
-      ],
+      async (): Promise<readonly FileStatEntry[]> => [textFileStatEntry('a.ts'), textFileStatEntry('/b.ts')],
     );
     const contentService = {
       resolve: vi.fn(),
@@ -122,9 +131,7 @@ describe('createWorkspaceFileSystemProvider', () => {
 
   it('findFiles returns only searchFiles hits (no addExtraLib fan-in)', async () => {
     const searchFiles = vi.fn(
-      async (): Promise<readonly FileStatEntry[]> => [
-        { path: 'node_modules/replicad/index.d.ts', name: 'index.d.ts', type: 'file', size: 0, mtimeMs: 0 },
-      ],
+      async (): Promise<readonly FileStatEntry[]> => [textFileStatEntry('node_modules/replicad/index.d.ts')],
     );
     const contentService = {
       resolve: vi.fn(),

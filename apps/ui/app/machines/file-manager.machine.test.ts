@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createActor } from 'xstate';
 import { SharedPool } from '@taucad/memory';
-import type * as TransportInternals from '@taucad/runtime/transport-internals';
+import type * as FsBridge from '@taucad/fs-bridge';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 
 const workerTestState = vi.hoisted(() => {
@@ -52,11 +52,16 @@ const mockCreateFileSystemBridge = vi.fn(() => ({
   },
   dispose: vi.fn(),
 }));
+const mockOpenFileSystemBridge = vi.fn(() => ({
+  port: new MessageChannel().port1,
+  dispose: vi.fn(),
+}));
 
-vi.mock('@taucad/runtime/transport-internals', () => ({
+vi.mock('@taucad/fs-bridge', () => ({
   createFileSystemBridge: () => mockCreateFileSystemBridge(),
+  openFileSystemBridge: () => mockOpenFileSystemBridge(),
   waitForWorkerReady: async () => mockWaitForWorkerReady(),
-  createBridgeProxy: vi.fn(() => ({
+  createFileSystemBridgeProxy: vi.fn(() => ({
     mount: mockMount,
     unmount: mockUnmount,
     getDirectoryStat: vi.fn(async () => []),
@@ -1369,11 +1374,11 @@ describe('fileManagerMachine', () => {
   });
 
   /* oxlint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- Vitest importActual resolves to loosely typed loader output */
-  describe('createFileSystemBridge + createBridgeProxy (actual transport-internals)', () => {
+  describe('createFileSystemBridge + createFileSystemBridgeProxy (actual fs-bridge)', () => {
     it('initializes bridge proxy synchronously without `Port.onMessage` TypeError', async () => {
-      const unsafeModule = await vi.importActual('@taucad/runtime/transport-internals');
+      const unsafeModule = await vi.importActual('@taucad/fs-bridge');
       /* oxlint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- tsgo vs ESLint inference skew for Vitest stub typing */
-      const actualModule = unsafeModule as typeof TransportInternals;
+      const actualModule = unsafeModule as typeof FsBridge;
       const fakeWorker = {
         postMessage: vi.fn(),
         addEventListener: vi.fn(),
@@ -1384,7 +1389,7 @@ describe('fileManagerMachine', () => {
       const bridge = actualModule.createFileSystemBridge(fakeWorker);
 
       expect(() => {
-        actualModule.createBridgeProxy<Record<string, never>>(bridge.port);
+        actualModule.createFileSystemBridgeProxy<Record<string, never>>(bridge);
       }).not.toThrow();
     });
   });

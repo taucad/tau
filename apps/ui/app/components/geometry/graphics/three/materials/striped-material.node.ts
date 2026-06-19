@@ -1,10 +1,23 @@
 import { DoubleSide, Color } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { attribute, cos, float, Fn, fwidth, mix, mod, mul, sin, smoothstep, uniform, vec2, vec3 } from 'three/tsl';
+import {
+  attribute,
+  cos,
+  float,
+  Fn as tslFunction,
+  fwidth,
+  mix,
+  mod,
+  mul,
+  sin,
+  smoothstep,
+  uniform,
+  vec2,
+  vec3,
+} from 'three/tsl';
 import { resolveStripedAppearance } from '#components/geometry/graphics/three/materials/striped-material-resolve-appearance.js';
+import { applySectionCapDepthState } from '#components/geometry/graphics/three/materials/section-cap-depth-state.js';
 import type { StripedMaterialProperties } from '#components/geometry/graphics/three/materials/striped-material.types.js';
-
-/* oxlint-disable eslint(new-cap) -- three/tsl `Fn()` builds node graphs via factory calls */
 
 /** WebGPU/TSL analogue of {@link createStripedMaterial}. */
 export function createStripedNodeMaterial(properties?: StripedMaterialProperties): MeshBasicNodeMaterial {
@@ -18,13 +31,10 @@ export function createStripedNodeMaterial(properties?: StripedMaterialProperties
 
   const material = new MeshBasicNodeMaterial({
     side: DoubleSide,
-    transparent: true,
-    polygonOffset: true,
-    polygonOffsetFactor: 1,
-    polygonOffsetUnits: 1,
   });
+  applySectionCapDepthState(material, 'webgpu');
 
-  material.colorNode = Fn(() => {
+  material.colorNode = tslFunction(() => {
     // Anchored to the section-plane basis via the consumer-supplied `aPlaneUv` attribute so
     // stripes stay diagonal regardless of how the plane is oriented in mesh-local space.
     // Explicit `<'vec2'>` narrows `attribute(...)`'s `TNodeType` so swizzles + `vec2(...)` typecheck.
@@ -40,6 +50,40 @@ export function createStripedNodeMaterial(properties?: StripedMaterialProperties
     const stripeMask = smoothstep(uStripeWidth.sub(aa), uStripeWidth.add(aa), pattern);
 
     return vec3(mix(uStripeColor, uBaseColor, stripeMask));
+  })();
+
+  return material;
+}
+
+export function createVertexColoredStripedNodeMaterial(properties?: StripedMaterialProperties): MeshBasicNodeMaterial {
+  const { stripeFrequency, stripeWidth } = resolveStripedAppearance(properties);
+
+  const uStripeFrequency = uniform(stripeFrequency);
+  const uStripeWidth = uniform(stripeWidth);
+
+  const material = new MeshBasicNodeMaterial({
+    side: DoubleSide,
+  });
+  applySectionCapDepthState(material, 'webgpu');
+
+  material.colorNode = tslFunction(() => {
+    const surfacePlane = vec2(attribute<'vec2'>('aPlaneUv', 'vec2')).toVar('surfaceXY');
+    const baseColor = vec3(attribute<'vec3'>('aCapBaseColor', 'vec3')).toVar('capBaseColor');
+    const stripeColor = vec3(attribute<'vec3'>('aCapStripeColor', 'vec3')).toVar('capStripeColor');
+    const patternStrength = float(attribute<'float'>('aCapPatternStrength', 'float')).toVar('capPatternStrength');
+    const stripeAxis = vec2(attribute<'vec2'>('aCapStripeAxis', 'vec2')).toVar('capStripeAxis');
+
+    const patternCoordinate = mul(surfacePlane.x, stripeAxis.x)
+      .add(mul(surfacePlane.y, stripeAxis.y))
+      .toVar('patternCoordinate');
+
+    const pattern = mod(patternCoordinate, uStripeFrequency).toVar('pattern');
+    const aa = mul(fwidth(pattern), float(1.5)).toVar('aa');
+
+    const stripeMask = smoothstep(uStripeWidth.sub(aa), uStripeWidth.add(aa), pattern);
+    const stripedColor = vec3(mix(stripeColor, baseColor, stripeMask)).toVar('stripedColor');
+
+    return vec3(mix(baseColor, stripedColor, patternStrength));
   })();
 
   return material;

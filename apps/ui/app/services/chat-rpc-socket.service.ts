@@ -13,7 +13,8 @@
  */
 import type { Socket } from 'socket.io-client';
 import { io } from 'socket.io-client';
-import type { RpcRequest, RpcResponse } from '@taucad/chat';
+import { chatRpcProtocolErrorCode, chatRpcProtocolVersion } from '@taucad/chat';
+import type { ChatRpcJoinAck, ChatRpcJoinMessage, RpcRequest, RpcResponse } from '@taucad/chat';
 import { ENV } from '#environment.config.js';
 
 /** Connection status for UI display */
@@ -78,6 +79,8 @@ export class ChatRpcSocketService {
 
   /** Whether connection was rejected due to authentication failure - prevents reconnection attempts */
   private isAuthenticationFailure = false;
+  /** Whether connection was rejected due to browser/API protocol skew. */
+  private isProtocolVersionMismatch = false;
 
   /** Private constructor to enforce singleton pattern */
   private constructor() {
@@ -95,6 +98,7 @@ export class ChatRpcSocketService {
 
     // Reset auth failure flag for new connection attempt (e.g., after user logs in)
     this.isAuthenticationFailure = false;
+    this.isProtocolVersionMismatch = false;
 
     // If we have an existing socket that's not connected, clean it up
     if (this.socket) {
@@ -215,6 +219,10 @@ export class ChatRpcSocketService {
    * Manually trigger reconnection.
    */
   public reconnect(): void {
+    if (this.isProtocolVersionMismatch) {
+      return;
+    }
+
     if (this.socket) {
       this.socket.disconnect();
       this.socket.connect();
@@ -239,7 +247,7 @@ export class ChatRpcSocketService {
     });
 
     socket.on('disconnect', (reason) => {
-      if (this.isAuthenticationFailure) {
+      if (this.isAuthenticationFailure || this.isProtocolVersionMismatch) {
         return;
       }
 
@@ -321,6 +329,13 @@ export class ChatRpcSocketService {
         return;
       }
 
+      if (serverError.code === chatRpcProtocolErrorCode.protocolVersionMismatch) {
+        this.isProtocolVersionMismatch = true;
+        this.setStatus('error', serverError.message);
+        socket.disconnect();
+        return;
+      }
+
       this.setError(serverError.message);
     });
   }
@@ -335,7 +350,7 @@ export class ChatRpcSocketService {
 
     this.handleVisibilityChange = (): void => {
       // Don't attempt reconnection if auth failed
-      if (this.isAuthenticationFailure) {
+      if (this.isAuthenticationFailure || this.isProtocolVersionMismatch) {
         return;
       }
 
@@ -346,7 +361,7 @@ export class ChatRpcSocketService {
 
     this.handleOnline = (): void => {
       // Don't attempt reconnection if auth failed
-      if (this.isAuthenticationFailure) {
+      if (this.isAuthenticationFailure || this.isProtocolVersionMismatch) {
         return;
       }
 
@@ -399,18 +414,26 @@ export class ChatRpcSocketService {
         return;
       }
 
-      const ack = await new Promise<{ success: boolean } | undefined>((resolve) => {
+      const ack = await new Promise<ChatRpcJoinAck | undefined>((resolve) => {
         const ackTimeoutTimer = setTimeout(() => {
           resolve(undefined);
         }, ChatRpcSocketService.joinAckTimeout);
 
-        socket.emit('join', { chatId }, (response: { success: boolean }) => {
+        const joinMessage: ChatRpcJoinMessage = { chatId, rpcProtocolVersion: chatRpcProtocolVersion };
+        socket.emit('join', joinMessage, (response: ChatRpcJoinAck) => {
           clearTimeout(ackTimeoutTimer);
           resolve(response);
         });
       });
 
       if (ack?.success) {
+        return;
+      }
+
+      if (ack?.code === chatRpcProtocolErrorCode.protocolVersionMismatch) {
+        this.isProtocolVersionMismatch = true;
+        this.setStatus('error', ack.message ?? 'Chat RPC protocol changed. Reload this page to reconnect.');
+        socket.disconnect();
         return;
       }
 

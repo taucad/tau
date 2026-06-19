@@ -34,9 +34,14 @@ yarn add @taucad/runtime
 `@taucad/runtime` uses Web Workers for kernel isolation. Vite handles worker URLs natively via `new URL(..., import.meta.url)`:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 ```
 
 ### Node.js
@@ -47,13 +52,17 @@ For server-side usage, workers run as Node.js worker threads. Use `fromNodeFs` f
 import { createRuntimeClient } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { replicad } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
 
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromNodeFs('/path/to/project') }),
+const runtime = defineRuntime({
   kernels: [replicad()],
   bundlers: [esbuild()],
+});
+
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromNodeFs('/path/to/project') }),
 });
 ```
 
@@ -63,7 +72,8 @@ The package exposes multiple subpath imports for tree-shaking:
 
 | Import Path                            | Contents                                                                                                       |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `@taucad/runtime`                      | Client, presets, `fromMemoryFs`, `fromFsLike`, plugin factories, error types, core types                       |
+| `@taucad/runtime`                      | Client, plugin factories, error types, core types                                                              |
+| `@taucad/runtime/presets`              | Built-in runtime presets                                                                                       |
 | `@taucad/runtime/kernels`              | Kernel factories (`replicad`, `opencascade`, `manifold`, `jscad`, `zoo`, `tau`)                                |
 | `@taucad/openscad`                     | OpenSCAD kernel (separate package, GPL-2.0-or-later — install with `pnpm add @taucad/openscad` to opt in)      |
 | `@taucad/runtime/kernel`               | Kernel-author entry (`defineKernel`, helpers, schemas) for building out-of-tree kernels                        |
@@ -73,7 +83,7 @@ The package exposes multiple subpath imports for tree-shaking:
 | `@taucad/runtime/transport/in-process` | Same-isolate transport (`inProcessTransport`) — cross-environment                                              |
 | `@taucad/runtime/transport/web`        | Browser-only transport (`webWorkerTransport`) — DOM `Worker` host                                              |
 | `@taucad/runtime/transport/node`       | Node-only transport (`nodeWorkerTransport`) — gated so browser bundles don't externalize `node:worker_threads` |
-| `@taucad/runtime/filesystem`           | `fromMemoryFs`, `fromFsLike`, `fromChannelFs`, `fromBrowserFs`                                                 |
+| `@taucad/runtime/filesystem`           | `fromMemoryFs`, `fromFsLike`, `fromFileSystemBridge`, `fromBrowserFs`                                          |
 | `@taucad/runtime/filesystem/node`      | `fromNodeFs` (Node-only)                                                                                       |
 | `@taucad/runtime/filesystem/browser`   | Browser File System Access helpers where split from the main `filesystem` entry                                |
 | `@taucad/runtime/types`                | All TypeScript type exports                                                                                    |
@@ -82,7 +92,7 @@ The package exposes multiple subpath imports for tree-shaking:
 | `@taucad/runtime/worker/node`          | Node worker entry / bootstrap                                                                                  |
 | `@taucad/runtime/worker-internals`     | `KernelRuntimeWorker` ([worker model](../concepts/worker-model))                                               |
 
-`fromMemoryFs` and `fromFsLike` are available from both the main `@taucad/runtime` entry and `@taucad/runtime/filesystem`. `fromNodeFs` is only available from `@taucad/runtime/filesystem/node` because it depends on Node.js APIs; `fromBrowserFs` is only available from `@taucad/runtime/filesystem/browser` because it depends on the browser-only File System Access API.
+`fromMemoryFs` and `fromFsLike` are available from `@taucad/runtime/filesystem`. `fromNodeFs` is only available from `@taucad/runtime/filesystem/node` because it depends on Node.js APIs; `fromBrowserFs` is only available from `@taucad/runtime/filesystem/browser` because it depends on the browser-only File System Access API.
 
 ## What's Next
 

@@ -15,6 +15,7 @@ import { ChatTextareaMobileImages } from '#components/chat/chat-textarea-mobile-
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import { focusTrapAttribute } from '#components/chat/chat-textarea-types.js';
 import type { ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
+import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '#components/ui/drawer.js';
 import { Command, CommandGroup, CommandItem, CommandList } from '#components/ui/command.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
@@ -67,6 +68,7 @@ type ChatTextareaMobileProperties = {
   readonly handleDragOver: (event: React.DragEvent) => void;
   readonly handleDragLeave: () => void;
   readonly handleDrop: (event: React.DragEvent) => Promise<void>;
+  readonly handlePaste: (event: ClipboardPasteEvent) => boolean;
   readonly handleFileSelect: () => void;
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   readonly handleTextChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
@@ -141,6 +143,7 @@ export const ChatTextareaMobile = memo(function ({
   handleDragOver,
   handleDragLeave,
   handleDrop,
+  handlePaste,
   handleFileSelect,
   handleFileChange,
   handleTextChange,
@@ -330,7 +333,7 @@ export const ChatTextareaMobile = memo(function ({
 
         {/* Textarea area */}
         <div
-          className={cn('flex flex-1 flex-col overflow-auto')}
+          className={cn('flex min-w-0 flex-1 flex-col overflow-auto')}
           onClick={(event) => {
             if (event.target !== textareaReference.current) {
               focusInput();
@@ -375,6 +378,7 @@ export const ChatTextareaMobile = memo(function ({
               disabled={isSubmitting}
               onChange={handleTextChange}
               onKeyDown={handleTextareaKeyDown}
+              onPaste={handlePaste}
             />
           </div>
         </div>

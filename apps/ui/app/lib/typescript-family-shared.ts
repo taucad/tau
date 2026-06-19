@@ -47,6 +47,93 @@ async function waitForProxy(fileManagerRef: FileManagerRef): Promise<FileManager
   });
 }
 
+async function readTextFile(proxy: FileManagerProxy, path: string): Promise<string | undefined> {
+  try {
+    const bytes = await proxy.readFile(path);
+    return typeof bytes === 'string' ? bytes : decoder.decode(bytes);
+  } catch {
+    return undefined;
+  }
+}
+
+async function collectDeclarationFiles(
+  proxy: FileManagerProxy,
+  directory: string,
+  packageRoot: string,
+): Promise<Array<{ relativePath: string; content: string }>> {
+  let entries: readonly string[];
+  try {
+    entries = await proxy.readdir(directory);
+  } catch {
+    return [];
+  }
+
+  const collected = await Promise.all(
+    entries.map(async (entry) => {
+      const path = `${directory}/${entry}`;
+      if (entry.endsWith('.d.ts')) {
+        const content = await readTextFile(proxy, path);
+        return content === undefined
+          ? []
+          : [
+              {
+                relativePath: path.slice(packageRoot.length + 1),
+                content,
+              },
+            ];
+      }
+      return collectDeclarationFiles(proxy, path, packageRoot);
+    }),
+  );
+
+  return collected.flat();
+}
+
+async function readStaticTypeDefinitions(
+  proxy: FileManagerProxy,
+  packageName: string,
+): Promise<StaticTypeDefinition[]> {
+  const packageRoot = `/node_modules/${packageName}`;
+  const packageJsonContent = await readTextFile(proxy, `${packageRoot}/package.json`);
+  const declarationFiles = await collectDeclarationFiles(proxy, packageRoot, packageRoot);
+
+  if (declarationFiles.length === 0) {
+    const content = await readTextFile(proxy, `${packageRoot}/index.d.ts`);
+    return content === undefined
+      ? []
+      : [
+          {
+            packageName,
+            content,
+            prewrapped: true,
+            packageJsonContent,
+          },
+        ];
+  }
+
+  return declarationFiles.map((file) => ({
+    packageName,
+    content: file.content,
+    prewrapped: true,
+    filePath: `file://${packageRoot}/${file.relativePath}`,
+    ...(file.relativePath === 'index.d.ts' ? { packageJsonContent } : {}),
+  }));
+}
+
+async function loadScopedStaticTypes(proxy: FileManagerProxy, scopeName: string): Promise<StaticTypeDefinition[]> {
+  let packageNames: readonly string[];
+  try {
+    packageNames = await proxy.readdir(`/node_modules/${scopeName}`);
+  } catch {
+    return [];
+  }
+
+  const definitions = await Promise.all(
+    packageNames.map((packageName) => readStaticTypeDefinitions(proxy, `${scopeName}/${packageName}`)),
+  );
+  return definitions.flat();
+}
+
 /**
  * Read kernel static type definitions from the FM worker's `/node_modules`
  * mount. The mount is populated eagerly during FM worker init (see
@@ -70,18 +157,15 @@ export async function loadKernelStaticTypesFromMount(
   }
 
   const definitions = await Promise.all(
-    packageNames.map(async (packageName): Promise<StaticTypeDefinition | undefined> => {
-      try {
-        const bytes = await proxy.readFile(`/node_modules/${packageName}/index.d.ts`);
-        const content = typeof bytes === 'string' ? bytes : decoder.decode(bytes);
-        return { packageName, content, prewrapped: true };
-      } catch {
-        return undefined;
+    packageNames.map(async (packageName): Promise<StaticTypeDefinition[]> => {
+      if (packageName.startsWith('@')) {
+        return loadScopedStaticTypes(proxy, packageName);
       }
+      return readStaticTypeDefinitions(proxy, packageName);
     }),
   );
 
-  return definitions.filter((definition): definition is StaticTypeDefinition => definition !== undefined);
+  return definitions.flat();
 }
 
 /**

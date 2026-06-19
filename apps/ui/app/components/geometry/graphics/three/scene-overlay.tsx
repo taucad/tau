@@ -31,11 +31,24 @@ const isRenderableMaterialHost = (object: THREE.Object3D): object is RenderableO
   );
 };
 
+function syncDepthOnlyCloneState(source: THREE.Material, clone: THREE.Material): void {
+  clone.colorWrite = false;
+  clone.transparent = false;
+  clone.depthWrite = true;
+  clone.depthTest = true;
+  clone.visible = source.visible;
+  clone.clippingPlanes = source.clippingPlanes ?? null;
+  clone.clipIntersection = source.clipIntersection;
+  clone.clipShadows = source.clipShadows;
+}
+
 /**
  * Cache of `colorWrite=false` clones keyed by the source material so the WebGPU
  * pipeline-cache (`stageVertex.id`, `stageFragment.id`, geometry signature) stays hot across
- * frames. We additionally hook the source material's `dispose` event so clones are released when
- * the source is, preventing GPU-resource leaks on hot-reload / route transitions.
+ * frames. Dynamic source state that affects depth ownership is synchronized on every use; WebGL
+ * section clipping is material-local, so stale cached clones would otherwise write depth for
+ * clipped-away geometry. We additionally hook the source material's `dispose` event so clones are
+ * released when the source is, preventing GPU-resource leaks on hot-reload / route transitions.
  */
 function makeDepthOnlyCloneCache(): (source: THREE.Material) => THREE.Material {
   const cloneBySource = new WeakMap<THREE.Material, THREE.Material>();
@@ -43,13 +56,11 @@ function makeDepthOnlyCloneCache(): (source: THREE.Material) => THREE.Material {
   return (source: THREE.Material): THREE.Material => {
     const cached = cloneBySource.get(source);
     if (cached !== undefined) {
+      syncDepthOnlyCloneState(source, cached);
       return cached;
     }
     const clone = source.clone();
-    clone.colorWrite = false;
-    clone.transparent = false;
-    clone.depthWrite = true;
-    clone.depthTest = true;
+    syncDepthOnlyCloneState(source, clone);
     const onSourceDispose = (): void => {
       clone.dispose();
       cloneBySource.delete(source);

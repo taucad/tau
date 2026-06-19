@@ -260,6 +260,7 @@ describe('ChatConverter', () => {
 
   it('should render format grid with all route formats', () => {
     render(<ChatConverter isExpanded />);
+    expect(screen.getAllByText(/^(BREP|Mesh)$/).map((heading) => heading.textContent)).toEqual(['BREP', 'Mesh']);
     expect(screen.getByRole('button', { name: /glb/i })).toBeDefined();
     expect(screen.getByRole('button', { name: /gltf/i })).toBeDefined();
     expect(screen.getByRole('button', { name: /stl/i })).toBeDefined();

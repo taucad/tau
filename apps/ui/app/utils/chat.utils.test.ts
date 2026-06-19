@@ -300,11 +300,11 @@ describe('serializeMessage', () => {
           toolCallId: 'c1',
           state: 'output-available',
           input: { targetFile: 'readme.md' },
-          output: { content: 'Hello', totalLines: 1, startLine: 1 },
+          output: { content: 'Hello', totalLines: 1, startLine: 1, size: 5, contentKind: 'text' },
         },
       ]);
       expect(serializeMessage(message)).toBe(
-        '<tool_call name="read_file">\ntargetFile: readme.md\n</tool_call>\n<tool_result>\nLine 1:\n```\nHello\n```\n</tool_result>',
+        '<tool_call name="read_file">\ntargetFile: readme.md\n</tool_call>\n<tool_result>\nL1-L1\n```\nHello\n```\n</tool_result>',
       );
     });
 
@@ -323,6 +323,34 @@ describe('serializeMessage', () => {
       );
     });
 
+    it('serializes tool-use_skill without dumping the raw SKILL.md body', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-use_skill',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { skillName: 'woodworking', reason: 'Need joinery guidance' },
+          output: {
+            skillName: 'woodworking',
+            resourceUri: 'file:.agents/skills/woodworking/SKILL.md',
+            skillPath: '.agents/skills/woodworking/SKILL.md',
+            baseDirectory: '.agents/skills/woodworking',
+            source: 'user',
+            fingerprint: 'woodhash',
+            frontmatter: {},
+            content: '# Full Woodworking Skill Body',
+            supportingFiles: [],
+          },
+        },
+      ]);
+
+      const serialized = serializeMessage(message);
+      expect(serialized).toBe(
+        '<tool_call name="use_skill">\nskillName: woodworking\nreason: Need joinery guidance\n</tool_call>\n<tool_result>\nActivated skill: woodworking\npath: .agents/skills/woodworking/SKILL.md\nresource: file:.agents/skills/woodworking/SKILL.md\nsource: user\nfingerprint: woodhash\n</tool_result>',
+      );
+      expect(serialized).not.toContain('Full Woodworking Skill Body');
+    });
+
     it('serializes tool-list_directory output-available', () => {
       const message = baseMessage([
         {
@@ -334,13 +362,36 @@ describe('serializeMessage', () => {
             path: '/',
             entries: [
               { name: 'src', type: 'dir', size: 0 },
-              { name: 'file.txt', type: 'file', size: 10 },
+              { name: 'file.txt', type: 'file', size: 10, contentKind: 'text', lineCount: 1 },
             ],
           },
         },
       ]);
       expect(serializeMessage(message)).toBe(
-        '<tool_call name="list_directory">\npath: /\n</tool_call>\n<tool_result>\nPath: /\n  [dir] src\n   file.txt\n</tool_result>',
+        '<tool_call name="list_directory">\npath: /\n</tool_call>\n<tool_result>\nPath: /\n  [dir] src\n   file.txt (1 line, 10B)\n</tool_result>',
+      );
+    });
+
+    it('serializes tool-glob_search output-available with enriched entries', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-glob_search',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { pattern: '**/*' },
+          output: {
+            files: ['src/main.ts', 'preview.glb'],
+            entries: [
+              { path: 'src/main.ts', size: 4096, contentKind: 'text', lineCount: 142 },
+              { path: 'preview.glb', size: 1_363_149, contentKind: 'binary' },
+            ],
+            totalFiles: 2,
+          },
+        },
+      ]);
+
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="glob_search">\npattern: **/*\n</tool_call>\n<tool_result>\nTotal: 2\nsrc/main.ts (142 lines, 4KB)\npreview.glb (binary, 1.3MB)\n</tool_result>',
       );
     });
 
@@ -695,6 +746,38 @@ describe('finalizeInterruptedToolParts', () => {
       message: 'Interrupted by user.',
       toolCallId: 'tc_no_ledger',
       toolName: 'create_file',
+    });
+  });
+
+  it('finalizes dynamic-tool input-available parts with their dynamic toolName', () => {
+    const messages: MyUIMessage[] = [
+      {
+        id: 'a',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'dynamic-tool',
+            toolName: 'experimental_tool',
+            toolCallId: 'tc_dynamic',
+            state: 'input-available',
+            input: { draft: true },
+          },
+        ],
+        metadata: { createdAt: 2 },
+      },
+    ];
+
+    const next = finalizeInterruptedToolParts(messages, undefined, 'user_stop');
+
+    expect(next).not.toBe(messages);
+    const part = next.at(-1)!.parts[0] as { state: string; errorText: string; input: unknown };
+    expect(part.state).toBe('output-error');
+    expect(part.input).toEqual({ draft: true });
+    expect(JSON.parse(part.errorText)).toEqual({
+      errorCode: 'USER_INTERRUPTED',
+      message: 'Interrupted by user.',
+      toolCallId: 'tc_dynamic',
+      toolName: 'experimental_tool',
     });
   });
 });

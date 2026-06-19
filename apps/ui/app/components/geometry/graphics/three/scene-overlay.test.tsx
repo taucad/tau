@@ -8,6 +8,10 @@ type FakeMaterial = {
   transparent: boolean;
   depthWrite: boolean;
   depthTest: boolean;
+  visible: boolean;
+  clippingPlanes: readonly unknown[] | undefined;
+  clipIntersection: boolean;
+  clipShadows: boolean;
   clone: () => FakeMaterial;
   dispose: () => void;
   addEventListener: (event: string, callback: () => void) => void;
@@ -31,12 +35,20 @@ const createFakeMaterial = (): FakeMaterial => {
     transparent: false,
     depthWrite: true,
     depthTest: true,
+    visible: true,
+    clippingPlanes: undefined,
+    clipIntersection: false,
+    clipShadows: false,
     clone: () => {
       const cloned = createFakeMaterial();
       cloned.colorWrite = self.colorWrite;
       cloned.transparent = self.transparent;
       cloned.depthWrite = self.depthWrite;
       cloned.depthTest = self.depthTest;
+      cloned.visible = self.visible;
+      cloned.clippingPlanes = self.clippingPlanes;
+      cloned.clipIntersection = self.clipIntersection;
+      cloned.clipShadows = self.clipShadows;
       return cloned;
     },
     dispose: vi.fn(),
@@ -264,6 +276,160 @@ describe('SceneOverlay (priority-2 traverse + clone-swap depth pre-pass + overla
     expect(firstFrameClone).toBeDefined();
     expect(secondFrameClone).toBeDefined();
     expect(secondFrameClone).toBe(firstFrameClone);
+  });
+
+  it('resynchronizes a cached depth-only clone when WebGL section clipping mutates the source material later', async () => {
+    const { SceneOverlay } = await import('#components/geometry/graphics/three/scene-overlay.js');
+
+    render(<SceneOverlay overlayActive>child</SceneOverlay>);
+
+    const sourceMaterial = createFakeMaterial();
+    const mesh: FakeMesh = { isMesh: true, material: sourceMaterial };
+    hoistedMocks.traverseSpy.mockImplementation((visitor: (object: unknown) => void) => {
+      visitor(mesh);
+    });
+
+    let cachedClone: FakeMaterial | undefined;
+    hoistedMocks.gl.render.mockImplementationOnce(() => {
+      cachedClone = mesh.material as FakeMaterial;
+    });
+    tickPriorityTwoFrame();
+
+    const sectionPlane = { plane: 'yz' };
+    sourceMaterial.clippingPlanes = [sectionPlane];
+    sourceMaterial.clipIntersection = true;
+    sourceMaterial.clipShadows = true;
+
+    let clippedFrameClone: FakeMaterial | undefined;
+    hoistedMocks.gl.render.mockClear();
+    hoistedMocks.gl.render.mockImplementationOnce(() => {
+      clippedFrameClone = mesh.material as FakeMaterial;
+    });
+    tickPriorityTwoFrame();
+
+    expect(clippedFrameClone).toBe(cachedClone);
+    expect(clippedFrameClone?.clippingPlanes).toBe(sourceMaterial.clippingPlanes);
+    expect(clippedFrameClone?.clipIntersection).toBe(true);
+    expect(clippedFrameClone?.clipShadows).toBe(true);
+    expect(clippedFrameClone?.colorWrite).toBe(false);
+    expect(clippedFrameClone?.transparent).toBe(false);
+    expect(clippedFrameClone?.depthWrite).toBe(true);
+    expect(clippedFrameClone?.depthTest).toBe(true);
+  });
+
+  it('resynchronizes cached depth-only clones for multi-material meshes', async () => {
+    const { SceneOverlay } = await import('#components/geometry/graphics/three/scene-overlay.js');
+
+    render(<SceneOverlay overlayActive>child</SceneOverlay>);
+
+    const sourceA = createFakeMaterial();
+    const sourceB = createFakeMaterial();
+    const mesh: FakeMesh = { isMesh: true, material: [sourceA, sourceB] };
+    hoistedMocks.traverseSpy.mockImplementation((visitor: (object: unknown) => void) => {
+      visitor(mesh);
+    });
+
+    let firstFrameClones: FakeMaterial[] | undefined;
+    hoistedMocks.gl.render.mockImplementationOnce(() => {
+      firstFrameClones = mesh.material as FakeMaterial[];
+    });
+    tickPriorityTwoFrame();
+
+    const sectionPlaneA = { plane: 'source-a' };
+    const sectionPlaneB = { plane: 'source-b' };
+    sourceA.clippingPlanes = [sectionPlaneA];
+    sourceA.clipIntersection = true;
+    sourceB.clippingPlanes = [sectionPlaneB];
+    sourceB.clipShadows = true;
+
+    let secondFrameClones: FakeMaterial[] | undefined;
+    hoistedMocks.gl.render.mockClear();
+    hoistedMocks.gl.render.mockImplementationOnce(() => {
+      secondFrameClones = mesh.material as FakeMaterial[];
+    });
+    tickPriorityTwoFrame();
+
+    expect(secondFrameClones?.[0]).toBe(firstFrameClones?.[0]);
+    expect(secondFrameClones?.[1]).toBe(firstFrameClones?.[1]);
+    expect(secondFrameClones?.[0]?.clippingPlanes).toBe(sourceA.clippingPlanes);
+    expect(secondFrameClones?.[0]?.clipIntersection).toBe(true);
+    expect(secondFrameClones?.[0]?.clipShadows).toBe(false);
+    expect(secondFrameClones?.[1]?.clippingPlanes).toBe(sourceB.clippingPlanes);
+    expect(secondFrameClones?.[1]?.clipIntersection).toBe(false);
+    expect(secondFrameClones?.[1]?.clipShadows).toBe(true);
+  });
+
+  it('clears stale clipping state on cached depth-only clones when WebGL section view disables mesh clipping', async () => {
+    const { SceneOverlay } = await import('#components/geometry/graphics/three/scene-overlay.js');
+
+    render(<SceneOverlay overlayActive>child</SceneOverlay>);
+
+    const sourceMaterial = createFakeMaterial();
+    const sectionPlane = { plane: 'yz' };
+    sourceMaterial.clippingPlanes = [sectionPlane];
+    sourceMaterial.clipIntersection = true;
+    sourceMaterial.clipShadows = true;
+
+    const mesh: FakeMesh = { isMesh: true, material: sourceMaterial };
+    hoistedMocks.traverseSpy.mockImplementation((visitor: (object: unknown) => void) => {
+      visitor(mesh);
+    });
+
+    let clippedClone: FakeMaterial | undefined;
+    hoistedMocks.gl.render.mockImplementationOnce(() => {
+      clippedClone = mesh.material as FakeMaterial;
+    });
+    tickPriorityTwoFrame();
+
+    sourceMaterial.clippingPlanes = [];
+    sourceMaterial.clipIntersection = false;
+    sourceMaterial.clipShadows = false;
+
+    let clearedClone: FakeMaterial | undefined;
+    hoistedMocks.gl.render.mockClear();
+    hoistedMocks.gl.render.mockImplementationOnce(() => {
+      clearedClone = mesh.material as FakeMaterial;
+    });
+    tickPriorityTwoFrame();
+
+    expect(clearedClone).toBe(clippedClone);
+    expect(clearedClone?.clippingPlanes).toEqual([]);
+    expect(clearedClone?.clipIntersection).toBe(false);
+    expect(clearedClone?.clipShadows).toBe(false);
+    expect(clearedClone?.colorWrite).toBe(false);
+    expect(clearedClone?.depthWrite).toBe(true);
+  });
+
+  it('resynchronizes cached depth-only clone visibility without reallocating the clone', async () => {
+    const { SceneOverlay } = await import('#components/geometry/graphics/three/scene-overlay.js');
+
+    render(<SceneOverlay overlayActive>child</SceneOverlay>);
+
+    const sourceMaterial = createFakeMaterial();
+    const mesh: FakeMesh = { isMesh: true, material: sourceMaterial };
+    hoistedMocks.traverseSpy.mockImplementation((visitor: (object: unknown) => void) => {
+      visitor(mesh);
+    });
+
+    let firstFrameClone: FakeMaterial | undefined;
+    hoistedMocks.gl.render.mockImplementationOnce(() => {
+      firstFrameClone = mesh.material as FakeMaterial;
+    });
+    tickPriorityTwoFrame();
+
+    sourceMaterial.visible = false;
+
+    let secondFrameClone: FakeMaterial | undefined;
+    hoistedMocks.gl.render.mockClear();
+    hoistedMocks.gl.render.mockImplementationOnce(() => {
+      secondFrameClone = mesh.material as FakeMaterial;
+    });
+    tickPriorityTwoFrame();
+
+    expect(secondFrameClone).toBe(firstFrameClone);
+    expect(secondFrameClone?.visible).toBe(false);
+    expect(secondFrameClone?.colorWrite).toBe(false);
+    expect(secondFrameClone?.transparent).toBe(false);
   });
 
   it('skips non-renderable objects (no material / not isMesh) during traverse', async () => {

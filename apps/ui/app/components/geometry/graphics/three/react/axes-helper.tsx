@@ -8,7 +8,7 @@ import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials
 import { axesHelperColors, axesHelperOpacity } from '#components/geometry/graphics/three/overlay-colors.constants.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import { sceneTag, sceneTagData } from '#components/geometry/graphics/three/utils/scene-tags.js';
-import { topMostRenderOrder } from '#components/geometry/graphics/three/utils/render-order.utils.js';
+import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
 
 /** Local +X axis used to orient pick hitboxes along arbitrary axis rays. */
 const canonicalAxisDirection = new THREE.Vector3(1, 0, 0);
@@ -211,14 +211,14 @@ export function AxesWebGpuFatLine({
     negativeGeometry.setPositions([negativeEnd.x, negativeEnd.y, negativeEnd.z, 0, 0, 0]);
 
     const positiveLine = new Line2WebGpu(positiveGeometry, material);
-    positiveLine.renderOrder = topMostRenderOrder;
+    positiveLine.renderOrder = viewportRenderTiers.viewportGizmo;
 
     const negativeLine = new Line2WebGpu(negativeGeometry, material);
-    negativeLine.renderOrder = topMostRenderOrder;
+    negativeLine.renderOrder = viewportRenderTiers.viewportGizmo;
     negativeLine.visible = false;
 
     const group = new THREE.Group();
-    group.renderOrder = topMostRenderOrder;
+    group.renderOrder = viewportRenderTiers.viewportGizmo;
     group.add(positiveLine);
     group.add(negativeLine);
 
@@ -375,7 +375,7 @@ export function AxesHelper({
                 lineWidth={isHovered ? hoverThickness : thickness}
                 opacity={axesHelperOpacity}
                 points={isHovered ? [axis.negativeEnd, axis.positiveEnd] : [axisOrigin, axis.positiveEnd]}
-                renderOrder={topMostRenderOrder}
+                renderOrder={viewportRenderTiers.viewportGizmo}
                 transparent
               />
             )}
@@ -384,7 +384,7 @@ export function AxesHelper({
               midpoint={midpoint}
               quaternion={axis.pickQuaternion}
               radial={pickRadial}
-              renderOrder={topMostRenderOrder}
+              renderOrder={viewportRenderTiers.viewportGizmo}
               onPointerOut={() => {
                 setHoveredAxis(undefined);
               }}

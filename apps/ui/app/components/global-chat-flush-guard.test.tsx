@@ -10,6 +10,8 @@ const harness = vi.hoisted(() => ({
     patchChat: vi.fn().mockResolvedValue(undefined),
     setMessageEdit: vi.fn().mockResolvedValue(undefined),
     clearMessageEdit: vi.fn().mockResolvedValue(undefined),
+    consumeChatStartupRequest: vi.fn().mockResolvedValue(undefined),
+    commitCancelledDraftRestore: vi.fn().mockResolvedValue(undefined),
   },
 }));
 

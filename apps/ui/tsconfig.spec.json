@@ -9,6 +9,7 @@
     "paths": {
       "package.json": ["./package.json"],
       "#*": ["./app/*"],
+      "#scripts/*": ["./scripts/*"],
       "fumadocs-mdx:collections/*": ["./.source/*"]
     },
     "outDir": "./out-tsc/spec",
@@ -32,6 +33,7 @@
     "server.ts",
     "server.test.ts",
     "scripts/**/*.ts",
+    "scripts/**/*.mts",
     "vite-environment.d.ts",
     ".source/**/*", // Fumadocs collections
     "package.json"

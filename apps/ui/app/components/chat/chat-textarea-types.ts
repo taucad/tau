@@ -7,6 +7,8 @@ import type { ResolvedModel } from '#hooks/use-models.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { toast } from '#components/ui/sonner.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
+import { handleClipboardImagePaste, readFileAsDataUrl } from '#components/chat/chat-paste-handler.js';
+import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 
 /**
  * Payload the chat textarea hands to its host's `onSubmit` callback.
@@ -110,30 +112,6 @@ const parseFileDragPaths = (raw: string): string[] => {
   return [];
 };
 
-/**
- * Reads a file as a data URL using FileReader.
- * Returns a Promise that resolves with the data URL string.
- */
-const readFileAsDataUrl = async (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener('load', (event) => {
-      const result = event.target?.result;
-      if (typeof result === 'string' && result !== '') {
-        resolve(result);
-      } else {
-        reject(new Error('Invalid file read result'));
-      }
-    });
-
-    reader.addEventListener('error', () => {
-      reject(new Error('Failed to read file'));
-    });
-
-    reader.readAsDataURL(file);
-  });
-};
-
 export type ChatTextareaHandle = {
   focus: () => void;
 };
@@ -216,6 +194,7 @@ export function useChatTextareaLogic({
   handleDragOver: (event: React.DragEvent) => void;
   handleDragLeave: () => void;
   handleDrop: (event: React.DragEvent) => Promise<void>;
+  handlePaste: (event: ClipboardPasteEvent) => boolean;
   handleFileSelect: () => void;
   handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   handleTextChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
@@ -495,39 +474,15 @@ export function useChatTextareaLogic({
   // Expose focus method via ref
   useImperativeHandle(ref, () => ({ focus: focusInput }), [focusInput]);
 
-  /**
-   * Handle paste event to add images to the chat
-   */
   const handlePaste = useCallback(
-    async (event: ClipboardEvent): Promise<void> => {
-      // Check if the textarea is the active element or its ancestor contains focus
-      const isTextareaFocused =
-        document.activeElement === textareaReference.current ||
-        textareaReference.current?.contains(document.activeElement);
-
-      if (!isTextareaFocused) {
-        return;
-      }
-
-      const items = event.clipboardData?.items;
-      if (!items) {
-        return;
-      }
-
-      for (const item of items) {
-        if (item.type.startsWith('image/')) {
-          const file = item.getAsFile();
-          if (file) {
-            try {
-              // oxlint-disable-next-line no-await-in-loop -- reading files sequentially
-              const dataUrl = await readFileAsDataUrl(file);
-              addImage(dataUrl);
-            } catch {
-              toast.error('Failed to read image');
-            }
-          }
-        }
-      }
+    (event: ClipboardPasteEvent): boolean => {
+      return handleClipboardImagePaste({
+        event,
+        onImage: addImage,
+        onReadError: () => {
+          toast.error('Failed to read image');
+        },
+      });
     },
     [addImage],
   );
@@ -659,16 +614,6 @@ export function useChatTextareaLogic({
   }, [enableAutoFocus, focusInput]);
 
   useEffect(() => {
-    if (!textareaReference.current) {
-      return;
-    }
-    document.addEventListener('paste', handlePaste);
-    return () => {
-      document.removeEventListener('paste', handlePaste);
-    };
-  }, [handlePaste]);
-
-  useEffect(() => {
     // Handle clicking outside the context menu to close it
     const handleClickOutside = (event: MouseEvent): void => {
       if (showContextMenu && textareaReference.current && !textareaReference.current.contains(event.target as Node)) {
@@ -748,6 +693,7 @@ export function useChatTextareaLogic({
     handleDragOver,
     handleDragLeave,
     handleDrop,
+    handlePaste,
     handleFileSelect,
     handleFileChange,
     handleTextChange,

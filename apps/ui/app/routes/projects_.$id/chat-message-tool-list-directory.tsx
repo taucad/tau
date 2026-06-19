@@ -17,6 +17,7 @@ import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { FileLink } from '#components/files/file-link.js';
 import { DirectoryLink } from '#components/files/directory-link.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
+import { formatToolFileMetadata } from '#routes/projects_.$id/chat-tool-file-metadata.js';
 
 /**
  * Joins a parent directory path with a basename. Tolerates root-listing
@@ -107,6 +108,7 @@ export function ChatMessageToolListDirectory({
                       iconNode={<FileExtensionIcon filename={entry.name} className='mt-0.5 size-3 shrink-0' />}
                     >
                       <FileLink path={childPath}>{entry.name}</FileLink>
+                      <span className='ml-1 text-muted-foreground/70'> ({formatToolFileMetadata(entry)})</span>
                     </ChatToolCardListItem>
                   );
                 })

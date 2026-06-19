@@ -7,7 +7,7 @@
  * ResourceQueue (VS Code pattern); writes to different files run in parallel.
  */
 
-import { exposeFileSystem, workerReadyMessageType } from '@taucad/runtime/transport-internals';
+import { exposeFileSystem, workerReadyMessageType } from '@taucad/fs-bridge';
 
 import { populateBundledTypesMount } from '@taucad/filesystem/bundled-types-mount';
 import type { BundledTypesMountEntry } from '@taucad/filesystem/bundled-types-mount';
@@ -22,6 +22,7 @@ import {
   WorkspaceFileService,
 } from '@taucad/filesystem';
 import { SharedPool } from '@taucad/memory';
+import { authoringTypeMaps } from '@taucad/api-extractor/authoring-types';
 import { kernelTypeMaps } from '@taucad/api-extractor/kernel-types';
 import type { SyncFsWorkspaceAdapter } from '@taucad/lsp-fs/sync';
 import { attachSyncFsServer } from '@taucad/lsp-fs/sync';
@@ -127,7 +128,7 @@ async function createNodeModulesMount(): Promise<void> {
 }
 
 function buildBundledTypesPayload(): readonly BundledTypesMountEntry[] {
-  return kernelTypeMaps.flatMap((typesMap) =>
+  const kernelTypes = kernelTypeMaps.flatMap((typesMap) =>
     Object.entries(typesMap).map(
       (entry): BundledTypesMountEntry => ({
         packageName: entry[0],
@@ -136,6 +137,19 @@ function buildBundledTypesPayload(): readonly BundledTypesMountEntry[] {
       }),
     ),
   );
+  const authoringTypes = authoringTypeMaps.flatMap((typesMap) =>
+    Object.entries(typesMap).map(
+      ([packageName, entry]): BundledTypesMountEntry => ({
+        packageName,
+        content: entry.content,
+        files: entry.files,
+        packageJson: entry.packageJson,
+        prewrapped: true,
+      }),
+    ),
+  );
+
+  return [...kernelTypes, ...authoringTypes];
 }
 
 const fileService = new WorkspaceFileService({

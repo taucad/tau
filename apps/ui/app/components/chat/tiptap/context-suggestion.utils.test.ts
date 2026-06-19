@@ -17,7 +17,45 @@ import {
 // ── Factories ──────────────────────────────────────────────────────────
 
 function createFileEntry(overrides: Partial<FileEntry> & { path: string; name: string }): FileEntry {
-  return { type: 'file', size: 100, mtimeMs: 0, isLoaded: true, ...overrides };
+  const size = overrides.size ?? 100;
+  const mtimeMs = overrides.mtimeMs ?? 0;
+  const isLoaded = overrides.isLoaded ?? true;
+
+  if (overrides.type === 'dir') {
+    return {
+      path: overrides.path,
+      name: overrides.name,
+      type: 'dir',
+      size,
+      mtimeMs,
+      isLoaded,
+      isDirectoryResolved: overrides.isDirectoryResolved,
+    };
+  }
+
+  const fileOverrides = overrides as Partial<Extract<FileEntry, { type: 'file' }>> & { path: string; name: string };
+  if (fileOverrides.contentKind === 'binary') {
+    return {
+      path: fileOverrides.path,
+      name: fileOverrides.name,
+      type: 'file',
+      size,
+      mtimeMs,
+      isLoaded,
+      contentKind: 'binary',
+    };
+  }
+
+  return {
+    path: fileOverrides.path,
+    name: fileOverrides.name,
+    type: 'file',
+    size,
+    mtimeMs,
+    isLoaded,
+    contentKind: 'text',
+    lineCount: fileOverrides.lineCount ?? 1,
+  };
 }
 
 function createChat(overrides: Partial<Chat> & { id: string; name: string }): Chat {

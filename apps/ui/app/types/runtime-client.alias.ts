@@ -7,21 +7,23 @@
  * how the app accepts any plugin configuration configured at runtime.
  */
 
-import type { KernelPlugin, RuntimeClient, RuntimeClientOptions, TranscoderPlugin } from '@taucad/runtime';
+import type { RuntimeClient } from '@taucad/runtime';
+import type { RuntimeClientOptionsWithTransport } from '@taucad/runtime/client';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
+import type { runtime } from '#runtime/ui-runtime.definition.js';
+import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 
 /**
  * The runtime client type used throughout the UI app.
  *
- * Use this alias instead of inlining `RuntimeClient<KernelPlugin[], TranscoderPlugin[]>`
- * so that downstream consumers have a single source of truth and can be
- * narrowed in one place if/when the UI standardizes on a fixed plugin set.
+ * Use this alias instead of inlining the runtime projection so that
+ * downstream consumers have a single source of truth.
  */
-// oxlint-disable-next-line @typescript-eslint/no-unnecessary-type-arguments -- intentional wide-default `RuntimeClient<KernelPlugin[], TranscoderPlugin[]>` form
-export type AppRuntimeClient = RuntimeClient<KernelPlugin[], TranscoderPlugin[]>;
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- the UI stores an intentionally erased client; runtime capabilities gate broad file-extension workflows at runtime.
+export type AppRuntimeClient = RuntimeClient<any, any>;
 
 /**
- * Deferred-construction shape for {@link RuntimeClientOptions}.
+ * Deferred-construction shape for typed runtime client options.
  *
  * The web-worker transport requires the file-system bridge handle and
  * the file-content `SharedArrayBuffer` to be supplied at construction
@@ -34,7 +36,12 @@ export type AppRuntimeClient = RuntimeClient<KernelPlugin[], TranscoderPlugin[]>
 export type KernelOptionsFactory = (deps: {
   readonly fileSystem: RuntimeFileSystem;
   readonly filePoolBuffer?: SharedArrayBuffer;
-}) => RuntimeClientOptions;
+  readonly runtimeConfig: UiRuntimeConfigInput;
+}) => RuntimeClientOptionsWithTransport<typeof runtime>;
+
+export type PageKernelOptionsFactory = (
+  deps: Omit<Parameters<KernelOptionsFactory>[0], 'runtimeConfig'>,
+) => RuntimeClientOptionsWithTransport<typeof runtime>;
 
 /**
  * Async loader for {@link KernelOptionsFactory}.
@@ -42,4 +49,4 @@ export type KernelOptionsFactory = (deps: {
  * Invoked from `connectKernelActor` after the file-manager worker is ready so
  * `@taucad/runtime` and `kernel-worker.constants` stay off the SSR eager graph.
  */
-export type LazyKernelOptionsFactory = () => Promise<KernelOptionsFactory>;
+export type LazyKernelOptionsFactory = () => Promise<PageKernelOptionsFactory>;

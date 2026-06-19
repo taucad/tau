@@ -9,11 +9,34 @@ type RunGeoSpecTestDiagnostic = NonNullable<RunGeoSpecTestFailure['diagnostics']
 
 const fullGeoSpecTestName = (test: GeoSpecTestCase): string => [...test.suite, test.name].join(' > ');
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
+const runtimeIssueText = (issue: unknown): string | undefined => {
+  if (!isRecord(issue) || typeof issue['message'] !== 'string') {
+    return undefined;
+  }
+
+  const prefix = typeof issue['code'] === 'string' ? `Runtime issue ${issue['code']}: ` : 'Runtime issue: ';
+  return `${prefix}${issue['message']}`;
+};
+
+const nestedDiagnosticText = (diagnostic: GeometryDiagnostic): readonly string[] => {
+  const { details } = diagnostic;
+  if (!isRecord(details) || !Array.isArray(details['issues'])) {
+    return [];
+  }
+
+  return details['issues'].flatMap((issue) => {
+    const text = runtimeIssueText(issue);
+    return text ? [text] : [];
+  });
+};
+
 const diagnosticText = (diagnostics: readonly GeometryDiagnostic[] | undefined): string | undefined => {
   if (!diagnostics || diagnostics.length === 0) {
     return undefined;
   }
-  return diagnostics.map((diagnostic) => diagnostic.message).join('\n');
+  return diagnostics.flatMap((diagnostic) => [diagnostic.message, ...nestedDiagnosticText(diagnostic)]).join('\n');
 };
 
 const cloneDiagnosticVec3 = (

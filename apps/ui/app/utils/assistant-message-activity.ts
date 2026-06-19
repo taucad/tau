@@ -83,12 +83,12 @@ const partTypeCategoryMap = new Map<string, ActivityCategory>([
   ['tool-get_kernel_result', 'research'],
   ['tool-screenshot', 'research'],
   ['tool-test_model', 'research'],
+  ['tool-use_skill', 'data'],
 
   // Write tools: singletons (preserve rich per-call diff cards)
   ['tool-edit_file', 'write'],
   ['tool-create_file', 'write'],
   ['tool-delete_file', 'write'],
-  ['tool-edit_tests', 'write'],
   ['tool-export_geometry', 'write'],
 
   // Transfer tools

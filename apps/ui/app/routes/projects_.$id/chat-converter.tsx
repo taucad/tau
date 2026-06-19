@@ -39,6 +39,7 @@ import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { sortGeometryUnitEntries } from '#routes/projects_.$id/geometry-unit.utils.js';
 import type { FormatEntry } from '#routes/projects_.$id/export-formats.utils.js';
 import { deriveAvailableFormats, getFormatInfo } from '#routes/projects_.$id/export-formats.utils.js';
+import { groupExportFormatsByFidelity } from '#components/files/export-format-groups.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { widgets, templates as rjsfTemplates } from '#components/geometry/parameters/rjsf-theme.js';
 import { rjsfIdPrefix, rjsfIdSeparator } from '#components/geometry/parameters/rjsf-utils.js';
@@ -110,6 +111,10 @@ type ResolvedSchema = {
   defaults: Record<string, unknown>;
 };
 
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function resolveFormatSchema(
   format: FileExtension,
   client: AppRuntimeClient | undefined,
@@ -128,7 +133,7 @@ function resolveFormatSchema(
     return undefined;
   }
 
-  return { schema: route.schema, defaults: route.defaults };
+  return { schema: route.schema, defaults: isRecordObject(route.defaults) ? route.defaults : {} };
 }
 
 // =============================================================================
@@ -270,18 +275,17 @@ function FormatGrid({
   readonly selectedFormats: FileExtension[];
   readonly onToggle: (format: FileExtension) => void;
 }) {
-  const meshFormats = formats.filter((f) => f.fidelity === 'mesh');
-  const brepFormats = formats.filter((f) => f.fidelity === 'brep');
+  const groups = groupExportFormatsByFidelity(formats);
 
   return (
     <TooltipProvider>
       <div className='@container flex flex-col gap-3'>
         <p className='text-sm font-medium text-muted-foreground'>Select format to export</p>
-        {meshFormats.length > 0 && (
-          <div>
-            <p className='mb-1.5 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'>Mesh</p>
+        {groups.map(({ name, items }) => (
+          <div key={name}>
+            <p className='mb-1.5 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'>{name}</p>
             <div className={formatGridCols}>
-              {meshFormats.map(({ format, direct }) => (
+              {items.map(({ format, direct }) => (
                 <FormatButton
                   key={format}
                   format={format}
@@ -292,23 +296,7 @@ function FormatGrid({
               ))}
             </div>
           </div>
-        )}
-        {brepFormats.length > 0 && (
-          <div>
-            <p className='mb-1.5 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'>BREP</p>
-            <div className={formatGridCols}>
-              {brepFormats.map(({ format, direct }) => (
-                <FormatButton
-                  key={format}
-                  format={format}
-                  isDirect={direct}
-                  isSelected={selectedFormats.includes(format)}
-                  onToggle={onToggle}
-                />
-              ))}
-            </div>
-          </div>
-        )}
+        ))}
       </div>
     </TooltipProvider>
   );

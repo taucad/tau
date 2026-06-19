@@ -3,18 +3,80 @@ import type { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { TransformControls } from '#components/geometry/graphics/three/react/transform-controls-drei.js';
+import type { TransformControls as TransformControlsImpl } from '#components/geometry/graphics/three/controls/transform-controls.js';
 import { pixelsToWorldUnits } from '#components/geometry/graphics/three/utils/spatial.utils.js';
 import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
-import { FontGeometry } from '#components/geometry/graphics/three/geometries/font-geometry.js';
-import { RoundedRectangleGeometry } from '#components/geometry/graphics/three/geometries/rounded-rectangle-geometry.js';
+import {
+  createBorderedRoundedRectangleGeometry,
+  setBorderedExtrusionRegionColor,
+} from '#components/geometry/graphics/three/geometries/bordered-extrusion-geometry.js';
+import { createViewportControlSelfOccludingBodyMaterial } from '#components/geometry/graphics/three/materials/viewport-control-material.js';
+import {
+  createSelectorLabelGeometry,
+  disabledSelectorLabelRaycast,
+  getSelectorLabelAtlasMaterial,
+  isSelectorLabelAtlasLabel,
+} from '#components/geometry/graphics/three/controls/selector-label-atlas.js';
 import { adjustHexColorBrightness } from '#utils/color.utils.js';
-import { topMostRenderOrder } from '#components/geometry/graphics/three/utils/render-order.utils.js';
+import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
+import { sceneTag, sceneTagData, setSceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 
 // Module-scope scratch vectors for PlaneSelector useFrame (avoids per-frame allocations)
 // oxlint-disable-next-line unicorn-js/prevent-abbreviations -- dir refers to direction vector, not directory
 const _normalizedDir = new THREE.Vector3();
 const _baseOffset = new THREE.Vector3();
 const _depthOffset = new THREE.Vector3();
+/* oxlint-disable tau-lint/no-hardcoded-color -- Three.js section control vertex colors */
+const sectionControlCoreColor = '#ffffff';
+/* oxlint-enable tau-lint/no-hardcoded-color */
+const sectionSelectorBorderWidth = 0.06;
+const sectionSelectorLabelSurfaceGap = 0.004;
+
+export type SectionControlDepthRenderer = {
+  readonly info?: {
+    readonly frame?: number;
+    readonly render?: {
+      readonly frame?: number;
+      readonly frameCalls?: number;
+    };
+  };
+  clearDepth?: () => void;
+};
+
+const sectionControlDepthClearFrames = new WeakMap<SectionControlDepthRenderer, number>();
+
+export function getSectionControlRendererFrameId(renderer: SectionControlDepthRenderer): number | undefined {
+  const webGlFrame = renderer.info?.render?.frame;
+  if (typeof webGlFrame === 'number') {
+    return webGlFrame;
+  }
+
+  const commonFrame = renderer.info?.frame;
+  if (typeof commonFrame === 'number') {
+    return commonFrame;
+  }
+
+  return undefined;
+}
+
+export function clearSectionControlDepthOnce(renderer: SectionControlDepthRenderer): void {
+  if (typeof renderer.clearDepth !== 'function') {
+    return;
+  }
+
+  const frame = getSectionControlRendererFrameId(renderer);
+  if (typeof frame !== 'number') {
+    renderer.clearDepth();
+    return;
+  }
+
+  if (sectionControlDepthClearFrames.get(renderer) === frame) {
+    return;
+  }
+
+  renderer.clearDepth();
+  sectionControlDepthClearFrames.set(renderer, frame);
+}
 
 export type PlaneId = 'xy' | 'xz' | 'yz';
 export type PlaneSelectorId = 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy';
@@ -224,7 +286,6 @@ type PlaneSelectorProperties = {
   readonly offset: number;
   readonly naming: 'cartesian' | 'face';
   readonly isExternallyHovered?: boolean;
-  readonly textDepth: number;
   readonly labelDepth: number;
   readonly isInverse?: boolean;
   readonly upDirection: UpDirection;
@@ -241,7 +302,6 @@ function PlaneSelector({
   offset,
   naming,
   isExternallyHovered,
-  textDepth,
   labelDepth,
   isInverse = false,
   upDirection,
@@ -321,17 +381,31 @@ function PlaneSelector({
   };
 
   const [forwardPlaneName] = getLabelsForUpDirection(planeId, naming, upDirection);
+  if (!isSelectorLabelAtlasLabel(forwardPlaneName)) {
+    throw new Error(`Unsupported section view selector label: ${forwardPlaneName}`);
+  }
 
-  const frontFontGeometry = useMemo(
-    // oxlint-disable-next-line new-cap -- Three.js naming convention
-    () => FontGeometry({ text: forwardPlaneName, depth: textDepth, size: 0.2 }),
-    [forwardPlaneName, textDepth],
-  );
   const roundedRectangleGeometry = useMemo(
-    // oxlint-disable-next-line new-cap -- Three.js naming convention
-    () => RoundedRectangleGeometry({ width: 1, height: 1, radius: 0.1, smoothness: 16, depth: labelDepth }),
-    [labelDepth],
+    () =>
+      createBorderedRoundedRectangleGeometry({
+        width: 1,
+        height: 1,
+        radius: 0.1,
+        smoothness: 16,
+        depth: labelDepth,
+        borderWidth: sectionSelectorBorderWidth,
+        borderColor: color,
+        coreColor: sectionControlCoreColor,
+      }),
+    [color, labelDepth],
   );
+  const selectorBodyMaterial = useMemo(
+    () => createViewportControlSelfOccludingBodyMaterial({ matcap: matcapTexture, side: THREE.FrontSide }),
+    [matcapTexture],
+  );
+  const selectorLabelFrontGeometry = useMemo(() => createSelectorLabelGeometry(forwardPlaneName), [forwardPlaneName]);
+  const selectorLabelBackGeometry = useMemo(() => createSelectorLabelGeometry(forwardPlaneName), [forwardPlaneName]);
+  const selectorLabelMaterial = useMemo(() => getSelectorLabelAtlasMaterial(), []);
   const darkenedColor = useMemo(() => adjustHexColorBrightness(color, -0.5), [color]);
   const slightlyDarkenedColor = useMemo(() => adjustHexColorBrightness(color, -0.3), [color]);
 
@@ -373,38 +447,79 @@ function PlaneSelector({
       })();
   const displayedHover = isHovered || Boolean(isExternallyHovered);
   const actualColor = displayedHover ? darkenedColor : slightlyDarkenedColor;
+  const sectionSelectorUserData = sceneTagData(sceneTag.sectionViewHelper);
+  const selectorLabelSurfaceOffset = labelDepth / 2 + sectionSelectorLabelSurfaceGap;
+  React.useEffect(() => {
+    setBorderedExtrusionRegionColor({ geometry: roundedRectangleGeometry, region: 'border', color: actualColor });
+  }, [actualColor, roundedRectangleGeometry]);
 
   return (
-    <group ref={groupRef} renderOrder={topMostRenderOrder} position={position} rotation={rotation}>
-      <mesh onClick={handleClick} onPointerOver={handlePointerOver} onPointerOut={handlePointerOut}>
+    <group
+      ref={groupRef}
+      renderOrder={viewportRenderTiers.sectionControlBody}
+      position={position}
+      rotation={rotation}
+      userData={sectionSelectorUserData}
+      dispose={null}
+    >
+      <mesh
+        renderOrder={viewportRenderTiers.sectionControlBody}
+        userData={sectionSelectorUserData}
+        onBeforeRender={clearSectionControlDepthOnce}
+        onClick={handleClick}
+        onPointerOver={handlePointerOver}
+        onPointerOut={handlePointerOut}
+      >
         <primitive object={roundedRectangleGeometry} />
-        <meshMatcapMaterial
-          transparent
-          matcap={matcapTexture}
-          color={actualColor}
-          opacity={1}
-          side={THREE.FrontSide}
-          depthTest={false}
-          depthWrite={false}
-        />
+        <primitive attach='material' object={selectorBodyMaterial} />
       </mesh>
-      <mesh>
-        <primitive object={frontFontGeometry} />
-        <meshMatcapMaterial
-          transparent
-          matcap={matcapTexture}
-          color='black'
-          opacity={1}
-          side={THREE.FrontSide}
-          depthTest={false}
-          depthWrite={false}
-        />
-      </mesh>
+      {(
+        [
+          ['front', selectorLabelSurfaceOffset, [0, 0, 0], selectorLabelFrontGeometry],
+          ['back', -selectorLabelSurfaceOffset, [0, Math.PI, 0], selectorLabelBackGeometry],
+        ] as const
+      ).map(([labelFace, labelZ, labelRotation, labelGeometry]) => (
+        <mesh
+          key={labelFace}
+          dispose={null}
+          material={selectorLabelMaterial}
+          position={[0, 0, labelZ]}
+          raycast={disabledSelectorLabelRaycast}
+          renderOrder={viewportRenderTiers.sectionControlLabel}
+          rotation={labelRotation}
+          userData={{
+            ...sectionSelectorUserData,
+            sectionSelectorLabel: forwardPlaneName,
+            sectionSelectorLabelFace: labelFace,
+            sectionSelectorPlaneId: planeId,
+          }}
+        >
+          <primitive object={labelGeometry} />
+        </mesh>
+      ))}
     </group>
   );
 }
 
 export type AvailablePlane = { id: PlaneId; normal: [number, number, number]; constant: number };
+
+function SectionTransformControls(properties: React.ComponentProps<typeof TransformControls>): React.JSX.Element {
+  const controlsRef = useRef<TransformControlsImpl>(null);
+
+  React.useLayoutEffect(() => {
+    const controls = controlsRef.current;
+
+    if (!controls) {
+      return;
+    }
+
+    controls.traverse((child) => {
+      setSceneTag(child, sceneTag.sectionViewHelper);
+    });
+  }, []);
+
+  return <TransformControls ref={controlsRef} {...properties} />;
+}
 
 type SectionViewControlsProperties = {
   readonly isActive: boolean;
@@ -419,6 +534,15 @@ type SectionViewControlsProperties = {
   readonly onHover: (planeId: PlaneSelectorId | undefined) => void;
   readonly onSetRotation: (rotation: THREE.Euler) => void;
   readonly onSetPivot?: (value: [number, number, number]) => void;
+  readonly onTransformDragStart?: () => void;
+  readonly onTransformDragMove?: () => void;
+  readonly onTransformDragEnd?: () => void;
+};
+
+type SectionTransformMode = 'translate' | 'rotate';
+type HoveredTransformAxis = {
+  readonly mode: SectionTransformMode;
+  readonly axis: string;
 };
 
 export function SectionViewControls({
@@ -434,6 +558,9 @@ export function SectionViewControls({
   onHover,
   onSetRotation,
   onSetPivot,
+  onTransformDragStart,
+  onTransformDragMove,
+  onTransformDragEnd,
 }: SectionViewControlsProperties): React.JSX.Element | undefined {
   const transformControlsRef = useRef<THREE.Object3D>(undefined);
   // Track the latest rotation locally to project translation along the rotated plane normal
@@ -444,8 +571,18 @@ export function SectionViewControls({
   // Track whether the user is actively dragging translate/rotate so we don't override the position mid-drag
   const isTranslatingRef = useRef<boolean>(false);
   const isRotatingRef = useRef<boolean>(false);
+  const onTransformDragStartRef = useRef(onTransformDragStart);
+  const onTransformDragMoveRef = useRef(onTransformDragMove);
+  const onTransformDragEndRef = useRef(onTransformDragEnd);
+  const [hoveredTransformAxis, setHoveredTransformAxisState] = React.useState<HoveredTransformAxis | undefined>(
+    undefined,
+  );
   // World-space pivot point to keep the plane anchored during rotation
   const pivotPointRef = useRef<THREE.Vector3>(new THREE.Vector3());
+
+  onTransformDragStartRef.current = onTransformDragStart;
+  onTransformDragMoveRef.current = onTransformDragMove;
+  onTransformDragEndRef.current = onTransformDragEnd;
 
   const planes = React.useMemo(() => {
     /* oxlint-disable tau-lint/no-hardcoded-color -- Three.js plane selector colors */
@@ -510,13 +647,76 @@ export function SectionViewControls({
     anchorPositionRef.current = undefined;
   }, [selectedPlaneId, rotation, pivot]);
 
+  const endActiveTransformDrag = React.useCallback((): void => {
+    let hadActiveDrag = false;
+
+    if (isTranslatingRef.current) {
+      isTranslatingRef.current = false;
+      hadActiveDrag = true;
+      if (transformControlsRef.current) {
+        anchorPositionRef.current = transformControlsRef.current.position.clone();
+      }
+    }
+
+    if (isRotatingRef.current) {
+      isRotatingRef.current = false;
+      hadActiveDrag = true;
+    }
+
+    if (hadActiveDrag) {
+      onTransformDragEndRef.current?.();
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (isActive) {
+      return undefined;
+    }
+
+    endActiveTransformDrag();
+    return undefined;
+  }, [endActiveTransformDrag, isActive]);
+
+  React.useEffect(() => {
+    endActiveTransformDrag();
+  }, [endActiveTransformDrag, selectedPlaneId]);
+
+  React.useEffect(
+    () => () => {
+      endActiveTransformDrag();
+    },
+    [endActiveTransformDrag],
+  );
+
+  const setHoveredTransformAxis = React.useCallback((mode: SectionTransformMode, axis: string | undefined): void => {
+    setHoveredTransformAxisState((currentAxis) => {
+      if (axis !== undefined) {
+        if (currentAxis?.mode === mode && currentAxis.axis === axis) {
+          return currentAxis;
+        }
+
+        return { mode, axis };
+      }
+
+      if (currentAxis?.mode !== mode) {
+        return currentAxis;
+      }
+
+      return undefined;
+    });
+  }, []);
+  const highlightedTransformAxis = hoveredTransformAxis?.axis;
+
+  React.useEffect(() => {
+    setHoveredTransformAxisState(undefined);
+  }, [isActive, selectedPlaneId]);
+
   if (!isActive) {
     return undefined;
   }
 
   // If no plane is selected, show the 6 plane selectors (3 base + 3 inverse faces)
   // Constants for depth calculations - extracted to allow precise back-to-back positioning
-  const textDepth = 0.01;
   const labelDepth = 0.02;
   const offsetPx = 40;
   if (!selectedPlane) {
@@ -539,7 +739,6 @@ export function SectionViewControls({
                 offset={offsetPx}
                 naming={planeName}
                 isExternallyHovered={hoveredSectionViewId === idPos}
-                textDepth={textDepth}
                 labelDepth={labelDepth}
                 upDirection={upDirection}
                 onClick={onSelectPlane}
@@ -555,7 +754,6 @@ export function SectionViewControls({
                 offset={offsetPx}
                 naming={planeName}
                 isExternallyHovered={hoveredSectionViewId === idNeg}
-                textDepth={textDepth}
                 labelDepth={labelDepth}
                 upDirection={upDirection}
                 onClick={onSelectPlane}
@@ -571,17 +769,17 @@ export function SectionViewControls({
   return (
     <group>
       {/* Hidden transform controls for dragging logic */}
-      <mesh ref={transformControlsRef}>
+      <mesh ref={transformControlsRef} userData={sceneTagData(sceneTag.sectionViewHelper)}>
         <boxGeometry args={[0.1, 0.1, 0.1]} />
         <meshBasicMaterial visible={false} />
       </mesh>
 
-      <TransformControls
+      <SectionTransformControls
         object={transformControlsRef as React.RefObject<THREE.Object3D>}
         mode='translate'
+        highlightAxis={highlightedTransformAxis}
         space='local'
         size={1}
-        visible={false}
         showX={Math.abs(normal.x) > 0.5}
         showY={Math.abs(normal.y) > 0.5}
         showZ={Math.abs(normal.z) > 0.5}
@@ -590,6 +788,7 @@ export function SectionViewControls({
             return;
           }
 
+          onTransformDragMoveRef.current?.();
           const currentObject = transformControlsRef.current;
           if (currentObject) {
             const { position } = currentObject;
@@ -601,21 +800,19 @@ export function SectionViewControls({
         onPointerDown={() => {
           // Keep current anchor so the gizmo does not snap to the plane projection
           isTranslatingRef.current = true;
+          onTransformDragStartRef.current?.();
         }}
-        onPointerUp={() => {
-          isTranslatingRef.current = false;
-          // Persist the final world position as the new anchor to avoid any post-drag snapping
-          if (transformControlsRef.current) {
-            anchorPositionRef.current = transformControlsRef.current.position.clone();
-          }
+        onPointerUp={endActiveTransformDrag}
+        onAxisChange={(axis) => {
+          setHoveredTransformAxis('translate', axis);
         }}
       />
-      <TransformControls
+      <SectionTransformControls
         object={transformControlsRef as React.RefObject<THREE.Object3D>}
         mode='rotate'
+        highlightAxis={highlightedTransformAxis}
         space='local'
         size={1}
-        visible={false}
         showX={Math.abs(normal.y) > 0.5 || Math.abs(normal.z) > 0.5}
         showY={Math.abs(normal.x) > 0.5 || Math.abs(normal.z) > 0.5}
         showZ={Math.abs(normal.x) > 0.5 || Math.abs(normal.y) > 0.5}
@@ -624,6 +821,7 @@ export function SectionViewControls({
             return;
           }
 
+          onTransformDragMoveRef.current?.();
           const currentObject = transformControlsRef.current;
           if (currentObject) {
             // Extract the rotation from the object
@@ -635,6 +833,7 @@ export function SectionViewControls({
         }}
         onPointerDown={() => {
           isRotatingRef.current = true;
+          onTransformDragStartRef.current?.();
           if (transformControlsRef.current) {
             // Capture current gizmo world position as the rotation pivot
             pivotPointRef.current.copy(transformControlsRef.current.position);
@@ -642,9 +841,9 @@ export function SectionViewControls({
             anchorPositionRef.current = pivotPointRef.current.clone();
           }
         }}
-        onPointerUp={() => {
-          isRotatingRef.current = false;
-          // Keep anchor until the next manipulation (or translation drag)
+        onPointerUp={endActiveTransformDrag}
+        onAxisChange={(axis) => {
+          setHoveredTransformAxis('rotate', axis);
         }}
       />
     </group>

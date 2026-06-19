@@ -21,10 +21,10 @@ Choose and configure a filesystem implementation so your runtime client can read
 
 ### 1. Import Filesystem Constructors
 
-`fromMemoryFs` and `fromFsLike` are available from the main entry. `fromNodeFs` requires the Node.js subpath (it depends on Node.js APIs):
+`fromMemoryFs` and `fromFsLike` are available from the filesystem entry. `fromNodeFs` requires the Node.js subpath (it depends on Node.js APIs):
 
 ```typescript
-import { fromMemoryFs, fromFsLike } from '@taucad/runtime';
+import { fromMemoryFs, fromFsLike } from '@taucad/runtime/filesystem';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 ```
 
@@ -36,13 +36,17 @@ Use `fromNodeFs` when your project files live on disk. Pass the base path; all f
 import { createRuntimeClient } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { replicad } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
 
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromNodeFs('/path/to/project') }),
+const runtime = defineRuntime({
   kernels: [replicad()],
   bundlers: [esbuild()],
+});
+
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromNodeFs('/path/to/project') }),
 });
 ```
 
@@ -53,8 +57,10 @@ Use this when running in Node.js (CLI, tests, server-side) and when you need per
 Use `fromMemoryFs` when file content is passed directly (e.g., from an editor) or when you want no disk I/O. Optionally seed with initial files:
 
 ```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { replicad } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
 
@@ -68,10 +74,13 @@ const filesystem = fromMemoryFs({
   'lib/utils.ts': 'export function helper() { return 42; }',
 });
 
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: filesystem }),
+const runtime = defineRuntime({
   kernels: [replicad()],
   bundlers: [esbuild()],
+});
+
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: filesystem }),
 });
 ```
 
@@ -81,17 +90,22 @@ Use `fromFsLike` when you have an fs-compatible object with a `promises` namespa
 
 ```typescript
 import nodeFs from 'node:fs';
-import { createRuntimeClient, fromFsLike } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromFsLike } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { replicad } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
 
 const filesystem = fromFsLike(nodeFs, '/path/to/project');
 
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: filesystem }),
+const runtime = defineRuntime({
   kernels: [replicad()],
   bundlers: [esbuild()],
+});
+
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: filesystem }),
 });
 ```
 
@@ -99,7 +113,7 @@ const client = createRuntimeClient({
 
 The framework uses three related filesystem types:
 
-**`RuntimeFileSystem`** -- The opaque connect-time value returned by `fromNodeFs`, `fromMemoryFs`, `fromFsLike`, `fromBrowserFs`, and `fromChannelFs`. Hand it to the wired transport callable at construction (`webWorkerTransport({ fileSystem })`, `inProcessTransport({ fileSystem })`, …); consumers cannot inspect its internals.
+**`RuntimeFileSystem`** -- The opaque connect-time value returned by `fromNodeFs`, `fromMemoryFs`, `fromFsLike`, `fromBrowserFs`, and `fromFileSystemBridge`. Hand it to the wired transport callable at construction (`webWorkerTransport({ fileSystem })`, `inProcessTransport({ runtime, fileSystem })`, …); consumers cannot inspect its internals.
 
 **`RuntimeFileSystemBase`** -- The 11-method contract bridged to the kernel. Matches `fs.promises` semantics: `readFile`, `writeFile`, `mkdir`, `readdir`, `unlink`, `rmdir`, `rename`, `stat`, `lstat`, `exists`.
 
@@ -116,12 +130,12 @@ All paths are absolute. Backends can supply optimized overrides for any enhanced
 
 ### 6. Use Filesystem Bridges for Cross-Worker Communication
 
-When the filesystem owns a **`Worker`** (**`exposeFileSystem`** there) and the client runs in another isolate (**`createFileSystemBridge(worker)`** on the owning thread), the returned **`FileSystemBridge.port`** is already a **`Port`** suited for **`createBridgeProxy`** in that isolate — no duplicate public helper exists for forwarding; opaque **`fromChannelFs`** builds the transferable **`MessagePort`** internally (**`packages/runtime`** `transport/_internal`).
+When the filesystem owns a **`Worker`** (**`exposeFileSystem`** there) and the client runs in another isolate, use **`openFileSystemBridge(worker)`** from **`@taucad/fs-bridge`** to open a transferable filesystem bridge connection. Pass that connection to **`fromFileSystemBridge(connection)`** from **`@taucad/runtime/filesystem`** when runtime is the consumer, or use **`createFileSystemBridge(worker)`** plus **`createFileSystemBridgeProxy<T>(bridge)`** when the current isolate needs to call filesystem methods directly.
 
-For the inverse pattern — you host handler objects in-process and hand a port to a worker that will call you — use **`createBridgePort(handlers)`**, which returns **`BridgePort`** (`raw` **`MessagePort`**) for **`postMessage(..., [port])`**.
+For the inverse pattern — you host handler objects in-process and hand a port to a worker that will call you — use **`createBridgePort(handlers)`** from **`@taucad/rpc/bridge`**, which returns **`BridgePort`** (`raw` **`MessagePort`**) for **`postMessage(..., [port])`**.
 
 ```typescript
-import { createBridgePort } from '@taucad/runtime/transport-internals';
+import { createBridgePort } from '@taucad/rpc/bridge';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 
 const fileSystem = fromNodeFs('/path/to/project');
@@ -136,9 +150,11 @@ const cleanup = () => {
 };
 ```
 
-**`createFileSystemBridge(worker, options?)`** -- Creates a **`MessageChannel`**, posts the server end to the FS worker, returns **`FileSystemBridge`** with a **`wrapMessagePort`**-backed **`port`** for same-isolate **`createBridgeProxy`**.
+**`openFileSystemBridge(worker, options?)`** -- Creates a **`MessageChannel`**, posts the server end to the FS worker, and returns a raw transferable filesystem bridge connection for another consumer such as runtime.
 
-**`exposeFileSystem(handlers, options?)`** -- Worker-side counterpart; listens for the connect envelope (see **`filesystemBridgeConnectMessageType`** in **`@taucad/runtime/transport-internals`**).
+**`createFileSystemBridge(worker, options?)`** -- Creates a **`MessageChannel`**, posts the server end to the FS worker, returns **`FileSystemBridge`** with a **`wrapMessagePort`**-backed **`port`** for same-isolate **`createFileSystemBridgeProxy`**.
+
+**`exposeFileSystem(handlers, options?)`** -- Worker-side counterpart from **`@taucad/fs-bridge`**; listens for the filesystem bridge connect envelope.
 
 Call `dispose()` on either handle when the bridge is no longer needed.
 
@@ -153,7 +169,7 @@ Call `dispose()` on either handle when the bridge is no longer needed.
 ## Variations
 
 - **Custom implementation**: Implement `RuntimeFileSystemBase` directly for custom backends (e.g., cloud storage, virtual mounts). See [API Reference: Filesystem](../api/filesystem) for the full interface.
-- **Filesystem bridge**: For custom worker topologies, use **`createBridgePort`** and **`createFileSystemBridge`** from **`@taucad/runtime/transport-internals`**. For opaque transport wiring, prefer **`fromChannelFs(worker)`** on the main package.
+- **Filesystem bridge**: For custom worker topologies, use **`createBridgePort`** from **`@taucad/rpc/bridge`** for generic object bridges and **`openFileSystemBridge`** / **`createFileSystemBridge`** from **`@taucad/fs-bridge`** for filesystem authorities. For opaque runtime transport wiring, prefer **`fromFileSystemBridge(connection)`** from **`@taucad/runtime/filesystem`**.
 
 ## Related
 

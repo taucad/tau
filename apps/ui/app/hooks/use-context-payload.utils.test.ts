@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSkillFrontmatter } from '#hooks/use-context-payload.utils.js';
+import { mergeSkillMetadata, parseSkillFrontmatter } from '#hooks/use-context-payload.utils.js';
 
 describe('parseSkillFrontmatter', () => {
   it('should parse valid YAML frontmatter with name and description', () => {
@@ -12,13 +12,18 @@ description: A useful skill for testing
 
 Some content here.
 `;
-    const result = parseSkillFrontmatter(content, '.tau/skills/my-skill/SKILL.md');
+    const result = parseSkillFrontmatter(content, '.agents/skills/my-skill/SKILL.md', { source: 'user' });
 
-    expect(result).toEqual({
-      name: 'my-skill',
-      description: 'A useful skill for testing',
-      path: '.tau/skills/my-skill',
-    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        name: 'my-skill',
+        description: 'A useful skill for testing',
+        path: '.agents/skills/my-skill',
+        source: 'user',
+        enabled: true,
+      }),
+    );
+    expect(result?.fingerprint).toMatch(/^[\da-f]{8}$/);
   });
 
   it('should return undefined for content without frontmatter', () => {
@@ -49,13 +54,15 @@ name: 'quoted-skill'
 description: 'A skill with quoted values'
 ---
 `;
-    const result = parseSkillFrontmatter(content, '.tau/skills/quoted-skill/SKILL.md');
+    const result = parseSkillFrontmatter(content, '.agents/skills/quoted-skill/SKILL.md');
 
-    expect(result).toEqual({
-      name: 'quoted-skill',
-      description: 'A skill with quoted values',
-      path: '.tau/skills/quoted-skill',
-    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        name: 'quoted-skill',
+        description: 'A skill with quoted values',
+        path: '.agents/skills/quoted-skill',
+      }),
+    );
   });
 
   it('should handle double-quoted values in frontmatter', () => {
@@ -64,13 +71,15 @@ name: "double-quoted"
 description: "Uses double quotes"
 ---
 `;
-    const result = parseSkillFrontmatter(content, '.tau/skills/double-quoted/SKILL.md');
+    const result = parseSkillFrontmatter(content, '.agents/skills/double-quoted/SKILL.md');
 
-    expect(result).toEqual({
-      name: 'double-quoted',
-      description: 'Uses double quotes',
-      path: '.tau/skills/double-quoted',
-    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        name: 'double-quoted',
+        description: 'Uses double quotes',
+        path: '.agents/skills/double-quoted',
+      }),
+    );
   });
 
   it('should strip SKILL.md from path to produce skill directory path', () => {
@@ -79,9 +88,9 @@ name: nested
 description: Nested skill
 ---
 `;
-    const result = parseSkillFrontmatter(content, '.tau/skills/deeply/nested/SKILL.md');
+    const result = parseSkillFrontmatter(content, '.agents/skills/deeply/nested/SKILL.md');
 
-    expect(result?.path).toBe('.tau/skills/deeply/nested');
+    expect(result?.path).toBe('.agents/skills/deeply/nested');
   });
 
   it('should return undefined for empty frontmatter block', () => {
@@ -99,12 +108,68 @@ status: active
 category: testing
 ---
 `;
-    const result = parseSkillFrontmatter(content, '.tau/skills/extra-fields/SKILL.md');
+    const result = parseSkillFrontmatter(content, '.agents/skills/extra-fields/SKILL.md');
 
-    expect(result).toEqual({
-      name: 'extra-fields',
-      description: 'Has extra fields',
-      path: '.tau/skills/extra-fields',
-    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        name: 'extra-fields',
+        description: 'Has extra fields',
+        path: '.agents/skills/extra-fields',
+      }),
+    );
+  });
+
+  it('should parse stable catalog fields from frontmatter', () => {
+    const content = `---
+name: catalog-fields
+description: Has catalog fields
+source: tau-store
+version: 2.1.0
+when_to_use: Use when catalog fields matter
+enabled: false
+---
+`;
+    const result = parseSkillFrontmatter(content, '.agents/skills/catalog-fields/SKILL.md');
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        name: 'catalog-fields',
+        source: 'tau-store',
+        version: '2.1.0',
+        whenToUse: 'Use when catalog fields matter',
+        enabled: false,
+      }),
+    );
+  });
+});
+
+describe('mergeSkillMetadata', () => {
+  it('should prefer canonical user skills and preserve lower-priority shadows', () => {
+    const result = mergeSkillMetadata([
+      {
+        name: 'woodworking',
+        description: 'Legacy copy',
+        path: '.tau/skills/woodworking',
+        source: 'legacy',
+        fingerprint: 'legacyhash',
+      },
+      {
+        name: 'woodworking',
+        description: 'User copy',
+        path: '.agents/skills/woodworking',
+        source: 'user',
+        fingerprint: 'userhash',
+      },
+    ]);
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        name: 'woodworking',
+        description: 'User copy',
+        path: '.agents/skills/woodworking',
+        source: 'user',
+        shadowedSources: [{ source: 'legacy', path: '.tau/skills/woodworking', fingerprint: 'legacyhash' }],
+      }),
+    ]);
   });
 });

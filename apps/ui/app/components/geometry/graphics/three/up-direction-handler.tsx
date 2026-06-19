@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import { useThree } from '@react-three/fiber';
-import type { OrbitControls } from 'three/addons';
 import * as THREE from 'three';
 import { useCameraCapability } from '#hooks/use-graphics.js';
+import { syncCameraControlsUp } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
 
 type UpDirectionHandlerProperties = {
   readonly upDirection: 'x' | 'y' | 'z';
@@ -31,8 +31,9 @@ export function UpDirectionHandler({ upDirection }: UpDirectionHandlerProperties
     // Set the global default for new objects
     THREE.Object3D.DEFAULT_UP.copy(newUp);
 
-    // Update the camera's up vector
-    camera.up.copy(newUp);
+    // Update the camera's up vector and CameraControls' cached up-space before
+    // any target/lookAt/reset work re-encodes spherical state.
+    syncCameraControlsUp({ camera, controls: controls ?? undefined, up: newUp });
 
     // Set up vectors on all objects without matrix updates during traverse,
     // then call updateMatrixWorld once on the scene root. This reduces O(N²)
@@ -42,16 +43,7 @@ export function UpDirectionHandler({ upDirection }: UpDirectionHandlerProperties
     });
     scene.updateMatrixWorld(true);
 
-    // Update the camera's orientation
-    camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
-
-    // Update controls if they exist (OrbitControls type)
-    if (controls && 'target' in controls && 'update' in controls) {
-      const orbitControls = controls as OrbitControls;
-      orbitControls.target.set(0, 0, 0);
-      orbitControls.update();
-    }
 
     // Trigger a camera reset to properly position the camera for the new up direction
     cameraCapabilityActor.send({ type: 'reset' });

@@ -62,26 +62,56 @@ export function Tags({
 }
 
 export type TagsTriggerProps = {
+  readonly id?: string;
   readonly placeholder?: string;
   readonly className?: string;
+  readonly inputAriaLabel?: string;
+  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors native input prop.
+  readonly disabled?: boolean;
 };
-export function TagsTrigger({ className, placeholder = 'Type to add tags...' }: TagsTriggerProps): React.JSX.Element {
+export function TagsTrigger({
+  id,
+  className,
+  placeholder = 'Type to add tags...',
+  inputAriaLabel,
+  disabled,
+}: TagsTriggerProps): React.JSX.Element {
   const { tags, onTagsChange, value, setValue } = useTagsContext();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleRemoveTag = (tagToRemove: string): void => {
+    if (disabled) {
+      return;
+    }
+
     onTagsChange(tags.filter((tag) => tag !== tagToRemove));
   };
 
+  const commitCurrentValue = (): void => {
+    if (disabled) {
+      return;
+    }
+
+    const normalizedTag = value.trim().toLowerCase();
+    if (!normalizedTag) {
+      return;
+    }
+
+    if (!tags.includes(normalizedTag)) {
+      onTagsChange([...tags, normalizedTag]);
+    }
+
+    setValue('');
+  };
+
   const handleKeyDown: React.KeyboardEventHandler<HTMLInputElement> = (event) => {
+    if (disabled) {
+      return;
+    }
+
     if (event.key === 'Enter' && value.trim()) {
       event.preventDefault();
-      const normalizedTag = value.trim().toLowerCase();
-      if (!tags.includes(normalizedTag)) {
-        onTagsChange([...tags, normalizedTag]);
-      }
-
-      setValue('');
+      commitCurrentValue();
     } else if (event.key === 'Backspace' && !value && tags.length > 0) {
       // Remove last tag on backspace when input is empty
       event.preventDefault();
@@ -90,6 +120,10 @@ export function TagsTrigger({ className, placeholder = 'Type to add tags...' }: 
   };
 
   const handleContainerClick: MouseEventHandler<HTMLDivElement> = (event) => {
+    if (disabled) {
+      return;
+    }
+
     // Don't focus if clicking on a tag remove button
     if ((event.target as HTMLElement).closest('[data-tag-remove]')) {
       return;
@@ -104,6 +138,7 @@ export function TagsTrigger({ className, placeholder = 'Type to add tags...' }: 
         className={cn(
           'group/tags-trigger flex h-auto min-h-9 w-full cursor-text flex-wrap items-center gap-1 rounded-md border border-input bg-background p-2 text-sm shadow-xs transition-[box-shadow] outline-none dark:bg-input/30',
           'focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50',
+          disabled && 'cursor-not-allowed opacity-50',
           className,
         )}
         onClick={handleContainerClick}
@@ -120,14 +155,18 @@ export function TagsTrigger({ className, placeholder = 'Type to add tags...' }: 
         ))}
         <input
           ref={inputRef}
+          id={id}
           type='text'
+          aria-label={inputAriaLabel}
           value={value}
+          disabled={disabled}
           placeholder={tags.length === 0 ? placeholder : ''}
           className='w-0 flex-1 bg-transparent px-0.5 py-px text-base outline-none group-focus-within/tags-trigger:w-[120px] placeholder:text-muted-foreground md:text-sm'
           onChange={(event) => {
             setValue(event.target.value);
           }}
           onKeyDown={handleKeyDown}
+          onBlur={commitCurrentValue}
         />
       </div>
     </PopoverTrigger>
@@ -141,7 +180,7 @@ export function TagsValue({
   onRemove,
   ...props
 }: TagsValueProps & { readonly onRemove?: () => void; readonly children?: string }): React.JSX.Element {
-  const handleRemove: MouseEventHandler<HTMLDivElement> = (event) => {
+  const handleRemove: MouseEventHandler<HTMLButtonElement> = (event) => {
     event.preventDefault();
     event.stopPropagation();
     if (onRemove) {
@@ -149,7 +188,7 @@ export function TagsValue({
     }
   };
 
-  const handlePointerDown: MouseEventHandler<HTMLDivElement> = (event) => {
+  const handlePointerDown: MouseEventHandler<HTMLButtonElement> = (event) => {
     event.preventDefault();
     event.stopPropagation();
   };
@@ -162,14 +201,16 @@ export function TagsValue({
     >
       {children}
       {onRemove ? (
-        <div
+        <button
+          type='button'
           data-tag-remove
+          aria-label={`Remove ${children}`}
           className='size-auto cursor-pointer rounded-full hover:bg-primary-foreground/30'
           onClick={handleRemove}
           onPointerDown={handlePointerDown}
         >
           <XIcon className='size-4' />
-        </div>
+        </button>
       ) : null}
     </Badge>
   );

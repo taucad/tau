@@ -95,7 +95,7 @@ describe('Parameters - Core Search Functionality', () => {
     // Test that our hasSearchResults would find matches in both parameters and groups
     // This mirrors the logic in the actual component
     const matchesSearch = (text: string, searchTerm: string): boolean => {
-      // This is the toTitleCase + toLowerCase logic from the component
+      // This mirrors the formatDisplayLabel + toLowerCase logic from the component
       const prettyText = text.replaceAll(/([A-Z])/g, ' $1').replace(/^./, (string_) => string_.toUpperCase());
       return prettyText.toLowerCase().includes(searchTerm.toLowerCase());
     };

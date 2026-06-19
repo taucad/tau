@@ -68,7 +68,7 @@ If no kernel matches at all, selection returns `undefined`. The framework report
 
 - **Performance** -- Extension and regex are cheap. Bundler detection is more expensive; it runs only when extension/regex fail or when multiple kernels share an extension.
 - **Correctness** -- Regex can only see the entry file. Transitive imports require the bundler. Catch-all ensures a fallback for unknown formats.
-- **Priority** -- Kernel order in `createRuntimeClient({ kernels: [...] })` matters. When multiple kernels match, the first wins. Put specific kernels before catch-all.
+- **Priority** -- Kernel order in `defineRuntime({ kernels: [...] })` matters. When multiple kernels match, the first wins. Put specific kernels before catch-all.
 
 ## Caching of Selection Results
 

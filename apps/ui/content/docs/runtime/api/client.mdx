@@ -1,6 +1,6 @@
 ---
 title: Client API
-description: createRuntimeClient, RuntimeClient, presets, filesystem constructors, and event subscription.
+description: createRuntimeClient, RuntimeClient, worker-owned runtime definitions, filesystem constructors, and event subscription.
 icon: lucide:monitor
 ---
 
@@ -14,52 +14,99 @@ Use the client API when you need to create a kernel runtime, configure filesyste
 
 <auto-type-table path='./props/client.ts' name='RuntimeClient' />
 
-## createRuntimeClientOptions
+## Worker-Owned Runtime
 
-A helper that provides full intellisense when declaring options -- without importing the `RuntimeClientOptions` type -- and smart-merges a base configuration with partial overrides.
-
-### Identity overload
-
-Provides type inference for the options object:
+Executable capabilities are declared in the worker or host process with `defineRuntime`. Browser and framework clients connect with a transport and may import only `typeof runtime` for compile-time narrowing:
 
 ```typescript
-import { createRuntimeClientOptions } from '@taucad/runtime';
+// runtime.worker.ts
+import { defineRuntime, createRuntimeWorker } from '@taucad/runtime/worker';
+import { webWorkerHost } from '@taucad/runtime/transport/web';
 import { replicad } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
 
-const options = createRuntimeClientOptions({
+export const runtime = defineRuntime({
   kernels: [replicad()],
   bundlers: [esbuild()],
 });
+
+await webWorkerHost({ worker: createRuntimeWorker({ runtime }) }).open();
 ```
-
-### Merge overload
-
-Smart-merges a base with overrides using three strategies based on field type:
-
-| Field type    | Examples                            | Strategy                                                                                                                   |
-| ------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Plugin arrays | `kernels`, `middleware`, `bundlers` | **ID-based merge** -- plugins with a matching `id` are replaced in-place (preserving priority order); new IDs are appended |
-| Opaque fields | `transport`                         | **Full replacement** -- the override replaces the base value entirely                                                      |
 
 ```typescript
-import { createRuntimeClientOptions } from '@taucad/runtime';
-import { replicad, jscad } from '@taucad/runtime/kernels';
-import { openscad } from '@taucad/openscad';
-import { parameterCache, geometryCache } from '@taucad/runtime/middleware';
-import { esbuild } from '@taucad/runtime/bundler';
+// app.ts
+import type { runtime } from './runtime.worker';
+import { createRuntimeClient } from '@taucad/runtime/client';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { webWorkerTransport } from '@taucad/runtime/transport/web';
 
-const defaults = createRuntimeClientOptions({
-  kernels: [openscad(), replicad(), jscad()],
-  middleware: [parameterCache(), geometryCache()],
-  bundlers: [esbuild()],
-});
-
-// Replace replicad with a debug-enabled version (matched by id)
-const debug = createRuntimeClientOptions(defaults, {
-  kernels: [replicad({ withSourceMapping: true })],
+const client = createRuntimeClient<typeof runtime>({
+  transport: webWorkerTransport({
+    createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
+    fileSystem: fromMemoryFs(),
+  }),
 });
 ```
+
+Node tests and CLIs can use the root entry's in-process convenience by passing the runtime definition directly:
+
+```typescript
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/runtime/kernels';
+import { esbuild } from '@taucad/runtime/bundler';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+
+const runtime = defineRuntime({ kernels: [replicad()], bundlers: [esbuild()] });
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
+```
+
+## Boot Config
+
+Runtime definitions may declare a Zod `configSchema` when worker-owned plugin construction needs deployment-specific values. The worker still owns executable composition; the client supplies only a structured-cloneable config payload before initialization:
+
+```typescript
+// runtime.worker.ts
+import { z } from 'zod';
+import { defineRuntime, createRuntimeWorker } from '@taucad/runtime/worker';
+import { webWorkerHost } from '@taucad/runtime/transport/web';
+import { zoo } from '@taucad/runtime/kernels';
+import { esbuild } from '@taucad/runtime/bundler';
+
+export const runtime = defineRuntime({
+  configSchema: z.object({
+    tauWebSocketUrl: z.string().url(),
+  }),
+  createRuntime(config) {
+    return {
+      kernels: [zoo({ baseUrl: `${config.tauWebSocketUrl}/v1/kernels/zoo` })],
+      bundlers: [esbuild()],
+    };
+  },
+});
+
+await webWorkerHost({ worker: createRuntimeWorker({ runtime }) }).open();
+```
+
+```typescript
+// app.ts
+import type { runtime } from './runtime.worker';
+import { createRuntimeClient } from '@taucad/runtime/client';
+import { webWorkerTransport } from '@taucad/runtime/transport/web';
+
+const client = createRuntimeClient<typeof runtime>({
+  config: async () => loadRuntimeConfig(),
+  transport: webWorkerTransport({
+    createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
+  }),
+});
+```
+
+The runtime factory receives `z.output<typeof configSchema>`, while the client accepts `z.input<typeof configSchema>`. Required schemas make `config` required on the client; schemas that default or accept `undefined` make it optional. Static runtimes do not accept `config`.
+
+Invalid config fails during `connect()` with `RuntimeConnectionError.causeKind === 'runtime-config'` and a `RuntimeConfigError` code of `'RUNTIME_CONFIG_INVALID'`. Filesystem remains a transport-owned workspace resource and is not part of boot config.
 
 ## Methods
 
@@ -86,24 +133,30 @@ const debug = createRuntimeClientOptions(defaults, {
 
 ## Presets
 
-`presets.all()` returns a `PresetOptions` object containing all built-in kernels, middleware, and bundlers. The type is `{ kernels: KernelPlugin[]; middleware: MiddlewarePlugin[]; bundlers: BundlerPlugin[] }`. See [`KernelPlugin`](./kernels), [`MiddlewarePlugin`](./middleware), and [`BundlerPlugin`](./bundler) for details:
+`presets.all()` returns a runtime definition containing all built-in kernels, middleware, bundlers, and transcoders. Import it from the explicit presets subpath:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 ```
 
-Merge with additional options:
+Use an explicit transport when you also need to bind a filesystem:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
+const runtime = presets.all();
 const client = createRuntimeClient({
-  ...presets.all(),
-  transport: inProcessTransport({ fileSystem: fromNodeFs('/path/to/project') }),
+  transport: inProcessTransport({ runtime, fileSystem: fromNodeFs('/path/to/project') }),
 });
 ```
 
@@ -111,7 +164,7 @@ const client = createRuntimeClient({
 
 <auto-type-table path='./props/client.ts' name='RuntimeFileSystem' />
 
-`fromMemoryFs`, `fromNodeFs`, `fromFsLike`, `fromBrowserFs`, and `fromChannelFs` all return an opaque `RuntimeFileSystem` value. Pass it into the wired transport callable (`webWorkerTransport({ fileSystem })`, `inProcessTransport({ fileSystem })`, …); the transport constructs the underlying bridge primitives internally. Consumers cannot inspect or branch on the handle's kind.
+`fromMemoryFs`, `fromNodeFs`, `fromFsLike`, `fromBrowserFs`, and `fromFileSystemBridge` all return an opaque `RuntimeFileSystem` value. Pass it into the wired transport callable (`webWorkerTransport({ fileSystem })`, `inProcessTransport({ runtime, fileSystem })`, …); the transport constructs the kernel-side bridge primitives internally. Consumers cannot inspect or branch on the handle's kind.
 
 ### Transport plugins vs materialized handles
 
@@ -122,7 +175,7 @@ Bundled transports are **`TransportPlugin`** callables (`webWorkerTransport`, `n
 Lifecycle errors:
 
 - **`RuntimeNotConnectedError`** -- a command was issued before `connect()` resolved.
-- **`RuntimeConnectionError`** -- the transport handshake failed. Carries a typed `causeKind`: `'transport-open' | 'capabilities-resolution' | 'kernel-binding'`.
+- **`RuntimeConnectionError`** -- the transport handshake failed. Carries a typed `causeKind`: `'transport-open' | 'runtime-config' | 'capabilities-resolution' | 'kernel-binding'`.
 - **`RuntimeTerminatedError`** -- a command was issued after `terminate()`, or an in-flight Promise was rejected because `terminate()` happened mid-flight. Carries a typed `causeKind`: `'explicit' | 'connection-failed' | 'transport-closed'`.
 
 Render errors:
@@ -144,15 +197,16 @@ guards for cross-realm detection.
 
 Every runtime error class exposes a stable `code` getter so callers can branch on the error kind without depending on `Error.message` or `instanceof` (the message is human prose; the code is the contract).
 
-| Error class                    | `code`                              | Notes                           |
-| ------------------------------ | ----------------------------------- | ------------------------------- |
-| `RuntimeNotConnectedError`     | `'RUNTIME_NOT_CONNECTED'`           | —                               |
-| `RuntimeConnectionError`       | `'RUNTIME_CONNECTION_FAILED'`       | Pair with the `causeKind` field |
-| `RuntimeTerminatedError`       | `'RUNTIME_TERMINATED'`              | Pair with the `causeKind` field |
-| `RenderTimeoutError`           | `'RUNTIME_RENDER_TIMEOUT'`          | —                               |
-| `RenderAbortedError`           | `'RUNTIME_RENDER_ABORTED'`          | —                               |
-| `NoRenderOutcomeError`         | `'RUNTIME_NO_RENDER_OUTCOME'`       | —                               |
-| `SharedPoolEntryNotFoundError` | `'RUNTIME_SHARED_POOL_KEY_MISSING'` | —                               |
+| Error class                    | `code`                              | Notes                                                  |
+| ------------------------------ | ----------------------------------- | ------------------------------------------------------ |
+| `RuntimeNotConnectedError`     | `'RUNTIME_NOT_CONNECTED'`           | —                                                      |
+| `RuntimeConnectionError`       | `'RUNTIME_CONNECTION_FAILED'`       | Pair with the `causeKind` field                        |
+| `RuntimeConfigError`           | `'RUNTIME_CONFIG_INVALID'`          | Wrapped by `RuntimeConnectionError` during `connect()` |
+| `RuntimeTerminatedError`       | `'RUNTIME_TERMINATED'`              | Pair with the `causeKind` field                        |
+| `RenderTimeoutError`           | `'RUNTIME_RENDER_TIMEOUT'`          | —                                                      |
+| `RenderAbortedError`           | `'RUNTIME_RENDER_ABORTED'`          | —                                                      |
+| `NoRenderOutcomeError`         | `'RUNTIME_NO_RENDER_OUTCOME'`       | —                                                      |
+| `SharedPoolEntryNotFoundError` | `'RUNTIME_SHARED_POOL_KEY_MISSING'` | —                                                      |
 
 `KernelIssue` payloads (delivered via the `error` event and on `Geometry` results) carry a parallel `code: KernelIssueCode` field — use it instead of `RegExp`-matching `issue.message`.
 
@@ -183,16 +237,21 @@ Subscribe to client events with `client.on(event, handler)`. Returns an unsubscr
 
 | Scenario                                      | Transport construction                                                                                                                                               | See                                                  |
 | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Inline `code:` -- one-shot or live re-renders | `presets.all()` default (`inProcessTransport`)                                                                                                                       | [Quick Start](../getting-started/quick-start)        |
-| Filesystem on disk (Node.js)                  | `inProcessTransport({ fileSystem: fromNodeFs(path) })`                                                                                                               | [Set Up the Filesystem](../guides/filesystem-setup)  |
-| Browser editor with FS worker                 | `webWorkerTransport({ url, fileSystem: fromChannelFs(fsWorker) })`                                                                                                   | [Embedding in a Host](../guides/embedding-in-a-host) |
+| Inline `code:` -- one-shot or live re-renders | `const runtime = presets.all(); createRuntimeClient({ transport: inProcessTransport({ runtime }) })`                                                                 | [Quick Start](../getting-started/quick-start)        |
+| Filesystem on disk (Node.js)                  | `inProcessTransport({ runtime, fileSystem: fromNodeFs(path) })`                                                                                                      | [Set Up the Filesystem](../guides/filesystem-setup)  |
+| Browser editor with FS worker                 | `const bridge = openFileSystemBridge(fsWorker); webWorkerTransport({ url, fileSystem: fromFileSystemBridge(bridge) })`                                               | [Embedding in a Host](../guides/embedding-in-a-host) |
 | Zero-copy file content (filePool SAB)         | `webWorkerTransport({ fileSystem, filePoolBuffer })` or `nodeWorkerTransport({ ... })` — host-supplied buffer; `inProcessTransport` uses `files` pool sizing instead | [Embedding in a Host](../guides/embedding-in-a-host) |
 
 ```typescript
 // Auto-connect (the npm-consumer default)
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 const result = await client.export('glb', {
   code: { 'main.ts': 'export default () => {}' },
   file: 'main.ts',
@@ -201,20 +260,23 @@ const result = await client.export('glb', {
 
 ```typescript
 // Explicit connect (host-wiring scenarios)
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import type { runtime } from './runtime.worker';
 import { webWorkerTransport } from '@taucad/runtime/transport/web';
-import { fromChannelFs } from '@taucad/runtime/filesystem';
+import { openFileSystemBridge } from '@taucad/fs-bridge';
+import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 
 const fsWorker = new Worker(new URL('./fm-worker.ts', import.meta.url));
+const fsBridge = openFileSystemBridge(fsWorker);
 const filePool = new SharedArrayBuffer(64 * 1024 * 1024);
 
 // `filePoolBuffer` is the ONLY SharedArrayBuffer the public API exposes —
 // geometry-pool and abort-channel SABs are allocated and owned internally
 // by the active transport.
-const client = createRuntimeClient({
-  ...presets.all(),
+const client = createRuntimeClient<typeof runtime>({
   transport: webWorkerTransport({
-    fileSystem: fromChannelFs(fsWorker),
+    createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
+    fileSystem: fromFileSystemBridge(fsBridge),
     filePoolBuffer: filePool,
   }),
 });
@@ -222,6 +284,7 @@ await client.connect();
 
 // ...drive the runtime as usual; on shutdown:
 client.terminate();
+fsBridge.dispose();
 ```
 
 ## Usage
@@ -229,9 +292,14 @@ client.terminate();
 `client.export(format, input)` runs a single render-and-export cycle and returns a Promise:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 
 const result = await client.export('glb', {
   code: { 'main.ts': 'export default () => {}' },

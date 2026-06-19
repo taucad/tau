@@ -4,7 +4,7 @@ import { useActorRef, useSelector } from '@xstate/react';
 import type { SnapshotFrom } from 'xstate';
 import { Check } from 'lucide-react';
 import type { Geometry } from '@taucad/types';
-import { createRuntimeClientOptions } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { jscad } from '@taucad/runtime/kernels';
@@ -16,7 +16,7 @@ import type { SplashbackPhase } from '#routes/auth.$/splashback/unified-splashba
 import { useSampledPoints } from '#routes/auth.$/splashback/use-sampled-points.js';
 import { generateScatterPoints, sliceSampledPoints } from '#routes/auth.$/splashback/scatter-points.js';
 import { Loader } from '#components/ui/loader.js';
-import { useRender } from '@taucad/react';
+import { useRuntime } from '@taucad/react';
 import gearJscad from '#routes/auth.$/splashback/gear.jscad.js?raw';
 import {
   morphPointCount,
@@ -27,12 +27,15 @@ import {
 // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key
 const gearCode = { 'main.js': gearJscad };
 
-const splashbackKernelClientOptions = createRuntimeClientOptions({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
+const splashbackRuntime = defineRuntime({
   kernels: [jscad()],
   middleware: [parameterCache(), geometryCache(), gltfCoordinateTransform()],
   bundlers: [esbuild()],
 });
+const splashbackKernelClientOptions = {
+  runtime: splashbackRuntime,
+  transport: inProcessTransport({ runtime: splashbackRuntime, fileSystem: fromMemoryFs() }),
+};
 
 const prompt1Text = 'Create a gear with 12 teeth';
 const prompt2Text = 'Change it to 8 teeth';
@@ -862,11 +865,11 @@ export function AuthSplashback(): React.JSX.Element {
   const { send } = actorRef;
   const derivedState = useSelector(actorRef, deriveVisibilityState);
 
-  // `useRender` runs unconditionally on mount: kernel + middleware caches keep subsequent
+  // `useRuntime` runs unconditionally on mount: kernel + middleware caches keep subsequent
   // calls free, and status never flickers back to 'loading' once primed. The previous
   // `enabled: showContainer` gate caused a re-render storm on every cycle restart that
   // briefly re-displayed the loading spinner over the still-rendered assembly.
-  const { geometries } = useRender({
+  const { geometries } = useRuntime({
     clientOptions: splashbackKernelClientOptions,
     code: gearCode,
   });

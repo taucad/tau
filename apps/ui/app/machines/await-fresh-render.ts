@@ -1,6 +1,7 @@
 import { waitFor } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 
+import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 
 /**
@@ -34,14 +35,12 @@ export type AwaitFreshRenderOptions = {
   signal?: AbortSignal;
   /**
    * Maximum wall-clock time to await a fresh render. Milliseconds.
-   * Defaults to 30 000 — the same default as {@link cadMachine}'s
+   * Defaults to {@link defaultRenderTimeout} — the same default as {@link cadMachine}'s
    * `renderTimeout`.
    */
   awaitTimeout?: number;
 };
 
-/** Milliseconds. */
-const defaultAwaitTimeout = 30_000;
 /**
  * XState's `waitFor` requires a finite `timeout`. We pass a generous
  * super-timeout (`awaitTimeout + slop`) so our owned `Promise.race` timer
@@ -77,7 +76,7 @@ export async function awaitFreshRender(
   options: AwaitFreshRenderOptions = {},
 ): Promise<SnapshotFrom<typeof cadMachine>> {
   const baselineRenderId = cadActor.getSnapshot().context.lastRequestedRenderId;
-  const awaitTimeout = options.awaitTimeout ?? defaultAwaitTimeout;
+  const awaitTimeout = options.awaitTimeout ?? defaultRenderTimeout;
 
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_resolve, reject) => {

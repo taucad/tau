@@ -36,7 +36,17 @@ vi.mock('#lib/monaco.constants.js', () => ({
     typescriptreact: 'typescriptreact',
     javascript: 'javascript',
     javascriptreact: 'javascriptreact',
+    bash: 'bash',
     json: 'json',
+    jsonl: 'jsonl',
+    jsonc: 'jsonc',
+    markdown: 'markdown',
+    kcl: 'kcl',
+    openscad: 'openscad',
+    stepfile: 'stepfile',
+    stl: 'stl',
+    usd: 'usd',
+    sysml: 'sysml',
   },
 }));
 vi.mock('#lib/kcl-language/kcl-register-language.js', () => ({ kclContribution: {} }));
@@ -44,6 +54,9 @@ vi.mock('#lib/openscad-language/openscad-register-language.js', () => ({ opensca
 vi.mock('#lib/stepfile-language/stepfile-register-language.js', () => ({ stepfileContribution: {} }));
 vi.mock('#lib/stl-language/stl-register-language.js', () => ({ stlContribution: {} }));
 vi.mock('#lib/usd-language/usd-register-language.js', () => ({ usdContribution: {} }));
+vi.mock('#lib/sysml-language/sysml-register-language.js', () => ({ sysmlContribution: {} }));
+vi.mock('#lib/markdown-language/markdown-register-language.js', () => ({ markdownContribution: {} }));
+vi.mock('#lib/bash-language/bash-register-language.js', () => ({ bashContribution: {} }));
 vi.mock('#lib/javascript-contribution.js', () => ({ jsContribution: {} }));
 vi.mock('#lib/typescript-contribution.js', () => ({ tsContribution: {} }));
 vi.mock('@taucad/lsp/language-fs-sync-host', () => ({

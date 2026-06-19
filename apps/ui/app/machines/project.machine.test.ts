@@ -2,16 +2,24 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
 import type { FileParameterEntry, Project } from '@taucad/types';
-import type { RuntimeClientOptions } from '@taucad/runtime';
-import { projectMachine } from '#machines/project.machine.js';
+import { isProjectContentActivityPath, projectMachine } from '#machines/project.machine.js';
 import type { ProjectContext } from '#machines/project.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { createDefaultEntry, getActiveGroupValues } from '#utils/parameter-config.utils.js';
-import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
+import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
+import { defaultProjectName } from '#constants/project-names.js';
 
 vi.mock('#constants/browser.constants.js', () => ({
   isBrowser: true,
 }));
+
+const createKernelOptionsFactory = (): LazyKernelOptionsFactory => async () => () =>
+  mock<ReturnType<KernelOptionsFactory>>({
+    config: {
+      tauApiUrl: 'https://api.test',
+      tauWebSocketUrl: 'wss://api.test',
+    },
+  });
 
 // ---------------------------------------------------------------------------
 // Stubs
@@ -86,7 +94,7 @@ function createTestActor(options?: {
   });
 
   const fileManagerRef = mock<ProjectContext['fileManagerRef']>({ send: vi.fn() });
-  const kernelOptionsFactory: LazyKernelOptionsFactory = async () => () => mock<RuntimeClientOptions>();
+  const kernelOptionsFactory = createKernelOptionsFactory();
 
   return createActor(machine, {
     input: {
@@ -113,6 +121,27 @@ async function startAndLoad(options?: Parameters<typeof createTestActor>[0]) {
 describe('projectMachine', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  describe('project content activity path classification', () => {
+    it.each([
+      ['', false],
+      ['.', false],
+      ['/', false],
+      ['.tau', false],
+      ['.tau/settings.json', false],
+      ['.cache', false],
+      ['.cache/render.bin', false],
+      ['node_modules', false],
+      ['node_modules/replicad/index.d.ts', false],
+      ['main.ts', true],
+      ['/main.ts', true],
+      ['src', true],
+      ['src/model.ts', true],
+      ['assets/mesh.step', true],
+    ])('classifies %s as project content activity: %s', (path, expected) => {
+      expect(isProjectContentActivityPath(path)).toBe(expected);
+    });
   });
 
   // =========================================================================
@@ -146,7 +175,7 @@ describe('projectMachine', () => {
         },
       });
       const fileManagerRef = mock<ProjectContext['fileManagerRef']>({ send: vi.fn() });
-      const kernelOptionsFactory: LazyKernelOptionsFactory = async () => () => mock<RuntimeClientOptions>();
+      const kernelOptionsFactory = createKernelOptionsFactory();
       const actor = createActor(machine, {
         input: { projectId: 'b', fileManagerRef, kernelOptionsFactory },
       });
@@ -357,6 +386,25 @@ describe('projectMachine', () => {
       actor.stop();
     });
 
+    it('should preserve updatedAt on generated name change', async () => {
+      const actor = await startAndLoad({ loadResult: { ...stubProject, name: defaultProjectName } });
+      const before = actor.getSnapshot().context.project!.updatedAt;
+      actor.send({ type: 'applyGeneratedProjectName', name: 'Generated Name' });
+      const snapshot = actor.getSnapshot().context.project;
+      expect(snapshot?.name).toBe('Generated Name');
+      expect(snapshot?.updatedAt).toBe(before);
+      actor.stop();
+    });
+
+    it('should ignore generated name changes once a project has a user name', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'applyGeneratedProjectName', name: 'Generated Name' });
+      const snapshot = actor.getSnapshot().context.project;
+      expect(snapshot?.name).toBe(stubProject.name);
+      expect(snapshot?.updatedAt).toBe(stubProject.updatedAt);
+      actor.stop();
+    });
+
     it('should NOT update updatedAt on tag change', async () => {
       const actor = await startAndLoad();
       const before = actor.getSnapshot().context.project!.updatedAt;
@@ -377,6 +425,30 @@ describe('projectMachine', () => {
       const actor = await startAndLoad();
       actor.send({ type: 'setMainFile', path: 'other.ts' });
       expect(actor.getSnapshot().context.project?.assets.mechanical).toBeUndefined();
+      actor.stop();
+    });
+
+    it('should bump updatedAt for visible project file activity', async () => {
+      const now = vi.spyOn(Date, 'now').mockReturnValue(3001);
+      const actor = await startAndLoad();
+      actor.send({ type: 'projectFileActivity', operation: 'written', paths: ['main.ts'] });
+      const snapshot = actor.getSnapshot().context.project;
+      expect(snapshot?.updatedAt).toBe(3001);
+      now.mockRestore();
+      actor.stop();
+    });
+
+    it('should preserve updatedAt for root and housekeeping file activity', async () => {
+      const now = vi.spyOn(Date, 'now').mockReturnValue(3001);
+      const actor = await startAndLoad();
+      actor.send({
+        type: 'projectFileActivity',
+        operation: 'batchWritten',
+        paths: ['', '.tau/project.json', '.cache/render.bin', 'node_modules/pkg/index.d.ts'],
+      });
+      const snapshot = actor.getSnapshot().context.project;
+      expect(snapshot?.updatedAt).toBe(stubProject.updatedAt);
+      now.mockRestore();
       actor.stop();
     });
   });

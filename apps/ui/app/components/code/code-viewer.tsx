@@ -2,14 +2,15 @@ import { useState, useEffect } from 'react';
 import { useShikiHighlighter } from 'react-shiki/core';
 import type { HighlighterCore } from 'shiki/core';
 import type { ClassValue } from 'clsx';
-import type { CodeLanguage } from '@taucad/types';
 import { cn } from '#utils/ui.utils.js';
 import { getHighlighter } from '#lib/shiki.lib.js';
 import { useTheme } from '#hooks/use-theme.js';
+import type { HighlightLanguageInput, ShikiLanguage } from '#lib/code-language-resolution.js';
+import { resolveHighlightLanguage } from '#lib/code-language-resolution.js';
 
 type CodeViewerProps = {
   readonly text: string;
-  readonly language: CodeLanguage;
+  readonly language?: HighlightLanguageInput;
   readonly className?: ClassValue;
 };
 
@@ -37,8 +38,16 @@ export function CodeViewer({ text, language, className }: CodeViewerProps): Reac
     );
   }
 
+  const resolvedLanguage = resolveHighlightLanguage(language);
+
   return (
-    <HighlightedCode text={text} language={language} theme={theme} highlighter={highlighter} className={className} />
+    <HighlightedCode
+      text={text}
+      language={resolvedLanguage.shikiLanguage}
+      theme={theme}
+      highlighter={highlighter}
+      className={className}
+    />
   );
 }
 
@@ -50,7 +59,7 @@ function HighlightedCode({
   className,
 }: {
   text: string;
-  language: CodeLanguage;
+  language: ShikiLanguage;
   theme: string;
   highlighter: HighlighterCore;
   className?: ClassValue;

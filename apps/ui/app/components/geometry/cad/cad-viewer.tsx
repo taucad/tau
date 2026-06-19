@@ -11,6 +11,7 @@ import { mergeGraphicsBackendWithQueryOverride } from '#components/geometry/grap
 
 type CadViewerProperties = Omit<ThreeViewerProperties, 'graphicsBackend'> & {
   readonly geometries: Geometry[];
+  readonly sourceFile?: string;
   readonly enableSurfaces?: boolean;
   readonly enableLines?: boolean;
   readonly enableMatcap?: boolean;
@@ -19,6 +20,7 @@ type CadViewerProperties = Omit<ThreeViewerProperties, 'graphicsBackend'> & {
 export const CadViewer = memo(
   ({
     geometries,
+    sourceFile,
     enableSurfaces = true,
     enableLines = true,
     enableMatcap = false,
@@ -52,6 +54,8 @@ export const CadViewer = memo(
                   <GltfMesh
                     key={geometry.hash}
                     gltfFile={geometry.content}
+                    sourceFile={sourceFile}
+                    geometryHash={geometry.hash}
                     enableMatcap={enableMatcap}
                     enableSurfaces={enableSurfaces}
                     enableLines={enableLines}

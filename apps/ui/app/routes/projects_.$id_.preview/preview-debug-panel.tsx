@@ -8,7 +8,7 @@ import type { GltfInspection } from '#utils/inspect-glb.utils.js';
 
 /**
  * `TAU_DEBUG`-gated diagnostic panel below the preview "Downloads" section.
- * Mirrors the `examples/electron-tau` BoundingBoxViewer one-for-one so the
+ * Mirrors the `examples/electron` BoundingBoxViewer one-for-one so the
  * cross-app e2e contract (counts, asset metadata, scene bounding box) is a
  * shared visual surface — flipping `TAU_DEBUG=true` in the UI lights up the
  * same `data-testid` set Playwright already consumes in the Electron suite.

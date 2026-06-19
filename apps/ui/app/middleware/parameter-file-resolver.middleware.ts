@@ -6,7 +6,8 @@ import { parametersDirectory } from '#utils/parameter-config.utils.js';
 /** Milliseconds. */
 const parameterWatchDebounce = 0;
 
-export const parameterFileResolverMiddleware = defineMiddleware({
+export const parameterFileResolver = defineMiddleware({
+  id: 'parameterFileResolver',
   name: 'parameter-file-resolver',
 
   optionsSchema: z.object({

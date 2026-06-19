@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useEffect, useMemo, useCallback } from 'react';
+import { createContext, useContext, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -18,7 +18,7 @@ import { defaultKernelOptions } from '#constants/kernel-options.presets.js';
 /**
  * Status of the CAD preview.
  */
-export type CadPreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
+export type CadPreviewStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
 
 /**
  * Context value exposed by CadPreviewProvider via the useCadPreview() hook.
@@ -51,7 +51,7 @@ export type CadPreviewProviderProps = {
   readonly children: ReactNode;
 };
 
-function deriveStatus(cadState: string): CadPreviewStatus {
+function deriveStatus(cadState: string): Exclude<CadPreviewStatus, 'empty'> {
   switch (cadState) {
     case 'idle': {
       return 'ready';
@@ -74,6 +74,28 @@ function deriveStatus(cadState: string): CadPreviewStatus {
 }
 
 /**
+ * Combines CAD machine phase, settled-render identity, and geometry count into
+ * the preview status exposed by {@link useCadPreview}.
+ */
+export const deriveCadPreviewStatus = (args: {
+  readonly initError: Error | undefined;
+  readonly cadState: string;
+  readonly lastSettledRenderId: number;
+  readonly geometryCount: number;
+}): CadPreviewStatus => {
+  if (args.initError) {
+    return 'error';
+  }
+
+  const baseStatus = deriveStatus(args.cadState);
+  if (baseStatus === 'ready' && args.lastSettledRenderId > 0 && args.geometryCount === 0) {
+    return 'empty';
+  }
+
+  return baseStatus;
+};
+
+/**
  * Provider that creates a lightweight CAD rendering pipeline (cadMachine + graphicsMachine),
  * optionally writes files to the filesystem, and exposes all rendering state via the useCadPreview() hook.
  *
@@ -81,7 +103,38 @@ function deriveStatus(cadState: string): CadPreviewStatus {
  * Uses cadPreviewMachine to orchestrate file preparation and kernel initialization,
  * following the same invoke+fromPromise pattern as projectMachine.
  *
- * @example <caption>Simple thumbnail</caption>
+ * ## Two-mode filesystem contract (when `files` is provided)
+ *
+ * Preview files always land under `/projects/<projectId>/...`, but who owns
+ * the worker-side mount depends on the surrounding `FileManagerProvider`:
+ *
+ * 1. **Case A — surrounding FM is project-scoped to the same `projectId`**
+ *    (e.g. `projects_.$id_.preview/route.tsx` and `v.$id/route.tsx`, both of
+ *    which wrap the preview in a `FileManagerProvider rootDirectory={/projects/<id>}`).
+ *    The FM machine has already mounted that prefix on the worker
+ *    (file-manager.machine.ts, gated on `context.projectId !== undefined`).
+ *    The provider writes via `FileContentService.writeFiles` so the FM's
+ *    cache + tree refresh stay coherent. Absolute keys resolve to
+ *    workspace-relative paths inside the resolver — no escape, no extra
+ *    mount lifecycle.
+ *
+ * 2. **Case B — surrounding FM does NOT match the preview's `projectId`**
+ *    (e.g. `import-viewer.tsx` with `projectId='import-preview-<owner>-<repo>'`
+ *    under the app shell's root FM at `/`, or `project-grid.tsx`
+ *    thumbnails). No mount exists for the preview prefix; writing through
+ *    the surrounding `FileContentService` would trip
+ *    `WorkspaceScopeViolationError` (keys escape its `rootDirectory`).
+ *    The provider mounts its own ephemeral `{ backend: 'memory',
+ *    preservePath: true }` at `/projects/<projectId>`, writes via
+ *    `client.writeFiles` (the worker-namespace escape hatch — see
+ *    `use-file-manager.tsx` `FileSystemClientFacade` JSDoc), and unmounts
+ *    on React teardown. Ephemerality keeps the user's persistent IDB clean.
+ *
+ * Detection is purely a function of `snapshot.context.projectId` on the
+ * `fileManagerRef`. No mount-table query / `isMounted` API is required —
+ * the FM machine is the only producer of `/projects/<id>` mounts.
+ *
+ * @example <caption>Simple thumbnail (Case B — root FM, ephemeral mount)</caption>
  * ```tsx
  * <CadPreviewProvider projectId="my-project" mainFile="main.ts" files={files}>
  *   <CadPreviewViewer className="size-full" />
@@ -104,7 +157,19 @@ export function CadPreviewProvider({
   kernelOptionsFactory = defaultKernelOptions,
   children,
 }: CadPreviewProviderProps): React.JSX.Element {
-  const { fileManagerRef } = useFileManager();
+  const { fileManagerRef, client, workspace } = useFileManager();
+
+  // Tracks the mount prefix this provider instance registered on the worker.
+  // Set by the `prepareFiles` actor when the preview owns the mount lifecycle
+  // (root-FM / cross-scope case); left `undefined` when the surrounding
+  // project-scoped FM already owns the mount. The unmount-on-cleanup effect
+  // reads this ref so a sibling provider with the same `projectId` cannot
+  // unmount someone else's mount.
+  const mountedPrefixRef = useRef<string | undefined>(undefined);
+  // Capture `workspace.unmount` so the cleanup effect uses a stable reference
+  // even if the gated facade re-renders.
+  const unmountRef = useRef(workspace.unmount);
+  unmountRef.current = workspace.unmount;
 
   const cadRef = useActorRef(cadMachine, {
     input: {
@@ -149,7 +214,7 @@ export function CadPreviewProvider({
 
             signal.throwIfAborted();
 
-            const { contentService } = snapshot.context;
+            const { contentService, projectId: fmProjectId } = snapshot.context;
             if (!contentService) {
               throw new Error('File manager services not available after initialization');
             }
@@ -167,7 +232,31 @@ export function CadPreviewProvider({
               };
             }
 
-            await contentService.writeFiles(projectFiles, 'machine');
+            // Two-mode dispatch (see CadPreviewProvider JSDoc):
+            //   - Case A (FM owns mount): surrounding FM machine has already
+            //     mounted the project's backend at `/projects/<projectId>` (it
+            //     does this iff `context.projectId !== undefined`, see
+            //     file-manager.machine.ts ~lines 295-309). Write through the
+            //     FM's `FileContentService` so its cache + tree refresh stay
+            //     coherent for the editor / publication view.
+            //   - Case B (preview owns mount): surrounding FM doesn't match
+            //     this preview's `projectId` (root-FM thumbnail / import-
+            //     preview / cross-scope). Mount an ephemeral `memory` backend
+            //     at the preview prefix and write via `client.writeFiles`,
+            //     the documented worker-namespace escape hatch. Going through
+            //     `contentService.writeFiles` would trip
+            //     `WorkspaceScopeViolationError` because the absolute keys
+            //     escape the FM's `rootDirectory` (the bug this fix closes).
+            const previewOwnsMount = fmProjectId !== input.projectId;
+            if (previewOwnsMount) {
+              const previewPrefix = joinPath('/projects', input.projectId);
+              await workspace.mount(previewPrefix, { backend: 'memory', preservePath: true });
+              mountedPrefixRef.current = previewPrefix;
+              signal.throwIfAborted();
+              await client.writeFiles(projectFiles);
+            } else {
+              await contentService.writeFiles(projectFiles, 'machine');
+            }
           }
         }),
       },
@@ -190,9 +279,29 @@ export function CadPreviewProvider({
     }
   }, [isEnabled, previewRef]);
 
+  // Unmount the preview-owned ephemeral prefix on React teardown.
+  // Mount-on-write registration happens inside `prepareFiles` (above) and
+  // sets `mountedPrefixRef.current` only when the preview owns the mount.
+  // Cleanup is a no-op when the surrounding FM already owned the mount.
+  // The effect intentionally has an empty dependency array — it should run
+  // exactly once at unmount (or `projectId` change, which remounts the
+  // provider via the `key={projectId-mainFile}` callers use). React invokes
+  // cleanup on unmount; the actor is what sets the ref between mount and
+  // cleanup.
+  useEffect(() => {
+    return () => {
+      const previewPrefix = mountedPrefixRef.current;
+      if (previewPrefix !== undefined) {
+        mountedPrefixRef.current = undefined;
+        unmountRef.current(previewPrefix);
+      }
+    };
+  }, []);
+
   // Selectors on cadRef for reactive state
   const geometries = useSelector(cadRef, (s) => s.context.geometries);
   const cadStateValue = useSelector(cadRef, (s) => s.value);
+  const lastSettledRenderId = useSelector(cadRef, (s) => s.context.lastSettledRenderId);
   const kernelIssues = useSelector(cadRef, (s) => s.context.kernelIssues);
   const defaultParameters = useSelector(cadRef, (s) => s.context.defaultParameters);
   const jsonSchema = useSelector(cadRef, (s) => s.context.jsonSchema);
@@ -201,7 +310,16 @@ export function CadPreviewProvider({
   // Initialization error from the preview machine
   const initError = useSelector(previewRef, (s) => s.context.initError);
 
-  const status = initError ? 'error' : deriveStatus(typeof cadStateValue === 'string' ? cadStateValue : 'idle');
+  const status = useMemo(
+    () =>
+      deriveCadPreviewStatus({
+        initError,
+        cadState: typeof cadStateValue === 'string' ? cadStateValue : 'idle',
+        lastSettledRenderId,
+        geometryCount: geometries.length,
+      }),
+    [initError, cadStateValue, lastSettledRenderId, geometries.length],
+  );
 
   const error = useMemo(() => {
     if (initError) {

@@ -34,9 +34,14 @@ For framework-specific configuration (Vite, Node.js), see [Installation](./insta
 Create a file called `render.ts` and paste the following code:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 const result = await client.export('glb', {
   code: {
     'main.ts': `
@@ -52,33 +57,37 @@ console.log(`Exported ${result.data.bytes.byteLength} bytes (${result.data.mimeT
 client.terminate();
 ```
 
-`presets.all()` includes all built-in kernels, middleware, and bundlers. Inline `code:` input runs in an in-memory filesystem; the first command call starts the worker.
+`presets.all()` includes all built-in kernels, middleware, bundlers, and transcoders as a worker-owned runtime definition. Inline `code:` input runs in an in-memory filesystem; the first command call starts the runtime.
 
 ### How the runtime is wired
 
 A `RuntimeClient` is composed of three orthogonal plug points:
 
-| Plane          | What it owns                                                                    | Default in this snippet                |
-| -------------- | ------------------------------------------------------------------------------- | -------------------------------------- |
-| **Transport**  | The wire (`MessagePort` / in-process channel / Electron `MessagePortMain`)      | `inProcessTransport`                   |
-| **Runner**     | Where kernel code executes (this isolate / `Worker` / `worker_thread` / remote) | in-process (same isolate)              |
-| **Filesystem** | The source of truth for files (`fromMemoryFs`, `fromNodeFs`, `fromChannelFs`)   | inline memory FS, derived from `code:` |
+| Plane          | What it owns                                                                         | Default in this snippet                |
+| -------------- | ------------------------------------------------------------------------------------ | -------------------------------------- |
+| **Runtime**    | Executable kernels, middleware, bundlers, and transcoders                            | `presets.all()`                        |
+| **Transport**  | The wire (`MessagePort` / in-process channel / Electron `MessagePortMain`)           | in-process channel                     |
+| **Filesystem** | The source of truth for files (`fromMemoryFs`, `fromNodeFs`, `fromFileSystemBridge`) | inline memory FS, derived from `code:` |
 
-The same three plug points compose every supported topology — browser UI, in-process Node, Electron renderer + main, multi-window Electron — without core changes. See [Worker Model → Topology Recipes](../concepts/worker-model#topology-recipes) for the canonical T1–T4 configs.
+The same plug points compose every supported topology — browser UI, in-process Node, Electron renderer + main, multi-window Electron — without core changes. See [Worker Model → Topology Recipes](../concepts/worker-model#topology-recipes) for the canonical T1–T4 configs.
 
-For tree-shaking, configure individual plugins with `createRuntimeClientOptions`:
+For tree-shaking, configure individual plugins in a runtime definition:
 
 ```typescript
-import { createRuntimeClient, createRuntimeClientOptions } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { replicad } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const options = createRuntimeClientOptions({
+const runtime = defineRuntime({
   kernels: [replicad()],
   bundlers: [esbuild()],
 });
 
-const client = createRuntimeClient(options);
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 ```
 
 ## Expected Output

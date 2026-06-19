@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react';
 import { ChevronRight, Sparkles } from 'lucide-react';
 import type { KernelProvider, KernelIssue, KernelStackFrame, IssueSeverity } from '@taucad/runtime';
-import { languageFromKernel } from '@taucad/types/constants';
+import { idPrefix, languageFromKernel } from '@taucad/types/constants';
 import { messageRole, messageStatus } from '@taucad/chat/constants';
+import { generatePrefixedId } from '@taucad/utils/id';
 import { Button } from '#components/ui/button.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
@@ -487,13 +488,9 @@ export function ChatStackTrace({ entryFile, className, side, ...props }: ChatSta
       });
 
       if (createNewChat) {
-        // Persist the pending user message and let the hydration auto-regen
-        // (chat-session-store#loadChatActor) fire the assistant turn through
-        // the chat-client once the new chat mounts. The seed message only
-        // needs the pending status — the wire body's `agent` payload is
-        // composed by the chat-client at regenerate time, not from this
-        // metadata block. Seeding `activeModel` / `activeKernel` on the
-        // chat row keeps the new chat pinned to the current selection.
+        // Persist the pending user message with an explicit one-shot startup
+        // request so hydration can fire this intentional Fix-with-AI turn
+        // without treating every pending user tail as command state.
         const message = createMessage({
           content: errorPrompt,
           role: messageRole.user,
@@ -504,6 +501,13 @@ export function ChatStackTrace({ entryFile, className, side, ...props }: ChatSta
         const newChat = await createChat({
           name: 'New chat',
           messages: [message],
+          startupRequest: {
+            id: generatePrefixedId(idPrefix.request),
+            kind: 'regenerate-tail',
+            messageId: message.id,
+            source: 'fix-with-ai-new-chat',
+            createdAt: Date.now(),
+          },
           activeModel: agent.model,
           activeKernel: agent.kernel,
         });

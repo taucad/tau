@@ -105,11 +105,15 @@ describe('useFileManager surface', () => {
   });
 
   it('does not expose ambient setDirectoryHandle, scoped suffix callbacks, or top-level admin callbacks', () => {
+    expectTypeOf<Context>().toHaveProperty('createDirectory');
+    expectTypeOf<Context>().toHaveProperty('deleteDirectory');
     expectTypeOf<Context>().not.toHaveProperty('setDirectoryHandle');
     expectTypeOf<Context>().not.toHaveProperty('readFileScoped');
     expectTypeOf<Context>().not.toHaveProperty('deleteFileScoped');
     expectTypeOf<Context>().not.toHaveProperty('deleteDirectoryScoped');
     expectTypeOf<Context>().not.toHaveProperty('getZippedDirectoryScoped');
+    expectTypeOf<Context>().not.toHaveProperty('mkdir');
+    expectTypeOf<Context>().not.toHaveProperty('rmdir');
     expectTypeOf<Context>().not.toHaveProperty('mount');
     expectTypeOf<Context>().not.toHaveProperty('unmount');
     expectTypeOf<Context>().not.toHaveProperty('invalidateStandaloneProvider');

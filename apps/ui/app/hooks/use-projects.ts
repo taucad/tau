@@ -45,9 +45,11 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
         throw new Error('Project not found');
       }
 
-      await updateProject(projectId, { deletedAt: undefined });
-      void queryClient.invalidateQueries({ queryKey: ['projects'] });
-      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      const restored = await updateProject(projectId, { deletedAt: undefined });
+      if (restored) {
+        void queryClient.invalidateQueries({ queryKey: ['projects'] });
+        void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      }
     },
     [getProject, updateProject, queryClient],
   );
@@ -64,9 +66,11 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
 
   const handleUpdateName = useCallback(
     async (projectId: string, name: string) => {
-      await updateProject(projectId, { name });
-      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
-      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+      const updated = await updateProject(projectId, { name });
+      if (updated) {
+        void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+        void queryClient.invalidateQueries({ queryKey: ['projects'] });
+      }
     },
     [updateProject, queryClient],
   );

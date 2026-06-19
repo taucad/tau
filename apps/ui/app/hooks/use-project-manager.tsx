@@ -6,8 +6,10 @@ import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Project, FileSystemBackend } from '@taucad/types';
+import { idPrefix } from '@taucad/types/constants';
 import type { KernelProvider } from '@taucad/runtime';
 import type { Chat } from '@taucad/chat';
+import { generatePrefixedId } from '@taucad/utils/id';
 import type { Remote } from 'comlink';
 import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { projectManagerMachine } from '#hooks/project-manager.machine.js';
@@ -29,21 +31,19 @@ import { createMessage } from '#utils/chat.utils.js';
 import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { defaultProjectName } from '#constants/project-names.js';
+import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 
 /**
  * Shared options for initial chat configuration.
  *
  * Note: the initial-message metadata block intentionally only carries
  * `status: pending`. Per-request configuration (kernel / model / mode /
- * toolChoice / testingEnabled / snapshot / contextPayload) is composed by
- * the chat-client at regenerate time — the hydration-driven auto-regen on
- * pending-tail (see `chat-session-store#loadChatActor`) flows through the
- * persistence machine, and the resulting `agent` payload is supplied by
- * `useCadChatClient` from the chat row's `activeModel` / `activeKernel`
- * seeds (and the current cookie defaults).
+ * toolChoice / testingEnabled / snapshot / contextPayload) is composed at
+ * request time. Homepage-created chats opt into the one-shot hydration run
+ * with `Chat.startupRequest`; plain pending messages are display state only.
  */
 type CreateProjectChatOptions = {
-  /** If provided, add to chat (triggers AI response via hydration auto-regen) */
+  /** If provided, add to chat and seed a one-shot startup request. */
   initialMessage?: {
     content: string;
     imageUrls?: string[];
@@ -65,7 +65,7 @@ type CreateProjectChatOptions = {
   /**
    * Seed `Chat.activeModel` so the chat owns its model choice independent
    * of the cookie default. Required when `initialMessage` is supplied so the
-   * pending-tail auto-regen runs with the caller's intended model rather
+   * one-shot startup request runs with the caller's intended model rather
    * than whatever the cookie happens to hold at hydration time.
    */
   activeModel?: string;
@@ -109,13 +109,7 @@ type ProjectManagerContextType = {
   error: Error | undefined;
   projectManagerRef: ActorRefFrom<typeof projectManagerMachine>;
   createProject: (options: CreateProjectOptions) => Promise<Project>;
-  updateProject: (
-    projectId: string,
-    update: PartialDeep<Project>,
-    options?: {
-      noUpdatedAt?: boolean;
-    },
-  ) => Promise<Project | undefined>;
+  updateProject: (projectId: string, update: PartialDeep<Project>) => Promise<Project | undefined>;
   touchProject: (projectId: string) => Promise<Project | undefined>;
   duplicateProject: (projectId: string) => Promise<Project>;
   getProjects: (options?: { includeDeleted?: boolean }) => Promise<Project[]>;
@@ -128,14 +122,12 @@ type ProjectManagerContextType = {
       id?: string;
     },
   ) => Promise<Chat>;
-  updateChat: (
-    chatId: string,
-    update: PartialDeep<Chat>,
-    options?: {
-      noUpdatedAt?: boolean;
-    },
-  ) => Promise<Chat | undefined>;
+  createNavigationRepairChat: (resourceId: string) => Promise<Chat>;
+  updateChat: (chatId: string, update: PartialDeep<Chat>) => Promise<Chat | undefined>;
+  applyGeneratedChatName: (chatId: string, name: string) => Promise<Chat | undefined>;
   patchChat: <K extends keyof Chat>(chatId: string, key: K, value: Chat[K]) => Promise<Chat | undefined>;
+  consumeChatStartupRequest: (chatId: string, requestId: string) => Promise<Chat | undefined>;
+  commitCancelledDraftRestore: (chatId: string, input: CommitCancelledDraftRestoreInput) => Promise<Chat | undefined>;
   setMessageEdit: (
     chatId: string,
     messageId: string,
@@ -212,25 +204,29 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         files = options.files;
       }
 
-      // Seed only the pending-status flag on the initial user message. The
-      // per-request `agent` payload (kernel / model / mode / toolChoice /
-      // testingEnabled / snapshot / contextPayload) is composed by the
-      // chat-client at regenerate time — the hydration auto-regen on
-      // pending-tail dispatches through `useCadChatClient.regenerateTail()`
-      // which sources the agent from the chat row's seeded active values
-      // plus the current cookie defaults.
-      const chatMessages = options.initialMessage
-        ? [
-            createMessage({
-              content: options.initialMessage.content,
-              role: messageRole.user,
-              metadata: {
-                status: messageStatus.pending,
-              },
-              imageUrls: options.initialMessage.imageUrls,
-            }),
-          ]
-        : [];
+      // The initial homepage prompt remains a normal pending user message
+      // for display purposes. The permission to run it automatically after
+      // route hydration is separate one-shot command state on the chat row.
+      const initialUserMessage = options.initialMessage
+        ? createMessage({
+            content: options.initialMessage.content,
+            role: messageRole.user,
+            metadata: {
+              status: messageStatus.pending,
+            },
+            imageUrls: options.initialMessage.imageUrls,
+          })
+        : undefined;
+      const chatMessages = initialUserMessage ? [initialUserMessage] : [];
+      const startupRequest: Chat['startupRequest'] | undefined = initialUserMessage
+        ? {
+            id: generatePrefixedId(idPrefix.request),
+            kind: 'regenerate-tail',
+            messageId: initialUserMessage.id,
+            source: 'homepage-initial-message',
+            createdAt: Date.now(),
+          }
+        : undefined;
 
       const chatName = options.chatName ?? (options.initialMessage ? 'Initial design' : 'Initial chat');
 
@@ -249,6 +245,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           messages: chatMessages,
           activeModel: seededActiveModel,
           activeKernel: seededActiveKernel,
+          ...(startupRequest ? { startupRequest } : {}),
         },
         editorState: options.editorState,
       });
@@ -338,7 +335,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
       const projectFiles: Record<string, { content: Uint8Array<ArrayBuffer> }> = {};
       for (const [path, file] of Object.entries(files)) {
-        projectFiles[`${projectPrefix}/${path}`] = file;
+        projectFiles[`${projectPrefix}/${path}`] = {
+          content: new Uint8Array(file.content),
+        };
       }
 
       // Cross-workspace bootstrap: keys are filesystem-absolute paths under
@@ -360,15 +359,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   );
 
   const updateProject = useCallback(
-    async (
-      projectId: string,
-      update: PartialDeep<Project>,
-      options?: {
-        noUpdatedAt?: boolean;
-      },
-    ): Promise<Project | undefined> => {
+    async (projectId: string, update: PartialDeep<Project>): Promise<Project | undefined> => {
       const worker = await getReadiedWorker();
-      return worker.updateProject(projectId, update, options);
+      return worker.updateProject(projectId, update);
     },
     [getReadiedWorker],
   );
@@ -510,16 +503,18 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [getReadiedWorker, invalidateProjectsList],
   );
 
-  const updateChat = useCallback(
-    async (
-      chatId: string,
-      update: PartialDeep<Chat>,
-      options?: {
-        noUpdatedAt?: boolean;
-      },
-    ): Promise<Chat | undefined> => {
+  const createNavigationRepairChat = useCallback(
+    async (resourceId: string): Promise<Chat> => {
       const worker = await getReadiedWorker();
-      const result = await worker.updateChat(chatId, update, options);
+      return worker.createNavigationRepairChat(resourceId);
+    },
+    [getReadiedWorker],
+  );
+
+  const updateChat = useCallback(
+    async (chatId: string, update: PartialDeep<Chat>): Promise<Chat | undefined> => {
+      const worker = await getReadiedWorker();
+      const result = await worker.updateChat(chatId, update);
       if (result) {
         invalidateProjectsList();
       }
@@ -529,10 +524,44 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [getReadiedWorker, invalidateProjectsList],
   );
 
+  const applyGeneratedChatName = useCallback(
+    async (chatId: string, name: string): Promise<Chat | undefined> => {
+      const worker = await getReadiedWorker();
+      return worker.applyGeneratedChatName(chatId, name);
+    },
+    [getReadiedWorker],
+  );
+
   const patchChat = useCallback(
     async <K extends keyof Chat>(chatId: string, key: K, value: Chat[K]): Promise<Chat | undefined> => {
       const worker = await getReadiedWorker();
       const result = await worker.patchChat(chatId, key, value);
+      if (result) {
+        invalidateProjectsList();
+      }
+
+      return result;
+    },
+    [getReadiedWorker, invalidateProjectsList],
+  );
+
+  const consumeChatStartupRequest = useCallback(
+    async (chatId: string, requestId: string): Promise<Chat | undefined> => {
+      const worker = await getReadiedWorker();
+      const result = await worker.consumeChatStartupRequest(chatId, requestId);
+      if (result) {
+        invalidateProjectsList();
+      }
+
+      return result;
+    },
+    [getReadiedWorker, invalidateProjectsList],
+  );
+
+  const commitCancelledDraftRestore = useCallback(
+    async (chatId: string, input: CommitCancelledDraftRestoreInput): Promise<Chat | undefined> => {
+      const worker = await getReadiedWorker();
+      const result = await worker.commitCancelledDraftRestore(chatId, input);
       if (result) {
         invalidateProjectsList();
       }
@@ -633,8 +662,12 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       getProject,
       deleteProject,
       createChat,
+      createNavigationRepairChat,
       updateChat,
+      applyGeneratedChatName,
       patchChat,
+      consumeChatStartupRequest,
+      commitCancelledDraftRestore,
       setMessageEdit,
       clearMessageEdit,
       softDeleteChat,
@@ -655,8 +688,12 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     getProject,
     deleteProject,
     createChat,
+    createNavigationRepairChat,
     updateChat,
+    applyGeneratedChatName,
     patchChat,
+    consumeChatStartupRequest,
+    commitCancelledDraftRestore,
     setMessageEdit,
     clearMessageEdit,
     softDeleteChat,

@@ -25,11 +25,12 @@ import { apiKeyPlugin } from '#utils/api-key-plugin.js';
 import { NewApiKeyDialog } from '#components/auth/api-key/new-api-key-dialog.js';
 
 export type CreateApiKeyDialogProps = {
+  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors Radix Dialog's controlled `open` prop API.
   open: boolean;
   onOpenChange: (open: boolean) => void;
 };
 
-export function CreateApiKeyDialog({ open, onOpenChange }: CreateApiKeyDialogProps) {
+export function CreateApiKeyDialog({ open, onOpenChange }: CreateApiKeyDialogProps): React.JSX.Element {
   const { authClient, localization } = useAuth();
   const { localization: apiKeyLocalization } = useAuthPlugin(apiKeyPlugin);
 
@@ -38,30 +39,54 @@ export function CreateApiKeyDialog({ open, onOpenChange }: CreateApiKeyDialogPro
   const [isNewKeyDialogOpen, setIsNewKeyDialogOpen] = useState(false);
   const [keyName, setKeyName] = useState<string | undefined>(undefined);
   const [secretKey, setSecretKey] = useState<string | undefined>(undefined);
+  const [fieldErrors, setFieldErrors] = useState<{
+    name?: string;
+  }>({});
 
-  const handleOpenChange = (nextOpen: boolean) => {
+  const nameRequiredMessage = `${apiKeyLocalization.apiKey} name is required.`;
+
+  const handleOpenChange = (nextOpen: boolean): void => {
     if (!nextOpen) {
       setKeyName(undefined);
       setSecretKey(undefined);
+      setFieldErrors({});
     }
 
     onOpenChange(nextOpen);
   };
 
-  const handleSubmit = (e: SyntheticEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const handleSubmit = (event: SyntheticEvent<HTMLFormElement>): void => {
+    event.preventDefault();
 
-    const formData = new FormData(e.target as HTMLFormElement);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     const name = (formData.get('name') as string).trim();
 
-    createApiKey(name ? { name } : {}, {
-      onSuccess: (result) => {
-        handleOpenChange(false);
-        setKeyName(name);
-        setSecretKey(result.key);
-        setIsNewKeyDialogOpen(true);
+    if (!name) {
+      const nameInput = form.elements.namedItem('name');
+      if (nameInput instanceof HTMLInputElement) {
+        nameInput.setCustomValidity(nameRequiredMessage);
+        nameInput.focus();
+      }
+
+      setFieldErrors((previous) => ({
+        ...previous,
+        name: nameRequiredMessage,
+      }));
+      return;
+    }
+
+    createApiKey(
+      { name },
+      {
+        onSuccess: (result) => {
+          handleOpenChange(false);
+          setKeyName(name);
+          setSecretKey(result.key);
+          setIsNewKeyDialogOpen(true);
+        },
       },
-    });
+    );
   };
 
   return (
@@ -79,18 +104,34 @@ export function CreateApiKeyDialog({ open, onOpenChange }: CreateApiKeyDialogPro
               <AlertDialogDescription>{apiKeyLocalization.apiKeysDescription}</AlertDialogDescription>
             </AlertDialogHeader>
 
-            <Field>
+            <Field data-invalid={Boolean(fieldErrors.name)}>
               <Label htmlFor='api-key-name'>{apiKeyLocalization.name}</Label>
 
               <Input
                 id='api-key-name'
                 name='name'
                 autoFocus
-                placeholder={localization.settings.optional}
+                placeholder='Enter name'
+                required
                 disabled={isCreating}
+                onChange={(event) => {
+                  event.currentTarget.setCustomValidity('');
+                  setFieldErrors((previous) => ({
+                    ...previous,
+                    name: undefined,
+                  }));
+                }}
+                onInvalid={(event) => {
+                  event.preventDefault();
+                  setFieldErrors((previous) => ({
+                    ...previous,
+                    name: event.currentTarget.validationMessage,
+                  }));
+                }}
+                aria-invalid={Boolean(fieldErrors.name)}
               />
 
-              <FieldError />
+              <FieldError>{fieldErrors.name}</FieldError>
             </Field>
 
             <AlertDialogFooter>

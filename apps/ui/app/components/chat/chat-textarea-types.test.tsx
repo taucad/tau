@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, act, waitFor } from '@testing-library/react';
 import {
   resolveKernel,
   tauEditorPanelDragMime,
@@ -346,6 +346,13 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
       dataTransfer: buildDataTransfer(files),
     }) as unknown as React.DragEvent;
 
+  const buildClipboardEvent = (files: readonly File[]) => {
+    return {
+      preventDefault: vi.fn(),
+      clipboardData: buildDataTransfer(files),
+    };
+  };
+
   const makeFile = (name: string, type = 'image/png'): File => {
     return Object.assign(new File([new Blob(['stub'])], name, { type }), { __taggedAs: name });
   };
@@ -476,5 +483,32 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     const dispatched = chatActionsMock.addDraftImage.mock.calls[0]?.[0];
     expect(dispatched).toBe('data:image/png;base64,RAW_A.png');
     expect(dispatched?.startsWith('data:image/png;base64,RAW_')).toBe(true);
+  });
+
+  it('should dispatch addDraftImage once per pasted image, in paste order, with raw data URLs', async () => {
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+
+    const files = ['A.png', 'B.png', 'C.png', 'D.png', 'E.png'].map((n) => makeFile(n));
+    const event = buildClipboardEvent(files);
+
+    act(() => {
+      expect(result.current.handlePaste(event)).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(chatActionsMock.addDraftImage).toHaveBeenCalledTimes(5);
+    });
+    const args = chatActionsMock.addDraftImage.mock.calls.map((c) => c[0]);
+    expect(args).toEqual([
+      'data:image/png;base64,RAW_A.png',
+      'data:image/png;base64,RAW_B.png',
+      'data:image/png;base64,RAW_C.png',
+      'data:image/png;base64,RAW_D.png',
+      'data:image/png;base64,RAW_E.png',
+    ]);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(toastErrorMock).not.toHaveBeenCalled();
   });
 });

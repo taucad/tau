@@ -1,14 +1,14 @@
 import type { RunGeoSpecTestsRpcResult } from '@taucad/chat';
 import { rpcClientErrorCode } from '@taucad/chat';
 import type { RpcGeoSpecClient } from '@taucad/chat/rpc';
-import { filesystemBridgeConnectMessageType } from '@taucad/runtime/transport-internals';
+import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import type { GeoSpecRunnerWorkerRequest, GeoSpecRunnerWorkerResponse } from '#workers/geospec-runner.types.js';
 
 type CreateGeoSpecWorker = () => Worker;
 
 export type GeoSpecWorkerRpcClientOptions = {
-  fileManagerWorker: Worker;
+  openFileSystemBridge: () => FileSystemBridgeConnection;
   projectRootPath: string;
   runtimeConfig: UiRuntimeConfigInput;
   filePoolBuffer?: SharedArrayBuffer;
@@ -42,10 +42,6 @@ const createDefaultGeoSpecWorker = (): Worker =>
 
 const createRequestId = (): string => {
   return globalThis.crypto.randomUUID();
-};
-
-const connectFileSystemBridge = (worker: Worker, port: MessagePort): void => {
-  worker.postMessage({ type: filesystemBridgeConnectMessageType, port }, [port]);
 };
 
 const errorResult = (message: string): RunGeoSpecTestsRpcResult => ({
@@ -192,7 +188,8 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
     worker.addEventListener('message', onMessage);
     worker.addEventListener('error', onError);
 
-    const vmFileSystemChannel = new MessageChannel();
+    const vmFileSystemBridge = options.openFileSystemBridge();
+    const runtimeFileSystemBridge = options.openFileSystemBridge();
     const nextSessionId = createRequestId();
     const requestId = createRequestId();
     initializeRequestId = requestId;
@@ -203,18 +200,20 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
     });
 
     try {
-      connectFileSystemBridge(options.fileManagerWorker, vmFileSystemChannel.port1);
       const request: GeoSpecRunnerWorkerRequest = {
         type: 'initialize',
         requestId,
         sessionId: nextSessionId,
         projectRootPath: options.projectRootPath,
         runtimeConfig: options.runtimeConfig,
-        vmFileSystemPort: vmFileSystemChannel.port2,
+        vmFileSystemPort: vmFileSystemBridge.port,
+        runtimeFileSystemPort: runtimeFileSystemBridge.port,
         ...(options.filePoolBuffer ? { filePoolBuffer: options.filePoolBuffer } : {}),
       };
-      worker.postMessage(request, [vmFileSystemChannel.port2]);
+      worker.postMessage(request, [vmFileSystemBridge.port, runtimeFileSystemBridge.port]);
     } catch (error) {
+      vmFileSystemBridge.dispose();
+      runtimeFileSystemBridge.dispose();
       const message = error instanceof Error ? error.message : 'GeoSpec worker failed to start.';
       terminateWorker(message);
       throw new Error(message);

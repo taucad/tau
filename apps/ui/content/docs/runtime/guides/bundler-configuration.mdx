@@ -28,20 +28,25 @@ The default bundler is created via the `esbuild()` factory:
 import { esbuild } from '@taucad/runtime/bundler';
 ```
 
-### 2. Add the Bundler to createRuntimeClient
+### 2. Add the Bundler to defineRuntime
 
-Pass the bundler in the `bundlers` array. JS/TS kernels (Replicad, OpenCASCADE, Manifold, JSCAD) require a bundler to resolve imports and execute code:
+Pass the bundler in the worker-owned runtime definition. JS/TS kernels (Replicad, OpenCASCADE, Manifold, JSCAD) require a bundler to resolve imports and execute code:
 
 ```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { replicad } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
 
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
+const runtime = defineRuntime({
   kernels: [replicad()],
   bundlers: [esbuild()],
+});
+
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 ```
 
@@ -75,7 +80,7 @@ If you build a custom JS/TS kernel, register built-in modules during `initialize
 ```typescript
 import { defineKernel } from '@taucad/runtime/kernel';
 
-export default defineKernel({
+export const myKernel = defineKernel({
   name: 'MyKernel',
   version: '1.0.0',
 
@@ -138,8 +143,8 @@ const myBundler = defineBundler({
   },
 
   async execute(code) {
-    const moduleUrl = `data:text/javascript;base64,${btoa(code)}`;
-    const module = (await import(moduleUrl)) as { default: unknown };
+    const dataUrl = `data:text/javascript;base64,${btoa(code)}`;
+    const module = (await import(dataUrl)) as { default: unknown };
     return { success: true, value: module.default };
   },
 
@@ -149,7 +154,16 @@ const myBundler = defineBundler({
 });
 ```
 
-Register your bundler via a [`BundlerPlugin`](../api/bundler) with `moduleUrl` pointing to the built module.
+The `myBundler` value returned by `defineBundler` is already the [`BundlerPlugin`](../api/bundler) factory. Register it directly in the worker-owned runtime:
+
+```typescript
+import { defineRuntime } from '@taucad/runtime/worker';
+import { myBundler } from './my-bundler';
+
+export const runtime = defineRuntime({
+  bundlers: [myBundler()],
+});
+```
 
 ## Variations
 

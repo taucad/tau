@@ -1,20 +1,39 @@
 import { createCookieSessionStorage } from 'react-router';
 import { createThemeSessionResolver } from 'remix-themes';
-import { ENV } from '#environment.config.js';
+import type { ThemeSessionResolver } from 'remix-themes';
 import { metaConfig } from '#constants/meta.constants.js';
 
-const isProduction = ENV.NODE_ENV === 'production';
+export type ThemeCookieOptionsInput = {
+  requestUrl: string;
+};
 
-const sessionStorage = createCookieSessionStorage({
-  cookie: {
+type ThemeCookieOptions = {
+  name: string;
+  path: string;
+  httpOnly: boolean;
+  sameSite: 'lax';
+  secrets: string[];
+  secure: boolean;
+};
+
+export const buildThemeCookieOptions = ({ requestUrl }: ThemeCookieOptionsInput): ThemeCookieOptions => {
+  const secure = new URL(requestUrl).protocol === 'https:';
+
+  return {
     name: `${metaConfig.cookiePrefix}theme`,
     path: '/',
     httpOnly: true,
     sameSite: 'lax',
     secrets: ['s3cr3t'],
-    // Set domain and secure only if in production
-    ...(isProduction ? { domain: 'taucad.com', secure: true } : {}),
-  },
-});
+    secure,
+  };
+};
 
-export const themeSessionResolver = createThemeSessionResolver(sessionStorage);
+export const themeSessionResolver: ThemeSessionResolver = async (request) => {
+  const sessionStorage = createCookieSessionStorage({
+    cookie: buildThemeCookieOptions({ requestUrl: request.url }),
+  });
+
+  const resolveThemeSession = createThemeSessionResolver(sessionStorage);
+  return resolveThemeSession(request);
+};

@@ -30,11 +30,11 @@ export type TransparentSortItem = Readonly<{
  * tie-breaks identical to upstream, so registering it on a reversed-Z renderer via
  * `renderer.setTransparentSort(...)` is a drop-in fix.
  *
- * **Symptom that motivated this.** `SectionViewControls` renders forward / inverse
- * label pairs at the same screen position with `transparent: true, depthTest: false`.
- * On the reversed-Z viewport, the inverse (180-degree-Y-rotated) selector overdrew the
- * forward one, producing the "Bottom" label in the "Top" slot with mirrored glyphs
- * (and the symmetric Front/Back, Right/Left swaps).
+ * **Symptom that motivated this.** Reversed-Z transparent overlays that intentionally
+ * disable depth testing must still draw farther transparent quads before nearer quads.
+ * Earlier section-view selector labels used that overlay contract; selector labels are
+ * now opaque alpha-tested cutouts, but the sort remains required for genuinely transparent
+ * helper overlays that still live in Three's transparent queue.
  *
  * `null` coercion via `?? 0` matches upstream JavaScript semantics: `null - null`
  * implicitly evaluates to 0, `null - 5` to -5, etc. Upstream omits the explicit

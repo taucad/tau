@@ -2,7 +2,7 @@ import type { RJSFSchema, WidgetProps } from '@rjsf/utils';
 import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
 import { ParametersNumber } from '#components/geometry/parameters/parameters-number.js';
 import { ParametersString } from '#components/geometry/parameters/parameters-string.js';
-import { toTitleCase } from '#utils/string.utils.js';
+import { formatDisplayLabel } from '#utils/string.utils.js';
 import { getDescriptor } from '#constants/project-parameters.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
 
@@ -14,7 +14,7 @@ export function ParametersWidget(
 
   const { formContext } = registry;
 
-  const prettyLabel = name ? toTitleCase(name) : '';
+  const prettyLabel = name ? formatDisplayLabel(name) : '';
   const defaultValue = schema.default as string | number | boolean | undefined;
   const type = schema.type as 'boolean' | 'integer' | 'number' | 'string';
 

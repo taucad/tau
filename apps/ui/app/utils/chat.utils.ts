@@ -8,10 +8,9 @@ import type {
   MyTools,
   UsageData,
 } from '@taucad/chat';
-import { isToolPart } from '@taucad/chat';
+import { getToolPartName, isAnyToolPart, isToolPart } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import { idPrefix } from '@taucad/types/constants';
-import { getStaticToolName } from 'ai';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { metaConfig } from '#constants/meta.constants.js';
 import { formatExportDate } from '#utils/date.utils.js';
@@ -21,7 +20,7 @@ import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js
 /**
  * Extract the mime type from a data URL
  *
- * @example
+ * @example <caption>Extract the media type from an image data URL.</caption>
  * extractMimeTypeFromDataUrl('data:image/webp;base64,UklGRu6VAQBXR')
  * // -> 'image/webp'
  *
@@ -43,6 +42,35 @@ export const extractMimeTypeFromDataUrl = (dataUrl: string): string => {
 const maxSnippetLength = 200;
 
 const joinLines = (...lines: Array<string | undefined | false>): string => lines.filter(Boolean).join('\n');
+
+type SerializableFileMetadata =
+  | {
+      readonly size: number;
+      readonly contentKind: 'text';
+      readonly lineCount: number;
+    }
+  | {
+      readonly size: number;
+      readonly contentKind: 'binary';
+    };
+
+const formatSerializedFileSize = (bytes: number): string => {
+  if (bytes < 1024) {
+    return `${bytes}B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${Math.round(bytes / 1024)}KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+};
+
+const formatSerializedFileMetadata = (metadata: SerializableFileMetadata): string => {
+  if (metadata.contentKind === 'binary') {
+    return `binary, ${formatSerializedFileSize(metadata.size)}`;
+  }
+  const lineLabel = metadata.lineCount === 1 ? '1 line' : `${metadata.lineCount} lines`;
+  return `${lineLabel}, ${formatSerializedFileSize(metadata.size)}`;
+};
 
 const serializeToolState = (part: { state: string; errorText?: string }): string | undefined => {
   switch (part.state) {
@@ -69,6 +97,11 @@ type ToolOutputOf<T extends keyof MyTools> = Extract<ToolInvocation<T>, { state:
 type ToolSerializer<T extends keyof MyTools> = {
   readonly input: (input: NonNullable<ToolInvocation<T>['input']>) => string;
   readonly output: (output: ToolOutputOf<T>) => string;
+};
+
+type ErasedToolSerializer = {
+  readonly input: (input: unknown) => string;
+  readonly output: (output: unknown) => string;
 };
 
 const toolSerializers = {
@@ -110,17 +143,16 @@ const toolSerializers = {
       return joinLines(...lines);
     },
   },
-  [toolName.editTests]: {
-    input: (input) => `codeEdit: <${input.codeEdit?.length ?? 0} chars>`,
-    output(output) {
-      const { diffStats } = output;
-      const lines = [`+${diffStats.linesAdded}/-${diffStats.linesRemoved} lines`];
-      if (diffStats.modifiedContent.length > 0) {
-        lines.push('```', diffStats.modifiedContent, '```');
-      }
-
-      return joinLines(...lines);
-    },
+  [toolName.useSkill]: {
+    input: (input) => joinLines(`skillName: ${input.skillName}`, input.reason ? `reason: ${input.reason}` : undefined),
+    output: (output) =>
+      joinLines(
+        `Activated skill: ${output.skillName}`,
+        output.skillPath ? `path: ${output.skillPath}` : undefined,
+        `resource: ${output.resourceUri}`,
+        `source: ${output.source}`,
+        output.fingerprint ? `fingerprint: ${output.fingerprint}` : undefined,
+      ),
   },
   [toolName.transferToCadExpert]: {
     input: () => '',
@@ -141,13 +173,22 @@ const toolSerializers = {
         input.offset === undefined ? undefined : `offset: ${input.offset}`,
         input.limit === undefined ? undefined : `limit: ${input.limit}`,
       ),
-    output: (output) => `Line ${output.startLine}:\n\`\`\`\n${output.content}\n\`\`\``,
+    output(output) {
+      const startLine = output.startLine ?? 1;
+      const visibleLineCount = output.content.split('\n').length;
+      const endLine = startLine + visibleLineCount - 1;
+      return `L${startLine}-L${endLine}\n\`\`\`\n${output.content}\n\`\`\``;
+    },
   },
   [toolName.listDirectory]: {
     input: (input) => `path: ${input.path}`,
     output(output) {
       const header = output.path ? `Path: ${output.path}\n` : '';
-      const list = output.entries.map((entry) => `  ${entry.type === 'dir' ? '[dir]' : ''} ${entry.name}`).join('\n');
+      const list = output.entries
+        .map((entry) =>
+          entry.type === 'dir' ? `  [dir] ${entry.name}` : `   ${entry.name} (${formatSerializedFileMetadata(entry)})`,
+        )
+        .join('\n');
 
       return header + list;
     },
@@ -182,7 +223,17 @@ const toolSerializers = {
   },
   [toolName.globSearch]: {
     input: (input) => joinLines(`pattern: ${input.pattern}`, input.path ? `path: ${input.path}` : undefined),
-    output: (output) => joinLines(`Total: ${output.totalFiles}`, output.files.join('\n')),
+    output: (output) =>
+      joinLines(
+        `Total: ${output.totalFiles}`,
+        output.entries
+          .map((entry) =>
+            entry.isDirectory === true
+              ? `${entry.path} [dir]`
+              : `${entry.path} (${formatSerializedFileMetadata(entry)})`,
+          )
+          .join('\n'),
+      ),
   },
   [toolName.getKernelResult]: {
     input: (input) => `targetFile: ${input.targetFile}`,
@@ -213,15 +264,11 @@ const toolSerializers = {
 } satisfies { [K in keyof MyTools]: ToolSerializer<K> };
 
 const serializeToolPart = (part: MyToolPart): string => {
-  const name = getStaticToolName<MyTools>(part);
-  const serializer = toolSerializers[name];
-  const inputString =
-    part.state !== 'input-streaming' && part.input !== undefined
-      ? serializer.input(part.input as NonNullable<typeof part.input>)
-      : '';
+  const name = getToolPartName(part);
+  const serializer = toolSerializers[name] as ErasedToolSerializer;
+  const inputString = part.state !== 'input-streaming' && part.input !== undefined ? serializer.input(part.input) : '';
   const resultString =
-    serializeToolState(part) ??
-    (part.state === 'output-available' ? (serializer as ToolSerializer<keyof MyTools>).output(part.output) : '');
+    serializeToolState(part) ?? (part.state === 'output-available' ? serializer.output(part.output) : '');
 
   return joinLines(
     `<tool_call name="${name}">`,
@@ -460,7 +507,7 @@ export function finalizeInterruptedToolParts(
   }
 
   const hasInterruptedTools = lastMessage.parts.some(
-    (part) => isToolPart(part) && (part.state === 'input-streaming' || part.state === 'input-available'),
+    (part) => isAnyToolPart(part) && (part.state === 'input-streaming' || part.state === 'input-available'),
   );
 
   if (!hasInterruptedTools) {
@@ -468,7 +515,7 @@ export function finalizeInterruptedToolParts(
   }
 
   const updatedParts = lastMessage.parts.map((part) => {
-    if (isToolPart(part) && (part.state === 'input-streaming' || part.state === 'input-available')) {
+    if (isAnyToolPart(part) && (part.state === 'input-streaming' || part.state === 'input-available')) {
       if (chatId) {
         const ledgered = getRpcOutcome(chatId, part.toolCallId);
         if (ledgered?.kind === 'success') {
@@ -481,7 +528,7 @@ export function finalizeInterruptedToolParts(
         }
 
         if (ledgered?.kind === 'error') {
-          const toolNm = getStaticToolName<MyTools>(part);
+          const toolNm = getToolPartName(part);
           const errorText = JSON.stringify({
             errorCode: ledgered.errorCode,
             message: ledgered.message,
@@ -497,7 +544,7 @@ export function finalizeInterruptedToolParts(
         }
       }
 
-      const toolNm = getStaticToolName<MyTools>(part);
+      const toolNm = getToolPartName(part);
       const { errorCode, message } = fallbackInterruptedToolError(cause);
       const errorText = JSON.stringify({
         errorCode,

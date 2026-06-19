@@ -1,7 +1,7 @@
 // oxlint-disable max-lines -- TODO: refactor this component to be more manageable
 import { useCallback, useState, useRef, useMemo, useEffect, memo } from 'react';
 import { flushSync } from 'react-dom';
-import type { ItemInstance } from '@headless-tree/core';
+import type { ItemInstance, TreeInstance } from '@headless-tree/core';
 import {
   FilePlus,
   FolderPlus,
@@ -18,9 +18,11 @@ import {
   Download,
   Code,
   Clipboard,
+  Lock,
 } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import {
+  AssistiveDndState,
   syncDataLoaderFeature,
   selectionFeature,
   hotkeysCoreFeature,
@@ -96,8 +98,36 @@ import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '#files
 import type { WorkspaceMutationErrorLike } from '#filesystem/workspace-errors.js';
 import { OverwriteConfirmDialog } from '#components/filesystem/overwrite-confirm-dialog.js';
 import type { OverwriteConfirmResult } from '#components/filesystem/overwrite-confirm-dialog.js';
+import {
+  createFileTreeMoveEdits,
+  fileTreeRootId,
+  joinFileTreePath,
+  resolveFileTreeTargetDirectory,
+} from '#routes/projects_.$id/file-tree-targets.js';
+import {
+  canReadForeignFileTreeDrop,
+  collectDropDirectoryPaths,
+  ingestFileTreeDataTransfer,
+} from '#routes/projects_.$id/file-tree-drop-ingestion.js';
+import type {
+  DroppedDirectory,
+  DroppedFile,
+  DropIngestionResult,
+} from '#routes/projects_.$id/file-tree-drop-ingestion.js';
+import { copyTextToClipboard, summarizeFileTreeImport } from '#routes/projects_.$id/file-tree-operation-results.js';
+import {
+  createFileTreeDownloadError,
+  getFileTreeDownloadErrorMessage,
+  getFileTreeDownloadPolicy,
+} from '#routes/projects_.$id/file-tree-download-policy.js';
 
-const rootId = '';
+const rootId = fileTreeRootId;
+const keyboardDragStartHotkey = 'Control+ShiftLeft+KeyD';
+const keyboardDragStartRightShiftHotkey = 'Control+ShiftRight+KeyD';
+const keyboardDragStartLabel = 'Control+Shift+D';
+type FileTreeAssistiveDndLabel = NonNullable<
+  React.ComponentProps<typeof AssistiveTreeDescription<TreeItemData>>['getLabel']
+>;
 
 const confirmDeleteKeyCombination = {
   key: 'Enter',
@@ -116,77 +146,104 @@ type PendingFile = {
   error: string | undefined;
 };
 
-// Helper to read all entries from a directory (may require multiple calls)
-async function readAllDirectoryEntries(directoryReader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
-  const entries: FileSystemEntry[] = [];
-  let batch: FileSystemEntry[];
-  do {
-    // oxlint-disable-next-line no-await-in-loop -- Must read batches sequentially
-    batch = await new Promise<FileSystemEntry[]>((resolve, reject) => {
-      directoryReader.readEntries(resolve, reject);
-    });
-    entries.push(...batch);
-  } while (batch.length > 0);
+type ForeignDropTarget = {
+  readonly path: string;
+  readonly isFolder: boolean;
+  readonly dataTransfer: DataTransfer;
+};
 
-  return entries;
+function startFileTreeKeyboardDrag(treeInstance: TreeInstance<TreeItemData>): void {
+  const selectedItems = treeInstance.getSelectedItems();
+  const focusedItem = treeInstance.getFocusedItem();
+  treeInstance.startKeyboardDrag(selectedItems.includes(focusedItem) ? selectedItems : [...selectedItems, focusedItem]);
 }
 
-// Recursively process a FileSystemEntry (file or directory)
-async function processFileSystemEntry(
-  entry: FileSystemEntry,
-  basePath: string,
-): Promise<Array<{ file: File; relativePath: string }>> {
-  if (entry.isFile) {
-    const fileEntry = entry as FileSystemFileEntry;
-    const file = await new Promise<File>((resolve, reject) => {
-      fileEntry.file(resolve, reject);
-    });
-    const relativePath = basePath ? `${basePath}/${entry.name}` : entry.name;
-    return [{ file, relativePath }];
-  }
+const getFileTreeAssistiveDndLabel: FileTreeAssistiveDndLabel = (dnd, assistiveState, hotkeys): string => {
+  const itemNames = dnd?.draggedItems?.map((item) => item.getItemName()).join(', ') ?? '';
+  const dragTarget = dnd?.dragTarget;
+  const position =
+    dragTarget === undefined
+      ? 'None'
+      : 'childIndex' in dragTarget
+        ? `${dragTarget.childIndex} of ${dragTarget.item.getChildren().length} in ${dragTarget.item.getItemName()}`
+        : `in ${dragTarget.item.getItemName()}`;
+  const navGuide =
+    `Press ${hotkeys.dragUp.hotkey} and ${hotkeys.dragDown.hotkey} to move up or down, ` +
+    `${hotkeys.completeDrag.hotkey} to drop, ${hotkeys.cancelDrag.hotkey} to abort.`;
 
-  if (entry.isDirectory) {
-    const directoryEntry = entry as FileSystemDirectoryEntry;
-    const directoryPath = basePath ? `${basePath}/${entry.name}` : entry.name;
-    const children = await readAllDirectoryEntries(directoryEntry.createReader());
-    const results: Array<{ file: File; relativePath: string }> = [];
-    for (const child of children) {
-      // oxlint-disable-next-line no-await-in-loop -- Must process entries sequentially
-      const childResults = await processFileSystemEntry(child, directoryPath);
-      results.push(...childResults);
+  switch (assistiveState) {
+    case AssistiveDndState.Started: {
+      return itemNames
+        ? `Dragging ${itemNames}. Current position: ${position}. ${navGuide}`
+        : `Current position: ${position}. ${navGuide}`;
     }
-
-    return results;
-  }
-
-  return [];
-}
-
-// Process all items from a DataTransfer object
-async function processDataTransferItems(
-  items: DataTransferItemList,
-): Promise<Array<{ file: File; relativePath: string }>> {
-  const results: Array<{ file: File; relativePath: string }> = [];
-  const entries: FileSystemEntry[] = [];
-
-  // Collect all entries first (must be done synchronously before promises)
-  for (const item of items) {
-    if (item.kind === 'file') {
-      const entry = item.webkitGetAsEntry();
-      if (entry) {
-        entries.push(entry);
-      }
+    case AssistiveDndState.Dragging: {
+      return itemNames ? `${itemNames}, ${position}` : position;
+    }
+    case AssistiveDndState.Completed: {
+      return `Drag completed. Press ${keyboardDragStartLabel} to move selected items`;
+    }
+    case AssistiveDndState.Aborted: {
+      return `Drag cancelled. Press ${keyboardDragStartLabel} to move selected items`;
+    }
+    case AssistiveDndState.None: {
+      return `Press ${keyboardDragStartLabel} to move selected items`;
     }
   }
 
-  // Process entries
-  for (const entry of entries) {
-    // oxlint-disable-next-line no-await-in-loop -- Must process entries sequentially
-    const entryResults = await processFileSystemEntry(entry, '');
-    results.push(...entryResults);
+  return `Press ${keyboardDragStartLabel} to move selected items`;
+};
+
+function getForeignDropTargetFromEvent(event: DragEvent): Omit<ForeignDropTarget, 'dataTransfer'> {
+  const targetElement = event.target instanceof Element ? event.target : undefined;
+  const itemElement = targetElement?.closest<HTMLElement>('[data-file-tree-path]');
+  if (!itemElement) {
+    return { path: rootId, isFolder: true };
   }
 
-  return results;
+  return {
+    path: itemElement.dataset.fileTreePath ?? rootId,
+    isFolder: itemElement.dataset.fileTreeKind !== 'file',
+  };
+}
+
+function surfaceDropIngestionResult(result: Exclude<DropIngestionResult, { type: 'entries' }>): void {
+  switch (result.type) {
+    case 'empty': {
+      toast.error(
+        result.reason === 'no-items'
+          ? 'Drop did not include any files or folders.'
+          : 'No readable files or folders were found in the drop.',
+      );
+      return;
+    }
+    case 'unsupported': {
+      toast.error(
+        result.reason === 'recursive-folder-drop-unavailable'
+          ? 'This browser cannot read dropped folders here.'
+          : 'Dropped items could not be read.',
+      );
+      return;
+    }
+    case 'error': {
+      toast.error('Drop failed.', { description: result.message });
+    }
+  }
+}
+
+function addDeletedDescendantPaths(options: {
+  readonly deletedPaths: Set<string>;
+  readonly fileTreeMap: ReadonlyMap<string, unknown>;
+  readonly path: string;
+}): void {
+  const descendantPrefix = `${options.path}/`;
+  for (const [key] of options.fileTreeMap) {
+    if (!key.startsWith(descendantPrefix)) {
+      continue;
+    }
+
+    options.deletedPaths.add(key);
+  }
 }
 
 type ChatEditorFileTreeProps = {
@@ -205,7 +262,6 @@ export const ChatEditorFileTree = memo(function ({
   'use no memo'; // Opt out of React Compiler memoization
   const { open: openPanel } = useFloatingPanel();
   const { projectRef, editorRef } = useProject();
-  const projectId = useSelector(projectRef, (state) => state.context.projectId);
   const fileManager = useFileManager();
   const {
     contentService,
@@ -215,11 +271,12 @@ export const ChatEditorFileTree = memo(function ({
     duplicateFile,
     deleteFile,
     getZippedDirectory,
-    mkdir,
-    rmdir,
+    createDirectory,
+    deleteDirectory,
     bulkMove,
     canMove,
     canRename,
+    canCreate,
     canDelete,
   } = fileManager;
 
@@ -289,7 +346,7 @@ export const ChatEditorFileTree = memo(function ({
       editorStateLoadedSub.unsubscribe();
       participantDispose?.();
     };
-  }, [projectRef, editorRef, contentService, projectId, readFile]);
+  }, [projectRef, editorRef, contentService, readFile]);
 
   const { treeService } = fileManager;
 
@@ -354,12 +411,15 @@ export const ChatEditorFileTree = memo(function ({
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [focusedItem, setFocusedItem] = useState<string | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const treeContainerRef = useRef<HTMLDivElement>(null);
   const [uploadTargetPath, setUploadTargetPath] = useState<string | undefined>(undefined);
   const [pendingFolder, setPendingFolder] = useState<PendingFolder | undefined>(undefined);
   const [pendingFile, setPendingFile] = useState<PendingFile | undefined>(undefined);
   const pendingFileInputRef = useRef<HTMLInputElement>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [itemsToDelete, setItemsToDelete] = useState<string[]>([]);
+  const focusedItemRef = useRef<string | undefined>(undefined);
+  const lastSyncedActiveFilePathRef = useRef<string | undefined>(undefined);
 
   /**
    * Overwrite-confirm dialog state. We surface the dialog from
@@ -402,14 +462,97 @@ export const ChatEditorFileTree = memo(function ({
     [],
   );
 
-  const surfacePreflightError = useCallback((error: WorkspaceMutationErrorLike): void => {
+  const mutationErrorMessage = useCallback((error: WorkspaceMutationErrorLike): string => {
     const copy = workspaceMutationErrorCopy[error.code];
     if (typeof copy === 'function') {
-      toast.error(copy({ path: error.path, target: error.target }));
-      return;
+      return copy({ path: error.path, target: error.target });
     }
-    toast.error(`'${error.path}' failed: ${error.code}`);
+    return `'${error.path}' failed: ${error.code}`;
   }, []);
+
+  const surfacePreflightError = useCallback(
+    (error: WorkspaceMutationErrorLike): void => {
+      toast.error(mutationErrorMessage(error));
+    },
+    [mutationErrorMessage],
+  );
+
+  const preflightCreate = useCallback(
+    async (path: string, kind: 'file' | 'directory'): Promise<true | WorkspaceMutationErrorLike> => {
+      const result = await canCreate(path, kind);
+      return result === true ? true : (result as WorkspaceMutationErrorLike);
+    },
+    [canCreate],
+  );
+
+  const submitCreateFolder = useCallback(
+    async (parentPath: string, name: string): Promise<void> => {
+      const folderPath = joinFileTreePath(parentPath, name);
+      try {
+        const preflight = await preflightCreate(folderPath, 'directory');
+        if (preflight !== true) {
+          const message = mutationErrorMessage(preflight);
+          setPendingFolder((previous) =>
+            previous?.parentPath === parentPath ? { ...previous, error: message } : previous,
+          );
+          toast.error(message);
+          return;
+        }
+        await createDirectory(folderPath, { recursive: true });
+        setPendingFolder(undefined);
+        setExpandedItems((previous) => (previous.includes(folderPath) ? previous : [...previous, folderPath]));
+        setFocusedItem(folderPath);
+        setSelectedItems([folderPath]);
+      } catch (error) {
+        const message = `Failed to create folder: ${error instanceof Error ? error.message : String(error)}`;
+        setPendingFolder((previous) =>
+          previous?.parentPath === parentPath ? { ...previous, error: message } : previous,
+        );
+        toast.error(message);
+      }
+    },
+    [createDirectory, mutationErrorMessage, preflightCreate],
+  );
+
+  const submitCreateFile = useCallback(
+    async (parentPath: string, filename: string, content: string): Promise<void> => {
+      const filePath = joinFileTreePath(parentPath, filename);
+      try {
+        const preflight = await preflightCreate(filePath, 'file');
+        if (preflight !== true) {
+          if (isWorkspaceMutationErrorLike(preflight) && preflight.code === 'NAME_EXISTS') {
+            const decision = await requestOverwriteConfirm([filePath]);
+            if (decision.choice !== 'overwrite') {
+              return;
+            }
+          } else {
+            const message = mutationErrorMessage(preflight);
+            setPendingFile((previous) =>
+              previous?.parentPath === parentPath ? { ...previous, error: message } : previous,
+            );
+            toast.error(message);
+            return;
+          }
+        }
+        await writeFile(filePath, encodeTextFile(content), { source: 'user' });
+        editorRef.send({
+          type: 'openFile',
+          path: filePath,
+          source: 'user',
+        });
+        setPendingFile(undefined);
+        setFocusedItem(filePath);
+        setSelectedItems([filePath]);
+      } catch (error) {
+        const message = `Failed to create file: ${error instanceof Error ? error.message : String(error)}`;
+        setPendingFile((previous) =>
+          previous?.parentPath === parentPath ? { ...previous, error: message } : previous,
+        );
+        toast.error(message);
+      }
+    },
+    [editorRef, mutationErrorMessage, preflightCreate, requestOverwriteConfirm, writeFile],
+  );
 
   // Reveal active file by expanding all parent directories (VSCode-style)
   // Also triggers listDirectory for unloaded ancestor directories.
@@ -531,6 +674,57 @@ export const ChatEditorFileTree = memo(function ({
     [fileTree, allPaths],
   );
 
+  const handleRename = useCallback(
+    async (item: ItemInstance<TreeItemData>, newName: string): Promise<void> => {
+      const oldPath = item.getId();
+      if (oldPath === rootId || isBundledTypesWorkspacePath(oldPath)) {
+        return;
+      }
+
+      const parts = oldPath.split('/');
+      parts[parts.length - 1] = newName;
+      const newPath = parts.join('/');
+      const wasExpanded = item.isFolder() && item.isExpanded();
+
+      // R6 preflight: `canRename` validates `newName` + collision against the
+      // worker's authoritative view before mutating. On `NAME_EXISTS` we route
+      // through the R8 overwrite-confirm dialog; every other typed error is
+      // surfaced as a copy-registry toast and the rename aborts.
+      const preflight = await canRename(oldPath, newName);
+      let overwriteApproved = false;
+      if (preflight !== true) {
+        if (isWorkspaceMutationErrorLike(preflight) && preflight.code === 'NAME_EXISTS') {
+          const decision = await requestOverwriteConfirm([newPath]);
+          if (decision.choice !== 'overwrite') {
+            return;
+          }
+          overwriteApproved = true;
+        } else {
+          surfacePreflightError(preflight as WorkspaceMutationErrorLike);
+          return;
+        }
+      }
+
+      try {
+        if (overwriteApproved) {
+          const { contentService: cs } = await fileManager.whenServicesReady();
+          await cs.move(oldPath, newPath, { overwrite: true });
+        } else {
+          await renameFile(oldPath, newPath);
+        }
+        if (wasExpanded) {
+          setExpandedItems((previous) => {
+            const withoutOld = previous.filter((p) => p !== oldPath);
+            return [...withoutOld, newPath];
+          });
+        }
+      } catch (error) {
+        toast.error(`Rename failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+    [canRename, fileManager, renameFile, requestOverwriteConfirm, surfacePreflightError],
+  );
+
   // Initialize headless-tree
   const tree = useTree<TreeItemData>({
     rootItemId: rootId,
@@ -564,31 +758,19 @@ export const ChatEditorFileTree = memo(function ({
       //      The resulting `directoryRenamed` / `fileRenamed` ContentChangeEvents flow
       //      through `file-operation-participants.ts` and update every consumer machine.
       const targetPath = target.item.getId();
-
-      let targetFolder = '';
-      if (targetPath === rootId) {
-        targetFolder = '';
-      } else if (target.item.isFolder()) {
-        targetFolder = targetPath;
-      } else {
-        const parts = targetPath.split('/');
-        parts.pop();
-        targetFolder = parts.join('/');
+      const targetDirectory = resolveFileTreeTargetDirectory({
+        targetPath,
+        getTargetData: (path) => (path === targetPath ? { isFolder: target.item.isFolder() } : undefined),
+      });
+      if (isBundledTypesWorkspacePath(targetPath) || isBundledTypesWorkspacePath(targetDirectory)) {
+        return;
       }
 
-      const edits: Array<{ source: string; target: string }> = [];
-      for (const item of draggedItems) {
-        const oldPath = item.getId();
-        if (oldPath === rootId || isBundledTypesWorkspacePath(oldPath)) {
-          continue;
-        }
-        const fileName = oldPath.split('/').pop() ?? oldPath;
-        const newPath = targetFolder ? `${targetFolder}/${fileName}` : fileName;
-        if (oldPath === newPath) {
-          continue;
-        }
-        edits.push({ source: oldPath, target: newPath });
-      }
+      const edits = createFileTreeMoveEdits({
+        sourcePaths: draggedItems.map((item) => item.getId()),
+        targetDirectory,
+        isReadOnlyPath: isBundledTypesWorkspacePath,
+      });
 
       if (edits.length === 0) {
         return;
@@ -629,60 +811,13 @@ export const ChatEditorFileTree = memo(function ({
           } else {
             toast.error('One or more items could not be moved.');
           }
-          return;
         }
       } catch (error) {
         toast.error(`Move failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     },
     onRename(item, newName) {
-      const oldPath = item.getId();
-      if (oldPath === rootId || isBundledTypesWorkspacePath(oldPath)) {
-        return;
-      }
-
-      const parts = oldPath.split('/');
-      parts[parts.length - 1] = newName;
-      const newPath = parts.join('/');
-      const wasExpanded = item.isFolder() && item.isExpanded();
-
-      // R6 preflight: `canRename` validates `newName` + collision against the
-      // worker's authoritative view before mutating. On `NAME_EXISTS` we route
-      // through the R8 overwrite-confirm dialog; every other typed error is
-      // surfaced as a copy-registry toast and the rename aborts.
-      void (async () => {
-        const preflight = await canRename(oldPath, newName);
-        let overwriteApproved = false;
-        if (preflight !== true) {
-          if (isWorkspaceMutationErrorLike(preflight) && preflight.code === 'NAME_EXISTS') {
-            const decision = await requestOverwriteConfirm([newPath]);
-            if (decision.choice !== 'overwrite') {
-              return;
-            }
-            overwriteApproved = true;
-          } else {
-            surfacePreflightError(preflight as WorkspaceMutationErrorLike);
-            return;
-          }
-        }
-
-        try {
-          if (overwriteApproved) {
-            const { contentService: cs } = await fileManager.whenServicesReady();
-            await cs.move(oldPath, newPath, { overwrite: true });
-          } else {
-            await renameFile(oldPath, newPath);
-          }
-          if (wasExpanded) {
-            setExpandedItems((previous) => {
-              const withoutOld = previous.filter((p) => p !== oldPath);
-              return [...withoutOld, newPath];
-            });
-          }
-        } catch (error) {
-          toast.error(`Rename failed: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      })();
+      void handleRename(item, newName);
     },
     onPrimaryAction(item) {
       if (!item.isFolder()) {
@@ -697,6 +832,19 @@ export const ChatEditorFileTree = memo(function ({
       }
     },
     hotkeys: {
+      startDrag: {
+        hotkey: keyboardDragStartHotkey,
+        preventDefault: true,
+        isEnabled: (treeInstance) => !treeInstance.getState().dnd,
+      },
+      customStartDragRightShift: {
+        hotkey: keyboardDragStartRightShiftHotkey,
+        preventDefault: true,
+        isEnabled: (treeInstance) => !treeInstance.getState().dnd,
+        handler(_event, treeInstance) {
+          startFileTreeKeyboardDrag(treeInstance);
+        },
+      },
       customDelete: {
         hotkey: 'Delete',
         handler(_event, treeInstance) {
@@ -726,24 +874,17 @@ export const ChatEditorFileTree = memo(function ({
         },
       },
     },
-    // Allow drops on any item, except when dropping into the same folder the item already lives in
+    // Allow no-op writable drops to target the intended folder. `onDrop` turns
+    // those into zero edits; returning false here lets the tree choose a nearby
+    // ancestor target and can accidentally move files out of their folder.
     canDrop(draggedItems, target) {
       const targetPath = target.item.getId();
+      const targetDirectory = resolveFileTreeTargetDirectory({
+        targetPath,
+        getTargetData: (path) => (path === targetPath ? { isFolder: target.item.isFolder() } : undefined),
+      });
 
-      // Determine target folder based on drop type (same logic as onDrop)
-      let targetFolder = '';
-      if (targetPath === rootId) {
-        targetFolder = '';
-      } else if (target.item.isFolder()) {
-        targetFolder = targetPath;
-      } else {
-        // Dropped on a file, use its parent folder
-        const parts = targetPath.split('/');
-        parts.pop();
-        targetFolder = parts.join('/');
-      }
-
-      if (isBundledTypesWorkspacePath(targetFolder)) {
+      if (isBundledTypesWorkspacePath(targetPath) || isBundledTypesWorkspacePath(targetDirectory)) {
         return false;
       }
 
@@ -751,17 +892,7 @@ export const ChatEditorFileTree = memo(function ({
         return false;
       }
 
-      // Check if ALL dragged items are already in the target folder
-      // If so, disallow the drop (nothing would change)
-      const allItemsAlreadyInTarget = draggedItems.every((item) => {
-        const itemPath = item.getId();
-        const itemParts = itemPath.split('/');
-        itemParts.pop(); // Remove filename to get parent folder
-        const itemParentFolder = itemParts.join('/');
-        return itemParentFolder === targetFolder;
-      });
-
-      return !allItemsAlreadyInTarget;
+      return true;
     },
     // Set custom data on the drag event so Dockview panels can receive file drops
     createForeignDragObject(items) {
@@ -771,48 +902,51 @@ export const ChatEditorFileTree = memo(function ({
         data: JSON.stringify(paths),
       };
     },
-    // Allow file drops from computer on folders, root, or root-level files
-    canDropForeignDragObject(_dataTransfer, target) {
+    // Allow file drops from computer on writable folders, root, or file-parent targets.
+    canDropForeignDragObject(dataTransfer, target) {
       const targetId = target.item.getId();
-      if (isBundledTypesWorkspacePath(targetId)) {
+      const targetDirectory = resolveFileTreeTargetDirectory({
+        targetPath: targetId,
+        getTargetData: (path) => (path === targetId ? { isFolder: target.item.isFolder() } : undefined),
+      });
+      if (
+        isBundledTypesWorkspacePath(targetId) ||
+        isBundledTypesWorkspacePath(targetDirectory) ||
+        !canReadForeignFileTreeDrop(dataTransfer)
+      ) {
         return false;
       }
 
-      const isRoot = targetId === rootId;
-      const isFolder = target.item.isFolder();
-      const isRootLevelFile = !targetId.includes('/') && !isFolder;
-
-      return isFolder || isRoot || isRootLevelFile;
+      return true;
     },
     // Handle file drops from computer (supports folders with directory structure)
     async onDropForeignDragObject(dataTransfer, target) {
-      const { items } = dataTransfer;
-      if (items.length === 0) {
-        return;
-      }
-
-      // Process all items (files and folders) with directory structure preserved
-      const filesWithPaths = await processDataTransferItems(items);
-      if (filesWithPaths.length === 0) {
-        return;
-      }
-
-      // Determine target folder based on drop type (same logic as onDrop)
       const targetPath = target.item.getId();
-      let directory = '';
-      if (targetPath === rootId) {
-        // Dropping on root folder
-        directory = '';
-      } else if (target.item.isFolder()) {
-        directory = targetPath;
-      } else {
-        // Dropped on a file, use its parent folder
-        const parts = targetPath.split('/');
-        parts.pop();
-        directory = parts.join('/');
+      const targetDirectory = resolveFileTreeTargetDirectory({
+        targetPath,
+        getTargetData: (path) => (path === targetPath ? { isFolder: target.item.isFolder() } : undefined),
+      });
+      if (isBundledTypesWorkspacePath(targetPath) || isBundledTypesWorkspacePath(targetDirectory)) {
+        toast.error('This path is read-only.');
+        return;
       }
 
-      await processDroppedFiles(filesWithPaths, directory);
+      const ingestion = await ingestFileTreeDataTransfer({
+        items: dataTransfer.items,
+        files: dataTransfer.files,
+      });
+      if (ingestion.type !== 'entries') {
+        surfaceDropIngestionResult(ingestion);
+        return;
+      }
+
+      if (ingestion.warnings.length > 0) {
+        toast.warning('Some dropped items could not be read.', {
+          description: ingestion.warnings.slice(0, 3).join('\n'),
+        });
+      }
+
+      await processDroppedEntries(ingestion, targetDirectory);
     },
     features: [
       syncDataLoaderFeature,
@@ -833,6 +967,10 @@ export const ChatEditorFileTree = memo(function ({
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- tree object is not stable, only rebuild when fileTree changes
   }, [fileTree]);
 
+  useEffect(() => {
+    focusedItemRef.current = focusedItem;
+  }, [focusedItem]);
+
   // Sync tree search state with external enableSearch prop
   useEffect(() => {
     if (enableSearch && !tree.isSearchOpen()) {
@@ -843,12 +981,26 @@ export const ChatEditorFileTree = memo(function ({
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- tree object is not stable, only sync when enableSearch changes
   }, [enableSearch]);
 
-  // Sync active file with tree focus
+  // Sync active file with tree focus when the active editor file changes.
+  // Do not re-run this on tree focus changes; users need to focus folders before
+  // invoking toolbar actions such as "Create new file" or "Create new folder".
   useEffect(() => {
-    if (activeFilePath && activeFilePath !== focusedItem) {
-      setFocusedItem(activeFilePath);
+    if (!activeFilePath) {
+      lastSyncedActiveFilePathRef.current = undefined;
+      return;
     }
-  }, [activeFilePath, focusedItem]);
+
+    if (activeFilePath === lastSyncedActiveFilePathRef.current) {
+      return;
+    }
+
+    lastSyncedActiveFilePathRef.current = activeFilePath;
+    if (focusedItemRef.current !== undefined) {
+      return;
+    }
+
+    setFocusedItem(activeFilePath);
+  }, [activeFilePath]);
 
   // Reveal a file in the tree when requested from the tab context menu.
   // Expands all parent directories, focuses the item, and scrolls it into view.
@@ -910,19 +1062,20 @@ export const ChatEditorFileTree = memo(function ({
       const content = template?.emptyCode ?? '';
       const extension = template ? getFileExtension(template.mainFile) : 'txt';
 
-      // Determine parent path based on focused item
+      // Determine parent path from the visible single selection first, then focused item.
       let parentPath = '';
-      if (focusedItem) {
-        const focusedItemInstance = tree.getItemInstance(focusedItem);
-        if (focusedItemInstance.isFolder()) {
-          // Focused item is a folder - create inside it
-          parentPath = focusedItem;
+      const targetPath = selectedItems.length === 1 ? selectedItems[0] : focusedItem;
+      if (targetPath !== undefined) {
+        const targetItem = tree.getItemInstance(targetPath);
+        if (targetItem.isFolder()) {
+          // Target is a folder - create inside it
+          parentPath = targetPath;
           // Expand the folder so user can see the pending input
-          setExpandedItems((previous) => (previous.includes(focusedItem) ? previous : [...previous, focusedItem]));
+          setExpandedItems((previous) => (previous.includes(targetPath) ? previous : [...previous, targetPath]));
         } else {
-          // Focused item is a file - create in its parent folder
-          const lastSlashIndex = focusedItem.lastIndexOf('/');
-          parentPath = lastSlashIndex > 0 ? focusedItem.slice(0, lastSlashIndex) : '';
+          // Target is a file - create in its parent folder
+          const lastSlashIndex = targetPath.lastIndexOf('/');
+          parentPath = lastSlashIndex > 0 ? targetPath.slice(0, lastSlashIndex) : '';
         }
       }
 
@@ -934,34 +1087,37 @@ export const ChatEditorFileTree = memo(function ({
         error: undefined,
       });
     },
-    [focusedItem, tree],
+    [focusedItem, selectedItems, tree],
   );
 
   const handleCreateFolder = useCallback(() => {
-    // Determine parent path based on focused item
+    // Determine parent path from the visible single selection first, then focused item.
     let parentPath = '';
-    if (focusedItem) {
-      const focusedItemInstance = tree.getItemInstance(focusedItem);
-      if (focusedItemInstance.isFolder()) {
-        // Focused item is a folder - create inside it
-        parentPath = focusedItem;
+    const targetPath = selectedItems.length === 1 ? selectedItems[0] : focusedItem;
+    if (targetPath !== undefined) {
+      const targetItem = tree.getItemInstance(targetPath);
+      if (targetItem.isFolder()) {
+        // Target is a folder - create inside it
+        parentPath = targetPath;
         // Expand the folder so user can see the pending input
-        setExpandedItems((previous) => (previous.includes(focusedItem) ? previous : [...previous, focusedItem]));
+        setExpandedItems((previous) => (previous.includes(targetPath) ? previous : [...previous, targetPath]));
       } else {
-        // Focused item is a file - create in its parent folder
-        const lastSlashIndex = focusedItem.lastIndexOf('/');
-        parentPath = lastSlashIndex > 0 ? focusedItem.slice(0, lastSlashIndex) : '';
+        // Target is a file - create in its parent folder
+        const lastSlashIndex = targetPath.lastIndexOf('/');
+        parentPath = lastSlashIndex > 0 ? targetPath.slice(0, lastSlashIndex) : '';
       }
     }
 
     setPendingFolder({ parentPath, error: undefined });
-  }, [focusedItem, tree]);
+  }, [focusedItem, selectedItems, tree]);
 
   const handleDelete = useCallback((items: Array<ItemInstance<TreeItemData>>) => {
-    const paths = items
-      .map((item) => item.getId())
-      .filter((path) => path !== rootId && !isBundledTypesWorkspacePath(path));
+    const candidatePaths = items.map((item) => item.getId()).filter((path) => path !== rootId);
+    const paths = candidatePaths.filter((path) => !isBundledTypesWorkspacePath(path));
     if (paths.length === 0) {
+      if (candidatePaths.length > 0) {
+        toast.error('This path is read-only.');
+      }
       return;
     }
 
@@ -969,7 +1125,7 @@ export const ChatEditorFileTree = memo(function ({
     setDeleteDialogOpen(true);
   }, []);
 
-  const confirmDelete = useCallback(() => {
+  const runConfirmDelete = useCallback(async (): Promise<void> => {
     const deletedPaths = new Set<string>();
 
     for (const path of itemsToDelete) {
@@ -977,42 +1133,25 @@ export const ChatEditorFileTree = memo(function ({
         continue;
       }
 
-      deletedPaths.add(path);
-
       const entry = fileTreeMap.get(path);
       const isFolder = entry?.type === 'dir';
 
-      // R6 preflight: `canDelete` validates against the worker's authoritative
-      // view (catches read-only mounts, races where the path disappeared
-      // between selection and confirmation). Failure surfaces a typed toast
-      // and skips the underlying mutation; success runs `rmdir`/`deleteFile`.
-      // The tab-close cascade is handled by `file-operation-participants.ts`
-      // via the `directoryDeleted` / `deleted` ContentChangeEvent.
-      void (async () => {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- Multi-select can include parent/child paths; ordered preflight keeps outcomes deterministic.
         const preflight = await canDelete(path);
         if (preflight !== true) {
           surfacePreflightError(preflight as WorkspaceMutationErrorLike);
-          return;
+          continue;
         }
-        try {
-          if (isFolder) {
-            await rmdir(path, { recursive: true });
-          } else {
-            await deleteFile(path, { source: 'user' });
-          }
-        } catch (error) {
-          toast.error(`Delete failed: ${error instanceof Error ? error.message : String(error)}`);
+        const deletion = isFolder ? deleteDirectory(path, { recursive: true }) : deleteFile(path, { source: 'user' });
+        // oxlint-disable-next-line no-await-in-loop -- Continue through the ordered batch after per-item failures instead of collapsing into Promise.all.
+        await deletion;
+        deletedPaths.add(path);
+        if (isFolder) {
+          addDeletedDescendantPaths({ deletedPaths, fileTreeMap, path });
         }
-      })();
-
-      if (isFolder) {
-        // Track deleted descendant paths locally so the selection /
-        // focus-restore logic below can filter them out.
-        for (const [key] of fileTreeMap) {
-          if (key.startsWith(`${path}/`)) {
-            deletedPaths.add(key);
-          }
-        }
+      } catch (error) {
+        toast.error(`Delete failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
@@ -1023,7 +1162,11 @@ export const ChatEditorFileTree = memo(function ({
 
     const firstRemainingItem = tree.getItems().find((i) => i.getId() !== rootId && !deletedPaths.has(i.getId()));
     setFocusedItem(firstRemainingItem?.getId());
-  }, [canDelete, deleteFile, fileTreeMap, itemsToDelete, rmdir, surfacePreflightError, tree]);
+  }, [canDelete, deleteDirectory, deleteFile, fileTreeMap, itemsToDelete, surfacePreflightError, tree]);
+
+  const confirmDelete = useCallback(() => {
+    void runConfirmDelete();
+  }, [runConfirmDelete]);
 
   const { formattedKeyCombination: confirmDeleteKeyLabel } = useKeybinding(confirmDeleteKeyCombination, confirmDelete, {
     enabled: deleteDialogOpen,
@@ -1094,73 +1237,195 @@ export const ChatEditorFileTree = memo(function ({
 
   const handleDownload = useCallback(
     (path: string, isFolder: boolean) => {
+      const policy = getFileTreeDownloadPolicy(path);
+      if (!policy.allowed) {
+        toast.error(policy.message);
+        return;
+      }
+
       const name = path.split('/').pop() ?? path;
 
       if (isFolder) {
-        const fullPath = `/projects/${projectId}/${path}`;
         toast.promise(
           async () => {
-            const zipBlob = await getZippedDirectory(fullPath);
-            downloadBlob(zipBlob, `${name}.zip`);
+            let zipBlob: Blob;
+            try {
+              zipBlob = await getZippedDirectory(path);
+            } catch (error) {
+              throw createFileTreeDownloadError({ code: 'zip-generation-failed', path, cause: error });
+            }
+            try {
+              downloadBlob(zipBlob, `${name}.zip`);
+            } catch (error) {
+              throw createFileTreeDownloadError({ code: 'browser-download-failed', path, cause: error });
+            }
           },
           {
             loading: `Downloading ${name}...`,
             success: `Downloaded ${name}.zip`,
-            error: `Failed to download ${name}`,
+            error: getFileTreeDownloadErrorMessage,
           },
         );
       } else {
         toast.promise(
           async () => {
-            const content = await readFile(path);
+            let content: Awaited<ReturnType<typeof readFile>>;
+            try {
+              content = await readFile(path);
+            } catch (error) {
+              throw createFileTreeDownloadError({ code: 'path-not-found', path, cause: error });
+            }
             const blob = new Blob([asBuffer(content.buffer)], {
               type: 'application/octet-stream',
             });
-            downloadBlob(blob, name);
+            try {
+              downloadBlob(blob, name);
+            } catch (error) {
+              throw createFileTreeDownloadError({ code: 'browser-download-failed', path, cause: error });
+            }
           },
           {
             loading: `Downloading ${name}...`,
             success: `Downloaded ${name}`,
-            error: `Failed to download ${path}`,
+            error: getFileTreeDownloadErrorMessage,
           },
         );
       }
     },
-    [projectId, readFile, getZippedDirectory],
+    [readFile, getZippedDirectory],
   );
 
-  const handleCopyPath = useCallback((path: string) => {
-    void navigator.clipboard.writeText(path);
-    toast.success('Path copied to clipboard');
+  const handleCopyPath = useCallback(async (path: string): Promise<void> => {
+    try {
+      const result = await copyTextToClipboard(path);
+      if (result.type === 'success') {
+        toast.success(result.message);
+        return;
+      }
+
+      toast.error(result.message, result.description ? { description: result.description } : undefined);
+    } catch (error) {
+      toast.error('Failed to copy path', { description: error instanceof Error ? error.message : String(error) });
+    }
   }, []);
 
   const handleUploadClick = useCallback((targetPath: string) => {
+    if (isBundledTypesWorkspacePath(targetPath)) {
+      toast.error('This path is read-only.');
+      return;
+    }
     setUploadTargetPath(targetPath);
     fileInputRef.current?.click();
   }, []);
 
-  // Shared file processing logic for both drag-drop and upload button
-  const processDroppedFiles = useCallback(
-    async (files: Array<{ file: File; relativePath: string }>, targetDirectory: string) => {
-      for (const { file, relativePath } of files) {
+  // Shared import processing logic for both drag-drop and upload button.
+  const processDroppedEntries = useCallback(
+    async (
+      entries: { readonly files: readonly DroppedFile[]; readonly directories: readonly DroppedDirectory[] },
+      targetDirectory: string,
+    ) => {
+      const directoryPaths = collectDropDirectoryPaths({
+        targetDirectory,
+        files: entries.files,
+        directories: entries.directories,
+      });
+      const failures: string[] = [];
+      let createdDirectoryCount = 0;
+
+      for (const directoryPath of directoryPaths) {
+        if (allPaths.has(directoryPath) && isPathFolder(directoryPath, fileTree, allPaths)) {
+          continue;
+        }
+
         try {
-          // oxlint-disable-next-line no-await-in-loop -- Files need to be read sequentially
-          const arrayBuffer = await file.arrayBuffer();
-          const uint8Array = new Uint8Array(arrayBuffer);
-          const filePath = targetDirectory ? `${targetDirectory}/${relativePath}` : relativePath;
+          // oxlint-disable-next-line no-await-in-loop -- Directory creation is ordered by depth so parents exist before children.
+          const preflight = await canCreate(directoryPath, 'directory');
+          if (preflight !== true) {
+            failures.push(mutationErrorMessage(preflight as WorkspaceMutationErrorLike));
+            continue;
+          }
 
-          // Write file to fileManager - calls worker directly
-          // oxlint-disable-next-line no-await-in-loop -- Files need to be written sequentially
-          await writeFile(filePath, uint8Array, { source: 'user' });
-
-          // Open file in fileExplorer
-          editorRef.send({ type: 'openFile', path: filePath, source: 'user' });
+          // oxlint-disable-next-line no-await-in-loop -- Ordered directory creation preserves deterministic import state.
+          await createDirectory(directoryPath, { recursive: true });
+          createdDirectoryCount++;
         } catch (error) {
-          console.error(`Error uploading file ${file.name}:`, error);
+          failures.push(`${directoryPath}: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
+
+      const candidates = entries.files.map(({ file, relativePath }) => ({
+        file,
+        relativePath,
+        filePath: joinFileTreePath(targetDirectory, relativePath),
+      }));
+      const collisions: string[] = [];
+      const approved = new Set<string>();
+
+      for (const candidate of candidates) {
+        // oxlint-disable-next-line no-await-in-loop -- Preflights are sequential so one overwrite dialog covers deterministic path order.
+        const preflight = await canCreate(candidate.filePath, 'file');
+        if (preflight === true) {
+          approved.add(candidate.filePath);
+          continue;
+        }
+        if (isWorkspaceMutationErrorLike(preflight) && preflight.code === 'NAME_EXISTS') {
+          collisions.push(candidate.filePath);
+          continue;
+        }
+        failures.push(mutationErrorMessage(preflight as WorkspaceMutationErrorLike));
+      }
+
+      if (collisions.length > 0) {
+        const decision = await requestOverwriteConfirm(collisions);
+        if (decision.choice === 'overwrite') {
+          for (const path of collisions) {
+            approved.add(path);
+          }
+        }
+      }
+
+      let uploadedCount = 0;
+      for (const candidate of candidates) {
+        if (!approved.has(candidate.filePath)) {
+          continue;
+        }
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- Files need to be read sequentially
+          const arrayBuffer = await candidate.file.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
+
+          // oxlint-disable-next-line no-await-in-loop -- Files need to be written sequentially
+          await writeFile(candidate.filePath, uint8Array, { source: 'user' });
+
+          editorRef.send({ type: 'openFile', path: candidate.filePath, source: 'user' });
+          uploadedCount++;
+        } catch (error) {
+          failures.push(`${candidate.relativePath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      const summary = summarizeFileTreeImport({
+        uploadedFiles: uploadedCount,
+        createdDirectories: createdDirectoryCount,
+        failures,
+      });
+      if (summary.success) {
+        toast.success(summary.success.message);
+      }
+      if (summary.failure) {
+        toast.error(summary.failure.message, { description: summary.failure.description });
+      }
     },
-    [writeFile, editorRef],
+    [
+      allPaths,
+      canCreate,
+      createDirectory,
+      editorRef,
+      fileTree,
+      mutationErrorMessage,
+      requestOverwriteConfirm,
+      writeFile,
+    ],
   );
 
   const handleFileUpload = useCallback(
@@ -1170,15 +1435,25 @@ export const ChatEditorFileTree = memo(function ({
         return;
       }
 
-      const targetItem = uploadTargetPath ? tree.getItemInstance(uploadTargetPath) : undefined;
-      const directory = targetItem?.isFolder() ? uploadTargetPath : '';
+      const directory = resolveFileTreeTargetDirectory({
+        targetPath: uploadTargetPath,
+        getTargetData(path) {
+          try {
+            const item = tree.getItemInstance(path);
+            return { isFolder: item.isFolder() };
+          } catch {
+            return undefined;
+          }
+        },
+      });
 
       // Convert FileList to the new format (flat files have relativePath = filename)
-      const filesWithPaths = [...files].map((file) => ({
+      const filesWithPaths: DroppedFile[] = [...files].map((file) => ({
+        kind: 'file',
         file,
-        relativePath: file.name,
+        relativePath: file.webkitRelativePath || file.name,
       }));
-      await processDroppedFiles(filesWithPaths, directory ?? '');
+      await processDroppedEntries({ files: filesWithPaths, directories: [] }, directory);
 
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -1186,8 +1461,94 @@ export const ChatEditorFileTree = memo(function ({
 
       setUploadTargetPath(undefined);
     },
-    [uploadTargetPath, tree, processDroppedFiles],
+    [uploadTargetPath, tree, processDroppedEntries],
   );
+
+  const handleForeignDrop = useCallback(
+    async ({ path, isFolder, dataTransfer }: ForeignDropTarget): Promise<void> => {
+      const targetDirectory = resolveFileTreeTargetDirectory({
+        targetPath: path,
+        getTargetData: (targetPath) => (targetPath === path ? { isFolder } : undefined),
+      });
+      if (isBundledTypesWorkspacePath(path) || isBundledTypesWorkspacePath(targetDirectory)) {
+        toast.error('This path is read-only.');
+        return;
+      }
+
+      const ingestion = await ingestFileTreeDataTransfer({
+        items: dataTransfer.items,
+        files: dataTransfer.files,
+      });
+      if (ingestion.type !== 'entries') {
+        surfaceDropIngestionResult(ingestion);
+        return;
+      }
+
+      if (ingestion.warnings.length > 0) {
+        toast.warning('Some dropped items could not be read.', {
+          description: ingestion.warnings.slice(0, 3).join('\n'),
+        });
+      }
+
+      await processDroppedEntries(ingestion, targetDirectory);
+    },
+    [processDroppedEntries],
+  );
+
+  const setTreeContainerElement: React.RefCallback<HTMLDivElement> = useCallback(
+    (element) => {
+      treeContainerRef.current = element;
+      tree.registerElement(element);
+    },
+    [tree],
+  );
+
+  useEffect(() => {
+    const container = treeContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const getTargetDirectory = (target: Omit<ForeignDropTarget, 'dataTransfer'>): string =>
+      resolveFileTreeTargetDirectory({
+        targetPath: target.path,
+        getTargetData: (path) => (path === target.path ? { isFolder: target.isFolder } : undefined),
+      });
+
+    const handleDragEnterOrOver = (event: DragEvent): void => {
+      const { dataTransfer } = event;
+      if (!dataTransfer || !canReadForeignFileTreeDrop(dataTransfer)) {
+        return;
+      }
+
+      const target = getForeignDropTargetFromEvent(event);
+      const targetDirectory = getTargetDirectory(target);
+      event.preventDefault();
+      event.stopPropagation();
+      dataTransfer.dropEffect =
+        isBundledTypesWorkspacePath(target.path) || isBundledTypesWorkspacePath(targetDirectory) ? 'none' : 'copy';
+    };
+
+    const handleDrop = (event: DragEvent): void => {
+      const { dataTransfer } = event;
+      if (!dataTransfer || !canReadForeignFileTreeDrop(dataTransfer)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      void handleForeignDrop({ ...getForeignDropTargetFromEvent(event), dataTransfer });
+    };
+
+    container.addEventListener('dragenter', handleDragEnterOrOver, true);
+    container.addEventListener('dragover', handleDragEnterOrOver, true);
+    container.addEventListener('drop', handleDrop, true);
+    return () => {
+      container.removeEventListener('dragenter', handleDragEnterOrOver, true);
+      container.removeEventListener('dragover', handleDragEnterOrOver, true);
+      container.removeEventListener('drop', handleDrop, true);
+    };
+  }, [handleForeignDrop]);
 
   // Get display name for delete dialog
   const deleteItemName = useMemo(() => {
@@ -1354,9 +1715,10 @@ export const ChatEditorFileTree = memo(function ({
             <div
               data-tree-container
               {...tree.getContainerProps()}
+              ref={setTreeContainerElement}
               className='flex min-h-full flex-1 flex-col gap-0 outline-none'
             >
-              <AssistiveTreeDescription tree={tree} />
+              <AssistiveTreeDescription tree={tree} getLabel={getFileTreeAssistiveDndLabel} />
               {/* Pending folder at root level */}
               {pendingFolder?.parentPath === '' ? (
                 <PendingFolderInput
@@ -1365,18 +1727,7 @@ export const ChatEditorFileTree = memo(function ({
                   allPaths={allPaths}
                   level={0}
                   onSubmit={(name) => {
-                    void (async () => {
-                      try {
-                        await mkdir(name, { recursive: true });
-                      } catch (error) {
-                        toast.error(
-                          `Failed to create folder: ${error instanceof Error ? error.message : String(error)}`,
-                        );
-                        return;
-                      }
-                    })();
-                    setPendingFolder(undefined);
-                    setExpandedItems((previous) => [...previous, name]);
+                    void submitCreateFolder('', name);
                   }}
                   onCancel={() => {
                     setPendingFolder(undefined);
@@ -1397,13 +1748,7 @@ export const ChatEditorFileTree = memo(function ({
                   allPaths={allPaths}
                   level={0}
                   onSubmit={(filename) => {
-                    void writeFile(filename, encodeTextFile(pendingFile.content), { source: 'user' });
-                    editorRef.send({
-                      type: 'openFile',
-                      path: filename,
-                      source: 'user',
-                    });
-                    setPendingFile(undefined);
+                    void submitCreateFile('', filename, pendingFile.content);
                   }}
                   onCancel={() => {
                     setPendingFile(undefined);
@@ -1474,6 +1819,7 @@ export const ChatEditorFileTree = memo(function ({
                               onOpenInViewer={handleOpenInViewer}
                               onDownload={handleDownload}
                               onCopyPath={handleCopyPath}
+                              onForeignDrop={handleForeignDrop}
                             />
                             {/* Pending folder inside this folder */}
                             {pendingFolder?.parentPath === itemId && item.isFolder() ? (
@@ -1483,21 +1829,7 @@ export const ChatEditorFileTree = memo(function ({
                                 allPaths={allPaths}
                                 level={itemLevel + 1}
                                 onSubmit={(name) => {
-                                  const folderPath = `${pendingFolder.parentPath}/${name}`;
-                                  void (async () => {
-                                    try {
-                                      await mkdir(folderPath, { recursive: true });
-                                    } catch (error) {
-                                      toast.error(
-                                        `Failed to create folder: ${
-                                          error instanceof Error ? error.message : String(error)
-                                        }`,
-                                      );
-                                      return;
-                                    }
-                                  })();
-                                  setPendingFolder(undefined);
-                                  setExpandedItems((previous) => [...previous, folderPath]);
+                                  void submitCreateFolder(pendingFolder.parentPath, name);
                                 }}
                                 onCancel={() => {
                                   setPendingFolder(undefined);
@@ -1518,14 +1850,7 @@ export const ChatEditorFileTree = memo(function ({
                                 allPaths={allPaths}
                                 level={itemLevel + 1}
                                 onSubmit={(filename) => {
-                                  const filePath = `${pendingFile.parentPath}/${filename}`;
-                                  void writeFile(filePath, encodeTextFile(pendingFile.content), { source: 'user' });
-                                  editorRef.send({
-                                    type: 'openFile',
-                                    path: filePath,
-                                    source: 'user',
-                                  });
-                                  setPendingFile(undefined);
+                                  void submitCreateFile(pendingFile.parentPath, filename, pendingFile.content);
                                 }}
                                 onCancel={() => {
                                   setPendingFile(undefined);
@@ -1570,7 +1895,8 @@ type TreeItemProps = {
   readonly onOpenInEditor: (path: string) => void;
   readonly onOpenInViewer: (path: string) => void;
   readonly onDownload: (path: string, isFolder: boolean) => void;
-  readonly onCopyPath: (path: string) => void;
+  readonly onCopyPath: (path: string) => Promise<void>;
+  readonly onForeignDrop: (target: ForeignDropTarget) => Promise<void>;
 };
 
 // oxlint-disable-next-line complexity -- UI rendering with many conditional states
@@ -1588,12 +1914,15 @@ function TreeItem({
   onOpenInViewer,
   onDownload,
   onCopyPath,
+  onForeignDrop,
 }: TreeItemProps): React.JSX.Element {
   const itemLevel = item.getItemMeta().level;
   const paddingLeft = itemLevel * 16 + 8;
   const isSelected = item.isSelected();
   const isRenaming = item.isRenaming();
   const isFolder = item.isFolder();
+  const readOnly = isBundledTypesWorkspacePath(item.getId());
+  const downloadPolicy = getFileTreeDownloadPolicy(item.getId());
 
   // Rename input - NOT wrapped by ContextMenu to avoid focus interference
   if (isRenaming) {
@@ -1622,9 +1951,9 @@ function TreeItem({
         <div className='flex min-w-0 flex-1 items-center gap-2'>
           {isFolder ? (
             item.isExpanded() ? (
-              <FolderOpen className='size-4 shrink-0 text-muted-foreground' />
+              <FolderOpen className='size-3.5 shrink-0 text-muted-foreground' />
             ) : (
-              <Folder className='size-4 shrink-0 text-muted-foreground' />
+              <Folder className='size-3.5 shrink-0 text-muted-foreground' />
             )
           ) : (
             <FileExtensionIcon filename={item.getItemName()} className='size-3.5 shrink-0 text-muted-foreground' />
@@ -1655,12 +1984,17 @@ function TreeItem({
 
   // Normal view - wrapped by ContextMenu
   const treeItemProps = item.getProps();
+  const treeDragOver = (treeItemProps as { readonly onDragOver?: (event: DragEvent) => void }).onDragOver;
+  const treeDrop = (treeItemProps as { readonly onDrop?: (event: DragEvent) => void }).onDrop;
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
           {...treeItemProps}
+          data-testid='file-tree-item'
+          data-file-tree-path={item.getId()}
+          data-file-tree-kind={isFolder ? 'directory' : 'file'}
           className={cn(
             'group/file relative flex h-7 w-full cursor-pointer items-center justify-between py-1 pr-1 pl-2 text-sm text-sidebar-foreground',
             !isActive && 'hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
@@ -1689,6 +2023,30 @@ function TreeItem({
             };
             onClick?.(event.nativeEvent);
           }}
+          onDragOver={(event) => {
+            if (canReadForeignFileTreeDrop(event.dataTransfer)) {
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = readOnly ? 'none' : 'copy';
+              return;
+            }
+
+            treeDragOver?.(event.nativeEvent);
+          }}
+          onDrop={(event) => {
+            if (canReadForeignFileTreeDrop(event.dataTransfer)) {
+              event.preventDefault();
+              event.stopPropagation();
+              void onForeignDrop({
+                path: item.getId(),
+                isFolder,
+                dataTransfer: event.dataTransfer,
+              });
+              return;
+            }
+
+            treeDrop?.(event.nativeEvent);
+          }}
         >
           {/* Indent guide lines (VS Code-style) */}
           {Array.from({ length: itemLevel }, (_, index) => {
@@ -1711,9 +2069,9 @@ function TreeItem({
           <div className='flex min-w-0 flex-1 grow items-center gap-2'>
             {isFolder ? (
               item.isExpanded() ? (
-                <FolderOpen className='size-4 shrink-0 text-muted-foreground' />
+                <FolderOpen className='size-3.5 shrink-0 text-muted-foreground' />
               ) : (
-                <Folder className='size-4 shrink-0 text-muted-foreground' />
+                <Folder className='size-3.5 shrink-0 text-muted-foreground' />
               )
             ) : (
               <FileExtensionIcon filename={item.getItemName()} className='size-3.5 shrink-0 text-muted-foreground' />
@@ -1728,6 +2086,7 @@ function TreeItem({
                 <Button
                   variant='secondary'
                   size='icon'
+                  aria-label={`Actions for ${item.getItemName()}`}
                   className='absolute top-1/2 right-1 size-5 -translate-y-1/2 opacity-0 group-hover/file:opacity-50 hover:bg-secondary hover:opacity-100'
                   onClick={(event) => {
                     event.stopPropagation();
@@ -1756,62 +2115,77 @@ function TreeItem({
                   <span>Open in Viewer</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onSelect={() => {
-                    item.startRenaming();
-                  }}
-                >
-                  <Edit />
-                  <span>Rename</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onUpload(item.getId());
-                  }}
-                >
-                  <Upload />
-                  <span>Upload Files</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onDuplicate([item]);
-                  }}
-                >
-                  <Copy />
-                  <span>Duplicate</span>
-                </DropdownMenuItem>
+                {readOnly ? (
+                  <DropdownMenuItem disabled>
+                    <Lock />
+                    <span>Read-only</span>
+                  </DropdownMenuItem>
+                ) : (
+                  <>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        item.startRenaming();
+                      }}
+                    >
+                      <Edit />
+                      <span>Rename</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onUpload(item.getId());
+                      }}
+                    >
+                      <Upload />
+                      <span>Upload Files</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onDuplicate([item]);
+                      }}
+                    >
+                      <Copy />
+                      <span>Duplicate</span>
+                    </DropdownMenuItem>
+                  </>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={(event) => {
                     event.stopPropagation();
-                    onCopyPath(item.getId());
+                    void onCopyPath(item.getId());
                   }}
                 >
                   <Clipboard />
                   <span>Copy Path</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onDownload(item.getId(), false);
-                  }}
-                >
-                  <Download />
-                  <span>Download</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  variant='destructive'
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onDelete([item]);
-                  }}
-                >
-                  <Trash2 />
-                  <span>Delete</span>
-                </DropdownMenuItem>
+                {downloadPolicy.allowed ? (
+                  <DropdownMenuItem
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDownload(item.getId(), false);
+                    }}
+                  >
+                    <Download />
+                    <span>Download</span>
+                  </DropdownMenuItem>
+                ) : null}
+                {readOnly ? null : (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant='destructive'
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onDelete([item]);
+                      }}
+                    >
+                      <Trash2 />
+                      <span>Delete</span>
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -1839,59 +2213,77 @@ function TreeItem({
             <ContextMenuSeparator />
           </>
         )}
-        <ContextMenuItem
-          onSelect={() => {
-            item.startRenaming();
-          }}
-        >
-          <Edit />
-          <span>Rename</span>
-        </ContextMenuItem>
-        <ContextMenuItem
-          onClick={() => {
-            onUpload(item.getId());
-          }}
-        >
-          <Upload />
-          <span>Upload Files</span>
-        </ContextMenuItem>
-        {isFolder ? null : (
-          <ContextMenuItem
-            onClick={() => {
-              onDuplicate([item]);
-            }}
-          >
-            <Copy />
-            <span>Duplicate</span>
-          </ContextMenuItem>
+        {readOnly ? (
+          <>
+            <ContextMenuItem disabled>
+              <Lock />
+              <span>Read-only</span>
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        ) : (
+          <>
+            <ContextMenuItem
+              onSelect={() => {
+                item.startRenaming();
+              }}
+            >
+              <Edit />
+              <span>Rename</span>
+            </ContextMenuItem>
+            <ContextMenuItem
+              onClick={() => {
+                onUpload(item.getId());
+              }}
+            >
+              <Upload />
+              <span>Upload Files</span>
+            </ContextMenuItem>
+            {isFolder ? null : (
+              <ContextMenuItem
+                onClick={() => {
+                  onDuplicate([item]);
+                }}
+              >
+                <Copy />
+                <span>Duplicate</span>
+              </ContextMenuItem>
+            )}
+            <ContextMenuSeparator />
+          </>
         )}
-        <ContextMenuSeparator />
         <ContextMenuItem
           onClick={() => {
-            onCopyPath(item.getId());
+            void onCopyPath(item.getId());
           }}
         >
           <Clipboard />
           <span>Copy Path</span>
         </ContextMenuItem>
-        <ContextMenuItem
-          onClick={() => {
-            onDownload(item.getId(), isFolder);
-          }}
-        >
-          <Download />
-          <span>{isFolder ? 'Download as ZIP' : 'Download'}</span>
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          variant='destructive'
-          onClick={() => {
-            onDelete([item]);
-          }}
-        >
-          <Trash2 />
-          <span>Delete</span>
-        </ContextMenuItem>
+        {downloadPolicy.allowed ? (
+          <ContextMenuItem
+            onClick={() => {
+              onDownload(item.getId(), isFolder);
+            }}
+          >
+            <Download />
+            <span>{isFolder ? 'Download as ZIP' : 'Download'}</span>
+          </ContextMenuItem>
+        ) : null}
+        {readOnly ? null : (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              variant='destructive'
+              onClick={() => {
+                onDelete([item]);
+              }}
+            >
+              <Trash2 />
+              <span>Delete</span>
+            </ContextMenuItem>
+          </>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -1974,7 +2366,7 @@ function PendingFolderInput({
         style={{ paddingLeft: `${paddingLeft}px` }}
       >
         <div className='flex min-w-0 flex-1 items-center gap-2'>
-          <Folder className='size-4 shrink-0 text-muted-foreground' />
+          <Folder className='size-3.5 shrink-0 text-muted-foreground' />
           <input
             autoFocus
             value={value}

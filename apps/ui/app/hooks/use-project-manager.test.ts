@@ -520,7 +520,7 @@ describe('useProjectManager', () => {
     // the seed message. Regression coverage for the previous failure mode
     // where the seed message stamped kernel/model and the seed mode drifted
     // from the chat row's activeKernel.
-    it('should seed the initial pending user message with only status: pending', async () => {
+    it('should seed the initial pending user message with one-shot startup intent', async () => {
       const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
       await act(async () => {
@@ -531,7 +531,12 @@ describe('useProjectManager', () => {
       });
 
       const callArgs = mockCreateProjectWithResources.mock.calls.at(-1)?.[0] as
-        | { chat: { messages: Array<{ metadata?: Record<string, unknown> }> } }
+        | {
+            chat: {
+              messages: Array<{ id: string; metadata?: Record<string, unknown> }>;
+              startupRequest?: { id: string; kind: string; messageId: string; source: string; createdAt: number };
+            };
+          }
         | undefined;
       const seedMetadata = callArgs?.chat.messages[0]?.metadata;
       expect(seedMetadata?.['status']).toBe('pending');
@@ -540,6 +545,12 @@ describe('useProjectManager', () => {
       expect(seedMetadata?.['mode']).toBeUndefined();
       expect(seedMetadata?.['toolChoice']).toBeUndefined();
       expect(seedMetadata?.['testingEnabled']).toBeUndefined();
+      const { startupRequest } = callArgs?.chat ?? {};
+      expect(startupRequest?.id).toMatch(/^req_/);
+      expect(startupRequest?.kind).toBe('regenerate-tail');
+      expect(startupRequest?.messageId).toBe(callArgs?.chat.messages[0]?.id);
+      expect(startupRequest?.source).toBe('homepage-initial-message');
+      expect(typeof startupRequest?.createdAt).toBe('number');
     });
 
     it('should write files with correct project paths', async () => {
@@ -559,6 +570,49 @@ describe('useProjectManager', () => {
       const paths = Object.keys(writtenFiles);
       expect(paths).toContain(`/projects/${fakeProject.id}/${sourceFile}`);
       expect(paths).toContain(`/projects/${fakeProject.id}/${packageFile}`);
+    });
+
+    it('should write cloned bootstrap bytes so repeated shared inputs survive transfer', async () => {
+      const sharedMain = new Uint8Array([1, 2, 3]);
+      const sharedPackageJson = new Uint8Array([4, 5, 6]);
+      const sharedFiles: Record<string, { content: Uint8Array<ArrayBuffer> }> = Object.fromEntries([
+        [mainFile, { content: sharedMain }],
+        ['package.json', { content: sharedPackageJson }],
+      ]);
+
+      mockClientWriteFiles.mockImplementation(async (files) => {
+        const transfer = Object.values(files).map((file) => file.content.buffer);
+        structuredClone(files, { transfer });
+      });
+
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await result.current.createProject({
+          project: stubProjectData,
+          files: sharedFiles,
+          backend: 'opfs',
+        });
+      });
+      await act(async () => {
+        await result.current.createProject({
+          project: stubProjectData,
+          files: sharedFiles,
+          backend: 'opfs',
+        });
+      });
+
+      expect(mockClientWriteFiles).toHaveBeenCalledTimes(2);
+      expect(sharedMain).toEqual(new Uint8Array([1, 2, 3]));
+      expect(sharedPackageJson).toEqual(new Uint8Array([4, 5, 6]));
+
+      const firstCallFiles = mockClientWriteFiles.mock.calls[0]![0];
+      const writtenMain = firstCallFiles[`/projects/${fakeProject.id}/${mainFile}`]?.content;
+      const writtenPackageJson = firstCallFiles[`/projects/${fakeProject.id}/package.json`]?.content;
+      expect(Object.is(writtenMain, sharedMain)).toBe(false);
+      expect(writtenMain?.buffer === sharedMain.buffer).toBe(false);
+      expect(Object.is(writtenPackageJson, sharedPackageJson)).toBe(false);
+      expect(writtenPackageJson?.buffer === sharedPackageJson.buffer).toBe(false);
     });
 
     // Regression: project bootstrap writes /projects/<id>/... keys that are

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { useDeferredValue } from 'react';
+import { Children, isValidElement, useDeferredValue } from 'react';
 import { Theme } from 'remix-themes';
 
 const mockUseTheme = vi.fn(() => ({ theme: Theme.LIGHT }));
@@ -41,6 +41,29 @@ vi.mock('#components/geometry/graphics/three/utils/lights.utils.js', () => ({
   darkModeIntensityScale: 0.5,
   darkModeAmbientBoost: 1.15,
 }));
+
+type TestElementProperties = {
+  readonly args?: unknown;
+  readonly children?: React.ReactNode;
+  readonly intensity?: unknown;
+  readonly position?: unknown;
+};
+
+const collectElements = (node: React.ReactNode): Array<React.ReactElement<TestElementProperties>> => {
+  const elements: Array<React.ReactElement<TestElementProperties>> = [];
+
+  Children.forEach(node, (child) => {
+    if (!isValidElement(child)) {
+      return;
+    }
+
+    const element = child as React.ReactElement<TestElementProperties>;
+    elements.push(element);
+    elements.push(...collectElements(element.props.children));
+  });
+
+  return elements;
+};
 
 describe('Lights', () => {
   it('should defer Environment rendering via useDeferredValue', async () => {
@@ -113,5 +136,31 @@ describe('Lights', () => {
         }),
       }),
     );
+  });
+
+  it('should use same-count fixed performance key and lower fill lights', async () => {
+    mockUseTheme.mockReturnValue({ theme: Theme.LIGHT });
+
+    const { Lights } = await import('#components/geometry/graphics/three/react/lights.js');
+    const { renderHook } = await import('@testing-library/react');
+
+    // oxlint-disable-next-line new-cap -- invoking component as function for hook testing
+    const { result } = renderHook(() => Lights({ environmentPreset: 'performance', upDirection: 'x' }));
+    const elements = collectElements(result.current);
+    const hemisphere = elements.find((element) => element.type === 'hemisphereLight');
+
+    // oxlint-disable-next-line tau-lint/no-hardcoded-color -- asserting Three.js performance light colors
+    expect(hemisphere?.props.args).toEqual(['#ffffff', '#777777', 1]);
+    expect(hemisphere?.props.position).toEqual([1, 0, 0]);
+
+    const directionalLights = elements.filter((element) => element.type === 'directionalLight');
+    expect(directionalLights).toHaveLength(3);
+
+    const performanceLights = directionalLights.slice(1);
+    expect(performanceLights.map((element) => element.props.position)).toEqual([
+      [5, -1, -3],
+      [-5, 1, 3],
+    ]);
+    expect(performanceLights.map((element) => element.props.intensity)).toEqual([2, 1.5]);
   });
 });

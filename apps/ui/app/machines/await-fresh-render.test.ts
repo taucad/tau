@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createActor, setup, assign } from 'xstate';
 
+import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { awaitFreshRender, AwaitFreshRenderTimeoutError } from '#machines/await-fresh-render.js';
 
 /**
@@ -146,6 +147,37 @@ describe('awaitFreshRender', () => {
       }),
     ).rejects.toBeInstanceOf(AwaitFreshRenderTimeoutError);
     actor.stop();
+  });
+
+  it('should default to the shared render timeout when awaitTimeout is omitted', async () => {
+    vi.useFakeTimers();
+    const actor = createActor(fakeCadMachine).start();
+    actor.send({ type: 'request' });
+    actor.send({ type: 'startRender' });
+
+    let settledError: unknown;
+    let settled = false;
+    const promise = awaitFreshRender(actor as unknown as Parameters<typeof awaitFreshRender>[0]).catch(
+      (error: unknown) => {
+        settled = true;
+        settledError = error;
+      },
+    );
+
+    try {
+      await vi.advanceTimersByTimeAsync(defaultRenderTimeout - 1);
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await promise;
+
+      expect(settled).toBe(true);
+      expect(settledError).toBeInstanceOf(AwaitFreshRenderTimeoutError);
+    } finally {
+      actor.stop();
+      vi.useRealTimers();
+    }
   });
 
   it('should expose code === "RENDER_TIMEOUT" on AwaitFreshRenderTimeoutError (never depends on XState message)', async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toSnakeCase, toTitleCase } from '#utils/string.utils.js';
+import { formatDisplayLabel, toSnakeCase, toTitleCase } from '#utils/string.utils.js';
 
 describe('toTitleCase', () => {
   describe('basic camelCase conversion', () => {
@@ -118,6 +118,19 @@ describe('toTitleCase', () => {
     it('should handle mixed alphanumeric and symbols', () => {
       expect(toTitleCase('test_value@123')).toBe('Test Value@ 123');
     });
+  });
+});
+
+describe('formatDisplayLabel', () => {
+  it('should format identifier-style parameter labels as Title Case display labels', () => {
+    expect(formatDisplayLabel('bankAngle')).toBe('Bank Angle');
+    expect(formatDisplayLabel('valve_cover_left')).toBe('Valve Cover Left');
+    expect(formatDisplayLabel('main-journal-dia')).toBe('Main Journal Dia');
+  });
+
+  it('should preserve already-authored Title Case labels and acronyms', () => {
+    expect(formatDisplayLabel('Valve Cover Left')).toBe('Valve Cover Left');
+    expect(formatDisplayLabel('USB Port')).toBe('USB Port');
   });
 });
 

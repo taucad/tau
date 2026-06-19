@@ -1,4 +1,4 @@
-import { memo, useEffect, useCallback, useMemo, useRef } from 'react';
+import { memo, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { DockviewApi, DockviewPanelApi, IDockviewPanelHeaderProps } from 'dockview-react';
 import { FileX, FolderOpen, PlayCircle } from 'lucide-react';
@@ -10,7 +10,12 @@ import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { useFileContent } from '#hooks/use-file-content.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import { CadProvider, useCad, useCadSelector } from '#hooks/use-cad.js';
-import { GraphicsProvider, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
+import {
+  GraphicsProvider,
+  useGraphics,
+  useGraphicsSelector,
+  useModelInteractionSelector,
+} from '#hooks/use-graphics.js';
 import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
 import { ChatStackTrace } from '#routes/projects_.$id/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/projects_.$id/chat-viewer-status.js';
@@ -22,9 +27,19 @@ import { useIsMobile } from '#hooks/use-mobile.js';
 import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import { cn } from '#utils/ui.utils.js';
 import { ArButton } from '#components/cad/ar-button.js';
+import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 
 /** Horizontal inset sum for bottom controls (`left-2` + `right-2`); pairs with `max-w-[calc(100%-1rem)]` on the overlay. */
 const bottomControlsGutterPx = 16;
+const componentNameBadgeRightEdgeThresholdPx = 220;
+const componentNameBadgeBottomEdgeThresholdPx = 56;
+
+type ViewerPointerPosition = {
+  readonly x: number;
+  readonly y: number;
+  readonly horizontal: 'left' | 'right';
+  readonly vertical: 'above' | 'below';
+};
 
 type ChatViewerProps = {
   /** Unique Dockview panel ID for this viewer instance */
@@ -247,9 +262,10 @@ const ViewerContent = memo(function ({
         type: 'updateGeometries',
         geometries,
         units,
+        sourceFile: entryFile,
       });
     }
-  }, [graphicsActor, geometries, units]);
+  }, [entryFile, graphicsActor, geometries, units]);
 
   // Sync graphics + render timeout settings back to editor state for persistence
   useViewSettingsSync({
@@ -296,6 +312,43 @@ const ViewerContent = memo(function ({
   const { width: viewerLayoutWidth } = useResizeObserver({ ref: viewerLayoutRef });
   const toolbarAvailableWidth =
     viewerLayoutWidth === undefined ? undefined : Math.max(0, viewerLayoutWidth - bottomControlsGutterPx);
+  const [viewerPointerPosition, setViewerPointerPosition] = useState<ViewerPointerPosition | undefined>(undefined);
+  const modelInteractionUnitId = useMemo(() => deriveModelInteractionUnitId({ sourceFile: entryFile }), [entryFile]);
+  const componentNameForPointer = useModelInteractionSelector((state) => {
+    const unit = getModelInteractionUnitState(state.context, modelInteractionUnitId);
+    const { hoveredComponentId } = unit;
+    if (!hoveredComponentId) {
+      return undefined;
+    }
+    return unit.manifest?.nodesById[hoveredComponentId]?.name;
+  });
+
+  const updateViewerPointerPosition = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
+    const viewerBounds = viewerLayoutRef.current?.getBoundingClientRect();
+    if (!viewerBounds) {
+      setViewerPointerPosition(undefined);
+      return;
+    }
+
+    const x = Math.max(0, Math.min(event.clientX - viewerBounds.left, viewerBounds.width));
+    const y = Math.max(0, Math.min(event.clientY - viewerBounds.top, viewerBounds.height));
+    setViewerPointerPosition({
+      x,
+      y,
+      horizontal: x > viewerBounds.width - componentNameBadgeRightEdgeThresholdPx ? 'right' : 'left',
+      vertical: y > viewerBounds.height - componentNameBadgeBottomEdgeThresholdPx ? 'above' : 'below',
+    });
+  }, []);
+
+  const clearViewerPointerPosition = useCallback((): void => {
+    setViewerPointerPosition(undefined);
+  }, []);
+
+  useEffect(() => {
+    if (isGeometryUnitClosed) {
+      setViewerPointerPosition(undefined);
+    }
+  }, [isGeometryUnitClosed]);
 
   return (
     <div ref={viewerLayoutRef} className='group/viewer relative flex h-full flex-col'>
@@ -315,7 +368,13 @@ const ViewerContent = memo(function ({
       />
 
       {/* Geometry canvas */}
-      <div className='min-h-0 flex-1'>
+      <div
+        data-testid='cad-viewer-canvas-region'
+        className='min-h-0 flex-1'
+        onPointerMove={updateViewerPointerPosition}
+        onPointerLeave={clearViewerPointerPosition}
+        onPointerCancel={clearViewerPointerPosition}
+      >
         <CadViewer
           enableZoom
           enablePan
@@ -327,9 +386,14 @@ const ViewerContent = memo(function ({
           enableMatcap={enableMatcap}
           upDirection={upDirection}
           geometries={geometries}
+          sourceFile={entryFile}
           gizmoContainer={`#viewport-gizmo-container-${viewId}`}
         />
       </div>
+
+      {!isGeometryUnitClosed && viewerPointerPosition && componentNameForPointer ? (
+        <ModelComponentNameBadge componentName={componentNameForPointer} position={viewerPointerPosition} />
+      ) : undefined}
 
       {/* Reopen-renderer overlay — shown when the geometry unit was closed */}
       {isGeometryUnitClosed && (
@@ -351,7 +415,10 @@ const ViewerContent = memo(function ({
       <ArButton geometries={geometries} kernelClient={kernelClient} className='absolute right-3 bottom-14 z-10' />
 
       {/* Bottom controls */}
-      <div className='absolute bottom-2 left-2 z-10 flex max-w-[calc(100%-1rem)] shrink-0 flex-col items-start gap-2'>
+      <div
+        data-testid='chat-viewer-bottom-controls-overlay'
+        className='pointer-events-none absolute bottom-2 left-2 z-10 flex max-w-[calc(100%-1rem)] shrink-0 flex-col items-start gap-2 [&>*]:pointer-events-auto'
+      >
         <ChatInterfaceGraphics />
         <ChatStackTrace entryFile={entryFile} side='bottom' />
         <ChatViewerControls availableWidth={toolbarAvailableWidth} className='self-stretch' />
@@ -359,3 +426,33 @@ const ViewerContent = memo(function ({
     </div>
   );
 });
+
+function ModelComponentNameBadge({
+  componentName,
+  position,
+}: {
+  readonly componentName: string;
+  readonly position: ViewerPointerPosition;
+}): React.JSX.Element {
+  return (
+    <div
+      aria-hidden='true'
+      data-testid='model-component-name-badge'
+      className={cn(
+        'pointer-events-none absolute z-20 max-w-[min(18rem,calc(100%-1rem))] truncate rounded-md border border-border/60 bg-popover px-2 py-1 text-xs font-medium text-popover-foreground shadow-md',
+        position.horizontal === 'right' ? '-translate-x-[calc(100%+8px)]' : 'translate-x-2',
+        position.vertical === 'above' ? '-translate-y-[calc(100%+10px)]' : 'translate-y-2.5',
+      )}
+      style={
+        {
+          left: `${position.x}px`,
+          top: `${position.y}px`,
+          '--viewer-hover-label-x': `${position.x}px`,
+          '--viewer-hover-label-y': `${position.y}px`,
+        } as React.CSSProperties
+      }
+    >
+      {componentName}
+    </div>
+  );
+}

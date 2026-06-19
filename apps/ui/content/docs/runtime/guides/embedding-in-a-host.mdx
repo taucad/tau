@@ -10,7 +10,7 @@ The `transport` option on `createRuntimeClient` is the single seam where the hos
 
 This guide covers the three scenarios where explicit transport wiring is the right choice:
 
-1. **Worker-hosted filesystems** -- the host owns the filesystem worker and exposes it to the runtime via `fromChannelFs(worker)`.
+1. **Worker-hosted filesystems** -- the host owns the filesystem worker, opens a filesystem bridge connection, and exposes that connection to the runtime via `fromFileSystemBridge(connection)`.
 2. **Externally allocated `filePoolBuffer` SABs** -- the host pre-allocates a `SharedArrayBuffer` for zero-copy file content sharing across workers.
 3. **Deferred client creation** -- the runtime client is constructed once the host knows which filesystem to bind to.
 
@@ -37,23 +37,26 @@ The **`fileSystem`** field on `webWorkerTransport({ ... })`, `inProcessTransport
 | `fromFsLike(myFs)`                   | Wrap a custom `RuntimeFileSystemBase` impl   |
 | `fromNodeFs('/projects/widget')`     | Headless / Node.js (CLI, benchmarks, server) |
 | `fromBrowserFs(directoryHandle)`     | Browser File System Access API root          |
-| `fromChannelFs(fileManagerWorker)`   | Editor host with a dedicated FS worker       |
+| `fromFileSystemBridge(connection)`   | Editor host with a dedicated FS bridge       |
 
 ### Worker-hosted filesystems
 
-When the host owns a File Manager Worker (the canonical editor pattern), wrap it with `fromChannelFs(...)` and pass the handle to `webWorkerTransport`:
+When the host owns a File Manager Worker (the canonical editor pattern), open a filesystem bridge connection with `@taucad/fs-bridge`, wrap that connection with `fromFileSystemBridge(...)`, and pass the opaque handle to `webWorkerTransport`:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import type { runtime } from './runtime.worker';
 import { webWorkerTransport } from '@taucad/runtime/transport/web';
-import { fromChannelFs } from '@taucad/runtime/filesystem';
+import { openFileSystemBridge } from '@taucad/fs-bridge';
+import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 
 const fileManagerWorker = new Worker(new URL('./fm-worker.ts', import.meta.url));
+const fileSystemBridge = openFileSystemBridge(fileManagerWorker);
 
-const client = createRuntimeClient({
-  ...presets.all(),
+const client = createRuntimeClient<typeof runtime>({
   transport: webWorkerTransport({
-    fileSystem: fromChannelFs(fileManagerWorker),
+    createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
+    fileSystem: fromFileSystemBridge(fileSystemBridge),
   }),
 });
 await client.connect();
@@ -62,23 +65,27 @@ const result = await client.export('glb', { file: 'main.ts' });
 if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
 
 client.terminate();
+fileSystemBridge.dispose();
 ```
 
-The transport defaults to its bundled worker entry — pass `url:` only when hosting a custom worker module.
+The runtime worker entry owns `defineRuntime(...)`; the client imports only the runtime type when it needs compile-time narrowing.
 
-The transport constructs the FS bridge `MessagePort` internally and disposes it on `client.terminate()`. The host never sees the port and never needs to call `dispose()` itself.
+The host owns the filesystem bridge connection it opens and should dispose it with the runtime session that consumes it. Runtime consumes the bridge connection; it does not know whether the filesystem authority is a Worker, iframe, Electron utility process, or another port broker.
 
 ### In-process filesystems
 
 For tests, CLIs, and other same-thread scenarios, use `inProcessTransport` with an inline filesystem:
 
 ```typescript
-import { createRuntimeClient, presets, fromMemoryFs } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { presets } from '@taucad/runtime/presets';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
+const runtime = presets.all();
 const client = createRuntimeClient({
-  ...presets.all(),
   transport: inProcessTransport({
+    runtime,
     fileSystem: fromMemoryFs({
       'main.ts':
         "import { drawCircle } from 'replicad';\nexport default () => drawCircle(10).sketchOnPlane('XY').extrude(20);",
@@ -97,17 +104,20 @@ Pair `fileSystem` with `filePoolBuffer` when the host has pre-allocated a `Share
 `filePoolBuffer` is the **only** `SharedArrayBuffer` exposed on the public runtime API. Geometry-pool and cooperative-abort SABs are owned and allocated by the active [transport](../api/client) — never by the host. The host owns this one because the file pool's lifetime is bound to the file manager (not the runtime), and crossing that boundary requires the host to allocate the buffer.
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import type { runtime } from './runtime.worker';
 import { webWorkerTransport } from '@taucad/runtime/transport/web';
-import { fromChannelFs } from '@taucad/runtime/filesystem';
+import { openFileSystemBridge } from '@taucad/fs-bridge';
+import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 
 const fileManagerWorker = new Worker(new URL('./fm-worker.ts', import.meta.url));
+const fileSystemBridge = openFileSystemBridge(fileManagerWorker);
 const filePoolBuffer = new SharedArrayBuffer(64 * 1024 * 1024);
 
-const client = createRuntimeClient({
-  ...presets.all(),
+const client = createRuntimeClient<typeof runtime>({
   transport: webWorkerTransport({
-    fileSystem: fromChannelFs(fileManagerWorker),
+    createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
+    fileSystem: fromFileSystemBridge(fileSystemBridge),
     filePoolBuffer,
   }),
 });
@@ -123,15 +133,16 @@ The same `filePoolBuffer` option is supported on **wire** transports such as `we
 When the host needs a runtime client before it knows which filesystem to bind to (e.g. the client is created at app boot and the project is chosen on user navigation), construct the client once the filesystem is known:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { presets } from '@taucad/runtime/presets';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 
 // ...later, once the user picks a project:
 const projectPath = '/Users/me/cad-projects/widget';
+const runtime = presets.all();
 const client = createRuntimeClient({
-  ...presets.all(),
-  transport: inProcessTransport({ fileSystem: fromNodeFs(projectPath) }),
+  transport: inProcessTransport({ runtime, fileSystem: fromNodeFs(projectPath) }),
 });
 await client.connect();
 ```
@@ -143,12 +154,15 @@ Because every wire concern is closed over at construction time, the client stays
 `client.connect()` is **idempotent**: calling it a second time while already connected resolves immediately without re-running the handshake. To switch a client to a different project, terminate the existing client and create a fresh one with the new transport options.
 
 ```typescript
-import { createRuntimeClient, presets, fromMemoryFs } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { presets } from '@taucad/runtime/presets';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
+const runtime = presets.all();
 const client = createRuntimeClient({
-  ...presets.all(),
   transport: inProcessTransport({
+    runtime,
     fileSystem: fromMemoryFs({ 'main.ts': 'export default () => 1;' }),
   }),
 });

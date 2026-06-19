@@ -11,6 +11,7 @@ import { ViewContextProvider } from '#routes/projects_.$id/chat-interface-view-c
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { ProjectCommandPaletteItems } from '#routes/projects_.$id/project-command-items.js';
 import { ProjectExportAction } from '#routes/projects_.$id/project-export-action.js';
+import { ProjectShareAction } from '#routes/projects_.$id/project-share-action.js';
 import { FileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { ChatRpcSocketProvider } from '#hooks/use-chat-rpc-socket.js';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
@@ -52,7 +53,12 @@ export const handle: Handle = {
     ];
   },
   actions() {
-    return <ProjectExportAction />;
+    return (
+      <>
+        <ProjectShareAction />
+        <ProjectExportAction />
+      </>
+    );
   },
   commandPalette(match) {
     return <ProjectCommandPaletteItems match={match} />;

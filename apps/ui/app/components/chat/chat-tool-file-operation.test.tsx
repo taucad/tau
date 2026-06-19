@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { CollapsibleFileOperation } from '#components/chat/chat-tool-file-operation.js';
+import { TooltipProvider } from '#components/ui/tooltip.js';
 
 type ViewportRef = {
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- mirrors React `RefObject` shape produced by `useRef<HTMLDivElement>(null)`
@@ -138,6 +139,14 @@ vi.mock('#components/icons/file-extension-icon.js', () => ({
   },
 }));
 
+const projectSend = vi.hoisted(() => vi.fn());
+
+vi.mock('#hooks/use-project.js', () => ({
+  useProject: () => ({
+    projectRef: { send: projectSend },
+  }),
+}));
+
 const stubViewportMetrics = (element: HTMLElement, scrollHeight: number, clientHeight: number): void => {
   Object.defineProperty(element, 'scrollHeight', {
     configurable: true,
@@ -174,24 +183,27 @@ const renderDiff = (overrides?: { originalContent?: string; modifiedContent?: st
   const targetFile = overrides?.targetFile ?? 'main.scad';
 
   return render(
-    <CollapsibleFileOperation
-      enableFileLink
-      targetFile={targetFile}
-      toolStatus='output-available'
-      content={modifiedContent}
-      diffStats={{
-        linesAdded: 3,
-        linesRemoved: 1,
-        originalContent,
-        modifiedContent,
-      }}
-    />,
+    <TooltipProvider>
+      <CollapsibleFileOperation
+        enableFileLink
+        targetFile={targetFile}
+        toolStatus='output-available'
+        content={modifiedContent}
+        diffStats={{
+          linesAdded: 3,
+          linesRemoved: 1,
+          originalContent,
+          modifiedContent,
+        }}
+      />
+    </TooltipProvider>,
   );
 };
 
 beforeEach(() => {
   resizeHarness.onResize = undefined;
   resizeHarness.ref = undefined;
+  projectSend.mockReset();
 });
 
 afterEach(() => {
@@ -330,6 +342,39 @@ describe('FourLineViewport (via CollapsibleFileOperation)', () => {
     });
   });
 
+  describe('header actions', () => {
+    it('should render Open before optional actions when enableFileLink is set', () => {
+      renderDiff({
+        targetFile: 'parts/fuselage.ts',
+      });
+
+      expect(screen.getByRole('button', { name: /^open$/i })).toBeInTheDocument();
+    });
+
+    it('should not render Open for ignored entry suffixes such as geospec.ts', () => {
+      renderDiff({
+        targetFile: 'mainWing.geospec.ts',
+      });
+
+      expect(screen.queryByRole('button', { name: /^open$/i })).toBeNull();
+    });
+
+    it('should not render Open while streaming', () => {
+      render(
+        <TooltipProvider>
+          <CollapsibleFileOperation
+            enableFileLink
+            targetFile='main.scad'
+            toolStatus='input-streaming'
+            content={'line1\nline2\nline3\nline4'}
+          />
+        </TooltipProvider>,
+      );
+
+      expect(screen.queryByRole('button', { name: /^open$/i })).toBeNull();
+    });
+  });
+
   describe('first-changed-line wiring', () => {
     it('should pass the first changed line into FileLink so the diff viewport opens on the change', () => {
       // First diverging modified line is line 2 ("x" replaces "b").
@@ -369,6 +414,40 @@ describe('FourLineViewport (via CollapsibleFileOperation)', () => {
       // Renders the trimmed last-4-lines through CodeViewer.
       const codeViewer = screen.getByTestId('code-viewer');
       expect(codeViewer.textContent).toBe('line2\nline3\nline4\nline5');
+    });
+
+    it('should resolve markdown files to the markdown highlighter', () => {
+      render(
+        <TooltipProvider>
+          <CollapsibleFileOperation
+            targetFile='docs/README.md'
+            toolStatus='input-streaming'
+            content={'# One\n\nbody\n\nmore'}
+          />
+        </TooltipProvider>,
+      );
+
+      expect(screen.getByTestId('code-viewer')).toHaveAttribute('data-language', 'markdown');
+    });
+
+    it('should fall back unknown file extensions to plaintext', () => {
+      render(
+        <CollapsibleFileOperation
+          targetFile='notes.unknown'
+          toolStatus='input-streaming'
+          content={'line1\nline2\nline3\nline4'}
+        />,
+      );
+
+      expect(screen.getByTestId('code-viewer')).toHaveAttribute('data-language', 'plaintext');
+    });
+  });
+
+  describe('language resolution', () => {
+    it('should resolve markdown diffs to the markdown highlighter', () => {
+      renderDiff({ targetFile: 'README.markdown' });
+
+      expect(screen.getByTestId('diff-viewer')).toHaveAttribute('data-language', 'markdown');
     });
   });
 });

@@ -150,6 +150,7 @@ vi.mock('#components/ui/tooltip.js', () => ({
 }));
 
 const { ExportSelector } = await import('./export-selector.js');
+const { groupExportFormatsByFidelity } = await import('./export-format-groups.js');
 
 function createCapabilities(overrides?: Partial<CapabilitiesManifest>): CapabilitiesManifest {
   return {
@@ -189,6 +190,17 @@ describe('ExportSelector', () => {
     vi.clearAllMocks();
     mockCapabilities = createCapabilities();
     mockActiveKernelId = 'replicad';
+  });
+
+  it('should group BREP formats before mesh formats for combobox menus', () => {
+    const groups = groupExportFormatsByFidelity([
+      { format: 'glb', fidelity: 'mesh', direct: true },
+      { format: 'step', fidelity: 'brep', direct: true },
+    ]);
+
+    expect(groups.map((group) => group.name)).toEqual(['BREP', 'Mesh']);
+    expect(groups[0]?.items.map((entry) => entry.format)).toEqual(['step']);
+    expect(groups[1]?.items.map((entry) => entry.format)).toEqual(['glb']);
   });
 
   it('should render the format grid for a single cad actor', () => {

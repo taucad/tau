@@ -1,7 +1,5 @@
 import { useCallback } from 'react';
 import { Theme, useTheme as useRemixTheme } from 'remix-themes';
-import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
 
 // oxlint-disable-next-line no-barrel-files/no-barrel-files -- re-export Theme enum so consumers don't need to depend on remix-themes directly
 export { Theme } from 'remix-themes';
@@ -56,15 +54,16 @@ type UseThemeReturn = {
  * @returns currentOption - The current theme option object
  */
 export function useTheme(): UseThemeReturn {
-  const [resolvedTheme, setRemixTheme] = useRemixTheme();
-  const [themeWithSystem, setThemeCookie] = useCookie<ThemeWithSystem>(cookieName.colorTheme, null);
+  const [resolvedTheme, setRemixTheme, metadata] = useRemixTheme();
+  // ResolvedTheme from remix-themes is always defined as 'light' or 'dark' on the client.
+  const theme = resolvedTheme ?? Theme.LIGHT;
+  const themeWithSystem = metadata.definedBy === 'SYSTEM' ? null : theme;
 
   const setTheme = useCallback(
     (newTheme: ThemeWithSystem) => {
       setRemixTheme(newTheme);
-      setThemeCookie(newTheme);
     },
-    [setRemixTheme, setThemeCookie],
+    [setRemixTheme],
   );
 
   const cycleTheme = useCallback(() => {
@@ -81,9 +80,6 @@ export function useTheme(): UseThemeReturn {
   }, [themeWithSystem, setTheme]);
 
   const currentOption = themeOptions.find((option) => option.id === themeWithSystem) ?? themeOptions[2]!;
-
-  // ResolvedTheme from remix-themes is always defined as 'light' or 'dark'
-  const theme = resolvedTheme ?? Theme.LIGHT;
 
   return {
     theme,

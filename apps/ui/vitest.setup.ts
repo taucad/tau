@@ -5,6 +5,7 @@ import '@testing-library/jest-dom';
 // Mock window.ENV for testing - required since the app uses window.ENV in browser environments
 const mockEnv = {
   TAU_API_URL: 'http://localhost:4000',
+  TAU_WEBSOCKET_URL: 'ws://localhost:4001',
   TAU_FRONTEND_URL: 'http://localhost:3000',
   NODE_ENV: 'test',
 };
@@ -13,6 +14,24 @@ Object.defineProperty(globalThis, 'ENV', {
   writable: true,
   value: mockEnv,
 });
+
+// ESBuild-wasm checks that TextEncoder returns this realm's Uint8Array.
+// Jsdom can mix Node's TextEncoder with jsdom's typed-array constructors,
+// which fails that invariant before browser-side GeoSpec tests can bundle.
+const NativeTextEncoder = globalThis.TextEncoder;
+if (typeof NativeTextEncoder === 'function' && !(new NativeTextEncoder().encode('') instanceof Uint8Array)) {
+  class RealmSafeTextEncoder extends NativeTextEncoder {
+    public override encode(input?: string): Uint8Array<ArrayBuffer> {
+      return new Uint8Array(super.encode(input));
+    }
+  }
+
+  Object.defineProperty(globalThis, 'TextEncoder', {
+    configurable: true,
+    writable: true,
+    value: RealmSafeTextEncoder,
+  });
+}
 
 // Monaco 0.55+ evaluates `document.queryCommandSupported('paste')` at module load
 // (see monaco-editor clipboard contribution). jsdom does not implement it.
@@ -25,7 +44,6 @@ if (typeof document !== 'undefined' && typeof document.queryCommandSupported !==
   });
 }
 
-// oxlint-disable-next-line @typescript-eslint/naming-convention -- Monaco's global contract
 const g = globalThis as typeof globalThis & {
   MonacoEnvironment?: { getWorkerUrl?: (moduleId: string, label: string) => string };
 };

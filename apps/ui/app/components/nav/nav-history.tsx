@@ -1,4 +1,4 @@
-import { Copy, Edit, History, MoreHorizontal, Trash2 } from 'lucide-react';
+import { Copy, Edit, Forward, History, MoreHorizontal, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router';
@@ -25,6 +25,8 @@ import { toast } from '#components/ui/sonner.js';
 import { groupItemsByTimeHorizon } from '#utils/temporal.utils.js';
 import { SearchInput } from '#components/search-input.js';
 import { Loader } from '#components/ui/loader.js';
+
+import { ProjectShareDialog } from '#components/publish/project-share-dialog.js';
 
 const projectsPerPage = 5;
 
@@ -121,6 +123,17 @@ export function NavHistory(): ReactNode {
     }
   };
 
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishProjectId, setPublishProjectId] = useState<string | undefined>(undefined);
+
+  const publishTarget = useMemo(() => {
+    if (!publishProjectId) {
+      return undefined;
+    }
+
+    return projects.find((project) => project.id === publishProjectId);
+  }, [projects, publishProjectId]);
+
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(event.target.value);
     // Reset visible count when searching to show all results
@@ -193,6 +206,10 @@ export function NavHistory(): ReactNode {
                 onRenameCancel={handleRenameCancel}
                 onDuplicate={handleDuplicate}
                 onDelete={handleDelete}
+                onShare={() => {
+                  setPublishProjectId(project.id);
+                  setPublishOpen(true);
+                }}
               />
             ))}
           </SidebarMenu>
@@ -225,6 +242,23 @@ export function NavHistory(): ReactNode {
           </SidebarMenu>
         </SidebarGroup>
       )}
+      {publishTarget ? (
+        <ProjectShareDialog
+          open={publishOpen}
+          onOpenChange={(next) => {
+            setPublishOpen(next);
+            if (!next) {
+              setPublishProjectId(undefined);
+            }
+          }}
+          projectId={publishTarget.id}
+          projectName={publishTarget.name}
+          projectDescription={publishTarget.description}
+          projectUpdatedAt={publishTarget.updatedAt}
+          entryFile={publishTarget.assets.mechanical?.main ?? 'main.ts'}
+          parameters={publishTarget.assets.mechanical?.parameters ?? {}}
+        />
+      ) : null}
     </>
   );
 }
@@ -237,6 +271,7 @@ type NavHistoryItemProps = {
   readonly onRenameCancel: () => void;
   readonly onDuplicate: (projectId: string) => Promise<void>;
   readonly onDelete: (projectId: string) => Promise<void>;
+  readonly onShare: () => void;
 };
 
 function NavHistoryItem({
@@ -247,6 +282,7 @@ function NavHistoryItem({
   onRenameCancel,
   onDuplicate,
   onDelete,
+  onShare,
 }: NavHistoryItemProps) {
   const { isMobile } = useSidebar();
   const [editValue, setEditValue] = useState(project.name);
@@ -282,6 +318,12 @@ function NavHistoryItem({
     event.preventDefault();
     event.stopPropagation();
     void onDelete(project.id);
+  };
+
+  const handleShareClick = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onShare();
   };
 
   const handleInputClick = (event: React.MouseEvent) => {
@@ -347,6 +389,10 @@ function NavHistoryItem({
             <DropdownMenuItem onClick={handleDuplicateClick}>
               <Copy />
               <span>Duplicate</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem data-testid='share-project-history' onClick={handleShareClick}>
+              <Forward />
+              <span>Share Project</span>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant='destructive' onClick={handleDeleteClick}>

@@ -5,10 +5,13 @@ import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
 import { Theme, useTheme, themeOptions } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
 import { useColor } from '#hooks/use-color.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
 import { Card, CardContent, CardHeader, CardTitle } from '#components/ui/card.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { ColorPicker } from '#components/ui/color-picker.js';
 import { Button } from '#components/ui/button.js';
+import { Switch } from '#components/ui/switch.js';
 
 type PrivacyMode = {
   id: 'share' | 'private';
@@ -52,6 +55,7 @@ export function GeneralSettings(): React.JSX.Element {
   const { preferences, isLoading, error, updatePreferences, isUpdating } = usePrivacyPreferences();
   const { themeWithSystem, setTheme, currentOption } = useTheme();
   const { hue, setHue, resetHue } = useColor();
+  const [areCodeInlayHintsEnabled, setCodeInlayHintsEnabled] = useCookie(cookieName.codeInlayHints, false);
 
   const currentModeId = preferences?.allowsAiTraining ? 'share' : 'private';
   const currentMode = privacyModes.find((mode) => mode.id === currentModeId) ?? privacyModes[0]!;
@@ -108,6 +112,15 @@ export function GeneralSettings(): React.JSX.Element {
                 <ChevronDown className='size-4 shrink-0 opacity-50' />
               </Button>
             </ComboBoxResponsive>
+          </div>
+
+          {/* Code Inlay Hints */}
+          <div className='flex items-center justify-between gap-4'>
+            <div className='flex flex-col gap-1'>
+              <span className='font-medium'>Code Inlay Hints</span>
+              <span className='text-sm text-muted-foreground'>Show inline parameter names in code editors</span>
+            </div>
+            <Switch checked={areCodeInlayHintsEnabled} onCheckedChange={setCodeInlayHintsEnabled} />
           </div>
 
           {/* Color Picker */}

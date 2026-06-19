@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
-import { filesystemBridgeConnectMessageType } from '@taucad/runtime/transport-internals';
+import { filesystemBridgeConnectMessageType, openFileSystemBridge } from '@taucad/fs-bridge';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import type { GeoSpecRunnerWorkerRequest, GeoSpecRunnerWorkerResponse } from '#workers/geospec-runner.types.js';
 
@@ -97,6 +97,9 @@ class FakeFileManagerWorker {
   public readonly postMessage = vi.fn();
 }
 
+const createOpenFileSystemBridge = (worker: FakeFileManagerWorker) => (): ReturnType<typeof openFileSystemBridge> =>
+  openFileSystemBridge(worker as unknown as Worker);
+
 const runtimeConfig = {
   tauApiUrl: 'https://api.tau.test',
   tauWebSocketUrl: 'wss://api.tau.test',
@@ -121,7 +124,7 @@ describe('createGeoSpecWorkerRpcClient', () => {
     const createWorker = vi.fn(() => geoSpecWorker as unknown as Worker);
     const filePoolBuffer = new SharedArrayBuffer(1024);
     const client = createGeoSpecWorkerRpcClient({
-      fileManagerWorker: fileManagerWorker as unknown as Worker,
+      openFileSystemBridge: createOpenFileSystemBridge(fileManagerWorker),
       projectRootPath: '/projects/proj-vase',
       runtimeConfig,
       filePoolBuffer,
@@ -139,11 +142,16 @@ describe('createGeoSpecWorkerRpcClient', () => {
     expect(first).toEqual(expect.objectContaining({ success: true, passed: 1, total: 1 }));
     expect(second).toEqual(expect.objectContaining({ success: true, passed: 1, total: 1 }));
     expect(createWorker).toHaveBeenCalledTimes(1);
-    expect(fileManagerWorker.postMessage).toHaveBeenCalledTimes(1);
-    const firstBridgeCall = fileManagerPostMessageCall(fileManagerWorker, 0);
-    expect(firstBridgeCall[0].type).toBe(filesystemBridgeConnectMessageType);
-    expect(firstBridgeCall[0].port).toBeDefined();
-    expect(firstBridgeCall[1]).toEqual([firstBridgeCall[0].port]);
+    expect(fileManagerWorker.postMessage).toHaveBeenCalledTimes(2);
+    const vmBridgeCall = fileManagerPostMessageCall(fileManagerWorker, 0);
+    const runtimeBridgeCall = fileManagerPostMessageCall(fileManagerWorker, 1);
+    expect(vmBridgeCall[0].type).toBe(filesystemBridgeConnectMessageType);
+    expect(vmBridgeCall[0].port).toBeDefined();
+    expect(vmBridgeCall[1]).toEqual([vmBridgeCall[0].port]);
+    expect(runtimeBridgeCall[0].type).toBe(filesystemBridgeConnectMessageType);
+    expect(runtimeBridgeCall[0].port).toBeDefined();
+    expect(runtimeBridgeCall[1]).toEqual([runtimeBridgeCall[0].port]);
+    expect(runtimeBridgeCall[0].port).not.toBe(vmBridgeCall[0].port);
 
     const [initializeMessage, initializeTransferables] = geoSpecPostMessageCall(geoSpecWorker, 0);
     expect(initializeMessage.type).toBe('initialize');
@@ -154,7 +162,12 @@ describe('createGeoSpecWorkerRpcClient', () => {
     expect(initializeMessage.runtimeConfig).toEqual(runtimeConfig);
     expect(initializeMessage.filePoolBuffer).toBe(filePoolBuffer);
     expect(initializeMessage.vmFileSystemPort).toBeDefined();
-    expect(initializeTransferables).toEqual([initializeMessage.vmFileSystemPort]);
+    expect(initializeMessage.runtimeFileSystemPort).toBeDefined();
+    expect(initializeMessage.runtimeFileSystemPort).not.toBe(initializeMessage.vmFileSystemPort);
+    expect(initializeTransferables).toEqual([
+      initializeMessage.vmFileSystemPort,
+      initializeMessage.runtimeFileSystemPort,
+    ]);
 
     const [firstRunMessage, firstRunTransferables] = geoSpecPostMessageCall(geoSpecWorker, 1);
     const [secondRunMessage, secondRunTransferables] = geoSpecPostMessageCall(geoSpecWorker, 2);
@@ -178,7 +191,7 @@ describe('createGeoSpecWorkerRpcClient', () => {
     const fileManagerWorker = new FakeFileManagerWorker();
     const geoSpecWorker = new FakeGeoSpecWorker();
     const client = createGeoSpecWorkerRpcClient({
-      fileManagerWorker: fileManagerWorker as unknown as Worker,
+      openFileSystemBridge: createOpenFileSystemBridge(fileManagerWorker),
       projectRootPath: '/projects/proj-vase',
       runtimeConfig,
       createWorker: () => geoSpecWorker as unknown as Worker,
@@ -233,7 +246,7 @@ describe('createGeoSpecWorkerRpcClient', () => {
     });
 
     const client = createGeoSpecWorkerRpcClient({
-      fileManagerWorker: fileManagerWorker as unknown as Worker,
+      openFileSystemBridge: createOpenFileSystemBridge(fileManagerWorker),
       projectRootPath: '/projects/proj-vase',
       runtimeConfig,
       createWorker: () => geoSpecWorker as unknown as Worker,
@@ -255,7 +268,7 @@ describe('createGeoSpecWorkerRpcClient', () => {
       const geoSpecWorker = new FakeGeoSpecWorker();
       geoSpecWorker.autoResolveRuns = false;
       const client = createGeoSpecWorkerRpcClient({
-        fileManagerWorker: fileManagerWorker as unknown as Worker,
+        openFileSystemBridge: createOpenFileSystemBridge(fileManagerWorker),
         projectRootPath: '/projects/proj-vase',
         runtimeConfig,
         createWorker: () => geoSpecWorker as unknown as Worker,
@@ -294,7 +307,7 @@ describe('createGeoSpecWorkerRpcClient', () => {
       const geoSpecWorker = new FakeGeoSpecWorker();
       geoSpecWorker.autoResolveRuns = false;
       const client = createGeoSpecWorkerRpcClient({
-        fileManagerWorker: fileManagerWorker as unknown as Worker,
+        openFileSystemBridge: createOpenFileSystemBridge(fileManagerWorker),
         projectRootPath: '/projects/proj-vase',
         runtimeConfig,
         createWorker: () => geoSpecWorker as unknown as Worker,
@@ -326,7 +339,7 @@ describe('createGeoSpecWorkerRpcClient', () => {
       .mockReturnValueOnce(firstWorker as unknown as Worker)
       .mockReturnValueOnce(secondWorker as unknown as Worker);
     const client = createGeoSpecWorkerRpcClient({
-      fileManagerWorker: fileManagerWorker as unknown as Worker,
+      openFileSystemBridge: createOpenFileSystemBridge(fileManagerWorker),
       projectRootPath: '/projects/proj-vase',
       runtimeConfig,
       createWorker,

@@ -5,6 +5,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as ChatErrorPayload } from '@taucad/types';
 import type { CombinedChatState } from '#hooks/use-chat.js';
@@ -15,6 +16,20 @@ const continueChat = vi.fn();
 const regenerate = vi.fn();
 
 let mockRetryAttempt = 0;
+
+const googleInvalidArgumentBody = [
+  {
+    error: {
+      code: 400,
+      message: 'Request contains an invalid argument.',
+      status: 'INVALID_ARGUMENT',
+    },
+  },
+];
+
+const googleInvalidArgumentByteList = [...new TextEncoder().encode(JSON.stringify(googleInvalidArgumentBody))].join(
+  ',',
+);
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => ({ continueChat, regenerate }),
@@ -126,6 +141,51 @@ describe('ChatError', () => {
     render(<ChatErrorBanner />);
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
+  });
+
+  it('should render a credit error as warning Resume UI outside the tool-error fallback', async () => {
+    const user = userEvent.setup();
+    const creditMessage =
+      'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.';
+    const creditError: ChatErrorPayload = {
+      category: errorCategory.credits,
+      title: 'Credit Limit Reached',
+      message: creditMessage,
+    };
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: creditError,
+      } as unknown as CombinedChatState),
+    );
+    mockRetryAttempt = 0;
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Credit Limit Reached')).toBeInTheDocument();
+    expect(screen.getByText(creditMessage)).toBeInTheDocument();
+    expect(screen.queryByText('Processing Error')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /resume/i }));
+
+    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  it('renders decoded Google provider errors instead of opaque byte lists', () => {
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: new Error(`Google request failed with status code 400: ${googleInvalidArgumentByteList}`),
+        persistedError: undefined,
+      } as unknown as CombinedChatState),
+    );
+    mockRetryAttempt = 0;
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Request contains an invalid argument.')).toBeInTheDocument();
+    expect(screen.queryByText(/91,123,10/)).not.toBeInTheDocument();
   });
 
   describe('hook-order stability across retryAttempt transitions', () => {

@@ -11,7 +11,7 @@ import type { Object3D } from 'three';
  * serialized scenes continue to work.
  */
 export const sceneTag = {
-  /** Section-view helpers (stencil groups, cap planes) whose materials must not be replaced. */
+  /** Section-view helpers (contour fills and diagnostic outlines) whose materials must not be replaced. */
   sectionViewHelper: 'isSectionViewHelper',
   /** Preview-only objects (grid, axes) hidden during screenshot capture. */
   previewOnly: 'isPreviewOnly',
@@ -25,6 +25,24 @@ export type SceneTagKey = (typeof sceneTag)[keyof typeof sceneTag];
  * Check whether an Object3D carries the given scene tag.
  */
 export const hasSceneTag = (object: Object3D, tag: SceneTagKey): boolean => Boolean(object.userData[tag]);
+
+/**
+ * Check whether an Object3D or any ancestor carries one of the given scene tags.
+ */
+export const hasSceneTagInHierarchy = (object: Object3D, tags: ReadonlySet<SceneTagKey>): boolean => {
+  let current: Object3D | undefined = object;
+  while (current) {
+    for (const tag of tags) {
+      if (hasSceneTag(current, tag)) {
+        return true;
+      }
+    }
+
+    current = current.parent ?? undefined;
+  }
+
+  return false;
+};
 
 /**
  * Set a boolean scene tag on an Object3D.

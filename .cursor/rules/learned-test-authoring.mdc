@@ -20,4 +20,8 @@ cleanup; they may exceed the 200-char cap.
 
 - Write failing tests first (TDD), then fix to pass; preserve existing tests; make minimal, targeted changes and run typecheck before considering done; remove tests for non-shipped APIs/behaviors rather than skipping them; do not mock Radix `Collapsible`/portal-rendered components in jsdom — find and fix the real reason the test sees the wrong initial state instead of mocking around it
 - In negative type tests, pass a deliberately wrong-typed value via `// @ts-expect-error`, not `as unknown as`; positive cases call the method directly on a real fixture so typechecking stays intact.
-
+- Delete model-specific or order-dependent chat SSE integration assertions (usage-metadata counts, preamble-skipping `text-start`) — non-deterministic tests must not ship.
+- GeoSpec recursive discovery is runner-owned, not inferred from lazy chat file-tree context; multi-file GeoSpec runs stay serial unless worker pooling is explicitly designed.
+- GeoSpec tests use `loadModel({ file })` or `{ code, file }`; do not pass public kernel hints. Fix runtime inference/diagnostics for ambiguity.
+- GeoSpec triangle-heavy matcher math belongs in the canonical native/WASM backend; JS is orchestration, diagnostics, or experiments only.
+- GeoSpec load paths keep rich mesh diagnostics lazy, dedupe `loadModel()` per invocation, and reuse scoped runtimes; never reintroduce eager connected-piece stats.

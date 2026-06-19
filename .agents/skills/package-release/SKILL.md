@@ -219,7 +219,7 @@ Ensure each `package.json` has:
 - `"repository"` field matching `github.com/taucad/tau`
 - `"publishConfig.access": "public"`
 - `"files": ["dist", "README.md"]`
-- Correct `publishConfig.exports` with dual ESM/CJS entries
+- Correct ESM-only `publishConfig.exports` with `types`, `import`, and `default` entries
 
 ## Prerelease Workflow
 

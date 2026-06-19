@@ -1,3 +1,13 @@
+---
+name: create-package
+description: >-
+  Scaffold new @taucad/* packages with Tau's workspace package generator,
+  including publishable packages under packages/ and internal libraries under
+  libs/. Use when creating a package or library, adding a new @taucad/*
+  workspace project, choosing generator options, or updating package templates
+  and conventions.
+---
+
 # Create Package Skill
 
 Create a new `@taucad/*` publishable package using the custom workspace generator.
@@ -26,18 +36,18 @@ pnpm nx g ./tools/workspace-plugin/generators.json:package react --description="
 
 All files are created in a single command with zero cleanup needed:
 
-| File                  | Purpose                                                                                       |
-| --------------------- | --------------------------------------------------------------------------------------------- |
-| `package.json`        | Tau conventions: dual ESM/CJS `publishConfig`, `#*` imports, source `exports`, `type: module` |
-| `tsdown.config.ts`    | Dual ESM/CJS build, `unbundle: true`, `dts: true`, `minify: true`                             |
-| `tsconfig.json`       | Extends `tsconfig.base.json`, references lib + spec configs                                   |
-| `tsconfig.lib.json`   | `module: ESNext`, `moduleResolution: Bundler`, `#*` paths                                     |
-| `tsconfig.spec.json`  | Vitest types, test globs, config file includes                                                |
-| `tsconfig.build.json` | Extends lib, `composite: false`, `declarationMap: false`                                      |
-| `vitest.config.ts`    | `nxViteTsPaths()`, coverage with 100% thresholds, typecheck for `*.test-d.ts`                 |
-| `project.json`        | `projectType: library`, `tags: ["scope:shared", "type:lib"]`                                  |
-| `src/index.ts`        | Empty barrel export                                                                           |
-| `README.md`           | Package name and description                                                                  |
+| File                  | Purpose                                                                                   |
+| --------------------- | ----------------------------------------------------------------------------------------- |
+| `package.json`        | Tau conventions: ESM-only `publishConfig`, `#*` imports, source `exports`, `type: module` |
+| `tsdown.config.ts`    | ESM-only build, `unbundle: true`, `dts: true`, `minify: true`                             |
+| `tsconfig.json`       | Extends `tsconfig.base.json`, references lib + spec configs                               |
+| `tsconfig.lib.json`   | `module: ESNext`, `moduleResolution: Bundler`, `#*` paths                                 |
+| `tsconfig.spec.json`  | Vitest types, test globs, config file includes                                            |
+| `tsconfig.build.json` | Extends lib, `composite: false`, `declarationMap: false`                                  |
+| `vitest.config.ts`    | `nxViteTsPaths()`, coverage with 100% thresholds, typecheck for `*.test-d.ts`             |
+| `project.json`        | `projectType: library`, `tags: ["scope:shared", "type:lib"]`                              |
+| `src/index.ts`        | Empty barrel export                                                                       |
+| `README.md`           | Package name and description                                                              |
 
 ## How it works
 
@@ -49,8 +59,7 @@ All NX targets are auto-inferred by existing file-based plugins — no manual wi
 - `test` → `@nx/vitest` (detects `vitest.config.ts`)
 - `typecheck` → `tools/tsgo.plugin.ts` (detects `tsconfig.json`)
 - `lint` → `@nx/eslint/plugin` (detects workspace `eslint.config.mjs`)
-- `generate-cjs-dts` → `tools/generate-cjs-dts.plugin.ts`
-- `pkgcheck` → `tools/pkgcheck.plugin.ts`
+- `pkgcheck` → `tools/pkgcheck.plugin.ts` for publishable packages
 
 ## Post-generation customization
 
@@ -60,8 +69,9 @@ After running the generator, apply package-specific changes:
 2. **Change vitest environment** if needed (e.g. `jsdom` for React packages)
 3. **Add vitest setup file** if needed (e.g. `@testing-library/jest-dom`)
 4. **Add subpath exports** if the package needs multiple entry points
-5. **Add `tsconfig.build.json` references** to workspace libs the package depends on
-6. **Run `pnpm install --no-frozen-lockfile`** to update the lockfile
+5. **Mirror every published subpath** in `publishConfig.exports` using ESM-only `types`, `import`, and `default` targets
+6. **Add `tsconfig.build.json` references** to workspace libs the package depends on
+7. **Run `pnpm install --no-frozen-lockfile`** to update the lockfile
 
 ## Conventions
 

@@ -28,7 +28,7 @@ Follow `docs/policy/context-engineering-policy.md` for prompts/tools. Follow `do
 - Every JSONL line has `role` + `timestamp`; content blocks split into separate lines
 - Drop opaque data (signatures, indexes); skip tool_use blocks (captured by wrapToolCall)
 - Tool offloading: large results to `.tau/tool-outputs/`, replaced with file path reference
-- Skills/memory: loaded from `.tau/skills/` and `.tau/AGENTS.md` by middleware, never hardcoded in prompt
+- Skills/memory: skills are discovered from `.agents/skills/` (canonical) with `.tau/skills/` as legacy fallback only; activation goes through `use_skill`, not direct `read_file`
 - All writes fire-and-forget (`void promise`) — never block the agent loop
 - Compaction uses `append`, never `write` (overwrite)
 

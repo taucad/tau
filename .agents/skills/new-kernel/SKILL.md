@@ -61,6 +61,19 @@ Key patterns:
 - `createKernelSuccess(data)` / `createKernelError(issues)` for structured results in non-throw paths
 - Throw `Error` with `.issues` array (custom `*BuildError`) for fatal geometry failures so framework returns structured issues
 - Prefer stack enrichment utilities in `#framework/error-enrichment.js` for JS/TS kernels
+- Follow `docs/policy/geometry-naming-policy.md` for shape labels, glTF node/mesh names, generated materials, scenes, component IDs, selectors, native handles, diagnostics, imports, and export artifact names
+
+### Geometry Naming Contract
+
+New kernels must preserve authored/imported names and route Tau-owned generated names through the centralized helpers:
+
+- Use `#utils/shape-names.js` for generated shape display labels (`Shape 1`, `Shape 2`, ...).
+- Use `#utils/geometry-names.js` for generated component IDs, selectors, and artifact naming.
+- Use `#utils/gltf-geometry-name-normalizer.js` when a native or external engine returns GLB/glTF bytes.
+- Keep semantic mesh-bearing glTF node and mesh names non-empty and equal.
+- Leave Tau-generated material names and single-scene names unset unless a real semantic role requires a stable label.
+- Do not derive component IDs from display labels, material indices, or mutable UI text; use payload addresses such as `component:node-0`.
+- Do not copy legacy generated labels such as `AnyShape`, `Geometry`, `Mesh`, zero-index `Shape_*`, color-derived material names, or converter fallback scene/material names.
 
 Reference: `packages/runtime/src/kernels/replicad/replicad.kernel.ts`
 
@@ -119,6 +132,7 @@ describe('MyKernel', () => {
 - `getParameters` — defaults extraction + empty fallback
 - `createGeometry` — happy path + parameterized + error cases
 - `exportGeometry` — supported and unsupported formats + no-geometry failure
+- Geometry naming — parse GLB/glTF output with `NodeIO` and assert node/mesh parity, material/scene naming, component IDs/selectors, and artifact filenames according to `docs/policy/geometry-naming-policy.md`
 
 Reference quality bar: `jscad.kernel.test.ts`, `replicad.kernel.test.ts`
 
@@ -164,8 +178,9 @@ publishConfig export (mirror `./kernels/tau` pattern):
 
 ```json
 "./kernels/<id>": {
-  "require": { "types": "./dist/cjs/kernels/<id>/<id>.kernel.d.cts", "default": "./dist/cjs/kernels/<id>/<id>.kernel.cjs" },
-  "import": { "types": "./dist/esm/kernels/<id>/<id>.kernel.d.ts", "default": "./dist/esm/kernels/<id>/<id>.kernel.js" }
+  "types": "./dist/esm/kernels/<id>/<id>.kernel.d.ts",
+  "import": "./dist/esm/kernels/<id>/<id>.kernel.js",
+  "default": "./dist/esm/kernels/<id>/<id>.kernel.js"
 }
 ```
 
@@ -306,9 +321,10 @@ Recommended order:
 1. Implement kernel + tests first
 2. Wire factories/exports/build/smoke
 3. Wire UI + type catalog + prompts
-4. Update docs
-5. Run Nx checks and fix all regressions
-6. Commit with descriptive message
+4. Verify geometry naming policy compliance for render, export, native handles, and converter boundaries
+5. Update docs
+6. Run Nx checks and fix all regressions
+7. Commit with descriptive message
 
 Keep commits logically grouped (implementation, wiring, docs) if practical.
 
@@ -341,6 +357,7 @@ Keep commits logically grouped (implementation, wiring, docs) if practical.
 - Missing `publishConfig` export → package consumers break
 - Added kernel to code but not to docs comparisons → docs drift
 - Defined local mock helpers instead of using shared testing utils → maintenance burden
+- Copied legacy generated geometry names instead of using the geometry naming helpers → explorer/import/export drift
 - Forgot Monaco IntelliSense types → no editor autocomplete for the kernel's API
 - Used `declare module` wrapper instead of raw `.d.ts` + JSON map → TS1038 errors in Monaco
 - Forgot to add `modules/` directory output in extraction script → type-level tests can't resolve imports

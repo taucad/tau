@@ -214,11 +214,19 @@ jobs:
             -e ANTHROPIC_API_KEY=sk-ant-smoke \
             -e GOOGLE_VERTEX_AI_CREDENTIALS='{"type":"service_account","project_id":"smoke","private_key_id":"smoke","private_key":"smoke","client_email":"smoke@example.com","client_id":"smoke","auth_uri":"https://example.com","token_uri":"https://example.com","auth_provider_x509_cert_url":"https://example.com","client_x509_cert_url":"https://example.com","universe_domain":"example.com"}' \
             -e AUTH_SECRET=smoke-secret \
+            -e TAU_VIEW_COOKIE_SECRET=smoke-view-cookie-secret-32chars \
             -e AUTH_URL=http://localhost \
             -e GITHUB_CLIENT_ID=smoke \
             -e GITHUB_CLIENT_SECRET=smoke \
             -e ZOO_API_KEY=smoke \
             -e REDIS_URL=redis://localhost:6379 \
+            -e TAU_S3_ENDPOINT=https://000000000000000000000000.r2.cloudflarestorage.com \
+            -e TAU_S3_PUBLIC_BASE_URL=https://cdn.tau.new \
+            -e TAU_S3_REGION=auto \
+            -e TAU_S3_ACCESS_KEY_ID=smoke \
+            -e TAU_S3_SECRET_ACCESS_KEY=smoke \
+            -e TAU_S3_FORCE_PATH_STYLE=false \
+            -e TAU_S3_BUCKET=tau-smoke-content \
             tau-api:smoke
 
       - name: Poll /health/live
@@ -242,6 +250,31 @@ jobs:
       - name: Cleanup
         if: always()
         run: docker rm -f tau-api-smoke || true
+
+  api-tests:
+    name: API tests (Postgres + MinIO)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Prepare API env file
+        run: cp apps/api/.env.example apps/api/.env
+
+      - name: Start Postgres + MinIO
+        run: docker-compose -f infra/docker-compose.yml up -d postgres minio minio-bootstrap
+
+      - name: MinIO smoke (seed + RW)
+        run: bash infra/docker-compose.test.sh
+
+      - name: Apply Drizzle migrations
+        run: cd apps/api && DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm exec drizzle-kit migrate
+
+      - name: Run API tests
+        run: pnpm nx test api --watch=false
 
   # Staging deployments — deploy after builds pass so the Nx Cloud cache is populated.
   # The staging UI is hosted on Netlify (`taucad` site, custom domain `taucad.dev`)

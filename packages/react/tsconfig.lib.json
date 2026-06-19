@@ -12,5 +12,16 @@
     }
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"]
+  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"],
+  "references": [
+    {
+      "path": "../types/tsconfig.lib.json"
+    },
+    {
+      "path": "../runtime/tsconfig.lib.json"
+    },
+    {
+      "path": "../json-schema/tsconfig.lib.json"
+    }
+  ]
 }

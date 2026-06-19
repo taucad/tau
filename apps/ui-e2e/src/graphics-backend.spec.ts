@@ -39,6 +39,58 @@ const webgpuValidationPatterns: readonly RegExp[] = [
   /depth-stencil format mismatch/,
 ];
 
+type GraphicsBackend = 'webgl' | 'webgpu';
+
+type GraphicsTestBridgeWindow = Window & {
+  __TAU_SECTION_VIEW_TEST__?: {
+    setCamera(camera: {
+      position: readonly [number, number, number];
+      target?: readonly [number, number, number];
+      fov?: number;
+      zoom?: number;
+    }): void;
+    setFovAngle(angle: number): void;
+    getCamera(): {
+      position: readonly [number, number, number];
+      quaternion: readonly [number, number, number, number];
+      target: readonly [number, number, number];
+      fov?: number;
+      zoom?: number;
+      controlsDistance: number;
+      controlsEnabled: boolean;
+      viewportGizmoLockActive: boolean;
+    };
+  };
+};
+
+type GraphicsTestCameraState = ReturnType<
+  NonNullable<GraphicsTestBridgeWindow['__TAU_SECTION_VIEW_TEST__']>['getCamera']
+>;
+
+type CanvasSampleRegion = Readonly<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}>;
+
+type EdgeOcclusionSampleStats = Readonly<{
+  totalSampled: number;
+  blueSurfacePixels: number;
+  edgeLikePixels: number;
+  redLeakPixels: number;
+}>;
+
+const previewCanvasSelector =
+  '[role="img"][aria-label*="3D model preview" i] canvas, canvas[role="img"][aria-label*="3D model preview" i]';
+
+const edgeOcclusionCenterRegion: CanvasSampleRegion = {
+  x: 0.32,
+  y: 0.32,
+  width: 0.36,
+  height: 0.36,
+};
+
 function attachWebGpuValidationListener(page: Page): {
   failuresRef: { lines: string[] };
   detach(): void;
@@ -145,8 +197,414 @@ async function assertCanvasHasNonBackgroundPixels(page: Page, canvasSelector: st
   ).toBeLessThan(0.99);
 }
 
+async function isWebGpuAvailable(page: Page): Promise<boolean> {
+  return page.evaluate(() => 'gpu' in navigator);
+}
+
+async function driveLowFovEdgeOcclusionCamera(page: Page): Promise<void> {
+  await waitForGraphicsTestBridge(page);
+  await page.evaluate(() => {
+    const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    if (!bridge) {
+      throw new Error('Graphics e2e bridge is not installed.');
+    }
+
+    bridge.setCamera({
+      position: [0, -5000, 0],
+      target: [0, 0, 0],
+      fov: 0.1,
+      zoom: 1,
+    });
+  });
+}
+
+async function waitForGraphicsTestBridge(page: Page): Promise<void> {
+  await page.waitForFunction(() =>
+    Boolean((globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__),
+  );
+}
+
+function calculateViewportFovFromAngle(cameraFovAngle: number): number {
+  const clamped = Math.max(0, Math.min(90, cameraFovAngle));
+  return 0.1 + 89.9 * (clamped / 90);
+}
+
+function calculateProjectedScale(camera: GraphicsTestCameraState): number {
+  const fov = camera.fov ?? 75;
+  const zoom = camera.zoom ?? 1;
+  return zoom / (camera.controlsDistance * Math.tan((fov * Math.PI) / 360));
+}
+
+function distanceBetweenPositions(
+  first: readonly [number, number, number],
+  second: readonly [number, number, number],
+): number {
+  return Math.hypot(first[0] - second[0], first[1] - second[1], first[2] - second[2]);
+}
+
+function quaternionAngularDistance(
+  first: readonly [number, number, number, number],
+  second: readonly [number, number, number, number],
+): number {
+  const dot = Math.abs(first[0] * second[0] + first[1] * second[1] + first[2] * second[2] + first[3] * second[3]);
+  return 2 * Math.acos(Math.min(1, dot));
+}
+
+async function clickViewportGizmoCenter(page: Page): Promise<void> {
+  const gizmo = page.locator('.viewport-gizmo-cube').first();
+  await expect(gizmo).toBeVisible({ timeout: 60_000 });
+  const box = await gizmo.boundingBox();
+  expect(box, 'viewport gizmo should have a measurable bounding box').not.toBeNull();
+
+  if (box === null) {
+    return;
+  }
+
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}
+
+async function dragMainPreviewCanvas(page: Page): Promise<void> {
+  const canvas = page.locator(previewCanvasSelector).first();
+  await expect(canvas).toBeVisible({ timeout: 60_000 });
+  const box = await canvas.boundingBox();
+  expect(box, 'main preview canvas should have a measurable bounding box').not.toBeNull();
+
+  if (box === null) {
+    return;
+  }
+
+  const startX = box.x + box.width * 0.52;
+  const startY = box.y + box.height * 0.52;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + 140, startY + 60, { steps: 8 });
+  await page.mouse.up();
+}
+
+async function sampleCameraFrames(page: Page, frameCount: number): Promise<GraphicsTestCameraState[]> {
+  return page.evaluate(async (count) => {
+    const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    if (!bridge) {
+      throw new Error('Graphics e2e bridge is not installed.');
+    }
+
+    const samples: GraphicsTestCameraState[] = [];
+    const collectSample = async (remainingCount: number): Promise<void> => {
+      if (remainingCount <= 0) {
+        return;
+      }
+
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+      samples.push(bridge.getCamera());
+      await collectSample(remainingCount - 1);
+    };
+
+    await collectSample(count);
+
+    return samples;
+  }, frameCount);
+}
+
+async function waitForCameraToSettle(page: Page): Promise<GraphicsTestCameraState> {
+  const samples = await sampleCameraFrames(page, 40);
+  return samples.at(-1)!;
+}
+
+function expectGizmoAnimationProgress(samples: readonly GraphicsTestCameraState[], backend: GraphicsBackend): void {
+  expect(samples.length, `${backend}: camera samples must be collected`).toBeGreaterThanOrEqual(8);
+
+  const initial = samples[0]!;
+  const distancesFromInitial = samples.map((sample) => distanceBetweenPositions(sample.position, initial.position));
+  const totalMovement = distancesFromInitial.at(-1) ?? 0;
+
+  expect(totalMovement, `${backend}: viewport gizmo click should move the camera`).toBeGreaterThan(1);
+
+  const firstVisibleMovement = distancesFromInitial.slice(1, 4).some((distance) => distance > totalMovement * 0.05);
+  expect(firstVisibleMovement, `${backend}: viewport gizmo animation should start promptly`).toBe(true);
+
+  for (let index = 2; index < distancesFromInitial.length; index += 1) {
+    const previous = distancesFromInitial[index - 1]!;
+    const current = distancesFromInitial[index]!;
+    expect(
+      current + totalMovement * 0.1,
+      `${backend}: viewport gizmo animation should not visibly backtrack. Distances=${JSON.stringify(distancesFromInitial)}`,
+    ).toBeGreaterThanOrEqual(previous);
+  }
+
+  const frameSteps = samples
+    .slice(1)
+    .map((sample, index) => distanceBetweenPositions(sample.position, samples[index]!.position));
+  const largestStep = Math.max(...frameSteps);
+  expect(
+    largestStep,
+    `${backend}: viewport gizmo animation has a large snap step. Steps=${JSON.stringify(frameSteps)}`,
+  ).toBeLessThan(totalMovement * 0.75);
+}
+
+function expectMainCanvasDragChangedCamera(
+  before: GraphicsTestCameraState,
+  after: GraphicsTestCameraState,
+  backend: GraphicsBackend,
+): void {
+  const positionDistance = distanceBetweenPositions(before.position, after.position);
+  const quaternionDistance = quaternionAngularDistance(before.quaternion, after.quaternion);
+  expect(
+    positionDistance > 0.5 || quaternionDistance > 0.005,
+    `${backend}: main canvas drag should change the camera after gizmo animation. Before=${JSON.stringify(before)}, after=${JSON.stringify(after)}`,
+  ).toBe(true);
+}
+
+function expectMainCanvasControlsAvailable(camera: GraphicsTestCameraState, backend: GraphicsBackend): void {
+  expect(camera.controlsEnabled, `${backend}: CameraControls should be enabled after viewport gizmo animation`).toBe(
+    true,
+  );
+  expect(camera.viewportGizmoLockActive, `${backend}: viewport gizmo interaction lock should be released`).toBe(false);
+}
+
+async function setFovAngleAndWait(page: Page, angle: number): Promise<GraphicsTestCameraState> {
+  const expectedFov = calculateViewportFovFromAngle(angle);
+  await page.evaluate((nextAngle) => {
+    const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    if (!bridge) {
+      throw new Error('Graphics e2e bridge is not installed.');
+    }
+
+    bridge.setFovAngle(nextAngle);
+  }, angle);
+
+  await page.waitForFunction(
+    ({ expected }) => {
+      const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      const camera = bridge?.getCamera();
+      return camera?.fov !== undefined && Math.abs(camera.fov - expected) < 0.01;
+    },
+    { expected: expectedFov },
+  );
+
+  return page.evaluate(() => {
+    const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    if (!bridge) {
+      throw new Error('Graphics e2e bridge is not installed.');
+    }
+
+    return bridge.getCamera();
+  });
+}
+
+async function sampleEdgeOcclusionCanvas(page: Page): Promise<EdgeOcclusionSampleStats> {
+  const canvas = page.locator(previewCanvasSelector).first();
+  await expect(canvas).toBeVisible({ timeout: 60_000 });
+  const screenshot = await canvas.screenshot({ animations: 'disabled' });
+
+  return page.evaluate(
+    async ({ pngBase64, region }) => {
+      const sampleWidth = 128;
+      const sampleHeight = 128;
+      const image = new Image();
+      const imageLoaded = new Promise<void>((resolve, reject) => {
+        image.addEventListener('load', () => {
+          resolve();
+        });
+        image.addEventListener('error', () => {
+          reject(new Error('3D preview canvas screenshot could not be decoded.'));
+        });
+      });
+      image.src = `data:image/png;base64,${pngBase64}`;
+      await imageLoaded;
+
+      const sourceX = Math.floor(image.naturalWidth * region.x);
+      const sourceY = Math.floor(image.naturalHeight * region.y);
+      const sourceWidth = Math.max(1, Math.floor(image.naturalWidth * region.width));
+      const sourceHeight = Math.max(1, Math.floor(image.naturalHeight * region.height));
+
+      const offscreen = document.createElement('canvas');
+      offscreen.width = sampleWidth;
+      offscreen.height = sampleHeight;
+      const context = offscreen.getContext('2d');
+      if (!context) {
+        return { totalSampled: 0, blueSurfacePixels: 0, edgeLikePixels: 0, redLeakPixels: 0 };
+      }
+
+      context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, sampleWidth, sampleHeight);
+      const { data } = context.getImageData(0, 0, sampleWidth, sampleHeight);
+      let blueSurfacePixels = 0;
+      let edgeLikePixels = 0;
+      let redLeakPixels = 0;
+
+      for (let index = 0; index < data.length; index += 4) {
+        const r = data[index]!;
+        const g = data[index + 1]!;
+        const b = data[index + 2]!;
+
+        if (b > 90 && b > r + 30 && g > r + 8) {
+          blueSurfacePixels += 1;
+        }
+
+        if (r < 80 && g < 80 && b < 80) {
+          edgeLikePixels += 1;
+        }
+
+        if (r > 120 && r > g * 1.4 && r > b * 1.4) {
+          redLeakPixels += 1;
+        }
+      }
+
+      return {
+        totalSampled: sampleWidth * sampleHeight,
+        blueSurfacePixels,
+        edgeLikePixels,
+        redLeakPixels,
+      };
+    },
+    {
+      pngBase64: screenshot.toString('base64'),
+      region: edgeOcclusionCenterRegion,
+    },
+  );
+}
+
+async function renderAndSampleEdgeOcclusionFixture(
+  page: Page,
+  backend: GraphicsBackend,
+): Promise<EdgeOcclusionSampleStats> {
+  await page.goto(`/projects/jscad_edge_occlusion_fixture/preview?graphicsBackend=${backend}`);
+
+  const canvas = page.getByRole('img', { name: /3d model preview/i });
+  await expect(canvas).toBeVisible({ timeout: 60_000 });
+
+  const bboxViewer = page.getByTestId('bbox-viewer');
+  await expect(bboxViewer).toBeVisible({ timeout: 60_000 });
+
+  await driveLowFovEdgeOcclusionCamera(page);
+  await page.waitForTimeout(1000);
+
+  return sampleEdgeOcclusionCanvas(page);
+}
+
+function expectFrontSlabDominates(stats: EdgeOcclusionSampleStats, context: string): void {
+  expect(stats.totalSampled, `${context}: sampled region must contain pixels`).toBeGreaterThan(0);
+  expect(
+    stats.blueSurfacePixels,
+    `${context}: front blue slab should dominate the central sample. Stats: ${JSON.stringify(stats)}`,
+  ).toBeGreaterThan(stats.totalSampled * 0.25);
+}
+
+function expectRearEdgesStayOccluded(
+  stats: EdgeOcclusionSampleStats,
+  baselineStats: EdgeOcclusionSampleStats,
+  context: string,
+): void {
+  expect(
+    stats.edgeLikePixels,
+    `${context}: hidden rear cuboid edges leaked through the front slab. WebGPU stats: ${JSON.stringify(stats)}; WebGL baseline: ${JSON.stringify(baselineStats)}`,
+  ).toBeLessThan(Math.max(128, baselineStats.edgeLikePixels + 96));
+  expect(
+    stats.edgeLikePixels / stats.totalSampled,
+    `${context}: too much of the center region is edge-like. Stats: ${JSON.stringify(stats)}`,
+  ).toBeLessThan(0.012);
+  expect(
+    stats.redLeakPixels,
+    `${context}: rear cuboid surface color leaked into the central sample. Stats: ${JSON.stringify(stats)}`,
+  ).toBeLessThan(32);
+}
+
 test.describe('Graphics backend regression guard', () => {
+  for (const backend of ['webgl', 'webgpu'] as const satisfies readonly GraphicsBackend[]) {
+    test(`FOV changes preserve projected size through CameraControls on ${backend}`, async ({ page }) => {
+      if (backend === 'webgpu') {
+        const hasWebGpu = await isWebGpuAvailable(page);
+        test.skip(!hasWebGpu, 'WebGPU is not available in this browser runtime.');
+      }
+
+      await page.goto(`/projects/jscad_edge_occlusion_fixture/preview?graphicsBackend=${backend}`);
+
+      const canvas = page.getByRole('img', { name: /3d model preview/i });
+      await expect(canvas).toBeVisible({ timeout: 60_000 });
+      await expect(page.getByTestId('bbox-viewer')).toBeVisible({ timeout: 60_000 });
+
+      await waitForGraphicsTestBridge(page);
+      await page.evaluate(() => {
+        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+        if (!bridge) {
+          throw new Error('Graphics e2e bridge is not installed.');
+        }
+
+        bridge.setCamera({
+          position: [0, -500, 0],
+          target: [0, 0, 0],
+          zoom: 1,
+        });
+      });
+
+      const nearOrthographicCamera = await setFovAngleAndWait(page, 0);
+      const perspectiveCamera = await setFovAngleAndWait(page, 2);
+
+      const nearOrthographicScale = calculateProjectedScale(nearOrthographicCamera);
+      const perspectiveScale = calculateProjectedScale(perspectiveCamera);
+      const ratio = perspectiveScale / nearOrthographicScale;
+
+      expect(
+        ratio,
+        `${backend}: projected scale changed after FOV update. Before=${JSON.stringify(nearOrthographicCamera)}, after=${JSON.stringify(perspectiveCamera)}`,
+      ).toBeGreaterThan(0.98);
+      expect(
+        ratio,
+        `${backend}: projected scale changed after FOV update. Before=${JSON.stringify(nearOrthographicCamera)}, after=${JSON.stringify(perspectiveCamera)}`,
+      ).toBeLessThan(1.02);
+    });
+
+    test(`viewport gizmo animation progresses smoothly through Tau CameraControls on ${backend}`, async ({ page }) => {
+      if (backend === 'webgpu') {
+        const hasWebGpu = await isWebGpuAvailable(page);
+        test.skip(!hasWebGpu, 'WebGPU is not available in this browser runtime.');
+      }
+
+      await page.goto(`/projects/jscad_edge_occlusion_fixture/preview?graphicsBackend=${backend}`);
+
+      const canvas = page.getByRole('img', { name: /3d model preview/i });
+      await expect(canvas).toBeVisible({ timeout: 60_000 });
+      await expect(page.getByTestId('bbox-viewer')).toBeVisible({ timeout: 60_000 });
+
+      await waitForGraphicsTestBridge(page);
+      await page.evaluate(() => {
+        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+        if (!bridge) {
+          throw new Error('Graphics e2e bridge is not installed.');
+        }
+
+        bridge.setCamera({
+          position: [125, -180, 95],
+          target: [0, 0, 0],
+          zoom: 1,
+        });
+      });
+
+      await waitForCameraToSettle(page);
+      const samplesPromise = sampleCameraFrames(page, 20);
+      await clickViewportGizmoCenter(page);
+      const samples = await samplesPromise;
+
+      expectGizmoAnimationProgress(samples, backend);
+
+      const beforeCanvasDrag = await waitForCameraToSettle(page);
+      expectMainCanvasControlsAvailable(beforeCanvasDrag, backend);
+
+      await dragMainPreviewCanvas(page);
+      const afterCanvasDragSamples = await sampleCameraFrames(page, 4);
+      const afterCanvasDrag = afterCanvasDragSamples.at(-1)!;
+
+      expectMainCanvasDragChangedCamera(beforeCanvasDrag, afterCanvasDrag, backend);
+    });
+  }
+
   test('no WebGPU validation errors emit during a Birdhouse preview render', async ({ page }) => {
+    const hasWebGpu = await isWebGpuAvailable(page);
+    test.skip(!hasWebGpu, 'WebGPU is not available in this browser runtime.');
+
     const listener = attachWebGpuValidationListener(page);
 
     try {
@@ -175,6 +633,9 @@ test.describe('Graphics backend regression guard', () => {
   });
 
   test('canvas pixel histogram detects "render went invisible" regressions', async ({ page }) => {
+    const hasWebGpu = await isWebGpuAvailable(page);
+    test.skip(!hasWebGpu, 'WebGPU is not available in this browser runtime.');
+
     const listener = attachWebGpuValidationListener(page);
 
     try {
@@ -204,6 +665,28 @@ test.describe('Graphics backend regression guard', () => {
       expect(
         listener.failuresRef.lines,
         `Pixel-histogram check passed but WebGPU validation errors were observed:\n${listener.failuresRef.lines.join('\n')}`,
+      ).toEqual([]);
+    } finally {
+      listener.detach();
+    }
+  });
+
+  test('low-FOV WebGPU keeps rear GLTF edges occluded behind the front slab', async ({ page }) => {
+    const hasWebGpu = await isWebGpuAvailable(page);
+    test.skip(!hasWebGpu, 'WebGPU is not available in this browser runtime.');
+
+    const webGlStats = await renderAndSampleEdgeOcclusionFixture(page, 'webgl');
+    expectFrontSlabDominates(webGlStats, 'WebGL low-FOV edge occlusion baseline');
+    expectRearEdgesStayOccluded(webGlStats, webGlStats, 'WebGL low-FOV edge occlusion baseline');
+
+    const listener = attachWebGpuValidationListener(page);
+    try {
+      const webGpuStats = await renderAndSampleEdgeOcclusionFixture(page, 'webgpu');
+      expectFrontSlabDominates(webGpuStats, 'WebGPU low-FOV edge occlusion fixture');
+      expectRearEdgesStayOccluded(webGpuStats, webGlStats, 'WebGPU low-FOV edge occlusion fixture');
+      expect(
+        listener.failuresRef.lines,
+        `WebGPU validation errors leaked to the console:\n${listener.failuresRef.lines.join('\n')}`,
       ).toEqual([]);
     } finally {
       listener.detach();

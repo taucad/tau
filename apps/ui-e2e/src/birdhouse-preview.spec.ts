@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * UI counterpart to `examples/electron-tau/e2e/render.spec.ts`.
+ * UI counterpart to `examples/electron/e2e/render.spec.ts`.
  *
  * Flow: load `/`, click the Birdhouse community card, land on the
  * Birdhouse preview, and assert the `TAU_DEBUG`-gated diagnostic panel

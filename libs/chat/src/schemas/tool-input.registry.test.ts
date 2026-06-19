@@ -57,7 +57,7 @@ describe('toolInputSchemas registry', () => {
     expect(result.success).toBe(true);
   });
 
-  it('should reject bracket-key test_model filters', () => {
+  it('should keep bracket-key test_model filters outside the canonical strict schema', () => {
     const input = Object.fromEntries([['exclude[0]', '**/*.slow.geospec.ts']]);
     const result = requireSchema(`tool-${toolName.testModel}`).safeParse(input);
 
@@ -69,6 +69,7 @@ describe('toolInputSchemas registry', () => {
     expect(geoSpecRunFilterInputSchema.shape.files.description).toContain('["lib"]');
     expect(geoSpecRunFilterInputSchema.shape.files.description).toContain('files or directory roots');
     expect(geoSpecRunFilterInputSchema.shape.files.description).not.toContain('files[0]');
+    expect(geoSpecRunFilterInputSchema.shape.files.description).not.toContain('Do not use bracket-key syntax');
     expect(geoSpecRunFilterInputSchema.shape.include.description).toContain('["parts/**/*.geospec.ts"]');
     expect(geoSpecRunFilterInputSchema.shape.exclude.description).toContain('["**/*.slow.geospec.ts"]');
     expect(geoSpecRunFilterInputSchema.shape.testNamePattern.description).toContain('"^(?!.*known failing check).*"');

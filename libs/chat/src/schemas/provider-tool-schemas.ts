@@ -1,6 +1,7 @@
 import type { ToolName, ToolSelection } from '#types/tool.types.js';
 import { toolName } from '#constants/tool.constants.js';
-import { toolInputSchemas, type ToolPartType } from '#schemas/tool-input.registry.js';
+import type { ToolPartType } from '#schemas/tool-input.registry.js';
+import { toolInputSchemas } from '#schemas/tool-input.registry.js';
 
 /**
  * CAD agent tools that are exposed to model providers through LangChain.

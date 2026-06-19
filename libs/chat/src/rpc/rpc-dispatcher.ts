@@ -16,6 +16,7 @@ import { handleExportGeometry } from '#rpc/handlers/handle-export-geometry.js';
 import { handleCaptureScreenshot } from '#rpc/handlers/handle-capture-screenshot.js';
 import { handleAppendFile } from '#rpc/handlers/handle-append-file.js';
 import { handleEditFile } from '#rpc/handlers/handle-edit-file.js';
+import { handleResolveSkill } from '#rpc/handlers/handle-resolve-skill.js';
 
 type RpcHandlerMap = {
   [K in RpcName]: (args: RpcInput<K>) => Promise<RpcResult<K>>;
@@ -53,6 +54,7 @@ export function createRpcDispatcher(deps: RpcDependencies): RpcDispatcher {
     [rpcName.captureScreenshot]: async (args) => handleCaptureScreenshot(args, deps.graphics),
     [rpcName.appendFile]: async (args) => handleAppendFile(args, deps.fileSystem),
     [rpcName.editFile]: async (args) => handleEditFile(args, deps.fileSystem),
+    [rpcName.resolveSkill]: async (args) => handleResolveSkill(args, deps.skillResolver),
   };
 
   const dispatch = async <K extends keyof RpcSchemasRegistry>(call: RpcCall<K>): Promise<RpcResult<K>> => {

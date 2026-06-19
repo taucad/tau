@@ -2,6 +2,8 @@ import type { ListDirectoryRpcInput, ListDirectoryRpcResult } from '#schemas/rpc
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
 
+type ListDirectoryEntry = Extract<ListDirectoryRpcResult, { success: true }>['entries'][number];
+
 /** @public */
 export async function handleListDirectory(
   input: ListDirectoryRpcInput,
@@ -9,15 +11,25 @@ export async function handleListDirectory(
 ): Promise<ListDirectoryRpcResult> {
   try {
     const rawEntries = await fileSystem.readdir(input.path);
-    const entries = rawEntries.map(
-      (entry) =>
-        ({
+    const entries: ListDirectoryEntry[] = rawEntries.map((entry) => {
+      if (entry.type === 'dir') {
+        return {
           name: entry.name,
-          type: entry.type,
+          type: 'dir',
           size: entry.size,
           ...(entry.modifiedAt ? { modifiedAt: entry.modifiedAt } : {}),
-        }) as const,
-    );
+        };
+      }
+      return {
+        name: entry.name,
+        type: 'file',
+        size: entry.size,
+        ...(entry.contentKind === 'text'
+          ? { contentKind: 'text', lineCount: entry.lineCount }
+          : { contentKind: 'binary' }),
+        ...(entry.modifiedAt ? { modifiedAt: entry.modifiedAt } : {}),
+      };
+    });
 
     return { success: true, entries, path: input.path || '/' };
   } catch (error) {

@@ -26,6 +26,7 @@ export const rpcName = {
   captureScreenshot: 'capture_screenshot',
   appendFile: 'append_file',
   editFile: 'edit_file',
+  resolveSkill: 'resolve_skill',
 } as const satisfies Record<string, string>;
 
 /**
@@ -76,6 +77,7 @@ export const readOnlyRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
   rpcName.fetchGeometry,
   rpcName.exportGeometry,
   rpcName.captureScreenshot,
+  rpcName.resolveSkill,
 ]);
 
 /**

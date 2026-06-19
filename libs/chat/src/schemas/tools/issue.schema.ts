@@ -4,6 +4,7 @@
  */
 import type { CodeIssue } from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime';
+import { kernelIssueCodeValues } from '@taucad/runtime/types';
 import { z } from 'zod';
 
 export const codeIssueSchema: z.ZodType<CodeIssue> = z
@@ -24,33 +25,27 @@ export const errorLocationSchema = z.object({
   endColumn: z.number().optional(),
 });
 
+const kernelStackFrameSchema = z
+  .object({
+    fileName: z.string().optional(),
+    functionName: z.string().optional(),
+    lineNumber: z.number().optional(),
+    columnNumber: z.number().optional(),
+    source: z.string().optional(),
+    context: z.enum(['user', 'library', 'framework', 'runtime']).optional(),
+  })
+  .catchall(z.unknown());
+
 export const kernelIssueSchema: z.ZodType<KernelIssue> = z
   .object({
     message: z.string(),
-    code: z.enum([
-      'RENDER_TIMEOUT',
-      'RENDER_ABORTED',
-      'KERNEL_BINDING_FAILED',
-      'KERNEL_CAPABILITY_MISSING',
-      'BUNDLER_FAILED',
-      'MIDDLEWARE_FAILED',
-      'RUNTIME',
-      'UNKNOWN',
-    ]),
+    code: z.enum(kernelIssueCodeValues),
     location: errorLocationSchema.optional(),
     stack: z.string().optional(),
-    stackFrames: z
-      .array(
-        z.object({
-          fileName: z.string().optional(),
-          functionName: z.string().optional(),
-          lineNumber: z.number().optional(),
-          columnNumber: z.number().optional(),
-          source: z.string().optional(),
-        }),
-      )
-      .optional(),
+    stackFrames: z.array(kernelStackFrameSchema).optional(),
+    details: z.unknown().optional(),
     severity: z.enum(['error', 'warning', 'info']),
     type: z.enum(['compilation', 'runtime', 'kernel', 'connection', 'unknown']).optional(),
   })
+  .catchall(z.unknown())
   .meta({ id: 'KernelIssue' });

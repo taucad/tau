@@ -15,11 +15,32 @@ import { diffStatsWithContentSchema } from '#schemas/tools/diff.schema.js';
 import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
 import { geoSpecRunFilterInputSchema, observationSchema } from '#schemas/tools/test-model.tool.schema.js';
 import { exportGeometryFormatSchema } from '#schemas/tools/export-geometry.tool.schema.js';
+import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
 import { testModelOutputSchema } from '@taucad/testing';
 
 // =============================================================================
 // RPC Error Types
 // =============================================================================
+
+const byteSizeSchema = zod.number().int().nonnegative();
+
+const textFileMetadataObjectSchema = zod
+  .object({
+    type: zod.literal('file'),
+    size: byteSizeSchema,
+    ...textFileContentMetadataSchema.shape,
+  })
+  .strict();
+
+const binaryFileMetadataObjectSchema = zod
+  .object({
+    type: zod.literal('file'),
+    size: byteSizeSchema,
+    ...binaryFileContentMetadataSchema.shape,
+  })
+  .strict();
+
+const fileMetadataObjectSchema = zod.union([textFileMetadataObjectSchema, binaryFileMetadataObjectSchema]);
 
 /**
  * Error codes for business-level RPC failures.
@@ -35,6 +56,7 @@ export const rpcClientErrorCodeSchema = zod.enum([
   'PARSE_ERROR',
   'RENDER_TIMEOUT',
   'RESULT_TOO_LARGE',
+  'SKILL_NOT_FOUND',
   'UNKNOWN',
   'UNKNOWN_GEOMETRY_UNIT',
   'VALIDATION_ERROR',
@@ -49,6 +71,7 @@ export const rpcClientErrorSchema = zod.object({
   success: zod.literal(false),
   errorCode: rpcClientErrorCodeSchema,
   message: zod.string(),
+  fileMetadata: fileMetadataObjectSchema.optional(),
 });
 
 // =============================================================================
@@ -105,6 +128,8 @@ const readFileRpc = defineRpc({
   }),
   success: zod.object({
     content: zod.string(),
+    size: byteSizeSchema,
+    contentKind: zod.literal('text'),
     totalLines: zod.number(),
     startLine: zod.number().optional(),
     truncated: zod.boolean().optional(),
@@ -133,12 +158,17 @@ const deleteFileRpc = defineRpc({
   }),
 });
 
-const directoryEntrySchema = zod.object({
+const directoryEntryBaseSchema = zod.object({
   name: zod.string(),
-  type: zod.enum(['file', 'dir']),
-  size: zod.number(),
+  size: byteSizeSchema,
   modifiedAt: zod.string().optional(),
 });
+
+const directoryEntrySchema = zod.union([
+  directoryEntryBaseSchema.extend({ type: zod.literal('dir') }).strict(),
+  directoryEntryBaseSchema.extend({ type: zod.literal('file'), ...textFileContentMetadataSchema.shape }).strict(),
+  directoryEntryBaseSchema.extend({ type: zod.literal('file'), ...binaryFileContentMetadataSchema.shape }).strict(),
+]);
 
 const listDirectoryRpc = defineRpc({
   input: zod.object({
@@ -174,12 +204,27 @@ const grepRpc = defineRpc({
   }),
 });
 
-const globFileEntrySchema = zod.object({
+const globEntryBaseSchema = zod.object({
   path: zod.string(),
-  isDirectory: zod.boolean().optional(),
-  size: zod.number().optional(),
+  size: byteSizeSchema,
   modifiedAt: zod.string().optional(),
 });
+
+const globFileEntrySchema = zod.union([
+  globEntryBaseSchema.extend({ isDirectory: zod.literal(true) }).strict(),
+  globEntryBaseSchema
+    .extend({
+      isDirectory: zod.literal(false).optional(),
+      ...textFileContentMetadataSchema.shape,
+    })
+    .strict(),
+  globEntryBaseSchema
+    .extend({
+      isDirectory: zod.literal(false).optional(),
+      ...binaryFileContentMetadataSchema.shape,
+    })
+    .strict(),
+]);
 
 const globSearchRpc = defineRpc({
   input: zod.object({
@@ -188,7 +233,7 @@ const globSearchRpc = defineRpc({
   }),
   success: zod.object({
     files: zod.array(zod.string()),
-    entries: zod.array(globFileEntrySchema).optional(),
+    entries: zod.array(globFileEntrySchema),
     totalFiles: zod.number(),
   }),
 });
@@ -285,6 +330,37 @@ const editFileRpc = defineRpc({
   }),
 });
 
+const skillShadowedSourceSchema = zod.object({
+  source: zod.string(),
+  resourceUri: zod.string().optional(),
+  path: zod.string().optional(),
+  skillPath: zod.string().optional(),
+  fingerprint: zod.string().optional(),
+});
+
+const resolveSkillRpc = defineRpc({
+  input: zod.object({
+    skillName: zod.string(),
+  }),
+  success: zod.object({
+    skillName: zod.string(),
+    title: zod.string().optional(),
+    description: zod.string(),
+    source: zod.string(),
+    enabled: zod.boolean(),
+    resourceUri: zod.string(),
+    skillPath: zod.string().optional(),
+    baseDirectory: zod.string().optional(),
+    version: zod.string().optional(),
+    whenToUse: zod.string().optional(),
+    fingerprint: zod.string().optional(),
+    frontmatter: zod.record(zod.string(), zod.unknown()),
+    content: zod.string(),
+    supportingFiles: zod.array(zod.string()),
+    shadowedSources: zod.array(skillShadowedSourceSchema).optional(),
+  }),
+});
+
 // =============================================================================
 // RPC Schemas Registry
 // =============================================================================
@@ -314,6 +390,7 @@ export type RpcSchemasRegistry = {
   [rpcName.captureScreenshot]: RpcSchemaEntry<CaptureScreenshotRpcInput, CaptureScreenshotRpcResult>;
   [rpcName.appendFile]: RpcSchemaEntry<AppendFileRpcInput, AppendFileRpcResult>;
   [rpcName.editFile]: RpcSchemaEntry<EditFileRpcInput, EditFileRpcResult>;
+  [rpcName.resolveSkill]: RpcSchemaEntry<ResolveSkillRpcInput, ResolveSkillRpcResult>;
 };
 
 /**
@@ -377,6 +454,10 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
   [rpcName.editFile]: {
     inputSchema: editFileRpc.inputSchema,
     resultSchema: editFileRpc.resultSchema,
+  },
+  [rpcName.resolveSkill]: {
+    inputSchema: resolveSkillRpc.inputSchema,
+    resultSchema: resolveSkillRpc.resultSchema,
   },
 };
 
@@ -445,6 +526,7 @@ export const rpcClientErrorCode = {
   parseError: 'PARSE_ERROR',
   renderTimeout: 'RENDER_TIMEOUT',
   resultTooLarge: 'RESULT_TOO_LARGE',
+  skillNotFound: 'SKILL_NOT_FOUND',
   unknown: 'UNKNOWN',
   unknownGeometryUnit: 'UNKNOWN_GEOMETRY_UNIT',
   validationError: 'VALIDATION_ERROR',
@@ -547,3 +629,10 @@ export type EditFileRpcInput = z.infer<typeof editFileRpc.inputSchema>;
 export type EditFileRpcSuccess = z.infer<typeof editFileRpc.successSchema>;
 /** @public */
 export type EditFileRpcResult = z.infer<typeof editFileRpc.resultSchema>;
+
+/** @public */
+export type ResolveSkillRpcInput = z.infer<typeof resolveSkillRpc.inputSchema>;
+/** @public */
+export type ResolveSkillRpcSuccess = z.infer<typeof resolveSkillRpc.successSchema>;
+/** @public */
+export type ResolveSkillRpcResult = z.infer<typeof resolveSkillRpc.resultSchema>;

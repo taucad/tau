@@ -44,9 +44,7 @@ export const geoSpecRunFilterInputSchema = z
       .array(z.string().min(1).max(512))
       .max(50)
       .optional()
-      .describe(
-        'JSON array of GeoSpec files or directory roots, e.g. ["main.geospec.ts"] or ["lib"]. Do not use bracket-key syntax.',
-      ),
+      .describe('JSON array of GeoSpec files or directory roots, e.g. ["main.geospec.ts"] or ["lib"].'),
     include: z
       .array(z.string().min(1).max(512))
       .max(50)

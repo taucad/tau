@@ -1,3 +1,4 @@
+import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 import type { RunGeoSpecTestsRpcInput, RunGeoSpecTestsRpcResult } from '#schemas/rpc.schema.js';
 import type { RpcGeoSpecClient } from '#rpc/rpc-dependencies.js';
 
@@ -9,7 +10,7 @@ export async function handleRunGeoSpecTests(
   if (!geospec) {
     return {
       success: false,
-      errorCode: 'UNKNOWN',
+      errorCode: rpcClientErrorCode.unknown,
       message: 'GeoSpec tests require a browser-connected Tau runner.',
     };
   }

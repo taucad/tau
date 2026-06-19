@@ -45,6 +45,14 @@ const serializeProviderFacingSchemas = (testingEnabled = true) =>
     jsonSchema: toJsonSchema(entry.schema),
   }));
 
+const providerSchemaFor = (name: string): { properties?: Record<string, { type?: string; description?: string }> } => {
+  const schema = serializeProviderFacingSchemas().find((entry) => entry.toolName === name)?.jsonSchema;
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+    throw new Error(`missing JSON Schema for ${name}`);
+  }
+  return schema as { properties?: Record<string, { type?: string; description?: string }> };
+};
+
 describe('provider-facing tool schema compatibility', () => {
   it('should resolve the active CAD toolbelt without internal transfer tools', () => {
     const entries = serializeProviderFacingSchemas();
@@ -94,5 +102,21 @@ describe('provider-facing tool schema compatibility', () => {
 
     expect(Object.keys(screenshot?.properties ?? {}).sort()).toEqual(['mode', 'targetFile']);
     expect(Object.keys(useSkill?.properties ?? {}).sort()).toEqual(['reason', 'skillName']);
+  });
+
+  it('should keep test_model provider filters as JSON arrays without bracket-key compatibility syntax', () => {
+    const schema = providerSchemaFor(toolName.testModel);
+    const properties = schema.properties ?? {};
+
+    expect(properties['files']?.type).toBe('array');
+    expect(properties['include']?.type).toBe('array');
+    expect(properties['exclude']?.type).toBe('array');
+
+    const serialized = JSON.stringify(schema);
+    expect(serialized).not.toContain('files[0]');
+    expect(serialized).not.toContain('include[0]');
+    expect(serialized).not.toContain('exclude[0]');
+    expect(serialized).not.toContain('files[]');
+    expect(serialized).not.toContain('Do not use bracket-key syntax');
   });
 });

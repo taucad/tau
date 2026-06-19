@@ -1,5 +1,11 @@
 import { describe, it, expectTypeOf } from 'vitest';
-import type { RpcResponse, RpcResponseFor, RpcRequest } from '#types/websocket.types.js';
+import type {
+  ChatRpcJoinAck,
+  ChatRpcJoinMessage,
+  RpcResponse,
+  RpcResponseFor,
+  RpcRequest,
+} from '#types/websocket.types.js';
 import type { RpcResult, ReadFileRpcInput } from '#schemas/rpc.schema.js';
 
 describe('RpcResponse discriminated by rpcName (R5)', () => {
@@ -23,5 +29,20 @@ describe('RpcResponse discriminated by rpcName (R5)', () => {
   it('should preserve the error branch with result: undefined', () => {
     type ErrorBranch = Extract<RpcResponse, { error: string }>;
     expectTypeOf<ErrorBranch['result']>().toEqualTypeOf<undefined>();
+  });
+});
+
+describe('ChatRpcJoinMessage (R4)', () => {
+  it('should require a protocol version on Socket.IO join registration', () => {
+    expectTypeOf<ChatRpcJoinMessage>().toExtend<{ chatId: string; rpcProtocolVersion: string }>();
+  });
+
+  it('should expose protocol mismatch metadata on failed join acks', () => {
+    type FailedAck = Extract<ChatRpcJoinAck, { success: false }>;
+    expectTypeOf<FailedAck>().toExtend<{
+      code?: string;
+      expectedProtocolVersion?: string;
+      receivedProtocolVersion?: string;
+    }>();
   });
 });

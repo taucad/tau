@@ -10,6 +10,7 @@ export const modelProviders = [
   'ollama',
   'vertexai',
   'cerebras',
+  'morph',
 ] as const;
 
 /**
@@ -21,4 +22,5 @@ export const modelFamilies = [
   'gpt',
   'claude',
   'gemini',
+  'minimax',
 ] as const;

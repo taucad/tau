@@ -38,6 +38,15 @@ export type ChatUsageCost = {
 };
 
 /** @public */
+export type ChatStartupRequest = {
+  id: string;
+  kind: 'regenerate-tail';
+  messageId: string;
+  source: 'homepage-initial-message' | 'fix-with-ai-new-chat';
+  createdAt: number;
+};
+
+/** @public */
 export type Chat = {
   id: string;
   resourceId: string; // Links chat to a resource (e.g., build)
@@ -46,6 +55,7 @@ export type Chat = {
   draft?: MyUIMessage; // Main draft
   messageEdits?: Record<string, MyUIMessage>; // Edit drafts by messageId
   error?: ChatError; // Persisted error for display after page reload
+  startupRequest?: ChatStartupRequest;
   /**
    * Chat-scoped active model id. When present, chat-scoped consumers prefer
    * this over the cookie-derived default so cookie changes elsewhere never

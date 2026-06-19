@@ -7,6 +7,7 @@
  */
 import type { RpcName } from '#types/rpc.types.js';
 import type { RpcInput, RpcResult } from '#schemas/rpc.schema.js';
+import type { ChatRpcProtocolErrorCode } from '#schemas/rpc-wire-protocol.schema.js';
 import type { wsCloseCode } from '#constants/websocket.constants.js';
 
 /** @public */
@@ -97,25 +98,27 @@ export function rpcWireSuccessResponse<K extends RpcName>(request: RpcRequest<K>
  */
 export type RpcResponse = { [K in RpcName]: RpcResponseFor<K> }[RpcName];
 
-/**
- * Client -> Server: Register connection for a specific chat.
- * @public
- */
-export type WsConnectMessage = {
-  type: 'connect';
-  /** The chat ID to associate with this connection */
+/** @public */
+export type ChatRpcJoinMessage = {
+  /** The chat ID to associate with this connection. */
   chatId: string;
+  /** Shared browser/API wire-protocol version. */
+  rpcProtocolVersion: string;
 };
 
-/**
- * Server -> Client: Acknowledgment of successful connection registration.
- * @public
- */
-export type WsConnectedMessage = {
-  type: 'connected';
-  /** The chat ID that was registered */
-  chatId: string;
-};
+/** @public */
+export type ChatRpcJoinAck =
+  | {
+      success: true;
+      rpcProtocolVersion: string;
+    }
+  | {
+      success: false;
+      code?: ChatRpcProtocolErrorCode | string;
+      message?: string;
+      expectedProtocolVersion?: string;
+      receivedProtocolVersion?: string;
+    };
 
 /**
  * Server -> Client: Error message.
@@ -133,10 +136,10 @@ export type WsErrorMessage = {
  * All possible messages from server to client.
  * @public
  */
-export type ServerToClientMessage = RpcRequest | WsConnectedMessage | WsErrorMessage;
+export type ServerToClientMessage = RpcRequest | WsErrorMessage;
 
 /**
  * All possible messages from client to server.
  * @public
  */
-export type ClientToServerMessage = RpcResponse | WsConnectMessage;
+export type ClientToServerMessage = RpcResponse | ChatRpcJoinMessage;

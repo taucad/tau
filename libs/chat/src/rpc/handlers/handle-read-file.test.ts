@@ -1,25 +1,31 @@
 import { describe, it, expect } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
+import type { RpcFileStat, RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 import { handleReadFile } from '#rpc/handlers/handle-read-file.js';
+
+const textStat = (size: number, lineCount: number): RpcFileStat => ({
+  size,
+  isDirectory: false,
+  contentKind: 'text',
+  lineCount,
+  createdAt: '2026-01-15T10:00:00.000Z',
+  modifiedAt: '2026-01-20T14:30:00.000Z',
+});
 
 describe('handleReadFile', () => {
   it('should return raw file content with line metadata', async () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.readFile.mockResolvedValue('line1\nline2\nline3');
-    fileSystem.stat.mockResolvedValue({
-      size: 18,
-      isDirectory: false,
-      createdAt: '2026-01-15T10:00:00.000Z',
-      modifiedAt: '2026-01-20T14:30:00.000Z',
-    });
+    fileSystem.stat.mockResolvedValue(textStat(18, 3));
 
     const result = await handleReadFile({ targetFile: 'test.txt' }, fileSystem);
 
     expect(result).toEqual({
       success: true,
       content: 'line1\nline2\nline3',
+      size: 18,
+      contentKind: 'text',
       totalLines: 3,
       startLine: 1,
       createdAt: '2026-01-15T10:00:00.000Z',
@@ -30,12 +36,7 @@ describe('handleReadFile', () => {
   it('should slice raw content from the offset', async () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.readFile.mockResolvedValue('alpha\nbeta\ngamma\ndelta\nepsilon');
-    fileSystem.stat.mockResolvedValue({
-      size: 30,
-      isDirectory: false,
-      createdAt: '2026-01-15T10:00:00.000Z',
-      modifiedAt: '2026-01-20T14:30:00.000Z',
-    });
+    fileSystem.stat.mockResolvedValue(textStat(30, 5));
 
     const result = await handleReadFile({ targetFile: 'test.txt', offset: 3, limit: 2 }, fileSystem);
 
@@ -50,8 +51,7 @@ describe('handleReadFile', () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.readFile.mockResolvedValue('data');
     fileSystem.stat.mockResolvedValue({
-      size: 4,
-      isDirectory: false,
+      ...textStat(4, 1),
       createdAt: '2026-03-01T00:00:00.000Z',
       modifiedAt: '2026-03-24T12:00:00.000Z',
     });
@@ -125,12 +125,7 @@ describe('handleReadFile', () => {
       const fileSystem = mock<RpcFileSystem>();
       const lines = Array.from({ length: 5000 }, (_, index) => `line-${index}`);
       fileSystem.readFile.mockResolvedValue(lines.join('\n'));
-      fileSystem.stat.mockResolvedValue({
-        size: 200,
-        isDirectory: false,
-        createdAt: '2026-05-12T00:00:00.000Z',
-        modifiedAt: '2026-05-12T00:00:00.000Z',
-      });
+      fileSystem.stat.mockResolvedValue(textStat(200, 5000));
 
       const result = await handleReadFile({ targetFile: 'big.ts' }, fileSystem);
 
@@ -143,12 +138,7 @@ describe('handleReadFile', () => {
       const fileSystem = mock<RpcFileSystem>();
       const lines = Array.from({ length: 5000 }, (_, index) => `line-${index}`);
       fileSystem.readFile.mockResolvedValue(lines.join('\n'));
-      fileSystem.stat.mockResolvedValue({
-        size: 200,
-        isDirectory: false,
-        createdAt: '2026-05-12T00:00:00.000Z',
-        modifiedAt: '2026-05-12T00:00:00.000Z',
-      });
+      fileSystem.stat.mockResolvedValue(textStat(200, 5000));
 
       // Bypass the Zod schema (which would already reject this at the wire layer)
       // by casting through `unknown` — we still want a defensive handler-level clamp.
@@ -171,12 +161,7 @@ describe('handleReadFile', () => {
     it('should not flag truncated when the file fits in the cap', async () => {
       const fileSystem = mock<RpcFileSystem>();
       fileSystem.readFile.mockResolvedValue('a\nb\nc');
-      fileSystem.stat.mockResolvedValue({
-        size: 5,
-        isDirectory: false,
-        createdAt: '2026-05-12T00:00:00.000Z',
-        modifiedAt: '2026-05-12T00:00:00.000Z',
-      });
+      fileSystem.stat.mockResolvedValue(textStat(5, 3));
 
       const result = await handleReadFile({ targetFile: 'small.ts' }, fileSystem);
 
@@ -188,12 +173,7 @@ describe('handleReadFile', () => {
   describe('Phase 0 — 256 KB precheck with directive error', () => {
     it('should reject reads of files >256 KB without explicit offset/limit and direct the model to paginate', async () => {
       const fileSystem = mock<RpcFileSystem>();
-      fileSystem.stat.mockResolvedValue({
-        size: 512 * 1024,
-        isDirectory: false,
-        createdAt: '2026-05-12T00:00:00.000Z',
-        modifiedAt: '2026-05-12T00:00:00.000Z',
-      });
+      fileSystem.stat.mockResolvedValue(textStat(512 * 1024, 226_592));
 
       const result = await handleReadFile({ targetFile: 'index.d.ts' }, fileSystem);
 
@@ -202,17 +182,39 @@ describe('handleReadFile', () => {
         errorCode: rpcClientErrorCode.resultTooLarge,
       });
       expect(!result.success && result.message).toContain('Use offset and limit');
+      expect(!result.success && result.message).toContain('226592 lines');
+      expect(!result.success && result.fileMetadata).toEqual({
+        type: 'file',
+        size: 512 * 1024,
+        contentKind: 'text',
+        lineCount: 226_592,
+      });
+      expect(fileSystem.readFile).not.toHaveBeenCalled();
+    });
+
+    it('should reject binary files before reading content and return binary metadata', async () => {
+      const fileSystem = mock<RpcFileSystem>();
+      fileSystem.stat.mockResolvedValue({
+        size: 1_300_000,
+        isDirectory: false,
+        contentKind: 'binary',
+        createdAt: '2026-05-12T00:00:00.000Z',
+        modifiedAt: '2026-05-12T00:00:00.000Z',
+      });
+
+      const result = await handleReadFile({ targetFile: 'preview.glb' }, fileSystem);
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: rpcClientErrorCode.ioError,
+        fileMetadata: { type: 'file', size: 1_300_000, contentKind: 'binary' },
+      });
       expect(fileSystem.readFile).not.toHaveBeenCalled();
     });
 
     it('should allow reads of files >256 KB when offset and limit are provided', async () => {
       const fileSystem = mock<RpcFileSystem>();
-      fileSystem.stat.mockResolvedValue({
-        size: 512 * 1024,
-        isDirectory: false,
-        createdAt: '2026-05-12T00:00:00.000Z',
-        modifiedAt: '2026-05-12T00:00:00.000Z',
-      });
+      fileSystem.stat.mockResolvedValue(textStat(512 * 1024, 226_592));
       fileSystem.readFile.mockResolvedValue('line1\nline2\nline3');
 
       const result = await handleReadFile({ targetFile: 'index.d.ts', offset: 1, limit: 100 }, fileSystem);
@@ -222,12 +224,7 @@ describe('handleReadFile', () => {
 
     it('should bypass the precheck when only offset is supplied (paginating without an explicit slice limit)', async () => {
       const fileSystem = mock<RpcFileSystem>();
-      fileSystem.stat.mockResolvedValue({
-        size: 512 * 1024,
-        isDirectory: false,
-        createdAt: '2026-05-12T00:00:00.000Z',
-        modifiedAt: '2026-05-12T00:00:00.000Z',
-      });
+      fileSystem.stat.mockResolvedValue(textStat(512 * 1024, 226_592));
       fileSystem.readFile.mockResolvedValue('a\nb\nc');
 
       const result = await handleReadFile({ targetFile: 'index.d.ts', offset: 10 }, fileSystem);

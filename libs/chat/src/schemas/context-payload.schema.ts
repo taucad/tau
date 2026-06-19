@@ -2,14 +2,34 @@
 import z from 'zod';
 
 /**
- * Schema for a single skill's metadata as discovered from `.tau/skills/` SKILL.md frontmatter.
+ * Schema for a single skill's metadata as discovered from `.agents/skills/`
+ * SKILL.md frontmatter. Legacy `.tau/skills/` entries may be present during
+ * migration, but `.agents/skills/` is the canonical location.
+ *
  * @public
  */
 export const skillMetadataSchema = z.object({
   name: z.string(),
   description: z.string(),
-  path: z.string(),
+  resourceUri: z.string().optional(),
+  path: z.string().optional(),
+  skillPath: z.string().optional(),
   source: z.string().optional(),
+  version: z.string().optional(),
+  whenToUse: z.string().optional(),
+  fingerprint: z.string().optional(),
+  enabled: z.boolean().optional(),
+  shadowedSources: z
+    .array(
+      z.object({
+        source: z.string(),
+        resourceUri: z.string().optional(),
+        path: z.string().optional(),
+        skillPath: z.string().optional(),
+        fingerprint: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 
 /**

@@ -3,6 +3,7 @@ import { editFileInputSchema } from '#schemas/tools/edit-file.tool.schema.js';
 import { webBrowserInputSchema } from '#schemas/tools/web-browser.tool.schema.js';
 import { webSearchInputSchema } from '#schemas/tools/web-search.tool.schema.js';
 import { readFileInputSchema } from '#schemas/tools/read-file.tool.schema.js';
+import { useSkillInputSchema } from '#schemas/tools/use-skill.tool.schema.js';
 import { listDirectoryInputSchema } from '#schemas/tools/list-directory.tool.schema.js';
 import { createFileInputSchema } from '#schemas/tools/create-file.tool.schema.js';
 import { deleteFileInputSchema } from '#schemas/tools/delete-file.tool.schema.js';
@@ -51,6 +52,7 @@ export const toolInputSchemas: Record<ToolPartType, z.ZodType> = {
   'tool-web_search': webSearchInputSchema,
   'tool-web_browser': webBrowserInputSchema,
   'tool-test_model': testModelInputSchema,
+  'tool-use_skill': useSkillInputSchema,
   'tool-read_file': readFileInputSchema,
   'tool-list_directory': listDirectoryInputSchema,
   'tool-create_file': createFileInputSchema,

@@ -284,7 +284,7 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
       expect((part as { rawInput?: unknown }).rawInput).toBeUndefined();
     });
 
-    it('should leave non-output-error tool parts untouched even if their input is unusual', () => {
+    it('should accept active input-streaming tool parts with unknown partial input', () => {
       const result = uiMessagesSchema.safeParse([
         userMessage,
         baseMessage([
@@ -292,8 +292,9 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
             type: 'tool-read_file',
             toolCallId: 'call_streaming',
             state: 'input-streaming',
-            input: { limit: 15 },
-          } as unknown as MyMessagePart,
+            input: 'partial-json-fragment',
+            rawInput: ['partial'],
+          },
         ]),
       ]);
 
@@ -306,7 +307,94 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
       if (part.state !== 'input-streaming') {
         return;
       }
-      expect(part.input).toEqual({ limit: 15 });
+      expect(part.input).toBe('partial-json-fragment');
+      expect((part as { rawInput?: unknown }).rawInput).toEqual(['partial']);
+    });
+
+    it('should terminalize stale historical input-available static tool parts followed by a user message', () => {
+      const result = uiMessagesSchema.safeParse([
+        userMessage,
+        baseMessage([
+          {
+            type: 'tool-read_file',
+            toolCallId: 'call_stale_read',
+            state: 'input-available',
+            input: { limit: 40 },
+          },
+        ]),
+        { id: 'm2', role: 'user', parts: [{ type: 'text', text: 'continue' }] },
+      ]);
+
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        return;
+      }
+      const part = findToolPart(result.data[1]?.parts ?? [], 'tool-read_file');
+      expect(part.state).toBe('output-error');
+      if (part.state !== 'output-error') {
+        return;
+      }
+      expect(part.input).toBeUndefined();
+      expect((part as { rawInput?: unknown }).rawInput).toEqual({ limit: 40 });
+      expect(JSON.parse(part.errorText) as Record<string, unknown>).toMatchObject({
+        errorCode: 'USER_INTERRUPTED',
+        toolName: 'read_file',
+        toolCallId: 'call_stale_read',
+      });
+    });
+
+    it('should preserve valid stale historical static input while terminalizing the lifecycle state', () => {
+      const result = uiMessagesSchema.safeParse([
+        userMessage,
+        baseMessage([
+          {
+            type: 'tool-read_file',
+            toolCallId: 'call_stale_valid_read',
+            state: 'input-available',
+            input: { targetFile: 'main.ts', limit: 40 },
+          },
+        ]),
+        { id: 'm2', role: 'user', parts: [{ type: 'text', text: 'continue' }] },
+      ]);
+
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        return;
+      }
+      const part = findToolPart(result.data[1]?.parts ?? [], 'tool-read_file');
+      expect(part.state).toBe('output-error');
+      if (part.state !== 'output-error') {
+        return;
+      }
+      expect(part.input).toEqual({ targetFile: 'main.ts', limit: 40 });
+      expect((part as { rawInput?: unknown }).rawInput).toBeUndefined();
+    });
+
+    it('should terminalize stale historical dynamic tool parts without requiring input', () => {
+      const result = uiMessagesSchema.safeParse([
+        userMessage,
+        baseMessage([
+          {
+            type: 'dynamic-tool',
+            toolName: 'experimental_tool',
+            toolCallId: 'call_dynamic_stale',
+            state: 'input-streaming',
+          },
+        ]),
+        { id: 'm2', role: 'user', parts: [{ type: 'text', text: 'continue' }] },
+      ]);
+
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        return;
+      }
+      const part = result.data[1]?.parts[0];
+      expect(part).toMatchObject({
+        type: 'dynamic-tool',
+        toolName: 'experimental_tool',
+        toolCallId: 'call_dynamic_stale',
+        state: 'output-error',
+      });
     });
 
     it('should accept dynamic-tool in output-error with rawInput populated', () => {
@@ -355,6 +443,35 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
       expect(result.success).toBe(true);
     });
 
+    it('should accept and preserve partial static approval-requested input without strict tool validation', () => {
+      const result = uiMessagesSchema.safeParse([
+        userMessage,
+        baseMessage([
+          {
+            type: 'tool-read_file',
+            toolCallId: 'call_approval_partial',
+            state: 'approval-requested',
+            input: { limit: 40 },
+            rawInput: { streamed: true },
+            approval: { id: 'approval_partial' },
+          },
+        ]),
+      ]);
+
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        return;
+      }
+      const part = findToolPart(result.data[1]?.parts ?? [], 'tool-read_file');
+      expect(part.state).toBe('approval-requested');
+      if (part.state !== 'approval-requested') {
+        return;
+      }
+      expect(part.input).toEqual({ limit: 40 });
+      expect((part as { rawInput?: unknown }).rawInput).toEqual({ streamed: true });
+      expect(part.approval).toEqual({ id: 'approval_partial' });
+    });
+
     it('should accept a static tool-read_file part in approval-responded state', () => {
       const result = uiMessagesSchema.safeParse([
         userMessage,
@@ -372,6 +489,33 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
       expect(result.success).toBe(true);
     });
 
+    it('should accept and preserve partial static approval-responded input without strict tool validation', () => {
+      const result = uiMessagesSchema.safeParse([
+        userMessage,
+        baseMessage([
+          {
+            type: 'tool-read_file',
+            toolCallId: 'call_approval_response_partial',
+            state: 'approval-responded',
+            input: { limit: 40 },
+            approval: { id: 'approval_1', approved: true, reason: 'ok' },
+          },
+        ]),
+      ]);
+
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        return;
+      }
+      const part = findToolPart(result.data[1]?.parts ?? [], 'tool-read_file');
+      expect(part.state).toBe('approval-responded');
+      if (part.state !== 'approval-responded') {
+        return;
+      }
+      expect(part.input).toEqual({ limit: 40 });
+      expect(part.approval).toEqual({ id: 'approval_1', approved: true, reason: 'ok' });
+    });
+
     it('should accept a static tool-read_file part in output-denied state', () => {
       const result = uiMessagesSchema.safeParse([
         userMessage,
@@ -387,6 +531,91 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
       ]);
 
       expect(result.success).toBe(true);
+    });
+
+    it('should accept and preserve partial static output-denied input without strict tool validation', () => {
+      const result = uiMessagesSchema.safeParse([
+        userMessage,
+        baseMessage([
+          {
+            type: 'tool-read_file',
+            toolCallId: 'call_denied_partial',
+            state: 'output-denied',
+            input: { limit: 40 },
+            approval: { id: 'approval_denied', approved: false, reason: 'not this path' },
+          },
+        ]),
+      ]);
+
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        return;
+      }
+      const part = findToolPart(result.data[1]?.parts ?? [], 'tool-read_file');
+      expect(part.state).toBe('output-denied');
+      if (part.state !== 'output-denied') {
+        return;
+      }
+      expect(part.input).toEqual({ limit: 40 });
+      expect(part.approval).toEqual({ id: 'approval_denied', approved: false, reason: 'not this path' });
+    });
+
+    it('should preserve approval metadata on static output-available parts', () => {
+      const result = uiMessagesSchema.safeParse([
+        userMessage,
+        baseMessage([
+          {
+            type: 'tool-read_file',
+            toolCallId: 'call_output_approved',
+            state: 'output-available',
+            input: { targetFile: 'main.ts' },
+            output: { content: 'hello', size: 5, contentKind: 'text', totalLines: 1 },
+            approval: { id: 'approval_output', approved: true, reason: 'safe' },
+          },
+        ]),
+      ]);
+
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        return;
+      }
+      const part = findToolPart(result.data[1]?.parts ?? [], 'tool-read_file');
+      expect(part.state).toBe('output-available');
+      if (part.state !== 'output-available') {
+        return;
+      }
+      expect((part as { approval?: unknown }).approval).toEqual({
+        id: 'approval_output',
+        approved: true,
+        reason: 'safe',
+      });
+    });
+
+    it('should preserve approval metadata on static output-error parts', () => {
+      const result = uiMessagesSchema.safeParse([
+        userMessage,
+        baseMessage([
+          {
+            type: 'tool-read_file',
+            toolCallId: 'call_error_approved',
+            state: 'output-error',
+            input: { targetFile: 'main.ts' },
+            errorText: 'failed after approval',
+            approval: { id: 'approval_error', approved: true },
+          },
+        ]),
+      ]);
+
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        return;
+      }
+      const part = findToolPart(result.data[1]?.parts ?? [], 'tool-read_file');
+      expect(part.state).toBe('output-error');
+      if (part.state !== 'output-error') {
+        return;
+      }
+      expect((part as { approval?: unknown }).approval).toEqual({ id: 'approval_error', approved: true });
     });
 
     it('should accept a filtered tool-test_model part in approval-requested state', () => {
@@ -458,6 +687,72 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
       ]);
 
       expect(result.success).toBe(true);
+    });
+
+    it('should accept dynamic-tool output-error without an input property', () => {
+      const result = uiMessagesSchema.safeParse([
+        userMessage,
+        baseMessage([
+          {
+            type: 'dynamic-tool',
+            toolName: 'experimental_tool',
+            toolCallId: 'call_dynamic_no_input',
+            state: 'output-error',
+            errorText: 'interrupted',
+          },
+        ]),
+      ]);
+
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        return;
+      }
+      expect(result.data[1]?.parts[0]).toMatchObject({
+        type: 'dynamic-tool',
+        toolName: 'experimental_tool',
+        toolCallId: 'call_dynamic_no_input',
+        state: 'output-error',
+      });
+    });
+
+    it('should preserve approval metadata on dynamic output-available and output-error parts', () => {
+      const result = uiMessagesSchema.safeParse([
+        userMessage,
+        baseMessage([
+          {
+            type: 'dynamic-tool',
+            toolName: 'experimental_tool',
+            toolCallId: 'call_dynamic_output',
+            state: 'output-available',
+            input: { foo: 'bar' },
+            output: { ok: true },
+            approval: { id: 'approval_dynamic_output', approved: true },
+          },
+          {
+            type: 'dynamic-tool',
+            toolName: 'experimental_tool',
+            toolCallId: 'call_dynamic_error',
+            state: 'output-error',
+            input: { foo: 'bar' },
+            errorText: 'failed',
+            approval: { id: 'approval_dynamic_error', approved: true, reason: 'still allowed' },
+          },
+        ]),
+      ]);
+
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        return;
+      }
+      expect((result.data[1]?.parts[0] as { approval?: unknown } | undefined)?.approval).toEqual({
+        id: 'approval_dynamic_output',
+        approved: true,
+      });
+      expect((result.data[1]?.parts[1] as { approval?: unknown } | undefined)?.approval).toEqual({
+        id: 'approval_dynamic_error',
+        approved: true,
+        reason: 'still allowed',
+      });
     });
   });
 

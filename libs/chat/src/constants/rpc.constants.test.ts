@@ -41,6 +41,7 @@ describe('rpc.constants', () => {
       expect(mutatingRpcNames.has(rpcName.grep)).toBe(false);
       expect(mutatingRpcNames.has(rpcName.listDirectory)).toBe(false);
       expect(mutatingRpcNames.has(rpcName.getKernelResult)).toBe(false);
+      expect(readOnlyRpcNames.has(rpcName.resolveSkill)).toBe(true);
     });
   });
 });

@@ -19,7 +19,24 @@ import type {
   RpcClientErrorCode,
   RunGeoSpecTestsRpcInput,
   RunGeoSpecTestsRpcResult,
+  ResolveSkillRpcResult,
 } from '#schemas/rpc.schema.js';
+import type { FileContentMetadata } from '@taucad/types';
+
+/** @public */
+export type RpcDirectoryEntry =
+  | {
+      name: string;
+      type: 'dir';
+      size: number;
+      modifiedAt?: string;
+    }
+  | ({
+      name: string;
+      type: 'file';
+      size: number;
+      modifiedAt?: string;
+    } & FileContentMetadata);
 
 /**
  * Abstract filesystem for RPC handlers.
@@ -42,14 +59,7 @@ export type RpcFileSystem = {
   writeFile(path: string, content: string): Promise<void>;
   writeBinaryFile(path: string, data: Uint8Array<ArrayBuffer>): Promise<void>;
   deleteFile(path: string): Promise<void>;
-  readdir(path: string): Promise<
-    Array<{
-      name: string;
-      type: 'file' | 'dir';
-      size: number;
-      modifiedAt?: string;
-    }>
-  >;
+  readdir(path: string): Promise<RpcDirectoryEntry[]>;
   exists(path: string): Promise<boolean>;
   appendFile(path: string, content: string): Promise<void>;
   editFile(path: string, oldString: string, newString: string, replaceAll?: boolean): Promise<{ occurrences: number }>;
@@ -57,15 +67,31 @@ export type RpcFileSystem = {
 };
 
 /**
+ * Structured file metadata returned on read refusals.
+ * @public
+ */
+export type RpcFileMetadata = {
+  type: 'file';
+  size: number;
+} & FileContentMetadata;
+
+/**
  * File metadata returned by stat().
  * @public
  */
-export type RpcFileStat = {
-  size: number;
-  isDirectory: boolean;
-  createdAt: string;
-  modifiedAt: string;
-};
+export type RpcFileStat =
+  | {
+      size: number;
+      isDirectory: true;
+      createdAt: string;
+      modifiedAt: string;
+    }
+  | ({
+      size: number;
+      isDirectory: false;
+      createdAt: string;
+      modifiedAt: string;
+    } & FileContentMetadata);
 
 /**
  * Abstract runtime client for getting compilation results.
@@ -117,6 +143,20 @@ export type RpcGeoSpecClient = {
 };
 
 /**
+ * Abstract skill resolver for live skill activation.
+ *
+ * Browser implementations merge workspace `.agents/skills`, installed Tau
+ * Store skills, virtual system skills, and legacy `.tau/skills`. API-side
+ * tool execution calls this through RPC so prompt-visible catalog metadata is
+ * only a discovery hint, not activation authority.
+ *
+ * @public
+ */
+export type RpcSkillResolver = {
+  resolveSkill(skillName: string): Promise<ResolveSkillRpcResult>;
+};
+
+/**
  * Dependencies required by RPC handlers.
  * `graphics` is optional -- headless mode omits it, and handlers
  * return an error if a graphics operation is requested without it.
@@ -127,6 +167,7 @@ export type RpcDependencies = {
   kernelClient: RpcRuntimeClient;
   graphics?: RpcGraphicsClient;
   geospec?: RpcGeoSpecClient;
+  skillResolver?: RpcSkillResolver;
 };
 
 /**
@@ -137,4 +178,5 @@ export type RpcHandlerError = {
   success: false;
   errorCode: RpcClientErrorCode;
   message: string;
+  fileMetadata?: RpcFileMetadata;
 };

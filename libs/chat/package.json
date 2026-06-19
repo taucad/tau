@@ -29,6 +29,16 @@
       "types": "./src/schemas/index.ts",
       "import": "./src/schemas/index.ts",
       "default": "./src/schemas/index.ts"
+    },
+    "./schemas/tools/test-model": {
+      "types": "./src/schemas/tools/test-model.tool.schema.ts",
+      "import": "./src/schemas/tools/test-model.tool.schema.ts",
+      "default": "./src/schemas/tools/test-model.tool.schema.ts"
+    },
+    "./schemas/tools/test-model-input-normalizer": {
+      "types": "./src/schemas/tools/test-model-input-normalizer.ts",
+      "import": "./src/schemas/tools/test-model-input-normalizer.ts",
+      "default": "./src/schemas/tools/test-model-input-normalizer.ts"
     }
   },
   "dependencies": {
@@ -38,6 +48,7 @@
     "@taucad/utils": "workspace:*"
   },
   "imports": {
+    "#*.js": "./src/*.ts",
     "#*": "./src/*"
   }
 }

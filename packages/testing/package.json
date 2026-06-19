@@ -9,9 +9,8 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/testing"
   },
-  "main": "./dist/cjs/index.cjs",
-  "types": "./dist/cjs/index.d.cts",
-  "module": "./dist/esm/index.js",
+  "main": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
   "files": [
     "dist",
     "README.md"
@@ -32,50 +31,30 @@
     "access": "public",
     "exports": {
       ".": {
-        "require": {
-          "types": "./dist/cjs/index.d.cts",
-          "default": "./dist/cjs/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/index.d.ts",
-          "default": "./dist/esm/index.js"
-        }
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "default": "./dist/esm/index.js"
       },
       "./geometry": {
-        "require": {
-          "types": "./dist/cjs/geometry/index.d.cts",
-          "default": "./dist/cjs/geometry/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/geometry/index.d.ts",
-          "default": "./dist/esm/geometry/index.js"
-        }
+        "types": "./dist/esm/geometry/index.d.ts",
+        "import": "./dist/esm/geometry/index.js",
+        "default": "./dist/esm/geometry/index.js"
       },
       "./parameters": {
-        "require": {
-          "types": "./dist/cjs/parameters.d.cts",
-          "default": "./dist/cjs/parameters.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/parameters.d.ts",
-          "default": "./dist/esm/parameters.js"
-        }
+        "types": "./dist/esm/parameters.d.ts",
+        "import": "./dist/esm/parameters.js",
+        "default": "./dist/esm/parameters.js"
       },
       "./tau": {
-        "require": {
-          "types": "./dist/cjs/tau.d.cts",
-          "default": "./dist/cjs/tau.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/tau.d.ts",
-          "default": "./dist/esm/tau.js"
-        }
+        "types": "./dist/esm/tau.d.ts",
+        "import": "./dist/esm/tau.js",
+        "default": "./dist/esm/tau.js"
       }
     }
   },
   "dependencies": {
-    "@gltf-transform/core": "^4.3.0",
-    "@gltf-transform/functions": "^4.3.0",
+    "@gltf-transform/core": "^4.4.0",
+    "@gltf-transform/functions": "^4.4.0",
     "geospec": "workspace:*"
   },
   "devDependencies": {

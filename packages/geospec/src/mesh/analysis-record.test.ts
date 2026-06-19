@@ -63,6 +63,47 @@ const createNamedAssemblyDocument = (
   return document;
 };
 
+const tetrahedronFaceIndices = [
+  [0, 2, 1],
+  [0, 1, 3],
+  [0, 3, 2],
+  [1, 2, 3],
+] as const;
+
+const appendTetrahedron = (
+  positions: number[],
+  indices: number[],
+  vertices: ReadonlyArray<[number, number, number]>,
+): void => {
+  const base = positions.length / 3;
+  for (const vertex of vertices) {
+    positions.push(vertex[0], vertex[1], vertex[2]);
+  }
+  for (const face of tetrahedronFaceIndices) {
+    indices.push(base + face[0], base + face[1], base + face[2]);
+  }
+};
+
+const createLowFractionNonManifoldDocument = (): Document => {
+  const positions: number[] = [];
+  const indices: number[] = [];
+
+  positions.push(0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1, 0, 0, 0, -1);
+  indices.push(0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3, 0, 1, 4, 0, 5, 1, 0, 4, 5, 1, 5, 4);
+
+  for (let index = 0; index < 100; index++) {
+    const x = 10 + index * 3;
+    appendTetrahedron(positions, indices, [
+      [x, 0, 0],
+      [x + 1, 0, 0],
+      [x, 1, 0],
+      [x, 0, 1],
+    ]);
+  }
+
+  return createTriangleDocument({ name: 'low-fraction-non-manifold', positions, indices });
+};
+
 describe('MeshAnalysisRecord', () => {
   it('should expose cheap primitive bounding-box records without materializing connected sub-pieces', () => {
     const record = buildMeshAnalysisRecord(
@@ -133,11 +174,31 @@ describe('MeshAnalysisRecord', () => {
     expect(stats.watertight).toBe(false);
     expect(watertight.watertight).toBe(false);
     expect(watertight.openBoundaryEdges).toBe(3);
+    expect(watertight.nonManifoldEdges).toBe(0);
+    expect(watertight.irregularEdgeKindCounts).toEqual({ openBoundary: 3, nonManifold: 0 });
+    expect(watertight.irregularEdgeClusters[0]).toMatchObject({ kind: 'open-boundary', edgeCount: 3 });
     expect(watertight.perPrimitive[0]).toMatchObject({
       name: 'open-triangle',
       boundaryEdges: 3,
     });
     expect(watertight.perPrimitive[0]?.loopCentroid.every((coordinate) => Number.isFinite(coordinate))).toBe(true);
+  });
+
+  it('should fail strict watertightness for low-fraction non-manifold edges with no open boundary', () => {
+    const stats = createGeometryStatsFromRecord(buildMeshAnalysisRecord(createLowFractionNonManifoldDocument()));
+    const watertight = stats.analyseWatertight();
+
+    expect(watertight.watertight).toBe(false);
+    expect(watertight.irregularEdges).toBe(1);
+    expect(watertight.openBoundaryEdges).toBe(0);
+    expect(watertight.nonManifoldEdges).toBe(1);
+    expect(watertight.irregularEdgeFraction).toBeLessThan(0.01);
+    expect(watertight.irregularEdgeKindCounts).toEqual({ openBoundary: 0, nonManifold: 1 });
+    expect(watertight.irregularEdgeClusters[0]).toMatchObject({
+      kind: 'non-manifold',
+      edgeCount: 1,
+      samples: [expect.objectContaining({ incidentTriangleCount: 4 })],
+    });
   });
 
   it('should build named component partitions from primitive ranges while merging repeated labels', () => {

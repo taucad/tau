@@ -69,7 +69,6 @@ export type TauModelRendererOutput = Uint8Array<ArrayBuffer> | GeometrySubject;
  */
 export type TauModelRenderer = (input: {
   file: string;
-  kernel?: string;
   format?: GeoSpecModelFormat;
   parameters?: Record<string, unknown>;
   parameterSource?: TauParameterGroup;
@@ -82,7 +81,6 @@ export type TauModelRenderer = (input: {
  */
 export type RenderTauModelOptions = {
   file: string;
-  kernel?: string;
   format?: GeoSpecModelFormat;
   parameters?: Record<string, unknown>;
   parameterSource?: TauParameterGroup;
@@ -268,7 +266,6 @@ export async function renderTauModel(options: RenderTauModelOptions): Promise<Ge
   const format = options.format ?? 'glb';
   const rendered = await options.renderer({
     file: options.file,
-    ...(options.kernel === undefined ? {} : { kernel: options.kernel }),
     format,
     ...(parameters === undefined ? {} : { parameters }),
     ...(options.parameterSource ? { parameterSource: options.parameterSource } : {}),
@@ -418,7 +415,6 @@ export const renderTauModel = async (options) => {
   const parameters = options.parameters ?? options.parameterSource?.values;
   return renderer({
     file: options.file,
-    ...(options.kernel === undefined ? {} : { kernel: options.kernel }),
     ...(options.format === undefined ? {} : { format: options.format }),
     ...(parameters === undefined ? {} : { parameters }),
     ...(options.parameterSource === undefined ? {} : { parameterSource: options.parameterSource }),
@@ -518,7 +514,6 @@ export async function runTauGeoSpecTests(options: RunTauGeoSpecTestsOptions): Pr
     renderer: async (input) =>
       renderTauModel({
         file: input.file,
-        kernel: input.kernel,
         format: input.format,
         parameters: input.parameters,
         parameterSource: input.parameterSource,
@@ -548,7 +543,6 @@ export async function runTauGeoSpecTests(options: RunTauGeoSpecTestsOptions): Pr
 
           return renderTauModel({
             file: input.file,
-            kernel: 'kernel' in input && typeof input.kernel === 'string' ? input.kernel : undefined,
             format: input.format,
             parameters: input.parameters,
             parameterSource: input.parameterSource,
@@ -614,7 +608,7 @@ export async function runTauGeoSpecTests(options: RunTauGeoSpecTestsOptions): Pr
     return {
       failures: [
         {
-          id: 'no_matching_geospec_tests',
+          id: 'NO_MATCHING_GEOSPEC_TESTS',
           requirement: 'At least one selected GeoSpec test must run',
           reason: 'GeoSpec files were found, but the supplied filters did not select any tests.',
           suggestion: 'Run without filters or use a matching Vitest-style testNamePattern.',

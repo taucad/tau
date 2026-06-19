@@ -164,8 +164,10 @@ GeoSpec records structured diagnostics.
                          Use \`count: 1\` for "the assembly
                          is one cohesive thing"; raise tolerance if parts visibly touch
                          but the test still reports >1.
-- watertight           — "Is each geometry unit's surface CLOSED (manifold / 3D-printable)?"
-                         The canonical "did the boolean fuse succeed" guardrail. Assert
+- watertight           — "Is each geometry unit's surface CLOSED (strict manifold topology)?"
+                         Requires zero irregular edges after spatial welding; slicer
+                         acceptance/repair is a different question. The canonical
+                         "did the boolean fuse succeed" guardrail. Assert
                          per geometry unit (e.g. \`lib/<part>.ts\`) so each part is verified
                          independently of how they are returned from \`main()\`.
 - surfaceArea / volume / centerOfMass / mass — "Does the model have the expected
@@ -174,7 +176,10 @@ GeoSpec records structured diagnostics.
 - componentOverlap     — "Do separate assembly components occupy the same solid volume?"
                          Use \`toHaveNoComponentOverlap({ tolerance: 0.1 })\`. GeoSpec
                          uses native exact solid intersection of mesh evidence; tangent
-                         contact and correctly meshed gears pass.
+                         contact and correctly meshed gears pass. For intentionally
+                         pair-specific checks, narrow the exact check with
+                         \`pairs: [{ left: /housing/i, right: /planet gear/i }]\`
+                         instead of dropping the global overlap test.
 - chamferDistance      — "How close is this geometry to a reference geometry?" Use
                          \`toHaveChamferDistanceTo\` for sampled shape comparison.`;
 

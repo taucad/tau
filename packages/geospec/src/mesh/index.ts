@@ -67,6 +67,9 @@ export type {
   StepEvidence,
   Vec3,
   WatertightFailure,
+  WatertightIrregularEdgeCluster,
+  WatertightIrregularEdgeKind,
+  WatertightIrregularEdgeSample,
   WatertightPrimitiveBreakdown,
   WatertightResult,
 } from '#mesh/types.js';

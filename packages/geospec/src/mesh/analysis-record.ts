@@ -11,6 +11,9 @@ import type {
   MeshTriangle,
   PrimitiveRecord,
   Vec3,
+  WatertightIrregularEdgeCluster,
+  WatertightIrregularEdgeKind,
+  WatertightIrregularEdgeSample,
   WatertightPrimitiveBreakdown,
   WatertightResult,
 } from '#mesh/types.js';
@@ -19,6 +22,21 @@ type Vec3Mutable = [number, number, number];
 type TriangleIndex = [number, number, number];
 
 type MeshQualityBase = Omit<MeshQualityStats, 'triangles'>;
+type IrregularEdgeKindCounts = {
+  openBoundary: number;
+  nonManifold: number;
+};
+
+type TopologyEdgeRecord = {
+  left: number;
+  right: number;
+  count: number;
+  triangleIndices: number[];
+};
+
+type IrregularTopologyEdgeRecord = TopologyEdgeRecord & {
+  kind: WatertightIrregularEdgeKind;
+};
 
 export type MeshAnalysisPrimitiveRecord = {
   index: number;
@@ -64,10 +82,11 @@ export type MeshComponentPartition = {
 
 export type MeshTopologySummary = {
   watertight: boolean;
-  manifoldForSolidAnalysis: boolean;
   irregularEdges: number;
   openBoundaryEdges: number;
   nonManifoldEdges: number;
+  irregularEdgeKindCounts: IrregularEdgeKindCounts;
+  irregularEdgeClusters: WatertightIrregularEdgeCluster[];
   totalEdges: number;
   irregularEdgeFraction: number;
   boundaryCentroid: Vec3;
@@ -100,7 +119,8 @@ export const meshAnalysisRecordSymbol: unique symbol = Symbol('geospec.meshAnaly
 
 const triangleAreaTolerance = 1e-12;
 const duplicatePrecision = 1e9;
-const irregularEdgeTolerance = 0.01;
+const irregularEdgeClusterLimit = 16;
+const irregularEdgeSampleLimit = 5;
 
 const emptyAabb = (): AabbMeters => ({
   min: [Infinity, Infinity, Infinity],
@@ -227,10 +247,11 @@ const primitiveNames = (options: {
 
 const makeEmptyTopologySummary = (): MeshTopologySummary => ({
   watertight: false,
-  manifoldForSolidAnalysis: false,
   irregularEdges: 0,
   openBoundaryEdges: 0,
   nonManifoldEdges: 0,
+  irregularEdgeKindCounts: { openBoundary: 0, nonManifold: 0 },
+  irregularEdgeClusters: [],
   totalEdges: 0,
   irregularEdgeFraction: 1,
   boundaryCentroid: [0, 0, 0],
@@ -247,11 +268,148 @@ const buildWeldedPositions = (positions: Float64Array<ArrayBuffer>): MeshAnalysi
   };
 };
 
+const createParentArray = (length: number): Uint32Array<ArrayBuffer> => {
+  const parent = new Uint32Array(length);
+  for (let index = 0; index < length; index++) {
+    parent[index] = index;
+  }
+  return parent;
+};
+
+const findParent = (parent: Uint32Array<ArrayBuffer>, input: number): number => {
+  let current = input;
+  while (parent[current] !== current) {
+    parent[current] = parent[parent[current]!]!;
+    current = parent[current]!;
+  }
+  return current;
+};
+
+const unionParent = (parent: Uint32Array<ArrayBuffer>, left: number, right: number): void => {
+  const leftRoot = findParent(parent, left);
+  const rightRoot = findParent(parent, right);
+  if (leftRoot !== rightRoot) {
+    parent[leftRoot] = rightRoot;
+  }
+};
+
+const edgeCenter = (start: Vec3, end: Vec3): Vec3Mutable => [
+  (start[0] + end[0]) / 2,
+  (start[1] + end[1]) / 2,
+  (start[2] + end[2]) / 2,
+];
+
+const edgeSample = (options: {
+  edge: IrregularTopologyEdgeRecord;
+  positionTuples: readonly Vec3Mutable[];
+  trianglePrimitiveIndices?: Uint32Array<ArrayBuffer>;
+  primitives?: readonly MeshAnalysisPrimitiveRecord[];
+}): WatertightIrregularEdgeSample => {
+  const start = cloneVec3(options.positionTuples[options.edge.left] ?? [0, 0, 0]);
+  const end = cloneVec3(options.positionTuples[options.edge.right] ?? [0, 0, 0]);
+  const primitiveNames = new Set<string>();
+  let color: string | undefined;
+
+  if (options.trianglePrimitiveIndices && options.primitives) {
+    for (const triangleIndex of options.edge.triangleIndices) {
+      const primitiveIndex = options.trianglePrimitiveIndices[triangleIndex];
+      const primitive = primitiveIndex === undefined ? undefined : options.primitives[primitiveIndex];
+      if (!primitive) {
+        continue;
+      }
+      primitiveNames.add(primitive.componentName);
+      color ??= primitive.color;
+    }
+  }
+
+  return {
+    start,
+    end,
+    center: edgeCenter(start, end),
+    incidentTriangleCount: options.edge.count,
+    primitives: [...primitiveNames].sort((left, right) => left.localeCompare(right)),
+    ...(color ? { color } : {}),
+  };
+};
+
+const buildIrregularEdgeClusters = (options: {
+  edges: readonly IrregularTopologyEdgeRecord[];
+  positionTuples: readonly Vec3Mutable[];
+  trianglePrimitiveIndices?: Uint32Array<ArrayBuffer>;
+  primitives?: readonly MeshAnalysisPrimitiveRecord[];
+}): WatertightIrregularEdgeCluster[] => {
+  if (options.edges.length === 0) {
+    return [];
+  }
+
+  const parent = createParentArray(options.edges.length);
+  const endpointBuckets = new Map<string, number[]>();
+  for (const [index, edge] of options.edges.entries()) {
+    for (const endpoint of [edge.left, edge.right]) {
+      const key = `${edge.kind}:${endpoint}`;
+      const bucket = endpointBuckets.get(key) ?? [];
+      bucket.push(index);
+      endpointBuckets.set(key, bucket);
+    }
+  }
+
+  for (const bucket of endpointBuckets.values()) {
+    for (let index = 1; index < bucket.length; index++) {
+      unionParent(parent, bucket[0]!, bucket[index]!);
+    }
+  }
+
+  const buckets = new Map<number, IrregularTopologyEdgeRecord[]>();
+  for (const [index, edge] of options.edges.entries()) {
+    const root = findParent(parent, index);
+    const bucket = buckets.get(root) ?? [];
+    bucket.push(edge);
+    buckets.set(root, bucket);
+  }
+
+  const clusters = [...buckets.values()].map((edges): WatertightIrregularEdgeCluster => {
+    const aabb = emptyAabb();
+    for (const edge of edges) {
+      expandAabb(aabb, options.positionTuples[edge.left] ?? [0, 0, 0]);
+      expandAabb(aabb, options.positionTuples[edge.right] ?? [0, 0, 0]);
+    }
+
+    return {
+      kind: edges[0]?.kind ?? 'open-boundary',
+      edgeCount: edges.length,
+      aabb: {
+        min: cloneVec3(aabb.min),
+        max: cloneVec3(aabb.max),
+        center: centerOfAabb(aabb),
+      },
+      samples: edges.slice(0, irregularEdgeSampleLimit).map((edge) =>
+        edgeSample({
+          edge,
+          positionTuples: options.positionTuples,
+          trianglePrimitiveIndices: options.trianglePrimitiveIndices,
+          primitives: options.primitives,
+        }),
+      ),
+    };
+  });
+
+  clusters.sort((left, right) => {
+    if (left.edgeCount !== right.edgeCount) {
+      return right.edgeCount - left.edgeCount;
+    }
+    return left.kind.localeCompare(right.kind);
+  });
+  return clusters.slice(0, irregularEdgeClusterLimit);
+};
+
 const topologyFromTriangles = (options: {
   positions: Float64Array<ArrayBuffer>;
   triangleIndices: Uint32Array<ArrayBuffer>;
   triangleIndicesToClassify?: readonly number[];
   weldedPositions?: MeshAnalysisWeldedPositions;
+  trianglePrimitiveIndices?: Uint32Array<ArrayBuffer>;
+  primitives?: readonly MeshAnalysisPrimitiveRecord[];
+  includeIrregularEdgeClusters?: boolean;
 }): MeshTopologySummary => {
   const triangleCount = options.triangleIndices.length / 3;
   const selected = options.triangleIndicesToClassify ?? Array.from({ length: triangleCount }, (_value, index) => index);
@@ -260,12 +418,25 @@ const topologyFromTriangles = (options: {
   }
 
   const { positionTuples, welded } = options.weldedPositions ?? buildWeldedPositions(options.positions);
-  const edgeCounts = new Map<string, number>();
-  const addEdge = (leftRaw: number, rightRaw: number): void => {
+  const edgeRecords = new Map<string, TopologyEdgeRecord>();
+  const addEdge = (leftRaw: number, rightRaw: number, triangleIndex: number): void => {
     const left = welded[leftRaw]!;
     const right = welded[rightRaw]!;
-    const key = left < right ? `${left},${right}` : `${right},${left}`;
-    edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+    const start = left < right ? left : right;
+    const end = left < right ? right : left;
+    const key = `${start},${end}`;
+    const record = edgeRecords.get(key);
+    if (record) {
+      record.count += 1;
+      record.triangleIndices.push(triangleIndex);
+      return;
+    }
+    edgeRecords.set(key, {
+      left: start,
+      right: end,
+      count: 1,
+      triangleIndices: [triangleIndex],
+    });
   };
 
   for (const triangleIndex of selected) {
@@ -273,9 +444,9 @@ const topologyFromTriangles = (options: {
     const a = options.triangleIndices[offset]!;
     const b = options.triangleIndices[offset + 1]!;
     const c = options.triangleIndices[offset + 2]!;
-    addEdge(a, b);
-    addEdge(b, c);
-    addEdge(a, c);
+    addEdge(a, b, triangleIndex);
+    addEdge(b, c, triangleIndex);
+    addEdge(a, c, triangleIndex);
   }
 
   let irregularEdges = 0;
@@ -284,31 +455,43 @@ const topologyFromTriangles = (options: {
   let bx = 0;
   let by = 0;
   let bz = 0;
-  for (const [key, count] of edgeCounts) {
-    if (count !== 2) {
+  const irregularEdgeRecords: IrregularTopologyEdgeRecord[] = [];
+  for (const edge of edgeRecords.values()) {
+    if (edge.count !== 2) {
       irregularEdges += 1;
     }
-    if (count === 1) {
+    if (edge.count === 1) {
       openBoundaryEdges += 1;
-      const [left, right] = key.split(',').map((value) => Number.parseInt(value, 10));
-      const a = positionTuples[left ?? 0] ?? [0, 0, 0];
-      const b = positionTuples[right ?? 0] ?? [0, 0, 0];
+      irregularEdgeRecords.push({ ...edge, kind: 'open-boundary' });
+      const a = positionTuples[edge.left] ?? [0, 0, 0];
+      const b = positionTuples[edge.right] ?? [0, 0, 0];
       bx += (a[0] + b[0]) / 2;
       by += (a[1] + b[1]) / 2;
       bz += (a[2] + b[2]) / 2;
-    } else if (count > 2) {
+    } else if (edge.count > 2) {
       nonManifoldEdges += 1;
+      irregularEdgeRecords.push({ ...edge, kind: 'non-manifold' });
     }
   }
 
-  const totalEdges = edgeCounts.size;
+  const totalEdges = edgeRecords.size;
   const irregularEdgeFraction = totalEdges > 0 ? irregularEdges / totalEdges : 0;
+  const irregularEdgeKindCounts = { openBoundary: openBoundaryEdges, nonManifold: nonManifoldEdges };
   return {
-    watertight: irregularEdgeFraction <= irregularEdgeTolerance,
-    manifoldForSolidAnalysis: irregularEdges === 0,
+    watertight: irregularEdges === 0,
     irregularEdges,
     openBoundaryEdges,
     nonManifoldEdges,
+    irregularEdgeKindCounts,
+    irregularEdgeClusters:
+      options.includeIrregularEdgeClusters === true
+        ? buildIrregularEdgeClusters({
+            edges: irregularEdgeRecords,
+            positionTuples,
+            trianglePrimitiveIndices: options.trianglePrimitiveIndices,
+            primitives: options.primitives,
+          })
+        : [],
     totalEdges,
     irregularEdgeFraction,
     boundaryCentroid:
@@ -408,6 +591,9 @@ const createWatertightResult = (record: MeshAnalysisRecord): WatertightResult =>
   watertight: record.topologySummary.watertight,
   irregularEdges: record.topologySummary.irregularEdges,
   openBoundaryEdges: record.topologySummary.openBoundaryEdges,
+  nonManifoldEdges: record.topologySummary.nonManifoldEdges,
+  irregularEdgeKindCounts: record.topologySummary.irregularEdgeKindCounts,
+  irregularEdgeClusters: record.topologySummary.irregularEdgeClusters,
   totalEdges: record.topologySummary.totalEdges,
   irregularEdgeFraction: record.topologySummary.irregularEdgeFraction,
   perPrimitive: buildPerPrimitiveBreakdowns(record),
@@ -768,6 +954,9 @@ const createRecord = (options: {
     positions: options.positions,
     triangleIndices: options.triangleIndices,
     weldedPositions: getWeldedPositions(),
+    trianglePrimitiveIndices: options.trianglePrimitiveIndices,
+    primitives: options.primitives,
+    includeIrregularEdgeClusters: true,
   });
   const record: MeshAnalysisRecord = {
     vertexCount: options.vertexCount,

@@ -99,9 +99,11 @@ export type TestFile = z.infer<typeof testFileSchema>;
 // Structured test failure payloads (geometry measurement checks)
 // =============================================================================
 
+const vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
+
 const aabbSchema = z.object({
-  min: z.tuple([z.number(), z.number(), z.number()]),
-  max: z.tuple([z.number(), z.number(), z.number()]),
+  min: vec3Schema,
+  max: vec3Schema,
 });
 
 const primitiveRecordSchema = z.object({
@@ -147,7 +149,27 @@ const boundingBoxAxisFailureSchema = z.object({
 const watertightPrimitiveBreakdownSchema = z.object({
   name: z.string(),
   boundaryEdges: z.number(),
-  loopCentroid: z.tuple([z.number(), z.number(), z.number()]),
+  loopCentroid: vec3Schema,
+});
+
+const watertightIrregularEdgeSampleSchema = z.object({
+  start: vec3Schema,
+  end: vec3Schema,
+  center: vec3Schema,
+  incidentTriangleCount: z.number(),
+  primitives: z.array(z.string()),
+  color: z.string().optional(),
+});
+
+const watertightIrregularEdgeClusterSchema = z.object({
+  kind: z.enum(['open-boundary', 'non-manifold']),
+  edgeCount: z.number(),
+  aabb: z.object({
+    min: vec3Schema,
+    max: vec3Schema,
+    center: vec3Schema,
+  }),
+  samples: z.array(watertightIrregularEdgeSampleSchema),
 });
 
 /**
@@ -171,6 +193,12 @@ export const testFailurePayloadSchema = z.discriminatedUnion('check', [
     check: z.literal('watertight'),
     irregularEdges: z.number(),
     openBoundaryEdges: z.number(),
+    nonManifoldEdges: z.number(),
+    irregularEdgeKindCounts: z.object({
+      openBoundary: z.number(),
+      nonManifold: z.number(),
+    }),
+    irregularEdgeClusters: z.array(watertightIrregularEdgeClusterSchema),
     irregularEdgeFraction: z.number(),
     perPrimitive: z.array(watertightPrimitiveBreakdownSchema),
   }),

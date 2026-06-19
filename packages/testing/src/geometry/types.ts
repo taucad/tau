@@ -13,6 +13,9 @@ import type {
   MeshQualityStats as GeoSpecMeshQualityStats,
   PrimitiveRecord as GeoSpecPrimitiveRecord,
   WatertightFailure as GeoSpecWatertightFailure,
+  WatertightIrregularEdgeCluster as GeoSpecWatertightIrregularEdgeCluster,
+  WatertightIrregularEdgeKind as GeoSpecWatertightIrregularEdgeKind,
+  WatertightIrregularEdgeSample as GeoSpecWatertightIrregularEdgeSample,
   WatertightPrimitiveBreakdown as GeoSpecWatertightPrimitiveBreakdown,
   WatertightResult as GeoSpecWatertightResult,
 } from 'geospec/mesh';
@@ -101,6 +104,23 @@ export type PrimitiveRecord = GeoSpecPrimitiveRecord;
  * @public
  */
 export type WatertightFailure = GeoSpecWatertightFailure;
+/** Class of irregular mesh edge found during watertight analysis.
+ *
+ * @public
+ */
+export type WatertightIrregularEdgeKind = GeoSpecWatertightIrregularEdgeKind;
+/**
+ * Spatial cluster of related irregular edges.
+ *
+ * @public
+ */
+export type WatertightIrregularEdgeCluster = GeoSpecWatertightIrregularEdgeCluster;
+/**
+ * Representative irregular edge from a watertightness failure.
+ *
+ * @public
+ */
+export type WatertightIrregularEdgeSample = GeoSpecWatertightIrregularEdgeSample;
 /**
  * Per-primitive watertightness evidence.
  *

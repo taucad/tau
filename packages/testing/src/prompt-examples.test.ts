@@ -16,6 +16,10 @@ describe('canonicalGeoSpecTestExample', () => {
   });
 
   it('should include examples for shape checks and physical measurements', () => {
+    expect(canonicalGeoSpecTestExample).toContain("const model = await loadModel({ file: '<file>' })");
+    expect(canonicalGeoSpecTestExample).not.toContain('modelPromise');
+    expect(canonicalGeoSpecTestExample).not.toContain('stepModelPromise');
+    expect(canonicalGeoSpecTestExample).not.toContain('getModel');
     expect(canonicalGeoSpecTestExample).toContain('toHaveBoundingBox');
     expect(canonicalGeoSpecTestExample).toContain('toHaveConnectedComponents');
     expect(canonicalGeoSpecTestExample).toContain('toBeWatertight');
@@ -63,7 +67,12 @@ describe('renderCanonicalExample', () => {
 
   it('should teach exact BRep checks to load STEP evidence explicitly', () => {
     expect(canonicalGeoSpecTestExample).not.toContain("format: 'step'");
-    expect(canonicalBrepGeoSpecTestExample).toContain("loadModel({ file: '<file>', format: 'step' })");
+    expect(canonicalBrepGeoSpecTestExample).toContain(
+      "const model = await loadModel({ file: '<file>', format: 'step' })",
+    );
+    expect(canonicalBrepGeoSpecTestExample).not.toContain('modelPromise');
+    expect(canonicalBrepGeoSpecTestExample).not.toContain('stepModelPromise');
+    expect(canonicalBrepGeoSpecTestExample).not.toContain('getModel');
     expect(renderCanonicalExample('ts', { includeBrepFeatures: true })).toContain(
       "loadModel({ file: 'main.ts', format: 'step' })",
     );
@@ -80,10 +89,11 @@ describe('availableChecksCopy', () => {
     expect(availableChecksCopy).toContain('centerOfMass');
     expect(availableChecksCopy).toContain('componentOverlap');
     expect(availableChecksCopy).toContain('toHaveNoComponentOverlap({ tolerance: 0.1 })');
+    expect(availableChecksCopy).toContain('pairs: [{ left: /housing/i, right: /planet gear/i }]');
     expect(availableChecksCopy).toContain('chamferDistance');
     expect(availableChecksCopy).toContain('SIZE / POSITION');
     expect(availableChecksCopy).toContain('SPATIALLY-DISJOINT CHUNKS');
-    expect(availableChecksCopy).toContain('CLOSED (manifold / 3D-printable)');
+    expect(availableChecksCopy).toContain('CLOSED (strict manifold topology)');
   });
 
   it('should explicitly mention the connectedComponents tolerance knob (mm) and its default', () => {
@@ -176,5 +186,6 @@ describe('agent-facing GeoSpec copy', () => {
     expect(corpus).not.toContain('test.json');
     expect(corpus).not.toMatch(/loadModel\([^)]*(?:scale|sourceUnit|coordinateSystem)/);
     expect(corpus).not.toMatch(/loadModel\([^)]*unit\s*:/);
+    expect(corpus).not.toMatch(/loadModel\([^)]*kernel\s*:/);
   });
 });

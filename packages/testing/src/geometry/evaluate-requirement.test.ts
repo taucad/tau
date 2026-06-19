@@ -39,6 +39,19 @@ const boxCode = `
   }
 `;
 
+const watertightResult = (overrides: Partial<WatertightResult> = {}): WatertightResult => ({
+  watertight: true,
+  irregularEdges: 0,
+  openBoundaryEdges: 0,
+  nonManifoldEdges: 0,
+  irregularEdgeKindCounts: { openBoundary: 0, nonManifold: 0 },
+  irregularEdgeClusters: [],
+  totalEdges: 0,
+  irregularEdgeFraction: 0,
+  perPrimitive: [],
+  ...overrides,
+});
+
 describe('evaluateRequirement', () => {
   let boxStats: GeometryStats;
 
@@ -356,14 +369,16 @@ describe('evaluateRequirement', () => {
     });
 
     it('should fail for non-watertight mesh and surface the per-part lib/<part>.ts hint', () => {
-      const wt: WatertightResult = {
+      const wt = watertightResult({
         watertight: false,
         irregularEdges: 12,
         openBoundaryEdges: 10,
+        irregularEdgeKindCounts: { openBoundary: 10, nonManifold: 2 },
+        nonManifoldEdges: 2,
         totalEdges: 100,
         irregularEdgeFraction: 0.12,
         perPrimitive: [{ name: 'Shell', boundaryEdges: 10, loopCentroid: [0, 0.1, 0] }],
-      };
+      });
       const openStats: GeometryStats = {
         ...boxStats,
         watertight: false,

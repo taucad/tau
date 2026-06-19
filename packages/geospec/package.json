@@ -112,7 +112,7 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@gltf-transform/core": "^4.3.0",
+    "@gltf-transform/core": "^4.4.0",
     "@taucad/runtime": "workspace:*",
     "@taucad/vm": "workspace:*",
     "manifold-3d": "catalog:"

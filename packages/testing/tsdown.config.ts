@@ -4,18 +4,11 @@ import type { Options } from 'tsdown';
 const baseConfig: Options = {
   entry: ['src/index.ts', 'src/geometry/index.ts', 'src/parameters.ts', 'src/tau.ts'],
   sourcemap: false,
-  clean: true,
+  clean: ['dist'],
   dts: true,
   minify: true,
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
-};
-
-const cjsConfig: Options = {
-  ...baseConfig,
-  format: 'cjs',
-  outDir: 'dist/cjs',
-  dts: false,
 };
 
 const esmConfig: Options = {
@@ -24,4 +17,4 @@ const esmConfig: Options = {
   outDir: 'dist/esm',
 };
 
-export default defineConfig([esmConfig, cjsConfig]);
+export default defineConfig(esmConfig);

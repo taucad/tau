@@ -140,18 +140,36 @@ const renderConnectedComponentsFailure = (
 
 const renderWatertightFailure = (failure: WatertightFailure): { reason: string; suggestion: string } => {
   const sorted = [...failure.perPrimitive].sort((a, b) => b.boundaryEdges - a.boundaryEdges);
+  const clusterLines = failure.irregularEdgeClusters.map((cluster, index) => {
+    const [cx, cy, cz] = cluster.aabb.center;
+    const samples = cluster.samples
+      .map((sample) => {
+        const [sx, sy, sz] = sample.center;
+        const primitives =
+          sample.primitives.length > 0 ? ` primitives=${sample.primitives.map((name) => `'${name}'`).join(', ')}` : '';
+        return `sample≈[${sx.toFixed(4)}, ${sy.toFixed(4)}, ${sz.toFixed(4)}] triangles=${sample.incidentTriangleCount}${primitives}`;
+      })
+      .join('; ');
+    return `- Cluster ${index + 1} (${cluster.kind}, ${cluster.edgeCount} edges, center≈[${cx.toFixed(4)}, ${cy.toFixed(4)}, ${cz.toFixed(4)}]): ${samples}`;
+  });
   const lines: string[] = [
-    `Mesh is not watertight: ${failure.irregularEdges} irregular edges (open boundary: ${failure.openBoundaryEdges}, ${(failure.irregularEdgeFraction * 100).toFixed(2)}% of edges)`,
+    `Mesh is not watertight: ${failure.irregularEdges} irregular edges (open boundary: ${failure.openBoundaryEdges}, non-manifold: ${failure.nonManifoldEdges}, ${(failure.irregularEdgeFraction * 100).toFixed(2)}% of edges)`,
     '',
     'Per-primitive boundary edges:',
     ...sorted.map((p) => {
       const [cx, cy, cz] = p.loopCentroid;
       return `- '${p.name}': ${p.boundaryEdges} edges (boundary centroid ≈[${cx.toFixed(4)}, ${cy.toFixed(4)}, ${cz.toFixed(4)}])`;
     }),
+    ...(clusterLines.length > 0 ? ['', 'Irregular edge clusters:', ...clusterLines] : []),
   ];
   const top = sorted.at(0);
+  const suggestionPrefix =
+    failure.nonManifoldEdges > 0 && failure.openBoundaryEdges === 0
+      ? 'The surface has over-adjacent or coincident triangles rather than open holes. Check overlapping boolean operands, duplicate shells, or kernel export canonicalization before GLB writing. '
+      : 'The surface has gaps. ';
   const suggestion =
-    'The surface has gaps. If you are asserting on an assembled main.ts that returns ' +
+    suggestionPrefix +
+    'If you are asserting on an assembled main.ts that returns ' +
     'multiple ShapeConfigs, move this requirement into each lib/<part>.ts entry instead — ' +
     'multi-part assemblies are watertight per part, not as one mesh. Otherwise check for ' +
     'failed boolean ops (use screenshot to inspect) or replace Compound with proper fuse.' +
@@ -326,6 +344,9 @@ export const evaluateRequirement = (requirement: MeasurementTestRequirement, sta
       const failure: WatertightFailure = {
         irregularEdges: wt.irregularEdges,
         openBoundaryEdges: wt.openBoundaryEdges,
+        nonManifoldEdges: wt.nonManifoldEdges,
+        irregularEdgeKindCounts: wt.irregularEdgeKindCounts,
+        irregularEdgeClusters: wt.irregularEdgeClusters,
         irregularEdgeFraction: wt.irregularEdgeFraction,
         perPrimitive: wt.perPrimitive,
       };

@@ -95,10 +95,10 @@ See `docs/research/geospec-standalone-cad-testing-blueprint.md` for the current 
 - [ ] `toHaveBoundingBox({ min, max, size, center, tolerance })`
 - [ ] `toHaveConnectedComponents(count, { tolerance })`
 - [ ] `toBeWatertight()`
-- [x] `toHaveNoComponentOverlap({ tolerance })`
+- [x] `toHaveNoComponentOverlap({ tolerance, pairs })`
   - Chosen first-class assembly-overlap API.
-  - Public options stay limited to `{ tolerance?: number }`; no component mode, pair exemptions, sample budget, or volume budget is exposed.
-  - Verdicts are native-only through GeoSpec OpenCascade.js faceted-solid intersection. Correct gear meshing and tangent contact pass because only positive common solid volume fails.
+  - Public options are `{ tolerance?: number; pairs?: Array<{ left: string | RegExp; right: string | RegExp }> }`; pair selectors narrow exact checks for pair-specific intent without adding component modes, sample budgets, or volume budgets.
+  - Verdicts use GeoSpec mesh records, cheap AABB candidate pruning, and Manifold WASM exact intersection volume. Correct gear meshing and tangent contact pass because only positive common solid volume fails.
   - If GeoSpec cannot identify independently testable components or native overlap support is missing, return structured diagnostics rather than a false pass or a JavaScript fallback.
 - [ ] `toHaveNoDegenerateTriangles({ areaTolerance })`
 - [ ] `toHaveNoNonFiniteVertices()`
@@ -152,7 +152,7 @@ See `docs/research/geospec-standalone-cad-testing-blueprint.md` for the current 
 - [ ] `toBePerpendicularTo(leftSelector, rightSelector, { angularTolerance })`
 - [ ] `toHaveClearanceTo(selector, { min, max, tolerance })`
 - [ ] Selector-aware exact interference API for a future slice.
-  - Do not add a duplicate alias for the P0 whole-assembly invariant. Use `toHaveNoComponentOverlap({ tolerance })` today.
+  - Do not add a duplicate alias for the P0 whole-assembly invariant. Use `toHaveNoComponentOverlap({ tolerance, pairs })` today.
   - Future selector APIs should express positive relationships such as clearance, contact, press-fit, or intentional interference with explicit selector evidence.
 - [ ] `toHaveContactWith(selector, { tolerance })`
 - [ ] `toHaveMateDelta({ translation, rotation, tolerance })`

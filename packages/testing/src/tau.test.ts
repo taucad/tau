@@ -62,6 +62,19 @@ const createTriangleGlb = async (): Promise<Uint8Array<ArrayBuffer>> => {
   return new WebIO().writeBinary(document);
 };
 
+const watertightResult = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  watertight: true,
+  irregularEdges: 0,
+  openBoundaryEdges: 0,
+  nonManifoldEdges: 0,
+  irregularEdgeKindCounts: { openBoundary: 0, nonManifold: 0 },
+  irregularEdgeClusters: [],
+  totalEdges: 0,
+  irregularEdgeFraction: 0,
+  perPrimitive: [],
+  ...overrides,
+});
+
 const createGeometrySubject = (sizeX: number): GeometrySubject =>
   ({
     kind: 'geometry-subject',
@@ -74,7 +87,7 @@ const createGeometrySubject = (sizeX: number): GeometrySubject =>
       stats: {
         boundingBox: { center: [sizeX / 2, 0, 0], size: [sizeX, 1, 1] },
         analyseConnectedComponents: () => ({ count: 1, components: [] }),
-        analyseWatertight: () => ({ watertight: true, irregularEdges: 0, openBoundaryEdges: 0 }),
+        analyseWatertight: () => watertightResult(),
       },
     },
   }) as unknown as GeometrySubject;
@@ -258,7 +271,7 @@ describe('runTauGeoSpecTests', () => {
         stats: {
           boundingBox: { center: [0, 0, 0], size: [800, 600, 750] },
           analyseConnectedComponents: () => ({ count: 1, components: [] }),
-          analyseWatertight: () => ({ watertight: true, irregularEdges: 0, openBoundaryEdges: 0 }),
+          analyseWatertight: () => watertightResult(),
         },
       },
     } as unknown as GeometrySubject;
@@ -349,7 +362,7 @@ describe('runTauGeoSpecTests', () => {
         stats: {
           boundingBox: { center: [0, 0, 0], size: [800, 600, 750] },
           analyseConnectedComponents: () => ({ count: 1, components: [] }),
-          analyseWatertight: () => ({ watertight: true, irregularEdges: 0, openBoundaryEdges: 0 }),
+          analyseWatertight: () => watertightResult(),
         },
       },
     } as unknown as GeometrySubject;
@@ -439,7 +452,7 @@ describe('runTauGeoSpecTests', () => {
     expect(result.total).toBe(1);
     expect(result.failures).toEqual([
       expect.objectContaining({
-        id: 'no_matching_geospec_tests',
+        id: 'NO_MATCHING_GEOSPEC_TESTS',
         requirement: 'At least one selected GeoSpec test must run',
         targetFile: 'main.geospec.ts',
       }),
@@ -557,14 +570,7 @@ describe('runTauGeoSpecTests', () => {
           connectedComponents: () => 0,
           analyseConnectedComponents: () => ({ count: 0, clusters: [], gaps: [] }),
           watertight: false,
-          analyseWatertight: () => ({
-            watertight: false,
-            irregularEdges: 0,
-            openBoundaryEdges: 0,
-            totalEdges: 0,
-            irregularEdgeFraction: 0,
-            perPrimitive: [],
-          }),
+          analyseWatertight: () => watertightResult({ watertight: false }),
         },
       },
       brep: {

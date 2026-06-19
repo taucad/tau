@@ -745,7 +745,7 @@ describe('runGeoSpecCli', () => {
         '    connectedComponents: () => 1,',
         '    analyseConnectedComponents: () => ({ count: 1, clusters: [], gaps: [] }),',
         '    watertight: true,',
-        '    analyseWatertight: () => ({ watertight: true, irregularEdges: 0, openBoundaryEdges: 0, totalEdges: 18, irregularEdgeFraction: 0, perPrimitive: [] }),',
+        '    analyseWatertight: () => ({ watertight: true, irregularEdges: 0, openBoundaryEdges: 0, nonManifoldEdges: 0, irregularEdgeKindCounts: { openBoundary: 0, nonManifold: 0 }, irregularEdgeClusters: [], totalEdges: 18, irregularEdgeFraction: 0, perPrimitive: [] }),',
         '    vertexCount: 8, meshCount: 1, triangleCount: 12,',
         '  } },',
         '  brep: {',

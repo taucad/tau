@@ -89,21 +89,48 @@ const touchingMultiShapeCode = `
   }
 `;
 
+// Regression for the original planetary-gear follow-up: the carrier is a
+// single manufactured component even when emitted as multiple named ShapeConfig
+// pieces. Pins and boss touch the carrier plate, so connectedComponents must
+// report one spatial component rather than one per returned part.
+const planetaryCarrierCode = `
+  import { makeBaseBox } from 'replicad';
+  export default function main() {
+    const plate = makeBaseBox(80, 80, 4);
+    const boss = makeBaseBox(14, 14, 20).translateZ(2);
+    const pinA = makeBaseBox(8, 8, 16).translate(26, 0, 2);
+    const pinB = makeBaseBox(8, 8, 16).translate(-26, 0, 2);
+    const pinC = makeBaseBox(8, 8, 16).translate(0, 26, 2);
+    const pinD = makeBaseBox(8, 8, 16).translate(0, -26, 2);
+    return [
+      { shape: plate, name: 'carrier-plate' },
+      { shape: boss, name: 'center-boss' },
+      { shape: pinA, name: 'planet-pin-a' },
+      { shape: pinB, name: 'planet-pin-b' },
+      { shape: pinC, name: 'planet-pin-c' },
+      { shape: pinD, name: 'planet-pin-d' },
+    ];
+  }
+`;
+
 describe('countConnectedComponents', () => {
   let boxGlb: Uint8Array<ArrayBuffer>;
   let farApartMultiShapeGlb: Uint8Array<ArrayBuffer>;
   let fusedGlb: Uint8Array<ArrayBuffer>;
   let disjointMultiShapeGlb: Uint8Array<ArrayBuffer>;
   let touchingMultiShapeGlb: Uint8Array<ArrayBuffer>;
+  let planetaryCarrierGlb: Uint8Array<ArrayBuffer>;
 
   beforeAll(async () => {
-    [boxGlb, farApartMultiShapeGlb, fusedGlb, disjointMultiShapeGlb, touchingMultiShapeGlb] = await Promise.all([
-      renderGlb('box.ts', boxCode),
-      renderGlb('far-apart.ts', farApartMultiShapeCode),
-      renderGlb('fused.ts', fusedCode),
-      renderGlb('disjoint.ts', disjointMultiShapeCode),
-      renderGlb('touching.ts', touchingMultiShapeCode),
-    ]);
+    [boxGlb, farApartMultiShapeGlb, fusedGlb, disjointMultiShapeGlb, touchingMultiShapeGlb, planetaryCarrierGlb] =
+      await Promise.all([
+        renderGlb('box.ts', boxCode),
+        renderGlb('far-apart.ts', farApartMultiShapeCode),
+        renderGlb('fused.ts', fusedCode),
+        renderGlb('disjoint.ts', disjointMultiShapeCode),
+        renderGlb('touching.ts', touchingMultiShapeCode),
+        renderGlb('planetary-carrier.ts', planetaryCarrierCode),
+      ]);
   }, 120_000);
 
   it('should report 1 component for a single solid at the default tolerance', async () => {
@@ -178,6 +205,21 @@ describe('countConnectedComponents', () => {
       id: 'req_helicopter',
       type: 'measurement',
       description: 'Helicopter assembly is one cohesive piece',
+      check: 'connectedComponents',
+      expected: { count: 1 },
+    };
+
+    const result = evaluateRequirement(requirement, stats);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('should pass connectedComponents:1 for a multi-part planetary carrier fixture', async () => {
+    const stats = await analyzeGlb(planetaryCarrierGlb);
+    const requirement: MeasurementTestRequirement = {
+      id: 'req_planetary_carrier',
+      type: 'measurement',
+      description: 'Planet carrier plate, boss, and pins are one connected manufactured component',
       check: 'connectedComponents',
       expected: { count: 1 },
     };

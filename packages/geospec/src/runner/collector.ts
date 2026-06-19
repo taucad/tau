@@ -798,9 +798,13 @@ const evaluateWatertight = (subject: unknown): GeometryDiagnostic[] => {
     {
       code: 'MESH_NOT_WATERTIGHT',
       severity: 'error',
-      message: `Mesh is not watertight: ${watertight.irregularEdges} irregular edges, ${watertight.openBoundaryEdges} open boundary edges.`,
+      message:
+        `Mesh is not watertight: ${watertight.irregularEdges} irregular edges, ` +
+        `${watertight.openBoundaryEdges} open boundary edges, ${watertight.nonManifoldEdges} non-manifold edges.`,
       suggestion:
-        'Check for failed booleans, missing caps, open surfaces, or assemblies that should be tested per part.',
+        watertight.nonManifoldEdges > 0 && watertight.openBoundaryEdges === 0
+          ? 'Check for coincident or over-adjacent surfaces from overlapping booleans; canonicalize valid imported meshes through the kernel before writing GLB.'
+          : 'Check for failed booleans, missing caps, open surfaces, or assemblies that should be tested per part.',
       details: watertight,
     },
   ];

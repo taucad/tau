@@ -396,6 +396,40 @@ export type WatertightPrimitiveBreakdown = {
 };
 
 /**
+ * Class of irregular mesh edge found during watertight analysis.
+ * @public
+ */
+export type WatertightIrregularEdgeKind = 'open-boundary' | 'non-manifold';
+
+/**
+ * Representative irregular edge, in glTF document coordinates.
+ * @public
+ */
+export type WatertightIrregularEdgeSample = {
+  start: Vec3;
+  end: Vec3;
+  center: Vec3;
+  incidentTriangleCount: number;
+  primitives: string[];
+  color?: string;
+};
+
+/**
+ * Spatial cluster of related irregular edges.
+ * @public
+ */
+export type WatertightIrregularEdgeCluster = {
+  kind: WatertightIrregularEdgeKind;
+  edgeCount: number;
+  aabb: {
+    min: Vec3;
+    max: Vec3;
+    center: Vec3;
+  };
+  samples: WatertightIrregularEdgeSample[];
+};
+
+/**
  * Structured payload when `watertight` fails.
  * @public
  */
@@ -404,6 +438,13 @@ export type WatertightFailure = {
   irregularEdges: number;
   /** Edges shared by exactly one triangle (open boundary). */
   openBoundaryEdges: number;
+  /** Edges shared by more than two triangles (over-adjacent/non-manifold). */
+  nonManifoldEdges: number;
+  irregularEdgeKindCounts: {
+    openBoundary: number;
+    nonManifold: number;
+  };
+  irregularEdgeClusters: WatertightIrregularEdgeCluster[];
   irregularEdgeFraction: number;
   perPrimitive: WatertightPrimitiveBreakdown[];
 };
@@ -426,6 +467,12 @@ export type WatertightResult = {
   watertight: boolean;
   irregularEdges: number;
   openBoundaryEdges: number;
+  nonManifoldEdges: number;
+  irregularEdgeKindCounts: {
+    openBoundary: number;
+    nonManifold: number;
+  };
+  irregularEdgeClusters: WatertightIrregularEdgeCluster[];
   totalEdges: number;
   irregularEdgeFraction: number;
   perPrimitive: WatertightPrimitiveBreakdown[];

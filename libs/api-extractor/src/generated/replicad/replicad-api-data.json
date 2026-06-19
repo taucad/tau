@@ -1,13 +1,13 @@
 {
   "metadata": {
-    "extractionDate": "2026-05-31T23:40:27.919Z",
+    "extractionDate": "2026-06-19T21:31:54.918Z",
     "source": "TypeScript Compiler API (replicad)",
-    "totalEntries": 223,
+    "totalEntries": 225,
     "breakdown": {
       "class": 46,
       "constant": 68,
-      "type": 36,
-      "interface": 16,
+      "type": 37,
+      "interface": 17,
       "function": 57
     }
   },
@@ -22,7 +22,7 @@
       "name": "_3DShape",
       "kind": "class",
       "category": "Geometry Types",
-      "signature": "export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> implements Shape3DLike<Shape3D, ShapeMesh, AnyShape, {\n    tolerance?: number;\n    angularTolerance?: number;\n}> {\n    fuse(other: Shape3D, { optimisation }?: {\n        optimisation?: 'none' | 'commonFace' | 'sameFace';\n    }): Shape3D;\n    cut(tool: Shape3D, { optimisation }?: {\n        optimisation?: 'none' | 'commonFace' | 'sameFace';\n    }): Shape3D;\n    intersect(tool: AnyShape): Shape3D;\n    meshShape(options?: {\n        tolerance?: number;\n        angularTolerance?: number;\n    }): MeshShape;\n    shell(config: {\n        filter: FaceFinder;\n        thickness: number;\n    }, tolerance?: number): Shape3D;\n    shell(thickness: number, finderFcn: (f: FaceFinder) => FaceFinder, tolerance?: number): Shape3D;\n    fillet(radiusConfig: RadiusConfig<FilletRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n    chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n    draft(angle: number, faceFinder: (e: FaceFinder) => FaceFinder, neutralPlane?: Plane | PlaneName): AnyShape;\n}"
+      "signature": "export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> implements Shape3DLike<Shape3D, ShapeMesh, AnyShape, {\n    tolerance?: number;\n    angularTolerance?: number;\n}> {\n    fuse(other: Shape3D, options?: BooleanOperationOptions): Shape3D;\n    fuseAll(others: readonly Shape3D[], options?: BooleanOperationOptions): Shape3D;\n    cut(tool: Shape3D, options?: BooleanOperationOptions): Shape3D;\n    cutAll(tools: readonly Shape3D[], options?: BooleanOperationOptions): Shape3D;\n    intersect(tool: AnyShape, options?: BooleanOperationOptions): Shape3D;\n    intersectAll(tools: readonly AnyShape[], options?: BooleanOperationOptions): Shape3D;\n    meshShape(options?: {\n        tolerance?: number;\n        angularTolerance?: number;\n    }): MeshShape;\n    shell(config: {\n        filter: FaceFinder;\n        thickness: number;\n    }, tolerance?: number): Shape3D;\n    shell(thickness: number, finderFcn: (f: FaceFinder) => FaceFinder, tolerance?: number): Shape3D;\n    fillet(radiusConfig: RadiusConfig<FilletRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n    chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n    draft(angle: number, faceFinder: (e: FaceFinder) => FaceFinder, neutralPlane?: Plane | PlaneName): AnyShape;\n}"
     },
     {
       "name": "addHolesInFace",
@@ -117,6 +117,18 @@
       "kind": "class",
       "category": "Drawing & Sketching",
       "signature": "export declare class BlueprintSketcher extends BaseSketcher2d implements GenericSketcher<Blueprint> {\n    constructor(origin?: Point2D);\n    done(): Blueprint;\n    close(): Blueprint;\n    closeWithMirror(): Blueprint;\n    closeWithCustomCorner(radius: number, mode?: \"fillet\" | \"chamfer\" | \"dogbone\"): Blueprint;\n}"
+    },
+    {
+      "name": "BooleanOperationOptions",
+      "kind": "interface",
+      "category": "Utilities",
+      "signature": "export declare interface BooleanOperationOptions {\n    optimisation?: BooleanOptimisation;\n}"
+    },
+    {
+      "name": "BooleanOptimisation",
+      "kind": "type",
+      "category": "Utilities",
+      "signature": "declare type BooleanOptimisation = 'none' | 'commonFace' | 'sameFace';"
     },
     {
       "name": "BoundingBox",
@@ -1765,7 +1777,7 @@
       "name": "Sketches",
       "kind": "class",
       "category": "Utilities",
-      "signature": "export declare class Sketches {\n    sketches: Array<Sketch | CompoundSketch>;\n    constructor(sketches: Array<Sketch | CompoundSketch>);\n    wires(): AnyShape;\n    faces(): AnyShape;\n    extrude(extrusionDistance: number, extrusionConfig?: {\n        extrusionDirection?: Point;\n        extrusionProfile?: ExtrusionProfile;\n        twistAngle?: number;\n        origin?: Point;\n    }): AnyShape;\n    revolve(revolutionAxis?: Point, config?: {\n        origin?: Point;\n        angle?: number;\n    }): AnyShape;\n}"
+      "signature": "export declare class Sketches {\n    sketches: Array<Sketch | CompoundSketch>;\n    constructor(sketches: Array<Sketch | CompoundSketch>);\n    wires(): AnyShape;\n    faces(): AnyShape;\n    extrude(extrusionDistance: number, extrusionConfig?: {\n        extrusionDirection?: Point;\n        extrusionProfile?: ExtrusionProfile;\n        twistAngle?: number;\n        origin?: Point;\n    }): Shape3D;\n    revolve(revolutionAxis?: Point, config?: {\n        origin?: Point;\n        angle?: number;\n    }): Shape3D;\n}"
     },
     {
       "name": "sketchFaceOffset",

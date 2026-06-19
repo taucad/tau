@@ -103,6 +103,8 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     expect(modelLoaderTypes).toContain('Load a CAD model into GeoSpec evidence.');
     expect(modelLoaderTypes).toContain('export declare function loadModel');
     expect(modelOptionTypes).toContain("'step' | 'stp'");
+    expect(modelOptionTypes).not.toContain('kernel?:');
+    expect(modelOptionTypes).not.toContain('CAD kernel hint');
     expect(modelTypes).toContain('GeoSpecModelLoadError');
     expect(modelTypes).not.toContain('loadModelSafe');
     expect(modelTypes).not.toContain('tryLoadModel');

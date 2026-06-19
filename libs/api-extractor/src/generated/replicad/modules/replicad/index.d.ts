@@ -67,23 +67,40 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> imp
      *
      * @category Shape Modifications
      */
-    fuse(other: Shape3D, { optimisation }?: {
-        optimisation?: 'none' | 'commonFace' | 'sameFace';
-    }): Shape3D;
+    fuse(other: Shape3D, options?: BooleanOperationOptions): Shape3D;
+    /**
+     * Builds a new shape by fusing this shape with all provided shapes in one
+     * OCCT boolean operation.
+     *
+     * @category Shape Modifications
+     */
+    fuseAll(others: readonly Shape3D[], options?: BooleanOperationOptions): Shape3D;
     /**
      * Builds a new shape by removing the tool tape from this shape
      *
      * @category Shape Modifications
      */
-    cut(tool: Shape3D, { optimisation }?: {
-        optimisation?: 'none' | 'commonFace' | 'sameFace';
-    }): Shape3D;
+    cut(tool: Shape3D, options?: BooleanOperationOptions): Shape3D;
+    /**
+     * Builds a new shape by removing all provided tool shapes in one OCCT boolean
+     * operation.
+     *
+     * @category Shape Modifications
+     */
+    cutAll(tools: readonly Shape3D[], options?: BooleanOperationOptions): Shape3D;
     /**
      * Builds a new shape by intersecting this shape and another
      *
      * @category Shape Modifications
      */
-    intersect(tool: AnyShape): Shape3D;
+    intersect(tool: AnyShape, options?: BooleanOperationOptions): Shape3D;
+    /**
+     * Builds a new shape by intersecting this shape with all provided shapes in
+     * one OCCT boolean operation.
+     *
+     * @category Shape Modifications
+     */
+    intersectAll(tools: readonly AnyShape[], options?: BooleanOperationOptions): Shape3D;
     meshShape(options?: {
         tolerance?: number;
         angularTolerance?: number;
@@ -326,6 +343,12 @@ export declare class BlueprintSketcher extends BaseSketcher2d implements Generic
      */
     closeWithCustomCorner(radius: number, mode?: "fillet" | "chamfer" | "dogbone"): Blueprint;
 }
+
+export declare interface BooleanOperationOptions {
+    optimisation?: BooleanOptimisation;
+}
+
+declare type BooleanOptimisation = 'none' | 'commonFace' | 'sameFace';
 
 export declare class BoundingBox extends WrappingObj<Bnd_Box> {
     constructor(wrapped?: Bnd_Box);
@@ -2220,7 +2243,7 @@ export declare class Sketches {
         extrusionProfile?: ExtrusionProfile;
         twistAngle?: number;
         origin?: Point;
-    }): AnyShape;
+    }): Shape3D;
     /**
      * Revolves the drawing on an axis (defined by its direction and an origin
      * (defaults to the sketch origin)
@@ -2228,7 +2251,7 @@ export declare class Sketches {
     revolve(revolutionAxis?: Point, config?: {
         origin?: Point;
         angle?: number;
-    }): AnyShape;
+    }): Shape3D;
 }
 
 /**

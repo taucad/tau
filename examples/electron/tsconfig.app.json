@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts", "package.json"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/**/*.spec.ts", "src/**/*.spec.tsx", "e2e/**/*"],
+  "compilerOptions": {
+    "outDir": "./out-tsc/lib",
+    "lib": ["DOM", "DOM.Iterable", "ES2024"],
+    "types": ["node", "electron"],
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2024"
+  },
+  "references": [
+    {
+      "path": "../../packages/types/tsconfig.lib.json"
+    },
+    {
+      "path": "../../kernels/openscad/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/runtime/tsconfig.lib.json"
+    }
+  ]
+}

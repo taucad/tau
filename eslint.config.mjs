@@ -232,7 +232,7 @@ const config = [
         projectService: {
           allowDefaultProject: [
             'eslint.config.mjs',
-            'examples/electron-tau/electron.vite.config.ts',
+            'examples/electron/electron.vite.config.ts',
             'apps/api/vitest.config.ts',
             'apps/ui/scripts/check-ssr-bundle-budget.mts',
           ],
@@ -382,11 +382,11 @@ const config = [
 
   {
     /*
-     * Electron PoC renderer: `declare global { interface Window { … } }` is the
+     * Electron renderer: `declare global { interface Window { … } }` is the
      * correct TypeScript merge pattern; ESLint `consistent-type-definitions`
      * would force `type` and breaks augmentation.
      */
-    files: ['examples/electron-tau/src/renderer/app.tsx'],
+    files: ['examples/electron/src/renderer/app.tsx'],
     rules: {
       '@typescript-eslint/consistent-type-definitions': 'off',
     },
@@ -394,13 +394,13 @@ const config = [
 
   {
     /*
-     * Electron PoC example: a small standalone app shell that mixes
+     * Electron example: a small standalone app shell that mixes
      * SCREAMING_SNAKE_CASE constants (glTF magic numbers) with React
      * components, making the workspace's strict naming-convention contract
      * an awkward fit. The example is non-shipping, so we relax the rule
      * mirror-style to `libs/tau-examples`.
      */
-    files: ['examples/electron-tau/**/*.{ts,tsx}'],
+    files: ['examples/electron/**/*.{ts,tsx}'],
     rules: {
       '@typescript-eslint/naming-convention': 'off',
       '@typescript-eslint/member-ordering': 'off',

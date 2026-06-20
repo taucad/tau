@@ -2,7 +2,7 @@
  * Filesystem bridge: worker-side ({@link exposeFileSystem}) and client-side ({@link createFileSystemBridge}).
  */
 
-import { getEventOrigin } from '@taucad/filesystem';
+import { getEventOrigin, isWorkspaceMutationError } from '@taucad/filesystem';
 import { safeDispose } from '@taucad/utils/dispose';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { ChangeEvent } from '@taucad/types';
@@ -14,6 +14,7 @@ import type {
   WorkspaceFileService,
   WorkspaceMutationContext,
   WorkspaceMutationError,
+  WorkspaceMutationErrorCode,
   WorkspaceScope,
 } from '@taucad/filesystem';
 import type { BridgeServerHandle, Port, StringKeyedObject } from '@taucad/rpc/bridge';
@@ -177,6 +178,43 @@ type BulkMoveResult = {
   moved: ReadonlyArray<{ edit: { source: string; target: string }; stat: FileStat }>;
   failed: ReadonlyArray<{ edit: { source: string; target: string }; error: WorkspaceMutationError }>;
 };
+type PreflightMethodName = 'canMove' | 'canRename' | 'canCreate' | 'canDelete';
+type PreflightMethods = Pick<WorkspaceFileService, PreflightMethodName>;
+type SerializedWorkspaceMutationError = Readonly<{
+  __workspaceMutationError__: true;
+  name: 'WorkspaceMutationError';
+  code: WorkspaceMutationErrorCode;
+  path: string;
+  target?: string;
+  message: string;
+}>;
+type PreflightOverrideMap = {
+  [K in PreflightMethodName]: PreflightMethods[K];
+};
+const workspaceMutationErrorMarker = '__workspaceMutationError__';
+
+const serializeWorkspaceMutationError = (error: WorkspaceMutationError): WorkspaceMutationError => {
+  const serialized: SerializedWorkspaceMutationError = {
+    [workspaceMutationErrorMarker]: true,
+    name: 'WorkspaceMutationError',
+    code: error.code,
+    path: error.path,
+    message: error.message,
+    ...(error.target === undefined ? {} : { target: error.target }),
+  };
+  return serialized as WorkspaceMutationError;
+};
+
+const serializeMutationResult = (result: true | WorkspaceMutationError): true | WorkspaceMutationError =>
+  isWorkspaceMutationError(result) ? serializeWorkspaceMutationError(result) : result;
+
+const serializeBulkMoveResult = (result: BulkMoveResult): BulkMoveResult => ({
+  moved: result.moved,
+  failed: result.failed.map(({ edit, error }) => ({
+    edit,
+    error: serializeWorkspaceMutationError(error),
+  })),
+});
 
 /**
  * Wrap `service` with a per-port mutation-context closure. Each mutating
@@ -217,6 +255,7 @@ export function bindMutationContextForPort<T extends StringKeyedObject>(
   // safe at runtime because the proxy `get` trap below only returns
   // an override when the method actually exists on `target`.
   const mutatingService = service as unknown as MutatingMethods;
+  const preflightService = service as unknown as PreflightMethods;
   const overrides: MutationOverrideMap = {
     writeFile: async (path: WriteFileParameters[0], data: WriteFileParameters[1]): Promise<void> =>
       mutatingService.writeFile(path, data, context),
@@ -227,7 +266,7 @@ export function bindMutationContextForPort<T extends StringKeyedObject>(
     move: async (source: string, target: string, options?: MoveOptions): Promise<FileStat> =>
       mutatingService.move(source, target, options, context),
     bulkMove: async (edits: readonly BulkMoveEdit[], options?: MoveOptions): Promise<BulkMoveResult> =>
-      mutatingService.bulkMove(edits, options, context),
+      serializeBulkMoveResult(await mutatingService.bulkMove(edits, options, context)),
     unlink: async (path: string, options?: { scope?: WorkspaceScope }): Promise<void> =>
       mutatingService.unlink(path, options, context),
     rmdir: async (path: string, options?: { scope?: WorkspaceScope; recursive?: boolean }): Promise<void> =>
@@ -241,9 +280,22 @@ export function bindMutationContextForPort<T extends StringKeyedObject>(
       destinationPath: CopyDirectoryParameters[1],
     ): Promise<void> => mutatingService.copyDirectory(sourcePath, destinationPath, context),
   };
+  const preflightOverrides: PreflightOverrideMap = {
+    canMove: async (source: string, target: string, options?: MoveOptions): Promise<true | WorkspaceMutationError> =>
+      serializeMutationResult(await preflightService.canMove(source, target, options)),
+    canRename: async (source: string, newName: string): Promise<true | WorkspaceMutationError> =>
+      serializeMutationResult(await preflightService.canRename(source, newName)),
+    canCreate: async (path: string, kind: 'file' | 'directory'): Promise<true | WorkspaceMutationError> =>
+      serializeMutationResult(await preflightService.canCreate(path, kind)),
+    canDelete: async (path: string): Promise<true | WorkspaceMutationError> =>
+      serializeMutationResult(await preflightService.canDelete(path)),
+  };
 
   return new Proxy(service, {
     get(target, property, _receiver) {
+      if (typeof property === 'string' && property in preflightOverrides && property in target) {
+        return (preflightOverrides as Record<string, unknown>)[property];
+      }
       if (typeof property === 'string' && property in overrides && property in target) {
         return (overrides as Record<string, unknown>)[property];
       }

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { Port } from '@taucad/rpc';
-import { ChangeEventBus, tagEventOrigin } from '@taucad/filesystem';
+import { ChangeEventBus, tagEventOrigin, WorkspaceMutationError } from '@taucad/filesystem';
 import type { ChangeEvent } from '@taucad/types';
 import {
   bindMutationContextForPort,
@@ -13,6 +13,7 @@ import {
 import { createBridgeCall, createBridgeServer } from '@taucad/rpc/bridge';
 
 const testBackend = 'memory';
+const workspaceMutationErrorMarker = '__workspaceMutationError__';
 const written = (path: string): ChangeEvent => ({ type: 'fileWritten', path, backend: testBackend });
 
 function fsBridgePort(port: MessagePort, label: string): Port<unknown> {
@@ -21,6 +22,17 @@ function fsBridgePort(port: MessagePort, label: string): Port<unknown> {
     wrapped.start();
   }
   return wrapped;
+}
+
+function firstFailedBulkMoveError(result: unknown): unknown {
+  if (typeof result !== 'object' || result === null) {
+    return undefined;
+  }
+  const { failed } = result as { readonly failed?: unknown };
+  if (!Array.isArray(failed)) {
+    return undefined;
+  }
+  return (failed[0] as { readonly error?: unknown } | undefined)?.error;
 }
 
 /**
@@ -35,6 +47,12 @@ function makeMutatingFakeHandlers() {
     writeFiles: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     mkdir: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     rename: vi.fn<AnyAsync>().mockResolvedValue(undefined),
+    move: vi.fn<AnyAsync>().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
+    bulkMove: vi.fn<AnyAsync>().mockResolvedValue({ moved: [], failed: [] }),
+    canMove: vi.fn<AnyAsync>().mockResolvedValue(true),
+    canRename: vi.fn<AnyAsync>().mockResolvedValue(true),
+    canCreate: vi.fn<AnyAsync>().mockResolvedValue(true),
+    canDelete: vi.fn<AnyAsync>().mockResolvedValue(true),
     unlink: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     rmdir: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     duplicateFile: vi.fn<AnyAsync>().mockResolvedValue(undefined),
@@ -93,6 +111,37 @@ describe('bindMutationContextForPort', () => {
       const wrapper = bindMutationContextForPort(handlers, mutationContext);
       await wrapper.rename('/a', '/b');
       expect(handlers.rename.mock.calls[0]).toEqual(['/a', '/b', mutationContext]);
+    });
+
+    it('move(source, target) lands as service.move(source, target, options, context)', async () => {
+      const handlers = makeMutatingFakeHandlers();
+      const wrapper = bindMutationContextForPort(handlers, mutationContext);
+      await wrapper.move('/a', '/b', { overwrite: true });
+      expect(handlers.move.mock.calls[0]).toEqual(['/a', '/b', { overwrite: true }, mutationContext]);
+    });
+
+    it('bulkMove serializes failed WorkspaceMutationError instances before they cross the bridge', async () => {
+      const handlers = makeMutatingFakeHandlers();
+      const error = new WorkspaceMutationError('NAME_EXISTS', '/b', { target: '/b' });
+      handlers.bulkMove.mockResolvedValueOnce({
+        moved: [],
+        failed: [{ edit: { source: '/a', target: '/b' }, error }],
+      });
+
+      const wrapper = bindMutationContextForPort(handlers, mutationContext);
+      const result = await wrapper.bulkMove([{ source: '/a', target: '/b' }]);
+      const firstError = firstFailedBulkMoveError(result);
+
+      expect(handlers.bulkMove.mock.calls[0]).toEqual([[{ source: '/a', target: '/b' }], undefined, mutationContext]);
+      expect(firstError).toEqual({
+        [workspaceMutationErrorMarker]: true,
+        name: 'WorkspaceMutationError',
+        code: 'NAME_EXISTS',
+        path: '/b',
+        target: '/b',
+        message: "A file or folder already exists at '/b'.",
+      });
+      expect(firstError).not.toBeInstanceOf(WorkspaceMutationError);
     });
 
     it('unlink(path) lands as service.unlink(path, undefined, context)', async () => {
@@ -168,6 +217,45 @@ describe('bindMutationContextForPort', () => {
       expect(handlers.stat.mock.calls[0]).toEqual(['/a']);
       expect(handlers.lstat.mock.calls[0]).toEqual(['/b']);
       expect(handlers.exists.mock.calls[0]).toEqual(['/c']);
+    });
+
+    it('preflight methods do not inject context and serialize WorkspaceMutationError results', async () => {
+      const handlers = makeMutatingFakeHandlers();
+      handlers.canMove.mockResolvedValueOnce(new WorkspaceMutationError('NAME_EXISTS', '/b', { target: '/b' }));
+      handlers.canRename.mockResolvedValueOnce(new WorkspaceMutationError('INVALID_NAME', 'bad/name'));
+      handlers.canCreate.mockResolvedValueOnce(
+        new WorkspaceMutationError('BUNDLED_TYPES_WORKSPACE', '/node_modules/x'),
+      );
+      handlers.canDelete.mockResolvedValueOnce(new WorkspaceMutationError('NOT_FOUND', '/gone'));
+
+      const wrapper = bindMutationContextForPort(handlers, mutationContext);
+
+      await expect(wrapper.canMove('/a', '/b')).resolves.toMatchObject({
+        [workspaceMutationErrorMarker]: true,
+        code: 'NAME_EXISTS',
+        path: '/b',
+        target: '/b',
+      });
+      await expect(wrapper.canRename('/a', 'bad/name')).resolves.toMatchObject({
+        [workspaceMutationErrorMarker]: true,
+        code: 'INVALID_NAME',
+        path: 'bad/name',
+      });
+      await expect(wrapper.canCreate('/node_modules/x', 'file')).resolves.toMatchObject({
+        [workspaceMutationErrorMarker]: true,
+        code: 'BUNDLED_TYPES_WORKSPACE',
+        path: '/node_modules/x',
+      });
+      await expect(wrapper.canDelete('/gone')).resolves.toMatchObject({
+        [workspaceMutationErrorMarker]: true,
+        code: 'NOT_FOUND',
+        path: '/gone',
+      });
+
+      expect(handlers.canMove.mock.calls[0]).toEqual(['/a', '/b', undefined]);
+      expect(handlers.canRename.mock.calls[0]).toEqual(['/a', 'bad/name']);
+      expect(handlers.canCreate.mock.calls[0]).toEqual(['/node_modules/x', 'file']);
+      expect(handlers.canDelete.mock.calls[0]).toEqual(['/gone']);
     });
   });
 

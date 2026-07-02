@@ -253,9 +253,10 @@ A human-readable `## References` section in the body can still exist for externa
 
 ## Size Budget
 
-- **Typical**: 150–600 lines
-- **Max**: 800 lines — split into focused sub-investigations if larger
-- **Changelogs/references** may exceed this (e.g., upstream release notes)
+- No minimum: small investigations should stay small.
+- Typical: 150-600 lines for broad research.
+- If a focused doc would exceed ~800 lines after pruning, split it into sub-investigations or justify the exception.
+- Do not omit evidence, root cause, or recommendation detail just to satisfy the budget.
 
 ## Filename Convention
 

@@ -178,9 +178,9 @@ publishConfig export (mirror `./kernels/tau` pattern):
 
 ```json
 "./kernels/<id>": {
-  "types": "./dist/esm/kernels/<id>/<id>.kernel.d.ts",
-  "import": "./dist/esm/kernels/<id>/<id>.kernel.js",
-  "default": "./dist/esm/kernels/<id>/<id>.kernel.js"
+  "types": "./dist/kernels/<id>/<id>.kernel.d.ts",
+  "import": "./dist/kernels/<id>/<id>.kernel.js",
+  "default": "./dist/kernels/<id>/<id>.kernel.js"
 }
 ```
 

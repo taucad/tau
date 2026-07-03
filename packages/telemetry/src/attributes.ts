@@ -37,6 +37,10 @@ export const AttributeKey = {
   GEN_AI_CONTEXT_BUDGET_KIND: 'gen_ai.context_budget.kind',
   GEN_AI_CONTEXT_BUDGET_TRIGGER_REASON: 'gen_ai.context_budget.trigger_reason',
   GEN_AI_CONTEXT_COMPACTION_STATUS: 'gen_ai.context_compaction.status',
+  GEN_AI_CONTEXT_COMPACTION_FAILURE_KIND: 'gen_ai.context_compaction.failure_kind',
+  GEN_AI_CONTEXT_COMPACTION_FAILURE_DISPOSITION: 'gen_ai.context_compaction.failure_disposition',
+  GEN_AI_PROVIDER_NATIVE_REPLAY_METADATA_PRESENT: 'gen_ai.provider.native_replay_metadata_present',
+  GEN_AI_PROVIDER_MISSING_FUNCTION_CALL_SIGNATURE_COUNT: 'gen_ai.provider.missing_function_call_signature_count',
 } as const;
 
 /**
@@ -148,6 +152,14 @@ export const GenAiContextCompactionStatus = {
   COMPACTED: 'compacted',
   FAILED: 'failed',
   OVERFLOW_RETRY_SUCCEEDED: 'overflow_retry_succeeded',
+} as const;
+
+/**
+ * Failure disposition emitted when compaction blocks provider dispatch.
+ * @public
+ */
+export const GenAiContextCompactionFailureDisposition = {
+  BLOCKED_BEFORE_PROVIDER: 'blocked_before_provider',
 } as const;
 
 /**

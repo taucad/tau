@@ -11,6 +11,7 @@ import {
   GenAiContextBudgetKind,
   GenAiContextBudgetTriggerReason,
   GenAiContextCompactionStatus,
+  GenAiContextCompactionFailureDisposition,
 } from '#attributes.js';
 
 describe('AttributeKey', () => {
@@ -104,6 +105,16 @@ describe('context-budget attribute keys', () => {
     expect(AttributeKey.GEN_AI_CONTEXT_BUDGET_KIND).toBe('gen_ai.context_budget.kind');
     expect(AttributeKey.GEN_AI_CONTEXT_BUDGET_TRIGGER_REASON).toBe('gen_ai.context_budget.trigger_reason');
     expect(AttributeKey.GEN_AI_CONTEXT_COMPACTION_STATUS).toBe('gen_ai.context_compaction.status');
+    expect(AttributeKey.GEN_AI_CONTEXT_COMPACTION_FAILURE_KIND).toBe('gen_ai.context_compaction.failure_kind');
+    expect(AttributeKey.GEN_AI_CONTEXT_COMPACTION_FAILURE_DISPOSITION).toBe(
+      'gen_ai.context_compaction.failure_disposition',
+    );
+    expect(AttributeKey.GEN_AI_PROVIDER_NATIVE_REPLAY_METADATA_PRESENT).toBe(
+      'gen_ai.provider.native_replay_metadata_present',
+    );
+    expect(AttributeKey.GEN_AI_PROVIDER_MISSING_FUNCTION_CALL_SIGNATURE_COUNT).toBe(
+      'gen_ai.provider.missing_function_call_signature_count',
+    );
   });
 });
 
@@ -128,5 +139,11 @@ describe('GenAiContextCompactionStatus', () => {
     expect(GenAiContextCompactionStatus.COMPACTED).toBe('compacted');
     expect(GenAiContextCompactionStatus.FAILED).toBe('failed');
     expect(GenAiContextCompactionStatus.OVERFLOW_RETRY_SUCCEEDED).toBe('overflow_retry_succeeded');
+  });
+});
+
+describe('GenAiContextCompactionFailureDisposition', () => {
+  it('should define blocked-before-provider disposition', () => {
+    expect(GenAiContextCompactionFailureDisposition.BLOCKED_BEFORE_PROVIDER).toBe('blocked_before_provider');
   });
 });

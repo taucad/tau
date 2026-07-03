@@ -283,6 +283,8 @@ export const TauMetrics = {
       'gen_ai.context_budget.kind': z.string().optional(),
       'gen_ai.context_budget.trigger_reason': z.string().optional(),
       'gen_ai.context_compaction.status': z.string().optional(),
+      'gen_ai.context_compaction.failure_kind': z.string().optional(),
+      'gen_ai.context_compaction.failure_disposition': z.string().optional(),
       'gen_ai.request.model': z.string().optional(),
       'gen_ai.provider.name': z.string().optional(),
     }),

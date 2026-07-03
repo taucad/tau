@@ -13,6 +13,7 @@ export {
   GenAiContextBudgetKind,
   GenAiContextBudgetTriggerReason,
   GenAiContextCompactionStatus,
+  GenAiContextCompactionFailureDisposition,
   RpcStatus,
 } from '#attributes.js';
 export { IngestEntryName, clientMetricEntrySchema, ingestPayloadSchema } from '#ingest.js';

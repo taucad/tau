@@ -80,7 +80,7 @@ export const exportCommand = defineCommand({
 
     try {
       const result = await client.export(format, {
-        file: inputFilename,
+        source: { path: inputFilename },
         parameters,
       });
 

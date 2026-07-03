@@ -95,10 +95,7 @@ describe('exportCommand', () => {
       rawArgs: [inputPath, '--ext=glb', `--output=${outputPath}`, '--params={"width":150}'],
     });
 
-    expect(exportFunction).toHaveBeenCalledWith('glb', {
-      file: 'model.ts',
-      parameters: { width: 150 },
-    });
+    expect(exportFunction).toHaveBeenCalledWith('glb', { source: { path: 'model.ts' }, parameters: { width: 150 } });
     const written = await readFile(outputPath);
     expect(new Uint8Array(written)).toEqual(bytes);
     expect(terminate).toHaveBeenCalledOnce();

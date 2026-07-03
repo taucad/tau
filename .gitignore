@@ -55,3 +55,12 @@ scripts/dist/*
 
 # Repos - for integration context
 repos/**/*
+
+# React Router
+.react-router
+
+# Tests
+test-results
+
+# Graphify generated graphs and extraction caches
+**/graphify-out/

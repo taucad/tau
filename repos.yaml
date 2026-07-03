@@ -32,6 +32,7 @@ groups:
       - build123d
       - FreeCAD
       - OCCT-Light
+      - OpenJSCAD.org
   slicers:
     description: 3D printer slicer applications
     repos:
@@ -69,6 +70,7 @@ groups:
       - three-viewport-gizmo
       - three-mesh-bvh
       - three-cad-viewer
+      - drei
   dev-tools:
     description: Development tools and frameworks
     repos:
@@ -132,6 +134,9 @@ groups:
     repos:
       - cloud-infra
       - terraform-provider-netlify
+  brain:
+    repos:
+      - tau-brain
 repos:
   langchainjs:
     upstream: langchain-ai/langchainjs
@@ -168,6 +173,7 @@ repos:
     upstream: sgenoud/replicad
     branch: main
     description: Replicad - CAD library built on OpenCASCADE
+    fork: taucad/replicad
   replicad-cli:
     upstream: sgenoud/replicad-cli
     branch: main
@@ -526,3 +532,14 @@ repos:
     upstream: openai/codex
     branch: main
     description: OpenAI Codex - terminal coding agent (Rust core in codex-rs + TS SDK)
+  OpenJSCAD.org:
+    upstream: jscad/OpenJSCAD.org
+    description: JSCAD is an open source set of modular, browser and command line tools for creating parametric 2D and 3D designs with JavaScript code. It provides a quick, precise and reproducible method for generating 3D models, and is especially useful for creating ready-to-print 3D designs.
+  drei:
+    upstream: pmndrs/drei
+    description: 🥉 useful helpers for react-three-fiber
+  tau-brain:
+    upstream: taucad/tau-brain
+    fork: taucad/tau-brain
+    branch: main
+    description: Private IP knowledge base — research + reference docs, symlinked into docs/

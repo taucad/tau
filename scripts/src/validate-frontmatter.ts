@@ -10,6 +10,15 @@ const policyDirectory = join(root, 'docs/policy');
 const researchDirectory = join(root, 'docs/research');
 const stalenessDays = 180;
 
+// docs/research and docs/reference are symlinks into the private tau-brain repo
+// (repos/tau-brain, gitignored). On a public clone without tau-brain the symlink
+// target is absent: skip listing/validating those dirs and skip existence checks
+// for references into them, so public CI stays green without a private-repo secret.
+const relocatableDirs = ['docs/research', 'docs/reference'];
+const unavailableRelocatable = relocatableDirs.filter((d) => !existsSync(join(root, d)));
+const skipsMissingReference = (reference: string): boolean =>
+  unavailableRelocatable.some((d) => reference === d || reference.startsWith(`${d}/`));
+
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be ISO 8601 date (YYYY-MM-DD)');
 
 const policySchema = z.object({
@@ -37,9 +46,11 @@ type Diagnostic = { level: 'ERROR' | 'WARN'; message: string };
 type FileResult = { path: string; diagnostics: Diagnostic[] };
 
 const listMarkdown = (directory: string): string[] =>
-  readdirSync(directory)
-    .filter((f) => f.endsWith('.md'))
-    .map((f) => join(directory, f));
+  existsSync(directory)
+    ? readdirSync(directory)
+        .filter((f) => f.endsWith('.md'))
+        .map((f) => join(directory, f))
+    : [];
 
 const extractH1 = (content: string): string | undefined => {
   const match = /^#\s+(.+)$/m.exec(content);
@@ -93,7 +104,7 @@ const validateFile = (filePath: string, schema: z.ZodObject<z.ZodRawShape>): Fil
     if (Array.isArray(data.related)) {
       for (const reference of data.related) {
         const absReference = resolve(root, reference);
-        if (!existsSync(absReference)) {
+        if (!existsSync(absReference) && !skipsMissingReference(reference)) {
           diagnostics.push({
             level: 'ERROR',
             message: `related: "${reference}" does not exist`,
@@ -104,7 +115,7 @@ const validateFile = (filePath: string, schema: z.ZodObject<z.ZodRawShape>): Fil
 
     if (data.superseded_by) {
       const absReference = resolve(root, data.superseded_by);
-      if (!existsSync(absReference)) {
+      if (!existsSync(absReference) && !skipsMissingReference(data.superseded_by)) {
         diagnostics.push({
           level: 'ERROR',
           message: `superseded_by: "${data.superseded_by}" does not exist`,
@@ -136,6 +147,12 @@ const validateFile = (filePath: string, schema: z.ZodObject<z.ZodRawShape>): Fil
 
 const policies = listMarkdown(policyDirectory);
 const research = listMarkdown(researchDirectory);
+
+if (unavailableRelocatable.length > 0) {
+  console.log(
+    `Note: ${unavailableRelocatable.join(', ')} unavailable (private tau-brain not cloned) — skipping their validation and references into them.`,
+  );
+}
 
 const results: FileResult[] = [
   ...policies.map((f) => validateFile(f, policySchema)),

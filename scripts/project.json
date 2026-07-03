@@ -17,10 +17,28 @@
         "command": "node scripts/src/validate-project-names.ts"
       }
     },
+    "validate-tsgo-runtime-references": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/src/validate-tsgo-runtime-references.ts"
+      }
+    },
     "validate-quickstart-budget": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node scripts/src/validate-quickstart-budget.ts"
+      }
+    },
+    "audit-singular-render-output": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/src/audit-singular-render-output.ts"
+      }
+    },
+    "pdf-to-md": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/src/pdf-to-md.ts"
       }
     }
   }

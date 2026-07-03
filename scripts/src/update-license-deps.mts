@@ -318,6 +318,14 @@ function getLicenseNotice(license: string): string[] {
     return ['> Apache-2.0 licensed packages require preservation of copyright notices and disclaimers.', ''];
   }
 
+  if (upper.includes('BSL-1.0') || upper.includes('BOOST')) {
+    return [
+      '> Boost Software License 1.0 packages are permissive and compatible with Tau distribution.',
+      '> Preserve copyright notices and license disclaimers in third-party notices.',
+      '',
+    ];
+  }
+
   return [];
 }
 

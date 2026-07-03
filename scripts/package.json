@@ -7,10 +7,15 @@
   "bin": {
     "repos": "./dist/repos.mjs"
   },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
   "dependencies": {
     "@inkjs/ui": "catalog:",
     "ink": "catalog:",
     "js-yaml": "catalog:",
+    "pdf-parse": "catalog:",
     "react": "catalog:"
   },
   "devDependencies": {

@@ -123,7 +123,7 @@ export const ChatTextarea = memo(function ({
   const geometryUnits = projectContext?.geometryUnits;
   const mainEntryFile = projectContext?.mainEntryFile;
   const screenshotActionItems = useMemo((): ContextSuggestionItem[] => {
-    if (!geometryUnits) {
+    if (!geometryUnits || !logic.imageInputSupported) {
       return [];
     }
 
@@ -162,7 +162,7 @@ export const ChatTextarea = memo(function ({
     }
 
     return items;
-  }, [geometryUnits, mainEntryFile]);
+  }, [geometryUnits, mainEntryFile, logic.imageInputSupported]);
 
   const { quality: screenshotQuality } = useImageQuality();
 
@@ -183,6 +183,10 @@ export const ChatTextarea = memo(function ({
   projectContextRef.current = projectContext;
   const handleAddImageRef = useRef(logic.handleAddImage);
   handleAddImageRef.current = logic.handleAddImage;
+  const imageInputSupportedRef = useRef(logic.imageInputSupported);
+  imageInputSupportedRef.current = logic.imageInputSupported;
+  const rejectUnsupportedImageInputRef = useRef(logic.rejectUnsupportedImageInput);
+  rejectUnsupportedImageInputRef.current = logic.rejectUnsupportedImageInput;
   const screenshotQualityRef = useRef(screenshotQuality);
   screenshotQualityRef.current = screenshotQuality;
 
@@ -247,6 +251,11 @@ export const ChatTextarea = memo(function ({
   // existing single-view + composite branches so unmount cleanup stays uniform.
   useEffect(() => {
     handleViewerScreenshotDropRef.current = (entryFile: string): void => {
+      if (!imageInputSupportedRef.current) {
+        rejectUnsupportedImageInputRef.current();
+        return;
+      }
+
       const graphicsRef = resolveGraphicsRefForEntry(entryFile);
       if (!graphicsRef) {
         toast.error('No graphics view available for screenshot');
@@ -272,6 +281,11 @@ export const ChatTextarea = memo(function ({
 
   const handleScreenshotAction = useCallback(
     (item: ContextSuggestionItem) => {
+      if (!imageInputSupportedRef.current) {
+        rejectUnsupportedImageInputRef.current();
+        return;
+      }
+
       const { screenshotAction } = item;
       if (!screenshotAction) {
         return;
@@ -418,6 +432,7 @@ export const ChatTextarea = memo(function ({
           selectedToolChoice={logic.selectedToolChoice}
           status={logic.status}
           selectedModel={logic.selectedModel}
+          imageInputSupported={logic.imageInputSupported}
           formattedCancelKeyCombination={logic.formattedCancelKeyCombination}
           // Refs
           textareaReference={logic.textareaReference}
@@ -467,6 +482,7 @@ export const ChatTextarea = memo(function ({
         selectedToolChoice={logic.selectedToolChoice}
         status={logic.status}
         selectedModel={logic.selectedModel}
+        imageInputSupported={logic.imageInputSupported}
         formattedCancelKeyCombination={logic.formattedCancelKeyCombination}
         // Context data for Tiptap
         treeService={treeService}

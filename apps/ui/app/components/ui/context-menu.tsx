@@ -2,6 +2,8 @@
 import * as React from 'react';
 import { ContextMenu as ContextMenuPrimitive } from 'radix-ui';
 import { CheckIcon, ChevronRightIcon, CircleIcon } from 'lucide-react';
+import { MenuSliderItem } from '#components/ui/menu-slider-item.js';
+import type { MenuSliderItemProperties } from '#components/ui/menu-slider-item.js';
 import { cn } from '#utils/ui.utils.js';
 import {
   menuItemVariants,
@@ -166,6 +168,12 @@ function ContextMenuRadioItem({
   );
 }
 
+type ContextMenuSliderItemProperties = Omit<MenuSliderItemProperties, 'dataSlot'>;
+
+function ContextMenuSliderItem(properties: ContextMenuSliderItemProperties): React.JSX.Element {
+  return <MenuSliderItem dataSlot='context-menu-slider-item' {...properties} />;
+}
+
 function ContextMenuLabel({
   className,
   inset,
@@ -208,6 +216,7 @@ export {
   ContextMenuItem,
   ContextMenuCheckboxItem,
   ContextMenuRadioItem,
+  ContextMenuSliderItem,
   ContextMenuLabel,
   ContextMenuSeparator,
   ContextMenuShortcut,

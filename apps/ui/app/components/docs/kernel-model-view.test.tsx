@@ -18,7 +18,7 @@
  *     (one allocation per app process, shared across every render).
  *   - Mounting N sibling `KernelModelView`s passes the **same**
  *     `clientOptions` reference to every `useRuntime` call.
- *   - Each `useRuntime` call receives a **distinct** `code` payload
+ *   - Each `useRuntime` call receives a **distinct** `source.files` payload
  *     wrapped under the canonical `'main.ts'` entry key.
  *
  * The runtime-level "fresh `RuntimeFileSystemBase` per client"
@@ -29,6 +29,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
 import { createContext } from 'react';
+import type { RenderStatus } from '@taucad/react';
 
 afterEach(() => {
   cleanup();
@@ -36,27 +37,26 @@ afterEach(() => {
 
 type CapturedUseRuntimeCall = {
   readonly clientOptions: unknown;
-  readonly code: unknown;
+  readonly source: unknown;
   readonly enabled: boolean;
 };
 
 const capturedUseRuntimeCalls: CapturedUseRuntimeCall[] = [];
 
-type RuntimeStatus = 'idle' | 'loading' | 'success' | 'error';
-const idleStatus: RuntimeStatus = 'idle';
+const idleStatus: RenderStatus = 'idle';
 
 vi.mock('@taucad/react', () => ({
   useRuntime: ({
     clientOptions,
-    code,
+    source,
     enabled,
   }: {
     clientOptions: unknown;
-    code: unknown;
+    source: unknown;
     enabled: boolean;
-  }): { geometries: unknown[]; status: RuntimeStatus; error: undefined } => {
-    capturedUseRuntimeCalls.push({ clientOptions, code, enabled });
-    return { geometries: [], status: idleStatus, error: undefined };
+  }): { geometry: undefined; status: RenderStatus; error: undefined } => {
+    capturedUseRuntimeCalls.push({ clientOptions, source, enabled });
+    return { geometry: undefined, status: idleStatus, error: undefined };
   },
 }));
 
@@ -148,14 +148,14 @@ describe('KernelModelView — multi-client-from-one-spec dogfood', () => {
     expect(first!.clientOptions).toBe(second!.clientOptions);
     expect(second!.clientOptions).toBe(third!.clientOptions);
 
-    /* Each instance forwards its own `code` payload — no cross-prop
+    /* Each instance forwards its own `source.files` payload — no cross-prop
      * leakage between siblings. (The runtime FS isolation that
      * prevents cross-`Map` writes is pinned in
      * `multi-client-fs-isolation.test.ts`; here we only assert the
      * input plumbing.) */
     const mainEntryKey = 'main.ts';
-    expect(first!.code).toEqual({ [mainEntryKey]: codeA });
-    expect(second!.code).toEqual({ [mainEntryKey]: codeB });
-    expect(third!.code).toEqual({ [mainEntryKey]: codeC });
+    expect(first!.source).toEqual({ files: { [mainEntryKey]: codeA } });
+    expect(second!.source).toEqual({ files: { [mainEntryKey]: codeB } });
+    expect(third!.source).toEqual({ files: { [mainEntryKey]: codeC } });
   });
 });

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
+import { modelSupportsInput } from '@taucad/chat';
 import type { ToolSelection } from '@taucad/chat';
 import { tauEditorPanelDragMime, tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import { useDraftActions, useDraftSelector } from '#hooks/use-chat.js';
@@ -7,7 +8,11 @@ import type { ResolvedModel } from '#hooks/use-models.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { toast } from '#components/ui/sonner.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
-import { handleClipboardImagePaste, readFileAsDataUrl } from '#components/chat/chat-paste-handler.js';
+import {
+  getClipboardImageFiles,
+  handleClipboardImagePaste,
+  readFileAsDataUrl,
+} from '#components/chat/chat-paste-handler.js';
 import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 
 /**
@@ -177,6 +182,7 @@ export function useChatTextareaLogic({
   selectedToolChoice: ToolSelection;
   status: string;
   selectedModel: ResolvedModel;
+  imageInputSupported: boolean;
   formattedCancelKeyCombination: string;
 
   // Refs
@@ -202,6 +208,7 @@ export function useChatTextareaLogic({
   handleContextImageAdd: (image: string) => void;
   handleAddText: (text: string) => void;
   handleAddImage: (image: string) => void;
+  rejectUnsupportedImageInput: () => void;
   handleTextareaBlur: () => void;
   handlePointerDown: (event: React.MouseEvent<HTMLDivElement>) => void;
   focusInput: () => void;
@@ -232,6 +239,7 @@ export function useChatTextareaLogic({
     status,
     stop,
   } = useChatComposer();
+  const imageInputSupported = modelSupportsInput(selectedModel.model?.support, 'image');
 
   // Read draft state from machine based on mode
   const inputText = useDraftSelector((state) => (mode === 'main' ? state.draftText : state.editDraftText));
@@ -262,15 +270,26 @@ export function useChatTextareaLogic({
     [mode, setDraftText, setEditDraftText],
   );
 
+  const rejectUnsupportedImageInput = useCallback((): void => {
+    toast.error('This model cannot read images', {
+      description: 'Switch to a vision-capable model to attach images, or continue with text and GeoSpec.',
+    });
+  }, []);
+
   const addImage = useCallback(
     (image: string) => {
+      if (!imageInputSupported) {
+        rejectUnsupportedImageInput();
+        return;
+      }
+
       if (mode === 'main') {
         addDraftImage(image);
       } else {
         addEditDraftImage(image);
       }
     },
-    [mode, addDraftImage, addEditDraftImage],
+    [mode, addDraftImage, addEditDraftImage, imageInputSupported, rejectUnsupportedImageInput],
   );
 
   const removeImage = useCallback(
@@ -393,6 +412,11 @@ export function useChatTextareaLogic({
       const viewerData = dataTransfer.getData(tauViewerPanelDragMime);
       const viewerEntryFile = viewerData ? parseViewerEntryFile(viewerData) : undefined;
       if (viewerEntryFile !== undefined) {
+        if (!imageInputSupported) {
+          rejectUnsupportedImageInput();
+          return;
+        }
+
         onViewerScreenshotDrop?.(viewerEntryFile);
         return;
       }
@@ -418,6 +442,12 @@ export function useChatTextareaLogic({
       // `imageProcessing` chokepoint inside `draftMachine`; the only failure
       // class we still own here is the file-read step itself.
       if (dataTransfer.files.length > 0) {
+        const hasImageFile = [...dataTransfer.files].some((file) => file.type.startsWith('image/'));
+        if (hasImageFile && !imageInputSupported) {
+          rejectUnsupportedImageInput();
+          return;
+        }
+
         for (const file of dataTransfer.files) {
           if (file.type.startsWith('image/')) {
             try {
@@ -433,16 +463,27 @@ export function useChatTextareaLogic({
         }
       }
     },
-    [addImage, onViewerScreenshotDrop, onAddContextChips],
+    [addImage, imageInputSupported, onViewerScreenshotDrop, onAddContextChips, rejectUnsupportedImageInput],
   );
 
   const handleFileSelect = useCallback((): void => {
+    if (!imageInputSupported) {
+      rejectUnsupportedImageInput();
+      return;
+    }
+
     fileInputReference.current?.click();
-  }, []);
+  }, [imageInputSupported, rejectUnsupportedImageInput]);
 
   const handleFileChange = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
       if (event.target.files && event.target.files.length > 0) {
+        if (!imageInputSupported) {
+          rejectUnsupportedImageInput();
+          event.target.value = '';
+          return;
+        }
+
         for (const file of event.target.files) {
           if (file.type.startsWith('image/')) {
             try {
@@ -459,7 +500,7 @@ export function useChatTextareaLogic({
         event.target.value = '';
       }
     },
-    [addImage],
+    [addImage, imageInputSupported, rejectUnsupportedImageInput],
   );
 
   const focusInput = useCallback((): void => {
@@ -476,6 +517,12 @@ export function useChatTextareaLogic({
 
   const handlePaste = useCallback(
     (event: ClipboardPasteEvent): boolean => {
+      if (!imageInputSupported && getClipboardImageFiles(event.clipboardData).length > 0) {
+        event.preventDefault();
+        rejectUnsupportedImageInput();
+        return true;
+      }
+
       return handleClipboardImagePaste({
         event,
         onImage: addImage,
@@ -484,7 +531,7 @@ export function useChatTextareaLogic({
         },
       });
     },
-    [addImage],
+    [addImage, imageInputSupported, rejectUnsupportedImageInput],
   );
 
   const handleAddText = useCallback(
@@ -679,6 +726,7 @@ export function useChatTextareaLogic({
     selectedToolChoice,
     status,
     selectedModel,
+    imageInputSupported,
     formattedCancelKeyCombination,
 
     // Refs
@@ -701,6 +749,7 @@ export function useChatTextareaLogic({
     handleContextImageAdd,
     handleAddText,
     handleAddImage,
+    rejectUnsupportedImageInput,
     handleTextareaBlur,
     handlePointerDown,
     focusInput,

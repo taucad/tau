@@ -21,10 +21,26 @@ import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 // + sonner mocks.
 // ---------------------------------------------------------------------------
 
-const stableModel: ResolvedModel = {
-  id: 'chat-scoped-model',
-  details: { family: 'gpt' },
-} as unknown as ResolvedModel;
+const makeResolvedModel = (
+  id = 'chat-scoped-model',
+  input: Array<'text' | 'image'> = ['text', 'image'],
+): ResolvedModel =>
+  ({
+    id,
+    name: id,
+    family: 'gpt',
+    provider: { id: 'openai', name: 'OpenAI' },
+    isResolved: true,
+    model: {
+      support: {
+        tools: true,
+        toolChoice: true,
+        modalities: { input, output: ['text'] },
+      },
+    } as unknown as NonNullable<ResolvedModel['model']>,
+  }) satisfies ResolvedModel;
+
+const stableModel = makeResolvedModel();
 
 let mockActiveModel: ResolvedModel = stableModel;
 
@@ -126,7 +142,7 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
       await result.current.handleSubmit();
     });
 
-    mockActiveModel = { id: 'next-chat-scoped-model', details: { family: 'gpt' } } as unknown as ResolvedModel;
+    mockActiveModel = makeResolvedModel('next-chat-scoped-model');
     rerender();
 
     await act(async () => {
@@ -510,5 +526,56 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     ]);
     expect(event.preventDefault).toHaveBeenCalledOnce();
     expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('should reject direct image adds when the selected model is text-only', () => {
+    mockActiveModel = makeResolvedModel('together-glm-5.2', ['text']);
+
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+
+    act(() => {
+      result.current.handleAddImage('data:image/png;base64,AAA');
+    });
+
+    expect(chatActionsMock.addDraftImage).not.toHaveBeenCalled();
+    expect(toastErrorMock).toHaveBeenCalledWith('This model cannot read images', {
+      description: 'Switch to a vision-capable model to attach images, or continue with text and GeoSpec.',
+    });
+  });
+
+  it('should reject pasted images when the selected model is text-only', () => {
+    mockActiveModel = makeResolvedModel('together-glm-5.2', ['text']);
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+    const event = buildClipboardEvent([makeFile('A.png')]);
+
+    act(() => {
+      expect(result.current.handlePaste(event)).toBe(true);
+    });
+
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(chatActionsMock.addDraftImage).not.toHaveBeenCalled();
+    expect(toastErrorMock).toHaveBeenCalledWith('This model cannot read images', {
+      description: 'Switch to a vision-capable model to attach images, or continue with text and GeoSpec.',
+    });
+  });
+
+  it('should reject dropped image files when the selected model is text-only', async () => {
+    mockActiveModel = makeResolvedModel('together-glm-5.2', ['text']);
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+
+    await act(async () => {
+      await result.current.handleDrop(buildDragEvent([makeFile('A.png')]));
+    });
+
+    expect(chatActionsMock.addDraftImage).not.toHaveBeenCalled();
+    expect(toastErrorMock).toHaveBeenCalledWith('This model cannot read images', {
+      description: 'Switch to a vision-capable model to attach images, or continue with text and GeoSpec.',
+    });
   });
 });

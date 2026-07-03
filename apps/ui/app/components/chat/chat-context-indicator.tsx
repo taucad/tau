@@ -129,7 +129,7 @@ function formatCompactionStatus(data: ContextUsageData): string | undefined {
     case 'compacted':
       return 'Context summarized';
     case 'failed':
-      return 'Compaction failed';
+      return 'Compaction blocked';
     case 'overflow_retry_succeeded':
       return 'Overflow retry trimmed context';
     case 'skipped':

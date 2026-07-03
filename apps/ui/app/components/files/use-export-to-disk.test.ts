@@ -106,7 +106,7 @@ describe('useExportToDisk', () => {
       await result.current.exportToDisk(actor, 'stl');
     });
 
-    expect(mockExport).toHaveBeenCalledWith('stl', { binary: true });
+    expect(mockExport).toHaveBeenCalledWith('stl', { exportOptions: { binary: true } });
   });
 
   // oxlint-disable-next-line no-template-curly-in-string -- documenting the produced filename pattern in a sentence

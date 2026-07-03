@@ -4,10 +4,11 @@ import { DropdownMenu as DropdownMenuPrimitive } from 'radix-ui';
 import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CircleIcon } from 'lucide-react';
 import { cn } from '#utils/ui.utils.js';
 import { Switch } from '#components/ui/switch.js';
-import { Slider } from '#components/ui/slider.js';
 import { ToggleGroup, ToggleGroupItem } from '#components/ui/toggle-group.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { Button } from '#components/ui/button.js';
+import { MenuSliderItem } from '#components/ui/menu-slider-item.js';
+import type { MenuSliderItemProperties } from '#components/ui/menu-slider-item.js';
 import {
   menuItemVariants,
   menuContentVariants,
@@ -181,60 +182,10 @@ function DropdownMenuSwitchItem({
   );
 }
 
-type DropdownMenuSliderItemProperties = {
-  readonly className?: string;
-  readonly children: React.ReactNode;
-  readonly value: number;
-  readonly onValueChange?: (value: number) => void;
-  readonly min?: number;
-  readonly max?: number;
-  readonly step?: number;
-  readonly infoTooltip?: React.ReactNode;
-  readonly formatValue?: (value: number) => string;
-};
+type DropdownMenuSliderItemProperties = Omit<MenuSliderItemProperties, 'dataSlot'>;
 
-function DropdownMenuSliderItem({
-  className,
-  children,
-  value,
-  onValueChange,
-  min = 0,
-  max = 100,
-  step = 1,
-  infoTooltip,
-  formatValue,
-}: DropdownMenuSliderItemProperties): React.JSX.Element {
-  const handleValueChange = React.useCallback(
-    (values: number[]) => {
-      const newValue = values[0];
-      if (newValue !== undefined) {
-        onValueChange?.(newValue);
-      }
-    },
-    [onValueChange],
-  );
-
-  const displayValue = formatValue ? formatValue(value) : `${value}`;
-
-  return (
-    <div
-      data-slot='dropdown-menu-slider-item'
-      className={cn('px-3 py-2', className)}
-      // Prevent dropdown from closing when interacting with slider
-      onPointerDown={(event) => {
-        event.stopPropagation();
-      }}
-    >
-      <div className='mb-2 flex items-center justify-between'>
-        <span className={cn(menuItemLayoutClass, menuItemIconClass, 'text-sm')}>
-          {children}
-          {infoTooltip}
-        </span>
-        <span className='text-xs text-muted-foreground'>{displayValue}</span>
-      </div>
-      <Slider value={[value]} min={min} max={max} step={step} className='w-full' onValueChange={handleValueChange} />
-    </div>
-  );
+function DropdownMenuSliderItem(properties: DropdownMenuSliderItemProperties): React.JSX.Element {
+  return <MenuSliderItem dataSlot='dropdown-menu-slider-item' {...properties} />;
 }
 
 type ToggleOption<T extends string> = {

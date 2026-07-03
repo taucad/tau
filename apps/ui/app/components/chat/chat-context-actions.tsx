@@ -20,6 +20,7 @@ import { buildScreenshotOverlayForPath, resolveScreenshotOverlay } from '#machin
 type ChatContextActionsProperties = {
   readonly addImage: (image: string) => void;
   readonly addText: (text: string) => void;
+  readonly imageInputSupported?: boolean;
   readonly asPopoverMenu?: boolean;
   readonly onClose?: () => void;
   readonly searchQuery?: string;
@@ -41,6 +42,7 @@ type ContextActionItem = {
 export function ChatContextActions({
   addImage,
   addText,
+  imageInputSupported = true,
   asPopoverMenu,
   onClose,
   searchQuery = '',
@@ -341,27 +343,29 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
   }, [addText, kernelIssue, asPopoverMenu, onClose]);
 
   const contextItems = useMemo((): ContextActionItem[] => {
-    const items: ContextActionItem[] = [
-      {
-        id: 'add-current-view-screenshot',
-        label: 'Current view',
-        group: 'Screenshot',
-        icon: <Image />,
-        action: handleAddModelScreenshot,
-        disabled: !isScreenshotReady,
-      },
-      {
-        id: 'add-all-views-screenshots',
-        label: 'Orthographic views x 6',
-        group: 'Screenshot',
-        icon: <Camera />,
-        action: handleAddAllViewsScreenshots,
-        disabled: !isScreenshotReady,
-      },
-    ];
+    const items: ContextActionItem[] = imageInputSupported
+      ? [
+          {
+            id: 'add-current-view-screenshot',
+            label: 'Current view',
+            group: 'Screenshot',
+            icon: <Image />,
+            action: handleAddModelScreenshot,
+            disabled: !isScreenshotReady,
+          },
+          {
+            id: 'add-all-views-screenshots',
+            label: 'Orthographic views x 6',
+            group: 'Screenshot',
+            icon: <Camera />,
+            action: handleAddAllViewsScreenshots,
+            disabled: !isScreenshotReady,
+          },
+        ]
+      : [];
 
     // Add per-view screenshot items for non-main views when there are 2+ views
-    if (viewGraphics.size >= 2) {
+    if (imageInputSupported && viewGraphics.size >= 2) {
       for (const [viewId, graphicsRef] of viewGraphics) {
         const settings = viewSettings[viewId];
         // Skip the main entry file view (already covered by "Current view screenshot")
@@ -406,6 +410,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
     return items;
   }, [
     handleAddModelScreenshot,
+    imageInputSupported,
     isScreenshotReady,
     handleAddAllViewsScreenshots,
     handleAddCodeIssues,

@@ -53,6 +53,7 @@ type ChatTextareaDesktopProperties = {
   readonly selectedToolChoice: ToolSelection;
   readonly status: string;
   readonly selectedModel: ResolvedModel;
+  readonly imageInputSupported: boolean;
   readonly formattedCancelKeyCombination: string;
 
   // Context data for Tiptap editor
@@ -115,6 +116,7 @@ export const ChatTextareaDesktop = memo(function ({
   selectedToolChoice,
   status,
   selectedModel,
+  imageInputSupported,
   formattedCancelKeyCombination,
 
   // Context data
@@ -351,6 +353,7 @@ export const ChatTextareaDesktop = memo(function ({
           enableContextActions={enableContextActions}
           handleAtButtonClick={handleAtButtonClick}
           handleFileSelect={handleFileSelect}
+          imageInputSupported={imageInputSupported}
           status={status}
           isSubmitting={isSubmitting}
           isDisabled={isDisabled}
@@ -537,6 +540,7 @@ const ChatTextareaRightControls = memo(function ({
   enableContextActions,
   handleAtButtonClick,
   handleFileSelect,
+  imageInputSupported,
   status,
   isSubmitting,
   isDisabled,
@@ -547,6 +551,7 @@ const ChatTextareaRightControls = memo(function ({
   readonly enableContextActions: boolean;
   readonly handleAtButtonClick: () => void;
   readonly handleFileSelect: () => void;
+  readonly imageInputSupported: boolean;
   readonly status: string;
   readonly isSubmitting: boolean;
   readonly isDisabled: boolean;
@@ -582,7 +587,11 @@ const ChatTextareaRightControls = memo(function ({
           <Button
             variant='outline'
             size='icon'
-            className='size-6 rounded-full text-muted-foreground hover:text-foreground'
+            aria-disabled={!imageInputSupported}
+            className={cn(
+              'size-6 rounded-full text-muted-foreground hover:text-foreground',
+              !imageInputSupported && 'opacity-50',
+            )}
             title='Add image'
             onClick={handleFileSelect}
           >
@@ -590,7 +599,7 @@ const ChatTextareaRightControls = memo(function ({
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          <p>Upload an image</p>
+          <p>{imageInputSupported ? 'Upload an image' : 'Selected model cannot read images'}</p>
         </TooltipContent>
       </Tooltip>
 

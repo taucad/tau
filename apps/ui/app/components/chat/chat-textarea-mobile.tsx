@@ -51,6 +51,7 @@ type ChatTextareaMobileProperties = {
   readonly setDraftToolChoice: (choice: ToolSelection) => void;
   readonly status: string;
   readonly selectedModel: ResolvedModel;
+  readonly imageInputSupported: boolean;
   readonly formattedCancelKeyCombination: string;
 
   // Refs
@@ -129,6 +130,7 @@ export const ChatTextareaMobile = memo(function ({
   setDraftToolChoice,
   status,
   selectedModel,
+  imageInputSupported,
   formattedCancelKeyCombination,
 
   // Refs
@@ -301,7 +303,12 @@ export const ChatTextareaMobile = memo(function ({
                 {/* Actions Group */}
                 <CommandGroup heading='Actions'>
                   {/* Upload Image */}
-                  <CommandItem value='upload-image' onSelect={handleDrawerFileSelect}>
+                  <CommandItem
+                    value='upload-image'
+                    aria-disabled={!imageInputSupported}
+                    className={cn(!imageInputSupported && 'opacity-50')}
+                    onSelect={handleDrawerFileSelect}
+                  >
                     <span className='flex w-full items-center justify-between'>
                       <div className='flex items-center gap-2'>
                         <Paperclip className='size-4' />
@@ -318,6 +325,7 @@ export const ChatTextareaMobile = memo(function ({
                     <ChatContextActions
                       asPopoverMenu
                       data-chat-textarea-focustrap={focusTrapAttribute}
+                      imageInputSupported={imageInputSupported}
                       addImage={handleDrawerAddImage}
                       addText={handleDrawerAddText}
                       onClose={() => {
@@ -391,6 +399,7 @@ export const ChatTextareaMobile = memo(function ({
               searchQuery={contextSearchQuery}
               selectedIndex={selectedMenuIndex}
               onSelectedIndexChange={setSelectedMenuIndex}
+              imageInputSupported={imageInputSupported}
               addImage={handleContextImageAdd}
               addText={handleContextMenuSelect}
               onSelectItem={handleContextMenuSelect}

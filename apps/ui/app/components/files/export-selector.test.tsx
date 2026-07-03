@@ -240,7 +240,7 @@ describe('ExportSelector', () => {
     fireEvent.click(screen.getByRole('button', { name: /stl/i }));
 
     await vi.waitFor(() => {
-      expect(mockExport).toHaveBeenCalledWith('stl', { binary: true });
+      expect(mockExport).toHaveBeenCalledWith('stl', { exportOptions: { binary: true } });
     });
 
     await vi.waitFor(() => {

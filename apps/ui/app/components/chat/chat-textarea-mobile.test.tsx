@@ -88,6 +88,7 @@ const { ChatTextareaMobile } = await import('#components/chat/chat-textarea-mobi
 
 const noop = (): void => undefined;
 const asyncNoop = async (): Promise<void> => undefined;
+const pasteNoop = (): boolean => false;
 const stubModel: ResolvedModel = {
   id: 'm',
   name: 'M',
@@ -115,6 +116,7 @@ function renderMobile() {
       setDraftToolChoice={noop}
       status='idle'
       selectedModel={stubModel}
+      imageInputSupported
       formattedCancelKeyCombination='Ctrl+Backspace'
       textareaReference={stubTextareaRef}
       fileInputReference={stubInputRef}
@@ -125,6 +127,7 @@ function renderMobile() {
       handleDragOver={noop}
       handleDragLeave={noop}
       handleDrop={asyncNoop}
+      handlePaste={pasteNoop}
       handleFileSelect={noop}
       handleFileChange={noop}
       handleTextChange={noop}

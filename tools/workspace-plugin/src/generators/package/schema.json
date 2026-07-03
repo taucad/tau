@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/schema",
   "$id": "TauPackage",
   "title": "Create a @taucad/* package",
-  "description": "Scaffolds a publishable @taucad/* package with dual ESM/CJS build, vitest, and all Tau conventions.",
+  "description": "Scaffolds a publishable @taucad/* package with an ESM-only build, vitest, and all Tau conventions.",
   "type": "object",
   "properties": {
     "name": {

@@ -11,7 +11,7 @@ type PackageGeneratorSchema = {
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 
-export default async function packageGenerator(tree: Tree, schema: PackageGeneratorSchema): Promise<void> {
+export const packageGenerator = async (tree: Tree, schema: PackageGeneratorSchema): Promise<void> => {
   const scope = schema.scope ?? 'packages';
   const projectRoot = `${scope}/${schema.name}`;
   const importPath = `@taucad/${schema.name}`;
@@ -35,4 +35,6 @@ export default async function packageGenerator(tree: Tree, schema: PackageGenera
   });
 
   await formatFiles(tree);
-}
+};
+
+export default packageGenerator;

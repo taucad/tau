@@ -106,6 +106,117 @@ function applyPublishConfig(package_: PackageJson): PackageJson {
   return result;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function validateEsmOnlyPackageMetadata(): CheckResult {
+  const publishPackage = applyPublishConfig(packageJson);
+  const issues: string[] = [];
+
+  function visit(value: unknown, path: string): void {
+    if (Array.isArray(value)) {
+      for (const [index, item] of value.entries()) {
+        visit(item, `${path}[${String(index)}]`);
+      }
+      return;
+    }
+
+    if (isRecord(value)) {
+      for (const [key, child] of Object.entries(value)) {
+        const nextPath = `${path}.${key}`;
+        if (key === 'require') {
+          issues.push(`${nextPath}: CommonJS export conditions are not allowed`);
+        }
+        if (path === '$' && key === 'module') {
+          issues.push(`${nextPath}: legacy package.json module field is not allowed`);
+        }
+        visit(child, nextPath);
+      }
+      return;
+    }
+
+    if (typeof value !== 'string') {
+      return;
+    }
+
+    if (value.includes('dist/cjs')) {
+      issues.push(`${path}: CJS dist path is not allowed (${value})`);
+    }
+    if (value.includes('.cjs')) {
+      issues.push(`${path}: .cjs output is not allowed (${value})`);
+    }
+    if (value.includes('.d.cts')) {
+      issues.push(`${path}: .d.cts declarations are not allowed (${value})`);
+    }
+  }
+
+  visit(publishPackage, '$');
+
+  if (issues.length === 0) {
+    return {
+      name: 'tau-esm-metadata',
+      status: 'pass',
+      details: ['published metadata is ESM-only'],
+    };
+  }
+
+  return {
+    name: 'tau-esm-metadata',
+    status: 'fail',
+    details: [`${String(issues.length)} CJS metadata issue(s) found`, ...issues],
+  };
+}
+
+function validateFlatDistLayout(): CheckResult {
+  const publishPackage = applyPublishConfig(packageJson);
+  const issues: string[] = [];
+
+  function visit(value: unknown, path: string): void {
+    if (Array.isArray(value)) {
+      for (const [index, item] of value.entries()) {
+        visit(item, `${path}[${String(index)}]`);
+      }
+      return;
+    }
+
+    if (isRecord(value)) {
+      for (const [key, child] of Object.entries(value)) {
+        visit(child, `${path}.${key}`);
+      }
+      return;
+    }
+
+    if (typeof value === 'string' && value.includes('dist/esm')) {
+      issues.push(`${path}: redundant dist/esm path is not allowed (${value}); use dist/...`);
+    }
+  }
+
+  visit(publishPackage, '$');
+
+  const tsdownConfigPath = join(absoluteRoot, 'tsdown.config.ts');
+  if (existsSync(tsdownConfigPath)) {
+    const source = readFileSync(tsdownConfigPath, 'utf8');
+    if (source.includes('dist/esm')) {
+      issues.push('tsdown.config.ts: redundant dist/esm output path is not allowed; use outDir: "dist"');
+    }
+  }
+
+  if (issues.length === 0) {
+    return {
+      name: 'tau-flat-dist-layout',
+      status: 'pass',
+      details: ['published metadata and build config use flat dist output'],
+    };
+  }
+
+  return {
+    name: 'tau-flat-dist-layout',
+    status: 'fail',
+    details: [`${String(issues.length)} flat dist layout issue(s) found`, ...issues],
+  };
+}
+
 /**
  * Create a publish-ready staging directory with publishConfig applied,
  * then pack and run attw against the tarball.
@@ -136,7 +247,7 @@ async function runAttw(): Promise<CheckResult> {
       cpSync(attwConfigSource, join(stagingDirectory, '.attw.json'));
     }
 
-    const output = execSync('pnpm attw --pack . --format table', {
+    const output = execSync('pnpm attw --pack . --format table --profile esm-only', {
       cwd: stagingDirectory,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -267,17 +378,7 @@ function walkDirectory(directory: string): string[] {
   return paths;
 }
 
-type ExportsCondition = {
-  types?: string;
-  default?: string;
-};
-
-type ExportsEntry = {
-  require?: ExportsCondition;
-  import?: ExportsCondition;
-};
-
-type ExportsMap = Record<string, ExportsEntry | string>;
+type ExportsMap = Record<string, Record<string, unknown> | string>;
 
 function fileSize(relativePath: string | undefined): number {
   if (!relativePath) {
@@ -303,6 +404,34 @@ function collectAssets(directory: string): Map<string, { count: number; bytes: n
   }
 
   return byExtension;
+}
+
+function getExportTarget(value: Record<string, unknown>): { js?: string; dts?: string } {
+  const directImport = value['import'];
+  if (typeof directImport === 'string') {
+    return {
+      js: directImport,
+      dts: typeof value['types'] === 'string' ? value['types'] : undefined,
+    };
+  }
+
+  if (typeof value['default'] === 'string') {
+    return {
+      js: value['default'],
+      dts: typeof value['types'] === 'string' ? value['types'] : undefined,
+    };
+  }
+
+  if (isRecord(directImport)) {
+    return {
+      js: typeof directImport['default'] === 'string' ? directImport['default'] : undefined,
+      dts: typeof directImport['types'] === 'string' ? directImport['types'] : undefined,
+    };
+  }
+
+  return {
+    dts: typeof value['types'] === 'string' ? value['types'] : undefined,
+  };
 }
 
 type ExportRow = {
@@ -334,13 +463,14 @@ function buildExportRows(): ExportRow[] {
       continue;
     }
 
-    const jsBytes = fileSize(value.import?.default);
-    const dtsBytes = fileSize(value.import?.types);
-    const esmDirectory = value.import?.default ? dirname(join(absoluteRoot, value.import.default)) : undefined;
-    const isRootExport = esmDirectory === join(absoluteRoot, 'dist', 'esm');
+    const target = getExportTarget(value);
+    const jsBytes = fileSize(target.js);
+    const dtsBytes = fileSize(target.dts);
+    const exportDirectory = target.js ? dirname(join(absoluteRoot, target.js)) : undefined;
+    const isRootExport = exportDirectory === join(absoluteRoot, 'dist');
     const assets =
-      esmDirectory && !isRootExport && existsSync(esmDirectory)
-        ? collectAssets(esmDirectory)
+      exportDirectory && !isRootExport && existsSync(exportDirectory)
+        ? collectAssets(exportDirectory)
         : new Map<string, { count: number; bytes: number }>();
     const assetBytes = [...assets.values()].reduce((sum, { bytes }) => sum + bytes, 0);
 
@@ -436,6 +566,41 @@ type DistributionRow = {
   total: number;
 };
 
+type DistributionStats = Omit<DistributionRow, 'label'>;
+
+function createDistributionStats(): DistributionStats {
+  return {
+    fileCount: 0,
+    jsBytes: 0,
+    dtsBytes: 0,
+    assets: new Map<string, { count: number; bytes: number }>(),
+    total: 0,
+  };
+}
+
+function addDistributionFile(stats: DistributionStats, filePath: string): void {
+  const { size } = statSync(filePath);
+  stats.fileCount += 1;
+  stats.total += size;
+  const name = basename(filePath);
+
+  if (/\.(js|cjs|mjs)$/.test(name)) {
+    stats.jsBytes += size;
+    return;
+  }
+
+  if (/\.(d\.ts|d\.cts|d\.mts)$/.test(name)) {
+    stats.dtsBytes += size;
+    return;
+  }
+
+  const extension = name.split('.').pop() ?? '?';
+  const entry = stats.assets.get(extension) ?? { count: 0, bytes: 0 };
+  entry.count += 1;
+  entry.bytes += size;
+  stats.assets.set(extension, entry);
+}
+
 function buildDistributionRows(): DistributionRow[] {
   const distributionDirectory = join(absoluteRoot, 'dist');
   if (!existsSync(distributionDirectory)) {
@@ -443,6 +608,23 @@ function buildDistributionRows(): DistributionRow[] {
   }
 
   const rows: DistributionRow[] = [];
+  const entries = readdirSync(distributionDirectory, { withFileTypes: true });
+  const topLevelFiles = entries
+    .filter((d) => d.isFile())
+    .map((d) => d.name)
+    .sort();
+  if (topLevelFiles.length > 0) {
+    const stats = createDistributionStats();
+    for (const file of topLevelFiles) {
+      addDistributionFile(stats, join(distributionDirectory, file));
+    }
+
+    rows.push({
+      label: 'dist',
+      ...stats,
+    });
+  }
+
   const subdirs = readdirSync(distributionDirectory, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
@@ -450,49 +632,14 @@ function buildDistributionRows(): DistributionRow[] {
 
   for (const sub of subdirs) {
     const files = walkDirectory(join(distributionDirectory, sub));
-    let jsBytes = 0;
-    let dtsBytes = 0;
-    let total = 0;
-    const assets = new Map<string, { count: number; bytes: number }>();
-
+    const stats = createDistributionStats();
     for (const f of files) {
-      const { size } = statSync(f);
-      total += size;
-      const name = basename(f);
-
-      if (/\.(js|cjs|mjs)$/.test(name)) {
-        jsBytes += size;
-      } else if (/\.(d\.ts|d\.cts|d\.mts)$/.test(name)) {
-        dtsBytes += size;
-      } else {
-        const extension = name.split('.').pop() ?? '?';
-        const entry = assets.get(extension) ?? { count: 0, bytes: 0 };
-        entry.count += 1;
-        entry.bytes += size;
-        assets.set(extension, entry);
-      }
+      addDistributionFile(stats, f);
     }
 
     rows.push({
       label: `dist/${sub}`,
-      fileCount: files.length,
-      jsBytes,
-      dtsBytes,
-      assets,
-      total,
-    });
-  }
-
-  const topLevelFiles = readdirSync(distributionDirectory, { withFileTypes: true }).filter((d) => d.isFile());
-  for (const file of topLevelFiles) {
-    const { size } = statSync(join(distributionDirectory, file.name));
-    rows.push({
-      label: `dist/${file.name}`,
-      fileCount: 1,
-      jsBytes: 0,
-      dtsBytes: 0,
-      assets: new Map([['other', { count: 1, bytes: size }]]),
-      total: size,
+      ...stats,
     });
   }
 
@@ -583,6 +730,12 @@ function printResult(result: CheckResult): void {
 }
 
 async function main(): Promise<void> {
+  results.push(validateEsmOnlyPackageMetadata());
+  printResult(results.at(-1)!);
+
+  results.push(validateFlatDistLayout());
+  printResult(results.at(-1)!);
+
   results.push(await runPublint());
   printResult(results.at(-1)!);
 

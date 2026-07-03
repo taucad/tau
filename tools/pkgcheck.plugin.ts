@@ -26,6 +26,7 @@ type InputDefinition =
   | { env: string };
 
 type PackageJson = {
+  private?: boolean;
   nx?: {
     namedInputs?: Record<string, Array<string | InputDefinition>>;
   };
@@ -60,7 +61,13 @@ const createPkgcheckTarget = (
     return undefined;
   }
 
-  if (!existsSync(join(projectRoot, 'package.json'))) {
+  const packageJsonPath = join(projectRoot, 'package.json');
+  if (!existsSync(packageJsonPath)) {
+    return undefined;
+  }
+
+  const packageJson = readJsonFile<PackageJson>(packageJsonPath);
+  if (packageJson.private === true) {
     return undefined;
   }
 
@@ -73,7 +80,7 @@ const createPkgcheckTarget = (
           pkgcheck: {
             executor: 'nx:run-commands',
             cache: true,
-            dependsOn: ['generate-cjs-dts'],
+            dependsOn: ['build'],
             options: {
               command: `tsx tools/pkgcheck.ts ${projectRoot}`,
               cwd: '.',

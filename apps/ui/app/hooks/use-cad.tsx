@@ -39,7 +39,7 @@ export function useCad(): CadActorRef | undefined {
  * Delegates to XState's useSelector for subscription management and re-render optimization.
  *
  * @example
- * const geometries = useCadSelector(state => state.context.geometries, []);
+ * const geometry = useCadSelector(state => state.context.geometry, undefined);
  * const status = useCadSelector(state => state.value, undefined);
  */
 export function useCadSelector<T>(selector: (state: SnapshotFrom<typeof cadMachine>) => T, defaultValue: T): T {

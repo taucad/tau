@@ -1157,7 +1157,7 @@ describe('ChatSessionStore', () => {
     });
 
     /**
-     * Regression: when the user clicks the "Retry" button on the
+     * Regression: when the user clicks the "Try again" button on the
      * `ChatErrorServiceUnavailable` banner (or the persistence machine's
      * transparent auto-retry fires), the resumed POST must still carry the
      * top-level `agent` block required by `chatTurnRequestSchema`. Before the

@@ -82,7 +82,7 @@ async function startAndConnect(options?: Parameters<typeof createTestActor>[0]) 
 
 const stubFile: GeometryFile = { path: '/projects/test', filename: 'main.ts' };
 
-const stubGeometries: Geometry[] = [{ format: 'gltf', content: new Uint8Array(0), hash: 'stub' }];
+const stubGeometry: Geometry = { format: 'gltf', content: new Uint8Array(0), hash: 'stub' };
 
 const stubIssues: KernelIssue[] = [{ message: 'test issue', code: 'RUNTIME', type: 'runtime', severity: 'warning' }];
 
@@ -155,7 +155,7 @@ describe('cadMachine', () => {
       resolveConnect();
       await waitFor(actor, (s) => s.value === 'idle');
 
-      expect(mockClient.openFile).toHaveBeenCalledWith({ file: stubFile, parameters: { width: 10 } });
+      expect(mockClient.render).toHaveBeenCalledWith({ source: { path: stubFile }, parameters: { width: 10 } });
       actor.stop();
     });
 
@@ -226,11 +226,11 @@ describe('cadMachine', () => {
   // State: idle
   // =========================================================================
   describe('idle', () => {
-    it('should forward setFile to runtime client as openFile', async () => {
+    it('should forward setFile to runtime client as render', async () => {
       const { actor, mockClient } = await startAndConnect();
 
       actor.send({ type: 'setFile', file: stubFile });
-      expect(mockClient.openFile).toHaveBeenCalledWith({ file: stubFile, parameters: {} });
+      expect(mockClient.render).toHaveBeenCalledWith({ source: { path: stubFile }, parameters: {} });
       expect(actor.getSnapshot().context.file).toEqual(stubFile);
       actor.stop();
     });
@@ -244,7 +244,7 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
-    it('should forward initializeModel as openFile with parameters', async () => {
+    it('should forward initializeModel as render with parameters', async () => {
       const { actor, mockClient } = await startAndConnect();
 
       actor.send({
@@ -252,7 +252,7 @@ describe('cadMachine', () => {
         file: stubFile,
         parameters: { width: 10 },
       });
-      expect(mockClient.openFile).toHaveBeenCalledWith({ file: stubFile, parameters: { width: 10 } });
+      expect(mockClient.render).toHaveBeenCalledWith({ source: { path: stubFile }, parameters: { width: 10 } });
       expect(actor.getSnapshot().context.file).toEqual(stubFile);
       actor.stop();
     });
@@ -281,16 +281,16 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
-    it('should update geometries on geometryComputed', async () => {
+    it('should update geometry on geometryComputed', async () => {
       const { actor } = await startAndConnect();
 
       actor.send({ type: 'setFile', file: stubFile });
       actor.send({
         type: 'geometryComputed',
-        geometries: stubGeometries,
+        geometry: stubGeometry,
         issues: [],
       });
-      expect(actor.getSnapshot().context.geometries).toEqual(stubGeometries);
+      expect(actor.getSnapshot().context.geometry).toEqual(stubGeometry);
       actor.stop();
     });
 
@@ -300,7 +300,7 @@ describe('cadMachine', () => {
       actor.send({ type: 'setFile', file: stubFile });
       actor.send({
         type: 'geometryComputed',
-        geometries: stubGeometries,
+        geometry: stubGeometry,
         issues: stubIssues,
       });
 
@@ -315,14 +315,14 @@ describe('cadMachine', () => {
       actor.send({ type: 'setFile', file: stubFile });
       actor.send({
         type: 'geometryComputed',
-        geometries: stubGeometries,
+        geometry: stubGeometry,
         issues: stubIssues,
       });
       expect(actor.getSnapshot().context.kernelIssues.has('main.ts')).toBe(true);
 
       actor.send({
         type: 'geometryComputed',
-        geometries: stubGeometries,
+        geometry: stubGeometry,
         issues: [],
       });
       expect(actor.getSnapshot().context.kernelIssues.has('main.ts')).toBe(false);
@@ -363,12 +363,12 @@ describe('cadMachine', () => {
       actor.send({ type: 'setFile', file: stubFile });
       actor.send({
         type: 'geometryComputed',
-        geometries: stubGeometries,
+        geometry: stubGeometry,
         issues: [],
       });
 
       expect(emitted).toHaveLength(1);
-      expect(emitted[0]).toMatchObject({ type: 'geometryEvaluated', geometries: stubGeometries });
+      expect(emitted[0]).toMatchObject({ type: 'geometryEvaluated', geometry: stubGeometry });
       actor.stop();
     });
   });
@@ -384,16 +384,16 @@ describe('cadMachine', () => {
       return result;
     }
 
-    it('should stay in rendering on geometryComputed and store geometries', async () => {
+    it('should stay in rendering on geometryComputed and store geometry', async () => {
       const { actor } = await enterRendering();
 
       actor.send({
         type: 'geometryComputed',
-        geometries: stubGeometries,
+        geometry: stubGeometry,
         issues: [],
       });
       expect(actor.getSnapshot().value).toBe('rendering');
-      expect(actor.getSnapshot().context.geometries).toBe(stubGeometries);
+      expect(actor.getSnapshot().context.geometry).toBe(stubGeometry);
       actor.stop();
     });
 
@@ -443,11 +443,11 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
-    it('should accept setFile during rendering (forwards to client as openFile)', async () => {
+    it('should accept setFile during rendering (forwards to client as render)', async () => {
       const { actor, mockClient } = await enterRendering();
 
       actor.send({ type: 'setFile', file: stubFile });
-      expect(mockClient.openFile).toHaveBeenCalledWith({ file: stubFile, parameters: {} });
+      expect(mockClient.render).toHaveBeenCalledWith({ source: { path: stubFile }, parameters: {} });
       actor.stop();
     });
 
@@ -525,7 +525,7 @@ describe('cadMachine', () => {
       const { actor, mockClient } = await enterBuffering();
 
       actor.send({ type: 'setFile', file: stubFile });
-      expect(mockClient.openFile).toHaveBeenCalledWith({ file: stubFile, parameters: {} });
+      expect(mockClient.render).toHaveBeenCalledWith({ source: { path: stubFile }, parameters: {} });
       actor.stop();
     });
 
@@ -537,16 +537,16 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
-    it('should accept geometryComputed during buffering and store geometries', async () => {
+    it('should accept geometryComputed during buffering and store geometry', async () => {
       const { actor } = await enterBuffering();
 
       actor.send({
         type: 'geometryComputed',
-        geometries: stubGeometries,
+        geometry: stubGeometry,
         issues: [],
       });
       expect(actor.getSnapshot().value).toBe('buffering');
-      expect(actor.getSnapshot().context.geometries).toBe(stubGeometries);
+      expect(actor.getSnapshot().context.geometry).toBe(stubGeometry);
       actor.stop();
     });
 
@@ -595,7 +595,7 @@ describe('cadMachine', () => {
 
       await waitFor(actor, (s) => s.value === 'idle');
       expect(actor.getSnapshot().context.kernelClient).toBeDefined();
-      expect(mockClient.openFile).toHaveBeenCalledWith({ file: stubFile, parameters: {} });
+      expect(mockClient.render).toHaveBeenCalledWith({ source: { path: stubFile }, parameters: {} });
       actor.stop();
     });
 
@@ -626,7 +626,7 @@ describe('cadMachine', () => {
 
       await waitFor(actor, (s) => s.value === 'idle');
       expect(actor.getSnapshot().context.kernelClient).toBeDefined();
-      expect(mockClient.openFile).toHaveBeenCalledWith({ file: stubFile, parameters: { width: 10 } });
+      expect(mockClient.render).toHaveBeenCalledWith({ source: { path: stubFile }, parameters: { width: 10 } });
       actor.stop();
     });
 
@@ -733,16 +733,17 @@ describe('cadMachine', () => {
   // =========================================================================
   describe('export', () => {
     it('should handle export via dispatchExport in idle', async () => {
-      const { actor } = await startAndConnect();
+      const { actor, mockClient } = await startAndConnect();
 
       const emitted: unknown[] = [];
       actor.on('geometryExported', (event) => emitted.push(event));
 
-      actor.send({ type: 'exportGeometry', format: 'stl' });
+      actor.send({ type: 'exportGeometry', format: 'stl', exportOptions: { binary: true } });
 
       // Wait for the async export to complete
       await waitFor(actor, (s) => s.context.exportedBlob !== undefined);
 
+      expect(mockClient.export).toHaveBeenCalledWith('stl', { exportOptions: { binary: true } });
       expect(actor.getSnapshot().context.exportedBlob).toBeDefined();
       expect(emitted).toHaveLength(1);
       actor.stop();
@@ -838,7 +839,7 @@ describe('cadMachine', () => {
       expect(context.screenshot).toBeUndefined();
       expect(context.parameters).toEqual({});
       expect(context.defaultParameters).toEqual({});
-      expect(context.geometries).toEqual([]);
+      expect(context.geometry).toBeUndefined();
       expect(context.kernelIssues.size).toBe(0);
       expect(context.codeIssues).toEqual([]);
       expect(context.exportedBlob).toBeUndefined();
@@ -867,11 +868,11 @@ describe('cadMachine', () => {
 
       actor.send({
         type: 'geometryComputed',
-        geometries: stubGeometries,
+        geometry: stubGeometry,
         issues: [],
       });
       expect(actor.getSnapshot().value).toBe('rendering');
-      expect(actor.getSnapshot().context.geometries).toEqual(stubGeometries);
+      expect(actor.getSnapshot().context.geometry).toEqual(stubGeometry);
 
       actor.send({ type: 'stateChanged', state: 'idle' });
       expect(actor.getSnapshot().value).toBe('idle');
@@ -886,7 +887,7 @@ describe('cadMachine', () => {
 
       const newFile: GeometryFile = { path: '/projects/test', filename: 'other.ts' };
       actor.send({ type: 'setFile', file: newFile });
-      expect(mockClient.openFile).toHaveBeenCalledWith({ file: newFile, parameters: {} });
+      expect(mockClient.render).toHaveBeenCalledWith({ source: { path: newFile }, parameters: {} });
       expect(actor.getSnapshot().context.file).toEqual(newFile);
 
       actor.send({ type: 'stateChanged', state: 'idle' });
@@ -895,7 +896,7 @@ describe('cadMachine', () => {
 
       actor.send({
         type: 'geometryComputed',
-        geometries: stubGeometries,
+        geometry: stubGeometry,
         issues: [],
       });
       expect(actor.getSnapshot().value).toBe('rendering');
@@ -923,14 +924,14 @@ describe('cadMachine', () => {
       expect(actor.getSnapshot().value).toBe('connecting');
 
       await waitFor(actor, (s) => s.value === 'idle');
-      expect(mockClient.openFile).toHaveBeenCalledWith({ file: stubFile, parameters: {} });
+      expect(mockClient.render).toHaveBeenCalledWith({ source: { path: stubFile }, parameters: {} });
 
       actor.send({ type: 'stateChanged', state: 'rendering' });
       expect(actor.getSnapshot().value).toBe('rendering');
 
       actor.send({
         type: 'geometryComputed',
-        geometries: stubGeometries,
+        geometry: stubGeometry,
         issues: [],
       });
       expect(actor.getSnapshot().value).toBe('rendering');
@@ -946,7 +947,7 @@ describe('cadMachine', () => {
       actor.send({ type: 'setFile', file: stubFile });
       actor.send({
         type: 'geometryComputed',
-        geometries: stubGeometries,
+        geometry: stubGeometry,
         issues: stubIssues,
       });
       expect(actor.getSnapshot().context.kernelIssues.has('main.ts')).toBe(true);
@@ -1059,7 +1060,7 @@ describe('cadMachine', () => {
 
       actor.send({
         type: 'geometryComputed',
-        geometries: stubGeometries,
+        geometry: stubGeometry,
         issues: [],
       });
 
@@ -1073,14 +1074,14 @@ describe('cadMachine', () => {
       actor.send({ type: 'setFile', file: stubFile });
       actor.send({
         type: 'geometryComputed',
-        geometries: stubGeometries,
+        geometry: stubGeometry,
         issues: [],
       });
       const settledFirst = actor.getSnapshot().context.lastSettledRenderId;
 
       actor.send({
         type: 'geometryComputed',
-        geometries: stubGeometries,
+        geometry: stubGeometry,
         issues: [],
       });
 
@@ -1088,7 +1089,7 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
-    it('should buffer setFile during connecting and forward as openFile on connect', async () => {
+    it('should buffer setFile during connecting and forward as render on connect', async () => {
       let resolveConnect!: () => void;
       const mockClient = createMockRuntimeClient() as AppRuntimeClient;
 
@@ -1110,7 +1111,7 @@ describe('cadMachine', () => {
       resolveConnect();
       await waitFor(actor, (s) => s.value === 'idle');
 
-      expect(mockClient.openFile).toHaveBeenCalledWith({ file: stubFile, parameters: {} });
+      expect(mockClient.render).toHaveBeenCalledWith({ source: { path: stubFile }, parameters: {} });
       actor.stop();
     });
   });

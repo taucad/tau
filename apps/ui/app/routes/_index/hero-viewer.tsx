@@ -50,31 +50,29 @@ export function HeroViewer(): React.JSX.Element {
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
-  const renderParams = useMemo(
-    () => (Object.keys(currentParams).length > 0 ? currentParams : undefined),
-    [currentParams],
-  );
-
-  const { geometries, status, defaultParameters, jsonSchema, exportGeometry, capabilities } = useRuntime({
+  const { geometry, status, defaultParameters, jsonSchema, exportGeometry, capabilities, setParameters } = useRuntime({
     clientOptions: heroKernelClientOptions,
-    code: heroCode,
-    parameters: renderParams,
+    source: { files: heroCode },
   });
 
   const hasParameters = Boolean(jsonSchema);
 
-  const exportFormatOptions = useMemo<ExportFormatOption[]>(
-    () => deriveExportFormatOptions(capabilities),
-    [capabilities],
-  );
+  type HeroExportFormat = NonNullable<typeof capabilities>['routes'][number]['targetFormat'];
+  type HeroExportFormatOption = ExportFormatOption<HeroExportFormat>;
 
-  const [selectedFormat, setSelectedFormat] = useState<ExportFormatOption | undefined>();
+  const exportFormatOptions = useMemo(() => deriveExportFormatOptions(capabilities), [capabilities]);
+
+  const [selectedFormat, setSelectedFormat] = useState<HeroExportFormatOption | undefined>();
   const activeFormat = selectedFormat ?? exportFormatOptions[0];
-  const canExport = status === 'success' && Boolean(activeFormat);
+  const canExport = status === 'ready' && Boolean(activeFormat);
 
-  const handleParametersChange = useCallback((newParameters: Record<string, unknown>) => {
-    setCurrentParams(newParameters);
-  }, []);
+  const handleParametersChange = useCallback(
+    (newParameters: Record<string, unknown>) => {
+      setCurrentParams(newParameters);
+      setParameters({ ...defaultParameters, ...newParameters });
+    },
+    [defaultParameters, setParameters],
+  );
 
   const handleExport = useCallback(() => {
     if (!activeFormat || isExporting) {
@@ -177,7 +175,7 @@ export function HeroViewer(): React.JSX.Element {
           </Button>
 
           <ModelViewer
-            geometries={geometries}
+            geometry={geometry}
             enablePan
             graphicsOptions={{ enableGrid: true, enableAxes: true }}
             stageOptions={{ zoomLevel: 1.2 }}

@@ -14,11 +14,13 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
+import type { FeatureFlagName } from '#flags/flag.constants.js';
 
 type NavRoute = {
   title: string;
   url: string;
   icon: LucideIcon;
+  featureFlag?: FeatureFlagName;
   /** When set, clicking the item calls this instead of navigating to `url`. */
   action?: () => void;
 };
@@ -78,6 +80,7 @@ export const navRoutes: {
       title: 'Plugins',
       url: '/plugins',
       icon: Plug,
+      featureFlag: 'pluginsStore',
     },
     {
       title: 'Usage',

@@ -9,6 +9,7 @@ const { vec2 } = jscad.maths;
 const { degToRad } = jscad.utils;
 
 const getParameterDefinitions = () => [
+  { name: 'numberTeeth', caption: 'Teeth:', type: 'int', initial: 12, min: 3 },
   { name: 'circularPitch', caption: 'Circular pitch:', type: 'float', initial: 5 },
   { name: 'pressureAngle', caption: 'Pressure angle:', type: 'float', initial: 20 },
   { name: 'clearance', caption: 'Clearance:', type: 'float', initial: 0 },
@@ -36,14 +37,10 @@ const createGearWithHole = (options) => {
 };
 
 const main = (parameters) => {
-  const { circularPitch, pressureAngle, clearance, thickness, centerHoleRadius } = parameters;
+  const { numberTeeth = 12, circularPitch, pressureAngle, clearance, thickness, centerHoleRadius } = parameters;
 
-  // Return two gears as array - Three.js handles positioning, animation, and coloring
   const gearOptions = { circularPitch, pressureAngle, clearance, thickness, centerHoleRadius };
-  const gear12 = createGearWithHole({ numberTeeth: 12, ...gearOptions });
-  const gear8 = createGearWithHole({ numberTeeth: 8, ...gearOptions });
-
-  return [gear12, gear8];
+  return createGearWithHole({ numberTeeth, ...gearOptions });
 };
 
 const involuteGear = (options) => {

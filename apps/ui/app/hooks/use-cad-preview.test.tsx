@@ -57,13 +57,12 @@ vi.mock('#machines/cad.machine.js', async () => {
       types: {
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup pattern
         context: {} as {
-          geometries: unknown[];
+          geometry: unknown | undefined;
           kernelIssues: Map<string, unknown>;
           defaultParameters: Record<string, unknown>;
           jsonSchema: undefined;
           units: undefined;
           kernelClient: undefined;
-          lastSettledRenderId: number;
         },
       },
     })
@@ -71,13 +70,12 @@ vi.mock('#machines/cad.machine.js', async () => {
       id: 'cad',
       initial: 'idle',
       context: {
-        geometries: [],
+        geometry: undefined,
         kernelIssues: new Map(),
         defaultParameters: {},
         jsonSchema: undefined,
         units: undefined,
         kernelClient: undefined,
-        lastSettledRenderId: 0,
       },
       states: { idle: {} },
     });

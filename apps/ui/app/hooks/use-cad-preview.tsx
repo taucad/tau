@@ -18,13 +18,13 @@ import { defaultKernelOptions } from '#constants/kernel-options.presets.js';
 /**
  * Status of the CAD preview.
  */
-export type CadPreviewStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
+export type CadPreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 /**
  * Context value exposed by CadPreviewProvider via the useCadPreview() hook.
  */
 export type CadPreviewContextValue = {
-  readonly geometries: Geometry[];
+  readonly geometry: Geometry | undefined;
   readonly status: CadPreviewStatus;
   readonly error: Error | undefined;
   readonly cadRef: ActorRefFrom<typeof cadMachine>;
@@ -51,7 +51,7 @@ export type CadPreviewProviderProps = {
   readonly children: ReactNode;
 };
 
-function deriveStatus(cadState: string): Exclude<CadPreviewStatus, 'empty'> {
+function deriveStatus(cadState: string): CadPreviewStatus {
   switch (cadState) {
     case 'idle': {
       return 'ready';
@@ -74,25 +74,18 @@ function deriveStatus(cadState: string): Exclude<CadPreviewStatus, 'empty'> {
 }
 
 /**
- * Combines CAD machine phase, settled-render identity, and geometry count into
- * the preview status exposed by {@link useCadPreview}.
+ * Combines CAD machine phase and initialization errors into the preview status
+ * exposed by {@link useCadPreview}.
  */
 export const deriveCadPreviewStatus = (args: {
   readonly initError: Error | undefined;
   readonly cadState: string;
-  readonly lastSettledRenderId: number;
-  readonly geometryCount: number;
 }): CadPreviewStatus => {
   if (args.initError) {
     return 'error';
   }
 
-  const baseStatus = deriveStatus(args.cadState);
-  if (baseStatus === 'ready' && args.lastSettledRenderId > 0 && args.geometryCount === 0) {
-    return 'empty';
-  }
-
-  return baseStatus;
+  return deriveStatus(args.cadState);
 };
 
 /**
@@ -299,9 +292,8 @@ export function CadPreviewProvider({
   }, []);
 
   // Selectors on cadRef for reactive state
-  const geometries = useSelector(cadRef, (s) => s.context.geometries);
+  const geometry = useSelector(cadRef, (s) => s.context.geometry);
   const cadStateValue = useSelector(cadRef, (s) => s.value);
-  const lastSettledRenderId = useSelector(cadRef, (s) => s.context.lastSettledRenderId);
   const kernelIssues = useSelector(cadRef, (s) => s.context.kernelIssues);
   const defaultParameters = useSelector(cadRef, (s) => s.context.defaultParameters);
   const jsonSchema = useSelector(cadRef, (s) => s.context.jsonSchema);
@@ -315,10 +307,8 @@ export function CadPreviewProvider({
       deriveCadPreviewStatus({
         initError,
         cadState: typeof cadStateValue === 'string' ? cadStateValue : 'idle',
-        lastSettledRenderId,
-        geometryCount: geometries.length,
       }),
-    [initError, cadStateValue, lastSettledRenderId, geometries.length],
+    [initError, cadStateValue],
   );
 
   const error = useMemo(() => {
@@ -338,16 +328,16 @@ export function CadPreviewProvider({
     return new Error('Unknown CAD error');
   }, [status, kernelIssues, initError]);
 
-  // Forward geometries to graphics machine
+  // Forward geometry to graphics machine
   useEffect(() => {
-    if (geometries.length > 0) {
+    if (geometry) {
       graphicsRef.send({
-        type: 'updateGeometries',
-        geometries,
+        type: 'updateGeometry',
+        geometry,
         units: cadUnits,
       });
     }
-  }, [geometries, cadUnits, graphicsRef]);
+  }, [geometry, cadUnits, graphicsRef]);
 
   const setParameters = useCallback(
     (newParameters: Record<string, unknown>) => {
@@ -358,7 +348,7 @@ export function CadPreviewProvider({
 
   const value = useMemo<CadPreviewContextValue>(
     () => ({
-      geometries,
+      geometry,
       status,
       error,
       cadRef,
@@ -367,7 +357,7 @@ export function CadPreviewProvider({
       jsonSchema,
       setParameters,
     }),
-    [geometries, status, error, cadRef, graphicsRef, defaultParameters, jsonSchema, setParameters],
+    [geometry, status, error, cadRef, graphicsRef, defaultParameters, jsonSchema, setParameters],
   );
 
   return <CadPreviewContext.Provider value={value}>{children}</CadPreviewContext.Provider>;
@@ -378,7 +368,7 @@ export function CadPreviewProvider({
  *
  * @example <caption>Read preview state</caption>
  * ```tsx
- * const { geometries, status, setParameters } = useCadPreview();
+ * const { geometry, status, setParameters } = useCadPreview();
  * ```
  */
 export function useCadPreview(): CadPreviewContextValue;

@@ -103,7 +103,7 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
     client = undefined;
   });
 
-  it('renders non-empty geometry from a transport-owned filesystem (FileInput)', async () => {
+  it('renders non-empty geometry from a transport-owned filesystem source', async () => {
     const fileSystem = fromMemoryFs({
       '/projects/proj_hollow_box/main.ts': hollowBoxSource,
     });
@@ -112,33 +112,39 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
 
     await client.connect();
 
-    const outcome = await client.openFile({
-      file: { path: '/projects/proj_hollow_box', filename: 'main.ts' },
+    const outcome = await client.render({
+      source: { path: { path: '/projects/proj_hollow_box', filename: 'main.ts' } },
     });
 
     expect(outcome.superseded).toBe(false);
     if (!outcome.superseded) {
       expect(outcome.geometry.success).toBe(true);
       if (outcome.geometry.success) {
-        expect(outcome.geometry.data.length).toBeGreaterThan(0);
+        expect(outcome.geometry.data.format).toBe('gltf');
+        if (outcome.geometry.data.format === 'gltf') {
+          expect(outcome.geometry.data.content.byteLength).toBeGreaterThan(0);
+        }
       }
     }
   });
 
-  it('renders non-empty geometry from inline code (CodeInput control path)', async () => {
+  it('renders non-empty geometry from inline source files', async () => {
     client = createIntegrationClient();
 
     await client.connect();
 
-    const outcome = await client.openFile({
-      code: { 'main.ts': hollowBoxSource },
+    const outcome = await client.render({
+      source: { files: { 'main.ts': hollowBoxSource } },
     });
 
     expect(outcome.superseded).toBe(false);
     if (!outcome.superseded) {
       expect(outcome.geometry.success).toBe(true);
       if (outcome.geometry.success) {
-        expect(outcome.geometry.data.length).toBeGreaterThan(0);
+        expect(outcome.geometry.data.format).toBe('gltf');
+        if (outcome.geometry.data.format === 'gltf') {
+          expect(outcome.geometry.data.content.byteLength).toBeGreaterThan(0);
+        }
       }
     }
   });
@@ -152,8 +158,8 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
 
     await client.connect();
 
-    const initial = await client.openFile({
-      file: { path: '/projects/proj_hollow_box', filename: 'main.ts' },
+    const initial = await client.render({
+      source: { path: { path: '/projects/proj_hollow_box', filename: 'main.ts' } },
     });
     expect(initial.superseded).toBe(false);
 
@@ -169,7 +175,10 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
     if (!updated.superseded) {
       expect(updated.geometry.success).toBe(true);
       if (updated.geometry.success) {
-        expect(updated.geometry.data.length).toBeGreaterThan(0);
+        expect(updated.geometry.data.format).toBe('gltf');
+        if (updated.geometry.data.format === 'gltf') {
+          expect(updated.geometry.data.content.byteLength).toBeGreaterThan(0);
+        }
       }
     }
   });
@@ -190,15 +199,18 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
     try {
       await client.connect();
 
-      const outcome = await client.openFile({
-        file: { path: '/projects/proj_ui_replicad', filename: 'main.ts' },
+      const outcome = await client.render({
+        source: { path: { path: '/projects/proj_ui_replicad', filename: 'main.ts' } },
       });
 
       expect(outcome.superseded).toBe(false);
       if (!outcome.superseded) {
         expect(outcome.geometry.success).toBe(true);
         if (outcome.geometry.success) {
-          expect(outcome.geometry.data.length).toBeGreaterThan(0);
+          expect(outcome.geometry.data.format).toBe('gltf');
+          if (outcome.geometry.data.format === 'gltf') {
+            expect(outcome.geometry.data.content.byteLength).toBeGreaterThan(0);
+          }
         }
       }
     } finally {

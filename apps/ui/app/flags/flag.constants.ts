@@ -35,6 +35,11 @@ export const flagRegistry = {
     label: 'Planning Mode',
     description: 'Show mode selector and plan viewer in chat.',
   },
+  pluginsStore: {
+    schema: z.boolean().default(false),
+    label: 'Plugins Store',
+    description: 'Expose the plugin and skill store while it is under development.',
+  },
   tauDebug: {
     schema: z.boolean().default(tauDebugDefault),
     label: 'Tau Debug',

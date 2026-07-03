@@ -551,7 +551,7 @@ export class ChatSessionStore {
         //
         //   - Startup-request hydration regenerate (see `loadChatActor`),
         //     which may fire before any client has attached a body.
-        //   - `continue` (manual Retry on a transient-network banner via
+        //   - `continue` (manual Try again on a transient-network banner via
         //     `continueChat`, and the persistence machine's transparent
         //     auto-retry in `retrying`), which resumes the in-flight stream
         //     and has no producer that owns the per-turn agent payload.
@@ -624,7 +624,7 @@ export class ChatSessionStore {
           // top-level `agent` block required by `chatTurnRequestSchema`. Without
           // it the API rejects the retry with `agent: expected object, received
           // undefined` and the user sees a fresh "Processing Error" banner the
-          // moment they click Retry on a network drop.
+          // moment they click Try again on a network drop.
           case 'continue': {
             type ChatMakeRequestShim = {
               makeRequest: (args: {

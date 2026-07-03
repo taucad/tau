@@ -37,6 +37,9 @@ const splashbackKernelClientOptions = {
   transport: inProcessTransport({ runtime: splashbackRuntime, fileSystem: fromMemoryFs() }),
 };
 
+const gear12Parameters = { numberTeeth: 12 };
+const gear8Parameters = { numberTeeth: 8 };
+
 const prompt1Text = 'Create a gear with 12 teeth';
 const prompt2Text = 'Change it to 8 teeth';
 const prompt3Text = 'Mesh the gears together';
@@ -573,7 +576,8 @@ type AuthSplashbackContentProperties = {
   readonly state: AuthSplashbackState;
   readonly send: AuthSplashbackSend;
   readonly derivedState: DerivedState;
-  readonly geometries: Geometry[];
+  readonly gear12Geometry: Geometry | undefined;
+  readonly gear8Geometry: Geometry | undefined;
   readonly loadingScatterPoints: ReturnType<typeof generateScatterPoints>;
   readonly unloadingScatterPointsA: ReturnType<typeof sliceSampledPoints>;
   readonly unloadingScatterPointsB: ReturnType<typeof sliceSampledPoints>;
@@ -584,7 +588,8 @@ function AuthSplashbackContent({
   state,
   send,
   derivedState,
-  geometries,
+  gear12Geometry,
+  gear8Geometry,
   loadingScatterPoints,
   unloadingScatterPointsA,
   unloadingScatterPointsB,
@@ -621,9 +626,6 @@ function AuthSplashbackContent({
     showAssembly,
     currentPhase,
   } = derivedState;
-
-  const gear12Geometry = geometries[0];
-  const gear8Geometry = geometries[1];
 
   const { gear12Points, gear8Points, assemblyGear12Points, assemblyGear8Points, assemblySplitRatio } = useSampledPoints(
     {
@@ -866,12 +868,18 @@ export function AuthSplashback(): React.JSX.Element {
   const derivedState = useSelector(actorRef, deriveVisibilityState);
 
   // `useRuntime` runs unconditionally on mount: kernel + middleware caches keep subsequent
-  // calls free, and status never flickers back to 'loading' once primed. The previous
+  // calls free, and status never flickers back to 'rendering' once primed. The previous
   // `enabled: showContainer` gate caused a re-render storm on every cycle restart that
   // briefly re-displayed the loading spinner over the still-rendered assembly.
-  const { geometries } = useRuntime({
+  const { geometry: gear12Geometry } = useRuntime({
     clientOptions: splashbackKernelClientOptions,
-    code: gearCode,
+    source: { files: gearCode },
+    initialParameters: gear12Parameters,
+  });
+  const { geometry: gear8Geometry } = useRuntime({
+    clientOptions: splashbackKernelClientOptions,
+    source: { files: gearCode },
+    initialParameters: gear8Parameters,
   });
 
   // Generate the alpha-and-omega scatter cloud once per component lifetime. It is the
@@ -896,7 +904,8 @@ export function AuthSplashback(): React.JSX.Element {
       state={state}
       send={send}
       derivedState={derivedState}
-      geometries={geometries}
+      gear12Geometry={gear12Geometry}
+      gear8Geometry={gear8Geometry}
       loadingScatterPoints={loadingScatterPoints}
       unloadingScatterPointsA={unloadingScatterPointsA}
       unloadingScatterPointsB={unloadingScatterPointsB}

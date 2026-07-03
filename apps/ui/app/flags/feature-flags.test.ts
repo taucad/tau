@@ -33,11 +33,23 @@ describe('isFeatureEnabled', () => {
     expect(isFeatureEnabled('planMode', storage)).toBe(false);
   });
 
+  it('should return false for the Plugins Store flag by default', () => {
+    const storage = createMockStorage();
+    expect(isFeatureEnabled('pluginsStore', storage)).toBe(false);
+  });
+
   it('should return overridden value when override is set to true', () => {
     const storage = createMockStorage({
       'tau:flags': JSON.stringify({ planMode: true }),
     });
     expect(isFeatureEnabled('planMode', storage)).toBe(true);
+  });
+
+  it('should return overridden value for the Plugins Store flag', () => {
+    const storage = createMockStorage({
+      'tau:flags': JSON.stringify({ pluginsStore: true }),
+    });
+    expect(isFeatureEnabled('pluginsStore', storage)).toBe(true);
   });
 
   it('should return overridden value when override is set to false', () => {
@@ -198,6 +210,7 @@ describe('zod schema fallback', () => {
     const storage = createMockStorage({
       'tau:flags': JSON.stringify({
         planMode: true,
+        pluginsStore: true,
         extra: 'data',
         another: 42,
       }),
@@ -205,5 +218,6 @@ describe('zod schema fallback', () => {
     const flags = getAllFlags(storage);
     expect(Object.keys(flags)).toStrictEqual(Object.keys(featureFlagDefaults));
     expect(flags.planMode).toBe(true);
+    expect(flags.pluginsStore).toBe(true);
   });
 });

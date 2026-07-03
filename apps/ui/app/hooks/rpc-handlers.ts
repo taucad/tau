@@ -46,6 +46,7 @@ import { buildScreenshotOverlayForPath } from '#machines/resolve-screenshot-over
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
+import type { AppRuntimeExportFormat } from '#types/runtime-client.alias.js';
 import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
 
@@ -155,18 +156,18 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
           if (entry.isFolder) {
             return {
               name: entry.name,
-              type: 'dir' as const,
+              type: 'dir',
               size: entry.size,
               ...(modifiedAt ? { modifiedAt } : {}),
             };
           }
           return {
             name: entry.name,
-            type: 'file' as const,
+            type: 'file',
             size: entry.size,
             ...(entry.contentKind === 'text'
-              ? { contentKind: 'text' as const, lineCount: entry.lineCount }
-              : { contentKind: 'binary' as const }),
+              ? { contentKind: 'text', lineCount: entry.lineCount }
+              : { contentKind: 'binary' }),
             ...(modifiedAt ? { modifiedAt } : {}),
           };
         });
@@ -407,7 +408,7 @@ function createBrowserGraphicsClient(
       }
 
       const { cadSnapshot } = resolved;
-      const geometry = cadSnapshot.context.geometries.find((g) => g.format === 'gltf');
+      const { geometry } = cadSnapshot.context;
 
       if (geometry?.format !== 'gltf') {
         const issues = cadSnapshot.context.kernelIssues.get(targetFile) ?? [];
@@ -464,7 +465,16 @@ function createBrowserGraphicsClient(
       }
 
       try {
-        const exportResult = await kernelClient.export(format as FileExtension);
+        const route = kernelClient.bestRouteFor(format as FileExtension, cadSnapshot.context.activeKernelId);
+        if (!route) {
+          return {
+            success: false,
+            errorCode: rpcClientErrorCode.unknown,
+            message: `Export format ${format} is not available for ${targetFile}`,
+          };
+        }
+
+        const exportResult = await kernelClient.export(route.targetFormat as AppRuntimeExportFormat);
         if (!exportResult.success) {
           const message = exportResult.issues.map((issue) => issue.message).join('; ') || 'Geometry export failed';
           return { success: false, errorCode: rpcClientErrorCode.unknown, message };

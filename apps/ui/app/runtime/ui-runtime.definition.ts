@@ -34,7 +34,6 @@ const createUiRuntime = (options: UiRuntimeOptions = {}) =>
             wasm: 'auto',
             withBrepEdges: true,
             withSourceMapping: options.withSourceMapping === true,
-            ocTracing: 'per-call',
           }),
           opencascade(),
           manifold(),

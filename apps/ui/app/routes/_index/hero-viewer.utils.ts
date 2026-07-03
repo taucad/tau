@@ -1,7 +1,7 @@
 import type { FileExtension } from '@taucad/types';
 
-export type ExportFormatOption = {
-  format: FileExtension;
+export type ExportFormatOption<Format extends FileExtension = FileExtension> = {
+  format: Format;
   label: string;
 };
 
@@ -12,14 +12,16 @@ export type ExportFormatOption = {
  * with a known kernel, so first-occurrence deduplication on `targetFormat` is
  * sufficient (unlike ChatConverter which filters by activeKernelId).
  */
-export function deriveExportFormatOptions(
-  capabilities: { routes: ReadonlyArray<{ targetFormat: FileExtension }> } | undefined,
-): ExportFormatOption[] {
+export function deriveExportFormatOptions<
+  const Capabilities extends { routes: ReadonlyArray<{ targetFormat: FileExtension }> },
+>(
+  capabilities: Capabilities | undefined,
+): Array<ExportFormatOption<Capabilities['routes'][number]['targetFormat'] & FileExtension>> {
   if (!capabilities) {
     return [];
   }
   const seen = new Set<FileExtension>();
-  const options: ExportFormatOption[] = [];
+  const options: Array<ExportFormatOption<Capabilities['routes'][number]['targetFormat'] & FileExtension>> = [];
   for (const route of capabilities.routes) {
     if (seen.has(route.targetFormat)) {
       continue;

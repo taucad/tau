@@ -171,7 +171,7 @@ describe('graphicsMachine model interaction child', () => {
     actor.stop();
   });
 
-  it('should eagerly extract GLTF component manifests from updateGeometries', () => {
+  it('should eagerly extract GLTF component manifests from updateGeometry', () => {
     const providedMachine = graphicsMachine.provide({
       actors: {
         probeWebGpu: fromPromise(async () => false),
@@ -181,21 +181,19 @@ describe('graphicsMachine model interaction child', () => {
     actor.start();
 
     actor.send({
-      type: 'updateGeometries',
+      type: 'updateGeometry',
       units: { length: 'mm' },
       sourceFile: 'src/main.ts',
-      geometries: [
-        {
-          format: 'gltf',
-          hash: 'geometry-hash',
-          content: encodeJson({
-            nodes: [{ name: 'Housing', mesh: 0, extras: { tauComponentId: housingComponentId } }],
-            meshes: [{ primitives: [{ attributes: { [positionAttributeName]: 0 }, material: 0 }] }],
-            accessors: [{ componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 1] }],
-            materials: [{ name: 'gray' }],
-          }),
-        },
-      ],
+      geometry: {
+        format: 'gltf',
+        hash: 'geometry-hash',
+        content: encodeJson({
+          nodes: [{ name: 'Housing', mesh: 0, extras: { tauComponentId: housingComponentId } }],
+          meshes: [{ primitives: [{ attributes: { [positionAttributeName]: 0 }, material: 0 }] }],
+          accessors: [{ componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 1] }],
+          materials: [{ name: 'gray' }],
+        }),
+      },
     });
 
     const sourceUnitId = deriveModelInteractionUnitId({ sourceFile: 'src/main.ts' });

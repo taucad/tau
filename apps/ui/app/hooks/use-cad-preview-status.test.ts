@@ -7,21 +7,17 @@ describe('deriveCadPreviewStatus', () => {
       deriveCadPreviewStatus({
         initError: undefined,
         cadState: 'idle',
-        lastSettledRenderId: 0,
-        geometryCount: 0,
       }),
     ).toBe('ready');
   });
 
-  it('should become empty after a settled render produced no geometry', () => {
+  it('should not expose an empty successful render state', () => {
     expect(
       deriveCadPreviewStatus({
         initError: undefined,
         cadState: 'idle',
-        lastSettledRenderId: 1,
-        geometryCount: 0,
       }),
-    ).toBe('empty');
+    ).toBe('ready');
   });
 
   it('should stay ready when geometry is present after a settled render', () => {
@@ -29,8 +25,6 @@ describe('deriveCadPreviewStatus', () => {
       deriveCadPreviewStatus({
         initError: undefined,
         cadState: 'idle',
-        lastSettledRenderId: 1,
-        geometryCount: 2,
       }),
     ).toBe('ready');
   });
@@ -40,19 +34,15 @@ describe('deriveCadPreviewStatus', () => {
       deriveCadPreviewStatus({
         initError: undefined,
         cadState: 'rendering',
-        lastSettledRenderId: 1,
-        geometryCount: 0,
       }),
     ).toBe('loading');
   });
 
-  it('should prefer initError over empty geometry', () => {
+  it('should prefer initError over CAD state', () => {
     expect(
       deriveCadPreviewStatus({
         initError: new Error('bootstrap failed'),
         cadState: 'idle',
-        lastSettledRenderId: 1,
-        geometryCount: 0,
       }),
     ).toBe('error');
   });

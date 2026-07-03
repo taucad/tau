@@ -155,8 +155,8 @@ export type GraphicsContext = {
   };
 
   // Geometry data from CAD
-  geometries: Geometry[];
-  /** Deterministic key derived from geometry content hashes. Used for skip-when-unchanged optimizations. */
+  geometry: Geometry | undefined;
+  /** Deterministic key derived from the geometry content hash. Used for skip-when-unchanged optimizations. */
   geometryKey: string;
   /** Restored per-component display state passed through to the model-interaction child. */
   componentDisplay?: PersistedModelComponentDisplayState;
@@ -254,8 +254,8 @@ export type GraphicsEvent =
   | { type: 'unregisterCameraCapability' }
   // Geometry updates from CAD
   | {
-      type: 'updateGeometries';
-      geometries: Geometry[];
+      type: 'updateGeometry';
+      geometry: Geometry;
       units: { length: LengthSymbol };
       sourceFile?: string;
     }
@@ -474,37 +474,33 @@ function normalize(v: [number, number, number]): [number, number, number] {
 }
 
 function extractComponentManifestUpdates({
-  geometries,
+  geometry,
   sourceFile,
 }: {
-  readonly geometries: readonly Geometry[];
+  readonly geometry: Geometry;
   readonly sourceFile?: string;
-}): Array<{ unitId: string; manifest: GeometryComponentManifest }> {
-  return geometries.flatMap((geometry) => {
-    if (geometry.format !== 'gltf') {
-      return [];
-    }
+}): { unitId: string; manifest: GeometryComponentManifest } | undefined {
+  if (geometry.format !== 'gltf') {
+    return undefined;
+  }
 
-    try {
-      const manifest = buildGltfComponentManifest(geometry.content, {
+  try {
+    const manifest = buildGltfComponentManifest(geometry.content, {
+      sourceFile,
+      geometryHash: geometry.hash,
+    });
+    return {
+      unitId: deriveModelInteractionUnitId({
         sourceFile,
         geometryHash: geometry.hash,
-      });
-      return [
-        {
-          unitId: deriveModelInteractionUnitId({
-            sourceFile,
-            geometryHash: geometry.hash,
-            manifest,
-          }),
-          manifest,
-        },
-      ];
-    } catch (error) {
-      console.error('Failed to extract GLTF component manifest in graphics machine', error);
-      return [];
-    }
-  });
+        manifest,
+      }),
+      manifest,
+    };
+  } catch (error) {
+    console.error('Failed to extract GLTF component manifest in graphics machine', error);
+    return undefined;
+  }
 }
 
 // Apply XYZ-order Euler rotation to a vector
@@ -794,12 +790,12 @@ export const graphicsMachine = setup({
       pickableMeshesVersion: ({ context }) => context.pickableMeshesVersion + 1,
     }),
 
-    updateGeometries: enqueueActions(({ enqueue, event, context }) => {
-      assertEvent(event, 'updateGeometries');
+    updateGeometry: enqueueActions(({ enqueue, event, context }) => {
+      assertEvent(event, 'updateGeometry');
 
       const cadUnitData = getLengthUnitData(event.units.length);
-      const componentManifestUpdates = extractComponentManifestUpdates({
-        geometries: event.geometries,
+      const componentManifestUpdate = extractComponentManifestUpdates({
+        geometry: event.geometry,
         sourceFile: event.sourceFile,
       });
 
@@ -807,8 +803,8 @@ export const graphicsMachine = setup({
       const relativeFactor = context.graphicsUnits.length.factor / cadUnitData.factor;
 
       enqueue.assign({
-        geometries: event.geometries,
-        geometryKey: event.geometries.map((g) => g.hash).join(','),
+        geometry: event.geometry,
+        geometryKey: event.geometry.hash,
         pickableMeshesVersion: context.pickableMeshesVersion + 1,
         cadUnits: {
           length: {
@@ -825,16 +821,16 @@ export const graphicsMachine = setup({
         },
       });
 
-      for (const { unitId, manifest } of componentManifestUpdates) {
+      if (componentManifestUpdate) {
         enqueue.sendTo('modelInteraction', {
           type: 'loadManifest',
-          unitId,
-          manifest,
+          unitId: componentManifestUpdate.unitId,
+          manifest: componentManifestUpdate.manifest,
           source: 'viewer',
         });
       }
 
-      if (event.sourceFile && componentManifestUpdates.length === 0) {
+      if (event.sourceFile && !componentManifestUpdate) {
         enqueue.sendTo('modelInteraction', {
           type: 'clearManifest',
           unitId: deriveModelInteractionUnitId({ sourceFile: event.sourceFile }),
@@ -1531,7 +1527,7 @@ export const graphicsMachine = setup({
       activeScreenshotRequest: undefined,
 
       // Shapes
-      geometries: [],
+      geometry: undefined,
       geometryKey: '',
       componentDisplay: input.componentDisplay,
     };
@@ -1658,8 +1654,8 @@ export const graphicsMachine = setup({
         },
 
         // Geometry updates
-        updateGeometries: {
-          actions: 'updateGeometries',
+        updateGeometry: {
+          actions: 'updateGeometry',
         },
         sceneRadiusUpdated: {
           actions: 'updateSceneRadius',

@@ -318,9 +318,13 @@ const exportProjectWithNodeRuntime = async (options: {
       import { createNodeClient } from ${JSON.stringify(runtimeNodeModuleUrl)};
       const client = await createNodeClient(${JSON.stringify(projectPath)});
       const result = await client.export(${JSON.stringify(options.format)}, {
-        file: ${JSON.stringify(file.startsWith(options.projectRootPath) ? relative(options.projectRootPath, file) : file)},
-        coordinateSystem: 'z-up',
-        unit: { length: 'millimeter' },
+        source: {
+          path: ${JSON.stringify(file.startsWith(options.projectRootPath) ? relative(options.projectRootPath, file) : file)},
+        },
+        exportOptions: {
+          coordinateSystem: 'z-up',
+          unit: { length: 'millimeter' },
+        },
       });
       client.terminate();
       if (!result.success) {
@@ -473,7 +477,7 @@ describe('geospec-runner.worker JSCAD integration', () => {
     expect(exportCalls).toHaveLength(1);
     expect(exportCalls[0]?.format).toBe('glb');
     expect(exportCalls[0]?.input).toMatchObject({
-      file: `${projectRootPath}/main.ts`,
+      source: { path: `${projectRootPath}/main.ts` },
     });
     expect(exportCalls[0]?.bytes).toBeGreaterThan(1000);
     expect(JSON.stringify(resultMessage.result)).not.toContain('MODEL_EXPORT_FAILED');

@@ -1,15 +1,15 @@
 /**
  * App-level aliases for the runtime client used across the UI.
  *
- * The UI does not statically know which kernels and transcoders it consumes
- * (the set is configured via runtime client options at startup), so these
- * aliases intentionally point to the wide-default erasure forms, matching
- * how the app accepts any plugin configuration configured at runtime.
+ * The UI owns a concrete runtime definition. Keep this alias projected from
+ * that definition so app code keeps the runtime client's format-specific
+ * render/export typing instead of erasing it.
  */
 
 import type { RuntimeClient } from '@taucad/runtime';
 import type { RuntimeClientOptionsWithTransport } from '@taucad/runtime/client';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
+import type { RuntimeKernels, RuntimeTranscoders } from '@taucad/runtime/worker';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 
@@ -19,8 +19,9 @@ import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
  * Use this alias instead of inlining the runtime projection so that
  * downstream consumers have a single source of truth.
  */
-// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- the UI stores an intentionally erased client; runtime capabilities gate broad file-extension workflows at runtime.
-export type AppRuntimeClient = RuntimeClient<any, any>;
+export type AppRuntimeClient = RuntimeClient<RuntimeKernels<typeof runtime>, RuntimeTranscoders<typeof runtime>>;
+
+export type AppRuntimeExportFormat = Parameters<AppRuntimeClient['export']>[0];
 
 /**
  * Deferred-construction shape for typed runtime client options.

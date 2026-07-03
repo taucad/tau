@@ -18,7 +18,11 @@ import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { logMachine } from '#machines/logs.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
-import type { AppRuntimeClient, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
+import type {
+  AppRuntimeClient,
+  AppRuntimeExportFormat,
+  LazyKernelOptionsFactory,
+} from '#types/runtime-client.alias.js';
 
 export type CadContext = {
   file: GeometryFile | undefined;
@@ -26,7 +30,7 @@ export type CadContext = {
   parameters: Record<string, unknown>;
   units: { length: LengthSymbol };
   defaultParameters: Record<string, unknown>;
-  geometries: Geometry[];
+  geometry: Geometry | undefined;
   kernelIssues: Map<string, KernelIssue[]>;
   codeIssues: CodeIssue[];
   exportedBlob: Blob | undefined;
@@ -69,8 +73,8 @@ type CadEvent =
   | { type: 'setFile'; file: GeometryFile }
   | { type: 'setParameters'; parameters: Record<string, unknown> }
   | { type: 'setCodeIssues'; errors: CadContext['codeIssues'] }
-  | { type: 'exportGeometry'; format: FileExtension; options?: Record<string, unknown> }
-  | { type: 'geometryComputed'; geometries: Geometry[]; issues: KernelIssue[] }
+  | { type: 'exportGeometry'; format: FileExtension; exportOptions?: Record<string, unknown> }
+  | { type: 'geometryComputed'; geometry: Geometry; issues: KernelIssue[] }
   | { type: 'parametersParsed'; defaultParameters: Record<string, unknown>; jsonSchema: JSONSchema7 }
   | { type: 'kernelIssue'; errors: KernelIssue[] }
   | { type: 'kernelProgress'; phase: RenderPhase }
@@ -85,7 +89,7 @@ type CadEvent =
   | KernelConnectedEvent;
 
 type CadEmitted =
-  | { type: 'geometryEvaluated'; geometries: Geometry[] }
+  | { type: 'geometryEvaluated'; geometry: Geometry }
   | { type: 'geometryExported'; blob: Blob; format: string }
   | { type: 'exportFailed'; errors: KernelIssue[] };
 
@@ -145,7 +149,7 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
       if (result.success) {
         machineRef.send({
           type: 'geometryComputed',
-          geometries: result.data,
+          geometry: result.data,
           issues: result.issues,
         });
       } else {
@@ -163,7 +167,7 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
         machineRef.send({
           type: 'parametersParsed',
           defaultParameters: parametersResult.data.defaultParameters,
-          jsonSchema: parametersResult.data.jsonSchema as JSONSchema7,
+          jsonSchema: parametersResult.data.jsonSchema,
         });
       }
     }),
@@ -268,11 +272,11 @@ export const cadMachine = setup({
         return event.parameters;
       },
     }),
-    setGeometries: enqueueActions(({ enqueue, event, context }) => {
+    setGeometry: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'geometryComputed');
       const currentFileName = context.file?.filename;
       enqueue.assign({
-        geometries: event.geometries,
+        geometry: event.geometry,
         kernelIssues({ context }) {
           if (!currentFileName) {
             return context.kernelIssues;
@@ -286,7 +290,7 @@ export const cadMachine = setup({
           return newIssues;
         },
       });
-      enqueue.emit({ type: 'geometryEvaluated', geometries: event.geometries });
+      enqueue.emit({ type: 'geometryEvaluated', geometry: event.geometry });
     }),
     setKernelIssue: assign({
       kernelIssues({ context, event }) {
@@ -346,18 +350,18 @@ export const cadMachine = setup({
         file: event.file,
         parameters: event.parameters ?? {},
         codeIssues: [],
-        geometries: [],
+        geometry: undefined,
         exportedBlob: undefined,
         jsonSchema: undefined,
       });
     }),
     forwardSetFile: ({ context, event }) => {
       assertEvent(event, 'setFile');
-      void context.kernelClient?.openFile({ file: event.file, parameters: context.parameters });
+      void context.kernelClient?.render({ source: { path: event.file }, parameters: context.parameters });
     },
     forwardInitializeModel: ({ context, event }) => {
       assertEvent(event, 'initializeModel');
-      void context.kernelClient?.openFile({ file: event.file, parameters: event.parameters ?? {} });
+      void context.kernelClient?.render({ source: { path: event.file }, parameters: event.parameters ?? {} });
     },
     setRenderTimeout: assign({
       renderTimeout({ event }) {
@@ -401,7 +405,26 @@ export const cadMachine = setup({
 
       const handleExport = async () => {
         try {
-          const result: ExportResult = await context.kernelClient!.export(event.format, event.options);
+          const route = context.kernelClient!.bestRouteFor(event.format, context.activeKernelId);
+          if (!route || (context.activeKernelId && route.kernelId !== context.activeKernelId)) {
+            self.send({
+              type: 'geometryExportFailed',
+              errors: [
+                {
+                  message: `Export format ${event.format} is not available for the active model.`,
+                  code: 'RUNTIME',
+                  type: 'runtime',
+                  severity: 'error',
+                },
+              ],
+            });
+            return;
+          }
+
+          const exportFormat = route.targetFormat as AppRuntimeExportFormat;
+          const result: ExportResult = await context.kernelClient!.export(exportFormat, {
+            exportOptions: event.exportOptions,
+          });
           if (result.success) {
             const { data } = result;
             const blob = new Blob([data.bytes], { type: data.mimeType });
@@ -448,7 +471,7 @@ export const cadMachine = setup({
     units: { length: 'mm' },
     parameters: {},
     defaultParameters: {},
-    geometries: [],
+    geometry: undefined,
     kernelIssues: new Map(),
     codeIssues: [],
     exportedBlob: undefined,
@@ -510,7 +533,7 @@ export const cadMachine = setup({
             });
             void event.client.setOptions({ renderTimeout: context.renderTimeout });
             if (context.file) {
-              void event.client.openFile({ file: context.file, parameters: context.parameters });
+              void event.client.render({ source: { path: context.file }, parameters: context.parameters });
             }
           }),
         },
@@ -544,7 +567,7 @@ export const cadMachine = setup({
         exportGeometry: { actions: 'dispatchExport' },
         geometryExported: { actions: 'setExportedBlob' },
         geometryExportFailed: { actions: 'setExportError' },
-        geometryComputed: { actions: ['setGeometries', 'setSettledRenderId'] },
+        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId'] },
         parametersParsed: { actions: 'setDefaultParameters' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
@@ -578,7 +601,7 @@ export const cadMachine = setup({
         exportGeometry: { actions: 'dispatchExport' },
         geometryExported: { actions: 'setExportedBlob' },
         geometryExportFailed: { actions: 'setExportError' },
-        geometryComputed: { actions: ['setGeometries', 'setSettledRenderId'] },
+        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId'] },
         parametersParsed: { actions: 'setDefaultParameters' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
@@ -613,7 +636,7 @@ export const cadMachine = setup({
         exportGeometry: { actions: 'dispatchExport' },
         geometryExported: { actions: 'setExportedBlob' },
         geometryExportFailed: { actions: 'setExportError' },
-        geometryComputed: { actions: ['setGeometries', 'setSettledRenderId'] },
+        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId'] },
         parametersParsed: { actions: 'setDefaultParameters' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
@@ -649,7 +672,7 @@ export const cadMachine = setup({
         exportGeometry: { actions: 'dispatchExport' },
         geometryExported: { actions: 'setExportedBlob' },
         geometryExportFailed: { actions: 'setExportError' },
-        geometryComputed: { actions: ['setGeometries', 'setSettledRenderId'] },
+        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId'] },
         parametersParsed: { actions: 'setDefaultParameters' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },

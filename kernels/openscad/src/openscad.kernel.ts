@@ -30,10 +30,15 @@ import type {
 } from '@taucad/runtime/kernel';
 import {
   convertOffToManifoldGltf,
+  createEmptyGlb,
+  createEmptyGltf,
+  createEmptyGltfGeometry,
   createKernelError,
   createKernelSuccess,
   defineKernel,
+  finalizeRenderOutput,
   loadBinaryFile,
+  RenderArtifactFinalizationError,
   resolveToRelative,
 } from '@taucad/runtime/kernel';
 import type { OpenScadParameterExport } from '#parse-parameters.js';
@@ -44,6 +49,7 @@ import { OpenScadStderrParser } from '#parse-output.js';
 
 const geistRegularUrl = new URL('fonts/Geist-Regular.ttf', import.meta.url).href;
 const geistBoldUrl = new URL('fonts/Geist-Bold.ttf', import.meta.url).href;
+const bundledManifoldWasmUrl = new URL('wasm/manifold.wasm', import.meta.url).href;
 
 // =============================================================================
 // Types & constants
@@ -227,7 +233,9 @@ async function getManifoldModule(
   const span = runtime.tracer.startSpan('openscad.manifold-init');
   context.manifoldModulePromise = (async () => {
     try {
-      const module = await createManifoldModule();
+      const module = await createManifoldModule({
+        locateFile: resolveManifoldWasmUrl,
+      });
       module.setup();
       return module;
     } catch (error) {
@@ -240,6 +248,19 @@ async function getManifoldModule(
   })();
 
   return context.manifoldModulePromise;
+}
+
+function resolveManifoldWasmUrl(): string {
+  const processVersions = typeof process === 'undefined' ? undefined : process.versions;
+  if (processVersions?.node && typeof import.meta.resolve === 'function') {
+    try {
+      return import.meta.resolve('manifold-3d/manifold.wasm');
+    } catch {
+      // Browser bundlers use the local asset URL below.
+    }
+  }
+
+  return bundledManifoldWasmUrl;
 }
 
 // =============================================================================
@@ -652,7 +673,7 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
     try {
       const code = await filesystem.readFile(filePath, 'utf8');
       if (code.trim() === '') {
-        return { geometry: [], nativeHandle: '' };
+        return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: '' });
       }
 
       const wasmSpan = tracer.startSpan('openscad.wasm-init');
@@ -704,7 +725,11 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
       if (result !== 0) {
         const hasActualErrors = collectedIssues.some((issue) => issue.severity === 'error');
         if (!hasActualErrors && collectedIssues.length > 0) {
-          return { geometry: [], nativeHandle: '', issues: collectedIssues };
+          return finalizeRenderOutput({
+            artifacts: [createEmptyGltfGeometry()],
+            nativeHandle: '',
+            issues: collectedIssues,
+          });
         }
 
         if (collectedIssues.length > 0) {
@@ -735,12 +760,12 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
       context.lastParameters = parameters;
 
       const geometry: GeometryGltf = { format: 'gltf', content: gltfBlob };
-      return {
-        geometry: [geometry],
-        nativeHandle: offData,
-        issues: collectedIssues,
-      };
+      return finalizeRenderOutput({ artifacts: [geometry], nativeHandle: offData, issues: collectedIssues });
     } catch (error) {
+      if (error instanceof RenderArtifactFinalizationError) {
+        throw error;
+      }
+
       if (error instanceof OpenScadBuildError) {
         throw error;
       }
@@ -755,6 +780,29 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
 
   async exportGeometry(input, runtime, context) {
     const { format, nativeHandle, options } = input;
+
+    if (nativeHandle === '') {
+      switch (format) {
+        case 'glb': {
+          return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))]);
+        }
+
+        case 'gltf': {
+          return createKernelSuccess([createExportFile('gltf', 'model.gltf', asBuffer(createEmptyGltf()))]);
+        }
+
+        default: {
+          const _exhaustive: never = format;
+          return createKernelError([
+            {
+              message: `Unsupported export format: ${_exhaustive as string}`,
+              code: 'RUNTIME',
+              severity: 'error',
+            },
+          ]);
+        }
+      }
+    }
 
     if (!nativeHandle) {
       return createKernelError([

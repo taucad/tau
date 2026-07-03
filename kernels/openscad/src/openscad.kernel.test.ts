@@ -139,14 +139,14 @@ describe('OpenSCAD Kernel', () => {
     });
     const offData = (worker as unknown as { nativeHandle?: unknown }).nativeHandle;
 
-    expect(result.success).toBe(true);
+    assertSuccess(result, 'openscad native handle serialization createGeometry');
     expect(offData).toEqual(expect.any(String));
     expect(result.serializedNativeHandle).toEqual(offData);
 
     (worker as unknown as { nativeHandle?: unknown }).nativeHandle = undefined;
     const exportResult = await worker.exportGeometry('glb');
 
-    expect(exportResult.success).toBe(true);
+    assertSuccess(exportResult, 'openscad native handle restoration exportGeometry');
   });
 
   describe('getParameters', () => {
@@ -1265,8 +1265,8 @@ describe('OpenSCAD Kernel', () => {
           parameters: {},
         });
 
-        // This may succeed with empty geometry or fail - just verify we get a proper result
-        expect(typeof result.success).toBe('boolean');
+        await geometryHelpers.expectValidGltf(result);
+        await geometryHelpers.expectMeshCount(result, 0);
       });
 
       it('should return warning when file only defines modules without rendering', async () => {
@@ -1284,13 +1284,11 @@ module my_cube(size = 10) {
           parameters: {},
         });
 
-        // Should succeed (not an error) but with a warning
+        await geometryHelpers.expectValidGltf(result);
+        await geometryHelpers.expectMeshCount(result, 0);
         expect(result.success).toBe(true);
         if (result.success) {
-          expect(result.issues.length).toBeGreaterThan(0);
-          expect(result.issues.some((index) => index.severity === 'warning')).toBe(true);
-          expect(result.issues.some((index) => index.message.includes('No geometry to render'))).toBe(true);
-          expect(result.issues.some((index) => index.message.includes('Call a module'))).toBe(true);
+          expect(result.issues).toEqual([expect.objectContaining({ severity: 'warning' })]);
         }
       });
 
@@ -2410,13 +2408,22 @@ describe('Export', () => {
     expect(Buffer.from(yUpBytes).equals(Buffer.from(zUpBytes))).toBe(false);
   });
 
-  it('should return error when no geometry computed', async () => {
+  it('should export empty GLB and glTF files after an empty render', async () => {
     const worker = await createWorker({ 'empty.scad': '' });
     const geometryFile = createGeometryFile('empty.scad');
-    await worker.createGeometry({ file: geometryFile, parameters: {} });
+    const createResult = await worker.createGeometry({ file: geometryFile, parameters: {} });
+    await geometryHelpers.expectValidGltf(createResult);
+    await geometryHelpers.expectMeshCount(createResult, 0);
 
-    const exportResult = await worker.exportGeometry('glb');
-    expect(exportResult.success).toBe(false);
+    const glbResult = await worker.exportGeometry('glb');
+    assertSuccess(glbResult);
+    const document = await new NodeIO().readBinary(glbResult.data[0]!.bytes);
+    expect(document.getRoot().listMeshes()).toHaveLength(0);
+
+    const gltfResult = await worker.exportGeometry('gltf');
+    assertSuccess(gltfResult);
+    const json = JSON.parse(new TextDecoder().decode(gltfResult.data[0]!.bytes)) as { meshes: unknown[] };
+    expect(json.meshes).toEqual([]);
   });
 });
 

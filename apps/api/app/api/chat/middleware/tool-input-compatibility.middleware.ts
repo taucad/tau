@@ -8,6 +8,7 @@ import { toolName } from '@taucad/chat/constants';
 import { normalizeGeoSpecRunFilterInputAliases } from '@taucad/chat/schemas/tools/test-model-input-normalizer';
 import { AttributeKey } from '@taucad/telemetry';
 import type { ModelService } from '#api/models/model.service.js';
+import { cloneAiMessage } from '#api/chat/utils/ai-message-clone.js';
 import type { MetricsService } from '#telemetry/metrics.js';
 
 const repairKind = 'bracket_array_alias';
@@ -128,18 +129,9 @@ function normalizeToolCallContent(
 }
 
 function rebuildAiMessage(message: AIMessage, toolCalls: readonly ToolCallLike[]): AIMessage {
-  return new AIMessage({
+  return cloneAiMessage(message, {
     content: normalizeToolCallContent(message.content, toolCalls),
-    id: message.id,
-    name: message.name,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    tool_calls: toolCalls as AIMessage['tool_calls'],
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    additional_kwargs: message.additional_kwargs,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    response_metadata: message.response_metadata,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    usage_metadata: message.usage_metadata,
+    toolCalls: toolCalls as AIMessage['tool_calls'],
   });
 }
 

@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import type { MyUIMessage } from '@taucad/chat';
-import { validateImageParts } from '#api/chat/utils/validate-image-parts.js';
+import { toolName } from '@taucad/chat/constants';
+import {
+  hasModelVisibleImagePart,
+  validateImageParts,
+  validateModelImageInputSupport,
+} from '#api/chat/utils/validate-image-parts.js';
 
 function makeMessage(parts: MyUIMessage['parts']): MyUIMessage {
   const message: MyUIMessage = {
@@ -68,6 +73,66 @@ describe('validateImageParts', () => {
     ];
     expect(() => {
       validateImageParts(messages);
+    }).not.toThrow();
+  });
+});
+
+describe('validateModelImageInputSupport', () => {
+  it('should pass text-only messages for a text-only model', () => {
+    const messages = [makeMessage([{ type: 'text', text: 'Hello' }])];
+
+    expect(hasModelVisibleImagePart(messages)).toBe(false);
+    expect(() => {
+      validateModelImageInputSupport({
+        messages,
+        modelName: 'together-glm-5.2',
+        supportsImageInput: false,
+      });
+    }).not.toThrow();
+  });
+
+  it('should reject image file parts for a text-only model', () => {
+    const messages = [makeMessage([{ type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,AAA' }])];
+
+    expect(hasModelVisibleImagePart(messages)).toBe(true);
+    expect(() => {
+      validateModelImageInputSupport({
+        messages,
+        modelName: 'together-glm-5.2',
+        supportsImageInput: false,
+      });
+    }).toThrow('together-glm-5.2 cannot read image attachments');
+  });
+
+  it('should reject screenshot tool image outputs for a text-only model', () => {
+    const messages = [
+      makeMessage([
+        {
+          type: `tool-${toolName.screenshot}`,
+          output: { images: [{ view: 'front', dataUrl: 'data:image/png;base64,AAA' }] },
+        },
+      ] as unknown as MyUIMessage['parts']),
+    ];
+
+    expect(hasModelVisibleImagePart(messages)).toBe(true);
+    expect(() => {
+      validateModelImageInputSupport({
+        messages,
+        modelName: 'together-glm-5.2',
+        supportsImageInput: false,
+      });
+    }).toThrow('Switch to a vision-capable model or remove the image');
+  });
+
+  it('should allow image parts for a vision-capable model', () => {
+    const messages = [makeMessage([{ type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,AAA' }])];
+
+    expect(() => {
+      validateModelImageInputSupport({
+        messages,
+        modelName: 'anthropic-claude-sonnet-5',
+        supportsImageInput: true,
+      });
     }).not.toThrow();
   });
 });

@@ -606,30 +606,31 @@ function findLastScreenshotIndex(messages: BaseMessage[]): number {
  * for Anthropic prompt caching. Consistent content enables cache hits
  * across conversation turns.
  */
-export const toolResultTrimmerMiddleware = createMiddleware({
-  name: 'ToolResultTrimmer',
+export const createToolResultTrimmerMiddleware = ({ allowImageBlocks = true } = {}) =>
+  createMiddleware({
+    name: 'ToolResultTrimmer',
 
-  async wrapModelCall(request, handler) {
-    const { messages } = request;
+    async wrapModelCall(request, handler) {
+      const { messages } = request;
 
-    const lastScreenshotIndex = findLastScreenshotIndex(messages);
+      const lastScreenshotIndex = allowImageBlocks ? findLastScreenshotIndex(messages) : -1;
 
-    const trimmedMessages = messages.map((message, index) => {
-      if (!isToolMessage(message)) {
-        return message;
-      }
+      const trimmedMessages = messages.map((message, index) => {
+        if (!isToolMessage(message)) {
+          return message;
+        }
 
-      // Inject images for the latest screenshot tool result so LLM can see them
-      if (index === lastScreenshotIndex) {
-        return injectScreenshotImages(message);
-      }
+        // Inject images for the latest screenshot tool result so LLM can see them
+        if (index === lastScreenshotIndex) {
+          return injectScreenshotImages(message);
+        }
 
-      return trimToolMessage(message);
-    });
+        return trimToolMessage(message);
+      });
 
-    return handler({
-      ...request,
-      messages: trimmedMessages,
-    });
-  },
-});
+      return handler({
+        ...request,
+        messages: trimmedMessages,
+      });
+    },
+  });

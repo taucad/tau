@@ -1,6 +1,7 @@
 import { createMiddleware } from 'langchain';
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage, ContentBlock } from '@langchain/core/messages';
+import { cloneAiMessage } from '#api/chat/utils/ai-message-clone.js';
 
 /**
  * Placeholder text added to AIMessages that have no text content.
@@ -99,36 +100,18 @@ function ensureTextContent(message: AIMessage): AIMessage {
   // Array content with no text blocks (e.g., only reasoning/thinking blocks)
   // → append a placeholder text block to satisfy the API
   if (Array.isArray(content) && content.length > 0) {
-    return new AIMessage({
+    return cloneAiMessage(message, {
       content: [...content, { type: 'text', text: interruptedPlaceholder }],
-      id: message.id,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      tool_calls: safeToolCalls,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      invalid_tool_calls: message.invalid_tool_calls,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      additional_kwargs: additionalKwargs,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      response_metadata: message.response_metadata,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      usage_metadata: message.usage_metadata,
+      toolCalls: safeToolCalls,
+      additionalKwargs,
     });
   }
 
   // Empty string content or empty array → create a single placeholder text block
-  return new AIMessage({
+  return cloneAiMessage(message, {
     content: [{ type: 'text', text: interruptedPlaceholder }],
-    id: message.id,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    tool_calls: safeToolCalls,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    invalid_tool_calls: message.invalid_tool_calls,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    additional_kwargs: additionalKwargs,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    response_metadata: message.response_metadata,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    usage_metadata: message.usage_metadata,
+    toolCalls: safeToolCalls,
+    additionalKwargs,
   });
 }
 

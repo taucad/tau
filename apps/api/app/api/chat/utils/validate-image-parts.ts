@@ -1,4 +1,5 @@
 import type { MyUIMessage } from '@taucad/chat';
+import { toolName } from '@taucad/chat/constants';
 
 /**
  * Maximum base64 string length for image data URLs (~5 MB raw).
@@ -6,6 +7,50 @@ import type { MyUIMessage } from '@taucad/chat';
  */
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Domain constant
 const MAX_BASE64_LENGTH = 5 * 1024 * 1024;
+
+const screenshotToolPartType = `tool-${toolName.screenshot}`;
+
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
+const isImageFilePart = (part: unknown): part is { mediaType: string; url?: string } =>
+  isObject(part) &&
+  part['type'] === 'file' &&
+  typeof part['mediaType'] === 'string' &&
+  part['mediaType'].startsWith('image/');
+
+const hasScreenshotDataUrl = (output: unknown): boolean => {
+  if (!isObject(output) || !Array.isArray(output['images'])) {
+    return false;
+  }
+
+  return output['images'].some((image) => isObject(image) && typeof image['dataUrl'] === 'string');
+};
+
+const isScreenshotImagePart = (part: unknown): boolean =>
+  isObject(part) && part['type'] === screenshotToolPartType && hasScreenshotDataUrl(part['output']);
+
+export const hasModelVisibleImagePart = (messages: MyUIMessage[]): boolean =>
+  messages.some(
+    (message) =>
+      Array.isArray(message.parts) &&
+      message.parts.some((part) => isImageFilePart(part) || isScreenshotImagePart(part)),
+  );
+
+export function validateModelImageInputSupport({
+  messages,
+  modelName,
+  supportsImageInput,
+}: {
+  messages: MyUIMessage[];
+  modelName: string;
+  supportsImageInput: boolean;
+}): void {
+  if (!supportsImageInput && hasModelVisibleImagePart(messages)) {
+    throw new Error(
+      `${modelName} cannot read image attachments. Switch to a vision-capable model or remove the image.`,
+    );
+  }
+}
 
 /**
  * Validates that all image file parts across messages do not exceed
@@ -22,16 +67,7 @@ export function validateImageParts(messages: MyUIMessage[]): void {
     }
 
     for (const part of message.parts) {
-      if (
-        typeof part === 'object' &&
-        'type' in part &&
-        part.type === 'file' &&
-        'mediaType' in part &&
-        typeof part.mediaType === 'string' &&
-        part.mediaType.startsWith('image/') &&
-        'url' in part &&
-        typeof part.url === 'string'
-      ) {
+      if (isImageFilePart(part) && typeof part.url === 'string') {
         const dataPrefix = 'base64,';
         const base64Start = part.url.indexOf(dataPrefix);
         if (base64Start === -1) {

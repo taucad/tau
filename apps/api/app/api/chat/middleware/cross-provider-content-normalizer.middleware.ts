@@ -3,6 +3,7 @@ import type { AgentMiddleware } from 'langchain';
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { ProviderId } from '#api/providers/provider.schema.js';
+import { cloneAiMessage } from '#api/chat/utils/ai-message-clone.js';
 
 type CanonicalToolCall = NonNullable<AIMessage['tool_calls']>[number];
 
@@ -180,19 +181,15 @@ function rebuildAiMessage(
     readonly additionalKwargs?: AIMessage['additional_kwargs'];
   } = {},
 ): AIMessage {
-  return new AIMessage({
+  const toolCallOverride = options.toolCalls === undefined ? {} : { toolCalls: options.toolCalls };
+  const additionalKwargsOverride =
+    options.additionalKwargs === undefined ? {} : { additionalKwargs: options.additionalKwargs };
+
+  return cloneAiMessage(message, {
     content,
-    id: message.id,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    tool_calls: options.toolCalls ?? message.tool_calls,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    invalid_tool_calls: message.invalid_tool_calls,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    additional_kwargs: options.additionalKwargs ?? message.additional_kwargs,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    response_metadata: responseMetadata,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    usage_metadata: message.usage_metadata,
+    responseMetadata,
+    ...toolCallOverride,
+    ...additionalKwargsOverride,
   });
 }
 

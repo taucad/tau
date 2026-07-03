@@ -4,7 +4,7 @@ import { toolName } from '@taucad/chat/constants';
 import type { TestModelOutput, TestFailure } from '@taucad/testing';
 import type { CreateFileOutput, EditFileOutput, GetKernelResultOutput, ScreenshotOutput } from '@taucad/chat';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { toolResultTrimmerMiddleware } from '#api/chat/middleware/tool-result-trimmer.middleware.js';
+import { createToolResultTrimmerMiddleware } from '#api/chat/middleware/tool-result-trimmer.middleware.js';
 
 const defaultTargetFile = 'main.scad';
 
@@ -89,10 +89,15 @@ function parseTestModelOutput(message: ToolMessage): TestModelOutput {
 
 // Helper type for the request shape we're testing
 type TestRequest = { messages: BaseMessage[] };
+type TestTrimmerOptions = Parameters<typeof createToolResultTrimmerMiddleware>[0];
 
 // Helper to call wrapModelCall with proper typing
-async function callWrapModelCall(request: TestRequest, handler: ReturnType<typeof vi.fn>): Promise<void> {
-  const { wrapModelCall } = toolResultTrimmerMiddleware;
+async function callWrapModelCall(
+  request: TestRequest,
+  handler: ReturnType<typeof vi.fn>,
+  options?: TestTrimmerOptions,
+): Promise<void> {
+  const { wrapModelCall } = createToolResultTrimmerMiddleware(options);
   if (!wrapModelCall) {
     throw new Error('wrapModelCall is not defined on middleware');
   }
@@ -101,7 +106,7 @@ async function callWrapModelCall(request: TestRequest, handler: ReturnType<typeo
   await wrapModelCall(request as Parameters<typeof wrapModelCall>[0], handler as Parameters<typeof wrapModelCall>[1]);
 }
 
-describe('toolResultTrimmerMiddleware', () => {
+describe('createToolResultTrimmerMiddleware', () => {
   let handler: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -790,6 +795,30 @@ describe('toolResultTrimmerMiddleware', () => {
       expect(latestContent[0]).toHaveProperty('text');
       expect(latestContent[0]!['text']).toContain('quality inspector');
       expect(latestContent[1]).toHaveProperty('type', 'image_url');
+    });
+
+    it('should strip screenshot dataUrl blocks when image blocks are disabled for the model', async () => {
+      const screenshot = createScreenshotOutput(['current']);
+      const messages: BaseMessage[] = [
+        new ToolMessage({
+          content: JSON.stringify(screenshot),
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+          tool_call_id: 'call_ss_text_only',
+          name: toolName.screenshot,
+        }),
+      ];
+
+      await callWrapModelCall({ messages }, handler, { allowImageBlocks: false });
+
+      const [request] = handler.mock.calls[0] as [TestRequest];
+      const resultMessage = request.messages[0] as ToolMessage;
+      expect(typeof resultMessage.content).toBe('string');
+      const parsed = JSON.parse(resultMessage.content as string) as Record<string, unknown>;
+
+      expect(parsed).toEqual({
+        images: [{ view: 'current' }],
+        _trimmed: true,
+      });
     });
 
     it('should trim screenshot by content shape detection when name is missing', async () => {

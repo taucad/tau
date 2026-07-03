@@ -13,19 +13,14 @@ export type CodeIssue = {
 /**
  * SVG geometry type.
  *
- * This is a type that is used to represent a SVG geometry.
- * It is used to represent a 2D geometry, which is a collection of paths.
+ * This is a standard SVG document, not a Tau-specific path schema.
  *
  * @see https://www.w3.org/TR/SVG11/
  */
 export type GeometrySvg = {
-  color?: string;
   format: 'svg';
-  paths: string[];
-  viewbox: string;
-  opacity?: number;
-  strokeType?: string;
-  name: string;
+  content: string;
+  name?: string;
 };
 
 /**

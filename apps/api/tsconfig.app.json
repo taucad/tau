@@ -11,43 +11,5 @@
     "erasableSyntaxOnly": false // Incompatible with NestJS dependency injection.
   },
   "include": ["app/**/*.ts"],
-  "exclude": ["app/**/*.spec.ts", "app/**/*.test.ts"],
-  "references": [
-    {
-      "path": "../../libs/tau-examples/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/vite/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/geospec/tsconfig.lib.json"
-    },
-    {
-      "path": "../../kernels/openscad/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/api-extractor/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/filesystem/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/utils/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/telemetry/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/chat/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/types/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/testing/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/runtime/tsconfig.lib.json"
-    }
-  ]
+  "exclude": ["app/**/*.spec.ts", "app/**/*.test.ts"]
 }

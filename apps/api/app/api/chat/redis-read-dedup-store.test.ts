@@ -91,14 +91,18 @@ describe('RedisReadDedupStore', () => {
 
   it('throws RedisReadDedupStoreUnsupportedOperationError for search', async () => {
     const { store } = createStore();
-    await expect(store.search(['recent_reads', 'chat-1'])).rejects.toBeInstanceOf(
+    await expect(store.search(['recent_reads', 'chat-1'])).rejects.toThrow(
       RedisReadDedupStoreUnsupportedOperationError,
+    );
+    await expect(store.search(['recent_reads', 'chat-1'])).rejects.toThrow(
+      'RedisReadDedupStore does not support search',
     );
   });
 
   it('throws RedisReadDedupStoreUnsupportedOperationError for listNamespaces', async () => {
     const { store } = createStore();
-    await expect(store.listNamespaces()).rejects.toBeInstanceOf(RedisReadDedupStoreUnsupportedOperationError);
+    await expect(store.listNamespaces()).rejects.toThrow(RedisReadDedupStoreUnsupportedOperationError);
+    await expect(store.listNamespaces()).rejects.toThrow('RedisReadDedupStore does not support listNamespaces');
   });
 
   it('runs multiple operations in parallel in a single batch() call', async () => {

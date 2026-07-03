@@ -2,7 +2,9 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Scripted LangChain model fixtures use BaseChatModel's required underscore methods and usage_metadata fields. */
 /* oxlint-disable @typescript-eslint/class-literal-property-style -- LangChain BaseChatModel pattern. */
 import process from 'node:process';
+import IORedisMock from 'ioredis-mock';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { Redis } from 'ioredis';
 import { AIMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { ChatResult } from '@langchain/core/outputs';
@@ -11,6 +13,8 @@ import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager
 import type { RpcGeoSpecClient } from '@taucad/chat/rpc';
 import { toolName } from '@taucad/chat/constants';
 import type { ChatUsageCost, ChatUsageTokens } from '#api/chat/chat.schema.js';
+import { MorphCompactionContractError } from '#api/chat/utils/compaction-errors.js';
+import { RedisReadDedupStore } from '#api/chat/redis-read-dedup-store.js';
 import { collectStreamChunks, collectFinalMessage } from '#testing/stream-consumer.js';
 import {
   expectNoErrors,
@@ -110,18 +114,124 @@ class RecordingCompactionModel extends BaseChatModel {
   }
 }
 
+class RedisMockStoreService {
+  public readonly redis = new IORedisMock() as unknown as Redis;
+
+  private readonly store = new RedisReadDedupStore({ redis: this.redis, ttlSeconds: 60 });
+
+  public getStore(): RedisReadDedupStore {
+    return this.store;
+  }
+
+  public getReadDedupClearer(): RedisReadDedupStore {
+    return this.store;
+  }
+
+  public async quit(): Promise<void> {
+    await this.redis.quit();
+  }
+}
+
+class GeminiStreamingSignatureReplayModel extends BaseChatModel {
+  public readonly calls: BaseMessage[][] = [];
+
+  public constructor() {
+    super({});
+  }
+
+  public override _llmType(): string {
+    return 'gemini-streaming-signature-replay-model';
+  }
+
+  public override _combineLLMOutput(): Record<string, unknown> {
+    return {};
+  }
+
+  public override bindTools(): this {
+    return this;
+  }
+
+  public override async _generate(
+    messages: BaseMessage[],
+    _options: this['ParsedCallOptions'],
+    _runManager?: CallbackManagerForLLMRun,
+  ): Promise<ChatResult> {
+    this.calls.push(messages);
+
+    if (this.calls.length === 1) {
+      const message = new AIMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'call_create_file_signed_by_gemini',
+            name: toolName.createFile,
+            args: {
+              targetFile: 'main.ts',
+              content: 'export default function main() { return "hello"; }\n',
+            },
+            type: 'tool_call',
+          },
+        ],
+        additional_kwargs: {
+          // LangChain's Gemini formatter accepts this positional signature
+          // carrier when it matches the final generated parts array. Tau
+          // middleware must preserve it without adding a parallel Gemini
+          // signature normalizer or preflight validator.
+          signatures: ['sig_google_function_call_step_1'],
+        },
+        usage_metadata: { input_tokens: 100, output_tokens: 5, total_tokens: 105 },
+        response_metadata: { model: 'google-gemini-3.5-flash', model_provider: 'google-vertexai' },
+      });
+      return { generations: [{ text: '', message }] };
+    }
+
+    const message = new AIMessage({
+      content: 'Created main.ts.',
+      usage_metadata: { input_tokens: 120, output_tokens: 5, total_tokens: 125 },
+      response_metadata: { model: 'google-gemini-3.5-flash', model_provider: 'google-vertexai' },
+    });
+    return { generations: [{ text: message.content as string, message }] };
+  }
+}
+
 const scriptedModelService = {
   buildModel() {
-    return { model: new ScriptedGeoSpecLoopModel() };
+    return {
+      model: new ScriptedGeoSpecLoopModel(),
+      support: {
+        tools: true,
+        toolChoice: true,
+        modalities: { input: ['text', 'image'], output: ['text'] },
+      },
+    };
   },
   getProviderId() {
     return 'anthropic';
+  },
+  createProviderDiagnosticsContext(options: Record<string, unknown>) {
+    return {
+      ...options,
+      verbose: false,
+      nextProviderAttemptId: () => 1,
+      setLatestModelCallSummary: () => undefined,
+      getLatestModelCallSummary: () => undefined,
+    };
   },
   getContextWindow() {
     return 200_000;
   },
   getKnowledgeCutoff() {
     return '2026-01-01';
+  },
+  getModelSupport() {
+    return {
+      tools: true,
+      toolChoice: true,
+      modalities: { input: ['text', 'image'], output: ['text'] },
+    };
+  },
+  filterProviderToolNamesForModel({ toolNames }) {
+    return [...toolNames];
   },
   getOtelProviderName() {
     return 'test';
@@ -306,7 +416,7 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
       expect(first).toHaveProperty('compressionRatio');
       expect(first).toHaveProperty('messagesEvicted');
       expect(first).toMatchObject({
-        status: expect.stringMatching(/^(compacted|failed)$/) as unknown as string,
+        status: 'compacted',
         budgetKind: 'estimated',
       });
 
@@ -530,7 +640,7 @@ describe('Middleware Integration: deterministic compaction state rewrite', () =>
     await testApp.app.close();
   });
 
-  it('does not resend evicted raw strings on the turn after compaction', async () => {
+  it('compacts one turn and succeeds on the following turn without resending evicted raw strings', async () => {
     const threadId = `test-deterministic-compaction-${Date.now()}`;
     const evictedText = `EVICT_ME_${Date.now()} ${'A'.repeat(8000)}`;
 
@@ -596,6 +706,30 @@ describe('Middleware Integration: deterministic compaction state rewrite', () =>
             metadata: { model: modelId, kernel: 'replicad' },
           },
           {
+            id: 'msg_evicted_assistant',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'old assistant without sentinel' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_user_2',
+            role: 'user',
+            parts: [{ type: 'text', text: 'more old context without sentinel' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_assistant_2',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'more old assistant context without sentinel' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_recent_user',
+            role: 'user',
+            parts: [{ type: 'text', text: 'recent question' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
             id: 'msg_assistant_after_compaction',
             role: 'assistant',
             parts: [
@@ -620,8 +754,271 @@ describe('Middleware Integration: deterministic compaction state rewrite', () =>
     expectNoErrors(secondChunks);
 
     const secondProviderPayload = recordingModel.calls[1] ?? [];
+    expect(recordingModel.calls.length).toBeGreaterThanOrEqual(2);
     expect(providerPayloadText(secondProviderPayload)).not.toContain(evictedText);
     expect(providerPayloadText(secondProviderPayload)).toContain('Summary without raw evicted text');
+  }, 60_000);
+});
+
+describe('Middleware Integration: Redis read-dedup compaction clear', () => {
+  let testApp: TestApp;
+  let recordingModel: RecordingCompactionModel;
+  let storeService: RedisMockStoreService;
+
+  beforeAll(async () => {
+    recordingModel = new RecordingCompactionModel();
+    storeService = new RedisMockStoreService();
+    testApp = await createTestApp({
+      storeService,
+      modelService: {
+        ...scriptedModelService,
+        buildModel() {
+          return { model: recordingModel };
+        },
+        getContextWindow() {
+          return 1000;
+        },
+      },
+      compactionService: {
+        async compact() {
+          return {
+            compactedMessages: [new AIMessage('[Compacted conversation history]\nRedis read-dedup clear summary')],
+            stats: {
+              tokensBeforeCompaction: 2000,
+              tokensAfterCompaction: 25,
+              compressionRatio: 0.0125,
+              messagesEvicted: 4,
+            },
+          };
+        },
+      },
+    });
+  }, 30_000);
+
+  afterAll(async () => {
+    await testApp.app.close();
+    await storeService.quit();
+  });
+
+  it('clears Redis read-dedup pointers after compaction through production store wiring', async () => {
+    const threadId = `test-redis-dedup-clear-${Date.now()}`;
+    const otherThreadId = `test-redis-dedup-clear-other-${Date.now()}`;
+    const store = storeService.getStore();
+
+    await store.put(['recent_reads', threadId], 'fp-1', { priorToolCallId: 'tc-1', modifiedAt: 1 });
+    await store.put(['recent_reads', threadId], 'fp-2', { priorToolCallId: 'tc-2', modifiedAt: 2 });
+    await store.put(['recent_reads', otherThreadId], 'fp-3', { priorToolCallId: 'tc-3', modifiedAt: 3 });
+
+    const response = await fetch(`${testApp.baseUrl}/v1/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: threadId,
+        messages: [
+          {
+            id: 'msg_evicted_user',
+            role: 'user',
+            parts: [{ type: 'text', text: `old context ${'A'.repeat(8000)}` }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_assistant',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'old assistant context' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_user_2',
+            role: 'user',
+            parts: [{ type: 'text', text: `more old context ${'B'.repeat(8000)}` }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_assistant_2',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'more old assistant context' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_recent_user',
+            role: 'user',
+            parts: [{ type: 'text', text: 'recent question' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+        ],
+        agent: buildCadAgent(modelId, 'replicad'),
+      }),
+    });
+
+    expect(response.ok, `HTTP ${response.status}: ${response.statusText}`).toBe(true);
+    const chunks = await collectStreamChunks(response);
+    expectNoErrors(chunks);
+
+    const compactionData = extractContextCompactionData(chunks);
+    expect(compactionData[0]).toMatchObject({ status: 'compacted' });
+    expect(recordingModel.calls).toHaveLength(1);
+
+    expect(await store.get(['recent_reads', threadId], 'fp-1')).toBeNull();
+    expect(await store.get(['recent_reads', threadId], 'fp-2')).toBeNull();
+    expect(await store.get(['recent_reads', otherThreadId], 'fp-3')).not.toBeNull();
+  }, 60_000);
+});
+
+describe('Middleware Integration: Gemini streaming function-call signature replay', () => {
+  let testApp: TestApp;
+  let replayModel: GeminiStreamingSignatureReplayModel;
+
+  beforeAll(async () => {
+    replayModel = new GeminiStreamingSignatureReplayModel();
+    testApp = await createTestApp({
+      modelService: {
+        ...scriptedModelService,
+        buildModel() {
+          return { model: replayModel };
+        },
+        getProviderId() {
+          return 'vertexai';
+        },
+        getOtelProviderName() {
+          return 'gcp.vertex_ai';
+        },
+      },
+    });
+  }, 30_000);
+
+  afterAll(async () => {
+    await testApp.app.close();
+  });
+
+  it('replays a fresh Gemini streaming tool call with its thought signature into the immediate second provider step', async () => {
+    const threadId = `test-gemini-signature-replay-${Date.now()}`;
+
+    const response = await fetch(`${testApp.baseUrl}/v1/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: threadId,
+        messages: [
+          {
+            id: 'msg_user_create_file',
+            role: 'user',
+            parts: [{ type: 'text', text: 'Create main.ts and then confirm it was created.' }],
+            metadata: { model: 'google-gemini-3.5-flash', kernel: 'replicad' },
+          },
+        ],
+        agent: buildCadAgent('google-gemini-3.5-flash', 'replicad'),
+      }),
+    });
+
+    expect(response.ok, `HTTP ${response.status}: ${response.statusText}`).toBe(true);
+    const chunks = await collectStreamChunks(response);
+    expectNoErrors(chunks);
+
+    expect(replayModel.calls).toHaveLength(2);
+    expect(await testApp.memFs.exists('main.ts')).toBe(true);
+  }, 60_000);
+});
+
+describe('Middleware Integration: deterministic compaction failures', () => {
+  let testApp: TestApp;
+  let recordingModel: RecordingCompactionModel;
+  let compactCalls = 0;
+
+  beforeAll(async () => {
+    recordingModel = new RecordingCompactionModel();
+    testApp = await createTestApp({
+      modelService: {
+        ...scriptedModelService,
+        buildModel() {
+          return { model: recordingModel };
+        },
+        getContextWindow() {
+          return 1000;
+        },
+      },
+      compactionService: {
+        async compact() {
+          compactCalls += 1;
+          throw new MorphCompactionContractError('Morph compact response missing output');
+        },
+      },
+    });
+  }, 30_000);
+
+  afterAll(async () => {
+    await testApp.app.close();
+  });
+
+  it('emits a failed compaction event and blocks provider dispatch when required compaction fails', async () => {
+    const threadId = `test-deterministic-compaction-failure-${Date.now()}`;
+    compactCalls = 0;
+
+    const response = await fetch(`${testApp.baseUrl}/v1/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: threadId,
+        messages: [
+          {
+            id: 'msg_evicted_user',
+            role: 'user',
+            parts: [{ type: 'text', text: `old context ${'A'.repeat(8000)}` }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_assistant',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'old assistant context' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_user_2',
+            role: 'user',
+            parts: [{ type: 'text', text: `more old context ${'B'.repeat(8000)}` }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_assistant_2',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'more old assistant context' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_recent_user',
+            role: 'user',
+            parts: [{ type: 'text', text: 'recent question' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_recent_assistant',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'recent answer' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+        ],
+        agent: buildCadAgent(modelId, 'replicad'),
+      }),
+    });
+
+    expect(response.ok, `HTTP ${response.status}: ${response.statusText}`).toBe(true);
+    const chunks = await collectStreamChunks(response);
+    const compactionData = extractContextCompactionData(chunks);
+    const errorChunk = chunks.find((chunk) => chunk.type === 'error') as { errorText?: string } | undefined;
+    const error = JSON.parse(errorChunk?.errorText ?? '{}') as Record<string, unknown>;
+
+    expect(compactCalls).toBe(1);
+    expect(recordingModel.calls).toHaveLength(0);
+    expect(compactionData[0]).toMatchObject({
+      status: 'failed',
+      compactionFailureKind: 'morph_contract_error',
+      failureDisposition: 'blocked_before_provider',
+      transcriptFilePath: null,
+    });
+    expect(error).toMatchObject({
+      code: 'CONTEXT_COMPACTION_FAILED',
+      category: 'tool_error',
+    });
+    expect(error['message']).toContain('Failure kind: morph_contract_error');
   }, 60_000);
 });
 

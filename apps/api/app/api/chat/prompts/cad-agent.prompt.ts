@@ -89,6 +89,7 @@ export async function getCadSystemPrompt(
     modelId?: string;
     contextWindow?: number;
     knowledgeCutoff?: string;
+    supportsImageInput?: boolean;
     /**
      * Per-section telemetry hook. Invoked once per non-empty section as
      * the registry assembles the final prompt, with the section name, cache
@@ -100,8 +101,12 @@ export async function getCadSystemPrompt(
   } = {},
 ): Promise<CadSystemPrompt> {
   const config = getKernelConfig(kernel);
+  const supportsImageInput = options.supportsImageInput ?? true;
 
   const decomposeStep = `0. **Decompose**: For multi-component, real-world, reference-based, high-fidelity, or spec/SysML requests, write a mini design brief before any code: assembly tree, major visible features, parametric relationships, key dimensions/assumptions, materials/surface treatments, and verification targets. Skip when the request is only a single shape or trivial parameter change.`;
+  const inspectStep = supportsImageInput
+    ? `switch to quality-inspector mindset — use \`${toolName.screenshot}\` (multi_angle) and evaluate as if reviewing someone else's work against the \`<visual_inspection>\` checklist`
+    : 'treat GeoSpec and kernel diagnostics as spatial feedback; add focused checks for dimensions, bounding boxes, connected components, topology, color/part identity, and overlaps before claiming completion';
 
   const workflowSteps = testingEnabled
     ? `${decomposeStep}
@@ -110,12 +115,12 @@ export async function getCadSystemPrompt(
 3. **Implement**: Use \`${toolName.editFile}\` to write code in \`main${config.fileExtension}\`
 4. **Verify**: Call \`${toolName.getKernelResult}\` after file changes
 5. **Test**: Call \`${toolName.testModel}\` to validate the GeoSpec tests
-6. **Inspect & iterate**: After tests pass, switch to quality-inspector mindset — use \`${toolName.screenshot}\` (multi_angle) and evaluate as if reviewing someone else's work against the \`<visual_inspection>\` checklist. If any defect is found, fix and re-render. Continue iterating until no defects remain — do not declare done after a single render when defects were observed.`
+6. **Inspect & iterate**: After tests pass, ${inspectStep}. If any defect is found, fix and re-render. Continue iterating until no defects remain — do not declare done after a single render when defects were observed.`
     : `${decomposeStep}
 1. **Plan**: Outline parameters, components, and assembly order
 2. **Implement**: Use \`${toolName.editFile}\` to write code in \`main${config.fileExtension}\`
 3. **Verify**: Call \`${toolName.getKernelResult}\` after file changes
-4. **Inspect & iterate**: Use \`${toolName.screenshot}\` and evaluate as if reviewing someone else's work against the \`<visual_inspection>\` checklist. If any defect is found, fix and re-render. Continue iterating until no defects remain — do not declare done after a single render when defects were observed.`;
+4. **Inspect & iterate**: ${supportsImageInput ? `Use \`${toolName.screenshot}\` and evaluate as if reviewing someone else's work against the \`<visual_inspection>\` checklist` : `Use \`${toolName.getKernelResult}\`, targeted measurements, and exported geometry evidence when needed`}. If any defect is found, fix and re-render. Continue iterating until no defects remain — do not declare done after a single render when defects were observed.`;
 
   const tddNote = testingEnabled
     ? `\n\n**TDD Pattern**: Update tests BEFORE implementing. This ensures you don't forget requirements and catches regressions.`
@@ -170,6 +175,16 @@ If you catch yourself writing an explanation instead of calling screenshot, stop
 
 Screenshot budget: at most 2 screenshots per inspection cycle. Do not chain a single screenshot after multi_angle — multi_angle already covers all six orthographic views.
 </visual_inspection>`;
+
+  const textOnlySpatialAwareness = supportsImageInput
+    ? ''
+    : `<text_only_spatial_awareness>
+This model cannot receive images. Use GeoSpec as the spatial feedback channel: write focused tests for dimensions, bounding boxes, centers, connected components, watertightness, overlaps, topology, and color/part identity.
+
+Use \`${toolName.getKernelResult}\` after edits and \`${toolName.testModel}\` before claiming completion. Use \`${toolName.exportGeometry}\` only when artifact evidence is explicitly useful.
+
+Do not claim visual inspection was performed.
+</text_only_spatial_awareness>`;
 
   const registry = createSectionRegistry();
 
@@ -247,7 +262,13 @@ Length limits: keep text between tool calls to <=25 words. Keep final responses 
   registry.register({
     name: 'visual_inspection',
     cacheBreak: false,
-    compute: () => visualInspection,
+    compute: () => (supportsImageInput ? visualInspection : ''),
+  });
+
+  registry.register({
+    name: 'text_only_spatial_awareness',
+    cacheBreak: false,
+    compute: () => textOnlySpatialAwareness,
   });
 
   registry.register({

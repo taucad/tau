@@ -10,6 +10,8 @@ import type { StructuredToolInterface } from '@langchain/core/tools';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { isCommand } from '@langchain/langgraph';
 import type { Command } from '@langchain/langgraph';
+import { toolName as chatToolName } from '@taucad/chat/constants';
+import { normalizeGeoSpecRunFilterInputAliases } from '@taucad/chat/schemas/tools/test-model-input-normalizer';
 import type { EagerToolEntry } from '#api/chat/eager-dispatch/state.js';
 import type { WriterAttachableCallbackHandler } from '#api/chat/eager-dispatch/writer-capable-handler.js';
 
@@ -38,6 +40,30 @@ function toolResultToWireOutput(toolName: string, result: ToolMessage | Command)
   }
 
   return `[Command:${toolName}]`;
+}
+
+type ToolInputNormalizer = typeof normalizeGeoSpecRunFilterInputAliases;
+
+const toolInputNormalizers: Partial<Record<string, ToolInputNormalizer>> = {
+  [chatToolName.testModel]: normalizeGeoSpecRunFilterInputAliases,
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeToolInput(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
+  const normalizer = toolInputNormalizers[toolName];
+  if (!normalizer) {
+    return args;
+  }
+
+  const normalized = normalizer(args);
+  if (!normalized.changed || !isRecord(normalized.input)) {
+    return args;
+  }
+
+  return normalized.input;
 }
 
 /**
@@ -228,15 +254,17 @@ export class EagerToolDispatchHandler extends BaseCallbackHandler implements Wri
       return;
     }
 
+    const normalizedArgs = normalizeToolInput(toolName, args);
+
     this.writer?.({
       type: 'tau-eager-tool-input-available',
       toolCallId,
       toolName,
-      input: args,
+      input: normalizedArgs,
     });
 
     const invokePromise = targetTool.invoke(
-      { name: toolName, args, id: toolCallId, type: 'tool_call' },
+      { name: toolName, args: normalizedArgs, id: toolCallId, type: 'tool_call' },
       {
         ...this.runnableConfigBaseline,
         config: this.runnableConfigBaseline,

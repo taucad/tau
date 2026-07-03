@@ -170,6 +170,11 @@ describe('ChatController', () => {
 
     const mockModelService = {
       getProviderId: vi.fn().mockReturnValue('test-provider'),
+      getModelSupport: vi.fn().mockReturnValue({
+        tools: true,
+        toolChoice: true,
+        modalities: { input: ['text', 'image'], output: ['text'] },
+      }),
       normalizeUsageTokens: vi.fn().mockImplementation((_modelId, usage) => usage as ChatUsageTokens),
       getModelCost: vi.fn().mockReturnValue({
         inputTokensCost: 0,
@@ -276,6 +281,7 @@ describe('ChatController', () => {
         {
           configurable: { thread_id: string };
           callbacks?: unknown[];
+          durability?: string;
           streamMode?: unknown;
           maxConcurrency?: number;
         },
@@ -283,6 +289,7 @@ describe('ChatController', () => {
       expect(streamArguments).toHaveProperty('messages');
       expect(Array.isArray(streamArguments.messages)).toBe(true);
       expect(streamConfig.callbacks?.length).toBe(3);
+      expect(streamConfig.durability).toBe('exit');
       expect(streamConfig.streamMode).toEqual(['values', 'messages', 'custom']);
       expect(streamConfig.configurable.thread_id).toBe('chat_123');
       // Parallel tool calls run unthrottled. `maxConcurrency: 1` triggers an

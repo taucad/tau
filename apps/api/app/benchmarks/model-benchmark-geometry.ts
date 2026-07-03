@@ -9,7 +9,6 @@ import type { MeasurementTestRequirement } from '@taucad/testing';
 import { analyzeGlb, evaluateRequirement } from '@taucad/testing/geometry';
 import type { GeometryStats } from '@taucad/testing/geometry';
 import type { GraderCheck } from '#benchmarks/model-benchmark-suite.js';
-import type { ApiRuntimeClient } from '#types/runtime-client.alias.js';
 
 const geometryRendererRuntime = defineRuntime({
   kernels: [openscad()],
@@ -47,7 +46,7 @@ export type GeometryValidationResult = {
 
 const defaultGeometryTolerance = 1;
 
-export function createGeometryRenderer(): ApiRuntimeClient {
+export function createGeometryRenderer() {
   return createRuntimeClient({
     transport: inProcessTransport({
       runtime: geometryRendererRuntime,
@@ -56,12 +55,12 @@ export function createGeometryRenderer(): ApiRuntimeClient {
   });
 }
 
+export type GeometryRendererClient = ReturnType<typeof createGeometryRenderer>;
+
 /**
- * Eagerly open a benchmark renderer so its first `openFile` call does not
- * throw `RuntimeNotConnectedError`. `connect()` is a hard precondition for
- * `openFile`/`updateParameters`/`setOptions`.
+ * Eagerly connect a benchmark renderer before the first render/export request.
  */
-export async function ensureGeometryRendererConnected(client: ApiRuntimeClient): Promise<void> {
+export async function ensureGeometryRendererConnected(client: GeometryRendererClient): Promise<void> {
   if (client.lifecycleState === 'connected') {
     return;
   }
@@ -69,13 +68,13 @@ export async function ensureGeometryRendererConnected(client: ApiRuntimeClient):
 }
 
 export async function renderCodeToGlb(
-  client: ApiRuntimeClient,
+  client: GeometryRendererClient,
   files: Record<string, string>,
   mainFile: string,
 ): Promise<GeometryRenderResult> {
   try {
     /* Subscribe to the geometry event before kicking off the render, so we can
-     * observe the (possibly superseded) settled result. `openFile()` returns a
+     * observe the (possibly superseded) settled result. `render()` returns a
      * `RenderOutcome` whose `geometry` field carries the latest hashed result;
      * we defensively also listen on `'geometry'` in case the settlement was
      * superseded by a fresh call (which is unlikely here since this is a
@@ -88,10 +87,6 @@ export async function renderCodeToGlb(
     try {
       await ensureGeometryRendererConnected(client);
 
-      /* Stage inline source via `code:` on `openFile` rather than
-       * pre-writing into the FS — the transport plumbs inline code
-       * through the kernel without requiring callers to reach into the
-       * underlying memory store. */
       const codeMap: Record<string, string> = {};
       for (const [filename, content] of Object.entries(files)) {
         const absolutePath = filename.startsWith('/') ? filename : `/${filename}`;
@@ -99,7 +94,7 @@ export async function renderCodeToGlb(
       }
       const resolvedMainFile = mainFile.startsWith('/') ? mainFile : `/${mainFile}`;
 
-      const settlement = await client.openFile({ code: codeMap, file: resolvedMainFile });
+      const settlement = await client.render({ source: { files: codeMap, entry: resolvedMainFile } });
       const result: HashedGeometryResult | undefined = settlement.superseded ? lastGeometry : settlement.geometry;
 
       if (!result) {
@@ -111,12 +106,11 @@ export async function renderCodeToGlb(
         return { success: false, error: `Render failed: ${messages}` };
       }
 
-      const gltf = result.data.find((geometry) => geometry.format === 'gltf');
-      if (!gltf) {
+      if (result.data.format !== 'gltf') {
         return { success: false, error: 'No GLTF geometry in render result' };
       }
 
-      return { success: true, glb: gltf.content };
+      return { success: true, glb: result.data.content };
     } finally {
       off();
     }
@@ -206,7 +200,7 @@ export async function gradeGeometry(
 // =============================================================================
 
 export type ValidateGeometryOptions = {
-  client: ApiRuntimeClient;
+  client: GeometryRendererClient;
   files: Record<string, string>;
   mainFile: string;
   expectations: BenchmarkGeometryExpectation;

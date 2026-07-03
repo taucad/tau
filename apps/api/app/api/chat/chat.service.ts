@@ -10,7 +10,10 @@ import { streamText } from 'ai';
 import type { ModelMessage } from 'ai';
 import type { KernelProvider } from '@taucad/runtime';
 import type { ToolSelection, ContextPayload } from '@taucad/chat';
+import { modelSupportsInput } from '@taucad/chat';
+import { toolName } from '@taucad/chat/constants';
 import type { ChatMode } from '@taucad/chat/constants';
+import { cadProviderFacingToolNames } from '@taucad/chat/schemas';
 import { ModelService } from '#api/models/model.service.js';
 import { createUsageTrackingMiddleware } from '#api/chat/middleware/usage-tracking.middleware.js';
 import { createTokenUsageContextMiddleware } from '#api/chat/middleware/token-usage-context.middleware.js';
@@ -27,7 +30,7 @@ import { ToolService } from '#api/tools/tool.service.js';
 import { projectNameGenerationSystemPrompt } from '#api/chat/prompts/cad-name.prompt.js';
 import { commitMessageGenerationSystemPrompt } from '#api/chat/prompts/git-commit.prompt.js';
 import { getCadSystemPrompt } from '#api/chat/prompts/cad-agent.prompt.js';
-import { toolResultTrimmerMiddleware } from '#api/chat/middleware/tool-result-trimmer.middleware.js';
+import { createToolResultTrimmerMiddleware } from '#api/chat/middleware/tool-result-trimmer.middleware.js';
 import { createPromptCachingMiddleware } from '#api/chat/middleware/prompt-caching.middleware.js';
 import { messageContentSanitizerMiddleware } from '#api/chat/middleware/message-content-sanitizer.middleware.js';
 import { createCrossProviderContentNormalizerMiddleware } from '#api/chat/middleware/cross-provider-content-normalizer.middleware.js';
@@ -93,6 +96,7 @@ export class ChatService {
 
     const checkpointer = this.checkpointerService.getCheckpointer();
     const store = this.storeService.getStore();
+    const readDedupClearer = this.storeService.getReadDedupClearer();
 
     const providerId = this.modelService.getProviderId(modelId);
     if (!providerId) {
@@ -105,30 +109,19 @@ export class ChatService {
       logger: this.createProviderDiagnosticsLogger(),
     });
 
-    const { model } = this.modelService.buildModel(modelId, {
+    const { model, support } = this.modelService.buildModel(modelId, {
       providerDiagnosticsContext,
     });
+    const supportsImageInput = modelSupportsInput(support, 'image');
 
-    // Combine all tools into a single array for the unified agent
-    const allTools = [
-      // CAD tools (testing tools conditionally included)
-      ...(testingEnabled ? [tools['test_model']] : []),
-      tools['get_kernel_result'],
-      tools['export_geometry'],
-      tools['screenshot'],
-      // Filesystem tools
-      tools['edit_file'],
-      tools['use_skill'],
-      tools['read_file'],
-      tools['list_directory'],
-      tools['create_file'],
-      tools['delete_file'],
-      tools['grep'],
-      tools['glob_search'],
-      // Research tools
-      tools['web_search'],
-      tools['web_browser'],
-    ].filter((tool) => tool !== undefined);
+    const requestedToolNames = cadProviderFacingToolNames.filter(
+      (name) => testingEnabled || name !== toolName.testModel,
+    );
+    const allowedToolNames = this.modelService.filterProviderToolNamesForModel({
+      modelId,
+      toolNames: requestedToolNames,
+    });
+    const allTools = allowedToolNames.map((name) => tools[name]).filter((tool) => tool !== undefined);
 
     // ==========================================================================
     // Prompt Caching Strategy (3 breakpoints)
@@ -151,6 +144,7 @@ export class ChatService {
       modelId,
       contextWindow,
       knowledgeCutoff,
+      supportsImageInput,
       // Per-section telemetry — record byte size of every non-empty section
       // so Grafana can show which sections dominate the static prefix and
       // which dynamic sections invalidate the cache the most.
@@ -187,7 +181,7 @@ export class ChatService {
         // --- Context prevention (offload large tool results before trimming) ---
         createToolOffloadingMiddleware(this.rpcBackendFactory, this.metricsService),
         createToolResultBudgetMiddleware(this.rpcBackendFactory, this.metricsService),
-        toolResultTrimmerMiddleware,
+        createToolResultTrimmerMiddleware({ allowImageBlocks: supportsImageInput }),
 
         // --- Token-usage context ---
         // Inserted before compaction so the budget decision sees the same
@@ -228,6 +222,7 @@ export class ChatService {
           rpcBackendFactory: this.rpcBackendFactory,
           tokenBudgetService: this.tokenBudgetService,
           metricsService: this.metricsService,
+          readDedupClearer,
           providerId,
         }),
 

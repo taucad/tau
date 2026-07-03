@@ -1,4 +1,5 @@
 import type { KernelProvider } from '@taucad/runtime';
+import { toolName } from '@taucad/chat/constants';
 import { describe, it, expect, vi } from 'vitest';
 import { getCadSystemPrompt } from '#api/chat/prompts/cad-agent.prompt.js';
 import { getKernelConfig } from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.js';
@@ -147,6 +148,31 @@ describe('getCadSystemPrompt', () => {
           expect(corpus).not.toMatch(pattern);
         }
       }
+    });
+  });
+
+  describe('text-only spatial awareness', () => {
+    it('should replace screenshot inspection guidance with GeoSpec-focused spatial feedback', async () => {
+      const result = await getCadSystemPrompt('openscad', 'agent', true, {
+        supportsImageInput: false,
+      });
+
+      expect(result.static).toContain('<text_only_spatial_awareness>');
+      expect(result.static).toContain('This model cannot receive images');
+      expect(result.static).toContain('Use GeoSpec as the spatial feedback channel');
+      expect(result.static).toContain('Do not claim visual inspection');
+      expect(result.static).not.toContain('<visual_inspection>');
+      expect(result.static).not.toContain(`\`${toolName.screenshot}\``);
+    });
+
+    it('should keep visual inspection guidance for image-capable models', async () => {
+      const result = await getCadSystemPrompt('openscad', 'agent', true, {
+        supportsImageInput: true,
+      });
+
+      expect(result.static).toContain('<visual_inspection>');
+      expect(result.static).toContain(`\`${toolName.screenshot}\``);
+      expect(result.static).not.toContain('<text_only_spatial_awareness>');
     });
   });
 

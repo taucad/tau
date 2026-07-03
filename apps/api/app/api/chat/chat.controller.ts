@@ -5,6 +5,7 @@ import type { UIMessageChunk } from 'ai';
 import type { FastifyReply } from 'fastify';
 import type { AIMessageChunk, BaseMessage } from '@langchain/core/messages';
 import type { ToolSelection, ChatSnapshot, ContextPayload } from '@taucad/chat';
+import { modelSupportsInput } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
 import type { KernelProvider } from '@taucad/runtime';
 import { ChatService } from '#api/chat/chat.service.js';
@@ -31,7 +32,7 @@ import { MetricsService } from '#telemetry/metrics.js';
 import { Span } from '#telemetry/tracer.service.js';
 import { AttributeKey } from '@taucad/telemetry';
 import { TtftCallbackHandler } from '#api/chat/middleware/ttft-callback.handler.js';
-import { validateImageParts } from '#api/chat/utils/validate-image-parts.js';
+import { validateImageParts, validateModelImageInputSupport } from '#api/chat/utils/validate-image-parts.js';
 import { logProviderStreamErrors } from '#api/chat/utils/provider-stream-error-log.js';
 import { toBaseMessagesWithIds } from '#api/chat/utils/to-base-messages-with-ids.js';
 import { reconcileThreadMessages } from '#api/chat/utils/reconcile-thread-messages.js';
@@ -179,7 +180,7 @@ export class ChatController {
           geometryAnalysisService: this.geometryAnalysisService,
         },
       };
-      const clientMessages = await this.prepareClientMessages(uiMessages);
+      const clientMessages = await this.prepareClientMessages(uiMessages, modelId);
       const reconciled = await reconcileThreadMessages({
         graph: agent.graph as unknown as ChatGraphStateApi,
         runnableConfig,
@@ -199,6 +200,7 @@ export class ChatController {
             ...reconciled.runnableConfig.configurable,
           },
           signal: abortController.signal,
+          durability: 'exit',
           streamMode: ['values', 'messages', 'custom'],
           callbacks: [ttftHandler, eagerHandler, this.providerRequestRecorder],
           context: {
@@ -266,8 +268,16 @@ export class ChatController {
    * Converts client-visible UI messages to LangChain messages while preserving
    * stable UI ids for LangGraph's message reducer.
    */
-  private async prepareClientMessages(messages: CreateChatDto['messages']): Promise<LangChainMessages> {
+  private async prepareClientMessages(
+    messages: CreateChatDto['messages'],
+    modelId: string,
+  ): Promise<LangChainMessages> {
     validateImageParts(messages);
+    validateModelImageInputSupport({
+      messages,
+      modelName: modelId,
+      supportsImageInput: modelSupportsInput(this.modelService.getModelSupport(modelId), 'image'),
+    });
     assertSupportedApprovalReplay(messages);
     return toBaseMessagesWithIds(messages);
   }

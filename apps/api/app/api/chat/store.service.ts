@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { RedisService } from '#redis/redis.service.js';
 import { RedisReadDedupStore } from '#api/chat/redis-read-dedup-store.js';
+import type { ReadDedupClearer } from '#api/chat/clear-recent-reads.js';
 
 /**
  * Time-to-live (seconds) applied to `read_file` dedup pointers in the
@@ -44,6 +45,10 @@ export class StoreService implements OnModuleInit, OnModuleDestroy {
   }
 
   public getStore(): RedisReadDedupStore {
+    return this.store;
+  }
+
+  public getReadDedupClearer(): ReadDedupClearer {
     return this.store;
   }
 }

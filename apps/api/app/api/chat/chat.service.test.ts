@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { createAgent } from 'langchain';
+import type { ToolName } from '@taucad/chat';
+import { toolName } from '@taucad/chat/constants';
 import { ChatService } from '#api/chat/chat.service.js';
 import { ModelService } from '#api/models/model.service.js';
 import { ToolService } from '#api/tools/tool.service.js';
@@ -49,8 +51,10 @@ describe('ChatService', () => {
   };
 
   const mockStore = { id: 'mock-store' };
+  const mockReadDedupClearer = { clearChat: vi.fn() };
   const mockStoreService = {
     getStore: vi.fn(() => mockStore),
+    getReadDedupClearer: vi.fn(() => mockReadDedupClearer),
   };
 
   const mockModelService = {
@@ -66,6 +70,9 @@ describe('ChatService', () => {
     getProviderId: vi.fn(() => 'openai'),
     getKnowledgeCutoff: vi.fn(() => '2025-08'),
     getOtelProviderName: vi.fn(() => 'openai'),
+    filterProviderToolNamesForModel: vi.fn(({ toolNames }: { readonly toolNames: readonly ToolName[] }) => [
+      ...toolNames,
+    ]),
   };
 
   const mockToolService = {
@@ -118,6 +125,18 @@ describe('ChatService', () => {
 
       // Assert
       expect(mockCheckpointerService.getCheckpointer).toHaveBeenCalledTimes(1);
+    });
+
+    it('should get read-dedup clearer from StoreService', async () => {
+      await service.createAgent({
+        chatId: 'test-chat-1',
+        modelId: 'model-1',
+        kernel: 'openscad',
+        mode: 'agent',
+        tools: { choice: 'auto', testingEnabled: true },
+      });
+
+      expect(mockStoreService.getReadDedupClearer).toHaveBeenCalledTimes(1);
     });
 
     it('should reuse the same checkpointer across multiple agent creations', async () => {
@@ -238,6 +257,45 @@ describe('ChatService', () => {
       expect(mockToolService.getTools).toHaveBeenCalledWith('auto', 'openscad');
     });
 
+    it('should filter provider tools through ModelService before creating the agent', async () => {
+      const testModelTool = { name: toolName.testModel };
+      const kernelTool = { name: toolName.getKernelResult };
+      const screenshotTool = { name: toolName.screenshot };
+      vi.mocked(mockToolService.getTools).mockReturnValueOnce({
+        tools: {
+          [toolName.testModel]: testModelTool,
+          [toolName.getKernelResult]: kernelTool,
+          [toolName.screenshot]: screenshotTool,
+        },
+      });
+      vi.mocked(mockModelService.filterProviderToolNamesForModel).mockReturnValueOnce([
+        toolName.testModel,
+        toolName.getKernelResult,
+      ]);
+      const eagerDispatchHandler = {
+        entries: new Map(),
+        setWriter: vi.fn(),
+        bindTools: vi.fn(),
+      } as unknown as EagerToolDispatchHandler;
+
+      await service.createAgent({
+        chatId: 'test-chat-filtered-tools',
+        modelId: 'together-glm-5.2',
+        kernel: 'openscad',
+        mode: 'agent',
+        tools: { choice: 'auto', testingEnabled: true },
+        eagerDispatchHandler,
+      });
+
+      expect(mockModelService.filterProviderToolNamesForModel).toHaveBeenCalledWith({
+        modelId: 'together-glm-5.2',
+        toolNames: expect.arrayContaining([toolName.testModel, toolName.getKernelResult, toolName.screenshot]),
+      });
+      const createAgentCall = vi.mocked(createAgent).mock.calls.at(-1)?.[0];
+      expect(createAgentCall?.tools).toEqual([testModelTool, kernelTool]);
+      expect(eagerDispatchHandler.bindTools).toHaveBeenCalledWith([testModelTool, kernelTool]);
+    });
+
     it('should pass the active kernel through to ToolService.getTools so kernel-aware tool factories receive it', async () => {
       await service.createAgent({
         chatId: 'test-chat-1',
@@ -261,7 +319,7 @@ describe('ChatService', () => {
       expect(mockModelService.getProviderId).toHaveBeenCalledWith('model-1');
     });
 
-    it('orders CrossProviderContentNormalizer after Compaction and before ProviderDiagnostics', async () => {
+    it('orders provider diagnostics after final payload normalization and before LLM timing', async () => {
       await service.createAgent({
         chatId: 'test-chat-order',
         modelId: 'model-1',
@@ -279,12 +337,15 @@ describe('ChatService', () => {
       const normalizerIndex = indexByName('CrossProviderContentNormalizer');
       const compactionIndex = indexByName('Compaction');
       const providerDiagnosticsIndex = indexByName('ProviderDiagnostics');
+      const llmTimingIndex = indexByName('LlmTiming');
 
       expect(normalizerIndex).toBeGreaterThanOrEqual(0);
       expect(compactionIndex).toBeGreaterThanOrEqual(0);
       expect(providerDiagnosticsIndex).toBeGreaterThanOrEqual(0);
+      expect(llmTimingIndex).toBeGreaterThanOrEqual(0);
       expect(normalizerIndex).toBeGreaterThan(compactionIndex);
       expect(providerDiagnosticsIndex).toBeGreaterThan(normalizerIndex);
+      expect(llmTimingIndex).toBeGreaterThan(providerDiagnosticsIndex);
     });
 
     it('should run ToolInputCompatibility after ToolErrorHandler and before eager dispatch/offloading', async () => {

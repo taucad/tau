@@ -19,6 +19,8 @@ import { ChatService } from '#api/chat/chat.service.js';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 import { CheckpointerService } from '#api/chat/checkpointer.service.js';
 import { StoreService } from '#api/chat/store.service.js';
+import type { ReadDedupClearer } from '#api/chat/clear-recent-reads.js';
+import { recentReadsRootNamespace } from '#api/chat/recent-reads-namespace.js';
 import { ModelService } from '#api/models/model.service.js';
 import { ProviderService } from '#api/providers/provider.service.js';
 import { ToolService } from '#api/tools/tool.service.js';
@@ -46,16 +48,28 @@ class MemoryCheckpointerService {
   }
 }
 
+class ClearableInMemoryStore extends InMemoryStore implements ReadDedupClearer {
+  public async clearChat(chatId: string): Promise<number> {
+    const namespace = [...recentReadsRootNamespace, chatId];
+    const items = await this.search(namespace);
+    await Promise.all(items.map(async (item) => this.delete(item.namespace, item.key)));
+    return items.length;
+  }
+}
+
 /**
- * In-memory LangGraph `BaseStore` that replaces the Redis-backed
- * {@link StoreService} during tests. Mirrors the
- * {@link MemoryCheckpointerService} pattern so the `read_file` dedup cache
- * exercises real `BaseStore` semantics without a Redis dependency.
+ * In-memory LangGraph store service that replaces the Redis-backed
+ * {@link StoreService} during tests. Mirrors production by exposing normal
+ * `BaseStore` operations separately from the read-dedup bulk clearer.
  */
 class MemoryStoreService {
-  private readonly store = new InMemoryStore();
+  private readonly store = new ClearableInMemoryStore();
 
-  public getStore(): InMemoryStore {
+  public getStore(): ClearableInMemoryStore {
+    return this.store;
+  }
+
+  public getReadDedupClearer(): ReadDedupClearer {
     return this.store;
   }
 }
@@ -112,6 +126,7 @@ class TestChatModule {}
 export type TestApp = {
   app: NestFastifyApplication;
   baseUrl: string;
+  checkpointer: MemorySaver;
   memFs: RuntimeFileSystemBase;
   headlessRpc: HeadlessChatRpcService;
   providerRequestRecorder: ProviderRequestRecorder;
@@ -123,15 +138,21 @@ export type TestApp = {
  * - `graphicsStub`: replace the default (omitted) graphics client.
  * - `geospecStub`: replace the default (omitted) GeoSpec client. Used by
  *   agent-loop safeguards tests to inject deterministic `test_model` failures.
+ * - `storeService`: replace the default in-memory store service. Used by
+ *   compaction tests to exercise Redis-backed read-dedup clearing.
  */
 export type CreateTestAppOptions = {
   graphicsStub?: RpcGraphicsClient;
   geospecStub?: RpcGeoSpecClient;
+  storeService?: Pick<StoreService, 'getStore' | 'getReadDedupClearer'>;
   modelService?: Pick<
     ModelService,
     | 'buildModel'
+    | 'createProviderDiagnosticsContext'
+    | 'filterProviderToolNamesForModel'
     | 'getContextWindow'
     | 'getKnowledgeCutoff'
+    | 'getModelSupport'
     | 'getModelCost'
     | 'getOtelProviderName'
     | 'getProviderId'
@@ -159,9 +180,11 @@ export async function createTestApp(options: CreateTestAppOptions = {}): Promise
     .overrideProvider(ChatRpcService)
     .useClass(HeadlessChatRpcService)
     .overrideProvider(CheckpointerService)
-    .useClass(MemoryCheckpointerService)
-    .overrideProvider(StoreService)
-    .useClass(MemoryStoreService);
+    .useClass(MemoryCheckpointerService);
+
+  builder = options.storeService
+    ? builder.overrideProvider(StoreService).useValue(options.storeService)
+    : builder.overrideProvider(StoreService).useClass(MemoryStoreService);
 
   if (options.modelService) {
     builder = builder.overrideProvider(ModelService).useValue(options.modelService);
@@ -186,6 +209,7 @@ export async function createTestApp(options: CreateTestAppOptions = {}): Promise
   logger.log(`Test app listening on ${baseUrl}`);
 
   const memFs = getTestFileSystem();
+  const checkpointer = moduleRef.get(CheckpointerService).getCheckpointer() as unknown as MemorySaver;
   const headlessRpc: HeadlessChatRpcService = moduleRef.get(ChatRpcService);
   const providerRequestRecorder = moduleRef.get(ProviderRequestRecorder);
 
@@ -197,5 +221,5 @@ export async function createTestApp(options: CreateTestAppOptions = {}): Promise
   });
   headlessRpc.setDispatcher(dispatcher);
 
-  return { app, baseUrl, memFs, headlessRpc, providerRequestRecorder };
+  return { app, baseUrl, checkpointer, memFs, headlessRpc, providerRequestRecorder };
 }

@@ -17,9 +17,13 @@ cleanup; they may exceed the 200-char cap.
 
 ## Learned Workspace Facts
 
+- Runtime/React operation inputs keep runtime keys top-level and plugin keys nested (`renderOptions`/`exportOptions`); destructured hook returns must avoid reserved words like `export`.
 - Section-view base caps and their primary black outlines are current-plane synchronous products; exact red/yellow overlap diagnostics are async refinements and must never own base cap responsiveness.
 - Model component highlight appearance is renderer-owned and shared by GLTF exterior materials plus section caps; derive cap tint from owner state, not mutated material channels.
+- Three.js transparent materials still honor `depthWrite`; ghosted CAD model opacity must set `depthWrite=false` and restore captured depth state.
 - CameraControls frame updates in CAD viewports must be Tau-owned; demand-loop overlays like viewport gizmos need a lock to skip `controls.update(delta)` while they animate.
+- R3F model `onContextMenu` handlers resolve hits only; Radix/viewer DOM owns native `contextmenu` preventDefault/opening, or Radix skips open on defaultPrevented events.
+- CAD viewer right-click menu + right-drag pan requires an app-owned secondary-button gesture controller with viewer-bound native contextmenu suppression.
 - Viewport gizmo `change` events are sync-only; only `start`/`end` may own CameraControls or mutate the interaction lock, since upstream can emit delayed changes after `end`.
 - Three.js `WebGPURenderer` defaults to **HalfFloat 16-bit** color attachments (not 8-bit) — screenshot-capture color-format assumptions must align with this when comparing WebGPU vs WebGL output.
 - Standalone Three.js scenes consuming `gltfCoordinateTransform` (e.g. `kernel-model-view.tsx`) must set `Object3D.DEFAULT_UP`/`camera.up` to `(0,0,1)` and frame `+X,-Y,+Z` — Y-up defaults tip Z-up GLBs.

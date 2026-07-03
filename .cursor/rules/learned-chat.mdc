@@ -16,6 +16,7 @@ cleanup; they may exceed the 200-char cap.
 ## Learned User Preferences
 
 - Credit/account-state chat errors resume via `continueChat()`; billing text classifies as `credits`, never destructive `tool_error` regeneration.
+- Supersedes older retry notes: chat-error banners use `Try again` + `continueChat()`; only credits say `Resume`; destructive reroll only via model switch.
 - Agent-visible filesystem metadata must preserve required text `lineCount` and binary `contentKind` from provider stats through snapshots, RPC/tools, and UI; never synthesize size-only file entries.
 - `libs/chat` holds only cross-package shared schemas (messages, RPC, tool inputs, sentinels) — API-only types like request body envelopes/controller DTOs stay in apps/api (`body` is an API concept).
 - Chat Zod schemas stay pure (no `.refine`/`.superRefine`/`.check`) so they convert cleanly to JSON Schema for OpenAPI exposure; centralise validation via `nestjs-zod` `ZodValidationPipe` at the controller boundary, never post-hoc in services.
@@ -41,6 +42,7 @@ cleanup; they may exceed the 200-char cap.
 - Vertex Gemini implicit context caching is enabled by default (not 'no cache') — async promotion lag means only the early prefix sticks (~85% hit); explicit `cachedContent` needed for ~99%.
 - Round-trip stable `msg_` ids through `toBaseMessages` into LangGraph BaseMessages is P0 — `@ai-sdk/langchain` currently strips them, breaking `messagesStateReducer` dedup.
 - Compaction must be committed via LangGraph state rewrite plus checkpoint-aware request merge; provider-call-local compaction is a bug.
+- Chat compaction clears read_file dedup via explicit ReadDedupClearer; never infer sidecar cleanup through LangGraph runtime stores or BaseStore.search.
 - Client is truth-bearer for visible history — API reconciles LangGraph to client UIMessages by id; server owns middleware, byte-exact reminders, and LangGraph persistence.
 - Cancel semantics: keep partial assistant only if client history includes it; edit/resubmit a prior user message removes that turn plus any subsequent partial assistant from server state.
 - Backend-injected reminders, token-usage, and file snapshots persist byte-exactly in LangGraph state — drop server bookkeeping only when its anchoring user turn is removed.

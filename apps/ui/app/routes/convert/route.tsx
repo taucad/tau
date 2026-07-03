@@ -109,7 +109,7 @@ const ConverterViewer = memo(function ({ glbData }: { readonly glbData: Uint8Arr
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
 
-  const geometries = useMemo<Geometry[]>(() => [{ format: 'gltf', content: glbData, hash: 'converter' }], [glbData]);
+  const geometry = useMemo<Geometry>(() => ({ format: 'gltf', content: glbData, hash: 'converter' }), [glbData]);
 
   return (
     <CadViewer
@@ -122,7 +122,7 @@ const ConverterViewer = memo(function ({ glbData }: { readonly glbData: Uint8Arr
       enableGrid={enableGrid}
       enableGizmo={enableGizmo}
       enableSurfaces={enableSurfaces}
-      geometries={geometries}
+      geometry={geometry}
     />
   );
 });

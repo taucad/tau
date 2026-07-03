@@ -15,13 +15,13 @@ vi.mock('#components/files/export-selector.js', () => ({
   ExportSelector: () => <div data-slot='export-selector-stub' />,
 }));
 
-const cadPreviewMocks = vi.hoisted(() => ({ geometries: [] as unknown[] }));
+const cadPreviewMocks = vi.hoisted(() => ({ geometry: undefined as unknown }));
 
 vi.mock('#hooks/use-cad-preview.js', () => ({
   useCadPreview: () => ({
     cadRef: {},
     defaultParameters: {},
-    geometries: cadPreviewMocks.geometries,
+    geometry: cadPreviewMocks.geometry,
     jsonSchema: undefined,
     setParameters: vi.fn(),
   }),
@@ -41,7 +41,7 @@ const publication: ParsedPublication = {
 
 describe('PublicationParamsPane', () => {
   it('fills its grid cell vertically (h-full + min-h-0)', () => {
-    cadPreviewMocks.geometries = [{ id: 'g1' }];
+    cadPreviewMocks.geometry = { id: 'g1' };
     const { container } = render(<PublicationParamsPane publication={publication} />);
     const root = container.querySelector('[data-slot="publication-params-pane"]');
     expect(root).not.toBeNull();
@@ -50,14 +50,14 @@ describe('PublicationParamsPane', () => {
   });
 
   it('exposes both regions via aria-label for assistive tech', () => {
-    cadPreviewMocks.geometries = [];
+    cadPreviewMocks.geometry = undefined;
     render(<PublicationParamsPane publication={publication} />);
     expect(screen.getByRole('region', { name: 'Parameters' })).toBeDefined();
     expect(screen.getByRole('region', { name: 'Downloads' })).toBeDefined();
   });
 
   it('shows the empty-state hint when no geometry has rendered yet', () => {
-    cadPreviewMocks.geometries = [];
+    cadPreviewMocks.geometry = undefined;
     render(<PublicationParamsPane publication={publication} />);
     expect(screen.getByText(/render the geometry to enable export/iu)).toBeDefined();
   });

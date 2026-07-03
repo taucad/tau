@@ -23,7 +23,7 @@ type PublicationViewerPaneProps = {
 export function PublicationViewerPane({ className }: PublicationViewerPaneProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const { isFullscreen, toggleFullscreen } = usePublicationFullscreen(containerRef);
-  const { cadRef, geometries } = useCadPreview();
+  const { cadRef, geometry } = useCadPreview();
   const kernelClient = useSelector(cadRef, (snapshot) => snapshot.context.kernelClient);
 
   useKeybinding(
@@ -57,7 +57,7 @@ export function PublicationViewerPane({ className }: PublicationViewerPaneProps)
         <CadPreviewStatus />
       </div>
       <div className='absolute right-3 bottom-3 z-10 flex items-center gap-2'>
-        <ArButton geometries={geometries} kernelClient={kernelClient} />
+        <ArButton geometry={geometry} kernelClient={kernelClient} />
         <PublicationFullscreenButton isFullscreen={isFullscreen} toggleFullscreen={toggleFullscreen} />
       </div>
     </section>

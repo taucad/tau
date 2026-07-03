@@ -1,6 +1,5 @@
 import { useCallback } from 'react';
 import { useSelector } from '@xstate/react';
-import type { RJSFSchema } from '@rjsf/utils';
 import { ExportSelector } from '#components/files/export-selector.js';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
 import type { Units } from '#components/geometry/parameters/rjsf-context.js';
@@ -22,7 +21,7 @@ type PublicationParamsPaneProps = {
  * drawer (`publication-mobile-sheet.tsx`).
  */
 export function PublicationParamsPane({ publication, className }: PublicationParamsPaneProps): React.JSX.Element {
-  const { cadRef, defaultParameters, geometries, jsonSchema, setParameters } = useCadPreview();
+  const { cadRef, defaultParameters, geometry, jsonSchema, setParameters } = useCadPreview();
   const parameterOverrides = useSelector(cadRef, (snapshot) => snapshot.context.parameters);
 
   const handleParametersChange = useCallback(
@@ -48,7 +47,7 @@ export function PublicationParamsPane({ publication, className }: PublicationPar
           <Parameters
             parameters={parameterOverrides}
             defaultParameters={defaultParameters}
-            jsonSchema={jsonSchema as RJSFSchema | undefined}
+            jsonSchema={jsonSchema}
             onParametersChange={handleParametersChange}
             units={viewerUnits}
             enableSearch={false}
@@ -61,7 +60,7 @@ export function PublicationParamsPane({ publication, className }: PublicationPar
           className='flex flex-col gap-2 border-t pt-4'
         >
           <h2 className='text-sm font-medium'>Downloads</h2>
-          {geometries.length === 0 ? (
+          {!geometry ? (
             <p className='text-xs text-muted-foreground'>Render the geometry to enable export.</p>
           ) : (
             <ExportSelector

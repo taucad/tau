@@ -24,7 +24,7 @@ vi.mock('@xstate/react', () => ({
 vi.mock('#hooks/use-cad-preview.js', () => ({
   useCadPreview: () => ({
     cadRef: {},
-    geometries: [],
+    geometry: undefined,
   }),
 }));
 

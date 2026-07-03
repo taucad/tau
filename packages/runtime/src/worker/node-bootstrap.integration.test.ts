@@ -53,7 +53,7 @@ describe('@taucad/runtime/worker/node bootstrap (Node integration)', () => {
        *     unit-level via `acquireNodeParentPort` mock).
        *
        * Re-enabling this test requires bundling the worker (e.g. via tsdown
-       * dist/esm output) or using a pre-compiled JS fixture.
+       * dist output) or using a pre-compiled JS fixture.
        */
       const client = createRuntimeClient({
         transport: nodeWorkerTransport({

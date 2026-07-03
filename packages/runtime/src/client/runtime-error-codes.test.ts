@@ -15,7 +15,6 @@ import {
   RuntimeConnectionError,
   RuntimeNotConnectedError,
   RuntimeTerminatedError,
-  SelfRenderExportSupersededError,
   SharedPoolEntryNotFoundError,
 } from '#index.js';
 import { RuntimeConfigError } from '#worker/runtime-definition.js';
@@ -55,7 +54,7 @@ describe('runtime error codes', () => {
   });
 
   it('RuntimeNotConnectedError exposes code RUNTIME_NOT_CONNECTED', () => {
-    const error = new RuntimeNotConnectedError('openFile');
+    const error = new RuntimeNotConnectedError('render');
     expect(error.code).toBe('RUNTIME_NOT_CONNECTED');
     expectTypeOf(error.code).toEqualTypeOf<'RUNTIME_NOT_CONNECTED'>();
   });
@@ -64,12 +63,6 @@ describe('runtime error codes', () => {
     const error = new RuntimeTerminatedError();
     expect(error.code).toBe('RUNTIME_TERMINATED');
     expectTypeOf(error.code).toEqualTypeOf<'RUNTIME_TERMINATED'>();
-  });
-
-  it('SelfRenderExportSupersededError exposes code RUNTIME_SELF_RENDER_EXPORT_SUPERSEDED', () => {
-    const error = new SelfRenderExportSupersededError();
-    expect(error.code).toBe('RUNTIME_SELF_RENDER_EXPORT_SUPERSEDED');
-    expectTypeOf(error.code).toEqualTypeOf<'RUNTIME_SELF_RENDER_EXPORT_SUPERSEDED'>();
   });
 
   it('SharedPoolEntryNotFoundError exposes code RUNTIME_SHARED_POOL_KEY_MISSING', () => {

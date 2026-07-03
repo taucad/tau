@@ -115,7 +115,7 @@ function toTransportResult(
   return {
     ...result,
     issues: result.issues.map(normaliseIssueForWire),
-    data: result.data.map((geo) => applyGeometryEncoder(geo, encode, transferables)),
+    data: applyGeometryEncoder(result.data, encode, transferables),
   };
 }
 

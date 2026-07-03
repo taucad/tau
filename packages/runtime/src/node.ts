@@ -33,8 +33,8 @@ export type DefaultNodeRuntimeClientOptions = Omit<
  * on first command.
  *
  * @param projectPath - Root directory for filesystem-backed rendering. Omit
- *   for inline-`code:` mode; the client provisions an in-memory filesystem
- *   on the first `openFile` / `export({ code })` call.
+ *   for inline-source mode; the client provisions an in-memory filesystem
+ *   on the first `render({ source })` / `export({ source })` call.
  * @param options - Override client options. Pass `runtime` to use a custom worker-owned runtime definition.
  * @returns Configured `RuntimeClient` ready for render and export operations
  *
@@ -46,8 +46,7 @@ export type DefaultNodeRuntimeClientOptions = Omit<
  *
  * const client = await createNodeClient();
  * const result = await client.export('glb', {
- *   code: { 'main.ts': 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(10, 20, 30);' },
- *   file: 'main.ts',
+ *   source: { files: { 'main.ts': 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(10, 20, 30);' } },
  * });
  * client.terminate();
  * ```
@@ -57,7 +56,7 @@ export type DefaultNodeRuntimeClientOptions = Omit<
  * import { createNodeClient } from '@taucad/runtime/node';
  *
  * const client = await createNodeClient('/path/to/project');
- * const result = await client.export('glb', { file: 'main.ts' });
+ * const result = await client.export('glb', { source: { path: 'main.ts' } });
  * client.terminate();
  * ```
  */

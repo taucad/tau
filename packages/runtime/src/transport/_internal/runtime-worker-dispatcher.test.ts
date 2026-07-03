@@ -9,6 +9,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { SharedPool } from '@taucad/memory';
 import { createChannelClient, wrapMessagePort } from '@taucad/rpc';
 import type { Channel, ChannelServerHandle, Port } from '@taucad/rpc';
+import type { Geometry } from '@taucad/types';
 import { createWorkerDispatcher, runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
@@ -24,6 +25,7 @@ type DispatcherFixture = {
 };
 
 type FixtureOptions = Parameters<typeof createWorkerDispatcher>[2];
+const testGeometry = { format: 'gltf', content: new Uint8Array([1]), hash: 'mock' } satisfies Geometry;
 
 /** Build a dispatcher fixture wired against an in-memory `MessageChannel` pair. */
 async function buildFixture(worker: KernelWorker, options?: FixtureOptions): Promise<DispatcherFixture> {
@@ -55,7 +57,9 @@ function createMockWorker(overrides?: Partial<KernelWorker> & { geometryPool?: S
   const { geometryPool, ...rest } = overrides ?? {};
   const base = {
     initialize: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    render: vi.fn<() => Promise<{ success: true; data: unknown[] }>>().mockResolvedValue({ success: true, data: [] }),
+    render: vi
+      .fn<() => Promise<{ success: true; data: typeof testGeometry; issues: never[] }>>()
+      .mockResolvedValue({ success: true, data: testGeometry, issues: [] }),
     exportGeometry: vi
       .fn<() => Promise<{ success: true; data: unknown[] }>>()
       .mockResolvedValue({ success: true, data: [] }),
@@ -334,7 +338,7 @@ describe('createWorkerDispatcher', () => {
       onGeometryComputed!(
         {
           success: true,
-          data: [{ format: 'gltf', content, hash: 'auto-0' }],
+          data: { format: 'gltf', content, hash: 'auto-0' },
           issues: [],
         },
         1,
@@ -343,11 +347,11 @@ describe('createWorkerDispatcher', () => {
 
       expect(seen).toHaveLength(1);
       const result = seen[0]!.result as {
-        data: Array<{ format: string; content: { delivery: string; key?: string } }>;
+        data: { format: string; content: { delivery: string; key?: string } };
       };
-      expect(result.data[0]!.format).toBe('gltf');
-      expect(result.data[0]!.content.delivery).toBe('pooled');
-      expect(result.data[0]!.content.key).toBe('auto-0');
+      expect(result.data.format).toBe('gltf');
+      expect(result.data.content.delivery).toBe('pooled');
+      expect(result.data.content.key).toBe('auto-0');
     });
 
     it('emits `progress` and `parametersResolved` notifies with `rgen` from the autonomous worker callbacks', async () => {
@@ -577,7 +581,7 @@ describe('createWorkerDispatcher', () => {
       emit(
         {
           success: true,
-          data: [{ format: 'gltf', content, hash: 'dep-hash-0' }],
+          data: { format: 'gltf', content, hash: 'dep-hash-0' },
           issues: [],
         },
         1,
@@ -590,9 +594,9 @@ describe('createWorkerDispatcher', () => {
 
       expect(seen).toHaveLength(1);
       expect(seen[0]!.rgen).toBe(1);
-      const data = (seen[0]!.result as { data: Array<{ content: { delivery: string; key?: string } }> }).data;
-      expect(data[0]!.content.delivery).toBe('pooled');
-      expect(data[0]!.content.key).toBe('dep-hash-0');
+      const data = (seen[0]!.result as { data: { content: { delivery: string; key?: string } } }).data;
+      expect(data.content.delivery).toBe('pooled');
+      expect(data.content.key).toBe('dep-hash-0');
     });
 
     it('falls back to inline delivery when pool.store rejects an oversized entry (pool→transfer fallback)', async () => {
@@ -606,7 +610,7 @@ describe('createWorkerDispatcher', () => {
       emit(
         {
           success: true,
-          data: [{ format: 'gltf', content, hash: 'oversized-0' }],
+          data: { format: 'gltf', content, hash: 'oversized-0' },
           issues: [],
         },
         1,
@@ -615,13 +619,13 @@ describe('createWorkerDispatcher', () => {
 
       const data = (
         seen[0]!.result as {
-          data: Array<{ format: string; content: { delivery: string; bytes?: Uint8Array } }>;
+          data: { format: string; content: { delivery: string; bytes?: Uint8Array } };
         }
       ).data;
-      expect(data[0]!.content.delivery).toBe('inline');
+      expect(data.content.delivery).toBe('inline');
       // Source `content` was transferred (detached) by the dispatcher; compare
       // the receiver-side bytes against an unrelated snapshot of the original.
-      expect(data[0]!.content.bytes).toEqual(expectedSnapshot);
+      expect(data.content.bytes).toEqual(expectedSnapshot);
     });
 
     it('skips re-storing geometry already present in the pool', async () => {
@@ -637,7 +641,7 @@ describe('createWorkerDispatcher', () => {
       emit(
         {
           success: true,
-          data: [{ format: 'gltf', content, hash: 'pre-stored-0' }],
+          data: { format: 'gltf', content, hash: 'pre-stored-0' },
           issues: [],
         },
         1,
@@ -655,7 +659,7 @@ describe('createWorkerDispatcher', () => {
       emit(
         {
           success: true,
-          data: [{ format: 'gltf', content, hash: 'h1' }],
+          data: { format: 'gltf', content, hash: 'h1' },
           issues: [],
         },
         1,
@@ -664,11 +668,11 @@ describe('createWorkerDispatcher', () => {
 
       const data = (
         seen[0]!.result as {
-          data: Array<{ format: string; content: { delivery: string; bytes?: Uint8Array } }>;
+          data: { format: string; content: { delivery: string; bytes?: Uint8Array } };
         }
       ).data;
-      expect(data[0]!.content.delivery).toBe('inline');
-      expect(data[0]!.content.bytes).toEqual(expectedSnapshot);
+      expect(data.content.delivery).toBe('inline');
+      expect(data.content.bytes).toEqual(expectedSnapshot);
     });
 
     it('passes SVG geometries through unchanged', async () => {
@@ -677,24 +681,21 @@ describe('createWorkerDispatcher', () => {
       emit(
         {
           success: true,
-          data: [
-            {
-              format: 'svg',
-              paths: ['M0 0'],
-              viewbox: '0 0 100 100',
-              name: 'test',
-              hash: 'svg-hash',
-            },
-          ],
+          data: {
+            format: 'svg',
+            content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M0 0"/></svg>',
+            name: 'test',
+            hash: 'svg-hash',
+          },
           issues: [],
         },
         1,
       );
       await flushMicrotasks();
 
-      const data = (seen[0]!.result as { data: Array<{ format: string; paths: string[] }> }).data;
-      expect(data[0]!.format).toBe('svg');
-      expect(data[0]!.paths).toEqual(['M0 0']);
+      const data = (seen[0]!.result as { data: { format: string; content: string } }).data;
+      expect(data.format).toBe('svg');
+      expect(data.content).toContain('<svg');
     });
   });
 

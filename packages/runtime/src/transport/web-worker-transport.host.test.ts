@@ -21,15 +21,17 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { Geometry } from '@taucad/types';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { webWorkerHost } from '#transport/web-worker-host.js';
 
 type Listener = (event: { data: unknown }) => void;
+const testGeometry = { format: 'gltf', content: new Uint8Array([1]), hash: 'mock' } satisfies Geometry;
 
 const createMockKernelWorker = (): KernelWorker => {
   const base = {
     initialize: vi.fn().mockResolvedValue(undefined),
-    render: vi.fn().mockResolvedValue({ success: true, data: [] }),
+    render: vi.fn().mockResolvedValue({ success: true, data: testGeometry, issues: [] }),
     exportGeometry: vi.fn().mockResolvedValue({ success: true, data: [] }),
     cleanup: vi.fn().mockResolvedValue(undefined),
     notifyFileChanged: vi.fn().mockResolvedValue(undefined),

@@ -30,6 +30,22 @@ export const encodeGeometryAsOwnedTransfer = (geometry: Geometry): EncodedGeomet
   };
 };
 
+export const encodeGeometryAsOwnedCopy = (geometry: Geometry): EncodedGeometry => {
+  if (geometry.format !== 'gltf') {
+    return { value: geometry, transferables: [], tier: 'copy' };
+  }
+
+  return {
+    value: {
+      format: 'gltf',
+      content: { delivery: 'inline', bytes: cloneBytes(geometry.content) },
+      hash: geometry.hash,
+    },
+    transferables: [],
+    tier: 'copy',
+  };
+};
+
 export const encodeFileAsOwnedTransfer = (file: Uint8Array<ArrayBuffer>): EncodedFileBytes => {
   const bytes = cloneBytes(file);
   return {
@@ -38,3 +54,9 @@ export const encodeFileAsOwnedTransfer = (file: Uint8Array<ArrayBuffer>): Encode
     tier: 'transfer',
   };
 };
+
+export const encodeFileAsOwnedCopy = (file: Uint8Array<ArrayBuffer>): EncodedFileBytes => ({
+  value: { delivery: 'inline', bytes: cloneBytes(file) },
+  transferables: [],
+  tier: 'copy',
+});

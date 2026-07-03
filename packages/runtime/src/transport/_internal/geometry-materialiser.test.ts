@@ -64,9 +64,9 @@ const pooledGltf = (hash: string, key: string): GeometryTransport => ({
   hash,
 });
 
-const successResult = (geometries: GeometryTransport[]): HashedGeometryResultTransport => ({
+const successResult = (geometry: GeometryTransport): HashedGeometryResultTransport => ({
   success: true,
-  data: geometries,
+  data: geometry,
   issues: [],
 });
 
@@ -86,8 +86,7 @@ describe('materialiseGeometry', () => {
   it('passes non-gltf payloads through unchanged', async () => {
     const svg: GeometryTransport = {
       format: 'svg',
-      paths: ['M0 0L1 1'],
-      viewbox: '0 0 1 1',
+      content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><path d="M0 0L1 1"/></svg>',
       name: 'test',
       hash: 'h-svg',
     };
@@ -127,21 +126,21 @@ describe('materialiseHashedGeometryResult', () => {
     await expect(materialiseHashedGeometryResult(failure, undefined)).resolves.toBe(failure);
   });
 
-  it('resolves every payload in a successful result and preserves issues', async () => {
+  it('resolves the payload in a successful result and preserves issues', async () => {
     const buffer = new SharedArrayBuffer(64 * 1024);
     const pool = new SharedPool(buffer, { maxEntries: 8 });
     pool.store('result-key-b', new Uint8Array([1, 2]));
 
     const transport: HashedGeometryResultTransport = {
       success: true,
-      data: [inlineGltf('h-a'), pooledGltf('h-b', 'result-key-b')],
+      data: pooledGltf('h-b', 'result-key-b'),
       issues: [{ message: 'warn', code: 'UNKNOWN', type: 'runtime', severity: 'warning' }],
     };
 
     const resolved = await materialiseHashedGeometryResult(transport, pool);
     expect(resolved.success).toBe(true);
     if (resolved.success) {
-      expect(resolved.data).toHaveLength(2);
+      expect(resolved.data.hash).toBe('h-b');
       expect(resolved.issues).toEqual(transport.issues);
     }
   });
@@ -154,51 +153,51 @@ describe('subscribeMaterialisedGeometry', () => {
 
     subscribeMaterialisedGeometry(channel, handler, { dedupeByHash: false });
 
-    channel.emit({ result: successResult([inlineGltf('h-a')]), rgen: 1 });
-    channel.emit({ result: successResult([inlineGltf('h-a')]), rgen: 2 });
+    channel.emit({ result: successResult(inlineGltf('h-a')), rgen: 1 });
+    channel.emit({ result: successResult(inlineGltf('h-a')), rgen: 2 });
     await flushMicrotasks();
 
     expect(handler).toHaveBeenCalledTimes(2);
   });
 
-  it('suppresses duplicate emissions with identical hash lists by default', async () => {
+  it('suppresses duplicate emissions with identical hashes by default', async () => {
     const channel = buildChannel();
     const handler = vi.fn<(result: unknown, rgen: number) => void>();
 
     subscribeMaterialisedGeometry(channel, handler);
 
-    channel.emit({ result: successResult([inlineGltf('h-a'), inlineGltf('h-b')]), rgen: 1 });
+    channel.emit({ result: successResult(inlineGltf('h-a')), rgen: 1 });
     await flushMicrotasks();
 
-    channel.emit({ result: successResult([inlineGltf('h-a'), inlineGltf('h-b')]), rgen: 2 });
+    channel.emit({ result: successResult(inlineGltf('h-a')), rgen: 2 });
     await flushMicrotasks();
 
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  it('emits when the per-shape hash list changes', async () => {
+  it('emits when the render hash changes', async () => {
     const channel = buildChannel();
     const handler = vi.fn<(result: unknown, rgen: number) => void>();
 
     subscribeMaterialisedGeometry(channel, handler);
 
-    channel.emit({ result: successResult([inlineGltf('h-a')]), rgen: 1 });
+    channel.emit({ result: successResult(inlineGltf('h-a')), rgen: 1 });
     await flushMicrotasks();
-    channel.emit({ result: successResult([inlineGltf('h-b')]), rgen: 2 });
+    channel.emit({ result: successResult(inlineGltf('h-b')), rgen: 2 });
     await flushMicrotasks();
 
     expect(handler).toHaveBeenCalledTimes(2);
   });
 
-  it('treats hash-list ordering as significant for dedupe', async () => {
+  it('emits when two successful renders have different hashes', async () => {
     const channel = buildChannel();
     const handler = vi.fn<(result: unknown, rgen: number) => void>();
 
     subscribeMaterialisedGeometry(channel, handler);
 
-    channel.emit({ result: successResult([inlineGltf('h-a'), inlineGltf('h-b')]), rgen: 1 });
+    channel.emit({ result: successResult(inlineGltf('h-a')), rgen: 1 });
     await flushMicrotasks();
-    channel.emit({ result: successResult([inlineGltf('h-b'), inlineGltf('h-a')]), rgen: 2 });
+    channel.emit({ result: successResult(inlineGltf('h-b')), rgen: 2 });
     await flushMicrotasks();
 
     expect(handler).toHaveBeenCalledTimes(2);
@@ -210,11 +209,11 @@ describe('subscribeMaterialisedGeometry', () => {
 
     subscribeMaterialisedGeometry(channel, handler);
 
-    channel.emit({ result: successResult([inlineGltf('h-a')]), rgen: 1 });
+    channel.emit({ result: successResult(inlineGltf('h-a')), rgen: 1 });
     await flushMicrotasks();
     channel.emit({ result: failureResult(), rgen: 2 });
     await flushMicrotasks();
-    channel.emit({ result: successResult([inlineGltf('h-a')]), rgen: 3 });
+    channel.emit({ result: successResult(inlineGltf('h-a')), rgen: 3 });
     await flushMicrotasks();
 
     expect(handler).toHaveBeenCalledTimes(3);
@@ -230,7 +229,7 @@ describe('subscribeMaterialisedGeometry', () => {
 
     subscribeMaterialisedGeometry(channel, handler, { pool });
 
-    channel.emit({ result: successResult([pooledGltf('h-x', 'no-such-key')]), rgen: 1 });
+    channel.emit({ result: successResult(pooledGltf('h-x', 'no-such-key')), rgen: 1 });
     await flushMicrotasks();
 
     expect(handler).toHaveBeenCalledTimes(1);
@@ -249,7 +248,7 @@ describe('subscribeMaterialisedGeometry', () => {
     const unsubscribe = subscribeMaterialisedGeometry(channel, handler);
     unsubscribe();
 
-    channel.emit({ result: successResult([inlineGltf('h-a')]), rgen: 1 });
+    channel.emit({ result: successResult(inlineGltf('h-a')), rgen: 1 });
     await flushMicrotasks();
 
     expect(handler).not.toHaveBeenCalled();
@@ -261,18 +260,17 @@ describe('subscribeMaterialisedGeometry', () => {
 
     subscribeMaterialisedGeometry(channel, (result) => {
       if (result.success) {
-        seen.push(...result.data);
+        seen.push(result.data);
       }
     });
 
     const svg: GeometryTransport = {
       format: 'svg',
-      paths: ['M0 0L1 1'],
-      viewbox: '0 0 1 1',
+      content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><path d="M0 0L1 1"/></svg>',
       name: 'test',
       hash: 'h-svg',
     };
-    channel.emit({ result: successResult([svg]), rgen: 1 });
+    channel.emit({ result: successResult(svg), rgen: 1 });
     await flushMicrotasks();
 
     expect(seen).toEqual([svg]);

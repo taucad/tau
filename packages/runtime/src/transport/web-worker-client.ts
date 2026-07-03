@@ -51,11 +51,11 @@ export type WebWorkerLike = {
 };
 
 /**
- * Options accepted by {@link webWorkerClient}.
+ * Options accepted by {@link webWorkerClient} and {@link webWorkerTransport}.
  *
  * @public
  */
-export type WebWorkerClientOptions = {
+export type WebWorkerTransportOptions = {
   /**
    * URL of the worker module entry. Must resolve to a `type: 'module'`
    * worker that composes `createRuntimeWorker({ runtime })` with
@@ -126,7 +126,7 @@ const wrapWorkerAsPort = (worker: WebWorkerLike, label: string): Port<unknown> =
  * @returns Diagnostic {@link TransportDescriptor}.
  * @public
  */
-export const webWorkerClientDescribe = (options: WebWorkerClientOptions): TransportDescriptor<WebWorkerId> => {
+export const webWorkerClientDescribe = (options: WebWorkerTransportOptions): TransportDescriptor<WebWorkerId> => {
   const fsKind = options.fileSystem ? 'inline' : 'unbound';
   const sabAvailable = typeof SharedArrayBuffer === 'function';
   const geometryDelivery = sabAvailable && options.sharedMemory?.geometry !== undefined ? 'pool' : 'transfer';
@@ -150,12 +150,12 @@ export const webWorkerClientDescribe = (options: WebWorkerClientOptions): Transp
  * Compose into {@link defineRuntimeTransport} via
  * {@link web-worker-transport.ts}.
  *
- * @param options - Client options; see {@link WebWorkerClientOptions}.
+ * @param options - Transport options; see {@link WebWorkerTransportOptions}.
  * @returns The {@link RuntimeTransportClient} fat handle for the web-worker wire.
  * @public
  */
 export const webWorkerClient = (
-  options: WebWorkerClientOptions,
+  options: WebWorkerTransportOptions,
 ): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, WebWorkerId> => {
   const workerCtor: typeof Worker | undefined =
     options.workerCtor ?? (typeof Worker === 'function' ? Worker : undefined);

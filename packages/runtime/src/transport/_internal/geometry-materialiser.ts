@@ -16,7 +16,7 @@
  * 2. **Inline passthrough** — non-`gltf` formats (e.g. `svg`) bypass
  *    pool resolution entirely.
  * 3. **Hash de-dupe** — when a successful result emits the same
- *    per-shape hash list as the previous emission, the handler is
+ *    render hash as the previous emission, the handler is
  *    skipped. Failed results never participate in dedupe and reset the
  *    last-known hash.
  *
@@ -130,17 +130,15 @@ export async function materialiseHashedGeometryResult(
   if (!transport.success) {
     return transport;
   }
-  const data = await Promise.all(transport.data.map(async (geo) => materialiseGeometry(geo, pool)));
+  const data = await materialiseGeometry(transport.data, pool);
   return { ...transport, data };
 }
 
 /**
- * Compute a stable dedupe key from a successful result's per-shape
- * hash list. The pipe (`|`) is reserved by the runtime hashing scheme
- * (Base64URL alphabet) so it cannot occur inside an individual hash.
+ * Compute a stable dedupe key from a successful result's render hash.
  */
-function hashKeyFor(data: ReadonlyArray<{ readonly hash: string }>): string {
-  return data.map((shape) => shape.hash).join('|');
+function hashKeyFor(data: { readonly hash: string }): string {
+  return data.hash;
 }
 
 /**
@@ -169,7 +167,7 @@ export function subscribeMaterialisedGeometry(
       if (!transport.success) {
         return transport;
       }
-      const data = await Promise.all(transport.data.map(async (g) => resolveGeometry(g)));
+      const data = await resolveGeometry(transport.data);
       return { ...transport, data };
     }
     return materialiseHashedGeometryResult(transport, pool);

@@ -10,6 +10,7 @@ import type {
   TransportClientReady,
 } from '#transport/runtime-transport.types.js';
 import { createRuntimeClientWithTransport } from '#client/runtime-client-core.js';
+import type { ExportResult } from '#client/runtime-client-core.js';
 
 const exportResult: ExportGeometryResult = {
   success: true,
@@ -102,27 +103,25 @@ function createFakeTransport() {
 }
 
 describe('RuntimeClient request-scoped export', () => {
-  it('should export a file request without calling openFile', async () => {
+  it('should export a file request without calling render', async () => {
     const { exportCall, exportModelCall, plugin } = createFakeTransport();
     const client = createRuntimeClientWithTransport({
       transport: plugin,
     });
-    const openFile = vi.fn();
-    client.openFile = openFile;
+    const render = vi.fn();
+    client.render = render;
 
     const result = await client.export('glb', {
-      file: 'main.ts',
+      source: { path: 'main.ts' },
       parameters: { height: 10 },
-      options: { quality: 'fine' },
-      binary: true,
+      exportOptions: { binary: true },
     });
 
-    expect(openFile).not.toHaveBeenCalled();
+    expect(render).not.toHaveBeenCalled();
     expect(exportCall).not.toHaveBeenCalled();
     expect(exportModelCall).toHaveBeenCalledWith({
       file: { path: '/', filename: 'main.ts' },
       parameters: { height: 10 },
-      options: { quality: 'fine' },
       format: 'glb',
       exportOptions: { binary: true },
     });
@@ -140,10 +139,9 @@ describe('RuntimeClient request-scoped export', () => {
     inlineCode['lib/part.ts'] = 'export const part = {};';
 
     const result = await client.export('step', {
-      code: inlineCode,
-      file: 'main.ts',
+      source: { files: inlineCode, entry: 'main.ts' },
       parameters: { radius: 4 },
-      unit: 'mm',
+      exportOptions: { unit: 'mm' },
     });
 
     expect(result.success).toBe(true);
@@ -176,9 +174,27 @@ describe('RuntimeClient request-scoped export', () => {
       transport: plugin,
     });
 
-    await client.export('glb', { file: 'main.ts' });
+    await client.export('glb', { source: { path: 'main.ts' } });
 
     await expect(client.export('glb')).rejects.toMatchObject({ code: 'RUNTIME_NO_RENDER_OUTCOME' });
+    client.terminate();
+  });
+
+  it('should reject legacy flat export input', async () => {
+    const { plugin } = createFakeTransport();
+    const client = createRuntimeClientWithTransport({
+      transport: plugin,
+    });
+    const exportFromJavaScript = client.export as (
+      format: string,
+      options?: Record<string, unknown>,
+    ) => Promise<ExportResult>;
+
+    await expect(exportFromJavaScript('glb', { file: 'main.ts' })).rejects.toThrow('source');
+    await expect(exportFromJavaScript('glb', { source: { path: 'main.ts' }, renderOptions: {} })).rejects.toThrow(
+      'renderOptions',
+    );
+    await expect(exportFromJavaScript('glb', { binary: true })).rejects.toThrow('binary');
     client.terminate();
   });
 });

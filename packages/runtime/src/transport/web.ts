@@ -28,8 +28,70 @@
  * @public
  */
 
+import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
+import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
+import type { RuntimeClientOptionsWithTransport } from '#client/runtime-client-core.js';
+import type { AnyRuntimeDefinition, RuntimeConfigInput, RuntimeConfigProvider } from '#worker/runtime-definition.js';
+import { webWorkerTransport } from '#transport/web-worker-transport.js';
+import type { WebWorkerTransportOptions } from '#transport/web-worker-client.js';
+
 export { webWorkerTransport } from '#transport/web-worker-transport.js';
-export type { WebWorkerLike, WebWorkerClientOptions } from '#transport/web-worker-client.js';
+export type { WebWorkerLike, WebWorkerTransportOptions } from '#transport/web-worker-client.js';
 export type { WebWorkerHostOptions } from '#transport/web-worker-host.js';
 export { webWorkerHost } from '#transport/web-worker-host.js';
 export { webWorkerClient } from '#transport/web-worker-client.js';
+
+/**
+ * Options for {@link createWebWorkerClientOptions}.
+ *
+ * @public
+ */
+export type CreateWebWorkerClientOptionsOptions<Runtime extends AnyRuntimeDefinition | undefined = undefined> = Omit<
+  WebWorkerTransportOptions,
+  'fileSystem'
+> & {
+  /**
+   * Optional seed files for the transport-owned in-memory filesystem. Omitting
+   * this still creates an empty memory filesystem for inline source staging.
+   * Pass `fileSystem` for custom FS authority.
+   */
+  readonly files?: Record<string, string>;
+  /** Explicit transport-owned filesystem. Mutually exclusive with `files`. */
+  readonly fileSystem?: RuntimeFileSystem;
+  /** Optional runtime client render timeout. */
+  readonly renderTimeout?: number;
+} & ([RuntimeConfigInput<Runtime>] extends [never]
+    ? { readonly config?: never }
+    : undefined extends RuntimeConfigInput<Runtime>
+      ? { readonly config?: RuntimeConfigProvider<Runtime> }
+      : { readonly config: RuntimeConfigProvider<Runtime> });
+
+/**
+ * Builds the runtime-client options object for the common app-owned web worker
+ * topology.
+ *
+ * Keep the result in module scope and pass it to `useRuntime` or
+ * `createRuntimeClient`. The worker module still owns the executable runtime
+ * definition; this helper assembles the browser transport and a per-session
+ * in-memory filesystem for inline source staging.
+ *
+ * @public
+ */
+export const createWebWorkerClientOptions = <Runtime extends AnyRuntimeDefinition | undefined = undefined>(
+  options: CreateWebWorkerClientOptionsOptions<Runtime>,
+): RuntimeClientOptionsWithTransport<Runtime, ReturnType<typeof webWorkerTransport>> => {
+  if (options.files !== undefined && options.fileSystem !== undefined) {
+    throw new TypeError('createWebWorkerClientOptions: pass either `files` or `fileSystem`, not both');
+  }
+
+  const { config, files, fileSystem, renderTimeout, ...transportOptions } = options;
+  const clientOptions = {
+    transport: webWorkerTransport({
+      ...transportOptions,
+      fileSystem: fileSystem ?? fromMemoryFs(files),
+    }),
+    ...(config === undefined ? {} : { config }),
+    ...(renderTimeout === undefined ? {} : { renderTimeout }),
+  };
+  return clientOptions as RuntimeClientOptionsWithTransport<Runtime, ReturnType<typeof webWorkerTransport>>;
+};

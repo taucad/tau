@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Transport descriptors intentionally use protocol-shaped keys. */
 /**
  * Conformance test C2 — bundled transports satisfy the canonical
  * fat {@link RuntimeTransportClient} / {@link RuntimeTransportHost}
@@ -15,19 +16,23 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
+import type { Geometry } from '@taucad/types';
+
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { nodeWorkerHost } from '#transport/node-worker-host.js';
-import type { WebWorkerClientOptions } from '#transport/web-worker-client.js';
+import type { WebWorkerTransportOptions } from '#transport/web-worker-client.js';
 import { webWorkerHost } from '#transport/web-worker-host.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
+
+const testGeometry = { format: 'gltf', content: new Uint8Array([1]), hash: 'mock' } satisfies Geometry;
 
 /** Surface stub for `KernelWorker` — only used to satisfy host typing in conformance assertions. */
 const makeStubKernelWorker = (): KernelWorker => {
   const base = {
     initialize: vi.fn().mockResolvedValue(undefined),
-    render: vi.fn().mockResolvedValue({ success: true, data: [] }),
+    render: vi.fn().mockResolvedValue({ success: true, data: testGeometry, issues: [] }),
     exportGeometry: vi.fn().mockResolvedValue({ success: true, data: [] }),
     cleanup: vi.fn().mockResolvedValue(undefined),
     notifyFileChanged: vi.fn().mockResolvedValue(undefined),
@@ -175,6 +180,59 @@ describe('transport conformance — web-worker (C2)', () => {
     }
   });
 
+  it('createWebWorkerClientOptions() builds client options with an empty memory filesystem by default', async () => {
+    const { createWebWorkerClientOptions } = await import('#transport/web.js');
+    const { workerCtor, dispose } = makeFakeWorkerCtor();
+    try {
+      const options = createWebWorkerClientOptions({
+        url: 'about:blank',
+        workerCtor,
+      });
+
+      expect(options.transport.describe().fileSystem).toBe('inline');
+    } finally {
+      dispose();
+    }
+  });
+
+  it('createWebWorkerClientOptions() builds client options with seeded memory filesystem', async () => {
+    const { createWebWorkerClientOptions } = await import('#transport/web.js');
+    const { workerCtor, dispose } = makeFakeWorkerCtor();
+    try {
+      const options = createWebWorkerClientOptions({
+        url: 'about:blank',
+        workerCtor,
+        files: { '/main.ts': 'export default () => true;' },
+        renderTimeout: 4567,
+      });
+
+      expect(options.renderTimeout).toBe(4567);
+      expect(options.transport.id).toBe('web-worker');
+      const description = options.transport.describe();
+      expect(description.fileSystem).toBe('inline');
+      expect(description.wire).toBe('web-worker');
+      expect(typeof description.memory.fileDelivery).toBe('string');
+      expect(typeof description.memory.geometryDelivery).toBe('string');
+    } finally {
+      dispose();
+    }
+  });
+
+  it('createWebWorkerClientOptions() rejects ambiguous filesystem inputs', async () => {
+    const { createWebWorkerClientOptions } = await import('#transport/web.js');
+    const createWorker = (): never => {
+      throw new Error('createWorker should not be called for invalid filesystem inputs');
+    };
+
+    expect(() =>
+      createWebWorkerClientOptions({
+        createWorker,
+        files: { '/main.ts': 'export default () => true;' },
+        fileSystem: fromMemoryFs(),
+      }),
+    ).toThrow(/either `files` or `fileSystem`/);
+  });
+
   it('materialise() returns the v6 fat client handle surface', async () => {
     const { webWorkerTransport } = await import('#transport/web-worker-transport.js');
     const { workerCtor, dispose } = makeFakeWorkerCtor();
@@ -272,7 +330,7 @@ describe('transport conformance — web-worker (C2)', () => {
     const { webWorkerTransport } = await import('#transport/web-worker-transport.js');
     const fake = makeFakeWorkerCtor();
     try {
-      const options = { workerCtor: fake.workerCtor } as unknown as WebWorkerClientOptions;
+      const options = { workerCtor: fake.workerCtor } as unknown as WebWorkerTransportOptions;
       const client = webWorkerTransport(options).materialize();
       await expect(client.open()).rejects.toThrow(/createWorker.*worker `url`/);
       expect(fake.urls).toEqual([]);

@@ -56,7 +56,7 @@ import { webWorkerId } from '#transport/_internal/web-worker-id.js';
 import { webWorkerClient } from '#transport/web-worker-client.js';
 import { webWorkerHost } from '#transport/web-worker-host.js';
 
-export type { WebWorkerLike, WebWorkerClientOptions } from '#transport/web-worker-client.js';
+export type { WebWorkerLike, WebWorkerTransportOptions } from '#transport/web-worker-client.js';
 export type { WebWorkerHostOptions } from '#transport/web-worker-host.js';
 
 /**

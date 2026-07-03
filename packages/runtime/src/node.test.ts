@@ -3,10 +3,10 @@ import { describe, it, expect } from 'vitest';
 import { createNodeClient } from '#node.js';
 
 describe('createNodeClient', () => {
-  it('should return a client with the v5 command surface', async () => {
+  it('should return a client with the command surface', async () => {
     const client = await createNodeClient();
 
-    expect(client.openFile).toBeTypeOf('function');
+    expect(client.render).toBeTypeOf('function');
     expect(client.updateParameters).toBeTypeOf('function');
     expect(client.setOptions).toBeTypeOf('function');
     expect(client.export).toBeTypeOf('function');
@@ -20,7 +20,7 @@ describe('createNodeClient', () => {
   it('should accept a project path for filesystem-backed rendering', async () => {
     const client = await createNodeClient('/tmp');
 
-    expect(client.openFile).toBeTypeOf('function');
+    expect(client.render).toBeTypeOf('function');
 
     client.terminate();
   });
@@ -41,15 +41,16 @@ describe('createNodeClient', () => {
     expect(client.lifecycleState).toBe('unconnected');
 
     const result = await client.export('glb', {
-      code: {
-        'main.ts': `
-          import { makeBaseBox } from 'replicad';
-          export default function main() {
-            return makeBaseBox(10, 20, 30);
-          }
-        `,
+      source: {
+        files: {
+          'main.ts': `
+            import { makeBaseBox } from 'replicad';
+            export default function main() {
+              return makeBaseBox(10, 20, 30);
+            }
+          `,
+        },
       },
-      file: 'main.ts',
     });
 
     expect(client.lifecycleState).toBe('connected');
@@ -67,16 +68,17 @@ describe('createNodeClient', () => {
     const client = await createNodeClient();
 
     const result = await client.export('glb', {
-      code: {
-        'main.ts': `
-          import { BRepPrimAPI_MakeBox } from 'opencascade.js';
+      source: {
+        files: {
+          'main.ts': `
+            import { BRepPrimAPI_MakeBox } from 'opencascade.js';
 
-          export default function main() {
-            return new BRepPrimAPI_MakeBox(10, 20, 30).Shape();
-          }
-        `,
+            export default function main() {
+              return new BRepPrimAPI_MakeBox(10, 20, 30).Shape();
+            }
+          `,
+        },
       },
-      file: 'main.ts',
     });
 
     expect(result.success).toBe(true);
@@ -91,15 +93,16 @@ describe('createNodeClient', () => {
   it('settles repeated identical exports', { timeout: 10_000 }, async () => {
     const client = await createNodeClient();
     const input = {
-      code: {
-        'main.ts': `
-          import { makeBaseBox } from 'replicad';
-          export default function main() {
-            return makeBaseBox(10, 20, 30);
-          }
-        `,
+      source: {
+        files: {
+          'main.ts': `
+            import { makeBaseBox } from 'replicad';
+            export default function main() {
+              return makeBaseBox(10, 20, 30);
+            }
+          `,
+        },
       },
-      file: 'main.ts',
     };
 
     const withSettlementLimit = async <T>(promise: Promise<T>): Promise<T> => {

@@ -138,9 +138,7 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
   const graphicsBackendPreference = useGraphicsSelector((state) => state.context.graphicsBackendPreference);
   const webGpuAvailable = useGraphicsSelector((state) => state.context.webGpuAvailable);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
-  const is2dGeometry = useGraphicsSelector((state) =>
-    state.context.geometries.some((geometry) => geometry.format === 'svg'),
-  );
+  const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
 
   const cadRef = useCad();
   const renderTimeout = useCadSelector((state) => state.context.renderTimeout, defaultRenderTimeout);

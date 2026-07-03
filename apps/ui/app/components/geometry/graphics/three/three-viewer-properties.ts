@@ -2,6 +2,8 @@ import type { CanvasProps } from '@react-three/fiber';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
 
+export type SecondaryMouseButtonMode = 'camera-pan' | 'context-menu' | 'none';
+
 export type ThreeViewerProperties = {
   /**
    * Active rendering backend for this viewer (typically URL-merged preference + probe).
@@ -13,6 +15,7 @@ export type ThreeViewerProperties = {
   readonly enableAxes?: boolean;
   readonly enableZoom?: boolean;
   readonly enablePan?: boolean;
+  readonly secondaryMouseButtonMode?: SecondaryMouseButtonMode;
   readonly enableDamping?: boolean;
   readonly upDirection?: 'x' | 'y' | 'z';
   readonly className?: string;

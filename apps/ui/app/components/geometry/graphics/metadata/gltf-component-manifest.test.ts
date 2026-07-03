@@ -11,6 +11,28 @@ function encodeJson(value: unknown): Uint8Array<ArrayBuffer> {
 }
 
 describe('buildGltfComponentManifest', () => {
+  it('should build a root-only manifest for an empty glTF scene', () => {
+    const bytes = encodeJson({
+      asset: { version: '2.0' },
+      scene: 0,
+      scenes: [{ nodes: [] }],
+      nodes: [],
+      meshes: [],
+      accessors: [],
+      bufferViews: [],
+      buffers: [{ byteLength: 0, uri: 'data:application/octet-stream;base64,' }],
+      materials: [],
+    });
+
+    const manifest = buildGltfComponentManifest(bytes, { sourceFile: 'src/main.ts', geometryHash: 'empty-hash' });
+
+    expect(manifest.rootId).toBe('root');
+    expect(manifest.nodeOrder).toEqual(['root']);
+    expect(manifest.nodesById['root']?.childIds).toEqual([]);
+    expect(manifest.sourceFile).toBe('src/main.ts');
+    expect(manifest.geometryHash).toBe('empty-hash');
+  });
+
   it('should build a component tree from Tau topology extension data', () => {
     const bytes = encodeJson({
       nodes: [

@@ -310,6 +310,9 @@ type GltfMeshDisplayProperties = {
    * Whether to enable lines.
    */
   readonly enableLines?: boolean;
+  readonly onModelComponentSecondaryPointerCandidate?: (
+    target: ModelComponentSecondaryPointerTarget | undefined,
+  ) => void;
 };
 
 type ComponentVisualStateOptions = {
@@ -390,6 +393,19 @@ export type ModelPointerClickDispatch =
   | { readonly type: 'clearModelComponentFocus'; readonly unitId: string; readonly source: 'viewer' }
   | { readonly type: 'clearModelComponentSelection'; readonly unitId: string; readonly source: 'viewer' };
 
+export type ModelComponentSecondaryPointerTarget = {
+  readonly unitId: string;
+  readonly componentId: string;
+};
+
+export type ModelComponentContextMenuTarget = ModelComponentSecondaryPointerTarget;
+
+export type ModelContextMenuAction =
+  | { readonly type: 'allowSceneUi' }
+  | { readonly type: 'consumeModelPointerGuard' }
+  | { readonly type: 'ignore' }
+  | { readonly type: 'openComponentMenu'; readonly componentId: string };
+
 export function resolveModelPointerClickAction({
   intersections,
   modelComponentId,
@@ -412,6 +428,32 @@ export function resolveModelPointerClickAction({
   return modelComponentId
     ? { type: 'toggleComponentSelection', componentId: modelComponentId }
     : { type: 'clearFocusAndSelection' };
+}
+
+export function resolveModelContextMenuAction({
+  intersections,
+  modelComponentId,
+  suppressNextModelPointerClick,
+  isModelPointerClickSuppressed,
+}: {
+  readonly intersections: ReadonlyArray<Pick<Intersection, 'distance' | 'object'>>;
+  readonly modelComponentId: string | undefined;
+  readonly suppressNextModelPointerClick: boolean;
+  readonly isModelPointerClickSuppressed: boolean;
+}): ModelContextMenuAction {
+  if (hasModelHitBlockingSceneUiHit(intersections)) {
+    return { type: 'allowSceneUi' };
+  }
+
+  if (suppressNextModelPointerClick) {
+    return { type: 'consumeModelPointerGuard' };
+  }
+
+  if (isModelPointerClickSuppressed) {
+    return { type: 'ignore' };
+  }
+
+  return modelComponentId ? { type: 'openComponentMenu', componentId: modelComponentId } : { type: 'ignore' };
 }
 
 export function resolveModelPointerMissedAction({
@@ -936,6 +978,72 @@ function seedSceneMaterialAppearances(scene: Group): void {
   });
 }
 
+export type ApplyModelComponentVisualStateToSceneOptions = Readonly<{
+  scene: Group;
+  componentManifest: GeometryComponentManifest;
+  modelVisualState: Pick<
+    ModelInteractionUnitState,
+    | 'hiddenComponentIds'
+    | 'isolatedComponentIds'
+    | 'focusedComponentId'
+    | 'opacityByComponentId'
+    | 'hoveredComponentId'
+    | 'selectedComponentIds'
+  >;
+  enableSurfaces: boolean;
+  enableLines: boolean;
+}>;
+
+export function applyModelComponentVisualStateToScene({
+  scene,
+  componentManifest,
+  modelVisualState,
+  enableSurfaces,
+  enableLines,
+}: ApplyModelComponentVisualStateToSceneOptions): void {
+  const hidden = new Set(modelVisualState.hiddenComponentIds);
+  const isolated = new Set(modelVisualState.isolatedComponentIds);
+
+  scene.traverse((object) => {
+    const componentId = getObjectComponentId(object);
+    if (!componentId) {
+      return;
+    }
+
+    const isLine = isLineObject(object);
+    const isSurface = isSurfaceObject(object);
+    const globallyVisible = isLine ? enableLines : isSurface ? enableSurfaces : true;
+    const visualState = resolveComponentVisualStateWithManifest({
+      componentId,
+      manifest: componentManifest,
+      hiddenComponentIds: hidden,
+      isolatedComponentIds: isolated,
+      focusedComponentId: modelVisualState.focusedComponentId,
+      explicitOpacity: modelVisualState.opacityByComponentId[componentId],
+      opacityByComponentId: modelVisualState.opacityByComponentId,
+    });
+    object.visible = globallyVisible && visualState.visible;
+
+    const materials = getObjectMaterials(object);
+    if (materials.length === 0) {
+      return;
+    }
+
+    if (isSectionSourceOnlyObject(object)) {
+      for (const material of materials) {
+        configureSectionSourceOnlyMaterial(material);
+      }
+      return;
+    }
+
+    const emphasis = resolveModelComponentEmphasisWithManifest(modelVisualState, componentManifest, componentId);
+    for (const material of materials) {
+      const snapshot = getOrCaptureModelMaterialAppearance(material);
+      applyModelMaterialAppearance(material, snapshot, { opacity: visualState.opacity, emphasis });
+    }
+  });
+}
+
 export function applyGltfEdgeThemeColor(scene: Group, edgeColor: number): void {
   const updatedMaterials = updateGltfEdgeColor(scene, edgeColor);
   for (const material of updatedMaterials) {
@@ -972,6 +1080,7 @@ export function GltfMesh({
   enableMatcap = false,
   enableSurfaces = true,
   enableLines = true,
+  onModelComponentSecondaryPointerCandidate,
 }: GltfMeshDisplayProperties): React.JSX.Element | undefined {
   const graphicsActor = useGraphics();
   const modelInteractionRef = useModelInteractionRef();
@@ -1223,50 +1332,15 @@ export function GltfMesh({
       return;
     }
 
-    const hidden = new Set(modelVisualState.hiddenComponentIds);
-    const isolated = new Set(modelVisualState.isolatedComponentIds);
-
-    scene.traverse((object) => {
-      const componentId = getObjectComponentId(object);
-      if (!componentId) {
-        return;
-      }
-
-      const isLine = isLineObject(object);
-      const isSurface = isSurfaceObject(object);
-      const globallyVisible = isLine ? enableLines : isSurface ? enableSurfaces : true;
-      const visualState = resolveComponentVisualStateWithManifest({
-        componentId,
-        manifest: componentManifest,
-        hiddenComponentIds: hidden,
-        isolatedComponentIds: isolated,
-        focusedComponentId: modelVisualState.focusedComponentId,
-        explicitOpacity: modelVisualState.opacityByComponentId[componentId],
-        opacityByComponentId: modelVisualState.opacityByComponentId,
-      });
-      object.visible = globallyVisible && visualState.visible;
-
-      const materials = getObjectMaterials(object);
-      if (materials.length === 0) {
-        return;
-      }
-
-      if (isSectionSourceOnlyObject(object)) {
-        for (const material of materials) {
-          configureSectionSourceOnlyMaterial(material);
-        }
-        return;
-      }
-
-      const emphasis = resolveModelComponentEmphasisWithManifest(modelVisualState, componentManifest, componentId);
-      for (const material of materials) {
-        const snapshot = getOrCaptureModelMaterialAppearance(material);
-        applyModelMaterialAppearance(material, snapshot, { opacity: visualState.opacity, emphasis });
-      }
+    applyModelComponentVisualStateToScene({
+      scene,
+      componentManifest,
+      modelVisualState,
+      enableSurfaces,
+      enableLines,
     });
-
     invalidate();
-  }, [scene, componentManifest, modelVisualState, activeEdgeColor, enableSurfaces, enableLines, invalidate]);
+  }, [scene, componentManifest, modelVisualState, enableSurfaces, enableLines, invalidate]);
 
   useEffect(() => {
     lastHoveredComponentIdRef.current = modelVisualState.isViewerHoverSuppressed
@@ -1426,6 +1500,65 @@ export function GltfMesh({
     [camera, getModelPickableMeshes, graphicsActor, modelRaycastClipState, unitId],
   );
 
+  const resolveContextMenuActionFromEvent = useCallback(
+    (event: ThreeEvent<MouseEvent | PointerEvent>): ModelContextMenuAction => {
+      const graphicsContext = graphicsActor.getSnapshot().context;
+      syncModelRaycasterFromPointerEvent({
+        raycaster: modelRaycasterRef.current,
+        ray: event.ray,
+        camera,
+      });
+      const modelComponentId = resolveModelComponentHitFromRay({
+        raycaster: modelRaycasterRef.current,
+        meshes: getModelPickableMeshes(),
+        clipping: modelRaycastClipState,
+      });
+      return resolveModelContextMenuAction({
+        intersections: event.intersections,
+        modelComponentId,
+        suppressNextModelPointerClick: graphicsContext.suppressNextModelPointerClick,
+        isModelPointerClickSuppressed: graphicsContext.modelPointerClickSuppressionReasons.length > 0,
+      });
+    },
+    [camera, getModelPickableMeshes, graphicsActor, modelRaycastClipState],
+  );
+
+  const publishSecondaryPointerAction = useCallback(
+    (contextMenuAction: ModelContextMenuAction): void => {
+      if (!onModelComponentSecondaryPointerCandidate) {
+        return;
+      }
+
+      if (contextMenuAction.type === 'consumeModelPointerGuard') {
+        graphicsActor.send({ type: 'clearModelPointerClickGuard' });
+      }
+      onModelComponentSecondaryPointerCandidate(
+        contextMenuAction.type === 'openComponentMenu'
+          ? { unitId, componentId: contextMenuAction.componentId }
+          : undefined,
+      );
+    },
+    [graphicsActor, onModelComponentSecondaryPointerCandidate, unitId],
+  );
+
+  const handlePointerDown = useCallback(
+    (event: ThreeEvent<PointerEvent>) => {
+      if (!onModelComponentSecondaryPointerCandidate || event.nativeEvent.button !== 2) {
+        return;
+      }
+
+      const contextMenuAction = resolveContextMenuActionFromEvent(event);
+
+      if (contextMenuAction.type === 'allowSceneUi') {
+        return;
+      }
+
+      event.stopPropagation();
+      publishSecondaryPointerAction(contextMenuAction);
+    },
+    [onModelComponentSecondaryPointerCandidate, publishSecondaryPointerAction, resolveContextMenuActionFromEvent],
+  );
+
   const handlePointerMissed = useCallback(() => {
     lastHoveredComponentIdRef.current = undefined;
     if (!modelVisualState.isViewerHoverSuppressed) {
@@ -1453,6 +1586,7 @@ export function GltfMesh({
     <primitive
       object={scene}
       onPointerMove={handlePointerMove}
+      onPointerDown={handlePointerDown}
       onPointerOut={handlePointerOut}
       onClick={handleClick}
       onPointerMissed={handlePointerMissed}

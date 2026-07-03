@@ -14,6 +14,7 @@ export function ThreeProvider({
   enableAxes = false,
   enableZoom = false,
   enablePan = false,
+  secondaryMouseButtonMode = 'camera-pan',
   enableDamping = false,
   upDirection = 'z',
   enableCentering = false,
@@ -80,6 +81,7 @@ export function ThreeProvider({
       enableAxes={enableAxes}
       enableZoom={enableZoom}
       enablePan={enablePan}
+      secondaryMouseButtonMode={secondaryMouseButtonMode}
       enableDamping={enableDamping}
       upDirection={upDirection}
       enableCentering={enableCentering}

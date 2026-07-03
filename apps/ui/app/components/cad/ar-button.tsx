@@ -34,16 +34,16 @@ function ArIcon({ className }: { readonly className?: string }): React.JSX.Eleme
 }
 
 export const ArButton = memo(function ({
-  geometries,
+  geometry,
   kernelClient,
   className,
 }: {
-  readonly geometries: readonly Geometry[];
+  readonly geometry: Geometry | undefined;
   readonly kernelClient?: AppRuntimeClient;
   readonly className?: string;
 }): React.ReactNode {
   const isMobile = useIsMobile();
-  const { canActivateAr, isConverting, activateAr } = useAr(geometries, kernelClient);
+  const { canActivateAr, isConverting, activateAr } = useAr(geometry, kernelClient);
 
   if (!isMobile || !canActivateAr) {
     return undefined;

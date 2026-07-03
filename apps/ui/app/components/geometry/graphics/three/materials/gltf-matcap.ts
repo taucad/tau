@@ -4,6 +4,7 @@ import { DoubleSide, MeshMatcapMaterial } from 'three';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import { MeshMatcapNodeMaterial } from 'three/webgpu';
 import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
+import { applyModelMaterialOpacityOverride } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 import { sceneTag, hasSceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 
 /**
@@ -23,6 +24,15 @@ type ApplyMatcapToClonedSceneOptions = Readonly<{
   backend?: ResolvedGraphicsBackend;
 }>;
 
+type MaterialWithColor = Material & { color: { getHexString(): string } };
+
+type SourceMaterialRenderState = Readonly<{
+  opacity: number;
+  transparent: boolean;
+  depthWrite: boolean;
+  colorHexString?: string;
+}>;
+
 function createMeshMatcapReplacement(
   backend: ResolvedGraphicsBackend,
   matcapTexture: Texture,
@@ -36,6 +46,84 @@ function createMeshMatcapReplacement(
         matcap: matcapTexture,
         side: DoubleSide,
       });
+}
+
+function getSourceMaterials(material: Material | Material[]): Material[] {
+  return Array.isArray(material) ? material : [material];
+}
+
+function hasColor(material: Material): material is MaterialWithColor {
+  const { color } = material as Partial<MaterialWithColor>;
+  if (!color) {
+    return false;
+  }
+
+  return typeof color.getHexString === 'function';
+}
+
+function resolveSourceMaterialRenderState(material: Material | Material[]): SourceMaterialRenderState {
+  const materials = getSourceMaterials(material);
+  if (materials.length === 0) {
+    return { opacity: 1, transparent: false, depthWrite: true };
+  }
+
+  const opacity = Math.min(...materials.map((sourceMaterial) => sourceMaterial.opacity));
+  const colorMaterial = materials.find((sourceMaterial) => hasColor(sourceMaterial));
+
+  return {
+    opacity,
+    transparent: materials.some((sourceMaterial) => sourceMaterial.transparent || sourceMaterial.opacity < 1),
+    depthWrite: materials.every((sourceMaterial) => sourceMaterial.depthWrite),
+    ...(colorMaterial ? { colorHexString: colorMaterial.color.getHexString() } : {}),
+  };
+}
+
+function applySourceMaterialRenderStateToMatcap(
+  matcap: MeshMatcapMaterial | MeshMatcapNodeMaterial,
+  state: SourceMaterialRenderState,
+): void {
+  matcap.opacity = state.opacity;
+  matcap.transparent = state.transparent;
+  matcap.depthWrite = state.depthWrite;
+
+  if (state.opacity < 1) {
+    applyModelMaterialOpacityOverride(matcap, state.opacity);
+  }
+}
+
+function applyMatcapMaterialToMesh({
+  mesh,
+  matcapTexture,
+  tint,
+  backend,
+}: {
+  readonly mesh: Mesh;
+  readonly matcapTexture: Texture;
+  readonly tint: number;
+  readonly backend: ResolvedGraphicsBackend;
+}): MeshMatcapMaterial | MeshMatcapNodeMaterial {
+  const meshMatcap = createMeshMatcapReplacement(backend, matcapTexture);
+  const sourceRenderState = resolveSourceMaterialRenderState(mesh.material);
+
+  // Preserve clipping planes so section-view clipping survives matcap replacement
+  if (!Array.isArray(mesh.material) && mesh.material.clippingPlanes?.length) {
+    meshMatcap.clippingPlanes = mesh.material.clippingPlanes;
+  }
+
+  const hasVertexColors = Boolean(mesh.geometry.attributes['color'] ?? mesh.geometry.attributes['COLOR_0']);
+  if (hasVertexColors) {
+    meshMatcap.vertexColors = true;
+  } else if (sourceRenderState.colorHexString) {
+    meshMatcap.color.set(`#${sourceRenderState.colorHexString}`);
+  }
+
+  applySourceMaterialRenderStateToMatcap(meshMatcap, sourceRenderState);
+
+  if (tint < 1) {
+    meshMatcap.color.multiplyScalar(tint);
+  }
+
+  return meshMatcap;
 }
 
 /**
@@ -60,36 +148,8 @@ export const applyMatcap = async (gltf: GLTF, tint = 1, backend: ResolvedGraphic
     }
 
     if ('isMesh' in child && child.isMesh) {
-      const meshMatcap = createMeshMatcapReplacement(backend, matcapTexture);
       const mesh = child as Mesh;
-
-      // Preserve clipping planes so section-view clipping survives matcap replacement
-      if (!Array.isArray(mesh.material) && mesh.material.clippingPlanes?.length) {
-        meshMatcap.clippingPlanes = mesh.material.clippingPlanes;
-      }
-
-      const hasVertexColors = Boolean(mesh.geometry.attributes['color'] ?? mesh.geometry.attributes['COLOR_0']);
-
-      if (hasVertexColors) {
-        meshMatcap.vertexColors = true;
-      } else {
-        if ('color' in mesh.material) {
-          const material = mesh.material as { color: { getHexString(): string } };
-          meshMatcap.color.set(`#${material.color.getHexString()}`);
-        }
-
-        if ('opacity' in mesh.material) {
-          const material = mesh.material as { opacity: number };
-          meshMatcap.opacity = material.opacity;
-          if (material.opacity < 1) {
-            meshMatcap.transparent = true;
-          }
-        }
-      }
-
-      if (tint < 1) {
-        meshMatcap.color.multiplyScalar(tint);
-      }
+      const meshMatcap = applyMatcapMaterialToMesh({ mesh, matcapTexture, tint, backend });
 
       // Dispose the old material(s) before replacing to prevent GPU memory leaks
       disposeMaterials(mesh.material);
@@ -137,34 +197,7 @@ export function applyMatcapToClonedScene(
 
     if ('isMesh' in child && child.isMesh) {
       const mesh = child as Mesh;
-      const meshMatcap = createMeshMatcapReplacement(backend, matcapTexture);
-
-      if (!Array.isArray(mesh.material) && mesh.material.clippingPlanes?.length) {
-        meshMatcap.clippingPlanes = mesh.material.clippingPlanes;
-      }
-
-      const hasVertexColors = Boolean(mesh.geometry.attributes['color'] ?? mesh.geometry.attributes['COLOR_0']);
-
-      if (hasVertexColors) {
-        meshMatcap.vertexColors = true;
-      } else {
-        if ('color' in mesh.material) {
-          const material = mesh.material as { color: { getHexString(): string } };
-          meshMatcap.color.set(`#${material.color.getHexString()}`);
-        }
-
-        if ('opacity' in mesh.material) {
-          const material = mesh.material as { opacity: number };
-          meshMatcap.opacity = material.opacity;
-          if (material.opacity < 1) {
-            meshMatcap.transparent = true;
-          }
-        }
-      }
-
-      if (tint < 1) {
-        meshMatcap.color.multiplyScalar(tint);
-      }
+      const meshMatcap = applyMatcapMaterialToMesh({ mesh, matcapTexture, tint, backend });
 
       mesh.material = meshMatcap;
       allocated.add(meshMatcap);

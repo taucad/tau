@@ -61,13 +61,13 @@ function launchQuickLook(usdzBlobUrl: string): void {
  * Hook providing iOS Quick Look AR capability detection and launch.
  *
  * Returns `canActivateAr: true` only when the device supports Quick Look
- * and geometry is available. Call `activateAr()` from a user click handler
+ * and GLTF geometry is available. Call `activateAr()` from a user click handler
  * to export the model to USDZ via the runtime client and open AR Quick Look.
  */
-export function useAr(geometries: readonly Geometry[], kernelClient?: AppRuntimeClient): ArCapability {
+export function useAr(geometry: Geometry | undefined, kernelClient?: AppRuntimeClient): ArCapability {
   const [isConverting, setIsConverting] = useState(false);
 
-  const hasGltfGeometry = geometries.some((g) => g.format === 'gltf');
+  const hasGltfGeometry = geometry?.format === 'gltf';
   const canActivateAr = isQuickLookSupported && hasGltfGeometry && Boolean(kernelClient);
 
   const activateAr = useCallback(async () => {

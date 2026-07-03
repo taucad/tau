@@ -6,6 +6,7 @@ import { ViewportGizmoCube } from '#components/geometry/graphics/three/controls/
 import { SectionViewControls } from '#components/geometry/graphics/three/react/section-view-controls.js';
 import { MeasureTool } from '#components/geometry/graphics/three/react/measure-tool.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
+import type { SecondaryMouseButtonMode } from '#components/geometry/graphics/three/three-viewer-properties.js';
 
 type ControlsProperties = {
   /**
@@ -24,6 +25,7 @@ type ControlsProperties = {
    * @description Whether to enable panning for the camera.
    */
   readonly enablePan: boolean;
+  readonly secondaryMouseButtonMode?: SecondaryMouseButtonMode;
   /**
    * @description The speed of the camera zoom.
    */
@@ -38,6 +40,7 @@ export const Controls = React.memo(function ({
   enableGizmo,
   enableZoom,
   enablePan,
+  secondaryMouseButtonMode = 'camera-pan',
   zoomSpeed,
   gizmoContainer,
 }: ControlsProperties) {
@@ -52,13 +55,8 @@ export const Controls = React.memo(function ({
   const hoveredSectionViewId = useGraphicsSelector((state) => state.context.hoveredSectionViewId);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
   const mouseButtons = useMemo(
-    () => ({
-      left: CameraControlsImpl.ACTION.ROTATE,
-      middle: enablePan ? CameraControlsImpl.ACTION.TRUCK : CameraControlsImpl.ACTION.NONE,
-      right: enablePan ? CameraControlsImpl.ACTION.TRUCK : CameraControlsImpl.ACTION.NONE,
-      wheel: enableZoom ? CameraControlsImpl.ACTION.DOLLY : CameraControlsImpl.ACTION.NONE,
-    }),
-    [enablePan, enableZoom],
+    () => resolveCameraControlMouseButtons({ enablePan, enableZoom, secondaryMouseButtonMode }),
+    [enablePan, enableZoom, secondaryMouseButtonMode],
   );
 
   // Handlers to send events to xstate
@@ -149,3 +147,23 @@ export const Controls = React.memo(function ({
     </>
   );
 });
+
+export function resolveCameraControlMouseButtons({
+  enablePan,
+  enableZoom,
+  secondaryMouseButtonMode,
+}: {
+  readonly enablePan: boolean;
+  readonly enableZoom: boolean;
+  readonly secondaryMouseButtonMode: SecondaryMouseButtonMode;
+}): React.ComponentProps<typeof TauCameraControls>['mouseButtons'] {
+  return {
+    left: CameraControlsImpl.ACTION.ROTATE,
+    middle: enablePan ? CameraControlsImpl.ACTION.TRUCK : CameraControlsImpl.ACTION.NONE,
+    right:
+      enablePan && secondaryMouseButtonMode === 'camera-pan'
+        ? CameraControlsImpl.ACTION.TRUCK
+        : CameraControlsImpl.ACTION.NONE,
+    wheel: enableZoom ? CameraControlsImpl.ACTION.DOLLY : CameraControlsImpl.ACTION.NONE,
+  };
+}

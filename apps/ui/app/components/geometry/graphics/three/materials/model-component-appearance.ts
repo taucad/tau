@@ -19,6 +19,7 @@ export const modelHoverAppearance = {
 export type ModelMaterialAppearanceSnapshot = Readonly<{
   opacity: number;
   transparent: boolean;
+  depthWrite: boolean;
   color?: Color;
   emissive?: Color;
   emissiveIntensity?: number;
@@ -71,6 +72,7 @@ export function captureModelMaterialAppearance(material: Material): ModelMateria
   return {
     opacity: material.opacity,
     transparent: material.transparent,
+    depthWrite: material.depthWrite,
     ...(hasColor(material) ? { color: material.color.clone() } : {}),
     ...(hasEmissive(material) ? { emissive: material.emissive.clone() } : {}),
     ...(hasEmissiveIntensity(material) ? { emissiveIntensity: material.emissiveIntensity } : {}),
@@ -124,6 +126,7 @@ export function resolveModelMaterialBaseTintHex(
 export function restoreModelMaterialAppearance(material: Material, snapshot: ModelMaterialAppearanceSnapshot): void {
   material.opacity = snapshot.opacity;
   material.transparent = snapshot.transparent;
+  material.depthWrite = snapshot.depthWrite;
 
   if (snapshot.color && hasColor(material)) {
     material.color.copy(snapshot.color);
@@ -138,6 +141,14 @@ export function restoreModelMaterialAppearance(material: Material, snapshot: Mod
   }
 }
 
+export function applyModelMaterialOpacityOverride(material: Material, opacity: number): void {
+  material.opacity = opacity;
+  if (opacity < 1) {
+    material.transparent = true;
+    material.depthWrite = false;
+  }
+}
+
 export function applyModelMaterialAppearance(
   material: Material,
   snapshot: ModelMaterialAppearanceSnapshot,
@@ -146,8 +157,7 @@ export function applyModelMaterialAppearance(
   restoreModelMaterialAppearance(material, snapshot);
 
   if (state.opacity < 1) {
-    material.transparent = true;
-    material.opacity = state.opacity;
+    applyModelMaterialOpacityOverride(material, state.opacity);
   }
 
   const appearance = getAppearanceForEmphasis(state.emphasis);

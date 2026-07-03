@@ -19,10 +19,12 @@ import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import {
   annotateSceneComponents,
   applyGltfEdgeThemeColor,
+  applyModelComponentVisualStateToScene,
   collectModelPickableSurfaceMeshes,
   hasModelHitBlockingSceneUiHit,
   probeGltfScene,
   resolveModelComponentHitFromRay,
+  resolveModelContextMenuAction,
   resolveComponentVisualState,
   resolveModelPointerClickAction,
   resolveModelPointerClickDispatches,
@@ -82,6 +84,26 @@ const getOnlyFatLineMaterial = (scene: Group): Material => {
 
   return material;
 };
+
+const getMeshBasicMaterial = (mesh: Mesh): MeshBasicMaterial => {
+  if (Array.isArray(mesh.material) || !(mesh.material instanceof MeshBasicMaterial)) {
+    throw new Error('Expected mesh material to be a MeshBasicMaterial');
+  }
+
+  return mesh.material;
+};
+
+const createModelVisualState = (
+  overrides: Partial<Parameters<typeof applyModelComponentVisualStateToScene>[0]['modelVisualState']> = {},
+): Parameters<typeof applyModelComponentVisualStateToScene>[0]['modelVisualState'] => ({
+  hiddenComponentIds: [],
+  isolatedComponentIds: [],
+  focusedComponentId: undefined,
+  opacityByComponentId: {},
+  hoveredComponentId: undefined,
+  selectedComponentIds: [],
+  ...overrides,
+});
 
 const createManifest = (): GeometryComponentManifest => {
   const capabilities: GeometryComponentManifest['capabilities'] = {
@@ -571,6 +593,88 @@ describe('resolveComponentVisualState', () => {
   });
 });
 
+describe('applyModelComponentVisualStateToScene', () => {
+  it('should dim non-focused component materials without writing depth', () => {
+    const scene = new Group();
+    const focusedMesh = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const dimmedMesh = buildMeshWithPositions([2, 0, 0, 3, 0, 0, 2, 1, 0]);
+    assignComponentOwner(focusedMesh, firstComponentId);
+    assignComponentOwner(dimmedMesh, secondComponentId);
+    scene.add(focusedMesh, dimmedMesh);
+
+    applyModelComponentVisualStateToScene({
+      scene,
+      componentManifest: createManifest(),
+      modelVisualState: createModelVisualState({ focusedComponentId: firstComponentId }),
+      enableSurfaces: true,
+      enableLines: true,
+    });
+
+    const focusedMaterial = getMeshBasicMaterial(focusedMesh);
+    const dimmedMaterial = getMeshBasicMaterial(dimmedMesh);
+    expect(focusedMesh.visible).toBe(true);
+    expect(focusedMaterial.opacity).toBe(1);
+    expect(focusedMaterial.transparent).toBe(false);
+    expect(focusedMaterial.depthWrite).toBe(true);
+    expect(dimmedMesh.visible).toBe(true);
+    expect(dimmedMaterial.opacity).toBe(0.5);
+    expect(dimmedMaterial.transparent).toBe(true);
+    expect(dimmedMaterial.depthWrite).toBe(false);
+  });
+
+  it('should restore depth writes after explicit opacity is cleared', () => {
+    const scene = new Group();
+    const mesh = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    assignComponentOwner(mesh, firstComponentId);
+    scene.add(mesh);
+
+    applyModelComponentVisualStateToScene({
+      scene,
+      componentManifest: createManifest(),
+      modelVisualState: createModelVisualState({ opacityByComponentId: { [firstComponentId]: 0.25 } }),
+      enableSurfaces: true,
+      enableLines: true,
+    });
+    const material = getMeshBasicMaterial(mesh);
+    expect(material.opacity).toBe(0.25);
+    expect(material.transparent).toBe(true);
+    expect(material.depthWrite).toBe(false);
+
+    applyModelComponentVisualStateToScene({
+      scene,
+      componentManifest: createManifest(),
+      modelVisualState: createModelVisualState(),
+      enableSurfaces: true,
+      enableLines: true,
+    });
+
+    expect(material.opacity).toBe(1);
+    expect(material.transparent).toBe(false);
+    expect(material.depthWrite).toBe(true);
+  });
+
+  it('should keep section-source-only materials depth-write disabled', () => {
+    const scene = new Group();
+    const mesh = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    assignComponentOwner(mesh, firstComponentId);
+    markSectionSourceOnlyObject(mesh);
+    scene.add(mesh);
+
+    applyModelComponentVisualStateToScene({
+      scene,
+      componentManifest: createManifest(),
+      modelVisualState: createModelVisualState({ opacityByComponentId: { [firstComponentId]: 0.25 } }),
+      enableSurfaces: true,
+      enableLines: true,
+    });
+
+    const material = getMeshBasicMaterial(mesh);
+    expect(material.opacity).toBe(0);
+    expect(material.transparent).toBe(true);
+    expect(material.depthWrite).toBe(false);
+  });
+});
+
 describe('resolveViewerHoverUpdate', () => {
   it('should clear the local cache and skip viewer hover sends while suppressed', () => {
     expect(
@@ -746,6 +850,72 @@ describe('resolveModelPointerClickAction', () => {
     ).toEqual({
       type: 'allowSceneUi',
     });
+  });
+});
+
+describe('resolveModelContextMenuAction', () => {
+  it('should open the component menu for an unguarded component hit', () => {
+    const mesh = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    assignComponentOwner(mesh, firstComponentId);
+
+    expect(
+      resolveModelContextMenuAction({
+        intersections: [{ distance: 1, object: mesh }],
+        modelComponentId: firstComponentId,
+        suppressNextModelPointerClick: false,
+        isModelPointerClickSuppressed: false,
+      }),
+    ).toEqual({ type: 'openComponentMenu', componentId: firstComponentId });
+  });
+
+  it('should ignore empty model hits and active tool suppressed component hits', () => {
+    const mesh = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    assignComponentOwner(mesh, firstComponentId);
+
+    expect(
+      resolveModelContextMenuAction({
+        intersections: [],
+        modelComponentId: undefined,
+        suppressNextModelPointerClick: false,
+        isModelPointerClickSuppressed: false,
+      }),
+    ).toEqual({ type: 'ignore' });
+    expect(
+      resolveModelContextMenuAction({
+        intersections: [{ distance: 1, object: mesh }],
+        modelComponentId: firstComponentId,
+        suppressNextModelPointerClick: false,
+        isModelPointerClickSuppressed: true,
+      }),
+    ).toEqual({ type: 'ignore' });
+  });
+
+  it('should consume the post-drag guard instead of opening a component menu', () => {
+    const mesh = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    assignComponentOwner(mesh, firstComponentId);
+
+    expect(
+      resolveModelContextMenuAction({
+        intersections: [{ distance: 1, object: mesh }],
+        modelComponentId: firstComponentId,
+        suppressNextModelPointerClick: true,
+        isModelPointerClickSuppressed: false,
+      }),
+    ).toEqual({ type: 'consumeModelPointerGuard' });
+  });
+
+  it('should let section-view scene UI handle context menus before model guards', () => {
+    const sectionSelector = buildMeshWithPositions([0, 0, 1, 1, 0, 1, 0, 1, 1]);
+    sectionSelector.userData[sceneTag.sectionViewHelper] = true;
+
+    expect(
+      resolveModelContextMenuAction({
+        intersections: [{ distance: 1, object: sectionSelector }],
+        modelComponentId: firstComponentId,
+        suppressNextModelPointerClick: true,
+        isModelPointerClickSuppressed: true,
+      }),
+    ).toEqual({ type: 'allowSceneUi' });
   });
 });
 

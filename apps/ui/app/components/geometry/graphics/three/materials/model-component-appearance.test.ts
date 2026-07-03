@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MeshBasicMaterial, MeshStandardMaterial, Color } from 'three';
 import {
   applyModelMaterialAppearance,
+  applyModelMaterialOpacityOverride,
   captureModelMaterialAppearance,
   getOrCaptureModelMaterialAppearance,
   mixModelEmphasisTint,
@@ -62,6 +63,7 @@ describe('model component appearance', () => {
     expect(updatedSnapshot).not.toBe(initialSnapshot);
     expect(updatedSnapshot.opacity).toBe(initialSnapshot.opacity);
     expect(updatedSnapshot.transparent).toBe(initialSnapshot.transparent);
+    expect(updatedSnapshot.depthWrite).toBe(initialSnapshot.depthWrite);
     expect(getOrCaptureModelMaterialAppearance(material)).toBe(updatedSnapshot);
     expect(resolveModelMaterialBaseTintHex(material)).toBe(gltfEdgeColorDarkMode);
     expect(material.color.getHex()).toBe(gltfEdgeColorDarkMode);
@@ -88,6 +90,7 @@ describe('model component appearance', () => {
     expect(material.emissiveIntensity).toBe(0.7);
     expect(material.opacity).toBe(0.8);
     expect(material.transparent).toBe(true);
+    expect(material.depthWrite).toBe(true);
   });
 
   it('mixes color-only materials toward blue rather than white', () => {
@@ -134,11 +137,40 @@ describe('model component appearance', () => {
 
     expect(material.transparent).toBe(true);
     expect(material.opacity).toBe(0.5);
+    expect(material.depthWrite).toBe(false);
 
     applyModelMaterialAppearance(material, snapshot, { opacity: 1, emphasis: 'none' });
 
     expect(material.transparent).toBe(false);
     expect(material.opacity).toBe(1);
+    expect(material.depthWrite).toBe(true);
+  });
+
+  it('should restore the original depth-write state after temporary model dimming', () => {
+    const material = new MeshBasicMaterial({ color: 0x40_40_40, opacity: 0.75, transparent: true });
+    material.depthWrite = false;
+    const snapshot = captureModelMaterialAppearance(material);
+
+    applyModelMaterialAppearance(material, snapshot, { opacity: 0.25, emphasis: 'none' });
+    expect(material.transparent).toBe(true);
+    expect(material.opacity).toBe(0.25);
+    expect(material.depthWrite).toBe(false);
+
+    applyModelMaterialAppearance(material, snapshot, { opacity: 1, emphasis: 'none' });
+
+    expect(material.transparent).toBe(true);
+    expect(material.opacity).toBe(0.75);
+    expect(material.depthWrite).toBe(false);
+  });
+
+  it('should apply translucent model opacity without writing depth', () => {
+    const material = new MeshBasicMaterial({ color: 0x40_40_40 });
+
+    applyModelMaterialOpacityOverride(material, 0.5);
+
+    expect(material.transparent).toBe(true);
+    expect(material.opacity).toBe(0.5);
+    expect(material.depthWrite).toBe(false);
   });
 
   it('resolves emphasis by focus, selection, hover priority', () => {

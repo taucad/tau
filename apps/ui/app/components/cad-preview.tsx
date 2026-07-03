@@ -20,15 +20,11 @@ type CadPreviewViewerProps = {
   readonly graphicsOptions?: CadPreviewGraphicsOptions;
 };
 
-const cadPreviewStatusToViewerState = (status: CadPreviewStatus, geometryCount: number): ModelViewerState => {
-  if (status === 'empty') {
-    return 'empty';
-  }
-
+const cadPreviewStatusToViewerState = (status: CadPreviewStatus, hasGeometry: boolean): ModelViewerState => {
   // Keep the last settled frame visible during parameter re-renders; only
   // block the viewport with a full-screen loader on the initial load.
   if (status === 'loading') {
-    return geometryCount === 0 ? 'loading' : 'ready';
+    return hasGeometry ? 'ready' : 'loading';
   }
 
   return 'ready';
@@ -58,7 +54,7 @@ export const CadPreviewViewer = memo(function CadPreviewViewer({
   stageOptions,
   graphicsOptions,
 }: CadPreviewViewerProps): React.JSX.Element {
-  const { geometries, graphicsRef, status, error } = useCadPreview();
+  const { geometry, graphicsRef, status, error } = useCadPreview();
   const enableLines = useSelector(graphicsRef, (state) => state.context.enableLines);
   const enableSurfaces = useSelector(graphicsRef, (state) => state.context.enableSurfaces);
   const enableMatcap = useSelector(graphicsRef, (state) => state.context.enableMatcap);
@@ -68,8 +64,8 @@ export const CadPreviewViewer = memo(function CadPreviewViewer({
 
   return (
     <ModelViewer
-      geometries={geometries}
-      viewerState={cadPreviewStatusToViewerState(status, geometries.length)}
+      geometry={geometry}
+      viewerState={cadPreviewStatusToViewerState(status, Boolean(geometry))}
       graphicsRef={graphicsRef}
       className={className}
       enablePan={enablePan}
@@ -102,5 +98,5 @@ type CadPreviewStatusProps = {
 export function CadPreviewStatus({ className }: CadPreviewStatusProps): React.ReactNode {
   const { status } = useCadPreview();
 
-  return <RuntimeStatusOverlay status={status === 'loading' ? 'loading' : 'idle'} className={className} />;
+  return <RuntimeStatusOverlay status={status === 'loading' ? 'rendering' : 'idle'} className={className} />;
 }

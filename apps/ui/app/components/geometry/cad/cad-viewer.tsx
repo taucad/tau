@@ -1,6 +1,8 @@
 import { memo, useMemo } from 'react';
+import type { CanvasProps } from '@react-three/fiber';
 import type { Geometry } from '@taucad/types';
 import { GltfMesh } from '#components/geometry/graphics/three/react/gltf-mesh.js';
+import type { ModelComponentSecondaryPointerTarget } from '#components/geometry/graphics/three/react/gltf-mesh.js';
 import { ThreeProvider } from '#components/geometry/graphics/three/three-context.js';
 import type { ThreeViewerProperties } from '#components/geometry/graphics/three/three-viewer-properties.js';
 import { SvgViewer } from '#components/geometry/graphics/svg/svg-viewer.js';
@@ -9,21 +11,28 @@ import { WebglErrorFallback } from '#components/geometry/cad/webgl-fallback.js';
 import { useGraphicsSelector } from '#hooks/use-graphics.js';
 import { mergeGraphicsBackendWithQueryOverride } from '#components/geometry/graphics/graphics-backend.js';
 
-type CadViewerProperties = Omit<ThreeViewerProperties, 'graphicsBackend'> & {
-  readonly geometries: Geometry[];
-  readonly sourceFile?: string;
-  readonly enableSurfaces?: boolean;
-  readonly enableLines?: boolean;
-  readonly enableMatcap?: boolean;
-};
+type CadViewerCanvasEventProperties = Pick<CanvasProps, 'eventSource' | 'eventPrefix'>;
+
+type CadViewerProperties = Omit<ThreeViewerProperties, 'graphicsBackend'> &
+  CadViewerCanvasEventProperties & {
+    readonly geometry: Geometry;
+    readonly sourceFile?: string;
+    readonly enableSurfaces?: boolean;
+    readonly enableLines?: boolean;
+    readonly enableMatcap?: boolean;
+    readonly onModelComponentSecondaryPointerCandidate?: (
+      target: ModelComponentSecondaryPointerTarget | undefined,
+    ) => void;
+  };
 
 export const CadViewer = memo(
   ({
-    geometries,
+    geometry,
     sourceFile,
     enableSurfaces = true,
     enableLines = true,
     enableMatcap = false,
+    onModelComponentSecondaryPointerCandidate,
     ...properties
   }: CadViewerProperties): React.JSX.Element => {
     const machineResolvedBackend = useGraphicsSelector((state) => state.context.resolvedGraphicsBackend);
@@ -35,19 +44,14 @@ export const CadViewer = memo(
       [gpuAvailable, graphicsPreference, machineResolvedBackend],
     );
 
-    const svgGeometries = geometries.filter((geometry) => geometry.format === 'svg');
-
-    // If there are any SVG geometries, we render them in a SVG viewer
-    if (svgGeometries.length > 0) {
-      return (
-        <SvgViewer enableGrid={properties.enableGrid} enableAxes={properties.enableAxes} geometries={svgGeometries} />
-      );
+    if (geometry.format === 'svg') {
+      return <SvgViewer enableGrid={properties.enableGrid} enableAxes={properties.enableAxes} geometry={geometry} />;
     }
 
     return (
       <WebglErrorBoundary fallback={(errorProps) => <WebglErrorFallback {...errorProps} />}>
         <ThreeProvider {...properties} graphicsBackend={graphicsBackendEffective}>
-          {geometries.map((geometry) => {
+          {(() => {
             switch (geometry.format) {
               case 'gltf': {
                 return (
@@ -59,12 +63,9 @@ export const CadViewer = memo(
                     enableMatcap={enableMatcap}
                     enableSurfaces={enableSurfaces}
                     enableLines={enableLines}
+                    onModelComponentSecondaryPointerCandidate={onModelComponentSecondaryPointerCandidate}
                   />
                 );
-              }
-
-              case 'svg': {
-                throw new Error('2D geometries are not supported');
               }
 
               case 'webrtc': {
@@ -76,7 +77,7 @@ export const CadViewer = memo(
                 throw new Error(`Unknown geometry type: ${JSON.stringify(neverGeometry)}`);
               }
             }
-          })}
+          })()}
         </ThreeProvider>
       </WebglErrorBoundary>
     );

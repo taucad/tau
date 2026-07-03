@@ -11,16 +11,23 @@ import { ThreeCanvasInstance } from '#components/geometry/graphics/three/three-c
  * (`onCreated` runs in a microtask so `ThreeCanvasInstance` has a measurable `isCanvasReady` gap).
  */
 let fireLatestWebGlContextLost: (() => void) | undefined;
+let latestCanvasEventSource: ReactThreeFiber.CanvasProps['eventSource'] | undefined;
+let latestCanvasEventPrefix: ReactThreeFiber.CanvasProps['eventPrefix'] | undefined;
 
 vi.mock('@react-three/fiber', async (importOriginal) => {
   const actual = await importOriginal<typeof ReactThreeFiber>();
 
   type StubCanvasProps = {
     readonly children?: React.ReactNode;
+    readonly eventPrefix?: ReactThreeFiber.CanvasProps['eventPrefix'];
+    readonly eventSource?: ReactThreeFiber.CanvasProps['eventSource'];
     readonly onCreated?: (state: { gl: Record<string, unknown> }) => void;
   };
 
-  function StubCanvas({ children, onCreated }: StubCanvasProps): JSX.Element {
+  function StubCanvas({ children, eventPrefix, eventSource, onCreated }: StubCanvasProps): JSX.Element {
+    latestCanvasEventPrefix = eventPrefix;
+    latestCanvasEventSource = eventSource;
+
     useEffect(() => {
       const webglListeners: EventListener[] = [];
       const domElement = {
@@ -106,6 +113,8 @@ function KeyedThreeCanvas({ canvasKey }: { readonly canvasKey: string }) {
 describe('ThreeCanvasInstance', () => {
   beforeEach(() => {
     fireLatestWebGlContextLost = undefined;
+    latestCanvasEventPrefix = undefined;
+    latestCanvasEventSource = undefined;
   });
 
   it('shows Graphics context lost fallback when WebGL fires context loss', async () => {
@@ -183,5 +192,26 @@ describe('ThreeCanvasInstance', () => {
     });
 
     expect(screen.getByTestId('actor-bridge')).toBeInTheDocument();
+  });
+
+  it('forwards explicit Canvas event routing props to R3F', async () => {
+    const eventSource: React.RefObject<HTMLElement> = { current: document.createElement('div') };
+
+    await act(async () => {
+      render(
+        <ThreeCanvasInstance
+          eventPrefix='client'
+          eventSource={eventSource}
+          graphicsBackend='webgl'
+          onRetry={() => undefined}
+        >
+          {null}
+        </ThreeCanvasInstance>,
+      );
+      await Promise.resolve();
+    });
+
+    expect(latestCanvasEventPrefix).toBe('client');
+    expect(latestCanvasEventSource).toBe(eventSource);
   });
 });

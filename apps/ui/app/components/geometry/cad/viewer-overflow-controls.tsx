@@ -118,9 +118,7 @@ export function GridOverflowControl(): React.ReactNode {
 export function SectionViewOverflowControl(): React.ReactNode {
   const graphicsRef = useGraphics();
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
-  const is2dGeometry = useGraphicsSelector((state) =>
-    state.context.geometries.some((geometry) => geometry.format === 'svg'),
-  );
+  const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
 
   const handleToggle = useCallback(
     (checked: boolean) => {
@@ -150,9 +148,7 @@ export function SectionViewOverflowControl(): React.ReactNode {
 export function MeasureOverflowControl(): React.ReactNode {
   const graphicsRef = useGraphics();
   const isMeasureActive = useGraphicsSelector((state) => state.matches({ operational: 'measure' }));
-  const is2dGeometry = useGraphicsSelector((state) =>
-    state.context.geometries.some((geometry) => geometry.format === 'svg'),
-  );
+  const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
 
   const handleToggle = useCallback(
     (checked: boolean) => {

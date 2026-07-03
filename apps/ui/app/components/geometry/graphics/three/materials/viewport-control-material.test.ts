@@ -37,10 +37,12 @@ describe('viewport-control-material', () => {
     setViewportControlMaterialOpacity(material, 0.25);
     expect(material.opacity).toBe(0.25);
     expect(material.transparent).toBe(true);
+    expect(material.depthWrite).toBe(false);
 
     setViewportControlMaterialOpacity(material, 1);
     expect(material.opacity).toBe(1);
     expect(material.transparent).toBe(false);
+    expect(material.depthWrite).toBe(false);
   });
 
   it('should create transparent depth-disabled basic material for overlay labels', () => {
@@ -52,12 +54,11 @@ describe('viewport-control-material', () => {
     expect(material.toneMapped).toBe(false);
   });
 
-  it('should create opaque alpha-tested depth-compatible basic material for selector labels', () => {
+  it('should create blended depth-compatible basic material for selector labels', () => {
     const material = createViewportControlSelectorLabelMaterial({ map: new Texture() });
 
-    expect(material.transparent).toBe(false);
-    expect(material.alphaTest).toBeGreaterThan(0);
-    expect(material.alphaTest).toBeLessThanOrEqual(0.001);
+    expect(material.transparent).toBe(true);
+    expect(material.alphaTest).toBe(0);
     expect(material.depthTest).toBe(true);
     expect(material.depthWrite).toBe(false);
     expect(material.toneMapped).toBe(false);

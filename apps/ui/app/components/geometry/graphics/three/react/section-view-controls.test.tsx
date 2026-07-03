@@ -136,9 +136,8 @@ describe('SectionViewControls', () => {
       }
 
       for (const label of selectorLabels) {
-        expect(label.material.transparent).toBe(false);
-        expect(label.material.alphaTest).toBeGreaterThan(0);
-        expect(label.material.alphaTest).toBeLessThanOrEqual(0.001);
+        expect(label.material.transparent).toBe(true);
+        expect(label.material.alphaTest).toBe(0);
         expect(label.material.depthTest).toBe(true);
         expect(label.material.depthWrite).toBe(false);
         expect(label.renderOrder).toBe(viewportRenderTiers.sectionControlLabel);

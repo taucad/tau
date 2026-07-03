@@ -40,9 +40,11 @@ const labelMaxFontSize = 154;
 const labelMinFontSize = 96;
 const labelHorizontalPadding = 36;
 const labelVerticalPadding = 28;
+const labelFontLoadShorthand = `700 ${labelMaxFontSize}px 'Geist Mono'`;
 
 let cachedTexture: CanvasTexture | undefined;
 let cachedMaterial: MeshBasicMaterial | undefined;
+let fontLoadPromise: Promise<void> | undefined;
 
 function keepSharedResourceAlive(resource: { dispose(): void }): void {
   resource.dispose = () => {
@@ -89,6 +91,43 @@ function getLargestReadableFontSize(context: CanvasRenderingContext2D, label: st
   return labelMinFontSize;
 }
 
+function drawSelectorLabelAtlas(canvas: HTMLCanvasElement): void {
+  const context = getContext(canvas);
+
+  if (!context || typeof context.fillText !== 'function') {
+    return;
+  }
+
+  context.clearRect(0, 0, atlasWidth, atlasHeight);
+  context.fillStyle = '#000000';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+
+  for (const [index, label] of selectorLabelAtlasLabels.entries()) {
+    const column = index % columns;
+    const row = Math.trunc(index / columns);
+    const fontSize = getLargestReadableFontSize(context, label);
+    context.font = `700 ${fontSize}px ${labelFontFamily}`;
+    context.fillText(label, column * cellWidth + cellWidth / 2, row * cellHeight + cellHeight / 2);
+  }
+}
+
+async function loadSelectorLabelFont(): Promise<void> {
+  // oxlint-disable-next-line typescript-eslint/no-unnecessary-condition -- defensive runtime guard: SSR and jsdom can lack FontFaceSet despite DOM typings
+  const fonts = typeof document === 'undefined' ? undefined : document.fonts;
+
+  if (!fonts || typeof fonts.load !== 'function') {
+    return;
+  }
+
+  try {
+    await fonts.load(labelFontLoadShorthand);
+  } catch {
+    // Falling back to the system monospace is acceptable; stale fallback text is
+    // worse than a failed font preload, so callers still redraw the atlas.
+  }
+}
+
 export function isSelectorLabelAtlasLabel(label: string): label is SelectorLabelAtlasLabel {
   return labelSet.has(label);
 }
@@ -99,22 +138,7 @@ export function getSelectorLabelAtlasTexture(): CanvasTexture {
   }
 
   const canvas = createAtlasCanvas();
-  const context = getContext(canvas);
-
-  if (context && typeof context.fillText === 'function') {
-    context.clearRect(0, 0, atlasWidth, atlasHeight);
-    context.fillStyle = '#000000';
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-
-    for (const [index, label] of selectorLabelAtlasLabels.entries()) {
-      const column = index % columns;
-      const row = Math.trunc(index / columns);
-      const fontSize = getLargestReadableFontSize(context, label);
-      context.font = `700 ${fontSize}px ${labelFontFamily}`;
-      context.fillText(label, column * cellWidth + cellWidth / 2, row * cellHeight + cellHeight / 2);
-    }
-  }
+  drawSelectorLabelAtlas(canvas);
 
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
@@ -127,6 +151,19 @@ export function getSelectorLabelAtlasTexture(): CanvasTexture {
   cachedTexture = texture;
 
   return texture;
+}
+
+async function redrawSelectorLabelAtlasAfterFontLoad(): Promise<void> {
+  await loadSelectorLabelFont();
+  const texture = getSelectorLabelAtlasTexture();
+  drawSelectorLabelAtlas(texture.image);
+  texture.needsUpdate = true;
+}
+
+export async function ensureSelectorLabelAtlasReady(): Promise<void> {
+  fontLoadPromise ??= redrawSelectorLabelAtlasAfterFontLoad();
+
+  await fontLoadPromise;
 }
 
 export function getSelectorLabelAtlasMaterial(): MeshBasicMaterial {
@@ -157,3 +194,9 @@ export function createSelectorLabelGeometry(label: SelectorLabelAtlasLabel): Pla
 export const disabledSelectorLabelRaycast: Object3D['raycast'] = () => {
   // Labels are visual ink on the selector body; the tile remains the hit target.
 };
+
+export function __resetSelectorLabelAtlasForTests(): void {
+  cachedTexture = undefined;
+  cachedMaterial = undefined;
+  fontLoadPromise = undefined;
+}

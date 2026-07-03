@@ -14,6 +14,7 @@ import { createViewportControlSelfOccludingBodyMaterial } from '#components/geom
 import {
   createSelectorLabelGeometry,
   disabledSelectorLabelRaycast,
+  ensureSelectorLabelAtlasReady,
   getSelectorLabelAtlasMaterial,
   isSelectorLabelAtlasLabel,
 } from '#components/geometry/graphics/three/controls/selector-label-atlas.js';
@@ -306,7 +307,7 @@ function PlaneSelector({
   isInverse = false,
   upDirection,
 }: PlaneSelectorProperties): React.JSX.Element {
-  const { gl, camera, size: threeSize, viewport } = useThree();
+  const { gl, camera, size: threeSize, viewport, invalidate } = useThree();
   const [isHovered, setIsHovered] = React.useState(false);
   const groupRef = useRef<THREE.Group>(null);
   const baseDirection = useMemo<THREE.Vector3>(
@@ -452,6 +453,22 @@ function PlaneSelector({
   React.useEffect(() => {
     setBorderedExtrusionRegionColor({ geometry: roundedRectangleGeometry, region: 'border', color: actualColor });
   }, [actualColor, roundedRectangleGeometry]);
+  React.useEffect(() => {
+    const cancellation = { cancelled: false };
+
+    // async-iife: bootstrap — React effects cannot be async; selector text
+    // redraws once the web font settles, and teardown simply suppresses the repaint.
+    void (async () => {
+      await ensureSelectorLabelAtlasReady();
+      if (!cancellation.cancelled) {
+        invalidate();
+      }
+    })();
+
+    return () => {
+      cancellation.cancelled = true;
+    };
+  }, [invalidate]);
 
   return (
     <group

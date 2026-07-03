@@ -5,21 +5,10 @@
   "compilerOptions": {
     "outDir": "./out-tsc/lib",
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
-    "types": ["node", "electron"],
+    "types": ["node", "electron", "vite/client"],
     "jsx": "react-jsx",
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "target": "ES2024"
-  },
-  "references": [
-    {
-      "path": "../../packages/types/tsconfig.lib.json"
-    },
-    {
-      "path": "../../kernels/openscad/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/runtime/tsconfig.lib.json"
-    }
-  ]
+  }
 }

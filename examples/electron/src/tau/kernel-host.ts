@@ -13,7 +13,7 @@ import { serveElectronRuntime } from '@taucad/runtime/electron/utility';
 
 import { runtime } from './runtime-definition.js';
 
-const projectRoot = process.env['TAU_PROJECT_ROOT'] ?? join(process.cwd(), '.tau-project');
+const projectRoot = process.env['TAU_PROJECT_ROOT'] ?? join(process.cwd(), 'workspace');
 mkdirSync(projectRoot, { recursive: true });
 
 serveElectronRuntime({

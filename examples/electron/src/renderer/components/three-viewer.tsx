@@ -1,6 +1,4 @@
-/* oxlint-disable tau-lint/no-hardcoded-color -- Electron demo UI + Three.js staging colors (no Tailwind tokens). */
-
-import type { CSSProperties, JSX } from 'react';
+import type { JSX } from 'react';
 
 import { useEffect, useRef } from 'react';
 
@@ -8,7 +6,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-export type MinimalGlbThreeViewerProperties = {
+export type ThreeViewerProperties = {
   readonly glb: ArrayBuffer | undefined;
 };
 
@@ -71,7 +69,7 @@ const fitPerspectiveCameraAndControls = (
   controls.update();
 };
 
-export function MinimalGlbThreeViewer({ glb }: MinimalGlbThreeViewerProperties): JSX.Element {
+export function ThreeViewer({ glb }: ThreeViewerProperties): JSX.Element {
   const hostReference = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -106,9 +104,7 @@ export function MinimalGlbThreeViewer({ glb }: MinimalGlbThreeViewerProperties):
     );
 
     const renderer = new THREE.WebGLRenderer({ alpha: false, antialias: true, powerPreference: 'high-performance' });
-    renderer.domElement.style.display = 'block';
-    renderer.domElement.style.height = '100%';
-    renderer.domElement.style.width = '100%';
+    renderer.domElement.className = 'block h-full w-full';
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     surface.append(renderer.domElement);
@@ -137,7 +133,7 @@ export function MinimalGlbThreeViewer({ glb }: MinimalGlbThreeViewerProperties):
       },
 
       (): void => {
-        /* Parsing rarely fails once `inspectGlb` accepts the payload; tolerate silently here. */
+        /* Parsing rarely fails once the runtime emits GLB bytes; tolerate silently here. */
       },
     );
 
@@ -195,10 +191,10 @@ export function MinimalGlbThreeViewer({ glb }: MinimalGlbThreeViewerProperties):
   const showPlaceholder = glb === undefined || glb.byteLength === 0;
 
   return (
-    <div style={viewportStyles}>
-      <div ref={hostReference} data-testid='geometry-three-viewer' style={surfaceStyles}>
+    <div className='bg-slate-950 min-h-96 flex-1 xl:min-h-0'>
+      <div ref={hostReference} className='relative h-full min-h-96 w-full overflow-hidden xl:min-h-0'>
         {showPlaceholder ? (
-          <div data-testid='geometry-three-viewer-placeholder' style={placeholderStyles}>
+          <div className='text-slate-500 absolute inset-0 grid place-items-center font-mono text-xs'>
             No geometry yet
           </div>
         ) : null}
@@ -206,31 +202,3 @@ export function MinimalGlbThreeViewer({ glb }: MinimalGlbThreeViewerProperties):
     </div>
   );
 }
-
-const viewportStyles: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  flex: 1,
-  minHeight: 0,
-};
-
-const surfaceStyles: CSSProperties = {
-  flex: 1,
-  minHeight: 360,
-  position: 'relative',
-  overflow: 'hidden',
-  background: '#0b0f13',
-};
-
-const placeholderStyles: CSSProperties = {
-  alignItems: 'center',
-  color: '#7e8b9b',
-  display: 'flex',
-  fontFamily: 'ui-monospace, monospace',
-  fontSize: '0.8rem',
-  height: '100%',
-  inset: 0,
-  justifyContent: 'center',
-  pointerEvents: 'none',
-  position: 'absolute',
-};

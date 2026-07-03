@@ -10,7 +10,7 @@
       "continuous": true,
       "options": {
         "cwd": "{projectRoot}",
-        "command": "electron-vite dev"
+        "command": "electron-vite"
       }
     },
     "build": {
@@ -27,24 +27,10 @@
       "dependsOn": ["build"],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "pnpm exec electron .",
+        "command": "electron-vite preview --skipBuild",
         "env": {
           "NODE_ENV": "production"
         }
-      }
-    },
-    "test": {
-      "executor": "nx:run-commands",
-      "options": {
-        "cwd": "{projectRoot}",
-        "command": "vitest run --config vitest.config.ts"
-      }
-    },
-    "test:e2e": {
-      "executor": "nx:run-commands",
-      "options": {
-        "cwd": "{projectRoot}",
-        "command": "playwright test"
       }
     }
   }

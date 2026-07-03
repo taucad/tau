@@ -1,26 +1,12 @@
 import { resolve } from 'node:path';
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
+import tailwindcss from '@tailwindcss/vite';
 import { runtime } from '@taucad/runtime/vite';
 
-/* `electron-vite` orchestrates three coordinated build pipelines (main /
- * preload / renderer); each pipeline is a regular Vite config underneath. We
- * keep dependencies external in main + preload so Electron resolves them at
- * runtime from `node_modules`, and bundle the renderer into a single ESM tree
- * because the renderer is loaded via `loadFile`. */
 export default defineConfig({
   main: {
-    /* `@taucad/openscad` resolves through the workspace exports map to
-     * raw `.ts` files; the utility process (Node) cannot dynamic-import
-     * those. We bundle openscad + runtime worker primitives into the
-     * main pipeline so `kernel-host.js` is a self-contained Node
-     * module. The rest of the deps (electron, etc.) stay external.
-     *
-     * `@taucad/runtime/vite` teaches Rollup to emit `.ts` files referenced
-     * via `new URL('./x.js', import.meta.url)` as full module chunks
-     * (transpile → bundle), instead of copying them verbatim as raw assets
-     * with the `.ts` extension. Without this,
-     * `dist/main/assets/openscad.kernel-XXX.ts` gets shipped where Node's
-     * ESM loader rejects it. */
+    /* Bundle selected Tau packages so the utility host can import workspace
+     * TypeScript kernels as ordinary Node ESM. */
     plugins: [
       externalizeDepsPlugin({
         exclude: [
@@ -43,15 +29,11 @@ export default defineConfig({
     ],
     build: {
       outDir: 'dist/main',
-      /* Topology C multi-entry main pipeline: `index` is the Electron main
-       * entry; `kernel-host` is the utility-process bootstrap that hosts
-       * `KernelRuntimeWorker` directly (no separate worker_threads spawn —
-       * the kernel runs in-process inside the utility process). Forked by
-       * `electronUtilityTransport` via `utilityProcess.fork(kernelHostUrl)`. */
+      /* `kernel-host` is the utility-process runtime entry forked by main. */
       rollupOptions: {
         input: {
           index: resolve(import.meta.dirname, 'src/main/index.ts'),
-          'kernel-host': resolve(import.meta.dirname, 'src/main/kernel-host.ts'),
+          'kernel-host': resolve(import.meta.dirname, 'src/tau/kernel-host.ts'),
         },
         output: {
           format: 'es',
@@ -76,9 +58,8 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(import.meta.dirname, 'src/renderer'),
-    /* Runtime Vite invariants cover COI headers, WASM asset handling, and
-     * TypeScript files referenced via `new URL(..., import.meta.url)`. */
-    plugins: [...runtime()],
+    /* Runtime Vite invariants cover COI headers, WASM assets, and module workers. */
+    plugins: [...runtime(), tailwindcss()],
     build: {
       outDir: resolve(import.meta.dirname, 'dist/renderer'),
       rollupOptions: {

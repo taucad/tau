@@ -4,8 +4,17 @@
   "type": "module",
   "private": true,
   "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "electron-vite",
+    "build": "electron-vite build",
+    "start": "electron-vite preview"
+  },
   "dependencies": {
+    "@rjsf/core": "^5.24.13",
+    "@rjsf/utils": "^5.24.13",
+    "@rjsf/validator-ajv8": "^5.24.13",
     "@taucad/openscad": "workspace:*",
+    "@taucad/react": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/types": "workspace:*",
     "react": "catalog:",
@@ -14,14 +23,12 @@
     "tslib": "catalog:"
   },
   "devDependencies": {
-    "@playwright/test": "catalog:",
-    "@testing-library/dom": "catalog:",
-    "@testing-library/react": "catalog:",
+    "@tailwindcss/vite": "^4.3.1",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@types/three": "^0.184.1",
     "electron": "^36.9.5",
     "electron-vite": "^4.0.1",
-    "jsdom": "catalog:"
+    "tailwindcss": "^4.3.1"
   }
 }

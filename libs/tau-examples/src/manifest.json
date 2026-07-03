@@ -1,7 +1,19 @@
 [
   {
+    "kernel": "build123d",
+    "name": "v8-engine-brep",
+    "mainFile": "main.py",
+    "files": ["__pycache__/main.cpython-313.pyc", "main.py"]
+  },
+  {
     "kernel": "jscad",
     "name": "cube",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
+    "name": "cube-cylinder-section-fixture",
     "mainFile": "main.ts",
     "files": ["main.ts"]
   },
@@ -13,7 +25,73 @@
   },
   {
     "kernel": "jscad",
+    "name": "edge-occlusion-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
     "name": "gear",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
+    "name": "non-manifold-section-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
+    "name": "section-cap-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
+    "name": "section-overlap-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
+    "name": "section-overlap-heavy-planetary-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
+    "name": "section-overlap-heavy-v8-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
+    "name": "section-picking-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "occt",
+    "name": "v8-engine-brep",
+    "mainFile": "main.ts",
+    "files": ["Makefile", "main.cpp", "v8-engine-brep-native"]
+  },
+  {
+    "kernel": "opencascade",
+    "name": "v8-engine-brep",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "openscad",
+    "name": "kitchen-sink",
+    "mainFile": "main.ts",
+    "files": ["main.scad"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "bambu-plate",
     "mainFile": "main.ts",
     "files": ["main.ts"]
   },
@@ -61,7 +139,19 @@
   },
   {
     "kernel": "replicad",
+    "name": "flower-attachment-section-outline-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "replicad",
     "name": "gridfinity-box",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "helical-gear",
     "mainFile": "main.ts",
     "files": ["main.ts"]
   },
@@ -91,6 +181,12 @@
   },
   {
     "kernel": "replicad",
+    "name": "logo-keychain",
+    "mainFile": "main.ts",
+    "files": ["assets/logo.svg", "main.ts", "params.ts"]
+  },
+  {
+    "kernel": "replicad",
     "name": "pot-plant",
     "mainFile": "main.ts",
     "files": ["main.ts"]
@@ -98,6 +194,12 @@
   {
     "kernel": "replicad",
     "name": "projection-test",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "rao-nozzle",
     "mainFile": "main.ts",
     "files": ["main.ts"]
   },
@@ -139,6 +241,75 @@
   },
   {
     "kernel": "replicad",
+    "name": "v8-engine-block",
+    "mainFile": "main.ts",
+    "files": [
+      "lib/assembly.ts",
+      "lib/block.ts",
+      "lib/conrod.ts",
+      "lib/crankshaft.ts",
+      "lib/cylinder-head.ts",
+      "lib/damper.ts",
+      "lib/flywheel.ts",
+      "lib/intake.ts",
+      "lib/oil-pan.ts",
+      "lib/params.ts",
+      "lib/piston.ts",
+      "lib/spark-plug.ts",
+      "lib/valve-cover.ts",
+      "lib/wrist-pin.ts",
+      "main.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
+    "name": "v8-engine-brep",
+    "mainFile": "main.ts",
+    "files": [
+      "lib/assembly.ts",
+      "lib/block.ts",
+      "lib/bottom-end.ts",
+      "lib/conrod.ts",
+      "lib/crankshaft.ts",
+      "lib/cylinder-head.ts",
+      "lib/damper.ts",
+      "lib/exhaust.ts",
+      "lib/fasteners.ts",
+      "lib/flywheel.ts",
+      "lib/helpers.ts",
+      "lib/intake.ts",
+      "lib/lubrication-cooling.ts",
+      "lib/oil-pan.ts",
+      "lib/params.ts",
+      "lib/piston.ts",
+      "lib/spark-plug.ts",
+      "lib/valve-cover.ts",
+      "lib/valvetrain.ts",
+      "lib/wrist-pin.ts",
+      "main.ts",
+      "spec/requirements.ts",
+      "spec/v8-engine.sysml2",
+      "test-exports/assembly.ts",
+      "test-exports/block.ts",
+      "test-exports/bottom-end.ts",
+      "test-exports/conrod.ts",
+      "test-exports/crankshaft.ts",
+      "test-exports/cylinder-head.ts",
+      "test-exports/exhaust.ts",
+      "test-exports/fasteners.ts",
+      "test-exports/flywheel.ts",
+      "test-exports/induction.ts",
+      "test-exports/lubrication.ts",
+      "test-exports/manufacturing-feature-gauge.ts",
+      "test-exports/piston-body.ts",
+      "test-exports/piston.ts",
+      "test-exports/rotating-assembly.ts",
+      "test-exports/valvetrain.ts",
+      "test-exports/wrist-pin.ts"
+    ]
+  },
+  {
+    "kernel": "replicad",
     "name": "vase",
     "mainFile": "main.ts",
     "files": ["main.ts"]
@@ -146,6 +317,12 @@
   {
     "kernel": "replicad",
     "name": "wavy-vase",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "wedge-door-stopper",
     "mainFile": "main.ts",
     "files": ["main.ts"]
   }

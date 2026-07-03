@@ -21,6 +21,32 @@ type ManifestEntry = {
   files: string[];
 };
 
+const candidateMainFiles = ['main.ts', 'main.py'] as const;
+
+function scanFiles(directory: string, prefix = ''): string[] {
+  const files: string[] = [];
+
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name.startsWith('.')) {
+      continue;
+    }
+
+    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const absolutePath = join(directory, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...scanFiles(absolutePath, relativePath));
+      continue;
+    }
+
+    if (entry.isFile()) {
+      files.push(relativePath);
+    }
+  }
+
+  return files.sort();
+}
+
 function scanFixtures(): ManifestEntry[] {
   const entries: ManifestEntry[] = [];
 
@@ -39,9 +65,7 @@ function scanFixtures(): ManifestEntry[] {
       }
 
       const exampleDirectory = join(kernelDirectory, exampleEntry.name);
-      const files = readdirSync(exampleDirectory)
-        .filter((f) => !f.startsWith('.'))
-        .sort();
+      const files = scanFiles(exampleDirectory);
 
       if (files.length === 0) {
         continue;
@@ -50,7 +74,7 @@ function scanFixtures(): ManifestEntry[] {
       entries.push({
         kernel: kernelEntry.name,
         name: exampleEntry.name,
-        mainFile: 'main.ts',
+        mainFile: candidateMainFiles.find((candidate) => files.includes(candidate)) ?? candidateMainFiles[0],
         files,
       });
     }

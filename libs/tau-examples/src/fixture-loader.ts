@@ -21,11 +21,35 @@ export type Fixture = {
   mainFile: string;
 };
 
-const defaultMainFile = 'main.ts';
+const candidateMainFiles = ['main.ts', 'main.py'] as const;
+
+function readFixtureFiles(directoryUrl: URL, prefix = ''): Record<string, string> {
+  const files: Record<string, string> = {};
+
+  for (const entry of readdirSync(directoryUrl, { withFileTypes: true })) {
+    if (entry.name.startsWith('.')) {
+      continue;
+    }
+
+    const relativePath = `${prefix}${entry.name}`;
+    const entryUrl = new URL(entry.name, directoryUrl);
+
+    if (entry.isDirectory()) {
+      Object.assign(files, readFixtureFiles(new URL(`${entry.name}/`, directoryUrl), `${relativePath}/`));
+      continue;
+    }
+
+    if (entry.isFile()) {
+      files[relativePath] = readFileSync(entryUrl, 'utf8');
+    }
+  }
+
+  return files;
+}
 
 /**
  * Loads a single example fixture from the filesystem.
- * Reads every file in `<kernel>/<name>/` and returns them as a filename → content map.
+ * Reads every file in `<kernel>/<name>/` recursively and returns them as a filename → content map.
  *
  * @param kernel - Kernel directory name (e.g. `'replicad'`, `'jscad'`).
  * @param name   - Example subdirectory name (e.g. `'tray'`, `'bottle'`).
@@ -33,18 +57,10 @@ const defaultMainFile = 'main.ts';
  */
 export function loadFixture<K extends KernelName>(kernel: K, name: ExampleName<K>): Fixture {
   const fixtureUrl = new URL(`${kernel}/${name}/`, baseUrl);
-  const files: Record<string, string> = {};
+  const files = readFixtureFiles(fixtureUrl);
+  const mainFile = candidateMainFiles.find((candidate) => Object.hasOwn(files, candidate)) ?? candidateMainFiles[0];
 
-  for (const entry of readdirSync(fixtureUrl, { withFileTypes: true })) {
-    if (!entry.isFile()) {
-      continue;
-    }
-
-    const fileUrl = new URL(entry.name, fixtureUrl);
-    files[entry.name] = readFileSync(fileUrl, 'utf8');
-  }
-
-  return { files, mainFile: defaultMainFile };
+  return { files, mainFile };
 }
 
 /**

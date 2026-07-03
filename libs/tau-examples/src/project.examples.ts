@@ -1,7 +1,15 @@
 // JSCAD example code
 import jscadCubeCode from '#kernels/jscad/cube/main.ts?raw';
+import jscadCubeCylinderSectionFixtureCode from '#kernels/jscad/cube-cylinder-section-fixture/main.ts?raw';
 import jscadCylinderCode from '#kernels/jscad/cylinder/main.ts?raw';
+import jscadEdgeOcclusionFixtureCode from '#kernels/jscad/edge-occlusion-fixture/main.ts?raw';
 import jscadGearCode from '#kernels/jscad/gear/main.ts?raw';
+import jscadNonManifoldSectionFixtureCode from '#kernels/jscad/non-manifold-section-fixture/main.ts?raw';
+import jscadSectionCapFixtureCode from '#kernels/jscad/section-cap-fixture/main.ts?raw';
+import jscadSectionOverlapFixtureCode from '#kernels/jscad/section-overlap-fixture/main.ts?raw';
+import jscadSectionOverlapHeavyPlanetaryFixtureCode from '#kernels/jscad/section-overlap-heavy-planetary-fixture/main.ts?raw';
+import jscadSectionOverlapHeavyV8FixtureCode from '#kernels/jscad/section-overlap-heavy-v8-fixture/main.ts?raw';
+import jscadSectionPickingFixtureCode from '#kernels/jscad/section-picking-fixture/main.ts?raw';
 // OpenSCAD example code
 import openscadKitchenSinkCode from '#kernels/openscad/kitchen-sink/main.scad?raw';
 // Replicad example code
@@ -25,6 +33,8 @@ import legoCode from '#kernels/replicad/lego/main.ts?raw';
 import simpleTrayCode from '#kernels/replicad/simple-tray/main.ts?raw';
 import hexScrewdriverCode from '#kernels/replicad/hex-screwdriver/main.ts?raw';
 import chairCode from '#kernels/replicad/chair/main.ts?raw';
+import flowerAttachmentSectionOutlineFixtureCode from '#kernels/replicad/flower-attachment-section-outline-fixture/main.ts?raw';
+import wedgeDoorStopperCode from '#kernels/replicad/wedge-door-stopper/main.ts?raw';
 
 type Model = {
   id: string;
@@ -59,6 +69,67 @@ export const jscadExamples: Model[] = [
     code: jscadGearCode,
     thumbnail: '/placeholder.svg',
   },
+  {
+    id: 'jscad_edge_occlusion_fixture',
+    name: 'Edge Occlusion Fixture',
+    description: 'A deterministic front-slab and rear-cuboid scene for low-FOV GLTF edge occlusion regression testing.',
+    code: jscadEdgeOcclusionFixtureCode,
+    thumbnail: '/placeholder.svg',
+  },
+  {
+    id: 'jscad_cube_cylinder_section_fixture',
+    name: 'Cube Cylinder Section Fixture',
+    description:
+      'A deterministic cube with a cylindrical through-cut for WebGL section-view overlay depth regression testing.',
+    code: jscadCubeCylinderSectionFixtureCode,
+    thumbnail: '/placeholder.svg',
+  },
+  {
+    id: 'jscad_section_cap_fixture',
+    name: 'Section Cap Fixture',
+    description:
+      'A deterministic holed housing with colored internal solids for section-view cap and contour-fill regression testing.',
+    code: jscadSectionCapFixtureCode,
+    thumbnail: '/placeholder.svg',
+  },
+  {
+    id: 'jscad_section_picking_fixture',
+    name: 'Section Picking Fixture',
+    description: 'A deterministic two-cuboid scene for section-view clipping-aware model picking regression testing.',
+    code: jscadSectionPickingFixtureCode,
+    thumbnail: '/placeholder.svg',
+  },
+  {
+    id: 'jscad_section_overlap_fixture',
+    name: 'Section Overlap Fixture',
+    description:
+      'A deterministic set of overlapping and tangent cuboids for section-plane overlap cap-shading regression testing.',
+    code: jscadSectionOverlapFixtureCode,
+    thumbnail: '/placeholder.svg',
+  },
+  {
+    id: 'jscad_section_overlap_heavy_planetary_fixture',
+    name: 'Heavy Planetary Section Overlap Fixture',
+    description:
+      'A deterministic dense planetary-style assembly for section-view overlap drag performance diagnostics.',
+    code: jscadSectionOverlapHeavyPlanetaryFixtureCode,
+    thumbnail: '/placeholder.svg',
+  },
+  {
+    id: 'jscad_section_overlap_heavy_v8_fixture',
+    name: 'Heavy V8 Section Overlap Fixture',
+    description: 'A deterministic engine-style assembly for section-view overlap drag performance diagnostics.',
+    code: jscadSectionOverlapHeavyV8FixtureCode,
+    thumbnail: '/placeholder.svg',
+  },
+  {
+    id: 'jscad_non_manifold_section_fixture',
+    name: 'Non-Manifold Section Fixture',
+    description:
+      'A deterministic one-mesh, non-booleaned pair of touching solids for section-view cap recovery regression testing.',
+    code: jscadNonManifoldSectionFixtureCode,
+    thumbnail: '/placeholder.svg',
+  },
 ] as const;
 
 export const openscadExamples: Model[] = [
@@ -73,6 +144,22 @@ export const openscadExamples: Model[] = [
 ] as const;
 
 export const mockProjects = [
+  {
+    id: 'proj_flower_attachment_section_outline_fixture',
+    name: 'Flower Attachment Section Outline Fixture',
+    description:
+      'A real exported Replicad flower attachment source fixture for section-view contour outline visual regression testing.',
+    code: flowerAttachmentSectionOutlineFixtureCode,
+    thumbnail: '/placeholder.svg',
+  },
+  {
+    id: 'proj_wedge_door_stopper',
+    name: 'Wedge Door Stopper',
+    description:
+      'A hollow, printable wedge door stopper with rounded front and back profiles, a solid nose, and concentric underside grip ridges.',
+    code: wedgeDoorStopperCode,
+    thumbnail: '/placeholder.svg',
+  },
   {
     id: 'proj_birdhouse',
     name: 'Birdhouse',

@@ -6,7 +6,7 @@ icon: lucide:refresh-cw
 
 # Render Lifecycle
 
-The runtime worker manages its own render lifecycle autonomously. After receiving `openFile`, it renders immediately, discovers dependencies, watches for changes, and re-renders on file or parameter updates. Three cancellation strategies ensure that superseded renders are aborted as quickly as possible while guaranteeing correctness.
+The runtime worker manages its own render lifecycle autonomously. After receiving `render`, it renders immediately, discovers dependencies, watches for changes, and re-renders on file or parameter updates. Three cancellation strategies ensure that superseded renders are aborted as quickly as possible while guaranteeing correctness.
 
 ## Context and Motivation
 
@@ -18,7 +18,7 @@ In a traditional command-driven model, the main thread decides when to render. B
 
 ```mermaid
 flowchart TD
-    OpenFile["openFile(file, params)"] --> Render1["render immediately"]
+    Render["render(file, params)"] --> Render1["render immediately"]
     Render1 --> Deps["discover dependencies"]
     Deps --> Watch["set up watch subscription"]
     Watch --> Push1["push geometryComputed"]
@@ -39,7 +39,7 @@ flowchart TD
     ExportGeom --> Push4["push exported"]
 ```
 
-**openFile(file, params):** Store the file and params. Render immediately (aborting any in-progress render). After rendering, discover the file's dependencies. Set up a filesystem watch subscription scoped to the dependency set. Push `geometryComputed` to the main thread.
+**render(file, params):** Store the file and params. Render immediately (aborting any in-progress render). After rendering, discover the file's dependencies. Set up a filesystem watch subscription scoped to the dependency set. Push `geometryComputed` to the main thread.
 
 **Watch event (file in dependency graph changed):** Watch events arrive directly from the File Manager Worker via the [filesystem bridge](./worker-model#filesystem-bridge) MessagePort -- they do not relay through the main thread. Invalidate the relevant caches (sync `Map.delete()`, atomic). Start or reset a 500ms debounce timer. When the timer fires, render again (aborting any in-progress render). After rendering, discover new dependencies and diff the watch set (add new paths, remove stale ones). Push `geometryComputed`.
 
@@ -185,4 +185,4 @@ Cache invalidation (`Map.delete()`) is synchronous and monotonically correct:
 - [Worker Model](./worker-model) -- Web Worker isolation, transport abort channel, and per-kernel abort table
 - [Architecture](./architecture) -- How the render loop fits in the layered design
 - [Handle Errors](../guides/error-handling) -- Handling `RenderTimeoutError` and `RenderOutcome` supersession
-- [API: Client](../api/client) -- `openFile`, `updateParameters`, and event subscription
+- [API: Client](../api/client) -- `render`, `updateParameters`, and event subscription

@@ -1,8 +1,12 @@
 export type {
   RuntimeClient,
   RuntimeClientOptions,
-  CodeInput,
-  FileInput,
+  FilesystemRuntimeSource,
+  InlineRuntimeSource,
+  RuntimeExportOptions,
+  RuntimeRenderInput,
+  RuntimeSetOptionsInput,
+  RuntimeSource,
   ExportResult,
   RuntimeFileSystem,
 } from '@taucad/runtime';

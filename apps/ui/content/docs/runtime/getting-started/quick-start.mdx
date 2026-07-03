@@ -36,20 +36,22 @@ Create a file called `render.ts` and paste the following code:
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
 import { presets } from '@taucad/runtime/presets';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 const runtime = presets.all();
 const client = createRuntimeClient({
-  transport: inProcessTransport({ runtime }),
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 const result = await client.export('glb', {
-  code: {
-    'main.ts': `
+  source: {
+    files: {
+      'main.ts': `
     import { drawRoundedRectangle } from 'replicad';
     export default () => drawRoundedRectangle(30, 50, 5).sketchOnPlane('XY').extrude(10);
   `,
+    },
   },
-  file: 'main.ts',
 });
 
 if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
@@ -57,17 +59,17 @@ console.log(`Exported ${result.data.bytes.byteLength} bytes (${result.data.mimeT
 client.terminate();
 ```
 
-`presets.all()` includes all built-in kernels, middleware, bundlers, and transcoders as a worker-owned runtime definition. Inline `code:` input runs in an in-memory filesystem; the first command call starts the runtime.
+`presets.all()` includes all built-in kernels, middleware, bundlers, and transcoders as a worker-owned runtime definition. Inline `source.files` input is staged into the transport-owned memory filesystem; the first command call starts the runtime.
 
 ### How the runtime is wired
 
 A `RuntimeClient` is composed of three orthogonal plug points:
 
-| Plane          | What it owns                                                                         | Default in this snippet                |
-| -------------- | ------------------------------------------------------------------------------------ | -------------------------------------- |
-| **Runtime**    | Executable kernels, middleware, bundlers, and transcoders                            | `presets.all()`                        |
-| **Transport**  | The wire (`MessagePort` / in-process channel / Electron `MessagePortMain`)           | in-process channel                     |
-| **Filesystem** | The source of truth for files (`fromMemoryFs`, `fromNodeFs`, `fromFileSystemBridge`) | inline memory FS, derived from `code:` |
+| Plane          | What it owns                                                                         | Default in this snippet               |
+| -------------- | ------------------------------------------------------------------------------------ | ------------------------------------- |
+| **Runtime**    | Executable kernels, middleware, bundlers, and transcoders                            | `presets.all()`                       |
+| **Transport**  | The wire (`MessagePort` / in-process channel / Electron `MessagePortMain`)           | in-process channel                    |
+| **Filesystem** | The source of truth for files (`fromMemoryFs`, `fromNodeFs`, `fromFileSystemBridge`) | `fromMemoryFs()` transport filesystem |
 
 The same plug points compose every supported topology — browser UI, in-process Node, Electron renderer + main, multi-window Electron — without core changes. See [Worker Model → Topology Recipes](../concepts/worker-model#topology-recipes) for the canonical T1–T4 configs.
 
@@ -101,7 +103,7 @@ Exported 5824 bytes (model/gltf-binary)
 > **Want live re-rendering?** This snippet runs a single render-and-export
 > cycle. For UI viewers that need to react to parameter changes or file edits,
 > see [Live Rendering](../guides/live-rendering) for the autonomous-loop API
-> (`client.openFile`, `client.updateParameters`, `client.setOptions`, and the
+> (`client.render`, `client.updateParameters`, `client.setOptions`, and the
 > `geometry` event).
 
 ## What's Next

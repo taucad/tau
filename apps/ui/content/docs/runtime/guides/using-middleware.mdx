@@ -36,6 +36,7 @@ import { createRuntimeClient } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { replicad } from '@taucad/runtime/kernels';
 import { esbuild } from '@taucad/runtime/bundler';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { geometryCache, parameterCache, gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/runtime/middleware';
 
@@ -46,11 +47,11 @@ const runtime = defineRuntime({
 });
 
 const client = createRuntimeClient({
-  transport: inProcessTransport({ runtime }),
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 ```
 
-Inline `code:` calls run in an in-memory filesystem. Wire `inProcessTransport({ runtime, fileSystem: fromNodeFs(...) })` (see step 4) when geometry/parameter caches should persist on disk.
+Inline `source.files` calls are staged into the transport-owned filesystem. Use `fromMemoryFs()` for ephemeral editor-style source, or wire `inProcessTransport({ runtime, fileSystem: fromNodeFs(...) })` (see step 4) when geometry/parameter caches should persist on disk.
 
 ### 3. Understand Each Middleware
 
@@ -96,23 +97,25 @@ worker -- nothing changes in the call site:
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
 import { presets } from '@taucad/runtime/presets';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 const runtime = presets.all();
 const client = createRuntimeClient({
-  transport: inProcessTransport({ runtime }),
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 
 const result = await client.export('glb', {
-  code: {
-    'main.ts': `
+  source: {
+    files: {
+      'main.ts': `
       import { drawRoundedRectangle } from 'replicad';
       export default function main() {
         return drawRoundedRectangle(30, 50, 5).sketchOnPlane('XY').extrude(10);
       }
     `,
+    },
   },
-  file: 'main.ts',
 });
 
 if (result.success) {

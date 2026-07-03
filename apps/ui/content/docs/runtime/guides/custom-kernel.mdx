@@ -25,7 +25,8 @@ Implement a kernel that handles a custom file type, produces geometry, and suppo
 Import `defineKernel` and result helpers from `@taucad/runtime`:
 
 ```typescript
-import { defineKernel, createKernelSuccess, createKernelError } from '@taucad/runtime';
+import { createKernelSuccess, createKernelError } from '@taucad/runtime';
+import { defineKernel, finalizeRenderOutput } from '@taucad/runtime/kernel';
 ```
 
 ### 2. Implement the Kernel Definition
@@ -69,9 +70,12 @@ export const myKernel = defineKernel({
 
   async createGeometry({ filePath }, { filesystem }, _context) {
     const code = await filesystem.readFile(filePath, 'utf8');
-    const geometry: GeometryResponse[] = [];
+    const geometry: GeometryResponse = {
+      format: 'svg',
+      content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><text>${code.length}</text></svg>`,
+    };
     const nativeHandle: MyNativeHandle = null;
-    return { geometry, nativeHandle };
+    return finalizeRenderOutput({ artifacts: [geometry], nativeHandle });
   },
 
   async exportGeometry({ format, nativeHandle }, { logger }, _context) {
@@ -125,6 +129,7 @@ Declare the executable runtime in the worker or host process, then connect a cli
 import { createRuntimeClient } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { esbuild } from '@taucad/runtime/bundler';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { myKernel } from './my-kernel.kernel';
 
@@ -134,11 +139,10 @@ const runtime = defineRuntime({
 });
 
 const client = createRuntimeClient({
-  transport: inProcessTransport({ runtime }),
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 const result = await client.export('glb', {
-  code: { 'model.myformat': '/* my custom format */' },
-  file: 'model.myformat',
+  source: { files: { 'model.myformat': '/* my custom format */' } },
 });
 
 if (result.success) {
@@ -192,13 +196,14 @@ Extract parameters and a JSON Schema for UI generation:
 
 ```typescript
 import type { KernelFileSystem } from '@taucad/runtime/kernel';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import { createKernelSuccess } from '@taucad/runtime';
 
 const PARAM_RE = /^export\s+const\s+([A-Za-z_$][\w$]*)\s*=\s*(\d+(?:\.\d+)?|true|false|"[^"]*")\s*;?/gm;
 
-function extractParameters(code: string): { defaultParameters: Record<string, unknown>; jsonSchema: object } {
+function extractParameters(code: string): { defaultParameters: Record<string, unknown>; jsonSchema: JSONSchema7 } {
   const defaultParameters: Record<string, unknown> = {};
-  const properties: Record<string, { type: string }> = {};
+  const properties: Record<string, JSONSchema7> = {};
   for (const match of code.matchAll(PARAM_RE)) {
     const name = match[1] ?? '';
     const raw = match[2] ?? '';

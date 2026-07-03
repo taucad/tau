@@ -100,7 +100,13 @@ export const myKernel = defineKernel({
     return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
   },
   async createGeometry() {
-    return { geometry: [], nativeHandle: {} };
+    return {
+      geometry: {
+        format: 'svg',
+        content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>',
+      },
+      nativeHandle: {},
+    };
   },
   async exportGeometry() {
     return { success: true, data: [], issues: [] };

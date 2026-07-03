@@ -101,15 +101,15 @@ The discriminated `KernelResult` shape arrives both from `client.export(format, 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
 import { presets } from '@taucad/runtime/presets';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 const runtime = presets.all();
 const client = createRuntimeClient({
-  transport: inProcessTransport({ runtime }),
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 const result = await client.export('glb', {
-  code: { 'main.ts': 'export default () => null' },
-  file: 'main.ts',
+  source: { files: { 'main.ts': 'export default () => null' } },
 });
 
 if (result.success) {

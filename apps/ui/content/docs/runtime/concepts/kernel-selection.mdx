@@ -6,7 +6,7 @@ icon: lucide:git-branch
 
 # Kernel Selection
 
-When you call `openFile({ file })` or `export(format, { file })`, the runtime must choose which kernel handles the file. Extension alone is insufficient: `.ts` files might use Replicad, OpenCASCADE, or JSCAD depending on imports. The selection cascade uses three strategies in order, with caching to avoid repeated work.
+When you call `render({ source: { path } })` or `export(format, { source: { path } })`, the runtime must choose which kernel handles the file. Extension alone is insufficient: `.ts` files might use Replicad, OpenCASCADE, or JSCAD depending on imports. The selection cascade uses three strategies in order, with caching to avoid repeated work.
 
 ## Context and Motivation
 
@@ -18,7 +18,7 @@ The selection runs inside [`KernelRuntimeWorker`](./worker-model)`.selectKernel(
 
 ```mermaid
 flowchart TD
-    Start["openFile / export"] --> Ext["1. Extension fast path"]
+    Start["render / export"] --> Ext["1. Extension fast path"]
     Ext -->|"extensions includes ext"| NoDetect{"detectImport?"}
     NoDetect -->|No| LoadExt["Load kernel, cache, return"]
     NoDetect -->|Yes| Regex["Regex test on file content"]
@@ -74,13 +74,13 @@ If no kernel matches at all, selection returns `undefined`. The framework report
 
 Selection results are cached in `selectionCache` keyed by file path. On a cache hit, the same kernel is used without re-running detection.
 
-In autonomous rendering mode (the default), the worker's filesystem watch subscription handles cache invalidation automatically when files change. When inline code is supplied via `openFile({ code, file, parameters })`, the runtime client notifies the worker about the inline file paths so the bundler/selection caches re-resolve on the next render.
+In autonomous rendering mode (the default), the worker's filesystem watch subscription handles cache invalidation automatically when files change. When inline code is supplied via `render({ source, parameters })`, the runtime client notifies the worker about the inline file paths so the bundler/selection caches re-resolve on the next render.
 
 ## Key Relationships
 
 - **Selection and Plugins** -- Kernel plugins supply `extensions`, `detectImport`, and `builtinModuleNames`. These drive all three passes.
 - **Selection and Bundler** -- The bundler plugin must implement `detectImports` for pass 2. The esbuild bundler does this via a lightweight build with externals extraction.
-- **Selection and Worker** -- Selection runs inside the worker. The client sends `openFile`/`export` and the worker selects the kernel before calling `getParameters` or `createGeometry`.
+- **Selection and Worker** -- Selection runs inside the worker. The client sends `render`/`export` and the worker selects the kernel before calling `getParameters` or `createGeometry`.
 
 ## Implications
 

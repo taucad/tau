@@ -61,7 +61,7 @@ const client = createRuntimeClient<typeof runtime>({
 });
 await client.connect();
 
-const result = await client.export('glb', { file: 'main.ts' });
+const result = await client.export('glb', { source: { path: 'main.ts' } });
 if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
 
 client.terminate();
@@ -183,7 +183,7 @@ The lifecycle progression is `'unconnected' -> 'connecting' -> 'connected' -> 't
 
 1. `client.lifecycleState` becomes `'terminated'` synchronously.
 2. The transport's `close()` is invoked exactly once.
-3. Every in-flight `connect()` / `openFile()` / `updateParameters()` / `setOptions()` / `export()` Promise rejects on the next microtask with `RuntimeTerminatedError` (`causeKind: 'explicit'`).
+3. Every in-flight `connect()` / `render()` / `updateParameters()` / `setOptions()` / `export()` Promise rejects on the next microtask with `RuntimeTerminatedError` (`causeKind: 'explicit'`).
 4. `client.on(...)` calls made after `terminate()` throw synchronously (subscription is no longer meaningful).
 5. Subsequent commands reject synchronously with `RuntimeTerminatedError` (`causeKind: 'explicit'`).
 6. A second `terminate()` call is a no-op (idempotent).

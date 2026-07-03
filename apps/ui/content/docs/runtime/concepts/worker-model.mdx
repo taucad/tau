@@ -39,7 +39,7 @@ flowchart TB
         EventBus["EventBus + WatchRegistry"]
     end
 
-    Editor -->|"openFile / updateParameters"| Client
+    Editor -->|"render / updateParameters"| Client
     Client -->|"MessagePort (kernel protocol)\n+ Transport abort channel"| RenderLoop
     RenderLoop --> KernelWorker
     KernelWorker --> Middleware
@@ -66,9 +66,9 @@ A single worker instance hosts all registered kernels. The `KernelRuntimeWorker`
 
 ### Autonomous Render Loop
 
-After receiving `openFile`, the worker manages its own render lifecycle:
+After receiving `render`, the worker manages its own render lifecycle:
 
-1. **openFile(file, params)** -- Store file and params. Render immediately (aborting any in-progress render). Discover dependencies. Set up filesystem watch subscription. Push `geometryComputed`.
+1. **render(file, params)** -- Store file and params. Render immediately (aborting any in-progress render). Discover dependencies. Set up filesystem watch subscription. Push `geometryComputed`.
 
 2. **Watch event (file in dependency graph changed)** -- Invalidate caches. Start/reset 500ms debounce timer. On timer fire: render (aborting any in-progress render). Discover new deps and diff watch set. Push `geometryComputed`.
 
@@ -100,7 +100,7 @@ flowchart LR
     Transport -->|"abort generation"| KernelProxy["OC Proxy in Worker"]
 ```
 
-When the main thread calls `openFile()`, `updateParameters()`, or
+When the main thread calls `render()`, `updateParameters()`, or
 `setOptions()`:
 
 1. The active [transport](../api/client) raises the abort generation via `signalAbort('superseded')` **before** posting the wire-format command.

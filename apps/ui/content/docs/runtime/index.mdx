@@ -11,23 +11,25 @@ A multi-kernel CAD runtime for browser and Node.js. Run multiple CAD engines fro
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
 import { presets } from '@taucad/runtime/presets';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 const runtime = presets.all();
 const client = createRuntimeClient({
-  transport: inProcessTransport({ runtime }),
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 
 const result = await client.export('step', {
-  code: {
-    'box.ts': `
+  source: {
+    files: {
+      'box.ts': `
       import { makeBaseBox } from 'replicad';
       export default function main() {
         return makeBaseBox(10, 20, 30);
       }
     `,
+    },
   },
-  file: 'box.ts',
 });
 
 // result.data -> { name: 'box.step', bytes: Uint8Array, mimeType: 'model/step' }
@@ -67,7 +69,7 @@ const client = createRuntimeClient({
 ## Key Capabilities
 
 - **Multi-kernel runtime** -- Switch between CAD engines based on file type or explicit selection.
-- **Autonomous rendering** -- `openFile` and `updateParameters` hand the worker a `(file, parameters)` pair and let it own the render loop with file watching, debounced re-renders, and event-driven geometry push.
+- **Autonomous rendering** -- `render` and `updateParameters` hand the worker a `(source, parameters)` pair and let it own the render loop with file watching, debounced re-renders, and event-driven geometry push.
 - **Cancellation without exceptions** -- When a new render starts before the previous one finishes, the older call resolves with `{ superseded: true }` instead of throwing. Real failures (timeouts, kernel crashes, lifecycle errors) still throw typed errors, so `try/catch` only fires for genuine problems.
 - **Plugin architecture** -- Extend with custom kernels, middleware, and bundlers via [`defineKernel`](./api/kernels), [`defineMiddleware`](./api/middleware), and [`defineBundler`](./api/bundler).
 - **Middleware pipeline** -- Add caching, coordinate transforms, and edge detection with an onion-model middleware system.

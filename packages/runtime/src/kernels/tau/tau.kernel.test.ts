@@ -90,10 +90,9 @@ const readNodeMeshNames = async (
   };
 };
 
-const findGltfGeometryContent = (geometries: GeometryResponse[]): Uint8Array<ArrayBuffer> => {
-  const gltfGeometry = geometries.find((geometry): geometry is GeometryGltf => geometry.format === 'gltf');
-  expect(gltfGeometry).toBeDefined();
-  return gltfGeometry!.content;
+const findGltfGeometryContent = (geometry: GeometryResponse): Uint8Array<ArrayBuffer> => {
+  expect(geometry.format).toBe('gltf');
+  return (geometry as GeometryGltf).content;
 };
 
 afterEach(() => {
@@ -234,7 +233,7 @@ describe('TauKernel', () => {
   describe('exportGeometry', () => {
     it('should return GLB file when format is glb', async () => {
       const runtime = createMockKernelRuntime();
-      const nativeHandle = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
+      const nativeHandle = await createNamedGlb();
 
       const result = await tauDefinition.exportGeometry({ format: 'glb', options: {}, nativeHandle }, runtime, {});
 
@@ -243,13 +242,13 @@ describe('TauKernel', () => {
         expect(result.data).toHaveLength(1);
         expect(result.data[0]!.name).toBe('model.glb');
         expect(result.data[0]!.mimeType).toBe('model/gltf-binary');
-        expect(result.data[0]!.bytes).toBe(nativeHandle);
+        expect(result.data[0]!.bytes.byteLength).toBeGreaterThan(0);
       }
     });
 
     it('should return glTF file when format is gltf', async () => {
       const runtime = createMockKernelRuntime();
-      const nativeHandle = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
+      const nativeHandle = await createNamedGlb();
 
       const result = await tauDefinition.exportGeometry({ format: 'gltf', options: {}, nativeHandle }, runtime, {});
 
@@ -299,8 +298,19 @@ describe('TauKernel', () => {
 
       const nativeHandle = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
       const runtime = createMockKernelRuntime();
-      const serializedNativeHandle = tauDefinition.serializeNativeHandle({ nativeHandle }, runtime, {});
-      const restored = tauDefinition.deserializeNativeHandle({ serializedNativeHandle }, runtime, {});
+      const { serializeNativeHandle, deserializeNativeHandle } = tauDefinition;
+      const serialize =
+        serializeNativeHandle ??
+        (() => {
+          throw new Error('Tau native-handle serializer must be defined');
+        });
+      const deserialize =
+        deserializeNativeHandle ??
+        (() => {
+          throw new Error('Tau native-handle deserializer must be defined');
+        });
+      const serializedNativeHandle = serialize({ nativeHandle }, runtime, {});
+      const restored = deserialize({ serializedNativeHandle }, runtime, {});
 
       expect(restored).toEqual(nativeHandle);
       expect(restored).not.toBe(nativeHandle);

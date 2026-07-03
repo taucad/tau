@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
+import type { JSONSchema7 } from '@taucad/json-schema';
+import type { GeometryResponse } from '@taucad/types';
 import { manifold as manifoldKernel } from '#kernels/manifold/manifold.kernel.js';
 import { createGeometryTestHelpers } from '#testing/kernel-geometry-testing.utils.js';
 import {
@@ -21,7 +23,7 @@ const getParameters = async (
   files: Record<string, string>,
   mainFile: string,
 ): Promise<{
-  jsonSchema: unknown;
+  jsonSchema: JSONSchema7;
   defaultParameters: Record<string, unknown>;
 }> => getTestParameters(manifoldKernel, files, mainFile);
 
@@ -58,12 +60,11 @@ const readGltfNodeMeshNames = async (
   };
 };
 
-const extractGltfBytes = (result: {
-  data: Array<{ format: string; content: Uint8Array<ArrayBuffer> }>;
-}): Uint8Array<ArrayBuffer> => {
-  const geometry = result.data.find((entry) => entry.format === 'gltf');
-  expect(geometry).toBeDefined();
-  return geometry!.content;
+const extractGltfBytes = (result: { data: GeometryResponse }): Uint8Array<ArrayBuffer> => {
+  if (result.data.format !== 'gltf') {
+    throw new Error(`Expected GLTF geometry, received ${result.data.format}`);
+  }
+  return result.data.content;
 };
 
 describe('ManifoldWorker', () => {
@@ -203,7 +204,7 @@ describe('ManifoldWorker', () => {
       await geometryHelpers.expectMeshCount(result, 1);
     });
 
-    it('should return success with no issues when main returns undefined (no return statement)', async () => {
+    it('should render an empty GLB when main returns undefined (no return statement)', async () => {
       const result = await createGeometry(
         {
           'no-return.ts': `
@@ -217,14 +218,11 @@ describe('ManifoldWorker', () => {
         'no-return.ts',
       );
 
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.issues).toEqual([]);
-        expect(result.data).toHaveLength(0);
-      }
+      await geometryHelpers.expectValidGltf(result);
+      await geometryHelpers.expectMeshCount(result, 0);
     });
 
-    it('should return success with no issues when main explicitly returns undefined', async () => {
+    it('should render an empty GLB when main explicitly returns undefined', async () => {
       const result = await createGeometry(
         {
           'explicit_undefined.ts': `
@@ -239,14 +237,11 @@ describe('ManifoldWorker', () => {
         'explicit_undefined.ts',
       );
 
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.issues).toEqual([]);
-        expect(result.data).toHaveLength(0);
-      }
+      await geometryHelpers.expectValidGltf(result);
+      await geometryHelpers.expectMeshCount(result, 0);
     });
 
-    it('should return success with no issues when main returns empty array', async () => {
+    it('should render an empty GLB when main returns empty array', async () => {
       const result = await createGeometry(
         {
           'empty_array.ts': `
@@ -260,11 +255,8 @@ describe('ManifoldWorker', () => {
         'empty_array.ts',
       );
 
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.issues).toEqual([]);
-        expect(result.data).toHaveLength(0);
-      }
+      await geometryHelpers.expectValidGltf(result);
+      await geometryHelpers.expectMeshCount(result, 0);
     });
 
     it('should return failure for syntax errors', async () => {
@@ -374,6 +366,31 @@ describe('ManifoldWorker', () => {
       }
     });
 
+    it('should export an empty GLB after an empty render', async () => {
+      const worker = await createWorker({
+        'empty.ts': `
+          export default function main() {
+            return [];
+          }
+        `,
+      });
+
+      const createResult = await worker.createGeometry({
+        file: createGeometryFile('empty.ts'),
+        parameters: {},
+      });
+      expect(createResult.success).toBe(true);
+
+      const exportResult = await worker.exportGeometry('glb');
+      expect(exportResult.success).toBe(true);
+      if (!exportResult.success) {
+        return;
+      }
+
+      const document = await new NodeIO().readBinary(exportResult.data[0]!.bytes);
+      expect(document.getRoot().listMeshes()).toHaveLength(0);
+    });
+
     it('should return error for unsupported gltf format', async () => {
       const worker = await createWorker({
         'cube.ts': `
@@ -441,8 +458,20 @@ describe('ManifoldWorker', () => {
 
       const nativeHandle = { glb: new Uint8Array([0x67, 0x6c, 0x54, 0x46]) };
       const runtime = createMockKernelRuntime();
-      const serializedNativeHandle = definition.serializeNativeHandle({ nativeHandle }, runtime, {});
-      const restored = definition.deserializeNativeHandle({ serializedNativeHandle }, runtime, {});
+      const { serializeNativeHandle, deserializeNativeHandle } = definition;
+      const serialize =
+        serializeNativeHandle ??
+        (() => {
+          throw new Error('Manifold native-handle serializer must be defined');
+        });
+      const deserialize =
+        deserializeNativeHandle ??
+        (() => {
+          throw new Error('Manifold native-handle deserializer must be defined');
+        });
+      const context = { manifoldCadModule: {} };
+      const serializedNativeHandle = serialize({ nativeHandle }, runtime, context);
+      const restored = deserialize({ serializedNativeHandle }, runtime, context);
 
       expect(restored.glb).toEqual(nativeHandle.glb);
       expect(restored.glb).not.toBe(nativeHandle.glb);

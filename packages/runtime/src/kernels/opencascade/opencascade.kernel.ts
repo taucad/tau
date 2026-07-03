@@ -36,11 +36,13 @@ import { detectMultiThreadSupport, activateOccParallelism } from '#kernels/occt/
 import { createIncrementalMesh, meshShapesToGltf, parseHexColor } from '#kernels/opencascade/opencascade-mesh.js';
 import type { ShapeEntry } from '#kernels/opencascade/opencascade.types.js';
 import { formatOcRuntimeError } from '#kernels/occt/oc-error-formatter.js';
+import { RenderArtifactFinalizationError, finalizeRenderOutput } from '#framework/render-artifact-finalizer.js';
 import { runOcMain } from '#kernels/occt/oc-run-main.js';
 import { wrapOcForExceptions, wrapOcWithTracing } from '#kernels/occt/oc-tracing.js';
 import type { OcTracingSummary } from '#kernels/occt/oc-tracing.js';
 import type { KernelIssue } from '#types/runtime.types.js';
 import { opencascadeDetectPattern } from '#kernels/opencascade/opencascade.constants.js';
+import { createEmptyGlb, createEmptyGltf, createEmptyGltfGeometry } from '#utils/glb-writer.js';
 import { resolveShapeName, uniqueShapeName } from '#utils/shape-names.js';
 
 import type { OpenCascadeInstance, TopoDS_Shape } from '#kernels/opencascade/wasm/opencascade_full.js';
@@ -598,11 +600,7 @@ export const opencascade = defineKernel({
         logger.warn('createGeometry returning empty: main-function-not-found', {
           data: { filePath: relativeFilePath },
         });
-        return {
-          geometry: [],
-          nativeHandle: [],
-          issues: [],
-        };
+        return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
       }
 
       const mainSpan = tracer.startSpan('opencascade.run-main', { phase: 'computingGeometry' });
@@ -628,11 +626,7 @@ export const opencascade = defineKernel({
         logger.warn('createGeometry returning empty: main-returned-no-shapes', {
           data: { filePath: relativeFilePath },
         });
-        return {
-          geometry: [],
-          nativeHandle: [],
-          issues: [],
-        };
+        return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
       }
 
       const meshSpan = tracer.startSpan('opencascade.mesh-to-gltf', {
@@ -649,10 +643,10 @@ export const opencascade = defineKernel({
       });
       meshSpan.end();
 
-      const geometry: GeometryGltf[] = [{ format: 'gltf', content: gltfData }];
-      return { geometry, nativeHandle: shapeEntries };
+      const geometry: GeometryGltf = { format: 'gltf', content: gltfData };
+      return finalizeRenderOutput({ artifacts: [geometry], nativeHandle: shapeEntries });
     } catch (error) {
-      if (error instanceof OcctBuildError) {
+      if (error instanceof OcctBuildError || error instanceof RenderArtifactFinalizationError) {
         throw error;
       }
 
@@ -663,15 +657,26 @@ export const opencascade = defineKernel({
 
   async exportGeometry(input, _runtime, context) {
     const { format, nativeHandle, options } = input;
-    if (nativeHandle.length === 0) {
-      return createKernelError([
+    const emptyGltfExport = () =>
+      createKernelSuccess([
+        createExportFile(
+          format,
+          format === 'glb' ? 'model.glb' : 'model.gltf',
+          asBuffer(format === 'glb' ? createEmptyGlb() : createEmptyGltf()),
+        ),
+      ]);
+    const noGeometryExportError = () =>
+      createKernelError([
         { message: 'No geometry available for export', code: 'RUNTIME', type: 'runtime', severity: 'error' },
       ]);
-    }
 
     switch (format) {
       case 'glb':
       case 'gltf': {
+        if (nativeHandle.length === 0) {
+          return emptyGltfExport();
+        }
+
         const { linearTolerance, angularTolerance } = options.tessellation;
         const { coordinateSystem, unit } = options;
 
@@ -689,6 +694,10 @@ export const opencascade = defineKernel({
       }
 
       case 'step': {
+        if (nativeHandle.length === 0) {
+          return noGeometryExportError();
+        }
+
         const result = exportOpencascadeStepAssembly(context.oc, nativeHandle);
         if (!result.ok) {
           return createKernelError([
@@ -700,6 +709,10 @@ export const opencascade = defineKernel({
       }
 
       case 'stl': {
+        if (nativeHandle.length === 0) {
+          return noGeometryExportError();
+        }
+
         const { oc } = context;
         const { linearTolerance, angularTolerance } = options.tessellation;
         const angularToleranceRad = angularTolerance * (Math.PI / 180);

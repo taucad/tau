@@ -1,27 +1,44 @@
 import type { AnyShape, Drawing } from 'replicad';
+import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { SetRequired } from 'type-fest';
 import type { GeometrySvg } from '@taucad/types';
 import { normalizeColor } from '#kernels/replicad/utils/normalize-color.js';
 import type { GeometryReplicad } from '#kernels/replicad/replicad.types.js';
 import { resolveShapeName, uniqueShapeName } from '#utils/shape-names.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
+import {
+  extractInstanceEdgeIds,
+  extractInstanceFaceIds,
+  extractPrototypeEdges,
+  extractPrototypeFaces,
+  inspectReplicadShapeIdentity,
+  transformReplicadGeometryInstance,
+} from '#kernels/replicad/utils/tessellation-instancing.js';
+import type {
+  Meshable,
+  ReplicadShapeIdentityInfo,
+  ReplicadTessellationInstance,
+} from '#kernels/replicad/utils/tessellation-instancing.js';
 
 type Tessellation = {
   linearTolerance: number;
   angularTolerance: number;
 };
 
-type Meshable = SetRequired<AnyShape, 'mesh' | 'meshEdges'>;
-
 type Svgable = SetRequired<Drawing, 'toSVGPaths' | 'toSVGViewBox'>;
+
+type RenderMode = 'flat' | 'tessellation-instanced' | 'mixed';
 
 type RenderTelemetry = {
   tracer?: RuntimeSpanTracer;
+  onRenderMode?: (mode: RenderMode) => void;
 };
 
 type RenderOptions = {
   tessellation?: Tessellation;
   withBrepEdges?: boolean;
+  openCascade?: OpenCascadeInstance;
+  tessellationInstancing?: boolean;
 } & RenderTelemetry;
 
 type RenderMeshOptions = {
@@ -80,6 +97,16 @@ type NamedInputShape = InputShape & { name: string };
 type SvgShapeConfiguration = NamedInputShape & { shape: Svgable };
 
 type MeshableConfiguration = NamedInputShape & { shape: Meshable };
+type MeshableInstance = {
+  config: MeshableConfiguration;
+  info: ReplicadShapeIdentityInfo;
+};
+
+type PrototypeGroup = {
+  key: string;
+  prototype: MeshableInstance;
+  instances: MeshableInstance[];
+};
 
 /** Union of all valid return types from a Replicad model's main function. */
 export type MainResultShapes = AnyShape | AnyShape[] | InputShape | InputShape[] | undefined;
@@ -167,21 +194,42 @@ function normalizeColorAndOpacity<T extends InputShape>(shape: T): InputShape {
   };
 }
 
+const escapeSvgAttribute = (value: string): string =>
+  value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
+
+const strokeDashArray = (strokeType: string | undefined): string | undefined => {
+  if (strokeType === 'dots') {
+    return '1 3';
+  }
+  if (strokeType === 'dashes') {
+    return '8 4';
+  }
+  return undefined;
+};
+
 function renderSvg(shapeConfig: SvgShapeConfiguration): GeometrySvg {
   const { name, shape, color, strokeType, opacity } = shapeConfig;
+  const viewBox = escapeSvgAttribute(shape.toSVGViewBox());
+  const stroke = escapeSvgAttribute(color ?? 'currentColor');
+  const opacityAttribute = opacity === undefined ? '' : ` opacity="${opacity}"`;
+  const dashArray = strokeDashArray(strokeType);
+  const dashAttribute = dashArray === undefined ? '' : ` stroke-dasharray="${dashArray}"`;
+  const paths = (shape.toSVGPaths() as string[])
+    .map(
+      (path) =>
+        `<path d="${escapeSvgAttribute(path)}" fill="none" stroke="${stroke}"${opacityAttribute}${dashAttribute}/>`,
+    )
+    .join('');
+
   return {
     format: 'svg',
     name,
-    color,
-    strokeType,
-    opacity,
-    paths: shape.toSVGPaths() as string[],
-    viewbox: shape.toSVGViewBox(),
+    content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">${paths}</svg>`,
   };
 }
 
 const defaultPreviewTessellation: Tessellation = {
-  linearTolerance: 0.01,
+  linearTolerance: 0.02,
   angularTolerance: 20,
 };
 
@@ -257,6 +305,313 @@ function renderMesh(shapeConfig: MeshableConfiguration, options: RenderMeshOptio
   return geometry;
 }
 
+function createEmptyReplicadGeometry(shapeConfig: MeshableConfiguration): GeometryReplicad {
+  const { name, color, opacity, metalness, roughness } = shapeConfig;
+  return {
+    format: 'replicad',
+    name,
+    color,
+    opacity,
+    metalness,
+    roughness,
+    faces: {
+      triangles: [],
+      vertices: [],
+      normals: [],
+      faceGroups: [],
+    },
+    edges: {
+      lines: [],
+      edgeGroups: [],
+    },
+  };
+}
+
+function instancingGroupKey(instance: MeshableInstance, tessellation: Tessellation, withBrepEdges: boolean): string {
+  const { info } = instance;
+  return [
+    info.partnerKey,
+    info.orientation,
+    tessellation.linearTolerance,
+    tessellation.angularTolerance,
+    withBrepEdges,
+  ].join('|');
+}
+
+function isInstancingEligible(info: ReplicadShapeIdentityInfo): boolean {
+  return info.canPrototypeMesh && info.partnerKey.length > 0 && Number.isFinite(info.determinant);
+}
+
+function groupMeshableInstances(
+  instances: MeshableInstance[],
+  tessellation: Tessellation,
+  withBrepEdges: boolean,
+): {
+  groups: PrototypeGroup[];
+  grouped: Set<MeshableConfiguration>;
+  missedContentHashGroups: number;
+} {
+  const candidates = new Map<string, PrototypeGroup>();
+  const contentHashes = new Map<string, number>();
+
+  for (const instance of instances) {
+    contentHashes.set(instance.info.prototypeHash, (contentHashes.get(instance.info.prototypeHash) ?? 0) + 1);
+    if (!isInstancingEligible(instance.info)) {
+      continue;
+    }
+
+    const key = instancingGroupKey(instance, tessellation, withBrepEdges);
+    const group = candidates.get(key);
+    if (group) {
+      group.instances.push(instance);
+    } else {
+      candidates.set(key, { key, prototype: instance, instances: [instance] });
+    }
+  }
+
+  const groups = [...candidates.values()].filter((group) => group.instances.length > 1);
+  const grouped = new Set<MeshableConfiguration>();
+  for (const group of groups) {
+    for (const instance of group.instances) {
+      grouped.add(instance.config);
+    }
+  }
+
+  let missedContentHashGroups = 0;
+  for (const count of contentHashes.values()) {
+    if (count > 1) {
+      missedContentHashGroups++;
+    }
+  }
+  missedContentHashGroups = Math.max(0, missedContentHashGroups - groups.length);
+
+  return { groups, grouped, missedContentHashGroups };
+}
+
+function detectInstancingGroups({
+  configs,
+  openCascade,
+  tessellation,
+  withBrepEdges,
+  tracer,
+}: {
+  configs: NamedInputShape[];
+  openCascade: OpenCascadeInstance;
+  tessellation: Tessellation;
+  withBrepEdges: boolean;
+  tracer?: RuntimeSpanTracer;
+}): {
+  instances: MeshableInstance[];
+  groups: PrototypeGroup[];
+  grouped: Set<MeshableConfiguration>;
+  missedContentHashGroups: number;
+} {
+  const span = tracer?.startSpan('replicad.tessellation-instancing.detect', {
+    shapeCount: configs.length,
+    linearTolerance: tessellation.linearTolerance,
+    angularToleranceDeg: tessellation.angularTolerance,
+    withBrepEdges,
+  });
+
+  try {
+    const instances: MeshableInstance[] = [];
+    for (const config of configs) {
+      if (!hasMeshableShape(config)) {
+        continue;
+      }
+
+      instances.push({
+        config,
+        info: inspectReplicadShapeIdentity({ openCascade, shape: config.shape }),
+      });
+    }
+
+    const groupedResult = groupMeshableInstances(instances, tessellation, withBrepEdges);
+    const instanceCount = groupedResult.groups.reduce((total, group) => total + group.instances.length, 0);
+    span?.end({
+      meshableShapeCount: instances.length,
+      prototypeCount: groupedResult.groups.length,
+      instanceCount,
+      eligibleInstanceCount: groupedResult.grouped.size,
+      missedContentHashGroups: groupedResult.missedContentHashGroups,
+    });
+
+    return {
+      instances,
+      ...groupedResult,
+    };
+  } catch (error) {
+    span?.end({ failed: true });
+    throw error;
+  }
+}
+
+function instanceFromConfig({
+  config,
+  info,
+  faceIds,
+  edgeIds,
+}: {
+  config: MeshableConfiguration;
+  info: ReplicadShapeIdentityInfo;
+  faceIds: number[];
+  edgeIds: number[];
+}): ReplicadTessellationInstance {
+  return {
+    name: config.name,
+    color: config.color,
+    opacity: config.opacity,
+    metalness: config.metalness,
+    roughness: config.roughness,
+    locationMatrix: info.locationMatrix,
+    determinant: info.determinant,
+    faceIds,
+    edgeIds,
+  };
+}
+
+function renderPrototypeGroup({
+  group,
+  openCascade,
+  tessellation,
+  withBrepEdges,
+  tracer,
+}: {
+  group: PrototypeGroup;
+  openCascade: OpenCascadeInstance;
+  tessellation: Tessellation;
+  withBrepEdges: boolean;
+  tracer?: RuntimeSpanTracer;
+}): Array<[MeshableConfiguration, GeometryReplicad]> {
+  const prototypeConfig = group.prototype.config;
+  const prototypeGeometry = createEmptyReplicadGeometry(prototypeConfig);
+  const shapeNames = group.instances.map((instance) => instance.config.name).join(',');
+  const sharedAttributes = {
+    prototypeHash: group.prototype.info.prototypeHash,
+    partnerKey: group.prototype.info.partnerKey,
+    instanceCount: group.instances.length,
+    shapeNames,
+    linearTolerance: tessellation.linearTolerance,
+    angularToleranceDeg: tessellation.angularTolerance,
+    withBrepEdges,
+  };
+
+  prototypeGeometry.faces = withSpan({
+    tracer,
+    name: 'replicad.tessellate.faces',
+    attributes: {
+      ...sharedAttributes,
+      output: 'faces',
+    },
+    operation: () => extractPrototypeFaces({ openCascade, shape: prototypeConfig.shape, tessellation }),
+  });
+
+  if (withBrepEdges) {
+    prototypeGeometry.edges = withSpan({
+      tracer,
+      name: 'replicad.tessellate.edges',
+      attributes: {
+        ...sharedAttributes,
+        output: 'edges',
+      },
+      operation: () => extractPrototypeEdges({ openCascade, shape: prototypeConfig.shape, tessellation }),
+    });
+  }
+
+  return withSpan({
+    tracer,
+    name: 'replicad.tessellation-instancing.expand',
+    attributes: {
+      prototypeHash: group.prototype.info.prototypeHash,
+      partnerKey: group.prototype.info.partnerKey,
+      instanceCount: group.instances.length,
+      vertexCount: prototypeGeometry.faces.vertices.length / 3,
+      triangleCount: prototypeGeometry.faces.triangles.length / 3,
+      linePointCount: prototypeGeometry.edges.lines.length / 3,
+    },
+    operation: () =>
+      group.instances.map((instance) => {
+        const faceIds = extractInstanceFaceIds({ openCascade, shape: instance.config.shape, tessellation });
+        const edgeIds = withBrepEdges
+          ? extractInstanceEdgeIds({ openCascade, shape: instance.config.shape, tessellation })
+          : [];
+        return [
+          instance.config,
+          transformReplicadGeometryInstance({
+            prototype: prototypeGeometry,
+            instance: instanceFromConfig({ config: instance.config, info: instance.info, faceIds, edgeIds }),
+          }),
+        ];
+      }),
+  });
+}
+
+function renderWithTessellationInstancing(
+  configs: NamedInputShape[],
+  {
+    openCascade,
+    tessellation,
+    withBrepEdges,
+    tracer,
+  }: {
+    openCascade: OpenCascadeInstance;
+    tessellation: Tessellation;
+    withBrepEdges: boolean;
+    tracer?: RuntimeSpanTracer;
+  },
+): { geometries: Array<GeometrySvg | GeometryReplicad>; renderMode: RenderMode } {
+  const detection = detectInstancingGroups({
+    configs,
+    openCascade,
+    tessellation,
+    withBrepEdges,
+    tracer,
+  });
+
+  if (detection.groups.length === 0) {
+    return {
+      geometries: render(configs, { tessellation, withBrepEdges, tracer, tessellationInstancing: false }),
+      renderMode: 'flat',
+    };
+  }
+
+  const groupedGeometries = new Map<MeshableConfiguration, GeometryReplicad>();
+  for (const group of detection.groups) {
+    for (const [config, geometry] of renderPrototypeGroup({
+      group,
+      openCascade,
+      tessellation,
+      withBrepEdges,
+      tracer,
+    })) {
+      groupedGeometries.set(config, geometry);
+    }
+  }
+
+  let legacyMeshCount = 0;
+  const geometries = configs.map((shapeConfig) => {
+    if (hasSvgableShape(shapeConfig)) {
+      return renderSvg(shapeConfig);
+    }
+
+    if (hasMeshableShape(shapeConfig)) {
+      const grouped = groupedGeometries.get(shapeConfig);
+      if (grouped) {
+        return grouped;
+      }
+      legacyMeshCount++;
+      return renderMesh(shapeConfig, { tessellation, withBrepEdges, tracer });
+    }
+
+    throw new Error('Invalid shape');
+  });
+
+  return {
+    geometries,
+    renderMode: legacyMeshCount === 0 ? 'tessellation-instanced' : 'mixed',
+  };
+}
+
 /**
  * Renders an array of input shapes into geometry representations.
  *
@@ -266,8 +621,32 @@ function renderMesh(shapeConfig: MeshableConfiguration, options: RenderMeshOptio
  */
 export function render(
   shapes: NamedInputShape[],
-  { tessellation = defaultPreviewTessellation, withBrepEdges = false, tracer }: RenderOptions = {},
+  {
+    tessellation = defaultPreviewTessellation,
+    withBrepEdges = false,
+    tracer,
+    openCascade,
+    tessellationInstancing = false,
+    onRenderMode,
+  }: RenderOptions = {},
 ): Array<GeometrySvg | GeometryReplicad> {
+  if (tessellationInstancing && openCascade) {
+    try {
+      const result = renderWithTessellationInstancing(shapes, {
+        openCascade,
+        tessellation,
+        withBrepEdges,
+        tracer,
+      });
+      onRenderMode?.(result.renderMode);
+      return result.geometries;
+    } catch {
+      onRenderMode?.('flat');
+      return render(shapes, { tessellation, withBrepEdges, tracer, tessellationInstancing: false });
+    }
+  }
+
+  onRenderMode?.('flat');
   return shapes.map((shapeConfig) => {
     if (hasSvgableShape(shapeConfig)) {
       return renderSvg(shapeConfig);
@@ -293,18 +672,24 @@ export function renderOutput({
   defaultName,
   tessellation,
   withBrepEdges = false,
+  openCascade,
+  tessellationInstancing = false,
   tracer,
+  onRenderMode,
 }: {
   shapes: MainResultShapes;
   beforeRender?: (shapes: InputShape[]) => InputShape[];
   defaultName?: string;
   tessellation?: Tessellation;
   withBrepEdges?: boolean;
+  openCascade?: OpenCascadeInstance;
+  tessellationInstancing?: boolean;
   tracer?: RuntimeSpanTracer;
+  onRenderMode?: (mode: RenderMode) => void;
 }): Array<GeometrySvg | GeometryReplicad> {
   const baseShape = createBasicShapeConfig(shapes, defaultName).map((element) => normalizeColorAndOpacity(element));
 
   const config = resolveReplicadShapeNames(beforeRender ? beforeRender(baseShape) : baseShape);
 
-  return render(config, { tessellation, withBrepEdges, tracer });
+  return render(config, { tessellation, withBrepEdges, openCascade, tessellationInstancing, tracer, onRenderMode });
 }

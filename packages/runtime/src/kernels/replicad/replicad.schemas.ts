@@ -16,10 +16,10 @@ import { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas
 const occtRenderOptionSchema = z.object({
   tessellation: z
     .object({
-      linearTolerance: z.number().positive().default(0.01).describe('Linear tolerance (distance) for tessellation'),
+      linearTolerance: z.number().positive().default(0.02).describe('Linear tolerance (distance) for tessellation'),
       angularTolerance: z.number().positive().default(20).describe('Angular tolerance (degrees) for tessellation'),
     })
-    .default({ linearTolerance: 0.01, angularTolerance: 20 })
+    .default({ linearTolerance: 0.02, angularTolerance: 20 })
     .describe('Tessellation quality for preview rendering'),
 });
 
@@ -68,6 +68,7 @@ export const replicadOptionsSchema = z.object({
   libraryTracing: z.enum(['off', 'summary', 'per-call']).optional().default('off'),
   withBrepEdges: z.boolean().optional().default(false),
   withSourceMapping: z.boolean().optional().default(false),
+  tessellationInstancing: z.boolean().optional().default(true),
 });
 
 /**

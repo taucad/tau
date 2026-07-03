@@ -32,6 +32,8 @@ import { discoverKclDependencies } from '#kernels/zoo/kcl-import-resolver.js';
 import { transformGltfExportBytes } from '#utils/gltf-export-transform.js';
 import { normalizeGltfGeometryNames } from '#utils/gltf-geometry-name-normalizer.js';
 import { enrichZooGltfTopology } from '#utils/zoo-gltf-topology.js';
+import { RenderArtifactFinalizationError, finalizeRenderOutput } from '#framework/render-artifact-finalizer.js';
+import { createEmptyGlb, createEmptyGltf, createEmptyGltfGeometry } from '#utils/glb-writer.js';
 
 // =============================================================================
 // Types
@@ -48,10 +50,46 @@ type ZooNativeHandle = {
   hasGeometry: boolean;
 };
 
+type ZooExportFormat = keyof typeof zooExportSchemas;
+
 const createZooNativeHandle = (hasGeometry: boolean): ZooNativeHandle => ({
   kind: 'zoo-live-engine-session',
   hasGeometry,
 });
+
+const createNoGeometryZooExportResult = (format: ZooExportFormat) => {
+  switch (format) {
+    case 'glb': {
+      return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))]);
+    }
+
+    case 'gltf': {
+      return createKernelSuccess([createExportFile('gltf', 'model.gltf', asBuffer(createEmptyGltf()))]);
+    }
+
+    case 'step':
+    case 'stl': {
+      return createKernelError([
+        {
+          message: 'No geometry available for export. Please build geometries before exporting.',
+          code: 'RUNTIME',
+          severity: 'error',
+        },
+      ]);
+    }
+
+    default: {
+      const _exhaustive: never = format;
+      return createKernelError([
+        {
+          message: `Unsupported export format: ${_exhaustive as string}`,
+          code: 'KERNEL_CAPABILITY_MISSING',
+          severity: 'error',
+        },
+      ]);
+    }
+  }
+};
 
 const mapCoordinateSystemToKclCoords = (coordinateSystem: 'y-up' | 'z-up' | undefined): System => {
   if (coordinateSystem === 'y-up') {
@@ -241,7 +279,10 @@ export const zoo = defineKernel({
     try {
       const trimmedCode = code.trim();
       if (trimmedCode === '') {
-        return { geometry: [], nativeHandle: createZooNativeHandle(false) };
+        return finalizeRenderOutput({
+          artifacts: [createEmptyGltfGeometry()],
+          nativeHandle: createZooNativeHandle(false),
+        });
       }
 
       const utilities = await getKclUtilitiesWithEngine(context);
@@ -268,7 +309,10 @@ export const zoo = defineKernel({
         storage: 'binary',
       });
       if (exportResult.length === 0) {
-        return { geometry: [], nativeHandle: createZooNativeHandle(false) };
+        return finalizeRenderOutput({
+          artifacts: [createEmptyGltfGeometry()],
+          nativeHandle: createZooNativeHandle(false),
+        });
       }
 
       const gltf = exportResult[0];
@@ -286,9 +330,9 @@ export const zoo = defineKernel({
       });
       const enrichedGltf = await enrichZooGltfTopology(normalizedGltf, { format: 'glb' });
       const geometry: GeometryGltf = { format: 'gltf', content: enrichedGltf };
-      return { geometry: [geometry], nativeHandle: createZooNativeHandle(true) };
+      return finalizeRenderOutput({ artifacts: [geometry], nativeHandle: createZooNativeHandle(true) });
     } catch (error) {
-      if (error instanceof KclBuildError) {
+      if (error instanceof KclBuildError || error instanceof RenderArtifactFinalizationError) {
         throw error;
       }
 
@@ -302,13 +346,7 @@ export const zoo = defineKernel({
     const { format, nativeHandle, options } = input;
 
     if (!nativeHandle.hasGeometry) {
-      return createKernelError([
-        {
-          message: 'No geometry available for export. Please build geometries before exporting.',
-          code: 'RUNTIME',
-          severity: 'error',
-        },
-      ]);
+      return createNoGeometryZooExportResult(format);
     }
 
     try {

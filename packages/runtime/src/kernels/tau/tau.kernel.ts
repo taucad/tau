@@ -17,6 +17,7 @@ import { resolveToRelative } from '#kernels/kernel-module-helpers.js';
 import type { KernelIssue } from '#types/runtime.types.js';
 import { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { createExportFile } from '@taucad/types/constants';
+import { finalizeRenderOutput } from '#framework/render-artifact-finalizer.js';
 import { normalizeGltfGeometryNames } from '#utils/gltf-geometry-name-normalizer.js';
 import { stripTauGltfMetadata } from '#utils/gltf-topology-metadata.js';
 
@@ -139,10 +140,10 @@ export const tau = defineKernel({
 
       logger.log(`Successfully converted ${formattedFormat} to GLB`);
 
-      return {
-        geometry: [{ format: 'gltf', content: normalizedGlbData }],
+      return finalizeRenderOutput({
+        artifacts: [{ format: 'gltf', content: normalizedGlbData }],
         nativeHandle: normalizedGlbData,
-      };
+      });
     } catch (error) {
       logger.error('Error converting file', { data: error });
       const errorMessage = error instanceof Error ? error.message : 'Failed to convert file';

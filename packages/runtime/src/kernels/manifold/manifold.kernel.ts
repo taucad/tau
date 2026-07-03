@@ -26,8 +26,10 @@ import type { RuntimeModuleExports } from '#kernels/kernel-module-helpers.js';
 import { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { initManifoldWasm } from '#kernels/manifold/init-manifold.js';
 import { parseStackTrace, resolveSourcePath, deriveLocationFromFrames } from '#framework/error-enrichment.js';
+import { finalizeRenderOutput } from '#framework/render-artifact-finalizer.js';
 import { transformGltfExportBytes } from '#utils/gltf-export-transform.js';
 import { normalizeGltfGeometryNames } from '#utils/gltf-geometry-name-normalizer.js';
+import { createEmptyGlb, createEmptyGltfGeometry } from '#utils/glb-writer.js';
 
 // =============================================================================
 // Types
@@ -313,11 +315,8 @@ export const manifold = defineKernel({
       runtime.logger.warn('createGeometry returning empty: main-returned-undefined', {
         data: { filePath: relativeFilePath },
       });
-      return {
-        geometry: [],
-        nativeHandle: { glb: new Uint8Array() },
-        issues: [],
-      };
+      const geometry = createEmptyGltfGeometry();
+      return finalizeRenderOutput({ artifacts: [geometry], nativeHandle: { glb: geometry.content } });
     }
 
     try {
@@ -329,10 +328,7 @@ export const manifold = defineKernel({
         sceneNamePolicy: 'clear-generated',
         sceneNameSource: 'external-generated',
       });
-      return {
-        geometry: [{ format: 'gltf', content: glb }],
-        nativeHandle: { glb },
-      };
+      return finalizeRenderOutput({ artifacts: [{ format: 'gltf', content: glb }], nativeHandle: { glb } });
     } catch (error) {
       const stackFrames = parseStackTrace(error, {
         sourceMap: bundleResult.sourceMap,
@@ -361,14 +357,7 @@ export const manifold = defineKernel({
     const { format, nativeHandle, options } = input;
 
     if (nativeHandle.glb.length === 0) {
-      return createKernelError([
-        {
-          message: 'No geometry available for export.',
-          code: 'RUNTIME',
-          type: 'runtime',
-          severity: 'error',
-        },
-      ]);
+      return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))]);
     }
 
     switch (format) {

@@ -44,6 +44,7 @@ import type { OcctModuleFactory } from '#kernels/occt/oc-init.js';
 import { detectMultiThreadSupport, activateOccParallelism } from '#kernels/occt/oc-threading.js';
 import { resolveCjsDefault } from '#kernels/replicad/utils/resolve-cjs-default.js';
 import { formatOcRuntimeError } from '#kernels/occt/oc-error-formatter.js';
+import { RenderArtifactFinalizationError, finalizeRenderOutput } from '#framework/render-artifact-finalizer.js';
 import type { OcErrorContext } from '#kernels/occt/oc-error-formatter.js';
 import { runOcMain } from '#kernels/occt/oc-run-main.js';
 import { wrapOcWithTracing, wrapOcForExceptions } from '#kernels/occt/oc-tracing.js';
@@ -54,13 +55,14 @@ import {
   demangleStackFrames,
   classifyLibraryFrames,
 } from '#framework/error-enrichment.js';
-import { renderOutput } from '#kernels/replicad/utils/render-output.js';
+import { render, renderOutput } from '#kernels/replicad/utils/render-output.js';
 import { convertReplicadGeometriesToGltf } from '#kernels/replicad/utils/replicad-to-gltf.js';
 import type { InputShape, MainResultShapes } from '#kernels/replicad/utils/render-output.js';
 import type { GeometryReplicad } from '#kernels/replicad/replicad.types.js';
 import { replicadDetectPattern } from '#kernels/replicad/replicad.constants.js';
 import { loadReplicadSingleWasm } from '#kernels/replicad/replicad-wasm-single-loader.js';
 import { loadReplicadMultiWasm } from '#kernels/replicad/replicad-wasm-multi-loader.js';
+import { createEmptyGlb, createEmptyGltf, createEmptyGltfGeometry } from '#utils/glb-writer.js';
 import { resolveShapeName } from '#utils/shape-names.js';
 
 const geistRegularUrl = new URL('fonts/Geist-Regular.ttf', import.meta.url).href;
@@ -160,6 +162,7 @@ type ReplicadContext = {
   openCascade: OpenCascadeInstance;
   replicadLibrary: ReplicadLibrary;
   withBrepEdges: boolean;
+  tessellationInstancing: boolean;
   replicadInitialised: boolean;
   librarySourceMapCache: Map<string, SourceMapConsumer | undefined>;
   exportNameMap: Map<string, string>;
@@ -476,6 +479,15 @@ export type ReplicadOptions = {
   libraryTracing?: KernelLibraryTraceMode;
   /** Include Boundary Representation (BRep) edge lines in the generated GLTF geometry. Defaults to `false`. */
   withBrepEdges?: boolean;
+  /**
+   * Reuse prototype tessellation for repeated transformed Replicad shapes.
+   *
+   * Temporary diagnostic flag. Set to `false` to force the legacy
+   * one-shape-one-tessellation path for benchmarks and regression isolation.
+   *
+   * @default true
+   */
+  tessellationInstancing?: boolean;
   /** Load library source maps for enriched error stack traces. Adds ~50ms to init. Defaults to `false`. */
   withSourceMapping?: boolean;
 };
@@ -501,7 +513,7 @@ export const replicadKernel = defineKernel({
     const { mangledToOriginal: exportNameMap, exportNames: libraryExportNames } = preserveExportNames(replicadLibrary);
 
     const { logger, tracer } = runtime;
-    const { ocTracing, libraryTracing, withBrepEdges, withSourceMapping, wasm } = options;
+    const { ocTracing, libraryTracing, withBrepEdges, withSourceMapping, tessellationInstancing, wasm } = options;
 
     const wasmLabel = typeof wasm === 'string' ? wasm : 'custom';
     logger.debug(
@@ -586,6 +598,7 @@ export const replicadKernel = defineKernel({
       openCascade,
       replicadLibrary,
       withBrepEdges,
+      tessellationInstancing,
       replicadInitialised: true,
       librarySourceMapCache,
       exportNameMap,
@@ -684,11 +697,7 @@ export const replicadKernel = defineKernel({
         runtime.logger.warn('createGeometry returning empty: main-returned-undefined', {
           data: { filePath: relativeFilePath },
         });
-        return {
-          geometry: [],
-          nativeHandle: [],
-          issues: [],
-        };
+        return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
       }
 
       const defaultName = extractDefaultName(module);
@@ -696,6 +705,7 @@ export const replicadKernel = defineKernel({
       const { tessellation } = options;
 
       let nativeHandle: InputShape[] = [];
+      let renderMode: 'flat' | 'tessellation-instanced' | 'mixed' = 'flat';
       const renderOutputSpan = tracer.startSpan('replicad.render-output', {
         phase: 'computingGeometry',
         stage: 'render-output',
@@ -714,11 +724,16 @@ export const replicadKernel = defineKernel({
                 defaultName,
                 tessellation,
                 withBrepEdges: context.withBrepEdges,
+                openCascade: context.openCascade,
+                tessellationInstancing: context.tessellationInstancing,
                 tracer,
+                onRenderMode(mode) {
+                  renderMode = mode;
+                },
               }),
           });
         } finally {
-          renderOutputSpan.end();
+          renderOutputSpan.end({ renderMode });
         }
       })();
 
@@ -733,10 +748,10 @@ export const replicadKernel = defineKernel({
             renderedShapeCount: renderedShapes.length,
           },
         });
-        return { geometry: [], nativeHandle: [] };
+        return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
       }
 
-      const gltfShapes: GeometryGltf[] = [];
+      const artifacts: Array<GeometryGltf | GeometrySvg> = [];
       if (shapes3d.length > 0) {
         const gltfSpan = tracer.startSpan('replicad.mesh-to-gltf', {
           shapeCount: shapes3d.length,
@@ -750,12 +765,13 @@ export const replicadKernel = defineKernel({
             gltfSpan.end();
           }
         })();
-        gltfShapes.push({ format: 'gltf', content: gltfBlob });
+        artifacts.push({ format: 'gltf', content: gltfBlob });
       }
+      artifacts.push(...shapes2d);
 
-      return { geometry: [...gltfShapes, ...shapes2d], nativeHandle };
+      return finalizeRenderOutput({ artifacts, nativeHandle });
     } catch (error) {
-      if (error instanceof ReplicadBuildError) {
+      if (error instanceof ReplicadBuildError || error instanceof RenderArtifactFinalizationError) {
         throw error;
       }
 
@@ -773,9 +789,16 @@ export const replicadKernel = defineKernel({
       scope: 'export',
       operation: async () => {
         const { format, nativeHandle, options } = input;
-
-        if (nativeHandle.length === 0) {
-          return createKernelError([
+        const emptyGltfExport = () =>
+          createKernelSuccess([
+            createExportFile(
+              format,
+              format === 'glb' ? 'model.glb' : 'model.gltf',
+              asBuffer(format === 'glb' ? createEmptyGlb() : createEmptyGltf()),
+            ),
+          ]);
+        const noGeometryExportError = () =>
+          createKernelError([
             {
               message: 'No geometry available for export',
               code: 'RUNTIME',
@@ -783,13 +806,15 @@ export const replicadKernel = defineKernel({
               severity: 'error',
             },
           ]);
-        }
 
         switch (format) {
           case 'glb':
           case 'gltf': {
+            if (nativeHandle.length === 0) {
+              return emptyGltfExport();
+            }
+
             const { linearTolerance, angularTolerance } = options.tessellation;
-            const angularToleranceRad = angularTolerance * (Math.PI / 180);
             const { coordinateSystem, unit } = options;
             const outputCoordinateSystem = coordinateSystem;
             const shapes =
@@ -797,23 +822,24 @@ export const replicadKernel = defineKernel({
                 ? nativeHandle.map((s) => ({ ...s, shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]) }))
                 : nativeHandle;
 
-            const temporaryShapes = shapes.map((shapeConfig, index) => {
-              const { shape } = shapeConfig;
-              const faces = shape.mesh({
-                tolerance: linearTolerance,
-                angularTolerance: angularToleranceRad,
-              });
-              return {
-                format: 'replicad',
-                name: resolveShapeName({ index, name: shapeConfig.name, source: 'generated' }),
-                color: shapeConfig.color,
-                opacity: shapeConfig.opacity,
-                metalness: shapeConfig.metalness,
-                roughness: shapeConfig.roughness,
-                faces,
-                edges: { lines: [], edgeGroups: [] },
-              } satisfies GeometryReplicad;
+            const namedShapes = shapes.map((shapeConfig, index) => ({
+              ...shapeConfig,
+              name: resolveShapeName({ index, name: shapeConfig.name, source: 'generated' }),
+            }));
+            const renderedShapes = render(namedShapes, {
+              tessellation: { linearTolerance, angularTolerance },
+              withBrepEdges: false,
+              openCascade: context.openCascade,
+              tessellationInstancing: context.tessellationInstancing,
+              tracer: runtime.tracer,
             });
+            const temporaryShapes = renderedShapes.filter(
+              (shape): shape is GeometryReplicad => shape.format === 'replicad',
+            );
+
+            if (temporaryShapes.length === 0) {
+              return emptyGltfExport();
+            }
 
             const gltfData = convertReplicadGeometriesToGltf({
               geometries: temporaryShapes,
@@ -829,6 +855,10 @@ export const replicadKernel = defineKernel({
           }
 
           case 'step': {
+            if (nativeHandle.length === 0) {
+              return noGeometryExportError();
+            }
+
             const { coordinateSystem } = options;
             const shapes =
               coordinateSystem === 'y-up'
@@ -850,6 +880,10 @@ export const replicadKernel = defineKernel({
           }
 
           case 'stl': {
+            if (nativeHandle.length === 0) {
+              return noGeometryExportError();
+            }
+
             const { linearTolerance, angularTolerance } = options.tessellation;
             const angularToleranceRad = angularTolerance * (Math.PI / 180);
             const { coordinateSystem } = options;

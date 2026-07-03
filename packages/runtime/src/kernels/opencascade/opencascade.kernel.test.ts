@@ -4,6 +4,7 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return any */
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
+import type { GeometryResponse } from '@taucad/types';
 import { opencascade as opencascadeKernel } from '#kernels/opencascade/opencascade.kernel.js';
 import { getModuleRegistry } from '#kernels/kernel-module-helpers.js';
 import type { OpenCascadeInstance } from '#kernels/opencascade/wasm/opencascade_full.js';
@@ -31,6 +32,10 @@ type OpenCascadeSnapshotForTest = {
 type RuntimeWorkerInternalsForTest = {
   loadedKernels: Map<string, { definition: KernelDefinition }>;
   nativeHandle: unknown;
+  serializedNativeHandleSlot?: { serializedNativeHandle: unknown };
+  currentPublishedRender?: {
+    serializedNativeHandleSlot?: { serializedNativeHandle: unknown };
+  };
   lastSerializedNativeHandle: unknown;
 };
 
@@ -112,12 +117,11 @@ async function readGltfMaterialNames(glbBytes: Uint8Array<ArrayBuffer>): Promise
     .map((material) => material.getName());
 }
 
-function extractGltfBytes(result: {
-  data: Array<{ format: string; content: Uint8Array<ArrayBuffer> }>;
-}): Uint8Array<ArrayBuffer> {
-  const gltf = result.data.find((geometry) => geometry.format === 'gltf');
-  expect(gltf).toBeDefined();
-  return gltf!.content;
+function extractGltfBytes(result: { data: GeometryResponse }): Uint8Array<ArrayBuffer> {
+  if (result.data.format !== 'gltf') {
+    throw new Error(`Expected GLTF geometry, received ${result.data.format}`);
+  }
+  return result.data.content;
 }
 
 function assertStepRoundTripVolumeMm3(stepBytes: Uint8Array<ArrayBuffer>, expectedMm3: number): void {
@@ -368,7 +372,7 @@ export default function main() {
       const result = await worker.createGeometry({ file: geometryFile, parameters: {} });
       assertSuccess(result, 'box createGeometry');
       expect(result.data).toBeDefined();
-      expect(Array.isArray(result.data)).toBe(true);
+      expect(result.data.format).toBe('gltf');
       await geometryHelpers.expectValidGltf(result);
       const { nodeNames, meshNames } = await readGltfNodeMeshNames(extractGltfBytes(result));
       expect(nodeNames).toEqual(['Shape 1']);
@@ -439,27 +443,29 @@ export default function main() {
       );
     });
 
-    it('should return success with no issues when main returns undefined (empty body)', async () => {
+    it('should render an empty GLB when main returns undefined (empty body)', async () => {
       const geometryFile = createGeometryFile('empty.ts');
       const result = await worker.createGeometry({ file: geometryFile, parameters: {} });
       assertSuccess(result, 'empty createGeometry');
-      expect(result.issues).toEqual([]);
-      expect(result.data).toHaveLength(0);
+      await geometryHelpers.expectValidGltf(result);
+      await geometryHelpers.expectMeshCount(result, 0);
     });
 
-    it('should return success with no issues when default export is not a function', async () => {
+    it('should render an empty GLB when default export is not a function', async () => {
       const geometryFile = createGeometryFile('default-not-function.ts');
       const result = await worker.createGeometry({ file: geometryFile, parameters: {} });
       assertSuccess(result, 'default-not-function createGeometry');
-      expect(result.issues).toEqual([]);
-      expect(result.data).toHaveLength(0);
+      await geometryHelpers.expectValidGltf(result);
+      await geometryHelpers.expectMeshCount(result, 0);
     });
 
     // -- exportGeometry --
 
     it('should fail export with no geometry', async () => {
-      const geometryFile = createGeometryFile('empty.ts');
-      await worker.createGeometry({ file: geometryFile, parameters: {} });
+      const internals = getWorkerInternals(worker);
+      internals.nativeHandle = undefined;
+      internals.lastSerializedNativeHandle = undefined;
+      internals.currentPublishedRender = undefined;
       const result = await worker.exportGeometry('step');
       expect(result.success).toBe(false);
     });
@@ -521,6 +527,25 @@ export default function main() {
       const exportResult = await worker.exportGeometry('glb');
       assertSuccess(exportResult, 'GLB export');
       expect(exportResult.data[0]?.name).toContain('glb');
+    });
+
+    it('should export empty GLB and glTF files after an empty render but keep STEP and STL unavailable', async () => {
+      const geometryFile = createGeometryFile('empty.ts');
+      const createResult = await worker.createGeometry({ file: geometryFile, parameters: {} });
+      assertSuccess(createResult, 'empty createGeometry for export');
+
+      const glbResult = await worker.exportGeometry('glb');
+      assertSuccess(glbResult, 'empty GLB export');
+      const document = await new NodeIO().readBinary(glbResult.data[0]!.bytes);
+      expect(document.getRoot().listMeshes()).toHaveLength(0);
+
+      const gltfResult = await worker.exportGeometry('gltf');
+      assertSuccess(gltfResult, 'empty glTF export');
+      const json = JSON.parse(new TextDecoder().decode(gltfResult.data[0]!.bytes)) as { meshes: unknown[] };
+      expect(json.meshes).toEqual([]);
+
+      assertFailure(await worker.exportGeometry('step'), 'empty STEP export');
+      assertFailure(await worker.exportGeometry('stl'), 'empty STL export');
     });
 
     it('should export STEP assembly with multiple named shapes', async () => {
@@ -616,13 +641,20 @@ export default function main() {
       const createGeometrySpy = vi.spyOn(definition, 'createGeometry');
       const internals = getWorkerInternals(worker);
       internals.nativeHandle = undefined;
-      internals.lastSerializedNativeHandle = {
+      const corruptSnapshot = {
         kind: 'opencascade-native-handle',
         version: 1,
         format: 'brep-ascii',
         occtFormatVersion: 'TopTools_FormatVersion_CURRENT',
         entries: [{ brep: new Uint8Array([0, 1, 2, 3]), metadata: { name: 'Shape 1' } }],
       };
+      internals.lastSerializedNativeHandle = corruptSnapshot;
+      if (internals.serializedNativeHandleSlot) {
+        internals.serializedNativeHandleSlot.serializedNativeHandle = corruptSnapshot;
+      }
+      if (internals.currentPublishedRender?.serializedNativeHandleSlot) {
+        internals.currentPublishedRender.serializedNativeHandleSlot.serializedNativeHandle = corruptSnapshot;
+      }
 
       const exportResult = await worker.exportGeometry('step');
 

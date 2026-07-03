@@ -3,9 +3,9 @@ import { opencascadeExportSchemas, opencascadeRenderSchema } from '#kernels/open
 import { replicadExportSchemas, replicadRenderSchema } from '#kernels/replicad/replicad.schemas.js';
 
 describe('OCCT-backed tessellation defaults', () => {
-  it('should default Replicad render and mesh exports to 0.01mm / 20deg', () => {
+  it('should default Replicad render to 0.02mm / 20deg and mesh exports to 0.01mm / 20deg', () => {
     expect(replicadRenderSchema.parse({}).tessellation).toEqual({
-      linearTolerance: 0.01,
+      linearTolerance: 0.02,
       angularTolerance: 20,
     });
     expect(replicadExportSchemas.glb.parse({}).tessellation).toEqual({
@@ -18,9 +18,9 @@ describe('OCCT-backed tessellation defaults', () => {
     });
   });
 
-  it('should default OpenCascade render and mesh exports to 0.01mm / 20deg', () => {
+  it('should default OpenCascade render to 0.02mm / 20deg and mesh exports to 0.01mm / 20deg', () => {
     expect(opencascadeRenderSchema.parse({}).tessellation).toEqual({
-      linearTolerance: 0.01,
+      linearTolerance: 0.02,
       angularTolerance: 20,
     });
     expect(opencascadeExportSchemas.glb.parse({}).tessellation).toEqual({

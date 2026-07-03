@@ -6,6 +6,7 @@ import {
   KERNEL_MODULES_KEY,
   isRecordObject,
   getModuleRegistry,
+  createKernelModuleShim,
   extractDefaultParameters,
   resolveToRelative,
   convertRawIssuesToKernelIssues,
@@ -48,6 +49,36 @@ describe('getModuleRegistry', () => {
   it('should store the registry on globalThis', () => {
     const registry = getModuleRegistry();
     expect((globalThis as Record<string, unknown>)[KERNEL_MODULES_KEY]).toBe(registry);
+  });
+});
+
+describe('createKernelModuleShim', () => {
+  it('preserves public export names as local bindings for readable runtime diagnostics', () => {
+    const code = createKernelModuleShim({
+      moduleExpression: 'globalThis.__testModule',
+      exports: {
+        primitives: {},
+        transforms: {},
+      },
+    });
+
+    expect(code).toContain('const primitives = __mod["primitives"];');
+    expect(code).toContain('export { primitives };');
+    expect(code).toContain('const transforms = __mod["transforms"];');
+    expect(code).toContain('export { transforms };');
+    expect(code).not.toContain('__kernel_export');
+  });
+
+  it('uses a generated local binding when the export name cannot be a safe local identifier', () => {
+    const code = createKernelModuleShim({
+      moduleExpression: 'globalThis.__testModule',
+      exports: {
+        class: {},
+      },
+    });
+
+    expect(code).toContain('const __kernel_export_0 = __mod["class"];');
+    expect(code).toContain('export { __kernel_export_0 as class };');
   });
 });
 

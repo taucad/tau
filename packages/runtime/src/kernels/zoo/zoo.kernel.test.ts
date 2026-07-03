@@ -2,7 +2,9 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { JSONDocument } from '@gltf-transform/core';
 import { NodeIO } from '@gltf-transform/core';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import { zoo as zooKernel } from '#kernels/zoo/zoo.kernel.js';
+import type { KclUtilities } from '#kernels/zoo/kcl-utils.js';
 import { createMockKernelRuntime, createTestWorker, createGeometryFile } from '#testing/kernel-testing.utils.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import { writeGlb, writeGltfJson } from '#utils/glb-writer.js';
@@ -137,7 +139,7 @@ async function getParameters(
   files: Record<string, string>,
   mainFile: string,
 ): Promise<{
-  jsonSchema: unknown;
+  jsonSchema: JSONSchema7;
   defaultParameters: Record<string, unknown>;
 }> {
   const worker = await createWorker(files);
@@ -894,10 +896,12 @@ cone = startSketchOn(XZ)
         context,
       );
 
-      expect(result).toEqual({
-        geometry: [],
-        nativeHandle: { kind: 'zoo-live-engine-session', hasGeometry: false },
-      });
+      expect(result.nativeHandle).toEqual({ kind: 'zoo-live-engine-session', hasGeometry: false });
+      expect(result.geometry.format).toBe('gltf');
+      if (result.geometry.format === 'gltf') {
+        const document = await new NodeIO().readBinary(result.geometry.content);
+        expect(document.getRoot().listMeshes()).toHaveLength(0);
+      }
     });
 
     it('should invalidate geometry handles when the KCL engine no longer has an executed program', async () => {
@@ -943,6 +947,64 @@ cone = startSketchOn(XZ)
       ).resolves.toBe(true);
     });
 
+    it('should export empty GLB and glTF files for empty handles but reject STEP and STL', async () => {
+      const context: Parameters<typeof zooDefinition.exportGeometry>[2] = {
+        baseUrl: 'ws://fake.example/modeling-commands',
+        fileSystemManager: undefined,
+        kclUtils: undefined,
+      };
+      const runtime = createMockKernelRuntime();
+      const nativeHandle = { kind: 'zoo-live-engine-session', hasGeometry: false } as const;
+
+      const glbResult = await zooDefinition.exportGeometry(
+        {
+          format: 'glb',
+          nativeHandle,
+          options: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
+        },
+        runtime,
+        context,
+      );
+      expect(glbResult.success).toBe(true);
+      if (glbResult.success) {
+        const document = await new NodeIO().readBinary(glbResult.data[0]!.bytes);
+        expect(document.getRoot().listMeshes()).toHaveLength(0);
+      }
+
+      const gltfResult = await zooDefinition.exportGeometry(
+        {
+          format: 'gltf',
+          nativeHandle,
+          options: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
+        },
+        runtime,
+        context,
+      );
+      expect(gltfResult.success).toBe(true);
+      if (gltfResult.success) {
+        const json = JSON.parse(new TextDecoder().decode(gltfResult.data[0]!.bytes)) as { meshes: unknown[] };
+        expect(json.meshes).toEqual([]);
+      }
+
+      const stepResult = await zooDefinition.exportGeometry(
+        { format: 'step', nativeHandle, options: { coordinateSystem: 'y-up' } },
+        runtime,
+        context,
+      );
+      expect(stepResult.success).toBe(false);
+
+      const stlResult = await zooDefinition.exportGeometry(
+        {
+          format: 'stl',
+          nativeHandle,
+          options: { binary: true, coordinateSystem: 'y-up', unit: { length: 'meter' } },
+        },
+        runtime,
+        context,
+      );
+      expect(stlResult.success).toBe(false);
+    });
+
     it('should normalize generated GLB names from the KCL engine', async () => {
       const engineMaterialName = ['Material', 'Default'].join('_');
       const exportFromMemory = vi
@@ -956,7 +1018,7 @@ cone = startSketchOn(XZ)
         kclUtils: {
           initializeEngine: vi.fn().mockResolvedValue(undefined),
           exportFromMemory,
-        },
+        } as unknown as KclUtilities,
       };
 
       const result = await zooDefinition.exportGeometry(
@@ -992,7 +1054,7 @@ cone = startSketchOn(XZ)
         kclUtils: {
           initializeEngine: vi.fn().mockResolvedValue(undefined),
           exportFromMemory,
-        },
+        } as unknown as KclUtilities,
       };
 
       const result = await zooDefinition.exportGeometry(

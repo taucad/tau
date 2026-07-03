@@ -78,8 +78,9 @@ export function createKernelModuleShim({
   const exportNames = Object.keys(exports).filter((key) => key !== 'default' && isValidJavaScriptIdentifier(key));
   const namedExports = exportNames
     .map((key, index) => {
-      const localName = `${exportPrefix}_${index}`;
-      return `const ${localName} = __mod[${JSON.stringify(key)}];\nexport { ${localName} as ${key} };`;
+      const localName = isSafeBindingIdentifier(key) ? key : `${exportPrefix}_${index}`;
+      const exportClause = localName === key ? localName : `${localName} as ${key}`;
+      return `const ${localName} = __mod[${JSON.stringify(key)}];\nexport { ${exportClause} };`;
     })
     .join('\n');
 
@@ -109,6 +110,61 @@ export function registerKernelModule(runtime: KernelRuntime, options: RegisterKe
 
 function isValidJavaScriptIdentifier(value: string): boolean {
   return /^[$_a-z][\w$]*$/i.test(value);
+}
+
+const reservedBindingIdentifiers = new Set([
+  'arguments',
+  'await',
+  'break',
+  'case',
+  'catch',
+  'class',
+  'const',
+  'continue',
+  'debugger',
+  'default',
+  'delete',
+  'do',
+  'else',
+  'enum',
+  'eval',
+  'export',
+  'extends',
+  'false',
+  'finally',
+  'for',
+  'function',
+  'if',
+  'implements',
+  'import',
+  'in',
+  'instanceof',
+  'interface',
+  'let',
+  'new',
+  'null',
+  'package',
+  'private',
+  'protected',
+  'public',
+  'return',
+  'static',
+  'super',
+  'switch',
+  'this',
+  'throw',
+  'true',
+  'try',
+  'typeof',
+  'var',
+  'void',
+  'while',
+  'with',
+  'yield',
+]);
+
+function isSafeBindingIdentifier(value: string): boolean {
+  return value !== '__mod' && isValidJavaScriptIdentifier(value) && !reservedBindingIdentifiers.has(value);
 }
 
 /**

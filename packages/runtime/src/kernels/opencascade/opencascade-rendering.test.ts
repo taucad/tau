@@ -142,7 +142,7 @@ export default function main() {
     })) as CreateGeometryResult;
     assertSuccess(result, 'occt uncoloured createGeometry');
 
-    expect(result.data.length).toBeGreaterThan(0);
+    expect(result.data.format).toBe('gltf');
 
     try {
       const baseColor = await getMaterialBaseColor(result);

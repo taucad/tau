@@ -27,11 +27,13 @@ import {
 import type { KernelIssue } from '#types/runtime.types.js';
 import { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { parseStackTrace, resolveSourcePath, deriveLocationFromFrames } from '#framework/error-enrichment.js';
+import { finalizeRenderOutput } from '#framework/render-artifact-finalizer.js';
 import { jscadToGltf } from '#kernels/jscad/jscad-to-gltf.js';
 import { collectJscadPartIssues } from '#kernels/jscad/jscad-diagnostics.js';
 import { resolveJscadModeling } from '#kernels/jscad/jscad-modeling.js';
 import { assignJscadPartName, isRenderableJscadPart, normalizeJscadParts } from '#kernels/jscad/jscad-parts.js';
 import type { JscadPartDescriptor } from '#kernels/jscad/jscad-parts.js';
+import { createEmptyGlb, createEmptyGltfGeometry } from '#utils/glb-writer.js';
 import { resolveShapeName } from '#utils/shape-names.js';
 
 import type { JscadParameterDefinition } from '#kernels/jscad/jscad.schema.js';
@@ -347,31 +349,29 @@ export const jscad = defineKernel({
     }
 
     if (shapes === undefined) {
-      return {
-        geometry: [],
-        nativeHandle: [],
-        issues: [],
-      };
+      return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
     }
 
     const parts = normalizeJscadParts(shapes);
     const issues = collectJscadPartIssues(parts);
 
     if (parts.length === 0) {
-      return { geometry: [], nativeHandle: [], issues };
+      return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [], issues });
     }
 
-    const geometries: GeometryResponse[] = [];
+    const artifacts: GeometryResponse[] = [];
     const renderableParts = parts.filter((part) => isRenderableJscadPart(part));
     if (renderableParts.length > 0) {
       try {
-        geometries.push({ format: 'gltf', content: jscadToGltf(renderableParts) });
+        artifacts.push({ format: 'gltf', content: jscadToGltf(renderableParts) });
       } catch (error) {
         logger.warn('Failed to convert JSCAD assembly to GLTF', { data: error });
       }
+    } else {
+      artifacts.push(createEmptyGltfGeometry());
     }
 
-    return { geometry: geometries, nativeHandle: parts, issues };
+    return finalizeRenderOutput({ artifacts, nativeHandle: parts, issues });
   },
 
   serializeNativeHandle({ nativeHandle }) {
@@ -431,32 +431,18 @@ export const jscad = defineKernel({
   async exportGeometry(input, _runtime, _context) {
     const { format, nativeHandle, options } = input;
 
-    if (nativeHandle.length === 0) {
-      return createKernelError([
-        {
-          message: 'No geometry available for export.',
-          code: 'RUNTIME',
-          type: 'runtime',
-          severity: 'error',
-        },
-      ]);
-    }
-
     switch (format) {
       // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- exhaustive switch for future format expansion
       case 'glb': {
+        if (nativeHandle.length === 0) {
+          return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))]);
+        }
+
         const { coordinateSystem, unit } = options;
         const renderableParts = nativeHandle.filter((part) => isRenderableJscadPart(part));
         const issues = collectJscadPartIssues(nativeHandle);
         if (renderableParts.length === 0) {
-          return createKernelError([
-            {
-              message: 'No renderable JSCAD geometry available for GLB export.',
-              code: 'RUNTIME',
-              type: 'runtime',
-              severity: 'error',
-            },
-          ]);
+          return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))], issues);
         }
 
         const gltfData = jscadToGltf(renderableParts, { coordinateSystem, unit });

@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { encode as msgpackEncode, decode as msgpackDecode } from '@msgpack/msgpack';
 import { NodeIO } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { jscad as jscadKernel } from '#kernels/jscad/jscad.kernel.js';
 import { resolveJscadModeling } from '#kernels/jscad/jscad-modeling.js';
@@ -32,12 +33,14 @@ import { createNodeClient } from '#node.js';
 const createWorker = async (files: Record<string, string>): ReturnType<typeof createTestWorker> =>
   createTestWorker(jscadKernel, files);
 
+type JscadSerializedNativeHandleEntry = { type: 'geom2' | 'geom3' | 'path2'; data: Float32Array; name?: string };
+
 /** Helper to extract parameters and assert success. */
 const getParameters = async (
   files: Record<string, string>,
   mainFile: string,
 ): Promise<{
-  jsonSchema: unknown;
+  jsonSchema: JSONSchema7;
   defaultParameters: Record<string, unknown>;
 }> => getTestParameters(jscadKernel, files, mainFile);
 
@@ -329,7 +332,7 @@ describe('JscadWorker', () => {
         expect(result.success).toBe(true);
         if (result.success) {
           expect(result.data).toBeDefined();
-          expect(Array.isArray(result.data)).toBe(true);
+          expect(result.data.format).toBe('gltf');
         }
 
         // Geometry quality assertions (10x10x10 cube)
@@ -463,7 +466,7 @@ describe('JscadWorker', () => {
 
         expect(result.success).toBe(true);
         if (result.success) {
-          expect(result.data).toHaveLength(1);
+          expect(result.data.format).toBe('gltf');
         }
 
         await geometryHelpers.expectValidGltf(result);
@@ -720,7 +723,7 @@ module.exports = { main, getParameterDefinitions }
         if (!result.success) {
           return;
         }
-        expect(result.data).toHaveLength(1);
+        expect(result.data.format).toBe('gltf');
         const invalidIssue = result.issues.find((issue) => issue.code === 'GEOMETRY_INVALID');
         expect(invalidIssue).toBeDefined();
         if (!invalidIssue) {
@@ -1040,7 +1043,7 @@ module.exports = { main, getParameterDefinitions }
     });
 
     describe('2D geometry', () => {
-      it('should handle 2D rectangle', async () => {
+      it('should render 2D rectangle output as an empty GLB artifact', async () => {
         const result = await createGeometry(
           {
             'rect.ts': `
@@ -1054,10 +1057,11 @@ module.exports = { main, getParameterDefinitions }
           'rect.ts',
         );
 
-        expect(result.success).toBe(true);
+        await geometryHelpers.expectValidGltf(result);
+        await geometryHelpers.expectMeshCount(result, 0);
       });
 
-      it('should handle 2D circle', async () => {
+      it('should render 2D circle output as an empty GLB artifact', async () => {
         const result = await createGeometry(
           {
             'circle.ts': `
@@ -1071,7 +1075,8 @@ module.exports = { main, getParameterDefinitions }
           'circle.ts',
         );
 
-        expect(result.success).toBe(true);
+        await geometryHelpers.expectValidGltf(result);
+        await geometryHelpers.expectMeshCount(result, 0);
       });
     });
 
@@ -1185,7 +1190,7 @@ module.exports = { main, getParameterDefinitions }
         );
       });
 
-      it('should return success with no issues when main returns undefined (no return statement)', async () => {
+      it('should render an empty GLB when main returns undefined (no return statement)', async () => {
         const result = await createGeometry(
           {
             'no_return.ts': `
@@ -1200,14 +1205,11 @@ module.exports = { main, getParameterDefinitions }
           'no_return.ts',
         );
 
-        expect(result.success).toBe(true);
-        if (result.success) {
-          expect(result.issues).toEqual([]);
-          expect(result.data).toHaveLength(0);
-        }
+        await geometryHelpers.expectValidGltf(result);
+        await geometryHelpers.expectMeshCount(result, 0);
       });
 
-      it('should return success with no issues when main explicitly returns undefined', async () => {
+      it('should render an empty GLB when main explicitly returns undefined', async () => {
         const result = await createGeometry(
           {
             'explicit_undefined.ts': `
@@ -1221,11 +1223,8 @@ module.exports = { main, getParameterDefinitions }
           'explicit_undefined.ts',
         );
 
-        expect(result.success).toBe(true);
-        if (result.success) {
-          expect(result.issues).toEqual([]);
-          expect(result.data).toHaveLength(0);
-        }
+        await geometryHelpers.expectValidGltf(result);
+        await geometryHelpers.expectMeshCount(result, 0);
       });
     });
   });
@@ -1338,6 +1337,32 @@ module.exports = { main, getParameterDefinitions }
           }),
         }),
       ]);
+    });
+
+    it('should export an empty GLB after an empty render', async () => {
+      const worker = await createWorker({
+        'no_return.ts': `
+          export default function main() {
+            // Missing return statement.
+          }
+        `,
+      });
+
+      const geometryFile = createGeometryFile('no_return.ts');
+      const createResult = await worker.createGeometry({
+        file: geometryFile,
+        parameters: {},
+      });
+      expect(createResult.success).toBe(true);
+
+      const exportResult = await worker.exportGeometry('glb');
+      expect(exportResult.success).toBe(true);
+      if (!exportResult.success) {
+        return;
+      }
+
+      const document = await createNodeIo().readBinary(exportResult.data[0]!.bytes);
+      expect(document.getRoot().listMeshes()).toHaveLength(0);
     });
 
     it('should return error when no geometry computed', async () => {
@@ -2050,7 +2075,7 @@ describe('serializeNativeHandle', () => {
     }
 
     const restored = deserializeNativeHandle(
-      { serializedNativeHandle: result.serializedNativeHandle },
+      { serializedNativeHandle: result.serializedNativeHandle as JscadSerializedNativeHandleEntry[] },
       createMockKernelRuntime(),
       { modulesRegistered: true },
     );
@@ -2082,7 +2107,7 @@ describe('serializeNativeHandle', () => {
     expect(ArrayBuffer.isView(decodedEntry?.data)).toBe(true);
 
     const restoredHandle = deserializeNativeHandle(
-      { serializedNativeHandle: decodedSerializedNativeHandle },
+      { serializedNativeHandle: decodedSerializedNativeHandle as JscadSerializedNativeHandleEntry[] },
       createMockKernelRuntime(),
       { modulesRegistered: true },
     );
@@ -2112,7 +2137,11 @@ describe('serializeNativeHandle', () => {
       return;
     }
     const deserializeInvalidHandle = (data: unknown): void => {
-      deserializeNativeHandle({ serializedNativeHandle: data }, createMockKernelRuntime(), { modulesRegistered: true });
+      deserializeNativeHandle(
+        { serializedNativeHandle: data as JscadSerializedNativeHandleEntry[] },
+        createMockKernelRuntime(),
+        { modulesRegistered: true },
+      );
     };
 
     expect(() => {
@@ -2134,8 +2163,8 @@ describe('serializeNativeHandle', () => {
     const projectPath = await mkdtemp(join(tmpdir(), 'tau-jscad-create-cache-export-'));
     const cacheDirectory = join(projectPath, '.tau', 'cache', 'geometry');
     const exportRequest = {
-      file: 'main.ts',
-      ...jscadGlbExportOptions,
+      source: { path: 'main.ts' },
+      exportOptions: jscadGlbExportOptions,
     };
 
     try {
@@ -2237,7 +2266,7 @@ describe('serializeNativeHandle', () => {
     }
 
     const restoredHandle = deserializeNativeHandle(
-      { serializedNativeHandle: result.serializedNativeHandle },
+      { serializedNativeHandle: result.serializedNativeHandle as JscadSerializedNativeHandleEntry[] },
       createMockKernelRuntime(),
       { modulesRegistered: true },
     );

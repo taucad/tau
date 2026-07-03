@@ -4,6 +4,9 @@
 /* eslint-disable @typescript-eslint/naming-convention -- File names use extensions like 'box.ts' */
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- Curated example fixtures are integration-test inputs.
+import { loadFixture } from '@taucad/tau-examples/fixtures';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import type { Document } from '@gltf-transform/core';
 import { replicadDetectPattern } from '#kernels/replicad/replicad.constants.js';
 import { replicad as replicadKernel } from '#kernels/replicad/replicad.kernel.js';
@@ -73,12 +76,44 @@ const readGltfNodeMeshNames = async (
   };
 };
 
+const readGltfStats = async (
+  glbBytes: Uint8Array<ArrayBuffer>,
+): Promise<{
+  nodeCount: number;
+  meshCount: number;
+  primitiveCount: number;
+  vertexCount: number;
+  extensionsUsed: string[];
+}> => {
+  const document = await new NodeIO().readBinary(glbBytes);
+  let primitiveCount = 0;
+  let vertexCount = 0;
+
+  for (const mesh of document.getRoot().listMeshes()) {
+    for (const primitive of mesh.listPrimitives()) {
+      primitiveCount++;
+      vertexCount += primitive.getAttribute('POSITION')?.getCount() ?? 0;
+    }
+  }
+
+  return {
+    nodeCount: document.getRoot().listNodes().length,
+    meshCount: document.getRoot().listMeshes().length,
+    primitiveCount,
+    vertexCount,
+    extensionsUsed: document
+      .getRoot()
+      .listExtensionsUsed()
+      .map((extension) => extension.extensionName),
+  };
+};
+
 /** Helper to extract parameters and assert success. */
 const getParameters = async (
   files: Record<string, string>,
   mainFile: string,
 ): Promise<{
-  jsonSchema: unknown;
+  jsonSchema: JSONSchema7;
   defaultParameters: Record<string, unknown>;
 }> => getTestParameters(replicadKernel, files, mainFile);
 
@@ -350,7 +385,7 @@ describe('ReplicadWorker', () => {
       });
 
       assertSuccess(result);
-      expect(result.data.length).toBeGreaterThan(0);
+      expect(result.data.format).toBe('gltf');
       const glbData = extractGltfFromResult(result);
       expect(glbData).toBeDefined();
       const { nodeNames, meshNames } = await readGltfNodeMeshNames(glbData!);
@@ -372,7 +407,7 @@ describe('ReplicadWorker', () => {
       });
 
       assertSuccess(result);
-      expect(result.data.length).toBeGreaterThan(0);
+      expect(result.data.format).toBe('gltf');
       const glbData = extractGltfFromResult(result);
       expect(glbData).toBeDefined();
       const { nodeNames, meshNames } = await readGltfNodeMeshNames(glbData!);
@@ -409,6 +444,35 @@ describe('ReplicadWorker', () => {
   // ===========================================================================
 
   describe('createGeometry', () => {
+    it('should render the canonical V8 BRep fixture with named assembly parts', { timeout: 120_000 }, async () => {
+      const fixture = loadFixture('replicad', 'v8-engine-brep');
+      const result = await createGeometry({
+        files: fixture.files,
+        mainFile: fixture.mainFile,
+      });
+
+      assertSuccess(result);
+      const glbData = extractGltfFromResult(result);
+      expect(glbData).toBeDefined();
+
+      const { nodeNames } = await readGltfNodeMeshNames(glbData!);
+      expect(nodeNames).toEqual(
+        expect.arrayContaining([
+          'Block',
+          'Crankshaft',
+          'Flywheel',
+          'Harmonic Damper',
+          'Oil Pan',
+          'Piston 1',
+          'Con Rod 1',
+          'Cylinder Head L',
+          'Valve Cover L',
+          'Spark Plug 1',
+          'Intake Plenum',
+        ]),
+      );
+    });
+
     describe('Basic geometry - ESM style', () => {
       it('should compute geometry for a simple extruded rectangle', async () => {
         const result = await createGeometry({
@@ -426,7 +490,7 @@ describe('ReplicadWorker', () => {
 
         assertSuccess(result);
         expect(result.data).toBeDefined();
-        expect(Array.isArray(result.data)).toBe(true);
+        expect(result.data.format).toBe('gltf');
 
         // Geometry quality assertions
         await geometryHelpers.expectValidGltf(result);
@@ -1192,8 +1256,7 @@ describe('ReplicadWorker', () => {
 
         assertSuccess(result);
         // Should contain SVG format geometry
-        const hasSvg = result.data.some((g: { format: string }) => g.format === 'svg');
-        expect(hasSvg).toBe(true);
+        expect(result.data.format).toBe('svg');
       });
     });
 
@@ -1719,7 +1782,7 @@ export default function main() {
         expect(allNames).not.toContain('rethrowIfWasmException');
       });
 
-      it('should handle empty geometry result gracefully', async () => {
+      it('should render an empty GLB for an empty geometry result', async () => {
         const result = await createGeometry({
           files: {
             'empty.ts': `
@@ -1733,12 +1796,11 @@ export default function main() {
           mainFile: 'empty.ts',
         });
 
-        assertSuccess(result);
-        expect(Array.isArray(result.data)).toBe(true);
-        expect(result.data).toHaveLength(0);
+        await geometryHelpers.expectValidGltf(result);
+        await geometryHelpers.expectMeshCount(result, 0);
       });
 
-      it('should return success with no issues when main returns undefined (no return statement)', async () => {
+      it('should render an empty GLB when main returns undefined (no return statement)', async () => {
         const result = await createGeometry({
           files: {
             'no_return.ts': `
@@ -1759,12 +1821,11 @@ export default function main() {
           mainFile: 'no_return.ts',
         });
 
-        assertSuccess(result);
-        expect(result.issues).toEqual([]);
-        expect(result.data).toHaveLength(0);
+        await geometryHelpers.expectValidGltf(result);
+        await geometryHelpers.expectMeshCount(result, 0);
       });
 
-      it('should return success with no issues when main explicitly returns undefined', async () => {
+      it('should render an empty GLB when main explicitly returns undefined', async () => {
         const result = await createGeometry({
           files: {
             'explicit_undefined.ts': `
@@ -1778,9 +1839,8 @@ export default function main() {
           mainFile: 'explicit_undefined.ts',
         });
 
-        assertSuccess(result);
-        expect(result.issues).toEqual([]);
-        expect(result.data).toHaveLength(0);
+        await geometryHelpers.expectValidGltf(result);
+        await geometryHelpers.expectMeshCount(result, 0);
       });
     });
 
@@ -2299,6 +2359,40 @@ export default function main() {
       expect(exportResult.data[0]?.name).toContain('glb');
     });
 
+    it('should export empty GLB and glTF files after an empty render', async () => {
+      const worker = await createWorker({
+        'empty.ts': `
+          export default function main() {
+            return [];
+          }
+        `,
+      });
+
+      const geometryFile = createGeometryFile('empty.ts');
+      const createResult = await worker.createGeometry({ file: geometryFile, parameters: {} });
+      assertSuccess(createResult);
+
+      const glbExportResult = await worker.exportGeometry('glb');
+      assertSuccess(glbExportResult);
+      const glbFile = glbExportResult.data[0];
+      expect(glbFile).toBeDefined();
+      if (glbFile === undefined) {
+        throw new Error('Expected empty GLB export file.');
+      }
+      const document = await new NodeIO().readBinary(glbFile.bytes);
+      expect(document.getRoot().listMeshes()).toHaveLength(0);
+
+      const gltfExportResult = await worker.exportGeometry('gltf');
+      assertSuccess(gltfExportResult);
+      const gltfFile = gltfExportResult.data[0];
+      expect(gltfFile).toBeDefined();
+      if (gltfFile === undefined) {
+        throw new Error('Expected empty glTF export file.');
+      }
+      const json = JSON.parse(new TextDecoder().decode(gltfFile.bytes)) as { meshes: unknown[] };
+      expect(json.meshes).toEqual([]);
+    });
+
     it('should export GLB in z-up millimeters when unit length is millimeter', async () => {
       const worker = await createWorker({
         'box.ts': `
@@ -2363,7 +2457,10 @@ export default function main() {
       // Don't compute geometry first
       const exportResult = await worker.exportGeometry('step');
       assertFailure(exportResult);
-      expect(exportResult.issues[0]?.message).toContain('No geometry available for export');
+      expect(exportResult.issues[0]).toMatchObject({
+        code: 'RUNTIME_EXPORT_RENDER_IDENTITY_MISSING',
+        severity: 'error',
+      });
     });
 
     it('should respect mesh configuration for export', async () => {
@@ -3071,7 +3168,7 @@ export default function main() {
       assertSuccess(result);
       // If shallow merge: base = { width: 50 } (missing depth, cornerRadius → runtime error)
       // If deep merge: base = { width: 50, depth: 20, cornerRadius: 5 } → success
-      expect(result.data.length).toBeGreaterThan(0);
+      expect(result.data.format).toBe('gltf');
     });
 
     it('should detect code changes between sequential renders', async () => {
@@ -3557,6 +3654,18 @@ describe('OC API Call Tracing', () => {
       return makeBaseBox(10, 20, 30);
     }
   `;
+  const repeatedCylinderCode = `
+    import { makeCylinder } from 'replicad';
+
+    export default function main() {
+      const shaft = makeCylinder(5, 20);
+      return [
+        { name: 'shaft-0', shape: shaft, color: '#ff0000' },
+        { name: 'shaft-1', shape: shaft.clone().translate(18, 0, 0), color: '#00ff00' },
+        { name: 'shaft-2', shape: shaft.clone().translate(36, 0, 0), color: '#0000ff' },
+      ];
+    }
+  `;
 
   /** Wait for PerformanceObserver callbacks to fire and then flush. */
   async function collectTelemetry(worker: Awaited<ReturnType<typeof createTestWorker>>): Promise<void> {
@@ -3575,6 +3684,10 @@ describe('OC API Call Tracing', () => {
     const span = entries.find((entry) => entry.name === name);
     expect(span).toBeDefined();
     return span!;
+  }
+
+  function telemetrySpans(entries: TelemetryEntry[], name: string): TelemetryEntry[] {
+    return entries.filter((entry) => entry.name === name);
   }
 
   it('emits separate Replicad render spans for BRep execution, tessellation, and glTF packing', async () => {
@@ -3617,7 +3730,7 @@ describe('OC API Call Tracing', () => {
     });
     expect(facesSpan.detail).toMatchObject({
       shapeName: 'Shape 1',
-      linearTolerance: 0.01,
+      linearTolerance: 0.02,
       angularToleranceDeg: 20,
       withBrepEdges: false,
       output: 'faces',
@@ -3653,7 +3766,7 @@ describe('OC API Call Tracing', () => {
 
     expect(edgesSpan.detail).toMatchObject({
       shapeName: 'Shape 1',
-      linearTolerance: 0.01,
+      linearTolerance: 0.02,
       angularToleranceDeg: 20,
       withBrepEdges: true,
       output: 'edges',
@@ -3661,6 +3774,156 @@ describe('OC API Call Tracing', () => {
     expect(edgesSpan.detail?.['phase']).toBeUndefined();
     expect(renderOutputSpan.detail?.['spanId']).toEqual(expect.any(String));
     expect(edgesSpan.detail?.['parentSpanId']).toBe(renderOutputSpan.detail?.['spanId']);
+  });
+
+  it('uses prototype tessellation for repeated translated shape instances by default', async () => {
+    const telemetryBatches: TelemetryEntry[][] = [];
+
+    const worker = await createTestWorker(
+      replicadKernel,
+      { 'shafts.ts': repeatedCylinderCode },
+      {
+        workerOptions: { ocTracing: 'off' },
+        onTelemetry: (entries) => telemetryBatches.push(entries),
+      },
+    );
+
+    const result = await worker.createGeometry({
+      file: createGeometryFile('shafts.ts'),
+      parameters: {},
+    });
+    await collectTelemetry(worker);
+
+    assertSuccess(result);
+
+    const allEntries = telemetryBatches.flat();
+    const renderOutputSpan = expectTelemetrySpan(allEntries, 'replicad.render-output');
+    const detectSpan = expectTelemetrySpan(allEntries, 'replicad.tessellation-instancing.detect');
+    const expandSpan = expectTelemetrySpan(allEntries, 'replicad.tessellation-instancing.expand');
+    const faceSpans = telemetrySpans(allEntries, 'replicad.tessellate.faces');
+
+    expect(renderOutputSpan.detail).toMatchObject({
+      renderMode: 'tessellation-instanced',
+    });
+    expect(detectSpan.detail).toMatchObject({
+      shapeCount: 3,
+      meshableShapeCount: 3,
+      prototypeCount: 1,
+      instanceCount: 3,
+      eligibleInstanceCount: 3,
+      missedContentHashGroups: 0,
+    });
+    expect(faceSpans).toHaveLength(1);
+    expect(faceSpans[0]!.detail).toMatchObject({
+      prototypeHash: expect.stringMatching(/^[\da-f]{64}$/),
+      partnerKey: expect.any(String),
+      instanceCount: 3,
+      shapeNames: 'shaft-0,shaft-1,shaft-2',
+      output: 'faces',
+    });
+    expect(faceSpans[0]!.detail?.['parentSpanId']).toBe(renderOutputSpan.detail?.['spanId']);
+    expect(expandSpan.detail).toMatchObject({
+      instanceCount: 3,
+    });
+    expect(expandSpan.detail?.['parentSpanId']).toBe(renderOutputSpan.detail?.['spanId']);
+  });
+
+  it('keeps the legacy per-shape tessellation path when tessellationInstancing is disabled', async () => {
+    const telemetryBatches: TelemetryEntry[][] = [];
+
+    const worker = await createTestWorker(
+      replicadKernel,
+      { 'shafts.ts': repeatedCylinderCode },
+      {
+        workerOptions: { ocTracing: 'off', tessellationInstancing: false },
+        onTelemetry: (entries) => telemetryBatches.push(entries),
+      },
+    );
+
+    const result = await worker.createGeometry({
+      file: createGeometryFile('shafts.ts'),
+      parameters: {},
+    });
+    await collectTelemetry(worker);
+
+    assertSuccess(result);
+
+    const allEntries = telemetryBatches.flat();
+    const renderOutputSpan = expectTelemetrySpan(allEntries, 'replicad.render-output');
+    const faceSpans = telemetrySpans(allEntries, 'replicad.tessellate.faces');
+
+    expect(renderOutputSpan.detail).toMatchObject({
+      renderMode: 'flat',
+    });
+    expect(telemetrySpans(allEntries, 'replicad.tessellation-instancing.detect')).toHaveLength(0);
+    expect(faceSpans).toHaveLength(3);
+    expect(faceSpans.map((span) => span.detail?.['shapeName'])).toEqual(['shaft-0', 'shaft-1', 'shaft-2']);
+  });
+
+  it('uses prototype edge tessellation for repeated translated shape instances when BRep edges are enabled', async () => {
+    const telemetryBatches: TelemetryEntry[][] = [];
+
+    const worker = await createTestWorker(
+      replicadKernel,
+      { 'shafts.ts': repeatedCylinderCode },
+      {
+        workerOptions: { ocTracing: 'off', withBrepEdges: true },
+        onTelemetry: (entries) => telemetryBatches.push(entries),
+      },
+    );
+
+    const result = await worker.createGeometry({
+      file: createGeometryFile('shafts.ts'),
+      parameters: {},
+    });
+    await collectTelemetry(worker);
+
+    assertSuccess(result);
+
+    const allEntries = telemetryBatches.flat();
+    const renderOutputSpan = expectTelemetrySpan(allEntries, 'replicad.render-output');
+    const edgeSpans = telemetrySpans(allEntries, 'replicad.tessellate.edges');
+
+    expect(edgeSpans).toHaveLength(1);
+    expect(edgeSpans[0]!.detail).toMatchObject({
+      instanceCount: 3,
+      shapeNames: 'shaft-0,shaft-1,shaft-2',
+      withBrepEdges: true,
+      output: 'edges',
+    });
+    expect(edgeSpans[0]!.detail?.['parentSpanId']).toBe(renderOutputSpan.detail?.['spanId']);
+  });
+
+  it('emits the same expanded GLB structure with tessellation instancing on and off', async () => {
+    const instanced = await createGeometry({
+      files: { 'shafts.ts': repeatedCylinderCode },
+      mainFile: 'shafts.ts',
+      options: { workerOptions: { ocTracing: 'off', tessellationInstancing: true } },
+    });
+    const legacy = await createGeometry({
+      files: { 'shafts.ts': repeatedCylinderCode },
+      mainFile: 'shafts.ts',
+      options: { workerOptions: { ocTracing: 'off', tessellationInstancing: false } },
+    });
+
+    assertSuccess(instanced);
+    assertSuccess(legacy);
+
+    const instancedGltf = extractGltfFromResult(instanced);
+    const legacyGltf = extractGltfFromResult(legacy);
+    expect(instancedGltf).toBeDefined();
+    expect(legacyGltf).toBeDefined();
+
+    const instancedStats = await readGltfStats(instancedGltf!);
+    const legacyStats = await readGltfStats(legacyGltf!);
+    const instancedSize = await readGltfSize(instancedGltf!);
+    const legacySize = await readGltfSize(legacyGltf!);
+
+    expect(instancedStats).toEqual(legacyStats);
+    expect(instancedStats.extensionsUsed).not.toContain('EXT_mesh_gpu_instancing');
+    expect(instancedSize[0]).toBeCloseTo(legacySize[0], 5);
+    expect(instancedSize[1]).toBeCloseTo(legacySize[1], 5);
+    expect(instancedSize[2]).toBeCloseTo(legacySize[2], 5);
   });
 
   it('emits Replicad library summary telemetry under run-main when summary tracing is enabled', async () => {
@@ -4589,7 +4852,7 @@ describe('serializeNativeHandle', () => {
 });
 
 describe('No kernel matched', () => {
-  it('should return empty geometry for an empty file when no kernel can handle it', async () => {
+  it('should fail when no kernel can handle an empty file', async () => {
     const result = await createGeometry({
       files: { 'empty.ts': '' },
       mainFile: 'empty.ts',
@@ -4599,8 +4862,8 @@ describe('No kernel matched', () => {
       },
     });
 
-    assertSuccess(result);
-    expect(result.data).toEqual([]);
+    assertFailure(result);
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: 'KERNEL_CAPABILITY_MISSING' }));
   });
 });
 

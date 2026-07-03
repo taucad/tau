@@ -8,6 +8,11 @@
     {
       "from": "./node_modules/geist/dist/fonts/geist-sans/Geist-Bold.ttf",
       "to": "src/fonts/Geist-Bold.ttf"
+    },
+    // Manifold canonicalizer WASM used to convert OpenSCAD OFF output to glTF
+    {
+      "from": "./node_modules/manifold-3d/manifold.wasm",
+      "to": "src/wasm/manifold.wasm"
     }
   ],
   // Always overwrite files

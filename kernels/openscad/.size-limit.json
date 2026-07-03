@@ -1,12 +1,12 @@
 [
   {
     "name": "@taucad/openscad",
-    "path": "dist/esm/index.js",
+    "path": "dist/index.js",
     "limit": "1 kB"
   },
   {
     "name": "kernel: openscad",
-    "path": "dist/esm/openscad.kernel.js",
+    "path": "dist/openscad.kernel.js",
     "limit": "4 kB"
   }
 ]

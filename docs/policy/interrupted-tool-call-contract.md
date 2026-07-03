@@ -1,145 +1,129 @@
 ---
 title: 'Interrupted Tool-Call Contract Policy'
-description: 'Schema and provider-adapter rules for tool parts left in output-error after a user interrupt'
+description: 'Schema and provider-adapter rules for interrupted, stale, and partial AI SDK tool lifecycle parts'
 status: active
 created: '2026-04-23'
-updated: '2026-04-23'
+updated: '2026-06-19'
 related:
   - docs/research/interrupted-tool-call-validation-failure.md
+  - docs/research/google-cancel-followup-stale-tool-part-validation.md
   - docs/policy/testing-policy.md
   - docs/policy/cross-provider-content-contract.md
 ---
 
 # Interrupted Tool-Call Contract Policy
 
-Internal reference for how the API must model, validate, and downstream-adapt tool calls that the user interrupted before the tool's `input` finished streaming.
+Internal reference for how the API models, validates, and downstream-adapts tool parts when the user interrupts an assistant turn or when persisted AI SDK UI messages contain stale partial lifecycle state.
 
 ## Rationale
 
-When a user clicks "Stop" mid-stream, the AI SDK leaves the open tool part in `output-error` with the partially-streamed `input` it managed to assemble. Treating that partial value as if it satisfied the tool's strict input schema cascades into a class of bugs we've hit in prod: `Validation failed: messages.N.parts.M: Invalid input` on every resubmission, the chat is permanently wedged, and the user has no way out except deleting the chat. The investigation in `docs/research/interrupted-tool-call-validation-failure.md` traced the failure to two seams the API owns: (a) the wire-level Zod schema that gates `/v1/chat`, and (b) the provider-adapter pipeline that pairs orphaned tool calls with synthetic tool results. This policy codifies the contract both seams must honor so the failure mode cannot recur.
+When a user stops or preempts a stream, the AI SDK can leave tool parts in several partial states: `input-streaming`, `input-available`, or `output-error` with malformed or incomplete arguments. If a later user message follows that assistant turn, those in-progress tool parts are no longer live stream state. They are historical interrupted records, and accepting the follow-up is a legitimate user flow.
 
-The fix is intentionally API-only. The client-side persistence shape is whatever the AI SDK produces — the API must accept any shape the SDK can emit and downstream-adapt it for every supported provider. No client-side healing is required because (1) the `output-error` UI render path reads only `errorText`, never `input`, so partial / forensic local state is harmless to display, and (2) the API healing covers IndexedDB-resident chats, future Tau clients (CLI, SDKs), and any third-party caller equally. Pushing healing into the client would re-implement the API's responsibility in every consumer.
+The API owns this wire contract. The UI finalizer still cleans up the local tail for display and IndexedDB persistence, but the schema boundary must also recover stale histories from IndexedDB, future clients, CLI flows, tests, and third-party callers.
 
 ## Rules
 
-### 1. `output-error` Tool Parts Are Forensic
+### 1. Historical In-Progress Tool Parts Are Interrupted Records
 
-A tool part in `state: 'output-error'` carries diagnostic context, not a contractually valid tool invocation. The strict per-tool input schema does not apply to it.
+A static or dynamic tool part in `input-streaming` or `input-available` becomes stale when it belongs to an assistant message followed by a later user message. `uiMessagesSchema` must canonicalize those historical in-progress parts to `output-error` with structured `USER_INTERRUPTED` metadata before strict per-tool validation runs.
 
-**Why**: A user interrupt by definition prevents the LLM from completing the input — locking it to the strict schema converts every interrupt into an unrecoverable validation failure.
+Active current-tail assistant messages are different: if no later user message exists, `input-streaming` can remain live and tolerant.
 
-CORRECT:
+### 2. Strict Static Tool Schemas Apply Only Where Semantically Meaningful
 
-```typescript
-z.object({
-  type: z.literal('tool-read_file'),
-  toolCallId: z.string(),
-  state: z.literal('output-error'),
-  input: z.unknown().optional(),
-  rawInput: z.unknown().optional(),
-  errorText: z.string(),
-});
-```
+Static tool input schemas remain authoritative for completed static tool inputs:
 
-INCORRECT:
+- `input-available`
+- `output-available`
+- valid `output-error.input` when present
 
-```typescript
-z.object({
-  type: z.literal('tool-read_file'),
-  toolCallId: z.string(),
-  state: z.literal('output-error'),
-  input: readFileInputSchema,
-  errorText: z.string(),
-});
-```
+They do not apply to active streaming fragments, approval lifecycle states, denied outputs, or dynamic tools. Invalid static interrupted input is demoted to `rawInput` and `input` is cleared.
 
-### 2. `rawInput` Is the Canonical Field for Partial / Forensic Arguments
+### 3. `rawInput` Is the Lossless Forensic Channel
 
-`rawInput: z.unknown().optional()` is present on every tool state (not only `output-error`) so future SDK upgrades that surface forensics in other states do not require another schema change. Server-side adapters (`convertToModelMessages`, `toBaseMessages`) fall back to `rawInput` when the model needs to see what was attempted.
+`rawInput: z.unknown().optional()` belongs on tool lifecycle states that may carry partial or provider-native argument data. The normalizer must preserve partial arguments rather than dropping them merely because Tau cannot validate them as completed static tool input.
 
-**Why**: Splitting forensic data into a dedicated field keeps `input` bound to the strict per-tool contract everywhere it is contractually meaningful, and matches the upstream AI SDK's `output-error` model.
+Provider conversion uses the existing `input ?? rawInput` behavior, so interrupted attempts still produce coherent model history.
 
-### 3. Heal Inbound Payloads in `z.preprocess`
+### 4. Normalize Inbound Payloads in `z.preprocess`
 
-`uiMessagesSchema` wraps the strict per-part schema in a `z.preprocess` (`healInterruptedToolParts`) that walks every `output-error` tool part, runs its `input` against the static tool-input registry, and (only on `safeParse` failure) demotes the offending value to `rawInput` before validation continues.
+`uiMessagesSchema` wraps the strict per-part schema in `z.preprocess(normalizeToolLifecycleParts, rawUiMessagesSchema)`.
 
-**Why**: Persisted IndexedDB chats authored before this contract existed must keep loading. Healing inside `z.preprocess` recovers them without bypassing schema discipline downstream. Because healing runs at the API boundary, it covers every caller (web client, CLI, future SDKs, third-party integrations) without requiring each to ship its own sanitizer.
+`normalizeToolLifecycleParts` is the single API-boundary lifecycle normalizer. It:
 
-CORRECT:
+- scans messages right-to-left with a `seenLaterUser` boolean;
+- terminalizes historical static and dynamic `input-streaming` / `input-available` tool parts;
+- uses `tool-input.registry.ts` only for static tool states where strict validation or invalid-input demotion is meaningful;
+- never consults the static registry for `dynamic-tool`;
+- copies arrays/objects only when something actually changes;
+- is idempotent.
 
-```typescript
-const healInterruptedToolParts = (input: unknown): unknown => {
-  // walk parts, demote invalid `input` to `rawInput`
-};
-export const uiMessagesSchema: z.ZodType<MyUIMessage[]> = z.preprocess(healInterruptedToolParts, rawUiMessagesSchema);
-```
+Do not move this to a transform after strict validation; strict validation would reject the stale shape before the normalizer can repair it.
 
-INCORRECT — applying the demotion via a transform on a strict schema runs validation first, so the legacy payload still 400s:
+### 5. Dynamic Tools Follow Lifecycle Shape, Not Static Registry Shape
 
-```typescript
-export const uiMessagesSchema = rawUiMessagesSchema.transform(healInterruptedToolParts);
-```
+`dynamic-tool` parts are tool parts. They use `toolName` for provider-facing identity and lifecycle repair, but they have no entry in `tool-input.registry.ts` and must not be strict-validated through static Tau tool schemas.
 
-### 4. Tool-Input Schema Registry Is the Single Source of Truth
+Shared tool helpers should use `isAnyToolPart` / `getToolPartName` when behavior applies to both static and dynamic tools.
 
-`libs/chat/src/schemas/tool-input.registry.ts` exports a `Record<`tool-${ToolName}`, z.ZodType>` keyed by static tool part type. The healing preprocess looks up each part's schema there. Adding a new tool means adding an entry; the `Record` shape produces a TypeScript error until exhaustive.
+### 6. Approval Lifecycle State Must Not Be Rewritten as Interruption
 
-**Why**: An inline switch inside `message.schema.ts` would silently drift the moment a new tool is added. The compile-time exhaustiveness check makes drift impossible.
+Approval lifecycle states (`approval-requested`, `approval-responded`, `output-denied`) are valid AI SDK UI message states. Tau parses them and preserves approval metadata, but provider replay through the current LangChain adapter is not fully supported.
 
-### 5. Provider Adapters Must Accept Synthetic Tool Results
+Until approval replay is implemented end-to-end, the API must fail explicitly before provider calls via `assertSupportedApprovalReplay`, returning `UNSUPPORTED_TOOL_APPROVAL_REPLAY`. The sanitizer must never silently relabel an approval response as `USER_INTERRUPTED`.
 
-The Anthropic, Vertex, and OpenAI wire formats all require every `tool_use` / `functionCall` / `tool_calls` to be followed by a corresponding tool result. `messageContentSanitizerMiddleware` is the only authority that synthesises a `ToolMessage` for orphaned tool calls; the synthetic message must include:
+### 7. Provider Adapters Must See Paired Interrupted Tool Results
 
-- `tool_call_id` matching the original call
-- `name` set to the tool name
-- `status: 'error'`
-- A JSON `content` body of `{ errorCode, toolName, toolCallId, message }`
+Once a stale tool part is canonicalized to interrupted `output-error`, the existing provider path applies:
 
-**Why**: Skipping this pairing causes the provider to 400 with "tool call without matching tool result", which is the wire-level failure mode the original investigation surfaced.
+- `toBaseMessages` carries the tool call using `input ?? rawInput`;
+- cross-provider content normalization strips or heals provider-specific tool-call content blocks as needed;
+- `messageContentSanitizerMiddleware` ensures every provider-facing tool call has a matching `ToolMessage`.
 
-### 6. Mirror the Full AI SDK Tool-Part Lifecycle
+Synthetic interrupted tool results must include matching `tool_call_id`, `name`, `status: 'error'`, and JSON content with `{ errorCode, toolName, toolCallId, message }`.
 
-`uiMessagesSchema` accepts every state the upstream `validateUIMessages` schema accepts, including `approval-requested`, `approval-responded`, and `output-denied`, for both static and dynamic tool parts.
+### 8. Append, Never Narrow, on AI SDK Schema Evolution
 
-**Why**: Drifting from the upstream contract means any future tool that opts into approval UI re-introduces the same class of "valid AI SDK message blocked at our schema" wedge.
+When the AI SDK adds a tool lifecycle field or state, Tau should add an optional field or new branch and a regression test. Do not narrow previously parseable persisted chat messages without a normalizer.
 
-### 7. Append, Never Overwrite, on Schema Evolution
+## Decision Table
 
-When a new tool state, error metadata field, or wire-level field appears in the AI SDK or a provider, it is added to `uiMessagesSchema` as a new branch or `.optional()` field. Never narrow an existing field, never split a state into multiple incompatible branches without a healer, and never ship a schema change that would 400 a chat that previously parsed.
-
-**Why**: IndexedDB chat persistence is the user's work. A schema regression that rejects previously-parseable chats cannot be recovered from outside the API.
-
-## Decision Table — Where Each Concern Lives
-
-| Concern                                          | Location                                                                          |
-| ------------------------------------------------ | --------------------------------------------------------------------------------- |
-| Wire-level Zod schema for chat messages          | `libs/chat/src/schemas/message.schema.ts` (`uiMessagesSchema`)                    |
-| Strict per-tool input schemas                    | `libs/chat/src/schemas/message.schema.ts` (`createToolSchemas`)                   |
-| Static tool-input schema lookup                  | `libs/chat/src/schemas/tool-input.registry.ts`                                    |
-| Heal legacy / interrupted payloads on inbound    | `libs/chat/src/schemas/message.schema.ts` (`healInterruptedToolParts` preprocess) |
-| Synthetic tool-result pairing for provider wires | `apps/api/app/api/chat/middleware/message-content-sanitizer.middleware.ts`        |
-| Server validation error code                     | `apps/api/app/api/chat/chat-exception.filter.ts` (`VALIDATION_ERROR`)             |
+| Concern                           | Location                                                                   |
+| --------------------------------- | -------------------------------------------------------------------------- |
+| UI-message wire schema            | `libs/chat/src/schemas/message.schema.ts` (`uiMessagesSchema`)             |
+| Tool lifecycle normalization      | `libs/chat/src/schemas/message.schema.ts` (`normalizeToolLifecycleParts`)  |
+| Strict static tool input schemas  | `libs/chat/src/schemas/tools/*.tool.schema.ts`                             |
+| Static tool input registry        | `libs/chat/src/schemas/tool-input.registry.ts`                             |
+| Static/dynamic tool part helpers  | `libs/chat/src/utils/tool-part.utils.ts`                                   |
+| UI tail finalization              | `apps/ui/app/utils/chat.utils.ts` (`finalizeInterruptedToolParts`)         |
+| Unsupported approval replay guard | `apps/api/app/api/chat/utils/assert-supported-approval-replay.ts`          |
+| Synthetic tool-result pairing     | `apps/api/app/api/chat/middleware/message-content-sanitizer.middleware.ts` |
 
 ## Anti-Patterns
 
-- Tightening the `output-error` `input` schema to "match the success path" — this is the original regression, do not reintroduce it.
-- Adding client-side sanitisers that duplicate the API's healing — every new client would have to re-implement the same logic, and the API still has to heal anyway for non-Tau callers, so the duplication is pure cost.
-- Putting partial / forensic data on `input` instead of `rawInput`.
-- Skipping the synthetic tool-result pairing because "the provider usually tolerates it" — at least one provider (Anthropic) consistently 400s.
-- Adding a per-tool special case to `messageContentSanitizerMiddleware` — middleware is provider-agnostic and tool-agnostic by contract.
+- Special-casing `edit_file`, `read_file`, or any individual tool for stale-state repair.
+- Treating every malformed tool input as acceptable forever; completed static success states still use strict schemas.
+- Requiring the web UI to heal every payload before the API can accept it.
+- Running lifecycle repair after strict Zod validation.
+- Consulting `tool-input.registry.ts` for `dynamic-tool`.
+- Letting approval lifecycle state fall through to synthetic `USER_INTERRUPTED`.
+- Adding provider-specific Google middleware for a DTO validation failure.
 
 ## Summary Checklist
 
-- [ ] `output-error` schema accepts `input: z.unknown().optional()` and `rawInput: z.unknown().optional()`
-- [ ] `rawInput: z.unknown().optional()` is present on every tool state (not just `output-error`)
-- [ ] `uiMessagesSchema` is wrapped in `z.preprocess(healInterruptedToolParts, …)`
-- [ ] `tool-input.registry.ts` is exhaustive over `ToolName` (compile-time enforced)
-- [ ] Sanitizer middleware emits a `ToolMessage` with `tool_call_id`, `name`, `status: 'error'`, and JSON content for every orphaned tool call
-- [ ] Schema accepts `approval-requested` / `approval-responded` / `output-denied` for static and dynamic tool parts
-- [ ] Round-trip integration test (`apps/api/app/api/chat/interrupted-tool-roundtrip.test.ts`) and provider integration tests still pass
+- [ ] Historical assistant `input-streaming` / `input-available` tool parts followed by a user message canonicalize to interrupted `output-error`.
+- [ ] Active current-tail `input-streaming` tool parts remain live and tolerant.
+- [ ] Static completed states still validate against strict tool schemas.
+- [ ] Invalid static interrupted input moves to `rawInput`.
+- [ ] Dynamic tools are included in lifecycle normalization and UI finalization.
+- [ ] `rawInput`, `title`, provider metadata, and approval metadata are preserved where valid.
+- [ ] Approval histories fail explicitly before provider replay until adapter support exists.
+- [ ] API round-trip tests cover the June 11 `edit_file` part 47 and June 18 `read_file` part 20 fixtures.
+- [ ] Performance tests assert copy-on-write and registry short-circuiting.
 
 ## References
 
-- Research: `docs/research/interrupted-tool-call-validation-failure.md`
-- Related: `docs/policy/testing-policy.md`
-- Upstream: `node_modules/ai/src/ui/validate-ui-messages.ts`
+- `docs/research/google-cancel-followup-stale-tool-part-validation.md`
+- `docs/research/interrupted-tool-call-validation-failure.md`
+- `docs/policy/testing-policy.md`
+- `node_modules/ai/src/ui/validate-ui-messages.ts`

@@ -166,7 +166,7 @@ Every request carries a monotonically increasing `id`. The server dispatches by 
 | `exposeFileSystem(handlers, options?)`     | High  | Worker-side: listen for incoming bridge ports                                                                                                  |
 | `createFileSystemBridge(worker, options?)` | High  | Client isolate: **`MessageChannel`** + transfer to FS worker — returns **`FileSystemBridge`** (wrapped **`Port`** for **`createBridgeProxy`**) |
 
-See **`docs/research/fs-bridge-port-migration.md`** for why **`createFileSystemBridge`** returns a **`Port`** while forwarding into a kernel worker uses an internal raw-**`MessagePort`** path (`fromChannelFs`), and how that avoids **`Port.onMessage`** mistakes at compile time.
+See **`docs/research/filesystem-bridge-runtime-inversion-blueprint.md`** for why generic object bridge primitives live under **`@taucad/rpc/bridge`**, filesystem-specific bridge helpers live under **`@taucad/fs-bridge`**, and runtime consumes an opened filesystem bridge connection via **`fromFileSystemBridge(connection)`**.
 
 **Naming split:** Generic bridge primitives use the `Bridge` prefix. Filesystem-typed functions use the `FileSystem` prefix. This distinction is intentional: `createBridgeServer` serves _any_ object (generic `<T extends Record<string, unknown>>`), while `createBridgeProxy<RuntimeFileSystemBase>` returns a typed filesystem proxy.
 
@@ -178,9 +178,14 @@ See **`docs/research/fs-bridge-port-migration.md`** for why **`createFileSystemB
 // Worker side (file-manager.worker.ts):
 exposeFileSystem(fileManager);
 
+// Kernel worker:
+export const runtime = presets.all();
+createRuntimeWorker({ runtime });
+
 // Main thread (app shell):
-const client = createRuntimeClient({
-  ...presets.all(),
+import type { runtime } from './kernel-worker';
+
+const client = createRuntimeClient<typeof runtime>({
   transport: webWorkerTransport({
     url: kernelWorkerUrl,
     fileSystem: fromWorkerOpaque(fileManagerWorker),
@@ -196,8 +201,9 @@ The transport creates the FS bridge `MessagePort` internally; the worker-hosted 
 `RuntimeClient.connect()` takes **no arguments**. Every wire concern (filesystem bridge, file pool SAB, abort signal channel) is closed over by the {@link TransportPlugin} the consumer hands to `createRuntimeClient({ transport })`.
 
 ```typescript
-const client = createRuntimeClient({
-  ...presets.all(),
+import type { runtime } from './kernel-worker';
+
+const client = createRuntimeClient<typeof runtime>({
   transport: webWorkerTransport({
     url: kernelWorkerUrl,
     fileSystem: fromMemoryFs(files), // or fromNodeFs / fromBrowserFs / fromWorkerOpaque
@@ -266,16 +272,16 @@ The function is generic (`<T extends Record<string, unknown>>`), not `RuntimeFil
 
 ## Open Questions
 
-### Should `@taucad/runtime/filesystem` split into two subpaths?
-
-Currently, `/filesystem` exports both filesystem-typed APIs (`createFileSystemBridge`) and generic bridge primitives (`createBridgeServer`, `createBridgeProxy`, `createBridgeCall`). A potential split:
+### Where do filesystem bridge helpers live?
 
 ```
-@taucad/runtime/filesystem   → filesystem-typed exports only
-@taucad/runtime/bridge       → generic bridge primitives
+@taucad/rpc/bridge  → generic object-over-MessagePort primitives
+@taucad/fs-bridge   → filesystem-specific bridge adapters
+@taucad/filesystem  → pure filesystem domain types/providers
+@taucad/runtime     → consumes RuntimeFileSystem handles
 ```
 
-**Current recommendation:** Keep them together. The bridge exists primarily for filesystem communication within Tau. A separate `/bridge` subpath adds complexity without clear consumer benefit. Revisit if the bridge primitives gain non-filesystem consumers.
+Generic bridge primitives must not import filesystem or runtime code. Core filesystem must not import RPC or runtime code. `@taucad/fs-bridge` is the adapter package allowed to depend on both `@taucad/filesystem` and `@taucad/rpc/bridge`.
 
 ### Should `fromFsLikeOpaque` accept Node.js `fs` directly?
 

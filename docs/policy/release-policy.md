@@ -3,7 +3,7 @@ title: 'Release Policy'
 description: 'Versioning, building, and publishing strategy for @taucad/* npm packages: Nx Release, version plans, tsdown, OIDC.'
 status: active
 created: '2026-02-27'
-updated: '2026-03-05'
+updated: '2026-06-11'
 related:
   - docs/policy/version-policy.md
 ---
@@ -85,12 +85,9 @@ Changelogs are generated automatically from version plan descriptions and conven
 
 All packages are built with [tsdown](https://tsdown.dev/) (Rolldown-based bundler) via a custom Nx plugin (`tools/tsdown.plugin.ts`). The build produces:
 
-| Output | Directory   | Description                  |
-| ------ | ----------- | ---------------------------- |
-| ESM    | `dist/esm/` | ES modules (`.js` + `.d.ts`) |
-| CJS    | `dist/cjs/` | CommonJS (`.cjs` + `.d.cts`) |
-
-A post-build plugin (`tools/generate-cjs-dts.plugin.ts`) copies `.d.ts` files to `.d.cts` for CJS type resolution.
+| Output | Directory | Description                  |
+| ------ | --------- | ---------------------------- |
+| ESM    | `dist/`   | ES modules (`.js` + `.d.ts`) |
 
 ### Build Order
 
@@ -104,7 +101,7 @@ The `pkgcheck` Nx plugin validates package.json structure before publish:
 
 - Correct `exports` and `publishConfig.exports` mappings
 - `files` array includes only intended artifacts
-- Dual ESM/CJS entry points resolve correctly
+- ESM-only entry points resolve correctly
 
 ## Publishing
 
@@ -192,5 +189,5 @@ For alpha, beta, and release candidate versions:
 | 2026-02 | Fixed versioning (all packages same version) | Packages are tightly coupled; simplifies compatibility story                                |
 | 2026-02 | npm Trusted Publishing (OIDC)                | Eliminates stored secrets; automatic provenance; industry best practice since July 2025     |
 | 2026-02 | Build provenance via Sigstore                | Supply chain transparency; required by Trusted Publishing; visible on npmjs.com             |
-| 2026-02 | tsdown for package builds                    | Already in use; Rolldown-based, fast dual ESM/CJS output with tree-shaking                  |
+| 2026-02 | tsdown for package builds                    | Already in use; Rolldown-based, fast ESM output with tree-shaking                           |
 | 2026-02 | CI-only publishing                           | Prevents accidental or unauthorized publishes from dev machines                             |

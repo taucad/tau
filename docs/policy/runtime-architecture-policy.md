@@ -3,7 +3,7 @@ title: 'Kernel Architecture Policy'
 description: 'CAD runtime worker architecture from editor to geometry computation. Covers ProjectMachine, CadMachine, RuntimeClient, plugin model, transport, and lifecycle.'
 status: active
 created: '2026-02-18'
-updated: '2026-04-22'
+updated: '2026-06-03'
 ---
 
 # Kernel Architecture Policy
@@ -56,7 +56,7 @@ The kernel API follows a three-layer design. Each layer has a distinct audience 
 
 The opaque {@link RuntimeFileSystem} attaches on the isolate that owns filesystem authority:
 
-- **`TransportDescriptor.fileSystem = 'inline' | 'bridged'`** → supply via **`webWorkerTransport({ fileSystem })`**, **`nodeWorkerTransport({ fileSystem })`**, or **`inProcessTransport({ fileSystem })`** (bundled transports: `inProcessTransport`, CLI `createNodeClient`, `webWorkerTransport`, `nodeWorkerTransport`).
+- **`TransportDescriptor.fileSystem = 'inline' | 'bridged'`** → supply via **`webWorkerTransport({ fileSystem })`**, **`nodeWorkerTransport({ fileSystem })`**, or **`inProcessTransport({ runtime, fileSystem })`** (bundled transports: `inProcessTransport`, CLI `createNodeClient`, `webWorkerTransport`, `nodeWorkerTransport`).
 - **`'host-local'`** → host-side **`RuntimeTransportHost`** constructed with **`electronUtilityHost({ fileSystem })`** (example app: Electron utility bootstrap).
 - **`'unbound'`** → omit the filesystem option altogether (none bundled yet).
 
@@ -68,12 +68,12 @@ Third-party transports pick the descriptor row matching their wire; avoid `@tauc
 
 | Entity                     | Purpose                                                                                                                                                                                                                                                                                                                                   | Layer         |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| **RuntimeClient**          | High-level facade. Lazy, Promise-based, event-subscribable. Supports inline code rendering (`CodeInput`) and filesystem rendering (`FileInput`). Emits `geometry` event on render completion. Auto-cancels superseded renders. Created by `createRuntimeClient()`.                                                                        | Consumer      |
+| **RuntimeClient**          | High-level facade. Lazy, Promise-based, event-subscribable. Supports inline code rendering (`RuntimeSource`) and filesystem rendering (filesystem `RuntimeSource`). Emits `geometry` event on render completion. Auto-cancels superseded renders. Created by `createRuntimeClient()`.                                                     | Consumer      |
 | **RuntimeTransportPlugin** | Legacy name — superseded by **`TransportPlugin`** callable (`webWorkerTransport({...})`). Bundled implementations: `inProcessTransport`, `webWorkerTransport`, `nodeWorkerTransport`. Standalone **`webWorkerHost` / `nodeWorkerHost` / `electronUtilityHost`** furnish worker/host entries — no `.host` accessor on the plugin callable. | Framework     |
 | **RuntimeTransportClient** | Fat consumer-facing transport handle. Owns SAB, abort, geometry pool, FS bridge. `client.connect()` takes no arguments — every wire concern is closed over by the transport at construction.                                                                                                                                              | Framework     |
 | **RuntimeWorkerClient**    | Protocol client wrapping a `RuntimeTransportClient` with request/response correlation and typed callbacks.                                                                                                                                                                                                                                | Framework     |
 | **KernelRuntimeWorker**    | Worker-side orchestrator. Manages kernel selection, middleware chain, bundler routing.                                                                                                                                                                                                                                                    | Worker        |
-| **RuntimeFileSystem**      | Opaque consumer-facing filesystem value produced by `fromMemoryFs`, `fromNodeFs`, `fromBrowserFs`, `fromFsLikeOpaque`, `fromWorkerOpaque`, etc. Passed into **`webWorkerTransport({ fileSystem })`** / **`inProcessTransport({ fileSystem })`**. Internal handle representation lives under `transport/_internal`.                        | Consumer      |
+| **RuntimeFileSystem**      | Opaque consumer-facing filesystem value produced by `fromMemoryFs`, `fromNodeFs`, `fromBrowserFs`, `fromFsLikeOpaque`, `fromWorkerOpaque`, etc. Passed into **`webWorkerTransport({ fileSystem })`** / **`inProcessTransport({ runtime, fileSystem })`**. Internal handle representation lives under `transport/_internal`.               | Consumer      |
 | **KernelDefinition**       | Kernel plugin contract (author API, via `defineKernel`). Runs in worker.                                                                                                                                                                                                                                                                  | Plugin Author |
 | **BundlerDefinition**      | Bundler plugin contract (author API, via `defineBundler`). Declares supported `extensions`.                                                                                                                                                                                                                                               | Plugin Author |
 | **KernelMiddleware**       | Middleware plugin contract (author API, via `defineMiddleware`). Wraps kernel operations.                                                                                                                                                                                                                                                 | Plugin Author |
@@ -141,9 +141,9 @@ Previously, all 5 kernels were loaded eagerly (~90 MB per CadMachine).
 ```text
 1. createRuntimeClient(options)                          → RuntimeClient created, no Worker yet
 2. client.on('geometry', handler)                       → Subscribe to render results (any time)
-3. client.render({ code: { 'box.ts': '...' } })        → Auto-creates filesystem, auto-connects, renders
-4. client.render({ file, parameters, changedPaths })    → Invalidates caches, renders from filesystem
-5. client.connect({ port })                             → Explicit connection for worker bridges
+3. client.render({ source: { files: { 'box.ts': '...' } } }) → Stages files into the transport-owned filesystem, auto-connects, renders
+4. client.render({ source: { path }, parameters })      → Renders from the connected transport-owned filesystem
+5. client.connect()                                     → Explicit connection for worker bridges
 6. client.terminate()                                   → Worker terminated, resources cleaned up
 ```
 
@@ -151,9 +151,9 @@ Previously, all 5 kernels were loaded eagerly (~90 MB per CadMachine).
 
 The `render()` method accepts two input shapes via generic overloads:
 
-**Inline code mode** (`CodeInput<T>`): A filename-to-content map. When the code object has a single key, `file` is optional (the runtime picks the only key). When multiple keys exist, `file` is required to specify the entry point. Auto-creates an in-memory filesystem, writes code, connects, and renders. Not compatible with port-based connections.
+**Inline source mode** (`InlineRuntimeSource<Files>`): A filename-to-content map under `source.files`. When the map has a single key, `entry` is optional (the runtime picks the only key). When multiple keys exist, `entry` is required to specify the entry point. The runtime stages files into the transport-owned filesystem, then connects and renders. High-level helpers provide a filesystem automatically; raw transports require `fileSystem`.
 
-**Filesystem mode** (`FileInput`): Renders from a connected filesystem. `file` can be a string shorthand (e.g., `'/src/main.ts'`) or a `GeometryFile` object. `changedPaths` absorbs the old `notifyFileChanged` pattern -- the client internally notifies the worker about changed files before rendering.
+**Filesystem mode** (`FilesystemRuntimeSource`): Renders from a connected filesystem. `source.path` can be a string shorthand (e.g., `'/src/main.ts'`) or a `GeometryFile` object. File-change invalidation is owned by the worker's filesystem watch path, not a public render-input field.
 
 ### Geometry Event
 
@@ -161,7 +161,7 @@ When any render completes (success or failure), the `geometry` event fires with 
 
 ### Auto-Cancellation (Latest-Wins)
 
-When a follow-up render request arrives while a previous render is in-flight, the previous render is cooperatively superseded via the abort signal slot. The prior outcome resolves as `{ status: 'superseded' }` on the discriminated `RenderOutcome` returned from `openFile`/`updateParameters`/`setOptions` — never as a thrown exception. Only the latest render's result fires the `geometry` event. For pull consumers (CLI), renders are sequential so supersession never triggers.
+When a follow-up render request arrives while a previous render is in-flight, the previous render is cooperatively superseded via the abort signal slot. The prior outcome resolves as `{ status: 'superseded' }` on the discriminated `RenderOutcome` returned from `render`/`updateParameters`/`setOptions` — never as a thrown exception. Only the latest render's result fires the `geometry` event. For pull consumers (CLI), renders are sequential so supersession never triggers.
 
 ## RuntimeFileSystem
 
@@ -224,12 +224,12 @@ type RuntimeTransport = {
    │  ├─ RuntimeClient creates Worker + Transport on first connect
    │  ├─ Worker selects kernel via three-pass detection
    │  ├─ render: unified pipeline (deps → params → geometry)
-   │  ├─ changedPaths passed to render() for cache invalidation (no separate notifyFileChanged)
+   │  ├─ filesystem watch events invalidate caches inside the worker
    │  └─ Auto-cancellation: new render supersedes in-flight render
    │
-7. CadMachine receives geometryComputed → updates context.geometries
+7. CadMachine receives geometryComputed → updates context.geometry
    │
-8. ViewerContent useEffect bridges geometries → GraphicsMachine
+8. ViewerContent useEffect bridges geometry → GraphicsMachine
    │
 9. GraphicsMachine → CadViewer → GltfMesh renders to WebGL canvas
 ```
@@ -248,11 +248,11 @@ type RuntimeTransport = {
 
 The RuntimeClient creates the Worker lazily on first `connect()` or `render()`:
 
-1. `createRuntimeClient(options)` — returns client, no Worker yet
-2. `client.connect({ fileSystem })` — creates Worker via `createWorkerTransport(workerUrl)`
-3. `RuntimeWorkerClient.initialize()` sends kernel config, middleware config, and bundler config
-4. Worker loads bundler modules via `import(bundlerModuleUrl)` for matching extensions
-5. Kernel module loading is deferred until `selectKernel()` determines which kernel is needed
+1. `createRuntimeClient({ transport })` — returns client, no Worker yet
+2. `client.connect()` — materializes the transport and creates the Worker
+3. `RuntimeWorkerClient.initialize()` sends boot config and transport-owned filesystem handles
+4. The worker resolves its own `defineRuntime(...)` definition and reports capabilities
+5. Kernel initialization is deferred until `selectKernel()` determines which kernel is needed
 
 Only the WASM runtime for the selected kernel is ever loaded.
 
@@ -319,7 +319,7 @@ This ensures all library modules are available at bundle time.
 
 ### Selection Cache Invalidation
 
-The selection cache is invalidated when `changedPaths` is provided in the render input (or via the escape-hatch `notifyFileChanged`), since changed imports may shift which kernel handles a file. The cache uses full file paths as keys to prevent collisions.
+The selection cache is invalidated by worker-owned filesystem watch events, since changed imports may shift which kernel handles a file. The cache uses full file paths as keys to prevent collisions.
 
 ## Plugin Architecture
 
@@ -330,7 +330,7 @@ Bundler plugins handle file bundling, code execution, and module registry. The e
 Each bundler declares which file extensions it handles via `extensions: string[]`:
 
 ```typescript
-export default defineBundler({
+export const myBundler = defineBundler({
   extensions: ['ts', 'js', 'tsx', 'jsx'],
   // ...methods
 });
@@ -359,9 +359,9 @@ Kernel modules define geometry computation logic. Each kernel is an ES module lo
 The kernel machine communicates with the worker via typed MessagePort events through the `RuntimeTransport` interface:
 
 - All request/response commands carry a `requestId` for correlation
-- Fire-and-forget commands (`fileChanged`, `configureMiddleware`, `cleanup`) have no requestId
+- Fire-and-forget commands (`fileChanged`, `cleanup`) have no requestId
 - `cancel` command is used by auto-cancellation (latest-wins semantics) when a new `render()` supersedes an in-flight one
-- `fileChanged` command is sent internally by the client when `changedPaths` is provided in the render input
+- `fileChanged` command is internal to filesystem watch delivery and is not exposed as a public render-input field
 - `progress` events stream render phase transitions to the UI
 - `telemetry` events batch performance entries for the kernel panel
 
@@ -413,6 +413,7 @@ Tessellation can be configured at two levels, with per-call overrides taking pre
 
 ```typescript
 createRuntimeClient({
+  transport,
   tessellation: {
     preview: { linearTolerance: 0.1, angularTolerance: 30 }, // Faster, lower quality
     export: { linearTolerance: 0.01, angularTolerance: 30 }, // Slower, higher quality
@@ -455,13 +456,13 @@ If no tessellation is specified at any level, each kernel applies its own intern
 ### Threading Path
 
 ```
-RuntimeClient.render({ file, parameters, tessellation?, changedPaths? })
-  → resolves: input.tessellation ?? options.tessellation.preview
-    → RuntimeWorkerClient.render(..., tessellation?)
-      → RuntimeCommand { type: 'render', tessellation? }
-        → dispatcher → KernelWorker.render(..., tessellation?)
-          → KernelWorker.createGeometry(..., tessellation?)
-            → CreateGeometryInput { tessellation? }
+RuntimeClient.render({ source, parameters, renderOptions? })
+  → resolves: input.renderOptions ?? active render options
+    → RuntimeWorkerClient.openFile(..., renderOptions?)
+      → RuntimeCommand { type: 'openFile', options? }
+        → dispatcher → KernelWorker.handleOpenFile(..., options?)
+          → KernelWorker.createGeometry(..., options?)
+            → CreateGeometryInput { options? }
               → KernelDefinition.onCreateGeometry(input, runtime, ctx)
 ```
 
@@ -485,8 +486,8 @@ Consumer-facing input uses `options` naming; validated output uses `config` inte
 
 | Cache               | Invalidation                                                         | Purpose                                             |
 | ------------------- | -------------------------------------------------------------------- | --------------------------------------------------- |
-| `fileHashCache`     | Per-path via `changedPaths` in render input (or `notifyFileChanged`) | Avoid re-hashing unchanged files                    |
-| `fileContentCache`  | Per-path via `changedPaths` in render input (or `notifyFileChanged`) | Avoid re-reading unchanged files                    |
+| `fileHashCache`     | Worker-owned filesystem watch invalidation                           | Avoid re-hashing unchanged files                    |
+| `fileContentCache`  | Worker-owned filesystem watch invalidation                           | Avoid re-reading unchanged files                    |
 | `bundleResultCache` | Dependency-aware: only entries whose deps overlap with changed files | Avoid re-bundling when deps haven't changed         |
 | `selectionCache`    | Cleared entirely on any file change                                  | Ensure kernel detection re-runs when imports change |
 

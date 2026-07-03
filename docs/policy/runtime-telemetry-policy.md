@@ -3,7 +3,10 @@ title: 'Kernel Telemetry Policy'
 description: 'Kernel worker telemetry: span naming, hierarchy rules, attribute conventions, and performance contracts. Covers RuntimeTracer, OC API tracing, and WorkerTelemetryCollector.'
 status: active
 created: '2026-02-20'
-updated: '2026-03-05'
+updated: '2026-06-19'
+related:
+  - docs/research/first-party-runtime-library-tracing-blueprint.md
+  - docs/research/replicad-native-batch-operations-performance-blueprint.md
 ---
 
 # Kernel Telemetry Policy
@@ -25,15 +28,16 @@ Structured telemetry enables performance debugging and kernel panel visualizatio
 
 All span names follow the pattern `{subsystem}.{operation}`, inspired by OpenTelemetry semantic conventions.
 
-| Subsystem      | Scope                         | Examples                                                                                                                                                                                                                                                           |
-| -------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `kernel.*`     | Framework lifecycle and infra | `kernel.bootstrap`, `kernel.render`, `kernel.init`, `kernel.select`, `kernel.detect-import`, `kernel.bundle`, `kernel.execute`, `kernel.compute`, `kernel.extract-params`, `kernel.export`, `kernel.resolve-deps`, `kernel.load-middleware`, `kernel.bundler-init` |
-| `deps.*`       | Dependency pipeline           | `deps.discover`, `deps.read`, `deps.hash`, `deps.content-hash`                                                                                                                                                                                                     |
-| `fs.*`         | Filesystem operations         | `fs.read`, `fs.readBatch`, `fs.exists`, `fs.readdir`                                                                                                                                                                                                               |
-| `wasm.*`       | WASM compilation              | `wasm.compile`                                                                                                                                                                                                                                                     |
-| `middleware.*` | Middleware wrapping           | `middleware.wrap({MiddlewareName})`                                                                                                                                                                                                                                |
-| `oc.*`         | OpenCASCADE API calls         | `oc.summary`, `oc.BRepPrimAPI_MakeBox`, `oc.BRepAlgoAPI_Fuse`                                                                                                                                                                                                      |
-| `{kernelId}.*` | Kernel-authored spans         | `replicad.wasm-init`, `replicad.run-main`, `replicad.font-load`, `replicad.mesh-to-gltf`, `openscad.wasm-init`, `openscad.call-main`, `openscad.mount-fonts`, `openscad.convert-geometry`                                                                          |
+| Subsystem              | Scope                                  | Examples                                                                                                                                                                                                                                                                      |
+| ---------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kernel.*`             | Framework lifecycle and infra          | `kernel.bootstrap`, `kernel.render`, `kernel.init`, `kernel.select`, `kernel.detect-import`, `kernel.bundle`, `kernel.execute`, `kernel.compute`, `kernel.extract-params`, `kernel.export`, `kernel.resolve-deps`, `kernel.load-middleware`, `kernel.bundler-init`            |
+| `deps.*`               | Dependency pipeline                    | `deps.discover`, `deps.read`, `deps.hash`, `deps.content-hash`                                                                                                                                                                                                                |
+| `fs.*`                 | Filesystem operations                  | `fs.read`, `fs.readBatch`, `fs.exists`, `fs.readdir`                                                                                                                                                                                                                          |
+| `wasm.*`               | WASM compilation                       | `wasm.compile`                                                                                                                                                                                                                                                                |
+| `middleware.*`         | Middleware wrapping                    | `middleware.wrap({MiddlewareName})`                                                                                                                                                                                                                                           |
+| `oc.*`                 | OpenCASCADE API calls                  | `oc.summary`, `oc.BRepPrimAPI_MakeBox`, `oc.BRepAlgoAPI_Fuse`                                                                                                                                                                                                                 |
+| `{kernelId}.library.*` | First-party kernel library attribution | `replicad.library.summary`, `replicad.library.makeBaseBox`, `replicad.library.cut`, `replicad.library.fuse`                                                                                                                                                                   |
+| `{kernelId}.*`         | Kernel-authored spans                  | `replicad.wasm-init`, `replicad.run-main`, `replicad.font-load`, `replicad.render-output`, `replicad.tessellate.faces`, `replicad.tessellate.edges`, `replicad.mesh-to-gltf`, `openscad.wasm-init`, `openscad.call-main`, `openscad.mount-fonts`, `openscad.convert-geometry` |
 
 ### Rules
 
@@ -92,9 +96,14 @@ kernel.render
     └── middleware.wrap({Name})
         ├── {kernelId}.run-main / {kernelId}.call-main
         │   ├── oc.{ClassName} (per-call mode only)
+        │   ├── {kernelId}.library.{operation} (per-call mode only)
+        │   ├── {kernelId}.library.summary (summary mode only)
+        │   ├── oc.summary (summary mode only)
         │   └── ...
-        ├── oc.summary (summary mode only, after run-main)
-        └── {kernelId}.mesh-to-gltf / {kernelId}.convert-geometry
+        ├── {kernelId}.render-output / {kernelId}.convert-geometry
+        │   ├── {kernelId}.tessellate.faces
+        │   └── {kernelId}.tessellate.edges
+        └── {kernelId}.mesh-to-gltf
 ```
 
 ### Subsequent Renders (kernel already selected)
@@ -105,31 +114,36 @@ The `kernel.select` subtree is absent. The `kernel.bundler-init` subtree is abse
 
 Attributes are `Record<string, string | number | boolean>` only. No objects, no arrays.
 
-| Span                      | Required Attributes                     | Optional Attributes                               |
-| ------------------------- | --------------------------------------- | ------------------------------------------------- |
-| `kernel.bootstrap`        | --                                      | `{ kernel }` (constructor name)                   |
-| `kernel.render`           | `{ file }`                              | --                                                |
-| `kernel.export`           | `{ format }`                            | --                                                |
-| `kernel.select`           | `{ file }`                              | --                                                |
-| `kernel.detect-import`    | `{ kernel }` (kernel ID being tested)   | --                                                |
-| `kernel.init`             | `{ kernel }`                            | --                                                |
-| `kernel.load-middleware`  | `{ count }`                             | --                                                |
-| `kernel.bundle`           | `{ entryPath }`                         | --                                                |
-| `kernel.bundler-init`     | --                                      | --                                                |
-| `deps.discover`           | --                                      | --                                                |
-| `deps.read`               | `{ fileCount }`                         | --                                                |
-| `deps.hash`               | `{ fileCount }`                         | --                                                |
-| `fs.read`                 | `{ path }`                              | --                                                |
-| `fs.readBatch`            | `{ fileCount }`                         | --                                                |
-| `fs.exists`               | `{ path }`                              | --                                                |
-| `fs.readdir`              | `{ path }`                              | --                                                |
-| `wasm.compile`            | `{ url }`                               | --                                                |
-| `middleware.wrap(...)`    | `{ middleware, phase }`                 | --                                                |
-| `{kernelId}.wasm-init`    | --                                      | `{ wasm }`                                        |
-| `{kernelId}.run-main`     | --                                      | --                                                |
-| `{kernelId}.mesh-to-gltf` | --                                      | `{ shapeCount }`                                  |
-| `oc.summary`              | `{ total.calls, total.ms, classes }`    | `{ {ClassName}.calls, {ClassName}.ms }` per class |
-| `oc.{ClassName}`          | `{ method }` (`constructor` or `apply`) | --                                                |
+| Span                             | Required Attributes                                           | Optional Attributes                                                       |
+| -------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `kernel.bootstrap`               | --                                                            | `{ kernel }` (constructor name)                                           |
+| `kernel.render`                  | `{ file }`                                                    | --                                                                        |
+| `kernel.export`                  | `{ format }`                                                  | --                                                                        |
+| `kernel.select`                  | `{ file }`                                                    | --                                                                        |
+| `kernel.detect-import`           | `{ kernel }` (kernel ID being tested)                         | --                                                                        |
+| `kernel.init`                    | `{ kernel }`                                                  | --                                                                        |
+| `kernel.load-middleware`         | `{ count }`                                                   | --                                                                        |
+| `kernel.bundle`                  | `{ entryPath }`                                               | --                                                                        |
+| `kernel.bundler-init`            | --                                                            | --                                                                        |
+| `deps.discover`                  | --                                                            | --                                                                        |
+| `deps.read`                      | `{ fileCount }`                                               | --                                                                        |
+| `deps.hash`                      | `{ fileCount }`                                               | --                                                                        |
+| `fs.read`                        | `{ path }`                                                    | --                                                                        |
+| `fs.readBatch`                   | `{ fileCount }`                                               | --                                                                        |
+| `fs.exists`                      | `{ path }`                                                    | --                                                                        |
+| `fs.readdir`                     | `{ path }`                                                    | --                                                                        |
+| `wasm.compile`                   | `{ url }`                                                     | --                                                                        |
+| `middleware.wrap(...)`           | `{ middleware, phase }`                                       | --                                                                        |
+| `{kernelId}.wasm-init`           | --                                                            | `{ wasm }`                                                                |
+| `{kernelId}.run-main`            | --                                                            | `{ stage }`                                                               |
+| `{kernelId}.render-output`       | `{ stage }`                                                   | --                                                                        |
+| `{kernelId}.tessellate.faces`    | `{ shapeName, linearTolerance, angularToleranceDeg, output }` | `{ withBrepEdges }`                                                       |
+| `{kernelId}.tessellate.edges`    | `{ shapeName, linearTolerance, angularToleranceDeg, output }` | `{ withBrepEdges }`                                                       |
+| `{kernelId}.mesh-to-gltf`        | `{ stage, shapeCount }`                                       | --                                                                        |
+| `{kernelId}.library.summary`     | `{ library, total.calls, total.ms, operations }`              | `{ {operation}.calls, {operation}.ms, {operation}.errors }` per operation |
+| `{kernelId}.library.{operation}` | `{ library, scope, memberPath, operation, callType }`         | --                                                                        |
+| `oc.summary`                     | `{ total.calls, total.ms, classes }`                          | `{ {ClassName}.calls, {ClassName}.ms }` per class                         |
+| `oc.{ClassName}`                 | `{ method }` (`constructor` or `apply`)                       | --                                                                        |
 
 ### Guidelines
 
@@ -179,13 +193,28 @@ kernel.compute
     └── oc.BRepAlgoAPI_Fuse
 ```
 
-Summary spans appear as siblings after `replicad.run-main` (flush is called after `mainSpan.end()`):
+Summary spans are flushed before `replicad.run-main` closes, so OC summary spans are parented under the BRep/user-code span:
 
 ```
 kernel.compute
-├── replicad.run-main
-└── oc.summary   (attributes: per-class counts and durations)
+└── replicad.run-main
+    └── oc.summary   (attributes: per-class counts and durations)
 ```
+
+## First-Party Library Tracing
+
+Kernel-owned JavaScript libraries registered through Tau's built-in module registry may use the first-party library tracer. This is for Tau-controlled kernel libraries such as Replicad, not arbitrary user dependencies.
+
+### Rules
+
+- Use `{kernelId}.library.{operation}` for per-call spans and `{kernelId}.library.summary` for aggregated summary spans.
+- Parent library spans under the semantic user-code span, for example `replicad.run-main`.
+- Do not attach `phase` to library tracing spans.
+- Use summary mode for normal benchmark attribution and per-call mode only for focused profiling.
+- Keep semantic pipeline spans explicit. Do not replace spans such as `replicad.render-output`, `replicad.tessellate.faces`, `replicad.tessellate.edges`, or `replicad.mesh-to-gltf` with library tracer output.
+- Use trace scopes to suppress Tau-owned render/export internals so library tracing represents user-authored library activity.
+
+**Why**: Library tracing attributes high-level modeling intent, while explicit pipeline spans describe Tau-owned render/export phases.
 
 ## Performance Contract
 
@@ -213,6 +242,7 @@ kernel.compute
 | Component                   | File                                                          | Role                                                         |
 | --------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------ |
 | `RuntimeTracer`             | `packages/runtime/src/framework/runtime-tracer.ts`            | Span creation with parent-child hierarchy                    |
+| `createKernelLibraryTracer` | `packages/runtime/src/framework/kernel-library-tracing.ts`    | First-party kernel library attribution proxy                 |
 | `WorkerTelemetryCollector`  | `packages/runtime/src/framework/worker-telemetry.ts`          | Batched collection via PerformanceObserver                   |
 | `KernelWorkerDispatcher`    | `packages/runtime/src/framework/runtime-worker-dispatcher.ts` | Telemetry flush on render completion                         |
 | `KernelWorker`              | `packages/runtime/src/framework/kernel-worker.ts`             | Framework span instrumentation                               |

@@ -3,12 +3,13 @@ title: 'Storage Policy'
 description: 'Rules for atomic read-modify-write semantics, field-scoped patches, and concurrent-writer safety in client-side persistent storage providers (IndexedDB, OPFS, etc.).'
 status: active
 created: '2026-04-20'
-updated: '2026-04-20'
+updated: '2026-06-05'
 related:
   - docs/policy/xstate-policy.md
   - docs/policy/filesystem-policy.md
   - docs/policy/testing-policy.md
   - docs/research/chat-draft-resurrection-race.md
+  - docs/research/project-updated-at-activity-boundary.md
 ---
 
 # Storage Policy
@@ -124,15 +125,15 @@ INCORRECT:
 updateChat(
   chatId: string,
   update: PartialDeep<Chat>,
-  options?: { ignoreKeys?: string[]; noUpdatedAt?: boolean },
+  options?: { ignoreKeys?: string[]; preserveUpdatedAt?: boolean },
 ): Promise<Chat | undefined>;
 ```
 
 ### 5. Bump `updatedAt` only on real mutations
 
-Field-scoped helpers must skip the `updatedAt` bump when the mutation is a no-op (e.g. clearing an entry that does not exist). The `atomicChatMutation` helper expresses this with a `(chat) => boolean` mutator: returning `false` means "nothing changed".
+Storage mutators must compute the candidate row before stamping. If the candidate is equal to the persisted row, return `undefined`, skip `put`, skip row `updatedAt`, and skip parent-project cascades. Field-scoped helpers express this with a `(chat) => boolean` mutator: returning `false` means "nothing changed".
 
-**Why**: `updatedAt` drives sort order in the chat list and React Query invalidation. A no-op clear should not reorder the list.
+**Why**: `updatedAt` drives sort order and React Query invalidation. A no-op clear, patch, generated-name retry, or load repair should not reorder the list.
 
 CORRECT:
 
@@ -144,7 +145,13 @@ this.atomicChatMutation(chatId, (chat) => {
 });
 ```
 
-### 6. Concurrent regression coverage is mandatory for new fields
+### 6. Project recency belongs to the project domain boundary
+
+Do not add low-level timestamp flags to storage, filesystem, worker, or hook APIs. Derived metadata and navigation repair use semantic operations (`applyGeneratedProjectName`, `applyGeneratedChatName`, `createNavigationRepairChat`). User/content activity enters through project-domain operations such as project rename, chat message persistence, or `projectFileActivity`.
+
+**Why**: Callers should describe intent, not negotiate whether a project list should reorder. Generic recency-preservation flags leak project-domain semantics into substrates and recreate the navigation-jump bug class.
+
+### 7. Concurrent regression coverage is mandatory for new fields
 
 When a new field is added to `Chat`/`Project` and is written by more than one actor or hook, add a concurrency regression test in `apps/ui/app/db/indexeddb-storage.test.ts` that fires both writers `Promise.all`-style for at least 100 iterations against a fresh row and asserts every writer's last-written value is preserved.
 
@@ -165,11 +172,11 @@ for (let i = 0; i < iterations; i++) {
 }
 ```
 
-### 7. Hooks invalidate React Query after every mutation
+### 8. Hooks invalidate React Query after material mutations
 
-Every hook wrapper around a storage mutation (`useChats`, `useProjects`, `useProjectManager`) must call `queryClient.invalidateQueries` for both the collection key (`['chats', resourceId]` / `['projects']`) and the row key (`['chat', chatId]` / `['project', projectId]`) inside the same `useCallback` body. Field-scoped helpers must not skip invalidation just because the touched field is "small".
+Every hook wrapper around a storage mutation (`useChats`, `useProjects`, `useProjectManager`) must invalidate collection and row queries only when the storage operation returns an updated row, except create/delete operations whose observable membership changes. Field-scoped helpers must not skip invalidation just because the touched field is "small", but they must skip invalidation when storage returns `undefined` for a no-op.
 
-**Why**: Storage atomicity is necessary but not sufficient — the UI cache must converge to the new value or the user sees a stale row in the list.
+**Why**: Storage atomicity is necessary but not sufficient: the UI cache must converge to new values, while no-op writes must not trigger refetches that can resurrect stale order or hide the absence of a real mutation.
 
 CORRECT:
 
@@ -177,6 +184,7 @@ CORRECT:
 const patchChat = useCallback(
   async <K extends keyof Chat>(chatId: string, key: K, value: Chat[K]) => {
     const updated = await patchChatInManager(chatId, key, value);
+    if (!updated) return undefined;
     void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
     void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
     return updated;
@@ -189,20 +197,24 @@ const patchChat = useCallback(
 
 - Calling `await getChat(id)` followed by `await updateChat(id, mutated)` from a hook or actor. Use a field-scoped helper instead — the manual `read → mutate → write` re-introduces the original race even though the storage layer is now atomic.
 - Adding a new option flag to `updateChat`/`updateProject` to "preserve" or "skip" a field. Add a field-scoped helper instead.
+- Adding project-recency preservation flags to storage or filesystem APIs. Add a semantic domain operation instead.
 - Wrapping `provider.updateChat` in `Promise.all([...])` in production code without confirming each writer touches a disjoint slot. Concurrent writers to the same slot must agree on a last-writer-wins serialisation point upstream.
 - Mocking `IndexedDbStorageProvider` in unit tests instead of using the real provider with `fake-indexeddb/auto`. The race shows up in the real provider, not in mocks.
 
 ## Decision Table: which API to use
 
-| Scenario                                       | API to call                                                  |
-| ---------------------------------------------- | ------------------------------------------------------------ |
-| Single top-level field on a chat               | `patchChat(chatId, key, value)`                              |
-| Single entry in `chat.messageEdits`            | `setMessageEdit(chatId, messageId, draft)`                   |
-| Remove a single entry in `chat.messageEdits`   | `clearMessageEdit(chatId, messageId)`                        |
-| Soft-delete a chat                             | `softDeleteChat(chatId)` (`deleteChat` forwards to this)     |
-| Full chat replacement (e.g. import, duplicate) | `updateChat(chatId, fullChat)` with `fullChat.id === chatId` |
-| Single project field                           | `updateProject(projectId, { field: value })`                 |
-| Full project replacement                       | `updateProject(projectId, fullProject)` with matching id     |
+| Scenario                                       | API to call                                                   |
+| ---------------------------------------------- | ------------------------------------------------------------- |
+| Single top-level field on a chat               | `patchChat(chatId, key, value)`                               |
+| Single entry in `chat.messageEdits`            | `setMessageEdit(chatId, messageId, draft)`                    |
+| Remove a single entry in `chat.messageEdits`   | `clearMessageEdit(chatId, messageId)`                         |
+| Soft-delete a chat                             | `softDeleteChat(chatId)` (`deleteChat` forwards to this)      |
+| Full chat replacement (e.g. import, duplicate) | `updateChat(chatId, fullChat)` with `fullChat.id === chatId`  |
+| Generated chat label                           | `applyGeneratedChatName(chatId, name)`                        |
+| Navigation repair empty chat                   | `createNavigationRepairChat(projectId)`                       |
+| Single project field                           | `updateProject(projectId, { field: value })`                  |
+| Full project replacement                       | `updateProject(projectId, fullProject)` with matching id      |
+| Generated project label                        | `applyGeneratedProjectName(name)` via project machine/context |
 
 ## Summary Checklist
 
@@ -212,9 +224,10 @@ Before merging a storage-layer change:
 - [ ] All public mutators go through `KeyedMutex.run(rowId, …)`.
 - [ ] New multi-writer fields have field-scoped helpers, not extra `updateChat` options.
 - [ ] No `ignoreKeys`/`customMerge` knob is reintroduced.
-- [ ] `updatedAt` bumps only when the mutator returns `true`.
+- [ ] `updatedAt` bumps only for material user/content mutations.
+- [ ] Derived metadata and navigation repair use semantic operations, not timestamp flags.
 - [ ] A concurrency regression test in `apps/ui/app/db/indexeddb-storage.test.ts` covers the new field with ≥100 iterations.
-- [ ] React Query invalidation hits both collection and row keys.
+- [ ] React Query invalidation hits both collection and row keys only when a material row change occurred, except create/delete membership changes.
 
 ## References
 

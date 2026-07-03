@@ -4,7 +4,7 @@
 
 **Proposal** -- documenting the target architecture for the kernel render pipeline. The current plan (filesystem watch-based overhaul) builds the foundation (watch infrastructure, bridge protocol, event pipeline) that makes this topology possible. This document captures the full vision for follow-up implementation.
 
-**Updated for runtime v5 blueprint** ([docs/research/runtime-event-driven-api-blueprint-v5.md](../research/runtime-event-driven-api-blueprint-v5.md)). The public client surface is `openFile` / `updateParameters` / `setOptions` / `export` / `connect` / `terminate` / `on`; `setFile` / `setParameters` / `setRenderTimeout` / `notifyFileChanged` / `render` are removed. Transport behaviour is encapsulated by the `RuntimeTransport` interface (in-process, worker, or future websocket); the client and `RuntimeWorkerClient` no longer touch `SharedArrayBuffer` directly. The `signalSlot` SAB channel shrinks to two slots (`abortGeneration`, `abortReason`); `workerState` and `progressPercent` are delivered through the same ordered `postMessage` channel as every other event. The kernel `nativeHandle` cache is opportunistic, not contractual -- single-arg `client.export(format)` rejects with `NoSettledRenderError` when no prior render context exists.
+**Updated for runtime source API migration** ([docs/research/runtime-source-api-unification-blueprint.md](../research/runtime-source-api-unification-blueprint.md)). The public client surface is `render` / `updateParameters` / `setOptions` / `export` / `connect` / `terminate` / `on`; `render({ source })` accepts either inline `source.files` or filesystem-backed `source.path`, and `export(format, { source?, parameters?, exportOptions? })` keeps plugin-owned export options nested under `exportOptions`. Transport behaviour is encapsulated by the `RuntimeTransport` interface (in-process, worker, or future websocket); the client and `RuntimeWorkerClient` no longer touch `SharedArrayBuffer` directly. The `signalSlot` SAB channel shrinks to two slots (`abortGeneration`, `abortReason`); `workerState` and `progressPercent` are delivered through the same ordered `postMessage` channel as every other event. The kernel `nativeHandle` cache is opportunistic, not contractual -- single-arg `client.export(format)` rejects with `NoRenderOutcomeError` when no prior render context exists.
 
 ---
 
@@ -43,7 +43,7 @@ The runtime worker becomes an **autonomous reactive render service**. Like a Lan
 ┌───────────────────────────────────────────────────────────────────────┐
 │ MAIN THREAD  (display + user input only)                              │
 │                                                                       │
-│  Editor ── openFile / updateParameters / setOptions ─▶ RuntimeClient   │
+│  Editor ── render / updateParameters / setOptions ───▶ RuntimeClient   │
 │  Params UI ┘                             │    ▲                       │
 │                                     (1) transport.signalAbort(reason) │
 │                                     (2) postMessage                  │
@@ -96,16 +96,16 @@ The protocol shifts from request/response to event-driven, with shared-memory ch
 
 **Main thread → Worker (commands, infrequent):**
 
-| Command                          | Trigger                                | Worker Behavior                                                                                                                    |
-| -------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `openFile({ file, parameters })` | User opens file, project loads         | Render immediately, discover deps, start watching                                                                                  |
-| `updateParameters(parameters)`   | User adjusts slider/input              | Store params, debounce 50ms, re-render                                                                                             |
-| `setOptions({ renderTimeout })`  | User adjusts runtime-wide options      | Apply settings (`renderTimeout` in **ms**); affects subsequent renders                                                             |
-| `setFiles({ files })`            | Inline-code mode (CLI, tests, hooks)   | Replace virtual filesystem entries before the next `openFile`/`export`                                                             |
-| `export(format, input?)`         | User clicks export, CLI export command | One-shot export: with input, render+export; without input, export current native                                                   |
-| `abort(reason)`                  | RuntimeClient supersedes prior render  | Bumps abort generation; in-flight render terminates with the internal cooperative-abort marker (`RenderAbortedError`, `@internal`) |
+| Command                                    | Trigger                                | Worker Behavior                                                                                                                    |
+| ------------------------------------------ | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `render({ source: { path }, parameters })` | User opens file, project loads         | Render immediately, discover deps, start watching                                                                                  |
+| `updateParameters(parameters)`             | User adjusts slider/input              | Store params, debounce 50ms, re-render                                                                                             |
+| `setOptions({ renderTimeout })`            | User adjusts runtime-wide options      | Apply settings (`renderTimeout` in **ms**); affects subsequent renders                                                             |
+| `render({ source: { files } })`            | Inline-code mode (CLI, tests, hooks)   | Stage inline source files and render from the inferred or explicit entry                                                           |
+| `export(format, input?)`                   | User clicks export, CLI export command | One-shot export: with `source`, render+export; without `source`, export current native; plugin options live under `exportOptions`  |
+| `abort(reason)`                            | RuntimeClient supersedes prior render  | Bumps abort generation; in-flight render terminates with the internal cooperative-abort marker (`RenderAbortedError`, `@internal`) |
 
-`openFile`, `updateParameters`, and `setOptions` resolve with a `RenderOutcome` discriminated union: `{ superseded: false; geometry }` on the settled render, or `{ superseded: true }` when a newer command preempted it. `connect()` is required exactly once before any of the above; subsequent calls with identical options are idempotent; calls with different options reject with `RuntimeReconnectError`.
+`render`, `updateParameters`, and `setOptions` resolve with a `RenderOutcome` discriminated union: `{ superseded: false; geometry }` on the settled render, or `{ superseded: true }` when a newer command preempted it. `connect()` is required exactly once before any of the above; subsequent calls with identical options are idempotent; calls with different options reject with `RuntimeReconnectError`.
 
 **Worker → Main thread (events, pushed reactively):**
 
@@ -152,7 +152,7 @@ setOptions({ renderTimeout })
 
 export(format, input?)
   → with input: render+export, return bytes
-  → without input: export from opportunistic nativeHandle, or reject with NoSettledRenderError
+  → without input: export from opportunistic nativeHandle, or reject with NoRenderOutcomeError
 
 abort(reason)
   → bump abortGeneration; in-flight render terminates with RenderAbortedError
@@ -496,9 +496,9 @@ const client = createRuntimeClient({
 await client.connect({ port, filePoolBuffer });
 
 // These return Promise<RenderOutcome>: { superseded: false, geometry } or { superseded: true }.
-const a = await client.openFile({ file: '/projects/xxx/main.ts', parameters: {} });
+const a = await client.render({ source: { path: '/projects/xxx/main.ts' }, parameters: {} });
 const b = await client.updateParameters({ width: 10 });
-await client.setOptions({ renderTimeout: 30_000 });
+await client.setOptions({ renderTimeout: 60_000 });
 
 client.on('geometry', (result) => {
   /* Three.js -- geometry bytes are already ArrayBuffer-backed (SAB resolved) */
@@ -515,8 +515,11 @@ client.on('activeKernelChanged', (kernelId) => {
 
 // Imperative one-shot export (e.g. CLI, Save As). With input it always renders fresh;
 // without input it uses the opportunistic native handle from the most recent settled render
-// or rejects with NoSettledRenderError.
-const glb = await client.export('glb', { file: '/projects/xxx/main.ts', parameters: { width: 10 } });
+// or rejects with NoRenderOutcomeError.
+const glb = await client.export('glb', {
+  source: { path: '/projects/xxx/main.ts' },
+  parameters: { width: 10 },
+});
 
 await client.terminate();
 // All subsequent method calls throw RuntimeTerminatedError synchronously.

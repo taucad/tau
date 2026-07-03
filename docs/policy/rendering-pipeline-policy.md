@@ -3,7 +3,7 @@ title: 'Rendering Pipeline Policy'
 description: 'Unified PBR defaults, material policy, tone mapping, AO, environment strategy, and performance patterns for the CAD viewer.'
 status: active
 created: '2026-02-15'
-updated: '2026-03-05'
+updated: '2026-06-18'
 ---
 
 # Rendering Pipeline Policy
@@ -73,11 +73,13 @@ distanceFalloff:   0.2         -- ratio of radius at which AO fades (for screen-
 **Rationale**: Professional CAD viewers (e.g. Onshape at 37.5% AO) use ambient occlusion to create depth perception. Without AO, the scene appears flat, especially from top-down and bottom-up views. N8AO was chosen because it:
 
 - Supports logarithmic depth buffers (auto-detected)
-- Supports stencil buffers (for section view compatibility)
+- Coexists with the BVH contour-fill section view path
 - Works with the `frameloop="demand"` mode (AO runs during render passes only)
 - Uses `screenSpaceRadius` for zoom-independent consistent appearance
 
-**Stencil compatibility**: The `EffectComposer` is configured with `stencilBuffer` to preserve stencil-based cross-section rendering in the Section View component.
+**Section view compatibility**: Section View uses clipped source geometry plus generated BVH contour fills outside the clipping group. Section caps are opaque, depth-owned meshes rather than stencil-derived transparent planes; post-processing must preserve their normal depth ordering.
+
+**Section cap diagnostics**: Section-plane overlap highlighting is a viewport visual diagnostic, not GeoSpec exact positive-volume evidence. Implement red overlap cues by splitting generated cap regions into disjoint normal and diagnostic triangles in section-cap geometry, preferably using one packed vertex-colored mesh per source and shared opaque WebGL/WebGPU striped cap materials. Do not render transparent red overlays, coincident duplicate cap meshes, or stencil-derived caps for this diagnostic.
 
 ## Environment Strategy
 

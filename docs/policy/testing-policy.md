@@ -3,10 +3,11 @@ title: 'Testing Policy'
 description: 'Writing high-quality tests across the Tau monorepo. Assert observable behavior, error assertions, resource cleanup, mock factories, and async patterns. Covers Vitest, kernel tests, and API tests.'
 status: active
 created: '2026-03-09'
-updated: '2026-04-21'
+updated: '2026-06-25'
 related:
   - docs/policy/react-testing-policy.md
   - docs/policy/typescript-policy.md
+  - docs/policy/geospec-policy.md
   - docs/research/typescript-overloads.md
   - docs/research/mesh-continuity-test-semantics.md
 ---
@@ -377,12 +378,15 @@ const options = {} as unknown as RuntimeClientOptions;
 
 ## 12. Geometry-Test Surface
 
-The agent-facing geometry-test surface (`test.json` requirements consumed by `test_model`) is a **deliberately consolidated 3-check vocabulary**: `boundingBox`, `connectedComponents`, and `watertight`. Treat this list as closed.
+The agent-facing geometry-test surface is GeoSpec: Vitest-style `*.geospec.ts` / `*.geospec.js` files executed by `test_model` through the browser-connected Tau runner or the standalone GeoSpec CLI. Agent-facing checks must remain semantically non-overlapping and produce spatially useful diagnostics.
 
-1. **The 3-check rule.** Every agent-facing check must answer a question none of the other two can. `boundingBox` answers size/position; `connectedComponents` answers spatial-chunk count; `watertight` answers per-geometry-unit closed-manifold. Adding a new check requires demonstrating, in writing in the proposal, that no existing check (with reasonable parameter tuning) can answer the new question.
+1. **Non-overlap rule.** Every agent-facing check must answer a question no existing check can. `boundingBox` answers size/position; `connectedComponents` answers spatial-chunk count; `watertight` answers per-geometry-unit closed-manifold; measurement checks answer physical scalar/center properties; BRep feature checks require exact feature evidence. Adding a new check requires demonstrating, in writing in the proposal, that no existing check (with reasonable parameter tuning) can answer the new question.
 2. **`watertight` is the canonical "single fused solid" assertion.** Assert `watertight` per geometry unit (e.g. `lib/<part>.ts`) — the boolean fuse welded iff the surface is closed-manifold. Do **not** use `connectedComponents: 1` for that intent: `connectedComponents` answers "how many spatial chunks," not "did the boolean fuse weld."
-3. **Pure-GLB only.** All agent-facing geometry checks must operate purely on the GLB output. No kernel `extras`, no per-kernel metadata propagation, no scene-level cooperation. Future kernels emit valid glTF and the checks work; if a check needs more than the GLB tells it, redesign the algorithm (see [`mesh-continuity-test-semantics.md`](../research/mesh-continuity-test-semantics.md) for the AABB-clustering rewrite of `connectedComponents`).
-4. **Kernel-author surface stays separate.** Raw mesh-count / vertex-count assertions remain available to kernel authors via `expectMeshCount` / `expectVertexCount` in `@taucad/runtime/testing` for Vitest-based kernel tests. The two surfaces intentionally do not share a vocabulary; do not mirror low-level helpers back into the agent surface.
+3. **Strict topology, not slicer acceptance.** A mesh is `watertight` only when every spatially welded mesh edge has exactly two incident triangles (`irregularEdges === 0`). `openBoundaryEdges` identify holes; `nonManifoldEdges` identify over-adjacent/coincident surfaces. Slicers may still repair or print non-manifold meshes, but that belongs in a separately named printable/slicer-tolerant check, not `watertight`.
+4. **Geometry evidence only.** Mesh checks must operate purely on geometry files/bytes such as GLB/glTF. No kernel `extras`, no per-kernel metadata propagation, no scene-level cooperation. BRep/topology checks must consume explicit BRep/STEP evidence and return typed unsupported diagnostics when that evidence is unavailable. Future kernels emit valid geometry evidence and the checks work; if a check needs more than the evidence tells it, redesign the algorithm (see [`mesh-continuity-test-semantics.md`](../research/mesh-continuity-test-semantics.md) for the AABB-clustering rewrite of `connectedComponents`).
+5. **AABB is broad-phase only for relationships.** Axis-aligned bounding boxes may prune candidates, assert explicit envelopes, and enrich diagnostics, but they must not decide production contact, clearance, containment, mate, shaft/bore, fastener, port, or manufacturability relationships. Return an unsupported-evidence diagnostic when relationship-grade evidence is unavailable.
+6. **Adversarial false-positive fixtures are mandatory.** Every new geometric matcher must include a fixture where the tempting broad-phase or approximate shortcut would pass while the real relationship fails, such as overlapping AABBs with separated mating faces or aligned envelopes with misaligned analytic axes. Relationship matcher tests must assert the diagnostic evidence type, not only pass/fail status.
+7. **Kernel-author surface stays separate.** Raw mesh-count / vertex-count assertions remain available to kernel authors via `expectMeshCount` / `expectVertexCount` in `@taucad/runtime/testing` for Vitest-based kernel tests. The two surfaces intentionally do not share a vocabulary; do not mirror low-level helpers back into the agent surface.
 
 ## Summary Checklist
 

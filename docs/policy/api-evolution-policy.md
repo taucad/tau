@@ -56,12 +56,14 @@ function resolveConfig(user: Partial<FutureConfig>): FutureConfig {
 **Why**: The `future` config pattern (used by React Router, Remix, and Prisma) lets consumers adopt breaking changes incrementally — one flag at a time — rather than facing a wall of changes on the next major upgrade. The `satisfies` pattern gives full type inference:
 
 ```typescript
-export default {
+const runtimeOptions = {
   kernels: [replicad()],
   future: {
     v2_middlewareApi: true,
   },
-} satisfies RuntimeClientConfig;
+} satisfies RuntimeDefinitionConfig;
+
+export const runtime = defineRuntime(runtimeOptions);
 ```
 
 ## 2. Stability Annotations in Code
@@ -391,11 +393,16 @@ Every public type export must have corresponding type-level tests. Adapted from 
 // src/types.test-d.ts
 import { expectTypeOf, describe, it } from 'vitest';
 import { createRuntimeClient } from './index';
+import { inProcessTransport } from './transport/in-process';
 import { replicad } from './kernels/replicad';
+import { defineRuntime } from './worker';
 
 describe('createRuntimeClient', () => {
   it('should infer kernel context types', () => {
-    const client = createRuntimeClient({ kernels: [replicad()] });
+    const runtime = defineRuntime({ kernels: [replicad()] });
+    const client = createRuntimeClient({
+      transport: inProcessTransport({ runtime }),
+    });
     expectTypeOf(client.render).toBeFunction();
     expectTypeOf(client.on).toBeCallableWith('progress', (_phase: string) => {});
   });

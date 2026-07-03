@@ -3,10 +3,11 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js stacks, TSL materials, snapshots, and e2e parity'
 status: active
 created: '2026-05-07'
-updated: '2026-05-27'
+updated: '2026-06-17'
 related:
   - docs/research/webgpu-migration-graphics-stack.md
   - docs/research/screenshot-viewport-shared-material-state-bleed.md
+  - docs/research/webgpu-gltf-edge-near-orthographic-occlusion.md
   - docs/policy/webgpu-rendering-pipeline.md
 ---
 
@@ -172,6 +173,12 @@ screenshotRenderer.render(screenshotScene, screenshotCamera);
 
 **Why**: Sharing a TSL-graph-baked material across renderers with divergent flags causes the secondary renderer to inherit the primary's depth-encoder choice, color-attachment expectations, and PassNode-level filtering assumptions — the canonical reason for grainy fat-line edges in WebGPU screenshot output documented in `docs/research/screenshot-viewport-shared-material-state-bleed.md`. Guards: **`apps/ui/app/machines/screenshot-capability.utils.test.ts`** (`R6 (WebGL/WebGPU): applyEdgeMaterialsToClonedScene replaces the LineSegments2's material with a fresh allocation`).
 
+### 11a. GLTF edge depth bias remains FOV-adaptive under reversed-Z
+
+WebGPU GLTF edge overlays must never apply a fixed `positionView.z * 0.999` pull. `reversedDepthBuffer: true` improves precision and preserves MSAA, but it does not make a view-space multiplier invariant under Tau's low-FOV perspective camera distance compensation. The WebGPU path must derive `tan(fov/2)` from `cameraProjectionMatrix[1][1]`, compute `pow(depthBias, tan(fov/2) / tan(30deg))`, and apply that adjusted multiplier before the renderer-aware reversed/log/standard depth encoder dispatch in Tau's `Line2NodeMaterial.setupDepth`.
+
+The shared base constants live in `apps/ui/app/components/geometry/graphics/three/materials/edge-depth-bias.ts`; `gltf-edges.ts` chooses the base policy, WebGL injects the matching shader expression, and WebGPU owns the TSL expression inside the Tau subclass. Guards: **`edge-depth-bias.test.ts`**, **`line2.material.test.ts`**, **`gltf-edges-webgpu.material.test.ts`**, **`gltf-edges-webgl.material.test.ts`**, and the low-FOV fixture check in **`apps/ui-e2e/src/graphics-backend.spec.ts`**.
+
 ### 7b. Interactive overlay tools must `invalidate()` after every user-driven state change
 
 When the viewport runs with `frameloop="demand"`, React state updates inside overlay tools (measure, section pickers, gizmos) do not schedule a frame by themselves. Every pointer-driven dispatch that changes visible overlay geometry **must** call `useThree((s) => s.invalidate)` immediately after the state commit.
@@ -201,13 +208,15 @@ When a component allocates `THREE.Material` or `BufferGeometry` in `useMemo`, a 
 
 Guards: **`measurement-line-materials.test.ts`**.
 
-### 14. Interactive raycasting routes through `bvhRaycastFirst`; `Mesh.prototype.raycast` monkey-patch banned
+### 14. Interactive raycasting routes through `raycastFirstVisibleMeshHit`; `Mesh.prototype.raycast` monkey-patch banned
 
-Pointer-event-rate picking (measure tool, future overlays) **must** use **`bvhRaycastFirst(raycaster, meshes)`** in **`apps/ui/app/components/geometry/graphics/three/utils/bvh-raycast.ts`**, which consults `getOrBuildBvh` per mesh. Patching `Mesh.prototype.raycast` with `acceleratedRaycast` is forbidden — it affects every mesh in the process globally.
+Pointer-event-rate model and measurement picking **must** use **`raycastFirstVisibleMeshHit({ raycaster, meshes, clipping })`** in **`apps/ui/app/components/geometry/graphics/three/utils/bvh-raycast.ts`**, which consults `getOrBuildBvh` per mesh. Patching `Mesh.prototype.raycast` with `acceleratedRaycast` is forbidden — it affects every mesh in the process globally.
+
+When section view is active and mesh clipping is enabled, callers must derive a `RaycastClipState` from `useSectionView` and pass it into this utility. Render clipping alone is not interaction clipping: GPU `Material.clippingPlanes` / `ClippingGroup` state does not affect CPU raycasts. The BVH helper owns the nearest-kept-hit search so a clipped-away first triangle does not hide farther visible geometry on the same mesh.
 
 Exempt: transform-controls gizmo picking may continue using stock `raycaster.intersectObject` on the gizmo subtree only.
 
-Guards: **`bvh-raycast.test.ts`**.
+Guards: **`bvh-raycast.test.ts`**, **`gltf-mesh.test.tsx`**, and **`section-view-clipped-picking.spec.ts`**.
 
 ### 15. High-frequency pointer events are rAF-coalesced; camera-drag suppression delegated to §16
 
@@ -305,7 +314,7 @@ S1-S4 are unconditional rules (pixels match within ~10-15 sRGB/channel once alig
 - **Drei `<Line>`** (or any third-party material wrapper) **without explicit `transparent`** when `opacity < 1` — opacity is silently dropped on WebGL, brightness diverges from WebGPU (CB-1).
 - **Pinning overlay color hex/RGB constants** to perceptual readouts produced by a known-broken pipeline state — locks the bug into the design contract (CB-2).
 - **Backend-specific color overrides** introduced to compensate for the residual gamma-vs-linear blend delta — band-aid that breaks as soon as either backend is touched. The delta is deferred work for non-line overlays (CB-3); for fat lines the architecturally correct fix is the in-shader sRGB blend (CB-4), not per-backend hex values.
-- **Stock `three/webgpu` `Line2NodeMaterial`** imported for any line drawn into the viewport canvas — bypasses Tau's renderer-aware depth encoder, hardware-clipping override, and the CB-4 in-shader gamma blend. Always import from `#components/geometry/graphics/three/materials/line2.material.js`.
+- **Stock `three/webgpu` `Line2NodeMaterial`** imported for any line drawn into the viewport canvas — bypasses Tau's renderer-aware depth encoder, FOV-adaptive GLTF edge bias, hardware-clipping override, and the CB-4 in-shader gamma blend. Always import from `#components/geometry/graphics/three/materials/line2.material.js`.
 - **Snapshot tests** that omit **`await`** on **`toMatchFileSnapshot`** (Vitest forwards will fail later).
 - **E2e** that asserts only DOM structure for GPU-heavy regressions without an opt-in screenshot in **`graphics-backend.spec.ts`**.
 - **Named `.toVar('…')` inside reusable `Fn` bodies** invoked more than once per shader stage — see §3.
@@ -313,7 +322,7 @@ S1-S4 are unconditional rules (pixels match within ~10-15 sRGB/channel once alig
 - **Sharing a TSL-graph-baked or `onBeforeCompile`-hooked material across renderer instances** with differing `reversedDepthBuffer`, `logarithmicDepthBuffer`, `samples`, or `outputColorSpace` — the secondary renderer inherits the primary's flag-baked graph (§11).
 - **Skipping `invalidate()`** after overlay tool state updates under `frameloop="demand"` — stale canvas until an unrelated interaction (§7b).
 - **Per-call `FontLoader` / `JSON.parse` / `ExtrudeGeometry`** for label text without module-scope LRU — multi-ms stalls on every preview frame (§12).
-- **`Mesh.prototype.raycast = acceleratedRaycast`** global monkey-patch — use `bvhRaycastFirst` instead (§14).
+- **`Mesh.prototype.raycast = acceleratedRaycast`** global monkey-patch — use `raycastFirstVisibleMeshHit` instead (§14).
 - **Camera quaternion/position delta heuristics** to detect orbit drags — use `cameraInteracting` from OrbitControls events (§16).
 - **Three separate `setState` calls** per pointer frame for related snap UI state — batch via `useReducer` + rAF coalescing (§15).
 
@@ -329,10 +338,11 @@ S1-S4 are unconditional rules (pixels match within ~10-15 sRGB/channel once alig
 - [ ] Saturated transparent fat-line overlay: routed through Tau **`Line2NodeMaterial`** (NOT stock `three/webgpu`) so CB-4's in-shader sRGB blend closes S7
 - [ ] Clone-and-render surface (screenshot, offscreen, exporter): allocator returns **`Set<Material>`**, teardown calls **`disposeCloneOwnedMaterials(set)`** — never traverses by **`isMesh`** (§10)
 - [ ] Material that branches on **`reversedDepthBuffer`** / **`logarithmicDepthBuffer`** / **`samples`** / **`outputColorSpace`**: fresh-allocated per renderer instance via the §10 allocator pattern, never reference-shared (§11)
+- [ ] GLTF edge overlays: base bias constants from **`edge-depth-bias.ts`** and WebGPU FOV-adaptive bias inside Tau **`Line2NodeMaterial.setupDepth`** (§11a)
 - [ ] Interactive overlay under demand frameloop: **`invalidate()`** after every user-driven state change (§7b)
 - [ ] Derived label/background geometry: module-scope LRU + dispose-on-evict; callers treat outputs as non-owned (§12)
 - [ ] Internal `useMemo` materials/geometries: `useEffect` dispose with caller-vs-internal discriminator (§13)
-- [ ] Pointer-rate picking: **`bvhRaycastFirst`** only — no `Mesh.prototype.raycast` patch (§14)
+- [ ] Pointer-rate picking: **`raycastFirstVisibleMeshHit`** only — no `Mesh.prototype.raycast` patch (§14)
 - [ ] High-frequency pointer pipeline: **`createRafCoalescer`** + batched reducer state (§15)
 - [ ] Overlay pointer lifecycle: XState input machine + **`cameraInteracting`** from OrbitControls — no quaternion heuristics (§16)
 - [ ] Scene-composition changes bump **`pickableMeshesVersion`** on `graphics.machine` for tool mesh caches (measure tool)
@@ -342,6 +352,7 @@ S1-S4 are unconditional rules (pixels match within ~10-15 sRGB/channel once alig
 - Research: **`docs/research/webgpu-migration-graphics-stack.md`**
 - Research: **`docs/research/measure-tool-performance-audit.md`**
 - Research: **`docs/research/screenshot-viewport-shared-material-state-bleed.md`** (§10 + §11 root cause and architectural fix)
+- Research: **`docs/research/webgpu-gltf-edge-near-orthographic-occlusion.md`** (§11a FOV-adaptive GLTF edge bias)
 - E2e harness route: **`apps/ui/app/routes/e2e.graphics-backend/route.tsx`**
 - Stability helper: **`apps/ui/app/components/geometry/graphics/three/utils/tsl-node-graph-snapshot.ts`**
 - Overlay color tuning point: **`apps/ui/app/components/geometry/graphics/three/overlay-colors.constants.ts`**

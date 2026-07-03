@@ -63,9 +63,9 @@ Using `text` instead of `ts` for internal TypeScript examples sacrifices DX: dev
 
 ### 1. Examples Must Show Real-World Usage
 
-Write the code a developer would actually write. If a function is always composed inside another (e.g., `replicad()` inside `createRuntimeClient`), the example must show that composition.
+Write the code a developer would actually write. If a function is always composed inside another (e.g., `replicad()` inside `defineRuntime`), the example must show that composition.
 
-**Why**: An example of `replicad()` called in isolation is never how it is used — it only appears inside `createRuntimeClient({ kernels: [replicad()] })`.
+**Why**: An example of `replicad()` called in isolation is never how it is used — it appears inside a worker- or host-owned `defineRuntime({ kernels: [replicad()] })`.
 
 ### 2. No Synthetic Stubs
 
@@ -149,8 +149,9 @@ CORRECT:
  *
  * @example <caption>Browser setup</caption>
  * ```typescript
- * import { createRuntimeClient } from '@taucad/runtime';
- * const client = createRuntimeClient({ kernels: [replicad()] });
+ * import { defineRuntime } from '@taucad/runtime/worker';
+ * import { replicad } from '@taucad/runtime/kernels';
+ * export const runtime = defineRuntime({ kernels: [replicad()] });
  * ```
  */
 ````
@@ -164,7 +165,7 @@ INCORRECT:
  * @example Browser setup
  * ```typescript
  * import { createRuntimeClient } from '@taucad/runtime';
- * const client = createRuntimeClient({ kernels: [replicad()] });
+ * const client = createRuntimeClient({ transport });
  * ```
  */
 ````

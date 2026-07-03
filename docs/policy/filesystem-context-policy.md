@@ -3,7 +3,7 @@ title: 'Filesystem Context Policy'
 description: 'Rules for the filesystem-backed context management pipeline: transcripts, tool offloading, skills, memory, compaction, and middleware ordering.'
 status: active
 created: '2026-03-24'
-updated: '2026-05-12'
+updated: '2026-06-22'
 related:
   - docs/policy/context-engineering-policy.md
   - docs/research/transcript-search-architecture.md
@@ -29,13 +29,13 @@ Store all conversation events in a single append-only JSONL file per chat sessio
 
 Every line has a top-level `role` field for fast filtering (`rg '"role":"user"'`):
 
-| Role                   | Fields                                                                            | Content                                  |
-| ---------------------- | --------------------------------------------------------------------------------- | ---------------------------------------- |
-| `user`                 | `role, content, timestamp`                                                        | Full user message text                   |
-| `assistant`            | `role, content, timestamp`                                                        | Full assistant text response             |
-| `assistant` (thinking) | `role, type, content, timestamp`                                                  | Thinking block text (`type: "thinking"`) |
-| `tool`                 | `role, toolName, toolCallId, contentLength, timestamp`                            | Metadata only — no full output           |
-| `compaction`           | `role, messagesEvicted, tokensBeforeCompaction, tokensAfterCompaction, timestamp` | Compaction event marker                  |
+| Role                   | Fields                                                                                                                 | Content                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `user`                 | `role, content, timestamp`                                                                                             | Full user message text                   |
+| `assistant`            | `role, content, timestamp`                                                                                             | Full assistant text response             |
+| `assistant` (thinking) | `role, type, content, timestamp`                                                                                       | Thinking block text (`type: "thinking"`) |
+| `tool`                 | `role, toolName, toolCallId, contentLength, timestamp`                                                                 | Metadata only — no full output           |
+| `compaction`           | `role, compactionId, status, triggerReason, messagesEvicted, tokensBeforeCompaction, tokensAfterCompaction, timestamp` | Compaction event marker                  |
 
 #### Content Block Rules
 
@@ -104,17 +104,21 @@ Do not add static skill or memory content to the system prompt. Let the middlewa
 Compaction fires when estimated token count exceeds 85% of the model's context window:
 
 1. **Truncate tool args** in old messages (lightweight, no API call)
-2. **Proactive compaction** via summarization service (evict + summarize older messages)
+2. **Proactive compaction** via native Morph Compact (evict + compact older messages)
 3. **Emergency re-compaction** on `ContextOverflowError` (calibrates estimation multiplier)
 
 When compaction fires:
 
-- Evicted messages are **appended** (not overwritten) to the unified transcript file
+- Evicted messages are rendered into a provider-neutral compaction transcript and **appended** (not overwritten) to the unified transcript file
 - A `role: "compaction"` marker event is appended to the transcript
 - A `data-context-compaction` SSE event is emitted to the UI
-- The model call proceeds with compacted messages — the stream is never interrupted
+- The model call proceeds only after Morph returns a valid compacted `output`, the transcript commit succeeds, and the in-memory graph is rewritten to compacted history plus recent complete turns
 
 All compaction writes use `append`, never `write` (overwrite). Overwrite semantics lose prior transcript data.
+
+Required compaction is fail-closed. Once Tau determines that the provider-visible request must be compacted, Morph transport errors, Morph HTTP errors, invalid Morph response shape, empty compacted output, transcript commit failure, state rewrite failure, or any Tau-authored compaction pipeline invariant failure MUST throw a typed pre-provider error such as `CONTEXT_COMPACTION_FAILED`. Tau MUST NOT continue with the same unreduced history, a tail-only request, or a partial `AIMessage` reconstruction as an implicit fallback.
+
+The compaction transcript renderer is provider-neutral. It preserves user-visible text, tool-call boundaries, tool-result boundaries, file references, and test outcomes, but excludes opaque provider signatures and raw provider reasoning by default. A compacted seed may replace whole old turn clusters; middleware must not partially reconstruct a native provider turn without all provider-required signatures, IDs, and replay metadata.
 
 ### 7. Middleware Ordering
 
@@ -133,11 +137,13 @@ The middleware chain order in `chat.service.ts` is load-bearing:
 
 **Why**: Transcript middleware must run after compaction and observability — it captures the final state of each model turn. Moving it earlier would miss compaction events or record pre-sanitized content.
 
-### 8. All Writes Are Non-Blocking
+### 8. Most Context Writes Are Non-Blocking
 
-Every transcript and offloading write uses fire-and-forget (`void promise`). Context persistence must never block or delay the agent loop.
+Routine transcript and offloading writes use fire-and-forget (`void promise`). Context persistence must not block the agent loop when it is an observability or recall enhancement.
 
 **Why**: A filesystem or RPC failure during write should not prevent the agent from responding. Transcript loss is acceptable; agent hang is not.
+
+Required compaction commits are the exception. When compaction is the gate that makes a provider request valid and small enough to send, the transcript append and state rewrite are part of the request contract. Failure blocks provider dispatch and is surfaced noisily instead of being hidden behind a degraded continuation.
 
 ## Anti-Patterns
 
@@ -159,9 +165,15 @@ Every transcript and offloading write uses fire-and-forget (`void promise`). Con
 ### 4. Blocking Writes
 
 - INCORRECT: `await appendTranscriptLine(...)` in the middleware hot path
-- CORRECT: `void appendTranscriptLine(...)` — fire-and-forget
+- CORRECT: `void appendTranscriptLine(...)` — fire-and-forget for ordinary transcript capture
+- EXCEPTION: required compaction transcript commits are awaited and fail closed before provider dispatch
 
-### 5. Static Injection of Dynamic Context
+### 5. Implicit Compaction Fallbacks
+
+- INCORRECT: On required compaction failure, sending truncated old messages, tail-only history, or partially cloned tool-call turns to the provider
+- CORRECT: Throw a typed pre-provider compaction or replay-metadata error with structured diagnostics
+
+### 6. Static Injection of Dynamic Context
 
 - INCORRECT: Hardcoding skill content or memory in the system prompt string
 - CORRECT: Let `createSkillsMiddleware` / `createMemoryMiddleware` load from filesystem
@@ -173,7 +185,7 @@ When adding or modifying filesystem-based context:
 - [ ] Data is greppable by the agent (full text, no opaque binary)
 - [ ] No duplication with another middleware hook
 - [ ] Uses append-only semantics (not overwrite)
-- [ ] Writes are fire-and-forget (void the promise)
+- [ ] Writes are fire-and-forget (void the promise), except required compaction commits that gate provider dispatch
 - [ ] `timestamp` is included on every JSONL line
 - [ ] Schema table in Rule 1 is updated for new event types
 - [ ] Tests added in the corresponding middleware test file

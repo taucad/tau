@@ -153,15 +153,15 @@ GLB.
 
 ## Conversion Boundary Summary
 
-| Source                                        | Color space at source    | Conversion site                                  | Final `baseColorFactor` |
-| --------------------------------------------- | ------------------------ | ------------------------------------------------ | ----------------------- |
-| Replicad CSS hex → `replicad-to-gltf.ts`      | sRGB                     | `srgbHexToLinearTuple` in writer                 | Linear                  |
-| OpenSCAD OFF integer colors → `export-glb.ts` | sRGB (0..1 normalised)   | `srgbTupleToLinear` in `colorGroupToPrimitive`   | Linear                  |
-| JSCAD `colorize()` tuple → `jscad-to-gltf.ts` | sRGB                     | `srgbTupleToLinear` in `buildNodeFromJscadShape` | Linear                  |
-| OCCT non-PBR CSS hex → `Quantity_Color`       | sRGB                     | OCCT internal (`Quantity_TOC_sRGB` constructor)  | Linear                  |
-| OCCT PBR CSS hex → `Quantity_ColorRGBA`       | sRGB                     | `srgbToLinear` per channel before constructor    | Linear                  |
-| Manifold `GLTFNode.material.baseColorFactor`  | Linear (author supplied) | None — passthrough                               | Linear                  |
-| Zoo/KCL external glTF                         | Linear (engine emits)    | None — passthrough                               | Linear                  |
+| Source                                        | Color space at source    | Conversion site                                 | Final `baseColorFactor` |
+| --------------------------------------------- | ------------------------ | ----------------------------------------------- | ----------------------- |
+| Replicad CSS hex → `replicad-to-gltf.ts`      | sRGB                     | `srgbHexToLinearTuple` in writer                | Linear                  |
+| OpenSCAD OFF integer colors → `export-glb.ts` | sRGB (0..1 normalised)   | `srgbTupleToLinear` in `colorGroupToPrimitive`  | Linear                  |
+| JSCAD `colorize()` tuple → `jscad-to-gltf.ts` | sRGB                     | `srgbTupleToLinear` in JSCAD GLB adapter        | Linear                  |
+| OCCT non-PBR CSS hex → `Quantity_Color`       | sRGB                     | OCCT internal (`Quantity_TOC_sRGB` constructor) | Linear                  |
+| OCCT PBR CSS hex → `Quantity_ColorRGBA`       | sRGB                     | `srgbToLinear` per channel before constructor   | Linear                  |
+| Manifold `GLTFNode.material.baseColorFactor`  | Linear (author supplied) | None — passthrough                              | Linear                  |
+| Zoo/KCL external glTF                         | Linear (engine emits)    | None — passthrough                              | Linear                  |
 
 ## Anti-Patterns
 

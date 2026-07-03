@@ -3,6 +3,8 @@ import type { OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import ollama from 'ollama';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import type { ToolName } from '@taucad/chat';
+import { filterProviderFacingToolNamesByModelSupport } from '@taucad/chat/schemas';
 import type { ChatUsageCost, ChatUsageTokens } from '#api/chat/chat.schema.js';
 import type { Environment } from '#config/environment.config.ts';
 import type { ModelFamily, ProviderId } from '#api/providers/provider.schema.js';
@@ -130,6 +132,24 @@ export class ModelService implements OnModuleInit {
     return modelConfig?.details.knowledgeCutoff;
   }
 
+  public getModelSupport(modelId: string): ModelSupport | undefined {
+    const modelConfig = this.models.find((model) => model.id === modelId);
+    return modelConfig?.support;
+  }
+
+  public filterProviderToolNamesForModel({
+    modelId,
+    toolNames,
+  }: {
+    modelId: string;
+    toolNames: readonly ToolName[];
+  }): ToolName[] {
+    return filterProviderFacingToolNamesByModelSupport({
+      toolNames,
+      modelSupport: this.getModelSupport(modelId),
+    });
+  }
+
   public getModelCost(modelId: string, usage: ChatUsageTokens): ChatUsageCost {
     const modelConfig = this.models.find((model) => model.id === modelId);
     if (!modelConfig) {
@@ -199,6 +219,7 @@ export class ModelService implements OnModuleInit {
               // Rudimentary tool support detection until Ollama exposes a better API
               tools: fullModel.template.includes('.Tools'),
               toolChoice: false,
+              modalities: { input: ['text'], output: ['text'] },
             },
             provider: {
               id: 'ollama',

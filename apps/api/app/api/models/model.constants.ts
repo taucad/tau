@@ -1,7 +1,10 @@
-import type { Model } from '#api/models/model.schema.js';
+import type { Model, ModelModalities } from '#api/models/model.schema.js';
 import type { ProviderId } from '#api/providers/provider.schema.js';
 
 type CloudCatalogProviderId = Exclude<ProviderId, 'ollama'>;
+
+const textOnlyModalities = { input: ['text'], output: ['text'] } satisfies ModelModalities;
+const imageInputModalities = { input: ['text', 'image'], output: ['text'] } satisfies ModelModalities;
 
 /** Catalog row; omit {@link ModelListEntry.enabled} or set `true` to expose via GET `/v1/models`. */
 export type ModelListEntry = Model & { readonly enabled?: boolean };
@@ -32,6 +35,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-fable-5',
       support: {
         toolChoice: false,
+        modalities: imageInputModalities,
       },
       details: {
         family: 'claude',
@@ -75,6 +79,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-opus-4-8',
       support: {
         toolChoice: false,
+        modalities: imageInputModalities,
       },
       details: {
         family: 'claude',
@@ -104,11 +109,54 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         },
       },
     },
+    'claude-sonnet-5': {
+      id: 'anthropic-claude-sonnet-5',
+      name: 'Sonnet 5',
+      slug: 'claude-sonnet-5',
+      recommended: true,
+      description: 'Strong Claude model for complex CAD design iterations and long multi-file edits.',
+      provider: {
+        id: 'anthropic',
+        name: 'Anthropic',
+      },
+      model: 'claude-sonnet-5',
+      support: {
+        toolChoice: false,
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'claude',
+        families: ['claude'],
+        contextWindow: 200_000, // Provider supports larger windows; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-02',
+        cost: {
+          inputTokens: 2,
+          outputTokens: 10,
+          cacheReadTokens: 0.2,
+          cacheWriteTokens: 2.5,
+        },
+      },
+      configuration: {
+        streaming: true,
+        maxTokens: 120_000,
+        // @ts-expect-error: FIXME - some models use camelCase
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
+        max_tokens: 120_000,
+        thinking: {
+          type: 'adaptive',
+          display: 'summarized',
+        },
+        outputConfig: {
+          effort: 'high',
+        },
+      },
+    },
     'claude-sonnet-4.6': {
       id: 'anthropic-claude-sonnet-4.6',
       name: 'Sonnet 4.6',
       slug: 'claude-sonnet-4.6',
-      recommended: true,
+      recommended: false,
       description: 'Best combination of speed and intelligence, great for most design tasks.',
       provider: {
         id: 'anthropic',
@@ -117,6 +165,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-sonnet-4-6',
       support: {
         toolChoice: false,
+        modalities: imageInputModalities,
       },
       details: {
         family: 'claude',
@@ -158,6 +207,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-haiku-4-5-20251001',
       support: {
         toolChoice: false,
+        modalities: imageInputModalities,
       },
       details: {
         family: 'claude',
@@ -199,6 +249,9 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         name: 'OpenAI',
       },
       model: 'gpt-5.5',
+      support: {
+        modalities: imageInputModalities,
+      },
       details: {
         family: 'gpt',
         families: ['GPT-5.5'],
@@ -233,6 +286,9 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         name: 'OpenAI',
       },
       model: 'gpt-5.3-codex',
+      support: {
+        modalities: imageInputModalities,
+      },
       details: {
         family: 'gpt',
         families: ['GPT-5.3'],
@@ -266,6 +322,9 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         name: 'OpenAI',
       },
       model: 'gpt-4.1',
+      support: {
+        modalities: imageInputModalities,
+      },
       details: {
         family: 'gpt',
         families: ['GPT-4.1'],
@@ -297,6 +356,9 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         name: 'Google',
       },
       model: 'gemini-3.1-pro-preview',
+      support: {
+        modalities: imageInputModalities,
+      },
       details: {
         family: 'gemini',
         families: ['gemini'],
@@ -328,6 +390,9 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         name: 'Google',
       },
       model: 'gemini-3.5-flash',
+      support: {
+        modalities: imageInputModalities,
+      },
       details: {
         family: 'gemini',
         families: ['gemini'],
@@ -362,6 +427,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'deepseek-ai/DeepSeek-V3.1',
       support: {
         toolChoice: false,
+        modalities: textOnlyModalities,
       },
       details: {
         family: 'deepseek',
@@ -393,6 +459,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'deepseek-ai/DeepSeek-R1',
       support: {
         toolChoice: false,
+        modalities: textOnlyModalities,
       },
       details: {
         family: 'deepseek',
@@ -424,6 +491,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'zai-org/GLM-5.1',
       support: {
         toolChoice: false,
+        modalities: textOnlyModalities,
       },
       details: {
         family: 'glm',
@@ -434,6 +502,38 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           inputTokens: 1.4,
           outputTokens: 4.4,
           cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+      },
+    },
+    'glm-5.2': {
+      id: 'together-glm-5.2',
+      name: 'GLM-5.2',
+      slug: 'glm-5.2',
+      description:
+        'Strong text-only open reasoning model for long-horizon CAD code generation and complex geometry planning.',
+      provider: {
+        id: 'together',
+        name: 'Together AI',
+      },
+      model: 'zai-org/GLM-5.2',
+      support: {
+        tools: true,
+        toolChoice: false,
+        modalities: textOnlyModalities,
+      },
+      details: {
+        family: 'glm',
+        families: ['glm'],
+        contextWindow: 200_000,
+        maxTokens: 131_072,
+        cost: {
+          inputTokens: 1.4,
+          outputTokens: 4.4,
+          cacheReadTokens: 0.26,
           cacheWriteTokens: 0,
         },
       },
@@ -454,6 +554,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'Qwen/Qwen3.5-397B-A17B',
       support: {
         toolChoice: false,
+        modalities: imageInputModalities,
       },
       details: {
         family: 'qwen',
@@ -484,6 +585,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
       support: {
         toolChoice: false,
+        modalities: imageInputModalities,
       },
       details: {
         family: 'llama',
@@ -519,6 +621,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'morph-qwen35-397b',
       support: {
         toolChoice: false,
+        modalities: imageInputModalities,
       },
       details: {
         family: 'qwen',
@@ -543,7 +646,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       id: 'morph-minimax-m2.7',
       name: 'MiniMax M2.7',
       slug: 'minimax-m2.7',
-      recommended: true,
+      recommended: false,
       description: 'Cost-efficient open coder for everyday design work and long agentic tool loops.',
       provider: {
         id: 'morph',
@@ -552,6 +655,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'morph-minimax27-230b',
       support: {
         toolChoice: false,
+        modalities: imageInputModalities,
       },
       details: {
         family: 'minimax',
@@ -585,6 +689,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'morph-dsv4flash',
       support: {
         toolChoice: false,
+        modalities: textOnlyModalities,
       },
       details: {
         family: 'deepseek',
@@ -621,6 +726,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'qwen-3-235b-a22b-instruct-2507',
       support: {
         toolChoice: false,
+        modalities: textOnlyModalities,
       },
       details: {
         family: 'qwen',

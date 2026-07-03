@@ -27,11 +27,11 @@ function getCompactionView(data: ContextCompactionData): CompactionView {
     case 'failed':
       return {
         icon: AlertTriangle,
-        tone: 'warning',
-        cardStatus: 'warning',
-        verb: 'Compaction failed',
-        description: 'chat context',
-        title: 'Context compaction failed',
+        tone: 'destructive',
+        cardStatus: 'error',
+        verb: 'Compaction blocked',
+        description: 'provider dispatch',
+        title: 'Context compaction blocked',
       };
     case 'overflow_retry_succeeded':
       return {
@@ -79,6 +79,38 @@ function formatTriggerReason(reason: ContextCompactionData['triggerReason']): st
   }
 }
 
+function formatFailureKind(kind: ContextCompactionData['compactionFailureKind']): string | undefined {
+  switch (kind) {
+    case 'morph_transport_error':
+      return 'Morph transport error';
+    case 'morph_http_error':
+      return 'Morph HTTP error';
+    case 'morph_contract_error':
+      return 'Morph response contract error';
+    case 'transcript_commit_failed':
+      return 'Transcript commit failed';
+    case 'context_overflow_retry_failed':
+      return 'Overflow retry failed';
+    case 'unexpected_error':
+      return 'Unexpected implementation error';
+    case undefined:
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
+function formatFailureDisposition(disposition: ContextCompactionData['failureDisposition']): string | undefined {
+  switch (disposition) {
+    case 'blocked_before_provider':
+      return 'Blocked before provider dispatch';
+    case undefined:
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
 /**
  * Renders a "Chat context summarized." line inline in the message stream,
  * styled consistently with other tool rows (see chat-message-tool-read-file).
@@ -88,6 +120,9 @@ export function ChatMessageContextCompaction({ data }: { readonly data: ContextC
   const view = getCompactionView(data);
   const reductionPercent = Math.max(0, (1 - data.compressionRatio) * 100).toFixed(0);
   const triggerReason = formatTriggerReason(data.triggerReason);
+  const failureKind = formatFailureKind(data.compactionFailureKind);
+  const failureDisposition = formatFailureDisposition(data.failureDisposition);
+  const isFailed = data.status === 'failed';
 
   return (
     <HoverCard openDelay={100} closeDelay={100}>
@@ -121,12 +156,46 @@ export function ChatMessageContextCompaction({ data }: { readonly data: ContextC
                 <span className='font-mono'>{formatNumberAbbreviation(data.estimatedInputTokens)} tokens</span>
               </>
             ) : null}
+            {failureKind ? (
+              <>
+                <span className='text-muted-foreground'>Failure</span>
+                <span>{failureKind}</span>
+              </>
+            ) : null}
+            {failureDisposition ? (
+              <>
+                <span className='text-muted-foreground'>Disposition</span>
+                <span>{failureDisposition}</span>
+              </>
+            ) : null}
+            {data.debugId ? (
+              <>
+                <span className='text-muted-foreground'>Debug ID</span>
+                <span className='font-mono'>{data.debugId}</span>
+              </>
+            ) : null}
+            {data.providerNativeReplayMetadataPresent !== undefined ? (
+              <>
+                <span className='text-muted-foreground'>Replay metadata</span>
+                <span>{data.providerNativeReplayMetadataPresent ? 'Present' : 'Missing'}</span>
+              </>
+            ) : null}
+            {data.missingFunctionCallSignatureCount !== undefined ? (
+              <>
+                <span className='text-muted-foreground'>Missing signatures</span>
+                <span className='font-mono'>{data.missingFunctionCallSignatureCount}</span>
+              </>
+            ) : null}
             <span className='text-muted-foreground'>Before</span>
             <span className='font-mono'>{formatNumberAbbreviation(data.tokensBeforeCompaction)} tokens</span>
             <span className='text-muted-foreground'>After</span>
             <span className='font-mono'>{formatNumberAbbreviation(data.tokensAfterCompaction)} tokens</span>
-            <span className='text-muted-foreground'>Reduction</span>
-            <span className='font-mono'>{reductionPercent}%</span>
+            {isFailed ? null : (
+              <>
+                <span className='text-muted-foreground'>Reduction</span>
+                <span className='font-mono'>{reductionPercent}%</span>
+              </>
+            )}
             <span className='text-muted-foreground'>Messages evicted</span>
             <span className='font-mono'>{data.messagesEvicted}</span>
           </div>

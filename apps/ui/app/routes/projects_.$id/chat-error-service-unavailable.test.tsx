@@ -1,12 +1,9 @@
 /**
- * R1: ChatErrorServiceUnavailable banner Retry button rewires.
+ * ChatErrorServiceUnavailable uses Try again copy with continuation behavior.
  *
- * The banner used to call `regenerate()` -- the destructive code path that
- * slices the trailing assistant tail and re-issues the user message --
- * which destroyed any partial assistant content the user had already seen
- * before the network drop. The rewire to `continueChat()` resumes the
- * stream WITHOUT touching `chat.messages`. This test pins the wiring so
- * a future refactor cannot silently re-introduce the regression.
+ * `continueChat()` resumes the stream without touching `chat.messages`.
+ * A destructive `regenerate()` here would erase partial assistant content
+ * the user already saw before the network or service interruption.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -45,12 +42,14 @@ describe('ChatErrorServiceUnavailable', () => {
     expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
   });
 
-  it('Resume button calls continueChat (NOT regenerate) so partial assistant parts survive', async () => {
+  it('should call continueChat when Try again is clicked', async () => {
     const user = userEvent.setup();
     render(<ChatErrorServiceUnavailable />);
 
-    const resume = screen.getByRole('button', { name: /resume/i });
-    await user.click(resume);
+    const tryAgain = screen.getByRole('button', { name: /try again/i });
+    expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
+
+    await user.click(tryAgain);
 
     expect(continueChat).toHaveBeenCalledTimes(1);
     expect(regenerate).not.toHaveBeenCalled();

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { mock } from 'vitest-mock-extended';
 import type { GeometryComponentAppearance, GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
@@ -449,6 +449,46 @@ describe('Chat explorer component rows', () => {
         referenceToken: '@cad[src/main.ts#component]',
       }),
     ]);
+  });
+
+  it('should expose the same component actions from a row right-click', async () => {
+    const user = userEvent.setup();
+    const node = createNode(firstComponentId, 'planetary_housing');
+    const manifest = createManifest([node]);
+    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
+
+    renderComponentRow({
+      manifest,
+      node,
+      graphicsRef,
+      unitId,
+      rootDepth: 0,
+      hoveredComponentId: undefined,
+      isSelected: false,
+      isHidden: false,
+      isIsolated: false,
+      isFocused: false,
+      opacity: 1,
+    });
+
+    const row = screen.getByRole('button', { name: 'planetary_housing' }).parentElement;
+    fireEvent.contextMenu(row!);
+
+    expect(await screen.findByText('Focus on part')).toBeInTheDocument();
+    expect(screen.getByText('Add to chat')).toBeInTheDocument();
+    expect(screen.getByText('Hide')).toBeInTheDocument();
+    expect(screen.getByText('Isolate')).toBeInTheDocument();
+    expect(screen.getByText('Opacity')).toBeInTheDocument();
+
+    await user.click(screen.getByText('Hide'));
+
+    expect(graphicsRef.send).toHaveBeenCalledWith({
+      type: 'hideModelComponent',
+      unitId,
+      componentId: firstComponentId,
+      source: 'explorer',
+    });
+    expect(mocks.addContextReferences).not.toHaveBeenCalled();
   });
 
   it('should show stateful tooltips for visible and non-isolated row action icons', async () => {

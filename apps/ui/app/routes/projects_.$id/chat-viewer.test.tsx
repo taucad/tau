@@ -1,9 +1,10 @@
 import type { MockInstance } from 'vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import type { RefObject } from 'react';
 import type { ActorRefFrom } from 'xstate';
 import type { DockviewApi, DockviewPanelApi } from 'dockview-react';
-import type { GeometryComponentManifest } from '@taucad/types';
+import type { Geometry, GeometryComponentManifest } from '@taucad/types';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
@@ -29,12 +30,22 @@ vi.mock('@xstate/react', () => ({
 
 const mockProjectSend = vi.fn();
 const mockEditorSend = vi.fn();
+const mockGraphicsSend = vi.fn();
 let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
 let mockHoveredComponentId: string | undefined;
+let mockCadViewerSecondaryPointerMode: 'component-hit' | 'suppressed';
+let mockCadViewerProps:
+  | {
+      readonly eventPrefix?: string;
+      readonly eventSource?: unknown;
+      readonly secondaryMouseButtonMode?: string;
+    }
+  | undefined;
 
 const helperEntryFile = 'helper.scad';
 const helperUnitId = `file:${helperEntryFile}`;
 const rightRimComponentId = 'component:right-rim';
+const mockGeometry = { format: 'gltf', content: new Uint8Array([0x67, 0x6c, 0x54, 0x46]) } satisfies Geometry;
 
 const componentCapabilities = {
   canHide: true,
@@ -112,7 +123,7 @@ function createMockCadActor(): ActorRefFrom<typeof cadMachine> {
   return {
     getSnapshot: vi.fn(() => ({
       context: {
-        geometries: [],
+        geometry: mockGeometry,
         units: { length: { symbol: 'mm', factor: 1 } },
         kernelClient: undefined,
         renderTimeout: defaultRenderTimeout,
@@ -140,6 +151,37 @@ function fireCanvasPointerMove(
   );
 }
 
+function fireCanvasPointerEvent(
+  element: HTMLElement,
+  type: 'pointerdown' | 'pointermove' | 'pointerup',
+  options: {
+    readonly button?: number;
+    readonly pointerId?: number;
+    readonly clientX: number;
+    readonly clientY: number;
+  },
+): MouseEvent {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    button: options.button ?? 0,
+    clientX: options.clientX,
+    clientY: options.clientY,
+  });
+  Object.defineProperty(event, 'pointerId', { value: options.pointerId ?? 1 });
+  fireEvent(element, event);
+  return event;
+}
+
+function fireInspectableContextMenu(element: HTMLElement): MouseEvent {
+  const event = new MouseEvent('contextmenu', {
+    bubbles: true,
+    cancelable: true,
+  });
+  fireEvent(element, event);
+  return event;
+}
+
 const mockGraphicsActor = {
   getSnapshot: vi.fn(() => ({
     context: {
@@ -157,7 +199,7 @@ const mockGraphicsActor = {
       units: undefined,
     },
   })),
-  send: vi.fn(),
+  send: mockGraphicsSend,
   subscribe: vi.fn(() => ({ unsubscribe: vi.fn() })),
   on: vi.fn(() => ({ unsubscribe: vi.fn() })),
 } as unknown as ActorRefFrom<typeof graphicsMachine>;
@@ -205,7 +247,38 @@ vi.mock('#hooks/use-file-content.js', () => ({
 // =============================================================================
 
 vi.mock('#components/geometry/cad/cad-viewer.js', () => ({
-  CadViewer: () => <div data-testid='cad-viewer-canvas' />,
+  CadViewer: ({
+    eventPrefix,
+    eventSource,
+    onModelComponentSecondaryPointerCandidate,
+    secondaryMouseButtonMode,
+  }: {
+    readonly eventPrefix?: string;
+    readonly eventSource?: unknown;
+    readonly onModelComponentSecondaryPointerCandidate?: (
+      target: { readonly unitId: string; readonly componentId: string } | undefined,
+    ) => void;
+    readonly secondaryMouseButtonMode?: string;
+  }) => {
+    mockCadViewerProps = { eventPrefix, eventSource, secondaryMouseButtonMode };
+
+    return (
+      <div
+        data-testid='cad-viewer-canvas'
+        onPointerDown={(event) => {
+          if (event.button !== 2) {
+            return;
+          }
+
+          onModelComponentSecondaryPointerCandidate?.(
+            mockCadViewerSecondaryPointerMode === 'suppressed'
+              ? undefined
+              : { unitId: helperUnitId, componentId: rightRimComponentId },
+          );
+        }}
+      />
+    );
+  },
 }));
 
 vi.mock('#components/files/file-selector.js', () => ({
@@ -284,8 +357,11 @@ describe('ChatViewer reopen-renderer overlay', () => {
   beforeEach(() => {
     mockProjectSend.mockClear();
     mockEditorSend.mockClear();
+    mockGraphicsSend.mockClear();
     mockGeometryUnits = new Map();
     mockHoveredComponentId = undefined;
+    mockCadViewerSecondaryPointerMode = 'component-hit';
+    mockCadViewerProps = undefined;
     mockViewGraphics.set('view-1', mockGraphicsActor);
     getBoundingClientRectSpy = vi
       .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
@@ -462,5 +538,138 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     expect(screen.getByRole('button', { name: /reopen renderer/i })).toBeInTheDocument();
     expect(screen.queryByTestId('model-component-name-badge')).not.toBeInTheDocument();
+  });
+
+  it('should open the model component action menu from a viewer right-click', async () => {
+    mockGeometryUnits.set(helperEntryFile, createMockCadActor());
+
+    render(
+      <ChatViewer
+        viewId='view-1'
+        entryFile={helperEntryFile}
+        panelApi={mockPanelApi}
+        containerApi={mockContainerApi}
+      />,
+    );
+
+    const canvasRegion = screen.getByTestId('cad-viewer-canvas-region');
+    const canvas = screen.getByTestId('cad-viewer-canvas');
+    expect(mockCadViewerProps?.secondaryMouseButtonMode).toBe('camera-pan');
+    expect(mockCadViewerProps?.eventPrefix).toBeUndefined();
+    expect((mockCadViewerProps?.eventSource as RefObject<HTMLElement> | undefined)?.current).toBe(canvasRegion);
+
+    fireCanvasPointerEvent(canvas, 'pointerdown', {
+      button: 2,
+      pointerId: 11,
+      clientX: 150,
+      clientY: 180,
+    });
+    fireCanvasPointerEvent(canvas, 'pointerup', {
+      button: 2,
+      pointerId: 11,
+      clientX: 151,
+      clientY: 181,
+    });
+
+    expect(await screen.findByRole('menuitem', { name: 'Focus on part' })).toBeInTheDocument();
+    expect(screen.getByText('Add to chat')).toBeInTheDocument();
+    expect(screen.getByText('Hide')).toBeInTheDocument();
+    expect(screen.getByText('Isolate')).toBeInTheDocument();
+    expect(screen.getByText('Opacity')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Hide'));
+
+    expect(mockGraphicsSend).toHaveBeenCalledWith({
+      type: 'hideModelComponent',
+      unitId: helperUnitId,
+      componentId: rightRimComponentId,
+      source: 'viewer',
+    });
+  });
+
+  it('should keep a right-button drag as camera pan instead of opening model component actions', () => {
+    mockGeometryUnits.set(helperEntryFile, createMockCadActor());
+
+    render(
+      <ChatViewer
+        viewId='view-1'
+        entryFile={helperEntryFile}
+        panelApi={mockPanelApi}
+        containerApi={mockContainerApi}
+      />,
+    );
+
+    const canvas = screen.getByTestId('cad-viewer-canvas');
+    fireCanvasPointerEvent(canvas, 'pointerdown', {
+      button: 2,
+      pointerId: 12,
+      clientX: 150,
+      clientY: 180,
+    });
+    fireCanvasPointerEvent(screen.getByTestId('cad-viewer-canvas-region'), 'pointermove', {
+      pointerId: 12,
+      clientX: 164,
+      clientY: 180,
+    });
+    fireCanvasPointerEvent(canvas, 'pointerup', {
+      button: 2,
+      pointerId: 12,
+      clientX: 164,
+      clientY: 180,
+    });
+
+    expect(screen.queryByText('Focus on part')).not.toBeInTheDocument();
+    expect(screen.queryByText('Hide')).not.toBeInTheDocument();
+    expect(mockGraphicsSend).toHaveBeenCalledWith({ type: 'markModelPointerGestureMoved' });
+  });
+
+  it('should not render model component actions when CadViewer suppresses a right-click gesture', () => {
+    mockCadViewerSecondaryPointerMode = 'suppressed';
+    mockGeometryUnits.set(helperEntryFile, createMockCadActor());
+
+    render(
+      <ChatViewer
+        viewId='view-1'
+        entryFile={helperEntryFile}
+        panelApi={mockPanelApi}
+        containerApi={mockContainerApi}
+      />,
+    );
+
+    const canvas = screen.getByTestId('cad-viewer-canvas');
+    fireCanvasPointerEvent(canvas, 'pointerdown', {
+      button: 2,
+      pointerId: 13,
+      clientX: 150,
+      clientY: 180,
+    });
+    fireCanvasPointerEvent(canvas, 'pointerup', {
+      button: 2,
+      pointerId: 13,
+      clientX: 150,
+      clientY: 180,
+    });
+
+    expect(screen.queryByText('Focus on part')).not.toBeInTheDocument();
+    expect(screen.queryByText('Hide')).not.toBeInTheDocument();
+  });
+
+  it('should suppress the browser context menu on the viewer surface without opening model actions', () => {
+    mockGeometryUnits.set(helperEntryFile, createMockCadActor());
+
+    render(
+      <ChatViewer
+        viewId='view-1'
+        entryFile={helperEntryFile}
+        panelApi={mockPanelApi}
+        containerApi={mockContainerApi}
+      />,
+    );
+
+    const contextMenuEvent = fireInspectableContextMenu(screen.getByTestId('cad-viewer-canvas-region'));
+
+    expect(contextMenuEvent.defaultPrevented).toBe(true);
+    expect(screen.queryByText('Focus on part')).not.toBeInTheDocument();
+    expect(screen.queryByText('Hide')).not.toBeInTheDocument();
   });
 });

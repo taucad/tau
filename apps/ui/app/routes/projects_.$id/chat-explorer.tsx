@@ -1,20 +1,8 @@
-import {
-  XIcon,
-  FileBox,
-  ChevronRight,
-  Box,
-  Eye,
-  EyeOff,
-  MoreHorizontal,
-  Focus,
-  AtSign,
-  Target,
-  Search,
-} from 'lucide-react';
+import { XIcon, FileBox, ChevronRight, Box, Eye, EyeOff, Target, Search } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
-import type { GeometryComponentManifest, GeometryComponentNode, GeometryComponentReference } from '@taucad/types';
+import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 import { SearchInput } from '#components/search-input.js';
@@ -31,15 +19,12 @@ import {
   FloatingPanelButtonGroup,
 } from '#components/ui/floating-panel.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSliderItem,
-  DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+import { ContextMenu, ContextMenuTrigger } from '#components/ui/context-menu.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import {
+  ModelComponentActionContextContent,
+  ModelComponentActionDropdown,
+} from '#components/geometry/cad/model-component-action-menu.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject } from '#hooks/use-project.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
@@ -48,7 +33,6 @@ import type { modelInteractionMachine } from '#machines/model-interaction.machin
 import { formatKeyCombination } from '#utils/keys.utils.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { cn } from '#utils/ui.utils.js';
-import { geometryReferenceToToken, useChatContextInsertion } from '#components/chat/chat-context-insertion.js';
 import { sortGeometryUnitEntries } from '#routes/projects_.$id/geometry-unit.utils.js';
 
 const keyCombinationEditor = {
@@ -614,9 +598,6 @@ export function ComponentRow({
   readonly isFocused: boolean;
   readonly opacity: number;
 }): React.JSX.Element {
-  const { addContextReferences } = useChatContextInsertion();
-  const reference = buildGeometryReference(manifest, node);
-  const token = reference ? geometryReferenceToToken(reference) : `@cad[${node.selector}]`;
   const isHovered = hoveredComponentId === node.id;
   const showActions = shouldShowComponentRowActions({ isHovered, isIsolated });
   const visibilityAction = getVisibilityAction({ isHidden, nodeName: node.name, unitId, componentId: node.id });
@@ -626,21 +607,6 @@ export function ComponentRow({
     'flex size-5 items-center justify-center rounded-sm transition-opacity hover:bg-muted-foreground/15 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none',
     showActions ? 'opacity-100' : 'opacity-0 group-hover/part:opacity-100',
   );
-
-  const addToChat = (): void => {
-    if (!reference) {
-      return;
-    }
-    addContextReferences([
-      {
-        id: `${reference.filePath}#${reference.componentId}`,
-        label: reference.label,
-        chipType: 'geometry',
-        referenceToken: token,
-        geometryReference: reference,
-      },
-    ]);
-  };
 
   const onHover = (componentId: string | undefined): void => {
     graphicsRef.send({ type: 'setHoveredModelComponent', unitId, componentId, source: 'explorer' });
@@ -655,198 +621,101 @@ export function ComponentRow({
   };
 
   return (
-    <div
-      className={cn(
-        'group/part flex h-7 w-full cursor-pointer items-center justify-between py-1 pr-1 pl-2 text-sm leading-5 transition-colors',
-        isSelected ? 'bg-primary/10 text-primary' : 'text-sidebar-foreground',
-        !isSelected && isFocused ? 'bg-sidebar-accent/70 text-foreground ring-1 ring-inset ring-primary/30' : undefined,
-        !isSelected && !isFocused && isIsolated ? 'text-primary' : undefined,
-        !isSelected && !isFocused ? 'hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground' : undefined,
-        isHovered && !isSelected ? 'text-foreground' : undefined,
-        isHidden ? 'opacity-45' : undefined,
-      )}
-      style={{ paddingLeft: `${getComponentRowPaddingLeft({ depth: node.depth, rootDepth })}px` }}
-      onMouseEnter={() => {
-        onHover(node.id);
-      }}
-      onMouseLeave={() => {
-        onHover(undefined);
-      }}
-    >
-      <button
-        type='button'
-        className='flex min-w-0 flex-1 items-center gap-2 text-left'
-        aria-pressed={isSelected}
-        onClick={toggleSelection}
-      >
-        <Box
-          aria-hidden='true'
-          data-testid='component-color-icon'
-          className='size-3.5 shrink-0'
-          style={node.appearance?.color ? { fill: node.appearance.color } : undefined}
-        />
-        <span className='truncate'>{node.name}</span>
-      </button>
-      <Tooltip>
-        <TooltipTrigger asChild>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn(
+            'group/part flex h-7 w-full cursor-pointer items-center justify-between py-1 pr-1 pl-2 text-sm leading-5 transition-colors',
+            isSelected ? 'bg-primary/10 text-primary' : 'text-sidebar-foreground',
+            !isSelected && isFocused
+              ? 'bg-sidebar-accent/70 text-foreground ring-1 ring-inset ring-primary/30'
+              : undefined,
+            !isSelected && !isFocused && isIsolated ? 'text-primary' : undefined,
+            !isSelected && !isFocused ? 'hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground' : undefined,
+            isHovered && !isSelected ? 'text-foreground' : undefined,
+            isHidden ? 'opacity-45' : undefined,
+          )}
+          style={{ paddingLeft: `${getComponentRowPaddingLeft({ depth: node.depth, rootDepth })}px` }}
+          onMouseEnter={() => {
+            onHover(node.id);
+          }}
+          onMouseLeave={() => {
+            onHover(undefined);
+          }}
+        >
           <button
             type='button'
-            tabIndex={showActions ? 0 : -1}
-            className={actionButtonClassName}
-            aria-label={visibilityAction.ariaLabel}
-            onClick={() => {
-              graphicsRef.send(visibilityAction.event);
-            }}
+            className='flex min-w-0 flex-1 items-center gap-2 text-left'
+            aria-pressed={isSelected}
+            onClick={toggleSelection}
           >
-            <VisibilityIcon className='size-3.5' />
+            <Box
+              aria-hidden='true'
+              data-testid='component-color-icon'
+              className='size-3.5 shrink-0'
+              style={node.appearance?.color ? { fill: node.appearance.color } : undefined}
+            />
+            <span className='truncate'>{node.name}</span>
           </button>
-        </TooltipTrigger>
-        <TooltipContent>{visibilityAction.tooltip}</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type='button'
-            tabIndex={showActions ? 0 : -1}
-            className={cn(actionButtonClassName, isolationAction.className)}
-            aria-label={isolationAction.ariaLabel}
-            aria-pressed={isolationAction.pressed}
-            onClick={() => {
-              graphicsRef.send(isolationAction.event);
-            }}
-          >
-            <Target className='size-3.5' />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>{isolationAction.tooltip}</TooltipContent>
-      </Tooltip>
-      <ComponentActionMenu
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type='button'
+                tabIndex={showActions ? 0 : -1}
+                className={actionButtonClassName}
+                aria-label={visibilityAction.ariaLabel}
+                onClick={() => {
+                  graphicsRef.send(visibilityAction.event);
+                }}
+              >
+                <VisibilityIcon className='size-3.5' />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{visibilityAction.tooltip}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type='button'
+                tabIndex={showActions ? 0 : -1}
+                className={cn(actionButtonClassName, isolationAction.className)}
+                aria-label={isolationAction.ariaLabel}
+                aria-pressed={isolationAction.pressed}
+                onClick={() => {
+                  graphicsRef.send(isolationAction.event);
+                }}
+              >
+                <Target className='size-3.5' />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{isolationAction.tooltip}</TooltipContent>
+          </Tooltip>
+          <ModelComponentActionDropdown
+            manifest={manifest}
+            node={node}
+            graphicsRef={graphicsRef}
+            unitId={unitId}
+            source='explorer'
+            isFocused={isFocused}
+            isIsolated={isIsolated}
+            shouldShowActions={showActions}
+            actionButtonClassName={actionButtonClassName}
+            opacity={opacity}
+          />
+        </div>
+      </ContextMenuTrigger>
+      <ModelComponentActionContextContent
+        manifest={manifest}
         node={node}
         graphicsRef={graphicsRef}
         unitId={unitId}
-        addToChat={addToChat}
+        source='explorer'
         isFocused={isFocused}
         isIsolated={isIsolated}
-        shouldShowActions={showActions}
-        actionButtonClassName={actionButtonClassName}
         opacity={opacity}
       />
-    </div>
+    </ContextMenu>
   );
-}
-
-function ComponentActionMenu({
-  node,
-  graphicsRef,
-  unitId,
-  addToChat,
-  isFocused,
-  isIsolated,
-  shouldShowActions,
-  actionButtonClassName,
-  opacity,
-}: {
-  readonly node: GeometryComponentNode;
-  readonly graphicsRef: GraphicsActorRef;
-  readonly unitId: string;
-  readonly addToChat: () => void;
-  readonly isFocused: boolean;
-  readonly isIsolated: boolean;
-  readonly shouldShowActions: boolean;
-  readonly actionButtonClassName: string;
-  readonly opacity: number;
-}): React.JSX.Element {
-  return (
-    <DropdownMenu modal={false}>
-      <DropdownMenuTrigger asChild>
-        <button
-          type='button'
-          tabIndex={shouldShowActions ? 0 : -1}
-          className={actionButtonClassName}
-          aria-label={`Actions for ${node.name}`}
-        >
-          <MoreHorizontal className='size-3.5' />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side='right' align='start' className='min-w-56'>
-        <DropdownMenuItem
-          disabled={isFocused}
-          onSelect={() => {
-            graphicsRef.send({ type: 'focusModelComponent', unitId, componentId: node.id, source: 'explorer' });
-          }}
-        >
-          <Focus className='size-3.5' />
-          Focus on part
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={addToChat}>
-          <AtSign className='size-3.5' />
-          Add to chat
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={() => {
-            graphicsRef.send({ type: 'hideModelComponent', unitId, componentId: node.id, source: 'explorer' });
-          }}
-        >
-          <EyeOff className='size-3.5' />
-          Hide
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onSelect={() => {
-            graphicsRef.send(
-              isIsolated
-                ? { type: 'clearModelComponentIsolation', unitId, source: 'explorer' }
-                : { type: 'isolateModelComponent', unitId, componentId: node.id, source: 'explorer' },
-            );
-          }}
-        >
-          <Target className='size-3.5' />
-          {isIsolated ? 'Remove isolation' : 'Isolate'}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuSliderItem
-          value={Math.round(opacity * 100)}
-          min={0}
-          max={100}
-          step={1}
-          formatValue={(value) => `${value}%`}
-          onValueChange={(value) => {
-            graphicsRef.send({
-              type: 'setModelComponentOpacity',
-              unitId,
-              componentId: node.id,
-              opacity: value / 100,
-              source: 'explorer',
-            });
-          }}
-        >
-          <Eye className='size-3.5' />
-          Opacity
-        </DropdownMenuSliderItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function buildGeometryReference(
-  manifest: GeometryComponentManifest,
-  node: GeometryComponentNode,
-): GeometryComponentReference | undefined {
-  if (node.reference) {
-    return node.reference;
-  }
-  if (!manifest.sourceFile) {
-    return undefined;
-  }
-  return {
-    scheme: 'tau-cad',
-    filePath: manifest.sourceFile,
-    componentId: node.id,
-    selector: node.selector,
-    geometryHash: manifest.geometryHash,
-    label: node.name,
-    kind: node.kind,
-  };
 }
 
 function ExplorerEmptyState(): React.JSX.Element {

@@ -37,6 +37,10 @@ vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector: vi.fn(),
 }));
 
+vi.mock('#components/code/code-viewer.js', () => ({
+  CodeViewer: ({ text }: { readonly text: string }) => <pre data-testid='code-viewer'>{text}</pre>,
+}));
+
 describe('ChatError', () => {
   beforeEach(() => {
     mockRetryAttempt = 0;
@@ -97,15 +101,8 @@ describe('ChatError', () => {
     expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
   });
 
-  /**
-   * Generic-banner button label must mirror the action: a resumable category
-   * (network/server/overloaded) calls `continueChat` and therefore reads
-   * "Resume"; everything else calls `regenerate` and reads "Retry". The
-   * server-category render falls through to the generic banner today (only
-   * `network` and `overloaded` have specialised components), so it is the
-   * sole code path that exercises the "Resume" branch in `chat-error.tsx`.
-   */
-  it('renders a "Resume" button for the server category (resumable -> continueChat)', () => {
+  it('should continue the server-category fallback when Try again is clicked', async () => {
+    const user = userEvent.setup();
     const serverError: ChatErrorPayload = {
       category: errorCategory.server,
       title: 'Server Error',
@@ -120,11 +117,16 @@ describe('ChatError', () => {
     mockRetryAttempt = 0;
 
     render(<ChatErrorBanner />);
-    expect(screen.getByRole('button', { name: /resume/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /try again/i }));
+
+    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });
 
-  it('renders a "Retry" button for the generic category (non-resumable -> regenerate)', () => {
+  it('should continue the generic fallback when Try again is clicked', async () => {
+    const user = userEvent.setup();
     const genericError: ChatErrorPayload = {
       category: errorCategory.generic,
       title: 'Error',
@@ -139,8 +141,38 @@ describe('ChatError', () => {
     mockRetryAttempt = 0;
 
     render(<ChatErrorBanner />);
-    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /try again/i }));
+
+    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
+  });
+
+  it('should continue unknown fallback categories instead of regenerating', async () => {
+    const user = userEvent.setup();
+    const unknownError = {
+      category: 'unknown',
+      title: 'Unknown Error',
+      message: 'Something unusual happened',
+    } as unknown as ChatErrorPayload;
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: unknownError,
+      } as unknown as CombinedChatState),
+    );
+    mockRetryAttempt = 0;
+
+    render(<ChatErrorBanner />);
+
+    await user.click(screen.getByRole('button', { name: /try again/i }));
+
+    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });
 
   it('should render a credit error as warning Resume UI outside the tool-error fallback', async () => {
@@ -166,6 +198,7 @@ describe('ChatError', () => {
     expect(screen.getByText(creditMessage)).toBeInTheDocument();
     expect(screen.queryByText('Processing Error')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /resume/i }));
 

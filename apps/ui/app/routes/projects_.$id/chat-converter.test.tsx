@@ -15,7 +15,7 @@ vi.mock('@xstate/react', () => ({
 }));
 
 let mockCapabilities: CapabilitiesManifest | undefined;
-let mockGeometries: unknown[] = [];
+let mockGeometry: unknown | undefined;
 let mockActiveKernelId: string | undefined = 'replicad';
 
 function fidelityRank(fidelity: ExportRoute['fidelity']): number {
@@ -70,7 +70,7 @@ const mockKernelClient = {
 const mockCadRef = {
   getSnapshot: vi.fn(() => ({
     context: {
-      geometries: mockGeometries,
+      geometry: mockGeometry,
       capabilities: mockCapabilities,
       activeKernelId: mockActiveKernelId,
       kernelClient: mockKernelClient,
@@ -216,15 +216,15 @@ function createCapabilities(overrides?: Partial<CapabilitiesManifest>): Capabili
 describe('ChatConverter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGeometries = [{ format: 'gltf', content: new Uint8Array([1]) }];
+    mockGeometry = { format: 'gltf', content: new Uint8Array([1]) };
     mockCapabilities = createCapabilities();
     mockActiveKernelId = 'replicad';
     mockContentService = {};
     mockReadFile.mockRejectedValue(new Error('File not found'));
   });
 
-  it('should show empty state when no geometries', () => {
-    mockGeometries = [];
+  it('should show empty state when no geometry is rendered', () => {
+    mockGeometry = undefined;
     render(<ChatConverter isExpanded />);
     expect(screen.getByText('No geometry to export')).toBeDefined();
   });
@@ -329,7 +329,7 @@ describe('ChatConverter', () => {
     fireEvent.click(exportButton);
 
     await vi.waitFor(() => {
-      expect(mockKernelClient.export).toHaveBeenCalledWith('glb', {});
+      expect(mockKernelClient.export).toHaveBeenCalledWith('glb', { exportOptions: {} });
     });
   });
 

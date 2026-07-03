@@ -4,11 +4,12 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { MyUIMessage, SkillMetadata } from '@taucad/chat';
 import { ChatMessage } from '#routes/projects_.$id/chat-message.js';
 
-const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog } = vi.hoisted(() => ({
+const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog, mockCadChatRetry } = vi.hoisted(() => ({
   mockMessagesById: new Map<string, MyUIMessage>(),
   mockMessageOrder: [] as string[],
   mockStatus: { value: 'ready' as 'ready' | 'streaming' | 'submitted' | 'error' },
   mockSkillsCatalog: [] as SkillMetadata[],
+  mockCadChatRetry: vi.fn(),
 }));
 
 const getMockChatSelectorState = (): {
@@ -54,7 +55,7 @@ vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
   useCadChatClient: () => ({
     submit: vi.fn(),
     edit: vi.fn(),
-    retry: vi.fn(),
+    retry: mockCadChatRetry,
     regenerateTail: vi.fn(),
     stop: vi.fn(),
     messages: [],
@@ -177,10 +178,28 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
 }));
 
 vi.mock('#components/chat/chat-model-selector.js', () => ({
-  ChatModelSelector: ({ children }: { readonly children: unknown }) => {
+  ChatModelSelector: ({
+    children,
+    onSelect,
+  }: {
+    readonly children: unknown;
+    readonly onSelect?: (modelId: string) => void;
+  }) => {
     if (typeof children === 'function') {
       const renderProperty = children as (context: { selectedModel: { name: string } }) => React.ReactNode;
-      return <div data-testid='chat-model-selector'>{renderProperty({ selectedModel: { name: 'mock' } })}</div>;
+      return (
+        <div data-testid='chat-model-selector'>
+          {renderProperty({ selectedModel: { name: 'mock' } })}
+          <button
+            type='button'
+            onClick={() => {
+              onSelect?.('anthropic-claude-opus-4.8');
+            }}
+          >
+            Select alternate model
+          </button>
+        </div>
+      );
     }
     return <div data-testid='chat-model-selector' />;
   },
@@ -272,6 +291,7 @@ const getColumnWrapper = (): HTMLDivElement => {
 
 afterEach(() => {
   cleanup();
+  mockCadChatRetry.mockClear();
   mockMessagesById.clear();
   mockMessageOrder.length = 0;
   mockStatus.value = 'ready';
@@ -375,6 +395,22 @@ describe('ChatMessage use_skill tool rendering', () => {
 
     expect(screen.getByTestId('chat-message-tool-use-skill')).toHaveTextContent('woodworking');
     expect(screen.queryByTestId('tool-unknown')).toBeNull();
+  });
+});
+
+describe('ChatMessage assistant actions', () => {
+  it('should keep model-switch retry without exposing same-model Try again', () => {
+    setMessages([assistantMessage('msg-1', 'Hello there')]);
+
+    render(<ChatMessage messageId='msg-1' />);
+
+    expect(screen.getAllByText('Switch model').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Try again')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /select alternate model/i }));
+
+    expect(mockCadChatRetry).toHaveBeenCalledTimes(1);
+    expect(mockCadChatRetry).toHaveBeenCalledWith('msg-1', 'anthropic-claude-opus-4.8');
   });
 });
 

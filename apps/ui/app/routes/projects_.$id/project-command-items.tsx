@@ -18,7 +18,7 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
   const cadActor = geometryUnits.get(mainEntryFile);
   const fileManager = useFileManager();
   const fileTree = useFileTreeMap();
-  const geometries = useSelector(cadActor, (state) => state?.context.geometries ?? []);
+  const geometry = useSelector(cadActor, (state) => state?.context.geometry);
   const project = useSelector(projectRef, (state) => state.context.project);
   const projectName = useSelector(projectRef, (state) => state.context.project?.name) ?? 'file';
 
@@ -238,16 +238,14 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
     );
   }, [projectName, sendScreenshotRequest]);
 
-  // Subscribe to the cadActor to update the thumbnail when the geometries change
+  // Subscribe to the cadActor to update the thumbnail when geometry changes.
   useEffect(() => {
     if (!cadActor) {
       return;
     }
 
-    const subscription = cadActor.on('geometryEvaluated', (event) => {
-      if (event.geometries.length > 0) {
-        // UpdateThumbnailScreenshot();
-      }
+    const subscription = cadActor.on('geometryEvaluated', () => {
+      // UpdateThumbnailScreenshot();
     });
 
     return () => {
@@ -264,7 +262,7 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
         group: 'Export',
         icon: <Download />,
         action: handleOpenExporter,
-        disabled: geometries.length === 0,
+        disabled: !geometry,
       },
       {
         id: 'download-zip',
@@ -307,7 +305,7 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
       handleDownloadPng,
       projectName,
       handleOpenExporter,
-      geometries,
+      geometry,
       handleDownloadZip,
       fileCount,
     ],

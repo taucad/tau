@@ -18,7 +18,7 @@ export const ChatErrorTool = memo(function ({
   description,
   helpUrl,
 }: ChatErrorToolProps): React.JSX.Element {
-  const { regenerate } = useChatActions();
+  const { continueChat } = useChatActions();
 
   return (
     <div
@@ -59,11 +59,11 @@ export const ChatErrorTool = memo(function ({
           size='sm'
           className='shrink-0'
           onClick={() => {
-            regenerate();
+            continueChat();
           }}
         >
           <RefreshCcw className='size-3.5' />
-          Retry
+          Try again
         </Button>
       </div>
     </div>

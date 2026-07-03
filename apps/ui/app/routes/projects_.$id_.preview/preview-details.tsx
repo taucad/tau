@@ -9,11 +9,11 @@ import type { cadMachine } from '#machines/cad.machine.js';
 
 type PreviewDetailsProps = {
   readonly project: Project;
-  readonly geometriesCount: number;
+  readonly hasGeometry: boolean;
   readonly cadRef: ActorRefFrom<typeof cadMachine>;
 };
 
-export function PreviewDetails({ project, geometriesCount, cadRef }: PreviewDetailsProps): React.JSX.Element {
+export function PreviewDetails({ project, hasGeometry, cadRef }: PreviewDetailsProps): React.JSX.Element {
   const isDebugEnabled = useFeature('tauDebug');
 
   return (
@@ -54,7 +54,7 @@ export function PreviewDetails({ project, geometriesCount, cadRef }: PreviewDeta
       {/* Downloads */}
       <div>
         <h3 className='mb-3 text-sm font-semibold'>Downloads</h3>
-        {geometriesCount === 0 ? (
+        {!hasGeometry ? (
           <p className='text-xs text-muted-foreground'>Render the geometry to enable export.</p>
         ) : (
           <ExportSelector cadActor={cadRef} filenameBase={project.name} variant='inline' />

@@ -24,7 +24,7 @@ export const PreviewDesktop = memo(function (): React.JSX.Element {
   const navigate = useNavigate();
   const { id } = useParams();
   const { project, isStaticProject, staticProjectFiles } = usePreviewProject();
-  const { geometries, jsonSchema, cadRef } = useCadPreview();
+  const { geometry, jsonSchema, cadRef } = useCadPreview();
   const fileManager = useFileManager();
   const projectManager = useProjectManager();
   const files = usePreviewFileList();
@@ -192,7 +192,7 @@ export const PreviewDesktop = memo(function (): React.JSX.Element {
 
             {/* Sidebar - About Section */}
             <div className='w-80 border-l bg-sidebar'>
-              <PreviewDetails project={project} geometriesCount={geometries.length} cadRef={cadRef} />
+              <PreviewDetails project={project} hasGeometry={Boolean(geometry)} cadRef={cadRef} />
               <Separator />
               <div className='hidden p-6'>
                 <h3 className='mb-3 text-sm font-semibold'>Version Control</h3>

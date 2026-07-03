@@ -1,6 +1,6 @@
 import { memo, useState } from 'react';
 import type React from 'react';
-import { ChevronRight, Play, RefreshCcw } from 'lucide-react';
+import { ChevronRight, RefreshCcw } from 'lucide-react';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '#components/ui/button.js';
@@ -39,7 +39,7 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
 
     return state.persistedError;
   });
-  const { regenerate, continueChat } = useChatActions();
+  const { continueChat } = useChatActions();
 
   // R7: hide the banner during transparent auto-retry; the reconnecting affordance
   // is `ChatMessagePlanning`, not this component. The early return MUST sit below
@@ -55,20 +55,12 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
     return null;
   }
 
-  // Generic fallback recovery: resumable infrastructure categories use
-  // `continueChat` so partial assistant parts survive; unknown generic errors
-  // fall back to `regenerate`. Specialized components own auth, credits,
-  // rate-limit, and tool-error actions. Credits are account-state interruptions
-  // and resume through `ChatErrorCredits`, not this fallback.
-  const isResumableCategory =
-    parsedError.category === errorCategory.network ||
-    parsedError.category === errorCategory.server ||
-    parsedError.category === errorCategory.overloaded;
-  const handleRetry = isResumableCategory ? continueChat : regenerate;
-  // Label mirrors the action: `continueChat` resumes the live stream without
-  // slicing `chat.messages` (partial assistant tail survives), whereas
-  // `regenerate` re-issues the request from scratch.
-  const retryLabel = isResumableCategory ? 'Resume' : 'Retry';
+  // Generic fallback recovery must preserve partial assistant parts the user
+  // already saw. Specialized components own auth, credits, rate-limit, and
+  // tool-error actions. Credits remain the account-state "Resume" exception.
+  const handleTryAgain = (): void => {
+    continueChat();
+  };
 
   // Render the generic/server error view with collapsible details
   const renderGenericError = (): React.ReactNode => {
@@ -104,11 +96,11 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
                   className='h-7 shrink-0 hover:border-neutral/50'
                   size='sm'
                   onClick={() => {
-                    handleRetry();
+                    handleTryAgain();
                   }}
                 >
-                  {isResumableCategory ? <Play className='size-3.5' /> : <RefreshCcw className='size-3.5' />}
-                  {retryLabel}
+                  <RefreshCcw className='size-3.5' />
+                  Try again
                 </Button>
               </div>
             </div>

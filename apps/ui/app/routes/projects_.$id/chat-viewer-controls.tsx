@@ -50,9 +50,7 @@ export function ChatViewerControls({
   availableWidth,
   ...props
 }: ChatViewerControlsProps): React.JSX.Element {
-  const is2dGeometry = useGraphicsSelector((state) =>
-    state.context.geometries.some((geometry) => geometry.format === 'svg'),
-  );
+  const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
   const controlItems = is2dGeometry ? controlItems2d : controlItems3d;
   const { visibleIds, overflowIds, isCompact } = useToolbarOverflow(controlItems, availableWidth, overflowOptions);
 

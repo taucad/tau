@@ -31,6 +31,7 @@ describe('ChatErrorCredits', () => {
     expect(screen.getByRole('button', { name: /resume/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /plans & billing/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
 
     expect(container.firstElementChild).toHaveClass('border-warning/20', 'bg-warning/10');
     expect(container.firstElementChild).not.toHaveClass('border-destructive/20');

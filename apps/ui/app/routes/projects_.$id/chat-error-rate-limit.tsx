@@ -6,7 +6,7 @@ import { cn } from '#utils/ui.utils.js';
 import { useChatActions } from '#hooks/use-chat.js';
 
 export const ChatErrorRateLimit = memo(function ({ className }: { readonly className?: string }): React.JSX.Element {
-  const { regenerate } = useChatActions();
+  const { continueChat } = useChatActions();
 
   return (
     <div className={cn('flex flex-col gap-2 rounded-md border border-warning/20 bg-warning/10 p-3 text-sm', className)}>
@@ -20,11 +20,11 @@ export const ChatErrorRateLimit = memo(function ({ className }: { readonly class
           variant='outline'
           size='sm'
           onClick={() => {
-            regenerate();
+            continueChat();
           }}
         >
           <RefreshCcw className='size-3.5' />
-          Retry
+          Try again
         </Button>
       </div>
     </div>

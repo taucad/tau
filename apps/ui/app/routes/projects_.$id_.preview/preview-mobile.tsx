@@ -21,7 +21,7 @@ import { usePreviewFileList } from '#routes/projects_.$id_.preview/use-preview-f
 export const PreviewMobile = memo(function (): React.JSX.Element {
   const navigate = useNavigate();
   const { project, isStaticProject, staticProjectFiles } = usePreviewProject();
-  const { geometries, cadRef } = useCadPreview();
+  const { geometry, cadRef } = useCadPreview();
   const projectManager = useProjectManager();
   const files = usePreviewFileList();
 
@@ -161,7 +161,7 @@ export const PreviewMobile = memo(function (): React.JSX.Element {
             </TabsContent>
             <TabsContent enableAnimation={false} value='model' className='flex h-full flex-col' />
             <TabsContent enableAnimation={false} value='details' className='flex h-full flex-col overflow-y-auto'>
-              <PreviewDetails project={project} geometriesCount={geometries.length} cadRef={cadRef} />
+              <PreviewDetails project={project} hasGeometry={Boolean(geometry)} cadRef={cadRef} />
             </TabsContent>
           </Tabs>
         </DrawerContent>

@@ -45,7 +45,7 @@ import { widgets, templates as rjsfTemplates } from '#components/geometry/parame
 import { rjsfIdPrefix, rjsfIdSeparator } from '#components/geometry/parameters/rjsf-utils.js';
 import { deleteValueAtPath, extractModifiedProperties } from '#utils/object.utils.js';
 import JSZip from 'jszip';
-import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
+import type { AppRuntimeClient, AppRuntimeExportFormat } from '#types/runtime-client.alias.js';
 
 const toggleConverterKeyCombination = {
   key: 'd',
@@ -582,7 +582,7 @@ export const ChatConverter = memo(function (properties: {
 
   const selectedActor = geometryUnits.get(selectedEntryFile) ?? geometryUnits.get(mainEntryFile);
 
-  const geometries = useSelector(selectedActor, (state) => state?.context.geometries ?? []);
+  const geometry = useSelector(selectedActor, (state) => state?.context.geometry);
   const capabilities = useSelector(selectedActor, (state) => state?.context.capabilities);
   const activeKernelId = useSelector(selectedActor, (state) => state?.context.activeKernelId);
   const kernelClient = useSelector(selectedActor, (state) => state?.context.kernelClient);
@@ -665,8 +665,16 @@ export const ChatConverter = memo(function (properties: {
         console.debug(`[Exporter] Exporting format: ${format}`);
 
         try {
+          const route = kernelClient.bestRouteFor(format, activeKernelId);
+          if (!route || route.kernelId !== activeKernelId) {
+            console.debug(`[Exporter] Export result for ${format}: failed — unsupported format`);
+            failed.push(format);
+            continue;
+          }
+
+          const exportFormat = route.targetFormat as AppRuntimeExportFormat;
           const options = formatOptions[format] ?? {};
-          const result = await kernelClient.export(format, options);
+          const result = await kernelClient.export(exportFormat, { exportOptions: options });
 
           if (!result.success) {
             const message = result.issues[0]?.message ?? 'Export failed';
@@ -757,7 +765,7 @@ export const ChatConverter = memo(function (properties: {
         </FloatingPanelContentHeader>
 
         <FloatingPanelContentBody className='p-2'>
-          {geometries.length === 0 ? (
+          {!geometry ? (
             <EmptyItems className='m-0'>
               <div className='mb-3 rounded-full bg-muted/50 p-2'>
                 <Info className='size-6 text-muted-foreground' strokeWidth={1.5} />

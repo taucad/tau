@@ -121,7 +121,7 @@ describe('PreviewDetails', () => {
   it('should render the dynamic export grid instead of legacy static download buttons', () => {
     const cadRef = createCadActor(createCapabilities());
     try {
-      render(<PreviewDetails project={baseProject} geometriesCount={1} cadRef={cadRef} />);
+      render(<PreviewDetails project={baseProject} hasGeometry={true} cadRef={cadRef} />);
 
       expect(screen.getByText('Mesh')).toBeInTheDocument();
       expect(screen.getByText('BREP')).toBeInTheDocument();
@@ -142,12 +142,12 @@ describe('PreviewDetails', () => {
   it('should call kernelClient.export and download as project.name.format when a pill is clicked', async () => {
     const cadRef = createCadActor(createCapabilities());
     try {
-      render(<PreviewDetails project={baseProject} geometriesCount={1} cadRef={cadRef} />);
+      render(<PreviewDetails project={baseProject} hasGeometry={true} cadRef={cadRef} />);
 
       fireEvent.click(screen.getByRole('button', { name: /stl/i }));
 
       await vi.waitFor(() => {
-        expect(mockExport).toHaveBeenCalledWith('stl', { binary: true });
+        expect(mockExport).toHaveBeenCalledWith('stl', { exportOptions: { binary: true } });
       });
       await vi.waitFor(() => {
         expect(mockDownloadBlob).toHaveBeenCalledTimes(1);
@@ -160,10 +160,10 @@ describe('PreviewDetails', () => {
     }
   });
 
-  it('should show a placeholder when no geometries are rendered yet', () => {
+  it('should show a placeholder when no geometry is rendered yet', () => {
     const cadRef = createCadActor(createCapabilities());
     try {
-      render(<PreviewDetails project={baseProject} geometriesCount={0} cadRef={cadRef} />);
+      render(<PreviewDetails project={baseProject} hasGeometry={false} cadRef={cadRef} />);
 
       expect(screen.getByText(/render the geometry to enable export\./i)).toBeInTheDocument();
       expect(screen.queryByText('Mesh')).toBeNull();
@@ -175,7 +175,7 @@ describe('PreviewDetails', () => {
   it('should render the project description when provided', () => {
     const cadRef = createCadActor(createCapabilities());
     try {
-      render(<PreviewDetails project={baseProject} geometriesCount={1} cadRef={cadRef} />);
+      render(<PreviewDetails project={baseProject} hasGeometry={true} cadRef={cadRef} />);
 
       expect(screen.getByText('A pot')).toBeInTheDocument();
     } finally {
@@ -187,7 +187,7 @@ describe('PreviewDetails', () => {
     const cadRef = createCadActor(createCapabilities());
     try {
       render(
-        <PreviewDetails project={{ ...baseProject, tags: ['ceramic', 'mug'] }} geometriesCount={1} cadRef={cadRef} />,
+        <PreviewDetails project={{ ...baseProject, tags: ['ceramic', 'mug'] }} hasGeometry={true} cadRef={cadRef} />,
       );
 
       expect(screen.getByText('ceramic')).toBeInTheDocument();

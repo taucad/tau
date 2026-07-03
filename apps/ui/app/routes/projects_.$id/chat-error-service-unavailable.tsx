@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import type React from 'react';
-import { Play, WifiOff } from 'lucide-react';
+import { RefreshCcw, WifiOff } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
 import { useChatActions } from '#hooks/use-chat.js';
@@ -27,14 +27,13 @@ export const ChatErrorServiceUnavailable = memo(function ({
           variant='outline'
           size='sm'
           onClick={() => {
-            // Resume the interrupted stream WITHOUT slicing the trailing assistant
-            // tail. `regenerate()` would discard partial parts the user already
-            // saw -- the whole point of this banner is recovery, not re-roll.
+            // Recover the interrupted stream without slicing the trailing
+            // assistant tail that the user already saw.
             continueChat();
           }}
         >
-          <Play className='size-3.5' />
-          Resume
+          <RefreshCcw className='size-3.5' />
+          Try again
         </Button>
       </div>
     </div>

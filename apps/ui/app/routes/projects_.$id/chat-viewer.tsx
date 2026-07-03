@@ -3,6 +3,9 @@ import { useSelector } from '@xstate/react';
 import type { DockviewApi, DockviewPanelApi, IDockviewPanelHeaderProps } from 'dockview-react';
 import { FileX, FolderOpen, PlayCircle } from 'lucide-react';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
+import type { ModelComponentActionMenuData } from '#components/geometry/cad/model-component-action-menu.js';
+import { ViewerModelComponentActionMenu } from '#components/geometry/cad/viewer-model-component-action-menu.js';
+import type { ModelComponentSecondaryPointerTarget } from '#components/geometry/graphics/three/react/gltf-mesh.js';
 import { FileSelector } from '#components/files/file-selector.js';
 import { Button } from '#components/ui/button.js';
 import { useProject } from '#hooks/use-project.js';
@@ -28,6 +31,19 @@ import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import { cn } from '#utils/ui.utils.js';
 import { ArButton } from '#components/cad/ar-button.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
+import {
+  attachViewerSecondaryGestureTarget,
+  beginViewerSecondaryGesture,
+  cancelViewerSecondaryGesture,
+  completeViewerSecondaryGesture,
+  idleViewerSecondaryGestureState,
+  moveViewerSecondaryGesture,
+} from '#routes/projects_.$id/chat-viewer-secondary-gesture.js';
+import type {
+  ViewerSecondaryGestureMenu,
+  ViewerSecondaryGesturePoint,
+  ViewerSecondaryGestureState,
+} from '#routes/projects_.$id/chat-viewer-secondary-gesture.js';
 
 /** Horizontal inset sum for bottom controls (`left-2` + `right-2`); pairs with `max-w-[calc(100%-1rem)]` on the overlay. */
 const bottomControlsGutterPx = 16;
@@ -39,6 +55,41 @@ type ViewerPointerPosition = {
   readonly y: number;
   readonly horizontal: 'left' | 'right';
   readonly vertical: 'above' | 'below';
+};
+
+const getViewerSecondaryGesturePoint = (event: React.PointerEvent<HTMLDivElement>): ViewerSecondaryGesturePoint => ({
+  clientX: event.clientX,
+  clientY: event.clientY,
+});
+
+const captureViewerPointer = ({
+  element,
+  pointerId,
+}: {
+  readonly element: HTMLElement;
+  readonly pointerId: number;
+}): void => {
+  try {
+    element.setPointerCapture(pointerId);
+  } catch {
+    // Pointer capture can fail if the browser has already ended the pointer session.
+  }
+};
+
+const releaseViewerPointerCapture = ({
+  element,
+  pointerId,
+}: {
+  readonly element: HTMLElement;
+  readonly pointerId: number;
+}): void => {
+  try {
+    if (element.hasPointerCapture(pointerId)) {
+      element.releasePointerCapture(pointerId);
+    }
+  } catch {
+    // Some test/browser environments do not support pointer capture for every pointer type.
+  }
 };
 
 type ChatViewerProps = {
@@ -241,12 +292,12 @@ const ViewerContent = memo(function ({
 }): React.JSX.Element {
   const { editorRef, projectRef } = useProject();
   const cadRef = useCad();
-  const geometries = useCadSelector((state) => state.context.geometries, []);
+  const geometry = useCadSelector((state) => state.context.geometry, undefined);
   const units = useCadSelector((state) => state.context.units, undefined);
   const kernelClient = useCadSelector((state) => state.context.kernelClient, undefined);
 
   // The geometry unit can be closed via the parameters panel context menu.
-  // When that happens cadRef goes undefined, geometries clear, but the panel
+  // When that happens cadRef goes undefined, geometry clears, but the panel
   // stays open. Surface a "Reopen renderer" overlay so the user can re-spawn
   // the cad actor without having to re-add the panel.
   const isGeometryUnitClosed = !cadRef;
@@ -257,15 +308,15 @@ const ViewerContent = memo(function ({
   // Bridge geometry data from the headless CadMachine to the per-view GraphicsMachine
   const graphicsActor = useGraphics();
   useEffect(() => {
-    if (units) {
+    if (units && geometry) {
       graphicsActor.send({
-        type: 'updateGeometries',
-        geometries,
+        type: 'updateGeometry',
+        geometry,
         units,
         sourceFile: entryFile,
       });
     }
-  }, [entryFile, graphicsActor, geometries, units]);
+  }, [entryFile, graphicsActor, geometry, units]);
 
   // Sync graphics + render timeout settings back to editor state for persistence
   useViewSettingsSync({
@@ -309,10 +360,14 @@ const ViewerContent = memo(function ({
   const shiftGizmo = isTopRight && !isMobile;
 
   const viewerLayoutRef = useRef<HTMLDivElement>(null);
+  const canvasRegionRef = useRef<HTMLDivElement>(null);
+  const canvasEventSource = canvasRegionRef as React.RefObject<HTMLElement>;
   const { width: viewerLayoutWidth } = useResizeObserver({ ref: viewerLayoutRef });
   const toolbarAvailableWidth =
     viewerLayoutWidth === undefined ? undefined : Math.max(0, viewerLayoutWidth - bottomControlsGutterPx);
   const [viewerPointerPosition, setViewerPointerPosition] = useState<ViewerPointerPosition | undefined>(undefined);
+  const [viewerActionMenu, setViewerActionMenu] = useState<ViewerSecondaryGestureMenu | undefined>(undefined);
+  const secondaryGestureRef = useRef<ViewerSecondaryGestureState>(idleViewerSecondaryGestureState);
   const modelInteractionUnitId = useMemo(() => deriveModelInteractionUnitId({ sourceFile: entryFile }), [entryFile]);
   const componentNameForPointer = useModelInteractionSelector((state) => {
     const unit = getModelInteractionUnitState(state.context, modelInteractionUnitId);
@@ -321,6 +376,29 @@ const ViewerContent = memo(function ({
       return undefined;
     }
     return unit.manifest?.nodesById[hoveredComponentId]?.name;
+  });
+  const viewerActionMenuData = useModelInteractionSelector((state): ModelComponentActionMenuData | undefined => {
+    if (!viewerActionMenu) {
+      return undefined;
+    }
+
+    const unit = getModelInteractionUnitState(state.context, viewerActionMenu.target.unitId);
+    const { manifest } = unit;
+    const node = manifest?.nodesById[viewerActionMenu.target.componentId];
+    if (!manifest || !node) {
+      return undefined;
+    }
+
+    return {
+      manifest,
+      node,
+      graphicsRef: graphicsActor,
+      unitId: viewerActionMenu.target.unitId,
+      source: 'viewer',
+      isFocused: unit.focusedComponentId === viewerActionMenu.target.componentId,
+      isIsolated: unit.isolatedComponentIds.includes(viewerActionMenu.target.componentId),
+      opacity: unit.opacityByComponentId[viewerActionMenu.target.componentId] ?? 1,
+    };
   });
 
   const updateViewerPointerPosition = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
@@ -344,9 +422,85 @@ const ViewerContent = memo(function ({
     setViewerPointerPosition(undefined);
   }, []);
 
+  const handleModelComponentSecondaryPointerCandidate = useCallback(
+    (target: ModelComponentSecondaryPointerTarget | undefined): void => {
+      secondaryGestureRef.current = attachViewerSecondaryGestureTarget(secondaryGestureRef.current, target);
+    },
+    [],
+  );
+
+  const handleCanvasRegionPointerDownCapture = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
+    if (event.button !== 2) {
+      return;
+    }
+
+    setViewerActionMenu(undefined);
+    secondaryGestureRef.current = beginViewerSecondaryGesture({
+      pointerId: event.pointerId,
+      point: getViewerSecondaryGesturePoint(event),
+    });
+    captureViewerPointer({ element: event.currentTarget, pointerId: event.pointerId });
+  }, []);
+
+  const handleCanvasRegionPointerMoveCapture = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      const previousGestureState = secondaryGestureRef.current;
+      const nextGestureState = moveViewerSecondaryGesture({
+        state: previousGestureState,
+        pointerId: event.pointerId,
+        point: getViewerSecondaryGesturePoint(event),
+      });
+
+      if (previousGestureState.status === 'pendingContextClick' && nextGestureState.status === 'cameraPan') {
+        graphicsActor.send({ type: 'markModelPointerGestureMoved' });
+      }
+
+      secondaryGestureRef.current = nextGestureState;
+    },
+    [graphicsActor],
+  );
+
+  const handleCanvasRegionPointerUpCapture = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
+    if (event.button !== 2) {
+      return;
+    }
+
+    const completion = completeViewerSecondaryGesture({
+      state: secondaryGestureRef.current,
+      pointerId: event.pointerId,
+      point: getViewerSecondaryGesturePoint(event),
+    });
+    secondaryGestureRef.current = completion.state;
+    releaseViewerPointerCapture({ element: event.currentTarget, pointerId: event.pointerId });
+    setViewerActionMenu(completion.menu);
+  }, []);
+
+  const handleCanvasRegionPointerCancelCapture = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
+    secondaryGestureRef.current = cancelViewerSecondaryGesture(secondaryGestureRef.current, event.pointerId);
+    releaseViewerPointerCapture({ element: event.currentTarget, pointerId: event.pointerId });
+    setViewerPointerPosition(undefined);
+  }, []);
+
+  const handleCanvasRegionLostPointerCapture = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
+    secondaryGestureRef.current = cancelViewerSecondaryGesture(secondaryGestureRef.current, event.pointerId);
+  }, []);
+
+  const handleCanvasRegionContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
+  const handleViewerActionMenuOpenChange = useCallback((isOpen: boolean): void => {
+    if (!isOpen) {
+      setViewerActionMenu(undefined);
+    }
+  }, []);
+
   useEffect(() => {
     if (isGeometryUnitClosed) {
       setViewerPointerPosition(undefined);
+      setViewerActionMenu(undefined);
+      secondaryGestureRef.current = idleViewerSecondaryGestureState;
     }
   }, [isGeometryUnitClosed]);
 
@@ -369,27 +523,49 @@ const ViewerContent = memo(function ({
 
       {/* Geometry canvas */}
       <div
+        ref={canvasRegionRef}
         data-testid='cad-viewer-canvas-region'
         className='min-h-0 flex-1'
+        onPointerDownCapture={handleCanvasRegionPointerDownCapture}
+        onPointerMoveCapture={handleCanvasRegionPointerMoveCapture}
+        onPointerUpCapture={handleCanvasRegionPointerUpCapture}
+        onPointerCancelCapture={handleCanvasRegionPointerCancelCapture}
+        onLostPointerCapture={handleCanvasRegionLostPointerCapture}
+        onContextMenu={handleCanvasRegionContextMenu}
         onPointerMove={updateViewerPointerPosition}
         onPointerLeave={clearViewerPointerPosition}
         onPointerCancel={clearViewerPointerPosition}
       >
-        <CadViewer
-          enableZoom
-          enablePan
-          enableGizmo={enableGizmo}
-          enableGrid={enableGrid}
-          enableAxes={enableAxes}
-          enableSurfaces={enableSurfaces}
-          enableLines={enableLines}
-          enableMatcap={enableMatcap}
-          upDirection={upDirection}
-          geometries={geometries}
-          sourceFile={entryFile}
-          gizmoContainer={`#viewport-gizmo-container-${viewId}`}
-        />
+        {geometry ? (
+          <CadViewer
+            enableZoom
+            enablePan
+            secondaryMouseButtonMode='camera-pan'
+            enableGizmo={enableGizmo}
+            enableGrid={enableGrid}
+            enableAxes={enableAxes}
+            enableSurfaces={enableSurfaces}
+            enableLines={enableLines}
+            enableMatcap={enableMatcap}
+            upDirection={upDirection}
+            geometry={geometry}
+            sourceFile={entryFile}
+            // Keep R3F on default offsetX/Y compute; eventPrefix='client'
+            // is window-relative and mis-rays docked panels.
+            eventSource={canvasEventSource}
+            gizmoContainer={`#viewport-gizmo-container-${viewId}`}
+            onModelComponentSecondaryPointerCandidate={handleModelComponentSecondaryPointerCandidate}
+          />
+        ) : (
+          <div role='status' aria-label='Waiting for geometry' className='size-full bg-background' />
+        )}
       </div>
+      <ViewerModelComponentActionMenu
+        isOpen={viewerActionMenu !== undefined}
+        point={viewerActionMenu?.point}
+        data={viewerActionMenuData}
+        onOpenChange={handleViewerActionMenuOpenChange}
+      />
 
       {!isGeometryUnitClosed && viewerPointerPosition && componentNameForPointer ? (
         <ModelComponentNameBadge componentName={componentNameForPointer} position={viewerPointerPosition} />
@@ -412,7 +588,7 @@ const ViewerContent = memo(function ({
       )}
 
       {/* AR button — mobile iOS only, positioned bottom-right above controls */}
-      <ArButton geometries={geometries} kernelClient={kernelClient} className='absolute right-3 bottom-14 z-10' />
+      <ArButton geometry={geometry} kernelClient={kernelClient} className='absolute right-3 bottom-14 z-10' />
 
       {/* Bottom controls */}
       <div

@@ -8,10 +8,8 @@ import type { GltfInspection } from '#utils/inspect-glb.utils.js';
 
 /**
  * `TAU_DEBUG`-gated diagnostic panel below the preview "Downloads" section.
- * Mirrors the `examples/electron` BoundingBoxViewer one-for-one so the
- * cross-app e2e contract (counts, asset metadata, scene bounding box) is a
- * shared visual surface — flipping `TAU_DEBUG=true` in the UI lights up the
- * same `data-testid` set Playwright already consumes in the Electron suite.
+ * Keeps the cross-app e2e contract (counts, asset metadata, scene bounding
+ * box) available without putting GLB inspection in the public examples.
  */
 type Props = {
   readonly cadRef: ActorRefFrom<typeof cadMachine>;
@@ -21,19 +19,18 @@ const fmt = (n: number): string => (Number.isInteger(n) ? n.toFixed(0) : n.toFix
 const vec = (v: readonly [number, number, number]): string => `[${fmt(v[0])}, ${fmt(v[1])}, ${fmt(v[2])}]`;
 
 export function PreviewDebugPanel({ cadRef }: Props): React.JSX.Element {
-  const geometries = useSelector(cadRef, (s) => s.context.geometries);
+  const geometry = useSelector(cadRef, (s) => s.context.geometry);
 
   const inspection = useMemo<GltfInspection | undefined>(() => {
-    const first = geometries[0];
-    if (first?.format !== 'gltf') {
+    if (geometry?.format !== 'gltf') {
       return undefined;
     }
     try {
-      return inspectGlb(first.content);
+      return inspectGlb(geometry.content);
     } catch {
       return undefined;
     }
-  }, [geometries]);
+  }, [geometry]);
 
   return (
     <>

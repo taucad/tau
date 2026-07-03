@@ -22,13 +22,13 @@ vi.mock('#hooks/use-project.js', async () => {
   const { createActor, setup } = await import('xstate');
 
   const cadMachineTypes = {
-    context: { geometries: [] as unknown[] },
-  } satisfies { context: { geometries: unknown[] } };
+    context: { geometry: undefined as unknown },
+  } satisfies { context: { geometry: unknown } };
 
   const cadMachine = setup({
     types: cadMachineTypes,
   }).createMachine({
-    context: { geometries: [] },
+    context: { geometry: undefined },
     initial: 'idle',
     states: { idle: {} },
   });

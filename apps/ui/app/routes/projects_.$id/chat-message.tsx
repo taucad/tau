@@ -35,8 +35,6 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuLabel,
 } from '#components/ui/dropdown-menu.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
@@ -691,16 +689,6 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                       </button>
                     )}
                   </ChatModelSelector>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className='flex justify-between'
-                    onClick={() => {
-                      cadChat.retry(messageId);
-                    }}
-                  >
-                    <p>Try again</p>
-                    <RefreshCw className='text-muted-foreground' />
-                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               <TooltipContent side='bottom'>Switch model</TooltipContent>

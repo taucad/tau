@@ -57,13 +57,26 @@ describe('ChatMessageContextCompaction', () => {
   });
 
   it('should render failed compaction distinctly', async () => {
-    render(<ChatMessageContextCompaction data={createCompactionData({ status: 'failed', compressionRatio: 1 })} />);
+    render(
+      <ChatMessageContextCompaction
+        data={createCompactionData({
+          status: 'failed',
+          compressionRatio: 1,
+          compactionFailureKind: 'morph_contract_error',
+          failureDisposition: 'blocked_before_provider',
+          debugId: 'dat_debug',
+        })}
+      />,
+    );
 
-    const badge = screen.getByText('Compaction failed');
+    const badge = screen.getByText('Compaction blocked');
     await userEvent.hover(badge);
 
-    expect(await screen.findByText('Context compaction failed')).toBeInTheDocument();
-    expect(screen.getByText(/0%/)).toBeInTheDocument();
+    expect(await screen.findByText('Context compaction blocked')).toBeInTheDocument();
+    expect(screen.getByText('Morph response contract error')).toBeInTheDocument();
+    expect(screen.getByText('Blocked before provider dispatch')).toBeInTheDocument();
+    expect(screen.getByText('dat_debug')).toBeInTheDocument();
+    expect(screen.queryByText(/0%/)).not.toBeInTheDocument();
   });
 
   it('should render overflow retry distinctly', async () => {

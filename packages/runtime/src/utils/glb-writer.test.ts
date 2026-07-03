@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
-import { writeGlb, writeGltfJson } from '#utils/glb-writer.js';
+import {
+  createEmptyGlb,
+  createEmptyGltf,
+  createEmptyGltfGeometry,
+  writeGlb,
+  writeGltfJson,
+} from '#utils/glb-writer.js';
 import type { GlbInput } from '#utils/glb-writer.js';
 import { packageName, packageVersion } from '#utils/package-info.js';
 
@@ -85,6 +91,18 @@ function readGlbJson(glb: Uint8Array<ArrayBuffer>) {
 // =============================================================================
 
 describe('writeGlb', () => {
+  it('should produce a valid empty scene when input has no nodes', async () => {
+    const glb = writeGlb({ nodes: [] });
+    const document = await new NodeIO().readBinary(glb);
+    const json = readGlbJson(glb) as { meshes: unknown[]; nodes: unknown[]; scenes: Array<{ nodes: number[] }> };
+
+    expect(document.getRoot().listMeshes()).toHaveLength(0);
+    expect(document.getRoot().listNodes()).toHaveLength(0);
+    expect(json.meshes).toEqual([]);
+    expect(json.nodes).toEqual([]);
+    expect(json.scenes[0]!.nodes).toEqual([]);
+  });
+
   it('should produce a valid GLB with correct magic bytes and version', async () => {
     const glb = writeGlb(createSingleTriangleInput());
     const view = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
@@ -532,6 +550,25 @@ describe('writeGlb', () => {
 });
 
 describe('writeGltfJson', () => {
+  it('should produce valid JSON glTF with zero meshes when input has no nodes', () => {
+    const gltfBytes = writeGltfJson({ nodes: [] });
+    const json = JSON.parse(new TextDecoder().decode(gltfBytes)) as {
+      asset: { version: string; generator: string };
+      meshes: unknown[];
+      nodes: unknown[];
+      scenes: Array<{ nodes: number[] }>;
+      buffers: Array<{ uri: string; byteLength: number }>;
+    };
+
+    expect(json.asset.version).toBe('2.0');
+    expect(json.asset.generator).toBe(expectedGenerator);
+    expect(json.meshes).toEqual([]);
+    expect(json.nodes).toEqual([]);
+    expect(json.scenes[0]!.nodes).toEqual([]);
+    expect(json.buffers[0]!.byteLength).toBe(0);
+    expect(json.buffers[0]!.uri).toBe('data:application/octet-stream;base64,');
+  });
+
   it('should produce valid JSON glTF with embedded base64 buffer URI', () => {
     const gltfBytes = writeGltfJson(createSingleTriangleInput());
     const json = JSON.parse(new TextDecoder().decode(gltfBytes)) as {
@@ -600,5 +637,25 @@ describe('writeGltfJson', () => {
 
     expect(json.extensionsUsed).toEqual([topologyExtension]);
     expect(json.extensions[topologyExtension].topologyBufferView).toBe(json.bufferViews.length - 1);
+  });
+});
+
+describe('empty GLB helpers', () => {
+  it('should create canonical empty GLB and glTF bytes', async () => {
+    const glb = createEmptyGlb();
+    const gltf = createEmptyGltf();
+    const glbDocument = await new NodeIO().readBinary(glb);
+    const gltfJson = JSON.parse(new TextDecoder().decode(gltf)) as { meshes: unknown[] };
+
+    expect(glbDocument.getRoot().listMeshes()).toHaveLength(0);
+    expect(gltfJson.meshes).toEqual([]);
+  });
+
+  it('should create a runtime glTF geometry artifact backed by empty GLB bytes', async () => {
+    const geometry = createEmptyGltfGeometry();
+    const document = await new NodeIO().readBinary(geometry.content);
+
+    expect(geometry.format).toBe('gltf');
+    expect(document.getRoot().listMeshes()).toHaveLength(0);
   });
 });

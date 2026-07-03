@@ -178,7 +178,7 @@ function isGltfResponse(response: GeometryResponse): response is { format: 'gltf
 }
 
 /**
- * Extracts the first GLTF content from a CreateGeometryResult.
+ * Extracts GLTF content from a CreateGeometryResult.
  *
  * Used at the kernel level (when calling `kernel.createGeometry(...)` directly
  * via the kernel-worker testing harness). For client-level tests using
@@ -186,7 +186,7 @@ function isGltfResponse(response: GeometryResponse): response is { format: 'gltf
  * which unwraps the single-file `ExportResult` shape.
  *
  * @param result - The geometry result to extract from
- * @returns The GLB binary content, or `undefined` if no GLTF geometry exists
+ * @returns The GLB binary content, or `undefined` if the render geometry is not GLTF
  * @public
  */
 export function extractGltfFromResult(result: CreateGeometryResult): Uint8Array<ArrayBuffer> | undefined {
@@ -194,8 +194,7 @@ export function extractGltfFromResult(result: CreateGeometryResult): Uint8Array<
     return undefined;
   }
 
-  const gltfResponse = result.data.find((response) => isGltfResponse(response));
-  return gltfResponse?.content;
+  return isGltfResponse(result.data) ? result.data.content : undefined;
 }
 
 /**
@@ -212,13 +211,19 @@ export function extractGltfFromResult(result: CreateGeometryResult): Uint8Array<
  *
  * @example <caption>Asserting a glTF/GLB export at the client level</caption>
  * ```typescript
+ * import type { ExportResult } from '@taucad/runtime';
  * import { extractGltfFromExportResult } from '@taucad/runtime/testing';
  *
- * declare const client: { export: (format: string, input: { code: Record<string, string>; file: string }) => Promise<unknown> };
+ * declare const client: {
+ *   export: (
+ *     format: 'glb',
+ *     input: { source: { files: { '/main.ts': string } } },
+ *   ) => Promise<ExportResult>;
+ * };
  * declare const expect: (value: unknown) => { toBeInstanceOf: (ctor: unknown) => void };
  * declare const source: string;
  *
- * const result = (await client.export('glb', { code: { '/main.ts': source }, file: '/main.ts' })) as never;
+ * const result = await client.export('glb', { source: { files: { '/main.ts': source } } });
  * const glb = extractGltfFromExportResult(result);
  * expect(glb).toBeInstanceOf(Uint8Array);
  * ```

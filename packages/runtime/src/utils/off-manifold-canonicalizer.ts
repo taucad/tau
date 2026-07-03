@@ -122,6 +122,10 @@ export const canonicalizeOffWithManifold = (
   manifoldModule: ManifoldToplevel,
 ): IndexedPolyhedron => {
   const offMesh = parseOff(offContent);
+  if (offMesh.faces.length === 0) {
+    return { vertices: [], faces: [], colors: [] };
+  }
+
   const runs = groupFacesByColor(offMesh, manifoldModule);
   const originalIdToColor = new Map(runs.map((run) => [run.originalId, run.color] as const));
   const mesh = createManifoldMesh({ mesh: offMesh, manifoldModule, runs });

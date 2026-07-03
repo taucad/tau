@@ -251,26 +251,7 @@ function buildGlbInput(
   const colorGroups = groupFacesByColor(meshData, transform);
   const nodes: GlbNode[] = [];
 
-  const primitives: GlbPrimitive[] = [];
-  if (colorGroups.length === 0) {
-    primitives.push({
-      mode: 4,
-      positions: new Float32Array([0, 0, 0]),
-      normals: new Float32Array([0, 0, 1]),
-      indices: new Uint32Array([0]),
-      material: {
-        baseColorFactor: [1, 1, 1, 1],
-        metallicFactor: cadMaterialDefaults.metalnessFactor,
-        roughnessFactor: cadMaterialDefaults.roughnessFactor,
-        doubleSided: true,
-        alphaMode: 'OPAQUE',
-      },
-    });
-  } else {
-    for (const colorGroup of colorGroups) {
-      primitives.push(colorGroupToPrimitive(colorGroup));
-    }
-  }
+  const primitives: GlbPrimitive[] = colorGroups.map((colorGroup) => colorGroupToPrimitive(colorGroup));
 
   if (meshData.lines?.positions.length) {
     const originalLinePositions = meshData.lines.positions;

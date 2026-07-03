@@ -147,14 +147,12 @@ describe('createGlb', () => {
     expect(indices.getCount()).toBe(6);
   });
 
-  it('should produce an empty-geometry fallback primitive when mesh has no faces', async () => {
+  it('should produce valid empty geometry when mesh has no faces', async () => {
     const glb = createGlb(emptyMesh);
     const document = await new NodeIO().readBinary(glb);
-    const primitives = document.getRoot().listMeshes()[0]!.listPrimitives();
 
-    expect(primitives).toHaveLength(1);
-    const positions = primitives[0]!.getAttribute('POSITION')!;
-    expect(positions.getCount()).toBe(1);
+    expect(document.getRoot().listMeshes()).toHaveLength(0);
+    expect(document.getRoot().listNodes()).toHaveLength(0);
   });
 
   it('should skip faces with fewer than 3 vertices', async () => {
@@ -237,6 +235,14 @@ describe('createGlb', () => {
 });
 
 describe('createGltf', () => {
+  it('should produce JSON glTF with zero meshes when mesh has no faces', () => {
+    const gltfBytes = createGltf(emptyMesh);
+    const json = JSON.parse(new TextDecoder().decode(gltfBytes)) as { meshes: unknown[]; nodes: unknown[] };
+
+    expect(json.meshes).toEqual([]);
+    expect(json.nodes).toEqual([]);
+  });
+
   it('should produce valid JSON glTF with embedded base64 buffer URIs', async () => {
     const gltfBytes = createGltf(triangle);
     const json = JSON.parse(new TextDecoder().decode(gltfBytes)) as {

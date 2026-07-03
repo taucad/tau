@@ -33,7 +33,7 @@ import { defineMiddleware } from '#middleware/runtime-middleware.js';
  * Exported for test isolation (`beforeEach` → `.clear()`).
  * @public
  */
-export const geometryMemoryCache = new LruMap<KernelSuccessResult<GeometryResponse[]>>({ maxEntries: 20 });
+export const geometryMemoryCache = new LruMap<KernelSuccessResult<GeometryResponse>>({ maxEntries: 20 });
 
 /**
  * In-memory L1 cache for export results.
@@ -45,12 +45,12 @@ export const exportMemoryCache = new LruMap<KernelSuccessResult<ExportFile[]>>({
 
 /**
  * Cache entry structure for MessagePack serialization.
- * Stores the full KernelSuccessResult so that all fields (geometries, issues,
+ * Stores the full KernelSuccessResult so that all fields (geometry, issues,
  * and any future additions) are persisted implicitly.
  */
 type CacheEntry = {
-  version: 4;
-  result: KernelSuccessResult<GeometryResponse[]>;
+  version: 5;
+  result: KernelSuccessResult<GeometryResponse>;
 };
 
 type ExportCacheEntry = {
@@ -61,14 +61,14 @@ type ExportCacheEntry = {
 
 /**
  * Serialize a successful geometry result for cache storage using MessagePack.
- * The entire result (geometries + issues) is stored directly; MessagePack
+ * The entire result (geometry + issues) is stored directly; MessagePack
  * handles Uint8Array natively so no base64 conversion is needed.
  *
  * @param result - The successful geometry result to serialize
  * @returns Binary MessagePack-encoded data
  */
-function serializeResult(result: KernelSuccessResult<GeometryResponse[]>): Uint8Array<ArrayBuffer> {
-  const entry: CacheEntry = { version: 4, result };
+function serializeResult(result: KernelSuccessResult<GeometryResponse>): Uint8Array<ArrayBuffer> {
+  const entry: CacheEntry = { version: 5, result };
   return msgpackEncode(entry);
 }
 
@@ -77,17 +77,17 @@ function serializeResult(result: KernelSuccessResult<GeometryResponse[]>): Uint8
  * Returns the full KernelSuccessResult including issues.
  *
  * @param data - Binary MessagePack-encoded data
- * @returns The deserialized result with geometries and issues
+ * @returns The deserialized result with geometry and issues
  * @throws Error if cache format is invalid or incompatible version
  */
-function deserializeResult(data: Uint8Array<ArrayBuffer>): KernelSuccessResult<GeometryResponse[]> {
+function deserializeResult(data: Uint8Array<ArrayBuffer>): KernelSuccessResult<GeometryResponse> {
   const decoded: unknown = msgpackDecode(data);
 
   if (
     typeof decoded !== 'object' ||
     decoded === null ||
     !('version' in decoded) ||
-    decoded.version !== 4 ||
+    decoded.version !== 5 ||
     !('result' in decoded)
   ) {
     throw new Error('Invalid or incompatible cache format');
@@ -97,10 +97,8 @@ function deserializeResult(data: Uint8Array<ArrayBuffer>): KernelSuccessResult<G
 
   // Copy GLTF Uint8Arrays to ensure we have proper ArrayBuffers
   // (MessagePack may return views into a shared buffer)
-  for (const geometry of entry.result.data) {
-    if (geometry.format === 'gltf') {
-      geometry.content = new Uint8Array(geometry.content);
-    }
+  if (entry.result.data.format === 'gltf') {
+    entry.result.data.content = new Uint8Array(entry.result.data.content);
   }
 
   return entry.result;
@@ -140,10 +138,10 @@ function cloneGeometry(geometry: GeometryResponse): GeometryResponse {
   return { ...geometry, content: new Uint8Array(geometry.content) };
 }
 
-function cloneSuccessResult(result: KernelSuccessResult<GeometryResponse[]>): KernelSuccessResult<GeometryResponse[]> {
+function cloneSuccessResult(result: KernelSuccessResult<GeometryResponse>): KernelSuccessResult<GeometryResponse> {
   return {
     ...result,
-    data: result.data.map((geometry) => cloneGeometry(geometry)),
+    data: cloneGeometry(result.data),
     issues: [...result.issues],
   };
 }
@@ -187,14 +185,11 @@ function getCacheDirectory(basePath: string): string {
 }
 
 /**
- * Check if any geometries in the result have webrtc format.
+ * Check if the result has webrtc format.
  * Video-stream geometries cannot be cached as they contain live streams.
- *
- * @param geometries - The geometries to check
- * @returns True if any geometry is a webrtc
  */
-function hasVideoStreamGeometry(geometries: readonly GeometryResponse[]): boolean {
-  return geometries.some((geometry) => geometry.format === 'webrtc');
+function hasVideoStreamGeometry(geometry: GeometryResponse): boolean {
+  return geometry.format === 'webrtc';
 }
 
 /**
@@ -312,7 +307,7 @@ export const geometryCache = defineMiddleware({
     const result = await handler(input);
 
     // Write back to L2 and populate L1 (skip webrtc for both)
-    if (result.success && result.data.length > 0) {
+    if (result.success) {
       if (hasVideoStreamGeometry(result.data)) {
         logger.debug(`Skipping cache for ${cacheKey}: contains webrtc geometry`);
       } else {
@@ -324,7 +319,7 @@ export const geometryCache = defineMiddleware({
 
           const serialized = serializeResult(result);
           await filesystem.writeFile(cachePath, serialized);
-          logger.debug(`Cached ${result.data.length} geometries at ${cacheKey}`);
+          logger.debug(`Cached geometry at ${cacheKey}`);
 
           await cleanupOldCacheEntries({
             filesystem,

@@ -357,7 +357,7 @@ describe('wrap hook behavior', () => {
         if (result.success) {
           return {
             ...result,
-            data: result.data.map((g) => ({ ...g, transformed: true })),
+            data: { ...result.data, transformed: true },
           };
         }
 
@@ -367,7 +367,7 @@ describe('wrap hook behavior', () => {
 
     const mockHandler = vi.fn().mockResolvedValue({
       success: true,
-      data: [{ format: 'gltf', hash: 'a'.repeat(64), content: new Uint8Array() }],
+      data: { format: 'gltf', hash: 'a'.repeat(64), content: new Uint8Array() },
       issues: [],
     });
 
@@ -397,19 +397,17 @@ describe('wrap hook behavior', () => {
 
     if (result.success) {
       // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- Testing dynamic property
-      expect((result.data[0] as any).transformed).toBe(true);
+      expect((result.data as any).transformed).toBe(true);
     }
   });
 
   it('should allow wrap hooks to short-circuit by not calling handler', async () => {
     const cachedResult: CreateGeometryResult = {
       success: true,
-      data: [
-        {
-          format: 'gltf',
-          content: new Uint8Array([1, 2, 3]),
-        },
-      ],
+      data: {
+        format: 'gltf',
+        content: new Uint8Array([1, 2, 3]),
+      },
       issues: [],
     };
 
@@ -479,7 +477,7 @@ describe('wrap hook behavior', () => {
 
     const mockHandler = vi.fn().mockResolvedValue({
       success: true,
-      data: [],
+      data: { format: 'gltf', content: new Uint8Array([1]) },
       issues: [],
     });
 

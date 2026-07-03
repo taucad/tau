@@ -198,28 +198,15 @@ export const gltfEdgeDetection = defineMiddleware({
     const result = await handler(input);
 
     // Add edges on the way back up (onion model "return journey")
-    if (!result.success || result.data.length === 0) {
+    if (!result.success || result.data.format !== 'gltf') {
       return result;
     }
 
-    logger.trace('Adding edge primitives to GLTF geometries');
-
-    // Process all GLTF geometries
-    const processedGeometries = await Promise.all(
-      result.data.map(async (geometry) => {
-        // Only process GLTF format geometries
-        if (geometry.format === 'gltf') {
-          return addEdgePrimitivesToGltf(geometry, options.thresholdDegrees);
-        }
-
-        // Return other formats unchanged (e.g., SVG)
-        return geometry;
-      }),
-    );
+    logger.trace('Adding edge primitives to GLTF geometry');
 
     return {
       ...result,
-      data: processedGeometries,
+      data: await addEdgePrimitivesToGltf(result.data, options.thresholdDegrees),
     };
   },
 });

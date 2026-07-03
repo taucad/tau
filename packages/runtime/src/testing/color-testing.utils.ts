@@ -6,7 +6,6 @@
 import { NodeIO } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { expect } from 'vitest';
-import type { GeometryResponse } from '@taucad/types';
 import { srgbHexToLinearTuple } from '#utils/color-space.js';
 import { extractGltfFromResult } from '#testing/kernel-geometry-testing.utils.js';
 import type { CreateGeometryResult } from '#types/runtime.types.js';
@@ -21,13 +20,7 @@ function listAllGlbBuffers(result: CreateGeometryResult): Array<Uint8Array<Array
   if (!result.success) {
     return [];
   }
-  const buffers: Array<Uint8Array<ArrayBuffer>> = [];
-  for (const response of result.data as GeometryResponse[]) {
-    if (response.format === 'gltf') {
-      buffers.push(response.content);
-    }
-  }
-  return buffers;
+  return result.data.format === 'gltf' ? [result.data.content] : [];
 }
 
 /**

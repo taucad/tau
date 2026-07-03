@@ -34,6 +34,10 @@ type TraceSummary = Record<
   }
 >;
 type BenchmarkOperation = 'export' | 'render';
+type BenchmarkTessellation = {
+  linearTolerance: number;
+  angularTolerance: number;
+};
 
 /** Result of a single benchmark case. */
 export type BenchmarkResult = {
@@ -92,6 +96,12 @@ export type BenchmarkRunnerOptions = {
   libraryTracing?: 'off' | 'summary' | 'per-call';
   /** Operation to time. Defaults to `'export'` for historical benchmark compatibility. */
   operation?: BenchmarkOperation;
+  /** Render/export tessellation options passed through to the runtime. */
+  tessellation?: BenchmarkTessellation;
+  /** Replicad tessellation instancing toggle for direct legacy-vs-instanced comparisons. */
+  tessellationInstancing?: boolean;
+  /** Include Replicad BRep edge extraction in benchmarked render/export paths. */
+  withBrepEdges?: boolean;
   /** WASM variant or custom config. Defaults to `'auto'` (multi when supported, else single). */
   wasm?: 'auto' | 'single' | 'multi' | { wasmUrl: string; wasmBindingsUrl: string };
   onProgress?: (completed: number, total: number, caseName: string) => void;
@@ -244,6 +254,9 @@ export async function runBenchmarks(
     ocTracing = 'summary',
     libraryTracing = 'off',
     operation = 'export',
+    tessellation,
+    tessellationInstancing,
+    withBrepEdges,
     wasm = 'auto',
     onProgress,
     onIterationProgress,
@@ -266,7 +279,14 @@ export async function runBenchmarks(
       absoluteFiles[`${basePath}/${filename}`] = content;
     }
 
-    const kernelOptions = { ocTracing, libraryTracing, wasm };
+    const kernelOptions = {
+      ocTracing,
+      libraryTracing,
+      wasm,
+      ...(tessellationInstancing === undefined ? {} : { tessellationInstancing }),
+      withBrepEdges,
+    };
+    const renderOptions = tessellation ? { tessellation } : undefined;
 
     const fileSystem = fromMemoryFs(absoluteFiles);
     const runtime = defineRuntime({
@@ -319,9 +339,10 @@ export async function runBenchmarks(
       const start = performance.now();
       let failureMessage: string | undefined;
       if (operation === 'render') {
-        const renderResult = await client.openFile({
-          file: `${basePath}/${benchCase.mainFile}`,
+        const renderResult = await client.render({
+          source: { path: `${basePath}/${benchCase.mainFile}` },
           parameters: {},
+          renderOptions,
         });
         if (renderResult.superseded) {
           failureMessage = 'render was unexpectedly superseded';
@@ -330,8 +351,9 @@ export async function runBenchmarks(
         }
       } else {
         const exportResult = await client.export('glb', {
-          file: { filename: benchCase.mainFile, path: basePath },
+          source: { path: { filename: benchCase.mainFile, path: basePath } },
           parameters: {},
+          ...(renderOptions === undefined ? {} : { exportOptions: renderOptions }),
         });
         if (!exportResult.success) {
           failureMessage = exportResult.issues.map((issue) => issue.message).join('; ');

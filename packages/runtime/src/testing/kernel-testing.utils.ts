@@ -7,6 +7,7 @@
 
 import deepmerge from 'deepmerge';
 import type { PartialDeep } from 'type-fest';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import type {
   FileExtension,
   GeometryResponse,
@@ -28,6 +29,7 @@ import type {
   KernelErrorResult,
   GetParametersResult,
   ExportGeometryResult,
+  ExportRoute,
 } from '#types/runtime.types.js';
 import type { TelemetryEntry } from '#types/runtime-protocol.types.js';
 import type {
@@ -484,14 +486,14 @@ export function createMockRuntime<
 /**
  * Creates a successful CreateGeometryResult for testing middleware.
  *
- * @param geometries - The geometry responses to include
- * @returns A successful result wrapping the provided geometries
+ * @param geometry - The geometry response to include
+ * @returns A successful result wrapping the provided geometry
  * @public
  */
-export function createSuccessResult(geometries: GeometryResponse[]): CreateGeometryResult {
+export function createSuccessResult(geometry: GeometryResponse): CreateGeometryResult {
   return {
     success: true,
-    data: geometries,
+    data: geometry,
     issues: [],
   };
 }
@@ -504,7 +506,7 @@ export function createSuccessResult(geometries: GeometryResponse[]): CreateGeome
  * @public
  */
 export function createGltfSuccessResult(content: Uint8Array<ArrayBuffer>): CreateGeometryResult {
-  return createSuccessResult([{ format: 'gltf', content }]);
+  return createSuccessResult({ format: 'gltf', content });
 }
 
 /**
@@ -521,7 +523,7 @@ export function createGltfSuccessResultWithIssues(
 ): CreateGeometryResult {
   return {
     success: true,
-    data: [{ format: 'gltf', content }],
+    data: { format: 'gltf', content },
     issues,
   };
 }
@@ -545,16 +547,6 @@ export function createErrorResult(issues?: KernelIssue[]): CreateGeometryResult 
       },
     ],
   };
-}
-
-/**
- * Creates an empty successful result with no geometries.
- *
- * @returns A successful result with an empty geometry array
- * @public
- */
-export function createEmptySuccessResult(): CreateGeometryResult {
-  return createSuccessResult([]);
 }
 
 // =============================================================================
@@ -785,7 +777,7 @@ export async function getTestParameters(
   files: Record<string, string>,
   mainFile: string,
 ): Promise<{
-  jsonSchema: unknown;
+  jsonSchema: JSONSchema7;
   defaultParameters: Record<string, unknown>;
 }> {
   const { expect } = await import('vitest');
@@ -919,12 +911,22 @@ const noop = () => {
  * ```
  */
 export function createMockRuntimeClient(): RuntimeClient {
+  const createRoute = (format: FileExtension): ExportRoute => ({
+    targetFormat: format,
+    kernelId: 'test-kernel',
+    sourceFormat: 'gltf',
+    fidelity: format === 'step' || format === 'stp' ? 'brep' : 'mesh',
+    schema: {},
+    defaults: {},
+  });
+
   return mock<RuntimeClient>({
     lifecycleState: 'connected',
+    renderStatus: 'idle',
     activeKernelId: undefined,
     capabilities: undefined,
     connect: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    openFile: vi.fn().mockResolvedValue({ superseded: true }),
+    render: vi.fn().mockResolvedValue({ superseded: true }),
     updateParameters: vi.fn().mockResolvedValue({ superseded: true }),
     setOptions: vi.fn().mockResolvedValue({ superseded: true }),
     export: vi.fn().mockResolvedValue({
@@ -932,6 +934,8 @@ export function createMockRuntimeClient(): RuntimeClient {
       data: { bytes: new Uint8Array([1, 2, 3]), mimeType: 'model/stl' },
       issues: [],
     }),
+    routesFor: vi.fn((format: FileExtension) => [createRoute(format)]),
+    bestRouteFor: vi.fn((format: FileExtension) => createRoute(format)),
     terminate: vi.fn(),
     on: vi.fn<(event: string, handler: (...args: never[]) => void) => () => void>().mockReturnValue(noop),
   });
@@ -1021,7 +1025,7 @@ export class MockKernelWorker extends KernelWorker {
       };
     });
     this.mockComputeResult =
-      options.computeResult ?? createSuccessResult([{ format: 'gltf', content: new Uint8Array([1, 2, 3]) }]);
+      options.computeResult ?? createSuccessResult({ format: 'gltf', content: new Uint8Array([1, 2, 3]) });
     this.mockExportResult = options.exportResult ?? {
       success: true,
       data: [
@@ -1087,6 +1091,13 @@ export class MockKernelWorker extends KernelWorker {
     format: FileExtension = 'gltf',
     options?: Record<string, unknown>,
   ): Promise<ExportGeometryResult> {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    // @ts-expect-error - Test helper checks framework private state to keep route-planner unit tests concise.
+    if (!this.currentPublishedRender) {
+      await this.runCreateGeometry();
+    }
     return this.exportGeometry(format, options);
   }
 
@@ -1120,6 +1131,7 @@ export class MockKernelWorker extends KernelWorker {
   ): Promise<CreateGeometryResult> {
     this.createGeometryCalls++;
     this.nativeHandle ??= { kind: 'mock-native-handle' };
+    this.captureNativeHandle(this.nativeHandle);
     return this.mockComputeResult;
   }
 

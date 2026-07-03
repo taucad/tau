@@ -28,7 +28,7 @@ describe('runtime-worker middleware onion chain', () => {
   const mockGltfContent = new Uint8Array([1, 2, 3, 4]);
   const successResult: CreateGeometryResult = {
     success: true,
-    data: [{ format: 'gltf', content: mockGltfContent }],
+    data: { format: 'gltf', content: mockGltfContent },
     issues: [],
   };
 
@@ -130,7 +130,7 @@ describe('runtime-worker middleware onion chain', () => {
     it('should allow middleware to short-circuit by not calling handler', async () => {
       const cachedResult: CreateGeometryResult = {
         success: true,
-        data: [{ format: 'gltf', content: new Uint8Array([9, 9, 9]) }],
+        data: { format: 'gltf', content: new Uint8Array([9, 9, 9]) },
         issues: [],
       };
 
@@ -165,10 +165,10 @@ describe('runtime-worker middleware onion chain', () => {
       // Result contains geometry with hash added by kernel-worker
       expect(result.success).toBe(true);
       if (result.success) {
-        const geometry = result.data[0];
-        const cachedGeometry = cachedResult.data[0];
+        const geometry = result.data;
+        const cachedGeometry = cachedResult.data;
 
-        if (geometry?.format === 'gltf' && cachedGeometry?.format === 'gltf') {
+        if (geometry.format === 'gltf' && cachedGeometry.format === 'gltf') {
           expect(geometry.content).toEqual(cachedGeometry.content);
         }
       }
@@ -179,7 +179,7 @@ describe('runtime-worker middleware onion chain', () => {
     it('should allow upstream middleware to process short-circuited results', async () => {
       const cachedResult: CreateGeometryResult = {
         success: true,
-        data: [{ format: 'gltf', content: new Uint8Array([5, 6, 7]) }],
+        data: { format: 'gltf', content: new Uint8Array([5, 6, 7]) },
         issues: [],
       };
 
@@ -199,12 +199,10 @@ describe('runtime-worker middleware onion chain', () => {
           if (result.success) {
             return {
               ...result,
-              data: result.data.map(
-                (_g): GeometryGltf => ({
-                  format: 'gltf',
-                  content: transformedContent,
-                }),
-              ),
+              data: {
+                format: 'gltf',
+                content: transformedContent,
+              } satisfies GeometryGltf,
             };
           }
 
@@ -245,11 +243,11 @@ describe('runtime-worker middleware onion chain', () => {
       expect(result.success).toBe(true);
 
       if (result.success) {
-        const geometry = result.data[0];
+        const geometry = result.data;
 
-        expect(geometry?.format).toBe('gltf');
+        expect(geometry.format).toBe('gltf');
 
-        if (geometry?.format === 'gltf') {
+        if (geometry.format === 'gltf') {
           expect(geometry.content).toBe(transformedContent);
         }
       }
@@ -388,7 +386,7 @@ describe('runtime-worker middleware onion chain', () => {
 
       const mainResult: CreateGeometryResult = {
         success: true,
-        data: [],
+        data: { format: 'gltf', content: new Uint8Array([1]) },
         issues: [{ message: 'main-issue', code: 'RUNTIME', severity: 'warning' }],
       };
 

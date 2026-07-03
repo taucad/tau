@@ -254,18 +254,18 @@ export type BundlerRegistrations = BundlerRegistration[];
 
 /**
  * Result type for createGeometry.
- * Used by kernel workers and middleware - geometries don't have hash yet.
+ * Used by kernel workers and middleware - geometry doesn't have hash yet.
  * The hash is added by kernel-worker.ts after the middleware chain.
  * @public
  */
-export type CreateGeometryResult = KernelResult<GeometryResponse[]>;
+export type CreateGeometryResult = KernelResult<GeometryResponse>;
 
 /**
  * Completed result type for createGeometry.
- * Returned to consumers - geometries have hash for React keys and caching.
+ * Returned to consumers - geometry has hash for React keys and caching.
  * @public
  */
-export type HashedGeometryResult = KernelResult<Geometry[]>;
+export type HashedGeometryResult = KernelResult<Geometry>;
 
 /**
  * Outcome of extracting customizer parameters from a CAD script, used to render the parameter editor UI.
@@ -273,7 +273,7 @@ export type HashedGeometryResult = KernelResult<Geometry[]>;
  */
 export type GetParametersResult = KernelResult<{
   defaultParameters: Record<string, unknown>;
-  jsonSchema: unknown;
+  jsonSchema: JSONSchema7;
 }>;
 
 /**

@@ -25,7 +25,7 @@ import {
 } from '#testing/kernel-testing.utils.js';
 
 /**
- * Create serialized cache content (MessagePack binary format, v4).
+ * Create serialized cache content (MessagePack binary format, v5).
  * Mirrors the CacheEntry structure: stores the full KernelSuccessResult.
  */
 function createSerializedCacheContent(
@@ -33,10 +33,10 @@ function createSerializedCacheContent(
   issues: KernelIssue[] = [],
 ): Uint8Array<ArrayBuffer> {
   return msgpackEncode({
-    version: 4,
+    version: 5,
     result: {
       success: true,
-      data: [{ format: 'gltf', content }],
+      data: { format: 'gltf', content },
       issues,
     },
   });
@@ -174,14 +174,13 @@ describe('geometryCacheMiddleware', () => {
         expect(result.success).toBe(true);
 
         if (result.success) {
-          expect(result.data).toHaveLength(1);
-          expect(result.data[0]?.format).toBe('gltf');
-          if (result.data[0]?.format === 'gltf') {
+          expect(result.data.format).toBe('gltf');
+          if (result.data.format === 'gltf') {
             // Content should be the cached Uint8Array
-            expect(result.data[0].content).toBeInstanceOf(Uint8Array);
-            expect(result.data[0].content).toEqual(gltfContent);
+            expect(result.data.content).toBeInstanceOf(Uint8Array);
+            expect(result.data.content).toEqual(gltfContent);
           } else {
-            throw new Error(`Unexpected geometry format: ${result.data[0]?.format}`);
+            throw new Error(`Unexpected geometry format: ${result.data.format}`);
           }
         }
       });
@@ -314,7 +313,7 @@ describe('geometryCacheMiddleware', () => {
         const { wrapCreateGeometry } = geometryCacheMiddleware;
         await wrapCreateGeometry!(input, handler, runtime);
 
-        expect(runtime.logger.debug).toHaveBeenCalledWith(expect.stringContaining('Cached 1 geometries'));
+        expect(runtime.logger.debug).toHaveBeenCalledWith(expect.stringContaining('Cached geometry'));
       });
 
       it('should persist issues when writing to cache', async () => {
@@ -328,7 +327,7 @@ describe('geometryCacheMiddleware', () => {
         ];
         const handlerResult: CreateGeometryResult = {
           success: true,
-          data: [{ format: 'gltf', content: new Uint8Array([1, 2, 3]) }],
+          data: { format: 'gltf', content: new Uint8Array([1, 2, 3]) },
           issues,
         };
         const { input, runtime } = createCacheTestContext({
@@ -448,7 +447,7 @@ describe('geometryCacheMiddleware', () => {
         const mockStream = new ReadableStream();
         const videoStreamResult = {
           success: true,
-          data: [{ format: 'webrtc', stream: mockStream } as const],
+          data: { format: 'webrtc', stream: mockStream } as const,
           issues: [],
         };
         const handler = createMockCreateGeometryHandler(videoStreamResult);
@@ -481,21 +480,17 @@ describe('geometryCacheMiddleware', () => {
         expect(runtime.filesystem.mocks.writeFile).toHaveBeenCalled();
       });
 
-      it('should skip caching when result contains mixed geometries including webrtc', async () => {
+      it('should skip caching when result is webrtc geometry', async () => {
         const { input, runtime } = createCacheTestContext({
           cacheExists: false,
         });
-        // Mixed result with both GLTF and webrtc
         const mockStream = new ReadableStream();
-        const mixedResult = {
+        const videoStreamResult = {
           success: true,
-          data: [
-            { format: 'gltf', content: new Uint8Array([1, 2, 3]) } as const,
-            { format: 'webrtc', stream: mockStream } as const,
-          ],
+          data: { format: 'webrtc', stream: mockStream } as const,
           issues: [],
         };
-        const handler = createMockCreateGeometryHandler(mixedResult);
+        const handler = createMockCreateGeometryHandler(videoStreamResult);
 
         const { wrapCreateGeometry } = geometryCacheMiddleware;
         await wrapCreateGeometry!(input, handler, runtime);
@@ -692,11 +687,11 @@ describe('geometryCacheMiddleware', () => {
 
       const cached = geometryMemoryCache.get(runtime.dependencyHash);
       expect(cached).toBeDefined();
-      if (cached?.success && cached.data[0]?.format === 'gltf') {
-        expect(cached.data[0].content.buffer).not.toBe(originalContent.buffer);
-        expect(cached.data[0].content).toEqual(originalContent);
+      if (cached?.success && cached.data.format === 'gltf') {
+        expect(cached.data.content.buffer).not.toBe(originalContent.buffer);
+        expect(cached.data.content).toEqual(originalContent);
         originalContent[0] = 99;
-        expect(cached.data[0].content).toEqual(new Uint8Array([1, 2, 3]));
+        expect(cached.data.content).toEqual(new Uint8Array([1, 2, 3]));
       }
     });
   });
@@ -721,8 +716,7 @@ describe('geometryCacheMiddleware', () => {
       expect(runtime.filesystem.mocks.writeFile).not.toHaveBeenCalled();
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data).toHaveLength(1);
-        expect(result.data[0]?.format).toBe('gltf');
+        expect(result.data.format).toBe('gltf');
       }
     });
 
@@ -745,7 +739,7 @@ describe('geometryCacheMiddleware', () => {
       expect(runtime.filesystem.mocks.readFile).not.toHaveBeenCalled();
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data[0]?.format).toBe('gltf');
+        expect(result.data.format).toBe('gltf');
       }
     });
 
@@ -768,7 +762,7 @@ describe('geometryCacheMiddleware', () => {
       const mockStream = new ReadableStream();
       const videoStreamResult = {
         success: true,
-        data: [{ format: 'webrtc', stream: mockStream } as const],
+        data: { format: 'webrtc', stream: mockStream } as const,
         issues: [],
       };
       const handler = createMockCreateGeometryHandler(videoStreamResult);
@@ -789,17 +783,17 @@ describe('geometryCacheMiddleware', () => {
 
     const { wrapCreateGeometry } = geometryCacheMiddleware;
     const first = await wrapCreateGeometry!(input, handler, runtime);
-    if (first.success && first.data[0]?.format === 'gltf') {
-      structuredClone(first.data[0].content, { transfer: [first.data[0].content.buffer] });
+    if (first.success && first.data.format === 'gltf') {
+      structuredClone(first.data.content, { transfer: [first.data.content.buffer] });
     }
 
     const second = await wrapCreateGeometry!(input, handler, runtime);
 
     expect(handler).toHaveBeenCalledOnce();
     expect(second.success).toBe(true);
-    if (second.success && second.data[0]?.format === 'gltf') {
-      expect(second.data[0].content).toEqual(new Uint8Array([1, 2, 3]));
-      expect(second.data[0].content.buffer).not.toBe(content.buffer);
+    if (second.success && second.data.format === 'gltf') {
+      expect(second.data.content).toEqual(new Uint8Array([1, 2, 3]));
+      expect(second.data.content.buffer).not.toBe(content.buffer);
     }
   });
 
@@ -809,7 +803,7 @@ describe('geometryCacheMiddleware', () => {
       const serializedNativeHandle = { brep: 'BREP_DATA', meta: { name: 'part' } };
       const handlerResult: CreateGeometryResult = {
         success: true,
-        data: [{ format: 'gltf', content: new Uint8Array([1, 2, 3]) }],
+        data: { format: 'gltf', content: new Uint8Array([1, 2, 3]) },
         issues: [],
         serializedNativeHandle,
       };
@@ -826,10 +820,10 @@ describe('geometryCacheMiddleware', () => {
     it('should restore serializedNativeHandle from L2 cache on cache hit', async () => {
       const serializedNativeHandle = { brep: 'CACHED_BREP' };
       const cacheData = msgpackEncode({
-        version: 4,
+        version: 5,
         result: {
           success: true,
-          data: [{ format: 'gltf', content: new Uint8Array([4, 5, 6]) }],
+          data: { format: 'gltf', content: new Uint8Array([4, 5, 6]) },
           issues: [],
           serializedNativeHandle,
         },

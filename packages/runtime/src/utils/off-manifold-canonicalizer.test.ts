@@ -55,4 +55,15 @@ describe('convertOffToManifoldGltf', () => {
     ]);
     expect(materials[0]!.getBaseColorFactor()[0]).toBeCloseTo(srgbToLinear(1), 6);
   });
+
+  it('converts face-less OFF output to an empty GLB scene', async () => {
+    const emptyOff = 'OFF 0 0 0\n';
+    const canonical = canonicalizeOffWithManifold(emptyOff, manifoldModule);
+    const glb = await convertOffToManifoldGltf(emptyOff, { format: 'glb', manifoldModule });
+    const document = await parseGlb(glb);
+
+    expect(canonical.faces).toEqual([]);
+    expect(document.getRoot().listMeshes()).toHaveLength(0);
+    expect(document.getRoot().listNodes()).toHaveLength(0);
+  });
 });

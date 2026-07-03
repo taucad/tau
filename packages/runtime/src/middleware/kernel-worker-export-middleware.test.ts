@@ -70,6 +70,7 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
     const worker = new MockKernelWorker({
       middleware: [middleware],
       exportResult: defaultExportResult,
+      exportZodSchemas: { gltf: z.object({}) },
       onLog: onLog as OnWorkerLog,
     });
 
@@ -96,14 +97,15 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
     const worker = new MockKernelWorker({
       middleware: [middleware],
       exportResult: defaultExportResult,
+      exportZodSchemas: { gltf: z.object({}) },
       onLog: onLog as OnWorkerLog,
     });
 
     await worker.runCreateGeometry('main.ts', {});
-    await worker.runExportGeometry('stl');
+    await worker.runExportGeometry('gltf');
 
     expect(capturedInput).toBeDefined();
-    expect(capturedInput!.format).toBe('stl');
+    expect(capturedInput!.format).toBe('gltf');
     expect(capturedInput).not.toHaveProperty('nativeHandle');
     expect(capturedRuntime).toBeDefined();
     expect(capturedRuntime!.logger).toBeDefined();
@@ -500,7 +502,7 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    const result = await worker.runExportGeometry('step');
+    const result = await worker.exportGeometry('step');
 
     expect(result.success).toBe(false);
     if (!result.success) {

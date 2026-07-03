@@ -48,25 +48,15 @@ export const gltfCoordinateTransform = defineMiddleware({
   async wrapCreateGeometry(input, handler, { logger }) {
     const result = await handler(input);
 
-    if (!result.success || result.data.length === 0) {
+    if (!result.success || result.data.format !== 'gltf') {
       return result;
     }
 
-    logger.trace('Transforming GLTF geometries to Z-up/mm');
-
-    const transformedGeometries = await Promise.all(
-      result.data.map(async (geometry) => {
-        if (geometry.format === 'gltf') {
-          return transformGltfGeometry(geometry);
-        }
-
-        return geometry;
-      }),
-    );
+    logger.trace('Transforming GLTF geometry to Z-up/mm');
 
     return {
       ...result,
-      data: transformedGeometries,
+      data: await transformGltfGeometry(result.data),
     };
   },
 });

@@ -1,5 +1,5 @@
 import { NodeIO } from '@gltf-transform/core';
-import type { Document, Mesh as GltfTransformMesh } from '@gltf-transform/core';
+import type { Document, JSONDocument, Mesh as GltfTransformMesh } from '@gltf-transform/core';
 import { registerTauGltfExtensions, TauCadTopology } from '@taucad/gltf-extensions';
 import type { KittyCadBrepNode, KittyCadBrepRoot } from '@taucad/gltf-extensions';
 import { kittyCadBoundaryRepresentationExtension, tauCadTopologyExtension } from '@taucad/types/constants';
@@ -437,7 +437,7 @@ export async function enrichZooGltfTopology(
   const document =
     options.format === 'glb'
       ? await io.readBinary(bytes)
-      : await io.readJSON({ json: JSON.parse(new TextDecoder().decode(bytes)) as JSONObject, resources: {} });
+      : await io.readJSON({ json: JSON.parse(new TextDecoder().decode(bytes)) as JSONDocument['json'], resources: {} });
 
   const root = document.getRoot();
   const brepRoot = root.getExtension<KittyCadBrepRoot>(kittyCadBoundaryRepresentationExtension);

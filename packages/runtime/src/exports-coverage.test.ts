@@ -2,7 +2,7 @@
  * Regression test for the runtime's bundling contract:
  *
  * Every `package.json#publishConfig.exports.<subpath>.default` chunk
- * (e.g. `./dist/esm/middleware/parameter-cache.middleware.js`) must have a
+ * (e.g. `./dist/middleware/parameter-cache.middleware.js`) must have a
  * matching `tsdown.config.ts` entry (e.g. `src/middleware/parameter-cache.middleware.ts`)
  * so the build emits a real file at that path.
  *
@@ -35,8 +35,8 @@ type RuntimePackage = {
   readonly publishConfig?: { readonly exports?: PublishExports };
 };
 
-const distributionEsmToSourceEntry = (distributionEsmPath: string): string => {
-  const withoutPrefix = distributionEsmPath.replace(/^\.\/dist\/esm\//, '');
+const distributionPathToSourceEntry = (distributionPath: string): string => {
+  const withoutPrefix = distributionPath.replace(/^\.\/dist\//, '');
   const tsRelative = withoutPrefix.replace(/\.js$/, '.ts');
   return `src/${tsRelative}`;
 };
@@ -67,8 +67,8 @@ describe('runtime publishConfig.exports → tsdown entries', () => {
   });
 
   it('should advertise an ESM-only package entry point', () => {
-    expect(packageJson.main).toBe('./dist/esm/index.js');
-    expect(packageJson.types).toBe('./dist/esm/index.d.ts');
+    expect(packageJson.main).toBe('./dist/index.js');
+    expect(packageJson.types).toBe('./dist/index.d.ts');
     expect(packageJson.module).toBeUndefined();
   });
 
@@ -85,15 +85,15 @@ describe('runtime publishConfig.exports → tsdown entries', () => {
       throw new Error(`Missing export conditions for ${subpath}`);
     }
     expect(conditions.require, `${subpath} must not declare a CommonJS "require" branch`).toBeUndefined();
-    expect(conditions.types, `${subpath} must declare an ESM declaration target`).toMatch(/^\.\/dist\/esm\/.+\.d\.ts$/);
-    expect(conditions.import, `${subpath} must declare an ESM "import" target`).toMatch(/^\.\/dist\/esm\/.+\.js$/);
-    expect(conditions.default, `${subpath} must declare an ESM "default" target`).toMatch(/^\.\/dist\/esm\/.+\.js$/);
+    expect(conditions.types, `${subpath} must declare an ESM declaration target`).toMatch(/^\.\/dist\/.+\.d\.ts$/);
+    expect(conditions.import, `${subpath} must declare an ESM "import" target`).toMatch(/^\.\/dist\/.+\.js$/);
+    expect(conditions.default, `${subpath} must declare an ESM "default" target`).toMatch(/^\.\/dist\/.+\.js$/);
     expect(conditions.import, `${subpath} import/default targets should stay aligned`).toBe(conditions.default);
     if (!conditions.default) {
       return;
     }
 
-    const expectedEntry = distributionEsmToSourceEntry(conditions.default);
+    const expectedEntry = distributionPathToSourceEntry(conditions.default);
     expect(tsdownEntries, `${subpath} → ${conditions.default} requires tsdown entry "${expectedEntry}"`).toContain(
       expectedEntry,
     );

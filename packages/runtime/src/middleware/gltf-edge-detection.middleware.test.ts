@@ -19,7 +19,6 @@ import {
   createMockInput,
   createSuccessResult,
   createErrorResult,
-  createEmptySuccessResult,
 } from '#testing/kernel-testing.utils.js';
 
 // =============================================================================
@@ -369,7 +368,7 @@ describe('gltfEdgeDetection', () => {
     describe('meshes without existing line primitives', () => {
       it('should detect edges and attach them to the source mesh', async () => {
         const gltfData = await createCubeGltfWithoutLines();
-        const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
+        const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
         const { input, runtime } = createEdgeDetectionContext();
         const handler = createMockCreateGeometryHandler(handlerResult);
 
@@ -382,7 +381,7 @@ describe('gltfEdgeDetection', () => {
         expect(result.success).toBe(true);
 
         if (result.success) {
-          const geometry = result.data[0] as GeometryGltf;
+          const geometry = result.data as GeometryGltf;
           expect(geometry.format).toBe('gltf');
 
           const meshes = await analyzeGltfPrimitives(geometry.content);
@@ -396,7 +395,7 @@ describe('gltfEdgeDetection', () => {
 
       it('should detect 12 edges for a cube (all 90-degree dihedral angles)', async () => {
         const gltfData = await createCubeGltfWithoutLines();
-        const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
+        const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
         const { input, runtime } = createEdgeDetectionContext();
         const handler = createMockCreateGeometryHandler(handlerResult);
 
@@ -404,7 +403,7 @@ describe('gltfEdgeDetection', () => {
         const result = await wrapCreateGeometry!(input, handler, runtime);
 
         if (result.success) {
-          const geometry = result.data[0] as GeometryGltf;
+          const geometry = result.data as GeometryGltf;
           const meshes = await analyzeGltfPrimitives(geometry.content);
 
           // A cube has 12 edges, each edge has 2 vertices, all in the source mesh's edge primitive.
@@ -417,7 +416,7 @@ describe('gltfEdgeDetection', () => {
 
       it('should produce a new GLTF binary (not return original)', async () => {
         const gltfData = await createCubeGltfWithoutLines();
-        const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
+        const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
         const { input, runtime } = createEdgeDetectionContext();
         const handler = createMockCreateGeometryHandler(handlerResult);
 
@@ -425,7 +424,7 @@ describe('gltfEdgeDetection', () => {
         const result = await wrapCreateGeometry!(input, handler, runtime);
 
         if (result.success) {
-          const geometry = result.data[0] as GeometryGltf;
+          const geometry = result.data as GeometryGltf;
           // The content should be different from the original (re-serialized with generated edges).
           expect(geometry.content).not.toBe(gltfData);
           expect(geometry.content.byteLength).toBeGreaterThan(gltfData.byteLength);
@@ -436,7 +435,7 @@ describe('gltfEdgeDetection', () => {
     describe('meshes with existing line primitives', () => {
       it('should skip detection and leave pre-existing LINES on the source mesh', async () => {
         const gltfData = await createCubeGltfWithLines();
-        const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
+        const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
         const { input, runtime } = createEdgeDetectionContext();
         const handler = createMockCreateGeometryHandler(handlerResult);
 
@@ -446,7 +445,7 @@ describe('gltfEdgeDetection', () => {
         expect(result.success).toBe(true);
 
         if (result.success) {
-          const geometry = result.data[0] as GeometryGltf;
+          const geometry = result.data as GeometryGltf;
           expect(geometry.format).toBe('gltf');
 
           const meshes = await analyzeGltfPrimitives(geometry.content);
@@ -465,7 +464,7 @@ describe('gltfEdgeDetection', () => {
           format: 'gltf',
           content: gltfData,
         };
-        const handlerResult = createSuccessResult([originalGeometry]);
+        const handlerResult = createSuccessResult(originalGeometry);
         const { input, runtime } = createEdgeDetectionContext();
         const handler = createMockCreateGeometryHandler(handlerResult);
 
@@ -473,8 +472,8 @@ describe('gltfEdgeDetection', () => {
         const result = await wrapCreateGeometry!(input, handler, runtime);
 
         if (result.success) {
-          expect(result.data[0]).toBe(originalGeometry);
-          const geometry = result.data[0] as GeometryGltf;
+          expect(result.data).toBe(originalGeometry);
+          const geometry = result.data as GeometryGltf;
           expect(geometry.content).toBe(gltfData);
         }
       });
@@ -485,7 +484,7 @@ describe('gltfEdgeDetection', () => {
           format: 'gltf',
           content: gltfData,
         };
-        const handlerResult = createSuccessResult([originalGeometry]);
+        const handlerResult = createSuccessResult(originalGeometry);
         const { input, runtime } = createEdgeDetectionContext();
         const handler = createMockCreateGeometryHandler(handlerResult);
 
@@ -494,7 +493,7 @@ describe('gltfEdgeDetection', () => {
 
         expect(result.success).toBe(true);
         if (result.success) {
-          expect(result.data[0]).toBe(originalGeometry);
+          expect(result.data).toBe(originalGeometry);
           const meshes = await analyzeGltfPrimitives(originalGeometry.content);
           expect(meshes).toHaveLength(1);
           expect(meshes[0]!.triangleCount).toBe(1);
@@ -506,7 +505,7 @@ describe('gltfEdgeDetection', () => {
     describe('mixed meshes', () => {
       it('should keep detection-generated edges and pre-existing edges on their source meshes', async () => {
         const gltfData = await createMixedMeshGltf();
-        const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
+        const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
         const { input, runtime } = createEdgeDetectionContext();
         const handler = createMockCreateGeometryHandler(handlerResult);
 
@@ -516,7 +515,7 @@ describe('gltfEdgeDetection', () => {
         expect(result.success).toBe(true);
 
         if (result.success) {
-          const geometry = result.data[0] as GeometryGltf;
+          const geometry = result.data as GeometryGltf;
           const meshes = await analyzeGltfPrimitives(geometry.content);
 
           expect(meshes).toHaveLength(2);
@@ -537,7 +536,7 @@ describe('gltfEdgeDetection', () => {
 
       it('should produce a new GLTF binary for mixed meshes (some edges were added)', async () => {
         const gltfData = await createMixedMeshGltf();
-        const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
+        const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
         const { input, runtime } = createEdgeDetectionContext();
         const handler = createMockCreateGeometryHandler(handlerResult);
 
@@ -545,7 +544,7 @@ describe('gltfEdgeDetection', () => {
         const result = await wrapCreateGeometry!(input, handler, runtime);
 
         if (result.success) {
-          const geometry = result.data[0] as GeometryGltf;
+          const geometry = result.data as GeometryGltf;
           // Should be different from original (edges were added to one source mesh).
           expect(geometry.content).not.toBe(gltfData);
         }
@@ -556,11 +555,10 @@ describe('gltfEdgeDetection', () => {
       it('should pass through SVG geometries unchanged', async () => {
         const svgGeometry: GeometrySvg = {
           format: 'svg',
-          paths: ['<path d="M0,0 L10,10"/>'],
-          viewbox: '0 0 100 100',
+          content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M0,0 L10,10"/></svg>',
           name: 'test-svg',
         };
-        const handlerResult = createSuccessResult([svgGeometry]);
+        const handlerResult = createSuccessResult(svgGeometry);
         const { input, runtime } = createEdgeDetectionContext();
         const handler = createMockCreateGeometryHandler(handlerResult);
 
@@ -570,38 +568,12 @@ describe('gltfEdgeDetection', () => {
         expect(result.success).toBe(true);
 
         if (result.success) {
-          expect(result.data[0]).toEqual(svgGeometry);
-        }
-      });
-
-      it('should handle mixed GLTF and SVG geometries', async () => {
-        const gltfData = await createCubeGltfWithoutLines();
-        const svgGeometry: GeometrySvg = {
-          format: 'svg',
-          paths: ['<path d="M0,0 L10,10"/>'],
-          viewbox: '0 0 100 100',
-          name: 'test-svg',
-        };
-        const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }, svgGeometry]);
-        const { input, runtime } = createEdgeDetectionContext();
-        const handler = createMockCreateGeometryHandler(handlerResult);
-
-        const { wrapCreateGeometry } = gltfEdgeDetectionDefinition;
-        const result = await wrapCreateGeometry!(input, handler, runtime);
-
-        expect(result.success).toBe(true);
-
-        if (result.success) {
-          expect(result.data).toHaveLength(2);
-          // GLTF should be processed (edges added)
-          expect(result.data[0]?.format).toBe('gltf');
-          // SVG should be unchanged
-          expect(result.data[1]).toEqual(svgGeometry);
+          expect(result.data).toEqual(svgGeometry);
         }
       });
     });
 
-    describe('failed and empty results', () => {
+    describe('failed results', () => {
       it('should pass through failed results unchanged', async () => {
         const errorResult = createErrorResult();
         const { input, runtime } = createEdgeDetectionContext();
@@ -612,34 +584,23 @@ describe('gltfEdgeDetection', () => {
 
         expect(result).toEqual(errorResult);
       });
-
-      it('should pass through results with empty data array', async () => {
-        const emptyResult = createEmptySuccessResult();
-        const { input, runtime } = createEdgeDetectionContext();
-        const handler = vi.fn().mockResolvedValue(emptyResult);
-
-        const { wrapCreateGeometry } = gltfEdgeDetectionDefinition;
-        const result = await wrapCreateGeometry!(input, handler, runtime);
-
-        expect(result).toEqual(emptyResult);
-      });
     });
 
     describe('logging', () => {
       it('should log trace message when processing GLTF geometries', async () => {
         const gltfData = await createCubeGltfWithoutLines();
-        const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
+        const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
         const { input, runtime } = createEdgeDetectionContext();
         const handler = createMockCreateGeometryHandler(handlerResult);
 
         const { wrapCreateGeometry } = gltfEdgeDetectionDefinition;
         await wrapCreateGeometry!(input, handler, runtime);
 
-        expect(runtime.logger.trace).toHaveBeenCalledWith('Adding edge primitives to GLTF geometries');
+        expect(runtime.logger.trace).toHaveBeenCalledWith('Adding edge primitives to GLTF geometry');
       });
 
-      it('should not log when result is empty', async () => {
-        const emptyResult = createEmptySuccessResult();
+      it('should not log when result failed', async () => {
+        const emptyResult = createErrorResult();
         const { input, runtime } = createEdgeDetectionContext();
         const handler = vi.fn().mockResolvedValue(emptyResult);
 
@@ -664,7 +625,7 @@ describe('gltfEdgeDetection', () => {
     describe('edge material properties', () => {
       it('should use unlit material for generated edge primitives', async () => {
         const gltfData = await createCubeGltfWithoutLines();
-        const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
+        const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
         const { input, runtime } = createEdgeDetectionContext();
         const handler = createMockCreateGeometryHandler(handlerResult);
 
@@ -672,7 +633,7 @@ describe('gltfEdgeDetection', () => {
         const result = await wrapCreateGeometry!(input, handler, runtime);
 
         if (result.success) {
-          const geometry = result.data[0] as GeometryGltf;
+          const geometry = result.data as GeometryGltf;
           const io = new NodeIO().registerExtensions([KHRMaterialsUnlit]);
           const document = await io.readBinary(geometry.content);
 
@@ -699,7 +660,7 @@ describe('gltfEdgeDetection', () => {
     describe('owner-local edge topology guarantees', () => {
       it('emits one LINES primitive per owner mesh that has edges', async () => {
         const gltfData = await createMixedMeshGltf();
-        const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
+        const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
         const { input, runtime } = createEdgeDetectionContext();
         const handler = createMockCreateGeometryHandler(handlerResult);
 
@@ -708,7 +669,7 @@ describe('gltfEdgeDetection', () => {
 
         expect(result.success).toBe(true);
         if (result.success) {
-          const geometry = result.data[0] as GeometryGltf;
+          const geometry = result.data as GeometryGltf;
           const io = new NodeIO().registerExtensions([KHRMaterialsUnlit]);
           const document = await io.readBinary(geometry.content);
 
@@ -726,7 +687,7 @@ describe('gltfEdgeDetection', () => {
 
       it('does not attach a bundled merged-edges node at the scene root', async () => {
         const gltfData = await createCubeGltfWithoutLines();
-        const handlerResult = createSuccessResult([{ format: 'gltf', content: gltfData }]);
+        const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
         const { input, runtime } = createEdgeDetectionContext();
         const handler = createMockCreateGeometryHandler(handlerResult);
 
@@ -734,7 +695,7 @@ describe('gltfEdgeDetection', () => {
         const result = await wrapCreateGeometry!(input, handler, runtime);
 
         if (result.success) {
-          const geometry = result.data[0] as GeometryGltf;
+          const geometry = result.data as GeometryGltf;
           const io = new NodeIO().registerExtensions([KHRMaterialsUnlit]);
           const document = await io.readBinary(geometry.content);
 

@@ -5,6 +5,7 @@
  */
 
 import { assertType, describe, expectTypeOf, it } from 'vitest';
+import type { GeometryResponse } from '@taucad/types';
 import { z } from 'zod';
 import type { RuntimeClientOptions } from '#client/runtime-client-core.js';
 import { createRuntimeClient } from '#client/runtime-client.js';
@@ -17,6 +18,8 @@ import { defineRuntime } from '#worker/runtime-definition.js';
 import type { RuntimeConfigInput, RuntimeConfigOutput } from '#worker/runtime-definition.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
+
+const testGeometry = { format: 'gltf', content: new Uint8Array([1]) } satisfies GeometryResponse;
 
 const makeKernel = () =>
   defineKernel({
@@ -47,7 +50,7 @@ const makeKernel = () =>
       return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
     },
     async createGeometry(input) {
-      return { geometry: [], nativeHandle: { id: input.filePath } };
+      return { geometry: testGeometry, nativeHandle: { id: input.filePath } };
     },
     async exportGeometry(_input) {
       return { success: true, data: [], issues: [] };
@@ -81,7 +84,7 @@ describe('defineKernel', () => {
         return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
       },
       async createGeometry() {
-        return { geometry: [], nativeHandle: {} };
+        return { geometry: testGeometry, nativeHandle: {} };
       },
       async exportGeometry() {
         return { success: true, data: [], issues: [] };
@@ -105,7 +108,7 @@ describe('defineKernel', () => {
         return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
       },
       async createGeometry() {
-        return { geometry: [], nativeHandle: { handleId: 'native' } };
+        return { geometry: testGeometry, nativeHandle: { handleId: 'native' } };
       },
       serializeNativeHandle(input, runtime, context) {
         expectTypeOf(input.nativeHandle).toEqualTypeOf<{ handleId: string }>();
@@ -151,7 +154,7 @@ describe('defineKernel', () => {
         return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
       },
       async createGeometry() {
-        return { geometry: [], nativeHandle: { handleId: 'native' } };
+        return { geometry: testGeometry, nativeHandle: { handleId: 'native' } };
       },
       serializeNativeHandle(input: { nativeHandle: { handleId: string } }) {
         const { nativeHandle } = input;
@@ -281,15 +284,20 @@ describe('defineRuntime and client projections', () => {
     const mainSourcePath = 'main.ts';
     void client.bestRouteFor('step');
     void client.export('step', {
-      code: { [mainSourcePath]: 'export default 1;' },
-      options: { tessellation: { linearTolerance: 0.1 } },
+      source: { files: { [mainSourcePath]: 'export default 1;' } },
+      exportOptions: { tolerance: 0.1 },
     });
     void client.export('step', {
-      code: { [mainSourcePath]: 'export default 1;' },
-      tolerance: 0.1,
+      source: { files: { [mainSourcePath]: 'export default 1;' } },
+      exportOptions: { tolerance: 0.1 },
     });
-    // @ts-expect-error -- `binary` is an STL export option, not a STEP export option.
-    void client.export('step', { code: { [mainSourcePath]: 'export default 1;' }, binary: true });
+    void client.export('step', {
+      source: { files: { [mainSourcePath]: 'export default 1;' } },
+      exportOptions: {
+        // @ts-expect-error -- `binary` is an STL export option, not a STEP export option.
+        binary: true,
+      },
+    });
     // @ts-expect-error -- unknown export formats are rejected from the typed runtime projection.
     void client.bestRouteFor('unknown');
 

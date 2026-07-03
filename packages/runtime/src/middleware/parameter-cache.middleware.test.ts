@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import type { GetParametersResult } from '#types/runtime.types.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
 import { parameterCache, parameterMemoryCache } from '#middleware/parameter-cache.middleware.js';
@@ -18,7 +19,7 @@ import {
 /** The data type for a successful GetParametersResult */
 type GetParametersData = {
   defaultParameters: Record<string, unknown>;
-  jsonSchema: unknown;
+  jsonSchema: JSONSchema7;
 };
 
 /**
@@ -162,10 +163,7 @@ describe('parameterCacheMiddleware', () => {
 
         expect(result.success).toBe(true);
         if (result.success) {
-          const schema = result.data.jsonSchema as {
-            properties?: Record<string, unknown>;
-          };
-          expect(schema.properties).toHaveProperty('customProp');
+          expect(result.data.jsonSchema.properties).toHaveProperty('customProp');
         }
       });
     });

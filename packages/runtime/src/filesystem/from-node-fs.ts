@@ -26,8 +26,8 @@ import { wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem
  * import { inProcessTransport } from '@taucad/runtime/transport/in-process';
  * import { fromNodeFs } from '@taucad/runtime/filesystem/node';
  * import { defineRuntime } from '@taucad/runtime/worker';
- * import { replicad } from '@taucad/runtime/kernels';
- * import { esbuild } from '@taucad/runtime/bundler';
+ * import { replicad } from '@taucad/runtime/kernels/replicad';
+ * import { esbuild } from '@taucad/runtime/bundler/esbuild';
  *
  * const runtime = defineRuntime({ kernels: [replicad()], bundlers: [esbuild()] });
  * const client = createRuntimeClient({

@@ -11,7 +11,12 @@ import { describe, expectTypeOf, it } from 'vitest';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { ExportFidelity, FileExtension } from '@taucad/types';
 import type * as RuntimeTypes from '#types/runtime.types.js';
-import type { CapabilitiesManifest, ExportRoute, KernelRenderSchema } from '#types/runtime.types.js';
+import type {
+  CapabilitiesManifest,
+  ExportRoute,
+  GetParametersResult,
+  KernelRenderSchema,
+} from '#types/runtime.types.js';
 import type { KernelPlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
 
 // =============================================================================
@@ -58,6 +63,14 @@ describe('KernelRenderSchema shape (wide default)', () => {
 
   it('should expose defaults as record of unknown for the wide-default bag', () => {
     expectTypeOf<KernelRenderSchema['defaults']>().toEqualTypeOf<Record<string, unknown>>();
+  });
+});
+
+describe('GetParametersResult target shape', () => {
+  it('should expose jsonSchema as JSONSchema7 on success', () => {
+    type Success = Extract<GetParametersResult, { success: true }>;
+
+    expectTypeOf<Success['data']['jsonSchema']>().toEqualTypeOf<JSONSchema7>();
   });
 });
 

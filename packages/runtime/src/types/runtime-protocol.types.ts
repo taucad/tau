@@ -61,7 +61,7 @@ export type GeometryTransport = GeometryResponseTransport & { readonly hash: str
  * Used on the MessagePort protocol; resolved to `HashedGeometryResult` by RuntimeClient.
  * @internal
  */
-export type HashedGeometryResultTransport = KernelResult<GeometryTransport[]>;
+export type HashedGeometryResultTransport = KernelResult<GeometryTransport>;
 
 /**
  * Caller-owned `SharedArrayBuffer` that backs file-content caching across

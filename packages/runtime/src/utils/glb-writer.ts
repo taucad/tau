@@ -11,7 +11,7 @@
  */
 
 import { packageName, packageVersion } from '#utils/package-info.js';
-import type { JSONObject } from '@taucad/types';
+import type { GeometryGltf, JSONObject } from '@taucad/types';
 
 // =============================================================================
 // Types
@@ -504,4 +504,40 @@ export function writeGltfJson(input: GlbInput): Uint8Array<ArrayBuffer> {
 
   const jsonString = JSON.stringify(json, undefined, 2);
   return new TextEncoder().encode(jsonString);
+}
+
+/**
+ * Create a canonical empty GLB scene.
+ *
+ * Empty renders are successful geometry artifacts with no scene nodes, not
+ * render failures and not fake degenerate triangles.
+ *
+ * @returns a valid GLB binary with zero meshes
+ *
+ * @public
+ */
+export function createEmptyGlb(): Uint8Array<ArrayBuffer> {
+  return writeGlb({ nodes: [] });
+}
+
+/**
+ * Create a canonical empty self-contained glTF JSON scene.
+ *
+ * @returns a UTF-8 encoded glTF JSON file with zero meshes
+ *
+ * @public
+ */
+export function createEmptyGltf(): Uint8Array<ArrayBuffer> {
+  return writeGltfJson({ nodes: [] });
+}
+
+/**
+ * Create a runtime geometry artifact for a successful empty render.
+ *
+ * @returns a glTF geometry artifact backed by {@link createEmptyGlb}
+ *
+ * @public
+ */
+export function createEmptyGltfGeometry(): GeometryGltf {
+  return { format: 'gltf', content: createEmptyGlb() };
 }

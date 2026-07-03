@@ -290,14 +290,14 @@ export type ExportGeometryInput<
 
 /**
  * Tessellated geometry and opaque native handle produced by a kernel evaluation.
- * The geometry array is transferred to the main thread for rendering, while the
- * native handle is retained in the worker for subsequent export operations.
+ * The singular geometry is transferred to the main thread for rendering, while
+ * the native handle is retained in the worker for subsequent export operations.
  *
  * @template NativeHandle - Kernel-specific type for the native geometry representation
  * @public
  */
 export type CreateGeometryOutput<NativeHandle = unknown> = {
-  geometry: GeometryResponse[];
+  geometry: GeometryResponse;
   nativeHandle: NativeHandle;
   issues?: KernelIssue[];
 };
@@ -558,7 +558,8 @@ export type KernelPluginFactory<
  *     return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
  *   },
  *   async createGeometry(input, runtime, context) {
- *     return { geometry: [], nativeHandle: {} };
+ *     const bytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
+ *     return { geometry: { format: 'gltf', content: bytes }, nativeHandle: {} };
  *   },
  *   async exportGeometry(input, runtime, context) {
  *     return { success: true, data: [], issues: [] };

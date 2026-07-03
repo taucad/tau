@@ -251,10 +251,11 @@ async function dropMockRecursiveFolder(page: Page, targetPath: string): Promise<
         item() {
           return null;
         },
-        *[Symbol.iterator]() {},
+        [Symbol.iterator]() {
+          return [][Symbol.iterator]();
+        },
       },
-      items: {
-        0: item,
+      items: Object.assign(Object.create(null) as Record<string, unknown>, {
         length: 1,
         item(index: number) {
           return index === 0 ? item : null;
@@ -262,7 +263,7 @@ async function dropMockRecursiveFolder(page: Page, targetPath: string): Promise<
         *[Symbol.iterator]() {
           yield item;
         },
-      },
+      }),
     };
   });
 

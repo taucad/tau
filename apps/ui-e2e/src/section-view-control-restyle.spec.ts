@@ -29,6 +29,7 @@ type PixelStats = Readonly<{
   greenish: number;
   blueish: number;
   darkTextish: number;
+  softTextEdge: number;
 }>;
 
 type CanvasSampleRegion = Readonly<{
@@ -166,11 +167,13 @@ async function samplePng(page: Page, png: Uint8Array<ArrayBuffer>, region: Canva
       let greenish = 0;
       let blueish = 0;
       let darkTextish = 0;
+      let softTextEdge = 0;
 
       for (let index = 0; index < data.length; index += 4) {
         const r = data[index]!;
         const g = data[index + 1]!;
         const b = data[index + 2]!;
+        const maxChannelDelta = Math.max(Math.abs(r - g), Math.abs(g - b), Math.abs(r - b));
         const bucket = Math.floor(r / 8) * 1024 + Math.floor(g / 8) * 32 + Math.floor(b / 8);
         histogram.set(bucket, (histogram.get(bucket) ?? 0) + 1);
 
@@ -179,6 +182,9 @@ async function samplePng(page: Page, png: Uint8Array<ArrayBuffer>, region: Canva
         greenish += Number(g > 135 && r < 135 && b < 145);
         blueish += Number(b > 145 && r < 155 && g < 190);
         darkTextish += Number(r < 65 && g < 65 && b < 65);
+        softTextEdge += Number(
+          r >= 65 && r <= 190 && g >= 65 && g <= 190 && b >= 65 && b <= 190 && maxChannelDelta < 18,
+        );
       }
 
       return {
@@ -189,6 +195,7 @@ async function samplePng(page: Page, png: Uint8Array<ArrayBuffer>, region: Canva
         greenish,
         blueish,
         darkTextish,
+        softTextEdge,
       };
     },
     { pngBase64: Buffer.from(png).toString('base64'), sampleRegion: region },
@@ -245,6 +252,14 @@ test.describe('Section view control restyle regressions', () => {
       ).toBeGreaterThan(borderPixels * 1.15);
       expect(stats.darkTextish, 'multiple visible selector labels should remain readable').toBeGreaterThan(45);
       expect(
+        stats.softTextEdge,
+        `selector labels should preserve blended antialias edge pixels: ${JSON.stringify(stats)}`,
+      ).toBeGreaterThan(35);
+      expect(
+        stats.softTextEdge,
+        `selector labels should not collapse into hard alpha-tested black cutouts: ${JSON.stringify(stats)}`,
+      ).toBeGreaterThan(stats.darkTextish * 0.08);
+      expect(
         stats.darkTextish,
         `hidden labels should not overdraw every stacked body: ${JSON.stringify(stats)}`,
       ).toBeLessThan(stats.whiteish * 0.24);
@@ -263,6 +278,10 @@ test.describe('Section view control restyle regressions', () => {
         reverseStats.darkTextish,
         `reverse selector labels should be visible on the opposite selector caps: ${JSON.stringify(reverseStats)}`,
       ).toBeGreaterThan(45);
+      expect(
+        reverseStats.softTextEdge,
+        `reverse selector labels should preserve blended antialias edges: ${JSON.stringify(reverseStats)}`,
+      ).toBeGreaterThan(35);
 
       await page.evaluate(() => {
         const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
@@ -289,6 +308,12 @@ test.describe('Section view control restyle regressions', () => {
           afterChangeStats,
         )}`,
       ).toBeGreaterThan(45);
+      expect(
+        afterChangeStats.softTextEdge,
+        `selector labels should remain antialiased after selecting a plane and reopening selector choices: ${JSON.stringify(
+          afterChangeStats,
+        )}`,
+      ).toBeGreaterThan(35);
     });
   }
 });

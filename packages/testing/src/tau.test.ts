@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { activeParams, analyzeTauModel, parameterGroups, params, renderTauModel, runTauGeoSpecTests } from '#tau.js';
 import type { GeometrySubject } from 'geospec';
 import type { GeoSpecModelFormat } from 'geospec/model';
+import type { WatertightResult } from '#geometry/types.js';
 
 type TestVmFileSystem = {
   exists(path: string): Promise<boolean>;
@@ -62,7 +63,7 @@ const createTriangleGlb = async (): Promise<Uint8Array<ArrayBuffer>> => {
   return new WebIO().writeBinary(document);
 };
 
-const watertightResult = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+const watertightResult = (overrides: Partial<WatertightResult> = {}): WatertightResult => ({
   watertight: true,
   irregularEdges: 0,
   openBoundaryEdges: 0,

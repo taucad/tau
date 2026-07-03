@@ -19,7 +19,7 @@ async function renderOpenScadGlb(relativePath: string, code: string): Promise<Ui
     }),
   });
   try {
-    const result = await client.export('glb', { file: filePath });
+    const result = await client.export('glb', { source: { path: filePath } });
     if (!result.success) {
       throw new Error(`Export failed: ${result.issues.map((issue) => issue.message).join('; ')}`);
     }

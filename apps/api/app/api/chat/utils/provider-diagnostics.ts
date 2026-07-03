@@ -460,7 +460,7 @@ const collectToolArgumentFlags = (args: unknown, flags: Set<string>): void => {
 const summarizeLegacyToolCalls = (
   additionalKwargs: AIMessage['additional_kwargs'] | undefined,
 ): LegacyToolCallSummary[] => {
-  const rawToolCalls = (additionalKwargs as Record<string, unknown> | undefined)?.tool_calls;
+  const rawToolCalls = (additionalKwargs as Record<string, unknown> | undefined)?.['tool_calls'];
   if (!Array.isArray(rawToolCalls)) {
     return [];
   }
@@ -474,7 +474,7 @@ const summarizeLegacyToolCalls = (
 const summarizeLegacyFunctionCall = (
   additionalKwargs: AIMessage['additional_kwargs'] | undefined,
 ): LegacyToolCallSummary | undefined => {
-  const functionCall = (additionalKwargs as Record<string, unknown> | undefined)?.function_call;
+  const functionCall = (additionalKwargs as Record<string, unknown> | undefined)?.['function_call'];
   if (!functionCall) {
     return undefined;
   }
@@ -664,7 +664,7 @@ const collectGeminiRequestDiagnosticFlags = (contents: unknown[]): string[] => {
     const parts = readArray(asRecord(content), 'parts') ?? [];
     for (const part of parts) {
       const partRecord = asRecord(part);
-      const functionCall = asRecord(partRecord?.functionCall) ?? asRecord(partRecord?.function_call);
+      const functionCall = asRecord(partRecord?.['functionCall']) ?? asRecord(partRecord?.['function_call']);
       if (!functionCall) {
         continue;
       }
@@ -672,6 +672,14 @@ const collectGeminiRequestDiagnosticFlags = (contents: unknown[]): string[] => {
       const name = readString(functionCall, 'name');
       if (!name || name.trim().length === 0) {
         flags.add('gemini_request_empty_function_call_name');
+      }
+      const thoughtSignature =
+        readString(functionCall, 'thoughtSignature') ??
+        readString(functionCall, 'thought_signature') ??
+        readString(partRecord, 'thoughtSignature') ??
+        readString(partRecord, 'thought_signature');
+      if (!thoughtSignature) {
+        flags.add('gemini_request_missing_function_call_thought_signature');
       }
     }
   }
@@ -720,10 +728,16 @@ const summarizeGeminiPart = (part: unknown): unknown => {
 
   const functionCall = asRecord(record['functionCall']) ?? asRecord(record['function_call']);
   if (functionCall) {
+    const thoughtSignature =
+      readString(functionCall, 'thoughtSignature') ??
+      readString(functionCall, 'thought_signature') ??
+      readString(record, 'thoughtSignature') ??
+      readString(record, 'thought_signature');
     return {
       type: 'functionCall',
       name: readString(functionCall, 'name'),
       args: summarizeValueShape(functionCall['args']),
+      hasThoughtSignature: thoughtSignature !== undefined,
     };
   }
 

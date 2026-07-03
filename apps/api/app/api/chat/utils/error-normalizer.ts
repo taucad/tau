@@ -7,6 +7,7 @@ import { errorCategory } from '@taucad/types/constants';
 import type { ErrorCategory, ChatError } from '@taucad/types';
 import { httpStatusToCategory, errorCategoryTitles } from '@taucad/chat/utils';
 import { decodeProviderErrorBody } from '#api/chat/utils/provider-error-decoder.js';
+import { isCompactionPipelineError } from '#api/chat/utils/compaction-errors.js';
 
 /**
  * LangChain error codes that may be present on wrapped errors.
@@ -213,6 +214,51 @@ function isAbortError(error: unknown): boolean {
   return false;
 }
 
+function extractRegexGroup(message: string, pattern: RegExp): string | undefined {
+  const match = pattern.exec(message);
+  return match?.[1];
+}
+
+function normalizeTauImplementationBugError(
+  error: unknown,
+  rawMessage: string,
+): Pick<ChatError, 'category' | 'code' | 'message' | 'raw'> | undefined {
+  if (isCompactionPipelineError(error)) {
+    const details = [
+      `Context compaction failed before provider dispatch.`,
+      `Failure kind: ${error.failureKind}.`,
+      `Failure disposition: ${error.failureDisposition}.`,
+      error.debugId ? `Debug ID: ${error.debugId}.` : undefined,
+    ].filter((entry): entry is string => entry !== undefined);
+    return {
+      category: errorCategory.toolError,
+      code: error.code,
+      message: details.join(' '),
+      raw: rawMessage,
+    };
+  }
+
+  if (rawMessage.includes('CONTEXT_COMPACTION_FAILED')) {
+    const failureKind = extractRegexGroup(rawMessage, /failureKind=([_a-z]+)/);
+    const failureDisposition = extractRegexGroup(rawMessage, /failureDisposition=([_a-z]+)/);
+    const debugId = extractRegexGroup(rawMessage, /debugId=([\w-]+)/);
+    const details = [
+      `Context compaction failed before provider dispatch.`,
+      failureKind ? `Failure kind: ${failureKind}.` : undefined,
+      failureDisposition ? `Failure disposition: ${failureDisposition}.` : undefined,
+      debugId ? `Debug ID: ${debugId}.` : undefined,
+    ].filter((entry): entry is string => entry !== undefined);
+    return {
+      category: errorCategory.toolError,
+      code: 'CONTEXT_COMPACTION_FAILED',
+      message: details.join(' '),
+      raw: rawMessage,
+    };
+  }
+
+  return undefined;
+}
+
 /**
  * Detects specific error patterns in message text.
  */
@@ -290,6 +336,13 @@ export function normalizeError(error: unknown): string {
   // 0. Check for abort errors first (explicit user cancellation)
   if (isAbortError(error)) {
     category = errorCategory.cancelled;
+  }
+
+  const tauImplementationBugError = normalizeTauImplementationBugError(error, rawMessage);
+  if (tauImplementationBugError && category !== errorCategory.cancelled) {
+    category = tauImplementationBugError.category;
+    code = tauImplementationBugError.code;
+    message = tauImplementationBugError.message;
   }
 
   // 1. Check for LangChain error codes

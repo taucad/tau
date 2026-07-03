@@ -8,11 +8,13 @@ import type { BaseStore } from '@langchain/langgraph';
 import { z } from 'zod';
 import {
   AttributeKey,
+  GenAiContextCompactionFailureDisposition,
   GenAiContextCompactionStatus,
   GenAiContextBudgetTriggerReason,
   GenAiContextBudgetKind,
 } from '@taucad/telemetry';
 import { clearReadDedupForChat } from '#api/chat/clear-recent-reads.js';
+import type { ReadDedupClearer } from '#api/chat/clear-recent-reads.js';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { CompactionService } from '#api/chat/compaction.service.js';
@@ -20,12 +22,7 @@ import { TauRpcBackendFactory } from '#api/chat/tau-rpc-backend.js';
 import { ModelService } from '#api/models/model.service.js';
 import { appendCompactionTranscriptCommit } from '#api/chat/middleware/compaction-transcript.js';
 import { loadRecentSkillsMessage, replaceRecentSkillsMessage } from '#api/chat/middleware/recent-skills.middleware.js';
-import {
-  extractTextFromContent,
-  countImageBlocks,
-  isImageBlock,
-  stripImageBlocks,
-} from '#api/chat/utils/image-block.utils.js';
+import { extractTextFromContent, countImageBlocks, isImageBlock } from '#api/chat/utils/image-block.utils.js';
 import type { MetricsService } from '#telemetry/metrics.js';
 import type { TokenBudgetDecision } from '#api/chat/token-budget.service.js';
 import {
@@ -33,6 +30,9 @@ import {
   FALLBACK_CONTEXT_WINDOW,
   TokenBudgetService,
 } from '#api/chat/token-budget.service.js';
+import { cloneAiMessage } from '#api/chat/utils/ai-message-clone.js';
+import { CompactionPipelineError, compactionFailureKindForError } from '#api/chat/utils/compaction-errors.js';
+import type { CompactionFailureDisposition, CompactionFailureKind } from '#api/chat/utils/compaction-errors.js';
 import { withTauInternalMetadata } from '#api/chat/utils/tau-internal-message.js';
 
 /** Max character length for tool arguments before truncation in old messages. */
@@ -73,6 +73,7 @@ export type CreateCompactionMiddlewareOptions = {
   rpcBackendFactory: TauRpcBackendFactory;
   tokenBudgetService: TokenBudgetService;
   metricsService: MetricsService;
+  readDedupClearer: ReadDedupClearer;
   providerId?: string;
 };
 
@@ -86,7 +87,7 @@ function isToolMessage(message: BaseMessage): boolean {
 }
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- AI is an acronym
-function isAIMessage(message: BaseMessage): boolean {
+function isAIMessage(message: BaseMessage): message is AIMessage {
   return message instanceof AIMessage;
 }
 
@@ -125,11 +126,11 @@ export function findSafeCutoffPoint(messages: BaseMessage[], targetKeep: number)
  */
 function truncateToolArgs(messages: BaseMessage[]): BaseMessage[] {
   return messages.map((message) => {
-    if (!isAIMessage(message) || !(message as AIMessage).tool_calls?.length) {
+    if (!isAIMessage(message) || !message.tool_calls?.length) {
       return message;
     }
 
-    const truncatedCalls = (message as AIMessage).tool_calls!.map((call) => {
+    const truncatedCalls = message.tool_calls.map((call) => {
       const argsString = JSON.stringify(call.args);
       if (argsString.length <= MAX_ARG_LENGTH) {
         return call;
@@ -141,13 +142,7 @@ function truncateToolArgs(messages: BaseMessage[]): BaseMessage[] {
       };
     });
 
-    return new AIMessage({
-      content: message.content,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      tool_calls: truncatedCalls,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      response_metadata: message.response_metadata,
-    });
+    return cloneAiMessage(message, { toolCalls: truncatedCalls });
   });
 }
 
@@ -215,6 +210,10 @@ export function stripExcessMedia(messages: BaseMessage[], limit = DEFAULT_MEDIA_
       return block;
     });
 
+    if (message instanceof AIMessage) {
+      return cloneAiMessage(message, { content: newContent as AIMessage['content'] });
+    }
+
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Constructor name is PascalCase by convention
     const MessageType = message.constructor as new (fields: { content: unknown }) => BaseMessage;
     return new MessageType({ ...message, content: newContent });
@@ -272,11 +271,17 @@ function recordCompactionDecision(options: {
   providerName?: string | undefined;
   status: ContextCompactionStatus;
   triggerReason?: TokenBudgetDecision['triggerReason'] | typeof GenAiContextBudgetTriggerReason.OVERFLOW;
+  failureKind?: CompactionFailureKind | undefined;
+  failureDisposition?: CompactionFailureDisposition | undefined;
 }): void {
   options.metricsService.genAiContextCompactionDecisions.add(1, {
     [AttributeKey.GEN_AI_CONTEXT_BUDGET_KIND]: options.decision.budgetKind,
     [AttributeKey.GEN_AI_CONTEXT_BUDGET_TRIGGER_REASON]: options.triggerReason ?? options.decision.triggerReason,
     [AttributeKey.GEN_AI_CONTEXT_COMPACTION_STATUS]: options.status,
+    ...(options.failureKind ? { [AttributeKey.GEN_AI_CONTEXT_COMPACTION_FAILURE_KIND]: options.failureKind } : {}),
+    ...(options.failureDisposition
+      ? { [AttributeKey.GEN_AI_CONTEXT_COMPACTION_FAILURE_DISPOSITION]: options.failureDisposition }
+      : {}),
     [AttributeKey.GEN_AI_REQUEST_MODEL]: options.modelId,
     ...(options.providerName ? { [AttributeKey.GEN_AI_PROVIDER_NAME]: options.providerName } : {}),
   });
@@ -290,6 +295,11 @@ function emitCompactionData(options: {
   decision: TokenBudgetDecision;
   stats: CompactionStats;
   transcriptFilePath?: string | undefined;
+  failureKind?: CompactionFailureKind | undefined;
+  failureDisposition?: CompactionFailureDisposition | undefined;
+  debugId?: string | undefined;
+  providerNativeReplayMetadataPresent?: boolean | undefined;
+  missingFunctionCallSignatureCount?: number | undefined;
 }): void {
   if (!options.writer) {
     return;
@@ -307,7 +317,40 @@ function emitCompactionData(options: {
     triggerThreshold: options.decision.triggerThreshold,
     ...options.stats,
     transcriptFilePath: options.transcriptFilePath ?? null,
+    ...(options.failureKind ? { compactionFailureKind: options.failureKind } : {}),
+    ...(options.failureDisposition ? { failureDisposition: options.failureDisposition } : {}),
+    ...(options.debugId ? { debugId: options.debugId } : {}),
+    ...(options.providerNativeReplayMetadataPresent === undefined
+      ? {}
+      : { providerNativeReplayMetadataPresent: options.providerNativeReplayMetadataPresent }),
+    ...(options.missingFunctionCallSignatureCount === undefined
+      ? {}
+      : { missingFunctionCallSignatureCount: options.missingFunctionCallSignatureCount }),
   });
+}
+
+function failedCompactionStats(decision: TokenBudgetDecision): CompactionStats {
+  return compactionStatsFromBudget({
+    beforeTokens: decision.estimatedInputTokens,
+    afterTokens: decision.estimatedInputTokens,
+    messagesEvicted: 0,
+  });
+}
+
+function toCompactionPipelineError(options: {
+  message: string;
+  error: unknown;
+  debugId: string;
+  failureKind?: CompactionFailureKind | undefined;
+}): CompactionPipelineError {
+  return new CompactionPipelineError(
+    options.message,
+    options.failureKind ?? compactionFailureKindForError(options.error),
+    {
+      cause: options.error,
+      debugId: options.debugId,
+    },
+  );
 }
 
 function stampCompactedMessages(messages: BaseMessage[], compactionId: string): BaseMessage[] {
@@ -352,15 +395,10 @@ function cloneMessageWithMetadata(
   }
 
   if (message instanceof AIMessage) {
-    return new AIMessage({
+    return cloneAiMessage(message, {
       id: metadata.id,
       content: message.content,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API is snake_case.
-      tool_calls: message.tool_calls,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain metadata is snake_case.
-      additional_kwargs: metadata.additionalKwargs,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain metadata is snake_case.
-      response_metadata: message.response_metadata,
+      additionalKwargs: metadata.additionalKwargs,
     });
   }
 
@@ -570,17 +608,26 @@ export const createCompactionMiddleware = (options: CreateCompactionMiddlewareOp
                 chatId,
                 messages: compactedPayload,
               });
-              const transcriptFilePath = await appendCompactionTranscriptCommit({
-                chatId,
-                rpcBackendFactory: options.rpcBackendFactory,
-                compactionId,
-                status: GenAiContextCompactionStatus.COMPACTED,
-                triggerReason: postTruncateDecision.triggerReason,
-                evictedMessages,
-                messagesEvicted: stats.messagesEvicted,
-                tokensBeforeCompaction: stats.tokensBeforeCompaction,
-                tokensAfterCompaction: stats.tokensAfterCompaction,
-              });
+              let transcriptFilePath: string;
+              try {
+                transcriptFilePath = await appendCompactionTranscriptCommit({
+                  chatId,
+                  rpcBackendFactory: options.rpcBackendFactory,
+                  compactionId,
+                  status: GenAiContextCompactionStatus.COMPACTED,
+                  triggerReason: postTruncateDecision.triggerReason,
+                  evictedMessages,
+                  messagesEvicted: stats.messagesEvicted,
+                  tokensBeforeCompaction: stats.tokensBeforeCompaction,
+                  tokensAfterCompaction: stats.tokensAfterCompaction,
+                });
+              } catch (transcriptError) {
+                throw new CompactionPipelineError(
+                  'Required compaction transcript commit failed',
+                  'transcript_commit_failed',
+                  { cause: transcriptError },
+                );
+              }
               rewriteOnSuccess = true;
               activeCompactionId = compactionId;
               activeCompactionStatus = GenAiContextCompactionStatus.COMPACTED;
@@ -605,27 +652,26 @@ export const createCompactionMiddleware = (options: CreateCompactionMiddlewareOp
                 status: activeCompactionStatus,
               });
             } catch (compactionError) {
-              processedMessages = [...truncateToolArgs(evictedMessages), ...recentMessages];
               activeCompactionId = compactionId;
               activeCompactionStatus = GenAiContextCompactionStatus.FAILED;
               mutableContext.lastCompactionId = compactionId;
               mutableContext.lastCompactionStatus = activeCompactionStatus;
 
-              const errorMessage =
-                compactionError instanceof Error ? compactionError.message : 'Unknown compaction error';
-              const fallbackStats = compactionStatsFromBudget({
-                beforeTokens: postTruncateDecision.estimatedInputTokens,
-                afterTokens: postTruncateDecision.estimatedInputTokens,
-                messagesEvicted: 0,
-              });
+              const debugId = generatePrefixedId(idPrefix.data);
+              const failureKind = compactionFailureKindForError(compactionError);
+              const failureDisposition = GenAiContextCompactionFailureDisposition.BLOCKED_BEFORE_PROVIDER;
+              const stats = failedCompactionStats(postTruncateDecision);
               emitCompactionData({
                 writer,
                 compactionId,
                 status: activeCompactionStatus,
                 triggerReason: postTruncateDecision.triggerReason,
                 decision: postTruncateDecision,
-                stats: fallbackStats,
+                stats,
                 transcriptFilePath: undefined,
+                failureKind,
+                failureDisposition,
+                debugId,
               });
               recordCompactionDecision({
                 metricsService: options.metricsService,
@@ -633,8 +679,15 @@ export const createCompactionMiddleware = (options: CreateCompactionMiddlewareOp
                 modelId,
                 providerName,
                 status: activeCompactionStatus,
+                failureKind,
+                failureDisposition,
               });
-              console.warn(`Morph compaction failed, using truncated fallback: ${errorMessage}`);
+              throw toCompactionPipelineError({
+                message: 'Required context compaction failed before provider dispatch',
+                error: compactionError,
+                debugId,
+                failureKind,
+              });
             }
           }
         } else {
@@ -671,7 +724,11 @@ export const createCompactionMiddleware = (options: CreateCompactionMiddlewareOp
           decision: mutableContext.lastContextBudget,
         });
         if (rewriteOnSuccess && activeCompactionId && activeCompactionStatus) {
-          await clearReadDedupForChat(store, chatId);
+          await clearReadDedupForChat({
+            chatId,
+            readDedupClearer: options.readDedupClearer,
+            storeActive: store !== undefined,
+          });
           return new Command({
             update: {
               messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES }), ...processedMessages, response],
@@ -686,63 +743,142 @@ export const createCompactionMiddleware = (options: CreateCompactionMiddlewareOp
           const emergencyKeep = Math.max(2, Math.floor(processedMessages.length * 0.05));
           const keep = findSafeCutoffPoint(processedMessages, emergencyKeep);
           const emergencyEvictedMessages = processedMessages.slice(0, processedMessages.length - keep);
-          const emergencyMessages = await restoreRecentSkillContent({
-            store,
-            chatId,
-            messages: stripImageBlocks(processedMessages.slice(processedMessages.length - keep)),
-          });
+          const emergencyRecentMessages = processedMessages.slice(processedMessages.length - keep);
           const compactionId = generatePrefixedId(idPrefix.data);
-          const emergencyDecision = options.tokenBudgetService.evaluateModelRequest({
-            request: { ...request, messages: emergencyMessages },
-            modelId,
-            providerId: options.providerId,
-            contextWindow,
-            previousUsageInputTokens,
-          });
-          const emergencyStats = compactionStatsFromBudget({
-            beforeTokens: budgetDecision.estimatedInputTokens,
-            afterTokens: emergencyDecision.estimatedInputTokens,
-            messagesEvicted: emergencyEvictedMessages.length,
-          });
+          mutableContext.lastCompactionId = compactionId;
+          mutableContext.lastCompactionStatus = GenAiContextCompactionStatus.FAILED;
+
+          if (emergencyEvictedMessages.length === 0) {
+            const debugId = generatePrefixedId(idPrefix.data);
+            const failureKind = 'context_overflow_retry_failed' satisfies CompactionFailureKind;
+            const failureDisposition = GenAiContextCompactionFailureDisposition.BLOCKED_BEFORE_PROVIDER;
+            const stats = failedCompactionStats(budgetDecision);
+            emitCompactionData({
+              writer,
+              compactionId,
+              status: GenAiContextCompactionStatus.FAILED,
+              triggerReason: GenAiContextBudgetTriggerReason.OVERFLOW,
+              decision: budgetDecision,
+              stats,
+              transcriptFilePath: undefined,
+              failureKind,
+              failureDisposition,
+              debugId,
+            });
+            recordCompactionDecision({
+              metricsService: options.metricsService,
+              decision: budgetDecision,
+              modelId,
+              providerName,
+              status: GenAiContextCompactionStatus.FAILED,
+              triggerReason: GenAiContextBudgetTriggerReason.OVERFLOW,
+              failureKind,
+              failureDisposition,
+            });
+            throw new CompactionPipelineError('Context overflow retry had no evictable messages', failureKind, {
+              cause: error,
+              debugId,
+            });
+          }
+
+          let emergencyMessages: BaseMessage[];
+          let emergencyStats: CompactionStats;
+          let emergencyDecision: TokenBudgetDecision;
+          let transcriptFilePath: string;
+
+          try {
+            const { compactedMessages, stats } = await options.compactionService.compact({
+              messages: emergencyEvictedMessages,
+              query: currentUserQuery(emergencyRecentMessages),
+            });
+            emergencyStats = stats;
+            const compactedPayload = [
+              ...stampCompactedMessages(addContinuityInstructions(compactedMessages), compactionId),
+              ...emergencyRecentMessages,
+            ];
+            emergencyMessages = await restoreRecentSkillContent({
+              store,
+              chatId,
+              messages: compactedPayload,
+            });
+            emergencyDecision = options.tokenBudgetService.evaluateModelRequest({
+              request: { ...request, messages: emergencyMessages },
+              modelId,
+              providerId: options.providerId,
+              contextWindow,
+              previousUsageInputTokens,
+            });
+            try {
+              transcriptFilePath = await appendCompactionTranscriptCommit({
+                chatId,
+                rpcBackendFactory: options.rpcBackendFactory,
+                compactionId,
+                status: GenAiContextCompactionStatus.OVERFLOW_RETRY_SUCCEEDED,
+                triggerReason: GenAiContextBudgetTriggerReason.OVERFLOW,
+                evictedMessages: emergencyEvictedMessages,
+                messagesEvicted: emergencyStats.messagesEvicted,
+                tokensBeforeCompaction: emergencyStats.tokensBeforeCompaction,
+                tokensAfterCompaction: emergencyStats.tokensAfterCompaction,
+              });
+            } catch (transcriptError) {
+              throw new CompactionPipelineError(
+                'Required overflow compaction transcript commit failed',
+                'transcript_commit_failed',
+                { cause: transcriptError },
+              );
+            }
+          } catch (overflowCompactionError) {
+            const debugId = generatePrefixedId(idPrefix.data);
+            const failureKind = compactionFailureKindForError(overflowCompactionError);
+            const failureDisposition = GenAiContextCompactionFailureDisposition.BLOCKED_BEFORE_PROVIDER;
+            const stats = failedCompactionStats(budgetDecision);
+            emitCompactionData({
+              writer,
+              compactionId,
+              status: GenAiContextCompactionStatus.FAILED,
+              triggerReason: GenAiContextBudgetTriggerReason.OVERFLOW,
+              decision: budgetDecision,
+              stats,
+              transcriptFilePath: undefined,
+              failureKind,
+              failureDisposition,
+              debugId,
+            });
+            recordCompactionDecision({
+              metricsService: options.metricsService,
+              decision: budgetDecision,
+              modelId,
+              providerName,
+              status: GenAiContextCompactionStatus.FAILED,
+              triggerReason: GenAiContextBudgetTriggerReason.OVERFLOW,
+              failureKind,
+              failureDisposition,
+            });
+            throw toCompactionPipelineError({
+              message: 'Context overflow retry compaction failed before provider dispatch',
+              error: overflowCompactionError,
+              debugId,
+              failureKind,
+            });
+          }
 
           mutableContext.skillContentRestoreNeeded = true;
-          mutableContext.lastCompactionId = compactionId;
-          let overflowCommitSucceeded = false;
-          let transcriptFilePath: string | undefined;
-          let overflowStatus: ContextCompactionStatus;
-          try {
-            transcriptFilePath = await appendCompactionTranscriptCommit({
-              chatId,
-              rpcBackendFactory: options.rpcBackendFactory,
-              compactionId,
-              status: GenAiContextCompactionStatus.OVERFLOW_RETRY_SUCCEEDED,
-              triggerReason: GenAiContextBudgetTriggerReason.OVERFLOW,
-              evictedMessages: emergencyEvictedMessages,
-              messagesEvicted: emergencyStats.messagesEvicted,
-              tokensBeforeCompaction: emergencyStats.tokensBeforeCompaction,
-              tokensAfterCompaction: emergencyStats.tokensAfterCompaction,
-            });
-            overflowCommitSucceeded = true;
-            overflowStatus = GenAiContextCompactionStatus.OVERFLOW_RETRY_SUCCEEDED;
-          } catch {
-            overflowStatus = GenAiContextCompactionStatus.FAILED;
-          }
-          mutableContext.lastCompactionStatus = overflowStatus;
+          mutableContext.lastCompactionStatus = GenAiContextCompactionStatus.OVERFLOW_RETRY_SUCCEEDED;
           emitCompactionData({
             writer,
             compactionId,
-            status: overflowStatus,
+            status: GenAiContextCompactionStatus.OVERFLOW_RETRY_SUCCEEDED,
             triggerReason: GenAiContextBudgetTriggerReason.OVERFLOW,
-            decision: budgetDecision,
+            decision: emergencyDecision,
             stats: emergencyStats,
             transcriptFilePath,
           });
           recordCompactionDecision({
             metricsService: options.metricsService,
-            decision: budgetDecision,
+            decision: emergencyDecision,
             modelId,
             providerName,
-            status: overflowStatus,
+            status: GenAiContextCompactionStatus.OVERFLOW_RETRY_SUCCEEDED,
             triggerReason: GenAiContextBudgetTriggerReason.OVERFLOW,
           });
 
@@ -755,12 +891,13 @@ export const createCompactionMiddleware = (options: CreateCompactionMiddlewareOp
             modelId,
             providerId: options.providerId,
             response: emergencyResponse,
-            decision: budgetDecision,
+            decision: emergencyDecision,
           });
-          if (!overflowCommitSucceeded) {
-            return emergencyResponse;
-          }
-          await clearReadDedupForChat(store, chatId);
+          await clearReadDedupForChat({
+            chatId,
+            readDedupClearer: options.readDedupClearer,
+            storeActive: store !== undefined,
+          });
           return new Command({
             update: {
               messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES }), ...emergencyMessages, emergencyResponse],

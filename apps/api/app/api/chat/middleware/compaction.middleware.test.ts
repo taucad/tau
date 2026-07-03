@@ -15,6 +15,7 @@ import type { TauRpcBackend, TauRpcBackendFactory } from '#api/chat/tau-rpc-back
 import type { ModelService } from '#api/models/model.service.js';
 import type { MetricsService } from '#telemetry/metrics.js';
 import { TokenBudgetService } from '#api/chat/token-budget.service.js';
+import { MorphCompactionContractError, MorphCompactionTransportError } from '#api/chat/utils/compaction-errors.js';
 
 vi.mock('@taucad/utils/id', () => ({
   generatePrefixedId: vi.fn(() => 'dat_test_123'),
@@ -92,6 +93,7 @@ describe('createCompactionMiddleware', () => {
   };
   let mockModelService: { getContextWindow: ReturnType<typeof vi.fn>; getOtelProviderName: ReturnType<typeof vi.fn> };
   let writer: ReturnType<typeof vi.fn>;
+  let readDedupClearer: { clearChat: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -110,6 +112,7 @@ describe('createCompactionMiddleware', () => {
       getOtelProviderName: vi.fn().mockReturnValue('anthropic'),
     };
     writer = vi.fn();
+    readDedupClearer = { clearChat: vi.fn().mockResolvedValue(0) };
   });
 
   const createMiddlewareInstance = () =>
@@ -118,6 +121,7 @@ describe('createCompactionMiddleware', () => {
       rpcBackendFactory,
       tokenBudgetService,
       metricsService: metricsService as unknown as MetricsService,
+      readDedupClearer,
       providerId: 'anthropic',
     });
 
@@ -285,7 +289,7 @@ describe('createCompactionMiddleware', () => {
     ).toBe(true);
   });
 
-  it('should not return a LangGraph state rewrite when required transcript commit fails', async () => {
+  it('should throw before provider dispatch when required transcript commit fails', async () => {
     const middleware = createMiddlewareInstance();
     const { wrapModelCall } = middleware;
     if (!wrapModelCall) {
@@ -313,25 +317,32 @@ describe('createCompactionMiddleware', () => {
     });
     mockBackend.append.mockRejectedValueOnce(new Error('transcript unavailable'));
 
-    const aiResponse = new AIMessage('fallback reply');
-    const handler = vi.fn().mockResolvedValue(aiResponse);
+    const handler = vi.fn().mockResolvedValue(new AIMessage('should not be called'));
 
-    const result = await wrapModelCall(
-      {
-        messages,
-        tools: [],
-        systemMessage: '',
-        runtime: { context: createContext(1000), writer },
-      } as unknown as Parameters<typeof wrapModelCall>[0],
-      handler,
-    );
+    await expect(
+      wrapModelCall(
+        {
+          messages,
+          tools: [],
+          systemMessage: '',
+          runtime: { context: createContext(1000), writer },
+        } as unknown as Parameters<typeof wrapModelCall>[0],
+        handler,
+      ),
+    ).rejects.toMatchObject({
+      code: 'CONTEXT_COMPACTION_FAILED',
+      failureKind: 'transcript_commit_failed',
+      failureDisposition: 'blocked_before_provider',
+    });
 
     expect(compactionService.compact).toHaveBeenCalled();
-    expect(result).toBe(aiResponse);
+    expect(handler).not.toHaveBeenCalled();
     expect(writer).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'context-compaction',
         status: 'failed',
+        failureDisposition: 'blocked_before_provider',
+        compactionFailureKind: 'transcript_commit_failed',
         transcriptFilePath: null,
       }),
     );
@@ -467,7 +478,23 @@ describe('createCompactionMiddleware', () => {
       throw new Error('wrapModelCall not defined');
     }
 
-    const messages: BaseMessage[] = [new HumanMessage('msg1'), new AIMessage('msg2')];
+    const messages: BaseMessage[] = [
+      new HumanMessage('old user'),
+      new AIMessage('old assistant'),
+      new HumanMessage('middle user'),
+      new AIMessage('middle assistant'),
+      new HumanMessage('recent user'),
+      new AIMessage('recent assistant'),
+    ];
+    compactionService.compact.mockResolvedValue({
+      compactedMessages: [new HumanMessage('[Compacted overflow history]')],
+      stats: {
+        tokensBeforeCompaction: 2000,
+        tokensAfterCompaction: 50,
+        compressionRatio: 0.025,
+        messagesEvicted: 4,
+      },
+    });
 
     const handler = vi
       .fn()
@@ -485,40 +512,70 @@ describe('createCompactionMiddleware', () => {
     );
 
     expect(handler).toHaveBeenCalledTimes(2);
+    expect(compactionService.compact).toHaveBeenCalledTimes(1);
+    expect(compactionService.compact.mock.calls[0]?.[0].messages).toEqual(
+      expect.arrayContaining([messages[0], messages[1]]),
+    );
+    expect(writer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'context-compaction',
+        status: 'overflow_retry_succeeded',
+        triggerReason: 'overflow',
+      }),
+    );
   });
 
-  it('should retry overflow without a state rewrite when required transcript commit fails', async () => {
+  it('should block overflow retry when required transcript commit fails', async () => {
     const middleware = createMiddlewareInstance();
     const { wrapModelCall } = middleware;
     if (!wrapModelCall) {
       throw new Error('wrapModelCall not defined');
     }
 
-    const messages: BaseMessage[] = [new HumanMessage('msg1'), new AIMessage('msg2')];
-    const aiResponse = new AIMessage('emergency response');
-    const handler = vi
-      .fn()
-      .mockRejectedValueOnce(new ContextOverflowError('overflow'))
-      .mockResolvedValueOnce(aiResponse);
+    const messages: BaseMessage[] = [
+      new HumanMessage('old user'),
+      new AIMessage('old assistant'),
+      new HumanMessage('middle user'),
+      new AIMessage('middle assistant'),
+      new HumanMessage('recent user'),
+      new AIMessage('recent assistant'),
+    ];
+    compactionService.compact.mockResolvedValue({
+      compactedMessages: [new HumanMessage('[Compacted overflow history]')],
+      stats: {
+        tokensBeforeCompaction: 2000,
+        tokensAfterCompaction: 50,
+        compressionRatio: 0.025,
+        messagesEvicted: 4,
+      },
+    });
+    const handler = vi.fn().mockRejectedValueOnce(new ContextOverflowError('overflow'));
     mockBackend.append.mockRejectedValueOnce(new Error('transcript unavailable'));
 
-    const result = await wrapModelCall(
-      {
-        messages,
-        tools: [],
-        systemMessage: '',
-        runtime: { context: createContext(1000), writer },
-      } as unknown as Parameters<typeof wrapModelCall>[0],
-      handler,
-    );
+    await expect(
+      wrapModelCall(
+        {
+          messages,
+          tools: [],
+          systemMessage: '',
+          runtime: { context: createContext(1000), writer },
+        } as unknown as Parameters<typeof wrapModelCall>[0],
+        handler,
+      ),
+    ).rejects.toMatchObject({
+      code: 'CONTEXT_COMPACTION_FAILED',
+      failureKind: 'transcript_commit_failed',
+      failureDisposition: 'blocked_before_provider',
+    });
 
-    expect(handler).toHaveBeenCalledTimes(2);
-    expect(result).toBe(aiResponse);
+    expect(handler).toHaveBeenCalledTimes(1);
     expect(writer).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'context-compaction',
         status: 'failed',
         triggerReason: 'overflow',
+        failureDisposition: 'blocked_before_provider',
+        compactionFailureKind: 'transcript_commit_failed',
         transcriptFilePath: null,
       }),
     );
@@ -896,7 +953,7 @@ describe('createCompactionMiddleware', () => {
     expect(aiMessage!.content).toBe('I understand');
   });
 
-  it('should fall back to truncated messages when Morph API fails', async () => {
+  it('should throw before provider dispatch when Morph API fails', async () => {
     const middleware = createMiddlewareInstance();
     const { wrapModelCall } = middleware;
     if (!wrapModelCall) {
@@ -913,38 +970,39 @@ describe('createCompactionMiddleware', () => {
       new AIMessage('recent reply'),
     ];
 
-    compactionService.compact.mockRejectedValue(new Error('Morph API down'));
+    compactionService.compact.mockRejectedValue(new MorphCompactionTransportError('Morph API down'));
 
     const handler = vi.fn().mockResolvedValue(undefined);
 
-    await wrapModelCall(
-      {
-        messages,
-        tools: [],
-        systemMessage: '',
-        runtime: { context: createContext(1000), writer },
-      } as unknown as Parameters<typeof wrapModelCall>[0],
-      handler,
-    );
+    await expect(
+      wrapModelCall(
+        {
+          messages,
+          tools: [],
+          systemMessage: '',
+          runtime: { context: createContext(1000), writer },
+        } as unknown as Parameters<typeof wrapModelCall>[0],
+        handler,
+      ),
+    ).rejects.toMatchObject({
+      code: 'CONTEXT_COMPACTION_FAILED',
+      failureKind: 'morph_transport_error',
+      failureDisposition: 'blocked_before_provider',
+    });
 
-    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).not.toHaveBeenCalled();
     expect(writer).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'context-compaction',
-        compressionRatio: 1,
+        status: 'failed',
+        failureDisposition: 'blocked_before_provider',
+        compactionFailureKind: 'morph_transport_error',
         messagesEvicted: 0,
       }),
     );
   });
 
-  // When the compaction service throws CompactSummaryValidationError (Morph
-  // returned a malformed summary that fails the 9-section schema), the
-  // middleware must transparently fall through to the truncate-tool-args
-  // fallback the same way it does for any other Morph failure.
-  // CompactSummaryValidationError extends Error so the existing catch path
-  // picks it up automatically; this test pins the contract.
-  it('should fall through to truncated args when compaction summary validation fails', async () => {
-    const { CompactSummaryValidationError } = await import('#api/chat/compaction.service.js');
+  it('should throw before provider dispatch when native Morph contract validation fails', async () => {
     const middleware = createMiddlewareInstance();
     const { wrapModelCall } = middleware;
     if (!wrapModelCall) {
@@ -962,28 +1020,34 @@ describe('createCompactionMiddleware', () => {
     ];
 
     compactionService.compact.mockRejectedValue(
-      new CompactSummaryValidationError('Morph compaction summary missing required sections: Pending Tasks', [
-        'Pending Tasks',
-      ]),
+      new MorphCompactionContractError('Morph compact response missing output'),
     );
 
     const handler = vi.fn().mockResolvedValue(undefined);
 
-    await wrapModelCall(
-      {
-        messages,
-        tools: [],
-        systemMessage: '',
-        runtime: { context: createContext(1000), writer },
-      } as unknown as Parameters<typeof wrapModelCall>[0],
-      handler,
-    );
+    await expect(
+      wrapModelCall(
+        {
+          messages,
+          tools: [],
+          systemMessage: '',
+          runtime: { context: createContext(1000), writer },
+        } as unknown as Parameters<typeof wrapModelCall>[0],
+        handler,
+      ),
+    ).rejects.toMatchObject({
+      code: 'CONTEXT_COMPACTION_FAILED',
+      failureKind: 'morph_contract_error',
+      failureDisposition: 'blocked_before_provider',
+    });
 
-    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).not.toHaveBeenCalled();
     expect(writer).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'context-compaction',
-        compressionRatio: 1,
+        status: 'failed',
+        failureDisposition: 'blocked_before_provider',
+        compactionFailureKind: 'morph_contract_error',
         messagesEvicted: 0,
       }),
     );
@@ -1042,7 +1106,7 @@ describe('createCompactionMiddleware', () => {
     expect(transcriptContent).toContain('"type":"image"');
   });
 
-  it('should handle messages with mixed text, reasoning, and image blocks in transcript', async () => {
+  it('should omit raw reasoning blocks from compaction transcript commits', async () => {
     const middleware = createMiddlewareInstance();
     const { wrapModelCall } = middleware;
     if (!wrapModelCall) {
@@ -1092,14 +1156,11 @@ describe('createCompactionMiddleware', () => {
     const transcriptContent = appendCalls[0]![1];
     expect(transcriptContent).toContain('Here is a design:');
     expect(transcriptContent).toContain('[user attached image]');
-    expect(transcriptContent).toContain('Thinking about design');
+    expect(transcriptContent).not.toContain('Thinking about design');
+    expect(transcriptContent).not.toContain('"type":"thinking"');
   });
 
-  // ===================================================================
-  // Emergency image stripping on ContextOverflowError
-  // ===================================================================
-
-  it('should strip image blocks from emergency messages on ContextOverflowError', async () => {
+  it('should retry overflow with compacted evicted history plus recent messages', async () => {
     const middleware = createMiddlewareInstance();
     const { wrapModelCall } = middleware;
     if (!wrapModelCall) {
@@ -1107,12 +1168,22 @@ describe('createCompactionMiddleware', () => {
     }
 
     const messages: BaseMessage[] = [
-      new HumanMessage([
-        { type: 'text', text: 'Analyze this image:' },
-        { type: 'image_url', image_url: { url: 'data:image/png;base64,' + 'A'.repeat(100) } },
-      ]),
-      new AIMessage('response'),
+      new HumanMessage('old user'),
+      new AIMessage('old assistant'),
+      new HumanMessage('middle user'),
+      new AIMessage('middle assistant'),
+      new HumanMessage('recent user'),
+      new AIMessage('recent assistant'),
     ];
+    compactionService.compact.mockResolvedValue({
+      compactedMessages: [new HumanMessage('[Compacted overflow history]')],
+      stats: {
+        tokensBeforeCompaction: 2000,
+        tokensAfterCompaction: 50,
+        compressionRatio: 0.025,
+        messagesEvicted: 4,
+      },
+    });
 
     const handler = vi
       .fn()
@@ -1131,14 +1202,12 @@ describe('createCompactionMiddleware', () => {
 
     expect(handler).toHaveBeenCalledTimes(2);
     const retryMessages = (handler.mock.calls[1]![0] as { messages: BaseMessage[] }).messages;
-    const allContent = retryMessages.flatMap((m) =>
-      Array.isArray(m.content) ? (m.content as Array<Record<string, unknown>>) : [],
-    );
-    const imageBlocks = allContent.filter((b) => b['type'] === 'image_url' || b['type'] === 'image');
-    expect(imageBlocks).toHaveLength(0);
+    expect(retryMessages[0]?.content).toContain('[Compacted overflow history]');
+    expect(retryMessages.at(-2)?.content).toBe('recent user');
+    expect(retryMessages.at(-1)?.content).toBe('recent assistant');
   });
 
-  it('should replace stripped images with [image] text markers on emergency', async () => {
+  it('should still bump tokenEstimationMultiplier on ContextOverflowError', async () => {
     const middleware = createMiddlewareInstance();
     const { wrapModelCall } = middleware;
     if (!wrapModelCall) {
@@ -1146,47 +1215,22 @@ describe('createCompactionMiddleware', () => {
     }
 
     const messages: BaseMessage[] = [
-      new HumanMessage([
-        { type: 'text', text: 'Check:' },
-        { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } },
-      ]),
-      new AIMessage('ok'),
+      new HumanMessage('old user'),
+      new AIMessage('old assistant'),
+      new HumanMessage('middle user'),
+      new AIMessage('middle assistant'),
+      new HumanMessage('recent user'),
+      new AIMessage('recent assistant'),
     ];
-
-    const handler = vi
-      .fn()
-      .mockRejectedValueOnce(new ContextOverflowError('overflow'))
-      .mockResolvedValueOnce(undefined);
-
-    await wrapModelCall(
-      {
-        messages,
-        tools: [],
-        systemMessage: '',
-        runtime: { context: createContext(), writer },
-      } as unknown as Parameters<typeof wrapModelCall>[0],
-      handler,
-    );
-
-    const retryMessages = (handler.mock.calls[1]![0] as { messages: BaseMessage[] }).messages;
-    const allContent = retryMessages.flatMap((m) =>
-      Array.isArray(m.content) ? (m.content as Array<Record<string, unknown>>) : [],
-    );
-    const markers = allContent.filter((b) => b['type'] === 'text' && (b['text'] as string) === '[image]');
-    expect(markers.length).toBeGreaterThan(0);
-  });
-
-  it('should still bump tokenEstimationMultiplier on ContextOverflowError with images', async () => {
-    const middleware = createMiddlewareInstance();
-    const { wrapModelCall } = middleware;
-    if (!wrapModelCall) {
-      throw new Error('wrapModelCall not defined');
-    }
-
-    const messages: BaseMessage[] = [
-      new HumanMessage([{ type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } }]),
-      new AIMessage('response'),
-    ];
+    compactionService.compact.mockResolvedValue({
+      compactedMessages: [new HumanMessage('[Compacted overflow history]')],
+      stats: {
+        tokensBeforeCompaction: 2000,
+        tokensAfterCompaction: 50,
+        compressionRatio: 0.025,
+        messagesEvicted: 4,
+      },
+    });
 
     const handler = vi
       .fn()
@@ -1282,8 +1326,8 @@ describe('stripExcessMedia', () => {
  * truncation) summarises away the message tail, those `tool_call_id`s
  * vanish, so the dedup namespace for the chat must be cleared as a
  * side effect. The middleware delegates to `clearReadDedupForChat`, which
- * dispatches to the Redis `clearChat` shortcut when available and falls
- * back to `search` + parallel `delete` on `InMemoryStore`.
+ * calls the explicitly wired read-dedup clearer instead of inferring store-
+ * specific capabilities from LangGraph's runtime store wrapper.
  */
 describe('createCompactionMiddleware — read-dedup clear on eviction', () => {
   let compactionService: ReturnType<typeof mock<CompactionService>>;
@@ -1296,6 +1340,7 @@ describe('createCompactionMiddleware — read-dedup clear on eviction', () => {
   };
   let mockModelService: { getContextWindow: ReturnType<typeof vi.fn>; getOtelProviderName: ReturnType<typeof vi.fn> };
   let writer: ReturnType<typeof vi.fn>;
+  let readDedupClearer: { clearChat: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1314,6 +1359,7 @@ describe('createCompactionMiddleware — read-dedup clear on eviction', () => {
       getOtelProviderName: vi.fn().mockReturnValue('anthropic'),
     };
     writer = vi.fn();
+    readDedupClearer = { clearChat: vi.fn().mockResolvedValue(0) };
   });
 
   const createMiddlewareInstance = () =>
@@ -1322,6 +1368,7 @@ describe('createCompactionMiddleware — read-dedup clear on eviction', () => {
       rpcBackendFactory,
       tokenBudgetService,
       metricsService: metricsService as unknown as MetricsService,
+      readDedupClearer,
       providerId: 'anthropic',
     });
 
@@ -1343,9 +1390,7 @@ describe('createCompactionMiddleware — read-dedup clear on eviction', () => {
     ];
   };
 
-  const buildStoreStub = () => ({
-    clearChat: vi.fn().mockResolvedValue(0),
-  });
+  const buildStoreStub = () => ({});
 
   it('clears the dedup namespace after a successful Morph compaction', async () => {
     const middleware = createMiddlewareInstance();
@@ -1379,7 +1424,7 @@ describe('createCompactionMiddleware — read-dedup clear on eviction', () => {
     );
 
     expect(compactionService.compact).toHaveBeenCalled();
-    expect(store.clearChat).toHaveBeenCalledWith('chat-recent-reads');
+    expect(readDedupClearer.clearChat).toHaveBeenCalledWith('chat-recent-reads');
     expect(result).toBeInstanceOf(Command);
     const updatedMessages = (result as Command).update?.['messages'] as BaseMessage[];
     expect(updatedMessages[0]?.id).toBe(REMOVE_ALL_MESSAGES);
@@ -1409,36 +1454,40 @@ describe('createCompactionMiddleware — read-dedup clear on eviction', () => {
     );
 
     expect(compactionService.compact).not.toHaveBeenCalled();
-    expect(store.clearChat).not.toHaveBeenCalled();
+    expect(readDedupClearer.clearChat).not.toHaveBeenCalled();
     expect(result).toBe(aiResponse);
   });
 
-  it('does not touch the dedup namespace when Morph compaction throws (truncated-args fallback path)', async () => {
+  it('does not touch the dedup namespace when Morph compaction throws before provider dispatch', async () => {
     const middleware = createMiddlewareInstance();
     const { wrapModelCall } = middleware;
     if (!wrapModelCall) {
       throw new Error('wrapModelCall not defined');
     }
 
-    compactionService.compact.mockRejectedValue(new Error('Morph API down'));
+    compactionService.compact.mockRejectedValue(new MorphCompactionTransportError('Morph API down'));
 
-    const aiResponse = new AIMessage('fallback reply');
-    const handler = vi.fn().mockResolvedValue(aiResponse);
+    const handler = vi.fn().mockResolvedValue(new AIMessage('should not be called'));
     const store = buildStoreStub();
 
-    const result = await wrapModelCall(
-      {
-        messages: buildLongMessages(),
-        tools: [],
-        systemMessage: '',
-        runtime: { context: buildContext(), writer, store },
-      } as unknown as Parameters<typeof wrapModelCall>[0],
-      handler,
-    );
+    await expect(
+      wrapModelCall(
+        {
+          messages: buildLongMessages(),
+          tools: [],
+          systemMessage: '',
+          runtime: { context: buildContext(), writer, store },
+        } as unknown as Parameters<typeof wrapModelCall>[0],
+        handler,
+      ),
+    ).rejects.toMatchObject({
+      code: 'CONTEXT_COMPACTION_FAILED',
+      failureDisposition: 'blocked_before_provider',
+    });
 
     expect(compactionService.compact).toHaveBeenCalled();
-    expect(store.clearChat).not.toHaveBeenCalled();
-    expect(result).toBe(aiResponse);
+    expect(handler).not.toHaveBeenCalled();
+    expect(readDedupClearer.clearChat).not.toHaveBeenCalled();
   });
 
   it('clears the dedup namespace after emergency re-compaction on ContextOverflowError', async () => {
@@ -1476,7 +1525,7 @@ describe('createCompactionMiddleware — read-dedup clear on eviction', () => {
     );
 
     expect(handler).toHaveBeenCalledTimes(2);
-    expect(store.clearChat).toHaveBeenCalledWith('chat-recent-reads');
+    expect(readDedupClearer.clearChat).toHaveBeenCalledWith('chat-recent-reads');
     expect(result).toBeInstanceOf(Command);
     const updatedMessages = (result as Command).update?.['messages'] as BaseMessage[];
     expect(updatedMessages[0]?.id).toBe(REMOVE_ALL_MESSAGES);
@@ -1514,5 +1563,6 @@ describe('createCompactionMiddleware — read-dedup clear on eviction', () => {
     );
 
     expect(result).toBeInstanceOf(Command);
+    expect(readDedupClearer.clearChat).not.toHaveBeenCalled();
   });
 });

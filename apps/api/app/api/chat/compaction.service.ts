@@ -1,26 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { BaseMessage } from '@langchain/core/messages';
-import { HumanMessage, SystemMessage, AIMessage, ToolMessage } from '@langchain/core/messages';
+import { HumanMessage } from '@langchain/core/messages';
 import type { Environment } from '#config/environment.config.js';
-import { formatCompactSummary, parseCompactSummary } from '#api/chat/utils/format-compact-summary.js';
-import { isImageBlock, countImageBlocks } from '#api/chat/utils/image-block.utils.js';
+import { countImageBlocks } from '#api/chat/utils/image-block.utils.js';
+import { renderCompactionTranscript } from '#api/chat/utils/compaction-renderer.js';
+import {
+  MorphCompactionContractError,
+  MorphCompactionHttpError,
+  MorphCompactionTransportError,
+} from '#api/chat/utils/compaction-errors.js';
 
-/**
- * Thrown when Morph returns a response that does not contain all 9 expected
- * `<summary>` sections. The compaction middleware catches this and falls back
- * to the truncate-tool-args tier instead of shipping a malformed summary that
- * would silently strip context.
- */
-export class CompactSummaryValidationError extends Error {
-  public constructor(
-    message: string,
-    public readonly missingSections: readonly string[],
-  ) {
-    super(message);
-    this.name = 'CompactSummaryValidationError';
-  }
-}
+const morphCompressionRatio = 0.35;
+const morphPreserveRecent = 0;
 
 /**
  * Statistics from a compaction operation.
@@ -41,7 +33,7 @@ export class CompactionService {
   private readonly logger = new Logger(CompactionService.name);
   private readonly apiKey: string;
   private get apiUrl() {
-    return 'https://api.morphllm.com/v1/chat/completions';
+    return 'https://api.morphllm.com/v1/compact';
   }
 
   public constructor(private readonly configService: ConfigService<Environment, true>) {
@@ -63,77 +55,44 @@ export class CompactionService {
   }): Promise<{ compactedMessages: BaseMessage[]; stats: CompactionStats }> {
     const { messages, query, keepContextTags = [] } = options;
 
-    const morphMessages = this.toMorphFormat(messages, keepContextTags);
-    const inputTokenEstimate = this.estimateTokens(morphMessages);
+    const input = renderCompactionTranscript(messages, { keepContextTags });
+    const inputTokenEstimate = this.estimateTokens(input);
 
-    const compactionPrompt = `${query}
-
-Respond with TEXT ONLY. Your response must be an <analysis> block followed by a <summary> block.
-
-Before providing your final summary, wrap your analysis in <analysis> tags to organize your thoughts. In your analysis, chronologically examine each message, identify user requests, decisions, code patterns, errors, and user feedback. Then produce the structured summary inside <summary> tags.
-
-<summary> sections:
-1. Primary Request and Intent
-2. Key Technical Concepts
-3. Files and Code Sections
-4. Errors and Fixes
-5. Problem Solving
-6. All User Messages (verbatim quotes of key requests)
-7. Pending Tasks
-8. Current Work
-9. Optional Next Step — ensure this step is DIRECTLY in line with the user's most recent explicit requests
-
-Use verbatim quotes from the conversation where possible to anchor context.`;
-
-    const response = await fetch(this.apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP header name
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'morph-compactor',
-        messages: [...morphMessages, { role: 'user', content: compactionPrompt }],
-      }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(this.apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP header name
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({
+          input,
+          query,
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- Morph native API uses snake_case.
+          compression_ratio: morphCompressionRatio,
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- Morph native API uses snake_case.
+          preserve_recent: morphPreserveRecent,
+        }),
+      });
+    } catch (error) {
+      this.logger.error(`Morph compact transport error: ${error instanceof Error ? error.message : String(error)}`);
+      throw new MorphCompactionTransportError('Morph compact request failed', { cause: error });
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
-      this.logger.error(`Morph API error: ${response.status} ${errorText}`);
-      throw new Error(`Morph compaction failed: ${response.status}`);
+      this.logger.error(`Morph compact API error: ${response.status} ${errorText}`);
+      throw new MorphCompactionHttpError(response.status, errorText);
     }
 
-    const data = (await response.json()) as {
-      choices: Array<{ message: { content: string } }>;
-      usage?: { prompt_tokens: number; completion_tokens: number };
-    };
-
-    const rawContent = data.choices[0]?.message.content ?? '';
-    const compactedContent = formatCompactSummary(rawContent);
-
-    if (compactedContent.length > 0) {
-      const validation = parseCompactSummary(compactedContent);
-      if (!validation.ok) {
-        const missing = validation.missingSections.join(', ');
-        this.logger.warn(
-          `Morph summary missing required sections [${missing}] — middleware will fall back to truncate-tool-args.`,
-        );
-        throw new CompactSummaryValidationError(
-          `Morph compaction summary missing required sections: ${missing}`,
-          validation.missingSections,
-        );
-      }
-    }
+    const data = await this.parseJsonResponse(response);
+    const compactedContent = this.parseNativeCompactOutput(data);
 
     const evictedImageCount = countImageBlocks(messages);
     const compactedMessages = this.parseCompactedOutput(compactedContent, evictedImageCount);
-    const outputTokenEstimate = this.estimateTokens(
-      compactedMessages.map((m) => ({
-        role: m instanceof HumanMessage ? 'user' : m instanceof AIMessage ? 'assistant' : 'system',
-        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-      })),
-    );
+    const outputTokenEstimate = this.estimateTokens(compactedContent);
 
     const stats: CompactionStats = {
       tokensBeforeCompaction: inputTokenEstimate,
@@ -151,47 +110,31 @@ Use verbatim quotes from the conversation where possible to anchor context.`;
     return { compactedMessages, stats };
   }
 
-  private toMorphFormat(messages: BaseMessage[], keepContextTags: string[]): Array<{ role: string; content: string }> {
-    return messages.map((message) => {
-      let content: string;
+  private async parseJsonResponse(response: Response): Promise<unknown> {
+    try {
+      return await response.json();
+    } catch (error) {
+      throw new MorphCompactionContractError(
+        `Morph compact response was not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 
-      if (typeof message.content === 'string') {
-        content = message.content;
-      } else if (Array.isArray(message.content)) {
-        const parts: string[] = [];
-        for (const block of message.content as Array<Record<string, unknown>>) {
-          if (isImageBlock(block)) {
-            parts.push('[image]');
-          } else {
-            const text = (block['text'] ?? block['reasoning'] ?? '') as string;
-            if (text) {
-              parts.push(text);
-            }
-          }
-        }
-        content = parts.join('\n');
-      } else {
-        content = JSON.stringify(message.content);
-      }
+  private parseNativeCompactOutput(data: unknown): string {
+    if (!isRecord(data)) {
+      throw new MorphCompactionContractError('Morph compact response must be a JSON object');
+    }
 
-      for (const tag of keepContextTags) {
-        if (content.includes(tag)) {
-          content = `<keepContext>${content}</keepContext>`;
-          break;
-        }
-      }
+    const output = data['output'];
+    if (typeof output !== 'string') {
+      throw new MorphCompactionContractError('Morph compact response missing string field "output"');
+    }
 
-      if (message instanceof SystemMessage) {
-        return { role: 'system', content };
-      }
-      if (message instanceof HumanMessage) {
-        return { role: 'user', content };
-      }
-      if (message instanceof ToolMessage) {
-        return { role: 'tool', content };
-      }
-      return { role: 'assistant', content };
-    });
+    if (!output.trim()) {
+      throw new MorphCompactionContractError('Morph compact response field "output" was empty');
+    }
+
+    return output;
   }
 
   private parseCompactedOutput(content: string, evictedImageCount: number): BaseMessage[] {
@@ -203,13 +146,12 @@ Use verbatim quotes from the conversation where possible to anchor context.`;
     return [new HumanMessage(`[Compacted conversation history${imageNote}]\n${content}`)];
   }
 
-  private estimateTokens(messages: Array<{ role: string; content: string }>): number {
-    let totalChars = 0;
-    for (const message of messages) {
-      totalChars += message.content.length;
-    }
-
+  private estimateTokens(content: string): number {
     // ~4 characters per token is a conservative estimate
-    return Math.ceil(totalChars / 4);
+    return Math.ceil(content.length / 4);
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

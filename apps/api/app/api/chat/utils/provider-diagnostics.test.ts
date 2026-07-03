@@ -239,7 +239,7 @@ describe('provider diagnostics', () => {
     expect(serialized).not.toContain('main.kcl');
   });
 
-  it('should flag empty function-call names in Gemini request summaries', () => {
+  it('should flag empty and unsigned function-call names in Gemini request summaries', () => {
     const summary = summarizeGeminiRequest({
       contents: [
         {
@@ -247,9 +247,36 @@ describe('provider diagnostics', () => {
           parts: [{ functionCall: { name: '', args: {} } }],
         },
       ],
-    }) as { diagnosticFlags?: string[] };
+    }) as { diagnosticFlags?: string[]; contents: Array<{ parts: Array<Record<string, unknown>> }> };
 
-    expect(summary.diagnosticFlags).toEqual(['gemini_request_empty_function_call_name']);
+    expect(summary.diagnosticFlags).toEqual([
+      'gemini_request_empty_function_call_name',
+      'gemini_request_missing_function_call_thought_signature',
+    ]);
+    expect(summary.contents[0]?.parts[0]).toMatchObject({
+      type: 'functionCall',
+      hasThoughtSignature: false,
+    });
+  });
+
+  it('should report Gemini function-call thought signatures without logging the signature value', () => {
+    const summary = summarizeGeminiRequest({
+      contents: [
+        {
+          role: 'model',
+          parts: [{ functionCall: { name: 'edit_file', args: {} }, thoughtSignature: 'SECRET_SIGNATURE' }],
+        },
+      ],
+    }) as { diagnosticFlags?: string[]; contents: Array<{ parts: Array<Record<string, unknown>> }> };
+    const serialized = JSON.stringify(summary);
+
+    expect(summary.diagnosticFlags).toEqual([]);
+    expect(summary.contents[0]?.parts[0]).toMatchObject({
+      type: 'functionCall',
+      name: 'edit_file',
+      hasThoughtSignature: true,
+    });
+    expect(serialized).not.toContain('SECRET_SIGNATURE');
   });
 
   it('should summarize Gemini inline media separately from function-call diagnostics', () => {
@@ -367,7 +394,10 @@ describe('provider diagnostics', () => {
       {
         method: 'POST',
         body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: 'SECRET PROMPT SHOULD NOT LOG' }] }],
+          contents: [
+            { role: 'user', parts: [{ text: 'SECRET PROMPT SHOULD NOT LOG' }] },
+            { role: 'model', parts: [{ functionCall: { name: 'edit_file', args: { targetFile: 'main.ts' } } }] },
+          ],
           tools: [{ functionDeclarations: [{ name: 'read_file', parameters: { type: 'object' } }] }],
         }),
       },
@@ -385,7 +415,10 @@ describe('provider diagnostics', () => {
     expect(serialized).toContain('"providerStatus":"INVALID_ARGUMENT"');
     expect(serialized).toContain('"providerMessage":"Request contains an invalid argument."');
     expect(serialized).toContain('"functionNames":["read_file"]');
+    expect(serialized).toContain('"gemini_request_missing_function_call_thought_signature"');
+    expect(serialized).toContain('"hasThoughtSignature":false');
     expect(serialized).toContain('"undefined_tool_arg"');
     expect(serialized).not.toContain('SECRET PROMPT SHOULD NOT LOG');
+    expect(serialized).not.toContain('main.ts');
   });
 });

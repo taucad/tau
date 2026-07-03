@@ -2,6 +2,7 @@
 import type { ChatError } from '@taucad/types';
 import { describe, it, expect } from 'vitest';
 import { normalizeError } from '#api/chat/utils/error-normalizer.js';
+import { CompactionPipelineError } from '#api/chat/utils/compaction-errors.js';
 
 function parseNormalizedError(result: string): ChatError {
   return JSON.parse(result) as ChatError;
@@ -51,6 +52,37 @@ describe('normalizeError', () => {
 
       expect(result.category).toBe('generic');
       expect(result.message).toBe('[object Object]');
+    });
+  });
+
+  describe('implementation bug errors', () => {
+    it('should preserve compaction failure metadata from the error object', () => {
+      const error = new CompactionPipelineError('Required compaction failed', 'morph_contract_error', {
+        debugId: 'dat_debug',
+      });
+
+      const result = parseNormalizedError(normalizeError(error));
+
+      expect(result.category).toBe('tool_error');
+      expect(result.code).toBe('CONTEXT_COMPACTION_FAILED');
+      expect(result.message).toContain('Failure kind: morph_contract_error');
+      expect(result.message).toContain('Debug ID: dat_debug');
+      expect(result.raw).toContain('CONTEXT_COMPACTION_FAILED');
+    });
+
+    it('should preserve compaction failure metadata from stream error text', () => {
+      const result = parseNormalizedError(
+        normalizeError(
+          new Error(
+            'CONTEXT_COMPACTION_FAILED: Required compaction failed failureKind=transcript_commit_failed failureDisposition=blocked_before_provider debugId=dat_debug',
+          ),
+        ),
+      );
+
+      expect(result.category).toBe('tool_error');
+      expect(result.code).toBe('CONTEXT_COMPACTION_FAILED');
+      expect(result.message).toContain('Failure kind: transcript_commit_failed');
+      expect(result.message).toContain('Debug ID: dat_debug');
     });
   });
 

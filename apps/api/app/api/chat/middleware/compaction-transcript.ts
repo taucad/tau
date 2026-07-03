@@ -65,8 +65,6 @@ export function serializeEvictedMessages(evictedMessages: readonly BaseMessage[]
     for (const block of message.content as Array<Record<string, unknown>>) {
       if (isImageBlock(block)) {
         lines.push(JSON.stringify({ role, type: 'image', content: '[user attached image]', timestamp }));
-      } else if (block['type'] === 'reasoning' && block['reasoning']) {
-        lines.push(JSON.stringify({ role, type: 'thinking', content: block['reasoning'], timestamp }));
       } else if (block['type'] === 'text' && block['text']) {
         lines.push(JSON.stringify({ role, content: block['text'], timestamp }));
       }

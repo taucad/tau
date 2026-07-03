@@ -41,11 +41,12 @@
     "@taucad/utils": "workspace:*",
     "json-rpc-2.0": "^1.7.1",
     "uint8array-extras": "catalog:",
-    "vscode-languageserver-protocol": "^3.17.5",
+    "vscode-languageserver-protocol": "^3.18.0",
     "vscode-uri": "catalog:",
     "zod": "catalog:"
   },
   "imports": {
+    "#*.js": "./src/*.ts",
     "#*": "./src/*"
   }
 }

@@ -5,6 +5,7 @@
   "type": "module",
   "private": true,
   "imports": {
+    "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
   "exports": {

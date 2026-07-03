@@ -25,10 +25,10 @@ const baseConfig: Options = {
   unbundle: true,
 };
 
-const esmConfig: Options = {
+const packageConfig: Options = {
   ...baseConfig,
   format: 'esm',
-  outDir: 'dist/esm',
+  outDir: 'dist',
 };
 
-export default defineConfig(esmConfig);
+export default defineConfig(packageConfig);

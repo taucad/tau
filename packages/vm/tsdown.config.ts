@@ -4,7 +4,7 @@ import type { Options } from 'tsdown';
 const baseConfig: Options = {
   entry: ['src/index.ts', 'src/internal.ts', 'src/constants.ts'],
   sourcemap: false,
-  clean: true,
+  clean: ['dist'],
   dts: true,
   minify: true,
   copy: (options) => [
@@ -17,17 +17,10 @@ const baseConfig: Options = {
   unbundle: true,
 };
 
-const cjsConfig: Options = {
-  ...baseConfig,
-  format: 'cjs',
-  outDir: 'dist/cjs',
-  dts: false,
-};
-
-const esmConfig: Options = {
+const packageConfig: Options = {
   ...baseConfig,
   format: 'esm',
-  outDir: 'dist/esm',
+  outDir: 'dist',
 };
 
-export default defineConfig([esmConfig, cjsConfig]);
+export default defineConfig(packageConfig);

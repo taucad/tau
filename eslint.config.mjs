@@ -250,6 +250,14 @@ const config = [
         {
           allow: ['@taucad/runtime'],
           allowCircularSelfDependency: true,
+          ignoredCircularDependencies: [
+            /*
+             * GeoSpec package tests intentionally exercise the OpenSCAD kernel.
+             * Tau example `.geospec.ts` fixtures also import GeoSpec, and that
+             * executable validation-fixture edge is not a production source edge.
+             */
+            ['tau-examples', 'geospec'],
+          ],
           depConstraints: [
             {
               sourceTag: 'scope:api',
@@ -361,9 +369,43 @@ const config = [
   },
 
   {
+    /*
+     * Tau examples are authored as portable, editor-loadable fixture trees.
+     * Multi-file examples must keep local relative imports instead of Tau-only
+     * package aliases, so they intentionally opt out of the workspace absolute
+     * import and extension requirements.
+     */
     files: ['libs/tau-examples/src/kernels/**/*.ts'],
     rules: {
+      'import-x/extensions': 'off',
+      'import-x/consistent-type-specifier-style': 'off',
+      'no-restricted-imports': 'off',
+      'unicorn/prefer-export-from': 'off',
       '@typescript-eslint/naming-convention': 'warn',
+    },
+  },
+
+  {
+    /*
+     * opencascade.js mirrors OCCT/Emscripten C++ binding names. Factory-like
+     * entry points and generated constructors intentionally do not follow
+     * JavaScript's capitalisation heuristics.
+     */
+    files: ['libs/tau-examples/src/kernels/opencascade/**/*.ts'],
+    rules: {
+      'new-cap': 'off',
+    },
+  },
+
+  {
+    /*
+     * Tau example GeoSpec files are executable validation fixtures. They import
+     * the GeoSpec runner by design, while `tau-examples` is also consumed by the
+     * runtime benchmark/test graph; this is not a production source dependency.
+     */
+    files: ['libs/tau-examples/src/**/*.geospec.ts'],
+    rules: {
+      '@nx/enforce-module-boundaries': 'off',
     },
   },
 

@@ -13,24 +13,17 @@ const baseConfig: Options = {
     'src/cache.utils.ts',
   ],
   sourcemap: false,
-  clean: true,
+  clean: ['dist'],
   dts: true,
   minify: true,
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
 };
 
-const cjsConfig: Options = {
-  ...baseConfig,
-  format: 'cjs',
-  outDir: 'dist/cjs',
-  dts: false,
-};
-
-const esmConfig: Options = {
+const packageConfig: Options = {
   ...baseConfig,
   format: 'esm',
-  outDir: 'dist/esm',
+  outDir: 'dist',
 };
 
-export default defineConfig([esmConfig, cjsConfig]);
+export default defineConfig(packageConfig);

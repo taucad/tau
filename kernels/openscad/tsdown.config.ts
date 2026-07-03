@@ -12,15 +12,19 @@ const baseConfig: Options = {
       from: 'src/fonts',
       to: `${options.outDir}/fonts`,
     },
+    {
+      from: 'src/wasm',
+      to: `${options.outDir}/wasm`,
+    },
   ],
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
 };
 
-const esmConfig: Options = {
+const packageConfig: Options = {
   ...baseConfig,
   format: 'esm',
-  outDir: 'dist/esm',
+  outDir: 'dist',
 };
 
-export default defineConfig(esmConfig);
+export default defineConfig(packageConfig);

@@ -25,24 +25,17 @@ const cliExternals: Array<RegExp | string> = [
 const baseConfig: Options = {
   entry: ['src/index.ts'],
   sourcemap: false,
-  clean: true,
+  clean: ['dist'],
   dts: true,
   minify: true,
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
 };
 
-const cjsConfig: Options = {
-  ...baseConfig,
-  format: 'cjs',
-  outDir: 'dist/cjs',
-  dts: false,
-};
-
-const esmConfig: Options = {
+const packageConfig: Options = {
   ...baseConfig,
   format: 'esm',
-  outDir: 'dist/esm',
+  outDir: 'dist',
 };
 
 const cliConfig: Options = {
@@ -51,7 +44,7 @@ const cliConfig: Options = {
   outDir: 'dist/bin',
   platform: 'node',
   target: 'node22',
-  clean: true,
+  clean: ['dist/bin'],
   dts: false,
   minify: false,
   sourcemap: false,
@@ -60,4 +53,4 @@ const cliConfig: Options = {
   banner: { js: '#!/usr/bin/env node' },
 };
 
-export default defineConfig([esmConfig, cjsConfig, cliConfig]);
+export default defineConfig([packageConfig, cliConfig]);

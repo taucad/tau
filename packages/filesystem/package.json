@@ -9,8 +9,8 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/filesystem"
   },
-  "main": "./dist/esm/index.js",
-  "types": "./dist/esm/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist",
     "README.md"
@@ -32,19 +32,19 @@
     "access": "public",
     "exports": {
       ".": {
-        "types": "./dist/esm/index.d.ts",
-        "import": "./dist/esm/index.js",
-        "default": "./dist/esm/index.js"
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
       },
       "./backend": {
-        "types": "./dist/esm/backend/index.d.ts",
-        "import": "./dist/esm/backend/index.js",
-        "default": "./dist/esm/backend/index.js"
+        "types": "./dist/backend/index.d.ts",
+        "import": "./dist/backend/index.js",
+        "default": "./dist/backend/index.js"
       },
       "./bundled-types-mount": {
-        "types": "./dist/esm/bundled-types-mount.d.ts",
-        "import": "./dist/esm/bundled-types-mount.js",
-        "default": "./dist/esm/bundled-types-mount.js"
+        "types": "./dist/bundled-types-mount.d.ts",
+        "import": "./dist/bundled-types-mount.js",
+        "default": "./dist/bundled-types-mount.js"
       }
     }
   },

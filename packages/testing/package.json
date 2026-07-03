@@ -9,8 +9,8 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/testing"
   },
-  "main": "./dist/esm/index.js",
-  "types": "./dist/esm/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist",
     "README.md"
@@ -31,24 +31,24 @@
     "access": "public",
     "exports": {
       ".": {
-        "types": "./dist/esm/index.d.ts",
-        "import": "./dist/esm/index.js",
-        "default": "./dist/esm/index.js"
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
       },
       "./geometry": {
-        "types": "./dist/esm/geometry/index.d.ts",
-        "import": "./dist/esm/geometry/index.js",
-        "default": "./dist/esm/geometry/index.js"
+        "types": "./dist/geometry/index.d.ts",
+        "import": "./dist/geometry/index.js",
+        "default": "./dist/geometry/index.js"
       },
       "./parameters": {
-        "types": "./dist/esm/parameters.d.ts",
-        "import": "./dist/esm/parameters.js",
-        "default": "./dist/esm/parameters.js"
+        "types": "./dist/parameters.d.ts",
+        "import": "./dist/parameters.js",
+        "default": "./dist/parameters.js"
       },
       "./tau": {
-        "types": "./dist/esm/tau.d.ts",
-        "import": "./dist/esm/tau.js",
-        "default": "./dist/esm/tau.js"
+        "types": "./dist/tau.d.ts",
+        "import": "./dist/tau.js",
+        "default": "./dist/tau.js"
       }
     }
   },

@@ -9,8 +9,8 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/types"
   },
-  "main": "./dist/esm/types/index.js",
-  "types": "./dist/esm/types/index.d.ts",
+  "main": "./dist/types/index.js",
+  "types": "./dist/types/index.d.ts",
   "files": [
     "dist",
     "README.md"
@@ -30,14 +30,14 @@
     "access": "public",
     "exports": {
       ".": {
-        "types": "./dist/esm/types/index.d.ts",
-        "import": "./dist/esm/types/index.js",
-        "default": "./dist/esm/types/index.js"
+        "types": "./dist/types/index.d.ts",
+        "import": "./dist/types/index.js",
+        "default": "./dist/types/index.js"
       },
       "./constants": {
-        "types": "./dist/esm/constants/index.d.ts",
-        "import": "./dist/esm/constants/index.js",
-        "default": "./dist/esm/constants/index.js"
+        "types": "./dist/constants/index.d.ts",
+        "import": "./dist/constants/index.js",
+        "default": "./dist/constants/index.js"
       }
     }
   },

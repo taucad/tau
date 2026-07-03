@@ -8,6 +8,7 @@
     ".": "./src/index.ts"
   },
   "imports": {
+    "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
   "dependencies": {

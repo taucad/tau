@@ -9,8 +9,8 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/rpc"
   },
-  "main": "./dist/esm/index.js",
-  "types": "./dist/esm/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist",
     "README.md"
@@ -29,14 +29,14 @@
     "access": "public",
     "exports": {
       ".": {
-        "types": "./dist/esm/index.d.ts",
-        "import": "./dist/esm/index.js",
-        "default": "./dist/esm/index.js"
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
       },
       "./bridge": {
-        "types": "./dist/esm/bridge/index.d.ts",
-        "import": "./dist/esm/bridge/index.js",
-        "default": "./dist/esm/bridge/index.js"
+        "types": "./dist/bridge/index.d.ts",
+        "import": "./dist/bridge/index.js",
+        "default": "./dist/bridge/index.js"
       }
     }
   },

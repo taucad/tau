@@ -40,69 +40,69 @@
     "access": "public",
     "exports": {
       "./workspace-path-resolver": {
-        "types": "./dist/esm/workspace-path-resolver.d.ts",
-        "import": "./dist/esm/workspace-path-resolver.js",
-        "default": "./dist/esm/workspace-path-resolver.js"
+        "types": "./dist/workspace-path-resolver.d.ts",
+        "import": "./dist/workspace-path-resolver.js",
+        "default": "./dist/workspace-path-resolver.js"
       },
       "./path-subscriber-registry": {
-        "types": "./dist/esm/path-subscriber-registry.d.ts",
-        "import": "./dist/esm/path-subscriber-registry.js",
-        "default": "./dist/esm/path-subscriber-registry.js"
+        "types": "./dist/path-subscriber-registry.d.ts",
+        "import": "./dist/path-subscriber-registry.js",
+        "default": "./dist/path-subscriber-registry.js"
       },
       "./visibility-provider": {
-        "types": "./dist/esm/visibility-provider.d.ts",
-        "import": "./dist/esm/visibility-provider.js",
-        "default": "./dist/esm/visibility-provider.js"
+        "types": "./dist/visibility-provider.d.ts",
+        "import": "./dist/visibility-provider.js",
+        "default": "./dist/visibility-provider.js"
       },
       "./refresh-generation-guard": {
-        "types": "./dist/esm/refresh-generation-guard.d.ts",
-        "import": "./dist/esm/refresh-generation-guard.js",
-        "default": "./dist/esm/refresh-generation-guard.js"
+        "types": "./dist/refresh-generation-guard.d.ts",
+        "import": "./dist/refresh-generation-guard.js",
+        "default": "./dist/refresh-generation-guard.js"
       },
       "./worker-change-channel": {
-        "types": "./dist/esm/worker-change-channel.d.ts",
-        "import": "./dist/esm/worker-change-channel.js",
-        "default": "./dist/esm/worker-change-channel.js"
+        "types": "./dist/worker-change-channel.d.ts",
+        "import": "./dist/worker-change-channel.js",
+        "default": "./dist/worker-change-channel.js"
       },
       "./file-write-source": {
-        "types": "./dist/esm/file-write-source.d.ts",
-        "import": "./dist/esm/file-write-source.js",
-        "default": "./dist/esm/file-write-source.js"
+        "types": "./dist/file-write-source.d.ts",
+        "import": "./dist/file-write-source.js",
+        "default": "./dist/file-write-source.js"
       },
       "./file-system-client": {
-        "types": "./dist/esm/file-system-client.d.ts",
-        "import": "./dist/esm/file-system-client.js",
-        "default": "./dist/esm/file-system-client.js"
+        "types": "./dist/file-system-client.d.ts",
+        "import": "./dist/file-system-client.js",
+        "default": "./dist/file-system-client.js"
       },
       "./file-content-errors": {
-        "types": "./dist/esm/file-content-errors.d.ts",
-        "import": "./dist/esm/file-content-errors.js",
-        "default": "./dist/esm/file-content-errors.js"
+        "types": "./dist/file-content-errors.d.ts",
+        "import": "./dist/file-content-errors.js",
+        "default": "./dist/file-content-errors.js"
       },
       "./seems-binary": {
-        "types": "./dist/esm/seems-binary.d.ts",
-        "import": "./dist/esm/seems-binary.js",
-        "default": "./dist/esm/seems-binary.js"
+        "types": "./dist/seems-binary.d.ts",
+        "import": "./dist/seems-binary.js",
+        "default": "./dist/seems-binary.js"
       },
       "./file-content-service": {
-        "types": "./dist/esm/file-content-service.d.ts",
-        "import": "./dist/esm/file-content-service.js",
-        "default": "./dist/esm/file-content-service.js"
+        "types": "./dist/file-content-service.d.ts",
+        "import": "./dist/file-content-service.js",
+        "default": "./dist/file-content-service.js"
       },
       "./file-tree-service": {
-        "types": "./dist/esm/file-tree-service.d.ts",
-        "import": "./dist/esm/file-tree-service.js",
-        "default": "./dist/esm/file-tree-service.js"
+        "types": "./dist/file-tree-service.d.ts",
+        "import": "./dist/file-tree-service.js",
+        "default": "./dist/file-tree-service.js"
       },
       "./directory-listing": {
-        "types": "./dist/esm/directory-listing.d.ts",
-        "import": "./dist/esm/directory-listing.js",
-        "default": "./dist/esm/directory-listing.js"
+        "types": "./dist/directory-listing.d.ts",
+        "import": "./dist/directory-listing.js",
+        "default": "./dist/directory-listing.js"
       },
       "./react/use-directory-listing": {
-        "types": "./dist/esm/react/use-directory-listing.d.ts",
-        "import": "./dist/esm/react/use-directory-listing.js",
-        "default": "./dist/esm/react/use-directory-listing.js"
+        "types": "./dist/react/use-directory-listing.d.ts",
+        "import": "./dist/react/use-directory-listing.js",
+        "default": "./dist/react/use-directory-listing.js"
       }
     }
   },

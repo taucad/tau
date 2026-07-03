@@ -10,6 +10,7 @@
     "./manifest": "./src/manifest.ts"
   },
   "imports": {
+    "#*.js": "./src/*.ts",
     "#*": "./src/*"
   }
 }

@@ -33,84 +33,44 @@
     "access": "public",
     "exports": {
       "./id": {
-        "require": {
-          "types": "./dist/cjs/id.utils.d.cts",
-          "default": "./dist/cjs/id.utils.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/id.utils.d.ts",
-          "default": "./dist/esm/id.utils.js"
-        }
+        "types": "./dist/id.utils.d.ts",
+        "import": "./dist/id.utils.js",
+        "default": "./dist/id.utils.js"
       },
       "./path": {
-        "require": {
-          "types": "./dist/cjs/path.utils.d.cts",
-          "default": "./dist/cjs/path.utils.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/path.utils.d.ts",
-          "default": "./dist/esm/path.utils.js"
-        }
+        "types": "./dist/path.utils.d.ts",
+        "import": "./dist/path.utils.js",
+        "default": "./dist/path.utils.js"
       },
       "./file": {
-        "require": {
-          "types": "./dist/cjs/file.utils.d.cts",
-          "default": "./dist/cjs/file.utils.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/file.utils.d.ts",
-          "default": "./dist/esm/file.utils.js"
-        }
+        "types": "./dist/file.utils.d.ts",
+        "import": "./dist/file.utils.js",
+        "default": "./dist/file.utils.js"
       },
       "./import": {
-        "require": {
-          "types": "./dist/cjs/import.utils.d.cts",
-          "default": "./dist/cjs/import.utils.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/import.utils.d.ts",
-          "default": "./dist/esm/import.utils.js"
-        }
+        "types": "./dist/import.utils.d.ts",
+        "import": "./dist/import.utils.js",
+        "default": "./dist/import.utils.js"
       },
       "./schema": {
-        "require": {
-          "types": "./dist/cjs/schema.utils.d.cts",
-          "default": "./dist/cjs/schema.utils.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/schema.utils.d.ts",
-          "default": "./dist/esm/schema.utils.js"
-        }
+        "types": "./dist/schema.utils.d.ts",
+        "import": "./dist/schema.utils.js",
+        "default": "./dist/schema.utils.js"
       },
       "./dispose": {
-        "require": {
-          "types": "./dist/cjs/dispose.utils.d.cts",
-          "default": "./dist/cjs/dispose.utils.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/dispose.utils.d.ts",
-          "default": "./dist/esm/dispose.utils.js"
-        }
+        "types": "./dist/dispose.utils.d.ts",
+        "import": "./dist/dispose.utils.js",
+        "default": "./dist/dispose.utils.js"
       },
       "./error": {
-        "require": {
-          "types": "./dist/cjs/error.utils.d.cts",
-          "default": "./dist/cjs/error.utils.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/error.utils.d.ts",
-          "default": "./dist/esm/error.utils.js"
-        }
+        "types": "./dist/error.utils.d.ts",
+        "import": "./dist/error.utils.js",
+        "default": "./dist/error.utils.js"
       },
       "./cache": {
-        "require": {
-          "types": "./dist/cjs/cache.utils.d.cts",
-          "default": "./dist/cjs/cache.utils.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/cache.utils.d.ts",
-          "default": "./dist/esm/cache.utils.js"
-        }
+        "types": "./dist/cache.utils.d.ts",
+        "import": "./dist/cache.utils.js",
+        "default": "./dist/cache.utils.js"
       }
     }
   },
@@ -120,6 +80,7 @@
     "cdn-resolve": "catalog:"
   },
   "imports": {
+    "#*.js": "./src/*.ts",
     "#*": "./src/*"
   }
 }

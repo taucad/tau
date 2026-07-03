@@ -51,6 +51,66 @@
     },
     {
       "path": "./libs/vite"
+    },
+    {
+      "path": "./tools/workspace-plugin"
+    },
+    {
+      "path": "./examples/react-router"
+    },
+    {
+      "path": "./packages/filesystem"
+    },
+    {
+      "path": "./packages/fs-client"
+    },
+    {
+      "path": "./packages/telemetry"
+    },
+    {
+      "path": "./examples/electron"
+    },
+    {
+      "path": "./packages/geospec"
+    },
+    {
+      "path": "./kernels/openscad"
+    },
+    {
+      "path": "./packages/testing"
+    },
+    {
+      "path": "./packages/events"
+    },
+    {
+      "path": "./examples/nextjs"
+    },
+    {
+      "path": "./packages/memory"
+    },
+    {
+      "path": "./packages/react"
+    },
+    {
+      "path": "./packages/cli"
+    },
+    {
+      "path": "./packages/rpc"
+    },
+    {
+      "path": "./packages/fs-bridge"
+    },
+    {
+      "path": "./libs/lsp-fs"
+    },
+    {
+      "path": "./libs/oxlint"
+    },
+    {
+      "path": "./packages/vm"
+    },
+    {
+      "path": "./libs/lsp"
     }
   ],
   "files": [],

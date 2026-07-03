@@ -97,6 +97,7 @@
     "tau-lint/no-bare-time-identifier": "error",
     "tau-lint/no-async-iife": "error",
     "tau-lint/no-monaco-create-model": "error",
+    "tau-lint/no-bare-rpc-error-code": "error",
     "tau-lint/no-scene-override-material": "error",
     "unicorn/no-accessor-recursion": "error",
     "unicorn/no-anonymous-default-export": "error",
@@ -1252,8 +1253,15 @@
     {
       // CAD examples may not always follow typical conventions. For example, it's
       // easier to read d_x rather than dX, so we relax the rules here.
+      // Multi-file Tau examples are also editor-loadable fixture trees, so they
+      // use local relative imports rather than Tau-only package aliases.
       "files": ["libs/tau-examples/src/kernels/**/*.ts"],
       "rules": {
+        "no-restricted-imports": "off",
+        "import/extensions": "off",
+        "import/consistent-type-specifier-style": "off",
+        "no-barrel-files/no-barrel-files": "off",
+        "unicorn-js/prefer-export-from": "off",
         "unicorn-js/prevent-abbreviations": "warn",
         "unicorn/no-array-callback-reference": "warn",
         "@typescript-eslint/explicit-module-boundary-types": "warn",
@@ -1264,6 +1272,15 @@
         "max-params": "warn"
       },
       "plugins": ["typescript"]
+    },
+    {
+      // opencascade.js exposes generated OCCT/Emscripten names whose constructor
+      // and factory conventions intentionally do not match JavaScript new-cap
+      // heuristics.
+      "files": ["libs/tau-examples/src/kernels/opencascade/**/*.ts"],
+      "rules": {
+        "new-cap": "off"
+      }
     },
     {
       /*

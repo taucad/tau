@@ -55,6 +55,7 @@ const baseConfig: Options = {
     'src/rolldown/index.ts',
     'src/nextjs/index.ts',
     'src/nextjs/config.ts',
+    'src/nextjs/node-fs-unavailable.ts',
     'src/utils/package-info.ts',
   ],
   sourcemap: false,
@@ -87,10 +88,10 @@ const baseConfig: Options = {
   unbundle: true,
 };
 
-const esmConfig: Options = {
+const packageConfig: Options = {
   ...baseConfig,
   format: 'esm',
-  outDir: 'dist/esm',
+  outDir: 'dist',
 };
 
-export default defineConfig(esmConfig);
+export default defineConfig(packageConfig);

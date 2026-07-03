@@ -9,8 +9,8 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/runtime"
   },
-  "main": "./dist/esm/index.js",
-  "types": "./dist/esm/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist",
     "README.md"
@@ -75,255 +75,261 @@
     "./react-router": "./src/react-router/index.ts",
     "./vite": "./src/vite/index.ts",
     "./rolldown": "./src/rolldown/index.ts",
-    "./nextjs/config": "./src/nextjs/config.ts"
+    "./nextjs/config": "./src/nextjs/config.ts",
+    "./nextjs/node-fs-unavailable": "./src/nextjs/node-fs-unavailable.ts"
   },
   "publishConfig": {
     "access": "public",
     "exports": {
       ".": {
-        "types": "./dist/esm/index.d.ts",
-        "import": "./dist/esm/index.js",
-        "default": "./dist/esm/index.js"
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
       },
       "./worker/web": {
-        "types": "./dist/esm/worker/web.d.ts",
-        "import": "./dist/esm/worker/web.js",
-        "default": "./dist/esm/worker/web.js"
+        "types": "./dist/worker/web.d.ts",
+        "import": "./dist/worker/web.js",
+        "default": "./dist/worker/web.js"
       },
       "./worker/node": {
-        "types": "./dist/esm/worker/node.d.ts",
-        "import": "./dist/esm/worker/node.js",
-        "default": "./dist/esm/worker/node.js"
+        "types": "./dist/worker/node.d.ts",
+        "import": "./dist/worker/node.js",
+        "default": "./dist/worker/node.js"
       },
       "./worker-internals": {
-        "types": "./dist/esm/worker-internals.d.ts",
-        "import": "./dist/esm/worker-internals.js",
-        "default": "./dist/esm/worker-internals.js"
+        "types": "./dist/worker-internals.d.ts",
+        "import": "./dist/worker-internals.js",
+        "default": "./dist/worker-internals.js"
       },
       "./transport-internals": {
-        "types": "./dist/esm/transport-internals.d.ts",
-        "import": "./dist/esm/transport-internals.js",
-        "default": "./dist/esm/transport-internals.js"
+        "types": "./dist/transport-internals.d.ts",
+        "import": "./dist/transport-internals.js",
+        "default": "./dist/transport-internals.js"
       },
       "./types": {
-        "types": "./dist/esm/types/index.d.ts",
-        "import": "./dist/esm/types/index.js",
-        "default": "./dist/esm/types/index.js"
+        "types": "./dist/types/index.d.ts",
+        "import": "./dist/types/index.js",
+        "default": "./dist/types/index.js"
       },
       "./metadata": {
-        "types": "./dist/esm/utils/package-info.d.ts",
-        "import": "./dist/esm/utils/package-info.js",
-        "default": "./dist/esm/utils/package-info.js"
+        "types": "./dist/utils/package-info.d.ts",
+        "import": "./dist/utils/package-info.js",
+        "default": "./dist/utils/package-info.js"
       },
       "./client": {
-        "types": "./dist/esm/client/index.d.ts",
-        "import": "./dist/esm/client/index.js",
-        "default": "./dist/esm/client/index.js"
+        "types": "./dist/client/index.d.ts",
+        "import": "./dist/client/index.js",
+        "default": "./dist/client/index.js"
       },
       "./presets": {
-        "types": "./dist/esm/plugins/presets.d.ts",
-        "import": "./dist/esm/plugins/presets.js",
-        "default": "./dist/esm/plugins/presets.js"
+        "types": "./dist/plugins/presets.d.ts",
+        "import": "./dist/plugins/presets.js",
+        "default": "./dist/plugins/presets.js"
       },
       "./worker": {
-        "types": "./dist/esm/worker/index.d.ts",
-        "import": "./dist/esm/worker/index.js",
-        "default": "./dist/esm/worker/index.js"
+        "types": "./dist/worker/index.d.ts",
+        "import": "./dist/worker/index.js",
+        "default": "./dist/worker/index.js"
       },
       "./nextjs": {
-        "types": "./dist/esm/nextjs/index.d.ts",
-        "import": "./dist/esm/nextjs/index.js",
-        "default": "./dist/esm/nextjs/index.js"
+        "types": "./dist/nextjs/index.d.ts",
+        "import": "./dist/nextjs/index.js",
+        "default": "./dist/nextjs/index.js"
       },
       "./kernel": {
-        "types": "./dist/esm/plugins/kernel-plugin-entry.d.ts",
-        "import": "./dist/esm/plugins/kernel-plugin-entry.js",
-        "default": "./dist/esm/plugins/kernel-plugin-entry.js"
+        "types": "./dist/plugins/kernel-plugin-entry.d.ts",
+        "import": "./dist/plugins/kernel-plugin-entry.js",
+        "default": "./dist/plugins/kernel-plugin-entry.js"
       },
       "./kernels": {
-        "types": "./dist/esm/plugins/kernels-entry.d.ts",
-        "import": "./dist/esm/plugins/kernels-entry.js",
-        "default": "./dist/esm/plugins/kernels-entry.js"
+        "types": "./dist/plugins/kernels-entry.d.ts",
+        "import": "./dist/plugins/kernels-entry.js",
+        "default": "./dist/plugins/kernels-entry.js"
       },
       "./middleware": {
-        "types": "./dist/esm/plugins/middleware-entry.d.ts",
-        "import": "./dist/esm/plugins/middleware-entry.js",
-        "default": "./dist/esm/plugins/middleware-entry.js"
+        "types": "./dist/plugins/middleware-entry.d.ts",
+        "import": "./dist/plugins/middleware-entry.js",
+        "default": "./dist/plugins/middleware-entry.js"
       },
       "./bundler": {
-        "types": "./dist/esm/plugins/bundler-entry.d.ts",
-        "import": "./dist/esm/plugins/bundler-entry.js",
-        "default": "./dist/esm/plugins/bundler-entry.js"
+        "types": "./dist/plugins/bundler-entry.d.ts",
+        "import": "./dist/plugins/bundler-entry.js",
+        "default": "./dist/plugins/bundler-entry.js"
       },
       "./transcoder": {
-        "types": "./dist/esm/plugins/transcoder-entry.d.ts",
-        "import": "./dist/esm/plugins/transcoder-entry.js",
-        "default": "./dist/esm/plugins/transcoder-entry.js"
+        "types": "./dist/plugins/transcoder-entry.d.ts",
+        "import": "./dist/plugins/transcoder-entry.js",
+        "default": "./dist/plugins/transcoder-entry.js"
       },
       "./transport": {
-        "types": "./dist/esm/transport/index.d.ts",
-        "import": "./dist/esm/transport/index.js",
-        "default": "./dist/esm/transport/index.js"
+        "types": "./dist/transport/index.d.ts",
+        "import": "./dist/transport/index.js",
+        "default": "./dist/transport/index.js"
       },
       "./transport/in-process": {
-        "types": "./dist/esm/transport/in-process.d.ts",
-        "import": "./dist/esm/transport/in-process.js",
-        "default": "./dist/esm/transport/in-process.js"
+        "types": "./dist/transport/in-process.d.ts",
+        "import": "./dist/transport/in-process.js",
+        "default": "./dist/transport/in-process.js"
       },
       "./transport/web": {
-        "types": "./dist/esm/transport/web.d.ts",
-        "import": "./dist/esm/transport/web.js",
-        "default": "./dist/esm/transport/web.js"
+        "types": "./dist/transport/web.d.ts",
+        "import": "./dist/transport/web.js",
+        "default": "./dist/transport/web.js"
       },
       "./transport/node": {
-        "types": "./dist/esm/transport/node.d.ts",
-        "import": "./dist/esm/transport/node.js",
-        "default": "./dist/esm/transport/node.js"
+        "types": "./dist/transport/node.d.ts",
+        "import": "./dist/transport/node.js",
+        "default": "./dist/transport/node.js"
       },
       "./electron/main": {
-        "types": "./dist/esm/electron/main.d.ts",
-        "import": "./dist/esm/electron/main.js",
-        "default": "./dist/esm/electron/main.js"
+        "types": "./dist/electron/main.d.ts",
+        "import": "./dist/electron/main.js",
+        "default": "./dist/electron/main.js"
       },
       "./electron/preload": {
-        "types": "./dist/esm/electron/preload.d.ts",
-        "import": "./dist/esm/electron/preload.js",
-        "default": "./dist/esm/electron/preload.js"
+        "types": "./dist/electron/preload.d.ts",
+        "import": "./dist/electron/preload.js",
+        "default": "./dist/electron/preload.js"
       },
       "./electron/renderer": {
-        "types": "./dist/esm/electron/renderer.d.ts",
-        "import": "./dist/esm/electron/renderer.js",
-        "default": "./dist/esm/electron/renderer.js"
+        "types": "./dist/electron/renderer.d.ts",
+        "import": "./dist/electron/renderer.js",
+        "default": "./dist/electron/renderer.js"
       },
       "./electron/utility": {
-        "types": "./dist/esm/electron/utility.d.ts",
-        "import": "./dist/esm/electron/utility.js",
-        "default": "./dist/esm/electron/utility.js"
+        "types": "./dist/electron/utility.d.ts",
+        "import": "./dist/electron/utility.js",
+        "default": "./dist/electron/utility.js"
       },
       "./host": {
-        "types": "./dist/esm/host/index.d.ts",
-        "import": "./dist/esm/host/index.js",
-        "default": "./dist/esm/host/index.js"
+        "types": "./dist/host/index.d.ts",
+        "import": "./dist/host/index.js",
+        "default": "./dist/host/index.js"
       },
       "./middleware/runtime-middleware": {
-        "types": "./dist/esm/middleware/runtime-middleware.d.ts",
-        "import": "./dist/esm/middleware/runtime-middleware.js",
-        "default": "./dist/esm/middleware/runtime-middleware.js"
+        "types": "./dist/middleware/runtime-middleware.d.ts",
+        "import": "./dist/middleware/runtime-middleware.js",
+        "default": "./dist/middleware/runtime-middleware.js"
       },
       "./kernels/replicad": {
-        "types": "./dist/esm/kernels/replicad/replicad.kernel.d.ts",
-        "import": "./dist/esm/kernels/replicad/replicad.kernel.js",
-        "default": "./dist/esm/kernels/replicad/replicad.kernel.js"
+        "types": "./dist/kernels/replicad/replicad.kernel.d.ts",
+        "import": "./dist/kernels/replicad/replicad.kernel.js",
+        "default": "./dist/kernels/replicad/replicad.kernel.js"
       },
       "./kernels/jscad": {
-        "types": "./dist/esm/kernels/jscad/jscad.kernel.d.ts",
-        "import": "./dist/esm/kernels/jscad/jscad.kernel.js",
-        "default": "./dist/esm/kernels/jscad/jscad.kernel.js"
+        "types": "./dist/kernels/jscad/jscad.kernel.d.ts",
+        "import": "./dist/kernels/jscad/jscad.kernel.js",
+        "default": "./dist/kernels/jscad/jscad.kernel.js"
       },
       "./kernels/manifold": {
-        "types": "./dist/esm/kernels/manifold/manifold.kernel.d.ts",
-        "import": "./dist/esm/kernels/manifold/manifold.kernel.js",
-        "default": "./dist/esm/kernels/manifold/manifold.kernel.js"
+        "types": "./dist/kernels/manifold/manifold.kernel.d.ts",
+        "import": "./dist/kernels/manifold/manifold.kernel.js",
+        "default": "./dist/kernels/manifold/manifold.kernel.js"
       },
       "./kernels/opencascade": {
-        "types": "./dist/esm/kernels/opencascade/opencascade.kernel.d.ts",
-        "import": "./dist/esm/kernels/opencascade/opencascade.kernel.js",
-        "default": "./dist/esm/kernels/opencascade/opencascade.kernel.js"
+        "types": "./dist/kernels/opencascade/opencascade.kernel.d.ts",
+        "import": "./dist/kernels/opencascade/opencascade.kernel.js",
+        "default": "./dist/kernels/opencascade/opencascade.kernel.js"
       },
       "./kernels/zoo": {
-        "types": "./dist/esm/kernels/zoo/zoo.kernel.d.ts",
-        "import": "./dist/esm/kernels/zoo/zoo.kernel.js",
-        "default": "./dist/esm/kernels/zoo/zoo.kernel.js"
+        "types": "./dist/kernels/zoo/zoo.kernel.d.ts",
+        "import": "./dist/kernels/zoo/zoo.kernel.js",
+        "default": "./dist/kernels/zoo/zoo.kernel.js"
       },
       "./kernels/zoo/engine-connection": {
-        "types": "./dist/esm/kernels/zoo/engine-connection.d.ts",
-        "import": "./dist/esm/kernels/zoo/engine-connection.js",
-        "default": "./dist/esm/kernels/zoo/engine-connection.js"
+        "types": "./dist/kernels/zoo/engine-connection.d.ts",
+        "import": "./dist/kernels/zoo/engine-connection.js",
+        "default": "./dist/kernels/zoo/engine-connection.js"
       },
       "./kernels/tau": {
-        "types": "./dist/esm/kernels/tau/tau.kernel.d.ts",
-        "import": "./dist/esm/kernels/tau/tau.kernel.js",
-        "default": "./dist/esm/kernels/tau/tau.kernel.js"
+        "types": "./dist/kernels/tau/tau.kernel.d.ts",
+        "import": "./dist/kernels/tau/tau.kernel.js",
+        "default": "./dist/kernels/tau/tau.kernel.js"
       },
       "./bundler/esbuild": {
-        "types": "./dist/esm/bundler/esbuild.bundler.d.ts",
-        "import": "./dist/esm/bundler/esbuild.bundler.js",
-        "default": "./dist/esm/bundler/esbuild.bundler.js"
+        "types": "./dist/bundler/esbuild.bundler.d.ts",
+        "import": "./dist/bundler/esbuild.bundler.js",
+        "default": "./dist/bundler/esbuild.bundler.js"
       },
       "./middleware/parameter-cache": {
-        "types": "./dist/esm/middleware/parameter-cache.middleware.d.ts",
-        "import": "./dist/esm/middleware/parameter-cache.middleware.js",
-        "default": "./dist/esm/middleware/parameter-cache.middleware.js"
+        "types": "./dist/middleware/parameter-cache.middleware.d.ts",
+        "import": "./dist/middleware/parameter-cache.middleware.js",
+        "default": "./dist/middleware/parameter-cache.middleware.js"
       },
       "./middleware/geometry-cache": {
-        "types": "./dist/esm/middleware/geometry-cache.middleware.d.ts",
-        "import": "./dist/esm/middleware/geometry-cache.middleware.js",
-        "default": "./dist/esm/middleware/geometry-cache.middleware.js"
+        "types": "./dist/middleware/geometry-cache.middleware.d.ts",
+        "import": "./dist/middleware/geometry-cache.middleware.js",
+        "default": "./dist/middleware/geometry-cache.middleware.js"
       },
       "./middleware/gltf-coordinate-transform": {
-        "types": "./dist/esm/middleware/gltf-coordinate-transform.middleware.d.ts",
-        "import": "./dist/esm/middleware/gltf-coordinate-transform.middleware.js",
-        "default": "./dist/esm/middleware/gltf-coordinate-transform.middleware.js"
+        "types": "./dist/middleware/gltf-coordinate-transform.middleware.d.ts",
+        "import": "./dist/middleware/gltf-coordinate-transform.middleware.js",
+        "default": "./dist/middleware/gltf-coordinate-transform.middleware.js"
       },
       "./middleware/gltf-edge-detection": {
-        "types": "./dist/esm/middleware/gltf-edge-detection.middleware.d.ts",
-        "import": "./dist/esm/middleware/gltf-edge-detection.middleware.js",
-        "default": "./dist/esm/middleware/gltf-edge-detection.middleware.js"
+        "types": "./dist/middleware/gltf-edge-detection.middleware.d.ts",
+        "import": "./dist/middleware/gltf-edge-detection.middleware.js",
+        "default": "./dist/middleware/gltf-edge-detection.middleware.js"
       },
       "./node": {
-        "types": "./dist/esm/node.d.ts",
-        "import": "./dist/esm/node.js",
-        "default": "./dist/esm/node.js"
+        "types": "./dist/node.d.ts",
+        "import": "./dist/node.js",
+        "default": "./dist/node.js"
       },
       "./filesystem": {
-        "types": "./dist/esm/filesystem/index.d.ts",
-        "import": "./dist/esm/filesystem/index.js",
-        "default": "./dist/esm/filesystem/index.js"
+        "types": "./dist/filesystem/index.d.ts",
+        "import": "./dist/filesystem/index.js",
+        "default": "./dist/filesystem/index.js"
       },
       "./filesystem/node": {
-        "types": "./dist/esm/filesystem/from-node-fs.d.ts",
-        "import": "./dist/esm/filesystem/from-node-fs.js",
-        "default": "./dist/esm/filesystem/from-node-fs.js"
+        "types": "./dist/filesystem/from-node-fs.d.ts",
+        "import": "./dist/filesystem/from-node-fs.js",
+        "default": "./dist/filesystem/from-node-fs.js"
       },
       "./filesystem/browser": {
-        "types": "./dist/esm/filesystem/from-browser-fs.d.ts",
-        "import": "./dist/esm/filesystem/from-browser-fs.js",
-        "default": "./dist/esm/filesystem/from-browser-fs.js"
+        "types": "./dist/filesystem/from-browser-fs.d.ts",
+        "import": "./dist/filesystem/from-browser-fs.js",
+        "default": "./dist/filesystem/from-browser-fs.js"
       },
       "./testing": {
-        "types": "./dist/esm/testing/index.d.ts",
-        "import": "./dist/esm/testing/index.js",
-        "default": "./dist/esm/testing/index.js"
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
       },
       "./cross-origin-isolation": {
-        "types": "./dist/esm/cross-origin-isolation/index.d.ts",
-        "import": "./dist/esm/cross-origin-isolation/index.js",
-        "default": "./dist/esm/cross-origin-isolation/index.js"
+        "types": "./dist/cross-origin-isolation/index.d.ts",
+        "import": "./dist/cross-origin-isolation/index.js",
+        "default": "./dist/cross-origin-isolation/index.js"
       },
       "./cross-origin-isolation/express": {
-        "types": "./dist/esm/cross-origin-isolation/express.d.ts",
-        "import": "./dist/esm/cross-origin-isolation/express.js",
-        "default": "./dist/esm/cross-origin-isolation/express.js"
+        "types": "./dist/cross-origin-isolation/express.d.ts",
+        "import": "./dist/cross-origin-isolation/express.js",
+        "default": "./dist/cross-origin-isolation/express.js"
       },
       "./react-router": {
-        "types": "./dist/esm/react-router/index.d.ts",
-        "import": "./dist/esm/react-router/index.js",
-        "default": "./dist/esm/react-router/index.js"
+        "types": "./dist/react-router/index.d.ts",
+        "import": "./dist/react-router/index.js",
+        "default": "./dist/react-router/index.js"
       },
       "./vite": {
-        "types": "./dist/esm/vite/index.d.ts",
-        "import": "./dist/esm/vite/index.js",
-        "default": "./dist/esm/vite/index.js"
+        "types": "./dist/vite/index.d.ts",
+        "import": "./dist/vite/index.js",
+        "default": "./dist/vite/index.js"
       },
       "./rolldown": {
-        "types": "./dist/esm/rolldown/index.d.ts",
-        "import": "./dist/esm/rolldown/index.js",
-        "default": "./dist/esm/rolldown/index.js"
+        "types": "./dist/rolldown/index.d.ts",
+        "import": "./dist/rolldown/index.js",
+        "default": "./dist/rolldown/index.js"
       },
       "./nextjs/config": {
-        "types": "./dist/esm/nextjs/config.d.ts",
-        "import": "./dist/esm/nextjs/config.js",
-        "default": "./dist/esm/nextjs/config.js"
+        "types": "./dist/nextjs/config.d.ts",
+        "import": "./dist/nextjs/config.js",
+        "default": "./dist/nextjs/config.js"
+      },
+      "./nextjs/node-fs-unavailable": {
+        "types": "./dist/nextjs/node-fs-unavailable.d.ts",
+        "import": "./dist/nextjs/node-fs-unavailable.js",
+        "default": "./dist/nextjs/node-fs-unavailable.js"
       }
     }
   },
@@ -360,7 +366,7 @@
     "manifold-3d": "catalog:",
     "opencascade.js": "npm:@taucad/opencascade.js@3.0.0-beta.3",
     "replicad": "file:../../tarballs/replicad-native-batch-operations/taucad-replicad-0.23.3-beta.1.tgz",
-    "replicad-opencascadejs": "file:../../tarballs/replicad-native-batch-operations/taucad-replicad-opencascadejs-0.23.0-beta.0.tgz",
+    "replicad-opencascadejs": "file:../../tarballs/replicad-tessellation-instancing/taucad-replicad-opencascadejs-0.23.0-beta.0.tgz",
     "source-map-js": "catalog:",
     "strip-literal": "catalog:",
     "type-fest": "catalog:",

@@ -9,9 +9,8 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/units"
   },
-  "main": "./dist/cjs/types/index.cjs",
-  "types": "./dist/cjs/types/index.d.cts",
-  "module": "./dist/esm/types/index.js",
+  "main": "./dist/types/index.js",
+  "types": "./dist/types/index.d.ts",
   "files": [
     "dist",
     "README.md"
@@ -33,48 +32,29 @@
     "access": "public",
     "exports": {
       ".": {
-        "require": {
-          "types": "./dist/cjs/types/index.d.cts",
-          "default": "./dist/cjs/types/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/types/index.d.ts",
-          "default": "./dist/esm/types/index.js"
-        }
+        "types": "./dist/types/index.d.ts",
+        "import": "./dist/types/index.js",
+        "default": "./dist/types/index.js"
       },
       "./constants": {
-        "require": {
-          "types": "./dist/cjs/constants/index.d.cts",
-          "default": "./dist/cjs/constants/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/constants/index.d.ts",
-          "default": "./dist/esm/constants/index.js"
-        }
+        "types": "./dist/constants/index.d.ts",
+        "import": "./dist/constants/index.js",
+        "default": "./dist/constants/index.js"
       },
       "./converter": {
-        "require": {
-          "types": "./dist/cjs/converter/index.d.cts",
-          "default": "./dist/cjs/converter/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/converter/index.d.ts",
-          "default": "./dist/esm/converter/index.js"
-        }
+        "types": "./dist/converter/index.d.ts",
+        "import": "./dist/converter/index.js",
+        "default": "./dist/converter/index.js"
       },
       "./parser": {
-        "require": {
-          "types": "./dist/cjs/parser/index.d.cts",
-          "default": "./dist/cjs/parser/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/parser/index.d.ts",
-          "default": "./dist/esm/parser/index.js"
-        }
+        "types": "./dist/parser/index.d.ts",
+        "import": "./dist/parser/index.js",
+        "default": "./dist/parser/index.js"
       }
     }
   },
   "imports": {
+    "#*.js": "./src/*.ts",
     "#*": "./src/*"
   }
 }

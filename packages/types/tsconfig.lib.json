@@ -9,13 +9,5 @@
       "#*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts"],
-  "references": [
-    {
-      "path": "../units/tsconfig.lib.json"
-    },
-    {
-      "path": "../json-schema/tsconfig.lib.json"
-    }
-  ]
+  "include": ["src/**/*.ts"]
 }

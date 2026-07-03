@@ -34,7 +34,7 @@ flowchart LR
 - The runtime definition includes parameter and geometry cache middleware so repeated parameter/source states use the cache-hit render path.
 - The browser quickstarts use Replicad's single-threaded WASM variant so Next.js and React Router exercise the same deterministic asset path.
 - The example uses selected capability subpaths, not broad barrels, so unused kernels and their assets stay out of the dependency graph.
-- Maintainer e2e coverage for this topology lives in `packages/react/e2e`; the example itself stays test-framework agnostic.
+- Maintainer e2e coverage for this topology lives in `apps/react-e2e`; the example itself stays test-framework agnostic.
 
 ## Parameters
 

@@ -281,7 +281,7 @@ import { webWorkerTransport } from '@taucad/runtime/transport'; // broad barrel;
 
 ### Examples are quickstarts, not test harnesses
 
-First-class framework examples should stay copyable and test-agnostic. Do not put Playwright configs, Vitest configs, repository-only GLB inspection helpers, `data-testid` assertions, query-string test branches, or `window.__tau*` geometry probes in public example apps. Keep those artifacts in package-owned e2e fixtures such as `packages/react/e2e`, where maintainers can preserve framework transport coverage without making the example code look like CI scaffolding.
+First-class framework examples should stay copyable and test-agnostic. Do not put Playwright configs, Vitest configs, repository-only GLB inspection helpers, `data-testid` assertions, query-string test branches, or `window.__tau*` geometry probes in public example apps. Keep those artifacts in a dedicated e2e project such as `apps/react-e2e`, where maintainers can preserve framework transport coverage without making the example code look like CI scaffolding.
 
 **Why**: A consumer opening an example should see the runtime integration topology, not Tau's regression-test strategy. Keeping test machinery out of examples makes the happy path easier to copy while preserving mature coverage in a purpose-built test surface.
 

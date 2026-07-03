@@ -157,7 +157,7 @@ describe('KernelWorker lifecycle', () => {
             createGeometryCallCount++;
             // Render A blocks in createGeometry on first call; render B on second
             await (createGeometryCallCount === 1 ? gateA : gateB);
-            return { success: true, data: [], issues: [] };
+            return { success: true, data: { format: 'gltf', content: new Uint8Array([1]) }, issues: [] };
           }
         }
 
@@ -345,7 +345,7 @@ describe('KernelWorker lifecycle', () => {
         '/projects/test/main.ts': new Uint8Array([1, 2, 3]),
       });
       const unsubscribe = vi.fn();
-      const watch = vi.fn(() => unsubscribe);
+      const watch = vi.fn((_request: { paths: readonly string[] }, _handler: unknown) => unsubscribe);
       const worker = new MockKernelWorker({
         middleware: [],
         onLog: noopLog,
@@ -703,7 +703,7 @@ describe('KernelWorker lifecycle', () => {
             _runtime: KernelRuntime,
           ): Promise<CreateGeometryResult> {
             await gate;
-            return { success: true, data: [], issues: [] };
+            return { success: true, data: { format: 'gltf', content: new Uint8Array([1]) }, issues: [] };
           }
         }
 
@@ -916,7 +916,7 @@ describe('KernelWorker lifecycle', () => {
             await gate;
             return {
               success: true,
-              data: [],
+              data: { format: 'gltf', content: new Uint8Array([1]) },
               issues: [],
             };
           }
@@ -988,7 +988,7 @@ describe('KernelWorker lifecycle', () => {
 
       const result1 = await worker.runCreateGeometry('main.ts');
       expect(result1.success).toBe(true);
-      const hash1 = result1.success ? result1.data[0]?.hash : undefined;
+      const hash1 = result1.success ? result1.data.hash : undefined;
 
       // Change the parameter file content and invalidate caches
       // (simulates a watch-triggered file change between render cycles)
@@ -1000,7 +1000,7 @@ describe('KernelWorker lifecycle', () => {
 
       const result2 = await worker.runCreateGeometry('main.ts');
       expect(result2.success).toBe(true);
-      const hash2 = result2.success ? result2.data[0]?.hash : undefined;
+      const hash2 = result2.success ? result2.data.hash : undefined;
 
       expect(hash1).toBeDefined();
       expect(hash2).toBeDefined();
@@ -1033,10 +1033,10 @@ describe('KernelWorker lifecycle', () => {
       worker.onGeometryComputed = vi.fn();
 
       const result1 = await worker.runCreateGeometry('main.ts');
-      const hash1 = result1.success ? result1.data[0]?.hash : undefined;
+      const hash1 = result1.success ? result1.data.hash : undefined;
 
       const result2 = await worker.runCreateGeometry('main.ts');
-      const hash2 = result2.success ? result2.data[0]?.hash : undefined;
+      const hash2 = result2.success ? result2.data.hash : undefined;
 
       expect(hash1).toBeDefined();
       expect(hash1).toBe(hash2);
@@ -1203,7 +1203,7 @@ describe('abort reason propagation', () => {
         Atomics.store(view, signalSlot.abortReason, 2);
         Atomics.add(view, signalSlot.abortGeneration, 1);
         checkAbort();
-        return { success: true, data: [], issues: [] };
+        return { success: true, data: { format: 'gltf', content: new Uint8Array([1]) }, issues: [] };
       }
     }
 
@@ -1252,7 +1252,7 @@ describe('abort reason propagation', () => {
         Atomics.store(view, signalSlot.abortReason, 1);
         Atomics.add(view, signalSlot.abortGeneration, 1);
         checkAbort();
-        return { success: true, data: [], issues: [] };
+        return { success: true, data: { format: 'gltf', content: new Uint8Array([1]) }, issues: [] };
       }
     }
 
@@ -2139,8 +2139,15 @@ describe('ensureNativeHandle', () => {
       nativeHandle: { meshData: new Float32Array(3) },
     });
 
+    const renderComplete = new Promise<void>((resolve) => {
+      worker.onStateChanged = (state) => {
+        if (state === 'idle' || state === 'error') {
+          resolve();
+        }
+      };
+    });
     worker.handleOpenFile(createGeometryFile('test.ts'), {});
-    await flushMicrotasks();
+    await renderComplete;
 
     const callsAfterRender = worker.createGeometryCalls;
     const result = await worker.runExportGeometry('gltf');
@@ -2155,7 +2162,7 @@ describe('ensureNativeHandle', () => {
     const worker = createConfiguredWorker({
       computeResult: {
         success: true,
-        data: [{ format: 'gltf', content: new Uint8Array([1, 2, 3]) }],
+        data: { format: 'gltf', content: new Uint8Array([1, 2, 3]) },
         issues: [],
         serializedNativeHandle: serializedData,
       },

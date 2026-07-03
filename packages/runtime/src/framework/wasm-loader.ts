@@ -18,6 +18,11 @@ import { isNode, resolveFileUrl } from '#framework/environment.js';
 export async function compileWasmStreaming(url: string, tracer?: RuntimeSpanTracer): Promise<WebAssembly.Module> {
   const span = tracer?.startSpan('wasm.compile', { url });
   try {
+    if (shouldLoadFromFileSystem(url)) {
+      const wasmBinary = await loadWasmBinary(url);
+      return await WebAssembly.compile(wasmBinary);
+    }
+
     const module = await WebAssembly.compileStreaming(fetch(url));
     return module;
   } catch (streamingError) {
@@ -50,6 +55,13 @@ export async function compileWasmStreaming(url: string, tracer?: RuntimeSpanTrac
  * @see https://www.zachleat.com/web/dynamic-import/ - similar pattern to import-module-string
  */
 export async function loadWasmBinary(url: string): Promise<ArrayBuffer> {
+  if (shouldLoadFromFileSystem(url)) {
+    const filePath = await resolveFileUrl(url);
+    const { readFile } = await import('node:fs/promises');
+    const buffer = await readFile(filePath);
+    return asBuffer(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
+  }
+
   try {
     // Try fetch first - works in browsers and some Node.js versions
     const response = await fetch(url);
@@ -69,4 +81,8 @@ export async function loadWasmBinary(url: string): Promise<ArrayBuffer> {
     const buffer = await readFile(filePath);
     return asBuffer(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
   }
+}
+
+function shouldLoadFromFileSystem(url: string): boolean {
+  return isNode() && url.startsWith('file:');
 }

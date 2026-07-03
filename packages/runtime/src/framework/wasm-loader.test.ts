@@ -60,6 +60,29 @@ describe('loadWasmBinary', () => {
       await unlink(temporaryFile).catch(() => undefined);
     }
   });
+
+  it('should read file:// URLs directly without probing fetch', async () => {
+    const { writeFile, unlink } = await import('node:fs/promises');
+    const { pathToFileURL } = await import('node:url');
+    const path = await import('node:path');
+    const os = await import('node:os');
+
+    const temporaryFile = path.join(os.tmpdir(), `wasm-loader-direct-file-test-${Date.now()}.wasm`);
+    const wasmBytes = Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+    await writeFile(temporaryFile, wasmBytes);
+
+    const fetchSpy = vi.fn().mockRejectedValue(new Error('file fetch must not run'));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    try {
+      const result = await loadWasmBinary(pathToFileURL(temporaryFile).href);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(new Uint8Array(result)).toEqual(new Uint8Array(wasmBytes));
+    } finally {
+      vi.unstubAllGlobals();
+      await unlink(temporaryFile).catch(() => undefined);
+    }
+  });
 });
 
 describe('compileWasmStreaming', () => {
@@ -96,6 +119,35 @@ describe('compileWasmStreaming', () => {
       expect(result).toBe(mockModule);
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+
+  it('should compile file:// URLs directly without compileStreaming or fetch', async () => {
+    const { writeFile, unlink } = await import('node:fs/promises');
+    const { pathToFileURL } = await import('node:url');
+    const path = await import('node:path');
+    const os = await import('node:os');
+
+    const temporaryFile = path.join(os.tmpdir(), `wasm-compile-direct-file-test-${Date.now()}.wasm`);
+    const wasmBytes = Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+    await writeFile(temporaryFile, wasmBytes);
+
+    // oxlint-disable-next-line consistent-type-assertions -- WebAssembly.Module is opaque; empty object suffices for mock
+    const mockModule = {} as WebAssembly.Module;
+    const fetchSpy = vi.fn().mockRejectedValue(new Error('file fetch must not run'));
+    vi.stubGlobal('fetch', fetchSpy);
+    const streamingSpy = vi.spyOn(WebAssembly, 'compileStreaming');
+    vi.spyOn(WebAssembly, 'compile').mockResolvedValue(mockModule);
+
+    try {
+      const result = await compileWasmStreaming(pathToFileURL(temporaryFile).href);
+      expect(result).toBe(mockModule);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(streamingSpy).not.toHaveBeenCalled();
+      expect(WebAssembly.compile).toHaveBeenCalledWith(expect.any(ArrayBuffer));
+    } finally {
+      vi.unstubAllGlobals();
+      await unlink(temporaryFile).catch(() => undefined);
     }
   });
 

@@ -8,15 +8,23 @@ import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import { createWorkerDispatcher, runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
-import type { KernelDefinition } from '#types/runtime-kernel.types.js';
-import type { TranscoderDefinition } from '#types/runtime-transcoder.types.js';
-import type { CapabilitiesManifest, KernelIssue } from '#types/runtime.types.js';
+import type {
+  CreateGeometryInput,
+  DeserializeNativeHandleInput,
+  ExportGeometryInput,
+  GetDependenciesInput,
+  KernelDefinition,
+  KernelRuntime,
+} from '#types/runtime-kernel.types.js';
+import type { TranscodeInput, TranscoderDefinition } from '#types/runtime-transcoder.types.js';
+import type { CapabilitiesManifest, ExportGeometryResult, KernelIssue } from '#types/runtime.types.js';
 import { seedTestFileSystem, initializeWorkerForTesting, createGeometryFile } from '#testing/kernel-testing.utils.js';
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
-import type { TranscoderPlugin } from '#plugins/plugin-types.js';
+import type { MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
 import { replicadDetectPattern } from '#kernels/replicad/replicad.constants.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
+import { exportMemoryCache, geometryCache, geometryMemoryCache } from '#middleware/geometry-cache.middleware.js';
 
 // ===================================================================
 // Helpers
@@ -26,18 +34,18 @@ type TestTranscoderPlugin = TranscoderPlugin & RuntimePluginDefinitionCarrier<Tr
 
 function createMockKernelDefinition(id: string, overrides?: Partial<KernelDefinition>): KernelDefinition {
   const initSpy = vi.fn().mockResolvedValue({ id });
-  const definition: KernelDefinition = {
+  const definition = {
     name: id,
     version: '1.0.0',
     initialize: initSpy,
-    getDependencies: async (input) => ({ resolved: [input.filePath], unresolved: [] }),
+    getDependencies: async (input: GetDependenciesInput) => ({ resolved: [input.filePath], unresolved: [] }),
     getParameters: async () => ({
       success: true,
       data: { defaultParameters: {}, jsonSchema: {} },
       issues: [] as KernelIssue[],
     }),
     createGeometry: async () => ({
-      geometry: [{ format: 'gltf', content: new Uint8Array([1, 2, 3]) }],
+      geometry: gltfGeometryBytes(new Uint8Array([1, 2, 3])),
       issues: [] as KernelIssue[],
       nativeHandle: undefined,
     }),
@@ -50,7 +58,8 @@ function createMockKernelDefinition(id: string, overrides?: Partial<KernelDefini
   };
 
   Object.defineProperty(definition, '_initSpy', { value: initSpy });
-  return definition;
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- test helper merges partial union branches.
+  return definition as KernelDefinition;
 }
 
 function getInitSpy(definition: KernelDefinition): ReturnType<typeof vi.fn> {
@@ -67,6 +76,7 @@ async function createMultiKernelWorker(
     builtinModuleNames?: string[];
   }>,
   transcoders: TestTranscoderPlugin[] = [],
+  middleware: MiddlewarePlugin[] = [],
 ): Promise<KernelRuntimeWorker> {
   const runtime = defineRuntime({
     kernels: modules.map((m) =>
@@ -80,11 +90,47 @@ async function createMultiKernelWorker(
         () => m.definition,
       ),
     ),
+    middleware,
     transcoders,
   });
   const worker = new KernelRuntimeWorker({ runtime });
   await initializeWorkerForTesting(worker);
   return worker;
+}
+
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+function bytesFor(value: string): Uint8Array<ArrayBuffer> {
+  return textEncoder.encode(value);
+}
+
+function textFrom(bytes: Uint8Array<ArrayBuffer>): string {
+  return textDecoder.decode(bytes);
+}
+
+function gltfGeometry(content: string): { format: 'gltf'; content: Uint8Array<ArrayBuffer> } {
+  return { format: 'gltf', content: bytesFor(content) };
+}
+
+function gltfGeometryBytes(content: Uint8Array<ArrayBuffer>): { format: 'gltf'; content: Uint8Array<ArrayBuffer> } {
+  return { format: 'gltf', content };
+}
+
+function exportFile(name: string, bytes: Uint8Array<ArrayBuffer>, mimeType: ExportFile['mimeType']): ExportFile {
+  return { name, bytes, mimeType };
+}
+
+function handleLabel(nativeHandle: unknown): string {
+  if (
+    typeof nativeHandle === 'object' &&
+    nativeHandle !== null &&
+    'label' in nativeHandle &&
+    typeof nativeHandle.label === 'string'
+  ) {
+    return nativeHandle.label;
+  }
+  throw new Error(`Unexpected native handle: ${String(nativeHandle)}`);
 }
 
 // ===================================================================
@@ -361,7 +407,7 @@ describe('KernelRuntimeWorker kernel selection', () => {
   });
 
   describe('no kernel matches', () => {
-    it('should return empty geometry when no kernel matches an unrecognized extension', async () => {
+    it('should fail when no kernel matches an unrecognized extension', async () => {
       const scadDefinition = createMockKernelDefinition('openscad');
 
       const worker = await createMultiKernelWorker([
@@ -373,9 +419,9 @@ describe('KernelRuntimeWorker kernel selection', () => {
         parameters: {},
       });
 
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data).toEqual([]);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.issues).toContainEqual(expect.objectContaining({ code: 'KERNEL_CAPABILITY_MISSING' }));
       }
     });
   });
@@ -530,14 +576,14 @@ describe('native-handle snapshot restoration', () => {
 
   it('should restore a durable native handle through paired kernel hooks', async () => {
     const createGeometry = vi.fn().mockResolvedValue({
-      geometry: [{ format: 'gltf', content: new Uint8Array([1, 2, 3]) }],
+      geometry: { format: 'gltf', content: new Uint8Array([1, 2, 3]) },
       nativeHandle: { kind: 'live-handle' },
       issues: [] as KernelIssue[],
     });
     const deserializeNativeHandle = vi.fn().mockReturnValue({ kind: 'restored-handle' });
     const exportGeometry = vi.fn().mockResolvedValue({
       success: true,
-      data: [{ name: 'model.gltf', bytes: new Uint8Array([9]), mimeType: 'model/gltf+json' }],
+      data: [exportFile('model.gltf', new Uint8Array([9]), 'model/gltf+json')],
       issues: [] as KernelIssue[],
     });
     const definition = createMockKernelDefinition('snapshot-kernel', {
@@ -575,12 +621,12 @@ describe('native-handle snapshot restoration', () => {
     const createGeometry = vi
       .fn()
       .mockResolvedValueOnce({
-        geometry: [{ format: 'gltf', content: new Uint8Array([1, 2, 3]) }],
+        geometry: { format: 'gltf', content: new Uint8Array([1, 2, 3]) },
         nativeHandle: { kind: 'initial-live-handle' },
         issues: [] as KernelIssue[],
       })
       .mockResolvedValueOnce({
-        geometry: [{ format: 'gltf', content: new Uint8Array([4, 5, 6]) }],
+        geometry: { format: 'gltf', content: new Uint8Array([4, 5, 6]) },
         nativeHandle: { kind: 'reheated-live-handle' },
         issues: [] as KernelIssue[],
       });
@@ -589,7 +635,7 @@ describe('native-handle snapshot restoration', () => {
     });
     const exportGeometry = vi.fn().mockResolvedValue({
       success: true,
-      data: [{ name: 'model.gltf', bytes: new Uint8Array([9]), mimeType: 'model/gltf+json' }],
+      data: [exportFile('model.gltf', new Uint8Array([9]), 'model/gltf+json')],
       issues: [] as KernelIssue[],
     });
     const definition = createMockKernelDefinition('snapshot-kernel', {
@@ -632,7 +678,7 @@ describe('native-handle snapshot restoration', () => {
       createCount += 1;
       canExportFromMemory = true;
       return {
-        geometry: [{ format: 'gltf', content: new Uint8Array([createCount]) }],
+        geometry: gltfGeometryBytes(new Uint8Array([createCount])),
         nativeHandle: {
           kind: 'live-engine-session',
           generation: createCount,
@@ -642,7 +688,7 @@ describe('native-handle snapshot restoration', () => {
       };
     });
 
-    const exportGeometry = vi.fn(async (input) => {
+    const exportGeometry = vi.fn(async (input: ExportGeometryInput): Promise<ExportGeometryResult> => {
       if (!canExportFromMemory) {
         return { success: false, issues: [noProgramIssue] };
       }
@@ -652,7 +698,7 @@ describe('native-handle snapshot restoration', () => {
           canExportFromMemory = false;
           return {
             success: true,
-            data: [{ name: 'source.glb', bytes: new Uint8Array([1, 2, 3]), mimeType: 'model/gltf-binary' }],
+            data: [exportFile('source.glb', new Uint8Array([1, 2, 3]), 'model/gltf-binary')],
             issues: [] as KernelIssue[],
           };
         }
@@ -660,7 +706,7 @@ describe('native-handle snapshot restoration', () => {
         case 'step': {
           return {
             success: true,
-            data: [{ name: 'model.step', bytes: new Uint8Array([4, 5, 6]), mimeType: 'model/step' }],
+            data: [exportFile('model.step', new Uint8Array([4, 5, 6]), 'application/step')],
             issues: [] as KernelIssue[],
           };
         }
@@ -689,7 +735,7 @@ describe('native-handle snapshot restoration', () => {
       exportGeometry,
       isNativeHandleValid: ({ nativeHandle }) => {
         if (typeof nativeHandle === 'object' && nativeHandle !== null && 'hasGeometry' in nativeHandle) {
-          return !nativeHandle.hasGeometry || canExportFromMemory;
+          return !nativeHandle['hasGeometry'] || canExportFromMemory;
         }
 
         return canExportFromMemory;
@@ -698,7 +744,7 @@ describe('native-handle snapshot restoration', () => {
 
     const transcode = vi.fn().mockResolvedValue({
       success: true,
-      data: [{ name: 'model.usdz', bytes: new Uint8Array([9, 8, 7]), mimeType: 'model/vnd.usdz+zip' }],
+      data: [exportFile('model.usdz', new Uint8Array([9, 8, 7]), 'model/vnd.usdz+zip')],
       issues: [] as KernelIssue[],
     });
     const transcoderDefinition: TranscoderDefinition = {
@@ -743,6 +789,467 @@ describe('native-handle snapshot restoration', () => {
       { id: 'volatile-kernel' },
     );
     /* oxlint-enable @typescript-eslint/no-unsafe-assignment */
+  });
+});
+
+// ===================================================================
+// Cache identity regressions
+// ===================================================================
+
+describe('cache identity regressions', () => {
+  const basePath = '/projects/test';
+
+  beforeEach(async () => {
+    geometryMemoryCache.clear();
+    exportMemoryCache.clear();
+    await seedTestFileSystem({
+      [`${basePath}/model.mock`]: 'mock geometry',
+      [`${basePath}/a.mock`]: 'alpha',
+      [`${basePath}/b.mock`]: 'bravo',
+      [`${basePath}/b.other`]: 'other',
+    });
+  });
+
+  afterEach(() => {
+    geometryMemoryCache.clear();
+    exportMemoryCache.clear();
+  });
+
+  it('should restore the cached native-handle snapshot for the settled render identity before export', async () => {
+    const createGeometry = vi.fn(async (input) => {
+      const label = `bank:${String(input.parameters['bankAngle'])}`;
+      return {
+        geometry: gltfGeometry(label),
+        nativeHandle: { label },
+        issues: [] as KernelIssue[],
+      };
+    });
+    const exportGeometry = vi.fn(async (input: ExportGeometryInput) => {
+      const label = handleLabel(input.nativeHandle);
+      return {
+        success: true,
+        data: [exportFile('model.usdz', bytesFor(label), 'model/vnd.usdz+zip')],
+        issues: [] as KernelIssue[],
+      };
+    });
+    const definition = createMockKernelDefinition('snapshot-kernel', {
+      exportSchemas: { usdz: z.object({}) },
+      createGeometry,
+      exportGeometry,
+      serializeNativeHandle: ({ nativeHandle }) => ({ label: handleLabel(nativeHandle) }),
+      deserializeNativeHandle: ({ serializedNativeHandle }) => {
+        if (
+          typeof serializedNativeHandle === 'object' &&
+          serializedNativeHandle !== null &&
+          'label' in serializedNativeHandle &&
+          typeof serializedNativeHandle.label === 'string'
+        ) {
+          return { label: serializedNativeHandle.label };
+        }
+        throw new Error('Unexpected serialized native handle');
+      },
+    });
+    const worker = await createMultiKernelWorker(
+      [{ id: 'snapshot-kernel', extensions: ['mock'], definition }],
+      [],
+      [geometryCache()],
+    );
+
+    await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: { bankAngle: 90 } });
+    await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: { bankAngle: 60 } });
+    await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: { bankAngle: 90 } });
+
+    const exportResult = await worker.exportGeometry('usdz');
+
+    expect(exportResult.success).toBe(true);
+    if (!exportResult.success) {
+      return;
+    }
+    expect(textFrom(exportResult.data[0]!.bytes)).toBe('bank:90');
+  });
+
+  it('should invalidate staged exportModel file hashes before computing export cache keys', async () => {
+    const createGeometry = vi.fn(async (input: CreateGeometryInput, runtime: KernelRuntime) => {
+      const source = await runtime.filesystem.readFile(input.filePath, 'utf8');
+      return {
+        geometry: gltfGeometry(source),
+        nativeHandle: { label: source },
+        issues: [] as KernelIssue[],
+      };
+    });
+    const exportGeometry = vi.fn(async (input: ExportGeometryInput) => {
+      const label = handleLabel(input.nativeHandle);
+      return {
+        success: true,
+        data: [exportFile('model.gltf', bytesFor(label), 'model/gltf+json')],
+        issues: [] as KernelIssue[],
+      };
+    });
+    const definition = createMockKernelDefinition('stage-kernel', {
+      exportSchemas: { gltf: z.object({}) },
+      createGeometry,
+      exportGeometry,
+      serializeNativeHandle: ({ nativeHandle }) => ({ label: handleLabel(nativeHandle) }),
+      deserializeNativeHandle: ({ serializedNativeHandle }) => {
+        if (
+          typeof serializedNativeHandle === 'object' &&
+          serializedNativeHandle !== null &&
+          'label' in serializedNativeHandle &&
+          typeof serializedNativeHandle.label === 'string'
+        ) {
+          return { label: serializedNativeHandle.label };
+        }
+        throw new Error('Unexpected serialized native handle');
+      },
+    });
+    const worker = await createMultiKernelWorker(
+      [{ id: 'stage-kernel', extensions: ['mock'], definition }],
+      [],
+      [geometryCache()],
+    );
+
+    await worker.exportModel({
+      stage: { [`${basePath}/model.mock`]: bytesFor('stage-a') },
+      file: createGeometryFile('model.mock'),
+      parameters: {},
+      format: 'gltf',
+    });
+
+    const second = await worker.exportModel({
+      stage: { [`${basePath}/model.mock`]: bytesFor('stage-b') },
+      file: createGeometryFile('model.mock'),
+      parameters: {},
+      format: 'gltf',
+    });
+
+    expect(second.success).toBe(true);
+    if (!second.success) {
+      return;
+    }
+    expect(textFrom(second.data[0]!.bytes)).toBe('stage-b');
+  });
+
+  it('should recompute base dependencies for consecutive direct createGeometry calls with different files', async () => {
+    const definition = createMockKernelDefinition('dependency-kernel', {
+      createGeometry: async (input: CreateGeometryInput, runtime: KernelRuntime) => {
+        const source = await runtime.filesystem.readFile(input.filePath, 'utf8');
+        return {
+          geometry: gltfGeometry(source),
+          nativeHandle: { label: source },
+          issues: [] as KernelIssue[],
+        };
+      },
+    });
+    const worker = await createMultiKernelWorker([{ id: 'dependency-kernel', extensions: ['mock'], definition }]);
+
+    const first = await worker.createGeometry({ file: createGeometryFile('a.mock'), parameters: {} });
+    const second = await worker.createGeometry({ file: createGeometryFile('b.mock'), parameters: {} });
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    if (!first.success || !second.success) {
+      return;
+    }
+    expect(first.data.hash).not.toBe(second.data.hash);
+  });
+
+  it('should keep request-scoped exportModel renders out of subsequent current-state exports', async () => {
+    const createGeometry = vi.fn(async (input) => {
+      const label = String(input.parameters['label']);
+      return {
+        geometry: gltfGeometry(label),
+        nativeHandle: { label },
+        issues: [] as KernelIssue[],
+      };
+    });
+    const exportGeometry = vi.fn(async (input: ExportGeometryInput) => {
+      const label = handleLabel(input.nativeHandle);
+      return {
+        success: true,
+        data: [exportFile('model.gltf', bytesFor(label), 'model/gltf+json')],
+        issues: [] as KernelIssue[],
+      };
+    });
+    const definition = createMockKernelDefinition('request-scope-kernel', {
+      exportSchemas: { gltf: z.object({}) },
+      createGeometry,
+      exportGeometry,
+    });
+    const worker = await createMultiKernelWorker([{ id: 'request-scope-kernel', extensions: ['mock'], definition }]);
+
+    await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: { label: 'preview' } });
+
+    const requestScoped = await worker.exportModel({
+      file: createGeometryFile('model.mock'),
+      parameters: { label: 'request-scoped' },
+      format: 'gltf',
+    });
+    expect(requestScoped.success).toBe(true);
+
+    const currentStateExport = await worker.exportGeometry('gltf');
+
+    expect(currentStateExport.success).toBe(true);
+    if (!currentStateExport.success) {
+      return;
+    }
+    expect(textFrom(currentStateExport.data[0]!.bytes)).toBe('preview');
+  });
+
+  it('should export a cached published render with its selected kernel after global active kernel drift', async () => {
+    const createGeometry = vi.fn(async (input) => {
+      const label = `source:${String(input.parameters['label'])}`;
+      return {
+        geometry: gltfGeometry(label),
+        nativeHandle: { label },
+        issues: [] as KernelIssue[],
+      };
+    });
+    const deserializeNativeHandle = vi.fn(
+      ({ serializedNativeHandle }: DeserializeNativeHandleInput<{ label: string }>) => ({
+        label: serializedNativeHandle.label,
+      }),
+    );
+    const exportGeometry = vi.fn(async (input: ExportGeometryInput) => {
+      const label = handleLabel(input.nativeHandle);
+      return {
+        success: true,
+        data: [exportFile('source.glb', bytesFor(label), 'model/gltf-binary')],
+        issues: [] as KernelIssue[],
+      };
+    });
+    const sourceDefinition = createMockKernelDefinition('source-kernel', {
+      exportSchemas: { glb: z.object({}) },
+      createGeometry,
+      exportGeometry,
+      serializeNativeHandle: ({ nativeHandle }) => ({ label: handleLabel(nativeHandle) }),
+      deserializeNativeHandle,
+    });
+    const otherDefinition = createMockKernelDefinition('other-kernel', {
+      exportSchemas: { glb: z.object({}) },
+      createGeometry: async () => ({
+        geometry: gltfGeometry('other-preview'),
+        nativeHandle: undefined,
+        issues: [] as KernelIssue[],
+      }),
+      exportGeometry: async () => ({
+        success: true,
+        data: [exportFile('other.glb', bytesFor('other-export'), 'model/gltf-binary')],
+        issues: [] as KernelIssue[],
+      }),
+    });
+    const transcode = vi.fn(async (input: TranscodeInput) => ({
+      success: true,
+      data: [exportFile('model.3mf', bytesFor(`3mf:${textFrom(input.files[0]!.bytes)}`), 'model/3mf')],
+      issues: [] as KernelIssue[],
+    }));
+    const transcoderDefinition: TranscoderDefinition = {
+      name: 'Mock Converter',
+      version: '1.0.0',
+      edges: [{ from: 'glb', to: '3mf', fidelity: 'mesh' }],
+      initialize: vi.fn().mockResolvedValue({ id: 'mock-converter' }),
+      transcode,
+      cleanup: vi.fn().mockResolvedValue(undefined),
+    };
+    const transcoderPlugin = attachRuntimePluginDefinition({ id: 'mock-converter' }, () => transcoderDefinition);
+    const worker = await createMultiKernelWorker(
+      [
+        { id: 'source-kernel', extensions: ['mock'], definition: sourceDefinition },
+        { id: 'other-kernel', extensions: ['other'], definition: otherDefinition },
+      ],
+      [transcoderPlugin],
+      [geometryCache()],
+    );
+
+    await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: { label: 'cached' } });
+
+    const internals = worker as unknown as {
+      currentPublishedRender: unknown;
+      nativeHandle: unknown;
+      nativeHandleSlot: unknown;
+      pendingNativeHandle: unknown;
+      serializedNativeHandleSlot: unknown;
+    };
+    internals.nativeHandle = undefined;
+    internals.nativeHandleSlot = undefined;
+    internals.pendingNativeHandle = undefined;
+    internals.serializedNativeHandleSlot = undefined;
+
+    await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: { label: 'cached' } });
+    expect(createGeometry).toHaveBeenCalledOnce();
+    const cachedSourceRender = internals.currentPublishedRender;
+
+    await worker.notifyFileChanged([`${basePath}/unrelated.txt`]);
+    await worker.createGeometry({ file: createGeometryFile('b.other'), parameters: {} });
+
+    internals.currentPublishedRender = cachedSourceRender;
+    internals.nativeHandle = undefined;
+    internals.nativeHandleSlot = undefined;
+    internals.pendingNativeHandle = undefined;
+    internals.serializedNativeHandleSlot = undefined;
+
+    const exportResult = await worker.exportGeometry('3mf');
+
+    if (!exportResult.success) {
+      throw new Error(
+        `Expected cached source render export to succeed, got: ${exportResult.issues
+          .map((issue) => issue.message)
+          .join('; ')}`,
+      );
+    }
+    expect(deserializeNativeHandle).toHaveBeenCalledOnce();
+    expect(exportGeometry).toHaveBeenCalledWith(
+      expect.objectContaining({ format: 'glb', nativeHandle: { label: 'source:cached' } }),
+      expect.any(Object),
+      { id: 'source-kernel' },
+    );
+    expect(textFrom(exportResult.data[0]!.bytes)).toBe('3mf:source:cached');
+  });
+
+  it('should export the cached published render after unrelated invalidation clears active kernel state', async () => {
+    const createGeometry = vi.fn(async (input) => {
+      const label = `source:${String(input.parameters['label'])}`;
+      return {
+        geometry: gltfGeometry(label),
+        nativeHandle: { label },
+        issues: [] as KernelIssue[],
+      };
+    });
+    const deserializeNativeHandle = vi.fn(
+      ({ serializedNativeHandle }: DeserializeNativeHandleInput<{ label: string }>) => ({
+        label: serializedNativeHandle.label,
+      }),
+    );
+    const exportGeometry = vi.fn(async (input: ExportGeometryInput) => ({
+      success: true,
+      data: [exportFile('source.glb', bytesFor(handleLabel(input.nativeHandle)), 'model/gltf-binary')],
+      issues: [] as KernelIssue[],
+    }));
+    const sourceDefinition = createMockKernelDefinition('source-kernel', {
+      exportSchemas: { glb: z.object({}) },
+      createGeometry,
+      exportGeometry,
+      serializeNativeHandle: ({ nativeHandle }) => ({ label: handleLabel(nativeHandle) }),
+      deserializeNativeHandle,
+    });
+    const transcode = vi.fn(async (input: TranscodeInput) => ({
+      success: true,
+      data: [exportFile('model.3mf', bytesFor(`3mf:${textFrom(input.files[0]!.bytes)}`), 'model/3mf')],
+      issues: [] as KernelIssue[],
+    }));
+    const transcoderDefinition: TranscoderDefinition = {
+      name: 'Mock Converter',
+      version: '1.0.0',
+      edges: [{ from: 'glb', to: '3mf', fidelity: 'mesh' }],
+      initialize: vi.fn().mockResolvedValue({ id: 'mock-converter' }),
+      transcode,
+      cleanup: vi.fn().mockResolvedValue(undefined),
+    };
+    const transcoderPlugin = attachRuntimePluginDefinition({ id: 'mock-converter' }, () => transcoderDefinition);
+    const worker = await createMultiKernelWorker(
+      [{ id: 'source-kernel', extensions: ['mock'], definition: sourceDefinition }],
+      [transcoderPlugin],
+      [geometryCache()],
+    );
+
+    await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: { label: 'cached' } });
+
+    const internals = worker as unknown as {
+      nativeHandle: unknown;
+      nativeHandleSlot: unknown;
+      pendingNativeHandle: unknown;
+    };
+    internals.nativeHandle = undefined;
+    internals.nativeHandleSlot = undefined;
+    internals.pendingNativeHandle = undefined;
+
+    await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: { label: 'cached' } });
+    expect(createGeometry).toHaveBeenCalledOnce();
+
+    await worker.notifyFileChanged([`${basePath}/unrelated.txt`]);
+
+    const exportResult = await worker.exportGeometry('3mf');
+
+    if (!exportResult.success) {
+      throw new Error(
+        `Expected cached render export after unrelated invalidation to succeed, got: ${exportResult.issues
+          .map((issue) => issue.message)
+          .join('; ')}`,
+      );
+    }
+    expect(deserializeNativeHandle).toHaveBeenCalledOnce();
+    expect(exportGeometry).toHaveBeenCalledWith(
+      expect.objectContaining({ format: 'glb', nativeHandle: { label: 'source:cached' } }),
+      expect.any(Object),
+      { id: 'source-kernel' },
+    );
+    expect(textFrom(exportResult.data[0]!.bytes)).toBe('3mf:source:cached');
+  });
+
+  it('should select the request file kernel for exportModel after a different kernel was active', async () => {
+    const sourceDefinition = createMockKernelDefinition('source-kernel', {
+      exportSchemas: { glb: z.object({}) },
+      createGeometry: async (input) => {
+        const label = `source:${String(input.parameters['label'])}`;
+        return {
+          geometry: gltfGeometry(label),
+          nativeHandle: { label },
+          issues: [] as KernelIssue[],
+        };
+      },
+      exportGeometry: async (input: ExportGeometryInput) => ({
+        success: true,
+        data: [exportFile('source.glb', bytesFor(handleLabel(input.nativeHandle)), 'model/gltf-binary')],
+        issues: [] as KernelIssue[],
+      }),
+    });
+    const otherCreateGeometry = vi.fn(async (input) => {
+      const label = `other:${String(input.parameters['label'])}`;
+      return {
+        geometry: gltfGeometry(label),
+        nativeHandle: { label },
+        issues: [] as KernelIssue[],
+      };
+    });
+    const otherExportGeometry = vi.fn(async (input: ExportGeometryInput) => ({
+      success: true,
+      data: [exportFile('other.glb', bytesFor(handleLabel(input.nativeHandle)), 'model/gltf-binary')],
+      issues: [] as KernelIssue[],
+    }));
+    const otherDefinition = createMockKernelDefinition('other-kernel', {
+      exportSchemas: { glb: z.object({}) },
+      createGeometry: otherCreateGeometry,
+      exportGeometry: otherExportGeometry,
+    });
+    const worker = await createMultiKernelWorker([
+      { id: 'source-kernel', extensions: ['mock'], definition: sourceDefinition },
+      { id: 'other-kernel', extensions: ['other'], definition: otherDefinition },
+    ]);
+
+    await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: { label: 'preview' } });
+
+    const exportResult = await worker.exportModel({
+      file: createGeometryFile('b.other'),
+      parameters: { label: 'request' },
+      format: 'glb',
+    });
+
+    if (!exportResult.success) {
+      throw new Error(
+        `Expected request-scoped export to use b.other's kernel, got: ${exportResult.issues
+          .map((issue) => issue.message)
+          .join('; ')}`,
+      );
+    }
+    const exportedText = textFrom(exportResult.data[0]!.bytes);
+    if (exportedText !== 'other:request') {
+      throw new Error(`Expected request-scoped exportModel to emit other:request, got: ${exportedText}`);
+    }
+    expect(otherCreateGeometry).toHaveBeenCalledOnce();
+    expect(otherExportGeometry).toHaveBeenCalledWith(
+      expect.objectContaining({ format: 'glb', nativeHandle: { label: 'other:request' } }),
+      expect.any(Object),
+      { id: 'other-kernel' },
+    );
   });
 });
 

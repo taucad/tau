@@ -81,6 +81,16 @@ import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-def
 import { createWorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import type { WorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import type { WatchEvent } from '@taucad/filesystem';
+import type {
+  DependencyResolutionContext,
+  KernelBinding,
+  MaterializedRender,
+  NativeHandleSlot,
+  OperationOwner,
+  RenderIdentity,
+  SerializedNativeHandleSlot,
+} from '#framework/render-artifact.js';
+import { createRenderIdentityKey } from '#framework/render-artifact.js';
 const tauVersion = '0.1.0';
 
 type FileSystemProxy = WorkerFileSystemProxy;
@@ -101,20 +111,31 @@ type LoadedTranscoder = {
   edges: readonly TranscoderEdge[];
 };
 
-export type LastSettledRenderIdentity = {
-  file: GeometryFile;
-  projectRootPath: string;
-  selectedKernelId: string | undefined;
-  parameters: Record<string, unknown>;
-  renderOptions: Record<string, unknown>;
-  dependencies: Dependency[];
-  dependencyHash: string;
-};
+export type LastSettledRenderIdentity = RenderIdentity;
 
-type ExportRequestPlan =
+type OwnerBoundExportRoute =
+  | {
+      kind: 'direct';
+      kernelId: string | undefined;
+      targetFormat: FileExtension;
+      options: Record<string, unknown>;
+    }
+  | {
+      kind: 'transcoded';
+      kernelId: string;
+      sourceFormat: FileExtension;
+      targetFormat: FileExtension;
+      transcoderId: string;
+      sourceOptions: Record<string, unknown>;
+      edgeOptions: Record<string, unknown>;
+    };
+
+type OwnerBoundExportPlan =
   | {
       success: true;
+      owner: OperationOwner;
       input: ExportGeometryRequest;
+      route: OwnerBoundExportRoute;
       dependency: ExportDependency;
     }
   | {
@@ -289,23 +310,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   protected readonly kernelRenderZodSchemaMap = new Map<string, z.ZodType>();
 
   /**
-   * Framework-managed native geometry handle from the last successful createGeometry call.
-   * Opaque to the framework -- typed by each kernel subclass.
-   * Passed to exportGeometry so exports work regardless of cache state.
-   *
-   * The cache is opportunistic, not contractual: an export immediately
-   * following a render may skip the re-mesh, but the only contractual
-   * guarantee is that single-arg `client.export(format)` throws
-   * `NoRenderOutcomeError` when no prior render has settled.
+   * Framework-managed native geometry handle currently loaded in memory.
+   * The handle is opaque to the framework; exports may use it only when the
+   * identity-bound nativeHandleSlot proves it belongs to the requested render.
    */
   protected nativeHandle: unknown;
 
   /**
-   * Durable native-handle snapshot from the last successful createGeometry call.
-   * Populated only by explicit kernel `serializeNativeHandle` hooks and restored
-   * only by the matching `deserializeNativeHandle` hook.
+   * Compatibility mirror for tests/subclasses that directly clear the old field.
+   * Export code resolves durable snapshots through serializedNativeHandleSlot.
    */
   protected lastSerializedNativeHandle: unknown;
+
+  protected pendingNativeHandle: unknown;
+  protected nativeHandleSlot: NativeHandleSlot | undefined;
+  protected serializedNativeHandleSlot: SerializedNativeHandleSlot | undefined;
 
   /** Fully initialized bundlers keyed by file extension. Shared context across extensions of the same bundler. */
   protected loadedBundlers = new Map<string, { definition: BundlerDefinition; ctx: unknown }>();
@@ -436,9 +455,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Unresolved import paths from the most recent getDependencies call, merged into the watch set. */
   private unresolvedDependencyPaths = new Set<string>();
 
-  /** Per-render dependency computation cache. Cleared at the start of each render cycle. */
-  private renderDependencyCache?: { hash: string; dependencies: Dependency[] };
-
   /** Middleware-registered watch paths with custom debounce tiers (path → debounce in ms). */
   private readonly middlewareWatchPaths = new Map<string, number>();
 
@@ -492,11 +508,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Current parameters for autonomous render loop. */
   private currentParameters: Record<string, unknown> = {};
 
-  /** Last merged parameters passed to createGeometry (defaults + user overrides). */
-  private lastRenderParameters: Record<string, unknown> = {};
-
-  /** Exact dependency identity for the last successful geometry render. */
-  private lastSettledRenderIdentity: LastSettledRenderIdentity | undefined;
+  /** Exact artifact identity for the currently published preview render. */
+  private currentPublishedRender: MaterializedRender | undefined;
 
   /** Current render options for autonomous render loop. */
   private currentRenderOptions: Record<string, unknown> | undefined;
@@ -711,36 +724,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     parameters?: Record<string, unknown>;
     options?: Record<string, unknown>;
   }): Promise<void> {
-    const entries = Object.entries(request.stage);
-
-    if (entries.length > 0) {
-      const fs = this.filesystem;
-      const writtenDirectories = new Set<string>();
-
-      for (const [absolutePath, bytes] of entries) {
-        const lastSlash = absolutePath.lastIndexOf('/');
-        if (lastSlash > 0) {
-          const directory = absolutePath.slice(0, lastSlash);
-          if (!writtenDirectories.has(directory)) {
-            writtenDirectories.add(directory);
-            // oxlint-disable-next-line no-await-in-loop -- Sequential mkdir to preserve parent-before-child order.
-            await fs.mkdir(directory, { recursive: true });
-          }
-        }
-        // oxlint-disable-next-line no-await-in-loop -- Writes must complete before render reads them.
-        await fs.writeFile(absolutePath, bytes);
-      }
-
-      // Invalidate every cache layer keyed on the staged paths so the
-      // next render reads the freshly written bytes. Without this,
-      // back-to-back `client.openFile({ code })` calls (e.g. an
-      // editor edit followed by a re-render) would resolve through
-      // the OLD `fileContentCache` entry and produce stale parameter
-      // extraction / dependency hashes — even though the underlying
-      // filesystem now holds the new content. Mirrors the
-      // `notifyFileChanged` invalidation path so the cache contract
-      // is identical regardless of who wrote the bytes.
-      this._invalidateCachesForPaths(entries.map(([absolutePath]) => absolutePath));
+    if (Object.keys(request.stage).length > 0) {
+      await this.writeFilesAndInvalidate(request.stage);
     }
 
     this.handleOpenFile(request.file, request.parameters, request.options);
@@ -829,9 +814,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.assetHashCache.clear();
     this.middlewareWatchPaths.clear();
     this.nativeHandle = undefined;
+    this.pendingNativeHandle = undefined;
+    this.nativeHandleSlot = undefined;
+    this.serializedNativeHandleSlot = undefined;
     this.lastSerializedNativeHandle = undefined;
-    this.lastRenderParameters = {};
-    this.lastSettledRenderIdentity = undefined;
+    this.currentPublishedRender = undefined;
     this.currentFile = undefined;
     this.telemetryCollector?.dispose();
     this.telemetryCollector = undefined;
@@ -858,8 +845,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @param file - The geometry file to extract parameters from.
    * @returns The extracted parameters.
    */
-  public async getParameters(file: GeometryFile): Promise<GetParametersResult> {
+  public async getParameters(
+    file: GeometryFile,
+    dependencyContext?: DependencyResolutionContext,
+    owner?: OperationOwner,
+  ): Promise<GetParametersResult> {
     this.setBasePath(file);
+    const operationOwner = owner ?? (await this.createOperationOwner(file, 'request'));
     const start = performance.now();
 
     const input: GetParametersInput = {
@@ -875,6 +867,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     });
     const dependencies = await this.computeDependencies({
       resolvedMiddleware: resolvedArray,
+      dependencyContext,
+      owner: operationOwner,
     });
     const dependencyHash = this.computeDependencyHash(dependencies);
     depsSpan.end();
@@ -907,7 +901,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const parametersSpan = tracer.startSpan('kernel.extract-params', {
         phase: 'extractingParams',
       });
-      const result = await this.onGetParameters(handlerInput, this.createRuntime());
+      const result = await this.onGetParametersForOwner(operationOwner, handlerInput, this.createRuntime());
       parametersSpan.end();
       return result;
     });
@@ -971,138 +965,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @param entry.options - Optional kernel-specific render options
    * @returns The computed geometry.
    */
-  public async createGeometry(entry: {
-    file: GeometryFile;
-    parameters: Record<string, unknown>;
-    options?: Record<string, unknown>;
-  }): Promise<HashedGeometryResult> {
-    this.setBasePath(entry.file);
-    this.lastRenderParameters = entry.parameters;
-    const start = performance.now();
-
-    const renderOptionsResult = this.validateRenderOptions(entry.options);
-    if (!renderOptionsResult.success) {
-      return createKernelError(renderOptionsResult.issues);
-    }
-
-    const input: CreateGeometryInput = {
-      filePath: this.activeFileAbsolutePath,
-      basePath: this.getProjectRootPath(),
-      parameters: entry.parameters,
-      options: renderOptionsResult.options,
-    };
-
-    const resolvedArray = this.getMiddleware();
-
-    const geoDepsSpan = this.tracer.startSpan('kernel.resolve-deps', {
-      phase: 'resolvingDeps',
+  public async createGeometry(
+    entry: {
+      file: GeometryFile;
+      parameters: Record<string, unknown>;
+      options?: Record<string, unknown>;
+    },
+    dependencyContext?: DependencyResolutionContext,
+    owner?: OperationOwner,
+  ): Promise<HashedGeometryResult> {
+    const { artifact } = await this.materializeRender(entry, {
+      dependencyContext,
+      owner,
+      publish: true,
     });
-    const dependencies = await this.computeDependencies({
-      parameters: entry.parameters,
-      renderOptions: renderOptionsResult.options,
-      resolvedMiddleware: resolvedArray,
-    });
-    const dependencyHash = this.computeDependencyHash(dependencies);
-    geoDepsSpan.end();
-
-    const runtimes = new Map<string, KernelMiddlewareRuntime>();
-    for (const { middleware, options: middlewareOptions, enabled } of resolvedArray) {
-      if (enabled && middleware.wrapCreateGeometry) {
-        runtimes.set(
-          middleware.name,
-          createMiddlewareRuntime({
-            onLog: this.onLog,
-            middlewareName: middleware.name,
-            filesystem: this.filesystem,
-            dependencies,
-            dependencyHash,
-            projectRootPath: this.getProjectRootPath(),
-            basePath: this.getProjectRootPath(),
-            stateSchema: middleware.stateSchema,
-            options: middlewareOptions,
-            logger: this.getMiddlewareLogger(middleware.name),
-            registerWatchPath: this.handleRegisterWatchPath,
-          }),
-        );
-      }
-    }
-
-    this.onProgress?.('computingGeometry');
-    const { tracer } = this;
-    let chain: CreateGeometryHandler = named('kernelHandler', async (handlerInput: CreateGeometryInput) => {
-      const computeSpan = tracer.startSpan('kernel.compute');
-      const result = await this.onCreateGeometry(handlerInput, this.createRuntime());
-      computeSpan.end();
-      return result;
-    });
-
-    for (let index = resolvedArray.length - 1; index >= 0; index--) {
-      const { middleware, enabled } = resolvedArray[index]!;
-      if (enabled && middleware.wrapCreateGeometry) {
-        const inner = chain;
-        const runtime = runtimes.get(middleware.name)!;
-        const middlewareName = middleware.name;
-        const wrapHook = middleware.wrapCreateGeometry;
-
-        chain = named(`middleware(${middlewareName})`, async (handlerInput: CreateGeometryInput) => {
-          const span = tracer.startSpan(`middleware.wrap(${middlewareName})`, {
-            middleware: middlewareName,
-          });
-          try {
-            const result = await wrapHook(handlerInput, inner, runtime);
-            span.end();
-            return result;
-          } catch (error) {
-            span.end();
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            this.logger.error('Middleware failed', {
-              data: { name: middlewareName, error: errorMessage },
-            });
-            return createKernelError([
-              {
-                message: `Middleware error in ${middlewareName}: ${errorMessage}`,
-                code: 'MIDDLEWARE_FAILED',
-                type: 'kernel',
-                severity: 'error',
-              },
-            ]);
-          }
-        });
-      }
-    }
-
-    const internalResult = await chain(input);
-
-    if (internalResult.success) {
-      this.lastSerializedNativeHandle = internalResult.serializedNativeHandle;
-      this.lastSettledRenderIdentity = {
-        file: entry.file,
-        projectRootPath: this.getProjectRootPath(),
-        selectedKernelId: this.getActiveKernelId(),
-        parameters: entry.parameters,
-        renderOptions: renderOptionsResult.options,
-        dependencies,
-        dependencyHash,
-      };
-    }
-
-    this.onProgress?.('postProcessing');
-    // Dependency hash + index is sufficient for unique React keys
-    const result: HashedGeometryResult = internalResult.success
-      ? {
-          ...internalResult,
-          data: internalResult.data.map((geometry, index) => ({
-            ...geometry,
-            hash: `${dependencyHash}-${index}`,
-          })),
-        }
-      : internalResult;
-
-    this.logger.debug('createGeometry completed', {
-      data: { ms: performance.now() - start },
-    });
-
-    return result;
+    return artifact.result;
   }
 
   /**
@@ -1123,7 +1000,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       format,
     });
 
-    const plan = this.createExportRequestPlan(format, options);
+    const currentRender = this.currentPublishedRender;
+    if (!currentRender) {
+      exportSpan.end();
+      return this.createExportRenderIdentityMissingResult();
+    }
+
+    const plan = this.createExportRequestPlan(currentRender.owner, format, options);
     if (!plan.success) {
       exportSpan.end();
       return plan.result;
@@ -1136,11 +1019,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     const result =
       activeMiddleware.length === 0
-        ? await this.executeExportRequest(plan.input, this.lastSettledRenderIdentity)
+        ? await this.executeExportRequest(plan, currentRender)
         : await this.runExportMiddlewarePipeline({
-            input: plan.input,
-            renderIdentity: this.lastSettledRenderIdentity,
-            exportDependency: plan.dependency,
+            plan,
+            renderIdentity: currentRender.identity,
+            renderArtifact: currentRender,
             activeMiddleware,
           });
 
@@ -1162,14 +1045,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     });
 
     try {
+      const dependencyContext: DependencyResolutionContext = {};
       if (request.stage) {
-        await this.stageFiles(request.stage);
+        await this.writeFilesAndInvalidate(request.stage);
       }
 
-      this.renderDependencyCache = undefined;
       this.setBasePath(request.file);
+      const owner = await this.createOperationOwner(request.file, 'request');
 
-      const parametersResult = await this.getParameters(request.file);
+      const parametersResult = await this.getParameters(request.file, dependencyContext, owner);
       let mergedParameters = request.parameters;
       if (parametersResult.success) {
         const extracted = parametersResult.data as {
@@ -1180,7 +1064,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
       }
 
-      const renderOptionsResult = this.validateRenderOptions(request.options);
+      const renderOptionsResult = this.validateRenderOptions(request.options, owner);
       if (!renderOptionsResult.success) {
         return createKernelError(renderOptionsResult.issues);
       }
@@ -1190,18 +1074,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         parameters: mergedParameters,
         renderOptions: renderOptionsResult.options,
         resolvedMiddleware: resolvedArray,
+        dependencyContext,
+        owner,
       });
-      const renderIdentity: LastSettledRenderIdentity = {
+      const renderIdentity = this.createRenderIdentity({
         file: request.file,
-        projectRootPath: this.getProjectRootPath(),
-        selectedKernelId: this.getActiveKernelId(),
         parameters: mergedParameters,
         renderOptions: renderOptionsResult.options,
         dependencies,
         dependencyHash: this.computeDependencyHash(dependencies),
-      };
+        owner,
+      });
 
-      const plan = this.createExportRequestPlan(request.format, request.exportOptions);
+      const plan = this.createExportRequestPlan(owner, request.format, request.exportOptions);
       if (!plan.success) {
         return plan.result;
       }
@@ -1210,19 +1095,26 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         ({ middleware, enabled }) => enabled && middleware.wrapExportGeometry,
       );
       const renderExactRequest = async (handlerInput: ExportGeometryRequest): Promise<ExportGeometryResult> => {
-        if (!this.isCurrentRenderIdentity(renderIdentity)) {
-          this.nativeHandle = undefined;
-          this.lastSerializedNativeHandle = undefined;
-          const renderResult = await this.createGeometry({
-            file: request.file,
-            parameters: mergedParameters,
-            options: renderOptionsResult.options,
-          });
-          if (!renderResult.success) {
-            return { success: false, issues: renderResult.issues };
+        let renderArtifact = this.getPublishedRenderForIdentity(renderIdentity);
+        if (!renderArtifact) {
+          const materialized = await this.materializeRender(
+            {
+              file: request.file,
+              parameters: mergedParameters,
+              options: renderOptionsResult.options,
+            },
+            {
+              dependencyContext,
+              owner,
+              publish: false,
+            },
+          );
+          renderArtifact = materialized.artifact;
+          if (!renderArtifact.result.success) {
+            return { success: false, issues: renderArtifact.result.issues };
           }
         }
-        return this.executeExportRequest(handlerInput, this.lastSettledRenderIdentity ?? renderIdentity);
+        return this.executeExportRequest({ ...plan, input: handlerInput }, renderArtifact);
       };
 
       if (activeMiddleware.length === 0) {
@@ -1230,9 +1122,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
 
       return await this.runExportMiddlewarePipeline({
-        input: plan.input,
+        plan,
         renderIdentity,
-        exportDependency: plan.dependency,
+        renderArtifact: this.getPublishedRenderForIdentity(renderIdentity),
         activeMiddleware,
         onCacheMiss: renderExactRequest,
       });
@@ -1277,11 +1169,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.onProgress = (phase: RenderPhase) => {
       this.onProgressUpdate?.(phase, generation);
     };
-    this.renderDependencyCache = undefined;
+    const dependencyContext: DependencyResolutionContext = {};
     this.setBasePath(input.file);
+    const owner = await this.createOperationOwner(input.file, 'render-artifact');
 
     try {
-      const parametersResult = await this.getParameters(input.file);
+      const parametersResult = await this.getParameters(input.file, dependencyContext, owner);
       this.onParametersResolved?.(parametersResult, generation);
 
       let mergedParameters = input.parameters;
@@ -1294,11 +1187,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
       }
 
-      const result = await this.createGeometry({
-        file: input.file,
-        parameters: mergedParameters,
-        options: input.options,
-      });
+      const result = await this.createGeometry(
+        {
+          file: input.file,
+          parameters: mergedParameters,
+          options: input.options,
+        },
+        dependencyContext,
+        owner,
+      );
 
       return result;
     } finally {
@@ -1439,6 +1336,332 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
   }
 
+  protected async materializeRender(
+    entry: {
+      file: GeometryFile;
+      parameters: Record<string, unknown>;
+      options?: Record<string, unknown>;
+    },
+    options: {
+      dependencyContext?: DependencyResolutionContext;
+      owner?: OperationOwner;
+      publish: boolean;
+    },
+  ): Promise<{ artifact: MaterializedRender }> {
+    this.setBasePath(entry.file);
+    const owner =
+      options.owner ?? (await this.createOperationOwner(entry.file, options.publish ? 'render-artifact' : 'request'));
+    const start = performance.now();
+
+    const renderOptionsResult = this.validateRenderOptions(entry.options, owner);
+    if (!renderOptionsResult.success) {
+      return {
+        artifact: {
+          identity: this.createRenderIdentity({
+            file: entry.file,
+            parameters: entry.parameters,
+            renderOptions: entry.options ?? {},
+            dependencies: [],
+            dependencyHash: '',
+            owner,
+          }),
+          owner,
+          result: createKernelError(renderOptionsResult.issues),
+        },
+      };
+    }
+
+    const input: CreateGeometryInput = {
+      filePath: this.activeFileAbsolutePath,
+      basePath: this.getProjectRootPath(),
+      parameters: entry.parameters,
+      options: renderOptionsResult.options,
+    };
+
+    const resolvedArray = this.getMiddleware();
+
+    const geoDepsSpan = this.tracer.startSpan('kernel.resolve-deps', {
+      phase: 'resolvingDeps',
+    });
+    const dependencies = await this.computeDependencies({
+      parameters: entry.parameters,
+      renderOptions: renderOptionsResult.options,
+      resolvedMiddleware: resolvedArray,
+      dependencyContext: options.dependencyContext,
+      owner,
+    });
+    const dependencyHash = this.computeDependencyHash(dependencies);
+    const identity = this.createRenderIdentity({
+      file: entry.file,
+      parameters: entry.parameters,
+      renderOptions: renderOptionsResult.options,
+      dependencies,
+      dependencyHash,
+      owner,
+    });
+    geoDepsSpan.end();
+
+    const runtimes = new Map<string, KernelMiddlewareRuntime>();
+    for (const { middleware, options: middlewareOptions, enabled } of resolvedArray) {
+      if (enabled && middleware.wrapCreateGeometry) {
+        runtimes.set(
+          middleware.name,
+          createMiddlewareRuntime({
+            onLog: this.onLog,
+            middlewareName: middleware.name,
+            filesystem: this.filesystem,
+            dependencies,
+            dependencyHash,
+            projectRootPath: this.getProjectRootPath(),
+            basePath: this.getProjectRootPath(),
+            stateSchema: middleware.stateSchema,
+            options: middlewareOptions,
+            logger: this.getMiddlewareLogger(middleware.name),
+            registerWatchPath: this.handleRegisterWatchPath,
+          }),
+        );
+      }
+    }
+
+    this.onProgress?.('computingGeometry');
+    const { tracer } = this;
+    let chain: CreateGeometryHandler = named('kernelHandler', async (handlerInput: CreateGeometryInput) => {
+      const computeSpan = tracer.startSpan('kernel.compute');
+      const result = await this.onCreateGeometryForOwner(owner, handlerInput, this.createRuntime());
+      computeSpan.end();
+      return result;
+    });
+
+    for (let index = resolvedArray.length - 1; index >= 0; index--) {
+      const { middleware, enabled } = resolvedArray[index]!;
+      if (enabled && middleware.wrapCreateGeometry) {
+        const inner = chain;
+        const runtime = runtimes.get(middleware.name)!;
+        const middlewareName = middleware.name;
+        const wrapHook = middleware.wrapCreateGeometry;
+
+        chain = named(`middleware(${middlewareName})`, async (handlerInput: CreateGeometryInput) => {
+          const span = tracer.startSpan(`middleware.wrap(${middlewareName})`, {
+            middleware: middlewareName,
+          });
+          try {
+            const result = await wrapHook(handlerInput, inner, runtime);
+            span.end();
+            return result;
+          } catch (error) {
+            span.end();
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            this.logger.error('Middleware failed', {
+              data: { name: middlewareName, error: errorMessage },
+            });
+            return createKernelError([
+              {
+                message: `Middleware error in ${middlewareName}: ${errorMessage}`,
+                code: 'MIDDLEWARE_FAILED',
+                type: 'kernel',
+                severity: 'error',
+              },
+            ]);
+          }
+        });
+      }
+    }
+
+    this.pendingNativeHandle = undefined;
+    const internalResult = await chain(input);
+
+    this.onProgress?.('postProcessing');
+    // One render request produces one public geometry artifact.
+    const result: HashedGeometryResult = internalResult.success
+      ? {
+          ...internalResult,
+          data: {
+            ...internalResult.data,
+            hash: dependencyHash,
+          },
+        }
+      : internalResult;
+
+    const serializedNativeHandle = internalResult.success ? internalResult.serializedNativeHandle : undefined;
+    const artifact = this.createMaterializedRender({
+      owner,
+      identity,
+      result,
+      serializedNativeHandle,
+    });
+    if (options.publish && result.success) {
+      this.publishCurrentRender(artifact);
+    }
+
+    this.logger.debug('createGeometry completed', {
+      data: {
+        ms: performance.now() - start,
+        publish: options.publish,
+        dependencyHash,
+      },
+    });
+
+    return { artifact };
+  }
+
+  protected captureNativeHandle(nativeHandle: unknown): void {
+    this.nativeHandle = nativeHandle;
+    this.pendingNativeHandle = nativeHandle;
+  }
+
+  protected createRenderIdentity(input: {
+    file: GeometryFile;
+    parameters: Record<string, unknown>;
+    renderOptions: Record<string, unknown>;
+    dependencies: Dependency[];
+    dependencyHash: string;
+    owner: OperationOwner;
+  }): RenderIdentity {
+    return {
+      file: input.file,
+      projectRootPath: input.owner.projectRootPath,
+      selectedKernelId: input.owner.binding?.kernelId,
+      selectedKernelVersion: input.owner.binding?.kernelVersion,
+      parameters: input.parameters,
+      renderOptions: input.renderOptions,
+      dependencies: input.dependencies,
+      dependencyHash: input.dependencyHash,
+    };
+  }
+
+  protected createMaterializedRender(options: {
+    owner: OperationOwner;
+    identity: RenderIdentity;
+    result: HashedGeometryResult;
+    serializedNativeHandle: unknown;
+  }): MaterializedRender {
+    const { owner, identity, result, serializedNativeHandle } = options;
+    const { liveNativeHandleSlot, serializedNativeHandleSlot } = this.bindNativeHandleSlots(
+      identity,
+      result.success,
+      serializedNativeHandle,
+    );
+
+    return {
+      identity,
+      owner,
+      result,
+      liveNativeHandleSlot,
+      serializedNativeHandleSlot,
+    };
+  }
+
+  protected bindNativeHandleSlots(
+    identity: RenderIdentity,
+    success: boolean,
+    serializedNativeHandle: unknown,
+  ): {
+    liveNativeHandleSlot?: NativeHandleSlot;
+    serializedNativeHandleSlot?: SerializedNativeHandleSlot;
+  } {
+    const identityKey = createRenderIdentityKey(identity);
+    const { pendingNativeHandle } = this;
+    this.pendingNativeHandle = undefined;
+
+    const liveNativeHandleSlot =
+      success && pendingNativeHandle !== undefined && pendingNativeHandle !== null
+        ? {
+            identityKey,
+            kernelId: identity.selectedKernelId,
+            kernelVersion: identity.selectedKernelVersion,
+            handle: pendingNativeHandle,
+          }
+        : undefined;
+
+    if (liveNativeHandleSlot) {
+      this.nativeHandleSlot = liveNativeHandleSlot;
+      this.nativeHandle = pendingNativeHandle;
+    }
+
+    const serializedNativeHandleSlot =
+      success && serializedNativeHandle !== undefined && serializedNativeHandle !== null
+        ? {
+            identityKey,
+            kernelId: identity.selectedKernelId,
+            kernelVersion: identity.selectedKernelVersion,
+            serializedNativeHandle,
+          }
+        : undefined;
+
+    if (serializedNativeHandleSlot) {
+      this.serializedNativeHandleSlot = serializedNativeHandleSlot;
+      this.lastSerializedNativeHandle = serializedNativeHandle;
+    }
+
+    return { liveNativeHandleSlot, serializedNativeHandleSlot };
+  }
+
+  protected publishCurrentRender(artifact: MaterializedRender): void {
+    this.currentPublishedRender = artifact;
+    this.publishOperationOwner(artifact.owner);
+  }
+
+  protected getPublishedRenderForIdentity(identity: RenderIdentity): MaterializedRender | undefined {
+    const current = this.currentPublishedRender;
+    if (!current) {
+      return undefined;
+    }
+    return createRenderIdentityKey(current.identity) === createRenderIdentityKey(identity) ? current : undefined;
+  }
+
+  protected getNativeHandleSlotForIdentity(
+    identity: RenderIdentity,
+    artifact?: MaterializedRender,
+  ): NativeHandleSlot | undefined {
+    const identityKey = createRenderIdentityKey(identity);
+    if (this.nativeHandleSlot?.identityKey === identityKey && this.nativeHandle === this.nativeHandleSlot.handle) {
+      return this.nativeHandleSlot;
+    }
+
+    const artifactSlot = artifact?.liveNativeHandleSlot;
+    if (artifactSlot?.identityKey === identityKey) {
+      return artifactSlot;
+    }
+    return this.nativeHandleSlot?.identityKey === identityKey ? this.nativeHandleSlot : undefined;
+  }
+
+  protected getSerializedNativeHandleSlotForIdentity(
+    identity: RenderIdentity,
+    artifact?: MaterializedRender,
+  ): SerializedNativeHandleSlot | undefined {
+    const identityKey = createRenderIdentityKey(identity);
+    const artifactSlot = artifact?.serializedNativeHandleSlot;
+    if (artifactSlot?.identityKey === identityKey) {
+      return artifactSlot;
+    }
+    return this.serializedNativeHandleSlot?.identityKey === identityKey ? this.serializedNativeHandleSlot : undefined;
+  }
+
+  protected useLiveNativeHandleSlot(identity: RenderIdentity, artifact?: MaterializedRender): boolean {
+    const slot = this.getNativeHandleSlotForIdentity(identity, artifact);
+    if (!slot || this.nativeHandle !== slot.handle) {
+      return false;
+    }
+    this.nativeHandle = slot.handle;
+    return true;
+  }
+
+  protected clearLiveNativeHandleSlot(slot?: NativeHandleSlot): void {
+    if (slot && this.nativeHandleSlot?.identityKey !== slot.identityKey) {
+      return;
+    }
+    this.nativeHandleSlot = undefined;
+    this.nativeHandle = undefined;
+  }
+
+  protected clearSerializedNativeHandleSlot(slot?: SerializedNativeHandleSlot): void {
+    if (slot && this.serializedNativeHandleSlot?.identityKey !== slot.identityKey) {
+      return;
+    }
+    this.serializedNativeHandleSlot = undefined;
+    this.lastSerializedNativeHandle = undefined;
+  }
+
   protected configureRuntimePlugins(options: KernelWorkerOptions): void {
     this.middlewarePlugins = options.middleware ?? [];
     this.bundlerPlugins = options.bundlers ?? [];
@@ -1488,19 +1711,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   protected async ensureNativeHandle(
     runtime: KernelRuntime,
     renderIdentity?: LastSettledRenderIdentity,
+    renderArtifact?: MaterializedRender,
   ): Promise<void> {
-    if (this.nativeHandle !== undefined && this.nativeHandle !== null) {
+    const identity = renderIdentity ?? this.currentPublishedRender?.identity;
+    if (!identity) {
       return;
     }
 
-    const identity = renderIdentity ?? this.lastSettledRenderIdentity;
-    const file = identity?.file ?? this.currentFile;
-    if (!file) {
+    if (this.useLiveNativeHandleSlot(identity, renderArtifact)) {
       return;
     }
 
+    const { file } = identity;
     this.setBasePath(file);
-    const reheatParameters = identity?.parameters ?? this.lastRenderParameters;
+    const reheatParameters = identity.parameters;
     this.logger.debug('Export reheat: re-running createGeometry to populate nativeHandle', {
       data: {
         filePath: this.activeFileAbsolutePath,
@@ -1509,25 +1733,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       },
     });
     const reheatSpan = this.tracer.startSpan('kernel.export-reheat');
-    const reheatRenderOptions = identity
-      ? ({ success: true, options: identity.renderOptions } as const)
-      : this.validateRenderOptions(this.currentRenderOptions);
-    if (!reheatRenderOptions.success) {
-      reheatSpan.end();
-      this.logger.warn('Export reheat skipped: render option validation failed', {
-        data: { issues: reheatRenderOptions.issues.map((i) => i.message) },
-      });
-      return;
-    }
     try {
+      this.pendingNativeHandle = undefined;
       const reheatResult = await this.onCreateGeometry(
         {
           filePath: this.activeFileAbsolutePath,
           basePath: this.getProjectRootPath(),
           parameters: reheatParameters,
-          options: reheatRenderOptions.options,
+          options: identity.renderOptions,
         },
         runtime,
+      );
+      this.bindNativeHandleSlots(
+        identity,
+        reheatResult.success,
+        reheatResult.success ? reheatResult.serializedNativeHandle : undefined,
       );
       this.logger.debug('Export reheat completed', {
         data: {
@@ -1695,6 +1915,73 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.onCapabilitiesUpdated?.(this._capabilitiesManifest);
   }
 
+  protected async resolveKernelBinding(
+    input: { filePath: string; basePath: string },
+    _runtime: KernelRuntime,
+  ): Promise<KernelBinding | undefined> {
+    const kernelId = this.getActiveKernelId();
+    const kernelVersion = this.getActiveKernelVersion();
+    return kernelId && kernelVersion
+      ? {
+          kernelId,
+          kernelVersion,
+          filePath: input.filePath,
+        }
+      : undefined;
+  }
+
+  protected publishOperationOwner(_owner: OperationOwner): void {
+    // Base workers do not maintain a separate active-kernel read model.
+  }
+
+  protected async onGetParametersForOwner(
+    _owner: OperationOwner,
+    input: GetParametersInput,
+    runtime: KernelRuntime,
+  ): Promise<GetParametersResult> {
+    return this.onGetParameters(input, runtime);
+  }
+
+  protected async onGetDependenciesForOwner(
+    _owner: OperationOwner,
+    input: GetDependenciesInput,
+    runtime: KernelRuntime,
+  ): Promise<GetDependenciesResult> {
+    return this.onGetDependencies(input, runtime);
+  }
+
+  protected async onCreateGeometryForOwner(
+    _owner: OperationOwner,
+    input: CreateGeometryInput,
+    runtime: KernelRuntime,
+  ): Promise<CreateGeometryResult> {
+    return this.onCreateGeometry(input, runtime);
+  }
+
+  protected async onExportGeometryForOwner(
+    _owner: OperationOwner,
+    input: ExportGeometryInput,
+    runtime: KernelRuntime,
+  ): Promise<ExportGeometryResult> {
+    return this.onExportGeometry(input, runtime);
+  }
+
+  protected async isNativeHandleValidForOwner(
+    _owner: OperationOwner,
+    _nativeHandle: unknown,
+    _runtime: KernelRuntime,
+  ): Promise<boolean | undefined> {
+    return undefined;
+  }
+
+  protected async deserializeNativeHandleForOwner(
+    _owner: OperationOwner,
+    _serializedNativeHandle: unknown,
+    _runtime: KernelRuntime,
+  ): Promise<unknown | undefined> {
+    return undefined;
+  }
+
   /**
    * Extract parameters from a file.
    *
@@ -1758,23 +2045,48 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   protected abstract getActiveKernelVersion(): string | undefined;
 
-  private async stageFiles(stage: Record<string, Uint8Array<ArrayBuffer>>): Promise<void> {
+  private async createOperationOwner(file: GeometryFile, kind: OperationOwner['kind']): Promise<OperationOwner> {
+    this.setBasePath(file);
+    const filePath = this.activeFileAbsolutePath;
+    const projectRootPath = this.getProjectRootPath();
+    const binding = await this.resolveKernelBinding({ filePath, basePath: projectRootPath }, this.createRuntime());
+    return {
+      kind,
+      file,
+      projectRootPath,
+      binding,
+    };
+  }
+
+  private async writeFilesAndInvalidate(stage: Record<string, Uint8Array<ArrayBuffer>>): Promise<void> {
+    const changedPaths: string[] = [];
+    const createdDirectories = new Set<string>();
     for (const [path, bytes] of Object.entries(stage)) {
       const absolutePath = path.startsWith('/') ? path : `/${path}`;
       const directory = parentDirectory(absolutePath);
-      if (directory && directory !== '/') {
+      if (directory && directory !== '/' && !createdDirectories.has(directory)) {
         // oxlint-disable-next-line no-await-in-loop -- staging must preserve filesystem order for deterministic tests
         await this.filesystem.mkdir(directory, { recursive: true });
+        createdDirectories.add(directory);
       }
       // oxlint-disable-next-line no-await-in-loop -- staging must complete before dependency resolution
       await this.filesystem.writeFile(absolutePath, bytes);
+      changedPaths.push(absolutePath);
+    }
+    this._invalidateCachesForPaths(changedPaths);
+    if (changedPaths.length > 0) {
+      this.onFileChanged(changedPaths);
     }
   }
 
-  private createExportRequestPlan(format: FileExtension, options?: Record<string, unknown>): ExportRequestPlan {
+  private createExportRequestPlan(
+    owner: OperationOwner,
+    format: FileExtension,
+    options?: Record<string, unknown>,
+  ): OwnerBoundExportPlan {
     const rawOptions = options ?? {};
-    const activeKernelId = this.getActiveKernelId();
-    const zodSchemas = activeKernelId ? this.kernelExportZodSchemasMap.get(activeKernelId) : undefined;
+    const ownerKernelId = owner.binding?.kernelId;
+    const zodSchemas = ownerKernelId ? this.kernelExportZodSchemasMap.get(ownerKernelId) : undefined;
     const formatZodSchema = zodSchemas?.[format];
 
     if (formatZodSchema) {
@@ -1796,14 +2108,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const validatedOptions = parseResult.data as Record<string, unknown>;
       return {
         success: true,
+        owner,
         input: { format, options: validatedOptions },
+        route: {
+          kind: 'direct',
+          kernelId: ownerKernelId,
+          targetFormat: format,
+          options: validatedOptions,
+        },
         dependency: {
           type: 'export',
           format,
           options: validatedOptions,
           route: {
             kind: 'direct',
-            kernelId: activeKernelId,
+            kernelId: ownerKernelId,
             targetFormat: format,
           },
         },
@@ -1811,18 +2130,36 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     const transcoderRoute = this._capabilitiesManifest.routes.find(
-      (route) =>
-        route.targetFormat === format && route.transcoderId && (!activeKernelId || route.kernelId === activeKernelId),
+      (route) => route.targetFormat === format && route.transcoderId && route.kernelId === ownerKernelId,
     );
-    if (zodSchemas && !transcoderRoute && Object.keys(rawOptions).length > 0) {
-      const declared = Object.keys(zodSchemas).join(', ');
+    if (!transcoderRoute) {
+      const declared = zodSchemas ? Object.keys(zodSchemas).join(', ') : '';
+      if (Object.keys(rawOptions).length > 0 && zodSchemas) {
+        return {
+          success: false,
+          result: {
+            success: false,
+            issues: [
+              {
+                message: `No export schema for format "${format}" on kernel "${ownerKernelId}". Declared native formats: ${declared || 'none'}.`,
+                code: 'KERNEL_CAPABILITY_MISSING',
+                type: 'runtime',
+                severity: 'error',
+              },
+            ],
+          },
+        };
+      }
+
       return {
         success: false,
         result: {
           success: false,
           issues: [
             {
-              message: `No export schema for format "${format}" — options cannot be validated. Declared formats: ${declared}. Register the format schema or use a transcoder.`,
+              message: ownerKernelId
+                ? `No export route found for format "${format}" from kernel "${ownerKernelId}". Native formats: ${declared || 'none'}. Register a transcoder that supports this conversion.`
+                : `No export route found for format "${format}" because the render artifact has no selected kernel owner.`,
               code: 'KERNEL_CAPABILITY_MISSING',
               type: 'runtime',
               severity: 'error',
@@ -1834,67 +2171,235 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     let sourceOptions = rawOptions;
     let edgeOptions = rawOptions;
-    if (transcoderRoute) {
-      const sourceZodSchema = zodSchemas?.[transcoderRoute.sourceFormat];
-      if (sourceZodSchema) {
-        const parseResult = sourceZodSchema.safeParse(rawOptions);
-        if (parseResult.success) {
-          sourceOptions = parseResult.data as Record<string, unknown>;
-        }
+    const sourceZodSchema = zodSchemas?.[transcoderRoute.sourceFormat];
+    if (sourceZodSchema) {
+      const parseResult = sourceZodSchema.safeParse(rawOptions);
+      if (parseResult.success) {
+        sourceOptions = parseResult.data as Record<string, unknown>;
       }
+    }
 
-      const transcoder = this.loadedTranscoders.get(transcoderRoute.transcoderId!);
-      const matchingEdge = transcoder?.edges.find(
-        (edge) => edge.from === transcoderRoute.sourceFormat && edge.to === format,
-      );
-      if (matchingEdge?.optionsSchema) {
-        const edgeParseResult = matchingEdge.optionsSchema.safeParse(rawOptions);
-        if (!edgeParseResult.success) {
-          return {
-            success: false,
-            result: createKernelError(
-              edgeParseResult.error.issues.map((issue) => ({
-                message: `Transcoder edge option validation failed (${transcoderRoute.sourceFormat} → ${format}): ${issue.path.join('.')} — ${issue.message}`,
-                code: 'RUNTIME',
-                severity: 'error',
-              })),
-            ),
-          };
-        }
-        edgeOptions = edgeParseResult.data as Record<string, unknown>;
+    const transcoder = this.loadedTranscoders.get(transcoderRoute.transcoderId!);
+    const matchingEdge = transcoder?.edges.find(
+      (edge) => edge.from === transcoderRoute.sourceFormat && edge.to === format,
+    );
+    if (matchingEdge?.optionsSchema) {
+      const edgeParseResult = matchingEdge.optionsSchema.safeParse(rawOptions);
+      if (!edgeParseResult.success) {
+        return {
+          success: false,
+          result: createKernelError(
+            edgeParseResult.error.issues.map((issue) => ({
+              message: `Transcoder edge option validation failed (${transcoderRoute.sourceFormat} → ${format}): ${issue.path.join('.')} — ${issue.message}`,
+              code: 'RUNTIME',
+              severity: 'error',
+            })),
+          ),
+        };
       }
+      edgeOptions = edgeParseResult.data as Record<string, unknown>;
     }
 
     return {
       success: true,
+      owner,
       input: { format, options: rawOptions },
+      route: {
+        kind: 'transcoded',
+        kernelId: transcoderRoute.kernelId,
+        sourceFormat: transcoderRoute.sourceFormat,
+        targetFormat: transcoderRoute.targetFormat,
+        transcoderId: transcoderRoute.transcoderId!,
+        sourceOptions,
+        edgeOptions,
+      },
       dependency: {
         type: 'export',
         format,
         options: rawOptions,
-        route: transcoderRoute
-          ? {
-              kind: 'transcoded',
-              kernelId: transcoderRoute.kernelId,
-              sourceFormat: transcoderRoute.sourceFormat,
-              targetFormat: transcoderRoute.targetFormat,
-              transcoderId: transcoderRoute.transcoderId,
-              sourceOptions,
-              edgeOptions,
-            }
-          : {
-              kind: 'direct',
-              kernelId: activeKernelId,
-              targetFormat: format,
-            },
+        route: {
+          kind: 'transcoded',
+          kernelId: transcoderRoute.kernelId,
+          sourceFormat: transcoderRoute.sourceFormat,
+          targetFormat: transcoderRoute.targetFormat,
+          transcoderId: transcoderRoute.transcoderId,
+          sourceOptions,
+          edgeOptions,
+        },
       },
     };
   }
 
-  private async runExportMiddlewarePipeline(options: {
-    input: ExportGeometryRequest;
+  private async materializeNativeHandleForOwner(options: {
+    owner: OperationOwner;
     renderIdentity: LastSettledRenderIdentity | undefined;
-    exportDependency: ExportDependency;
+    runtime: KernelRuntime;
+    renderArtifact?: MaterializedRender;
+  }): Promise<{ success: true; handle: unknown } | { success: false; result: ExportGeometryResult }> {
+    const { owner, renderIdentity, runtime, renderArtifact } = options;
+    const identity = renderIdentity ?? renderArtifact?.identity;
+    if (!identity) {
+      return { success: false, result: this.createExportRenderIdentityMissingResult() };
+    }
+
+    const liveSlot = this.getNativeHandleSlotForIdentity(identity, renderArtifact);
+    if (this.isLiveNativeHandleSlotUsableForOwner(liveSlot, owner)) {
+      const validity = await this.validateNativeHandleSlot(owner, liveSlot, runtime);
+      if (validity) {
+        return { success: true, handle: liveSlot.handle };
+      }
+    }
+
+    const serializedSlot = this.getSerializedNativeHandleSlotForIdentity(identity, renderArtifact);
+    if (serializedSlot && this.serializedNativeHandleSlotMatchesOwner(serializedSlot, owner)) {
+      const restored = await this.restoreSerializedNativeHandleSlot({
+        owner,
+        identity,
+        slot: serializedSlot,
+        runtime,
+      });
+      if (restored.success) {
+        return { success: true, handle: restored.handle };
+      }
+    }
+
+    await this.reheatNativeHandleForOwner(owner, identity, runtime);
+    const reheatedSlot = this.getNativeHandleSlotForIdentity(identity, renderArtifact);
+    if (this.isLiveNativeHandleSlotUsableForOwner(reheatedSlot, owner)) {
+      return { success: true, handle: reheatedSlot.handle };
+    }
+
+    return {
+      success: false,
+      result: createKernelError([
+        {
+          message: 'Export could not materialize the kernel-native geometry handle for the requested render identity.',
+          code: 'RUNTIME_EXPORT_NATIVE_HANDLE_MISSING',
+          type: 'runtime',
+          severity: 'error',
+        },
+      ]),
+    };
+  }
+
+  private nativeHandleSlotMatchesOwner(slot: NativeHandleSlot, owner: OperationOwner): boolean {
+    return slot.kernelId === owner.binding?.kernelId && slot.kernelVersion === owner.binding?.kernelVersion;
+  }
+
+  private serializedNativeHandleSlotMatchesOwner(slot: SerializedNativeHandleSlot, owner: OperationOwner): boolean {
+    return slot.kernelId === owner.binding?.kernelId && slot.kernelVersion === owner.binding?.kernelVersion;
+  }
+
+  private isLiveNativeHandleSlotUsableForOwner(
+    slot: NativeHandleSlot | undefined,
+    owner: OperationOwner,
+  ): slot is NativeHandleSlot {
+    if (!slot) {
+      return false;
+    }
+    return this.nativeHandle === slot.handle && this.nativeHandleSlotMatchesOwner(slot, owner);
+  }
+
+  private async validateNativeHandleSlot(
+    owner: OperationOwner,
+    slot: NativeHandleSlot,
+    runtime: KernelRuntime,
+  ): Promise<boolean> {
+    try {
+      const isValid = await this.isNativeHandleValidForOwner(owner, slot.handle, runtime);
+      if (isValid === false) {
+        this.clearLiveNativeHandleSlot(slot);
+        this.logger.debug('Native handle is stale; export will reheat');
+        return false;
+      }
+      return true;
+    } catch (error) {
+      this.clearLiveNativeHandleSlot(slot);
+      this.logger.warn('Native-handle validity check failed; export will reheat', {
+        data: { error: error instanceof Error ? error.message : String(error) },
+      });
+      return false;
+    }
+  }
+
+  private async restoreSerializedNativeHandleSlot(options: {
+    owner: OperationOwner;
+    identity: RenderIdentity;
+    slot: SerializedNativeHandleSlot;
+    runtime: KernelRuntime;
+  }): Promise<{ success: true; handle: unknown } | { success: false }> {
+    const { owner, identity, slot, runtime } = options;
+    try {
+      const handle = await this.deserializeNativeHandleForOwner(owner, slot.serializedNativeHandle, runtime);
+      if (handle === undefined || handle === null) {
+        return { success: false };
+      }
+      this.logger.debug('Restoring nativeHandle via owner-bound deserializeNativeHandle');
+      this.captureNativeHandle(handle);
+      this.bindNativeHandleSlots(identity, true, slot.serializedNativeHandle);
+      return { success: true, handle };
+    } catch (error) {
+      this.clearSerializedNativeHandleSlot(slot);
+      this.logger.warn('Native-handle snapshot restore failed; export will reheat', {
+        data: { error: error instanceof Error ? error.message : String(error) },
+      });
+      return { success: false };
+    }
+  }
+
+  private async reheatNativeHandleForOwner(
+    owner: OperationOwner,
+    identity: RenderIdentity,
+    runtime: KernelRuntime,
+  ): Promise<void> {
+    const { file } = identity;
+    this.setBasePath(file);
+    const reheatParameters = identity.parameters;
+    this.logger.debug('Export reheat: re-running createGeometry to populate nativeHandle', {
+      data: {
+        filePath: this.activeFileAbsolutePath,
+        basePath: this.getProjectRootPath(),
+        parameterCount: Object.keys(reheatParameters).length,
+      },
+    });
+    const reheatSpan = this.tracer.startSpan('kernel.export-reheat');
+    try {
+      this.pendingNativeHandle = undefined;
+      const reheatResult = await this.onCreateGeometryForOwner(
+        owner,
+        {
+          filePath: this.activeFileAbsolutePath,
+          basePath: this.getProjectRootPath(),
+          parameters: reheatParameters,
+          options: identity.renderOptions,
+        },
+        runtime,
+      );
+      this.bindNativeHandleSlots(
+        identity,
+        reheatResult.success,
+        reheatResult.success ? reheatResult.serializedNativeHandle : undefined,
+      );
+      this.logger.debug('Export reheat completed', {
+        data: {
+          success: reheatResult.success,
+          nativeHandleType: typeof this.nativeHandle,
+          nativeHandleSet: this.nativeHandle !== undefined,
+          issues: reheatResult.issues.map((i) => i.message),
+        },
+      });
+    } catch (error) {
+      this.logger.error('Export reheat threw', {
+        data: { error: error instanceof Error ? error.message : String(error) },
+      });
+    }
+    reheatSpan.end();
+  }
+
+  private async runExportMiddlewarePipeline(options: {
+    plan: Extract<OwnerBoundExportPlan, { success: true }>;
+    renderIdentity: LastSettledRenderIdentity | undefined;
+    renderArtifact?: MaterializedRender;
     activeMiddleware: ResolvedMiddleware[];
     onCacheMiss?: (input: ExportGeometryRequest) => Promise<ExportGeometryResult>;
   }): Promise<ExportGeometryResult> {
@@ -1905,7 +2410,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const depsSpan = this.tracer.startSpan('kernel.resolve-deps', {
       phase: 'resolvingDeps',
     });
-    const dependencies: Dependency[] = [...options.renderIdentity.dependencies, options.exportDependency];
+    const dependencies: Dependency[] = [...options.renderIdentity.dependencies, options.plan.dependency];
     const dependencyHash = this.computeDependencyHash(dependencies);
     depsSpan.end();
 
@@ -1929,12 +2434,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       );
     }
 
+    const { onCacheMiss, renderArtifact } = options;
+    const computeExport =
+      onCacheMiss ??
+      (async (handlerInput: ExportGeometryRequest): Promise<ExportGeometryResult> => {
+        if (!renderArtifact) {
+          return this.createExportRenderIdentityMissingResult();
+        }
+        return this.executeExportRequest({ ...options.plan, input: handlerInput }, renderArtifact);
+      });
+
     const { tracer } = this;
     let chain: ExportGeometryHandler = named('kernelHandler', async (handlerInput: ExportGeometryRequest) => {
       const computeSpan = tracer.startSpan('kernel.export-compute');
-      const exportResult = options.onCacheMiss
-        ? await options.onCacheMiss(handlerInput)
-        : await this.executeExportRequest(handlerInput, options.renderIdentity);
+      const exportResult = await computeExport(handlerInput);
       computeSpan.end();
       return exportResult;
     });
@@ -1972,104 +2485,52 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       });
     }
 
-    return chain(options.input);
+    return chain(options.plan.input);
   }
 
   private async executeExportRequest(
-    input: ExportGeometryRequest,
-    renderIdentity: LastSettledRenderIdentity | undefined,
+    plan: Extract<OwnerBoundExportPlan, { success: true }>,
+    renderArtifact: MaterializedRender,
   ): Promise<ExportGeometryResult> {
     const runtime = this.createRuntime();
-    const routeAvailability = this.checkExportRouteAvailability(input.format);
-    if (!routeAvailability.success) {
-      return routeAvailability.result;
-    }
-
-    const nativeInput = await this.prepareNativeExportInput(input, renderIdentity, runtime);
+    const nativeInput = await this.prepareNativeExportInput({
+      plan,
+      renderIdentity: renderArtifact.identity,
+      runtime,
+      renderArtifact,
+    });
     if (!nativeInput.success) {
       return nativeInput.result;
     }
 
     const computeSpan = this.tracer.startSpan('kernel.export-compute');
-    const result = await this.executeExportWithRoute(nativeInput.input, runtime);
+    const result = await this.executeExportWithRoute(plan, nativeInput.input, runtime);
     computeSpan.end();
     return result;
   }
 
-  private async prepareNativeExportInput(
-    input: ExportGeometryRequest,
-    renderIdentity: LastSettledRenderIdentity | undefined,
-    runtime: KernelRuntime,
-  ): Promise<{ success: true; input: KernelExportGeometryInput } | { success: false; result: ExportGeometryResult }> {
-    if (!this.getActiveKernelId()) {
-      return {
-        success: true,
-        input: {
-          ...input,
-          nativeHandle: this.nativeHandle,
-        },
-      };
-    }
-
-    await this.ensureNativeHandle(runtime, renderIdentity);
-    if (this.nativeHandle === undefined || this.nativeHandle === null) {
-      return {
-        success: false,
-        result: createKernelError([
-          {
-            message:
-              'Export could not materialize the kernel-native geometry handle for the requested render identity.',
-            code: 'RUNTIME_EXPORT_NATIVE_HANDLE_MISSING',
-            type: 'runtime',
-            severity: 'error',
-          },
-        ]),
-      };
+  private async prepareNativeExportInput(options: {
+    plan: Extract<OwnerBoundExportPlan, { success: true }>;
+    renderIdentity: LastSettledRenderIdentity | undefined;
+    runtime: KernelRuntime;
+    renderArtifact?: MaterializedRender;
+  }): Promise<{ success: true; input: KernelExportGeometryInput } | { success: false; result: ExportGeometryResult }> {
+    const { plan, renderIdentity, runtime, renderArtifact } = options;
+    const nativeHandle = await this.materializeNativeHandleForOwner({
+      owner: plan.owner,
+      renderIdentity,
+      runtime,
+      renderArtifact,
+    });
+    if (!nativeHandle.success) {
+      return nativeHandle;
     }
 
     return {
       success: true,
       input: {
-        ...input,
-        nativeHandle: this.nativeHandle,
-      },
-    };
-  }
-
-  private checkExportRouteAvailability(
-    format: FileExtension,
-  ): { success: true } | { success: false; result: ExportGeometryResult } {
-    const activeKernelId = this.getActiveKernelId();
-    if (!activeKernelId) {
-      return { success: true };
-    }
-
-    const zodSchemas = this.kernelExportZodSchemasMap.get(activeKernelId);
-    const kernelFormats = zodSchemas ? (Object.keys(zodSchemas) as FileExtension[]) : undefined;
-    if (kernelFormats?.includes(format)) {
-      return { success: true };
-    }
-
-    const hasTranscoderRoute = this._capabilitiesManifest.routes.some(
-      (route) => route.targetFormat === format && route.transcoderId && route.kernelId === activeKernelId,
-    );
-    if (hasTranscoderRoute) {
-      return { success: true };
-    }
-
-    const nativeFormats = kernelFormats?.join(', ') ?? 'none';
-    return {
-      success: false,
-      result: {
-        success: false,
-        issues: [
-          {
-            message: `No export route found for format "${format}" from kernel "${activeKernelId}". Native formats: ${nativeFormats}. Register a transcoder that supports this conversion.`,
-            code: 'KERNEL_CAPABILITY_MISSING',
-            type: 'runtime',
-            severity: 'error',
-          },
-        ],
+        ...plan.input,
+        nativeHandle: nativeHandle.handle,
       },
     };
   }
@@ -2084,10 +2545,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         severity: 'error',
       },
     ]);
-  }
-
-  private isCurrentRenderIdentity(identity: LastSettledRenderIdentity): boolean {
-    return this.lastSettledRenderIdentity?.dependencyHash === identity.dependencyHash;
   }
 
   /**
@@ -2186,15 +2643,16 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       this.onProgress = (phase: RenderPhase) => {
         this.onProgressUpdate?.(phase, generation);
       };
-      this.renderDependencyCache = undefined;
+      const dependencyContext: DependencyResolutionContext = {};
       this.setBasePath(this.currentFile);
+      const owner = await this.createOperationOwner(this.currentFile, 'render-artifact');
 
       if (this.isAborted(generation)) {
         return;
       }
 
       const renderWork = async (): Promise<HashedGeometryResult> => {
-        const parametersResult = await this.getParameters(this.currentFile!);
+        const parametersResult = await this.getParameters(this.currentFile!, dependencyContext, owner);
         if (this.isAborted(generation)) {
           throw new RenderAbortedError();
         }
@@ -2217,11 +2675,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
         this.pushProgress(30);
 
-        const geometryResult = await this.createGeometry({
-          file: this.currentFile!,
-          parameters: mergedParameters,
-          options: this.currentRenderOptions,
-        });
+        const geometryResult = await this.createGeometry(
+          {
+            file: this.currentFile!,
+            parameters: mergedParameters,
+            options: this.currentRenderOptions,
+          },
+          dependencyContext,
+          owner,
+        );
 
         if (this.isAborted(generation)) {
           throw new RenderAbortedError();
@@ -2290,6 +2752,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         this.bundleResultCache.delete(entryPath);
       }
     }
+
+    if (
+      this.currentPublishedRender &&
+      this.identityDependsOnPaths(this.currentPublishedRender.identity, changedPaths)
+    ) {
+      this.currentPublishedRender = undefined;
+    }
+  }
+
+  private identityDependsOnPaths(identity: RenderIdentity, changedPaths: readonly string[]): boolean {
+    const changed = new Set(changedPaths);
+    return identity.dependencies.some((dependency) => dependency.type === 'file' && changed.has(dependency.path));
   }
 
   /**
@@ -2562,114 +3036,67 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *    and execute the first viable route via the matching transcoder.
    * 3. Return an actionable error if no route succeeds.
    *
+   * @param plan - Owner-bound export plan selected for this render artifact.
    * @param input - The export geometry input
    * @param runtime - The kernel runtime services
    * @returns The export result
    */
   // oxlint-disable-next-line complexity -- Multi-step route planner with fallback
   private async executeExportWithRoute(
+    plan: Extract<OwnerBoundExportPlan, { success: true }>,
     input: KernelExportGeometryInput,
     runtime: KernelRuntime,
   ): Promise<ExportGeometryResult> {
-    const activeKernelId = this.getActiveKernelId();
-
-    if (!activeKernelId) {
-      return this.onExportGeometry(input, runtime);
+    if (plan.route.kind === 'direct') {
+      return this.onExportGeometryForOwner(
+        plan.owner,
+        {
+          ...input,
+          format: plan.route.targetFormat,
+          options: plan.route.options,
+        },
+        runtime,
+      );
     }
-
-    const zodSchemas = this.kernelExportZodSchemasMap.get(activeKernelId);
-    const kernelFormats = zodSchemas ? (Object.keys(zodSchemas) as FileExtension[]) : undefined;
-
-    if (kernelFormats?.includes(input.format)) {
-      return this.onExportGeometry(input, runtime);
-    }
-
-    const candidateRoutes = this._capabilitiesManifest.routes.filter(
-      (r) => r.targetFormat === input.format && r.transcoderId && (!activeKernelId || r.kernelId === activeKernelId),
-    );
 
     const transcoderRuntime: TranscoderRuntime = {
       logger: this.logger,
       tracer: this.tracer,
     };
 
-    /* oxlint-disable no-await-in-loop -- Sequential candidate evaluation: each route runs source export + transcode */
-    for (const route of candidateRoutes) {
-      const transcoder = this.loadedTranscoders.get(route.transcoderId!);
-      if (!transcoder) {
-        continue;
-      }
-
-      const zodSchemas = activeKernelId ? this.kernelExportZodSchemasMap.get(activeKernelId) : undefined;
-      const sourceZodSchema = zodSchemas?.[route.sourceFormat];
-      let resolvedSourceOptions = input.options;
-      if (sourceZodSchema) {
-        const parseResult = sourceZodSchema.safeParse(input.options);
-        if (parseResult.success) {
-          resolvedSourceOptions = parseResult.data as Record<string, unknown>;
-        }
-      }
-
-      const sourceInput: KernelExportGeometryInput = {
-        ...input,
-        format: route.sourceFormat,
-        options: resolvedSourceOptions,
-      };
-
-      const kernelResult = await this.onExportGeometry(sourceInput, runtime);
-      if (!kernelResult.success) {
-        continue;
-      }
-
-      const matchingEdge = transcoder.edges.find(
-        (edge) => edge.from === route.sourceFormat && edge.to === input.format,
-      );
-      let resolvedTranscodeOptions = input.options;
-      if (matchingEdge?.optionsSchema) {
-        const edgeParseResult = matchingEdge.optionsSchema.safeParse(input.options);
-        if (!edgeParseResult.success) {
-          return createKernelError(
-            edgeParseResult.error.issues.map((issue) => ({
-              message: `Transcoder edge option validation failed (${route.sourceFormat} → ${input.format}): ${issue.path.join('.')} — ${issue.message}`,
-              code: 'RUNTIME',
-              severity: 'error',
-            })),
-          );
-        }
-        resolvedTranscodeOptions = edgeParseResult.data as Record<string, unknown>;
-      }
-
-      const transcodeResult = await transcoder.definition.transcode(
+    const { route } = plan;
+    const transcoder = this.loadedTranscoders.get(route.transcoderId);
+    if (!transcoder) {
+      return createKernelError([
         {
-          from: route.sourceFormat,
-          to: input.format,
-          files: kernelResult.data,
-          options: resolvedTranscodeOptions,
-        },
-        transcoderRuntime,
-        transcoder.context,
-      );
-      if (transcodeResult.success) {
-        return transcodeResult;
-      }
-    }
-    /* oxlint-enable no-await-in-loop */
-
-    const nativeFormats = kernelFormats?.join(', ') ?? 'none';
-    return {
-      success: false,
-      issues: [
-        {
-          message:
-            `No export route found for format "${input.format}"` +
-            (activeKernelId ? ` from kernel "${activeKernelId}"` : '') +
-            `. Native formats: ${nativeFormats}. Register a transcoder that supports this conversion.`,
+          message: `No loaded transcoder "${route.transcoderId}" for route ${route.sourceFormat} → ${route.targetFormat}.`,
           code: 'KERNEL_CAPABILITY_MISSING',
           type: 'runtime',
           severity: 'error',
         },
-      ],
+      ]);
+    }
+
+    const sourceInput: KernelExportGeometryInput = {
+      ...input,
+      format: route.sourceFormat,
+      options: route.sourceOptions,
     };
+    const kernelResult = await this.onExportGeometryForOwner(plan.owner, sourceInput, runtime);
+    if (!kernelResult.success) {
+      return kernelResult;
+    }
+
+    return transcoder.definition.transcode(
+      {
+        from: route.sourceFormat,
+        to: route.targetFormat,
+        files: kernelResult.data,
+        options: route.edgeOptions,
+      },
+      transcoderRuntime,
+      transcoder.context,
+    );
   }
 
   /**
@@ -2763,15 +3190,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     parameters?: Record<string, unknown>;
     renderOptions?: Record<string, unknown>;
     resolvedMiddleware?: ResolvedMiddleware[];
+    dependencyContext?: DependencyResolutionContext;
+    owner: OperationOwner;
   }): Promise<Dependency[]> {
-    // Use cached base deps within a render cycle (file discovery + hashing is expensive)
-    let baseDeps: Dependency[];
-    if (this.renderDependencyCache) {
-      baseDeps = this.renderDependencyCache.dependencies;
-    } else {
-      baseDeps = await this.computeBaseDependencies(input.resolvedMiddleware);
-      // Cache for reuse by createGeometry within the same render cycle
-      this.renderDependencyCache = { hash: '', dependencies: baseDeps };
+    let baseDeps = input.dependencyContext?.baseDependencies;
+    if (!baseDeps) {
+      baseDeps = await this.computeBaseDependencies(input.owner, input.resolvedMiddleware);
+      if (input.dependencyContext) {
+        input.dependencyContext.baseDependencies = baseDeps;
+      }
     }
 
     const runtimeDeps: Dependency[] = [...baseDeps];
@@ -2800,17 +3227,24 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * can be cached for the duration of a render cycle (shared between
    * getParameters and createGeometry).
    *
+   * @param owner - Kernel/file owner for this dependency-resolution operation
    * @param resolvedMiddleware - optional resolved middleware entries to include as dependencies
    * @returns array of file and asset dependencies with content hashes
    */
-  private async computeBaseDependencies(resolvedMiddleware?: ResolvedMiddleware[]): Promise<Dependency[]> {
+  private async computeBaseDependencies(
+    owner: OperationOwner,
+    resolvedMiddleware?: ResolvedMiddleware[],
+  ): Promise<Dependency[]> {
+    this.setBasePath(owner.file);
+    const ownerFilePath = KernelWorker.resolveFromRoot(owner.file.filename, owner.projectRootPath);
+
     // 1. Discover file dependencies from kernel module
     const discoverSpan = this.tracer.startSpan('deps.discover');
     const discoverInput: GetDependenciesInput = {
-      filePath: this.activeFileAbsolutePath,
-      basePath: this.getProjectRootPath(),
+      filePath: ownerFilePath,
+      basePath: owner.projectRootPath,
     };
-    const depsResult = await this.onGetDependencies(discoverInput, this.createRuntime());
+    const depsResult = await this.onGetDependenciesForOwner(owner, discoverInput, this.createRuntime());
     this.unresolvedDependencyPaths = new Set(depsResult.unresolved);
     const absolutePaths = depsResult.resolved;
     discoverSpan.end();
@@ -2898,8 +3332,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       version: tauVersion,
     };
 
-    const activeKernelId = this.getActiveKernelId();
-    const activeKernelVersion = this.getActiveKernelVersion();
+    const activeKernelId = owner.binding?.kernelId;
+    const activeKernelVersion = owner.binding?.kernelVersion;
     const kernelDeps: KernelDependency[] =
       activeKernelId && activeKernelVersion
         ? [{ type: 'kernel', id: activeKernelId, version: activeKernelVersion }]
@@ -3202,8 +3636,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   private validateRenderOptions(
     renderOptions: Record<string, unknown> | undefined,
+    owner: OperationOwner,
   ): { success: true; options: Record<string, unknown> } | { success: false; issues: KernelIssue[] } {
-    const activeKernelId = this.getActiveKernelId();
+    const activeKernelId = owner.binding?.kernelId;
     const zodSchema = activeKernelId ? this.kernelRenderZodSchemaMap.get(activeKernelId) : undefined;
     if (!zodSchema) {
       return { success: true, options: renderOptions ?? {} };

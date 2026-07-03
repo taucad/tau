@@ -33,7 +33,7 @@ import type {
 } from '#types/runtime-kernel.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import { KernelWorker } from '#framework/kernel-worker.js';
-import type { LastSettledRenderIdentity } from '#framework/kernel-worker.js';
+import type { KernelBinding, OperationOwner } from '#framework/render-artifact.js';
 import { isRenderAbortedError } from '#framework/runtime-worker-client.js';
 import { preserveMethodNames } from '#framework/named.js';
 import { isWebAssemblyException } from '#kernels/occt/wasm-exception.js';
@@ -56,6 +56,8 @@ type LoadedKernel = {
   ctx: unknown;
   initialized: boolean;
 };
+
+type RuntimeKernelBinding = KernelBinding<LoadedKernel>;
 
 type RuntimeWorkerOptions = Record<string, never>;
 
@@ -127,20 +129,22 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     input: GetDependenciesInput,
     runtime: KernelRuntime,
   ): Promise<GetDependenciesResult> {
+    const owner = await this.createLegacyOperationOwner(input, 'request', runtime);
+    return this.onGetDependenciesForOwner(owner, input, runtime);
+  }
+
+  protected override async onGetDependenciesForOwner(
+    owner: OperationOwner,
+    input: GetDependenciesInput,
+    runtime: KernelRuntime,
+  ): Promise<GetDependenciesResult> {
     if (this.cachedDetectionDeps) {
       const deps = this.cachedDetectionDeps;
       this.cachedDetectionDeps = undefined;
       return deps;
     }
 
-    let kernel: LoadedKernel | undefined;
-    try {
-      kernel = await this.ensureActiveKernel(input.filePath, runtime);
-    } catch (error) {
-      this.selectionErrors.set(input.filePath, error);
-      return { resolved: [input.filePath], unresolved: [] };
-    }
-
+    const kernel = this.getKernelForOwner(owner);
     if (!kernel) {
       return { resolved: [input.filePath], unresolved: [] };
     }
@@ -152,13 +156,21 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     input: GetParametersInput,
     runtime: KernelRuntime,
   ): Promise<GetParametersResult> {
-    let kernel: LoadedKernel | undefined;
-    try {
-      kernel = await this.ensureActiveKernel(input.filePath, runtime);
-    } catch (error) {
-      return createKernelError([this.createKernelBindingIssue(error)]);
+    const owner = await this.createLegacyOperationOwner(input, 'request', runtime);
+    return this.onGetParametersForOwner(owner, input, runtime);
+  }
+
+  protected override async onGetParametersForOwner(
+    owner: OperationOwner,
+    input: GetParametersInput,
+    runtime: KernelRuntime,
+  ): Promise<GetParametersResult> {
+    const selectionError = this.selectionErrors.get(input.filePath);
+    if (selectionError) {
+      return createKernelError([this.createKernelBindingIssue(selectionError)]);
     }
 
+    const kernel = this.getKernelForOwner(owner);
     if (!kernel) {
       runtime.logger.warn('getParameters returning empty: kernel-not-selected', {
         data: { filePath: input.filePath, loadedKernels: [...this.loadedKernels.keys()] },
@@ -177,24 +189,34 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     input: CreateGeometryInput,
     runtime: KernelRuntime,
   ): Promise<CreateGeometryResult> {
+    const owner = await this.createLegacyOperationOwner(input, 'request', runtime);
+    return this.onCreateGeometryForOwner(owner, input, runtime);
+  }
+
+  protected override async onCreateGeometryForOwner(
+    owner: OperationOwner,
+    input: CreateGeometryInput,
+    runtime: KernelRuntime,
+  ): Promise<CreateGeometryResult> {
     const selectionError = this.selectionErrors.get(input.filePath);
     if (selectionError) {
       this.selectionErrors.delete(input.filePath);
       return createKernelError([this.createKernelBindingIssue(selectionError)]);
     }
 
-    let kernel: LoadedKernel | undefined;
-    try {
-      kernel = await this.ensureActiveKernel(input.filePath, runtime);
-    } catch (error) {
-      return createKernelError([this.createKernelBindingIssue(error)]);
-    }
-
+    const kernel = this.getKernelForOwner(owner);
     if (!kernel) {
-      runtime.logger.warn('createGeometry returning empty: kernel-not-selected', {
+      runtime.logger.warn('createGeometry failed: kernel-not-selected', {
         data: { filePath: input.filePath, loadedKernels: [...this.loadedKernels.keys()] },
       });
-      return { success: true, data: [], issues: [] };
+      return createKernelError([
+        {
+          message: 'No runtime kernel selected for render.',
+          code: 'KERNEL_CAPABILITY_MISSING',
+          type: 'kernel',
+          severity: 'error',
+        },
+      ]);
     }
 
     const zodSchema = this.kernelRenderZodSchemaMap.get(kernel.entry.id);
@@ -206,7 +228,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     try {
       const output = await kernel.definition.createGeometry(resolvedInput, runtime, kernel.ctx);
 
-      this.nativeHandle = output.nativeHandle;
+      this.captureNativeHandle(output.nativeHandle);
 
       if (kernel.definition.serializeNativeHandle) {
         const serializedNativeHandle = kernel.definition.serializeNativeHandle(
@@ -285,66 +307,88 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     return kernel.definition.exportGeometry(input, runtime, kernel.ctx);
   }
 
-  protected override async ensureNativeHandle(
+  protected override async onExportGeometryForOwner(
+    owner: OperationOwner,
+    input: ExportGeometryInput,
     runtime: KernelRuntime,
-    renderIdentity?: LastSettledRenderIdentity,
-  ): Promise<void> {
-    if (this.nativeHandle !== undefined && this.nativeHandle !== null) {
-      if (!this.activeKernelId) {
-        return;
-      }
-
-      const kernel = this.getActiveKernel();
-      if (!kernel.definition.isNativeHandleValid) {
-        return;
-      }
-
-      try {
-        const isValid = await kernel.definition.isNativeHandleValid(
-          { nativeHandle: this.nativeHandle },
-          runtime,
-          kernel.ctx,
-        );
-        if (isValid) {
-          return;
-        }
-
-        this.nativeHandle = undefined;
-        this.logger.debug('Native handle is stale; export will reheat');
-      } catch (error) {
-        this.nativeHandle = undefined;
-        this.logger.warn('Native-handle validity check failed; export will reheat', {
-          data: { error: error instanceof Error ? error.message : String(error) },
-        });
-      }
+  ): Promise<ExportGeometryResult> {
+    const kernel = this.getKernelForOwner(owner);
+    if (!kernel) {
+      return {
+        success: false,
+        issues: [
+          {
+            message: 'No geometry available for export',
+            code: 'RUNTIME',
+            type: 'runtime',
+            severity: 'error',
+          },
+        ],
+      };
     }
 
-    if (this.nativeHandle !== undefined && this.nativeHandle !== null) {
+    return kernel.definition.exportGeometry(input, runtime, kernel.ctx);
+  }
+
+  protected override async isNativeHandleValidForOwner(
+    owner: OperationOwner,
+    nativeHandle: unknown,
+    runtime: KernelRuntime,
+  ): Promise<boolean | undefined> {
+    const kernel = this.getKernelForOwner(owner);
+    if (!kernel?.definition.isNativeHandleValid) {
+      return undefined;
+    }
+
+    return kernel.definition.isNativeHandleValid({ nativeHandle }, runtime, kernel.ctx);
+  }
+
+  protected override async deserializeNativeHandleForOwner(
+    owner: OperationOwner,
+    serializedNativeHandle: unknown,
+    runtime: KernelRuntime,
+  ): Promise<unknown | undefined> {
+    const kernel = this.getKernelForOwner(owner);
+    if (!kernel?.definition.deserializeNativeHandle) {
+      return undefined;
+    }
+
+    return kernel.definition.deserializeNativeHandle({ serializedNativeHandle }, runtime, kernel.ctx);
+  }
+
+  protected override async resolveKernelBinding(
+    input: { filePath: string; basePath: string },
+    runtime: KernelRuntime,
+  ): Promise<RuntimeKernelBinding | undefined> {
+    const span = runtime.tracer.startSpan('kernel.select', { file: input.filePath });
+    try {
+      const selection = await this.selectKernel(input.filePath, runtime);
+      if (!selection) {
+        return undefined;
+      }
+
+      return {
+        kernelId: selection.kernel.entry.id,
+        kernelVersion: selection.kernel.definition.version,
+        filePath: input.filePath,
+        kernel: selection.kernel,
+      };
+    } catch (error) {
+      this.selectionErrors.set(input.filePath, error);
+      return undefined;
+    } finally {
+      span.end();
+    }
+  }
+
+  protected override publishOperationOwner(owner: OperationOwner): void {
+    const nextKernelId = owner.binding?.kernelId;
+    if (this.activeKernelId === nextKernelId) {
       return;
     }
 
-    const serialized = this.lastSerializedNativeHandle;
-    if (serialized !== undefined && serialized !== null && this.activeKernelId) {
-      const kernel = this.getActiveKernel();
-      if (kernel.definition.deserializeNativeHandle) {
-        try {
-          this.logger.debug('Restoring nativeHandle via kernel deserializeNativeHandle');
-          this.nativeHandle = kernel.definition.deserializeNativeHandle(
-            { serializedNativeHandle: serialized },
-            runtime,
-            kernel.ctx,
-          );
-          return;
-        } catch (error) {
-          this.lastSerializedNativeHandle = undefined;
-          this.logger.warn('Native-handle snapshot restore failed; export will reheat', {
-            data: { error: error instanceof Error ? error.message : String(error) },
-          });
-        }
-      }
-    }
-
-    return super.ensureNativeHandle(runtime, renderIdentity);
+    this.activeKernelId = nextKernelId;
+    this.onActiveKernelChanged?.(nextKernelId);
   }
 
   protected override getActiveKernelId(): string | undefined {
@@ -371,22 +415,35 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   // Private methods
   // =====================================================================
 
-  private async ensureActiveKernel(filePath: string, runtime: KernelRuntime): Promise<LoadedKernel | undefined> {
-    if (this.activeKernelId) {
-      return this.getActiveKernel();
+  private async createLegacyOperationOwner(
+    input: GetDependenciesInput | GetParametersInput | CreateGeometryInput,
+    kind: OperationOwner['kind'],
+    runtime: KernelRuntime,
+  ): Promise<OperationOwner> {
+    const binding = await this.resolveKernelBinding({ filePath: input.filePath, basePath: input.basePath }, runtime);
+    return {
+      kind,
+      file: {
+        filename: KernelRuntimeWorker.resolveToRelative(input.filePath, input.basePath),
+        path: input.basePath,
+      },
+      projectRootPath: input.basePath,
+      binding,
+    };
+  }
+
+  private getKernelForOwner(owner: OperationOwner): LoadedKernel | undefined {
+    const binding = owner.binding as RuntimeKernelBinding | undefined;
+    if (binding?.kernel) {
+      return binding.kernel;
     }
 
-    const span = runtime.tracer.startSpan('kernel.select', { file: filePath });
-    const selection = await this.selectKernel(filePath, runtime);
-    if (!selection) {
-      span.end();
+    if (!binding?.kernelId) {
       return undefined;
     }
 
-    this.activeKernelId = selection.kernel.entry.id;
-    this.onActiveKernelChanged?.(this.activeKernelId);
-    span.end();
-    return selection.kernel;
+    const kernel = this.loadedKernels.get(binding.kernelId);
+    return kernel?.definition.version === binding.kernelVersion ? kernel : undefined;
   }
 
   private async loadKernelModule(config: KernelPluginEntry, tracer: RuntimeSpanTracer): Promise<LoadedKernel> {

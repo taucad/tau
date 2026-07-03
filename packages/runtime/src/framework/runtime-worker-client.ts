@@ -346,7 +346,7 @@ export class RuntimeWorkerClient {
     if (!result.success) {
       return result;
     }
-    const data = await Promise.all(result.data.map(async (g) => this.transport.resolveGeometry(g)));
+    const data = await this.transport.resolveGeometry(result.data);
     return { ...result, data };
   }
 

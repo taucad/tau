@@ -42,7 +42,7 @@ const allowedMembers: ReadonlySet<string> = new Set([
   'activeKernelId',
   'capabilities',
   'connect',
-  'openFile',
+  'render',
   'updateParameters',
   'setOptions',
   'export',
@@ -57,11 +57,11 @@ const allowedMembers: ReadonlySet<string> = new Set([
 /**
  * Members that were part of the pre-cutover surface and must NEVER appear
  * again. The current redesign collapsed these verbs into the event-driven
- * `openFile` / `updateParameters` / `setOptions` trio plus typed errors;
+ * `render` / `updateParameters` / `setOptions` trio plus typed errors;
  * reintroducing any of them silently regresses the public contract.
  */
 const forbiddenMembers: ReadonlySet<string> = new Set([
-  'render',
+  'openFile',
   'setFile',
   'setParameters',
   'setRenderTimeout',
@@ -147,8 +147,14 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'createRuntimeClient',
   'RuntimeClient',
   'RuntimeClientOptions',
-  'CodeInput',
-  'FileInput',
+  'FilesystemRuntimeSource',
+  'InlineRuntimeSource',
+  'RuntimeExportOptions',
+  'RuntimeRenderInput',
+  'RuntimeSetOptionsInput',
+  'RuntimeSource',
+  'RuntimeSourceContent',
+  'RuntimeSourceFiles',
   'ExportResult',
   'RenderOutcome',
   'RuntimeLifecycleState',
@@ -159,8 +165,6 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   // Lifecycle errors + guards
   'NoRenderOutcomeError',
   'isNoRenderOutcomeError',
-  'SelfRenderExportSupersededError',
-  'isSelfRenderExportSupersededError',
   'RuntimeNotConnectedError',
   'isRuntimeNotConnectedError',
   'RuntimeConnectionError',
@@ -189,6 +193,8 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'CollectRenderOptions',
   'CollectTranscodeMap',
   'CollectTranscoderTargets',
+  'ExportFormatsFor',
+  'ExportOptionsFor',
   'KnownSourceFormats',
   'KnownTargetFormats',
   'KnownTranscoderIds',

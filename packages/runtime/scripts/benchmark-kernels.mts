@@ -71,6 +71,10 @@ const { values } = parseArgs({
     noTracing: { type: 'boolean', default: false },
     libraryTracing: { type: 'string', default: 'off' },
     operation: { type: 'string', default: 'export' },
+    'tessellation-instancing': { type: 'string' },
+    'with-brep-edges': { type: 'boolean', default: false },
+    linearTolerance: { type: 'string', default: '0.01' },
+    angularTolerance: { type: 'string', default: '20' },
     cpuProfile: { type: 'boolean', default: false },
     profileInterval: { type: 'string', default: '100' },
     help: { type: 'boolean', short: 'h', default: false },
@@ -99,6 +103,10 @@ ${c.dim}Options:${c.reset}
       ${c.cyan}--noTracing${c.reset}         Disable OC tracing entirely for pure timing
       ${c.cyan}--libraryTracing${c.reset} <v> Replicad library tracing: off (default) | summary | per-call
       ${c.cyan}--operation${c.reset} <v>     Operation to time: export (default) | render
+      ${c.cyan}--tessellation-instancing${c.reset} <v> Replicad toggle: true | false (default: kernel default)
+      ${c.cyan}--with-brep-edges${c.reset} Include Replicad BRep edge tessellation in the benchmark
+      ${c.cyan}--linearTolerance${c.reset} <n> Render/export linear tolerance in mm (default: 0.01)
+      ${c.cyan}--angularTolerance${c.reset} <n> Render/export angular tolerance in degrees (default: 20)
       ${c.cyan}--cpuProfile${c.reset}        Enable V8 CPU profiling for per-function timing breakdown
       ${c.cyan}--profileInterval${c.reset} <us>  CPU profiler sampling interval in microseconds (default: 100)
   ${c.cyan}-h${c.reset}, ${c.cyan}--help${c.reset}              Show this help message
@@ -356,6 +364,9 @@ async function runSuite(): Promise<void> {
   const ocTracing = values.noTracing ? 'off' : values.ocProfile ? 'per-call' : 'summary';
   const libraryTracing = resolveLibraryTracingOption();
   const operation = resolveOperationOption();
+  const tessellation = resolveTessellationOption();
+  const tessellationInstancing = resolveTessellationInstancingOption();
+  const withBrepEdges = values['with-brep-edges'];
 
   const provenance = loadProvenance();
   const wasmOption = resolveWasmOption();
@@ -373,6 +384,12 @@ async function runSuite(): Promise<void> {
   label('Tracing', ocTracing);
   label('Library Tracing', libraryTracing);
   label('Operation', operation);
+  label('Tessellation', `${tessellation.linearTolerance}mm / ${tessellation.angularTolerance}deg`);
+  label(
+    'Tessellation Instancing',
+    tessellationInstancing === undefined ? 'kernel default' : tessellationInstancing ? 'enabled' : 'disabled',
+  );
+  label('BRep Edges', withBrepEdges ? 'enabled' : 'disabled');
   label('WASM', typeof wasmOption === 'string' ? wasmOption : 'custom');
   if (typeof wasmOption === 'string' && wasmOption === 'auto') {
     label('Auto', 'kernel will pick multi when SAB available, else single');
@@ -388,6 +405,9 @@ async function runSuite(): Promise<void> {
     ocTracing,
     libraryTracing,
     operation,
+    tessellation,
+    tessellationInstancing,
+    withBrepEdges,
     wasm: wasmOption,
     onProgress: onBenchmarkProgress,
     onIterationProgress: onBenchmarkIterationProgress,
@@ -426,6 +446,42 @@ function resolveOperationOption(): 'export' | 'render' {
   }
 
   console.error(`${c.red}Invalid --operation: ${raw} (expected: export | render)${c.reset}`);
+  process.exit(1);
+}
+
+function resolvePositiveNumberOption(name: 'linearTolerance' | 'angularTolerance'): number {
+  const raw = values[name];
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.error(`${c.red}Invalid --${name}: ${raw} (expected a positive number)${c.reset}`);
+    process.exit(1);
+  }
+
+  return parsed;
+}
+
+function resolveTessellationOption(): { linearTolerance: number; angularTolerance: number } {
+  return {
+    linearTolerance: resolvePositiveNumberOption('linearTolerance'),
+    angularTolerance: resolvePositiveNumberOption('angularTolerance'),
+  };
+}
+
+function resolveTessellationInstancingOption(): boolean | undefined {
+  const raw = values['tessellation-instancing'];
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  if (raw === 'true') {
+    return true;
+  }
+
+  if (raw === 'false') {
+    return false;
+  }
+
+  console.error(`${c.red}Invalid --tessellation-instancing: ${raw} (expected true | false)${c.reset}`);
   process.exit(1);
 }
 

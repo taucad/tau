@@ -11,7 +11,7 @@ import { defineRuntime } from '#worker/runtime-definition.js';
 import { activateOccParallelism } from '#kernels/occt/oc-threading.js';
 import { createIncrementalMesh, meshShapesToGltf } from '#kernels/opencascade/opencascade-mesh.js';
 
-type Oc = Record<string, any>;
+type Oc = any;
 type Owned = { delete(): void };
 type BenchContext = Record<string, unknown>;
 
@@ -775,7 +775,7 @@ const stlExport = (oc: Oc, shape: any): number => {
   const writer = new oc.StlAPI_Writer();
   let mesh: Owned | undefined;
   try {
-    mesh = createIncrementalMesh(oc as any, shape, {
+    mesh = createIncrementalMesh(oc, shape, {
       linearTolerance: 0.1,
       angularTolerance: (30 * Math.PI) / 180,
       inParallel: true,
@@ -826,7 +826,7 @@ const stepExport = (oc: Oc, shape: any): number => {
 
 const glbExportViaOpenCascadeKernel = async (oc: Oc, shape: any): Promise<number> => {
   const glb = await meshShapesToGltf(
-    oc as any,
+    oc,
     [
       {
         name: 'V8Block',
@@ -1029,7 +1029,7 @@ const createOpenCascadeKernelContext = async (variant: string): Promise<BenchCon
 const opencascadeKernelExportGlb = async (context: BenchContext): Promise<number> => {
   const client = context['client'] as ReturnType<typeof createRuntimeClient>;
   const result = await client.export('glb', {
-    file: context['file'] as { filename: string; path: string },
+    source: { path: context['file'] as { filename: string; path: string } },
     parameters: {},
   });
   if (!result.success) {
@@ -1517,14 +1517,14 @@ const stringOption = (value: string | boolean | undefined, fallback: string): st
 const initOpenCascade = async (variant: string): Promise<Oc> => {
   const moduleName = variant === 'multi' ? 'opencascade.js/multi' : 'opencascade.js';
   const module = await import(moduleName);
-  const oc = (await module.default({
+  const oc = await module.default({
     print() {
       // Keep benchmark output deterministic.
     },
     printErr(message: string) {
       console.error(message);
     },
-  })) as Oc;
+  });
 
   if (variant === 'multi') {
     const threads = activateOccParallelism(oc, {
@@ -1532,6 +1532,8 @@ const initOpenCascade = async (variant: string): Promise<Oc> => {
       warn: (message) => console.warn(message),
       error: (message) => console.error(message),
       debug: () => undefined,
+      trace: () => undefined,
+      custom: (_level, message) => console.log(message),
     });
     if (threads) {
       console.log(`OCCT multi-thread benchmark using ${threads} threads`);

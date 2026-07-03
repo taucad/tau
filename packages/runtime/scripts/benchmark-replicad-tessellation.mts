@@ -10,7 +10,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
@@ -376,7 +376,7 @@ async function loadProject(mainFile: string, variant: WasmVariant): Promise<Proj
   const url = `${pathToFileURL(mainFile).href}?tauBench=${variant}-${Date.now()}`;
   const module_ = (await import(url)) as ProjectModule;
   const cjsExports = module_['module.exports'];
-  if ((cjsExports?.default ?? cjsExports?.main) !== undefined) {
+  if (cjsExports !== undefined && (cjsExports.default ?? cjsExports.main) !== undefined) {
     return cjsExports;
   }
 

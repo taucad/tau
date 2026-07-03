@@ -5,7 +5,7 @@ client, send a command, consume the result.
 
 ## Quick start
 
-`client.export(format, { code, file })` self-provisions an in-memory
+`client.export(format, { source })` self-provisions an in-memory
 filesystem, connects on first call, runs the render, and resolves a single
 `ExportResult`.
 
@@ -14,13 +14,14 @@ import { createRuntimeClient, presets } from '@taucad/runtime';
 
 const client = createRuntimeClient(presets.all());
 const result = await client.export('glb', {
-  code: {
-    'main.ts': `
+  source: {
+    files: {
+      'main.ts': `
     import { drawRoundedRectangle } from 'replicad';
     export default () => drawRoundedRectangle(30, 50, 5).sketchOnPlane('XY').extrude(10);
   `,
+    },
   },
-  file: 'main.ts',
 });
 
 if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
@@ -38,19 +39,19 @@ follows the same shape:
    `SharedArrayBuffer` — SAB lifecycle is owned by the active
    {@link RuntimeTransportClient} (in-process, dedicated worker, or remote).
    The client is in `lifecycleState: 'unconnected'`.
-2. **Command** — `client.openFile`, `client.updateParameters`,
+2. **Command** — `client.render`, `client.updateParameters`,
    `client.setOptions`, and `client.export` drive the worker. Each
    command-shaped method (apart from `export`) returns a `RenderOutcome`
    so consumers can branch on supersession without try/catch flow control.
    The first command call lazy-connects the transport and (for inline
-   `code:` input) auto-provisions an in-memory filesystem.
+   `source.files` input) auto-provisions an in-memory filesystem.
 3. **Consume** — `client.on('geometry' | 'error' | 'progress' | …, handler)`
    subscribes to the single ordered event stream the worker produces.
    Subscriptions auto-dispose on `client.terminate()`.
 
 ```mermaid
 flowchart LR
-  c["createRuntimeClient"] --> command["openFile / updateParameters / setOptions / export"]
+  c["createRuntimeClient"] --> command["render / updateParameters / setOptions / export"]
   command --> consume["client.on('geometry')"]
   consume --> command
   consume --> term["client.terminate"]
@@ -67,10 +68,10 @@ See [Embedding in a Host](../../apps/ui/content/docs/runtime/guides/embedding-in
 
 ## Autonomous render loop (editors and live UIs)
 
-`openFile` hands the worker a `(file, parameters)` pair and lets it own
+`render` hands the worker a `(source, parameters)` pair and lets it own
 re-rendering. New calls supersede in-flight ones; the prior `RenderOutcome`
 resolves with `{ superseded: true }` and the latest one carries the geometry.
-For inline `code:` input the runtime auto-provisions the filesystem on the
+For inline `source.files` input the runtime auto-provisions the filesystem on the
 first call.
 
 ```typescript
@@ -83,13 +84,11 @@ const unsubscribe = client.on('geometry', (result) => {
     console.error('render failed', result.issues);
     return;
   }
-  const gltf = result.data.find((g) => g.format === 'gltf');
-  console.log('fresh geometry', gltf?.content.byteLength, 'bytes');
+  console.log('fresh geometry', result.data.content.byteLength, 'bytes');
 });
 
-await client.openFile({
-  code: { 'main.ts': 'export default () => drawCircle(10).sketchOnPlane().extrude(20);' },
-  file: 'main.ts',
+await client.render({
+  source: { files: { 'main.ts': 'export default () => drawCircle(10).sketchOnPlane().extrude(20);' } },
   parameters: {},
 });
 
@@ -100,7 +99,7 @@ client.terminate();
 ```
 
 For viewers that watch a real filesystem (Node fs, OPFS, the browser FM
-worker), pass it once at construction so every `openFile({ file })` call
+worker), pass it once at construction so every `render({ source: { path } })` call
 runs against it: `createRuntimeClient({ ...presets.all(), fileSystem })`.
 
 ## Lifecycle states
@@ -108,19 +107,19 @@ runs against it: `createRuntimeClient({ ...presets.all(), fileSystem })`.
 `client.lifecycleState` is the single source of truth for what the client can
 do right now:
 
-| State         | Reachable methods                             | Notes                                                                                                                             |
-| ------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `unconnected` | every public method                           | The default after construction. Command methods (`openFile`/`updateParameters`/`setOptions`/`export`) lazy-connect on first call. |
-| `connecting`  | `lifecycleState`                              | Concurrent command calls await the in-flight handshake.                                                                           |
-| `connected`   | every public method                           | Steady state.                                                                                                                     |
-| `terminated`  | `lifecycleState`, `terminate()`, `shutdown()` | All other methods throw `RuntimeTerminatedError`. `shutdown()` is idempotent.                                                     |
+| State         | Reachable methods                             | Notes                                                                                                                           |
+| ------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `unconnected` | every public method                           | The default after construction. Command methods (`render`/`updateParameters`/`setOptions`/`export`) lazy-connect on first call. |
+| `connecting`  | `lifecycleState`                              | Concurrent command calls await the in-flight handshake.                                                                         |
+| `connected`   | every public method                           | Steady state.                                                                                                                   |
+| `terminated`  | `lifecycleState`, `terminate()`, `shutdown()` | All other methods throw `RuntimeTerminatedError`. `shutdown()` is idempotent.                                                   |
 
 Connect failures leave the client in `unconnected` so retry is safe.
 `connect()` is one-shot per client lifetime: once `connected`, subsequent
 `connect()` calls return the existing connection. To bind a single client to
 a different filesystem, `terminate()` (or `await shutdown()`) it and create a
-fresh one. `FileInput` commands (i.e. `openFile({ file })` with no inline
-`code:`) on a client whose transport has no filesystem bridge throw
+fresh one. Filesystem source commands (i.e. `render({ source: { path } })`)
+on a client whose transport has no filesystem bridge throw
 `RuntimeNotConnectedError`.
 
 ### Termination

@@ -2,10 +2,11 @@
 
 export { createRuntimeClient, createRuntimeClientWithTransport } from '#client/index.js';
 export type {
-  CodeInput,
   ExportResult,
-  FileInput,
+  FilesystemRuntimeSource,
+  InlineRuntimeSource,
   RenderOutcome,
+  RenderStatus,
   RuntimeClient,
   RuntimeClientOptions,
   RuntimeClientOptionsWithTransport,
@@ -13,7 +14,13 @@ export type {
   RuntimeConfigOutput,
   RuntimeConfigProvider,
   RuntimeConnectionCause,
+  RuntimeExportOptions,
   RuntimeLifecycleState,
+  RuntimeRenderInput,
+  RuntimeSetOptionsInput,
+  RuntimeSource,
+  RuntimeSourceContent,
+  RuntimeSourceFiles,
   RuntimeTerminatedCause,
 } from '#client/index.js';
 export type { KernelIssue } from '#types/runtime.types.js';
@@ -24,14 +31,12 @@ export {
   isRuntimeConnectionError,
   isRuntimeNotConnectedError,
   isRuntimeTerminatedError,
-  isSelfRenderExportSupersededError,
   NoRenderOutcomeError,
   RenderAbortedError,
   RenderTimeoutError,
   RuntimeConnectionError,
   RuntimeNotConnectedError,
   RuntimeTerminatedError,
-  SelfRenderExportSupersededError,
 } from '#client/index.js';
 export { nextRuntimeConfig, nextRuntimeHeaders } from '#nextjs/config.js';
 export type { NextRuntimeHeaderRule, NextRuntimeHeadersOptions } from '#nextjs/config.js';

@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import type { GeometryResponse } from '@taucad/types';
 import { z } from 'zod';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
 import { defineBundler } from '#types/runtime-bundler.types.js';
 import { defineKernel } from '#types/runtime-kernel.types.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+
+const testGeometry = { format: 'gltf', content: new Uint8Array([1]) } satisfies GeometryResponse;
 
 describe('plugin factory public surface', () => {
   it('keeps implementation details hidden on one-call plugin registrations', async () => {
@@ -24,7 +27,7 @@ describe('plugin factory public surface', () => {
         return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
       },
       async createGeometry() {
-        return { geometry: [], nativeHandle: {} };
+        return { geometry: testGeometry, nativeHandle: {} };
       },
       async exportGeometry() {
         return { success: true, data: [], issues: [] };

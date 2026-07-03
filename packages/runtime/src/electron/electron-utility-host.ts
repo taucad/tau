@@ -17,6 +17,7 @@ import type { Geometry } from '@taucad/types';
 import type { RuntimeProtocol } from '#index.js';
 import { extractInlineFileSystem } from '#transport-internals.js';
 import { installWorkerCrashTrap, createWorkerDispatcher } from '#worker-internals.js';
+import { encodeFileAsOwnedCopy, encodeGeometryAsOwnedCopy } from '#transport/_internal/owned-transfer-bytes.js';
 
 import type { ElectronUtilityHostOptions } from '#electron/electron-utility-transport.schemas.js';
 
@@ -41,6 +42,31 @@ const debugLog = (origin: string, message: string, data?: Record<string, unknown
   console.log(`[tau-electron:${origin}] ${message}${payload}`);
 };
 
+const summariseFrame = (value: unknown): Record<string, unknown> => {
+  if (value === null || typeof value !== 'object') {
+    return { frameType: typeof value };
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    k: record['k'],
+    n: record['n'],
+    a:
+      typeof record['a'] === 'object' && record['a'] !== null
+        ? Object.fromEntries(
+            Object.entries(record['a'] as Record<string, unknown>).filter(([key]) =>
+              ['state', 'detail', 'rgen', 'kernelId', 'reason'].includes(key),
+            ),
+          )
+        : undefined,
+    r: record['r'],
+    kind: record['kind'],
+    method: record['method'],
+    name: record['name'],
+    id: record['id'],
+    keys: Object.keys(record),
+  };
+};
+
 /** */
 const buildHelloPayload = (): {
   readonly server: 'kernel-runtime-worker';
@@ -62,7 +88,7 @@ const wrapMessagePortMain = (port: MessagePortMainLike, label: string): Port<unk
     if (closed) {
       return;
     }
-    debugLog(label, 'rx-frame');
+    debugLog(label, 'rx-frame', summariseFrame(event.data));
     for (const handler of handlers) {
       handler(event.data);
     }
@@ -91,6 +117,7 @@ const wrapMessagePortMain = (port: MessagePortMainLike, label: string): Port<unk
       debugLog(label, 'tx-frame', {
         transferableCount: tList?.length ?? 0,
         portsOnlyCount: portsOnly?.length ?? 0,
+        ...summariseFrame(value),
       });
       if (portsOnly && portsOnly.length > 0) {
         port.postMessage(value, portsOnly);
@@ -152,23 +179,12 @@ export const electronUtilityHost = (
   /* Encoders are inline-only — Electron `MessagePortMain` cannot
    * carry SAB or non-port transferables */
   const encodeGeometry = (geometry: Geometry): EncodedGeometry => {
-    if (geometry.format !== 'gltf') {
-      return { value: geometry, transferables: [], tier: 'copy' };
-    }
-    return {
-      value: {
-        format: 'gltf',
-        content: { delivery: 'inline', bytes: geometry.content },
-        hash: geometry.hash,
-      },
-      transferables: [],
-      tier: 'copy',
-    };
+    return encodeGeometryAsOwnedCopy(geometry);
   };
 
   // oxlint-disable-next-line enforce-uint8array-arraybuffer/enforce-uint8array-arraybuffer -- binding signature uses Uint8Array
   const encodeFile = (file: Uint8Array): EncodedFileBytes => {
-    return { value: { delivery: 'inline', bytes: file }, transferables: [], tier: 'copy' };
+    return encodeFileAsOwnedCopy(file as Uint8Array<ArrayBuffer>);
   };
 
   const open = async (): Promise<TransportHostReady> => {

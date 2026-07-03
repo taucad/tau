@@ -28,6 +28,7 @@ import { tsModuleUrlPlugin } from '#vite/ts-module-url.vite-plugin.js';
  * `runtime.test.ts`.
  */
 const wasmAssetsInlineLimit = (filePath: string): false | undefined => (filePath.endsWith('.wasm') ? false : undefined);
+const nodeRuntimeExternals = ['esbuild', 'esbuild-wasm'] as const;
 
 const documentHeaders: Readonly<Record<string, string>> = Object.freeze({
   'Cross-Origin-Opener-Policy': 'same-origin',
@@ -103,6 +104,8 @@ export type RuntimePluginOptions = {
  * - forces `worker.format: 'es'` so workers preserve `import.meta.url`
  * - bundles TypeScript files referenced via `new URL(..., import.meta.url)`
  *   as module chunks instead of raw `.ts` assets
+ * - keeps native Node runtime helpers such as `esbuild` external in SSR /
+ *   Electron utility builds so they can resolve their package-owned binaries
  *
  * Any consumer that needs to override these invariants should compose their
  * own plugin set; this helper exists to remove the gap between "install
@@ -136,6 +139,9 @@ export function runtime(options: RuntimePluginOptions = {}): Plugin[] {
       },
       worker: {
         format: 'es',
+      },
+      ssr: {
+        external: [...nodeRuntimeExternals],
       },
     }),
   };

@@ -204,7 +204,7 @@ export type CollectExportFormats<Plugins extends readonly AnyKernelPlugin[]> =
  * distributive conditional behavior so a union value type does not split
  * the test.
  *
- * @internal
+ * @public
  */
 type IsRecordStringNever<T> = string extends keyof T ? ([T[string]] extends [never] ? true : false) : false;
 
@@ -217,7 +217,7 @@ type IsRecordStringNever<T> = string extends keyof T ? ([T[string]] extends [nev
  * shape — concrete schemas, `Record<string, unknown>`, `{}`, indexed types —
  * is passed through untouched.
  *
- * @internal
+ * @public
  */
 type FilterEmpty<T> = IsRecordStringNever<T> extends true ? never : T;
 

@@ -39,6 +39,7 @@ const subresourceHeaders: Readonly<Record<string, string>> = Object.freeze({
 });
 
 const wasmAssetRule = '*.wasm';
+const nodeFsUnavailableModule = '@taucad/runtime/nextjs/node-fs-unavailable';
 
 const toPatterns = (value: string | readonly string[] | undefined, fallback: readonly string[]): readonly string[] =>
   value === undefined ? fallback : typeof value === 'string' ? [value] : value;
@@ -71,12 +72,20 @@ export function nextRuntimeHeaders(options: NextRuntimeHeadersOptions = {}): Nex
  */
 export function nextRuntimeConfig(options: NextRuntimeHeadersOptions = {}): {
   turbopack: {
+    resolveAlias: Record<string, string>;
     rules: Record<string, { type: 'asset' }>;
   };
   headers(): Promise<NextRuntimeHeaderRule[]>;
 } {
   return {
     turbopack: {
+      resolveAlias: {
+        fs: nodeFsUnavailableModule,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js module name
+        'node:fs': nodeFsUnavailableModule,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js module name
+        'node:fs/promises': nodeFsUnavailableModule,
+      },
       rules: {
         [wasmAssetRule]: { type: 'asset' },
       },

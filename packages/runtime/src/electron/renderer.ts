@@ -6,9 +6,13 @@
 
 /* oxlint-disable no-barrel-files/no-barrel-files -- public Electron renderer subpath */
 
+import type { RuntimeClientOptionsWithTransport } from '#client/runtime-client-core.js';
+import { electronUtilityTransport } from '#electron/electron-utility-transport.js';
+import type { AnyRuntimeDefinition, RuntimeConfigInput, RuntimeConfigProvider } from '#worker/runtime-definition.js';
+
 export { electronUtilityClient, electronUtilityClientDescribe } from '#electron/electron-utility-client.js';
 export { electronUtilityTransport } from '#electron/electron-utility-transport.js';
-export type { ElectronUtilityClientOptions } from '#electron/electron-utility-transport.schemas.js';
+export type { ElectronUtilityTransportOptions } from '#electron/electron-utility-transport.schemas.js';
 
 export type ElectronRuntimeRendererBridge = {
   readonly relayTag: {
@@ -22,6 +26,21 @@ export type RequestElectronRuntimePortOptions = {
   readonly globalName?: string;
   readonly target?: ElectronRuntimeMessageTarget;
 };
+
+/**
+ * Options for {@link createElectronClientOptions}.
+ *
+ * @public
+ */
+export type CreateElectronClientOptionsOptions<Runtime extends AnyRuntimeDefinition | undefined = undefined> =
+  RequestElectronRuntimePortOptions & {
+    /** Optional runtime client render timeout. */
+    readonly renderTimeout?: number;
+  } & ([RuntimeConfigInput<Runtime>] extends [never]
+      ? { readonly config?: never }
+      : undefined extends RuntimeConfigInput<Runtime>
+        ? { readonly config?: RuntimeConfigProvider<Runtime> }
+        : { readonly config: RuntimeConfigProvider<Runtime> });
 
 type ElectronRuntimeMessageTarget = Pick<Window, 'addEventListener' | 'removeEventListener'>;
 
@@ -69,4 +88,28 @@ export const requestElectronRuntimePort = async (
   const port = await portPromise;
   port.start();
   return port;
+};
+
+/**
+ * Builds an async runtime-client options provider for Electron renderers.
+ *
+ * Keep the returned provider in module scope and pass it to `useRuntime`.
+ * It requests a fresh `MessagePort` from preload each time the hook creates a
+ * client, then wraps the port in `electronUtilityTransport`.
+ *
+ * @public
+ */
+export const createElectronClientOptions = <Runtime extends AnyRuntimeDefinition | undefined = undefined>(
+  options: CreateElectronClientOptionsOptions<Runtime> = {} as CreateElectronClientOptionsOptions<Runtime>,
+): (() => Promise<RuntimeClientOptionsWithTransport<Runtime, ReturnType<typeof electronUtilityTransport>>>) => {
+  const { config, renderTimeout, ...portOptions } = options;
+  return async () => {
+    const port = await requestElectronRuntimePort(portOptions);
+    const clientOptions = {
+      transport: electronUtilityTransport({ port }),
+      ...(config === undefined ? {} : { config }),
+      ...(renderTimeout === undefined ? {} : { renderTimeout }),
+    };
+    return clientOptions as RuntimeClientOptionsWithTransport<Runtime, ReturnType<typeof electronUtilityTransport>>;
+  };
 };

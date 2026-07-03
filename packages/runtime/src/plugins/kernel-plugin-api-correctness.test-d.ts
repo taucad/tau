@@ -7,8 +7,11 @@
  */
 
 import { assertType, describe, it } from 'vitest';
+import type { GeometryResponse } from '@taucad/types';
 import type { KernelPlugin } from '#plugins/plugin-types.js';
 import { defineKernel } from '#types/runtime-kernel.types.js';
+
+const testGeometry = { format: 'gltf', content: new Uint8Array([1]) } satisfies GeometryResponse;
 
 const baseKernelDefinition = {
   id: 'x',
@@ -25,7 +28,7 @@ const baseKernelDefinition = {
     return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
   },
   async createGeometry() {
-    return { geometry: [], nativeHandle: {} };
+    return { geometry: testGeometry, nativeHandle: {} };
   },
   async exportGeometry() {
     return { success: true, data: [], issues: [] };

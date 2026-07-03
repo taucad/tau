@@ -46,7 +46,7 @@ export const electronUtilityHostOptionsSchema = z.object({
 });
 
 /** Renderer-side validated options inferred from schema. */
-export type ElectronUtilityClientOptions = z.input<typeof electronUtilityClientOptionsSchema>;
+export type ElectronUtilityTransportOptions = z.input<typeof electronUtilityClientOptionsSchema>;
 
 /** Utility-process validated options inferred from schema. */
 export type ElectronUtilityHostOptions = z.input<typeof electronUtilityHostOptionsSchema>;

@@ -17,16 +17,22 @@ import type {
   TransportDescriptor,
 } from '#transport/index.js';
 
-import type { ElectronUtilityClientOptions } from '#electron/electron-utility-transport.schemas.js';
+import type { ElectronUtilityTransportOptions } from '#electron/electron-utility-transport.schemas.js';
 
 const electronUtilityId = 'electron-utility';
 const sessionKey = 'tau.runtime/v1';
 
-// oxlint-disable-next-line n/prefer-global/process -- gated by typeof check below
-const debugEnabled = typeof process === 'undefined' ? true : process.env['TAU_ELECTRON_DEBUG'] === '1';
+const isDebugEnabled = (): boolean => {
+  if ((globalThis as { __TAU_ELECTRON_DEBUG?: unknown }).__TAU_ELECTRON_DEBUG === true) {
+    return true;
+  }
+  // oxlint-disable-next-line n/prefer-global/process -- guarded by typeof check below
+  const processEnv = typeof process === 'undefined' ? undefined : process.env;
+  return processEnv?.['TAU_ELECTRON_DEBUG'] === '1';
+};
 
 const debugLog = (origin: string, message: string, data?: Record<string, unknown>): void => {
-  if (!debugEnabled) {
+  if (!isDebugEnabled()) {
     return;
   }
   const payload = data ? ` ${JSON.stringify(data)}` : '';
@@ -54,7 +60,7 @@ const buildHelloPayload = (): {
  * @public
  */
 export const electronUtilityClientDescribe = (
-  _options: ElectronUtilityClientOptions,
+  _options: ElectronUtilityTransportOptions,
 ): TransportDescriptor<typeof electronUtilityId> => ({
   id: electronUtilityId,
   wire: 'electron-utility',
@@ -72,7 +78,7 @@ export const electronUtilityClientDescribe = (
  * @public
  */
 export const electronUtilityClient = (
-  clientOptions: ElectronUtilityClientOptions,
+  clientOptions: ElectronUtilityTransportOptions,
 ): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, typeof electronUtilityId> => {
   debugLog('renderer:client', 'constructed');
   const { port: receivedPort } = clientOptions;

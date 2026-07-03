@@ -78,6 +78,12 @@ describe('runtime (vite plugin)', () => {
     expect(config['worker']).toEqual({ format: 'es' });
   });
 
+  it('should keep native Node runtime dependencies external in SSR and Electron utility builds', () => {
+    const config = resolveConfig(findInvariants(runtime()));
+
+    expect(config['ssr']).toEqual({ external: ['esbuild', 'esbuild-wasm'] });
+  });
+
   it('should expose an assetsInlineLimit callback that disables WASM inlining only', () => {
     const config = resolveConfig(findInvariants(runtime()));
 

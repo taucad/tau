@@ -48,6 +48,25 @@ export const contextCompactionScheduleStatusSchema = z.enum(['none', 'scheduled_
 /** @public */
 export type ContextCompactionScheduleStatus = z.infer<typeof contextCompactionScheduleStatusSchema>;
 
+/** @public */
+export const contextCompactionFailureKindSchema = z.enum([
+  'morph_transport_error',
+  'morph_http_error',
+  'morph_contract_error',
+  'transcript_commit_failed',
+  'context_overflow_retry_failed',
+  'unexpected_error',
+]);
+
+/** @public */
+export type ContextCompactionFailureKind = z.infer<typeof contextCompactionFailureKindSchema>;
+
+/** @public */
+export const contextCompactionFailureDispositionSchema = z.enum(['blocked_before_provider']);
+
+/** @public */
+export type ContextCompactionFailureDisposition = z.infer<typeof contextCompactionFailureDispositionSchema>;
+
 /**
  * Schema for context compaction event data.
  * Emitted when the compaction middleware compresses conversation history.
@@ -68,6 +87,11 @@ export const contextCompactionDataSchema = z.object({
   compressionRatio: z.number(),
   messagesEvicted: z.number(),
   transcriptFilePath: z.string().nullable(),
+  compactionFailureKind: contextCompactionFailureKindSchema.optional(),
+  failureDisposition: contextCompactionFailureDispositionSchema.optional(),
+  debugId: z.string().optional(),
+  providerNativeReplayMetadataPresent: z.boolean().optional(),
+  missingFunctionCallSignatureCount: z.number().optional(),
 });
 
 /** @public */

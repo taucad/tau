@@ -37,6 +37,6 @@ export * from '#utils/tool-part.utils.js';
 export type * from '#types/message.types.js';
 export type * from '#types/tool.types.js';
 export type * from '#types/chat.types.js';
-export type * from '#types/model.types.js';
+export * from '#types/model.types.js';
 export type * from '#types/message-metadata.types.js';
 export * from '#types/websocket.types.js';

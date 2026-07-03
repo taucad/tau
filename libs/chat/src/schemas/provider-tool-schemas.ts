@@ -2,6 +2,8 @@ import type { ToolName, ToolSelection } from '#types/tool.types.js';
 import { toolName } from '#constants/tool.constants.js';
 import type { ToolPartType } from '#schemas/tool-input.registry.js';
 import { toolInputSchemas } from '#schemas/tool-input.registry.js';
+import type { ModelInputModality, ModelSupport } from '#types/model.types.js';
+import { modelSupportsInput, modelSupportsTools } from '#types/model.types.js';
 
 /**
  * CAD agent tools that are exposed to model providers through LangChain.
@@ -28,10 +30,36 @@ export const cadProviderFacingToolNames = [
   toolName.webBrowser,
 ] as const satisfies readonly ToolName[];
 
+const requiredModelInputModalities: Partial<Record<ToolName, readonly ModelInputModality[]>> = {
+  [toolName.screenshot]: ['image'],
+};
+
+/** @public */
+export const filterProviderFacingToolNamesByModelSupport = ({
+  toolNames,
+  modelSupport,
+}: {
+  toolNames: readonly ToolName[];
+  modelSupport?: ModelSupport;
+}): ToolName[] => {
+  if (modelSupport === undefined) {
+    return [...toolNames];
+  }
+
+  if (!modelSupportsTools(modelSupport)) {
+    return [];
+  }
+
+  return toolNames.filter((name) =>
+    (requiredModelInputModalities[name] ?? []).every((modality) => modelSupportsInput(modelSupport, modality)),
+  );
+};
+
 /** @public */
 export type ProviderFacingToolSchemaOptions = {
   toolChoice: ToolSelection;
   testingEnabled: boolean;
+  modelSupport?: ModelSupport;
 };
 
 /** @public */
@@ -52,11 +80,19 @@ export type ProviderFacingToolSchemaEntry = {
 export const getProviderFacingToolInputSchemas = ({
   toolChoice,
   testingEnabled,
+  modelSupport,
 }: ProviderFacingToolSchemaOptions): ProviderFacingToolSchemaEntry[] => {
   const selectedTools = Array.isArray(toolChoice) ? new Set<ToolName>(toolChoice) : undefined;
+  const allowedTools = new Set(
+    filterProviderFacingToolNamesByModelSupport({ toolNames: cadProviderFacingToolNames, modelSupport }),
+  );
 
   return cadProviderFacingToolNames.flatMap((name) => {
     if (name === toolName.testModel && !testingEnabled) {
+      return [];
+    }
+
+    if (!allowedTools.has(name)) {
       return [];
     }
 

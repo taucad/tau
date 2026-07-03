@@ -19,12 +19,19 @@ describe('contextCompactionDataSchema', () => {
         compressionRatio: 0.067,
         messagesEvicted: 32,
         transcriptFilePath: '.tau/transcripts/chat.jsonl',
+        compactionFailureKind: 'morph_contract_error',
+        failureDisposition: 'blocked_before_provider',
+        debugId: 'dat_debug',
+        providerNativeReplayMetadataPresent: false,
+        missingFunctionCallSignatureCount: 0,
       }),
     ).toMatchObject({
       status: 'compacted',
       triggerReason: 'previous_usage',
       budgetKind: 'estimated',
       compactionId: 'dat_compaction',
+      compactionFailureKind: 'morph_contract_error',
+      failureDisposition: 'blocked_before_provider',
     });
   });
 

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import { toolMode, toolName } from '#constants/tool.constants.js';
-import { getProviderFacingToolInputSchemas } from '#schemas/provider-tool-schemas.js';
+import {
+  filterProviderFacingToolNamesByModelSupport,
+  getProviderFacingToolInputSchemas,
+} from '#schemas/provider-tool-schemas.js';
 
 const vertexBreakingKeywords = ['const', 'propertyNames', 'prefixItems'] as const;
 
@@ -80,6 +83,38 @@ describe('provider-facing tool schema compatibility', () => {
 
     expect(entries.map((entry) => entry.toolName)).not.toContain(toolName.testModel);
     expect(entries.map((entry) => entry.toolName)).toContain(toolName.screenshot);
+  });
+
+  it('should omit image-input tools for text-only models while keeping GeoSpec and file tools', () => {
+    const entries = getProviderFacingToolInputSchemas({
+      toolChoice: toolMode.auto,
+      testingEnabled: true,
+      modelSupport: {
+        tools: true,
+        toolChoice: false,
+        modalities: { input: ['text'], output: ['text'] },
+      },
+    });
+    const names = entries.map((entry) => entry.toolName);
+
+    expect(names).not.toContain(toolName.screenshot);
+    expect(names).toContain(toolName.testModel);
+    expect(names).toContain(toolName.getKernelResult);
+    expect(names).toContain(toolName.exportGeometry);
+    expect(names).toContain(toolName.editFile);
+  });
+
+  it('should return no provider-facing tools when the model does not support tools', () => {
+    expect(
+      filterProviderFacingToolNamesByModelSupport({
+        toolNames: [toolName.testModel, toolName.screenshot],
+        modelSupport: {
+          tools: false,
+          toolChoice: false,
+          modalities: { input: ['text', 'image'], output: ['text'] },
+        },
+      }),
+    ).toEqual([]);
   });
 
   it('should emit no Vertex-breaking JSON Schema keywords for active provider-facing inputs', () => {

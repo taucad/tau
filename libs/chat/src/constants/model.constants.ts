@@ -4,12 +4,12 @@
  */
 export const modelProviders = [
   //
-  'sambanova',
   'openai',
   'anthropic',
   'ollama',
   'vertexai',
   'cerebras',
+  'together',
   'morph',
 ] as const;
 
@@ -22,5 +22,9 @@ export const modelFamilies = [
   'gpt',
   'claude',
   'gemini',
+  'deepseek',
+  'glm',
+  'qwen',
+  'llama',
   'minimax',
 ] as const;

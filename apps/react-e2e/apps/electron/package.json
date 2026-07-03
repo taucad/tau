@@ -1,0 +1,17 @@
+{
+  "name": "@taucad/react-e2e-electron",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/index.js",
+  "dependencies": {
+    "@taucad/react": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "electron": "^36.9.5",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "three": "catalog:"
+  },
+  "devDependencies": {
+    "electron-vite": "^4.0.1"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "extends": "../../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "noEmit": true
+  },
+  "include": [
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "../../support/**/*.ts",
+    "../../support/**/*.tsx",
+    "../../../src/**/*.ts",
+    "vite.react-router.config.ts"
+  ]
+}

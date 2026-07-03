@@ -1,0 +1,38 @@
+{
+  "name": "react-e2e",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "apps/react-e2e",
+  "tags": ["scope:shared", "type:e2e"],
+  "implicitDependencies": ["react", "runtime"],
+  "targets": {
+    "test:e2e": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "playwright test --config apps/react-e2e/playwright.config.ts"
+      }
+    },
+    "test:e2e:nextjs": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "playwright test --config apps/react-e2e/playwright.config.ts --project=nextjs"
+      }
+    },
+    "test:e2e:react-router": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "playwright test --config apps/react-e2e/playwright.config.ts --project=react-router"
+      }
+    },
+    "test:e2e:electron": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "playwright test --config apps/react-e2e/playwright.config.ts --project=electron"
+      }
+    }
+  }
+}

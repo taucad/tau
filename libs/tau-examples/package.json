@@ -12,5 +12,8 @@
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
+  },
+  "devDependencies": {
+    "geospec": "workspace:*"
   }
 }

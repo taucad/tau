@@ -8,12 +8,6 @@
     "test": {
       "dependsOn": ["copy-assets"]
     },
-    "benchmark": {
-      "command": "tsx --require ./scripts/cjs-compat.cjs scripts/benchmark-kernels.mts",
-      "options": {
-        "cwd": "{projectRoot}"
-      }
-    },
     "benchmark-replicad-tessellation": {
       "command": "tsx --require ./scripts/cjs-compat.cjs scripts/benchmark-replicad-tessellation.mts",
       "options": {
@@ -28,18 +22,6 @@
     },
     "wasm-inspect": {
       "command": "tsx scripts/wasm-inspect.mts",
-      "options": {
-        "cwd": "{projectRoot}"
-      }
-    },
-    "build-matrix": {
-      "command": "tsx scripts/build-matrix-report.mts",
-      "options": {
-        "cwd": "{projectRoot}"
-      }
-    },
-    "compare-benchmarks": {
-      "command": "tsx scripts/compare-benchmarks.mts",
       "options": {
         "cwd": "{projectRoot}"
       }

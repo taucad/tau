@@ -1192,8 +1192,8 @@ importers:
         specifier: ^2.0.4
         version: 2.0.4(react-router@7.14.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7))
       replicad:
-        specifier: file:tarballs/replicad-native-batch-operations/taucad-replicad-0.23.3-beta.1.tgz
-        version: '@taucad/replicad@file:tarballs/replicad-native-batch-operations/taucad-replicad-0.23.3-beta.1.tgz'
+        specifier: file:tarballs/replicad-annotations/taucad-replicad-0.23.4-beta.2.tgz
+        version: '@taucad/replicad@file:tarballs/replicad-annotations/taucad-replicad-0.23.4-beta.2.tgz'
       replicad-opencascadejs:
         specifier: file:tarballs/replicad-tessellation-instancing/taucad-replicad-opencascadejs-0.23.0-beta.0.tgz
         version: '@taucad/replicad-opencascadejs@file:tarballs/replicad-tessellation-instancing/taucad-replicad-opencascadejs-0.23.0-beta.0.tgz'
@@ -1635,6 +1635,18 @@ importers:
         specifier: workspace:*
         version: link:../../packages/geospec
 
+  apps/runtime-e2e:
+    devDependencies:
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+      '@taucad/tau-examples':
+        specifier: workspace:*
+        version: link:../../libs/tau-examples
+      geospec:
+        specifier: workspace:*
+        version: link:../../packages/geospec
+
   apps/ui:
     dependencies:
       '@base-ui/react':
@@ -2070,7 +2082,11 @@ importers:
 
   libs/oxlint: {}
 
-  libs/tau-examples: {}
+  libs/tau-examples:
+    devDependencies:
+      geospec:
+        specifier: workspace:*
+        version: link:../../packages/geospec
 
   libs/vite:
     dependencies:
@@ -2356,8 +2372,8 @@ importers:
         specifier: npm:@taucad/opencascade.js@3.0.0-beta.3
         version: '@taucad/opencascade.js@3.0.0-beta.3'
       replicad:
-        specifier: file:../../tarballs/replicad-native-batch-operations/taucad-replicad-0.23.3-beta.1.tgz
-        version: '@taucad/replicad@file:tarballs/replicad-native-batch-operations/taucad-replicad-0.23.3-beta.1.tgz'
+        specifier: file:../../tarballs/replicad-annotations/taucad-replicad-0.23.4-beta.2.tgz
+        version: '@taucad/replicad@file:tarballs/replicad-annotations/taucad-replicad-0.23.4-beta.2.tgz'
       replicad-opencascadejs:
         specifier: file:../../tarballs/replicad-tessellation-instancing/taucad-replicad-opencascadejs-0.23.0-beta.0.tgz
         version: '@taucad/replicad-opencascadejs@file:tarballs/replicad-tessellation-instancing/taucad-replicad-opencascadejs-0.23.0-beta.0.tgz'
@@ -2389,9 +2405,6 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
     devDependencies:
-      '@taucad/tau-examples':
-        specifier: workspace:*
-        version: link:../../libs/tau-examples
       geist:
         specifier: 'catalog:'
         version: 1.7.2(next@16.2.9(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.61.0)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))
@@ -11339,9 +11352,9 @@ packages:
     resolution: {integrity: sha512-08iKM3p4XAT3CPc+Zo9+uVGfVO75AnEs/Qlfovpwh4B4lIrGsshEqeN4lIGzcwEPktZ99nQE4InP1tZIsBeUIg==, tarball: file:tarballs/replicad-tessellation-instancing/taucad-replicad-opencascadejs-0.23.0-beta.0.tgz}
     version: 0.23.0-beta.0
 
-  '@taucad/replicad@file:tarballs/replicad-native-batch-operations/taucad-replicad-0.23.3-beta.1.tgz':
-    resolution: {integrity: sha512-Tv28vNnqD72ZA9VVIVVKAANIlvQRtgKZgCc/0iC7wzfjiyDsBib0SP//dysJmtzgfgQsMCx+YvBLYByRwyKNFA==, tarball: file:tarballs/replicad-native-batch-operations/taucad-replicad-0.23.3-beta.1.tgz}
-    version: 0.23.3-beta.1
+  '@taucad/replicad@file:tarballs/replicad-annotations/taucad-replicad-0.23.4-beta.2.tgz':
+    resolution: {integrity: sha512-N2cOh9Qi7vQ+KSdqdke9IV1mMJUrnduTnbmECKuzHYSP+GBbbvJGhHrwLbDSQbq1CqhulAN1DzHCTckQX1GLqQ==, tarball: file:tarballs/replicad-annotations/taucad-replicad-0.23.4-beta.2.tgz}
+    version: 0.23.4-beta.2
 
   '@testing-library/dom@10.4.1':
     resolution: {integrity: sha512-o4PXJQidqJl82ckFaXUeoAW+XysPLauYI43Abki5hABd853iMhitooc6znOnczgbTYmEP6U6/y1ZyKAIsvMKGg==}
@@ -31224,7 +31237,7 @@ snapshots:
     dependencies:
       '@react-email/text': 0.1.6(react@19.2.7)
       react: 19.2.7
-      tailwindcss: 4.3.1
+      tailwindcss: 4.3.2
     optionalDependencies:
       '@react-email/body': 0.2.1(react@19.2.7)
       '@react-email/button': 0.2.1(react@19.2.7)
@@ -32810,7 +32823,7 @@ snapshots:
 
   '@taucad/replicad-opencascadejs@file:tarballs/replicad-tessellation-instancing/taucad-replicad-opencascadejs-0.23.0-beta.0.tgz': {}
 
-  '@taucad/replicad@file:tarballs/replicad-native-batch-operations/taucad-replicad-0.23.3-beta.1.tgz':
+  '@taucad/replicad@file:tarballs/replicad-annotations/taucad-replicad-0.23.4-beta.2.tgz':
     dependencies:
       '@types/opentype.js': 1.3.4
       flatbush: 4.6.2

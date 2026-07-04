@@ -9,6 +9,5 @@
       "#*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.geospec.ts"]
+  "include": ["src/**/*.ts"]
 }

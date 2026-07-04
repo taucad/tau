@@ -48,3 +48,6 @@ export {
 } from '#testing/color-testing.utils.js';
 
 export type { ColorParityCase } from '#testing/color-testing.utils.js';
+
+export { readGltfNamingSummary } from '#testing/gltf-naming-testing.utils.js';
+export type { GltfNamingSummary } from '#testing/gltf-naming-testing.utils.js';

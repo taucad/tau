@@ -7,7 +7,7 @@
  */
 
 import type { CpuProfile, ProfileNode } from '#benchmarks/cpu-profiler.js';
-import type { TelemetryEntry } from '#types/runtime-protocol.types.js';
+import type { TelemetryEntry } from '@taucad/runtime/types';
 
 // =============================================================================
 // Types

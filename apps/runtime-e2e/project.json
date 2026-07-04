@@ -1,0 +1,28 @@
+{
+  "name": "runtime-e2e",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/runtime-e2e/src",
+  "projectType": "application",
+  "tags": ["scope:shared", "type:e2e"],
+  "implicitDependencies": ["runtime", "tau-examples", "geospec"],
+  "targets": {
+    "benchmark": {
+      "command": "tsx --require ./scripts/cjs-compat.cjs scripts/benchmark-kernels.mts",
+      "options": {
+        "cwd": "{projectRoot}"
+      }
+    },
+    "build-matrix": {
+      "command": "tsx scripts/build-matrix-report.mts",
+      "options": {
+        "cwd": "{projectRoot}"
+      }
+    },
+    "compare-benchmarks": {
+      "command": "tsx scripts/compare-benchmarks.mts",
+      "options": {
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
+}

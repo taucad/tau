@@ -9,13 +9,13 @@
  * to dogfood the same API path as production consumers.
  */
 
-import type { TelemetryEntry } from '#types/runtime-protocol.types.js';
-import { createRuntimeClient } from '#index.js';
-import { inProcessTransport } from '#transport/in-process-transport.js';
-import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
-import { replicad } from '#plugins/kernel-factories.js';
-import { esbuild } from '#plugins/bundler-entry.js';
-import { defineRuntime } from '#worker/runtime-definition.js';
+import type { TelemetryEntry } from '@taucad/runtime/types';
+import { createRuntimeClient } from '@taucad/runtime';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { replicad } from '@taucad/runtime/kernels/replicad';
+import { esbuild } from '@taucad/runtime/bundler/esbuild';
+import { defineRuntime } from '@taucad/runtime/worker';
 import type { BenchmarkCase } from '#benchmarks/benchmark-suite.js';
 import type { CpuProfile, CpuProfiler } from '#benchmarks/cpu-profiler.js';
 import type { ProfileAnalysis } from '#benchmarks/profile-analyzer.js';

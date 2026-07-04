@@ -6,7 +6,6 @@
  * Cases are grouped by category for filtering and reporting.
  */
 
-// eslint-disable-next-line @nx/enforce-module-boundaries -- Allowable for devDependencies.
 import { loadFixture } from '@taucad/tau-examples/fixtures';
 
 /** A single benchmark case with its files and metadata. */

@@ -1,0 +1,16 @@
+{
+  "name": "@taucad/runtime-e2e",
+  "version": "0.1.0",
+  "description": "Cross-package runtime regression + benchmark backbone (fixture-driven tests over tau-examples, runtime, and geospec).",
+  "type": "module",
+  "private": true,
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "devDependencies": {
+    "@taucad/runtime": "workspace:*",
+    "@taucad/tau-examples": "workspace:*",
+    "geospec": "workspace:*"
+  }
+}

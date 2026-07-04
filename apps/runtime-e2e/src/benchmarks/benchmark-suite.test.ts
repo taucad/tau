@@ -1,4 +1,3 @@
-// eslint-disable-next-line @nx/enforce-module-boundaries -- Benchmark fixtures are allowed dev inputs.
 import { loadFixture } from '@taucad/tau-examples/fixtures';
 import { describe, expect, it } from 'vitest';
 import { benchmarkSuite, filterBenchmarks } from '#benchmarks/benchmark-suite.js';

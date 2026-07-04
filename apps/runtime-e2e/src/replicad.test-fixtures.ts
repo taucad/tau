@@ -3,9 +3,7 @@
  * Loads curated examples from @taucad/tau-examples covering a wide range of replicad API surface area.
  */
 
-// eslint-disable-next-line @nx/enforce-module-boundaries -- Allowable for devDependencies.
 import type { Fixture } from '@taucad/tau-examples/fixtures';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- Allowable for devDependencies.
 import { loadFixture } from '@taucad/tau-examples/fixtures';
 
 /** A named example fixture for parameterized testing. */

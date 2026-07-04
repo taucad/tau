@@ -170,7 +170,7 @@ function splitTextAfterDot(text: string): string[] {
   }
 
   const dotIndex = text.indexOf('.');
-  if (dotIndex >= 0 && dotIndex < text.length - 1) {
+  if (dotIndex !== -1 && dotIndex < text.length - 1) {
     return [
       text.slice(0, dotIndex + 1).trim(),
       text.slice(dotIndex + 1).trim(),

@@ -23,9 +23,7 @@ import {
   gp_Vec,
   type BRepAlgoAPI_BooleanOperation,
   type TopoDS_Edge,
-  type TopoDS_Face,
   type TopoDS_Shape,
-  type TopoDS_Wire,
 } from 'opencascade.js';
 
 export const defaultParams = {

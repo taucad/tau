@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { clearCollectorGlobals, createCollector, installCollector } from '#runner/collector.js';
 import type { GeometrySubject, MeshTriangle, Vec3 } from '#mesh/types.js';
-import type { GeoSpecComponentOverlapExpectation } from '#runner/types.js';
+import type { GeoSpecComponentInterferenceExpectation } from '#runner/types.js';
 
 const boxPositions = [
   0, 0, 0, 10, 20, 0, 10, 0, 0, 0, 0, 0, 0, 20, 0, 10, 20, 0, 0, 0, 30, 10, 0, 30, 10, 20, 30, 0, 0, 30, 10, 20, 30, 0,
@@ -111,7 +111,7 @@ const runOneAssertion = async (callback: (collector: ReturnType<typeof createCol
   const collector = createCollector();
   installCollector(collector);
   try {
-    collector.it('should evaluate component overlap', async () => callback(collector));
+    collector.it('should evaluate component interference', async () => callback(collector));
     await collector.waitForCompletion(10_000);
     return collector.tests[0]!;
   } finally {
@@ -119,16 +119,16 @@ const runOneAssertion = async (callback: (collector: ReturnType<typeof createCol
   }
 };
 
-describe('component overlap matcher', () => {
+describe('component interference matcher', () => {
   it('should pass when exact-volume analysis reports no positive-volume overlaps', async () => {
     const test = await runOneAssertion((collector) => {
-      collector.expectGeo(subject(15)).toHaveNoComponentOverlap({ tolerance: 0.001 });
+      collector.expectGeo(subject(15)).toHaveNoComponentInterference({ tolerance: 0.001 });
     });
 
     expect(test.status).toBe('passed');
     expect(test.assertions).toEqual([
       expect.objectContaining({
-        kind: 'componentOverlap',
+        kind: 'componentInterference',
         passed: true,
         diagnostics: [],
       }),
@@ -137,16 +137,16 @@ describe('component overlap matcher', () => {
 
   it('should fail with structured diagnostics when exact-volume analysis finds overlap volume', async () => {
     const test = await runOneAssertion((collector) => {
-      collector.expectGeo(subject(9)).toHaveNoComponentOverlap({ tolerance: 0.001 });
+      collector.expectGeo(subject(9)).toHaveNoComponentInterference({ tolerance: 0.001 });
     });
 
     expect(test.status).toBe('failed');
     expect(test.assertions[0]).toMatchObject({
-      kind: 'componentOverlap',
+      kind: 'componentInterference',
       passed: false,
       diagnostics: [
         {
-          code: 'GEOSPEC_COMPONENT_OVERLAP_DETECTED',
+          code: 'GEOSPEC_COMPONENT_INTERFERENCE_DETECTED',
           severity: 'error',
           details: {
             componentSource: 'named',
@@ -176,27 +176,27 @@ describe('component overlap matcher', () => {
     const invalidExpectation = {
       tolerance: 0.1,
       components: 'auto',
-    } as unknown as GeoSpecComponentOverlapExpectation;
+    } as unknown as GeoSpecComponentInterferenceExpectation;
 
     const test = await runOneAssertion((collector) => {
-      collector.expectGeo(subject(15)).toHaveNoComponentOverlap(invalidExpectation);
+      collector.expectGeo(subject(15)).toHaveNoComponentInterference(invalidExpectation);
     });
 
     expect(test.status).toBe('failed');
     const assertion = test.assertions[0];
-    expect(assertion?.kind).toBe('componentOverlap');
+    expect(assertion?.kind).toBe('componentInterference');
     const diagnostic = assertion?.diagnostics?.[0];
     expect(diagnostic?.code).toBe('GEOSPEC_INVALID_EXPECTATION');
     expect(diagnostic?.message).toContain("unknown field 'components'");
     expect(diagnostic?.details).toMatchObject({
-      matcher: 'toHaveNoComponentOverlap',
+      matcher: 'toHaveNoComponentInterference',
       field: 'components',
     });
   });
 
   it('should restrict overlap checks to selected component pairs', async () => {
     const filtered = await runOneAssertion((collector) => {
-      collector.expectGeo(pairFilteredSubject()).toHaveNoComponentOverlap({
+      collector.expectGeo(pairFilteredSubject()).toHaveNoComponentInterference({
         tolerance: 0.001,
         pairs: [{ left: 'ring#0', right: /planet/ }],
       });
@@ -205,16 +205,16 @@ describe('component overlap matcher', () => {
     expect(filtered.status).toBe('passed');
 
     const global = await runOneAssertion((collector) => {
-      collector.expectGeo(pairFilteredSubject()).toHaveNoComponentOverlap({ tolerance: 0.001 });
+      collector.expectGeo(pairFilteredSubject()).toHaveNoComponentInterference({ tolerance: 0.001 });
     });
 
     expect(global.status).toBe('failed');
     expect(global.assertions[0]).toMatchObject({
-      kind: 'componentOverlap',
+      kind: 'componentInterference',
       passed: false,
       diagnostics: [
         {
-          code: 'GEOSPEC_COMPONENT_OVERLAP_DETECTED',
+          code: 'GEOSPEC_COMPONENT_INTERFERENCE_DETECTED',
           details: {
             overlaps: [
               {
@@ -229,9 +229,69 @@ describe('component overlap matcher', () => {
     });
   });
 
+  it('should allow bounded intentional component interference with an engineering reason', async () => {
+    const allowed = await runOneAssertion((collector) => {
+      collector.expectGeo(subject(9)).toHaveNoComponentInterference({
+        tolerance: 0.001,
+        allowances: [
+          {
+            kind: 'intentionalInterference',
+            left: 'left-box#0',
+            right: 'right-box#0',
+            maxVolume: 1000,
+            reason: 'Synthetic fixture asserts that intentional press-fit allowances suppress only classified pairs.',
+          },
+        ],
+      });
+    });
+
+    expect(allowed.status).toBe('passed');
+
+    const unbounded = await runOneAssertion((collector) => {
+      collector.expectGeo(subject(9)).toHaveNoComponentInterference({
+        tolerance: 0.001,
+        allowances: [
+          {
+            kind: 'intentionalInterference',
+            left: 'left-box#0',
+            right: 'right-box#0',
+            maxVolume: 0,
+            reason: 'Intentional interference is bounded too tightly and must still fail.',
+          },
+        ],
+      });
+    });
+
+    expect(unbounded.status).toBe('failed');
+    expect(unbounded.assertions[0]).toMatchObject({
+      kind: 'componentInterference',
+      passed: false,
+      diagnostics: [
+        {
+          code: 'GEOSPEC_COMPONENT_INTERFERENCE_DETECTED',
+          details: {
+            allowedInterferences: [],
+            unclassifiedInterferences: [
+              {
+                leftLabel: 'left-box#0',
+                rightLabel: 'right-box#0',
+              },
+            ],
+            allowances: [
+              {
+                kind: 'intentionalInterference',
+                reason: 'Intentional interference is bounded too tightly and must still fail.',
+              },
+            ],
+          },
+        },
+      ],
+    });
+  });
+
   it('should report structured diagnostics for unmatched component pair selectors', async () => {
     const test = await runOneAssertion((collector) => {
-      collector.expectGeo(pairFilteredSubject()).toHaveNoComponentOverlap({
+      collector.expectGeo(pairFilteredSubject()).toHaveNoComponentInterference({
         tolerance: 0.001,
         pairs: [{ left: 'missing#0', right: /planet/ }],
       });
@@ -239,7 +299,7 @@ describe('component overlap matcher', () => {
 
     expect(test.status).toBe('failed');
     expect(test.assertions[0]).toMatchObject({
-      kind: 'componentOverlap',
+      kind: 'componentInterference',
       passed: false,
       diagnostics: [
         {
@@ -259,10 +319,10 @@ describe('component overlap matcher', () => {
   it('should reject malformed component pair selectors before analysis', async () => {
     const invalidExpectation = {
       pairs: [{ left: 1, right: 'right-box#0' }],
-    } as unknown as GeoSpecComponentOverlapExpectation;
+    } as unknown as GeoSpecComponentInterferenceExpectation;
 
     const test = await runOneAssertion((collector) => {
-      collector.expectGeo(subject(15)).toHaveNoComponentOverlap(invalidExpectation);
+      collector.expectGeo(subject(15)).toHaveNoComponentInterference(invalidExpectation);
     });
 
     expect(test.status).toBe('failed');

@@ -4,11 +4,10 @@ This directory contains the custom C++ STEP, BRep, mesh, and distance wrappers
 used by GeoSpec-aware OpenCascade.js builds. It is intentionally separate from
 the root `geospec` runtime so importing `geospec` never initializes WASM.
 
-Build with the Tau OpenCascade.js Docker image:
+Build with the GeoSpec Nx target:
 
 ```bash
-cd packages/geospec/native/opencascade
-docker run --rm -v "$(pwd):/src" -u "$(id -u):$(id -g)" ghcr.io/taucad/opencascade.js:single-threaded link geospec.single.yml
+pnpm nx run geospec:build-wasm
 ```
 
 The generated module exposes:
@@ -46,7 +45,7 @@ backend, distance matchers report a structured native-unavailable diagnostic;
 production code does not run a JavaScript triangle-distance fallback.
 
 Component-overlap checks are stricter: there is no JavaScript verdict fallback.
-`toHaveNoComponentOverlap({ tolerance, pairs })` and `analyzeMeshOverlap(...)`
+`toHaveNoComponentInterference({ tolerance, pairs })` and `analyzeMeshOverlap(...)`
 use GeoSpec mesh records, optional pair selectors, cheap AABB candidate
 pruning, and Manifold WASM exact intersection volume. Tangent contact and
 correctly meshed gears pass because zero-volume contact is not overlap. If

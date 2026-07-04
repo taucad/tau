@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { GeoSpecModelLoadError, createModelLoader, loadModel, parameterGroups, params } from '#model/index.js';
 import type { GeoSpecModelLoader, GeoSpecRuntimeClient, GeoSpecRuntimeSourceAdapter } from '#model/index.js';
 import type { GeometryDiagnostic, GeometrySubject } from '#mesh/types.js';
+import { clearCollectorGlobals, createCollector, installCollector } from '#runner/collector.js';
 import {
   createCachedModelLoader,
   createModelLoadCacheKey,
@@ -130,7 +131,7 @@ const createOpenScadSourceAdapter = (): GeoSpecRuntimeSourceAdapter => ({
       ...baseRuntime,
       kernels: [openscad(), ...baseRuntime.kernels],
     });
-    return createNodeClient(projectPath, { runtime }) as Promise<GeoSpecRuntimeClient>;
+    return (await createNodeClient(projectPath, { runtime })) as GeoSpecRuntimeClient;
   },
 });
 
@@ -176,6 +177,91 @@ const createMockGeometrySubject = (name: string): GeometrySubject => ({
   capabilities: [],
   diagnostics: [],
 });
+
+const createReplicadStepOverlapAssemblyCode = (
+  parts: ReadonlyArray<{ name: string; x: number }>,
+): string => `import { makeBaseBox, type ShapeConfig } from 'replicad';
+
+const part = (name: string, x: number): ShapeConfig => ({
+  shape: makeBaseBox(10, 10, 10).translate([x, 0, 0]),
+  name,
+});
+
+export default function main(): ShapeConfig[] {
+  return [
+${parts.map((part) => `    part(${JSON.stringify(part.name)}, ${part.x}),`).join('\n')}
+  ];
+}`;
+
+const runComponentOverlapAssertion = async (subject: GeometrySubject) => {
+  const collector = createCollector();
+  installCollector(collector);
+  try {
+    collector.it('should report authored component names for overlap failures', async () => {
+      collector.expectGeo(subject).toHaveNoComponentInterference({ tolerance: 0.001 });
+    });
+    await collector.waitForCompletion(120_000);
+    return collector.tests[0]!;
+  } finally {
+    clearCollectorGlobals();
+  }
+};
+
+const getComponentOverlapDetails = (
+  details: unknown,
+): {
+  componentSource: unknown;
+  overlaps: Array<{ leftLabel: string; rightLabel: string; intersectionVolume: number }>;
+} => {
+  if (typeof details !== 'object' || details === null || !('overlaps' in details)) {
+    throw new Error('Expected component-overlap diagnostic details.');
+  }
+  const overlapDetails = details as { componentSource?: unknown; overlaps?: unknown };
+  if (!Array.isArray(overlapDetails.overlaps)) {
+    throw new TypeError('Expected component-overlap diagnostic details to include overlaps.');
+  }
+  return {
+    componentSource: overlapDetails.componentSource,
+    overlaps: overlapDetails.overlaps as Array<{
+      leftLabel: string;
+      rightLabel: string;
+      intersectionVolume: number;
+    }>,
+  };
+};
+
+const expectStepOverlapFailureNames = async (options: {
+  code: string;
+  expectedPairs: ReadonlyArray<{ left: string; right: string }>;
+}): Promise<void> => {
+  const subject = await loadModel({
+    code: { [mainFile]: options.code },
+    file: mainFile,
+    format: 'step',
+  });
+
+  const test = await runComponentOverlapAssertion(subject);
+
+  expect(test.status).toBe('failed');
+  const diagnostic = test.assertions[0]?.diagnostics?.[0];
+  expect(diagnostic?.code).toBe('GEOSPEC_COMPONENT_INTERFERENCE_DETECTED');
+  expect(diagnostic?.message).not.toContain('connected-component-');
+  for (const pair of options.expectedPairs) {
+    expect(diagnostic?.message).toContain(`${pair.left} to ${pair.right}: volume`);
+  }
+
+  const details = getComponentOverlapDetails(diagnostic?.details);
+  expect(details.componentSource).toBe('named');
+  expect(
+    details.overlaps.map((overlap) => ({
+      left: overlap.leftLabel,
+      right: overlap.rightLabel,
+    })),
+  ).toEqual(options.expectedPairs);
+  for (const overlap of details.overlaps) {
+    expect(overlap.intersectionVolume).toBeGreaterThan(0);
+  }
+};
 
 describe('loadModel', () => {
   it('should create order-stable deterministic cache keys and reject non-deterministic source loads', () => {
@@ -395,9 +481,11 @@ describe('loadModel', () => {
     expect(exportMock).toHaveBeenCalledWith(
       'glb',
       expect.objectContaining({
-        file: mainFile,
-        coordinateSystem: 'z-up',
-        unit: { length: 'millimeter' },
+        source: { path: mainFile },
+        exportOptions: {
+          coordinateSystem: 'z-up',
+          unit: { length: 'millimeter' },
+        },
       }),
     );
     expect(subject.mesh.stats.boundingBox?.size[0]).toBeCloseTo(50, 5);
@@ -427,7 +515,14 @@ describe('loadModel', () => {
       }),
     });
 
-    expect(exportMock).toHaveBeenCalledWith('glb', { file: mainFile, parameters: undefined });
+    expect(exportMock).toHaveBeenCalledWith('glb', {
+      source: { path: mainFile },
+      parameters: undefined,
+      exportOptions: {
+        coordinateSystem: 'z-up',
+        unit: { length: 'millimeter' },
+      },
+    });
     expect(subject.mesh.stats.boundingBox?.size[0]).toBeCloseTo(50, 5);
     expect(subject.mesh.stats.boundingBox?.size[1]).toBeCloseTo(50, 5);
     expect(subject.provenance.exportIntent?.honored).toEqual({
@@ -864,6 +959,97 @@ describe('loadModel', () => {
     expect(typeof subject.brep?.massProperties?.surfaceArea).toBe('number');
     expect(subject.mesh.stats.triangleCount).toBeGreaterThan(0);
   });
+
+  it('should skip the runtime-backed STEP mesh supplement when mesh loading is disabled', async () => {
+    const stepBytes = new TextEncoder().encode('ISO-10303-21; HEADER; ENDSEC; END-ISO-10303-21;');
+    const exportMock = vi.fn(async () => ({
+      success: true,
+      data: { bytes: stepBytes, name: 'assembly.step' },
+      issues: [],
+    }));
+    let parsedOptions: unknown;
+    const reader = {
+      readText: vi.fn((_data: string, optionsJson: string) => {
+        parsedOptions = JSON.parse(optionsJson);
+        return {
+          success: true,
+          evidenceJson: () =>
+            JSON.stringify({
+              brep: { validity: { valid: true } },
+              diagnostics: [],
+            }),
+          delete: vi.fn(),
+        };
+      }),
+    };
+    const stepStreamReaderKey = 'GeoSpecStepStreamReader';
+
+    const subject = await loadModel({
+      file: mainFile,
+      format: 'step',
+      mesh: false,
+      runtime: runtimeMock({ export: exportMock }),
+      nativeStepBackend: { [stepStreamReaderKey]: reader },
+    });
+
+    expect(exportMock).toHaveBeenCalledOnce();
+    expect(exportMock).toHaveBeenCalledWith('step', {
+      source: { path: mainFile },
+      parameters: undefined,
+      exportOptions: {},
+    });
+    expect(parsedOptions).toMatchObject({ mesh: false });
+    expect(subject.mesh.stats.triangleCount).toBe(0);
+    expect(subject.capabilities).not.toContainEqual({ kind: 'mesh', feature: 'component-overlap' });
+  });
+
+  it(
+    'should report authored names for a STEP-backed two-component Replicad overlap failure',
+    { timeout: 120_000 },
+    async () => {
+      await expectStepOverlapFailureNames({
+        code: createReplicadStepOverlapAssemblyCode([
+          { name: 'Housing and Ring Gear', x: 0 },
+          { name: 'Planet Gear', x: 9 },
+        ]),
+        expectedPairs: [{ left: 'Housing and Ring Gear', right: 'Planet Gear' }],
+      });
+    },
+  );
+
+  it(
+    'should report authored names for a STEP-backed three-component Replicad assembly with one overlapping pair',
+    { timeout: 120_000 },
+    async () => {
+      await expectStepOverlapFailureNames({
+        code: createReplicadStepOverlapAssemblyCode([
+          { name: 'Housing and Ring Gear', x: 0 },
+          { name: 'Planet Gear', x: 9 },
+          { name: 'Planet Carrier', x: 30 },
+        ]),
+        expectedPairs: [{ left: 'Housing and Ring Gear', right: 'Planet Gear' }],
+      });
+    },
+  );
+
+  it(
+    'should report authored names for a STEP-backed three-component Replicad assembly with every pair overlapping',
+    { timeout: 120_000 },
+    async () => {
+      await expectStepOverlapFailureNames({
+        code: createReplicadStepOverlapAssemblyCode([
+          { name: 'Housing and Ring Gear', x: 0 },
+          { name: 'Planet Gear', x: 3 },
+          { name: 'Planet Carrier', x: 6 },
+        ]),
+        expectedPairs: [
+          { left: 'Housing and Ring Gear', right: 'Planet Gear' },
+          { left: 'Housing and Ring Gear', right: 'Planet Carrier' },
+          { left: 'Planet Gear', right: 'Planet Carrier' },
+        ],
+      });
+    },
+  );
 
   it('should expose merged parameter groups for model tests', () => {
     const groups = parameterGroups(

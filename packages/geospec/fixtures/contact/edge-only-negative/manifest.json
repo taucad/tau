@@ -1,0 +1,49 @@
+{
+  "family": "contact",
+  "fixture": "contact.edge-only-negative",
+  "generator": {
+    "script": "scripts/contact/edge-only/main.ts",
+    "parameters": {}
+  },
+  "tolerances": {
+    "contact": 0.02
+  },
+  "selectors": [
+    {
+      "selector": "base.top",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, 0, 1],
+        "offset": 20
+      }
+    },
+    {
+      "selector": "block.seat",
+      "status": "resolved",
+      "entityCount": 1
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "contact",
+      "subject": "block.seat",
+      "target": "base.top",
+      "options": {
+        "tolerance": 0.02,
+        "minContactArea": 20
+      },
+      "expected": {
+        "verdict": "fail",
+        "final": {
+          "measured": {
+            "distance": 0
+          }
+        },
+        "mentions": ["block.seat"]
+      },
+      "pending": "SB4-R2: contact-area estimation is deferred by design (minContactArea returns unsupported); activate when contact-area evidence lands"
+    }
+  ],
+  "notes": "Zero-distance edge touch is not production face contact: measured contact area is below minContactArea 20 (audit contact row 8)."
+}

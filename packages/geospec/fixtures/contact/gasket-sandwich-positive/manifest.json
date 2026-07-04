@@ -1,0 +1,89 @@
+{
+  "family": "contact",
+  "fixture": "contact.gasket-sandwich-positive",
+  "generator": {
+    "script": "scripts/contact/gasket-sandwich/main.ts",
+    "parameters": {}
+  },
+  "tolerances": {
+    "contact": 0.02
+  },
+  "selectors": [
+    {
+      "selector": "block.deck",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, 0, 1],
+        "offset": 10
+      }
+    },
+    {
+      "selector": "gasket.lower",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, 0, -1],
+        "offset": -10
+      }
+    },
+    {
+      "selector": "gasket.upper",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, 0, 1],
+        "offset": 11.2
+      }
+    },
+    {
+      "selector": "head.deck",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, 0, -1],
+        "offset": -11.2
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "contact",
+      "subject": "gasket.lower",
+      "target": "block.deck",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "measured": {
+            "distance": 0
+          }
+        }
+      }
+    },
+    {
+      "kind": "contact",
+      "subject": "gasket.upper",
+      "target": "head.deck",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "measured": {
+            "distance": 0
+          }
+        }
+      }
+    }
+  ]
+}

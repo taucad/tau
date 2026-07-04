@@ -1,0 +1,71 @@
+{
+  "family": "containment",
+  "fixture": "containment.spark-plug-thread-positive",
+  "generator": {
+    "script": "scripts/contact/plug-seat/main.ts",
+    "parameters": {}
+  },
+  "tolerances": {
+    "contact": 0.02,
+    "reachMin": 14.5,
+    "reachMax": 19
+  },
+  "selectors": [
+    {
+      "selector": "plug.thread",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "radius": 5.95
+      }
+    },
+    {
+      "selector": "head.plugBore",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "radius": 6
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "insertion",
+      "subject": "plug.thread",
+      "target": "head.plugBore",
+      "options": {
+        "axis": [0, 0, -1],
+        "min": 14.5,
+        "max": 19
+      },
+      "expected": {
+        "verdict": "pass",
+        "final": {
+          "measured": {
+            "depth": 16
+          }
+        }
+      }
+    },
+    {
+      "kind": "contact",
+      "subject": "plug.washerSeat",
+      "target": "head.seat",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "measured": {
+            "distance": 0
+          }
+        }
+      }
+    }
+  ],
+  "notes": "Containment and seat contact form one coherent installed-plug relationship (threaded reach 16.0 inside [14.5, 19.0])."
+}

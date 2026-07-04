@@ -12,16 +12,5 @@
     }
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"],
-  "references": [
-    {
-      "path": "../runtime/tsconfig.lib.json"
-    },
-    {
-      "path": "../../kernels/openscad/tsconfig.lib.json"
-    },
-    {
-      "path": "../vm/tsconfig.lib.json"
-    }
-  ]
+  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"]
 }

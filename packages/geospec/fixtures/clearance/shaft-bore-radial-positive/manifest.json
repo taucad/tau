@@ -1,0 +1,77 @@
+{
+  "family": "clearance",
+  "fixture": "clearance.shaft-bore-radial-positive",
+  "generator": {
+    "script": "scripts/clearance/shaft-bore/main.ts",
+    "parameters": {}
+  },
+  "tolerances": {
+    "clearanceMin": 0.02,
+    "clearanceMax": 0.06,
+    "measurement": 0.001
+  },
+  "selectors": [
+    {
+      "selector": "housing.bore",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "cylinder",
+        "radius": 25.04,
+        "axisDirection": [0, 0, 1]
+      }
+    },
+    {
+      "selector": "shaft.journal",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "cylinder",
+        "radius": 25,
+        "axisDirection": [0, 0, 1]
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "clearance",
+      "subject": "shaft.journal",
+      "target": "housing.bore",
+      "options": {
+        "min": 0.02,
+        "max": 0.06,
+        "tolerance": 0.001
+      },
+      "expected": {
+        "verdict": "pass",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "method": "extrema",
+          "measured": {
+            "distance": 0.04
+          }
+        }
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "shaft.journal",
+      "target": "housing.bore",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "final": {
+          "method": "analytic",
+          "measured": {
+            "radialOffset": 0,
+            "angle": 0
+          }
+        }
+      }
+    }
+  ]
+}

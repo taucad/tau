@@ -1,0 +1,133 @@
+{
+  "family": "mate",
+  "fixture": "mate.flanged-pipe-port-positive",
+  "generator": {
+    "script": "scripts/mate/flanged-pipe-port/main.ts",
+    "parameters": {}
+  },
+  "tolerances": {
+    "contact": 0.02,
+    "coaxial": 0.05
+  },
+  "selectors": [
+    {
+      "selector": "manifold.face",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, 0, 1],
+        "offset": 10
+      }
+    },
+    {
+      "selector": "manifold.port",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "cylinder",
+        "radius": 10
+      }
+    },
+    {
+      "selector": {
+        "kind": "group",
+        "name": "manifold.boltHole",
+        "expect": {
+          "exactly": 4
+        }
+      },
+      "status": "resolved",
+      "entityCount": 4
+    },
+    {
+      "selector": "runnerFlange.face",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, 0, -1],
+        "offset": -10
+      }
+    },
+    {
+      "selector": "runnerFlange.port",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "cylinder",
+        "radius": 10
+      }
+    },
+    {
+      "selector": {
+        "kind": "group",
+        "name": "runnerFlange.boltHole",
+        "expect": {
+          "exactly": 4
+        }
+      },
+      "status": "resolved",
+      "entityCount": 4
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "contact",
+      "subject": "runnerFlange.face",
+      "target": "manifold.face",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "measured": {
+            "distance": 0
+          }
+        }
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "runnerFlange.port",
+      "target": "manifold.port",
+      "options": {
+        "tolerance": 0.05
+      },
+      "expected": {
+        "verdict": "pass",
+        "final": {
+          "method": "analytic",
+          "measured": {
+            "radialOffset": 0,
+            "angle": 0
+          }
+        }
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "runnerFlange.boltHole[1]",
+      "target": "manifold.boltHole[1]",
+      "options": {
+        "tolerance": 0.05
+      },
+      "expected": {
+        "verdict": "pass"
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "runnerFlange.boltHole[4]",
+      "target": "manifold.boltHole[4]",
+      "options": {
+        "tolerance": 0.05
+      },
+      "expected": {
+        "verdict": "pass"
+      }
+    }
+  ]
+}

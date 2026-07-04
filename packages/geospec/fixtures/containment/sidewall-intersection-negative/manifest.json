@@ -1,0 +1,41 @@
+{
+  "family": "containment",
+  "fixture": "containment.sidewall-intersection-negative",
+  "generator": {
+    "script": "scripts/containment/filter-inside-housing/main.ts",
+    "parameters": {
+      "axisOffset": 5
+    }
+  },
+  "tolerances": {
+    "clearanceMin": 1,
+    "clearanceMax": 4
+  },
+  "selectors": [
+    {
+      "selector": "cartridge.body",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "axisOrigin": [5, 0, 6]
+      },
+      "factsTolerance": 0.001
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "containment",
+      "subject": "cartridge",
+      "target": "housing",
+      "options": {},
+      "expected": {
+        "verdict": "fail",
+        "broadPhase": {
+          "candidate": true
+        },
+        "mentions": ["cartridge"]
+      }
+    }
+  ],
+  "notes": "The 5.0 axis offset makes the cartridge (r24) pierce the cavity wall (r27) by 2.0 while its AABB stays inside the housing AABB; the failure holds under both material- and enclosure-containment semantics."
+}

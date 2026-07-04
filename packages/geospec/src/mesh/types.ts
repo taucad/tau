@@ -1,4 +1,5 @@
 import type { KernelIssueCode } from '@taucad/runtime/types';
+import type { GeoSpecNativeXdeReadResult, XdeReadResult } from '#step/types.js';
 
 /**
  * Numeric 3D vector.
@@ -191,6 +192,12 @@ export type BrepEvidence = {
   validity?: {
     valid: boolean;
     checks?: Array<{ shape: string; status: string }>;
+    maxTolerance?: number;
+    freeBounds?: { count: number };
+    smallEdges?: Array<{ length: number; shape?: string; location?: Vec3 }>;
+    sameParameter?: boolean;
+    closedShells?: boolean;
+    closedWires?: boolean;
   };
   topologyCounts?: {
     vertices?: number;
@@ -274,6 +281,8 @@ export type StepEvidence = {
     copiedToEmscriptenFs: boolean;
   };
   capabilities: Array<{ feature: string; supported: boolean; reason?: string }>;
+  /** Structured AP242 XDE read result (occurrences, subshape names, properties). */
+  xde?: XdeReadResult;
 };
 
 /**
@@ -292,6 +301,14 @@ export type GeometrySubject = {
   provenance: GeometryProvenance;
   capabilities: GeometryCapability[];
   diagnostics: GeometryDiagnostic[];
+  /**
+   * Native XDE handle retaining parsed shapes for exact BRep proof calls
+   * (extrema, classification, boolean common). Present only when the native
+   * backend exposes `GeoSpecXdeReader`.
+   *
+   * @internal
+   */
+  nativeXde?: GeoSpecNativeXdeReadResult;
 };
 
 /**

@@ -1,0 +1,189 @@
+{
+  "family": "mate",
+  "fixture": "mate.dowel-located-flange-positive",
+  "generator": {
+    "script": "scripts/mate/dowel-located-flange/main.ts",
+    "parameters": {}
+  },
+  "tolerances": {
+    "contact": 0.02,
+    "coaxial": 0.05
+  },
+  "budgets": {
+    "loadAndResolve": 10000
+  },
+  "selectors": [
+    {
+      "selector": "base.origin",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "origin": [0, 0, 0],
+        "xAxis": [1, 0, 0],
+        "zAxis": [0, 0, 1]
+      }
+    },
+    {
+      "selector": "base.deck",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, 0, 1],
+        "offset": 10
+      }
+    },
+    {
+      "selector": {
+        "kind": "group",
+        "name": "base.dowel",
+        "expect": {
+          "exactly": 2
+        }
+      },
+      "status": "resolved",
+      "entityCount": 2
+    },
+    {
+      "selector": {
+        "kind": "group",
+        "name": "base.boltHole",
+        "expect": {
+          "exactly": 4
+        }
+      },
+      "status": "resolved",
+      "entityCount": 4
+    },
+    {
+      "selector": "cover.deck",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, 0, -1],
+        "offset": -10
+      }
+    },
+    {
+      "selector": {
+        "kind": "group",
+        "name": "cover.dowelBore",
+        "expect": {
+          "exactly": 2
+        }
+      },
+      "status": "resolved",
+      "entityCount": 2
+    },
+    {
+      "selector": {
+        "kind": "group",
+        "name": "cover.boltHole",
+        "expect": {
+          "exactly": 4
+        }
+      },
+      "status": "resolved",
+      "entityCount": 4
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "contact",
+      "subject": "cover.deck",
+      "target": "base.deck",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "measured": {
+            "distance": 0
+          }
+        }
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "cover.dowelBore[1]",
+      "target": "base.dowel[1]",
+      "options": {
+        "tolerance": 0.05
+      },
+      "expected": {
+        "verdict": "pass",
+        "final": {
+          "method": "analytic",
+          "measured": {
+            "radialOffset": 0
+          }
+        }
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "cover.dowelBore[2]",
+      "target": "base.dowel[2]",
+      "options": {
+        "tolerance": 0.05
+      },
+      "expected": {
+        "verdict": "pass",
+        "final": {
+          "method": "analytic",
+          "measured": {
+            "radialOffset": 0
+          }
+        }
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "cover.boltHole[1]",
+      "target": "base.boltHole[1]",
+      "options": {
+        "tolerance": 0.05
+      },
+      "expected": {
+        "verdict": "pass"
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "cover.boltHole[2]",
+      "target": "base.boltHole[2]",
+      "options": {
+        "tolerance": 0.05
+      },
+      "expected": {
+        "verdict": "pass"
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "cover.boltHole[3]",
+      "target": "base.boltHole[3]",
+      "options": {
+        "tolerance": 0.05
+      },
+      "expected": {
+        "verdict": "pass"
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "cover.boltHole[4]",
+      "target": "base.boltHole[4]",
+      "options": {
+        "tolerance": 0.05
+      },
+      "expected": {
+        "verdict": "pass"
+      }
+    }
+  ],
+  "notes": "Composite mate: face contact + dowel coaxiality + hole-stack alignment. Largest fixture; carries the corpus performance budget and the one authored datum()."
+}

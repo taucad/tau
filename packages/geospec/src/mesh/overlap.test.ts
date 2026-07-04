@@ -290,6 +290,9 @@ describe('analyzeMeshOverlap', () => {
               watertight: false,
               irregularEdges: 6,
               openBoundaryEdges: 6,
+              nonManifoldEdges: 0,
+              irregularEdgeKindCounts: { openBoundary: 6, nonManifold: 0 },
+              irregularEdgeClusters: [],
               totalEdges: 6,
               irregularEdgeFraction: 1,
               perPrimitive: [

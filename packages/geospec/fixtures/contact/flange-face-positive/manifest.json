@@ -1,0 +1,57 @@
+{
+  "family": "contact",
+  "fixture": "contact.flange-face-positive",
+  "generator": {
+    "script": "scripts/contact/flange-face/main.ts",
+    "parameters": {}
+  },
+  "tolerances": {
+    "contact": 0.02
+  },
+  "selectors": [
+    {
+      "selector": "head.port.mount",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "plane",
+        "normal": [0, -1, 0],
+        "offset": 10,
+        "area": 1600,
+        "centroid": [0, -10, 20]
+      }
+    },
+    {
+      "selector": "runnerFlange.mount",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "plane",
+        "normal": [0, 1, 0],
+        "centroid": [0, -10, 20]
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "contact",
+      "subject": "runnerFlange.mount",
+      "target": "head.port.mount",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "method": "extrema",
+          "measured": {
+            "distance": 0
+          }
+        }
+      }
+    }
+  ]
+}

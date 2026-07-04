@@ -17,8 +17,8 @@ describe('built GeoSpec package output', () => {
     'should load STEP evidence from built dist with the copied native WASM',
     { timeout: 30_000 },
     async () => {
-      const distributionModelEntry = resolve(packageRoot, 'dist/esm/model/index.js');
-      const copiedWasm = resolve(packageRoot, 'dist/esm/native/opencascade/geospec_opencascade_single.wasm');
+      const distributionModelEntry = resolve(packageRoot, 'dist/model/index.js');
+      const copiedWasm = resolve(packageRoot, 'dist/native/opencascade/geospec_opencascade_single.wasm');
       const cubeStep = resolve(packageRoot, '../runtime/src/kernels/replicad/__fixtures__/cube.step');
 
       await expect(access(copiedWasm)).resolves.toBeUndefined();

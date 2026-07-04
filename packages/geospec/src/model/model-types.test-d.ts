@@ -79,10 +79,10 @@ describe('geospec/model public types', () => {
     void invalidCodeOptions;
   });
 
-  it('should use Tau runtime client types directly for runtime-backed loads', () => {
-    expectTypeOf<GeoSpecRuntimeClient>().toEqualTypeOf<RuntimeClient>();
+  it('should accept Tau runtime clients through the GeoSpec runtime surface', () => {
+    expectTypeOf<RuntimeClient>().toExtend<GeoSpecRuntimeClient>();
     expectTypeOf<LoadModelFileOptions['runtime']>().toEqualTypeOf<
-      RuntimeClient | GeoSpecRuntimeClientFactory | undefined
+      GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory | undefined
     >();
 
     const adapter: GeoSpecRuntimeSourceAdapter = {

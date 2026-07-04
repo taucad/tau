@@ -1,0 +1,52 @@
+{
+  "family": "contact",
+  "fixture": "contact.flange-face-gap-negative",
+  "generator": {
+    "script": "scripts/contact/flange-face/main.ts",
+    "parameters": {
+      "gap": 0.5
+    }
+  },
+  "tolerances": {
+    "contact": 0.02
+  },
+  "selectors": [
+    {
+      "selector": "head.port.mount",
+      "status": "resolved",
+      "entityCount": 1
+    },
+    {
+      "selector": "runnerFlange.mount",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "centroid": [0, -10.5, 20]
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "contact",
+      "subject": "runnerFlange.mount",
+      "target": "head.port.mount",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "fail",
+        "broadPhase": {
+          "candidate": false
+        },
+        "final": {
+          "method": "extrema",
+          "measured": {
+            "distance": 0.5
+          }
+        },
+        "mentions": ["runnerFlange.mount", "head.port.mount"]
+      }
+    }
+  ],
+  "notes": "Deviation from the sub-blueprint's manifest example (broadPhase.candidate true): SB4 records candidacy over the resolved faces' bounds, so a 0.5 mm gap is honestly not a candidate; the naive part-AABB premise is asserted via adversarialAabb on the aabb-* fixtures."
+}

@@ -1,0 +1,39 @@
+{
+  "family": "selector",
+  "fixture": "selector.unnamed-import",
+  "generator": {
+    "script": "scripts/selector/unnamed-import/main.ts",
+    "parameters": {}
+  },
+  "selectors": [
+    {
+      "selector": {
+        "kind": "interface",
+        "name": "head.port.mount"
+      },
+      "status": "unsupported",
+      "mentions": ["no authored interface names"]
+    },
+    {
+      "selector": {
+        "kind": "face",
+        "of": "head",
+        "query": {
+          "containsPoint": [0, -10, 20]
+        }
+      },
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, -1, 0],
+        "offset": 10
+      }
+    },
+    {
+      "selector": "head",
+      "status": "resolved",
+      "entityCount": 1
+    }
+  ],
+  "notes": "Master acceptance case 4: a third-party-style artifact with no authored names — queries and probes resolve, authored-interface selectors return unsupported with a fallback suggestion."
+}

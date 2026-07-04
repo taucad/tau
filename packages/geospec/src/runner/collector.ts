@@ -1,10 +1,20 @@
 import type { GeometryDiagnostic, GeometrySubject, Vec3 } from '#mesh/types.js';
 import { analyzeChamferDistance } from '#mesh/distance.js';
 import { analyzeMeshOverlap } from '#mesh/overlap.js';
+import { inspectGeometry } from '#inspection/index.js';
+import type { GeometryInspectionEntity } from '#inspection/index.js';
+import { getSubjectProofContext, proveRelationship } from '#proofs/index.js';
+import type { RelationshipProofContext } from '#proofs/index.js';
+import { proveVoidContinuity } from '#proofs/void-continuity.js';
+import { selectorDiagnosticCodes } from '#selector/diagnostics.js';
+import { resolve as resolveGeometrySelector } from '#selector/resolve.js';
+import type { AxisQuery, GeometrySelection, PlaneQuery, ResolvedEntity } from '#selector/types.js';
+import type { SelectorIndex } from '#selector/index-builder.js';
 import { matchesGeoSpecTestName } from '#runner/filter.js';
 import type { GeoSpecTestNamePattern } from '#runner/filter.js';
 import type {
   GeoSpecAssertion,
+  GeoSpecAssemblyOccurrencesExpectation,
   GeoSpecAxisExpectation,
   GeoSpecBoundingBoxExpectation,
   GeoSpecCenterOfMassExpectation,
@@ -13,21 +23,29 @@ import type {
   GeoSpecCircularHoleExpectation,
   GeoSpecCircularHolePatternExpectation,
   GeoSpecCylindricalFaceExpectation,
-  GeoSpecComponentOverlapExpectation,
+  GeoSpecComponentInterferenceAllowance,
+  GeoSpecComponentInterferenceExpectation,
+  GeoSpecComponentInterferencePairExpectation,
   GeoSpecConnectedComponentsExpectation,
   GeoSpecFilletFeatureExpectation,
+  GeoSpecGeometrySelector,
   GeoSpecMatcher,
   GeoSpecMassExpectation,
+  GeoSpecMeshIntegrityExpectation,
   GeoSpecMinimumDistanceExpectation,
   GeoSpecMinimumWallThicknessExpectation,
   GeoSpecNumericExpectation,
   GeoSpecPlanarFaceExpectation,
   GeoSpecPointExpectation,
   GeoSpecProductStructureExpectation,
+  GeoSpecSpatialRelationshipExpectation,
+  GeoSpecSpatialRelationshipsExpectation,
   GeoSpecStepUnitsExpectation,
   GeoSpecSurfaceAreaExpectation,
   GeoSpecTestCase,
   GeoSpecTopologyCountsExpectation,
+  GeoSpecValidBrepExpectation,
+  GeoSpecVoidContinuityExpectation,
   GeoSpecVolumeExpectation,
 } from '#runner/types.js';
 
@@ -120,7 +138,7 @@ const defaultConnectedToleranceMm = 0.1;
 const defaultScalarTolerance = 0.1;
 const defaultUnitVectorTolerance = 1e-4;
 const defaultChamferSamples = 10_000;
-const defaultComponentOverlapTolerance = 0.1;
+const defaultComponentInterferenceTolerance = 0.1;
 
 const axisNames = ['x', 'y', 'z'] as const;
 
@@ -810,14 +828,15 @@ const evaluateWatertight = (subject: unknown): GeometryDiagnostic[] => {
   ];
 };
 
-const validateComponentOverlapExpectation = (expected: unknown): GeometryDiagnostic[] => {
-  const matcher = 'toHaveNoComponentOverlap';
-  const accepted = '{ tolerance?: number; pairs?: Array<{ left: string | RegExp; right: string | RegExp }> }';
+const validateComponentInterferenceExpectation = (expected: unknown): GeometryDiagnostic[] => {
+  const matcher = 'toHaveNoComponentInterference';
+  const accepted =
+    '{ tolerance?: number; pairs?: Array<{ left: string | RegExp; right: string | RegExp }>, allowances?: Array<{ kind: "intentionalInterference", left: string | RegExp, right: string | RegExp, maxVolume?: number, reason: string }> }';
   const normalized = expected ?? {};
   const objectDiagnostics = validateObjectExpectation({
     matcher,
     expected: normalized,
-    allowed: ['tolerance', 'pairs'],
+    allowed: ['tolerance', 'pairs', 'allowances'],
     accepted,
   });
   if (!isRecord(normalized)) {
@@ -827,14 +846,34 @@ const validateComponentOverlapExpectation = (expected: unknown): GeometryDiagnos
     ...objectDiagnostics,
     ...validateFiniteNumberField({ matcher, expected: normalized, field: 'tolerance', accepted }),
   ];
-  const { pairs } = normalized as { pairs?: unknown };
+  const { allowances, pairs } = normalized as { allowances?: unknown; pairs?: unknown };
+  if (allowances !== undefined && !Array.isArray(allowances)) {
+    diagnostics.push(
+      invalidExpectationDiagnostic({
+        matcher,
+        path: '$.allowances',
+        message: "expected 'allowances' to be an array.",
+        expected: allowances,
+        accepted,
+      }),
+    );
+  }
+  if (Array.isArray(allowances)) {
+    diagnostics.push(
+      ...allowances.flatMap((allowance, index) =>
+        validateComponentInterferenceAllowance({ matcher, accepted, allowance, index }),
+      ),
+    );
+  }
   if (pairs === undefined) {
     return diagnostics;
   }
   if (Array.isArray(pairs)) {
     return [
       ...diagnostics,
-      ...pairs.flatMap((pair, index) => validateComponentOverlapPairExpectation({ matcher, accepted, pair, index })),
+      ...pairs.flatMap((pair, index) =>
+        validateComponentInterferencePairExpectation({ matcher, accepted, pair, index }),
+      ),
     ];
   }
   return [
@@ -849,10 +888,10 @@ const validateComponentOverlapExpectation = (expected: unknown): GeometryDiagnos
   ];
 };
 
-const isComponentOverlapSelector = (selector: unknown): boolean =>
+const isComponentInterferenceSelector = (selector: unknown): boolean =>
   typeof selector === 'string' || Object.prototype.toString.call(selector) === '[object RegExp]';
 
-const validateComponentOverlapPairExpectation = (options: {
+const validateComponentInterferencePairExpectation = (options: {
   matcher: string;
   accepted: string;
   pair: unknown;
@@ -871,7 +910,7 @@ const validateComponentOverlapPairExpectation = (options: {
   }
   for (const side of ['left', 'right'] as const) {
     const selector = options.pair[side];
-    if (isComponentOverlapSelector(selector)) {
+    if (isComponentInterferenceSelector(selector)) {
       continue;
     }
     diagnostics.push(
@@ -887,45 +926,883 @@ const validateComponentOverlapPairExpectation = (options: {
   return diagnostics;
 };
 
-const evaluateComponentOverlap = async (
+const validateComponentInterferenceAllowance = (options: {
+  matcher: string;
+  accepted: string;
+  allowance: unknown;
+  index: number;
+}): GeometryDiagnostic[] => {
+  const path = `$.allowances[${options.index}]`;
+  const diagnostics = validateObjectExpectation({
+    matcher: options.matcher,
+    expected: options.allowance,
+    allowed: ['kind', 'left', 'right', 'maxVolume', 'reason'],
+    required: ['kind', 'left', 'right', 'reason'],
+    accepted: options.accepted,
+  });
+  const { allowance } = options;
+  if (!isRecord(allowance)) {
+    return diagnostics;
+  }
+  const { kind, reason, maxVolume } = allowance;
+  if (kind !== 'intentionalInterference') {
+    diagnostics.push(
+      invalidExpectationDiagnostic({
+        matcher: options.matcher,
+        path: `${path}.kind`,
+        message: "expected kind to be 'intentionalInterference'.",
+        expected: kind,
+        accepted: options.accepted,
+      }),
+    );
+  }
+  for (const side of ['left', 'right'] as const) {
+    const selector = allowance[side];
+    if (isComponentInterferenceSelector(selector)) {
+      continue;
+    }
+    diagnostics.push(
+      invalidExpectationDiagnostic({
+        matcher: options.matcher,
+        path: `${path}.${side}`,
+        message: `expected '${side}' to be a string or RegExp component selector.`,
+        expected: selector,
+        accepted: options.accepted,
+      }),
+    );
+  }
+  if (typeof reason !== 'string' || reason.trim() === '') {
+    diagnostics.push(
+      invalidExpectationDiagnostic({
+        matcher: options.matcher,
+        path: `${path}.reason`,
+        message: "expected 'reason' to be a non-empty string.",
+        expected: reason,
+        accepted: options.accepted,
+      }),
+    );
+  }
+  if (maxVolume !== undefined && (typeof maxVolume !== 'number' || !Number.isFinite(maxVolume) || maxVolume < 0)) {
+    diagnostics.push(
+      invalidExpectationDiagnostic({
+        matcher: options.matcher,
+        path: `${path}.maxVolume`,
+        message: "expected 'maxVolume' to be a non-negative finite number.",
+        expected: maxVolume,
+        accepted: options.accepted,
+      }),
+    );
+  }
+  return diagnostics;
+};
+
+const componentSelectorLabel = (selector: GeoSpecComponentInterferencePairExpectation['left']): string =>
+  typeof selector === 'string' ? selector : selector.toString();
+
+const componentSelectorMatches = (
+  selector: GeoSpecComponentInterferencePairExpectation['left'],
+  label: string,
+): boolean =>
+  typeof selector === 'string'
+    ? label === selector
+    : (() => {
+        selector.lastIndex = 0;
+        const matched = selector.test(label);
+        selector.lastIndex = 0;
+        return matched;
+      })();
+
+const allowanceMatches = (
+  allowance: GeoSpecComponentInterferenceAllowance,
+  overlap: { leftLabel: string; rightLabel: string; intersectionVolume: number },
+): boolean => {
+  const direct =
+    componentSelectorMatches(allowance.left, overlap.leftLabel) &&
+    componentSelectorMatches(allowance.right, overlap.rightLabel);
+  const reverse =
+    componentSelectorMatches(allowance.left, overlap.rightLabel) &&
+    componentSelectorMatches(allowance.right, overlap.leftLabel);
+  const volumeAllowed = allowance.maxVolume === undefined || overlap.intersectionVolume <= allowance.maxVolume;
+  return (direct || reverse) && volumeAllowed;
+};
+
+const evaluateComponentInterference = async (
   subject: unknown,
-  expected: GeoSpecComponentOverlapExpectation,
+  expected: GeoSpecComponentInterferenceExpectation,
 ): Promise<GeometryDiagnostic[]> => {
   if (!isGeometrySubject(subject)) {
-    return [unsupportedSubjectDiagnostic('toHaveNoComponentOverlap')];
+    return [unsupportedSubjectDiagnostic('toHaveNoComponentInterference')];
   }
 
   const analysis = await analyzeMeshOverlap({
     subject,
-    tolerance: expected.tolerance ?? defaultComponentOverlapTolerance,
+    tolerance: expected.tolerance ?? defaultComponentInterferenceTolerance,
     ...(expected.pairs ? { pairs: expected.pairs } : {}),
   });
   if (!analysis.success) {
     return analysis.diagnostics;
   }
-  if (analysis.evidence.overlaps.length === 0) {
+  const allowedInterferences = analysis.evidence.overlaps.filter((overlap) =>
+    (expected.allowances ?? []).some((allowance) => allowanceMatches(allowance, overlap)),
+  );
+  const unclassifiedInterferences = analysis.evidence.overlaps.filter(
+    (overlap) => !(expected.allowances ?? []).some((allowance) => allowanceMatches(allowance, overlap)),
+  );
+  if (unclassifiedInterferences.length === 0) {
     return [];
   }
 
-  const pairSummary = analysis.evidence.overlaps
+  const pairSummary = unclassifiedInterferences
     .map((overlap) => `${overlap.leftLabel} to ${overlap.rightLabel}: volume ${overlap.intersectionVolume}`)
     .join('\n');
   return [
     {
-      code: 'GEOSPEC_COMPONENT_OVERLAP_DETECTED',
+      code: 'GEOSPEC_COMPONENT_INTERFERENCE_DETECTED',
       severity: 'error',
-      message: `Component overlap detected between ${analysis.evidence.overlaps.length} component pair(s):\n${pairSummary}`,
+      message: `Unclassified component interference detected between ${unclassifiedInterferences.length} component pair(s):\n${pairSummary}`,
       suggestion:
-        'Fix the assembly positions, clearances, boolean operations, or component dimensions so separate parts do not occupy the same solid volume.',
-      spatial: analysis.evidence.overlaps[0]?.witnessPoint
-        ? { center: analysis.evidence.overlaps[0].witnessPoint }
+        'Fix the assembly positions, clearances, boolean operations, or component dimensions, or add a bounded intentional-interference allowance with an engineering reason.',
+      spatial: unclassifiedInterferences[0]?.witnessPoint
+        ? { center: unclassifiedInterferences[0].witnessPoint }
         : undefined,
       details: {
         ...analysis.evidence,
+        allowedInterferences,
+        unclassifiedInterferences,
+        allowances: (expected.allowances ?? []).map((allowance) => ({
+          kind: allowance.kind,
+          left: componentSelectorLabel(allowance.left),
+          right: componentSelectorLabel(allowance.right),
+          maxVolume: allowance.maxVolume,
+          reason: allowance.reason,
+        })),
         ...subjectDiagnosticContext(subject),
       },
     },
   ];
+};
+
+const entityBounds = (entity: GeometryInspectionEntity): { min: Vec3; max: Vec3; center: Vec3 } | undefined =>
+  'bounds' in entity && entity.bounds
+    ? {
+        min: entity.bounds.min,
+        max: entity.bounds.max,
+        center:
+          entity.kind === 'occurrence'
+            ? entity.center
+            : [
+                (entity.bounds.min[0] + entity.bounds.max[0]) / 2,
+                (entity.bounds.min[1] + entity.bounds.max[1]) / 2,
+                (entity.bounds.min[2] + entity.bounds.max[2]) / 2,
+              ],
+      }
+    : undefined;
+
+const vectorFromAxis = (axis: 'x' | 'y' | 'z' | undefined): Vec3 | undefined => {
+  switch (axis) {
+    case 'x': {
+      return [1, 0, 0];
+    }
+    case 'y': {
+      return [0, 1, 0];
+    }
+    case 'z': {
+      return [0, 0, 1];
+    }
+    default: {
+      return undefined;
+    }
+  }
+};
+
+const validateMeshIntegrityExpectation = (expected: unknown): GeometryDiagnostic[] => {
+  const matcher = 'toHaveMeshIntegrity';
+  const accepted =
+    '{ finitePositions?: boolean, degenerateTriangles?: { count?: number, maxCount?: number, areaTolerance?: number }, duplicateFaces?: { count?: number, maxCount?: number }, watertight?: boolean, triangleCount?: number | numericRange }';
+  const objectDiagnostics = validateObjectExpectation({
+    matcher,
+    expected,
+    allowed: ['finitePositions', 'degenerateTriangles', 'duplicateFaces', 'watertight', 'triangleCount'],
+    accepted,
+  });
+  if (!isRecord(expected)) {
+    return objectDiagnostics;
+  }
+  const diagnostics = [
+    ...objectDiagnostics,
+    ...validateBooleanField({ matcher, expected, field: 'finitePositions', accepted, optional: true }),
+    ...validateBooleanField({ matcher, expected, field: 'watertight', accepted, optional: true }),
+    ...(expected['triangleCount'] === undefined
+      ? []
+      : validateNumericExpectation({
+          matcher,
+          path: '$.triangleCount',
+          expected: expected['triangleCount'],
+          accepted,
+        })),
+  ];
+  for (const field of ['degenerateTriangles', 'duplicateFaces'] as const) {
+    const value = expected[field];
+    if (value === undefined) {
+      continue;
+    }
+    diagnostics.push(
+      ...validateObjectExpectation({
+        matcher,
+        expected: value,
+        allowed: field === 'degenerateTriangles' ? ['count', 'maxCount', 'areaTolerance'] : ['count', 'maxCount'],
+        accepted,
+      }),
+    );
+    if (isRecord(value)) {
+      diagnostics.push(
+        ...validateFiniteNumberField({ matcher, expected: value, field: 'count', accepted }),
+        ...validateFiniteNumberField({ matcher, expected: value, field: 'maxCount', accepted }),
+        ...(field === 'degenerateTriangles'
+          ? validateFiniteNumberField({ matcher, expected: value, field: 'areaTolerance', accepted })
+          : []),
+      );
+    }
+  }
+  return diagnostics;
+};
+
+const evaluateMeshIntegrity = (subject: unknown, expected: GeoSpecMeshIntegrityExpectation): GeometryDiagnostic[] => {
+  if (!isGeometrySubject(subject)) {
+    return [unsupportedSubjectDiagnostic('toHaveMeshIntegrity')];
+  }
+  const quality = subject.mesh.stats.meshQuality;
+  const watertight = subject.mesh.stats.analyseWatertight();
+  const failures: string[] = [];
+  const actual = {
+    triangleCount: quality.triangleCount,
+    nonFiniteVertices: quality.nonFiniteVertices,
+    degenerateTriangles: quality.degenerateTriangles,
+    duplicateFaces: quality.duplicateFaces,
+    watertight,
+  };
+
+  if (expected.finitePositions === true && quality.nonFiniteVertices.length > 0) {
+    failures.push(`finitePositions: expected no non-finite vertices, got ${quality.nonFiniteVertices.length}`);
+  }
+  if (expected.degenerateTriangles) {
+    const count = quality.degenerateTriangles.filter(
+      (triangle) => triangle.area <= (expected.degenerateTriangles?.areaTolerance ?? Number.POSITIVE_INFINITY),
+    ).length;
+    const expectedCount = expected.degenerateTriangles.count ?? expected.degenerateTriangles.maxCount;
+    if (expectedCount !== undefined && count > expectedCount) {
+      failures.push(`degenerateTriangles: expected <= ${expectedCount}, got ${count}`);
+    }
+  }
+  if (expected.duplicateFaces) {
+    const expectedCount = expected.duplicateFaces.count ?? expected.duplicateFaces.maxCount;
+    if (expectedCount !== undefined && quality.duplicateFaces.length > expectedCount) {
+      failures.push(`duplicateFaces: expected <= ${expectedCount}, got ${quality.duplicateFaces.length}`);
+    }
+  }
+  if (expected.watertight !== undefined && watertight.watertight !== expected.watertight) {
+    failures.push(`watertight: expected ${expected.watertight}, got ${watertight.watertight}`);
+  }
+  if (expected.triangleCount !== undefined) {
+    failures.push(
+      ...evaluateNumeric({
+        actual: quality.triangleCount,
+        expected: expected.triangleCount,
+        tolerance: 0,
+        label: 'triangleCount',
+      }),
+    );
+  }
+
+  if (failures.length === 0) {
+    return [];
+  }
+  return [
+    {
+      code: 'MESH_INTEGRITY_MISMATCH',
+      severity: 'error',
+      message: `Mesh integrity mismatch:\n${failures.map((failure) => `- ${failure}`).join('\n')}`,
+      suggestion:
+        'Fix invalid tessellation evidence before relying on connected-component, distance, volume, or interference assertions.',
+      details: { expected, actual, ...subjectDiagnosticContext(subject) },
+    },
+  ];
+};
+
+const validateAssemblyOccurrencesExpectation = (expected: unknown): GeometryDiagnostic[] => {
+  const matcher = 'toHaveAssemblyOccurrences';
+  const accepted =
+    '{ occurrences: Array<{ name: string | RegExp, count?: number | numericRange, bounds?: object }>, uniqueNames?: boolean }';
+  const diagnostics = validateObjectExpectation({
+    matcher,
+    expected,
+    allowed: ['occurrences', 'uniqueNames'],
+    required: ['occurrences'],
+    accepted,
+  });
+  if (!isRecord(expected)) {
+    return diagnostics;
+  }
+  diagnostics.push(...validateBooleanField({ matcher, expected, field: 'uniqueNames', accepted, optional: true }));
+  const { occurrences } = expected;
+  if (!Array.isArray(occurrences)) {
+    diagnostics.push(
+      invalidExpectationDiagnostic({
+        matcher,
+        path: '$.occurrences',
+        message: "expected 'occurrences' to be an array.",
+        expected: occurrences,
+        accepted,
+      }),
+    );
+    return diagnostics;
+  }
+  for (const [index, occurrence] of occurrences.entries()) {
+    const path = `$.occurrences[${index}]`;
+    diagnostics.push(
+      ...validateObjectExpectation({
+        matcher,
+        expected: occurrence,
+        allowed: ['name', 'count', 'bounds'],
+        required: ['name'],
+        accepted,
+      }),
+    );
+    if (!isRecord(occurrence)) {
+      continue;
+    }
+    const { name, count } = occurrence;
+    if (!isComponentInterferenceSelector(name)) {
+      diagnostics.push(
+        invalidExpectationDiagnostic({
+          matcher,
+          path: `${path}.name`,
+          message: "expected 'name' to be a string or RegExp selector.",
+          expected: name,
+          accepted,
+        }),
+      );
+    }
+    if (count !== undefined) {
+      diagnostics.push(...validateNumericExpectation({ matcher, path: `${path}.count`, expected: count, accepted }));
+    }
+  }
+  return diagnostics;
+};
+
+const evaluateAssemblyOccurrences = (
+  subject: unknown,
+  expected: GeoSpecAssemblyOccurrencesExpectation,
+): GeometryDiagnostic[] => {
+  if (!isGeometrySubject(subject)) {
+    return [unsupportedSubjectDiagnostic('toHaveAssemblyOccurrences')];
+  }
+  const inspection = inspectGeometry({
+    subject,
+    selectors: expected.occurrences.map((occurrence) => occurrence.name),
+    evidence: ['bounds', 'facts'],
+  });
+  const failures: string[] = [];
+  const actual = inspection.selections.map((selection, index) => ({
+    expectation: expected.occurrences[index],
+    matches: selection.matches,
+  }));
+
+  if (expected.uniqueNames) {
+    const allNames = actual.flatMap((entry) => entry.matches.map((match) => match.name));
+    const duplicates = allNames.filter((name, index) => allNames.indexOf(name) !== index);
+    if (duplicates.length > 0) {
+      failures.push(`uniqueNames: duplicate occurrence names ${[...new Set(duplicates)].join(', ')}`);
+    }
+  }
+
+  for (const [index, occurrence] of expected.occurrences.entries()) {
+    const matches = actual[index]?.matches ?? [];
+    const expectedCount = occurrence.count ?? { greaterThan: 0 };
+    const countFailures = evaluateNumeric({
+      actual: matches.length,
+      expected: expectedCount,
+      tolerance: 0,
+      label: `occurrences[${index}].count`,
+    });
+    failures.push(...countFailures);
+
+    if (occurrence.bounds) {
+      const tolerance = occurrence.bounds.tolerance ?? defaultLengthTolerance;
+      for (const match of matches) {
+        const bounds = entityBounds(match);
+        if (!bounds) {
+          failures.push(`${match.name}: expected bounds evidence.`);
+          continue;
+        }
+        if (occurrence.bounds.min) {
+          failures.push(
+            ...evaluatePoint({
+              actual: bounds.min,
+              expected: occurrence.bounds.min,
+              tolerance,
+              label: `${match.name}.bounds.min`,
+            }),
+          );
+        }
+        if (occurrence.bounds.max) {
+          failures.push(
+            ...evaluatePoint({
+              actual: bounds.max,
+              expected: occurrence.bounds.max,
+              tolerance,
+              label: `${match.name}.bounds.max`,
+            }),
+          );
+        }
+        if (occurrence.bounds.center) {
+          failures.push(
+            ...evaluatePoint({
+              actual: bounds.center,
+              expected: occurrence.bounds.center,
+              tolerance,
+              label: `${match.name}.bounds.center`,
+            }),
+          );
+        }
+      }
+      if (occurrence.bounds.within) {
+        const container = inspectGeometry({ subject, selectors: [occurrence.bounds.within], evidence: ['bounds'] });
+        const containers =
+          container.selections[0]?.matches
+            .map(entityBounds)
+            .filter((bounds): bounds is NonNullable<typeof bounds> => bounds !== undefined) ?? [];
+        if (containers.length === 0) {
+          failures.push(
+            `bounds.within: selector ${componentSelectorLabel(occurrence.bounds.within)} matched no bounded occurrence.`,
+          );
+        }
+        for (const match of matches) {
+          const bounds = entityBounds(match);
+          if (!bounds) {
+            continue;
+          }
+          const contained = containers.some(
+            (containerBounds) =>
+              bounds.min[0] >= containerBounds.min[0] - tolerance &&
+              bounds.max[0] <= containerBounds.max[0] + tolerance &&
+              bounds.min[1] >= containerBounds.min[1] - tolerance &&
+              bounds.max[1] <= containerBounds.max[1] + tolerance &&
+              bounds.min[2] >= containerBounds.min[2] - tolerance &&
+              bounds.max[2] <= containerBounds.max[2] + tolerance,
+          );
+          if (!contained) {
+            failures.push(
+              `${match.name}: expected occurrence bounds inside ${componentSelectorLabel(occurrence.bounds.within)}.`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  if (failures.length === 0 && inspection.diagnostics.length === 0) {
+    return [];
+  }
+  const mismatchDiagnostics: GeometryDiagnostic[] =
+    failures.length === 0
+      ? []
+      : [
+          {
+            code: 'ASSEMBLY_OCCURRENCES_MISMATCH',
+            severity: 'error',
+            message: `Assembly occurrence mismatch:\n${failures.map((failure) => `- ${failure}`).join('\n')}`,
+            suggestion: 'Add, remove, rename, or reposition the reported assembly occurrences.',
+            details: { expected, actual, ...subjectDiagnosticContext(subject) },
+          },
+        ];
+  return [...inspection.diagnostics, ...mismatchDiagnostics];
+};
+
+const isVec3Value = (value: unknown): value is Vec3 =>
+  Array.isArray(value) &&
+  value.length === 3 &&
+  value.every((entry) => typeof entry === 'number' && Number.isFinite(entry));
+
+const validateSpatialRelationshipsExpectation = (expected: unknown): GeometryDiagnostic[] => {
+  const matcher = 'toHaveSpatialRelationships';
+  const accepted =
+    '{ relationships: Array<{ kind, subject, target, tolerance?, angularToleranceDegrees?, angleDegrees?, axis?, minContactArea?, min?, max?, minVolume?, maxVolume?, reason? }> }';
+  const diagnostics = validateObjectExpectation({
+    matcher,
+    expected,
+    allowed: ['relationships'],
+    required: ['relationships'],
+    accepted,
+  });
+  if (!isRecord(expected)) {
+    return diagnostics;
+  }
+  const { relationships } = expected;
+  if (!Array.isArray(relationships)) {
+    diagnostics.push(
+      invalidExpectationDiagnostic({
+        matcher,
+        path: '$.relationships',
+        message: "expected 'relationships' to be an array.",
+        expected: relationships,
+        accepted,
+      }),
+    );
+    return diagnostics;
+  }
+  for (const [index, relationship] of relationships.entries()) {
+    diagnostics.push(
+      ...validateObjectExpectation({
+        matcher,
+        expected: relationship,
+        allowed: [
+          'id',
+          'kind',
+          'subject',
+          'target',
+          'tolerance',
+          'angularToleranceDegrees',
+          'angleDegrees',
+          'axis',
+          'minContactArea',
+          'min',
+          'max',
+          'minVolume',
+          'maxVolume',
+          'reason',
+        ],
+        required: ['kind', 'subject', 'target'],
+        accepted,
+      }),
+    );
+    if (!isRecord(relationship)) {
+      continue;
+    }
+    const kinds = [
+      'contact',
+      'clearance',
+      'coaxial',
+      'concentric',
+      'coplanar',
+      'parallel',
+      'perpendicular',
+      'angle',
+      'containment',
+      'insertion',
+      'interference',
+    ];
+    const { kind } = relationship;
+    if (typeof kind !== 'string' || !kinds.includes(kind)) {
+      diagnostics.push(
+        invalidExpectationDiagnostic({
+          matcher,
+          path: `$.relationships[${index}].kind`,
+          message: `expected kind to be one of ${kinds.join(', ')}.`,
+          expected: kind,
+          accepted,
+        }),
+      );
+    }
+    if (relationship['axis'] !== undefined && !isVec3Value(relationship['axis'])) {
+      diagnostics.push(
+        invalidExpectationDiagnostic({
+          matcher,
+          path: `$.relationships[${index}].axis`,
+          message: "expected 'axis' to be a [x, y, z] array of finite numbers.",
+          expected: relationship['axis'],
+          accepted,
+        }),
+      );
+    }
+    for (const field of [
+      'tolerance',
+      'angularToleranceDegrees',
+      'angleDegrees',
+      'minContactArea',
+      'min',
+      'max',
+      'minVolume',
+      'maxVolume',
+    ] as const) {
+      diagnostics.push(...validateFiniteNumberField({ matcher, expected: relationship, field, accepted }));
+    }
+  }
+  return diagnostics;
+};
+
+/**
+ * Wrap a proof or resolution diagnostic with its relationship context (R7):
+ * the emitted payload keeps the proof's `broadPhase` vs `final` evidence
+ * separation, both selector resolutions with stability, measured vs expected
+ * values, witnesses, and repair suggestion, and gains the relationship
+ * declaration and index.
+ */
+const relationshipDiagnostic = (options: {
+  relationship: GeoSpecSpatialRelationshipExpectation;
+  index: number;
+  diagnostic: GeometryDiagnostic;
+}): GeometryDiagnostic => ({
+  ...options.diagnostic,
+  message: `Spatial relationship ${options.index}${options.relationship.id ? ` (${options.relationship.id})` : ''} failed: ${options.diagnostic.message}`,
+  details: {
+    relationship: options.relationship,
+    relationshipIndex: options.index,
+    ...(isRecord(options.diagnostic.details) ? options.diagnostic.details : { original: options.diagnostic.details }),
+  },
+});
+
+/** D5 matcher precondition: relationship proofs need a BRep-kernel subject. */
+const brepRelationshipPreconditionDiagnostic = (subject: GeometrySubject): GeometryDiagnostic => ({
+  code: selectorDiagnosticCodes.unsupportedEvidence,
+  severity: 'error',
+  message:
+    'toHaveSpatialRelationships requires a BRep-kernel subject (D5 matcher precondition): an AP242 STEP artifact with XDE structure and native proof bindings. This subject carries no STEP-XDE/native BRep evidence, so relationship-grade claims cannot be proven.',
+  suggestion:
+    'Load the subject from an exported STEP artifact (loadStep, or loadModel through a BRep kernel). Mesh-only subjects keep whole-subject checks and toHaveNoComponentInterference.',
+  details: {
+    precondition:
+      'D5: toHaveSpatialRelationships requires a BRep-kernel subject; mesh subjects fail the whole matcher.',
+    ...subjectDiagnosticContext(subject),
+  },
+});
+
+type LegacyAxisSelector = Extract<GeoSpecGeometrySelector, { kind: 'axis' }>;
+type LegacyPlaneSelector = Extract<GeoSpecGeometrySelector, { kind: 'plane' }>;
+
+const explicitSelection = (
+  selector: LegacyAxisSelector | LegacyPlaneSelector,
+  entity: ResolvedEntity,
+): GeometrySelection => ({
+  selector,
+  status: 'resolved',
+  entities: [entity],
+  expected: 'one',
+  source: 'explicit',
+  stability: 'explicit',
+  diagnostics: [],
+});
+
+const legacyAxisSelection = (selector: LegacyAxisSelector, index: SelectorIndex): GeometrySelection => {
+  const direction = selector.direction ?? vectorFromAxis(selector.axis);
+  if (selector.name === undefined) {
+    // Explicit analytic fixture (layer rule 3): resolves as stability
+    // 'explicit' and is rejected by the production evidence policy.
+    return explicitSelection(selector, {
+      id: 'explicit:axis',
+      entityType: 'axis',
+      facts: {
+        surfaceType: 'cylinder',
+        ...(direction ? { axisDirection: direction } : {}),
+        ...(selector.center ? { axisOrigin: selector.center } : {}),
+        ...(selector.radius === undefined ? {} : { radius: selector.radius }),
+      },
+    });
+  }
+  const query: AxisQuery = {
+    ...(direction ? { axis: { direction } } : {}),
+    ...(selector.radius === undefined
+      ? {}
+      : {
+          radius:
+            selector.tolerance === undefined
+              ? selector.radius
+              : { min: selector.radius - selector.tolerance, max: selector.radius + selector.tolerance },
+        }),
+    ...(selector.center
+      ? {
+          near: {
+            x: selector.center[0],
+            y: selector.center[1],
+            z: selector.center[2],
+            ...(selector.tolerance === undefined ? {} : { tolerance: selector.tolerance }),
+          },
+        }
+      : {}),
+  };
+  return resolveGeometrySelector(
+    { kind: 'axis', of: selector.name, ...(Object.keys(query).length > 0 ? { query } : {}) },
+    index,
+  );
+};
+
+const legacyPlaneSelection = (selector: LegacyPlaneSelector, index: SelectorIndex): GeometrySelection => {
+  if (selector.name === undefined) {
+    // Explicit analytic fixture (layer rule 3): resolves as stability
+    // 'explicit' and is rejected by the production evidence policy.
+    return explicitSelection(selector, {
+      id: 'explicit:plane',
+      entityType: 'plane',
+      facts: {
+        surfaceType: 'plane',
+        ...(selector.normal ? { normal: selector.normal } : {}),
+        ...(selector.offset === undefined ? {} : { offset: selector.offset }),
+      },
+    });
+  }
+  const query: PlaneQuery = {
+    ...(selector.normal ? { normal: { direction: selector.normal } } : {}),
+    ...(selector.offset === undefined
+      ? {}
+      : {
+          offset:
+            selector.tolerance === undefined
+              ? selector.offset
+              : { min: selector.offset - selector.tolerance, max: selector.offset + selector.tolerance },
+        }),
+  };
+  return resolveGeometrySelector(
+    { kind: 'plane', of: selector.name, ...(Object.keys(query).length > 0 ? { query } : {}) },
+    index,
+  );
+};
+
+/**
+ * Resolve one relationship endpoint through the SB3 selector engine.
+ * Legacy `GeoSpecGeometrySelector` forms stay supported: strings and RegExp
+ * resolve as occurrence/authored-path shorthands, named legacy axis/plane
+ * forms become engine queries, and explicit analytic axis/plane forms become
+ * `stability: 'explicit'` fixture selections.
+ */
+const resolveRelationshipSelector = (selector: GeoSpecGeometrySelector, index: SelectorIndex): GeometrySelection => {
+  if (selector instanceof RegExp) {
+    return resolveGeometrySelector({ kind: 'occurrence', name: selector }, index);
+  }
+  if (typeof selector === 'string') {
+    return resolveGeometrySelector(selector, index);
+  }
+  if (selector.kind === 'axis') {
+    return legacyAxisSelection(selector, index);
+  }
+  if (selector.kind === 'plane') {
+    return legacyPlaneSelection(selector, index);
+  }
+  return resolveGeometrySelector(selector, index);
+};
+
+const evaluateOneSpatialRelationship = (options: {
+  context: RelationshipProofContext;
+  relationship: GeoSpecSpatialRelationshipExpectation;
+  index: number;
+}): GeometryDiagnostic[] => {
+  const { context, relationship, index } = options;
+  const subjectSelection = resolveRelationshipSelector(relationship.subject, context.index);
+  const targetSelection = resolveRelationshipSelector(relationship.target, context.index);
+  const resolutionDiagnostics = [subjectSelection, targetSelection]
+    .filter((selection) => selection.status !== 'resolved')
+    .flatMap((selection) => selection.diagnostics);
+  if (resolutionDiagnostics.length > 0) {
+    return resolutionDiagnostics.map((diagnostic) => relationshipDiagnostic({ relationship, index, diagnostic }));
+  }
+  const evidence = proveRelationship({
+    subject: subjectSelection,
+    target: targetSelection,
+    expectation: relationship,
+    context,
+  });
+  return evidence.diagnostics.map((diagnostic) => relationshipDiagnostic({ relationship, index, diagnostic }));
+};
+
+const evaluateSpatialRelationships = async (
+  subject: unknown,
+  expected: GeoSpecSpatialRelationshipsExpectation,
+): Promise<GeometryDiagnostic[]> => {
+  if (!isGeometrySubject(subject)) {
+    return [unsupportedSubjectDiagnostic('toHaveSpatialRelationships')];
+  }
+  const context = getSubjectProofContext(subject);
+  if (!context) {
+    return [brepRelationshipPreconditionDiagnostic(subject)];
+  }
+  return expected.relationships.flatMap((relationship, index) =>
+    evaluateOneSpatialRelationship({ context, relationship, index }),
+  );
+};
+
+const validateVoidContinuityExpectation = (expected: unknown): GeometryDiagnostic[] => {
+  const matcher = 'toHaveVoidContinuity';
+  const accepted =
+    '{ path: Array<[x,y,z] | { occurrence }>, material?: string[], resolution?: number, minCrossSection?: number, isolatedFrom?: [x,y,z][], bounds?: { min, max } }';
+  const diagnostics = validateObjectExpectation({
+    matcher,
+    expected,
+    allowed: ['path', 'material', 'resolution', 'minCrossSection', 'isolatedFrom', 'bounds'],
+    required: ['path'],
+    accepted,
+  });
+  if (!isRecord(expected)) {
+    return diagnostics;
+  }
+  const { path } = expected;
+  if (!Array.isArray(path) || path.length === 0) {
+    diagnostics.push(
+      invalidExpectationDiagnostic({
+        matcher,
+        path: '$.path',
+        message: "expected 'path' to be a non-empty array of waypoints.",
+        expected: path,
+        accepted,
+      }),
+    );
+  } else {
+    for (const [index, waypoint] of path.entries()) {
+      const isPoint = isVec3Value(waypoint);
+      const isOccurrence = isRecord(waypoint) && typeof waypoint['occurrence'] === 'string';
+      if (!isPoint && !isOccurrence) {
+        diagnostics.push(
+          invalidExpectationDiagnostic({
+            matcher,
+            path: `$.path[${index}]`,
+            message: 'expected a waypoint to be a [x, y, z] point or { occurrence: name }.',
+            expected: waypoint,
+            accepted,
+          }),
+        );
+      }
+    }
+  }
+  for (const field of ['resolution', 'minCrossSection'] as const) {
+    diagnostics.push(...validateFiniteNumberField({ matcher, expected, field, accepted }));
+  }
+  if (
+    expected['isolatedFrom'] !== undefined &&
+    (!Array.isArray(expected['isolatedFrom']) || !expected['isolatedFrom'].every((point) => isVec3Value(point)))
+  ) {
+    diagnostics.push(
+      invalidExpectationDiagnostic({
+        matcher,
+        path: '$.isolatedFrom',
+        message: "expected 'isolatedFrom' to be an array of [x, y, z] points.",
+        expected: expected['isolatedFrom'],
+        accepted,
+      }),
+    );
+  }
+  return diagnostics;
+};
+
+/** D5 matcher precondition: void-continuity proofs need a BRep-kernel subject. */
+const brepVoidContinuityPreconditionDiagnostic = (subject: GeometrySubject): GeometryDiagnostic => ({
+  code: selectorDiagnosticCodes.unsupportedEvidence,
+  severity: 'error',
+  message:
+    'toHaveVoidContinuity requires a BRep-kernel subject (D5 matcher precondition): an AP242 STEP artifact with XDE structure and native proof bindings. This subject carries no STEP-XDE/native BRep evidence, so void-topology claims cannot be proven.',
+  suggestion: 'Load the subject from an exported STEP artifact (loadStep, or loadModel through a BRep kernel).',
+  details: {
+    precondition: 'D5: toHaveVoidContinuity requires a BRep-kernel subject; mesh subjects fail the whole matcher.',
+    ...subjectDiagnosticContext(subject),
+  },
+});
+
+const evaluateVoidContinuity = (subject: unknown, expected: GeoSpecVoidContinuityExpectation): GeometryDiagnostic[] => {
+  if (!isGeometrySubject(subject)) {
+    return [unsupportedSubjectDiagnostic('toHaveVoidContinuity')];
+  }
+  const context = getSubjectProofContext(subject);
+  if (!context) {
+    return [brepVoidContinuityPreconditionDiagnostic(subject)];
+  }
+  return proveVoidContinuity(expected, context);
 };
 
 const subjectDiagnosticContext = (subject: GeometrySubject): Record<string, unknown> => ({
@@ -1440,7 +2317,66 @@ const evaluateMinimumWallThickness = (
   ];
 };
 
-const evaluateValidBrep = (subject: unknown): GeometryDiagnostic[] => {
+const validateValidBrepExpectation = (expected: unknown): GeometryDiagnostic[] => {
+  const matcher = 'toBeValidBrep';
+  const accepted =
+    '{ maxTolerance?: number, freeBounds?: { count?: number | numericRange }, minEdgeLength?: number, sameParameter?: boolean, closedShells?: boolean, closedWires?: boolean }';
+  if (expected === undefined) {
+    return [];
+  }
+  const diagnostics = validateObjectExpectation({
+    matcher,
+    expected,
+    allowed: ['maxTolerance', 'freeBounds', 'minEdgeLength', 'sameParameter', 'closedShells', 'closedWires'],
+    accepted,
+  });
+  if (!isRecord(expected)) {
+    return diagnostics;
+  }
+  diagnostics.push(
+    ...validateFiniteNumberField({ matcher, expected, field: 'maxTolerance', accepted }),
+    ...validateFiniteNumberField({ matcher, expected, field: 'minEdgeLength', accepted }),
+    ...validateBooleanField({ matcher, expected, field: 'sameParameter', accepted, optional: true }),
+    ...validateBooleanField({ matcher, expected, field: 'closedShells', accepted, optional: true }),
+    ...validateBooleanField({ matcher, expected, field: 'closedWires', accepted, optional: true }),
+  );
+  const { freeBounds } = expected;
+  if (freeBounds !== undefined) {
+    diagnostics.push(
+      ...validateObjectExpectation({
+        matcher,
+        expected: freeBounds,
+        allowed: ['count'],
+        accepted,
+      }),
+    );
+    if (isRecord(freeBounds)) {
+      const { count } = freeBounds;
+      if (count !== undefined) {
+        diagnostics.push(
+          ...validateNumericExpectation({
+            matcher,
+            path: '$.freeBounds.count',
+            expected: count,
+            accepted,
+          }),
+        );
+      }
+    }
+  }
+  return diagnostics;
+};
+
+const missingBrepValidityEvidence = (field: string): GeometryDiagnostic => ({
+  code: 'UNSUPPORTED_GEOMETRY_EVIDENCE',
+  severity: 'error',
+  message: `toBeValidBrep requires BRep validity '${field}' evidence, but this geometry subject does not include it.`,
+  suggestion:
+    'Load STEP/BRep evidence with the requested validity facet or remove the unsupported exact-BRep constraint.',
+  details: { matcher: 'toBeValidBrep', field },
+});
+
+const evaluateValidBrep = (subject: unknown, expected: GeoSpecValidBrepExpectation = {}): GeometryDiagnostic[] => {
   if (!isGeometrySubject(subject)) {
     return [unsupportedSubjectDiagnostic('toBeValidBrep')];
   }
@@ -1448,16 +2384,68 @@ const evaluateValidBrep = (subject: unknown): GeometryDiagnostic[] => {
   if (!validity) {
     return [unsupportedEvidenceDiagnostic('toBeValidBrep', 'BRep validity')];
   }
-  if (validity.valid) {
+  const failures: string[] = [];
+  const unsupported: GeometryDiagnostic[] = [];
+  if (!validity.valid) {
+    failures.push('validity: expected valid BRep, got invalid BRep');
+  }
+  if (expected.maxTolerance !== undefined) {
+    if (validity.maxTolerance === undefined) {
+      unsupported.push(missingBrepValidityEvidence('maxTolerance'));
+    } else if (validity.maxTolerance > expected.maxTolerance) {
+      failures.push(`maxTolerance: expected <= ${expected.maxTolerance}, got ${validity.maxTolerance}`);
+    }
+  }
+  if (expected.freeBounds?.count !== undefined) {
+    if (validity.freeBounds === undefined) {
+      unsupported.push(missingBrepValidityEvidence('freeBounds'));
+    } else {
+      failures.push(
+        ...evaluateNumeric({
+          actual: validity.freeBounds.count,
+          expected: expected.freeBounds.count,
+          tolerance: 0,
+          label: 'freeBounds.count',
+        }),
+      );
+    }
+  }
+  if (expected.minEdgeLength !== undefined) {
+    if (validity.smallEdges === undefined) {
+      unsupported.push(missingBrepValidityEvidence('smallEdges'));
+    } else {
+      const smallEdges = validity.smallEdges.filter((edge) => edge.length < expected.minEdgeLength!);
+      if (smallEdges.length > 0) {
+        failures.push(`minEdgeLength: expected no edges below ${expected.minEdgeLength}, got ${smallEdges.length}`);
+      }
+    }
+  }
+  for (const field of ['sameParameter', 'closedShells', 'closedWires'] as const) {
+    if (expected[field] === undefined) {
+      continue;
+    }
+    if (validity[field] === undefined) {
+      unsupported.push(missingBrepValidityEvidence(field));
+      continue;
+    }
+    if (validity[field] !== expected[field]) {
+      failures.push(`${field}: expected ${expected[field]}, got ${validity[field]}`);
+    }
+  }
+
+  if (unsupported.length > 0) {
+    return unsupported;
+  }
+  if (failures.length === 0) {
     return [];
   }
   return [
     {
       code: 'BREP_INVALID',
       severity: 'error',
-      message: 'BRep validity check failed.',
+      message: `BRep validity check failed:\n${failures.map((failure) => `- ${failure}`).join('\n')}`,
       suggestion: 'Inspect failed booleans, missing caps, self-intersections, and imported STEP diagnostics.',
-      details: { actual: validity, ...subjectDiagnosticContext(subject) },
+      details: { expected, actual: validity, ...subjectDiagnosticContext(subject) },
     },
   ];
 };
@@ -1845,24 +2833,66 @@ export const createCollector = (): GeoSpecCollector => {
           return recordAssertion(assertion, evaluateWatertight(subject));
         },
 
-        toHaveNoComponentOverlap(expected) {
+        toHaveNoComponentInterference(expected) {
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
           const normalizedExpected = expected ?? {};
           const assertion: GeoSpecAssertion = {
-            kind: 'componentOverlap',
+            kind: 'componentInterference',
             subject,
             expected: normalizedExpected,
           };
           activeTest.assertions.push(assertion);
-          const validationDiagnostics = validateComponentOverlapExpectation(normalizedExpected);
+          const validationDiagnostics = validateComponentInterferenceExpectation(normalizedExpected);
           if (validationDiagnostics.length > 0) {
             return recordAssertion(assertion, validationDiagnostics);
           }
           return recordAsyncAssertion(activeTest, assertion, async () =>
-            evaluateComponentOverlap(subject, normalizedExpected),
+            evaluateComponentInterference(subject, normalizedExpected),
+          );
+        },
+
+        toHaveAssemblyOccurrences(expected) {
+          if (!isGeoSpecTestCase(activeTest)) {
+            throw new Error('expectGeo() must be called inside it().');
+          }
+
+          const assertion: GeoSpecAssertion = { kind: 'assemblyOccurrences', subject, expected };
+          activeTest.assertions.push(assertion);
+          const validationDiagnostics = validateAssemblyOccurrencesExpectation(expected);
+          return recordValidatedAssertion(assertion, validationDiagnostics, () =>
+            evaluateAssemblyOccurrences(subject, expected),
+          );
+        },
+
+        toHaveSpatialRelationships(expected) {
+          if (!isGeoSpecTestCase(activeTest)) {
+            throw new Error('expectGeo() must be called inside it().');
+          }
+
+          const assertion: GeoSpecAssertion = { kind: 'spatialRelationships', subject, expected };
+          activeTest.assertions.push(assertion);
+          const validationDiagnostics = validateSpatialRelationshipsExpectation(expected);
+          if (validationDiagnostics.length > 0) {
+            return recordAssertion(assertion, validationDiagnostics);
+          }
+          return recordAsyncAssertion(activeTest, assertion, async () =>
+            evaluateSpatialRelationships(subject, expected),
+          );
+        },
+
+        toHaveMeshIntegrity(expected) {
+          if (!isGeoSpecTestCase(activeTest)) {
+            throw new Error('expectGeo() must be called inside it().');
+          }
+
+          const assertion: GeoSpecAssertion = { kind: 'meshIntegrity', subject, expected };
+          activeTest.assertions.push(assertion);
+          const validationDiagnostics = validateMeshIntegrityExpectation(expected);
+          return recordValidatedAssertion(assertion, validationDiagnostics, () =>
+            evaluateMeshIntegrity(subject, expected),
           );
         },
 
@@ -2071,14 +3101,18 @@ export const createCollector = (): GeoSpecCollector => {
           );
         },
 
-        toBeValidBrep() {
+        toBeValidBrep(expected) {
           if (!isGeoSpecTestCase(activeTest)) {
             throw new Error('expectGeo() must be called inside it().');
           }
 
-          const assertion: GeoSpecAssertion = { kind: 'validBrep', subject, expected: true };
+          const normalizedExpected = expected ?? {};
+          const assertion: GeoSpecAssertion = { kind: 'validBrep', subject, expected: normalizedExpected };
           activeTest.assertions.push(assertion);
-          return recordAssertion(assertion, evaluateValidBrep(subject));
+          const validationDiagnostics = validateValidBrepExpectation(expected);
+          return recordValidatedAssertion(assertion, validationDiagnostics, () =>
+            evaluateValidBrep(subject, normalizedExpected),
+          );
         },
 
         toHaveTopologyCounts(expected) {
@@ -2479,6 +3513,19 @@ export const createCollector = (): GeoSpecCollector => {
             : [];
           return recordValidatedAssertion(assertion, [...objectDiagnostics, ...fieldDiagnostics], () =>
             evaluateMinimumWallThickness(subject, expected),
+          );
+        },
+
+        toHaveVoidContinuity(expected) {
+          if (!isGeoSpecTestCase(activeTest)) {
+            throw new Error('expectGeo() must be called inside it().');
+          }
+
+          const assertion: GeoSpecAssertion = { kind: 'voidContinuity', subject, expected };
+          activeTest.assertions.push(assertion);
+          const validationDiagnostics = validateVoidContinuityExpectation(expected);
+          return recordValidatedAssertion(assertion, validationDiagnostics, () =>
+            evaluateVoidContinuity(subject, expected),
           );
         },
       };

@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { resolveRuntimeExportIntent } from '#model/export-intent.js';
 import type { GeoSpecRuntimeClient } from '#model/types.js';
 
-const createRuntime = (runtime?: Record<string, unknown>): GeoSpecRuntimeClient =>
+const createRuntime = <Runtime extends Record<string, unknown> = Record<string, never>>(
+  runtime?: Runtime,
+): GeoSpecRuntimeClient & Runtime =>
   ({
     export: vi.fn(),
     ...runtime,
-  }) as unknown as GeoSpecRuntimeClient;
+  }) as unknown as GeoSpecRuntimeClient & Runtime;
 
 describe('resolveRuntimeExportIntent', () => {
   it('should request canonical mesh options from route-aware runtimes', () => {
@@ -59,7 +61,10 @@ describe('resolveRuntimeExportIntent', () => {
     const intent = resolveRuntimeExportIntent({ runtime, format: 'glb' });
 
     expect(intent).toEqual({
-      options: {},
+      options: {
+        coordinateSystem: 'z-up',
+        unit: { length: 'millimeter' },
+      },
       sourceUnit: 'mm',
       provenance: {
         requested: {

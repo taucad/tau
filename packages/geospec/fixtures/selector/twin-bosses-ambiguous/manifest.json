@@ -1,0 +1,45 @@
+{
+  "family": "selector",
+  "fixture": "selector.twin-bosses-ambiguous",
+  "generator": {
+    "script": "scripts/selector/twin-bosses/main.ts",
+    "parameters": {}
+  },
+  "selectors": [
+    {
+      "selector": {
+        "kind": "axis",
+        "of": "twinBosses",
+        "query": {
+          "radius": 6
+        }
+      },
+      "status": "ambiguous",
+      "mentions": ["2"]
+    },
+    {
+      "selector": {
+        "kind": "axis",
+        "of": "twinBosses",
+        "query": {
+          "radius": 6,
+          "nearestTo": [-20, 0, 17]
+        }
+      },
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "axisOrigin": [-20, 0, 10]
+      },
+      "factsTolerance": 0.001
+    },
+    {
+      "selector": {
+        "kind": "interface",
+        "name": "twinBosses.boss"
+      },
+      "status": "unsupported"
+    }
+  ],
+  "notes": "Master acceptance case 2: two geometrically identical bosses; a radius query without a disambiguating probe resolves ambiguous with both ranked candidates, never auto-picks. No authored interfaces are exported."
+}

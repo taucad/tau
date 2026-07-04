@@ -4,7 +4,7 @@
  * @module
  */
 
-import { getCollector } from '#runner/collector.js';
+import { createCollector, getCollector } from '#runner/collector.js';
 import type { GeoSpecConfig } from '#config/index.js';
 import type { AnalyzeMeshResult, LoadMeshOptions, LoadMeshResult } from '#mesh/load-mesh.js';
 import type { GeoSpecMatcher } from '#runner/types.js';
@@ -12,6 +12,8 @@ import type { GeoSpecMatcher } from '#runner/types.js';
 export type { GeoSpecConfig, GeoSpecRunnerConfig, GeoSpecToleranceConfig, GeoSpecUnit } from '#config/index.js';
 export type {
   GeoSpecAssertion,
+  GeoSpecAssemblyOccurrenceExpectation,
+  GeoSpecAssemblyOccurrencesExpectation,
   GeoSpecAxisExpectation,
   GeoSpecBoundingBoxExpectation,
   GeoSpecCenterOfMassExpectation,
@@ -19,10 +21,14 @@ export type {
   GeoSpecChamferFeatureExpectation,
   GeoSpecCircularHoleExpectation,
   GeoSpecCylindricalFaceExpectation,
-  GeoSpecComponentOverlapExpectation,
+  GeoSpecComponentInterferenceAllowance,
+  GeoSpecComponentInterferenceExpectation,
+  GeoSpecComponentInterferencePairExpectation,
   GeoSpecConnectedComponentsExpectation,
+  GeoSpecGeometrySelector,
   GeoSpecMatcher,
   GeoSpecMassExpectation,
+  GeoSpecMeshIntegrityExpectation,
   GeoSpecMinimumWallThicknessExpectation,
   GeoSpecCircularHolePatternExpectation,
   GeoSpecFilletFeatureExpectation,
@@ -31,9 +37,14 @@ export type {
   GeoSpecPlanarFaceExpectation,
   GeoSpecPointExpectation,
   GeoSpecProductStructureExpectation,
+  GeoSpecSpatialRelationshipExpectation,
+  GeoSpecSpatialRelationshipsExpectation,
   GeoSpecStepUnitsExpectation,
   GeoSpecSurfaceAreaExpectation,
   GeoSpecTopologyCountsExpectation,
+  GeoSpecValidBrepExpectation,
+  GeoSpecVoidContinuityExpectation,
+  GeoSpecVoidWaypoint,
   GeoSpecVolumeExpectation,
 } from '#runner/types.js';
 export type {
@@ -148,6 +159,18 @@ export const test = it;
 export function expectGeo(subject: unknown): GeoSpecMatcher {
   return getCollector().expectGeo(subject);
 }
+
+/**
+ * Every matcher name exposed by {@link expectGeo}, derived from the live
+ * matcher surface so it can never drift from the real implementation. Use it to
+ * assert that documentation, prompt examples, or authored suites only reference
+ * matchers that actually exist.
+ *
+ * @public
+ */
+export const geoSpecMatcherNames: readonly string[] = Object.freeze(
+  Object.keys(createCollector().expectGeo(undefined)),
+);
 
 export type { AnalyzeMeshResult, LoadMeshOptions, LoadMeshResult } from '#mesh/load-mesh.js';
 export type { Vec3 as GeoSpecVec3 } from '#mesh/types.js';

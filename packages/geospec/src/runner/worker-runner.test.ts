@@ -432,7 +432,7 @@ describe('GeoSpec worker-style runners', () => {
         "describe('overlap cleanup', () => {",
         "  it('fails after preparing overlap resources', async () => {",
         "    const model = await loadModel({ file: 'main.ts', format: 'glb' });",
-        '    expectGeo(model).toHaveNoComponentOverlap({ tolerance: 0.001 });',
+        '    expectGeo(model).toHaveNoComponentInterference({ tolerance: 0.001 });',
         '  });',
         '});',
       ].join('\n'),

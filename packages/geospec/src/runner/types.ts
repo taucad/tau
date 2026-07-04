@@ -1,5 +1,6 @@
 import type { BuiltinModule, BundleResult, VmFileSystem, VmIssue } from '@taucad/vm';
 import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
+import type { GeometrySelector } from '#selector/types.js';
 import type { GeoSpecModelLoader } from '#model/index.js';
 import type { GeoSpecRunProfile } from '#runner/profile.js';
 import type { GeoSpecResourceScope } from '#runner/resource-scope.js';
@@ -43,37 +44,54 @@ export type GeoSpecConnectedComponentsExpectation = {
 };
 
 /**
- * Component selector used by pair-filtered component-overlap checks.
+ * Component selector used by pair-filtered component-interference checks.
  *
  * @public
  */
 export type GeoSpecComponentSelector = string | RegExp;
 
 /**
- * A pair-specific overlap check accepted by
- * `expectGeo(...).toHaveNoComponentOverlap(...)`.
+ * A pair-specific component-interference check accepted by
+ * `expectGeo(...).toHaveNoComponentInterference(...)`.
  *
  * @public
  */
-export type GeoSpecComponentOverlapPairExpectation = {
+export type GeoSpecComponentInterferencePairExpectation = {
   left: GeoSpecComponentSelector;
   right: GeoSpecComponentSelector;
 };
 
 /**
- * Component-overlap expectation accepted by
- * `expectGeo(...).toHaveNoComponentOverlap(...)`.
+ * Intentional component interference allowance accepted by
+ * `expectGeo(...).toHaveNoComponentInterference(...)`.
+ *
+ * @public
+ */
+export type GeoSpecComponentInterferenceAllowance = {
+  kind: 'intentionalInterference';
+  left: GeoSpecComponentSelector;
+  right: GeoSpecComponentSelector;
+  maxVolume?: number;
+  reason: string;
+};
+
+/**
+ * Component-interference expectation accepted by
+ * `expectGeo(...).toHaveNoComponentInterference(...)`.
  *
  * GeoSpec checks for positive solid intersection volume between assembly
  * components. Tangent contact and correctly meshed gears are allowed.
  * `pairs` narrows the check to specific component-label pairs while preserving
- * exact positive-volume evidence for every selected pair.
+ * exact positive-volume evidence for every selected pair. `allowances`
+ * documents explicitly intentional positive-volume interference such as gasket
+ * compression, press fits, or simplified thread engagement.
  *
  * @public
  */
-export type GeoSpecComponentOverlapExpectation = {
+export type GeoSpecComponentInterferenceExpectation = {
   tolerance?: number;
-  pairs?: GeoSpecComponentOverlapPairExpectation[];
+  pairs?: GeoSpecComponentInterferencePairExpectation[];
+  allowances?: GeoSpecComponentInterferenceAllowance[];
 };
 
 /**
@@ -223,6 +241,50 @@ export type GeoSpecMinimumWallThicknessExpectation = {
 };
 
 /**
+ * One void-continuity waypoint: an explicit subject-frame point known to lie
+ * in the void, or an occurrence whose bounds centre is taken as the waypoint
+ * (convenient for "this bore/cavity connects to that one" claims).
+ *
+ * @public
+ */
+export type GeoSpecVoidWaypoint = Vec3 | { occurrence: string };
+
+/**
+ * Void-continuity expectation accepted by
+ * `expectGeo(...).toHaveVoidContinuity(...)`.
+ *
+ * A whole-assembly negative-space claim: the ordered `path` waypoints must all
+ * lie in ONE connected open-void component (void = outside every `material`
+ * solid), that component must not reach any `isolatedFrom` point, and its
+ * tightest sampled cross-section must meet `minCrossSection`. Connectivity and
+ * isolation are proven by a deterministic 6-connectivity flood-fill over exact
+ * point-in-solid classification at `resolution`-spaced voxel centres;
+ * `minCrossSection` is a sampled measure reported with its quantization band.
+ *
+ * @public
+ */
+export type GeoSpecVoidContinuityExpectation = {
+  /** Ordered waypoints (>= 1) known to lie in the void being proven. */
+  path: GeoSpecVoidWaypoint[];
+  /**
+   * Occurrence names whose solids bound the void. Defaults to every occurrence
+   * in the subject (the whole-assembly negative space).
+   */
+  material?: string[];
+  /** Voxel edge length (mm) for the flood-fill sampling. Default 2.0. */
+  resolution?: number;
+  /** Minimum required bottleneck cross-section (mm²), sampled. */
+  minCrossSection?: number;
+  /** Points that must NOT be reachable from the path void (isolation claim). */
+  isolatedFrom?: Vec3[];
+  /**
+   * Region voxelized for the flood-fill (subject frame). Defaults to the union
+   * of the `material` occurrence bounds, which encloses every interior void.
+   */
+  bounds?: { min: Vec3; max: Vec3 };
+};
+
+/**
  * Topology-count expectation accepted by `expectGeo(...).toHaveTopologyCounts(...)`.
  *
  * @public
@@ -297,6 +359,153 @@ export type GeoSpecMinimumDistanceExpectation = {
 };
 
 /**
+ * Geometry selector used by inspection and spatial relationship matchers.
+ *
+ * @public
+ */
+export type GeoSpecGeometrySelector =
+  | GeoSpecComponentSelector
+  | { kind: 'occurrence'; name: GeoSpecComponentSelector }
+  | {
+      kind: 'axis';
+      name?: GeoSpecComponentSelector;
+      axis?: 'x' | 'y' | 'z';
+      center?: Vec3;
+      direction?: Vec3;
+      radius?: number;
+      tolerance?: number;
+    }
+  | {
+      kind: 'plane';
+      name?: GeoSpecComponentSelector;
+      normal?: Vec3;
+      offset?: number;
+      tolerance?: number;
+    }
+  /**
+   * SB3 V1 selector catalog kinds (body/face/datum/interface/group plus the
+   * string shorthand), resolved by the `geospec/selector` engine. SB4 routes
+   * relationship endpoints through that engine: the legacy explicit
+   * axis/plane members above resolve as `stability: 'explicit'` fixtures
+   * (rejected by the production evidence policy), while named legacy forms
+   * become engine queries. The catalog's occurrence/axis/plane query forms
+   * stay out of this union because their `kind` discriminants collide with
+   * the legacy explicit members.
+   */
+  | Exclude<GeometrySelector, string | { kind: 'occurrence' | 'axis' | 'plane' }>;
+
+/**
+ * Assembly occurrence rule accepted by
+ * `expectGeo(...).toHaveAssemblyOccurrences(...)`.
+ *
+ * @public
+ */
+export type GeoSpecAssemblyOccurrenceExpectation = {
+  name: GeoSpecComponentSelector;
+  count?: GeoSpecNumericExpectation;
+  bounds?: {
+    within?: GeoSpecComponentSelector;
+    min?: Vec3 | GeoSpecAxisExpectation;
+    max?: Vec3 | GeoSpecAxisExpectation;
+    center?: GeoSpecPointExpectation;
+    tolerance?: number;
+  };
+};
+
+/**
+ * Assembly occurrence expectation accepted by
+ * `expectGeo(...).toHaveAssemblyOccurrences(...)`.
+ *
+ * @public
+ */
+export type GeoSpecAssemblyOccurrencesExpectation = {
+  occurrences: GeoSpecAssemblyOccurrenceExpectation[];
+  uniqueNames?: boolean;
+};
+
+/**
+ * One spatial relationship accepted by
+ * `expectGeo(...).toHaveSpatialRelationships(...)`.
+ *
+ * Verdicts are decided by exact BRep evidence only (D3): extrema for
+ * `contact`/`clearance`, analytic fact comparison for
+ * `coaxial`/`concentric`/`coplanar`/`parallel`/`perpendicular`/`angle`,
+ * exact solid classification for `containment`/`insertion`, and exact
+ * boolean common volume for `interference` (positive volume outside the
+ * `minVolume`/`maxVolume` allowance band fails).
+ *
+ * @public
+ */
+export type GeoSpecSpatialRelationshipExpectation = {
+  id?: string;
+  kind:
+    | 'contact'
+    | 'clearance'
+    | 'coaxial'
+    | 'concentric'
+    | 'coplanar'
+    | 'parallel'
+    | 'perpendicular'
+    | 'angle'
+    | 'containment'
+    | 'insertion'
+    | 'interference';
+  subject: GeoSpecGeometrySelector;
+  target: GeoSpecGeometrySelector;
+  tolerance?: number;
+  angularToleranceDegrees?: number;
+  /** Expected angle in degrees for `kind: 'angle'` (orientation-insensitive). */
+  angleDegrees?: number;
+  /** Declared insertion axis (subject-frame direction) for `kind: 'insertion'`. */
+  axis?: Vec3;
+  /** Declared minimum contact area (mm²); currently deferred, not approximated. */
+  minContactArea?: number;
+  min?: number;
+  max?: number;
+  minVolume?: number;
+  maxVolume?: number;
+  reason?: string;
+};
+
+/**
+ * Spatial relationship expectation accepted by
+ * `expectGeo(...).toHaveSpatialRelationships(...)`.
+ *
+ * @public
+ */
+export type GeoSpecSpatialRelationshipsExpectation = {
+  relationships: GeoSpecSpatialRelationshipExpectation[];
+};
+
+/**
+ * Mesh integrity expectation accepted by
+ * `expectGeo(...).toHaveMeshIntegrity(...)`.
+ *
+ * @public
+ */
+export type GeoSpecMeshIntegrityExpectation = {
+  finitePositions?: boolean;
+  degenerateTriangles?: { count?: number; maxCount?: number; areaTolerance?: number };
+  duplicateFaces?: { count?: number; maxCount?: number };
+  watertight?: boolean;
+  triangleCount?: GeoSpecNumericExpectation;
+};
+
+/**
+ * Exact BRep validity expectation accepted by `expectGeo(...).toBeValidBrep(...)`.
+ *
+ * @public
+ */
+export type GeoSpecValidBrepExpectation = {
+  maxTolerance?: number;
+  freeBounds?: { count?: GeoSpecNumericExpectation };
+  minEdgeLength?: number;
+  sameParameter?: boolean;
+  closedShells?: boolean;
+  closedWires?: boolean;
+};
+
+/**
  * Assertion chain returned by `expectGeo(subject)`.
  *
  * @public
@@ -317,7 +526,19 @@ export type GeoSpecMatcher = {
   /**
    * Assert that separate assembly components do not occupy the same solid volume.
    */
-  toHaveNoComponentOverlap(expected?: GeoSpecComponentOverlapExpectation): GeoSpecAssertion;
+  toHaveNoComponentInterference(expected?: GeoSpecComponentInterferenceExpectation): GeoSpecAssertion;
+  /**
+   * Assert that named assembly occurrences exist with expected counts and bounds.
+   */
+  toHaveAssemblyOccurrences(expected: GeoSpecAssemblyOccurrencesExpectation): GeoSpecAssertion;
+  /**
+   * Assert that selected entities satisfy declared spatial relationships.
+   */
+  toHaveSpatialRelationships(expected: GeoSpecSpatialRelationshipsExpectation): GeoSpecAssertion;
+  /**
+   * Assert rendered mesh evidence is internally trustworthy for downstream checks.
+   */
+  toHaveMeshIntegrity(expected: GeoSpecMeshIntegrityExpectation): GeoSpecAssertion;
   /**
    * Assert total surface area, preferring exact BRep mass properties when available.
    */
@@ -349,7 +570,7 @@ export type GeoSpecMatcher = {
   /**
    * Assert that exact BRep evidence reports a valid shape.
    */
-  toBeValidBrep(): GeoSpecAssertion;
+  toBeValidBrep(expected?: GeoSpecValidBrepExpectation): GeoSpecAssertion;
   /**
    * Assert exact BRep topology counts.
    */
@@ -390,6 +611,11 @@ export type GeoSpecMatcher = {
    * Assert that BRep evidence reports a minimum wall thickness satisfying the expectation.
    */
   toHaveMinimumWallThickness(expected: GeoSpecMinimumWallThicknessExpectation): GeoSpecAssertion;
+  /**
+   * Assert that the declared waypoints share one connected void, stay isolated
+   * from the declared spaces, and hold the minimum cross-section.
+   */
+  toHaveVoidContinuity(expected: GeoSpecVoidContinuityExpectation): GeoSpecAssertion;
 };
 
 /**
@@ -403,7 +629,10 @@ export type GeoSpecAssertion = {
     | 'boundingBox'
     | 'connectedComponents'
     | 'watertight'
-    | 'componentOverlap'
+    | 'componentInterference'
+    | 'assemblyOccurrences'
+    | 'spatialRelationships'
+    | 'meshIntegrity'
     | 'surfaceArea'
     | 'volume'
     | 'mass'
@@ -421,7 +650,8 @@ export type GeoSpecAssertion = {
     | 'circularHolePattern'
     | 'chamferFeature'
     | 'filletFeature'
-    | 'minimumWallThickness';
+    | 'minimumWallThickness'
+    | 'voidContinuity';
   /** User-authored value passed to expectGeo(). */
   subject: unknown;
   /** Expected geometry condition. */

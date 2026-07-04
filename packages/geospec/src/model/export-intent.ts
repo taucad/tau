@@ -165,7 +165,13 @@ export const resolveRuntimeExportIntent = (options: {
 
   const requested = requestedMeshIntent(format);
   if (!routeAware) {
-    return canonicalMeshIntent({ format, exportOptions: {} });
+    return canonicalMeshIntent({
+      format,
+      exportOptions: {
+        coordinateSystem: 'z-up',
+        unit: { length: 'millimeter' },
+      },
+    });
   }
 
   if (!route) {

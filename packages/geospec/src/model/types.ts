@@ -7,7 +7,14 @@ import type {
   StepSource,
   StepStreamingMode,
 } from '#step/types.js';
-import type { RuntimeClient } from '@taucad/runtime/client';
+import type {
+  ExportFormatsFor,
+  ExportResult,
+  KernelPlugin,
+  RuntimeSource,
+  RuntimeSourceFiles,
+  TranscoderPlugin,
+} from '@taucad/runtime';
 
 /**
  * Geometry formats accepted by {@link import('./load-model.js').loadModel}.
@@ -17,14 +24,29 @@ import type { RuntimeClient } from '@taucad/runtime/client';
 export type GeoSpecModelFormat = MeshFileFormat | 'step' | 'stp';
 
 /**
- * Runtime client consumed by `geospec/model`.
+ * Runtime client surface consumed by `geospec/model`.
  *
- * GeoSpec is built on `@taucad/runtime`; this alias intentionally preserves the
- * runtime client contract instead of maintaining a parallel structural copy.
+ * GeoSpec accepts concrete Tau runtime clients from multiple call sites but
+ * only needs connection lifecycle and request-scoped export. Keep this shape
+ * small so typed runtime clients do not have to widen their full generic
+ * method surface to GeoSpec's testing DSL.
  *
  * @public
  */
-export type GeoSpecRuntimeClient = RuntimeClient;
+type GeoSpecRuntimeExportFormat = ExportFormatsFor<readonly KernelPlugin[], readonly TranscoderPlugin[]>;
+
+export type GeoSpecRuntimeClient = {
+  connect(): Promise<void>;
+  terminate(): void;
+  export<const Format extends GeoSpecRuntimeExportFormat, const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(
+    format: Format,
+    options?: {
+      readonly source?: RuntimeSource<Files>;
+      readonly parameters?: Record<string, unknown>;
+      readonly exportOptions?: Record<string, unknown>;
+    },
+  ): Promise<ExportResult>;
+};
 
 /**
  * Lazy runtime factory consumed by `geospec/model`.

@@ -1,6 +1,7 @@
 additionalCppFiles:
   - wrappers/geospec-mesh-metrics.cpp
   - wrappers/geospec-step-reader.cpp
+  - wrappers/geospec-xde-reader.cpp
 
 mainBuild:
   name: geospec_opencascade_single.js
@@ -46,6 +47,8 @@ mainBuild:
     - symbol: GeoSpecNativeVec3
     - symbol: GeoSpecStepReadResult
     - symbol: GeoSpecStepStreamReader
+    - symbol: GeoSpecXdeReadResult
+    - symbol: GeoSpecXdeReader
   emccFlags:
     - -flto
     - -O3

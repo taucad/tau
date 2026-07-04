@@ -1,0 +1,73 @@
+{
+  "family": "clearance",
+  "fixture": "clearance.piston-bore-skirt-positive",
+  "generator": {
+    "script": "scripts/clearance/piston-bore/main.ts",
+    "parameters": {}
+  },
+  "tolerances": {
+    "clearanceMin": 0.015,
+    "clearanceMax": 0.06,
+    "measurement": 0.001
+  },
+  "selectors": [
+    {
+      "selector": "block.bore",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "cylinder",
+        "radius": 47
+      }
+    },
+    {
+      "selector": "piston.skirt",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "cylinder",
+        "radius": 46.97
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "clearance",
+      "subject": "piston.skirt",
+      "target": "block.bore",
+      "options": {
+        "min": 0.015,
+        "max": 0.06,
+        "tolerance": 0.001
+      },
+      "expected": {
+        "verdict": "pass",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "measured": {
+            "distance": 0.03
+          }
+        }
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "piston.skirt",
+      "target": "block.bore",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "final": {
+          "method": "analytic",
+          "measured": {
+            "radialOffset": 0
+          }
+        }
+      }
+    }
+  ]
+}

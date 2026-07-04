@@ -3,5 +3,16 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/geospec",
   "projectType": "library",
-  "tags": ["scope:shared", "type:lib"]
+  "tags": ["scope:shared", "type:lib"],
+  "targets": {
+    "build-wasm": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "parallelism": false,
+      "options": {
+        "cwd": "{projectRoot}/native/opencascade",
+        "command": "docker run --rm -v \"$PWD:/src\" -u \"$(id -u):$(id -g)\" ghcr.io/taucad/opencascade.js:single-threaded link geospec.single.yml"
+      }
+    }
+  }
 }

@@ -10,10 +10,10 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/geospec"
   },
-  "main": "./dist/esm/index.js",
-  "types": "./dist/esm/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "bin": {
-    "geospec": "./dist/esm/cli.js"
+    "geospec": "./dist/cli.js"
   },
   "files": [
     "dist",
@@ -33,75 +33,93 @@
     ".": "./src/index.ts",
     "./brep": "./src/brep/index.ts",
     "./config": "./src/config/index.ts",
+    "./inspection": "./src/inspection/index.ts",
     "./mesh": "./src/mesh/index.ts",
     "./model": "./src/model/index.ts",
+    "./proofs": "./src/proofs/index.ts",
     "./runner": "./src/runner/index.ts",
     "./runner/node": "./src/runner/node/index.ts",
     "./runner/web": "./src/runner/web/index.ts",
     "./runner/worker": "./src/runner/worker/index.ts",
+    "./selector": "./src/selector/index.ts",
     "./step": "./src/step/index.ts",
     "./native/opencascade/single": "./native/opencascade/geospec_opencascade_single.js"
   },
   "publishConfig": {
     "access": "public",
     "bin": {
-      "geospec": "./dist/esm/cli.js"
+      "geospec": "./dist/cli.js"
     },
     "exports": {
       ".": {
-        "types": "./dist/esm/index.d.ts",
-        "import": "./dist/esm/index.js",
-        "default": "./dist/esm/index.js"
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
       },
       "./brep": {
-        "types": "./dist/esm/brep/index.d.ts",
-        "import": "./dist/esm/brep/index.js",
-        "default": "./dist/esm/brep/index.js"
+        "types": "./dist/brep/index.d.ts",
+        "import": "./dist/brep/index.js",
+        "default": "./dist/brep/index.js"
       },
       "./config": {
-        "types": "./dist/esm/config/index.d.ts",
-        "import": "./dist/esm/config/index.js",
-        "default": "./dist/esm/config/index.js"
+        "types": "./dist/config/index.d.ts",
+        "import": "./dist/config/index.js",
+        "default": "./dist/config/index.js"
+      },
+      "./inspection": {
+        "types": "./dist/inspection/index.d.ts",
+        "import": "./dist/inspection/index.js",
+        "default": "./dist/inspection/index.js"
       },
       "./mesh": {
-        "types": "./dist/esm/mesh/index.d.ts",
-        "import": "./dist/esm/mesh/index.js",
-        "default": "./dist/esm/mesh/index.js"
+        "types": "./dist/mesh/index.d.ts",
+        "import": "./dist/mesh/index.js",
+        "default": "./dist/mesh/index.js"
       },
       "./model": {
-        "types": "./dist/esm/model/index.d.ts",
-        "import": "./dist/esm/model/index.js",
-        "default": "./dist/esm/model/index.js"
+        "types": "./dist/model/index.d.ts",
+        "import": "./dist/model/index.js",
+        "default": "./dist/model/index.js"
+      },
+      "./proofs": {
+        "types": "./dist/proofs/index.d.ts",
+        "import": "./dist/proofs/index.js",
+        "default": "./dist/proofs/index.js"
       },
       "./runner": {
-        "types": "./dist/esm/runner/index.d.ts",
-        "import": "./dist/esm/runner/index.js",
-        "default": "./dist/esm/runner/index.js"
+        "types": "./dist/runner/index.d.ts",
+        "import": "./dist/runner/index.js",
+        "default": "./dist/runner/index.js"
       },
       "./runner/node": {
-        "types": "./dist/esm/runner/node/index.d.ts",
-        "import": "./dist/esm/runner/node/index.js",
-        "default": "./dist/esm/runner/node/index.js"
+        "types": "./dist/runner/node/index.d.ts",
+        "import": "./dist/runner/node/index.js",
+        "default": "./dist/runner/node/index.js"
       },
       "./runner/web": {
-        "types": "./dist/esm/runner/web/index.d.ts",
-        "import": "./dist/esm/runner/web/index.js",
-        "default": "./dist/esm/runner/web/index.js"
+        "types": "./dist/runner/web/index.d.ts",
+        "import": "./dist/runner/web/index.js",
+        "default": "./dist/runner/web/index.js"
       },
       "./runner/worker": {
-        "types": "./dist/esm/runner/worker/index.d.ts",
-        "import": "./dist/esm/runner/worker/index.js",
-        "default": "./dist/esm/runner/worker/index.js"
+        "types": "./dist/runner/worker/index.d.ts",
+        "import": "./dist/runner/worker/index.js",
+        "default": "./dist/runner/worker/index.js"
+      },
+      "./selector": {
+        "types": "./dist/selector/index.d.ts",
+        "import": "./dist/selector/index.js",
+        "default": "./dist/selector/index.js"
       },
       "./step": {
-        "types": "./dist/esm/step/index.d.ts",
-        "import": "./dist/esm/step/index.js",
-        "default": "./dist/esm/step/index.js"
+        "types": "./dist/step/index.d.ts",
+        "import": "./dist/step/index.js",
+        "default": "./dist/step/index.js"
       },
       "./native/opencascade/single": {
-        "types": "./dist/esm/native/opencascade/geospec_opencascade_single.d.ts",
-        "import": "./dist/esm/native/opencascade/geospec_opencascade_single.js",
-        "default": "./dist/esm/native/opencascade/geospec_opencascade_single.js"
+        "types": "./dist/native/opencascade/geospec_opencascade_single.d.ts",
+        "import": "./dist/native/opencascade/geospec_opencascade_single.js",
+        "default": "./dist/native/opencascade/geospec_opencascade_single.js"
       }
     }
   },

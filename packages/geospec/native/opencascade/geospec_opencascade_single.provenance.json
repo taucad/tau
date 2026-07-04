@@ -1,7 +1,7 @@
 {
   "schema": "wasm-build-provenance-v1.1",
-  "buildId": "20260608T201553-O3-noLTO-single",
-  "timestamp": "2026-06-08T20:15:53.876151+00:00",
+  "buildId": "20260703T034027-O3-noLTO-single",
+  "timestamp": "2026-07-03T03:40:27.189891+00:00",
   "toolchain": {
     "emscripten": "5.0.1",
     "llvm": "unknown",
@@ -49,8 +49,8 @@
   },
   "linking": {
     "yamlConfig": "geospec_opencascade_single.js",
-    "yamlConfigHash": "c89eaf86db60",
-    "boundSymbols": 41,
+    "yamlConfigHash": "5855019b435c",
+    "boundSymbols": 43,
     "symbolList": [
       "Message_ProgressRange",
       "STEPControl_Reader",
@@ -92,7 +92,9 @@
       "GeoSpecMeshMetrics",
       "GeoSpecNativeVec3",
       "GeoSpecStepReadResult",
-      "GeoSpecStepStreamReader"
+      "GeoSpecStepStreamReader",
+      "GeoSpecXdeReadResult",
+      "GeoSpecXdeReader"
     ],
     "emccFlags": [
       "-sMALLOC=mimalloc",
@@ -113,7 +115,7 @@
       "-sERROR_ON_UNDEFINED_SYMBOLS=0",
       "--no-entry"
     ],
-    "linkDuration_s": 76.6
+    "linkDuration_s": 52.5
   },
   "postProcessing": {
     "wasmOptFlags": [
@@ -129,22 +131,22 @@
       "--enable-exception-handling",
       "--enable-simd"
     ],
-    "preOptSize": 12996813,
-    "postOptSize": 12988785,
+    "preOptSize": 13641047,
+    "postOptSize": 13632713,
     "optReduction": "0.1%",
-    "wasmOptDuration_s": 93.9
+    "wasmOptDuration_s": 78.7
   },
   "output": {
     "geospec_opencascade_single.wasm": {
-      "size": 12988785,
-      "sha256": "f4ac40705e1f42fc"
+      "size": 13632713,
+      "sha256": "2233aa787544cd1a"
     },
     "geospec_opencascade_single.js": {
       "size": 60586
     },
     "geospec_opencascade_single.d.ts": {
-      "size": 270298,
-      "lines": 6323
+      "size": 271186,
+      "lines": 6347
     }
   },
   "sections": {},
@@ -156,5 +158,5 @@
     "total": 878,
     "dropped": 859
   },
-  "totalDuration_s": 209
+  "totalDuration_s": 167
 }

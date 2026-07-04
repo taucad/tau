@@ -11,9 +11,11 @@ import type {
   CreateStepLoaderOptions,
   GeoSpecNativeStepBackend,
   GeoSpecNativeStepReadResult,
+  GeoSpecNativeXdeReadResult,
   GeoSpecOpenCascadeStepModule,
   GeoSpecStepLoader,
   LoadStepOptions,
+  XdeReadResult,
 } from '#step/types.js';
 
 type StepBytes = {
@@ -305,6 +307,35 @@ const readNativeStep = async (options: {
   }
 };
 
+type NativeXdeRead = {
+  xde?: XdeReadResult;
+  nativeXde?: GeoSpecNativeXdeReadResult;
+  diagnostic?: GeometryDiagnostic;
+};
+
+// One STEP-XDE read yields structure, names, and properties together; the
+// native result also retains placed shapes for exact BRep proof calls, so it
+// is handed to the subject instead of being deleted here.
+const readNativeXde = (options: { text: string; module: GeoSpecNativeStepBackend }): NativeXdeRead => {
+  const reader = options.module.GeoSpecXdeReader;
+  if (!reader) {
+    return {};
+  }
+  const result = reader.readText(options.text);
+  if (!result.isSuccess()) {
+    let message = 'GeoSpec native XDE reader failed.';
+    try {
+      const parsed = JSON.parse(result.resultJson()) as { error?: string };
+      message = parsed.error ?? message;
+    } catch {
+      // Keep the generic message when the native error payload is unreadable.
+    }
+    result.delete?.();
+    return { diagnostic: { code: 'GEOSPEC_XDE_READ_FAILED', severity: 'warning', message } };
+  }
+  return { xde: JSON.parse(result.resultJson()) as XdeReadResult, nativeXde: result };
+};
+
 const resolveNativeStepBackend = async (options: {
   nativeStepBackend?: LoadStepOptions['nativeStepBackend'];
   openCascade?: LoadStepOptions['openCascade'];
@@ -487,6 +518,7 @@ const buildStepSubject = async (options: {
   loadOptions: LoadStepOptions;
   payload: NativeEvidencePayload;
   strategy: StepEvidence['readStrategy'];
+  xdeRead?: NativeXdeRead;
 }): Promise<GeometrySubject> => {
   const unit = options.loadOptions.unit ?? 'mm';
   const triangles = options.payload.triangles ?? [];
@@ -532,6 +564,7 @@ const buildStepSubject = async (options: {
         reason: 'GeoSpec P0 reports unsupported AP242 PMI/GD&T evidence explicitly.',
       },
     ],
+    xde: options.xdeRead?.xde,
   };
   return {
     ...meshResult.subject,
@@ -545,7 +578,11 @@ const buildStepSubject = async (options: {
       parameters: options.loadOptions.parameters,
     },
     capabilities: stepCapabilities({ brep, hasMesh }),
-    diagnostics: [...(options.payload.diagnostics ?? [])],
+    diagnostics: [
+      ...(options.payload.diagnostics ?? []),
+      ...(options.xdeRead?.diagnostic ? [options.xdeRead.diagnostic] : []),
+    ],
+    nativeXde: options.xdeRead?.nativeXde,
   };
 };
 
@@ -565,13 +602,14 @@ export const loadStep = async (options: LoadStepOptions): Promise<GeometrySubjec
     openCascade: options.openCascade,
   });
   const native = module ? await readNativeStep({ bytes, loadOptions: options, module }) : undefined;
-  if (!native) {
+  if (!module || !native) {
     throw new Error(
       'GeoSpec native STEP reader is unavailable. Use geospec/native/opencascade/single or pass a nativeStepBackend module with GeoSpecStepStreamReader.',
     );
   }
   options.onProgress?.({ phase: 'mesh-brep', bytesRead: bytes.bytes.byteLength });
-  return buildStepSubject({ bytes, loadOptions: options, payload: native.payload, strategy: native.strategy });
+  const xdeRead = readNativeXde({ text: bytes.text, module });
+  return buildStepSubject({ bytes, loadOptions: options, payload: native.payload, strategy: native.strategy, xdeRead });
 };
 
 /**

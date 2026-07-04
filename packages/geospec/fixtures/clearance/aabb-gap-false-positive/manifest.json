@@ -1,0 +1,51 @@
+{
+  "family": "clearance",
+  "fixture": "clearance.aabb-gap-false-positive",
+  "generator": {
+    "script": "scripts/clearance/shaft-bore/main.ts",
+    "parameters": {
+      "tiltDegrees": 2.5
+    }
+  },
+  "tolerances": {
+    "clearanceMin": 0.02,
+    "clearanceMax": 0.06,
+    "measurement": 0.001
+  },
+  "adversarialAabb": {
+    "subject": "shaft",
+    "target": "housing"
+  },
+  "selectors": [
+    {
+      "selector": "housing.bore",
+      "status": "resolved",
+      "entityCount": 1
+    },
+    {
+      "selector": "shaft.journal",
+      "status": "resolved",
+      "entityCount": 1
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "clearance",
+      "subject": "shaft.journal",
+      "target": "housing.bore",
+      "options": {
+        "min": 0.02,
+        "max": 0.06,
+        "tolerance": 0.001
+      },
+      "expected": {
+        "verdict": "fail",
+        "broadPhase": {
+          "candidate": true
+        },
+        "mentions": ["shaft.journal", "housing.bore"]
+      }
+    }
+  ],
+  "notes": "Master acceptance case 6 (clearance form): whole-part AABBs keep an acceptable envelope relationship while the tilted shaft pierces the bore wall; AABB is broad phase only."
+}

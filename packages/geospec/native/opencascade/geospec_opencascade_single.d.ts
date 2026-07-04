@@ -1529,6 +1529,15 @@ export declare class NCollection_HSequence_handle_Standard_Transient {
   [Symbol.dispose](): void;
 }
 
+export declare class GeoSpecXdeReader {
+  constructor();
+  static readText(data: string): GeoSpecXdeReadResult;
+  static readFile(path: string): GeoSpecXdeReadResult;
+  /** Releases the C++ object. The caller must ensure no further access. */
+  delete(): void;
+  [Symbol.dispose](): void;
+}
+
 /**
  * Purpose: Definition of a sequence of elements indexed by an Integer in range of 1..n
  */
@@ -3004,6 +3013,19 @@ export declare class NCollection_List_BRepCheck_Status {
    * @param theOther Mutated in place; read the updated value from this argument after the call.
    */
   Exchange(theOther: NCollection_List_BRepCheck_Status): void;
+  /** Releases the C++ object. The caller must ensure no further access. */
+  delete(): void;
+  [Symbol.dispose](): void;
+}
+
+export declare class GeoSpecXdeReadResult {
+  constructor();
+  isSuccess(): boolean;
+  resultJson(): string;
+  extrema(occurrenceA: number, faceA: number, occurrenceB: number, faceB: number): string;
+  classifyPoints(occurrence: number, pointsJson: string): string;
+  commonVolume(occurrenceA: number, occurrenceB: number): string;
+  faceFacts(occurrence: number): string;
   /** Releases the C++ object. The caller must ensure no further access. */
   delete(): void;
   [Symbol.dispose](): void;
@@ -6455,6 +6477,7 @@ export type OpenCascadeInstance = {
   NCollection_Array1_int: typeof NCollection_Array1_int;
   NCollection_Array1_gp_Pnt: typeof NCollection_Array1_gp_Pnt;
   NCollection_HSequence_handle_Standard_Transient: typeof NCollection_HSequence_handle_Standard_Transient;
+  GeoSpecXdeReader: typeof GeoSpecXdeReader;
   NCollection_Sequence_handle_Standard_Transient: typeof NCollection_Sequence_handle_Standard_Transient;
   GeoSpecMeshMetrics: typeof GeoSpecMeshMetrics;
   NCollection_HArray1_gp_Pnt: typeof NCollection_HArray1_gp_Pnt;
@@ -6479,6 +6502,7 @@ export type OpenCascadeInstance = {
   NCollection_HArray1_gp_Pnt2d: typeof NCollection_HArray1_gp_Pnt2d;
   NCollection_HArray1_double: typeof NCollection_HArray1_double;
   NCollection_List_BRepCheck_Status: typeof NCollection_List_BRepCheck_Status;
+  GeoSpecXdeReadResult: typeof GeoSpecXdeReadResult;
   NCollection_Sequence_TCollection_AsciiString: typeof NCollection_Sequence_TCollection_AsciiString;
   NCollection_List_handle_Poly_Triangulation: typeof NCollection_List_handle_Poly_Triangulation;
   TopLoc_Location: typeof TopLoc_Location;

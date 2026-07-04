@@ -105,6 +105,26 @@ const createLowFractionNonManifoldDocument = (): Document => {
 };
 
 describe('MeshAnalysisRecord', () => {
+  it('should produce zero-count geometry stats for an empty glTF document', () => {
+    const document = new Document();
+    document.createScene();
+
+    const record = buildMeshAnalysisRecord(document);
+    const stats = createGeometryStatsFromRecord(record);
+
+    expect(record.vertexCount).toBe(0);
+    expect(record.meshCount).toBe(0);
+    expect(record.triangleCount).toBe(0);
+    expect(record.primitives).toEqual([]);
+    expect(record.positions).toHaveLength(0);
+    expect(record.triangleIndices).toHaveLength(0);
+    expect(stats.vertexCount).toBe(0);
+    expect(stats.meshCount).toBe(0);
+    expect(stats.triangleCount).toBe(0);
+    expect(stats.boundingBox).toBeUndefined();
+    expect(stats.meshQuality.triangleCount).toBe(0);
+  });
+
   it('should expose cheap primitive bounding-box records without materializing connected sub-pieces', () => {
     const record = buildMeshAnalysisRecord(
       createTriangleDocument({

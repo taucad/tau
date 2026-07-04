@@ -1,0 +1,58 @@
+{
+  "family": "clearance",
+  "fixture": "clearance.shaft-bore-too-tight-negative",
+  "generator": {
+    "script": "scripts/clearance/shaft-bore/main.ts",
+    "parameters": {
+      "boreRadius": 25.005
+    }
+  },
+  "tolerances": {
+    "clearanceMin": 0.02,
+    "clearanceMax": 0.06,
+    "measurement": 0.001
+  },
+  "selectors": [
+    {
+      "selector": "housing.bore",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "radius": 25.005
+      }
+    },
+    {
+      "selector": "shaft.journal",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "radius": 25
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "clearance",
+      "subject": "shaft.journal",
+      "target": "housing.bore",
+      "options": {
+        "min": 0.02,
+        "max": 0.06,
+        "tolerance": 0.001
+      },
+      "expected": {
+        "verdict": "fail",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "measured": {
+            "distance": 0.005
+          }
+        },
+        "mentions": ["shaft.journal", "housing.bore", "too tight"]
+      }
+    }
+  ],
+  "notes": "Too tight: clearance 0.005 below min 0.020. The 0.001 measurement tolerance keeps the exact synthetic band honest (the default 0.02 padding would swallow the violation)."
+}

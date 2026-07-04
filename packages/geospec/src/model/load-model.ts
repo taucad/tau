@@ -1,5 +1,6 @@
 import { loadMesh } from '#mesh/load-mesh.js';
 import type {
+  GeometryCapability,
   GeoSpecUnit,
   GeometryDiagnostic,
   GeometryExportIntent,
@@ -17,6 +18,7 @@ import type {
   CreateModelLoaderOptions,
   GeoSpecModelFormat,
   GeoSpecModelLoader,
+  GeoSpecRuntimeClient,
   LoadModelCodeOptions,
   LoadModelFileOptions,
   LoadModelOptions,
@@ -36,6 +38,21 @@ type ModelLoadFailure = {
 };
 
 type ModelLoadResult = ModelLoadSuccess | ModelLoadFailure;
+
+type RuntimeBackedLoadOptions = LoadModelCodeOptions | LoadModelFileOptions;
+
+type RuntimeExportSuccess = {
+  success: true;
+  bytes: Uint8Array<ArrayBuffer>;
+  name?: string;
+  sourceUnit: GeoSpecUnit;
+  exportIntent: GeometryExportIntent;
+  diagnostics: GeometryDiagnostic[];
+};
+
+type RuntimeExportBundle = RuntimeExportSuccess & {
+  meshSupplement?: RuntimeExportSuccess;
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
@@ -195,19 +212,98 @@ const runtimeIssueDiagnostics = (options: {
     };
   });
 
+const buildRuntimeExportInput = (options: {
+  loadOptions: RuntimeBackedLoadOptions;
+  parameters: Record<string, unknown> | undefined;
+  exportOptions: Record<string, unknown>;
+}) =>
+  isCodeOptions(options.loadOptions)
+    ? {
+        source: { files: options.loadOptions.code, entry: options.loadOptions.file },
+        parameters: options.parameters,
+        exportOptions: options.exportOptions,
+      }
+    : {
+        source: { path: options.loadOptions.file },
+        parameters: options.parameters,
+        exportOptions: options.exportOptions,
+      };
+
+const exportRuntimeFormat = async (options: {
+  runtime: GeoSpecRuntimeClient;
+  loadOptions: RuntimeBackedLoadOptions;
+  format: RuntimeBackedModelFormat;
+}): Promise<RuntimeExportSuccess | ModelLoadFailure> => {
+  const exportIntent = resolveRuntimeExportIntent({
+    runtime: options.runtime,
+    format: options.format,
+  });
+  if ('success' in exportIntent) {
+    return exportIntent;
+  }
+
+  const parameters = getParameters(options.loadOptions);
+  const input = buildRuntimeExportInput({
+    loadOptions: options.loadOptions,
+    parameters,
+    exportOptions: exportIntent.options,
+  });
+
+  try {
+    const exported = await options.runtime.export(options.format, input);
+    if (!exported.success) {
+      return {
+        success: false,
+        diagnostics: [
+          {
+            code: 'MODEL_EXPORT_FAILED',
+            severity: 'error',
+            message: 'Tau runtime did not produce geometry bytes for this model.',
+            suggestion: runtimeExportFailureSuggestion,
+            details: {
+              file: options.loadOptions.file,
+              format: options.format,
+              issues: exported.issues,
+            },
+          },
+        ],
+      };
+    }
+    return {
+      success: true,
+      bytes: exported.data.bytes,
+      name: exported.data.name,
+      sourceUnit: exportIntent.sourceUnit,
+      exportIntent: exportIntent.provenance,
+      diagnostics: runtimeIssueDiagnostics({
+        issues: exported.issues,
+        file: options.loadOptions.file,
+        format: options.format,
+      }),
+    };
+  } catch (error) {
+    return {
+      success: false,
+      diagnostics: [
+        {
+          code: 'MODEL_EXPORT_FAILED',
+          severity: 'error',
+          message: error instanceof Error ? error.message : String(error),
+          suggestion: runtimeExportFailureSuggestion,
+          details: {
+            file: options.loadOptions.file,
+            format: options.format,
+            error: errorDetails(error),
+          },
+        },
+      ],
+    };
+  }
+};
+
 const exportWithRuntime = async (
   options: LoadModelCodeOptions | LoadModelFileOptions,
-): Promise<
-  | {
-      success: true;
-      bytes: Uint8Array<ArrayBuffer>;
-      name?: string;
-      sourceUnit: GeoSpecUnit;
-      exportIntent: GeometryExportIntent;
-      diagnostics: GeometryDiagnostic[];
-    }
-  | ModelLoadFailure
-> => {
+): Promise<RuntimeExportBundle | ModelLoadFailure> => {
   const runtimeResult = await resolveRuntimeForModelLoad({
     runtime: options.runtime,
     sourceAdapters: options.sourceAdapters,
@@ -240,73 +336,179 @@ const exportWithRuntime = async (
     };
   }
 
-  const exportIntent = resolveRuntimeExportIntent({
+  const exported = await exportRuntimeFormat({
     runtime: runtimeResult.runtime,
+    loadOptions: options,
     format: runtimeFormat,
   });
-  if ('success' in exportIntent) {
-    return exportIntent;
+  if (!exported.success) {
+    if (runtimeResult.ownsRuntime) {
+      runtimeResult.runtime.terminate();
+    }
+    return exported;
   }
 
-  const parameters = getParameters(options);
-  const exportOptions = exportIntent.options;
-  const input = isCodeOptions(options)
-    ? { code: options.code, file: options.file, parameters, ...exportOptions }
-    : { file: options.file, parameters, ...exportOptions };
-
   try {
-    const exported = await runtimeResult.runtime.export(runtimeFormat, input);
-    if (!exported.success) {
-      return {
-        success: false,
-        diagnostics: [
-          {
-            code: 'MODEL_EXPORT_FAILED',
-            severity: 'error',
-            message: 'Tau runtime did not produce geometry bytes for this model.',
-            suggestion: runtimeExportFailureSuggestion,
-            details: {
-              file: options.file,
-              format,
-              issues: exported.issues,
-            },
-          },
-        ],
-      };
+    if (!stepFormats.has(runtimeFormat) || options.mesh === false) {
+      return exported;
     }
+
+    const meshSupplement = await exportRuntimeFormat({
+      runtime: runtimeResult.runtime,
+      loadOptions: options,
+      format: 'glb',
+    });
+    if (!meshSupplement.success) {
+      return meshSupplement;
+    }
+
     return {
-      success: true,
-      bytes: exported.data.bytes,
-      name: exported.data.name,
-      sourceUnit: exportIntent.sourceUnit,
-      exportIntent: exportIntent.provenance,
-      diagnostics: runtimeIssueDiagnostics({
-        issues: exported.issues,
-        file: options.file,
-        format,
-      }),
-    };
-  } catch (error) {
-    return {
-      success: false,
-      diagnostics: [
-        {
-          code: 'MODEL_EXPORT_FAILED',
-          severity: 'error',
-          message: error instanceof Error ? error.message : String(error),
-          suggestion: runtimeExportFailureSuggestion,
-          details: {
-            file: options.file,
-            format,
-            error: errorDetails(error),
-          },
-        },
-      ],
+      ...exported,
+      meshSupplement,
     };
   } finally {
     if (runtimeResult.ownsRuntime) {
       runtimeResult.runtime.terminate();
     }
+  }
+};
+
+const capabilityKey = (capability: GeometryCapability): string => `${capability.kind}:${capability.feature}`;
+
+const mergeCapabilities = (
+  left: readonly GeometryCapability[],
+  right: readonly GeometryCapability[],
+): GeometryCapability[] => {
+  const merged = new Map<string, GeometryCapability>();
+  for (const capability of [...left, ...right]) {
+    merged.set(capabilityKey(capability), capability);
+  }
+  return [...merged.values()];
+};
+
+const loadRuntimeStepMeshSupplement = async (options: {
+  exported: RuntimeExportBundle;
+  parameters: Record<string, unknown> | undefined;
+  fallbackName: string;
+}): Promise<GeometrySubject | ModelLoadFailure> => {
+  const { meshSupplement } = options.exported;
+  if (!meshSupplement) {
+    return {
+      success: false,
+      diagnostics: [
+        {
+          code: 'GEOSPEC_RUNTIME_STEP_MESH_SUPPLEMENT_MISSING',
+          severity: 'error',
+          message: 'Runtime-backed STEP model loading did not produce the required named mesh evidence.',
+          suggestion:
+            'Use loadModel({ format: "step", mesh: false }) for BRep-only checks, or use a runtime that supports canonical GLB mesh export for overlap diagnostics.',
+        },
+      ],
+    };
+  }
+
+  const loaded = await loadMesh({
+    source: meshSupplement.bytes,
+    format: 'glb',
+    name: meshSupplement.name ?? options.fallbackName,
+    unit: 'mm',
+    sourceUnit: meshSupplement.sourceUnit,
+    parameters: options.parameters,
+  });
+  return loaded.success ? loaded.subject : loaded;
+};
+
+const loadSourceModelResult = async (options: {
+  loadOptions: LoadModelSourceOptions;
+  format: GeoSpecModelFormat;
+  parameters: Record<string, unknown> | undefined;
+}): Promise<ModelLoadResult> => {
+  if (stepFormats.has(options.format)) {
+    try {
+      const subject = await loadStep({
+        source: options.loadOptions.source as StepSource,
+        unit: options.loadOptions.unit,
+        parameters: options.parameters,
+        path: options.loadOptions.path,
+        name: options.loadOptions.name,
+        nativeStepBackend: options.loadOptions.nativeStepBackend,
+        openCascade: options.loadOptions.openCascade,
+        streaming: options.loadOptions.stepStreaming,
+        mesh: options.loadOptions.mesh,
+        meshLinearTolerance: options.loadOptions.meshLinearTolerance,
+        meshAngularToleranceDegrees: options.loadOptions.meshAngularToleranceDegrees,
+      });
+      return { success: true, subject, format: options.format };
+    } catch (error) {
+      return stepLoadFailure(error);
+    }
+  }
+
+  const loaded = await loadMesh({
+    source: options.loadOptions.source as Parameters<typeof loadMesh>[0]['source'],
+    format: options.format as MeshFileFormat,
+    path: options.loadOptions.path,
+    name: options.loadOptions.name,
+    unit: options.loadOptions.unit,
+    parameters: options.parameters,
+  });
+  return loaded.success ? { success: true, subject: loaded.subject, format: options.format } : loaded;
+};
+
+const loadRuntimeStepModelResult = async (options: {
+  loadOptions: RuntimeBackedLoadOptions;
+  exported: RuntimeExportBundle;
+  parameters: Record<string, unknown> | undefined;
+  format: GeoSpecModelFormat;
+}): Promise<ModelLoadResult> => {
+  try {
+    const meshSupplementSubject =
+      options.exported.meshSupplement && options.loadOptions.mesh !== false
+        ? await loadRuntimeStepMeshSupplement({
+            exported: options.exported,
+            parameters: options.parameters,
+            fallbackName: options.exported.name ?? options.loadOptions.file,
+          })
+        : undefined;
+    if (meshSupplementSubject && 'success' in meshSupplementSubject) {
+      return meshSupplementSubject;
+    }
+    const subject = await loadStep({
+      source: options.exported.bytes,
+      unit: 'mm',
+      parameters: options.parameters,
+      name: options.exported.name ?? options.loadOptions.file,
+      nativeStepBackend: options.loadOptions.nativeStepBackend,
+      openCascade: options.loadOptions.openCascade,
+      streaming: options.loadOptions.stepStreaming,
+      mesh: meshSupplementSubject ? false : options.loadOptions.mesh,
+      meshLinearTolerance: options.loadOptions.meshLinearTolerance,
+      meshAngularToleranceDegrees: options.loadOptions.meshAngularToleranceDegrees,
+    });
+    return {
+      success: true,
+      subject: {
+        ...subject,
+        ...(meshSupplementSubject
+          ? {
+              mesh: meshSupplementSubject.mesh,
+              capabilities: mergeCapabilities(subject.capabilities, meshSupplementSubject.capabilities),
+            }
+          : {}),
+        diagnostics: [
+          ...subject.diagnostics,
+          ...options.exported.diagnostics,
+          ...(options.exported.meshSupplement?.diagnostics ?? []),
+        ],
+        provenance: {
+          ...subject.provenance,
+          exportIntent: options.exported.exportIntent,
+        },
+      },
+      format: options.format,
+    };
+  } catch (error) {
+    return stepLoadFailure(error);
   }
 };
 
@@ -320,35 +522,11 @@ const loadModelResult = async <Code extends Record<string, string> = Record<stri
 
   const parameters = getParameters(options);
   if (isSourceOptions(options)) {
-    if (stepFormats.has(format)) {
-      try {
-        const subject = await loadStep({
-          source: options.source as StepSource,
-          unit: options.unit,
-          parameters,
-          path: options.path,
-          name: options.name,
-          nativeStepBackend: options.nativeStepBackend,
-          openCascade: options.openCascade,
-          streaming: options.stepStreaming,
-          mesh: options.mesh,
-          meshLinearTolerance: options.meshLinearTolerance,
-          meshAngularToleranceDegrees: options.meshAngularToleranceDegrees,
-        });
-        return { success: true, subject, format };
-      } catch (error) {
-        return stepLoadFailure(error);
-      }
-    }
-    const loaded = await loadMesh({
-      source: options.source as Parameters<typeof loadMesh>[0]['source'],
-      format: format as MeshFileFormat,
-      path: options.path,
-      name: options.name,
-      unit: options.unit,
+    return loadSourceModelResult({
+      loadOptions: options,
+      format,
       parameters,
     });
-    return loaded.success ? { success: true, subject: loaded.subject, format } : loaded;
   }
 
   const invalidOptions = validateRuntimeBackedOptions(options);
@@ -362,34 +540,12 @@ const loadModelResult = async <Code extends Record<string, string> = Record<stri
   }
 
   if (stepFormats.has(format)) {
-    try {
-      const subject = await loadStep({
-        source: exported.bytes,
-        unit: 'mm',
-        parameters,
-        name: exported.name ?? options.file,
-        nativeStepBackend: options.nativeStepBackend,
-        openCascade: options.openCascade,
-        streaming: options.stepStreaming,
-        mesh: options.mesh,
-        meshLinearTolerance: options.meshLinearTolerance,
-        meshAngularToleranceDegrees: options.meshAngularToleranceDegrees,
-      });
-      return {
-        success: true,
-        subject: {
-          ...subject,
-          diagnostics: [...subject.diagnostics, ...exported.diagnostics],
-          provenance: {
-            ...subject.provenance,
-            exportIntent: exported.exportIntent,
-          },
-        },
-        format,
-      };
-    } catch (error) {
-      return stepLoadFailure(error);
-    }
+    return loadRuntimeStepModelResult({
+      loadOptions: options,
+      exported,
+      parameters,
+      format,
+    });
   }
 
   const loaded = await loadMesh({

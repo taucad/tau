@@ -1,8 +1,8 @@
 {
   "schema": "build-manifest-v2",
-  "timestamp": "2026-06-08T20:19:22Z",
+  "timestamp": "2026-07-03T03:43:14Z",
   "yaml_config": "geospec.single.yml",
-  "yaml_hash": "c89eaf86db60",
+  "yaml_hash": "5855019b435c",
   "validation_passed": true,
   "symbols": {
     "requested": [
@@ -26,6 +26,8 @@
       "GeoSpecPoint",
       "GeoSpecStepReadResult",
       "GeoSpecStepStreamReader",
+      "GeoSpecXdeReadResult",
+      "GeoSpecXdeReader",
       "GeomAbs_SurfaceType",
       "IFSelect_ReturnStatus",
       "Message_ProgressRange",
@@ -48,11 +50,11 @@
       "gp_Vec",
       "gp_XYZ"
     ],
-    "compiled": 5331,
+    "compiled": 5336,
     "missing": [],
     "alias_resolved": [],
     "builtin": ["TopoDS"],
-    "extra_compiled": 5291,
+    "extra_compiled": 5294,
     "pass": true
   },
   "outputs": [
@@ -60,7 +62,7 @@
       "name": "geospec_opencascade_single.js",
       "wasm_file": "geospec_opencascade_single.wasm",
       "wasm_exists": true,
-      "wasm_size": 12988785,
+      "wasm_size": 13632713,
       "js_exists": true,
       "js_size": 60586,
       "pass": true

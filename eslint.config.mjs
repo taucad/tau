@@ -218,6 +218,10 @@ const config = [
       '**/wasm/**',
       'repos/**',
       '**/reports/**',
+      // GeoSpec fixture generation scripts are verbatim-normative model-code
+      // inputs run through the runtime VM (see fixtures/README.md), not
+      // library sources — same class as prompt examples and experiments.
+      'packages/geospec/fixtures/scripts/**',
     ],
   },
 
@@ -250,14 +254,6 @@ const config = [
         {
           allow: ['@taucad/runtime'],
           allowCircularSelfDependency: true,
-          ignoredCircularDependencies: [
-            /*
-             * GeoSpec package tests intentionally exercise the OpenSCAD kernel.
-             * Tau example `.geospec.ts` fixtures also import GeoSpec, and that
-             * executable validation-fixture edge is not a production source edge.
-             */
-            ['tau-examples', 'geospec'],
-          ],
           depConstraints: [
             {
               sourceTag: 'scope:api',
@@ -280,8 +276,16 @@ const config = [
               onlyDependOnLibsWithTags: ['type:lib'],
             },
             {
+              // Example projects (fixtures) depend on libs they demonstrate —
+              // geospec for `.geospec.ts` suites, runtime for export scripts.
+              sourceTag: 'type:examples',
+              onlyDependOnLibsWithTags: ['type:lib', 'type:examples'],
+            },
+            {
+              // E2e/regression packages sit at the top of the graph and may
+              // consume anything they exercise: apps, ui, libs, and examples.
               sourceTag: 'type:e2e',
-              onlyDependOnLibsWithTags: ['type:app'],
+              onlyDependOnLibsWithTags: ['type:app', 'type:ui', 'type:lib', 'type:examples'],
             },
           ],
         },
@@ -387,7 +391,7 @@ const config = [
 
   {
     /*
-     * opencascade.js mirrors OCCT/Emscripten C++ binding names. Factory-like
+     * Opencascade.js mirrors OCCT/Emscripten C++ binding names. Factory-like
      * entry points and generated constructors intentionally do not follow
      * JavaScript's capitalisation heuristics.
      */

@@ -22,7 +22,8 @@
     "**/content/docs/**",
     "tarballs/**",
     "experiments/**",
-    "**/*.jscad.js"
+    "**/*.jscad.js",
+    "**/fixtures/scripts/**"
   ],
   "plugins": [
     "unicorn",
@@ -1262,9 +1263,16 @@
         "import/consistent-type-specifier-style": "off",
         "no-barrel-files/no-barrel-files": "off",
         "unicorn-js/prefer-export-from": "off",
-        "unicorn-js/prevent-abbreviations": "warn",
+        "unicorn-js/prevent-abbreviations": [
+          "warn",
+          {
+            "replacements": {
+              "params": false
+            }
+          }
+        ],
         "unicorn/no-array-callback-reference": "warn",
-        "@typescript-eslint/explicit-module-boundary-types": "warn",
+        "@typescript-eslint/explicit-module-boundary-types": "off",
         "@typescript-eslint/no-unsafe-assignment": "warn",
         "@typescript-eslint/no-unsafe-call": "warn",
         "@typescript-eslint/no-restricted-types": "warn",
@@ -1298,7 +1306,14 @@
       "rules": {
         "no-restricted-imports": "off",
         "import/extensions": "off",
-        "unicorn-js/prevent-abbreviations": "warn",
+        "unicorn-js/prevent-abbreviations": [
+          "warn",
+          {
+            "replacements": {
+              "params": false
+            }
+          }
+        ],
         "@typescript-eslint/explicit-module-boundary-types": "warn"
       }
     },

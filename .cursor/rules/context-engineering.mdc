@@ -19,8 +19,12 @@ Follow `docs/policy/context-engineering-policy.md` for prompts/tools. Follow `do
 - **Minimize tokens**: Find the smallest set of high-signal tokens that maximize outcomes.
 - **Right altitude**: Balance brittle (prescriptive steps) vs. vague (generic guidance). Calibration test: would a senior engineer need this detail?
 - **Single source of truth**: Tool description = HOW; system prompt = WHEN. Never explain the same concept twice.
-- **Examples over rules**: One comprehensive example > three paragraphs of explanation.
+- **Placement framework**: prompt slot only for every-request behavior; task-conditional procedure → skill; lookup-shaped reference → workspace file + grep; tool mechanics → tool description.
+- **One canonical example** in-prompt per domain; further examples live in skills/reference files.
 - **Trust model capability**: If a competent developer wouldn't need the instruction, the model doesn't either.
+- **Cache-stable assembly**: stable prefix (no timestamps/IDs), append-only history, deterministic serialization, mask tools instead of adding/removing mid-conversation.
+- **Budgets (Part 9)**: behavioral core ≤3k tokens; in-prompt domain reference ≤1.5k; total static ≤4.5k; <150 words/tool; negative-guidance blocks on ≤20% of the toolbelt.
+- **Eval evidence**: every prompt/tool change lands with an EVAL changelog entry backed by a benchmark run, tested per model-harness pair.
 
 ## Filesystem Context Rules
 
@@ -39,7 +43,7 @@ Follow `docs/policy/context-engineering-policy.md` for prompts/tools. Follow `do
 | Tool explained in prompt AND description | Keep in description only |
 | "1. Analyze 2. Understand 3. Fix" | "Fix incrementally, verify after" |
 | "CRITICAL: You MUST always..." | State once |
-| All tool definitions in every request | Dynamic discovery |
-| Full conversation history forever | Sliding windows + summarization |
-| Signature/binary data in transcript | Drop — zero search value |
-| `await` on transcript writes | `void` — fire-and-forget |
+| Discovery machinery on a ≤15-tool belt | Static toolbelt; discovery only past dozens of tools |
+| Raw tool outputs kept forever / history rewritten in place | Tool-result clearing first, then recall-tuned compaction; append-only |
+| Safety rules only in conversation history | Pin in system prompt/memory; compaction preserves pinned content |
+| Numbers cited from memory | Cite a `docs/reference/<slug>.md` that greps clean |

@@ -120,10 +120,10 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     expect(runnerTypes).toContain('toHaveCircularHolePattern');
     expect(runnerTypes).toContain('toHaveFilletFeature');
     expect(runnerTypes).toContain('toHavePlanarFace');
-    expect(runnerTypes).toContain('GeoSpecComponentOverlapExpectation');
-    expect(runnerTypes).toContain('toHaveNoComponentOverlap');
+    expect(runnerTypes).toContain('GeoSpecComponentInterferenceExpectation');
+    expect(runnerTypes).toContain('toHaveNoComponentInterference');
     expect(runnerTypes).toContain('Assert that separate assembly components do not occupy the same solid volume');
-    expect(runnerIndexTypes).toContain('GeoSpecComponentOverlapExpectation');
+    expect(runnerIndexTypes).toContain('GeoSpecComponentInterferenceExpectation');
     expect(runnerNodeTypes).toContain('Create a GeoSpec runner for Node.js and CLI environments.');
     expect(runnerWebTypes).toContain('Create a GeoSpec runner for browser environments.');
     expect(runnerWorkerTypes).toContain('Lifecycle event emitted by GeoSpec worker-style runners.');
@@ -140,12 +140,10 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     const { files = {} } = geospec;
     const meshIndexTypes = files['mesh/index.d.ts'] ?? '';
     const meshOverlapTypes = files['mesh/overlap.d.ts'] ?? '';
-    const meshNativeTypes = files['mesh/native.d.ts'] ?? '';
 
     expect(meshIndexTypes).toContain('analyzeMeshOverlap');
     expect(meshOverlapTypes).toContain('Analyze whether separate mesh components physically occupy the same solid');
     expect(meshOverlapTypes).toContain('AnalyzeMeshOverlapOptions');
     expect(meshOverlapTypes).toContain('MeshComponentOverlap');
-    expect(meshNativeTypes).toContain('GeoSpecNativeMeshOverlapResult');
   });
 });

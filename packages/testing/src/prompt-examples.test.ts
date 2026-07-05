@@ -23,7 +23,7 @@ describe('canonicalGeoSpecTestExample', () => {
     expect(canonicalGeoSpecTestExample).toContain('toHaveBoundingBox');
     expect(canonicalGeoSpecTestExample).toContain('toHaveConnectedComponents');
     expect(canonicalGeoSpecTestExample).toContain('toBeWatertight');
-    expect(canonicalGeoSpecTestExample).toContain('toHaveNoComponentOverlap');
+    expect(canonicalGeoSpecTestExample).toContain('toHaveNoComponentInterference');
     expect(canonicalGeoSpecTestExample).toContain('toHaveSurfaceArea');
     expect(canonicalGeoSpecTestExample).toContain('toHaveVolume');
     expect(canonicalGeoSpecTestExample).toContain('toHaveCenterOfMass');
@@ -87,8 +87,8 @@ describe('availableChecksCopy', () => {
     expect(availableChecksCopy).toContain('surfaceArea');
     expect(availableChecksCopy).toContain('volume');
     expect(availableChecksCopy).toContain('centerOfMass');
-    expect(availableChecksCopy).toContain('componentOverlap');
-    expect(availableChecksCopy).toContain('toHaveNoComponentOverlap({ tolerance: 0.1 })');
+    expect(availableChecksCopy).toContain('componentInterference');
+    expect(availableChecksCopy).toContain('toHaveNoComponentInterference({ tolerance: 0.1 })');
     expect(availableChecksCopy).toContain('pairs: [{ left: /housing/i, right: /planet gear/i }]');
     expect(availableChecksCopy).toContain('chamferDistance');
     expect(availableChecksCopy).toContain('SIZE / POSITION');
@@ -150,6 +150,32 @@ describe('geospecParameterTestingCopy', () => {
     expect(geospecParameterTestingCopy).toContain('"#params/*.json": "./.tau/parameters/*.json"');
     expect(geospecParameterTestingCopy).toContain("import { describe, expectGeo, it } from 'geospec'");
     expect(geospecParameterTestingCopy).not.toContain('@taucad/testing/tau');
+  });
+});
+
+describe('GeoSpec matcher vocabulary is real (anti-drift guard)', () => {
+  // Every `toHave*` / `toBe*` token the agent-facing copy teaches must be a
+  // matcher that actually exists on geospec's live surface. This is the guard
+  // that would have caught the toHaveNoComponentOverlap -> ...Interference
+  // rename drift instead of the old hardcoded-name asserts protecting it.
+  const corpus = [
+    canonicalGeoSpecTestExample,
+    canonicalBrepGeoSpecTestExample,
+    availableChecksCopy,
+    geospecParameterTestingCopy,
+  ].join('\n');
+  const referencedMatchers = [...new Set(corpus.match(/to(?:Have|Be)[A-Za-z]+/g) ?? [])];
+
+  it('references at least the core matchers (sanity that parsing works)', () => {
+    expect(referencedMatchers).toContain('toBeValidBrep');
+    expect(referencedMatchers).toContain('toHaveNoComponentInterference');
+    expect(referencedMatchers.length).toBeGreaterThan(5);
+  });
+
+  it.each(referencedMatchers)('%s exists on the geospec matcher surface', async (matcher) => {
+    // Geospec is lazy-loaded (heavy WASM), so import it inside the test.
+    const { geoSpecMatcherNames } = await import('geospec');
+    expect(geoSpecMatcherNames).toContain(matcher);
   });
 });
 

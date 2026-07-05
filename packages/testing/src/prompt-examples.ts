@@ -49,9 +49,9 @@ describe('main geometry', () => {
     expectGeo(model).toBeWatertight();
   });
 
-  it('should have no physical component overlap', async () => {
+  it('should have no physical component interference', async () => {
     const model = await loadModel({ file: '<file>' });
-    expectGeo(model).toHaveNoComponentOverlap({ tolerance: 0.1 });
+    expectGeo(model).toHaveNoComponentInterference({ tolerance: 0.1 });
   });
 
   it('should have expected physical measurements', async () => {
@@ -120,6 +120,34 @@ describe('main exact features', () => {
       tolerance: 0.05,
     });
   });
+
+  it('should have a named, non-interfering assembly structure', async () => {
+    const model = await loadModel({ file: '<file>', format: 'step' });
+    expectGeo(model).toHaveStepUnits({ unit: 'mm' });
+    // The AP242 exporter emits a root assembly product above the named
+    // components, so count is componentNames.length + 1.
+    expectGeo(model).toHaveProductStructure({
+      names: ['Housing', 'Shaft', 'Cap'],
+      count: 4,
+    });
+    expectGeo(model).toHaveNoComponentInterference({
+      tolerance: 0.05,
+      allowances: [
+        { kind: 'intentionalInterference', left: /shaft/i, right: /cap/i, maxVolume: 5, reason: 'press fit' },
+      ],
+    });
+    expectGeo(model).toHaveSpatialRelationships({
+      relationships: [
+        {
+          id: 'shaft rides coaxially in the housing bore',
+          kind: 'coaxial',
+          subject: { kind: 'interface', name: 'journal', of: 'Shaft' },
+          target: { kind: 'interface', name: 'bore', of: 'Housing' },
+          tolerance: 0.05,
+        },
+      ],
+    });
+  });
 });
 `;
 
@@ -173,20 +201,36 @@ GeoSpec records structured diagnostics.
 - surfaceArea / volume / centerOfMass / mass — "Does the model have the expected
                          physical measurements?" Use these for scale, balance, material
                          estimates, and regression checks.
-- componentOverlap     — "Do separate assembly components occupy the same solid volume?"
-                         Use \`toHaveNoComponentOverlap({ tolerance: 0.1 })\`. GeoSpec
+- componentInterference — "Do separate assembly components occupy the same solid volume?"
+                         Use \`toHaveNoComponentInterference({ tolerance: 0.1 })\`. GeoSpec
                          uses native exact solid intersection of mesh evidence; tangent
-                         contact and correctly meshed gears pass. For intentionally
-                         pair-specific checks, narrow the exact check with
-                         \`pairs: [{ left: /housing/i, right: /planet gear/i }]\`
-                         instead of dropping the global overlap test.
+                         contact and correctly meshed gears pass. Narrow to specific pairs
+                         with \`pairs: [{ left: /housing/i, right: /planet gear/i }]\`, and
+                         permit deliberate press-fits with \`allowances: [{ kind:
+                         'intentionalInterference', left: /pin/i, right: /bore/i, maxVolume:
+                         5, reason: 'press fit' }]\` instead of dropping the global check.
 - chamferDistance      — "How close is this geometry to a reference geometry?" Use
                          \`toHaveChamferDistanceTo\` for sampled shape comparison.`;
 
-const brepAvailableChecksCopy = `- planarFace / cylindricalFace / circularHole / chamferFeature / minimumWallThickness
-                       — "Does this BRep-capable kernel expose the expected exact feature?"
-                         Use these only with \`loadModel({ format: 'step' })\` when BRep
-                         evidence is available.`;
+const brepAvailableChecksCopy = `BRep/STEP matchers require exact BRep evidence: load with \`loadModel({ file, format: 'step' })\`.
+On a mesh-only subject (no \`format: 'step'\`) they report unsupported diagnostics — e.g.
+\`toBeValidBrep\` fails with "requires BRep validity evidence." This applies to ALL of:
+- validBrep / topologyCounts / stepUnits / productStructure
+                       — "Is the exported STEP a valid solid with the expected topology,
+                         units, and named product structure?" Use \`toBeValidBrep()\`,
+                         \`toHaveTopologyCounts({ solids, faces, ... })\`, \`toHaveStepUnits({
+                         unit: 'mm' })\`, and \`toHaveProductStructure({ names, count })\`. The
+                         AP242 exporter emits a root assembly product above the named
+                         components, so \`count = names.length + 1\`.
+- planarFace / cylindricalFace / circularHole / circularHolePattern / chamferFeature /
+  filletFeature / minimumWallThickness
+                       — "Does the model expose the expected exact feature?"
+- spatialRelationships — "Do components sit in the intended geometric relationship?"
+                         Use \`toHaveSpatialRelationships({ relationships: [{ kind, subject,
+                         target, tolerance }] })\` with \`kind\` one of contact | clearance |
+                         coaxial | concentric | coplanar | parallel | perpendicular | angle |
+                         containment | insertion | interference, and \`subject\`/\`target\`
+                         selectors like \`{ kind: 'interface', name, of: '<Component>' }\`.`;
 
 const fusedSolidGuidanceCopy = `For "is this one fused solid?" assert \`watertight\` on a geometry unit that exports a
 single solid — a fused solid is closed-manifold iff the boolean fuse succeeded. Do NOT

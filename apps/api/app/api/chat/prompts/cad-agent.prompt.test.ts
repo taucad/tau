@@ -1440,7 +1440,7 @@ describe('getCadSystemPrompt', () => {
       expect(block).toContain('boundingBox');
       expect(block).toContain('connectedComponents');
       expect(block).toContain('watertight');
-      expect(block).toContain('toHaveNoComponentOverlap');
+      expect(block).toContain('toHaveNoComponentInterference');
       expect(block).toContain('surfaceArea');
       expect(block).toContain('volume');
       expect(block).toContain('centerOfMass');
@@ -1454,7 +1454,7 @@ describe('getCadSystemPrompt', () => {
       expect(block).toMatch(/Available checks/);
       expect(block).toContain('SIZE / POSITION');
       expect(block).toContain('SPATIALLY-DISJOINT CHUNKS');
-      expect(block).toContain('CLOSED (manifold / 3D-printable)');
+      expect(block).toContain('CLOSED (strict manifold topology)');
       expect(block).toContain('separate assembly components occupy the same solid volume');
       expect(block).toContain('tolerance');
       expect(block).toContain('default 0.1');

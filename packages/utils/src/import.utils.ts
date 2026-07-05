@@ -292,6 +292,23 @@ export function getNodeModulesPath(packageName: string): string {
 }
 
 /**
+ * Whether a virtual-filesystem path points into the CDN module cache (the
+ * root-level `/node_modules/` mount populated by {@link getCdnCachePath}).
+ *
+ * Callers use this to separate externally-sourced modules — tracked via asset
+ * hashes — from genuine project files, without hard-coding the mount path. A
+ * project file may still be an absolute path (when imported from outside its
+ * project root), so an absolute path alone does not imply an external module.
+ *
+ * @param path - Absolute virtual-filesystem path to classify.
+ * @returns `true` when the path lives under the CDN cache root.
+ * @public
+ */
+export function isNodeModulesPath(path: string): boolean {
+  return path.includes(`${nodeModulesRoot}/`);
+}
+
+/**
  * Get the full file path for a cached CDN module.
  *
  * @param packageName - Package name (e.g., 'lodash')

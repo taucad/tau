@@ -13,7 +13,13 @@
 
 import * as esbuild from 'esbuild-wasm';
 import type { Plugin, BuildOptions, Loader, Message, Metafile } from 'esbuild-wasm';
-import { isBareSpecifier, parsePackageSpecifier, getCdnCachePath, resolveRelativePath } from '@taucad/utils/import';
+import {
+  isBareSpecifier,
+  isNodeModulesPath,
+  parsePackageSpecifier,
+  getCdnCachePath,
+  resolveRelativePath,
+} from '@taucad/utils/import';
 import { base64ToString } from 'uint8array-extras';
 import type { VmIssue, VmFileSystem, VmExecuteResult } from '#types.js';
 import type { BuiltinModule } from '#module-manager.js';
@@ -783,7 +789,7 @@ export function createVfsPlugin(options: VfsPluginOptions): Plugin {
         // CDN-relative paths: when a cached CDN module (under /node_modules/)
         // imports an absolute path like /@thi.ng/vectors@^8.6.20/..., resolve
         // it against the esm.sh CDN origin rather than the local filesystem.
-        if (args.path.startsWith('/') && importerAbsolute.startsWith('/node_modules/')) {
+        if (args.path.startsWith('/') && isNodeModulesPath(importerAbsolute)) {
           return {
             path: `https://esm.sh${args.path}`,
             namespace: esbuildNamespace.httpUrl,
@@ -930,7 +936,7 @@ export function createVfsPlugin(options: VfsPluginOptions): Plugin {
       // -----------------------------------------------------------------
       build.onLoad({ filter: /.*/, namespace: esbuildNamespace.vfs }, async (args) => {
         const absolutePath = toAbsolute(args.path);
-        const isNodeModules = absolutePath.includes('/node_modules/');
+        const isNodeModules = isNodeModulesPath(absolutePath);
         const resolveDirectory = absolutePath.slice(0, absolutePath.lastIndexOf('/'));
 
         // Vite-style query suffixes (`?raw`/`?text`/...) and TC39 `with { type }` import
@@ -1196,44 +1202,14 @@ const module = { exports };
   }
 
   /**
-   * Extract absolute paths of project-file dependencies from the esbuild metafile.
-   *
-   * Metafile input keys use "namespace:path" format. Project files live in the
-   * `vfs` namespace with project-relative paths. CDN/node_modules and builtin
-   * modules are excluded since they are tracked separately via asset hashes.
+   * Extract absolute paths of project-file dependencies from the esbuild
+   * metafile. Thin instance wrapper over {@link extractProjectDependencies}.
    *
    * @param metafile - The esbuild metafile from a build with `metafile: true`
    * @returns Absolute paths of all project files involved in the bundle
    */
   private extractDependencies(metafile: Metafile | undefined): string[] {
-    if (!metafile) {
-      return [];
-    }
-
-    const projectPrefix = this.projectPath.endsWith('/') ? this.projectPath : this.projectPath + '/';
-    const dependencies: string[] = [];
-
-    for (const inputKey of Object.keys(metafile.inputs)) {
-      // Only include project files from the vfs namespace
-      if (!inputKey.startsWith(vfsNamespacePrefix)) {
-        continue;
-      }
-
-      // Collapse Vite-style query suffixes / hashes onto the underlying path so the
-      // watch set tracks `lib/cube.step?raw` as `lib/cube.step` regardless of how
-      // esbuild folds the suffix into the metafile key.
-      const relativePath = stripPathQuery(inputKey.slice(vfsNamespacePrefix.length));
-
-      // Exclude CDN/node_modules paths (they start with '/')
-      if (relativePath.startsWith('/')) {
-        continue;
-      }
-
-      // Convert project-relative path to absolute
-      dependencies.push(`${projectPrefix}${relativePath}`);
-    }
-
-    return dependencies;
+    return extractProjectDependencies(metafile, this.projectPath);
   }
 
   /**
@@ -1397,7 +1373,12 @@ export function createDetectionPlugin({ filesystem, projectPath }: DetectionPlug
 }
 
 /**
- * Extract project file dependencies from an esbuild metafile.
+ * Extract absolute project-file dependencies from an esbuild metafile.
+ *
+ * Project files live in the `vfs` namespace; CDN modules cached under the
+ * node_modules mount are excluded (tracked via asset hashes). Files imported
+ * from outside `projectPath` (e.g. `../lib/foo.ts`) carry absolute paths and are
+ * retained so edits to them invalidate the geometry cache.
  *
  * @param metafile - esbuild metafile output, or undefined if unavailable
  * @param projectPath - absolute project path for prefix matching
@@ -1421,11 +1402,17 @@ export function extractProjectDependencies(metafile: Metafile | undefined, proje
     // Strip query/fragment so `vfs:lib/cube.step?raw` collapses onto its filesystem path.
     const relativePath = stripPathQuery(inputKey.slice(vfsNamespacePrefix.length));
 
-    if (relativePath.startsWith('/')) {
+    // A CDN module cached under the node_modules mount is tracked via asset
+    // hashes, not as a project dependency. Any other absolute path is a project
+    // file imported from outside projectPath (e.g. `../lib/foo.ts`) and must be
+    // kept so edits to it invalidate the geometry cache.
+    if (isNodeModulesPath(relativePath)) {
       continue;
     }
 
-    dependencies.push(`${projectPrefix}${relativePath}`);
+    // Absolute paths already point at the file; only project-relative paths need
+    // the project prefix reattached.
+    dependencies.push(relativePath.startsWith('/') ? relativePath : `${projectPrefix}${relativePath}`);
   }
 
   return dependencies;

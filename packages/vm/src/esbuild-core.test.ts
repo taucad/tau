@@ -523,6 +523,23 @@ describe('extractProjectDependencies', () => {
     expect(result).toEqual(['/projects/project/main.ts']);
   });
 
+  it('should keep local files imported from outside projectPath', () => {
+    // When projectPath is a subdirectory (e.g. the CLI points it at the entry
+    // file's own directory), an import like `../lib/block.ts` resolves above
+    // projectPath and lands in the metafile as an absolute vfs path. It must be
+    // retained so edits to it invalidate the geometry cache.
+    const metafile: Metafile = {
+      inputs: {
+        'vfs:main.ts': { bytes: 100, imports: [], format: undefined },
+        'vfs:/projects/other/lib/block.ts': { bytes: 50, imports: [], format: undefined },
+      },
+      outputs: {},
+    };
+
+    const result = extractProjectDependencies(metafile, '/projects/project');
+    expect(result).toEqual(['/projects/project/main.ts', '/projects/other/lib/block.ts']);
+  });
+
   it('should exclude non-vfs namespace entries', () => {
     const metafile: Metafile = {
       inputs: {

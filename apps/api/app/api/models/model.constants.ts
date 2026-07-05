@@ -21,7 +21,7 @@ export function isModelListEntryEnabled(entry: ModelListEntry): boolean {
 export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListEntry>> = {
   anthropic: {
     'claude-fable-5': {
-      enabled: false,
+      enabled: true,
       id: 'anthropic-claude-fable-5',
       name: 'Fable 5',
       slug: 'claude-fable-5',

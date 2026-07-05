@@ -382,19 +382,35 @@ function exportOpencascadeStepAssembly(
   const shapeTool = oc.XCAFDoc_DocumentTool.ShapeTool(mainLabel);
   const colorTool = oc.XCAFDoc_DocumentTool.ColorTool(mainLabel);
 
+  // GeoSpec AP242 profile (blueprint R1): every export is a proper root
+  // assembly — one component per entry (identity placement), names on both the
+  // instance and product labels, never free shapes. A single entry still
+  // yields a one-component assembly. Auto-naming off so only authored names
+  // reach the STEP output.
+  oc.XCAFDoc_ShapeTool.SetAutoNaming(false);
+  const rootLabel = shapeTool.NewShape();
+  const rootName = new oc.TCollection_ExtendedString('assembly', true);
+  oc.TDataStd_Name.Set(rootLabel, rootName);
+  rootName.delete();
+
   for (const entry of nativeHandle) {
     if (entry.shape.IsNull()) {
       continue;
     }
 
-    const label = shapeTool.NewShape();
-    shapeTool.SetShape(label, entry.shape);
+    const label = shapeTool.AddShape(entry.shape, false);
+    const identity = new oc.TopLoc_Location();
+    const instanceLabel = shapeTool.AddComponent(rootLabel, label, identity);
+    identity.delete();
 
     if (entry.name) {
       const entryName = new oc.TCollection_ExtendedString(entry.name, true);
+      // Product label (PRODUCT name) and instance label (NEXT_ASSEMBLY_USAGE_OCCURRENCE name).
       oc.TDataStd_Name.Set(label, entryName);
+      oc.TDataStd_Name.Set(instanceLabel, entryName);
       entryName.delete();
     }
+    instanceLabel.delete();
 
     if (entry.color) {
       const [r, g, b] = parseHexColor(entry.color);
@@ -445,6 +461,7 @@ function exportOpencascadeStepAssembly(
   }
 
   shapeTool.UpdateAssemblies();
+  rootLabel.delete();
 
   const session = new oc.XSControl_WorkSession();
   const writer = new oc.STEPCAFControl_Writer(session, false);

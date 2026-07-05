@@ -485,6 +485,8 @@ export default function main() {
       expect(stepContent).toContain('CLOSED_SHELL');
       expect(stepContent).toContain('ADVANCED_BREP_SHAPE_REPRESENTATION');
       expect(stepContent).toContain('MANIFOLD_SOLID_BREP');
+      // GeoSpec R1: a single-shape export is a one-component assembly, never a free shape.
+      expect([...stepContent.matchAll(/NEXT_ASSEMBLY_USAGE_OCCURRENCE/g)]).toHaveLength(1);
     });
 
     it('should export to STL format', async () => {
@@ -564,6 +566,13 @@ export default function main() {
       expect(stepContent).toContain('MANIFOLD_SOLID_BREP');
       expect(stepContent).toContain('SmallBox');
       expect(stepContent).toContain('LargeBox');
+      // GeoSpec R1: one NEXT_ASSEMBLY_USAGE_OCCURRENCE per component, carrying
+      // the authored instance name.
+      expect([...stepContent.matchAll(/NEXT_ASSEMBLY_USAGE_OCCURRENCE/g)]).toHaveLength(2);
+      expect(stepContent).toMatch(/NEXT_ASSEMBLY_USAGE_OCCURRENCE\('[^']*','SmallBox'/);
+      expect(stepContent).toMatch(/NEXT_ASSEMBLY_USAGE_OCCURRENCE\('[^']*','LargeBox'/);
+      expect(stepContent).toContain("PRODUCT('SmallBox'");
+      expect(stepContent).toContain("PRODUCT('LargeBox'");
     });
 
     it('should export STEP with non-shape material labels', async () => {

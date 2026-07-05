@@ -42,6 +42,9 @@ pruned
 apps/ui/.source/**/*
 **/.next
 
+# Next.js
+next-env.d.ts
+
 # Local Netlify folder
 .netlify
 

@@ -4,13 +4,10 @@
 /* eslint-disable @typescript-eslint/naming-convention -- File names use extensions like 'box.ts' */
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- Curated example fixtures are integration-test inputs.
-import { loadFixture } from '@taucad/tau-examples/fixtures';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { Document } from '@gltf-transform/core';
 import { replicadDetectPattern } from '#kernels/replicad/replicad.constants.js';
 import { replicad as replicadKernel } from '#kernels/replicad/replicad.kernel.js';
-import { exampleFixtures } from '#kernels/replicad/replicad.test-fixtures.js';
 import { createGeometryTestHelpers, extractGltfFromResult } from '#testing/kernel-geometry-testing.utils.js';
 import {
   assertFailure,
@@ -444,34 +441,9 @@ describe('ReplicadWorker', () => {
   // ===========================================================================
 
   describe('createGeometry', () => {
-    it('should render the canonical V8 BRep fixture with named assembly parts', { timeout: 120_000 }, async () => {
-      const fixture = loadFixture('replicad', 'v8-engine-brep');
-      const result = await createGeometry({
-        files: fixture.files,
-        mainFile: fixture.mainFile,
-      });
-
-      assertSuccess(result);
-      const glbData = extractGltfFromResult(result);
-      expect(glbData).toBeDefined();
-
-      const { nodeNames } = await readGltfNodeMeshNames(glbData!);
-      expect(nodeNames).toEqual(
-        expect.arrayContaining([
-          'Block',
-          'Crankshaft',
-          'Flywheel',
-          'Harmonic Damper',
-          'Oil Pan',
-          'Piston 1',
-          'Con Rod 1',
-          'Cylinder Head L',
-          'Valve Cover L',
-          'Spark Plug 1',
-          'Intake Plenum',
-        ]),
-      );
-    });
+    // NOTE: the tau-examples fixture render test moved to
+    // apps/runtime-e2e/src/replicad-fixtures.test.ts to keep this package free
+    // of a tau-examples dependency (project-cycle break).
 
     describe('Basic geometry - ESM style', () => {
       it('should compute geometry for a simple extruded rectangle', async () => {
@@ -4753,26 +4725,8 @@ describe('Normal consistency', () => {
   }, 15_000);
 });
 
-// =============================================================================
-// Example models with exceptions enabled
-// =============================================================================
-
-// Longer test suite for verifying opencascadejs bindings to replicad are all present.
-describe.skip('Example models', () => {
-  for (const fixture of exampleFixtures) {
-    it(`should produce valid geometry for ${fixture.name}`, async () => {
-      const result = await createGeometry({
-        files: fixture.files,
-        mainFile: fixture.mainFile,
-        options: { workerOptions: { wasm: 'single' } },
-      });
-
-      assertSuccess(result);
-      await geometryHelpers.expectValidGltf(result);
-      await geometryHelpers.expectMeshCount(result, 1);
-    });
-  }
-});
+// Example-model fixture sweep moved to
+// apps/runtime-e2e/src/replicad-fixtures.test.ts (project-cycle break).
 
 // =============================================================================
 // serializeNativeHandle / deserializeNativeHandle

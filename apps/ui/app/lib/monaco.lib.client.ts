@@ -237,26 +237,28 @@ export const registerCompletions = (
   editor: Monaco.editor.IStandaloneCodeEditor,
   monaco: typeof Monaco,
 ): CompletionRegistration => {
-  const registrations: CompletionRegistration[] = completionLanguages.map((language) =>
-    registerCompletion(monaco, editor, {
-      endpoint: `${ENV.TAU_API_URL}/v1/code-completion`,
-      language,
-      trigger: 'onTyping',
-      async requestHandler(request) {
-        const response = await fetch(`${ENV.TAU_API_URL}/v1/code-completion`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(request.body),
-          credentials: 'include',
-        });
-        const data = (await response.json()) as Awaited<ReturnType<CompletionCopilot['complete']>>;
+  const registrations: CompletionRegistration[] = [];
+  // oxlint-disable-next-line capitalized-comments -- UI kill switch while /v1/code-completion points at an unmaintained model.
+  // const registrations: CompletionRegistration[] = completionLanguages.map((language) =>
+  //   registerCompletion(monaco, editor, {
+  //     endpoint: `${ENV.TAU_API_URL}/v1/code-completion`,
+  //     language,
+  //     trigger: 'onTyping',
+  //     async requestHandler(request) {
+  //       const response = await fetch(`${ENV.TAU_API_URL}/v1/code-completion`, {
+  //         method: 'POST',
+  //         headers: {
+  //           'Content-Type': 'application/json',
+  //         },
+  //         body: JSON.stringify(request.body),
+  //         credentials: 'include',
+  //       });
+  //       const data = (await response.json()) as Awaited<ReturnType<CompletionCopilot['complete']>>;
 
-        return data;
-      },
-    }),
-  );
+  //       return data;
+  //     },
+  //   }),
+  // );
 
   return {
     trigger() {

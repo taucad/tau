@@ -18,6 +18,10 @@ pnpm ci:affected                          # CI: affected tests, builds, lint, ty
 pnpm docs:validate                        # Validate policy/research doc frontmatter
 ```
 
+## Docs Symlink Git Boundary
+
+- `docs/research` and `docs/reference` are symlinks into `repos/tau-brain`; write through `docs/...`, validate from Tau root, but check git with `git -C repos/tau-brain status --short -- research/<file>` or `reference/<file>`.
+
 ## Graphify Monorepo Index
 
 - For monorepo Graphify work, run `scripts/graphify-slices.sh list` instead of inventing slice names.

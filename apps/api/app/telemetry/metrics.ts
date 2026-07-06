@@ -105,6 +105,14 @@ export class MetricsService {
     unit: TauMetrics.chatToolResultOffloaded.unit,
   });
 
+  public readonly chatToolResultMediaPreserved = this.apiMeter.createCounter(
+    TauMetrics.chatToolResultMediaPreserved.name,
+    {
+      description: TauMetrics.chatToolResultMediaPreserved.description,
+      unit: TauMetrics.chatToolResultMediaPreserved.unit,
+    },
+  );
+
   public readonly genAiPromptSectionSize = this.apiMeter.createHistogram(TauMetrics.genAiPromptSectionSize.name, {
     description: TauMetrics.genAiPromptSectionSize.description,
     unit: TauMetrics.genAiPromptSectionSize.unit,

@@ -65,6 +65,11 @@ describe('MetricsService', () => {
       expect(() => service.genAiToolInputRepairs.add(1)).not.toThrow();
     });
 
+    it('should create tool-result media preservation counter', () => {
+      expect(service.chatToolResultMediaPreserved).toBeDefined();
+      expect(() => service.chatToolResultMediaPreserved.add(1)).not.toThrow();
+    });
+
     it('should create genAiAgentIterations histogram', () => {
       expect(service.genAiAgentIterations).toBeDefined();
     });

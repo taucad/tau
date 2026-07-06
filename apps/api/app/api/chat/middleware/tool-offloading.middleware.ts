@@ -6,6 +6,7 @@ import { toolName, fileUnchangedMarker } from '@taucad/chat/constants';
 import { countTextLines } from '@taucad/filesystem';
 import { TauRpcBackendFactory } from '#api/chat/tau-rpc-backend.js';
 import { MetricsService } from '#telemetry/metrics.js';
+import { shouldPreserveToolResultForMedia } from '#api/chat/middleware/tool-result-retention.js';
 
 /** Characters per token approximation. */
 const charactersPerToken = 4;
@@ -37,16 +38,11 @@ const offloadConfig: Record<string, { maxChars: number }> = {
   [toolName.listDirectory]: { maxChars: 20_000 },
 };
 
-/**
- * Tools that should never have their output persisted/replaced. Their results
- * are either tiny ack messages (mutators) or binary fixtures consumed by the
- * UI verbatim (screenshot).
- */
+/** Tools with tiny ack messages that should never be persisted/replaced. */
 const skipOffloadTools: ReadonlySet<string> = new Set<string>([
   toolName.editFile,
   toolName.createFile,
   toolName.deleteFile,
-  toolName.screenshot,
 ]);
 
 const offloadingContextSchema = z.object({
@@ -228,7 +224,7 @@ export const createToolOffloadingMiddleware = (
       }
 
       const tool = result.name ?? '';
-      if (skipOffloadTools.has(tool)) {
+      if (skipOffloadTools.has(tool) || shouldPreserveToolResultForMedia(result)) {
         return result;
       }
 

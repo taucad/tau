@@ -27,6 +27,7 @@ cleanup; they may exceed the 200-char cap.
 - CAD agent-authored visible labels use Title Case words with spaces; code identifiers keep each kernel's native casing.
 - CAD prompts must steer the model to exact mathematical/curve-based geometry over sampled approximations — fold model-self-recognized topology insights into the per-kernel prompt section so it never shortcuts to sampling by default.
 - Cross-provider content normalisation belongs at the API middleware layer (e.g. `cross-provider-content-normalizer`), never the UI or `tool-result-trimmer` — provider-specific image/format quirks must be healed centrally and provider-agnostically.
+- Media tool results must be classified before text budgeting; screenshots go to trimmer/provider image blocks, never `.txt` persisted-output recovery.
 - Prefer API middleware over forking `@langchain/*` / `@langchain/google-*` for cross-provider healing; fork only when upstream has no fix and the user explicitly approves.
 - Keep provider-facing tool schemas minimal and implemented-only; never expose internal RPC fields or speculative records, and guard LangChain JSON Schema for Vertex-breaking keywords.
 - Never drop persisted reasoning/thinking blocks on cross-provider model switches — accuracy loss is unacceptable; heal via middleware, not v1 omission or stripping.

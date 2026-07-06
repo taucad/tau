@@ -1,9 +1,15 @@
 import { createMiddleware } from 'langchain';
+import type { AgentMiddleware } from 'langchain';
 import { ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { PartialDeep } from 'type-fest';
 import { toolName } from '@taucad/chat/constants';
 import type { ToolOutputRegistry } from '@taucad/chat';
+import {
+  isScreenshotResultContent,
+  isScreenshotResultMessage,
+  parseToolContent,
+} from '#api/chat/middleware/tool-result-retention.js';
 
 // =============================================================================
 // Configuration
@@ -233,18 +239,6 @@ function isGlobSearchShape(content: unknown): boolean {
 }
 
 /**
- * Checks if content has the shape of ScreenshotOutput.
- * Unique: has images array.
- */
-function isScreenshotShape(content: unknown): boolean {
-  if (!isObject(content)) {
-    return false;
-  }
-
-  return Array.isArray(content['images']);
-}
-
-/**
  * Registry of content shape detectors.
  * Maps tool names to functions that detect if content matches that tool's output shape.
  * Used as a fallback when message.name is undefined.
@@ -261,7 +255,7 @@ const contentShapeDetectors: Record<string, ContentShapeDetector> = {
   [toolName.listDirectory]: isListDirectoryShape,
   [toolName.grep]: isGrepShape,
   [toolName.globSearch]: isGlobSearchShape,
-  [toolName.screenshot]: isScreenshotShape,
+  [toolName.screenshot]: isScreenshotResultContent,
 };
 
 /**
@@ -434,18 +428,6 @@ function isToolMessage(message: BaseMessage): message is ToolMessage {
 }
 
 /**
- * Attempts to parse JSON content from a tool message.
- * Returns undefined if parsing fails.
- */
-function parseToolContent(content: string): unknown | undefined {
-  try {
-    return JSON.parse(content) as unknown;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
  * Trims tool message content if a trimmer is registered for the tool.
  * Falls back to content-based detection when message.name is undefined
  * (common with messages created by `@ai-sdk/langchain` adapter).
@@ -528,7 +510,7 @@ function injectScreenshotImages(message: ToolMessage): ToolMessage {
   }
 
   const parsed = parseToolContent(content);
-  if (!isObject(parsed) || !Array.isArray(parsed['images'])) {
+  if (!isScreenshotResultContent(parsed) || !isObject(parsed)) {
     return message;
   }
 
@@ -573,16 +555,8 @@ function findLastScreenshotIndex(messages: BaseMessage[]): number {
       continue;
     }
 
-    if (message.name === toolName.screenshot) {
+    if (isScreenshotResultMessage(message)) {
       return index;
-    }
-
-    const { content } = message;
-    if (typeof content === 'string') {
-      const parsed = parseToolContent(content);
-      if (isObject(parsed) && Array.isArray(parsed['images'])) {
-        return index;
-      }
     }
   }
 
@@ -606,7 +580,7 @@ function findLastScreenshotIndex(messages: BaseMessage[]): number {
  * for Anthropic prompt caching. Consistent content enables cache hits
  * across conversation turns.
  */
-export const createToolResultTrimmerMiddleware = ({ allowImageBlocks = true } = {}) =>
+export const createToolResultTrimmerMiddleware = ({ allowImageBlocks = true } = {}): AgentMiddleware =>
   createMiddleware({
     name: 'ToolResultTrimmer',
 

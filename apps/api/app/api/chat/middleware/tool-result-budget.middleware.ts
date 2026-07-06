@@ -6,13 +6,20 @@ import { z } from 'zod';
 import { countTextLines } from '@taucad/filesystem';
 import { TauRpcBackendFactory } from '#api/chat/tau-rpc-backend.js';
 import { MetricsService } from '#telemetry/metrics.js';
+import {
+  isPersistedOutputEnvelope,
+  persistedOutputOpenTag,
+  serialiseToolMessageContent,
+  shouldPreserveToolResultForMedia,
+} from '#api/chat/middleware/tool-result-retention.js';
 
 /**
- * Aggregate char budget across every `ToolMessage` in the latest turn.
+ * Aggregate text char budget across every non-media `ToolMessage` in the latest turn.
  * Mirrors claude-code's `MAX_TOOL_RESULTS_PER_MESSAGE_CHARS` envelope: a
- * single turn whose tool fan-out blows past this ceiling has the largest
- * fresh results persisted to `.tau/tool-results/` and replaced with a
- * `<persisted-output>` envelope until the budget is satisfied.
+ * single turn whose text tool fan-out blows past this ceiling has the largest
+ * fresh text results persisted to `.tau/tool-results/` and replaced with a
+ * `<persisted-output>` envelope until the budget is satisfied. Media-bearing
+ * results are preserved for the trimmer/provider adapter instead.
  */
 const maxToolResultsPerMessageChars = 200_000;
 
@@ -21,14 +28,6 @@ const charactersPerToken = 4;
 
 /** Head budget (chars) for the `<persisted-output>` envelope preview. */
 const envelopePreviewBudget = 4000;
-
-/**
- * Structural marker used to detect tool messages that already carry an offload
- * envelope. Both this middleware and {@link createToolOffloadingMiddleware}
- * emit content that begins with this prefix; matching it lets us skip
- * re-persisting bytes that were already persisted in a previous pass.
- */
-const persistedEnvelopeOpenTag = '<persisted-output>';
 
 const budgetContextSchema = z.object({
   chatId: z.string(),
@@ -46,7 +45,7 @@ function getToolMessages(messages: BaseMessage[]): ToolMessageEntry[] {
     const candidate = messages[i];
     if (candidate instanceof ToolMessage) {
       const message = candidate as ToolMessage;
-      const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
+      const content = serialiseToolMessageContent(message);
       entries.push({ index: i, message, content });
       continue;
     }
@@ -85,7 +84,7 @@ function buildEnvelope(options: { toolName: string; persistedPath: string; rawCo
       ? `Re-read narrower ranges via read_file ${options.persistedPath} offset=<line> limit=<lines> ` +
         `(showing head ${preview.length} chars; ${truncatedChars} chars omitted).`
       : `Full content shown below.`);
-  return [persistedEnvelopeOpenTag, header, '', preview, '</persisted-output>'].join('\n');
+  return [persistedOutputOpenTag, header, '', preview, '</persisted-output>'].join('\n');
 }
 
 function buildPersistedPath(options: { chatId: string; toolCallId: string }): string {
@@ -94,19 +93,6 @@ function buildPersistedPath(options: { chatId: string; toolCallId: string }): st
 
 function estimateTokens(chars: number): number {
   return Math.ceil(chars / charactersPerToken);
-}
-
-/**
- * Returns true when the content already carries a `<persisted-output>`
- * envelope. The check is purely structural — we never persisted these bytes
- * in this process, but the offload-envelope shape is stable across both
- * middleware (this one and `tool-offloading.middleware.ts`) so a prefix
- * match is a sufficient short-circuit. Avoiding a second persist keeps the
- * prompt-cache prefix byte-identical AND makes the dedup logic stateless,
- * which is essential for cross-instance / cross-region durability.
- */
-function isAlreadyPersisted(content: string): boolean {
-  return content.startsWith(persistedEnvelopeOpenTag);
 }
 
 /**
@@ -122,13 +108,15 @@ function isAlreadyPersisted(content: string): boolean {
  *    are the just-finished turn's tool results).
  * 2. Sum their content lengths. If under {@link maxToolResultsPerMessageChars},
  *    return the request unchanged.
- * 3. Otherwise sort the *fresh* results (those whose content does NOT already
- *    begin with `<persisted-output>`) descending by size. Persist the largest
- *    one via `TauRpcBackend.write`, replace its content with a
+ * 3. Otherwise preserve media-bearing results for the tool-result trimmer and
+ *    enforce the budget over text results only.
+ * 4. Sort the *fresh* text results (those whose content does NOT already begin
+ *    with `<persisted-output>`) descending by size. Persist the largest one via
+ *    `TauRpcBackend.write`, replace its content with a
  *    `<persisted-output>` envelope. Continue until the budget is satisfied.
  *
  * The fresh-vs-persisted distinction is purely structural — see
- * {@link isAlreadyPersisted}. There is no in-process state to consult; the
+ * {@link isPersistedOutputEnvelope}. There is no in-process state to consult; the
  * checkpointer's serialised `messages` channel is the single source of truth
  * across pods, regions, and process restarts.
  *
@@ -154,13 +142,32 @@ export const createToolResultBudgetMiddleware = (
         return handler(request);
       }
 
-      let total = totalChars(entries);
-      if (total <= maxChars) {
+      const allToolResultChars = totalChars(entries);
+      if (allToolResultChars <= maxChars) {
         return handler(request);
       }
 
       const messages = [...request.messages];
-      const freshEntries = entries.filter((entry) => !isAlreadyPersisted(entry.content));
+      const mediaEntries = entries.filter((entry) => shouldPreserveToolResultForMedia(entry.message));
+      const textEntries = entries.filter((entry) => !shouldPreserveToolResultForMedia(entry.message));
+
+      for (const entry of mediaEntries) {
+        metricsService.chatToolResultMediaPreserved.add(1, {
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- OTEL attribute names use dot-notation
+          'tool.name': entry.message.name ?? '',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- OTEL attribute names use dot-notation
+          'tool.result.original_bytes': entry.content.length,
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- OTEL attribute names use dot-notation
+          'tool.result.preservation_reason': 'media_result',
+        });
+      }
+
+      let total = totalChars(textEntries);
+      if (total <= maxChars) {
+        return handler(request);
+      }
+
+      const freshEntries = textEntries.filter((entry) => !isPersistedOutputEnvelope(entry.content));
       freshEntries.sort((a, b) => b.content.length - a.content.length);
 
       for (const entry of freshEntries) {

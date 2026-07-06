@@ -5,12 +5,18 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(30);
+    expect(metrics).toHaveLength(31);
   });
 
   it('should expose the tool-result offload counter with the canonical OTEL name', () => {
     expect(TauMetrics.chatToolResultOffloaded.name).toBe('chat.tool_result.offloads');
     expect(TauMetrics.chatToolResultOffloaded.type).toBe('counter');
+  });
+
+  it('should expose the tool-result media preservation counter with the canonical OTEL name', () => {
+    expect(TauMetrics.chatToolResultMediaPreserved.name).toBe('chat.tool_result.media_preservations');
+    expect(TauMetrics.chatToolResultMediaPreserved.type).toBe('counter');
+    expect(TauMetrics.chatToolResultMediaPreserved.unit).toBe('{preservation}');
   });
 
   it('should expose the agent-safeguard counter with the canonical OTEL name', () => {

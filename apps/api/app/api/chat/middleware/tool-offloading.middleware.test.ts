@@ -185,13 +185,13 @@ describe('createToolOffloadingMiddleware', () => {
     },
   );
 
-  it('should fall back to jsonCompact for unknown tools with structured JSON output', async () => {
+  it('should fall back to jsonCompact for unknown tools with structured non-media JSON output', async () => {
     const middleware = createToolOffloadingMiddleware(rpcBackendFactory, metricsService, {
       unknownToolMaxChars: 50,
     });
 
     const toolOutput = {
-      images: [{ view: 'composite', dataUrl: 'data:image/webp;base64,' + 'A'.repeat(2000) }],
+      results: [{ title: 'large result', body: 'A'.repeat(2000) }],
     };
     const jsonContent = JSON.stringify(toolOutput);
     const original = new ToolMessage({
@@ -212,10 +212,10 @@ describe('createToolOffloadingMiddleware', () => {
 
     const content = (result as ToolMessage).content as string;
     const parsed = JSON.parse(content) as Record<string, unknown>;
-    const images = parsed['images'] as Array<Record<string, unknown>>;
+    const results = parsed['results'] as Array<Record<string, unknown>>;
 
-    expect(images[0]!['view']).toBe('composite');
-    expect(images[0]!['dataUrl']).toMatch(/^\[offloaded: \d+ chars]$/);
+    expect(results[0]!['title']).toBe('large result');
+    expect(results[0]!['body']).toMatch(/^\[offloaded: \d+ chars]$/);
     expect(parsed['_offloadedTo']).toBe('.tau/tool-results/chat-1/tc1.json');
     expect(mockBackend.write).toHaveBeenCalledWith('.tau/tool-results/chat-1/tc1.json', jsonContent);
   });

@@ -225,6 +225,21 @@ export const TauMetrics = {
   }),
 
   /**
+   * Media-bearing tool results preserved through text-budget offloading so
+   * provider adapters can send typed media blocks instead of base64 text.
+   */
+  chatToolResultMediaPreserved: defineCounter({
+    name: 'chat.tool_result.media_preservations',
+    unit: '{preservation}',
+    description: 'Media tool results preserved instead of text-offloaded by the tool-result budget middleware',
+    attributes: z.object({
+      'tool.name': z.string().optional(),
+      'tool.result.original_bytes': z.number().optional(),
+      'tool.result.preservation_reason': z.string().optional(),
+    }),
+  }),
+
+  /**
    * Per-section system-prompt byte budget. Recorded by `chat.service.ts`
    * via the `onSectionResolved` callback exposed by
    * [apps/api/app/api/chat/prompts/prompt-section-registry.ts]. One sample

@@ -46,6 +46,7 @@ export type ModelInteractionEvent =
   | { type: 'endViewerHoverSuppression'; reason: ViewerHoverSuppressionReason; source?: ModelInteractionSource }
   | { type: 'setHoveredComponent'; unitId: string; componentId: string | undefined; source?: ModelInteractionSource }
   | { type: 'toggleComponentSelection'; unitId: string; componentId: string; source?: ModelInteractionSource }
+  | { type: 'selectComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
   | { type: 'clearSelection'; unitId: string; source?: ModelInteractionSource }
   | { type: 'hideComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
   | { type: 'showComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
@@ -397,6 +398,23 @@ export const modelInteractionMachine = setup({
         displayChanged: false,
       });
     }),
+    selectComponent: assign(({ context, event }) => {
+      assertEvent(event, 'selectComponent');
+      const unit = getModelInteractionUnitState(context, event.unitId);
+      if (!hasComponent(unit, event.componentId) || arraysEqual(unit.selectedComponentIds, [event.componentId])) {
+        return {};
+      }
+      return assignUnit({
+        context,
+        unitId: event.unitId,
+        unit: {
+          ...unit,
+          selectedComponentIds: [event.componentId],
+        },
+        source: event.source,
+        displayChanged: false,
+      });
+    }),
     clearSelection: assign(({ context, event }) => {
       assertEvent(event, 'clearSelection');
       const unit = getModelInteractionUnitState(context, event.unitId);
@@ -576,6 +594,7 @@ export const modelInteractionMachine = setup({
     endViewerHoverSuppression: { actions: 'endViewerHoverSuppression' },
     setHoveredComponent: { actions: 'setHoveredComponent' },
     toggleComponentSelection: { actions: 'toggleComponentSelection' },
+    selectComponent: { actions: 'selectComponent' },
     clearSelection: { actions: 'clearSelection' },
     hideComponent: { actions: 'hideComponent' },
     showComponent: { actions: 'showComponent' },

@@ -184,6 +184,28 @@ describe('modelInteractionMachine', () => {
     actor.stop();
   });
 
+  it('should select a component idempotently without setting explicit focus', () => {
+    const actor = createActor(modelInteractionMachine, { input: {} });
+    actor.start();
+    actor.send({ type: 'loadManifest', unitId: mainUnitId, manifest: createManifest() });
+
+    actor.send({ type: 'selectComponent', unitId: mainUnitId, componentId: housingComponentId, source: 'viewer' });
+    const afterSelect = actor.getSnapshot().context;
+    let unit = getModelInteractionUnitState(afterSelect, mainUnitId);
+    expect(unit.selectedComponentIds).toEqual([housingComponentId]);
+    expect(unit.focusedComponentId).toBeUndefined();
+    expect(afterSelect.displayRevision).toBe(0);
+
+    actor.send({ type: 'selectComponent', unitId: mainUnitId, componentId: housingComponentId, source: 'viewer' });
+    expect(actor.getSnapshot().context.revision).toBe(afterSelect.revision);
+
+    actor.send({ type: 'selectComponent', unitId: mainUnitId, componentId: gearComponentId, source: 'explorer' });
+    unit = getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId);
+    expect(unit.selectedComponentIds).toEqual([gearComponentId]);
+    expect(unit.focusedComponentId).toBeUndefined();
+    actor.stop();
+  });
+
   it('should keep duplicate component ids isolated between compilation units', () => {
     const actor = createActor(modelInteractionMachine, { input: {} });
     actor.start();
@@ -471,6 +493,7 @@ describe('modelInteractionMachine', () => {
     actor.send({ type: 'setHoveredComponent', unitId: mainUnitId, componentId: housingComponentId });
     actor.send({ type: 'toggleComponentSelection', unitId: mainUnitId, componentId: housingComponentId });
     actor.send({ type: 'toggleComponentSelection', unitId: mainUnitId, componentId: housingComponentId });
+    actor.send({ type: 'selectComponent', unitId: mainUnitId, componentId: housingComponentId });
     actor.send({ type: 'focusComponent', unitId: mainUnitId, componentId: housingComponentId });
     actor.send({ type: 'beginViewerHoverSuppression', reason: 'cameraControls', source: 'viewer' });
     actor.send({ type: 'setHoveredComponent', unitId: mainUnitId, componentId: gearComponentId, source: 'viewer' });
@@ -513,6 +536,7 @@ describe('modelInteractionMachine', () => {
     actor.start();
     actor.send({ type: 'loadManifest', unitId: mainUnitId, manifest: createManifest() });
     actor.send({ type: 'toggleComponentSelection', unitId: mainUnitId, componentId: missingComponentId });
+    actor.send({ type: 'selectComponent', unitId: mainUnitId, componentId: missingComponentId });
     actor.send({ type: 'hideComponent', unitId: mainUnitId, componentId: missingComponentId });
 
     const unit = getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId);

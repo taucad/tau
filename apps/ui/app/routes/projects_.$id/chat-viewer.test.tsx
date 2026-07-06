@@ -573,17 +573,24 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     expect(await screen.findByRole('menuitem', { name: 'Focus on part' })).toBeInTheDocument();
     expect(screen.getByText('Add to chat')).toBeInTheDocument();
+    expect(screen.getByText('Reveal in Explorer')).toBeInTheDocument();
     expect(screen.getByText('Hide')).toBeInTheDocument();
     expect(screen.getByText('Isolate')).toBeInTheDocument();
     expect(screen.getByText('Opacity')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('Hide'));
+    fireEvent.click(screen.getByText('Reveal in Explorer'));
 
     expect(mockGraphicsSend).toHaveBeenCalledWith({
-      type: 'hideModelComponent',
+      type: 'selectModelComponent',
       unitId: helperUnitId,
       componentId: rightRimComponentId,
       source: 'viewer',
+    });
+    expect(mockEditorSend).toHaveBeenCalledWith({
+      type: 'revealModelComponentInExplorer',
+      entryFile: helperEntryFile,
+      unitId: helperUnitId,
+      componentId: rightRimComponentId,
     });
   });
 

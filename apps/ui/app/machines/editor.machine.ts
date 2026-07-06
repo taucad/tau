@@ -276,6 +276,7 @@ type EditorStateEvent =
   | { type: 'closeFile'; path: string }
   | { type: 'setActiveFile'; path: string }
   | { type: 'revealFileInTree'; path: string; expandTarget?: boolean }
+  | { type: 'revealModelComponentInExplorer'; entryFile: string; unitId: string; componentId: string }
   | { type: 'renameFile'; oldPath: string; newPath: string }
   | { type: 'closeAll' }
   // Chat operations
@@ -315,7 +316,8 @@ type EditorStateEmitted =
     }
   | { type: 'fileOpening'; path: string }
   | { type: 'fileOpenFailed'; path: string; error: Error }
-  | { type: 'fileRevealRequested'; path: string; expandTarget?: boolean };
+  | { type: 'fileRevealRequested'; path: string; expandTarget?: boolean }
+  | { type: 'modelComponentRevealRequested'; entryFile: string; unitId: string; componentId: string };
 
 // Actors to be provided by the consumer
 const loadEditorStateActor = fromSafeAsync<
@@ -681,6 +683,16 @@ export const editorMachine = setup({
         type: 'fileRevealRequested',
         path: event.path,
         expandTarget: event.expandTarget,
+      });
+    }),
+    revealModelComponentInExplorer: enqueueActions(({ enqueue, event }) => {
+      assertEvent(event, 'revealModelComponentInExplorer');
+
+      enqueue.emit({
+        type: 'modelComponentRevealRequested',
+        entryFile: event.entryFile,
+        unitId: event.unitId,
+        componentId: event.componentId,
       });
     }),
 
@@ -1049,6 +1061,9 @@ export const editorMachine = setup({
             },
             revealFileInTree: {
               actions: 'revealFileInTree',
+            },
+            revealModelComponentInExplorer: {
+              actions: 'revealModelComponentInExplorer',
             },
             renameFile: {
               actions: 'renameFile',

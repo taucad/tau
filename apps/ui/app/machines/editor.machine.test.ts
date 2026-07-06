@@ -290,6 +290,28 @@ describe('editorMachine', () => {
       actor.stop();
     });
 
+    it('should emit model component reveal requests', async () => {
+      const actor = await startAndLoad({ loadResult: undefined });
+      const emitted: unknown[] = [];
+      actor.on('modelComponentRevealRequested', (event) => emitted.push(event));
+
+      actor.send({
+        type: 'revealModelComponentInExplorer',
+        entryFile: 'src/main.ts',
+        unitId: 'file:src/main.ts',
+        componentId: 'component:housing',
+      });
+      expect(emitted).toEqual([
+        {
+          type: 'modelComponentRevealRequested',
+          entryFile: 'src/main.ts',
+          unitId: 'file:src/main.ts',
+          componentId: 'component:housing',
+        },
+      ]);
+      actor.stop();
+    });
+
     it('should rekey nested component display units on directory rename', async () => {
       const oldMainUnitId = 'file:src/foo/main.ts';
       const oldNestedUnitId = 'file:src/foo/nested/part.ts';

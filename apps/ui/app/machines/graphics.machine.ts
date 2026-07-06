@@ -274,6 +274,7 @@ export type GraphicsEvent =
       source?: ModelInteractionSource;
     }
   | { type: 'toggleModelComponentSelection'; unitId: string; componentId: string; source?: ModelInteractionSource }
+  | { type: 'selectModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
   | { type: 'clearModelComponentSelection'; unitId: string; source?: ModelInteractionSource }
   | { type: 'hideModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
   | { type: 'showModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
@@ -1326,6 +1327,15 @@ export const graphicsMachine = setup({
         source: event.source,
       };
     }),
+    selectModelComponent: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'selectModelComponent');
+      return {
+        type: 'selectComponent',
+        unitId: event.unitId,
+        componentId: event.componentId,
+        source: event.source,
+      };
+    }),
     clearModelComponentSelection: sendTo('modelInteraction', ({ event }) => {
       assertEvent(event, 'clearModelComponentSelection');
       return { type: 'clearSelection', unitId: event.unitId, source: event.source };
@@ -1673,6 +1683,9 @@ export const graphicsMachine = setup({
         },
         toggleModelComponentSelection: {
           actions: 'toggleModelComponentSelection',
+        },
+        selectModelComponent: {
+          actions: 'selectModelComponent',
         },
         clearModelComponentSelection: {
           actions: 'clearModelComponentSelection',

@@ -1,5 +1,5 @@
 import { XIcon, FileBox, ChevronRight, Box, Eye, EyeOff, Target, Search } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
@@ -42,6 +42,13 @@ const keyCombinationEditor = {
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
+
+type ModelComponentRevealTarget = {
+  readonly entryFile: string;
+  readonly unitId: string;
+  readonly componentId: string;
+  readonly requestId: number;
+};
 
 export function getComponentRowPaddingLeft({
   depth,
@@ -156,6 +163,7 @@ export function ChatExplorerTree({
   const project = useProject({ enableNoContext: true });
   const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [query, setQuery] = useState('');
+  const [revealTarget, setRevealTarget] = useState<ModelComponentRevealTarget>();
   const toggleEditor = () => {
     setIsExpanded?.((current) => !current);
   };
@@ -169,6 +177,25 @@ export function ChatExplorerTree({
       return next;
     });
   }, []);
+  useEffect(() => {
+    if (!project) {
+      return undefined;
+    }
+    const subscription = project.editorRef.on('modelComponentRevealRequested', (event) => {
+      setIsExpanded?.(true);
+      setIsSearchVisible(false);
+      setQuery('');
+      setRevealTarget((current) => ({
+        entryFile: event.entryFile,
+        unitId: event.unitId,
+        componentId: event.componentId,
+        requestId: (current?.requestId ?? 0) + 1,
+      }));
+    });
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [project, setIsExpanded]);
 
   return (
     <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
@@ -203,6 +230,7 @@ export function ChatExplorerTree({
               project={project}
               query={query}
               isSearchVisible={isSearchVisible}
+              revealTarget={revealTarget}
               onQueryChange={setQuery}
             />
           ) : (
@@ -218,14 +246,17 @@ function ChatGeometryExplorerContent({
   project,
   query,
   isSearchVisible,
+  revealTarget,
   onQueryChange,
 }: {
   readonly project: NonNullable<ReturnType<typeof useProject>>;
   readonly query: string;
   readonly isSearchVisible: boolean;
+  readonly revealTarget: ModelComponentRevealTarget | undefined;
   readonly onQueryChange: (query: string) => void;
 }): React.JSX.Element {
   const [openByEntryFile, setOpenByEntryFile] = useState<Record<string, boolean>>({});
+  const contentRef = useRef<HTMLDivElement>(null);
   const viewSettings = useSelector(project.editorRef, (state) => state.context.viewSettings);
   const entries = useMemo(
     () => sortGeometryUnitEntries([...project.geometryUnits.entries()], project.mainEntryFile),
@@ -245,6 +276,25 @@ function ChatGeometryExplorerContent({
   const setSectionOpen = useCallback((entryFile: string, isOpen: boolean): void => {
     setOpenByEntryFile((current) => ({ ...current, [entryFile]: isOpen }));
   }, []);
+  useEffect(() => {
+    if (!revealTarget || !entries.some(([entryFile]) => entryFile === revealTarget.entryFile)) {
+      return;
+    }
+    setOpenByEntryFile((current) =>
+      current[revealTarget.entryFile] ? current : { ...current, [revealTarget.entryFile]: true },
+    );
+  }, [entries, revealTarget]);
+  useEffect(() => {
+    if (!revealTarget) {
+      return;
+    }
+    const row = [...(contentRef.current?.querySelectorAll<HTMLElement>('[data-model-component-row]') ?? [])].find(
+      (candidate) =>
+        candidate.dataset['modelComponentUnitId'] === revealTarget.unitId &&
+        candidate.dataset['modelComponentId'] === revealTarget.componentId,
+    );
+    row?.scrollIntoView({ block: 'center' });
+  }, [openByEntryFile, query, revealTarget]);
 
   if (entries.length === 0) {
     return <ExplorerEmptyState />;
@@ -267,7 +317,7 @@ function ChatGeometryExplorerContent({
           />
         </div>
       )}
-      <div className='flex min-h-0 flex-1 flex-col'>
+      <div ref={contentRef} className='flex min-h-0 flex-1 flex-col'>
         {entries.map(([entryFile]) => (
           <CompilationUnitExplorerSection
             key={entryFile}
@@ -624,6 +674,9 @@ export function ComponentRow({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
+          data-model-component-row=''
+          data-model-component-unit-id={unitId}
+          data-model-component-id={node.id}
           className={cn(
             'group/part flex h-7 w-full cursor-pointer items-center justify-between py-1 pr-1 pl-2 text-sm leading-5 transition-colors',
             isSelected ? 'bg-primary/10 text-primary' : 'text-sidebar-foreground',

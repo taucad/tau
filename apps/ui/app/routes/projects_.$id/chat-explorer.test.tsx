@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { mock } from 'vitest-mock-extended';
 import type { GeometryComponentAppearance, GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
@@ -98,15 +98,47 @@ function createManifest(nodes: GeometryComponentNode[], sourceFile = unitId): Ge
   };
 }
 
-function createStaticActor<Snapshot>(snapshot: Snapshot): {
+type StaticActor<Snapshot> = {
   getSnapshot: () => Snapshot;
   subscribe: () => { unsubscribe: () => void };
+  on: ReturnType<typeof vi.fn>;
   send: ReturnType<typeof vi.fn>;
-} {
+};
+
+type EditorTestActor = StaticActor<{
+  readonly context: { readonly viewSettings: Record<string, { readonly entryFile: string }> };
+}>;
+
+function createStaticActor<Snapshot>(snapshot: Snapshot): StaticActor<Snapshot> {
   return {
     getSnapshot: () => snapshot,
     subscribe: () => ({ unsubscribe: vi.fn() }),
+    on: vi.fn(() => ({ unsubscribe: vi.fn() })),
     send: vi.fn(),
+  };
+}
+
+function createTestEditorActor(snapshot: {
+  readonly context: { readonly viewSettings: Record<string, { readonly entryFile: string }> };
+}): EditorTestActor & { readonly emit: (type: string, event: unknown) => void } {
+  const listeners = new Map<string, Set<(event: unknown) => void>>();
+  return {
+    ...createStaticActor(snapshot),
+    on: vi.fn((type: string, listener: (event: unknown) => void) => {
+      const eventListeners = listeners.get(type) ?? new Set<(event: unknown) => void>();
+      eventListeners.add(listener);
+      listeners.set(type, eventListeners);
+      return {
+        unsubscribe: () => {
+          eventListeners.delete(listener);
+        },
+      };
+    }),
+    emit: (type: string, event: unknown) => {
+      for (const listener of listeners.get(type) ?? []) {
+        listener(event);
+      }
+    },
   };
 }
 
@@ -115,8 +147,10 @@ function createGraphicsRefForUnit(
   nodes: GeometryComponentNode[],
   {
     hiddenComponentIds = [],
+    selectedComponentIds = [],
   }: {
     readonly hiddenComponentIds?: readonly string[];
+    readonly selectedComponentIds?: readonly string[];
   } = {},
 ): ActorRefFrom<typeof graphicsMachine> {
   const modelRef = createActor(modelInteractionMachine, { input: {} });
@@ -125,6 +159,9 @@ function createGraphicsRefForUnit(
   modelRef.send({ type: 'loadManifest', unitId: modelUnitId, manifest: createManifest(nodes, entryFile) });
   for (const componentId of hiddenComponentIds) {
     modelRef.send({ type: 'hideComponent', unitId: modelUnitId, componentId });
+  }
+  for (const componentId of selectedComponentIds) {
+    modelRef.send({ type: 'selectComponent', unitId: modelUnitId, componentId });
   }
 
   return createStaticActor({
@@ -139,24 +176,32 @@ function mockProjectForExplorer({
   viewSettings,
   viewGraphics,
   geometryUnitFiles,
+  editorRef = createStaticActor({ context: { viewSettings } }),
 }: {
   readonly mainEntryFile: string;
   readonly viewSettings: Record<string, { readonly entryFile: string }>;
   readonly viewGraphics: Map<string, ActorRefFrom<typeof graphicsMachine>>;
   readonly geometryUnitFiles: readonly string[];
+  readonly editorRef?: EditorTestActor;
 }): void {
   mocks.useProject.mockReturnValue({
     mainEntryFile,
-    editorRef: createStaticActor({ context: { viewSettings } }),
+    editorRef,
     viewGraphics,
     geometryUnits: new Map(geometryUnitFiles.map((entryFile) => [entryFile, createStaticActor({})])),
   });
 }
 
-function renderExplorerTree(): ReturnType<typeof render> {
+function renderExplorerTree({
+  isExpanded = true,
+  setIsExpanded,
+}: {
+  readonly isExpanded?: boolean;
+  readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
+} = {}): ReturnType<typeof render> {
   return render(
     <TooltipProvider>
-      <ChatExplorerTree isExpanded />
+      <ChatExplorerTree isExpanded={isExpanded} setIsExpanded={setIsExpanded} />
     </TooltipProvider>,
   );
 }
@@ -227,6 +272,118 @@ describe('ChatExplorerTree', () => {
 
     expect(screen.queryByPlaceholderText('Search parts...')).not.toBeInTheDocument();
     expect(screen.getByText('main_part')).toBeInTheDocument();
+  });
+
+  it('should reveal requested model component rows', async () => {
+    const user = userEvent.setup();
+    const setIsExpanded = vi.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const mainNode = createNode(firstComponentId, 'main_part');
+    const helperNode = createNode(secondComponentId, 'helper_part');
+    const helperUnitId = createSourceModelInteractionUnitId('src/helper.ts');
+    const editorRef = createTestEditorActor({
+      context: {
+        viewSettings: {
+          mainView: { entryFile: 'src/main.ts' },
+          helperView: { entryFile: 'src/helper.ts' },
+        },
+      },
+    });
+    try {
+      mockProjectForExplorer({
+        mainEntryFile: 'src/main.ts',
+        geometryUnitFiles: ['src/main.ts', 'src/helper.ts'],
+        viewSettings: {
+          mainView: { entryFile: 'src/main.ts' },
+          helperView: { entryFile: 'src/helper.ts' },
+        },
+        viewGraphics: new Map([
+          ['mainView', createGraphicsRefForUnit('src/main.ts', [mainNode])],
+          [
+            'helperView',
+            createGraphicsRefForUnit('src/helper.ts', [helperNode], {
+              selectedComponentIds: [secondComponentId],
+            }),
+          ],
+        ]),
+        editorRef,
+      });
+
+      renderExplorerTree({ setIsExpanded });
+
+      await user.click(screen.getByRole('button', { name: 'src/helper.ts' }));
+      expect(screen.queryByText('helper_part')).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Show search' }));
+      await user.type(screen.getByPlaceholderText('Search parts...'), 'main');
+
+      act(() => {
+        editorRef.emit('modelComponentRevealRequested', {
+          type: 'modelComponentRevealRequested',
+          entryFile: 'src/helper.ts',
+          unitId: helperUnitId,
+          componentId: secondComponentId,
+        });
+      });
+
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+      });
+      expect(setIsExpanded).toHaveBeenCalledWith(true);
+      expect(screen.queryByPlaceholderText('Search parts...')).not.toBeInTheDocument();
+      const rowButton = screen.getByRole('button', { name: 'helper_part' });
+      const row = rowButton.parentElement;
+      expect(rowButton).toHaveAttribute('aria-pressed', 'true');
+      expect(row).toHaveAttribute('data-model-component-row');
+      expect(row).toHaveAttribute('data-model-component-unit-id', helperUnitId);
+      expect(row).toHaveAttribute('data-model-component-id', secondComponentId);
+      expect(row).toHaveClass('bg-primary/10');
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  it('should open requested unavailable renderer sections', async () => {
+    const user = userEvent.setup();
+    const setIsExpanded = vi.fn();
+    const mainNode = createNode(firstComponentId, 'main_part');
+    const editorRef = createTestEditorActor({
+      context: {
+        viewSettings: {
+          mainView: { entryFile: 'src/main.ts' },
+        },
+      },
+    });
+    mockProjectForExplorer({
+      mainEntryFile: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts', 'src/unopened.ts'],
+      viewSettings: {
+        mainView: { entryFile: 'src/main.ts' },
+      },
+      viewGraphics: new Map([['mainView', createGraphicsRefForUnit('src/main.ts', [mainNode])]]),
+      editorRef,
+    });
+
+    renderExplorerTree({ setIsExpanded });
+
+    await user.click(screen.getByRole('button', { name: 'src/unopened.ts' }));
+    expect(screen.queryByText('Open renderer to inspect components')).not.toBeInTheDocument();
+
+    act(() => {
+      editorRef.emit('modelComponentRevealRequested', {
+        type: 'modelComponentRevealRequested',
+        entryFile: 'src/unopened.ts',
+        unitId: createSourceModelInteractionUnitId('src/unopened.ts'),
+        componentId: secondComponentId,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Open renderer to inspect components')).toBeInTheDocument();
+    });
+    expect(setIsExpanded).toHaveBeenCalledWith(true);
   });
 
   it('should surface compilation units without an active renderer as unavailable', () => {

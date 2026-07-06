@@ -1,4 +1,4 @@
-import { AtSign, Eye, EyeOff, Focus, MoreHorizontal, Target } from 'lucide-react';
+import { AtSign, Eye, EyeOff, FileBox, Focus, MoreHorizontal, Target } from 'lucide-react';
 import type { ActorRefFrom } from 'xstate';
 import type { GeometryComponentManifest, GeometryComponentNode, GeometryComponentReference } from '@taucad/types';
 import { geometryReferenceToToken, useChatContextInsertion } from '#components/chat/chat-context-insertion.js';
@@ -18,6 +18,7 @@ import {
 } from '#components/ui/dropdown-menu.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { ModelInteractionSource } from '#machines/model-interaction.machine.js';
+import { useProject } from '#hooks/use-project.js';
 import { MenuSliderItem } from '#components/ui/menu-slider-item.js';
 import { menuItemVariants, menuSeparatorVariants } from '#components/ui/menu.variants.js';
 import { cn } from '#utils/ui.utils.js';
@@ -48,6 +49,7 @@ type ModelComponentActionContextContentProperties = ModelComponentActionMenuData
 
 type ModelComponentActions = {
   readonly addToChat: () => void;
+  readonly revealInExplorer: () => void;
   readonly focusComponent: () => void;
   readonly hideComponent: () => void;
   readonly toggleIsolation: () => void;
@@ -57,7 +59,7 @@ type ModelComponentActions = {
 type ModelComponentActionDescriptor =
   | {
       readonly type: 'item';
-      readonly id: 'focus' | 'addToChat' | 'hide' | 'isolate';
+      readonly id: 'focus' | 'addToChat' | 'revealInExplorer' | 'hide' | 'isolate';
       readonly label: string;
       readonly icon: React.ReactNode;
       readonly isDisabled?: boolean;
@@ -166,6 +168,18 @@ function useModelComponentActionDescriptors(
 ): readonly ModelComponentActionDescriptor[] {
   const actions = useModelComponentActions(data);
   const opacityPercent = Math.round(data.opacity * 100);
+  const revealInExplorerDescriptor: readonly ModelComponentActionDescriptor[] =
+    data.source === 'viewer' && data.manifest.sourceFile
+      ? [
+          {
+            type: 'item',
+            id: 'revealInExplorer',
+            label: 'Reveal in Explorer',
+            icon: <FileBox className='size-3.5' />,
+            onSelect: actions.revealInExplorer,
+          },
+        ]
+      : [];
 
   return [
     {
@@ -183,6 +197,7 @@ function useModelComponentActionDescriptors(
       icon: <AtSign className='size-3.5' />,
       onSelect: actions.addToChat,
     },
+    ...revealInExplorerDescriptor,
     { type: 'separator', id: 'primary' },
     {
       type: 'item',
@@ -343,6 +358,7 @@ function useModelComponentActions({
   isIsolated,
 }: ModelComponentActionMenuData): ModelComponentActions {
   const { addContextReferences } = useChatContextInsertion();
+  const project = useProject({ enableNoContext: true });
 
   return {
     addToChat: () => {
@@ -359,6 +375,18 @@ function useModelComponentActions({
           geometryReference: reference,
         },
       ]);
+    },
+    revealInExplorer: () => {
+      if (source !== 'viewer' || !manifest.sourceFile || !project) {
+        return;
+      }
+      graphicsRef.send({ type: 'selectModelComponent', unitId, componentId: node.id, source: 'viewer' });
+      project.editorRef.send({
+        type: 'revealModelComponentInExplorer',
+        entryFile: manifest.sourceFile,
+        unitId,
+        componentId: node.id,
+      });
     },
     focusComponent: () => {
       graphicsRef.send({ type: 'focusModelComponent', unitId, componentId: node.id, source });

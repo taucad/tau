@@ -14,11 +14,16 @@ import type { graphicsMachine } from '#machines/graphics.machine.js';
 
 const mocks = vi.hoisted(() => ({
   addContextReferences: vi.fn(),
+  editorSend: vi.fn(),
 }));
 
 vi.mock('#components/chat/chat-context-insertion.js', () => ({
   geometryReferenceToToken: () => '@cad[src/main.ts#component:first]',
   useChatContextInsertion: () => ({ addContextReferences: mocks.addContextReferences }),
+}));
+
+vi.mock('#hooks/use-project.js', () => ({
+  useProject: () => ({ editorRef: { send: mocks.editorSend } }),
 }));
 
 const componentId = 'component:first';
@@ -79,6 +84,7 @@ function createManifest(node = createNode(), sourceFile?: string): GeometryCompo
 
 beforeEach(() => {
   mocks.addContextReferences.mockReset();
+  mocks.editorSend.mockReset();
 });
 
 function renderViewerModelComponentActionMenu({
@@ -197,6 +203,7 @@ describe('model component action menu', () => {
     expect(screen.getByRole('menu')).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Focus on part' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Add to chat' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Reveal in Explorer' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Hide' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Isolate' })).toBeInTheDocument();
     expect(screen.getByText('Opacity')).toBeInTheDocument();
@@ -210,6 +217,66 @@ describe('model component action menu', () => {
       source: 'viewer',
     });
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('should reveal viewer components in Explorer without adding the action to Explorer menus', async () => {
+    const user = userEvent.setup();
+    const node = createNode();
+    const manifest = createManifest(node, 'src/main.ts');
+    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
+
+    const { unmount } = render(
+      <ViewerModelComponentActionMenu
+        isOpen
+        point={{ clientX: 120, clientY: 160 }}
+        data={{
+          manifest,
+          node,
+          graphicsRef,
+          unitId,
+          source: 'viewer',
+          isFocused: false,
+          isIsolated: false,
+          opacity: 1,
+        }}
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('menuitem', { name: 'Reveal in Explorer' }));
+
+    expect(graphicsRef.send).toHaveBeenCalledWith({
+      type: 'selectModelComponent',
+      unitId,
+      componentId,
+      source: 'viewer',
+    });
+    expect(mocks.editorSend).toHaveBeenCalledWith({
+      type: 'revealModelComponentInExplorer',
+      entryFile: 'src/main.ts',
+      unitId,
+      componentId,
+    });
+    unmount();
+
+    render(
+      <ModelComponentActionDropdown
+        manifest={manifest}
+        node={node}
+        graphicsRef={graphicsRef}
+        unitId={unitId}
+        source='explorer'
+        isFocused={false}
+        isIsolated={false}
+        shouldShowActions
+        actionButtonClassName='size-5'
+        opacity={1}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+
+    expect(screen.queryByText('Reveal in Explorer')).not.toBeInTheDocument();
   });
 
   it('should move coordinate-anchored viewer menu focus to enabled items on pointer hover', async () => {

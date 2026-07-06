@@ -81,6 +81,14 @@ describe('graphicsMachine model interaction child', () => {
     ]);
     actor.send({ type: 'toggleModelComponentSelection', unitId, componentId: housingComponentId, source: 'viewer' });
     expect(getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).selectedComponentIds).toEqual([]);
+    actor.send({ type: 'selectModelComponent', unitId, componentId: housingComponentId, source: 'viewer' });
+    expect(getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).selectedComponentIds).toEqual([
+      housingComponentId,
+    ]);
+    actor.send({ type: 'selectModelComponent', unitId, componentId: housingComponentId, source: 'viewer' });
+    expect(getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).selectedComponentIds).toEqual([
+      housingComponentId,
+    ]);
 
     actor.send({ type: 'focusModelComponent', unitId, componentId: 'component:housing', source: 'explorer' });
     expect(getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).focusedComponentId).toBe(

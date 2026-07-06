@@ -125,7 +125,7 @@ export class CompactionService {
       throw new MorphCompactionContractError('Morph compact response must be a JSON object');
     }
 
-    const output = data['output'];
+    const { output } = data;
     if (typeof output !== 'string') {
       throw new MorphCompactionContractError('Morph compact response missing string field "output"');
     }

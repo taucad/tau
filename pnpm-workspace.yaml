@@ -235,6 +235,9 @@ catalog:
   zod: ^4.4.3
 
 catalogMode: prefer
+minimumReleaseAgeExclude:
+  - '@taucad/*'
+  - '@tau-forks/*'
 peerDependencyRules:
   allowedVersions:
     fumadocs-mdx>vite: ^8.0.0
@@ -248,7 +251,8 @@ overrides:
   '@langchain/google-gauth': 2.1.30
   '@langchain/google-vertexai': file:tarballs/langchain-fork/langchain-google-vertexai-2.1.33.tgz
   '@types/express': 'catalog:'
-  replicad-opencascadejs: file:tarballs/replicad-tessellation-instancing/taucad-replicad-opencascadejs-0.23.0-beta.0.tgz
+  replicad: file:tarballs/replicad-interface-export-migration/tau-forks-replicad-0.23.4-beta.2.tgz
+  replicad-opencascadejs: file:tarballs/replicad-interface-export-migration/tau-forks-replicad-opencascadejs-0.23.0-beta.0.tgz
   vitest: 'catalog:'
 ignoreWorkspaceRootCheck: true
 pmOnFail: error

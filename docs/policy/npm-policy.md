@@ -3,13 +3,14 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-06-29'
+updated: '2026-07-06'
 related:
   - docs/policy/release-policy.md
   - docs/policy/version-policy.md
   - docs/policy/library-api-policy.md
   - docs/research/runtime-npm-release-bundling.md
   - docs/research/runtime-zero-config-bundling.md
+  - docs/research/third-party-fork-org-naming.md
 ---
 
 # npm Publishing Policy
@@ -102,7 +103,7 @@ CORRECT:
 {
   "dependencies": {
     "opencascade.js": "npm:@taucad/opencascade.js@^3.0.0-beta",
-    "replicad": "npm:@taucad/replicad@^0.21.0-v8.57"
+    "replicad": "npm:@tau-forks/replicad@0.23.4-beta.2"
   }
 }
 ```
@@ -113,15 +114,15 @@ INCORRECT:
 {
   "dependencies": {
     "opencascade.js": "file:../../tarballs/opencascade-fork/taucad-opencascade.js-3.0.0-beta.d3056ef.tgz",
-    "replicad": "file:../../tarballs/replicad-fork/taucad-replicad-0.21.0-v8.57.2-jsdoc.tgz"
+    "replicad": "file:../../tarballs/replicad-fork/tau-forks-replicad-0.23.4-beta.2.tgz"
   }
 }
 ```
 
 **Migration recipe** for replacing a fork tarball with an aliased npm package:
 
-1. Publish the fork to the `@taucad/*` scope (e.g., `@taucad/replicad`).
-2. Replace the `file:` spec with `"<original-name>": "npm:@taucad/<original-name>@^<version>"`.
+1. Publish the fork to the `@tau-forks/*` npm scope (e.g., `@tau-forks/replicad`).
+2. Replace the `file:` spec with `"<original-name>": "npm:@tau-forks/<original-name>@<version>"`.
 3. Consumers continue to write `import 'replicad'` — the alias is invisible.
 
 ### 3. tsdown Configuration Defaults

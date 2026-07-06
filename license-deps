@@ -23,7 +23,7 @@ Distributions that exclude `@taucad/openscad` carry no GPL obligation.
 
 By using Tau, you agree to comply with the license terms of all included dependencies.
 
-*Generated on 2026-06-29*
+*Generated on 2026-07-06*
 
 ## Summary
 
@@ -278,10 +278,10 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **@tanstack/react-query** v5.101.0 — [Repository](https://github.com/TanStack/query)
 - **@tanstack/react-table** v8.21.3 — [Repository](https://github.com/TanStack/table)
 - **@tanstack/react-virtual** v3.14.3 — [Repository](https://github.com/TanStack/virtual)
+- **@tau-forks/replicad** v0.23.4-beta.2 — [Repository](https://github.com/taucad/replicad)
+- **@tau-forks/replicad-opencascadejs** v0.23.0-beta.0 — [Repository](https://github.com/taucad/replicad)
 - **@taucad/filesystem** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
 - **@taucad/json-schema** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
-- **@taucad/replicad** v0.23.3-beta.1 — [Repository](https://github.com/taucad/replicad)
-- **@taucad/replicad-opencascadejs** v0.23.0-beta.0 — [Repository](https://github.com/taucad/replicad)
 - **@taucad/runtime** v0.1.0-beta.1 — [Repository](https://github.com/taucad/tau)
 - **@taucad/utils** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
 - **@testing-library/jest-dom** v6.6.3 — [Repository](https://github.com/testing-library/jest-dom)

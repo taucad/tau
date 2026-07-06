@@ -284,7 +284,7 @@ function prepareFixture(fixturePath: string): { projectDir: string; cleanup: boo
     throw new Error(`Fixture must be a directory or .zip archive: ${fixturePath}`);
   }
 
-  const cacheRoot = join(packageRoot, 'node_modules/.cache/taucad-replicad-tessellation');
+  const cacheRoot = join(packageRoot, 'node_modules/.cache/tau-forks-replicad-tessellation');
   mkdirSync(cacheRoot, { recursive: true });
   const projectDirectory = mkdtempSync(join(cacheRoot, `${slugify(fixtureDisplayName(fixturePath))}-`));
   execFileSync('unzip', ['-q', fixturePath, '-d', projectDirectory], { stdio: 'pipe' });

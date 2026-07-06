@@ -22,17 +22,6 @@ pnpm docs:validate                        # Validate policy/research doc frontma
 
 - `docs/research` and `docs/reference` are symlinks into `repos/tau-brain`; write through `docs/...`, validate from Tau root, but check git with `git -C repos/tau-brain status --short -- research/<file>` or `reference/<file>`.
 
-## Graphify Monorepo Index
-
-- For monorepo Graphify work, run `scripts/graphify-slices.sh list` instead of inventing slice names.
-- Canonical slices: `apps`, `packages`, `docs`, `libs`, `kernels`, `examples`, `scripts`, `tools`.
-- Build missing slice graphs by `cd <slice>` and invoking the existing `graphify` skill on `.` so Codex subagents handle docs/papers/images when no Gemini key is set.
-- Do not use headless `graphify extract <slice>` for Codex-driven semantic extraction; that CLI path needs a backend key or local backend and cannot call Codex subagents.
-- If a code slice size-gates, use Nx project roots to subdivide that slice.
-- Merge root output with `scripts/graphify-slices.sh merge`; the helper raises `GRAPHIFY_VIZ_NODE_LIMIT` to emit Tau's large root `graph.html` unless you override the env var.
-- Root `graphify-out/` should contain `graph.html`, `GRAPH_REPORT.md`, and `graph.json`.
-- Query from the merged root graph at `graphify-out/graph.json`.
-
 ## Architecture
 
 Tau is the AI-native CAD platform for the web (`tau.new`), built as an Nx monorepo with pnpm workspaces.

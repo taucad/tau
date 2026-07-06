@@ -1,6 +1,38 @@
 import { describe, expect, it } from 'vitest';
+import type { GeometrySvg } from '@taucad/types';
 import { finalizeRenderOutput, RenderArtifactFinalizationError } from '#framework/render-artifact-finalizer.js';
 import { createEmptyGltfGeometry } from '#utils/glb-writer.js';
+
+const expectFinalizationError = ({
+  operation,
+  code,
+  message,
+}: {
+  operation: () => void;
+  code: string;
+  message: string;
+}): void => {
+  try {
+    operation();
+    expect.fail('should have thrown a render artifact finalization error');
+  } catch (error) {
+    expect(error).toBeInstanceOf(RenderArtifactFinalizationError);
+    expect((error as Error).message).toBe(message);
+    expect((error as RenderArtifactFinalizationError).issues).toMatchObject([
+      {
+        code,
+        message,
+        severity: 'error',
+        type: 'runtime',
+      },
+    ]);
+  }
+};
+
+const createSvgArtifact = (): GeometrySvg => ({
+  format: 'svg',
+  content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><path d="M0 0"/></svg>',
+});
 
 describe('finalizeRenderOutput', () => {
   it('accepts canonical empty GLB geometry artifacts', () => {
@@ -20,5 +52,25 @@ describe('finalizeRenderOutput', () => {
 
   it('still rejects kernels that produce no public artifact', () => {
     expect(() => finalizeRenderOutput({ artifacts: [], nativeHandle: null })).toThrow(RenderArtifactFinalizationError);
+  });
+
+  it('should still reject multiple public artifacts with the same format', () => {
+    const svg = createSvgArtifact();
+
+    expectFinalizationError({
+      operation: () => finalizeRenderOutput({ artifacts: [svg, svg], nativeHandle: null }),
+      code: 'MULTI_RENDER_ARTIFACT_UNSUPPORTED',
+      message: 'Kernel render produced multiple public geometry artifacts.',
+    });
+  });
+
+  it('should still reject mixed public artifact formats', () => {
+    const svg = createSvgArtifact();
+
+    expectFinalizationError({
+      operation: () => finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry(), svg], nativeHandle: null }),
+      code: 'MIXED_RENDER_OUTPUT_UNSUPPORTED',
+      message: 'Kernel render produced mixed public geometry formats.',
+    });
   });
 });

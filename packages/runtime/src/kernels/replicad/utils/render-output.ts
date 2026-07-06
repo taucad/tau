@@ -2,6 +2,7 @@ import type { AnyShape, Drawing } from 'replicad';
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { SetRequired } from 'type-fest';
 import type { GeometrySvg } from '@taucad/types';
+import type { InterfaceDeclarations } from '#kernels/replicad/annotations/index.js';
 import { normalizeColor } from '#kernels/replicad/utils/normalize-color.js';
 import type { GeometryReplicad } from '#kernels/replicad/replicad.types.js';
 import { resolveShapeName, uniqueShapeName } from '#utils/shape-names.js';
@@ -28,6 +29,13 @@ type Tessellation = {
 type Svgable = SetRequired<Drawing, 'toSVGPaths' | 'toSVGViewBox'>;
 
 type RenderMode = 'flat' | 'tessellation-instanced' | 'mixed';
+
+type ParsedSvgViewBox = {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+};
 
 type RenderTelemetry = {
   tracer?: RuntimeSpanTracer;
@@ -90,6 +98,11 @@ export type InputShape = {
   roughness?: number;
   /** Physical density in g/cm³. Written to STEP as XCAFDoc_Material for mass computation. */
   density?: number;
+  /**
+   * GeoSpec interface declarations authored via
+   * `@taucad/runtime/kernels/replicad/annotations`.
+   */
+  interfaces?: InterfaceDeclarations;
 };
 
 type NamedInputShape = InputShape & { name: string };
@@ -132,6 +145,30 @@ const isMeshable = (shape: unknown): shape is Meshable => {
 const hasSvgableShape = (config: InputShape): config is SvgShapeConfiguration => isSvgable(config.shape);
 
 const hasMeshableShape = (config: InputShape): config is MeshableConfiguration => isMeshable(config.shape);
+
+function partitionRenderConfigs(configs: NamedInputShape[]): {
+  svgConfigs: SvgShapeConfiguration[];
+  meshConfigs: MeshableConfiguration[];
+} {
+  const svgConfigs: SvgShapeConfiguration[] = [];
+  const meshConfigs: MeshableConfiguration[] = [];
+
+  for (const config of configs) {
+    if (hasSvgableShape(config)) {
+      svgConfigs.push(config);
+      continue;
+    }
+
+    if (hasMeshableShape(config)) {
+      meshConfigs.push(config);
+      continue;
+    }
+
+    throw new Error('Invalid shape');
+  }
+
+  return { svgConfigs, meshConfigs };
+}
 
 const isInputShape = (shape: unknown): shape is InputShape => {
   return typeof shape === 'object' && shape !== null && Boolean((shape as InputShape).shape);
@@ -197,6 +234,16 @@ function normalizeColorAndOpacity<T extends InputShape>(shape: T): InputShape {
 const escapeSvgAttribute = (value: string): string =>
   value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
 
+const normalizeSvgPathEntries = (paths: string[] | string[][]): string[] => {
+  const flattened: unknown[] = paths.flat();
+  return flattened.map((path) => {
+    if (typeof path !== 'string') {
+      throw new TypeError('Replicad SVG path entries must be strings.');
+    }
+    return path;
+  });
+};
+
 const strokeDashArray = (strokeType: string | undefined): string | undefined => {
   if (strokeType === 'dots') {
     return '1 3';
@@ -207,26 +254,85 @@ const strokeDashArray = (strokeType: string | undefined): string | undefined => 
   return undefined;
 };
 
-function renderSvg(shapeConfig: SvgShapeConfiguration): GeometrySvg {
-  const { name, shape, color, strokeType, opacity } = shapeConfig;
-  const viewBox = escapeSvgAttribute(shape.toSVGViewBox());
+const defaultSvgStrokeWidth = '1';
+const defaultSvgVectorEffect = 'non-scaling-stroke';
+
+const parseSvgViewBox = (viewBox: string): ParsedSvgViewBox => {
+  const values = viewBox
+    .trim()
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .map(Number);
+
+  if (values.length !== 4 || values.some((value) => !Number.isFinite(value))) {
+    throw new TypeError(`Replicad SVG viewBox must contain four finite numbers: ${viewBox}`);
+  }
+
+  const minX = values[0]!;
+  const minY = values[1]!;
+  const width = values[2]!;
+  const height = values[3]!;
+  return {
+    minX,
+    minY,
+    maxX: minX + width,
+    maxY: minY + height,
+  };
+};
+
+const formatSvgNumber = (value: number): string => (Object.is(value, -0) ? '0' : String(value));
+
+const formatSvgViewBox = (boxes: readonly ParsedSvgViewBox[]): string => {
+  if (boxes.length === 0) {
+    throw new TypeError('Replicad SVG render requires at least one SVG viewBox.');
+  }
+
+  const minX = Math.min(...boxes.map((box) => box.minX));
+  const minY = Math.min(...boxes.map((box) => box.minY));
+  const maxX = Math.max(...boxes.map((box) => box.maxX));
+  const maxY = Math.max(...boxes.map((box) => box.maxY));
+  return [minX, minY, maxX - minX, maxY - minY].map((value) => formatSvgNumber(value)).join(' ');
+};
+
+function renderSvgPathElements(shapeConfig: SvgShapeConfiguration): string[] {
+  const { shape, color, strokeType, opacity } = shapeConfig;
   const stroke = escapeSvgAttribute(color ?? 'currentColor');
   const opacityAttribute = opacity === undefined ? '' : ` opacity="${opacity}"`;
   const dashArray = strokeDashArray(strokeType);
   const dashAttribute = dashArray === undefined ? '' : ` stroke-dasharray="${dashArray}"`;
-  const paths = (shape.toSVGPaths() as string[])
-    .map(
-      (path) =>
-        `<path d="${escapeSvgAttribute(path)}" fill="none" stroke="${stroke}"${opacityAttribute}${dashAttribute}/>`,
-    )
-    .join('');
+  return normalizeSvgPathEntries(shape.toSVGPaths()).map(
+    (path) =>
+      `<path d="${escapeSvgAttribute(path)}" fill="none" stroke="${stroke}" stroke-width="${defaultSvgStrokeWidth}" vector-effect="${defaultSvgVectorEffect}"${opacityAttribute}${dashAttribute}/>`,
+  );
+}
+
+function renderSvgDocument(shapeConfigs: readonly SvgShapeConfiguration[]): GeometrySvg {
+  if (shapeConfigs.length === 0) {
+    throw new TypeError('Replicad SVG render requires at least one SVG shape.');
+  }
+
+  const viewBox = escapeSvgAttribute(
+    formatSvgViewBox(shapeConfigs.map((shapeConfig) => parseSvgViewBox(shapeConfig.shape.toSVGViewBox()))),
+  );
+  const paths = shapeConfigs.flatMap((shapeConfig) => renderSvgPathElements(shapeConfig)).join('');
 
   return {
     format: 'svg',
-    name,
+    ...(shapeConfigs.length === 1 ? { name: shapeConfigs[0]!.name } : {}),
     content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">${paths}</svg>`,
   };
 }
+
+function renderSvg(shapeConfig: SvgShapeConfiguration): GeometrySvg {
+  return renderSvgDocument([shapeConfig]);
+}
+
+const renderSvgArtifacts = (shapeConfigs: readonly SvgShapeConfiguration[]): GeometrySvg[] => {
+  if (shapeConfigs.length === 0) {
+    return [];
+  }
+  return [shapeConfigs.length === 1 ? renderSvg(shapeConfigs[0]!) : renderSvgDocument(shapeConfigs)];
+};
 
 const defaultPreviewTessellation: Tessellation = {
   linearTolerance: 0.02,
@@ -560,8 +666,9 @@ function renderWithTessellationInstancing(
     tracer?: RuntimeSpanTracer;
   },
 ): { geometries: Array<GeometrySvg | GeometryReplicad>; renderMode: RenderMode } {
+  const { svgConfigs, meshConfigs } = partitionRenderConfigs(configs);
   const detection = detectInstancingGroups({
-    configs,
+    configs: meshConfigs,
     openCascade,
     tessellation,
     withBrepEdges,
@@ -589,22 +696,18 @@ function renderWithTessellationInstancing(
   }
 
   let legacyMeshCount = 0;
-  const geometries = configs.map((shapeConfig) => {
-    if (hasSvgableShape(shapeConfig)) {
-      return renderSvg(shapeConfig);
+  const geometries: Array<GeometrySvg | GeometryReplicad> = [];
+  for (const shapeConfig of meshConfigs) {
+    const grouped = groupedGeometries.get(shapeConfig);
+    if (grouped) {
+      geometries.push(grouped);
+      continue;
     }
 
-    if (hasMeshableShape(shapeConfig)) {
-      const grouped = groupedGeometries.get(shapeConfig);
-      if (grouped) {
-        return grouped;
-      }
-      legacyMeshCount++;
-      return renderMesh(shapeConfig, { tessellation, withBrepEdges, tracer });
-    }
-
-    throw new Error('Invalid shape');
-  });
+    legacyMeshCount++;
+    geometries.push(renderMesh(shapeConfig, { tessellation, withBrepEdges, tracer }));
+  }
+  geometries.push(...renderSvgArtifacts(svgConfigs));
 
   return {
     geometries,
@@ -647,17 +750,11 @@ export function render(
   }
 
   onRenderMode?.('flat');
-  return shapes.map((shapeConfig) => {
-    if (hasSvgableShape(shapeConfig)) {
-      return renderSvg(shapeConfig);
-    }
-
-    if (hasMeshableShape(shapeConfig)) {
-      return renderMesh(shapeConfig, { tessellation, withBrepEdges, tracer });
-    }
-
-    throw new Error('Invalid shape');
-  });
+  const { svgConfigs, meshConfigs } = partitionRenderConfigs(shapes);
+  return [
+    ...meshConfigs.map((shapeConfig) => renderMesh(shapeConfig, { tessellation, withBrepEdges, tracer })),
+    ...renderSvgArtifacts(svgConfigs),
+  ];
 }
 
 /**

@@ -4,7 +4,9 @@
 /* eslint-disable @typescript-eslint/naming-convention -- File names use extensions like 'box.ts' */
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
+import { Window } from 'happy-dom';
 import type { JSONSchema7 } from '@taucad/json-schema';
+import type { GeometryResponse } from '@taucad/types';
 import type { Document } from '@gltf-transform/core';
 import { replicadDetectPattern } from '#kernels/replicad/replicad.constants.js';
 import { replicad as replicadKernel } from '#kernels/replicad/replicad.kernel.js';
@@ -31,6 +33,31 @@ vi.setConfig({ testTimeout: 15_000 });
 /** Create a runtime worker for testing with the provided files. */
 const createWorker = async (files: Record<string, string>): ReturnType<typeof createTestWorker> =>
   createTestWorker(replicadKernel, files);
+
+const expectSvgContent = (geometry: GeometryResponse): string => {
+  expect(geometry.format).toBe('svg');
+  if (geometry.format !== 'svg') {
+    throw new Error(`Expected SVG geometry, received ${geometry.format}`);
+  }
+  return geometry.content;
+};
+
+const expectStandardReplicadSvgPaths = (svg: string, { minPathCount = 1 } = {}): Array<string | undefined> => {
+  const window = new Window();
+  const document_ = new window.DOMParser().parseFromString(svg, 'image/svg+xml');
+  const root = document_.documentElement;
+  expect(root.localName).toBe('svg');
+  expect(document_.querySelectorAll('svg')).toHaveLength(1);
+
+  const paths = [...document_.querySelectorAll('path')];
+  expect(paths.length).toBeGreaterThanOrEqual(minPathCount);
+  for (const path of paths) {
+    expect(path.getAttribute('stroke-width')).toBe('1');
+    expect(path.getAttribute('vector-effect')).toBe('non-scaling-stroke');
+  }
+
+  return paths.map((path) => path.getAttribute('stroke'));
+};
 
 const readGltfSize = async (glbBytes: Uint8Array<ArrayBuffer>): Promise<[number, number, number]> => {
   const document = await new NodeIO().readBinary(glbBytes);
@@ -1227,8 +1254,165 @@ describe('ReplicadWorker', () => {
         });
 
         assertSuccess(result);
-        // Should contain SVG format geometry
-        expect(result.data.format).toBe('svg');
+        const svg = expectSvgContent(result.data);
+        expect(svg.startsWith('<svg')).toBe(true);
+        expect(svg).toContain('</svg>');
+        expectStandardReplicadSvgPaths(svg);
+      });
+
+      it('should render a projected drawing view with SVG path objects', async () => {
+        const result = await createGeometry({
+          files: {
+            'projection-drawing.ts': `
+              import { drawProjection, draw } from 'replicad';
+
+              export default function main() {
+                const shape = draw()
+                  .vLine(-10)
+                  .hLine(-5)
+                  .vLine(15)
+                  .customCorner(2)
+                  .hLine(15)
+                  .vLine(-5)
+                  .close()
+                  .sketchOnPlane()
+                  .extrude(10)
+                  .chamfer(5, (e) => e.inPlane("XY", 10).containsPoint([10, 1, 10]));
+
+                return { shape: drawProjection(shape, "front").visible, name: "Front" };
+              }
+            `,
+          },
+          mainFile: 'projection-drawing.ts',
+        });
+
+        assertSuccess(result, 'projection drawing');
+        const svg = expectSvgContent(result.data);
+        expect(svg.startsWith('<svg')).toBe(true);
+        expect(svg).toContain('</svg>');
+        expectStandardReplicadSvgPaths(svg);
+      });
+
+      it('should reject mixed 3D and projected SVG drawing output without path serialization errors', async () => {
+        const result = await createGeometry({
+          files: {
+            'projection-drawings.ts': `
+              import { drawProjection, draw } from 'replicad';
+
+              /* This follow the "first angle projection" convention
+               * https://en.wikipedia.org/wiki/Multiview_orthographic_projection#First-angle_projection
+               */
+              const descriptiveGeom = (shape) => {
+                return [
+                  { shape, name: "Shape to project" },
+                  { shape: drawProjection(shape, "front").visible, name: "Front" },
+                  { shape: drawProjection(shape, "back").visible, name: "Back" },
+                  { shape: drawProjection(shape, "top").visible, name: "Top" },
+                  { shape: drawProjection(shape, "bottom").visible, name: "Bottom" },
+                  { shape: drawProjection(shape, "left").visible, name: "Left" },
+                  { shape: drawProjection(shape, "right").visible, name: "Right" },
+                ];
+              };
+
+              const main = () => {
+                // This shape looks different from every angle
+                const shape = draw()
+                  .vLine(-10)
+                  .hLine(-5)
+                  .vLine(15)
+                  .customCorner(2)
+                  .hLine(15)
+                  .vLine(-5)
+                  .close()
+                  .sketchOnPlane()
+                  .extrude(10)
+                  .chamfer(5, (e) => e.inPlane("XY", 10).containsPoint([10, 1, 10]));
+
+                return descriptiveGeom(shape);
+              };
+
+              export default main;
+            `,
+          },
+          mainFile: 'projection-drawings.ts',
+        });
+
+        assertFailure(result, 'projection drawings');
+        expect(result.issues).toHaveLength(1);
+        expect(result.issues[0]).toMatchObject({
+          code: 'MIXED_RENDER_OUTPUT_UNSUPPORTED',
+          message: 'Kernel render produced mixed public geometry formats.',
+          severity: 'error',
+          type: 'runtime',
+        });
+        expect(result.issues.map((issue) => issue.message).join('\n')).not.toContain('replaceAll');
+      });
+
+      it('should render multiple colored 2D drawings as one SVG', async () => {
+        const result = await createGeometry({
+          files: {
+            'colored-drawings.ts': `
+              import { draw } from 'replicad';
+
+              export default function main() {
+                const spline = draw()
+                  .smoothSplineTo([20, 0], {
+                    startTangent: 50,
+                    startFactor: 1.8,
+                    endTangent: -50,
+                    endFactor: 1.8,
+                  })
+                  .done();
+
+                const spline2 = draw()
+                  .smoothSplineTo([10, 5])
+                  .smoothSplineTo([20, 0])
+                  .done();
+
+                const spline3 = draw()
+                  .lineTo([0, 0.1])
+                  .smoothSplineTo([10, 5])
+                  .smoothSplineTo([20, 0.4])
+                  .lineTo([20, 0])
+                  .done();
+
+                const spline4 = draw()
+                  .smoothSplineTo([0, 10], {
+                    startTangent: 180,
+                    startFactor: 2.63,
+                    endTangent: 0,
+                    endFactor: 2.63,
+                  })
+                  .done()
+                  .translate(10.0);
+
+                const arc = draw()
+                  .threePointsArcTo([0, 10], [-5, 5])
+                  .done()
+                  .translate(10, 0);
+
+                return [
+                  { shape: spline, color: "red" },
+                  { shape: spline2, color: "blue" },
+                  { shape: spline3, color: "green" },
+                  { shape: spline4, color: "black" },
+                  { shape: arc, color: "purple" },
+                ];
+              }
+            `,
+          },
+          mainFile: 'colored-drawings.ts',
+        });
+
+        assertSuccess(result, 'colored drawings');
+        const svg = expectSvgContent(result.data);
+        expect(svg).toContain('</svg>');
+        const strokes = expectStandardReplicadSvgPaths(svg, { minPathCount: 5 });
+        expect(strokes).toContain('#ff0000');
+        expect(strokes).toContain('#0000ff');
+        expect(strokes).toContain('#008000');
+        expect(strokes).toContain('#000000');
+        expect(strokes).toContain('#800080');
       });
     });
 

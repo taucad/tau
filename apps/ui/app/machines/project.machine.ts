@@ -37,6 +37,8 @@ export type ProjectContext = {
   viewGraphics: Map<string, ActorRefFrom<typeof graphicsMachine>>;
   /** Dynamic geometry units keyed by entry file path. Each is a headless CadMachine+KernelMachine. */
   geometryUnits: Map<string, ActorRefFrom<typeof cadMachine>>;
+  /** Geometry unit file paths that currently have geometry and at least one export route. */
+  exportableGeometryUnitPaths: Set<string>;
   /** The main entry file path from project.assets.mechanical.main. Set after project loads. */
   mainEntryFile: string;
   logRef: ActorRefFrom<typeof logMachine>;
@@ -150,6 +152,7 @@ type ProjectEventInternal =
   | { type: 'loadModel' }
   | { type: 'setMainFile'; path: string }
   | { type: 'createGeometryUnit'; entryFile: string }
+  | { type: 'geometryUnit.exportAvailabilityChanged'; actorId: string; available: boolean }
   | { type: 'openInViewer'; entryFile: string }
   | { type: 'destroyGeometryUnit'; entryFile: string }
   | {
@@ -407,11 +410,40 @@ export const projectMachine = setup({
     respawnStatefulActors: assign({
       // Reset geometry units - the primary one will be created during initializeKernelIfNeeded after project load
       geometryUnits: () => new Map(),
+      exportableGeometryUnitPaths: () => new Set(),
       mainEntryFile: () => '',
       // Reset view graphics - they'll be created by Dockview viewer panels
       viewGraphics: () => new Map(),
     }),
-    initializeKernelIfNeeded: enqueueActions(({ enqueue, context }) => {
+    updateGeometryUnitExportAvailability: assign(({ context, event }) => {
+      assertEvent(event, 'geometryUnit.exportAvailabilityChanged');
+
+      let entryFile: string | undefined;
+      for (const [candidateEntryFile, actor] of context.geometryUnits) {
+        if (actor.id === event.actorId) {
+          entryFile = candidateEntryFile;
+          break;
+        }
+      }
+
+      if (!entryFile) {
+        return {};
+      }
+
+      const isCurrentlyExportable = context.exportableGeometryUnitPaths.has(entryFile);
+      if (isCurrentlyExportable === event.available) {
+        return {};
+      }
+
+      const next = new Set(context.exportableGeometryUnitPaths);
+      if (event.available) {
+        next.add(entryFile);
+      } else {
+        next.delete(entryFile);
+      }
+      return { exportableGeometryUnitPaths: next };
+    }),
+    initializeKernelIfNeeded: enqueueActions(({ enqueue, context, self }) => {
       if (!context.shouldLoadModelOnStart) {
         return;
       }
@@ -439,6 +471,7 @@ export const projectMachine = setup({
             id: `cad-${context.projectId}-${mainFile.replaceAll('/', '-')}`,
             input: {
               shouldInitializeKernelOnStart: false,
+              parentRef: self,
               logRef: context.logRef,
               fileManagerRef: context.fileManagerRef,
               kernelOptionsFactory: context.kernelOptionsFactory,
@@ -459,7 +492,7 @@ export const projectMachine = setup({
         });
       }
     }),
-    loadModel: enqueueActions(({ enqueue, context }) => {
+    loadModel: enqueueActions(({ enqueue, context, self }) => {
       const mechanicalAsset = context.project?.assets.mechanical;
       if (!mechanicalAsset) {
         return;
@@ -482,6 +515,7 @@ export const projectMachine = setup({
             id: `cad-${context.projectId}-${mainFile.replaceAll('/', '-')}`,
             input: {
               shouldInitializeKernelOnStart: false,
+              parentRef: self,
               logRef: context.logRef,
               fileManagerRef: context.fileManagerRef,
               kernelOptionsFactory: context.kernelOptionsFactory,
@@ -502,7 +536,7 @@ export const projectMachine = setup({
         });
       }
     }),
-    createGeometryUnit: enqueueActions(({ enqueue, context, event }) => {
+    createGeometryUnit: enqueueActions(({ enqueue, context, event, self }) => {
       assertEvent(event, 'createGeometryUnit');
 
       // No-op if a geometry unit already exists for this entry file
@@ -516,6 +550,7 @@ export const projectMachine = setup({
           id: `cad-${context.projectId}-${event.entryFile.replaceAll('/', '-')}`,
           input: {
             shouldInitializeKernelOnStart: true,
+            parentRef: self,
             logRef: context.logRef,
             fileManagerRef: context.fileManagerRef,
             kernelOptionsFactory: context.kernelOptionsFactory,
@@ -558,8 +593,11 @@ export const projectMachine = setup({
       enqueue.assign(({ context }) => {
         const newUnits = new Map(context.geometryUnits);
         newUnits.delete(event.entryFile);
+        const exportableGeometryUnitPaths = new Set(context.exportableGeometryUnitPaths);
+        exportableGeometryUnitPaths.delete(event.entryFile);
         return {
           geometryUnits: newUnits,
+          exportableGeometryUnitPaths,
           ...(context.mainEntryFile === event.entryFile ? { mainEntryFile: '' } : {}),
         };
       });
@@ -603,12 +641,26 @@ export const projectMachine = setup({
           }
         }
 
+        // Exportable geometry units: Set<entryFile>
+        const newExportablePaths = new Set(context.exportableGeometryUnitPaths);
+        let mutatedExportablePaths = false;
+        for (const key of context.exportableGeometryUnitPaths) {
+          if (matches(key)) {
+            newExportablePaths.delete(key);
+            newExportablePaths.add(rewrite(key));
+            mutatedExportablePaths = true;
+          }
+        }
+
         const next: Partial<ProjectContext> = {};
         if (mutatedEntries) {
           next.parameterEntries = newEntries;
         }
         if (mutatedUnits) {
           next.geometryUnits = newUnits;
+        }
+        if (mutatedExportablePaths) {
+          next.exportableGeometryUnitPaths = newExportablePaths;
         }
         if (matches(context.mainEntryFile)) {
           next.mainEntryFile = rewrite(context.mainEntryFile);
@@ -650,10 +702,13 @@ export const projectMachine = setup({
       enqueue.assign(({ context }) => {
         const newUnits = new Map(context.geometryUnits);
         newUnits.delete(path);
+        const exportableGeometryUnitPaths = new Set(context.exportableGeometryUnitPaths);
+        exportableGeometryUnitPaths.delete(path);
         const newEntries = new Map(context.parameterEntries);
         newEntries.delete(path);
         return {
           geometryUnits: newUnits,
+          exportableGeometryUnitPaths,
           parameterEntries: newEntries,
           ...(context.mainEntryFile === path ? { mainEntryFile: '' } : {}),
         };
@@ -678,6 +733,12 @@ export const projectMachine = setup({
             newUnits.delete(key);
           }
         }
+        const newExportablePaths = new Set(context.exportableGeometryUnitPaths);
+        for (const key of context.exportableGeometryUnitPaths) {
+          if (matches(key)) {
+            newExportablePaths.delete(key);
+          }
+        }
         for (const key of context.parameterEntries.keys()) {
           if (matches(key)) {
             newEntries.delete(key);
@@ -685,6 +746,7 @@ export const projectMachine = setup({
         }
         return {
           geometryUnits: newUnits,
+          exportableGeometryUnitPaths: newExportablePaths,
           parameterEntries: newEntries,
           ...(matches(context.mainEntryFile) ? { mainEntryFile: '' } : {}),
         };
@@ -819,6 +881,7 @@ export const projectMachine = setup({
     // Compilation units are created dynamically after project loads (when we know the main file).
     // The primary geometry unit is created by initializeKernelIfNeeded.
     const geometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
+    const exportableGeometryUnitPaths = new Set<string>();
 
     // View graphics are created dynamically by Dockview viewer panels.
     const viewGraphics = new Map<string, ActorRefFrom<typeof graphicsMachine>>();
@@ -833,13 +896,19 @@ export const projectMachine = setup({
       fileManagerRef,
       viewGraphics,
       geometryUnits,
+      exportableGeometryUnitPaths,
       mainEntryFile: '',
       logRef,
       parameterEntries: new Map(),
       dirtyParameterPaths: new Set(),
     };
   },
-  on: {},
+  on: {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- XState event name
+    'geometryUnit.exportAvailabilityChanged': {
+      actions: 'updateGeometryUnitExportAvailability',
+    },
+  },
   exit: ['stopStatefulActors'],
   initial: 'checkEnvironment',
   states: {

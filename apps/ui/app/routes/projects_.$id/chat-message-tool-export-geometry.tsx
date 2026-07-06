@@ -27,7 +27,7 @@ import { menuItemVariants } from '#components/ui/menu.variants.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
-import { deriveAvailableFormats } from '#routes/projects_.$id/export-formats.utils.js';
+import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
 import { cn } from '#utils/ui.utils.js';
 
 /** Matches {@link chat-tool-file-operation.tsx} action buttons — label hidden until `@xs/code`. */

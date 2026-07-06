@@ -18,6 +18,7 @@ import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { logMachine } from '#machines/logs.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
+import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
 import type {
   AppRuntimeClient,
   AppRuntimeExportFormat,
@@ -35,6 +36,7 @@ export type CadContext = {
   codeIssues: CodeIssue[];
   exportedBlob: Blob | undefined;
   shouldInitializeKernelOnStart: boolean;
+  parentRef?: AnyActorRef;
   logActorRef?: ActorRefFrom<typeof logMachine>;
   fileManagerRef?: ActorRefFrom<typeof fileManagerMachine>;
   kernelOptionsFactory: LazyKernelOptionsFactory;
@@ -95,6 +97,7 @@ type CadEmitted =
 
 type CadInput = {
   shouldInitializeKernelOnStart: boolean;
+  parentRef?: AnyActorRef;
   logRef?: ActorRefFrom<typeof logMachine>;
   fileManagerRef?: ActorRefFrom<typeof fileManagerMachine>;
   kernelOptionsFactory: LazyKernelOptionsFactory;
@@ -203,6 +206,9 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   return { type: 'kernelConnected', client, cleanups };
 });
 
+const hasExportAvailability = (context: CadContext): boolean =>
+  Boolean(context.geometry) && deriveAvailableFormats(context.kernelClient, context.activeKernelId).length > 0;
+
 /**
  * CAD Machine -- Autonomous Kernel Topology
  *
@@ -240,6 +246,17 @@ export const cadMachine = setup({
           options: { level: event.level, origin: event.origin, data: event.data },
         });
       }
+    }),
+    notifyExportAvailability: enqueueActions(({ enqueue, context, self }) => {
+      if (!context.parentRef) {
+        return;
+      }
+
+      enqueue.sendTo(context.parentRef, {
+        type: 'geometryUnit.exportAvailabilityChanged',
+        actorId: self.id,
+        available: hasExportAvailability(context),
+      });
     }),
     trackProgress: assign({
       renderPhase({ event }) {
@@ -476,6 +493,7 @@ export const cadMachine = setup({
     codeIssues: [],
     exportedBlob: undefined,
     shouldInitializeKernelOnStart: input.shouldInitializeKernelOnStart,
+    parentRef: input.parentRef,
     logActorRef: input.logRef,
     fileManagerRef: input.fileManagerRef,
     kernelOptionsFactory: input.kernelOptionsFactory,
@@ -526,36 +544,39 @@ export const cadMachine = setup({
       },
       on: {
         kernelConnected: {
-          actions: enqueueActions(({ enqueue, context, event }) => {
-            enqueue.assign({
-              kernelClient: event.client,
-              eventCleanups: event.cleanups,
-            });
-            void event.client.setOptions({ renderTimeout: context.renderTimeout });
-            if (context.file) {
-              void event.client.render({ source: { path: context.file }, parameters: context.parameters });
-            }
-          }),
+          actions: [
+            enqueueActions(({ enqueue, context, event }) => {
+              enqueue.assign({
+                kernelClient: event.client,
+                eventCleanups: event.cleanups,
+              });
+              void event.client.setOptions({ renderTimeout: context.renderTimeout });
+              if (context.file) {
+                void event.client.render({ source: { path: context.file }, parameters: context.parameters });
+              }
+            }),
+            'notifyExportAvailability',
+          ],
         },
-        initializeModel: { actions: ['bumpRequestedRenderId', 'initializeModel'] },
-        setFile: { actions: ['bumpRequestedRenderId', 'setFile'] },
+        initializeModel: { actions: ['bumpRequestedRenderId', 'initializeModel', 'notifyExportAvailability'] },
+        setFile: { actions: ['bumpRequestedRenderId', 'setFile', 'notifyExportAvailability'] },
         setParameters: { actions: ['bumpRequestedRenderId', 'setParameters'] },
         setRenderTimeout: { actions: ['setRenderTimeout'] },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
         kernelTelemetry: { actions: 'storeTelemetry' },
-        capabilitiesUpdated: { actions: 'setCapabilities' },
-        activeKernelChanged: { actions: 'setActiveKernelId' },
+        capabilitiesUpdated: { actions: ['setCapabilities', 'notifyExportAvailability'] },
+        activeKernelChanged: { actions: ['setActiveKernelId', 'notifyExportAvailability'] },
       },
     },
 
     idle: {
       on: {
         initializeModel: {
-          actions: ['bumpRequestedRenderId', 'initializeModel', 'forwardInitializeModel'],
+          actions: ['bumpRequestedRenderId', 'initializeModel', 'notifyExportAvailability', 'forwardInitializeModel'],
         },
         setFile: {
-          actions: ['bumpRequestedRenderId', 'setFile', 'forwardSetFile'],
+          actions: ['bumpRequestedRenderId', 'setFile', 'notifyExportAvailability', 'forwardSetFile'],
         },
         setParameters: {
           actions: ['bumpRequestedRenderId', 'setParameters'],
@@ -567,14 +588,14 @@ export const cadMachine = setup({
         exportGeometry: { actions: 'dispatchExport' },
         geometryExported: { actions: 'setExportedBlob' },
         geometryExportFailed: { actions: 'setExportError' },
-        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId'] },
+        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'] },
         parametersParsed: { actions: 'setDefaultParameters' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
         kernelTelemetry: { actions: 'storeTelemetry' },
-        capabilitiesUpdated: { actions: 'setCapabilities' },
-        activeKernelChanged: { actions: 'setActiveKernelId' },
+        capabilitiesUpdated: { actions: ['setCapabilities', 'notifyExportAvailability'] },
+        activeKernelChanged: { actions: ['setActiveKernelId', 'notifyExportAvailability'] },
         stateChanged: [
           { guard: ({ event }) => event.state === 'buffering', target: 'buffering' },
           { guard: ({ event }) => event.state === 'rendering', target: 'rendering' },
@@ -586,10 +607,10 @@ export const cadMachine = setup({
     buffering: {
       on: {
         initializeModel: {
-          actions: ['bumpRequestedRenderId', 'initializeModel', 'forwardInitializeModel'],
+          actions: ['bumpRequestedRenderId', 'initializeModel', 'notifyExportAvailability', 'forwardInitializeModel'],
         },
         setFile: {
-          actions: ['bumpRequestedRenderId', 'setFile', 'forwardSetFile'],
+          actions: ['bumpRequestedRenderId', 'setFile', 'notifyExportAvailability', 'forwardSetFile'],
         },
         setParameters: {
           actions: ['bumpRequestedRenderId', 'setParameters'],
@@ -601,14 +622,14 @@ export const cadMachine = setup({
         exportGeometry: { actions: 'dispatchExport' },
         geometryExported: { actions: 'setExportedBlob' },
         geometryExportFailed: { actions: 'setExportError' },
-        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId'] },
+        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'] },
         parametersParsed: { actions: 'setDefaultParameters' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
         kernelTelemetry: { actions: 'storeTelemetry' },
-        capabilitiesUpdated: { actions: 'setCapabilities' },
-        activeKernelChanged: { actions: 'setActiveKernelId' },
+        capabilitiesUpdated: { actions: ['setCapabilities', 'notifyExportAvailability'] },
+        activeKernelChanged: { actions: ['setActiveKernelId', 'notifyExportAvailability'] },
         stateChanged: [
           { guard: ({ event }) => event.state === 'rendering', target: 'rendering' },
           { guard: ({ event }) => event.state === 'idle', target: 'idle' },
@@ -621,10 +642,10 @@ export const cadMachine = setup({
       exit: assign({ renderPhase: () => undefined }),
       on: {
         initializeModel: {
-          actions: ['bumpRequestedRenderId', 'initializeModel', 'forwardInitializeModel'],
+          actions: ['bumpRequestedRenderId', 'initializeModel', 'notifyExportAvailability', 'forwardInitializeModel'],
         },
         setFile: {
-          actions: ['bumpRequestedRenderId', 'setFile', 'forwardSetFile'],
+          actions: ['bumpRequestedRenderId', 'setFile', 'notifyExportAvailability', 'forwardSetFile'],
         },
         setParameters: {
           actions: ['bumpRequestedRenderId', 'setParameters'],
@@ -636,14 +657,14 @@ export const cadMachine = setup({
         exportGeometry: { actions: 'dispatchExport' },
         geometryExported: { actions: 'setExportedBlob' },
         geometryExportFailed: { actions: 'setExportError' },
-        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId'] },
+        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'] },
         parametersParsed: { actions: 'setDefaultParameters' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
         kernelTelemetry: { actions: 'storeTelemetry' },
-        capabilitiesUpdated: { actions: 'setCapabilities' },
-        activeKernelChanged: { actions: 'setActiveKernelId' },
+        capabilitiesUpdated: { actions: ['setCapabilities', 'notifyExportAvailability'] },
+        activeKernelChanged: { actions: ['setActiveKernelId', 'notifyExportAvailability'] },
         stateChanged: [
           { guard: ({ event }) => event.state === 'buffering', target: 'buffering' },
           { guard: ({ event }) => event.state === 'idle', target: 'idle' },
@@ -656,11 +677,11 @@ export const cadMachine = setup({
       on: {
         initializeModel: {
           target: 'connecting',
-          actions: ['destroyKernel', 'bumpRequestedRenderId', 'initializeModel'],
+          actions: ['destroyKernel', 'bumpRequestedRenderId', 'initializeModel', 'notifyExportAvailability'],
         },
         setFile: {
           target: 'connecting',
-          actions: ['destroyKernel', 'bumpRequestedRenderId', 'setFile'],
+          actions: ['destroyKernel', 'bumpRequestedRenderId', 'setFile', 'notifyExportAvailability'],
         },
         setParameters: {
           actions: ['bumpRequestedRenderId', 'setParameters'],
@@ -672,14 +693,14 @@ export const cadMachine = setup({
         exportGeometry: { actions: 'dispatchExport' },
         geometryExported: { actions: 'setExportedBlob' },
         geometryExportFailed: { actions: 'setExportError' },
-        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId'] },
+        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'] },
         parametersParsed: { actions: 'setDefaultParameters' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
         kernelTelemetry: { actions: 'storeTelemetry' },
-        capabilitiesUpdated: { actions: 'setCapabilities' },
-        activeKernelChanged: { actions: 'setActiveKernelId' },
+        capabilitiesUpdated: { actions: ['setCapabilities', 'notifyExportAvailability'] },
+        activeKernelChanged: { actions: ['setActiveKernelId', 'notifyExportAvailability'] },
         stateChanged: [
           { guard: ({ event }) => event.state === 'buffering', target: 'buffering' },
           { guard: ({ event }) => event.state === 'idle', target: 'idle' },

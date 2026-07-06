@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { FormatEntry } from '#routes/projects_.$id/export-formats.utils.js';
+import type { FormatEntry } from '#utils/export-formats.utils.js';
 
 const { ExportFormatGrid } = await import('./export-format-grid.js');
 

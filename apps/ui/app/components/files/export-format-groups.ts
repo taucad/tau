@@ -1,4 +1,4 @@
-import type { FormatEntry } from '#routes/projects_.$id/export-formats.utils.js';
+import type { FormatEntry } from '#utils/export-formats.utils.js';
 
 export type ExportFormatGroup = {
   readonly name: string;

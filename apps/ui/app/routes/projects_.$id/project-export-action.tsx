@@ -5,9 +5,8 @@ import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 
 export function ProjectExportAction(): React.JSX.Element {
-  const { geometryUnits, mainEntryFile, editorRef } = useProject();
-  const cadActor = geometryUnits.get(mainEntryFile);
-  const hasGeometry = useSelector(cadActor, (state) => Boolean(state?.context.geometry));
+  const { projectRef, editorRef } = useProject();
+  const hasExportableGeometry = useSelector(projectRef, (state) => state.context.exportableGeometryUnitPaths.size > 0);
 
   const handleClick = (): void => {
     editorRef.send({
@@ -22,13 +21,19 @@ export function ProjectExportAction(): React.JSX.Element {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant='secondary' size='sm' className='max-md:size-8' disabled={!hasGeometry} onClick={handleClick}>
+        <Button
+          variant='secondary'
+          size='sm'
+          className='max-md:size-8'
+          disabled={!hasExportableGeometry}
+          onClick={handleClick}
+        >
           <DownloadIcon className='size-3.5' aria-hidden />
           <span className='sr-only sm:hidden'>Export</span>
           <span className='hidden sm:inline'>Export</span>
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{hasGeometry ? 'Open exporter' : 'Generate geometry first to export'}</TooltipContent>
+      <TooltipContent>{hasExportableGeometry ? 'Open exporter' : 'Generate exportable geometry first'}</TooltipContent>
     </Tooltip>
   );
 }

@@ -321,6 +321,7 @@ describe('projectMachine', () => {
         shouldLoadModelOnStart: false,
       });
       expect(actor.getSnapshot().context.geometryUnits.size).toBe(0);
+      expect(actor.getSnapshot().context.exportableGeometryUnitPaths.size).toBe(0);
       actor.stop();
     });
 
@@ -535,6 +536,120 @@ describe('projectMachine', () => {
       expect(actor.getSnapshot().context.geometryUnits.has('viewer.ts')).toBe(true);
       expect(emitted).toHaveLength(1);
       expect(emitted[0]).toMatchObject({ entryFile: 'viewer.ts' });
+      actor.stop();
+    });
+
+    it('should add an exportable geometry unit path from a child availability event', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
+      const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
+      expect(unit).toBeDefined();
+
+      actor.send({
+        type: 'geometryUnit.exportAvailabilityChanged',
+        actorId: unit!.id,
+        available: true,
+      });
+
+      expect(actor.getSnapshot().context.exportableGeometryUnitPaths).toEqual(new Set(['main.ts']));
+      actor.stop();
+    });
+
+    it('should track only the exportable secondary geometry unit when the main unit is unavailable', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
+      actor.send({ type: 'createGeometryUnit', entryFile: 'helper.ts' });
+      const mainUnit = actor.getSnapshot().context.geometryUnits.get('main.ts');
+      const helperUnit = actor.getSnapshot().context.geometryUnits.get('helper.ts');
+      expect(mainUnit).toBeDefined();
+      expect(helperUnit).toBeDefined();
+
+      actor.send({
+        type: 'geometryUnit.exportAvailabilityChanged',
+        actorId: mainUnit!.id,
+        available: false,
+      });
+      actor.send({
+        type: 'geometryUnit.exportAvailabilityChanged',
+        actorId: helperUnit!.id,
+        available: true,
+      });
+
+      expect(actor.getSnapshot().context.exportableGeometryUnitPaths).toEqual(new Set(['helper.ts']));
+      actor.stop();
+    });
+
+    it('should remove an exportable geometry unit path when availability becomes false', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
+      const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
+      expect(unit).toBeDefined();
+
+      actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: true });
+      actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: false });
+
+      expect(actor.getSnapshot().context.exportableGeometryUnitPaths.size).toBe(0);
+      actor.stop();
+    });
+
+    it('should ignore availability events from unknown geometry units', async () => {
+      const actor = await startAndLoad();
+
+      actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: 'missing-actor', available: true });
+
+      expect(actor.getSnapshot().context.exportableGeometryUnitPaths.size).toBe(0);
+      actor.stop();
+    });
+
+    it('should clear exportability when destroying a geometry unit', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
+      const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
+      expect(unit).toBeDefined();
+      actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: true });
+
+      actor.send({ type: 'destroyGeometryUnit', entryFile: 'main.ts' });
+
+      expect(actor.getSnapshot().context.exportableGeometryUnitPaths.size).toBe(0);
+      actor.stop();
+    });
+
+    it('should rekey exportability when a geometry unit file moves', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
+      const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
+      expect(unit).toBeDefined();
+      actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: true });
+
+      actor.send({ type: 'fileMoved', oldPath: 'main.ts', newPath: 'renamed.ts' });
+
+      expect(actor.getSnapshot().context.exportableGeometryUnitPaths).toEqual(new Set(['renamed.ts']));
+      actor.stop();
+    });
+
+    it('should clear exportability when a geometry unit file is deleted', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
+      const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
+      expect(unit).toBeDefined();
+      actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: true });
+
+      actor.send({ type: 'fileDeleted', path: 'main.ts' });
+
+      expect(actor.getSnapshot().context.exportableGeometryUnitPaths.size).toBe(0);
+      actor.stop();
+    });
+
+    it('should clear exportability when a geometry unit directory is deleted', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryFile: 'parts/main.ts' });
+      const unit = actor.getSnapshot().context.geometryUnits.get('parts/main.ts');
+      expect(unit).toBeDefined();
+      actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: true });
+
+      actor.send({ type: 'directoryDeleted', path: 'parts' });
+
+      expect(actor.getSnapshot().context.exportableGeometryUnitPaths.size).toBe(0);
       actor.stop();
     });
   });

@@ -37,8 +37,8 @@ import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '#components/ui/tooltip.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { sortGeometryUnitEntries } from '#routes/projects_.$id/geometry-unit.utils.js';
-import type { FormatEntry } from '#routes/projects_.$id/export-formats.utils.js';
-import { deriveAvailableFormats, getFormatInfo } from '#routes/projects_.$id/export-formats.utils.js';
+import type { FormatEntry } from '#utils/export-formats.utils.js';
+import { deriveAvailableFormats, getFormatInfo } from '#utils/export-formats.utils.js';
 import { groupExportFormatsByFidelity } from '#components/files/export-format-groups.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { widgets, templates as rjsfTemplates } from '#components/geometry/parameters/rjsf-theme.js';
@@ -765,24 +765,16 @@ export const ChatConverter = memo(function (properties: {
         </FloatingPanelContentHeader>
 
         <FloatingPanelContentBody className='p-2'>
-          {!geometry ? (
-            <EmptyItems className='m-0'>
-              <div className='mb-3 rounded-full bg-muted/50 p-2'>
-                <Info className='size-6 text-muted-foreground' strokeWidth={1.5} />
-              </div>
-              <h3 className='mb-1 text-base font-medium'>No geometry to export</h3>
-              <p className='text-muted-foreground'>Generate or compute geometry first to enable export options</p>
-            </EmptyItems>
-          ) : (
-            <div className='flex flex-col gap-3 px-1'>
-              <GeometryUnitSelector
-                entries={cuEntries}
-                selectedEntryFile={selectedEntryFile}
-                mainEntryFile={mainEntryFile}
-                onSelect={setSelectedEntryFile}
-              />
+          <div className='flex flex-col gap-3 px-1'>
+            <GeometryUnitSelector
+              entries={cuEntries}
+              selectedEntryFile={selectedEntryFile}
+              mainEntryFile={mainEntryFile}
+              onSelect={setSelectedEntryFile}
+            />
 
-              {availableFormats.length > 0 ? (
+            {geometry ? (
+              availableFormats.length > 0 ? (
                 <>
                   <FormatGrid
                     formats={availableFormats}
@@ -849,9 +841,19 @@ export const ChatConverter = memo(function (properties: {
                 <p className='text-sm text-muted-foreground'>
                   No export formats available. The kernel is still initializing.
                 </p>
-              )}
-            </div>
-          )}
+              )
+            ) : (
+              <EmptyItems className='m-0'>
+                <div className='mb-3 rounded-full bg-muted/50 p-2'>
+                  <Info className='size-6 text-muted-foreground' strokeWidth={1.5} />
+                </div>
+                <h3 className='mb-1 text-base font-medium'>No geometry to export for this file</h3>
+                <p className='wrap-break-word text-muted-foreground'>
+                  Generate or compute geometry for {selectedEntryFile} to enable export options
+                </p>
+              </EmptyItems>
+            )}
+          </div>
         </FloatingPanelContentBody>
       </FloatingPanelContent>
     </FloatingPanel>

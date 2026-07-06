@@ -6,8 +6,8 @@ import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '#components/ui/tooltip.js';
 import { menuItemVariants } from '#components/ui/menu.variants.js';
 import { groupExportFormatsByFidelity } from '#components/files/export-format-groups.js';
-import type { FormatEntry } from '#routes/projects_.$id/export-formats.utils.js';
-import { getFormatInfo } from '#routes/projects_.$id/export-formats.utils.js';
+import type { FormatEntry } from '#utils/export-formats.utils.js';
+import { getFormatInfo } from '#utils/export-formats.utils.js';
 import { cn } from '#utils/ui.utils.js';
 
 const formatGridCols = 'grid grid-cols-1 gap-1.5 @[10rem]:grid-cols-2 @[16rem]:grid-cols-3';

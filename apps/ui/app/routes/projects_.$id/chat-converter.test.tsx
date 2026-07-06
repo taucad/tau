@@ -16,6 +16,7 @@ vi.mock('@xstate/react', () => ({
 
 let mockCapabilities: CapabilitiesManifest | undefined;
 let mockGeometry: unknown | undefined;
+let mockHelperGeometry: unknown | undefined;
 let mockActiveKernelId: string | undefined = 'replicad';
 
 function fidelityRank(fidelity: ExportRoute['fidelity']): number {
@@ -71,6 +72,17 @@ const mockCadRef = {
   getSnapshot: vi.fn(() => ({
     context: {
       geometry: mockGeometry,
+      capabilities: mockCapabilities,
+      activeKernelId: mockActiveKernelId,
+      kernelClient: mockKernelClient,
+    },
+  })),
+} as unknown as ActorRefFrom<typeof cadMachine>;
+
+const mockHelperCadRef = {
+  getSnapshot: vi.fn(() => ({
+    context: {
+      geometry: mockHelperGeometry,
       capabilities: mockCapabilities,
       activeKernelId: mockActiveKernelId,
       kernelClient: mockKernelClient,
@@ -217,16 +229,30 @@ describe('ChatConverter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGeometry = { format: 'gltf', content: new Uint8Array([1]) };
+    mockHelperGeometry = { format: 'gltf', content: new Uint8Array([2]) };
     mockCapabilities = createCapabilities();
     mockActiveKernelId = 'replicad';
     mockContentService = {};
     mockReadFile.mockRejectedValue(new Error('File not found'));
+    mockGeometryUnits.clear();
+    mockGeometryUnits.set('main.ts', mockCadRef);
   });
 
   it('should show empty state when no geometry is rendered', () => {
     mockGeometry = undefined;
     render(<ChatConverter isExpanded />);
-    expect(screen.getByText('No geometry to export')).toBeDefined();
+    expect(screen.getByText('No geometry to export for this file')).toBeDefined();
+  });
+
+  it('should keep the geometry unit selector visible when the selected file has no geometry', () => {
+    mockGeometry = undefined;
+    mockGeometryUnits.set('helper.ts', mockHelperCadRef);
+
+    render(<ChatConverter isExpanded />);
+
+    expect(screen.getByText('Select file to export')).toBeDefined();
+    expect(screen.getByText('No geometry to export for this file')).toBeDefined();
+    expect(screen.queryByRole('button', { name: /glb/i })).toBeNull();
   });
 
   it('should derive formats solely from manifest routes', () => {

@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { createActor, waitFor } from 'xstate';
-import type { KernelIssue, TelemetryEntry } from '@taucad/runtime';
+import { assign, createActor, setup, waitFor } from 'xstate';
+import type { CapabilitiesManifest, ExportRoute, KernelIssue, TelemetryEntry } from '@taucad/runtime';
 import { createMockRuntimeClient } from '@taucad/runtime/testing';
 import type { Geometry, GeometryFile } from '@taucad/types';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
@@ -35,6 +35,7 @@ function createTestActor(options?: {
   }>;
   connectError?: Error;
   shouldInitializeKernelOnStart?: boolean;
+  parentRef?: CadContext['parentRef'];
 }) {
   const mockClient = createMockRuntimeClient() as AppRuntimeClient;
   const cleanups: Array<() => void> = [];
@@ -62,6 +63,7 @@ function createTestActor(options?: {
   const actor = createActor(machine, {
     input: {
       shouldInitializeKernelOnStart: options?.shouldInitializeKernelOnStart ?? false,
+      parentRef: options?.parentRef,
       kernelOptionsFactory,
     },
   });
@@ -85,6 +87,61 @@ const stubFile: GeometryFile = { path: '/projects/test', filename: 'main.ts' };
 const stubGeometry: Geometry = { format: 'gltf', content: new Uint8Array(0), hash: 'stub' };
 
 const stubIssues: KernelIssue[] = [{ message: 'test issue', code: 'RUNTIME', type: 'runtime', severity: 'warning' }];
+
+const stubExportRoute: ExportRoute = {
+  targetFormat: 'glb',
+  kernelId: 'replicad',
+  sourceFormat: 'gltf',
+  fidelity: 'mesh',
+  schema: {},
+  defaults: {},
+};
+
+const stubCapabilities: CapabilitiesManifest = {
+  routes: [stubExportRoute],
+  renderSchemas: {},
+};
+
+type ExportAvailabilityEvent = {
+  type: 'geometryUnit.exportAvailabilityChanged';
+  actorId: string;
+  available: boolean;
+};
+
+function createParentActor() {
+  const parentMachine = setup({
+    types: {
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
+      context: {} as { events: ExportAvailabilityEvent[] },
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
+      events: {} as ExportAvailabilityEvent,
+    },
+    actions: {
+      recordAvailability: assign({
+        events: ({ context, event }) => [...context.events, event],
+      }),
+    },
+  }).createMachine({
+    context: { events: [] },
+    on: {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- XState event name
+      'geometryUnit.exportAvailabilityChanged': {
+        actions: 'recordAvailability',
+      },
+    },
+  });
+
+  return createActor(parentMachine).start();
+}
+
+function createExportableRuntimeClient(): AppRuntimeClient {
+  const client = createMockRuntimeClient() as AppRuntimeClient;
+  Object.defineProperty(client, 'capabilities', { value: stubCapabilities, configurable: true });
+  vi.mocked(client.bestRouteFor).mockImplementation((format) =>
+    format === stubExportRoute.targetFormat ? stubExportRoute : undefined,
+  );
+  return client;
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -370,6 +427,68 @@ describe('cadMachine', () => {
       expect(emitted).toHaveLength(1);
       expect(emitted[0]).toMatchObject({ type: 'geometryEvaluated', geometry: stubGeometry });
       actor.stop();
+    });
+
+    it('should keep running availability-affecting transitions without a parentRef', async () => {
+      const mockClient = createExportableRuntimeClient();
+      const { actor } = await startAndConnect({
+        connectResult: async () => ({ type: 'kernelConnected', client: mockClient, cleanups: [] }),
+      });
+
+      actor.send({ type: 'activeKernelChanged', kernelId: 'replicad' });
+      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
+
+      expect(actor.getSnapshot().context.geometry).toBe(stubGeometry);
+      expect(actor.getSnapshot().context.activeKernelId).toBe('replicad');
+      actor.stop();
+    });
+
+    it('should notify the parentRef when export availability becomes true', async () => {
+      const parentRef = createParentActor();
+      const mockClient = createExportableRuntimeClient();
+      const { actor } = await startAndConnect({
+        parentRef,
+        connectResult: async () => ({ type: 'kernelConnected', client: mockClient, cleanups: [] }),
+      });
+
+      actor.send({ type: 'activeKernelChanged', kernelId: 'replicad' });
+      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
+
+      await waitFor(parentRef, (state) => state.context.events.some((event) => event.available));
+      const availableEvent = parentRef.getSnapshot().context.events.find((event) => event.available);
+      expect(availableEvent).toEqual({
+        type: 'geometryUnit.exportAvailabilityChanged',
+        actorId: actor.id,
+        available: true,
+      });
+
+      actor.stop();
+      parentRef.stop();
+    });
+
+    it('should notify the parentRef when initializeModel clears export availability', async () => {
+      const parentRef = createParentActor();
+      const mockClient = createExportableRuntimeClient();
+      const { actor } = await startAndConnect({
+        parentRef,
+        connectResult: async () => ({ type: 'kernelConnected', client: mockClient, cleanups: [] }),
+      });
+
+      actor.send({ type: 'activeKernelChanged', kernelId: 'replicad' });
+      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
+      await waitFor(parentRef, (state) => state.context.events.some((event) => event.available));
+
+      actor.send({ type: 'initializeModel', file: stubFile });
+
+      await waitFor(parentRef, (state) => state.context.events.at(-1)?.available === false);
+      expect(parentRef.getSnapshot().context.events.at(-1)).toEqual({
+        type: 'geometryUnit.exportAvailabilityChanged',
+        actorId: actor.id,
+        available: false,
+      });
+
+      actor.stop();
+      parentRef.stop();
     });
   });
 

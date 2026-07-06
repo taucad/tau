@@ -76,6 +76,7 @@ const parseLength = (value: string | undefined): number | undefined => {
 };
 
 const parseSvgDocument = (content: string): ParsedSvgDocument => {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- DOMPurify API.
   const sanitized = DOMPurify.sanitize(content, { USE_PROFILES: { svg: true } });
   const document_ = new DOMParser().parseFromString(sanitized, 'image/svg+xml');
   const parserError = document_.querySelector('parsererror');
@@ -212,7 +213,7 @@ export function SvgViewer({ geometry, enableGrid = true, enableAxes = true, defa
       >
         {enableGrid ? <SvgGrid viewBox={viewBox} /> : null}
         {enableAxes ? <SvgAxes viewBox={viewBox} /> : null}
-        {/* eslint-disable-next-line react/no-danger -- DOMPurify sanitizes the SVG document before injection. */}
+        {/* oxlint-disable-next-line react/no-danger -- DOMPurify sanitizes the SVG document before injection. */}
         <g data-slot='geometry' dangerouslySetInnerHTML={{ __html: innerHtml }} />
       </svg>
       <SvgActorBridge svgRef={svgRef} />

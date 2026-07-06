@@ -33,6 +33,9 @@ groups:
       - FreeCAD
       - OCCT-Light
       - OpenJSCAD.org
+      - PicoGK
+      - PicoGKRuntime
+      - openvdb
   slicers:
     description: 3D printer slicer applications
     repos:
@@ -158,6 +161,11 @@ repos:
     fork: taucad/opencascade.js
     branch: master
     description: OpenCASCADE compiled to WASM via Emscripten
+  PicoGK:
+    upstream: leap71/PicoGK
+    fork: rifont/PicoGK
+    branch: main
+    description: PicoGK - compact geometry kernel for Computational Engineering
   zoo-modeling-app:
     upstream: KittyCAD/modeling-app
     fork: taucad/modeling-app
@@ -543,3 +551,9 @@ repos:
     fork: taucad/tau-brain
     branch: main
     description: Private IP knowledge base — research + reference docs, symlinked into docs/
+  PicoGKRuntime:
+    upstream: leap71/PicoGKRuntime
+    description: PicoGK Runtime is the C++ framework behind PicoGK a compact and robust geometry kernel for Computational Engineering
+  openvdb:
+    upstream: mjurczyk/openvdb
+    description: Web implementation of volumetric grids

@@ -327,6 +327,8 @@ describe('ESBuild VM – CDN absolute-path resolution', () => {
 // Package Imports Resolution
 // =============================================================================
 
+/* eslint-disable @typescript-eslint/naming-convention -- package.json imports fixtures use package import specifier keys */
+
 describe('ESBuild VM – package imports resolution', () => {
   let filesystem: MockFileSystem;
   let mainOnResolve: CapturedResolveHandler;
@@ -489,6 +491,8 @@ describe('ESBuild VM – package imports resolution', () => {
     expect(result.errors[0]!.text).toContain("resolved to missing file '/project/.tau/parameters/missing.ts.json'");
   });
 });
+
+/* eslint-enable @typescript-eslint/naming-convention -- re-enable after package imports fixture blocks */
 
 // =============================================================================
 // extractProjectDependencies

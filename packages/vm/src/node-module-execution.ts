@@ -17,6 +17,9 @@ const importNodeBuiltin = async <T>(specifier: string): Promise<T> =>
 /**
  * Strip inline source map comments to prevent Node.js `--enable-source-maps`
  * from applying them before our own stack trace parser has a chance to.
+ *
+ * @param code - bundled JavaScript code
+ * @returns bundled code without an inline source map comment
  */
 const stripInlineSourceMap = (code: string): string => code.replace(/\/\/# sourceMappingURL=data:[^\n]+$/m, '');
 
@@ -25,6 +28,9 @@ const stripInlineSourceMap = (code: string): string => code.replace(/\/\/# sourc
  *
  * Browser/client bundlers still parse this file, so Node imports are intentionally
  * hidden behind an opaque dynamic importer and the caller keeps the runtime guard.
+ *
+ * @param code - bundled JavaScript module code to execute
+ * @returns imported module value and the temporary entry URL used to run it
  */
 export async function executeCodeInNode(code: string): Promise<{ value: unknown; entryUrl: string }> {
   const [fs, os, path, nodeProcess, url] = await Promise.all([

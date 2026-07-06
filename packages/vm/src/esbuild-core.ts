@@ -404,7 +404,9 @@ const findPackageImportsScope = async (
 
   while (directory.startsWith(projectRoot)) {
     const packageJsonPath = `${directory}/package.json`;
+    // oxlint-disable-next-line no-await-in-loop -- Intentional: nearest package.json wins
     if (await filesystem.exists(packageJsonPath)) {
+      // oxlint-disable-next-line no-await-in-loop -- Intentional: only read the nearest package.json
       const packageJson = JSON.parse(await filesystem.readFile(packageJsonPath, 'utf8')) as unknown;
       if (isRecord(packageJson) && isRecord(packageJson['imports'])) {
         return { directory, imports: packageJson['imports'] };

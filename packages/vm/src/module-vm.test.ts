@@ -105,6 +105,7 @@ describe('createEsbuildModuleVm', () => {
       JSON.stringify({
         type: 'module',
         imports: {
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- package.json imports use package import specifier keys
           '#params/*.json': './.tau/parameters/*.json',
         },
       }),

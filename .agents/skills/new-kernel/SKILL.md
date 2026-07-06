@@ -1,37 +1,62 @@
 ---
 name: new-kernel
-description: Add a new first-party CAD kernel to Tau's @taucad/runtime plugin system. Use when adding a kernel, integrating a new CAD engine, implementing defineKernel, or wiring kernel factories, exports, presets, and UI catalog entries.
+description: Add a new first-party CAD kernel to Tau as a standalone @taucad/* package. Use when adding a kernel, integrating a new CAD engine, implementing defineKernel, scaffolding a kernel package, or wiring kernel UI catalog, prompt, and Monaco entries.
 ---
 
 # New Kernel Integration
 
-Add a new first-party CAD kernel to Tau following the `@taucad/runtime` plugin architecture.
+Add a new first-party CAD kernel to Tau as a standalone, publishable `@taucad/*` package (like `@taucad/openscad`). Kernels live under `kernels/<id>/` and consume the runtime only through its public author surface (`@taucad/runtime/kernel`, `/types`, `/testing`) — never its `#`-prefixed internals.
 
 ## Definition of Done
 
-1. Kernel implementation at `packages/runtime/src/kernels/<id>/<id>.kernel.ts`
-2. Comprehensive tests pass at `packages/runtime/src/kernels/<id>/<id>.kernel.test.ts`
-3. Wired into plugin factories, presets, exports, build entries
-4. UI default/debug options include kernel where applicable
-5. Type/catalog metadata in `libs/types/src/constants/kernel.constants.ts`
-6. Prompt configuration supports the kernel
-7. Monaco IntelliSense types extracted, exported, and registered
-8. Nx lint/typecheck/test pass
+1. Standalone package scaffolded at `kernels/<id>/` (via the generator in section 0)
+2. Kernel implementation at `kernels/<id>/src/<id>.kernel.ts`
+3. Comprehensive tests pass at `kernels/<id>/src/<id>.kernel.test.ts`
+4. Consumers opt in by depending on `@taucad/<id>` and composing it explicitly (there is no runtime factory/preset/barrel to register into)
+5. UI default/debug options include the kernel where applicable
+6. Type/catalog metadata in `libs/types/src/constants/kernel.constants.ts`
+7. Prompt configuration supports the kernel
+8. Monaco IntelliSense types extracted, exported, and registered
+9. Nx lint/typecheck/test pass
+
+## 0) Scaffold the package
+
+Generate the baseline with the workspace **kernel generator** — the reference script for this skill (sibling to the `package` generator behind the `create-package` skill):
+
+```bash
+pnpm nx g ./tools/workspace-plugin/generators.json:kernel <id> --description="<one-line kernel description>"
+pnpm install --no-frozen-lockfile
+```
+
+This creates `kernels/<id>/` fully wired, zero cleanup:
+
+| File                                                              | Purpose                                                                                                                                                                             |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `package.json`                                                    | ESM `publishConfig`, `.` + `./kernel` subpath exports, `@taucad/runtime` + `zod` deps, MIT                                                                                          |
+| `tsdown.config.ts`                                                | Two entries (`src/index.ts`, `src/<id>.kernel.ts`), `unbundle`, `dts`, `minify`                                                                                                     |
+| `tsconfig*.json`, `vitest.config.ts`, `project.json`, `README.md` | Shared Tau conventions (reused from the `package` generator)                                                                                                                        |
+| `src/index.ts`                                                    | Public barrel re-exporting the kernel factory + schemas                                                                                                                             |
+| `src/<id>.kernel.ts`                                              | A `defineKernel` **stub** importing only from `@taucad/runtime/kernel`, with an explicit `KernelPluginFactory<...>` annotation (keeps the emitted `.d.ts` portable — avoids TS2742) |
+| `src/<id>.kernel.test.ts`                                         | A green, 100%-coverage smoke test driving every lifecycle method via `@taucad/runtime/testing`                                                                                      |
+
+The scaffold builds (`tsdown`), typechecks, and tests green immediately. Then fill in the stub (section 1), add your engine's runtime dependency to `kernels/<id>/package.json` (via `catalog:` where catalogued), and wire the UI/catalog/prompt/Monaco surfaces (section 3).
+
+To change conventions for future kernels, edit the templates at `tools/workspace-plugin/src/generators/kernel/files/`.
 
 ## 1) Implement Kernel
 
-**File:** `packages/runtime/src/kernels/<id>/<id>.kernel.ts`
+**File:** `kernels/<id>/src/<id>.kernel.ts` (the generator stubs this)
 
-Use `defineKernel({...})` from `#types/runtime-kernel.types.js`:
+Use `defineKernel({...})` from `@taucad/runtime/kernel`:
 
 ```typescript
-import { defineKernel } from '#types/runtime-kernel.types.js';
-import { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
+import { createKernelError, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
 
-export default defineKernel({
+export const <id> = defineKernel({
   name: '<Name>Kernel',
   version: '1.0.0',
-  optionsSchema, // zod schema
+  renderSchema, // zod schema
+  exportSchemas, // per-format zod schemas
 
   async initialize(options, runtime) {
     /* load WASM/SDK, register modules */
@@ -60,69 +85,55 @@ Key patterns:
 - `runtime.bundler.bundle(filePath)` + `runtime.execute(code)` for user code
 - `createKernelSuccess(data)` / `createKernelError(issues)` for structured results in non-throw paths
 - Throw `Error` with `.issues` array (custom `*BuildError`) for fatal geometry failures so framework returns structured issues
-- Prefer stack enrichment utilities in `#framework/error-enrichment.js` for JS/TS kernels
+- Prefer stack enrichment utilities from `@taucad/runtime/kernel` for JS/TS kernels
 - Follow `docs/policy/geometry-naming-policy.md` for shape labels, glTF node/mesh names, generated materials, scenes, component IDs, selectors, native handles, diagnostics, imports, and export artifact names
+
+Every helper a kernel needs is on the `@taucad/runtime/kernel` author surface. If a cross-kernel helper you need is not yet exported there, promote it (see `docs/research/kernel-package-extraction.md`, Finding F3) — never reach into `@taucad/runtime`'s `#` internals from a kernel package.
 
 ### Geometry Naming Contract
 
-New kernels must preserve authored/imported names and route Tau-owned generated names through the centralized helpers:
+New kernels must preserve authored/imported names and route Tau-owned generated names through the centralized helpers (all on `@taucad/runtime/kernel`):
 
-- Use `#utils/shape-names.js` for generated shape display labels (`Shape 1`, `Shape 2`, ...).
-- Use `#utils/geometry-names.js` for generated component IDs, selectors, and artifact naming.
-- Use `#utils/gltf-geometry-name-normalizer.js` when a native or external engine returns GLB/glTF bytes.
+- Use the shape-name helper for generated shape display labels (`Shape 1`, `Shape 2`, ...).
+- Use the geometry-name helpers for generated component IDs, selectors, and artifact naming.
+- Use the glTF name normalizer when a native or external engine returns GLB/glTF bytes.
 - Keep semantic mesh-bearing glTF node and mesh names non-empty and equal.
 - Leave Tau-generated material names and single-scene names unset unless a real semantic role requires a stable label.
 - Do not derive component IDs from display labels, material indices, or mutable UI text; use payload addresses such as `component:node-0`.
 - Do not copy legacy generated labels such as `AnyShape`, `Geometry`, `Mesh`, zero-index `Shape_*`, color-derived material names, or converter fallback scene/material names.
 
-Reference: `packages/runtime/src/kernels/replicad/replicad.kernel.ts`
+Reference: `kernels/openscad/src/openscad.kernel.ts`.
 
 ## 2) Add Tests
 
-**File:** `packages/runtime/src/kernels/<id>/<id>.kernel.test.ts`
+**File:** `kernels/<id>/src/<id>.kernel.test.ts` (the generator stubs a green smoke test)
 
 ### Mandatory shared utils
 
-All kernel tests MUST use helpers from `#testing/kernel-testing.utils.js`. Do NOT define local mock helpers for filesystem, logger, or runtime — use the shared utilities.
+All kernel tests MUST use helpers from `@taucad/runtime/testing`. Do NOT define local mock helpers for filesystem, logger, or runtime — use the shared utilities.
 
-| Helper                                            | Purpose                                                                           |
-| ------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `createMockKernelRuntime(options?)`               | Unit tests calling kernel methods directly (`createGeometry`, etc.)               |
-| `createTestWorker(definition, files, options?)`   | Integration tests via `KernelRuntimeWorker` with seeded filesystem                |
-| `createGeometryFile(filename, basePath?)`         | Build `GeometryFile` for worker methods                                           |
-| `createGeometryTestHelpers()`                     | GLTF validation (`expectValidGltf`, `expectVertexCount`, `expectBoundingBoxSize`) |
-| `createMockLogger()`                              | Mock `RuntimeLogger` with vitest mocks for all log levels                         |
-| `createMockFileSystem(options?)`                  | Mock `RuntimeFileSystem` with vitest mocks and `.mocks` property                  |
-| `assertSuccess(result)` / `assertFailure(result)` | Type-narrowing assertions on `KernelResult`                                       |
+| Helper                                                            | Purpose                                                                                                      |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `createTestWorker(definition, files, options?)`                   | Integration tests via `KernelRuntimeWorker` with a seeded filesystem                                         |
+| `getTestParameters(definition, files, mainFile)`                  | Extract parameters through the worker                                                                        |
+| `createTestGeometry({ definition, files, mainFile, parameters })` | Render geometry through the worker                                                                           |
+| `createGeometryFile(filename, basePath?)`                         | Build a `GeometryFile` for worker methods                                                                    |
+| `createGeometryTestHelpers()`                                     | GLTF validation (`expectValidGltf`, `expectVertexCount`, `expectBoundingBoxSize`)                            |
+| `createMockKernelRuntime(options?)`                               | Unit tests calling lifecycle methods directly (pair with `resolveRuntimePluginDefinition('kernel', <id>())`) |
+| `assertSuccess(result)`                                           | Type-narrowing assertion on `KernelResult`                                                                   |
 
 ### Test structure example
 
 ```typescript
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mock } from 'vitest-mock-extended';
-import type { KernelRuntime, CreateGeometryInput } from '#types/runtime-kernel.types.js';
-import { createMockKernelRuntime } from '#testing/kernel-testing.utils.js';
-import myKernel from '#kernels/my-kernel/my-kernel.kernel.js';
+import { describe, it, expect } from 'vitest';
+import { createGeometryFile, createTestWorker, getTestParameters } from '@taucad/runtime/testing';
+import { <id> } from '#<id>.kernel.js';
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
-
-describe('MyKernel', () => {
-  describe('createGeometry', () => {
-    it('should return geometry on success', async () => {
-      const runtime = createMockKernelRuntime({
-        filesystemOverrides: { readFileResult: new Uint8Array([1, 2, 3]) },
-      });
-
-      const result = await myKernel.createGeometry(
-        mock<CreateGeometryInput>({ filePath: '/test/model.ext', basePath: '/test' }),
-        runtime,
-        {},
-      );
-
-      expect(result.geometry).toHaveLength(1);
-    });
+describe('<Name>Kernel', () => {
+  it('renders geometry through the worker', async () => {
+    const worker = await createTestWorker(<id>, { 'model.ext': '/* source */' });
+    const result = await worker.createGeometry({ file: createGeometryFile('model.ext'), parameters: {} });
+    expect(result.success).toBe(true);
   });
 });
 ```
@@ -132,147 +143,67 @@ describe('MyKernel', () => {
 - `getParameters` — defaults extraction + empty fallback
 - `createGeometry` — happy path + parameterized + error cases
 - `exportGeometry` — supported and unsupported formats + no-geometry failure
-- Geometry naming — parse GLB/glTF output with `NodeIO` and assert node/mesh parity, material/scene naming, component IDs/selectors, and artifact filenames according to `docs/policy/geometry-naming-policy.md`
+- Geometry naming — parse GLB/glTF output with `NodeIO` and assert node/mesh parity, material/scene naming, component IDs/selectors, and artifact filenames per `docs/policy/geometry-naming-policy.md`
 
-Reference quality bar: `jscad.kernel.test.ts`, `replicad.kernel.test.ts`
+Reference quality bar: `kernels/openscad/src/openscad.kernel.test.ts`.
 
-## 3) Wire Into System
+## 3) Wire Into the System
 
-### 3.1 Plugin factory
+The generator already produced the package's own exports and build entries. A standalone kernel has **no** runtime-side factory, `kernels-entry` barrel, or preset to touch. Remaining wiring:
 
-**File:** `packages/runtime/src/plugins/kernel-factories.ts`
+### 3.1 Consumer composition
 
-```typescript
-export const <id> = createKernelPlugin<Options>({
-  id: '<id>',
-  moduleUrl: new URL('../kernels/<id>/<id>.kernel.js', import.meta.url).href,
-  extensions: ['ts', 'js'],
-  detectImport: /import.*from\s+["']<library>["']/s,
-  builtinModuleNames: ['<library>'],
-});
-```
-
-### 3.2 Export factory
-
-**File:** `packages/runtime/src/plugins/kernels-entry.ts`
-
-Add: `export { <id> } from '#plugins/kernel-factories.js';`
-
-### 3.3 Presets
-
-**File:** `packages/runtime/src/plugins/presets.ts`
-
-Add `<id>()` to `presets.all().kernels` array in priority order.
-
-### 3.4 Package exports
-
-**File:** `packages/runtime/package.json`
-
-Source export:
-
-```json
-"./kernels/<id>": "./src/kernels/<id>/<id>.kernel.ts"
-```
-
-publishConfig export (mirror `./kernels/tau` pattern):
-
-```json
-"./kernels/<id>": {
-  "types": "./dist/kernels/<id>/<id>.kernel.d.ts",
-  "import": "./dist/kernels/<id>/<id>.kernel.js",
-  "default": "./dist/kernels/<id>/<id>.kernel.js"
-}
-```
-
-### 3.5 Build entry
-
-**File:** `packages/runtime/tsdown.config.ts`
-
-Add `'src/kernels/<id>/<id>.kernel.ts'` to `entry` array.
-
-### 3.6 Smoke import
-
-**File:** `packages/runtime/src/testing/smoke-esm.test.ts`
+Consumers that want the kernel add `@taucad/<id>` to their `package.json` and compose it explicitly:
 
 ```typescript
-const <id>Module = await import('#kernels/<id>/<id>.kernel.js');
-expect(<id>Module.default).toBeDefined();
+import { <id> } from '@taucad/<id>';
+const client = createRuntimeClient({ kernels: [<id>()] /* ... */ });
 ```
 
-### 3.7 UI defaults
+### 3.2 UI defaults
 
 **File:** `apps/ui/app/constants/kernel-worker.constants.ts`
 
-Import and add `<id>()` to `defaultKernelOptions.kernels`.
+Import `<id>` from `@taucad/<id>` and add `<id>()` to `defaultKernelOptions.kernels` (and debug options where applicable). Add `@taucad/<id>` to `apps/ui`'s `package.json`.
 
-### 3.8 Catalog metadata
+### 3.3 Catalog metadata
 
 **File:** `libs/types/src/constants/kernel.constants.ts`
 
-Add entry to `kernelConfigurations` with `id`, `name`, `language`, `dimensions`, `description`, `mainFile`, `backendProvider`, `longDescription`, `emptyCode`, `recommended`, `tags`, `features`.
+Add an entry to `kernelConfigurations` with `id`, `name`, `language`, `dimensions`, `description`, `mainFile`, `backendProvider`, `longDescription`, `emptyCode`, `recommended`, `tags`, `features`. This static catalog (id + extensions + metadata) is also what extension→kernel mapping reads — keep `extensions` in sync with the kernel's `extensions`.
 
-### 3.9 Monaco IntelliSense types
+### 3.4 Monaco IntelliSense types
 
 The editor provides IntelliSense for kernel imports via bundled `.d.ts` files registered with Monaco's `addExtraLib`. If the kernel exposes a JS/TS API that users import (e.g. `import ... from '<library>'`), add type definitions to the Monaco pipeline.
 
 All kernels use the same **JSON map approach**: `buildBundledTypes()` returns `Record<string, string>` mapping module paths to raw `.d.ts` content. Each entry is registered at `file:///node_modules/<modulePath>/index.d.ts`. Do **not** use `declare module` wrappers (causes TS1038 in already-ambient contexts).
 
 1. **Create extraction script:** `libs/api-extractor/src/extract-<id>-types.ts`
-   - Read the kernel's `.d.ts` file(s)
-   - Keep `export declare` as-is (valid in raw module `.d.ts` files)
+   - Read the kernel's `.d.ts` file(s); keep `export declare` as-is
    - Export `buildBundledTypes(): Record<string, string>` (for testability) and a `main()` CLI entry
-   - In `main()`, write `<id>.bundled.json` (JSON-serialized map) to `generated/<id>/`
-   - Also write individual `.d.ts` files under `generated/<id>/modules/<module-path>/index.d.ts` for type-level testing
-   - Use `extract-manifold-types.ts` as template (simple wrapping) or `extract-jscad-types.ts` (TS Compiler API deep extraction)
-
-   For single-module kernels, the map has one entry. For kernels with subpath exports, include an entry per subpath:
-
-   ```typescript
-   export function buildBundledTypes(): Record<string, string> {
-     return {
-       '<library>': mainContent,
-       '<library>/sub': subContent,
-     };
-   }
-   ```
+   - In `main()`, write `<id>.bundled.json` to `generated/<id>/`, and individual `.d.ts` files under `generated/<id>/modules/<module-path>/index.d.ts` for type-level testing
+   - Use `extract-manifold-types.ts` (simple wrapping) or `extract-jscad-types.ts` (TS Compiler API) as a template
 
 2. **Add Nx target:** `libs/api-extractor/project.json`
 
    ```json
    "extract-<id>": {
      "executor": "nx:run-commands",
-     "options": {
-       "command": "tsx src/extract-<id>-types.ts",
-       "cwd": "libs/api-extractor"
-     }
+     "options": { "command": "tsx src/extract-<id>-types.ts", "cwd": "libs/api-extractor" }
    }
    ```
 
 3. **Export from `@taucad/api-extractor`:** `libs/api-extractor/src/index.ts`
 
-   Import the raw JSON string, parse it via `parseTypesMap`, and export a typed `KernelTypesMap` object. Add it to the `kernelTypeMaps` array:
-
    ```typescript
    import <id>Raw from '#generated/<id>/<id>.bundled.json?raw';
-
    export const <id>Types: KernelTypesMap = parseTypesMap(<id>Raw);
-
-   // Add to the kernelTypeMaps array:
-   export const kernelTypeMaps: readonly KernelTypesMap[] = [
-     // ...existing entries...
-     <id>Types,
-   ];
+   // Add <id>Types to the kernelTypeMaps array.
    ```
 
-   Consumers import the typed object directly — no `JSON.parse` or type assertions needed.
+4. **Register in Monaco:** no change — `apps/ui/app/lib/javascript-contribution.ts` iterates `kernelTypeMaps` automatically.
 
-4. **Register in Monaco:** `apps/ui/app/lib/javascript-contribution.ts`
-
-   No changes needed — the `kernelTypeMaps` array from `@taucad/api-extractor` is already iterated and registered automatically.
-
-5. **Add type-level tests:** `libs/api-extractor/src/generated/<id>/<id>.bundled.test-d.ts`
-
-   Add path mappings in `tsconfig.typetest.json` pointing to the `modules/` directory. Write `.test-d.ts` tests verifying module resolution, key exports, and class shapes using `expectTypeOf`.
+5. **Add type-level tests:** `libs/api-extractor/src/generated/<id>/<id>.bundled.test-d.ts` and path mappings in `tsconfig.typetest.json`.
 
 6. **Run extraction:** `pnpm nx extract-<id> api-extractor`
 
@@ -291,17 +222,16 @@ Use existing configs (replicad/jscad/zoo/openscad) as templates.
 At minimum update:
 
 - `docs/policy/runtime-architecture-policy.md`
-- Kernel docs site pages under `apps/ui/content/docs/(runtime)/...`:
-  - index, choosing-a-kernel, installation, api/kernels, concepts/plugin-system, guides/bundler-configuration
+- Kernel docs site pages under `apps/ui/content/docs/(runtime)/...`: index, choosing-a-kernel, installation, api/kernels, concepts/plugin-system, guides/bundler-configuration
 
 Update all kernel lists/comparison tables, examples, and selection priority references.
 
 ## 6) Verify
 
 ```bash
-pnpm nx typecheck runtime
-pnpm nx test runtime --watch=false
-pnpm nx lint runtime
+pnpm nx typecheck <id>
+pnpm nx test <id> --watch=false
+pnpm nx lint <id>
 pnpm nx typecheck ui
 pnpm nx lint ui
 ```
@@ -318,47 +248,41 @@ pnpm nx test api --watch=false
 
 Recommended order:
 
-1. Implement kernel + tests first
-2. Wire factories/exports/build/smoke
-3. Wire UI + type catalog + prompts
+1. Scaffold the package (section 0)
+2. Implement kernel + tests
+3. Wire consumer composition + UI + type catalog + prompts
 4. Verify geometry naming policy compliance for render, export, native handles, and converter boundaries
 5. Update docs
 6. Run Nx checks and fix all regressions
-7. Commit with descriptive message
+7. Commit with a descriptive message
 
-Keep commits logically grouped (implementation, wiring, docs) if practical.
+Keep commits logically grouped (scaffold, implementation, wiring, docs) if practical.
 
 ## File Checklist
 
-- [ ] `packages/runtime/src/kernels/<id>/<id>.kernel.ts`
-- [ ] `packages/runtime/src/kernels/<id>/<id>.kernel.test.ts`
-- [ ] `packages/runtime/src/plugins/kernel-factories.ts`
-- [ ] `packages/runtime/src/plugins/kernels-entry.ts`
-- [ ] `packages/runtime/src/plugins/presets.ts`
-- [ ] `packages/runtime/package.json`
-- [ ] `packages/runtime/tsdown.config.ts`
-- [ ] `packages/runtime/src/testing/smoke-esm.test.ts`
-- [ ] `apps/ui/app/constants/kernel-worker.constants.ts`
-- [ ] `libs/types/src/constants/kernel.constants.ts`
+- [ ] `kernels/<id>/` scaffolded via the kernel generator (section 0)
+- [ ] `kernels/<id>/src/<id>.kernel.ts` implemented
+- [ ] `kernels/<id>/src/<id>.kernel.test.ts` grown from the stub
+- [ ] `kernels/<id>/package.json` — engine dependency added
+- [ ] `apps/ui/app/constants/kernel-worker.constants.ts` — import + default options; `@taucad/<id>` dep added
+- [ ] `libs/types/src/constants/kernel.constants.ts` — catalog + extensions entry
 - [ ] `apps/api/app/api/chat/prompts/kernel-prompt-configs/<id>.prompt.config.ts`
 - [ ] `apps/api/app/api/chat/prompts/kernel-prompt-configs/<id>.prompt.example.<ext>`
 - [ ] `libs/api-extractor/src/extract-<id>-types.ts` (extraction script producing JSON map)
-- [ ] `libs/api-extractor/src/index.ts` (export `<id>TypesMap` via `?raw`)
-- [ ] `apps/ui/app/lib/javascript-contribution.ts` (add to `kernelTypeMaps` array)
+- [ ] `libs/api-extractor/src/index.ts` (export `<id>Types`, add to `kernelTypeMaps`)
 - [ ] `libs/api-extractor/src/generated/<id>/<id>.bundled.test-d.ts` (type-level tests)
-- [ ] `libs/api-extractor/tsconfig.typetest.json` (add path mappings for new kernel)
+- [ ] `libs/api-extractor/tsconfig.typetest.json` (add path mappings for the new kernel)
 - [ ] Kernel docs pages + architecture policy updates
 
 ## Common Failure Modes
 
-- Forgot `tsdown` entry → build output missing
-- Forgot `kernels-entry.ts` export → consumer import fails
+- Skipped the generator and hand-rolled package files → drifting conventions; always start from `nx g ...:kernel`
+- Reached into `@taucad/runtime`'s `#` internals from the kernel package → use the `@taucad/runtime/kernel` author surface (promote missing helpers there)
+- Dropped the explicit `KernelPluginFactory<...>` annotation → TS2742 "inferred type not portable" breaks the `.d.ts` build
 - Missing `builtinModuleNames` for JS/TS kernels → transitive import detection fails
-- Missing `publishConfig` export → package consumers break
-- Added kernel to code but not to docs comparisons → docs drift
+- Added the kernel to code but not to docs comparisons → docs drift
+- Catalog `extensions` out of sync with the kernel's `extensions` → extension→kernel mapping misroutes files
 - Defined local mock helpers instead of using shared testing utils → maintenance burden
 - Copied legacy generated geometry names instead of using the geometry naming helpers → explorer/import/export drift
 - Forgot Monaco IntelliSense types → no editor autocomplete for the kernel's API
 - Used `declare module` wrapper instead of raw `.d.ts` + JSON map → TS1038 errors in Monaco
-- Forgot to add `modules/` directory output in extraction script → type-level tests can't resolve imports
-- Forgot to add path mappings in `tsconfig.typetest.json` → `vitest --typecheck` fails

@@ -10,9 +10,9 @@ The AI-native CAD platform — open-source, browser-based, and kernel-agnostic. 
 **[Try it now at tau.new](https://tau.new)**
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tau-desktop-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/tau-desktop-light.jpg">
-  <img alt="Tau Desktop View" src="docs/assets/tau-desktop-light.jpg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tau-desktop-dark.webp">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/tau-desktop-light.webp">
+  <img alt="Tau Desktop View" src="docs/assets/tau-desktop-light.webp">
 </picture>
 
 > 🚧 **Tau is currently under heavy development.** APIs and interfaces may change as we add new features and improvements.

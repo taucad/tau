@@ -114,6 +114,6 @@
     }
   ],
   "files": [],
-  "include": ["vitest.workspace.ts", "eslint.config.mjs", "scripts/**/*", "tools/**/*"],
+  "include": ["eslint.config.mjs", "scripts/**/*", "tools/**/*"],
   "exclude": ["node_modules", "tmp"]
 }

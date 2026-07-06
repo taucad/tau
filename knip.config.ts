@@ -41,7 +41,6 @@ const config: KnipConfig = {
 
   workspaces: {
     '.': {
-      entry: ['vitest.workspace.ts'],
       project: ['**/*.{ts,tsx,mts}'],
       ignore: ['tarballs/**'],
       ignoreDependencies: [

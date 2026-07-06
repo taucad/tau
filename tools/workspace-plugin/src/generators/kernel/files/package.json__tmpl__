@@ -1,0 +1,45 @@
+{
+  "name": "<%= importPath %>",
+  "version": "0.1.0-beta.0",
+  "description": "<%= description %>",
+  "type": "module",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "kernels/<%= name %>"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "keywords": ["cad", "kernel", "<%= name %>"],
+  "author": "Richard Fontein",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts",
+    "./kernel": "./src/<%= name %>.kernel.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./kernel": {
+        "types": "./dist/<%= name %>.kernel.d.ts",
+        "import": "./dist/<%= name %>.kernel.js",
+        "default": "./dist/<%= name %>.kernel.js"
+      }
+    }
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@taucad/runtime": "workspace:*",
+    "zod": "catalog:"
+  }
+}

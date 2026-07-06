@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/schema",
+  "$id": "TauKernel",
+  "title": "Create a @taucad/* CAD kernel package",
+  "description": "Scaffolds a publishable @taucad/* kernel package under kernels/ with a defineKernel stub, matching test, and all Tau conventions.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Kernel id / package name without the @taucad/ prefix (e.g. 'openscad' → @taucad/openscad)",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "What is the kernel name (without @taucad/ prefix)?",
+      "x-priority": "important"
+    },
+    "description": {
+      "type": "string",
+      "description": "Kernel description for package.json and README",
+      "default": ""
+    }
+  },
+  "required": ["name"]
+}

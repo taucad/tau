@@ -6,6 +6,7 @@ export {
   createMockLogger,
   createMockFileSystem,
   createMockRuntime,
+  createMockKernelRuntime,
   createSuccessResult,
   createErrorResult,
   createMockInput,

@@ -51,6 +51,34 @@ function readGlbJsonAndBin(glb: Uint8Array<ArrayBuffer>) {
   };
 }
 
+type TopologyPayload = {
+  schemaVersion: number;
+  components: Array<{
+    id: string;
+    name: string;
+    selector: string;
+    nodeIndex: number;
+    faceGroups?: Array<{ faceId: number }>;
+    edgeGroups?: Array<{ edgeId: number }>;
+    capabilities?: { hasPreciseTopology: boolean };
+  }>;
+};
+
+function readTopologyPayload(glb: Uint8Array<ArrayBuffer>) {
+  const { json, bin } = readGlbJsonAndBin(glb);
+  const extension = json.extensions?.[tauCadTopologyExtension];
+  if (extension?.topologyBufferView === undefined) {
+    throw new Error('Missing Tau topology extension.');
+  }
+
+  const bufferView = json.bufferViews[extension.topologyBufferView]!;
+  const payloadBytes = bin.slice(bufferView.byteOffset, bufferView.byteOffset + bufferView.byteLength);
+  return {
+    json,
+    payload: JSON.parse(new TextDecoder().decode(payloadBytes)) as TopologyPayload,
+  };
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -182,6 +210,82 @@ describe('convertReplicadGeometriesToGltf', () => {
     expect(document.getRoot().listNodes()[1]!.getName()).toBe('Blue');
   });
 
+  it('should emit semantic Tau component ids for named geometries', () => {
+    const carrier = createSimpleGeometry({ name: 'Carrier' });
+    const cover = createSimpleGeometry({ name: 'Cover' });
+
+    const glb = convertReplicadGeometriesToGltf({ geometries: [carrier, cover], format: 'glb' });
+    const { json, payload } = readTopologyPayload(glb);
+
+    expect(
+      payload.components.map(({ id, name, selector }) => ({
+        id,
+        name,
+        selector,
+      })),
+    ).toEqual([
+      { id: 'component:carrier', name: 'Carrier', selector: 'node/0' },
+      { id: 'component:cover', name: 'Cover', selector: 'node/1' },
+    ]);
+    expect(json.nodes.map((node) => node.extras?.['tauComponentId'])).toEqual(['component:carrier', 'component:cover']);
+    expect(json.meshes.map((mesh) => mesh.primitives[0]!.extras?.['tauComponentId'])).toEqual([
+      'component:carrier',
+      'component:cover',
+    ]);
+    expect(json.meshes.map((mesh) => mesh.primitives[0]!.extras?.['tauComponentSelector'])).toEqual([
+      'node/0/surface',
+      'node/1/surface',
+    ]);
+  });
+
+  it('should keep named component ids stable when a geometry is inserted earlier', () => {
+    const first = readTopologyPayload(
+      convertReplicadGeometriesToGltf({
+        geometries: [createSimpleGeometry({ name: 'Carrier' }), createSimpleGeometry({ name: 'Cover' })],
+        format: 'glb',
+      }),
+    ).payload;
+    const second = readTopologyPayload(
+      convertReplicadGeometriesToGltf({
+        geometries: [
+          createSimpleGeometry({ name: 'Planet Gear 4' }),
+          createSimpleGeometry({ name: 'Carrier' }),
+          createSimpleGeometry({ name: 'Cover' }),
+        ],
+        format: 'glb',
+      }),
+    ).payload;
+
+    expect(first.components.map(({ name, id }) => [name, id])).toEqual([
+      ['Carrier', 'component:carrier'],
+      ['Cover', 'component:cover'],
+    ]);
+    expect(second.components.map(({ name, id }) => [name, id])).toEqual([
+      ['Planet Gear 4', 'component:planet-gear-4'],
+      ['Carrier', 'component:carrier'],
+      ['Cover', 'component:cover'],
+    ]);
+  });
+
+  it('should de-duplicate semantic component ids when geometry names repeat', () => {
+    const glb = convertReplicadGeometriesToGltf({
+      geometries: [createSimpleGeometry({ name: 'Cover' }), createSimpleGeometry({ name: 'Cover' })],
+      format: 'glb',
+    });
+    const { payload } = readTopologyPayload(glb);
+
+    expect(
+      payload.components.map(({ id, name, selector }) => ({
+        id,
+        name,
+        selector,
+      })),
+    ).toEqual([
+      { id: 'component:cover', name: 'Cover', selector: 'node/0' },
+      { id: 'component:cover-2', name: 'Cover 2', selector: 'node/1' },
+    ]);
+  });
+
   it('should include edge line primitives when edges are provided', async () => {
     const geometry = createSimpleGeometry({
       edges: {
@@ -226,18 +330,18 @@ describe('convertReplicadGeometriesToGltf', () => {
     const { json } = readGlbJsonAndBin(glb);
 
     expect(json.nodes[0]!.extras).toEqual({
-      tauComponentId: 'component:node-0',
+      tauComponentId: 'component:planet-gear',
       tauComponentKind: 'part',
       tauComponentSelector: 'node/0',
     });
     expect(json.meshes[0]!.primitives[0]!.extras).toMatchObject({
-      tauComponentId: 'component:node-0',
+      tauComponentId: 'component:planet-gear',
       tauComponentKind: 'body',
       tauComponentSelector: 'node/0/surface',
       faceGroups: [{ start: 0, count: 3, faceId: 7 }],
     });
     expect(json.meshes[0]!.primitives[1]!.extras).toMatchObject({
-      tauComponentId: 'component:node-0',
+      tauComponentId: 'component:planet-gear',
       tauComponentKind: 'line',
       tauComponentSelector: 'node/0/edges',
       edgeGroups: [{ start: 0, count: 6, edgeId: 11 }],
@@ -260,29 +364,15 @@ describe('convertReplicadGeometriesToGltf', () => {
     });
 
     const glb = convertReplicadGeometriesToGltf({ geometries: [geometry], format: 'glb' });
-    const { json, bin } = readGlbJsonAndBin(glb);
+    const { json, payload } = readTopologyPayload(glb);
     const extension = json.extensions?.[tauCadTopologyExtension];
     expect(json.extensionsUsed).toEqual([tauCadTopologyExtension]);
     expect(extension?.topologyBufferView).toBeDefined();
 
-    const bufferView = json.bufferViews[extension!.topologyBufferView!]!;
-    const payloadBytes = bin.slice(bufferView.byteOffset, bufferView.byteOffset + bufferView.byteLength);
-    const payload = JSON.parse(new TextDecoder().decode(payloadBytes)) as {
-      schemaVersion: number;
-      components: Array<{
-        id: string;
-        name: string;
-        nodeIndex: number;
-        faceGroups: Array<{ faceId: number }>;
-        edgeGroups: Array<{ edgeId: number }>;
-        capabilities: { hasPreciseTopology: boolean };
-      }>;
-    };
-
     expect(payload.schemaVersion).toBe(1);
     expect(payload.components).toHaveLength(1);
     expect(payload.components[0]).toMatchObject({
-      id: 'component:node-0',
+      id: 'component:housing',
       name: 'Housing',
       selector: 'node/0',
       nodeIndex: 0,

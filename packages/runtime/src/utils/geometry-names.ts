@@ -1,4 +1,4 @@
-import { normalizeShapeName } from '#utils/shape-names.js';
+import { formatShapeName, isLegacyGeneratedShapeName, normalizeShapeName } from '#utils/shape-names.js';
 
 /** Declares whether a geometry name came from authored content, imported content, or Tau/generated output. */
 export type GeometryNameSource = 'authored' | 'imported' | 'generated' | 'external-generated' | 'internal';
@@ -113,6 +113,29 @@ export function formatComponentId(nodeIndex: number): string {
   }
 
   return `component:node-${nodeIndex}`;
+}
+
+/**
+ * Format a semantic component ID from a modeled component name.
+ *
+ * @param name - Resolved component display name.
+ * @param nodeIndex - Zero-based glTF node index used to identify generated labels.
+ * @returns A semantic component id, or undefined when the name is generated.
+ */
+export function formatNamedComponentId(name: string, nodeIndex: number): string | undefined {
+  const normalized = normalizeGeometryName(name);
+  if (!normalized || isLegacyGeneratedShapeName(normalized) || normalized === formatShapeName(nodeIndex)) {
+    return undefined;
+  }
+
+  const slug = normalized
+    .toLowerCase()
+    .normalize('NFKD')
+    .replaceAll(/[\u0300-\u036F]/g, '')
+    .replaceAll(/[^\da-z]+/g, '-')
+    .replaceAll(/^-+|-+$/g, '');
+
+  return slug.length > 0 ? `component:${slug}` : undefined;
 }
 
 /**

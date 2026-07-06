@@ -5,10 +5,15 @@ import type { GeometryOutputTransformOptions } from '#framework/common.js';
 import type { GeometryReplicad } from '#kernels/replicad/replicad.types.js';
 import type { RuntimeLogger } from '#types/runtime-kernel.types.js';
 import { srgbHexToLinearTuple } from '#utils/color-space.js';
-import { formatComponentId, formatNodeSelector, formatPrimitiveSelector } from '#utils/geometry-names.js';
+import {
+  formatComponentId,
+  formatNamedComponentId,
+  formatNodeSelector,
+  formatPrimitiveSelector,
+} from '#utils/geometry-names.js';
 import { writeGlb, writeGltfJson } from '#utils/glb-writer.js';
 import type { GlbInput, GlbNode, GlbPrimitive } from '#utils/glb-writer.js';
-import { resolveShapeName } from '#utils/shape-names.js';
+import { resolveShapeName, uniqueShapeName } from '#utils/shape-names.js';
 import type { JSONObject } from '@taucad/types';
 
 type ReplicadTopologyComponent = {
@@ -40,6 +45,7 @@ type ReplicadGltfOptions = GeometryOutputTransformOptions & {
 type BuildNodeFromReplicadGeometryOptions = {
   geometry: GeometryReplicad;
   nodeIndex: number;
+  usedNames: Map<string, number>;
   transformOptions: GeometryOutputTransformOptions;
   includeTauTopology: boolean;
 };
@@ -53,13 +59,19 @@ type BuildNodeFromReplicadGeometryOptions = {
 function buildNodeFromReplicadGeometry({
   geometry,
   nodeIndex,
+  usedNames,
   transformOptions,
   includeTauTopology,
 }: BuildNodeFromReplicadGeometryOptions): ReplicadNodeBuildResult | undefined {
   const primitives: GlbPrimitive[] = [];
   const { faces, edges } = geometry;
-  const nodeName = resolveShapeName({ index: nodeIndex, name: geometry.name, source: 'generated' });
-  const componentId = formatComponentId(nodeIndex);
+  if ((faces.vertices.length === 0 || faces.triangles.length === 0) && edges.lines.length === 0) {
+    return undefined;
+  }
+
+  const resolvedName = resolveShapeName({ index: nodeIndex, name: geometry.name, source: 'generated' });
+  const nodeName = uniqueShapeName(resolvedName, usedNames);
+  const componentId = formatNamedComponentId(nodeName, nodeIndex) ?? formatComponentId(nodeIndex);
   const selector = formatNodeSelector(nodeIndex);
 
   if (faces.vertices.length > 0 && faces.triangles.length > 0) {
@@ -204,11 +216,13 @@ export function convertReplicadGeometriesToGltf(options: ReplicadGltfOptions): U
   const transformOptions: GeometryOutputTransformOptions = { coordinateSystem, unit };
   const nodes: GlbNode[] = [];
   const topologyComponents: ReplicadTopologyComponent[] = [];
+  const usedNames = new Map<string, number>();
 
   for (const geometry of geometries) {
     const result = buildNodeFromReplicadGeometry({
       geometry,
       nodeIndex: nodes.length,
+      usedNames,
       transformOptions,
       includeTauTopology,
     });

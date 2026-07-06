@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatAssemblyArtifactName,
   formatComponentId,
+  formatNamedComponentId,
   formatModelArtifactName,
   formatNodeSelector,
   formatPrimitiveSelector,
@@ -66,6 +67,19 @@ describe('geometry names', () => {
   it('should reject invalid component and selector indexes', () => {
     expect(() => formatComponentId(-1)).toThrow(RangeError);
     expect(() => formatNodeSelector(1.5)).toThrow(RangeError);
+  });
+
+  it('should format named component IDs from semantic shape names', () => {
+    expect(formatNamedComponentId('Cover', 0)).toBe('component:cover');
+    expect(formatNamedComponentId('Planet Gear 4', 3)).toBe('component:planet-gear-4');
+    expect(formatNamedComponentId('  Ring/Gear  ', 1)).toBe('component:ring-gear');
+  });
+
+  it('should omit named component IDs for generated labels', () => {
+    expect(formatNamedComponentId('', 0)).toBeUndefined();
+    expect(formatNamedComponentId('Shape 1', 0)).toBeUndefined();
+    expect(formatNamedComponentId('Shape_1', 0)).toBeUndefined();
+    expect(formatNamedComponentId('***', 0)).toBeUndefined();
   });
 
   it('should format artifact names by export intent', () => {

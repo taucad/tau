@@ -281,7 +281,7 @@ export type StepEvidence = {
     copiedToEmscriptenFs: boolean;
   };
   capabilities: Array<{ feature: string; supported: boolean; reason?: string }>;
-  /** Structured AP242 XDE read result (occurrences, subshape names, properties). */
+  /** Structured AP242 XDE read result (occurrences, subshape names, datum placements). */
   xde?: XdeReadResult;
 };
 

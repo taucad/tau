@@ -4,8 +4,8 @@
  * placement (rotate 90° about Z, translate +20 x) — plus duplicated `bolt`
  * instance names disambiguated as `bolt[k]` paths per the AP242 profile.
  *
- * All face facts are in the SUBJECT frame (the verification kernel's
- * `faceFacts` contract); stamped `geospec:facts` payloads are PART-LOCAL.
+ * All face facts and datum placements are in the SUBJECT frame, matching the
+ * verification kernel's `faceFacts` contract and native AP242 datum reader.
  *
  * @module
  */
@@ -37,41 +37,21 @@ export const createFixtureXde = (): XdeReadResult => ({
     { occurrencePath: 'cubeB', name: 'face.a', shapeType: 'face', faceIndex: 0 },
     { occurrencePath: 'cubeB', name: 'sideBore', shapeType: 'face', faceIndex: 1 },
   ],
-  properties: [
-    // Doctored stamp: observed area is 100, stamped 300 → stale (area drift).
-    {
-      occurrencePath: 'cubeA',
-      name: 'face.bottom',
-      payload: '{"v":1,"kind":"face","surfaceType":"plane","normal":[0,0,-1],"offset":0,"area":300,"centroid":[5,5,0]}',
-    },
-    // Part-local stamp on an identity-placed occurrence → matches observed.
-    {
-      occurrencePath: 'cubeB',
-      name: 'face.a',
-      payload:
-        '{"v":1,"kind":"face","surfaceType":"plane","normal":[0,0,1],"offset":10,"area":100,"centroid":[5,5,10]}',
-    },
-    // Part-local axis [1,0,0] maps to subject [0,1,0] through cubeB's
-    // rotation — NOT stale only when the transform mapping is applied.
-    {
-      occurrencePath: 'cubeB',
-      name: 'sideBore',
-      payload:
-        '{"v":1,"kind":"axis","surfaceType":"cylinder","axisOrigin":[5,5,5],"axisDirection":[1,0,0],"radius":3,"area":50,"centroid":[5,5,5]}',
-    },
-    // Datum rows (constitutive payloads, part-local frames).
+  datumPlacements: [
     {
       occurrencePath: 'cubeA',
       name: 'origin',
-      payload: '{"v":1,"kind":"datum","origin":[0,0,0],"xAxis":[1,0,0],"zAxis":[0,0,1]}',
+      origin: [0, 0, 0],
+      xAxis: [1, 0, 0],
+      zAxis: [0, 0, 1],
     },
     {
       occurrencePath: 'cubeB',
       name: 'origin',
-      payload: '{"v":1,"kind":"datum","origin":[0,0,0],"xAxis":[1,0,0],"zAxis":[0,0,1]}',
+      origin: [20, 0, 0],
+      xAxis: [0, 1, 0],
+      zAxis: [0, 0, 1],
     },
-    // Unknown version → absent facts + info diagnostic; no datum materializes.
-    { occurrencePath: 'cubeA', name: 'mystery', payload: '{"v":99,"kind":"face"}' },
   ],
   freeShapeCount: 0,
 });

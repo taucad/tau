@@ -14,8 +14,8 @@
  *
  * This suite is also the conformance suite for the GeoSpec AP242 profile:
  * the hand-authored second-producer fixture (non-identity occurrence
- * transform, part-local stamped facts) proves reader/index kernel-agnosticism
- * and the SB3-R5 stamped-fact transform mapping.
+ * transform and native datum placement) proves reader/index
+ * kernel-agnosticism without writer-side stamp metadata.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';

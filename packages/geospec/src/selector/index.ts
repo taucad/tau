@@ -1,8 +1,7 @@
 /**
  * GeoSpec selector index and resolution engine (SB3): the canonical selector
  * type system (L2/L3 of the durable selector architecture), the per-subject
- * selector index, pure resolution, diagnostics, tolerances, and stale
- * detection.
+ * selector index, pure resolution, diagnostics, and tolerances.
  *
  * @module
  */
@@ -62,20 +61,8 @@ export {
 export { resolve } from '#selector/resolve.js';
 export {
   ambiguousDiagnostic,
-  missingStampedFactsDiagnostic,
   selectorDiagnosticCodes,
-  staleDiagnostic,
   unmatchedDiagnostic,
   unsupportedEvidenceDiagnostic,
   type SelectorDiagnosticOptions,
 } from '#selector/diagnostics.js';
-export {
-  compareStampedFacts,
-  mapStampedFactsToSubjectFrame,
-  parseStampedFacts,
-  type ParsedStampedFacts,
-  type StaleComparison,
-  type StampedDatumFacts,
-  type StampedFaceFacts,
-  type StampedFacts,
-} from '#selector/stale.js';

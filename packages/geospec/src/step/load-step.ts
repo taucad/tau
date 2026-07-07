@@ -313,7 +313,7 @@ type NativeXdeRead = {
   diagnostic?: GeometryDiagnostic;
 };
 
-// One STEP-XDE read yields structure, names, and properties together; the
+// One STEP-XDE read yields structure, names, and datum placements together; the
 // native result also retains placed shapes for exact BRep proof calls, so it
 // is handed to the subject instead of being deleted here.
 const readNativeXde = (options: { text: string; module: GeoSpecNativeStepBackend }): NativeXdeRead => {

@@ -96,17 +96,17 @@ export type XdeSubshapeName = {
 };
 
 /**
- * One stamped `geospec:facts` property row — aspect-attached (face/axis) or
- * product-attached (datum), expanded per occurrence like subshape names.
- * `payload` is opaque here; the selector layer parses it against the profile
- * schema.
+ * One native AP242 datum placement row, expanded per occurrence like subshape
+ * names and expressed in subject-frame coordinates.
  *
  * @public
  */
-export type XdeProperty = {
+export type XdeDatumPlacement = {
   occurrencePath: string;
   name: string;
-  payload: string;
+  origin: [number, number, number];
+  xAxis: [number, number, number];
+  zAxis: [number, number, number];
 };
 
 /**
@@ -118,7 +118,7 @@ export type XdeProperty = {
 export type XdeReadResult = {
   occurrences: XdeOccurrence[];
   subshapeNames: XdeSubshapeName[];
-  properties: XdeProperty[];
+  datumPlacements: XdeDatumPlacement[];
   /** Free (non-assembly) top-level shapes — the flat-export degenerate case. */
   freeShapeCount: number;
 };

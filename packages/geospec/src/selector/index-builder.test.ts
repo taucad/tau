@@ -49,7 +49,7 @@ describe('buildSelectorIndex', () => {
     expect(topInterface?.face?.facts.normal).toEqual([0, 0, 1]);
   });
 
-  it('should derive entity kinds from geometry, not from stamped metadata', () => {
+  it('should derive entity kinds from geometry, not from authoring metadata', () => {
     const index = buildFixtureIndex();
 
     expect(index.interfaces.find((row) => row.fullName === 'cubeB.sideBore')?.entityKinds).toEqual(['face', 'axis']);
@@ -65,7 +65,8 @@ describe('buildSelectorIndex', () => {
     });
     expect(
       index.diagnostics.some(
-        (diagnostic) => diagnostic.code === selectorDiagnosticCodes.stale && diagnostic.message.includes('cubeA.ghost'),
+        (diagnostic) =>
+          diagnostic.code === selectorDiagnosticCodes.unsupportedEvidence && diagnostic.message.includes('cubeA.ghost'),
       ),
     ).toBe(true);
   });
@@ -79,28 +80,7 @@ describe('buildSelectorIndex', () => {
     ).toBe(true);
   });
 
-  it('should map stamped part-local facts through a non-identity occurrence transform', () => {
-    const index = buildFixtureIndex();
-
-    const sideBore = index.interfaces.find((row) => row.fullName === 'cubeB.sideBore');
-    expect(sideBore?.stamped?.axisDirection).toEqual([0, 1, 0]);
-    expect(sideBore?.stamped?.axisOrigin).toEqual([15, 5, 5]);
-  });
-
-  it('should degrade an unknown geospec:facts version to absent with an info diagnostic', () => {
-    const index = buildFixtureIndex();
-
-    expect(index.datums.some((row) => row.name === 'mystery')).toBe(false);
-    expect(
-      index.diagnostics.some(
-        (diagnostic) =>
-          diagnostic.code === selectorDiagnosticCodes.missingStampedFacts &&
-          diagnostic.message.includes('cubeA.mystery'),
-      ),
-    ).toBe(true);
-  });
-
-  it('should materialize datums from property rows mapped into the subject frame', () => {
+  it('should materialize native datum placements in the subject frame', () => {
     const index = buildFixtureIndex();
 
     const datumOfCubeA = index.datums.find((row) => row.fullName === 'cubeA.origin');
@@ -127,12 +107,14 @@ describe('buildSelectorIndex', () => {
     ]);
   });
 
-  it('should skip datum properties attached to unknown occurrences with an info diagnostic', () => {
+  it('should skip datum placements attached to unknown occurrences with an info diagnostic', () => {
     const xde = createFixtureXde();
-    xde.properties.push({
+    xde.datumPlacements.push({
       occurrencePath: 'missing',
       name: 'origin',
-      payload: '{"v":1,"kind":"datum","origin":[0,0,0],"xAxis":[1,0,0],"zAxis":[0,0,1]}',
+      origin: [0, 0, 0],
+      xAxis: [1, 0, 0],
+      zAxis: [0, 0, 1],
     });
 
     const index = buildSelectorIndex({ xde, faceFactsByOccurrence: createFixtureFaceFacts() });

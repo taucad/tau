@@ -12,10 +12,7 @@
 
 import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
 import type { XdeOccurrence, XdeReadResult } from '#step/types.js';
-import { missingStampedFactsDiagnostic } from '#selector/diagnostics.js';
 import { composeFullName } from '#selector/grammar.js';
-import { mapStampedFactsToSubjectFrame, parseStampedFacts } from '#selector/stale.js';
-import type { StampedDatumFacts, StampedFaceFacts } from '#selector/stale.js';
 import type { ResolvedEntityType, SelectorFaceFacts } from '#selector/types.js';
 
 /**
@@ -83,15 +80,10 @@ export type SelectorInterfaceRow = {
   /** True when the named `faceIndex` no longer exists in the geometry. */
   dangling: boolean;
   face?: SelectorFaceRow;
-  /** Stamped facts mapped into the subject frame, when present and usable. */
-  stamped?: StampedFaceFacts;
-  /** Why stamped facts are absent/unusable, when a resolution should say so. */
-  stampedAbsentReason?: string;
 };
 
 /**
- * One materialized datum row (subject frame). The stamped payload is
- * constitutive — datums have no carrier subshape and are never stale.
+ * One materialized datum row (subject frame).
  *
  * @public
  */
@@ -154,8 +146,6 @@ export type BuildSelectorIndexOptions = {
   xde: XdeReadResult;
   faceFactsByOccurrence: SelectorFaceFactsTable;
 };
-
-const identityTransform = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
 const computeOrdinalPaths = (occurrences: XdeOccurrence[]): Map<string, number[]> => {
   const childrenByParent = new Map<string, string[]>();
@@ -268,51 +258,12 @@ const buildBodyRows = (options: {
     };
   });
 
-type StampAttachment = {
-  stamped?: StampedFaceFacts;
-  stampedAbsentReason?: string;
-  diagnostics: GeometryDiagnostic[];
-};
-
-const attachStamp = (options: {
-  payload: string | undefined;
-  fullName: string;
-  transform: number[];
-}): StampAttachment => {
-  if (options.payload === undefined) {
-    return { diagnostics: [] };
-  }
-  const parsed = parseStampedFacts(options.payload);
-  if (parsed.status === 'absent') {
-    return {
-      stampedAbsentReason: parsed.reason,
-      diagnostics: [missingStampedFactsDiagnostic({ interfaceName: options.fullName, reason: parsed.reason })],
-    };
-  }
-  if (parsed.facts.kind === 'datum') {
-    const reason = 'a datum payload cannot stamp a carrier face interface';
-    return {
-      stampedAbsentReason: reason,
-      diagnostics: [missingStampedFactsDiagnostic({ interfaceName: options.fullName, reason })],
-    };
-  }
-  return {
-    stamped: mapStampedFactsToSubjectFrame(parsed.facts, options.transform) as StampedFaceFacts,
-    diagnostics: [],
-  };
-};
-
 const buildInterfaceRows = (options: {
   xde: XdeReadResult;
-  occurrences: SelectorOccurrenceRow[];
   faces: SelectorFaceRow[];
   diagnostics: GeometryDiagnostic[];
 }): SelectorInterfaceRow[] => {
   const faceByKey = new Map(options.faces.map((face) => [`${face.occurrencePath}#${face.faceIndex}`, face]));
-  const occurrenceByPath = new Map(options.occurrences.map((occurrence) => [occurrence.path, occurrence]));
-  const payloadByKey = new Map(
-    options.xde.properties.map((property) => [`${property.occurrencePath} ${property.name}`, property.payload]),
-  );
   const rows: SelectorInterfaceRow[] = [];
   for (const subshape of options.xde.subshapeNames) {
     if (subshape.shapeType !== 'face') {
@@ -329,20 +280,13 @@ const buildInterfaceRows = (options: {
     const dangling = face === undefined;
     if (dangling) {
       options.diagnostics.push({
-        code: 'GEOSPEC_SELECTOR_STALE',
+        code: 'GEOSPEC_SELECTOR_UNSUPPORTED_EVIDENCE',
         severity: 'warning',
         message: `Authored interface '${fullName}' names faceIndex ${subshape.faceIndex}, which no longer exists in the geometry.`,
         suggestion: 'Re-export the artifact so authored interface names are re-evaluated against the current shape.',
         details: { interfaceName: fullName, faceIndex: subshape.faceIndex },
       });
     }
-    const transform = occurrenceByPath.get(subshape.occurrencePath)?.transform ?? identityTransform;
-    const attachment = attachStamp({
-      payload: payloadByKey.get(`${subshape.occurrencePath} ${subshape.name}`),
-      fullName,
-      transform,
-    });
-    options.diagnostics.push(...attachment.diagnostics);
     rows.push({
       id: `interface:${fullName}`,
       fullName,
@@ -352,8 +296,6 @@ const buildInterfaceRows = (options: {
       entityKinds: derivedEntityKinds(face),
       dangling,
       ...(face ? { face } : {}),
-      ...(attachment.stamped ? { stamped: attachment.stamped } : {}),
-      ...(attachment.stampedAbsentReason ? { stampedAbsentReason: attachment.stampedAbsentReason } : {}),
     });
   }
   return rows;
@@ -362,48 +304,31 @@ const buildInterfaceRows = (options: {
 const buildDatumRows = (options: {
   xde: XdeReadResult;
   occurrences: SelectorOccurrenceRow[];
-  interfaceNames: Set<string>;
   diagnostics: GeometryDiagnostic[];
 }): SelectorDatumRow[] => {
   const occurrenceByPath = new Map(options.occurrences.map((occurrence) => [occurrence.path, occurrence]));
   const rows: SelectorDatumRow[] = [];
-  for (const property of options.xde.properties) {
-    if (options.interfaceNames.has(`${property.occurrencePath} ${property.name}`)) {
-      continue; // Aspect-attached stamp, already joined to its interface row.
-    }
-    const fullName = composeFullName(property.occurrencePath, property.name);
-    const parsed = parseStampedFacts(property.payload);
-    if (parsed.status === 'absent' || parsed.facts.kind !== 'datum') {
-      options.diagnostics.push(
-        missingStampedFactsDiagnostic({
-          interfaceName: fullName,
-          reason:
-            parsed.status === 'absent'
-              ? parsed.reason
-              : 'a face/axis stamp has no matching authored subshape name (orphan property)',
-        }),
-      );
-      continue; // Absent/unparseable datum: the interface does not exist.
-    }
-    const occurrence = occurrenceByPath.get(property.occurrencePath);
+  for (const placement of options.xde.datumPlacements) {
+    const fullName = composeFullName(placement.occurrencePath, placement.name);
+    const occurrence = occurrenceByPath.get(placement.occurrencePath);
     if (!occurrence) {
-      options.diagnostics.push(
-        missingStampedFactsDiagnostic({
-          interfaceName: fullName,
-          reason: `datum property is attached to unknown occurrence '${property.occurrencePath}'`,
-        }),
-      );
+      options.diagnostics.push({
+        code: 'GEOSPEC_SELECTOR_UNSUPPORTED_EVIDENCE',
+        severity: 'warning',
+        message: `Datum '${fullName}' is attached to unknown occurrence '${placement.occurrencePath}'.`,
+        suggestion: 'Re-export the artifact so datum placements and occurrence paths come from the same STEP graph.',
+        details: { datumName: fullName, occurrencePath: placement.occurrencePath },
+      });
       continue;
     }
-    const mapped = mapStampedFactsToSubjectFrame(parsed.facts, occurrence.transform) as StampedDatumFacts;
     rows.push({
       id: `datum:${fullName}`,
       fullName,
-      occurrencePath: property.occurrencePath,
-      name: property.name,
-      origin: mapped.origin,
-      xAxis: mapped.xAxis,
-      zAxis: mapped.zAxis,
+      occurrencePath: placement.occurrencePath,
+      name: placement.name,
+      origin: placement.origin,
+      xAxis: placement.xAxis,
+      zAxis: placement.zAxis,
     });
   }
   return rows;
@@ -423,7 +348,7 @@ const buildGroupRows = (interfaces: SelectorInterfaceRow[]): SelectorGroupRow[] 
     if (prefix === undefined || memberIndex === undefined) {
       continue;
     }
-    const key = `${row.occurrencePath} ${prefix}`;
+    const key = `${row.occurrencePath}\u0000${prefix}`;
     const group = groups.get(key) ?? { occurrencePath: row.occurrencePath, name: prefix, members: [] };
     group.members.push({ index: Number(memberIndex), row });
     groups.set(key, group);
@@ -472,11 +397,8 @@ export const buildSelectorIndex = (options: BuildSelectorIndexOptions): Selector
       occurrence.bounds = bounds;
     }
   }
-  const interfaces = buildInterfaceRows({ xde: options.xde, occurrences, faces, diagnostics });
-  const interfaceNames = new Set(
-    options.xde.subshapeNames.map((subshape) => `${subshape.occurrencePath} ${subshape.name}`),
-  );
-  const datums = buildDatumRows({ xde: options.xde, occurrences, interfaceNames, diagnostics });
+  const interfaces = buildInterfaceRows({ xde: options.xde, faces, diagnostics });
+  const datums = buildDatumRows({ xde: options.xde, occurrences, diagnostics });
   return {
     occurrences,
     faces,

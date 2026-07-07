@@ -82,24 +82,11 @@ describe('GeoSpecXdeReader', () => {
     expect(namedFace?.area).toBeCloseTo(100, 6);
   });
 
-  it('should read geospec:facts properties from both attachment legs', () => {
-    expect(result.properties).toHaveLength(2);
-
-    const aspectProperty = result.properties.find((property) => property.name === 'face.a');
-    expect(aspectProperty?.occurrencePath).toBe('cubeA');
-    expect(JSON.parse(aspectProperty?.payload ?? '{}')).toMatchObject({
-      v: 1,
-      kind: 'face',
-      surfaceType: 'plane',
-      normal: [0, 0, 1],
-      offset: 5,
-    });
-
-    const datumProperty = result.properties.find((property) => property.name === 'origin');
-    expect(datumProperty?.occurrencePath).toBe('cubeA');
-    expect(JSON.parse(datumProperty?.payload ?? '{}')).toMatchObject({
-      v: 1,
-      kind: 'datum',
+  it('should surface native AP242 datum placements and no legacy property rows', () => {
+    expect(result).not.toHaveProperty('properties');
+    const origin = result.datumPlacements.find((placement) => placement.name === 'origin');
+    expect(origin).toMatchObject({
+      occurrencePath: 'cubeA',
       origin: [0, 0, 0],
       xAxis: [1, 0, 0],
       zAxis: [0, 0, 1],

@@ -1,6 +1,6 @@
 /**
- * Tolerance and unit contract shared by selector resolution (R3) and stale
- * detection (R5). Units are millimetres and degrees throughout GeoSpec's
+ * Tolerance and unit contract shared by selector resolution (R3). Units are
+ * millimetres and degrees throughout GeoSpec's
  * selector layer; SB4 imports the same module for proof tolerances so the
  * program has a single tolerance vocabulary ("defined once", master rule).
  *
@@ -8,7 +8,7 @@
  */
 
 /**
- * Tolerance vocabulary consumed by selector predicates and stale comparison.
+ * Tolerance vocabulary consumed by selector predicates.
  *
  * @public
  */
@@ -17,8 +17,6 @@ export type SelectorTolerances = {
   linearMm: number;
   /** Angular tolerance in degrees for normal/axis/parallelism predicates. */
   angularToleranceDegrees: number;
-  /** Relative area drift above which stamped facts are considered stale. */
-  staleAreaRatio: number;
 };
 
 /**
@@ -30,15 +28,12 @@ export type SelectorTolerances = {
  *   STEP round-trip noise.
  * - `angularToleranceDegrees: 0.5` — separates deliberate drafts/tilts from
  *   numeric noise in exported analytic directions.
- * - `staleAreaRatio: 0.02` — 2% area drift; below this is parametrisation
- *   noise, above it indicates the named face was split, trimmed, or moved.
  *
  * @public
  */
 export const defaultSelectorTolerances: SelectorTolerances = {
   linearMm: 0.02,
   angularToleranceDegrees: 0.5,
-  staleAreaRatio: 0.02,
 };
 
 /**

@@ -1,6 +1,6 @@
 {
   "schema": "build-manifest-v2",
-  "timestamp": "2026-07-03T03:43:14Z",
+  "timestamp": "2026-07-06T02:47:16Z",
   "yaml_config": "geospec.single.yml",
   "yaml_hash": "5855019b435c",
   "validation_passed": true,
@@ -50,11 +50,13 @@
       "gp_Vec",
       "gp_XYZ"
     ],
-    "compiled": 5336,
+    "compiled": 5337,
     "missing": [],
     "alias_resolved": [],
-    "builtin": ["TopoDS"],
-    "extra_compiled": 5294,
+    "builtin": [
+      "TopoDS"
+    ],
+    "extra_compiled": 5295,
     "pass": true
   },
   "outputs": [
@@ -62,7 +64,7 @@
       "name": "geospec_opencascade_single.js",
       "wasm_file": "geospec_opencascade_single.wasm",
       "wasm_exists": true,
-      "wasm_size": 13632713,
+      "wasm_size": 13635797,
       "js_exists": true,
       "js_size": 60586,
       "pass": true
@@ -71,7 +73,11 @@
   "runtime_helpers": {
     "required": true,
     "pass": true,
-    "checked": ["getExceptionMessage", "incrementExceptionRefcount", "decrementExceptionRefcount"],
+    "checked": [
+      "getExceptionMessage",
+      "incrementExceptionRefcount",
+      "decrementExceptionRefcount"
+    ],
     "missing": []
   },
   "binding_report": {

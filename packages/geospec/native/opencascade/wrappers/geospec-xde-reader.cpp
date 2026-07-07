@@ -1,10 +1,10 @@
 // GeoSpec AP242 STEP-XDE structure reader for custom opencascade.js builds.
 //
 // Implements SB1 of the GeoSpec verification-kernel blueprint: one STEP-XDE
-// read yields occurrence structure, product/subshape names, and stamped
-// `geospec:facts` properties together with retained placed shapes so exact
-// BRep proof queries (extrema, classification, boolean common, face facts)
-// run without a second parse. JavaScript receives compact JSON only.
+// read yields occurrence structure, product/subshape names, and native AP242
+// datum placements together with retained placed shapes so exact BRep proof
+// queries (extrema, classification, boolean common, face facts) run without a
+// second parse. JavaScript receives compact JSON only.
 //
 // Deterministic orderings relied on by consumers (SB3 selector index):
 // - `faceIndex` is the 0-based position of a face in
@@ -17,12 +17,7 @@
 //   segments are disambiguated `name[k]` (1-based) in the parent's stored
 //   XCAF component-label order, which mirrors NAUO order in the file.
 //
-// Known limitation (documented for SB3): `geospec:facts` properties are
-// attributed to occurrences by owning *product name*, not by product label
-// identity, because the STEP entity model and the XCAF label space are only
-// joined by name here. Two distinct products sharing one name would
-// cross-attribute properties. Conforming producers use unique product names.
-
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <iomanip>
@@ -50,13 +45,17 @@
 #include <StepBasic_Product.hxx>
 #include <StepBasic_ProductDefinition.hxx>
 #include <StepBasic_ProductDefinitionFormation.hxx>
-#include <StepRepr_CharacterizedDefinition.hxx>
-#include <StepRepr_DescriptiveRepresentationItem.hxx>
+#include <StepGeom_Axis2Placement3d.hxx>
+#include <StepGeom_CartesianPoint.hxx>
+#include <StepGeom_Direction.hxx>
+#include <StepRepr_ConstructiveGeometryRepresentation.hxx>
+#include <StepRepr_ConstructiveGeometryRepresentationRelationship.hxx>
 #include <StepRepr_ProductDefinitionShape.hxx>
 #include <StepRepr_PropertyDefinition.hxx>
-#include <StepRepr_PropertyDefinitionRepresentation.hxx>
 #include <StepRepr_Representation.hxx>
+#include <StepRepr_RepresentationRelationship.hxx>
 #include <StepRepr_ShapeAspect.hxx>
+#include <StepShape_ShapeDefinitionRepresentation.hxx>
 #include <TCollection_AsciiString.hxx>
 #include <TCollection_ExtendedString.hxx>
 #include <TDF_Label.hxx>
@@ -97,10 +96,17 @@ struct GeoSpecXdeSubshapeRow {
   int faceIndex = -1;
 };
 
-struct GeoSpecXdePropertyRow {
+struct GeoSpecXdeDatumPlacementRow {
   std::string occurrencePath;
   std::string name;
-  std::string payload;
+  gp_Pnt origin;
+  gp_Dir xAxis;
+  gp_Dir zAxis;
+};
+
+struct GeoSpecXdeRepresentationProductRow {
+  Handle(StepRepr_Representation) representation;
+  std::string productName;
 };
 
 static std::string geospecXdeEscapeJson(const std::string& value) {
@@ -128,6 +134,23 @@ static void geospecXdeAppendPoint(std::ostringstream& output, const gp_Pnt& poin
 
 static void geospecXdeAppendDir(std::ostringstream& output, const gp_Dir& direction) {
   output << "[" << direction.X() << "," << direction.Y() << "," << direction.Z() << "]";
+}
+
+static gp_Dir geospecXdeDirectionOrDefault(
+  const Handle(StepGeom_Direction)& direction,
+  const gp_Dir& fallback
+) {
+  if (direction.IsNull() || direction->NbDirectionRatios() < 3) {
+    return fallback;
+  }
+  const double x = direction->DirectionRatiosValue(1);
+  const double y = direction->DirectionRatiosValue(2);
+  const double z = direction->DirectionRatiosValue(3);
+  const double magnitude = std::sqrt(x * x + y * y + z * z);
+  if (magnitude <= 1e-12) {
+    return fallback;
+  }
+  return gp_Dir(x, y, z);
 }
 
 static std::string geospecXdeLabelName(const TDF_Label& label) {
@@ -543,10 +566,10 @@ private:
 
     const std::vector<GeoSpecXdeSubshapeRow> subshapeRows =
       collectSubshapeRows(occurrences, productShapes, productLabels);
-    const std::vector<GeoSpecXdePropertyRow> propertyRows = collectPropertyRows(reader, occurrences);
+    const std::vector<GeoSpecXdeDatumPlacementRow> datumPlacementRows = collectDatumPlacementRows(reader, occurrences);
 
     result.success_ = true;
-    result.resultJson_ = emitResultJson(occurrences, subshapeRows, propertyRows, freeShapeCount);
+    result.resultJson_ = emitResultJson(occurrences, subshapeRows, datumPlacementRows, freeShapeCount);
     return result;
   }
 
@@ -672,19 +695,55 @@ private:
     return rows;
   }
 
-  // Reads `geospec:facts` properties directly from the STEP entity model:
-  // XCAF does not surface user-defined property_definitions, so this walks
-  // PROPERTY_DEFINITION -> PROPERTY_DEFINITION_REPRESENTATION ->
-  // DESCRIPTIVE_REPRESENTATION_ITEM and attributes each payload to its owning
-  // product from either attachment leg the profile defines: a named
-  // SHAPE_ASPECT (face/axis interfaces) or the product definition itself
-  // (datum interfaces). Product-to-occurrence mapping is by product name
-  // (see the header-comment limitation).
-  static std::vector<GeoSpecXdePropertyRow> collectPropertyRows(
+  static std::vector<GeoSpecXdeRepresentationProductRow> collectRepresentationProducts(
+    const Handle(Interface_InterfaceModel)& model
+  ) {
+    std::vector<GeoSpecXdeRepresentationProductRow> rows;
+    if (model.IsNull()) {
+      return rows;
+    }
+    for (int entityIndex = 1; entityIndex <= model->NbEntities(); entityIndex++) {
+      const Handle(StepShape_ShapeDefinitionRepresentation) shapeDefinition =
+        Handle(StepShape_ShapeDefinitionRepresentation)::DownCast(model->Value(entityIndex));
+      if (shapeDefinition.IsNull() || shapeDefinition->UsedRepresentation().IsNull()) {
+        continue;
+      }
+      const Handle(StepRepr_PropertyDefinition) propertyDefinition =
+        shapeDefinition->Definition().PropertyDefinition();
+      const Handle(StepRepr_ProductDefinitionShape) productShape =
+        Handle(StepRepr_ProductDefinitionShape)::DownCast(propertyDefinition);
+      const std::string productName = geospecXdeProductNameFromShapeDefinition(productShape);
+      if (!productName.empty()) {
+        rows.push_back({shapeDefinition->UsedRepresentation(), productName});
+      }
+    }
+    return rows;
+  }
+
+  static std::string productNameForRepresentation(
+    const Handle(StepRepr_Representation)& representation,
+    const std::vector<GeoSpecXdeRepresentationProductRow>& products
+  ) {
+    if (representation.IsNull()) {
+      return "";
+    }
+    for (const GeoSpecXdeRepresentationProductRow& product : products) {
+      if (!product.representation.IsNull() && product.representation == representation) {
+        return product.productName;
+      }
+    }
+    return "";
+  }
+
+  // Reads AP242 datum frames from CONSTRUCTIVE_GEOMETRY_REPRESENTATION items
+  // and relates them to product shape representations through constructive
+  // representation relationships. The emitted rows are occurrence-subject
+  // frame placements, so selector resolution remains pure data.
+  static std::vector<GeoSpecXdeDatumPlacementRow> collectDatumPlacementRows(
     STEPCAFControl_Reader& reader,
     const std::vector<GeoSpecXdeOccurrenceRecord>& occurrences
   ) {
-    std::vector<GeoSpecXdePropertyRow> rows;
+    std::vector<GeoSpecXdeDatumPlacementRow> rows;
     const Handle(XSControl_WorkSession) session = reader.Reader().WS();
     if (session.IsNull()) {
       return rows;
@@ -694,63 +753,82 @@ private:
       return rows;
     }
     const Interface_Graph& graph = session->Graph();
+    const std::vector<GeoSpecXdeRepresentationProductRow> representationProducts =
+      collectRepresentationProducts(model);
 
     for (int entityIndex = 1; entityIndex <= model->NbEntities(); entityIndex++) {
-      const Handle(StepRepr_PropertyDefinition) property =
-        Handle(StepRepr_PropertyDefinition)::DownCast(model->Value(entityIndex));
-      if (property.IsNull() || !property->HasDescription() || property->Description().IsNull()) {
-        continue;
-      }
-      if (geospecXdeHAsciiToString(property->Description()) != "geospec:facts") {
-        continue;
-      }
-      const std::string interfaceName = geospecXdeHAsciiToString(property->Name());
-      if (interfaceName.empty()) {
+      const Handle(StepRepr_ConstructiveGeometryRepresentation) representation =
+        Handle(StepRepr_ConstructiveGeometryRepresentation)::DownCast(model->Value(entityIndex));
+      if (representation.IsNull() || representation->Items().IsNull()) {
         continue;
       }
 
-      std::string payload;
-      Interface_EntityIterator sharings = graph.Sharings(property);
-      for (sharings.Start(); payload.empty() && sharings.More(); sharings.Next()) {
-        const Handle(StepRepr_PropertyDefinitionRepresentation) propertyRepresentation =
-          Handle(StepRepr_PropertyDefinitionRepresentation)::DownCast(sharings.Value());
-        if (propertyRepresentation.IsNull()) {
+      std::vector<std::string> productNames;
+      Interface_EntityIterator sharings = graph.Sharings(representation);
+      const Handle(StepRepr_Representation) constructiveRepresentation = representation;
+      for (sharings.Start(); sharings.More(); sharings.Next()) {
+        const Handle(StepRepr_RepresentationRelationship) relationship =
+          Handle(StepRepr_RepresentationRelationship)::DownCast(sharings.Value());
+        if (relationship.IsNull()) {
           continue;
         }
-        const Handle(StepRepr_Representation) representation = propertyRepresentation->UsedRepresentation();
-        if (representation.IsNull() || representation->Items().IsNull()) {
+        Handle(StepRepr_Representation) productRepresentation;
+        if (relationship->Rep1() == constructiveRepresentation) {
+          productRepresentation = relationship->Rep2();
+        } else if (relationship->Rep2() == constructiveRepresentation) {
+          productRepresentation = relationship->Rep1();
+        }
+        const std::string productName = productNameForRepresentation(productRepresentation, representationProducts);
+        if (!productName.empty() && std::find(productNames.begin(), productNames.end(), productName) == productNames.end()) {
+          productNames.push_back(productName);
+        }
+      }
+      if (productNames.empty()) {
+        continue;
+      }
+
+      const std::string representationName = geospecXdeHAsciiToString(representation->Name());
+      for (int itemIndex = 1; itemIndex <= representation->NbItems(); itemIndex++) {
+        const Handle(StepGeom_Axis2Placement3d) placement =
+          Handle(StepGeom_Axis2Placement3d)::DownCast(representation->ItemsValue(itemIndex));
+        if (placement.IsNull() || placement->Location().IsNull() || placement->Location()->NbCoordinates() < 3) {
           continue;
         }
-        for (int itemIndex = 1; itemIndex <= representation->NbItems(); itemIndex++) {
-          const Handle(StepRepr_DescriptiveRepresentationItem) descriptive =
-            Handle(StepRepr_DescriptiveRepresentationItem)::DownCast(representation->ItemsValue(itemIndex));
-          if (!descriptive.IsNull() && !descriptive->Description().IsNull()) {
-            payload = geospecXdeHAsciiToString(descriptive->Description());
-            break;
+        const std::string itemName = geospecXdeHAsciiToString(placement->Name());
+        const std::string datumName = itemName.empty() ? representationName : itemName;
+        if (datumName.empty()) {
+          continue;
+        }
+        const Handle(StepGeom_CartesianPoint) location = placement->Location();
+        const gp_Pnt localOrigin(
+          location->CoordinatesValue(1),
+          location->CoordinatesValue(2),
+          location->CoordinatesValue(3)
+        );
+        Handle(StepGeom_Direction) axis;
+        if (placement->HasAxis()) {
+          axis = placement->Axis();
+        }
+        Handle(StepGeom_Direction) refDirection;
+        if (placement->HasRefDirection()) {
+          refDirection = placement->RefDirection();
+        }
+        const gp_Dir localZ = geospecXdeDirectionOrDefault(axis, gp_Dir(0, 0, 1));
+        const gp_Dir localX = geospecXdeDirectionOrDefault(refDirection, gp_Dir(1, 0, 0));
+
+        for (const std::string& productName : productNames) {
+          for (const GeoSpecXdeOccurrenceRecord& occurrence : occurrences) {
+            if (occurrence.productName != productName) {
+              continue;
+            }
+            gp_Pnt origin = localOrigin;
+            gp_Dir zAxis = localZ;
+            gp_Dir xAxis = localX;
+            origin.Transform(occurrence.transform);
+            zAxis.Transform(occurrence.transform);
+            xAxis.Transform(occurrence.transform);
+            rows.push_back({occurrence.path, datumName, origin, xAxis, zAxis});
           }
-        }
-      }
-      if (payload.empty()) {
-        continue;
-      }
-
-      std::string productName;
-      const StepRepr_CharacterizedDefinition definition = property->Definition();
-      const Handle(StepRepr_ShapeAspect) aspect = definition.ShapeAspect();
-      if (!aspect.IsNull()) {
-        productName = geospecXdeProductNameFromShapeDefinition(aspect->OfShape());
-      } else if (!definition.ProductDefinitionShape().IsNull()) {
-        productName = geospecXdeProductNameFromShapeDefinition(definition.ProductDefinitionShape());
-      } else if (!definition.ProductDefinition().IsNull()) {
-        productName = geospecXdeProductNameFromProductDefinition(definition.ProductDefinition());
-      }
-      if (productName.empty()) {
-        continue;
-      }
-
-      for (const GeoSpecXdeOccurrenceRecord& occurrence : occurrences) {
-        if (occurrence.productName == productName) {
-          rows.push_back({occurrence.path, interfaceName, payload});
         }
       }
     }
@@ -760,7 +838,7 @@ private:
   static std::string emitResultJson(
     const std::vector<GeoSpecXdeOccurrenceRecord>& occurrences,
     const std::vector<GeoSpecXdeSubshapeRow>& subshapeRows,
-    const std::vector<GeoSpecXdePropertyRow>& propertyRows,
+    const std::vector<GeoSpecXdeDatumPlacementRow>& datumPlacementRows,
     int freeShapeCount
   ) {
     std::ostringstream json;
@@ -791,12 +869,18 @@ private:
            << geospecXdeEscapeJson(row.name) << "\",\"shapeType\":\"" << row.shapeType
            << "\",\"faceIndex\":" << row.faceIndex << "}";
     }
-    json << "],\"properties\":[";
-    for (std::size_t index = 0; index < propertyRows.size(); index++) {
-      const GeoSpecXdePropertyRow& row = propertyRows[index];
+    json << "],\"datumPlacements\":[";
+    for (std::size_t index = 0; index < datumPlacementRows.size(); index++) {
+      const GeoSpecXdeDatumPlacementRow& row = datumPlacementRows[index];
       if (index > 0) json << ",";
       json << "{\"occurrencePath\":\"" << geospecXdeEscapeJson(row.occurrencePath) << "\",\"name\":\""
-           << geospecXdeEscapeJson(row.name) << "\",\"payload\":\"" << geospecXdeEscapeJson(row.payload) << "\"}";
+           << geospecXdeEscapeJson(row.name) << "\",\"origin\":";
+      geospecXdeAppendPoint(json, row.origin);
+      json << ",\"xAxis\":";
+      geospecXdeAppendDir(json, row.xAxis);
+      json << ",\"zAxis\":";
+      geospecXdeAppendDir(json, row.zAxis);
+      json << "}";
     }
     json << "],\"freeShapeCount\":" << freeShapeCount << "}";
     return json.str();

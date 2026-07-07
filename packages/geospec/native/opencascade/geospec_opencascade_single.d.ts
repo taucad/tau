@@ -76,12 +76,7 @@ export declare class BRep_Tool {
    * - `Last`: updated value from the call.
    * Dispose the returned envelope to release owned Handle fields.
    */
-  static Curve(
-    E: unknown,
-    L: TopLoc_Location,
-    First: number,
-    Last: number,
-  ): { returnValue: unknown; First: number; Last: number; [Symbol.dispose](): void };
+  static Curve(E: unknown, L: TopLoc_Location, First: number, Last: number): { returnValue: unknown; First: number; Last: number; [Symbol.dispose](): void };
   /**
    * Returns the 3D curve of the edge. May be a Null handle. In <First> and <Last> the parameter range. It can be a copy if there is a Location.
    * @returns A result object with fields:
@@ -90,11 +85,7 @@ export declare class BRep_Tool {
    * - `Last`: updated value from the call.
    * Dispose the returned envelope to release owned Handle fields.
    */
-  static Curve(
-    E: unknown,
-    First: number,
-    Last: number,
-  ): { returnValue: unknown; First: number; Last: number; [Symbol.dispose](): void };
+  static Curve(E: unknown, First: number, Last: number): { returnValue: unknown; First: number; Last: number; [Symbol.dispose](): void };
   /**
    * Returns the 3D polygon of the edge. May be a Null handle. Returns in <L> the location for the polygon.
    * @param L Mutated in place; read the updated value from this argument after the call.
@@ -110,12 +101,7 @@ export declare class BRep_Tool {
    * - `Last`: updated value from the call.
    * Dispose the returned envelope to release owned Handle fields.
    */
-  static CurveOnSurface(
-    E: unknown,
-    L: TopLoc_Location,
-    First: number,
-    Last: number,
-  ): { C: unknown; S: unknown; First: number; Last: number; [Symbol.dispose](): void };
+  static CurveOnSurface(E: unknown, L: TopLoc_Location, First: number, Last: number): { C: unknown; S: unknown; First: number; Last: number; [Symbol.dispose](): void };
   /**
    * Returns the curve associated to the edge in the parametric space of the face. Returns a NULL handle if this curve does not exist. Returns in <First> and <Last> the parameter range. If the surface is a plane the curve can be not stored but created a new each time. The flag pointed by <theIsStored> serves to indicate storage status. It is valued if the pointer is non-null.
    * @returns A result object with fields:
@@ -124,13 +110,7 @@ export declare class BRep_Tool {
    * - `Last`: updated value from the call.
    * Dispose the returned envelope to release owned Handle fields.
    */
-  static CurveOnSurface(
-    E: unknown,
-    F: TopoDS_Face,
-    First: number,
-    Last: number,
-    theIsStored: boolean,
-  ): { returnValue: unknown; First: number; Last: number; [Symbol.dispose](): void };
+  static CurveOnSurface(E: unknown, F: TopoDS_Face, First: number, Last: number, theIsStored: boolean): { returnValue: unknown; First: number; Last: number; [Symbol.dispose](): void };
   /**
    * Returns in `, , <L> the 2d curve, the surface and the location for the edge <E> of rank <Index>. and are null if the index is out of range. Returns in <First> and <Last> the parameter range.`
    * @param L Mutated in place; read the updated value from this argument after the call.
@@ -141,13 +121,7 @@ export declare class BRep_Tool {
    * - `Last`: updated value from the call.
    * Dispose the returned envelope to release owned Handle fields.
    */
-  static CurveOnSurface(
-    E: unknown,
-    L: TopLoc_Location,
-    First: number,
-    Last: number,
-    Index: number,
-  ): { C: unknown; S: unknown; First: number; Last: number; [Symbol.dispose](): void };
+  static CurveOnSurface(E: unknown, L: TopLoc_Location, First: number, Last: number, Index: number): { C: unknown; S: unknown; First: number; Last: number; [Symbol.dispose](): void };
   /**
    * Returns the curve associated to the edge in the parametric space of the surface. Returns a NULL handle if this curve does not exist. Returns in <First> and <Last> the parameter range. If the surface is a plane the curve can be not stored but created a new each time. The flag pointed by <theIsStored> serves to indicate storage status. It is valued if the pointer is non-null.
    * @returns A result object with fields:
@@ -156,14 +130,7 @@ export declare class BRep_Tool {
    * - `Last`: updated value from the call.
    * Dispose the returned envelope to release owned Handle fields.
    */
-  static CurveOnSurface(
-    E: unknown,
-    S: unknown,
-    L: TopLoc_Location,
-    First: number,
-    Last: number,
-    theIsStored: boolean,
-  ): { returnValue: unknown; First: number; Last: number; [Symbol.dispose](): void };
+  static CurveOnSurface(E: unknown, S: unknown, L: TopLoc_Location, First: number, Last: number, theIsStored: boolean): { returnValue: unknown; First: number; Last: number; [Symbol.dispose](): void };
   /**
    * For the planar surface builds the 2d curve for the edge by projection of the edge on plane. Returns a NULL handle if the surface is not planar or the projection failed.
    * @returns A result object with fields:
@@ -172,13 +139,7 @@ export declare class BRep_Tool {
    * - `Last`: updated value from the call.
    * Dispose the returned envelope to release owned Handle fields.
    */
-  static CurveOnPlane(
-    E: unknown,
-    S: unknown,
-    L: TopLoc_Location,
-    First: number,
-    Last: number,
-  ): { returnValue: unknown; First: number; Last: number; [Symbol.dispose](): void };
+  static CurveOnPlane(E: unknown, S: unknown, L: TopLoc_Location, First: number, Last: number): { returnValue: unknown; First: number; Last: number; [Symbol.dispose](): void };
   /**
    * Returns the polygon associated to the edge in the parametric space of the face. Returns a NULL handle if this polygon does not exist.
    */
@@ -204,11 +165,7 @@ export declare class BRep_Tool {
    * - `S`: owned by the returned envelope.
    * Dispose the returned envelope to release owned Handle fields.
    */
-  static PolygonOnSurface(
-    E: unknown,
-    L: TopLoc_Location,
-    Index: number,
-  ): { C: unknown; S: unknown; [Symbol.dispose](): void };
+  static PolygonOnSurface(E: unknown, L: TopLoc_Location, Index: number): { C: unknown; S: unknown; [Symbol.dispose](): void };
   /**
    * Returns in.
    *
@@ -221,10 +178,7 @@ export declare class BRep_Tool {
    * - `T`: owned by the returned envelope.
    * Dispose the returned envelope to release owned Handle fields.
    */
-  static PolygonOnTriangulation(
-    E: unknown,
-    L: TopLoc_Location,
-  ): { P: unknown; T: Poly_Triangulation; [Symbol.dispose](): void };
+  static PolygonOnTriangulation(E: unknown, L: TopLoc_Location): { P: unknown; T: Poly_Triangulation; [Symbol.dispose](): void };
   /**
    * Returns the polygon associated to the edge in the parametric space of the face. Returns a NULL handle if this polygon does not exist.
    */
@@ -239,11 +193,7 @@ export declare class BRep_Tool {
    * - `T`: owned by the returned envelope.
    * Dispose the returned envelope to release owned Handle fields.
    */
-  static PolygonOnTriangulation(
-    E: unknown,
-    L: TopLoc_Location,
-    Index: number,
-  ): { P: unknown; T: Poly_Triangulation; [Symbol.dispose](): void };
+  static PolygonOnTriangulation(E: unknown, L: TopLoc_Location, Index: number): { P: unknown; T: Poly_Triangulation; [Symbol.dispose](): void };
   /**
    * Returns the SameParameter flag for the edge.
    */
@@ -269,13 +219,7 @@ export declare class BRep_Tool {
    * - `First`: updated value from the call.
    * - `Last`: updated value from the call.
    */
-  static Range(
-    E: unknown,
-    S: unknown,
-    L: TopLoc_Location,
-    First: number,
-    Last: number,
-  ): { First: number; Last: number };
+  static Range(E: unknown, S: unknown, L: TopLoc_Location, First: number, Last: number): { First: number; Last: number };
   /**
    * Gets the range of the edge on the pcurve on the face.
    * @returns A result object with fields:
@@ -392,13 +336,7 @@ export declare class BRepTools {
    * - `VMin`: updated value from the call.
    * - `VMax`: updated value from the call.
    */
-  static UVBounds(
-    F: TopoDS_Face,
-    UMin: number,
-    UMax: number,
-    VMin: number,
-    VMax: number,
-  ): { UMin: number; UMax: number; VMin: number; VMax: number };
+  static UVBounds(F: TopoDS_Face, UMin: number, UMax: number, VMin: number, VMax: number): { UMin: number; UMax: number; VMin: number; VMax: number };
   /**
    * Returns in UMin, UMax, VMin, VMax the bounding values of the wire in the parametric space of F.
    * @returns A result object with fields:
@@ -407,14 +345,7 @@ export declare class BRepTools {
    * - `VMin`: updated value from the call.
    * - `VMax`: updated value from the call.
    */
-  static UVBounds(
-    F: TopoDS_Face,
-    W: unknown,
-    UMin: number,
-    UMax: number,
-    VMin: number,
-    VMax: number,
-  ): { UMin: number; UMax: number; VMin: number; VMax: number };
+  static UVBounds(F: TopoDS_Face, W: unknown, UMin: number, UMax: number, VMin: number, VMax: number): { UMin: number; UMax: number; VMin: number; VMax: number };
   /**
    * Returns in UMin, UMax, VMin, VMax the bounding values of the edge in the parametric space of F.
    * @returns A result object with fields:
@@ -423,14 +354,7 @@ export declare class BRepTools {
    * - `VMin`: updated value from the call.
    * - `VMax`: updated value from the call.
    */
-  static UVBounds(
-    F: TopoDS_Face,
-    E: unknown,
-    UMin: number,
-    UMax: number,
-    VMin: number,
-    VMax: number,
-  ): { UMin: number; UMax: number; VMin: number; VMax: number };
+  static UVBounds(F: TopoDS_Face, E: unknown, UMin: number, UMax: number, VMin: number, VMax: number): { UMin: number; UMax: number; VMin: number; VMax: number };
   /**
    * Adds to the box **the bounding values in the parametric space of F.**
    * @param B Mutated in place; read the updated value from this argument after the call.
@@ -522,11 +446,7 @@ export declare class BRepTools {
    * @param theToActivateStrictly flag to activate exactly triangulation with defined theTriangulationIdx index. In TRUE case if some face doesn't contain triangulation with this index, active triangulation will not be changed for it. Else the last available triangulation will be activated.
    * @returns TRUE if at least one active triangulation was changed.
    */
-  static ActivateTriangulation(
-    theShape: TopoDS_Shape,
-    theTriangulationIdx: number,
-    theToActivateStrictly?: boolean,
-  ): boolean;
+  static ActivateTriangulation(theShape: TopoDS_Shape, theTriangulationIdx: number, theToActivateStrictly?: boolean): boolean;
   /**
    * Releases all available triangulations for each face of the shape if there is deferred storage to load them later.
    * @param theShape shape to unload triangulations
@@ -560,11 +480,7 @@ export declare class BRepTools {
    * - `theUclosed`: updated value from the call.
    * - `theVclosed`: updated value from the call.
    */
-  static DetectClosedness(
-    theFace: TopoDS_Face,
-    theUclosed: boolean,
-    theVclosed: boolean,
-  ): { theUclosed: boolean; theVclosed: boolean };
+  static DetectClosedness(theFace: TopoDS_Face, theUclosed: boolean, theVclosed: boolean): { theUclosed: boolean; theVclosed: boolean };
   /**
    * Writes the shape to the file in an ASCII format TopTools_FormatVersion_VERSION_1. This alias writes shape with triangulation data.
    * @param theShape the shape to write
@@ -581,14 +497,7 @@ export declare class BRepTools {
    * @param theVersion the {@link TopTools | `TopTools`} format version
    * @param theProgress the range of progress indicator to fill in
    */
-  static Write(
-    theShape: TopoDS_Shape,
-    theFile: string,
-    theWithTriangles: boolean,
-    theWithNormals: boolean,
-    theVersion: unknown,
-    theProgress: Message_ProgressRange,
-  ): boolean;
+  static Write(theShape: TopoDS_Shape, theFile: string, theWithTriangles: boolean, theWithNormals: boolean, theVersion: unknown, theProgress: Message_ProgressRange): boolean;
   /**
    * Reads a Shape from in returns it in <Sh>. **is used to build the shape.**
    * @param Sh Mutated in place; read the updated value from this argument after the call.
@@ -597,14 +506,7 @@ export declare class BRepTools {
   /**
    * Evals real tolerance of edge <theE>. <theC3d>, <theC2d>, <theS>, <theF>, <theL> are correspondently 3d curve of edge, 2d curve on surface <theS> and rang of edge If calculated tolerance is more then current edge tolerance, edge is updated. Method returns actual tolerance of edge.
    */
-  static EvalAndUpdateTol(
-    theE: unknown,
-    theC3d: unknown,
-    theC2d: unknown,
-    theS: unknown,
-    theF: number,
-    theL: number,
-  ): number;
+  static EvalAndUpdateTol(theE: unknown, theC3d: unknown, theC2d: unknown, theS: unknown, theF: number, theL: number): number;
   /**
    * returns the cumul of the orientation of <Edge> and the containing wire in <Face>
    */
@@ -1001,7 +903,7 @@ export declare class TopExp_Explorer {
   [Symbol.dispose](): void;
 }
 
-export type TopAbs_Orientation = (typeof TopAbs_Orientation)[keyof typeof TopAbs_Orientation];
+export type TopAbs_Orientation = typeof TopAbs_Orientation[keyof typeof TopAbs_Orientation];
 /**
  * Identifies the orientation of a topological shape. Orientation can represent a relation between two entities, or it can apply to a shape in its own right.
  * When used to describe a relation between two shapes, orientation allows you to use the underlying entity in either direction.
@@ -1015,7 +917,7 @@ export declare const TopAbs_Orientation: {
   readonly TopAbs_EXTERNAL: 'TopAbs_EXTERNAL';
 };
 
-export type TopAbs_ShapeEnum = (typeof TopAbs_ShapeEnum)[keyof typeof TopAbs_ShapeEnum];
+export type TopAbs_ShapeEnum = typeof TopAbs_ShapeEnum[keyof typeof TopAbs_ShapeEnum];
 /**
  * Identifies various topological shapes. This enumeration allows you to use dynamic typing of shapes. The values are listed in order of complexity, from the most complex to the most simple i.e. COMPOUND > COMPSOLID > SOLID > .... > VERTEX > SHAPE. Any shape can contain simpler shapes in its definition. Abstract topological data structure describes a basic entity, the shape (present in this enumeration as the SHAPE value), which can be divided into the following component topologies:
  *
@@ -1675,20 +1577,8 @@ export declare class NCollection_Sequence_handle_Standard_Transient {
 
 export declare class GeoSpecMeshMetrics {
   constructor();
-  static componentOverlapFromTrianglePointers(
-    trianglePointer: number,
-    triangleCount: number,
-    componentIdPointer: number,
-    componentCount: number,
-    tolerance: number,
-  ): GeoSpecMeshOverlapResult;
-  static chamferDistanceFromTrianglePointers(
-    actualPointer: number,
-    actualTriangleCount: number,
-    expectedPointer: number,
-    expectedTriangleCount: number,
-    samples: number,
-  ): GeoSpecMeshDistanceStats;
+  static componentOverlapFromTrianglePointers(trianglePointer: number, triangleCount: number, componentIdPointer: number, componentCount: number, tolerance: number): GeoSpecMeshOverlapResult;
+  static chamferDistanceFromTrianglePointers(actualPointer: number, actualTriangleCount: number, expectedPointer: number, expectedTriangleCount: number, samples: number): GeoSpecMeshDistanceStats;
   /** Releases the C++ object. The caller must ensure no further access. */
   delete(): void;
   [Symbol.dispose](): void;
@@ -2492,9 +2382,7 @@ export declare class NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher
   /**
    * Assign. This method does not change the internal allocator.
    */
-  Assign(
-    theOther: NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher,
-  ): NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher;
+  Assign(theOther: NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher): NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher;
   /**
    * ReSize.
    */
@@ -2556,89 +2444,89 @@ export declare class NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher
   [Symbol.dispose](): void;
 }
 
-/**
- * Constructor.
- */
-export declare class NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher_2 extends NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher {
   /**
    * Constructor.
    */
-  constructor(theNbBuckets: number, theAllocator: unknown);
-}
+  export declare class NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher_2 extends NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher {
+    /**
+     * Constructor.
+     */
+    constructor(theNbBuckets: number, theAllocator: unknown);
+  }
 
-/**
- * Constructor (legacy int-taking).
- */
-export declare class NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher_3 extends NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher {
   /**
    * Constructor (legacy int-taking).
    */
-  constructor(theNbBuckets: number, theAllocator: unknown);
-}
+  export declare class NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher_3 extends NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher {
+    /**
+     * Constructor (legacy int-taking).
+     */
+    constructor(theNbBuckets: number, theAllocator: unknown);
+  }
 
-/**
- * Constructor with custom hasher (copy).
- * @param theHasher custom hasher instance
- * @param theNbBuckets initial number of buckets
- * @param theAllocator custom memory allocator
- */
-export declare class NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher_4 extends NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher {
   /**
    * Constructor with custom hasher (copy).
    * @param theHasher custom hasher instance
    * @param theNbBuckets initial number of buckets
    * @param theAllocator custom memory allocator
    */
-  constructor(theHasher: unknown, theNbBuckets: number, theAllocator: unknown);
-}
+  export declare class NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher_4 extends NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher {
+    /**
+     * Constructor with custom hasher (copy).
+     * @param theHasher custom hasher instance
+     * @param theNbBuckets initial number of buckets
+     * @param theAllocator custom memory allocator
+     */
+    constructor(theHasher: unknown, theNbBuckets: number, theAllocator: unknown);
+  }
 
-/**
- * Constructor with custom hasher (move).
- * @param theHasher custom hasher instance (moved)
- * @param theNbBuckets initial number of buckets
- * @param theAllocator custom memory allocator
- */
-export declare class NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher_5 extends NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher {
   /**
    * Constructor with custom hasher (move).
    * @param theHasher custom hasher instance (moved)
    * @param theNbBuckets initial number of buckets
    * @param theAllocator custom memory allocator
    */
-  constructor(theHasher: unknown, theNbBuckets: number, theAllocator: unknown);
-}
+  export declare class NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher_5 extends NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher {
+    /**
+     * Constructor with custom hasher (move).
+     * @param theHasher custom hasher instance (moved)
+     * @param theNbBuckets initial number of buckets
+     * @param theAllocator custom memory allocator
+     */
+    constructor(theHasher: unknown, theNbBuckets: number, theAllocator: unknown);
+  }
 
-/**
- * Constructor with custom hasher (move).
- * @param theHasher custom hasher instance (moved)
- * @param theNbBuckets initial number of buckets
- * @param theAllocator custom memory allocator
- */
-export declare class NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher_6 extends NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher {
   /**
    * Constructor with custom hasher (move).
    * @param theHasher custom hasher instance (moved)
    * @param theNbBuckets initial number of buckets
    * @param theAllocator custom memory allocator
    */
-  constructor(theHasher: unknown, theNbBuckets: number, theAllocator: unknown);
-}
+  export declare class NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher_6 extends NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher {
+    /**
+     * Constructor with custom hasher (move).
+     * @param theHasher custom hasher instance (moved)
+     * @param theNbBuckets initial number of buckets
+     * @param theAllocator custom memory allocator
+     */
+    constructor(theHasher: unknown, theNbBuckets: number, theAllocator: unknown);
+  }
 
-/**
- * Constructor with custom hasher (move).
- * @param theHasher custom hasher instance (moved)
- * @param theNbBuckets initial number of buckets
- * @param theAllocator custom memory allocator
- */
-export declare class NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher_7 extends NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher {
   /**
    * Constructor with custom hasher (move).
    * @param theHasher custom hasher instance (moved)
    * @param theNbBuckets initial number of buckets
    * @param theAllocator custom memory allocator
    */
-  constructor(theHasher: unknown, theNbBuckets: number, theAllocator: unknown);
-}
+  export declare class NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher_7 extends NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher {
+    /**
+     * Constructor with custom hasher (move).
+     * @param theHasher custom hasher instance (moved)
+     * @param theNbBuckets initial number of buckets
+     * @param theAllocator custom memory allocator
+     */
+    constructor(theHasher: unknown, theNbBuckets: number, theAllocator: unknown);
+  }
 
 /**
  * Template class for Handle-managed 1D arrays. Inherits from both NCollection_Array1<TheItemType> and {@link Standard_Transient | `Standard_Transient`}, providing reference-counted array functionality.
@@ -3332,7 +3220,7 @@ export declare class TopLoc_Location {
   [Symbol.dispose](): void;
 }
 
-export type GeomAbs_SurfaceType = (typeof GeomAbs_SurfaceType)[keyof typeof GeomAbs_SurfaceType];
+export type GeomAbs_SurfaceType = typeof GeomAbs_SurfaceType[keyof typeof GeomAbs_SurfaceType];
 export declare const GeomAbs_SurfaceType: {
   readonly GeomAbs_Plane: 'GeomAbs_Plane';
   readonly GeomAbs_Cylinder: 'GeomAbs_Cylinder';
@@ -3378,11 +3266,7 @@ export declare class Poly_Triangulation {
   /**
    * Constructs a triangulation from a set of triangles. The triangulation is initialized with 3D points from Nodes, 2D points from UVNodes and triangles from Triangles, where coordinates of a 2D point from UVNodes are the (u, v) parameters of the corresponding 3D point from Nodes on the surface approximated by the constructed triangulation.
    */
-  constructor(
-    Nodes: NCollection_Array1_gp_Pnt,
-    UVNodes: NCollection_Array1_gp_Pnt2d,
-    Triangles: NCollection_Array1_Poly_Triangle,
-  );
+  constructor(Nodes: NCollection_Array1_gp_Pnt, UVNodes: NCollection_Array1_gp_Pnt2d, Triangles: NCollection_Array1_Poly_Triangle);
   /**
    * Constructs a triangulation from a set of triangles. The triangulation is initialized without a triangle or a node, but capable of containing specified number of nodes and triangles.
    * @param theNbNodes number of nodes to allocate
@@ -3858,15 +3742,7 @@ export declare class gp_Vec {
   /**
    * <me> is set to the following linear form : theA1 * theV1 + theA2 * theV2 + theA3 * theV3 + theV4
    */
-  SetLinearForm(
-    theA1: number,
-    theV1: gp_Vec,
-    theA2: number,
-    theV2: gp_Vec,
-    theA3: number,
-    theV3: gp_Vec,
-    theV4: gp_Vec,
-  ): void;
+  SetLinearForm(theA1: number, theV1: gp_Vec, theA2: number, theV2: gp_Vec, theA3: number, theV3: gp_Vec, theV4: gp_Vec): void;
   /**
    * <me> is set to the following linear form : theA1 * theV1 + theA2 * theV2 + theA3 * theV3
    */
@@ -3986,29 +3862,7 @@ export declare class gp_Cylinder {
    * - `theC3`: updated value from the call.
    * - `theD`: updated value from the call.
    */
-  Coefficients(
-    theA1: number,
-    theA2: number,
-    theA3: number,
-    theB1: number,
-    theB2: number,
-    theB3: number,
-    theC1: number,
-    theC2: number,
-    theC3: number,
-    theD: number,
-  ): {
-    theA1: number;
-    theA2: number;
-    theA3: number;
-    theB1: number;
-    theB2: number;
-    theB3: number;
-    theC1: number;
-    theC2: number;
-    theC3: number;
-    theD: number;
-  };
+  Coefficients(theA1: number, theA2: number, theA3: number, theB1: number, theB2: number, theB3: number, theC1: number, theC2: number, theC3: number, theD: number): { theA1: number; theA2: number; theA3: number; theB1: number; theB2: number; theB3: number; theC1: number; theC2: number; theC3: number; theD: number };
   /**
    * Returns the "Location" point of the cylinder.
    */
@@ -4256,7 +4110,7 @@ export declare class gp_Dir {
   [Symbol.dispose](): void;
 }
 
-export type gp_Dir_D = (typeof gp_Dir_D)[keyof typeof gp_Dir_D];
+export type gp_Dir_D = typeof gp_Dir_D[keyof typeof gp_Dir_D];
 /**
  * {@link Standard | `Standard`} directions in 3D space for optimized constexpr construction.
  */
@@ -4331,12 +4185,7 @@ export declare class gp_Pln {
    * - `theC`: updated value from the call.
    * - `theD`: updated value from the call.
    */
-  Coefficients(
-    theA: number,
-    theB: number,
-    theC: number,
-    theD: number,
-  ): { theA: number; theB: number; theC: number; theD: number };
+  Coefficients(theA: number, theB: number, theC: number, theD: number): { theA: number; theB: number; theC: number; theD: number };
   /**
    * Modifies this plane, by redefining its local coordinate system so that.
    *
@@ -4697,15 +4546,7 @@ export declare class gp_XYZ {
    * theA1*theXYZ1+theA2*theXYZ2+theA3*theXYZ3+theXYZ4
    * ```
    */
-  SetLinearForm(
-    theA1: number,
-    theXYZ1: gp_XYZ,
-    theA2: number,
-    theXYZ2: gp_XYZ,
-    theA3: number,
-    theXYZ3: gp_XYZ,
-    theXYZ4: gp_XYZ,
-  ): void;
+  SetLinearForm(theA1: number, theXYZ1: gp_XYZ, theA2: number, theXYZ2: gp_XYZ, theA3: number, theXYZ3: gp_XYZ, theXYZ4: gp_XYZ): void;
   /**
    * <me> is set to the following linear form :
    *
@@ -4954,13 +4795,7 @@ export declare class BRepAlgoAPI_Common {
 export declare class BRepMesh_IncrementalMesh {
   constructor();
   constructor(theShape: TopoDS_Shape, theParameters: unknown, theRange?: Message_ProgressRange);
-  constructor(
-    theShape: TopoDS_Shape,
-    theLinDeflection: number,
-    isRelative?: boolean,
-    theAngDeflection?: number,
-    isInParallel?: boolean,
-  );
+  constructor(theShape: TopoDS_Shape, theLinDeflection: number, isRelative?: boolean, theAngDeflection?: number, isInParallel?: boolean);
   Perform(theRange: Message_ProgressRange): void;
   Perform(theContext: unknown, theRange: Message_ProgressRange): void;
   Parameters(): unknown;
@@ -5064,13 +4899,7 @@ export declare class BRepBndLib {
    * If theIsShapeToleranceUsed == TRUE then resulting box will be extended on the tolerance of the shape. theIsOptimal flag defines whether to look for the more tight OBB for the cost of performance or not.
    * @param theOBB Mutated in place; read the updated value from this argument after the call.
    */
-  static AddOBB(
-    theS: TopoDS_Shape,
-    theOBB: unknown,
-    theIsTriangulationUsed: boolean,
-    theIsOptimal: boolean,
-    theIsShapeToleranceUsed: boolean,
-  ): void;
+  static AddOBB(theS: TopoDS_Shape, theOBB: unknown, theIsTriangulationUsed: boolean, theIsOptimal: boolean, theIsShapeToleranceUsed: boolean): void;
   /** Releases the C++ object. The caller must ensure no further access. */
   delete(): void;
   [Symbol.dispose](): void;
@@ -5120,53 +4949,22 @@ export declare class BRepGProp {
    * For ex., if SkipShared = True, the volumes formed by the equal (the same TShape, location and orientation) faces are taken into calculation only once. UseTriangulation is a special flag, which defines preferable source of geometry data. If UseTriangulation = false, exact geometry objects (surfaces) are used, otherwise face triangulations are used first.
    * @param VProps Mutated in place; read the updated value from this argument after the call.
    */
-  static VolumeProperties(
-    S: TopoDS_Shape,
-    VProps: GProp_GProps,
-    OnlyClosed: boolean,
-    SkipShared: boolean,
-    UseTriangulation: boolean,
-  ): void;
+  static VolumeProperties(S: TopoDS_Shape, VProps: GProp_GProps, OnlyClosed: boolean, SkipShared: boolean, UseTriangulation: boolean): void;
   /**
    * Updates <VProps> with the shape , that contains its principal properties. The volume properties of all the FORWARD and REVERSED faces in are computed. If OnlyClosed is True then computed faces must belong to closed Shells. Adaptive 2D Gauss integration is used. Parameter Eps sets maximal relative error of computed mass (volume) for each face.
    * Error is calculated as std::abs((M(i+1)-M(i))/M(i+1)), M(i+1) and M(i) are values for two successive steps of adaptive integration. Method returns estimation of relative error reached for whole shape. WARNING: if Eps > 0.001 algorithm performs non-adaptive integration. SkipShared is a special flag, which allows taking in calculation shared topological entities or not.
    * For ex., if SkipShared = True, the volumes formed by the equal (the same TShape, location and orientation) faces are taken into calculation only once.
    * @param VProps Mutated in place; read the updated value from this argument after the call.
    */
-  static VolumeProperties(
-    S: TopoDS_Shape,
-    VProps: GProp_GProps,
-    Eps: number,
-    OnlyClosed: boolean,
-    SkipShared: boolean,
-  ): number;
+  static VolumeProperties(S: TopoDS_Shape, VProps: GProp_GProps, Eps: number, OnlyClosed: boolean, SkipShared: boolean): number;
   /**
    * Updates <VProps> with the shape , that contains its principal properties. The volume properties of all the FORWARD and REVERSED faces in are computed. If OnlyClosed is True then computed faces must belong to closed Shells. Adaptive 2D Gauss integration is used. Parameter IsUseSpan says if it is necessary to define spans on a face. This option has an effect only for BSpline faces. Parameter Eps sets maximal relative error of computed property for each face.
    * Error is delivered by the adaptive Gauss-Kronrod method of integral computation that is used for properties computation. Method returns estimation of relative error reached for whole shape. Returns negative value if the computation is failed. SkipShared is a special flag, which allows taking in calculation shared topological entities or not.
    * For ex., if SkipShared = True, the volumes formed by the equal (the same TShape, location and orientation) faces are taken into calculation only once.
    * @param VProps Mutated in place; read the updated value from this argument after the call.
    */
-  static VolumePropertiesGK(
-    S: TopoDS_Shape,
-    VProps: GProp_GProps,
-    Eps: number,
-    OnlyClosed: boolean,
-    IsUseSpan: boolean,
-    CGFlag: boolean,
-    IFlag: boolean,
-    SkipShared: boolean,
-  ): number;
-  static VolumePropertiesGK(
-    S: TopoDS_Shape,
-    VProps: GProp_GProps,
-    thePln: gp_Pln,
-    Eps: number,
-    OnlyClosed: boolean,
-    IsUseSpan: boolean,
-    CGFlag: boolean,
-    IFlag: boolean,
-    SkipShared: boolean,
-  ): number;
+  static VolumePropertiesGK(S: TopoDS_Shape, VProps: GProp_GProps, Eps: number, OnlyClosed: boolean, IsUseSpan: boolean, CGFlag: boolean, IFlag: boolean, SkipShared: boolean): number;
+  static VolumePropertiesGK(S: TopoDS_Shape, VProps: GProp_GProps, thePln: gp_Pln, Eps: number, OnlyClosed: boolean, IsUseSpan: boolean, CGFlag: boolean, IFlag: boolean, SkipShared: boolean): number;
   /** Releases the C++ object. The caller must ensure no further access. */
   delete(): void;
   [Symbol.dispose](): void;
@@ -5714,11 +5512,7 @@ export declare class STEPControl_Reader {
    * @param theUnitAngleNames Mutated in place; read the updated value from this argument after the call.
    * @param theUnitSolidAngleNames Mutated in place; read the updated value from this argument after the call.
    */
-  FileUnits(
-    theUnitLengthNames: NCollection_Sequence_TCollection_AsciiString,
-    theUnitAngleNames: NCollection_Sequence_TCollection_AsciiString,
-    theUnitSolidAngleNames: NCollection_Sequence_TCollection_AsciiString,
-  ): void;
+  FileUnits(theUnitLengthNames: NCollection_Sequence_TCollection_AsciiString, theUnitAngleNames: NCollection_Sequence_TCollection_AsciiString, theUnitSolidAngleNames: NCollection_Sequence_TCollection_AsciiString): void;
   /**
    * Sets system length unit used by transfer process. Performs only if a model is not NULL.
    */
@@ -5732,7 +5526,7 @@ export declare class STEPControl_Reader {
   [Symbol.dispose](): void;
 }
 
-export type IFSelect_ReturnStatus = (typeof IFSelect_ReturnStatus)[keyof typeof IFSelect_ReturnStatus];
+export type IFSelect_ReturnStatus = typeof IFSelect_ReturnStatus[keyof typeof IFSelect_ReturnStatus];
 /**
  * Qualifies an execution status : RetVoid : normal execution which created nothing, or no data to process RetDone : normal execution with a result RetError : error in command or input data, no execution RetFail : execution was run and has failed RetStop : indicates end or stop (such as Raise)
  */
@@ -5858,6 +5652,7 @@ type Standard_ShortReal = number;
 /** OCCT unsigned size/count primitive, mapped to JS `number`. */
 type Standard_Size = number;
 
+
 /**
  * Emscripten virtual filesystem.
  *
@@ -5870,8 +5665,8 @@ type Standard_Size = number;
 export declare namespace FS {
   /** Result of a path lookup containing the resolved node. */
   interface Lookup {
-    path: string;
-    node: unknown;
+      path: string;
+      node: unknown;
   }
 
   /** Opaque handle to an open file stream. */
@@ -6205,12 +6000,12 @@ export declare namespace FS {
    * @returns The number of bytes actually written.
    */
   function write(
-    stream: unknown,
-    buffer: ArrayBufferView,
-    offset: number,
-    length: number,
-    position?: number,
-    canOwn?: boolean,
+      stream: unknown,
+      buffer: ArrayBufferView,
+      offset: number,
+      length: number,
+      position?: number,
+      canOwn?: boolean,
   ): number;
   /**
    * Pre-allocate storage for a file region.
@@ -6233,13 +6028,13 @@ export declare namespace FS {
    * @returns The mapped memory region.
    */
   function mmap(
-    stream: unknown,
-    buffer: ArrayBufferView,
-    offset: number,
-    length: number,
-    position: number,
-    prot: number,
-    flags: number,
+      stream: unknown,
+      buffer: ArrayBufferView,
+      offset: number,
+      length: number,
+      position: number,
+      prot: number,
+      flags: number,
   ): any;
   /**
    * Perform a device-specific I/O control operation.
@@ -6303,9 +6098,9 @@ export declare namespace FS {
    * @param error - Callback receiving characters from stderr, or `null` for default.
    */
   function init(
-    input: null | (() => number | null),
-    output: null | ((c: number) => any),
-    error: null | ((c: number) => any),
+      input: null | (() => number | null),
+      output: null | ((c: number) => any),
+      error: null | ((c: number) => any),
   ): void;
 
   /**
@@ -6319,11 +6114,11 @@ export declare namespace FS {
    * @returns The created filesystem node.
    */
   function createLazyFile(
-    parent: string | FSNode,
-    name: string,
-    url: string,
-    canRead: boolean,
-    canWrite: boolean,
+      parent: string | FSNode,
+      name: string,
+      url: string,
+      canRead: boolean,
+      canWrite: boolean,
   ): unknown;
   /**
    * Create a file that is preloaded (fetched and stored) before the program runs.
@@ -6339,15 +6134,15 @@ export declare namespace FS {
    * @param canOwn - When `true`, the runtime may take ownership of the data.
    */
   function createPreloadedFile(
-    parent: string | FSNode,
-    name: string,
-    url: string,
-    canRead: boolean,
-    canWrite: boolean,
-    onload?: () => void,
-    onerror?: () => void,
-    dontCreateFile?: boolean,
-    canOwn?: boolean,
+      parent: string | FSNode,
+      name: string,
+      url: string,
+      canRead: boolean,
+      canWrite: boolean,
+      onload?: () => void,
+      onerror?: () => void,
+      dontCreateFile?: boolean,
+      canOwn?: boolean,
   ): void;
   /**
    * Create a file from in-memory data.
@@ -6361,24 +6156,24 @@ export declare namespace FS {
    * @returns The created filesystem node.
    */
   function createDataFile(
-    parent: string | FSNode,
-    name: string,
-    data: ArrayBufferView | string,
-    canRead: boolean,
-    canWrite: boolean,
-    canOwn: boolean,
+      parent: string | FSNode,
+      name: string,
+      data: ArrayBufferView | string,
+      canRead: boolean,
+      canWrite: boolean,
+      canOwn: boolean,
   ): unknown;
   /** Result of analyzing a filesystem path for existence and parent resolution. */
   interface AnalysisResults {
-    isRoot: boolean;
-    exists: boolean;
-    error: Error;
-    name: string;
-    path: any;
-    object: any;
-    parentExists: boolean;
-    parentPath: any;
-    parentObject: any;
+    isRoot: boolean,
+    exists: boolean,
+    error: Error,
+    name: string,
+    path: any,
+    object: any,
+    parentExists: boolean,
+    parentPath: any,
+    parentObject: any
   }
   /**
    * Analyze a path to determine existence, parent information, and errors.
@@ -6388,6 +6183,7 @@ export declare namespace FS {
    */
   function analyzePath(path: string): unknown;
 }
+
 
 /**
  * Emscripten WASM heap views.
@@ -6420,6 +6216,7 @@ export declare const HEAPF32: Float32Array;
 /** 64-bit floating-point view of the WASM heap. */
 export declare const HEAPF64: Float64Array;
 
+
 /**
  * Extract the exception type and message from a caught `WebAssembly.Exception`.
  *
@@ -6444,6 +6241,7 @@ export declare function incrementExceptionRefcount(ex: WebAssembly.Exception): v
  * @param ex - The exception whose refcount to decrement.
  */
 export declare function decrementExceptionRefcount(ex: WebAssembly.Exception): void;
+
 
 /**
  * Union of the Emscripten runtime exports and all bound OCCT classes, enums, and functions.

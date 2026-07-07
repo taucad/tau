@@ -17,8 +17,8 @@ export type {
   StepLoadProgressEvent,
   StepSource,
   StepStreamingMode,
+  XdeDatumPlacement,
   XdeOccurrence,
-  XdeProperty,
   XdeReadResult,
   XdeSubshapeName,
 } from '#step/types.js';

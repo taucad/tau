@@ -222,9 +222,8 @@ export type PlaneSelector = {
 };
 
 /**
- * Datum selector: a named coordinate frame authored as a product-attached
- * `geospec:facts` property (the payload is constitutive; datums are never
- * stale).
+ * Datum selector: a named coordinate frame authored as a native AP242 datum
+ * placement.
  *
  * @public
  */
@@ -283,7 +282,7 @@ export type GeometrySelector =
 
 /**
  * Entity kind a resolved entity denotes. Derived from geometry at resolution
- * time (profile rule), never from stamped metadata.
+ * time.
  *
  * @public
  */
@@ -370,12 +369,12 @@ export type CandidateEntity = ResolvedEntity & {
 
 /**
  * Resolution status. First-class, machine-actionable outcomes per D1/E4 —
- * `ambiguous`, `unsupported`, and `stale` are correct results, never errors
- * to paper over.
+ * `ambiguous` and `unsupported` are correct results, never errors to paper
+ * over.
  *
  * @public
  */
-export type GeometrySelectionStatus = 'resolved' | 'unmatched' | 'ambiguous' | 'unsupported' | 'stale';
+export type GeometrySelectionStatus = 'resolved' | 'unmatched' | 'ambiguous' | 'unsupported';
 
 /**
  * Evidence source a selection resolved against.
@@ -411,8 +410,6 @@ export type GeometrySelection = {
   stability: GeometrySelectionStability;
   /** Ranked candidates with facts — ambiguous/unmatched repair data. */
   candidates?: CandidateEntity[];
-  /** Stamped-facts vs observed-geometry mismatch description. */
-  staleReason?: string;
   diagnostics: GeometryDiagnostic[];
 };
 

@@ -4,7 +4,7 @@
  * `resolve(selector, index)` is pure and deterministic: a function of the
  * selector and the per-subject index only — no I/O, no wasm calls, no
  * cross-artifact caching (D1). Results are set-valued with first-class
- * `unmatched | ambiguous | unsupported | stale` outcomes; the engine never
+ * `unmatched | ambiguous | unsupported` outcomes; the engine never
  * silently picks a candidate or downgrades evidence.
  *
  * @module
@@ -13,8 +13,6 @@
 import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
 import {
   ambiguousDiagnostic,
-  missingStampedFactsDiagnostic,
-  staleDiagnostic,
   unmatchedDiagnostic,
   unsupportedEvidenceDiagnostic,
 } from '#selector/diagnostics.js';
@@ -28,7 +26,6 @@ import type {
   SelectorInterfaceRow,
   SelectorOccurrenceRow,
 } from '#selector/index-builder.js';
-import { compareStampedFacts } from '#selector/stale.js';
 import { resolveTolerances } from '#selector/tolerances.js';
 import type { SelectorTolerances } from '#selector/tolerances.js';
 import type {
@@ -189,27 +186,6 @@ const failedSelection = (status: 'unmatched' | 'ambiguous' | 'unsupported', draf
     ],
   };
 };
-
-const staleSelection = (draft: FailureDraft & { staleReason: string }): GeometrySelection => ({
-  selector: draft.selector,
-  status: 'stale',
-  entities: [],
-  expected: draft.expected,
-  source: 'step-xde',
-  stability: draft.stability,
-  ...(draft.candidates ? { candidates: draft.candidates } : {}),
-  staleReason: draft.staleReason,
-  diagnostics: [
-    staleDiagnostic({
-      selector: draft.selector,
-      stability: draft.stability,
-      message: draft.message,
-      suggestion: draft.suggestion,
-      ...(draft.candidates ? { candidates: draft.candidates } : {}),
-      ...(draft.details ? { details: draft.details } : {}),
-    }),
-  ],
-});
 
 const cardinalityCount = (expected: Cardinality): { exact?: number; atLeast?: number } => {
   if (expected === 'one') {
@@ -752,16 +728,6 @@ const resolveOccurrenceSelector = (selector: OccurrenceSelector, context: Resolv
   return cardinalitySelection({ draft, matches, ...(matches.length === 0 ? { nearMisses } : {}) });
 };
 
-const interfaceStaleReasons = (row: SelectorInterfaceRow, tolerances: SelectorTolerances): string[] => {
-  if (row.dangling) {
-    return [`authored faceIndex ${row.faceIndex} no longer exists in the geometry`];
-  }
-  if (row.stamped && row.face) {
-    return compareStampedFacts({ stamped: row.stamped, observed: row.face.facts, tolerances }).reasons;
-  }
-  return [];
-};
-
 const resolveInterfaceRows = (options: {
   draft: SelectionDraft;
   rows: SelectorInterfaceRow[];
@@ -769,21 +735,17 @@ const resolveInterfaceRows = (options: {
   requestedName: string;
 }): GeometrySelection => {
   const { draft, rows, context } = options;
-  const firstStale = rows
-    .map((row) => ({ row, reasons: interfaceStaleReasons(row, context.tolerances) }))
-    .find((entry) => entry.reasons.length > 0);
-  if (firstStale) {
-    return staleSelection({
+  const firstDangling = rows.find((row) => row.dangling);
+  if (firstDangling) {
+    return failedSelection('unsupported', {
       ...draft,
-      message: `Authored interface '${firstStale.row.fullName}' is stale: ${firstStale.reasons.join('; ')}.`,
+      message: `Authored interface '${firstDangling.fullName}' references missing faceIndex ${firstDangling.faceIndex}.`,
       suggestion:
-        'Re-export the artifact so authored names and stamped facts are re-evaluated; never trust either fact set silently.',
-      staleReason: firstStale.reasons.join('; '),
+        'Re-export from Tau runtime so authored names resolve against the live shape before STEP writing.',
       candidates: rankCandidates(rows.map((row) => interfaceEntity(row))),
       details: {
-        stamped: firstStale.row.stamped,
-        observed: firstStale.row.face?.facts,
-        reasons: firstStale.reasons,
+        interfaceName: firstDangling.fullName,
+        faceIndex: firstDangling.faceIndex,
       },
     });
   }
@@ -809,15 +771,7 @@ const resolveInterfaceRows = (options: {
       details: { availableInterfaces: context.index.interfaces.map((row) => row.fullName) },
     });
   }
-  const diagnostics = rows
-    .filter((row) => row.stamped === undefined)
-    .map((row) =>
-      missingStampedFactsDiagnostic({
-        interfaceName: row.fullName,
-        reason: row.stampedAbsentReason ?? 'no geospec:facts property is stamped for this interface',
-      }),
-    );
-  return cardinalitySelection({ draft, matches: rows.map((row) => interfaceEntity(row)), diagnostics });
+  return cardinalitySelection({ draft, matches: rows.map((row) => interfaceEntity(row)) });
 };
 
 const matchNamedRows = <Row extends { fullName: string; name: string; occurrencePath: string }>(options: {
@@ -844,8 +798,8 @@ const resolveInterfaceSelector = (selector: InterfaceSelector, context: ResolveC
 const resolveDatumSelector = (selector: DatumSelector, context: ResolveContext): GeometrySelection => {
   const draft: SelectionDraft = { selector, expected: selector.expect ?? 'one', stability: 'authored' };
   const rows = matchNamedRows({ rows: context.index.datums, name: selector.name, of: selector.of, context });
-  // Datums are never stale: the stamped payload is constitutive (profile
-  // rule); a missing or unparseable datum property means no row exists here.
+  // Datum rows are native AP242 placement evidence; absence simply means the
+  // selector has no authored datum to match.
   return cardinalitySelection({
     draft,
     matches: rows.map((row) => datumEntity(row)),

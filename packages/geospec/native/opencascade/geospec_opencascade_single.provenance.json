@@ -1,7 +1,7 @@
 {
   "schema": "wasm-build-provenance-v1.1",
-  "buildId": "20260703T034027-O3-noLTO-single",
-  "timestamp": "2026-07-03T03:40:27.189891+00:00",
+  "buildId": "20260706T024419-O3-noLTO-single",
+  "timestamp": "2026-07-06T02:44:19.452855+00:00",
   "toolchain": {
     "emscripten": "5.0.1",
     "llvm": "unknown",
@@ -42,7 +42,13 @@
     "exceptions": "wasm-native",
     "threading": "single-threaded",
     "wasmOptLevel": "-O4",
-    "emccCompileFlags": ["-O3", "-fwasm-exceptions", "-DOCCT_NO_DUMP", "-UOCC_CONVERT_SIGNALS", "-msimd128"],
+    "emccCompileFlags": [
+      "-O3",
+      "-fwasm-exceptions",
+      "-DOCCT_NO_DUMP",
+      "-UOCC_CONVERT_SIGNALS",
+      "-msimd128"
+    ],
     "sourceFiles": 0,
     "bindingFiles": 0,
     "compileDuration_s": 0
@@ -115,7 +121,7 @@
       "-sERROR_ON_UNDEFINED_SYMBOLS=0",
       "--no-entry"
     ],
-    "linkDuration_s": 52.5
+    "linkDuration_s": 54.1
   },
   "postProcessing": {
     "wasmOptFlags": [
@@ -131,15 +137,15 @@
       "--enable-exception-handling",
       "--enable-simd"
     ],
-    "preOptSize": 13641047,
-    "postOptSize": 13632713,
+    "preOptSize": 13644133,
+    "postOptSize": 13635797,
     "optReduction": "0.1%",
-    "wasmOptDuration_s": 78.7
+    "wasmOptDuration_s": 75.4
   },
   "output": {
     "geospec_opencascade_single.wasm": {
-      "size": 13632713,
-      "sha256": "2233aa787544cd1a"
+      "size": 13635797,
+      "sha256": "bfdc6c03845a8d54"
     },
     "geospec_opencascade_single.js": {
       "size": 60586
@@ -158,5 +164,5 @@
     "total": 878,
     "dropped": 859
   },
-  "totalDuration_s": 167
+  "totalDuration_s": 177
 }

@@ -1309,8 +1309,26 @@ const evaluateAssemblyOccurrences = (
   }));
 
   if (expected.uniqueNames) {
-    const allNames = actual.flatMap((entry) => entry.matches.map((match) => match.name));
-    const duplicates = allNames.filter((name, index) => allNames.indexOf(name) !== index);
+    // A node matched by several overlapping selectors — e.g. an exact-name selector
+    // plus a catch-all `/^./` — is one occurrence, not a duplicate. Dedupe by physical
+    // identity (name + center) so uniqueNames only flags two *distinct* nodes that
+    // genuinely share a name.
+    const seenNodes = new Set<string>();
+    const names: string[] = [];
+    for (const entry of actual) {
+      for (const match of entry.matches) {
+        const identity =
+          match.kind === 'occurrence'
+            ? `${match.name}@${match.center[0]},${match.center[1]},${match.center[2]}`
+            : match.name;
+        if (seenNodes.has(identity)) {
+          continue;
+        }
+        seenNodes.add(identity);
+        names.push(match.name);
+      }
+    }
+    const duplicates = names.filter((name, index) => names.indexOf(name) !== index);
     if (duplicates.length > 0) {
       failures.push(`uniqueNames: duplicate occurrence names ${[...new Set(duplicates)].join(', ')}`);
     }

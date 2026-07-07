@@ -177,6 +177,25 @@ describe('production matcher primitives', () => {
     );
   });
 
+  it('should not flag uniqueNames duplicates when overlapping selectors match one node', async () => {
+    // A catch-all selector alongside exact-name selectors matches each node twice;
+    // that is one occurrence per node, not a duplicate name. Regression guard for
+    // the AP242-instancing census pattern (exact rows + `/^./` catch-all).
+    const passing = await runOneAssertion((collector) => {
+      collector.expectGeo(createSubject()).toHaveAssemblyOccurrences({
+        uniqueNames: true,
+        occurrences: [
+          { name: 'left-block#0', count: 1 },
+          { name: 'right-block#0', count: 1 },
+          { name: 'far-block#0', count: 1 },
+          { name: /#0$/, count: 3 },
+        ],
+      });
+    });
+
+    expect(passing?.status).toBe('passed');
+  });
+
   it('should fail the whole spatial-relationship matcher once for mesh-only subjects (D5 precondition)', async () => {
     // Mesh-only subjects carried AABB-decided relationship verdicts before
     // SB4; the honest contract fails the whole matcher with one

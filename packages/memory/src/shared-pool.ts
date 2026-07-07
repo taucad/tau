@@ -84,7 +84,7 @@ export class SharedPool {
    * @param data - Raw content bytes.
    * @returns `true` if stored successfully, `false` if skipped (oversized or arena full).
    */
-  // oxlint-disable-next-line @protontech/enforce-uint8array-arraybuffer/enforce-uint8array-arraybuffer -- accepts content from kernels that may use ArrayBuffer or SharedArrayBuffer
+  // oxlint-disable-next-line enforce-uint8array-arraybuffer/enforce-uint8array-arraybuffer -- accepts content from kernels that may use ArrayBuffer or SharedArrayBuffer
   public store(key: string, data: Uint8Array): boolean {
     if (data.byteLength > this._maxEntryBytes) {
       return false;

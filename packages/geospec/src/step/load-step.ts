@@ -17,6 +17,7 @@ import type {
   LoadStepOptions,
   XdeReadResult,
 } from '#step/types.js';
+import type { SelectorFaceFacts } from '#selector/types.js';
 
 type StepBytes = {
   bytes: Uint8Array<ArrayBuffer>;
@@ -503,27 +504,136 @@ const holeThroughFromAxisRange = (options: {
   );
 };
 
-const normalizeBrepEvidence = (brep: BrepEvidence | undefined): BrepEvidence | undefined => {
-  if (!brep?.circularHoles) {
+type ChamferFeature = NonNullable<BrepEvidence['chamferFeatures']>[number];
+
+const axisOf = (direction: readonly [number, number, number] | undefined): 'x' | 'y' | 'z' | undefined => {
+  if (!direction) {
+    return undefined;
+  }
+  const abs = direction.map((component) => Math.abs(component));
+  const dominant = Math.max(...abs);
+  // Axis-aligned means one component dominates and the others are near zero.
+  if (dominant <= 0.999 || abs.filter((value) => value > 0.05).length !== 1) {
+    return undefined;
+  }
+  return abs[0] === dominant ? 'x' : abs[1] === dominant ? 'y' : 'z';
+};
+
+const axialSpan = (facts: SelectorFaceFacts, axis: 'x' | 'y' | 'z'): number => {
+  const index = axisIndices[axis];
+  return facts.bounds.max[index] - facts.bounds.min[index];
+};
+
+// Re-derive revolved (conical) chamfer features the native planar-only
+// recognizer misses (WS-E / Finding 7). A shaft-end or bore-entry chamfer is a
+// `cone` face that is axis-aligned, small, and topologically flanked by a
+// coaxial `cylinder` face and a coaxial planar end face (normal along the axis).
+// Its 45 deg leg length equals its axial span, which is what toHaveChamferFeature
+// checks as `distance`.
+// C1: emitted only when the cone is small, axis-aligned, and flanked by both a
+// coaxial cylinder and a coaxial end plane - the shaft-end / bore chamfer
+// signature - so a deep taper or a stray cone is never reported as a chamfer.
+// Deterministic: candidates are traversal-ordered and distances rounded to a
+// stable key before de-duplication.
+const deriveChamferFeaturesFromFaceFacts = (faces: readonly SelectorFaceFacts[]): ChamferFeature[] => {
+  const cones = faces.filter((face) => face.surfaceType === 'cone');
+  const cylinders = faces.filter((face) => face.surfaceType === 'cylinder');
+  const planes = faces.filter((face) => face.surfaceType === 'plane');
+  const maxChamferDistance = 10;
+
+  const distances = new Set<number>();
+  const derived: ChamferFeature[] = [];
+  for (const cone of cones) {
+    const axis = axisOf(cone.axisDirection);
+    if (!axis) {
+      continue;
+    }
+    const distance = axialSpan(cone, axis);
+    if (distance <= 1e-6 || distance > maxChamferDistance) {
+      continue;
+    }
+    // A chamfer bridges a coaxial cylinder wall and a coaxial end face; require
+    // both so a stand-alone taper is never surfaced as a chamfer (C1).
+    const coaxialCylinder = cylinders.some((cylinder) => axisOf(cylinder.axisDirection) === axis);
+    const coaxialEndPlane = planes.some((plane) => axisOf(plane.normal) === axis);
+    if (!coaxialCylinder || !coaxialEndPlane) {
+      continue;
+    }
+    // Round to a micrometer-stable key so identical chamfers around a revolve collapse.
+    const key = Math.round(distance * 1000) / 1000;
+    if (distances.has(key)) {
+      continue;
+    }
+    distances.add(key);
+    derived.push({ distance: key, selection: `revolved chamfer (axis ${axis})` });
+  }
+  return derived;
+};
+
+const normalizeBrepEvidence = (
+  brep: BrepEvidence | undefined,
+  faceFacts: readonly SelectorFaceFacts[] = [],
+): BrepEvidence | undefined => {
+  if (!brep) {
     return brep;
   }
 
+  const circularHoles = brep.circularHoles?.map((hole) => {
+    const rangeThrough = holeThroughFromAxisRange({ brep, axis: hole.axis, axisRange: hole.axisRange });
+    const cappedBlindHole = hasInternalCircularCap({
+      brep,
+      diameter: hole.diameter,
+      axis: hole.axis,
+      center: hole.center,
+    });
+    return {
+      ...hole,
+      through: rangeThrough ?? (hole.through && !cappedBlindHole),
+    };
+  });
+
+  // Union the native (planar-bevel) chamfers with revolved cone chamfers the
+  // native recognizer cannot see.
+  const derivedChamfers = deriveChamferFeaturesFromFaceFacts(faceFacts);
+  const chamferFeatures =
+    derivedChamfers.length > 0 ? [...(brep.chamferFeatures ?? []), ...derivedChamfers] : brep.chamferFeatures;
+
   return {
     ...brep,
-    circularHoles: brep.circularHoles.map((hole) => {
-      const rangeThrough = holeThroughFromAxisRange({ brep, axis: hole.axis, axisRange: hole.axisRange });
-      const cappedBlindHole = hasInternalCircularCap({
-        brep,
-        diameter: hole.diameter,
-        axis: hole.axis,
-        center: hole.center,
-      });
-      return {
-        ...hole,
-        through: rangeThrough ?? (hole.through && !cappedBlindHole),
-      };
-    }),
+    ...(circularHoles ? { circularHoles } : {}),
+    ...(chamferFeatures ? { chamferFeatures } : {}),
   };
+};
+
+// Chamfer re-derivation is a per-part feature check; the native analyzeShape
+// brep it augments is only meaningful for a single-solid part, and the rev2
+// chamfer REQs load individual parts (loadPartStep). Cap face-fact collection
+// to part-scale occurrence counts so a 650-occurrence assembly load never pays
+// a native faceFacts() call per occurrence.
+const maxPartOccurrences = 8;
+
+// Gather per-face analytic facts across every occurrence so TS-side feature
+// re-derivation (revolved chamfers) can read cone/cylinder/plane geometry the
+// native analyzeShape payload omits. Returns [] when the native XDE handle is
+// absent (mesh-only or failed read) or the subject is assembly-scale.
+const collectFaceFacts = (xdeRead?: NativeXdeRead): SelectorFaceFacts[] => {
+  const native = xdeRead?.nativeXde;
+  const occurrences = xdeRead?.xde?.occurrences;
+  if (!native || !occurrences || occurrences.length > maxPartOccurrences) {
+    return [];
+  }
+  const facts: SelectorFaceFacts[] = [];
+  for (let position = 0; position < occurrences.length; position++) {
+    try {
+      const parsed = JSON.parse(native.faceFacts(position)) as { faces?: SelectorFaceFacts[] };
+      if (Array.isArray(parsed.faces)) {
+        facts.push(...parsed.faces);
+      }
+    } catch {
+      // A single occurrence's fact read failing must not drop the load.
+    }
+  }
+  return facts;
 };
 
 const buildStepSubject = async (options: {
@@ -550,7 +660,7 @@ const buildStepSubject = async (options: {
   if (!meshResult.success) {
     throw new Error(meshResult.diagnostics.map((diagnostic) => diagnostic.message).join('\n'));
   }
-  const brep = normalizeBrepEvidence(options.payload.brep);
+  const brep = normalizeBrepEvidence(options.payload.brep, collectFaceFacts(options.xdeRead));
   const payloadStepCapabilities = options.payload.step?.capabilities ?? [];
   const step: StepEvidence = {
     schema: extractStepSchema(options.bytes.text),

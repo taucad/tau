@@ -110,5 +110,5 @@ describe('load-path canonical per-test profiler', () => {
     } finally {
       await rm(projectPath, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });

@@ -1,4 +1,5 @@
 import { loadMesh } from '#mesh/load-mesh.js';
+import { forensicAsync, forensicSync } from '#runner/forensic.js';
 import type {
   BrepEvidence,
   GeometryCapability,
@@ -816,21 +817,27 @@ const buildStepSubject = async (options: {
  */
 export const loadStep = async (options: LoadStepOptions): Promise<GeometrySubject> => {
   options.onProgress?.({ phase: 'read-source', bytesRead: 0 });
-  const bytes = await readStepSource(options);
+  const bytes = await forensicAsync('load.readSource', async () => readStepSource(options));
   options.onProgress?.({ phase: 'parse-step', bytesRead: bytes.bytes.byteLength });
   const module = await resolveNativeStepBackend({
     nativeStepBackend: options.nativeStepBackend,
     openCascade: options.openCascade,
   });
-  const native = module ? await readNativeStep({ bytes, loadOptions: options, module }) : undefined;
+  const native = module
+    ? await forensicAsync('load.native.analyzeReader', async () =>
+        readNativeStep({ bytes, loadOptions: options, module }),
+      )
+    : undefined;
   if (!module || !native) {
     throw new Error(
       'GeoSpec native STEP reader is unavailable. Use geospec/native/opencascade/single or pass a nativeStepBackend module with GeoSpecStepStreamReader.',
     );
   }
   options.onProgress?.({ phase: 'mesh-brep', bytesRead: bytes.bytes.byteLength });
-  const xdeRead = readNativeXde({ text: bytes.text, module });
-  return buildStepSubject({ bytes, loadOptions: options, payload: native.payload, strategy: native.strategy, xdeRead });
+  const xdeRead = forensicSync('load.native.xdeReader', () => readNativeXde({ text: bytes.text, module }));
+  return forensicAsync('load.buildSubject', async () =>
+    buildStepSubject({ bytes, loadOptions: options, payload: native.payload, strategy: native.strategy, xdeRead }),
+  );
 };
 
 /**

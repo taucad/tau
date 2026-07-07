@@ -13,6 +13,7 @@ import { resolveRuntimeExportIntent } from '#model/export-intent.js';
 import type { RuntimeBackedModelFormat } from '#model/export-intent.js';
 import { resolveRuntimeForModelLoad } from '#model/runtime.js';
 import { loadStep } from '#step/load-step.js';
+import { forensicAsync } from '#runner/forensic.js';
 import type { StepSource } from '#step/types.js';
 import type {
   CreateModelLoaderOptions,
@@ -250,7 +251,9 @@ const exportRuntimeFormat = async (options: {
   });
 
   try {
-    const exported = await options.runtime.export(options.format, input);
+    const exported = await forensicAsync('load.kernel.export', async () =>
+      options.runtime.export(options.format, input),
+    );
     if (!exported.success) {
       return {
         success: false,

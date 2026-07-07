@@ -13,6 +13,7 @@ import type { SelectorIndex } from '#selector/index-builder.js';
 import { matchesGeoSpecTestName } from '#runner/filter.js';
 import type { GeoSpecTestNamePattern } from '#runner/filter.js';
 import { withMatcherBudget } from '#runner/matcher-budget.js';
+import { forensicSync } from '#runner/forensic.js';
 import type {
   GeoSpecAssertion,
   GeoSpecAssemblyOccurrencesExpectation,
@@ -1732,12 +1733,14 @@ const evaluateSpatialRelationships = async (
   if (!isGeometrySubject(subject)) {
     return [unsupportedSubjectDiagnostic('toHaveSpatialRelationships')];
   }
-  const context = getSubjectProofContext(subject);
+  const context = forensicSync('assert.proofContext', () => getSubjectProofContext(subject));
   if (!context) {
     return [brepRelationshipPreconditionDiagnostic(subject)];
   }
   return expected.relationships.flatMap((relationship, index) =>
-    evaluateOneSpatialRelationship({ context, relationship, index }),
+    forensicSync(`assert.relationship[${index}].${relationship.kind}`, () =>
+      evaluateOneSpatialRelationship({ context, relationship, index }),
+    ),
   );
 };
 

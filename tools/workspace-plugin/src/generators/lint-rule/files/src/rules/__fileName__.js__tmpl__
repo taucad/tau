@@ -1,0 +1,26 @@
+/**
+ * @typedef {import('eslint').Rule.RuleModule} RuleModule
+ */
+
+/** @type {RuleModule} */
+export const <%= propertyName %>Rule = {
+  meta: {
+    type: 'suggestion',
+    docs: {
+      description: '<%= description %>',
+    },
+    messages: {
+      violation: 'TODO: describe the violation and how to fix it.',
+    },
+    schema: [],
+  },
+  create(context) {
+    // Read `context.filename` here if the rule should only run on some files.
+    return {
+      // TODO: add ESTree visitors. Example:
+      // CallExpression(node) {
+      //   context.report({ node, messageId: 'violation' });
+      // },
+    };
+  },
+};

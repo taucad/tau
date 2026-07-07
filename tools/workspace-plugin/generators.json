@@ -9,6 +9,11 @@
       "factory": "./src/generators/kernel/generator",
       "schema": "./src/generators/kernel/schema.json",
       "description": "Create a @taucad/* CAD kernel package under kernels/ with a defineKernel stub"
+    },
+    "lint-rule": {
+      "factory": "./src/generators/lint-rule/generator",
+      "schema": "./src/generators/lint-rule/schema.json",
+      "description": "Create a tau-lint oxlint rule + RuleTester test under libs/oxlint/src/rules"
     }
   }
 }

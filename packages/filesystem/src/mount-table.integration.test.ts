@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { MountTable } from '#mount-table.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
 import { ProviderRegistry } from '#provider-registry.js';
@@ -105,6 +105,7 @@ describe('MountTable integration', () => {
       const nmNode = nodes.find((n) => n.name === 'node_modules');
       expect(nmNode).toBeDefined();
       expect(nmNode!.children).toEqual([]);
+      expect(nmNode!.mtimeMs).toBe(0);
     });
 
     it('should only query node_modules provider for /node_modules/ paths', async () => {
@@ -183,9 +184,16 @@ describe('MountTable integration', () => {
   describe('cache and tree coherence', () => {
     it('should cache readDirectory per virtual path across mounts', async () => {
       await rootProvider.writeFile('/main.ts', 'x');
-      const first = await service.readDirectory('/');
-      const second = await service.readDirectory('/');
-      expect(first).toEqual(second);
+      const dateNow = vi.spyOn(Date, 'now');
+      try {
+        dateNow.mockReturnValue(100);
+        const first = await service.readDirectory('/');
+        dateNow.mockReturnValue(101);
+        const second = await service.readDirectory('/');
+        expect(first).toEqual(second);
+      } finally {
+        dateNow.mockRestore();
+      }
     });
 
     it('should collect directory stats from mounted provider', async () => {

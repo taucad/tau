@@ -101,7 +101,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     const result: Array<{ name: string } & FileStat> = [];
     for await (const [name, handle] of directoryEntries(directoryHandle)) {
       if (handle.kind === 'directory') {
-        result.push({ name, type: 'dir', size: 0, mtimeMs: Date.now() });
+        result.push({ name, type: 'dir', size: 0, mtimeMs: 0 });
       } else {
         // oxlint-disable-next-line no-await-in-loop -- Sequential within single directory iteration
         const file = await handle.getFile();
@@ -123,7 +123,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     const segments = this._splitPath(path);
 
     if (segments.length === 0) {
-      return { type: 'dir', size: 0, mtimeMs: Date.now() };
+      return { type: 'dir', size: 0, mtimeMs: 0 };
     }
 
     const parentHandle = await this._resolveDirectoryHandle('/' + segments.slice(0, -1).join('/'));
@@ -136,7 +136,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     } catch {
       try {
         await parentHandle.getDirectoryHandle(name);
-        return { type: 'dir', size: 0, mtimeMs: Date.now() };
+        return { type: 'dir', size: 0, mtimeMs: 0 };
       } catch {
         throw this._enoent(path);
       }

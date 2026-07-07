@@ -162,7 +162,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
           name,
           type: 'dir',
           size: 0,
-          mtimeMs: this._mtimes.get(fullPath) ?? Date.now(),
+          mtimeMs: this._mtimes.get(fullPath) ?? 0,
         });
       } else {
         const cachedSize = this._fileSizes.get(fullPath);
@@ -236,7 +236,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    */
   public async stat(path: string): Promise<FileStat> {
     if (this._dirs.has(path)) {
-      return { type: 'dir', size: 0, mtimeMs: this._mtimes.get(path) ?? Date.now() };
+      return { type: 'dir', size: 0, mtimeMs: this._mtimes.get(path) ?? 0 };
     }
     if (this._paths.has(path)) {
       const cachedSize = this._fileSizes.get(path);

@@ -105,7 +105,7 @@ export class MemoryProvider extends AbstractFileSystemProvider {
           name,
           type: 'dir',
           size: 0,
-          mtimeMs: this._mtimes.get(fullPath) ?? Date.now(),
+          mtimeMs: this._mtimes.get(fullPath) ?? 0,
         });
       } else {
         const data = this._files.get(fullPath);
@@ -123,7 +123,7 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    */
   public async stat(path: string): Promise<FileStat> {
     if (this._dirs.has(path)) {
-      return { type: 'dir', size: 0, mtimeMs: this._mtimes.get(path) ?? Date.now() };
+      return { type: 'dir', size: 0, mtimeMs: this._mtimes.get(path) ?? 0 };
     }
     const data = this._files.get(path);
     if (data) {

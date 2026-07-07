@@ -1112,7 +1112,7 @@ export class WorkspaceFileService {
     for (const mount of childMounts) {
       const mountName = mount.prefix.split('/').pop();
       if (mountName && !entryMap.has(mountName)) {
-        entryMap.set(mountName, { name: mountName, type: 'dir', size: 0, mtimeMs: Date.now() });
+        entryMap.set(mountName, { name: mountName, type: 'dir', size: 0, mtimeMs: 0 });
       }
     }
 

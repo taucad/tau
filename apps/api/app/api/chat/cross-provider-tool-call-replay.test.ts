@@ -41,8 +41,8 @@ const assertNoEmptyIds = (items: Array<Record<string, unknown>>): void => {
 
 /**
  * Block types accepted by @langchain/google-common's messageContentComplexToPart
- * (dist/utils/gemini.js). Any other type throws CrossProviderContentError before
- * the Vertex API is contacted.
+ * (dist/utils/gemini.js). Provider-native tool blocks are normalized away before
+ * replay reaches Vertex.
  */
 const googlePortableBlockTypes = new Set([
   'text',

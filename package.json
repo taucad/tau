@@ -77,7 +77,7 @@
     "@langchain/classic": "catalog:",
     "@langchain/community": "catalog:",
     "@langchain/core": "catalog:",
-    "@langchain/google-vertexai": "file:tarballs/langchain-fork/langchain-google-vertexai-2.1.33.tgz",
+    "@langchain/google-vertexai": "catalog:",
     "@langchain/langgraph": "catalog:",
     "@langchain/langgraph-checkpoint": "catalog:",
     "@langchain/langgraph-checkpoint-postgres": "catalog:",

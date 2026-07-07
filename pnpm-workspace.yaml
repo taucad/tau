@@ -52,7 +52,7 @@ catalog:
   '@langchain/classic': ^1.0.36
   '@langchain/community': ^1.1.29
   '@langchain/core': ^1.2.0
-  '@langchain/google-vertexai': ^2.1.20
+  '@langchain/google-vertexai': ^2.2.0
   '@langchain/langgraph': ^1.4.4
   '@langchain/langgraph-checkpoint': ^1.1.2
   '@langchain/langgraph-checkpoint-postgres': ^1.0.3
@@ -248,9 +248,7 @@ patchedDependencies:
   '@kittycad/lib@2.0.48': patches/@kittycad__lib@2.0.48.patch
   vite-plugin-mkcert@2.0.0: patches/vite-plugin-mkcert@2.0.0.patch
 overrides:
-  '@langchain/google-common': file:tarballs/langchain-fork/langchain-google-common-2.1.33.tgz
-  '@langchain/google-gauth': 2.1.30
-  '@langchain/google-vertexai': file:tarballs/langchain-fork/langchain-google-vertexai-2.1.33.tgz
+  '@langchain/google-common': file:tarballs/langchain-fork/langchain-google-common-2.2.0-beta.0.tgz
   '@types/express': 'catalog:'
   replicad: file:tarballs/replicad-interface-export-migration/taulabs-replicad-0.23.4-beta.2.tgz
   replicad-opencascadejs: file:tarballs/replicad-interface-export-migration/taulabs-replicad-opencascadejs-0.23.0-beta.0.tgz

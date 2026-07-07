@@ -1,5 +1,6 @@
 packages:
   - apps/*
+  - apps/react-e2e/apps/*
   - examples/*
   - kernels/*
   - libs/*

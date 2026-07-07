@@ -178,4 +178,51 @@ describe('GeoSpec Node invocation context', () => {
     expect(createRuntimeClient).not.toHaveBeenCalled();
     await context.dispose();
   });
+
+  it('should terminate and evict a runtime whose load exceeds the budget, then recreate on the next load', async () => {
+    const previous = process.env['GEOSPEC_MODEL_LOAD_TIMEOUT_MS'];
+    process.env['GEOSPEC_MODEL_LOAD_TIMEOUT_MS'] = '50';
+    try {
+      const bytes = await createTriangleGlb();
+      const created: GeoSpecRuntimeClient[] = [];
+      const createRuntimeClient = vi.fn(async (): Promise<ModelRuntimeClientResult> => {
+        const first = created.length === 0;
+        const runtime = {
+          connect: vi.fn(async () => undefined),
+          // The first runtime hangs on export; the recreated one succeeds.
+          export: vi.fn(async () => {
+            if (first) {
+              await new Promise<never>(() => {
+                // Never settles: simulates a hung native build/serialization.
+              });
+            }
+            return { success: true, data: { bytes, name: 'main.glb' } };
+          }),
+          terminate: vi.fn(),
+        } as unknown as GeoSpecRuntimeClient;
+        created.push(runtime);
+        return { success: true, runtime };
+      });
+      const context = createGeoSpecNodeInvocationContext({ projectPath: '/project', createRuntimeClient });
+
+      await expect(context.modelLoader({ file: 'main.ts', format: 'glb' })).rejects.toMatchObject({
+        name: 'GeoSpecModelLoadError',
+        diagnostics: [expect.objectContaining({ code: 'MODEL_LOAD_TIMEOUT' })],
+      });
+
+      // The poisoned worker is terminated and evicted, so the next load spins up
+      // a fresh runtime that succeeds instead of reusing the hung one.
+      await context.modelLoader({ file: 'main.ts', format: 'glb' });
+      expect(createRuntimeClient).toHaveBeenCalledTimes(2);
+      expect(created[0]!.terminate).toHaveBeenCalledTimes(1);
+
+      await context.dispose();
+    } finally {
+      if (previous === undefined) {
+        delete process.env['GEOSPEC_MODEL_LOAD_TIMEOUT_MS'];
+      } else {
+        process.env['GEOSPEC_MODEL_LOAD_TIMEOUT_MS'] = previous;
+      }
+    }
+  });
 });

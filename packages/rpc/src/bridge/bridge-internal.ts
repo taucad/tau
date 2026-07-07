@@ -1,0 +1,49 @@
+import type { WithTransferables } from '#channel.js';
+import type { BridgeError } from '#bridge/bridge-errors.js';
+import { extractTransferables } from '#bridge/transferables.js';
+
+/** Milliseconds. */
+export const messagePortCallTimeout = 30_000;
+
+export const broadcastEvent = 'broadcast';
+export const watchEvent = 'watch';
+
+/** Wire frame carrying a broadcast event name and its payload. */
+export type BroadcastFrame = { event: string; data: unknown };
+
+export const wrapAsTransferables = <T>(value: T): WithTransferables<T> | T => {
+  const transferables = extractTransferables(value);
+  if (transferables.length === 0) {
+    return value;
+  }
+  return { value, transferables } satisfies WithTransferables<T>;
+};
+
+export const serializeBridgeError = (error: unknown): BridgeError => ({
+  message: error instanceof Error ? error.message : String(error),
+  name: error instanceof Error ? error.constructor.name : 'Error',
+  stack: error instanceof Error ? error.stack : undefined,
+  code: (error as { code?: string }).code,
+  metadata: (error as Record<string, unknown>)['metadata'] as Record<string, unknown> | undefined,
+});
+
+export const reconstructError = (
+  bridgeError: BridgeError,
+): Error & {
+  code?: string;
+  metadata?: Record<string, unknown>;
+} => {
+  const error = Object.assign(new Error(bridgeError.message), {
+    name: bridgeError.name,
+    code: bridgeError.code,
+    metadata: bridgeError.metadata,
+  });
+  if (bridgeError.stack) {
+    error.stack = bridgeError.stack;
+  }
+  return error;
+};
+
+export const isBridgeErrorWire = (value: unknown): value is { __bridgeError: BridgeError } => {
+  return value !== null && typeof value === 'object' && '__bridgeError' in (value as Record<string, unknown>);
+};

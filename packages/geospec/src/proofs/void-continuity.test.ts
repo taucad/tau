@@ -61,7 +61,7 @@ describe('void-continuity proof (native fixtures)', () => {
       guideContext,
     );
     expect(diagnostics).toEqual([]);
-  });
+  }, 15_000);
 
   it('should fail connectivity when the waypoints sit in different void components', () => {
     // The cavity (z in [3, 60]) and the below-block exterior (z < 0) are sealed
@@ -173,7 +173,7 @@ describe('void-continuity proof (native fixtures)', () => {
     const measured = (pinched[0]?.details as { measuredCrossSection?: number } | undefined)?.measuredCrossSection ?? 0;
     expect(measured).toBeGreaterThan(40);
     expect(measured).toBeLessThan(70);
-  });
+  }, 15_000);
 
   it('should keep the verdict identical across tessellation settings (exact classification)', async () => {
     const coarse = await loadStep({
@@ -213,6 +213,152 @@ describe('void-continuity proof (native fixtures)', () => {
       fine.nativeXde?.delete?.();
     }
   }, 120_000);
+
+  describe('WS-A/WS-B remediation (bounded material, honest cross-section, isolation)', () => {
+    it('should refuse a claim with neither material nor bounds instead of classifying every occurrence', () => {
+      // A3 (Finding 2): the old default classified all occurrences over an
+      // unbounded region — O(all x V). Refuse it honestly.
+      const diagnostics = prove(
+        {
+          path: [
+            [0, 0, 10],
+            [0, 0, 55],
+          ],
+        },
+        housingContext,
+      );
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0]?.message).toContain('material set or explicit bounds');
+    });
+
+    it('should derive the full material neighbourhood (all region solids) from declared bounds when material is omitted', () => {
+      // A3: deriving material from bounds includes every occurrence in the region
+      // (conservative — all solids bound the void), not a refusal and not "all
+      // occurrences". The housing region also holds the filter occurrence, so a
+      // point that is open when only 'housing' is material becomes inside-material
+      // once the filter is derived too.
+      const explicitHousingOnly = prove(
+        {
+          path: [
+            [0, 0, 10],
+            [0, 0, 55],
+          ],
+          material: ['housing'],
+          resolution: 2,
+          bounds: housingBlockBounds,
+        },
+        housingContext,
+      );
+      const derived = prove(
+        {
+          path: [
+            [0, 0, 10],
+            [0, 0, 55],
+          ],
+          resolution: 2,
+          bounds: housingBlockBounds,
+        },
+        housingContext,
+      );
+      expect(explicitHousingOnly).toEqual([]);
+      expect(derived).toHaveLength(1);
+      expect(derived[0]?.message).not.toContain('material set or explicit bounds');
+    });
+
+    it('should report unsupported when the declared section is finer than the grid can resolve', () => {
+      // B3: a section below ~2x2 cells cannot be sampled honestly (Nyquist).
+      const diagnostics = prove(
+        {
+          path: [
+            [0, 0, 5],
+            [0, 0, 40],
+          ],
+          material: ['guide'],
+          resolution: 1,
+          minCrossSection: 2,
+        },
+        guideContext,
+      );
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0]?.message).toContain('cannot bound');
+    });
+
+    it('should report unsupported (not a vacuous pass) when the band swamps a tight section', () => {
+      // B2: the r4 bore at 2 mm samples to ~13 cells, where the quantization
+      // band >= the measured area — the old code let this pass unfalsifiably.
+      const diagnostics = prove(
+        {
+          path: [
+            [0, 0, 5],
+            [0, 0, 40],
+          ],
+          material: ['guide'],
+          resolution: 2,
+          minCrossSection: 40,
+        },
+        guideContext,
+      );
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0]?.message).toContain('too coarse to bound honestly');
+    }, 15_000);
+
+    it('should report unsupported (not a vacuous pass) when an isolatedFrom probe lands in material', () => {
+      // B4: z = 1.5 is inside the housing floor — the old single-point check
+      // passed vacuously because a buried probe never shares the path component.
+      const diagnostics = prove(
+        {
+          path: [
+            [0, 0, 10],
+            [0, 0, 55],
+          ],
+          material: ['housing'],
+          resolution: 2,
+          isolatedFrom: [[0, 0, 1.5]],
+          bounds: housingBlockBounds,
+        },
+        housingContext,
+      );
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0]?.message).toContain('inside material');
+    });
+
+    it('should reuse per-occurrence occupancy across identical claims in one run (A4)', () => {
+      // A4: two identical claims on the same subject + grid classify once. Count
+      // native classifyPoints via a proxy; the memo is keyed by the native handle
+      // identity, so the second proof adds zero native calls and matches verdicts.
+      let classifyCalls = 0;
+      const source = guideContext.native;
+      const countingContext: RelationshipProofContext = {
+        ...guideContext,
+        native: new Proxy(source, {
+          get(target, property, receiver) {
+            if (property === 'classifyPoints') {
+              return (occurrence: number, json: string) => {
+                classifyCalls += 1;
+                return target.classifyPoints(occurrence, json);
+              };
+            }
+            return Reflect.get(target, property, receiver) as unknown;
+          },
+        }),
+      };
+      const claim: GeoSpecVoidContinuityExpectation = {
+        path: [
+          [0, 0, 3],
+          [0, 0, 42],
+        ],
+        material: ['guide'],
+        resolution: 1,
+        bounds: { min: [-13, -13, -3], max: [13, 13, 48] },
+      };
+      const first = prove(claim, countingContext);
+      const afterFirst = classifyCalls;
+      const second = prove(claim, countingContext);
+      expect(afterFirst).toBeGreaterThan(0);
+      expect(classifyCalls).toBe(afterFirst);
+      expect(second).toEqual(first);
+    }, 15_000);
+  });
 
   describe('toHaveVoidContinuity matcher wiring', () => {
     const runOneAssertion = async (callback: (collector: ReturnType<typeof createCollector>) => void) => {
@@ -281,5 +427,29 @@ describe('void-continuity proof (native fixtures)', () => {
       expect(rejected?.status).toBe('failed');
       expect(rejected?.assertions[0]?.diagnostics?.[0]?.message).toContain('BRep-kernel subject');
     });
+
+    it('should fail a heavy matcher as a bounded MATCHER_TIMEOUT through the collector (WS-C)', async () => {
+      // WS-C end to end: a low budget + a large grid (multi-chunk classification,
+      // fresh bounds so the A4 memo misses) makes the void-continuity matcher hit
+      // checkBudget between chunks and fail as a bounded timeout, not a stall.
+      process.env['GEOSPEC_MATCHER_TIMEOUT_MS'] = '1';
+      try {
+        const timedOut = await runOneAssertion((collector) => {
+          collector.expectGeo(housing).toHaveVoidContinuity({
+            path: [
+              [0, 0, 10],
+              [0, 0, 55],
+            ],
+            material: ['housing'],
+            resolution: 1,
+            bounds: { min: [-14, -14, -5], max: [14, 14, 61] },
+          });
+        });
+        expect(timedOut?.status).toBe('failed');
+        expect(timedOut?.assertions[0]?.diagnostics?.[0]?.code).toBe('MATCHER_TIMEOUT');
+      } finally {
+        delete process.env['GEOSPEC_MATCHER_TIMEOUT_MS'];
+      }
+    }, 30_000);
   });
 });

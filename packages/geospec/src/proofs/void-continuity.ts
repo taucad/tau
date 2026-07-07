@@ -9,13 +9,25 @@
  * Method — a deterministic 6-connectivity flood-fill over a uniform voxel grid
  * bounding the declared region. A cell is "open void" iff exact point-in-solid
  * classification (`classifyPoints`, exact per point) reports `out` of EVERY
- * material occurrence at the cell centre. Connectivity and isolation are
- * decided by which cells share a flood-fill component; they are exact-per-point
- * measurements sampled on the grid. The cross-section is a sampled estimate:
- * the minimum, over stations along the path, of the open-cell count in the
- * grid plane perpendicular to the local path tangent, times the cell area —
- * reported with its quantization band and only failed when the estimate clears
- * the band, never approximated to a pass.
+ * material occurrence at the cell centre. Each occurrence is classified only
+ * over the voxels inside its own inflated AABB — a voxel outside a solid's
+ * bounding box is trivially `out` of that solid — so the verdict is identical
+ * to classifying every voxel against every solid, at a fraction of the native
+ * calls. The scan is chunked and checks the matcher budget between chunks, so a
+ * heavy claim fails bounded rather than stalling the run.
+ *
+ * Guarantees (stated honestly, not "never approximated"):
+ * - Connectivity uses 6-connectivity, which is *conservative*: a path proven
+ *   connected under 6-connectivity is connected under any richer adjacency, and
+ *   `on` (on a wall) is treated as closed.
+ * - The cross-section is a sampled estimate measured perpendicular to the
+ *   void's *local* axis — estimated by PCA of the nearby lumen, not the raw
+ *   path chord — so an oblique cut cannot over-report a tight throat; it is
+ *   failed only when the estimate clears its quantization band, and reported
+ *   `unsupported` (never a silent pass) when the band swamps the measurement or
+ *   the declared section is finer than the grid can resolve.
+ * - Isolation floods a small region around each probe and reports `unsupported`
+ *   when the probe lands in material, so it is not decided vacuously.
  *
  * @module
  */
@@ -26,6 +38,7 @@ import { selectorDiagnosticCodes } from '#selector/diagnostics.js';
 import type { SelectorIndex } from '#selector/index-builder.js';
 import { dot, normalize, subtract } from '#selector/vector-math.js';
 import type { RelationshipProofContext } from '#proofs/relationship-proofs.js';
+import { checkBudget } from '#runner/matcher-budget.js';
 
 /**
  * Voxel budget ceiling. At the 2 mm default resolution this covers roughly a
@@ -40,6 +53,16 @@ const maxVoxels = 4_000_000;
 
 /** Default voxel edge (mm) when the expectation declares none. */
 const defaultResolution = 2;
+
+/**
+ * Points per native classification chunk. The per-occurrence scan is batched so
+ * the matcher budget (WS-C) can preempt a heavy claim between chunks; a
+ * monolithic native call over all voxels cannot be interrupted.
+ *
+ * ponytail: fixed batch; tune only if marshalling overhead or preemption
+ * latency measurably matters.
+ */
+const classifyChunk = 16_384;
 
 type ClassificationPayload = { states: Array<'in' | 'out' | 'on'> };
 
@@ -156,9 +179,135 @@ const materialBounds = (
 };
 
 /**
- * Classify every cell centre against every material occurrence and return the
- * open-void bitmap (true iff `out` of all material solids). Batches one
- * `classifyPoints` call per occurrence over the full centre list.
+ * Occurrence paths whose (one-step-inflated) AABB overlaps `region` — the
+ * neighbourhood material set used when a claim declares `bounds` but no explicit
+ * `material` (Finding 2: never default to all occurrences).
+ */
+const occurrencesIntersecting = (
+  region: { min: Vec3; max: Vec3 },
+  index: SelectorIndex,
+  resolution: number,
+): string[] => {
+  const overlaps = (bounds: { min: Vec3; max: Vec3 }): boolean =>
+    bounds.min[0] - resolution <= region.max[0] &&
+    bounds.max[0] + resolution >= region.min[0] &&
+    bounds.min[1] - resolution <= region.max[1] &&
+    bounds.max[1] + resolution >= region.min[1] &&
+    bounds.min[2] - resolution <= region.max[2] &&
+    bounds.max[2] + resolution >= region.min[2];
+  return index.occurrences
+    .filter((occurrence) => occurrence.bounds !== undefined && overlaps(occurrence.bounds))
+    .map((occurrence) => occurrence.path);
+};
+
+/** Inclusive integer cell sub-box. */
+type CellRange = { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number };
+
+/**
+ * Inclusive cell range whose centres may fall inside `bbox`, clamped to the
+ * grid, with a one-cell margin so a solid's boundary voxels are never skipped
+ * (keeps AABB pruning verdict-preserving). Returns `undefined` when the box
+ * lies entirely outside the grid.
+ */
+const cellRangeForBounds = (grid: Grid, bbox: { min: Vec3; max: Vec3 }): CellRange | undefined => {
+  const axisRange = (lo: number, hi: number, axis: 0 | 1 | 2): [number, number] | undefined => {
+    const first = Math.max(0, Math.floor((lo - grid.origin[axis]) / grid.resolution) - 1);
+    const last = Math.min(grid.dims[axis] - 1, Math.ceil((hi - grid.origin[axis]) / grid.resolution) + 1);
+    return first <= last ? [first, last] : undefined;
+  };
+  const rangeX = axisRange(bbox.min[0], bbox.max[0], 0);
+  const rangeY = axisRange(bbox.min[1], bbox.max[1], 1);
+  const rangeZ = axisRange(bbox.min[2], bbox.max[2], 2);
+  if (!rangeX || !rangeY || !rangeZ) {
+    return undefined;
+  }
+  return { x0: rangeX[0], x1: rangeX[1], y0: rangeY[0], y1: rangeY[1], z0: rangeZ[0], z1: rangeZ[1] };
+};
+
+/**
+ * Per-subject cache of each occurrence's closed cells for a given grid, so
+ * repeated void claims on the same part in one run reuse the classification.
+ * Keyed by the native handle (identity of the loaded subject) so it is scoped
+ * to that artifact and released with it.
+ *
+ * ponytail: run-scoped, one entry per (occurrence, grid); a suite spanning many
+ * distinct grids on the same subject could grow it — add an LRU only if that
+ * shows up.
+ */
+const occupancyCache = new WeakMap<RelationshipProofContext['native'], Map<string, readonly number[]>>();
+
+const gridKey = (grid: Grid): string =>
+  `${grid.origin[0]},${grid.origin[1]},${grid.origin[2]}|${grid.resolution}|${grid.dims[0]},${grid.dims[1]},${grid.dims[2]}`;
+
+/**
+ * Cells that `occurrence` closes over `grid`: those inside its inflated AABB
+ * whose centre classifies `in`/`on`. Classifies only AABB voxels (A1), chunked
+ * with a matcher-budget check between chunks (A2) so a heavy claim is
+ * preemptible. The returned cell indices are in `linearIndex` space regardless
+ * of scan order.
+ */
+const closedCellsForOccurrence = (options: {
+  context: RelationshipProofContext;
+  grid: Grid;
+  occurrence: number;
+  bounds: { min: Vec3; max: Vec3 } | undefined;
+}): { closed: number[] } | { error: string } => {
+  const { context, grid, occurrence, bounds } = options;
+  // Without bounds we cannot prune; classify the whole grid for this occurrence.
+  const range = bounds
+    ? cellRangeForBounds(grid, bounds)
+    : { x0: 0, x1: grid.dims[0] - 1, y0: 0, y1: grid.dims[1] - 1, z0: 0, z1: grid.dims[2] - 1 };
+  if (!range) {
+    return { closed: [] };
+  }
+  const closed: number[] = [];
+  let batch: Vec3[] = [];
+  let batchCells: number[] = [];
+  const flush = (): string | undefined => {
+    if (batch.length === 0) {
+      return undefined;
+    }
+    const payload = parse<ClassificationPayload>(context.native.classifyPoints(occurrence, JSON.stringify(batch)));
+    if ('error' in payload) {
+      return payload.error;
+    }
+    for (const [position, cell] of batchCells.entries()) {
+      // A cell is void only where it is out of EVERY material solid. `in`/`on`
+      // (inside/on the wall of any solid) closes the cell.
+      if (payload.states[position] !== 'out') {
+        closed.push(cell);
+      }
+    }
+    batch = [];
+    batchCells = [];
+    return undefined;
+  };
+  for (let iz = range.z0; iz <= range.z1; iz += 1) {
+    for (let iy = range.y0; iy <= range.y1; iy += 1) {
+      for (let ix = range.x0; ix <= range.x1; ix += 1) {
+        batch.push(cellCenter(grid, [ix, iy, iz]));
+        batchCells.push(linearIndex(grid, [ix, iy, iz]));
+        if (batch.length >= classifyChunk) {
+          const error = flush();
+          if (error !== undefined) {
+            return { error };
+          }
+          checkBudget();
+        }
+      }
+    }
+  }
+  const error = flush();
+  if (error !== undefined) {
+    return { error };
+  }
+  return { closed };
+};
+
+/**
+ * Classify the material occurrences against the grid and return the open-void
+ * bitmap (true iff `out` of all material solids). Each occurrence is pruned to
+ * its own AABB (A1) and memoized per (subject, grid, occurrence) (A4).
  */
 const computeOpenCells = (options: {
   context: RelationshipProofContext;
@@ -166,35 +315,40 @@ const computeOpenCells = (options: {
   materialPaths: string[];
 }): boolean[] | { error: string } => {
   const { context, grid, materialPaths } = options;
-  const [nx, ny, nz] = grid.dims;
-  const total = nx * ny * nz;
-  // Fill in linear-index order (iz outer, iy mid, ix inner) so cell N of the
-  // classification payload is exactly linearIndex(ix, iy, iz).
-  const centers: Vec3[] = [];
-  for (let iz = 0; iz < nz; iz += 1) {
-    for (let iy = 0; iy < ny; iy += 1) {
-      for (let ix = 0; ix < nx; ix += 1) {
-        centers.push(cellCenter(grid, [ix, iy, iz]));
-      }
+  const total = grid.dims[0] * grid.dims[1] * grid.dims[2];
+  const open: boolean[] = Array.from({ length: total }, () => true);
+
+  const boundsByPath = new Map<string, { min: Vec3; max: Vec3 }>();
+  for (const occurrence of context.index.occurrences) {
+    if (occurrence.bounds) {
+      boundsByPath.set(occurrence.path, occurrence.bounds);
     }
   }
-  const open: boolean[] = Array.from({ length: total }, () => true);
-  const centersJson = JSON.stringify(centers);
+
+  let cache = occupancyCache.get(context.native);
+  if (!cache) {
+    cache = new Map<string, readonly number[]>();
+    occupancyCache.set(context.native, cache);
+  }
+  const key = gridKey(grid);
+
   for (const path of materialPaths) {
     const occurrence = context.occurrenceIndexByPath.get(path);
     if (occurrence === undefined) {
       return { error: `material occurrence '${path}' is not bound to the STEP-XDE structure.` };
     }
-    const payload = parse<ClassificationPayload>(context.native.classifyPoints(occurrence, centersJson));
-    if ('error' in payload) {
-      return { error: `classifyPoints failed for '${path}': ${payload.error}` };
-    }
-    for (let cell = 0; cell < total; cell += 1) {
-      // A cell is void only where it is out of EVERY material solid. `in`/`on`
-      // (inside/on the wall of any solid) closes the cell.
-      if (payload.states[cell] !== 'out') {
-        open[cell] = false;
+    const cacheKey = `${key}|${occurrence}`;
+    let closed = cache.get(cacheKey);
+    if (!closed) {
+      const result = closedCellsForOccurrence({ context, grid, occurrence, bounds: boundsByPath.get(path) });
+      if ('error' in result) {
+        return { error: `classifyPoints failed for '${path}': ${result.error}` };
       }
+      closed = result.closed;
+      cache.set(cacheKey, closed);
+    }
+    for (const cell of closed) {
+      open[cell] = false;
     }
   }
   return open;
@@ -244,10 +398,92 @@ const floodComponents = (grid: Grid, open: boolean[]): { components: Int32Array;
 };
 
 /**
+ * Dominant unit direction of the open-cell lumen within `radius` cells of
+ * `stationPoint` — the void's *local* axis — by power iteration on the sample
+ * covariance. Returns `undefined` when too few samples or the spread is
+ * near-isotropic (a junction or blob, where a single axis is ill-defined), so
+ * the caller falls back to the declared path tangent. Deterministic: fixed seed
+ * and iteration count, fixed sample order (C2).
+ */
+const localVoidAxis = (options: {
+  grid: Grid;
+  components: Int32Array;
+  component: number;
+  stationPoint: Vec3;
+  radius: number;
+}): Vec3 | undefined => {
+  const { grid, components, component, stationPoint, radius } = options;
+  const [cx, cy, cz] = cellOf(grid, stationPoint);
+  const [nx, ny, nz] = grid.dims;
+  const samples: Vec3[] = [];
+  for (let iz = Math.max(0, cz - radius); iz <= Math.min(nz - 1, cz + radius); iz += 1) {
+    for (let iy = Math.max(0, cy - radius); iy <= Math.min(ny - 1, cy + radius); iy += 1) {
+      for (let ix = Math.max(0, cx - radius); ix <= Math.min(nx - 1, cx + radius); ix += 1) {
+        if (components[linearIndex(grid, [ix, iy, iz])] === component) {
+          samples.push(cellCenter(grid, [ix, iy, iz]));
+        }
+      }
+    }
+  }
+  if (samples.length < 3) {
+    return undefined;
+  }
+  const mean: [number, number, number] = [0, 0, 0];
+  for (const point of samples) {
+    mean[0] += point[0];
+    mean[1] += point[1];
+    mean[2] += point[2];
+  }
+  mean[0] /= samples.length;
+  mean[1] /= samples.length;
+  mean[2] /= samples.length;
+  let sxx = 0;
+  let syy = 0;
+  let szz = 0;
+  let sxy = 0;
+  let sxz = 0;
+  let syz = 0;
+  for (const point of samples) {
+    const dx = point[0] - mean[0];
+    const dy = point[1] - mean[1];
+    const dz = point[2] - mean[2];
+    sxx += dx * dx;
+    syy += dy * dy;
+    szz += dz * dz;
+    sxy += dx * dy;
+    sxz += dx * dz;
+    syz += dy * dz;
+  }
+  let vector: Vec3 = [1, 1, 1];
+  for (let iteration = 0; iteration < 24; iteration += 1) {
+    const nextX = sxx * vector[0] + sxy * vector[1] + sxz * vector[2];
+    const nextY = sxy * vector[0] + syy * vector[1] + syz * vector[2];
+    const nextZ = sxz * vector[0] + syz * vector[1] + szz * vector[2];
+    const length = Math.hypot(nextX, nextY, nextZ);
+    if (!(length > 0)) {
+      return undefined;
+    }
+    vector = [nextX / length, nextY / length, nextZ / length];
+  }
+  // Reject near-isotropic spread: the dominant eigenvalue (Rayleigh quotient)
+  // must clearly exceed an isotropic third of the total variance before the
+  // axis is trusted as a tube direction.
+  const dominant =
+    vector[0] * (sxx * vector[0] + sxy * vector[1] + sxz * vector[2]) +
+    vector[1] * (sxy * vector[0] + syy * vector[1] + syz * vector[2]) +
+    vector[2] * (sxz * vector[0] + syz * vector[1] + szz * vector[2]);
+  const trace = sxx + syy + szz;
+  if (!(trace > 0) || dominant / trace < 0.55) {
+    return undefined;
+  }
+  return vector;
+};
+
+/**
  * Cells of `component` whose centre lies within half a step of the plane
- * through `stationPoint` with normal `tangent`, AND that are reachable from the
- * station's own cell by a flood fill confined to that slab. Restricting to the
- * station-connected lumen excludes disconnected pockets sharing the plane —
+ * through `stationPoint` with the given `normal`, AND that are reachable from
+ * the station's own cell by a flood fill confined to that slab. Restricting to
+ * the station-connected lumen excludes disconnected pockets sharing the plane —
  * critically the unbounded exterior, which is "out of material" everywhere and
  * would otherwise swamp an interior passage's true cross-section. Returns the
  * cell count, or 0 when the station itself is not in the slab component.
@@ -256,16 +492,16 @@ const slabLumenCells = (options: {
   grid: Grid;
   components: Int32Array;
   component: number;
-  tangent: Vec3;
+  normal: Vec3;
   stationPoint: Vec3;
 }): number => {
-  const { grid, components, component, tangent, stationPoint } = options;
-  const planeOffset = dot(tangent, stationPoint);
+  const { grid, components, component, normal, stationPoint } = options;
+  const planeOffset = dot(normal, stationPoint);
   const inSlab = (ix: number, iy: number, iz: number): boolean => {
     if (components[linearIndex(grid, [ix, iy, iz])] !== component) {
       return false;
     }
-    return Math.abs(dot(tangent, cellCenter(grid, [ix, iy, iz])) - planeOffset) <= grid.resolution / 2;
+    return Math.abs(dot(normal, cellCenter(grid, [ix, iy, iz])) - planeOffset) <= grid.resolution / 2;
   };
   const [sx, sy, sz] = cellOf(grid, stationPoint);
   if (!inSlab(sx, sy, sz)) {
@@ -302,10 +538,12 @@ const slabLumenCells = (options: {
 /**
  * Sampled bottleneck cross-section (mm²) along the path: the minimum over
  * stations (one per resolution step) of the station-connected lumen area
- * ({@link slabLumenCells} times the cell area) in the plane perpendicular to
- * the local path tangent. Returns the estimate plus the bottleneck cell count
- * (its quantization band scales with the slice perimeter, bounded below by one
- * cell), or `undefined` when no station's lumen could be sampled.
+ * ({@link slabLumenCells} times the cell area), measured in the plane
+ * perpendicular to the void's local axis ({@link localVoidAxis}, with the path
+ * tangent as fallback and conservative co-measure). Returns the estimate plus
+ * the bottleneck cell count (its quantization band scales with the slice
+ * perimeter, bounded below by one cell), or `undefined` when no station's lumen
+ * could be sampled.
  */
 const bottleneckCrossSection = (options: {
   grid: Grid;
@@ -335,13 +573,48 @@ const bottleneckCrossSection = (options: {
         from[1] + (to[1] - from[1]) * t,
         from[2] + (to[2] - from[2]) * t,
       ];
-      const cells = slabLumenCells({ grid, components, component, tangent, stationPoint });
-      if (cells > 0 && (!best || cells < best.cells)) {
+      // Measure perpendicular to the void's local axis so an oblique path chord
+      // cannot over-report a tight throat (B1); the raw path tangent is the
+      // fallback and a conservative co-measure — take the smaller of the two.
+      const axis = localVoidAxis({ grid, components, component, stationPoint, radius: 3 }) ?? tangent;
+      const perpendicular = slabLumenCells({ grid, components, component, normal: axis, stationPoint });
+      const alongTangent = slabLumenCells({ grid, components, component, normal: tangent, stationPoint });
+      const candidates = [perpendicular, alongTangent].filter((count) => count > 0);
+      if (candidates.length === 0) {
+        continue;
+      }
+      const cells = Math.min(...candidates);
+      if (!best || cells < best.cells) {
         best = { area: cells * cellArea, cells, center: stationPoint };
       }
     }
   }
   return best;
+};
+
+/** True if any open cell within `radius` cells of `center` belongs to `component`. */
+const regionJoinsComponent = (options: {
+  grid: Grid;
+  open: boolean[];
+  components: Int32Array;
+  center: Cell;
+  radius: number;
+  component: number;
+}): boolean => {
+  const { grid, open, components, center, radius, component } = options;
+  const [cx, cy, cz] = center;
+  const [nx, ny, nz] = grid.dims;
+  for (let iz = Math.max(0, cz - radius); iz <= Math.min(nz - 1, cz + radius); iz += 1) {
+    for (let iy = Math.max(0, cy - radius); iy <= Math.min(ny - 1, cy + radius); iy += 1) {
+      for (let ix = Math.max(0, cx - radius); ix <= Math.min(nx - 1, cx + radius); ix += 1) {
+        const cell = linearIndex(grid, [ix, iy, iz]);
+        if (open[cell] && components[cell] === component) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
 };
 
 /**
@@ -392,17 +665,33 @@ export const proveVoidContinuity = (
     waypoints.push(resolved.point);
   }
 
-  // Material set + region.
-  const materialPaths = expectation.material ?? context.index.occurrences.map((occurrence) => occurrence.path);
+  // Material set + region. Refuse the degenerate "classify every occurrence
+  // over an unbounded region" default (Finding 2): it is O(all-occurrences x V)
+  // and no tract needs every solid as material. Require a declared material
+  // set, or derive a narrow neighbourhood from declared bounds.
+  const declaredBounds = expectation.bounds;
+  let materialPaths: string[];
+  if (expectation.material) {
+    materialPaths = expectation.material;
+  } else if (declaredBounds) {
+    materialPaths = occurrencesIntersecting(declaredBounds, context.index, resolution);
+  } else {
+    return [
+      unsupported(
+        'void-continuity needs a material set or explicit bounds to bound the void; refusing to classify every occurrence over an unbounded region.',
+        'Declare `material` occurrence names, or `bounds` { min, max } so the neighbourhood material set can be derived.',
+      ),
+    ];
+  }
   if (materialPaths.length === 0) {
     return [
       unsupported(
         'void-continuity found no material occurrences to bound the void.',
-        'Declare material occurrence names, or load a subject whose XDE structure carries occurrences.',
+        'Declare material occurrence names, or select bounds that overlap occurrences carrying face bounds.',
       ),
     ];
   }
-  const region = expectation.bounds ?? materialBounds(materialPaths, context.index, resolution);
+  const region = declaredBounds ?? materialBounds(materialPaths, context.index, resolution);
   if (!region) {
     return [
       unsupported(
@@ -482,14 +771,25 @@ export const proveVoidContinuity = (
     ];
   }
 
-  // Isolation: no isolatedFrom point may share the path component.
+  // Isolation: no isolatedFrom space may reach the path component. Probe a small
+  // region (not a single cell) so a leak a cell away is caught, and report
+  // `unsupported` when the probe lands in material rather than passing vacuously.
   for (const [order, point] of (expectation.isolatedFrom ?? []).entries()) {
-    const [ix, iy, iz] = cellOf(grid, point);
-    const cell = linearIndex(grid, [ix, iy, iz]);
-    if (open[cell] && components[cell] === pathComponent) {
+    const probeCell = cellOf(grid, point);
+    const cell = linearIndex(grid, probeCell);
+    if (!open[cell]) {
+      return [
+        unsupported(
+          `void-continuity isolatedFrom point ${order} at [${point.join(', ')}] is inside material, not an open space, so isolation cannot be decided at ${resolution} mm sampling.`,
+          'Move the isolatedFrom point into the space it represents, or refine the resolution if that space is thinner than one cell.',
+          { isolatedFromIndex: order, point, resolution },
+        ),
+      ];
+    }
+    if (regionJoinsComponent({ grid, open, components, center: probeCell, radius: 1, component: pathComponent })) {
       return [
         fail(
-          `void-continuity isolation breached: isolatedFrom point ${order} at [${point.join(', ')}] is void-connected to the path at ${resolution} mm sampling.`,
+          `void-continuity isolation breached: isolatedFrom point ${order} at [${point.join(', ')}] is void-connected to the path (within one cell) at ${resolution} mm sampling.`,
           'Add wall between the path void and this space, or declare the connection as an intended opening (drop it from isolatedFrom).',
           { center: point, details: { isolatedFromIndex: order, point, resolution } },
         ),
@@ -497,8 +797,23 @@ export const proveVoidContinuity = (
     }
   }
 
-  // Cross-section: sampled bottleneck, failed only when it clears the band.
+  // Cross-section: sampled bottleneck. Refuse (unsupported) rather than decide
+  // when the grid is too coarse to bound the declared section (B3), or when the
+  // quantization band swamps the measurement (B2). The band is a fail-side
+  // tolerance only — it never manufactures a pass at a tight passage.
   if (expectation.minCrossSection !== undefined && waypoints.length >= 2) {
+    const cellArea = grid.resolution * grid.resolution;
+    // Resolution guard (B3): a section only a few cells in area cannot be
+    // sampled honestly (Nyquist) — require it to span at least ~2x2 cells.
+    if (expectation.minCrossSection < 4 * cellArea) {
+      return [
+        unsupported(
+          `void-continuity cannot bound a ${expectation.minCrossSection} mm² section at ${resolution} mm sampling (needs >= ${4 * cellArea} mm², ~2x2 cells).`,
+          'Refine the resolution (finer voxels) so the required section spans several cells.',
+          { minCrossSection: expectation.minCrossSection, resolution, cellArea },
+        ),
+      ];
+    }
     const bottleneck = bottleneckCrossSection({ grid, components, component: pathComponent, waypoints });
     if (!bottleneck) {
       return [
@@ -512,10 +827,24 @@ export const proveVoidContinuity = (
     // Quantization band: a one-cell-thick perimeter ring around the bottleneck
     // slice (bounded below by one cell), the same step-tolerance idea the
     // classification proofs use — never fail inside the sampling's own noise.
-    const band = Math.max(
-      grid.resolution * grid.resolution,
-      Math.sqrt(bottleneck.cells) * 4 * grid.resolution * grid.resolution,
-    );
+    const band = Math.max(cellArea, Math.sqrt(bottleneck.cells) * 4 * cellArea);
+    // Band-swamp guard (B2): if the band is >= the measured area the section is
+    // unfalsifiable at this resolution — report unsupported, not a vacuous pass.
+    if (band >= bottleneck.area) {
+      return [
+        unsupported(
+          `void-continuity cross-section is ${bottleneck.area.toFixed(0)} mm² but its quantization band is ±${band.toFixed(0)} mm² (${bottleneck.cells} cells at ${resolution} mm); too coarse to bound honestly.`,
+          'Refine the resolution so the tightest section spans several cells, or declare bounds that isolate the passage.',
+          {
+            measuredCrossSection: bottleneck.area,
+            band,
+            cells: bottleneck.cells,
+            minCrossSection: expectation.minCrossSection,
+            resolution,
+          },
+        ),
+      ];
+    }
     if (bottleneck.area + band < expectation.minCrossSection) {
       return [
         fail(

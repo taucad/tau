@@ -100,6 +100,7 @@
     "tau-lint/no-monaco-create-model": "error",
     "tau-lint/no-bare-rpc-error-code": "error",
     "tau-lint/no-scene-override-material": "error",
+    "tau-lint/no-impl-in-index": "error",
     "unicorn/no-accessor-recursion": "error",
     "unicorn/no-anonymous-default-export": "error",
     "unicorn/no-array-callback-reference": "error",

@@ -1,5 +1,5 @@
 import { makeBaseBox, makeCylinder } from 'replicad';
-import { axis } from 'replicad/annotations';
+import { axis } from '@taucad/runtime/kernels/replicad/annotations';
 
 // Audit row `clearance.piston-bore-skirt-positive`: bore r47.000, skirt
 // r46.970 (side clearance 0.030 in [0.015, 0.060]), insertion depth 30.

@@ -1,5 +1,5 @@
 import { makeCylinder } from 'replicad';
-import { axis } from 'replicad/annotations';
+import { axis } from '@taucad/runtime/kernels/replicad/annotations';
 
 // Audit rows `containment.filter-inside-housing-positive`,
 // `containment.sidewall-intersection-negative` (axisOffset 5 pierces the

@@ -12,12 +12,11 @@ fixtures/
   clearance/               # clearance.* family
   mate/                    # mate.* family
   containment/             # containment.* family
-  selector/                # selector-behavior fixtures (ambiguity, stale, unnamed, drift,
+  selector/                # selector-behavior fixtures (ambiguity, unnamed, drift,
                            # second-producer transformed-instance)
   scripts/                 # generation scripts (replicad model code run through the runtime CLI)
     regenerate.mjs         # corpus regeneration driver
     <family>/<name>/main.ts
-    selector/doctor-stale.mjs
 ```
 
 Each fixture directory holds exactly two files:
@@ -35,7 +34,7 @@ node packages/cli/dist/bin/taucad.js export packages/geospec/fixtures/scripts/co
   --params='{"gap":0.5}'
 ```
 
-Or regenerate everything (or a named subset) from the manifests — this also applies post-edit scripts (the stale fixture's doctored stamps), removes the CLI's `.tau` cache directories, and verifies each output is STEP text with NAUO structure:
+Or regenerate everything (or a named subset) from the manifests — this removes the CLI's `.tau` cache directories and verifies each output is STEP text with NAUO structure:
 
 ```bash
 node packages/geospec/fixtures/scripts/regenerate.mjs [fixtureId ...]
@@ -43,14 +42,13 @@ node packages/geospec/fixtures/scripts/regenerate.mjs [fixtureId ...]
 
 The generation scripts are verbatim-normative model code (the sub-blueprint's authoring sources) executed by the runtime VM — they are lint-ignored as fixture inputs, like `experiments/**`.
 
-Two fixtures are not CLI-generated:
+One fixture is not CLI-generated:
 
-- `selector/second-producer-transformed/model.step` is **hand-authored source** (the AP242 text is the artifact): a producer sharing zero code with tau's exporters, with a named-interface component under a non-identity occurrence transform — the fixture that catches part-local-vs-subject-frame stamped-fact mapping bugs.
-- `selector/stale-doctored/model.step` is generated, then doctored by the committed `scripts/selector/doctor-stale.mjs` (recorded in its manifest's `generator.postEdit`) — an honest exporter constructively cannot produce stamps that disagree with geometry.
+- `selector/second-producer-transformed/model.step` is **hand-authored source** (the AP242 text is the artifact): a producer sharing zero code with tau's exporters, with named face and native datum-placement evidence under a non-identity occurrence transform.
 
 ## Determinism rule
 
-Regenerating a fixture from its script must produce **geometrically identical** STEP. Byte identity is not required (header timestamps and entity ids may differ); the harness compares via loaded facts — reader-derived structure, resolved selector facts, and stamped `geospec:facts` payloads — never bytes.
+Regenerating a fixture from its script must produce **geometrically identical** STEP. Byte identity is not required (header timestamps and entity ids may differ); the harness compares via reader-derived structure, resolved selector facts, and native datum-placement rows — never bytes.
 
 ## Budgets
 

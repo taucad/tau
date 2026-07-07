@@ -1,5 +1,5 @@
 import { makeBaseBox, makeCylinder } from 'replicad';
-import { axis } from 'replicad/annotations';
+import { axis } from '@taucad/runtime/kernels/replicad/annotations';
 
 export const defaultParams = {
   pinLength: 64, // Mm - full span x ∈ [-32, 32]; 20 reaches only bossA

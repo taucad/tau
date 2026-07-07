@@ -1,5 +1,5 @@
 import { makeCylinder } from 'replicad';
-import { axis, face } from 'replicad/annotations';
+import { axis, face } from '@taucad/runtime/kernels/replicad/annotations';
 
 // Audit rows `mate.shaft-shoulder-bearing-positive` and
 // `mate.shaft-shoulder-stand-off-negative`: pulley bore coaxial on the

@@ -1,5 +1,5 @@
 import { makeBaseBox } from 'replicad';
-import { face } from 'replicad/annotations';
+import { face } from '@taucad/runtime/kernels/replicad/annotations';
 
 // Audit row `contact.edge-only-negative`: two solids touch along a line with
 // zero planar seating area — distance is 0 but a `minContactArea: 20`

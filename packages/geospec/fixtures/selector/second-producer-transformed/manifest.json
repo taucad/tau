@@ -53,5 +53,5 @@
       }
     }
   ],
-  "notes": "Second-producer conformance fixture (R1): hand-authored AP242 text sharing zero code with tau's exporters. cubeB is placed under a NON-IDENTITY occurrence transform (rotate 90 deg about Z, translate +30 X) and carries a named interface whose stamped part-local facts (normal [1,0,0], centroid [5,0,0]) differ from the subject frame — resolving it as 'resolved' (not stale) with subject-frame facts proves the SB3-R5 stamped-fact transform mapping."
+  "notes": "Second-producer conformance fixture (R1): hand-authored AP242 text sharing zero code with tau's exporters. cubeB is placed under a NON-IDENTITY occurrence transform (rotate 90 deg about Z, translate +30 X) and carries native face and datum-placement evidence that must resolve in the subject frame."
 }

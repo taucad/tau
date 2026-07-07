@@ -1,5 +1,5 @@
 import { makeBaseBox, makeCylinder } from 'replicad';
-import { axis } from 'replicad/annotations';
+import { axis } from '@taucad/runtime/kernels/replicad/annotations';
 
 export const defaultParams = {
   boreRadius: 25.04, // Mm

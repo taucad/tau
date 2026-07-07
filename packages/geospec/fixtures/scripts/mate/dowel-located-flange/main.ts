@@ -1,5 +1,5 @@
 import { makeBaseBox, makeCylinder } from 'replicad';
-import { axis, datum, face, group } from 'replicad/annotations';
+import { axis, datum, face, group } from '@taucad/runtime/kernels/replicad/annotations';
 
 const DOWELS: Array<[number, number]> = [
   [-25, 0],

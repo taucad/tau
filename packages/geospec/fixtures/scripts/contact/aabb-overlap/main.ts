@@ -1,5 +1,5 @@
 import { makeBaseBox } from 'replicad';
-import { face } from 'replicad/annotations';
+import { face } from '@taucad/runtime/kernels/replicad/annotations';
 
 export default function main() {
   // Boss: x ∈ [-10, 10], y ∈ [-10, 10], z ∈ [0, 40].

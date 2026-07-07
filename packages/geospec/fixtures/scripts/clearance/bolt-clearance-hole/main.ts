@@ -1,5 +1,5 @@
 import { makeBaseBox, makeCylinder } from 'replicad';
-import { axis } from 'replicad/annotations';
+import { axis } from '@taucad/runtime/kernels/replicad/annotations';
 
 // Audit row `clearance.bolt-clearance-hole-positive`: shank r4.000 through a
 // clearance hole r4.200 (radial clearance 0.200) traversing the full plate

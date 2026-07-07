@@ -1,5 +1,5 @@
 import { draw } from 'replicad';
-import { face } from 'replicad/annotations';
+import { face } from '@taucad/runtime/kernels/replicad/annotations';
 
 // Serves `contact.valve-seat-cone-positive`: a valve-seat insert whose 45°
 // seat cone band carries the seating patch — the SB4 contact-area frontier's

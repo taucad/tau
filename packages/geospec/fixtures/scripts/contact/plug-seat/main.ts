@@ -1,5 +1,5 @@
 import { makeBaseBox, makeCylinder } from 'replicad';
-import { axis, face } from 'replicad/annotations';
+import { axis, face } from '@taucad/runtime/kernels/replicad/annotations';
 
 // Serves two audit rows over one geometry: `contact.plug-seat-positive`
 // (annular washer-to-seat contact plus coaxial prerequisite) and

@@ -1,5 +1,5 @@
 import { makeBaseBox, makeCylinder } from 'replicad';
-import { axis, group } from 'replicad/annotations';
+import { axis, group } from '@taucad/runtime/kernels/replicad/annotations';
 
 export const defaultParams = {
   holeCount: 8, // 7 = drift variant (skips the last station; never redistributes)

@@ -1,3 +1,4 @@
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- @types/json-schema supplies this erased type import.
 import type { JSONSchema7 } from 'json-schema';
 import { isEqual, keys, xor } from '#to-json-schema/to-json-schema.utils.js';
 import { formatRegexps, types } from '#to-json-schema/json-schema-helpers.js';

@@ -214,13 +214,26 @@ const extractStepSchema = (text: string): string | undefined => {
 
 const extractProducts = (text: string): StepEvidence['productStructure'] => {
   const products: StepEvidence['productStructure'] = [];
-  const expression = /PRODUCT\s*\(\s*'([^']*)'/giu;
-  let match: RegExpExecArray | undefined;
-  while ((match = expression.exec(text) ?? undefined) !== undefined) {
-    const name = match[1]?.trim();
-    if (name) {
-      products.push({ name, path: `product[${products.length}]` });
+  const seen = new Set<string>();
+  const add = (rawName: string | undefined, kind: 'product' | 'occurrence'): void => {
+    const name = rawName?.trim();
+    if (name !== undefined && name.length > 0 && !seen.has(name)) {
+      seen.add(name);
+      products.push({ name, path: `${kind}[${products.length}]` });
     }
+  };
+  const productExpression = /PRODUCT\s*\(\s*'([^']*)'/giu;
+  let match: RegExpExecArray | undefined;
+  while ((match = productExpression.exec(text) ?? undefined) !== undefined) {
+    add(match[1], 'product');
+  }
+  // Idiomatic AP242 instancing collapses repeated placements into one shared PRODUCT
+  // plus a NEXT_ASSEMBLY_USAGE_OCCURRENCE per instance; the occurrence name lives in
+  // the NAUO's second field, not as a distinct PRODUCT entity. Collect those so the
+  // product structure carries every occurrence name, not only the shared prototypes.
+  const occurrenceExpression = /NEXT_ASSEMBLY_USAGE_OCCURRENCE\s*\(\s*'[^']*'\s*,\s*'([^']*)'/giu;
+  while ((match = occurrenceExpression.exec(text) ?? undefined) !== undefined) {
+    add(match[1], 'occurrence');
   }
   return products;
 };

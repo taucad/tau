@@ -202,6 +202,8 @@ const makeXdeResult = (facts: SelectorFaceFacts[], occurrenceCount = 1): GeoSpec
   delete: vi.fn(),
 });
 
+type Hole = NonNullable<BrepEvidence['circularHoles']>[number];
+
 // Named native reader keys carry PascalCase class identity; use computed keys so
 // the object-literal naming lint stays satisfied (mirrors the loadStep tests).
 const stepReaderKey = 'GeoSpecStepStreamReader';
@@ -262,7 +264,7 @@ const shaftEndPlane: SelectorFaceFacts = {
   bounds: { min: [-10, -11, -11], max: [-10, 11, 11] },
 };
 
-describe('WS-E chamfer feature re-derivation', () => {
+describe('WS-E feature re-derivation', () => {
   it('surfaces a revolved cone-chamfer at a shaft end as one chamfer feature', async () => {
     const subject = await loadWithFaceFacts({ validity: { valid: true } }, [
       chamferCone(1),
@@ -377,6 +379,132 @@ describe('WS-E chamfer feature re-derivation', () => {
     expect(subject.brep?.chamferFeatures).toEqual([
       expect.objectContaining({ distance: 1, selection: 'revolved chamfer (axis y)' }),
     ]);
+  });
+
+  it('skips holes with no centre when rebuilding patterns', async () => {
+    const withMissingCentre: BrepEvidence['circularHoles'] = [
+      { diameter: 8, through: false, axis: 'z' },
+      { diameter: 8, through: false, axis: 'z', center: [0, 0, 0], axisRange: { min: -5, max: 0 } },
+      { diameter: 8, through: false, axis: 'z', center: [1, 1, 0], axisRange: { min: -5, max: 0 } },
+    ];
+    const subject = await loadWithFaceFacts({ validity: { valid: true }, circularHoles: withMissingCentre }, []);
+    // The two positioned holes still pattern; the centre-less one is skipped.
+    expect(subject.brep?.circularHolePatterns).toHaveLength(1);
+    expect(subject.brep?.circularHolePatterns?.[0]?.count).toBe(2);
+  });
+
+  it('reports two mirror-symmetric blind-tap pads as count-3 patterns, not a merged count-6', async () => {
+    // Two positive/negative-y mount pads, each with 3 M10 blind taps entering the y face.
+    const padTaps: BrepEvidence['circularHoles'] = [];
+    for (const y of [106, -106]) {
+      for (const x of [-30, 0, 30]) {
+        padTaps.push({
+          diameter: 10,
+          through: false,
+          axis: 'y',
+          center: [257 + x, y - 6, -21],
+          axisRange: { min: y - 12, max: y },
+        });
+      }
+    }
+    const subject = await loadWithFaceFacts({ validity: { valid: true }, circularHoles: padTaps }, []);
+
+    const patterns = subject.brep?.circularHolePatterns ?? [];
+    expect(patterns).toHaveLength(2);
+    expect(patterns.every((pattern) => pattern.count === 3)).toBe(true);
+    expect(patterns.every((pattern) => pattern.holeDiameter === 10 && pattern.axis === 'y')).toBe(true);
+    // Pads sit on opposite sides of y = 0.
+    expect(patterns.map((pattern) => Math.sign(pattern.center![1])).sort((a, b) => a - b)).toEqual([-1, 1]);
+  });
+
+  it('keeps a through-hole row as a single pattern and honours re-derived through-state', async () => {
+    // Through-holes along X spread over the part; boundingBox lets the loader
+    // recompute through-state from axisRange.
+    const windows: BrepEvidence['circularHoles'] = [0, 200, 400].flatMap((x) =>
+      [30, -30].map((y): Hole => ({
+        diameter: 28,
+        through: true,
+        axis: 'x',
+        center: [x, y, 45],
+        axisRange: { min: -1, max: 493 },
+      })),
+    );
+    const subject = await loadWithFaceFacts(
+      {
+        validity: { valid: true },
+        boundingBox: { min: [0, -110, -40], max: [492, 110, 60], size: [492, 220, 100], center: [246, 0, 10] },
+        circularHoles: windows,
+      },
+      [],
+    );
+    const patterns = subject.brep?.circularHolePatterns ?? [];
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0]).toEqual(expect.objectContaining({ count: 6, holeDiameter: 28, axis: 'x' }));
+    expect(subject.brep?.circularHoles?.every((hole) => hole.through)).toBe(true);
+  });
+
+  it('preserves through-holes lacking a bounding box', async () => {
+    // Two through-holes with no boundingBox: through-state falls through to the
+    // native flag (rangeThrough undefined), and they still form one pattern.
+    const throughHoles: BrepEvidence['circularHoles'] = [-20, 20].map((x): Hole => ({
+      diameter: 12,
+      through: true,
+      axis: 'z',
+      center: [x, 0, 0],
+      axisRange: { min: -5, max: 5 },
+    }));
+    const subject = await loadWithFaceFacts({ validity: { valid: true }, circularHoles: throughHoles }, []);
+    expect(subject.brep?.circularHoles?.every((hole) => hole.through)).toBe(true);
+    expect(subject.brep?.circularHolePatterns).toHaveLength(1);
+  });
+
+  it('keeps a single-face bolt circle of blind taps as one pattern', async () => {
+    // 6 M10 blind taps on one rear face (all share the same X entry plane).
+    const bolts: BrepEvidence['circularHoles'] = Array.from({ length: 6 }, (_value, index): Hole => {
+      const theta = ((index * 60 + 30) * Math.PI) / 180;
+      return {
+        diameter: 10,
+        through: false,
+        axis: 'x',
+        center: [491, 165 * Math.cos(theta), 165 * Math.sin(theta)],
+        axisRange: { min: 472, max: 491 },
+      };
+    });
+    const subject = await loadWithFaceFacts({ validity: { valid: true }, circularHoles: bolts }, []);
+
+    const patterns = subject.brep?.circularHolePatterns ?? [];
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0]).toEqual(expect.objectContaining({ count: 6, holeDiameter: 10, axis: 'x' }));
+    expect(patterns[0]?.boltCircleDiameter).toBeCloseTo(330, 6);
+  });
+
+  it('drops a lone tap that splits off from a pad (a singleton is not a pattern)', async () => {
+    // One pad of 2 taps near y=100 plus a single stray tap far away at y=-100.
+    const holes: BrepEvidence['circularHoles'] = [
+      { diameter: 10, through: false, axis: 'y', center: [0, 100, 0], axisRange: { min: 94, max: 106 } },
+      { diameter: 10, through: false, axis: 'y', center: [30, 100, 0], axisRange: { min: 94, max: 106 } },
+      { diameter: 10, through: false, axis: 'y', center: [0, -100, 0], axisRange: { min: -106, max: -94 } },
+    ];
+    const subject = await loadWithFaceFacts({ validity: { valid: true }, circularHoles: holes }, []);
+    const patterns = subject.brep?.circularHolePatterns ?? [];
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0]?.count).toBe(2);
+  });
+
+  it('detects a shallow blind tap pad (no depth/aspect floor drops it)', async () => {
+    // 3 very shallow M6 taps (axisRange spans only 3mm) still form a pad.
+    const shallow: BrepEvidence['circularHoles'] = [-20, 0, 20].map((x): Hole => ({
+      diameter: 6,
+      through: false,
+      axis: 'z',
+      center: [x, 40, -35],
+      axisRange: { min: -38, max: -35 },
+    }));
+    const subject = await loadWithFaceFacts({ validity: { valid: true }, circularHoles: shallow }, []);
+
+    const patterns = subject.brep?.circularHolePatterns ?? [];
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0]).toEqual(expect.objectContaining({ count: 3, holeDiameter: 6, axis: 'z' }));
   });
 
   it('leaves a subject without brep evidence untouched', async () => {

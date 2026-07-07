@@ -504,6 +504,8 @@ const holeThroughFromAxisRange = (options: {
   );
 };
 
+type CircularHole = NonNullable<BrepEvidence['circularHoles']>[number];
+type CircularHolePattern = NonNullable<BrepEvidence['circularHolePatterns']>[number];
 type ChamferFeature = NonNullable<BrepEvidence['chamferFeatures']>[number];
 
 const axisOf = (direction: readonly [number, number, number] | undefined): 'x' | 'y' | 'z' | undefined => {
@@ -570,6 +572,97 @@ const deriveChamferFeaturesFromFaceFacts = (faces: readonly SelectorFaceFacts[])
   return derived;
 };
 
+// Axial gap (mm) beyond which two blind holes belong to different pads.
+const padSeparationGap = 20;
+
+const holePatternFrom = (group: readonly CircularHole[]): CircularHolePattern => {
+  const { axis } = group[0]!;
+  const centre: [number, number, number] = [0, 0, 0];
+  for (const hole of group) {
+    centre[0] += hole.center![0];
+    centre[1] += hole.center![1];
+    centre[2] += hole.center![2];
+  }
+  centre[0] /= group.length;
+  centre[1] /= group.length;
+  centre[2] /= group.length;
+  const [px, py] = perpendicularAxes(axis).map((perpendicularAxis) => axisIndices[perpendicularAxis]);
+  let radialSum = 0;
+  for (const hole of group) {
+    radialSum += Math.hypot(hole.center![px!] - centre[px!], hole.center![py!] - centre[py!]);
+  }
+  return {
+    count: group.length,
+    holeDiameter: group[0]!.diameter,
+    boltCircleDiameter: (2 * radialSum) / group.length,
+    axis,
+    center: centre,
+  };
+};
+
+// Split a blind-hole family into per-pad clusters by their entry-face plane:
+// sort by axial centre and start a new pad wherever the gap exceeds
+// padSeparationGap. Sorting on a scalar coordinate keeps the split deterministic
+// (C2).
+const splitBlindHolesByPad = (holes: readonly CircularHole[]): CircularHole[][] => {
+  const axialIndex = axisIndices[holes[0]!.axis];
+  const sorted = [...holes].sort((a, b) => a.center![axialIndex] - b.center![axialIndex]);
+  const pads: CircularHole[][] = [];
+  let current: CircularHole[] = [];
+  let previous: number | undefined;
+  for (const hole of sorted) {
+    const axial = hole.center![axialIndex];
+    if (previous !== undefined && axial - previous > padSeparationGap) {
+      pads.push(current);
+      current = [];
+    }
+    current.push(hole);
+    previous = axial;
+  }
+  pads.push(current);
+  return pads;
+};
+
+// Re-group circular holes into per-pattern families (WS-E / Finding 7). The
+// native recognizer keys only by (axis, diameter), so two mirror-symmetric
+// blind-tap pads on opposite faces merge into one over-counted pattern. Rule:
+//   - Base family = (axis, diameter).
+//   - THROUGH holes stay in one family per base key (a through pattern spans the
+//     part and legitimately spreads along/around the axis, for example a bolt
+//     circle or a row of breathing windows).
+//   - BLIND holes (taps) enter from a single face, so a family is split into
+//     pads by entry-plane clustering: a large axial gap starts a new pad.
+// So two positive/negative-y pads of 3 taps report count 3 each (not a merged
+// 6), while a single-face bolt circle of 6 blind taps stays count 6. Shallow
+// taps are kept (no depth/aspect floor) so short blind bores still pattern.
+// Deterministic: holes are consumed in native traversal order, clusters seeded
+// by that order.
+const deriveHolePatterns = (holes: readonly CircularHole[]): CircularHolePattern[] => {
+  const families = new Map<string, CircularHole[]>();
+  for (const hole of holes) {
+    if (!hole.center) {
+      continue;
+    }
+    const diameterKey = Math.round(hole.diameter * 1000) / 1000;
+    // Through patterns are one family per (axis, diameter); blind taps are split
+    // into pads below, keyed apart so a through row and a blind pad never merge.
+    const kindKey = hole.through ? 'through' : 'blind';
+    const key = `${hole.axis}:${diameterKey}:${kindKey}`;
+    families.set(key, [...(families.get(key) ?? []), hole]);
+  }
+
+  const patterns: CircularHolePattern[] = [];
+  for (const [key, family] of families) {
+    const groups = key.endsWith(':blind') ? splitBlindHolesByPad(family) : [family];
+    for (const group of groups) {
+      if (group.length >= 2) {
+        patterns.push(holePatternFrom(group));
+      }
+    }
+  }
+  return patterns;
+};
+
 const normalizeBrepEvidence = (
   brep: BrepEvidence | undefined,
   faceFacts: readonly SelectorFaceFacts[] = [],
@@ -592,6 +685,10 @@ const normalizeBrepEvidence = (
     };
   });
 
+  // Re-derive pattern grouping from the corrected through-state so mirror-
+  // symmetric pads and single-face bolt circles are grouped per the rule above.
+  const circularHolePatterns = circularHoles ? deriveHolePatterns(circularHoles) : brep.circularHolePatterns;
+
   // Union the native (planar-bevel) chamfers with revolved cone chamfers the
   // native recognizer cannot see.
   const derivedChamfers = deriveChamferFeaturesFromFaceFacts(faceFacts);
@@ -601,15 +698,16 @@ const normalizeBrepEvidence = (
   return {
     ...brep,
     ...(circularHoles ? { circularHoles } : {}),
+    ...(circularHolePatterns ? { circularHolePatterns } : {}),
     ...(chamferFeatures ? { chamferFeatures } : {}),
   };
 };
 
-// Chamfer re-derivation is a per-part feature check; the native analyzeShape
-// brep it augments is only meaningful for a single-solid part, and the rev2
-// chamfer REQs load individual parts (loadPartStep). Cap face-fact collection
-// to part-scale occurrence counts so a 650-occurrence assembly load never pays
-// a native faceFacts() call per occurrence.
+// Chamfer/hole re-derivation is a per-part feature check; the native
+// analyzeShape brep it augments is only meaningful for a single-solid part, and
+// the rev2 chamfer/pattern REQs load individual parts (loadPartStep). Cap
+// face-fact collection to part-scale occurrence counts so a 650-occurrence
+// assembly load never pays a native faceFacts() call per occurrence.
 const maxPartOccurrences = 8;
 
 // Gather per-face analytic facts across every occurrence so TS-side feature

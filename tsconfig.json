@@ -32,9 +32,6 @@
       "path": "./packages/json-schema"
     },
     {
-      "path": "./packages/js"
-    },
-    {
       "path": "./packages/runtime"
     },
     {

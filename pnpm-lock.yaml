@@ -2292,12 +2292,6 @@ importers:
         specifier: workspace:*
         version: link:../types
 
-  packages/js:
-    dependencies:
-      xstate:
-        specifier: 'catalog:'
-        version: 5.32.1
-
   packages/json-schema:
     dependencies:
       '@types/json-schema':

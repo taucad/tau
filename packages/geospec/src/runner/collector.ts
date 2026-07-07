@@ -12,6 +12,7 @@ import type { AxisQuery, GeometrySelection, PlaneQuery, ResolvedEntity } from '#
 import type { SelectorIndex } from '#selector/index-builder.js';
 import { matchesGeoSpecTestName } from '#runner/filter.js';
 import type { GeoSpecTestNamePattern } from '#runner/filter.js';
+import { withMatcherBudget } from '#runner/matcher-budget.js';
 import type {
   GeoSpecAssertion,
   GeoSpecAssemblyOccurrencesExpectation,
@@ -569,7 +570,10 @@ const recordValidatedAssertion = (
   validationDiagnostics: GeometryDiagnostic[],
   evaluate: () => GeometryDiagnostic[],
 ): GeoSpecAssertion =>
-  recordAssertion(assertion, validationDiagnostics.length > 0 ? validationDiagnostics : evaluate());
+  recordAssertion(
+    assertion,
+    validationDiagnostics.length > 0 ? validationDiagnostics : withMatcherBudget(assertion.kind, evaluate),
+  );
 
 const isVec3 = (value: unknown): value is Vec3 =>
   Array.isArray(value) && value.length === 3 && value.every((entry) => typeof entry === 'number');

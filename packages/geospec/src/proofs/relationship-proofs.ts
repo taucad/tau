@@ -20,6 +20,7 @@ import type { SelectorTolerances } from '#selector/tolerances.js';
 import { serializeSelector } from '#selector/types.js';
 import type { GeometryFacts, GeometrySelection, ResolvedEntity } from '#selector/types.js';
 import { axisAngleBetweenDegrees, distance, dot, normalize, scale, subtract } from '#selector/vector-math.js';
+import { checkBudget } from '#runner/matcher-budget.js';
 import type {
   RelationshipBroadPhase,
   RelationshipEvidence,
@@ -870,6 +871,10 @@ const proveContactArea = (input: RelationshipProofInput, minContactArea: number)
   const totals = { patchArea: 0, band: 0, faceArea: 0, footprint: 0, contacting: 0, penetrating: 0 };
   let witness: { point: Vec3; topologyRef?: string } | undefined;
   for (const entity of subjectEntities) {
+    // A face-group patch sums one fixed-lattice classification per face, so the
+    // cost scales with the group size — check the matcher budget between faces
+    // so a large group fails bounded rather than stalling the run (WS-C/C3).
+    checkBudget();
     const subject = shapeRef(entity, input.context);
     if (!subject) {
       return unsupportedEvidence(bindingDraft);

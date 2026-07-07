@@ -102,6 +102,26 @@ describe('ResourceQueue', () => {
     expect(queue.depth).toBe(0);
   });
 
+  it('should resolve concurrent whenDrained waiters together', async () => {
+    const queue = new ResourceQueue();
+
+    const op = queue.queueFor('/dir/file.txt', async () => {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 10);
+      });
+    });
+
+    const drainedA = queue.whenDrained();
+    const drainedB = queue.whenDrained();
+
+    expect(drainedA).toBe(drainedB);
+
+    await op;
+    await Promise.all([drainedA, drainedB]);
+
+    expect(queue.depth).toBe(0);
+  });
+
   it('should resolve whenDrained immediately if already empty', async () => {
     const queue = new ResourceQueue();
     await queue.whenDrained();

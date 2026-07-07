@@ -7,9 +7,8 @@ const resolved: Promise<void> = Promise.resolve();
  * Writes to the same file path are serialized (FIFO). Writes to different
  * file paths run in parallel. Auto-cleans empty queues on drain.
  *
- * Replaces both WriteCoordinator (global — too strict) and the legacy
- * ResourceWriteQueue (per-parent — ZenFS artifact, unnecessary with
- * path-keyed IDB).
+ * Replaces the old global and per-parent queue variants, which were either
+ * too strict or unnecessary with path-keyed IDB.
  *
  * @public
  * @see {@link https://github.com/microsoft/vscode | VS Code's} `ResourceQueue` in `src/vs/base/common/async.ts`.
@@ -18,7 +17,7 @@ const resolved: Promise<void> = Promise.resolve();
 export class ResourceQueue {
   private readonly _queues = new Map<string, Promise<void>>();
   private _totalDepth = 0;
-  private _drainResolvers: Array<() => void> = [];
+  private _drainWaiter: PromiseWithResolvers<void> | undefined;
 
   /**
    * Queue an operation serialized by the exact file path.
@@ -50,10 +49,7 @@ export class ResourceQueue {
         } finally {
           this._totalDepth--;
           if (this._totalDepth === 0) {
-            for (const drainResolve of this._drainResolvers) {
-              drainResolve();
-            }
-            this._drainResolvers = [];
+            this._resolveDrainWaiter();
           }
         }
       });
@@ -84,13 +80,19 @@ export class ResourceQueue {
    * Resolves when all queues are empty (no in-flight or pending operations).
    * @returns A promise that settles once every per-path queue has drained.
    */
-  public async whenDrained(): Promise<void> {
+  // oxlint-disable-next-line @typescript-eslint/promise-function-async -- concurrent waiters must receive the same pending promise by identity.
+  public whenDrained(): Promise<void> {
     if (this._totalDepth === 0) {
-      return;
+      return resolved;
     }
 
-    return new Promise<void>((resolve) => {
-      this._drainResolvers.push(resolve);
-    });
+    this._drainWaiter ??= Promise.withResolvers<void>();
+    return this._drainWaiter.promise;
+  }
+
+  private _resolveDrainWaiter(): void {
+    const waiter = this._drainWaiter;
+    this._drainWaiter = undefined;
+    waiter?.resolve();
   }
 }

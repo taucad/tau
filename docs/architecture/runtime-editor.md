@@ -26,13 +26,13 @@ Three runtime contexts collaborate to turn user code into 3D geometry:
 │ File Manager │  │ Kernel Worker    │
 │ Worker       │  │ (per comp. unit) │
 │              │  │                  │
-│ FileService  │◀─│ watch() ──────── │
-│ ZenFS        │  │ render loop      │
+│ Workspace FS │◀─│ watch() ──────── │
+│ Providers    │  │ render loop      │
 │ EventBus     │──│ ──▶ push geometry│
 └──────────────┘  └──────────────────┘
 ```
 
-**File Manager Worker**: single instance hosting `FileService`, `ProviderRegistry`, `WriteCoordinator`, `DirectoryTreeCache`, and `ChangeEventBus`. Owns all ZenFS access. Serves both the main thread and kernel workers via the bridge protocol.
+**File Manager Worker**: single instance hosting `WorkspaceFileService`, `ProviderRegistry`, `ResourceQueue`, `InMemoryFileTree`, and `ChangeEventBus`. Owns mounted browser filesystem access. Serves both the main thread and kernel workers via the bridge protocol.
 
 **Kernel Worker**: one per geometry unit. Runs bundler (esbuild), executes user code, computes geometry, tessellates, and pushes results. Watches its dependency graph via the filesystem bridge.
 

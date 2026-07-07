@@ -124,18 +124,15 @@ Source files are typically <100 KB. Binary CAD files (STL, STEP, glTF) can be 10
 
 ### Rule 5: Write serialization scope
 
-All mutating operations (`writeFile`, `writeFiles`, `mkdir`, `rename`, `unlink`, `rmdir`) must be serialized to prevent ZenFS directory listing corruption (zen-fs/core#256).
+All mutating operations (`writeFile`, `writeFiles`, `mkdir`, `rename`, `unlink`, `rmdir`) must route through `ResourceQueue` at the narrowest conflict key.
 
-**Verified TOCTOU scope (from ZenFS source audit):** The race condition is in `StoreFS.commitNew` — a read-modify-write on the parent directory's listing blob (`Record<string, number>` in JSON). Two concurrent `commitNew` calls to the **same parent directory** can lose entries. Writes to files in **different parent directories** are independent and safe to parallelize.
+**Why**: Same-path writes need FIFO ordering, but global serialization blocks unrelated files. Path-keyed providers removed the old ZenFS parent-directory listing TOCTOU, so `WorkspaceFileService` serializes by exact path and lets independent writes run in parallel.
 
-**Current implementation:** Global `WriteCoordinator` — a single FIFO promise chain (`_writeQueue: Promise<void>`). This is overly conservative.
-
-**Target implementation:** Per-parent-directory serialization. Serialize writes that share a parent directory; parallelize writes to different parent directories. This is safe today — it does not require a ZenFS fix.
+If a future backend reintroduces parent-directory read-modify-write metadata, use the parent directory as the queue key for that backend. Do not reintroduce a global write queue.
 
 ```typescript
-// CORRECT: Per-parent-directory serialization (safe now)
-const parentDir = path.substring(0, path.lastIndexOf('/')) || '/';
-await resourceQueue.queueFor(parentDir, () => provider.writeFile(path, data));
+// CORRECT: serialize at the narrowest known conflict key
+await resourceQueue.queueFor(path, () => provider.writeFile(path, data));
 
 // INCORRECT: Global serialization (unnecessarily blocks independent writes)
 await globalQueue.serialized(() => provider.writeFile(path, data));

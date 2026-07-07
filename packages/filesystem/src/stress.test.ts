@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { BoundedFileCache } from '#bounded-file-cache.js';
-import { WriteCoordinator } from '#write-coordinator.js';
 import { ChangeEventBus } from '#change-event-bus.js';
 
 describe('BoundedFileCache stress tests', () => {
@@ -98,74 +97,6 @@ describe('BoundedFileCache stress tests', () => {
     expect(cache.has('file-0.txt')).toBe(false);
     expect(cache.has('renamed-0.txt')).toBe(true);
     expect(cache.get('renamed-49.txt')![0]).toBe(49);
-  });
-});
-
-describe('WriteCoordinator stress tests', () => {
-  it('should serialize 100 concurrent operations correctly', async () => {
-    const coordinator = new WriteCoordinator();
-    const results: number[] = [];
-
-    const operations = Array.from({ length: 100 }, async (_, i) =>
-      coordinator.serialized(async () => {
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, 0);
-        });
-        results.push(i);
-        return i;
-      }),
-    );
-
-    const returnValues = await Promise.all(operations);
-
-    expect(results).toEqual(Array.from({ length: 100 }, (_, i) => i));
-    expect(returnValues).toEqual(Array.from({ length: 100 }, (_, i) => i));
-  });
-
-  it('should continue after errors without blocking', async () => {
-    const coordinator = new WriteCoordinator();
-    const results: string[] = [];
-
-    const operations = [
-      coordinator.serialized(async () => {
-        results.push('first');
-      }),
-      coordinator.serialized(async () => {
-        results.push('second-start');
-        throw new Error('intentional failure');
-      }),
-      coordinator.serialized(async () => {
-        results.push('third');
-      }),
-    ];
-
-    const settled = await Promise.allSettled(operations);
-
-    expect(settled[0]?.status).toBe('fulfilled');
-    expect(settled[1]?.status).toBe('rejected');
-    expect(settled[2]?.status).toBe('fulfilled');
-    expect(results).toEqual(['first', 'second-start', 'third']);
-  });
-
-  it('should handle deeply nested serialization', async () => {
-    const coordinator = new WriteCoordinator();
-    const results: number[] = [];
-
-    await coordinator.serialized(async () => {
-      results.push(1);
-      // Note: nested serialized calls will deadlock if not handled correctly.
-      // This test verifies the queue works sequentially from the outside.
-    });
-
-    const nested = Array.from({ length: 50 }, async (_, i) =>
-      coordinator.serialized(async () => {
-        results.push(i + 2);
-      }),
-    );
-
-    await Promise.all(nested);
-    expect(results.length).toBe(51);
-    expect(results[0]).toBe(1);
   });
 });
 

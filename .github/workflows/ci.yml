@@ -10,6 +10,9 @@ on:
       - production
 env:
   NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+  TAU_API_URL: http://localhost:4000
+  TAU_WEBSOCKET_URL: ws://localhost:4001
+  TAU_FRONTEND_URL: http://localhost:3000
 
 # Cancel in-progress runs when a new workflow with the same group name is triggered
 # This can save 10-50% on CI compute costs.

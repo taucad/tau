@@ -8,6 +8,43 @@
     "build": {
       "dependsOn": ["copy-assets", "^copy-assets"],
       "outputs": ["{projectRoot}/build"],
+      "inputs": [
+        "default",
+        "^default",
+        {
+          "env": "TAU_API_URL"
+        },
+        {
+          "env": "TAU_WEBSOCKET_URL"
+        },
+        {
+          "env": "TAU_FRONTEND_URL"
+        },
+        {
+          "env": "NETLIFY"
+        },
+        {
+          "env": "NETLIFY_AI_GATEWAY_URL"
+        },
+        {
+          "env": "TAU_DEBUG"
+        },
+        {
+          "env": "POSTHOG_CLIENT_KEY"
+        },
+        {
+          "env": "POSTHOG_API_HOST"
+        },
+        {
+          "env": "POSTHOG_UI_HOST"
+        },
+        {
+          "env": "POSTHOG_ASSET_HOST"
+        },
+        {
+          "env": "STATS"
+        }
+      ],
       "command": "react-router build --sourcemapClient hidden",
       "options": {
         "cwd": "{projectRoot}",

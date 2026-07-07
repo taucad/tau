@@ -303,6 +303,7 @@
     "@taucad/chat": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/oxlint": "workspace:*",
+    "@taucad/react": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@testing-library/jest-dom": "catalog:",

@@ -1,7 +1,7 @@
 # Replicad API Catalog (verified)
 
 Every signature below is verified against the pinned build
-(`node_modules/replicad/dist/replicad.d.ts`, `@taucad/replicad`). If an
+(`node_modules/replicad/dist/replicad.d.ts`, `@taulabs/replicad`). If an
 operation is not in this file, do not assume it exists — see the
 [not-present list](#not-present-plan-around-these) for workarounds.
 

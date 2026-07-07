@@ -56,7 +56,7 @@
     "@gltf-transform/functions": "catalog:",
     "@taucad/gltf-extensions": "workspace:*",
     "@taucad/types": "workspace:*",
-    "assimpjs": "npm:@tau-forks/assimpjs@0.0.19",
+    "assimpjs": "npm:@taulabs/assimpjs@0.0.19",
     "draco3dgltf": "^1.5.7",
     "occt-import-js": "^0.0.23",
     "rhino3dm": "^8.17.0"

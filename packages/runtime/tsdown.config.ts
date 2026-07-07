@@ -34,6 +34,7 @@ const baseConfig: Options = {
     'src/worker-internals.ts',
     'src/transport-internals.ts',
     'src/kernels/replicad/replicad.kernel.ts',
+    'src/kernels/replicad/annotations/index.ts',
     'src/kernels/replicad/replicad-wasm-single-loader.ts',
     'src/kernels/replicad/replicad-wasm-multi-loader.ts',
     'src/kernels/jscad/jscad.kernel.ts',

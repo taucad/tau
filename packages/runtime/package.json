@@ -58,6 +58,7 @@
     "./worker-internals": "./src/worker-internals.ts",
     "./transport-internals": "./src/transport-internals.ts",
     "./kernels/replicad": "./src/kernels/replicad/replicad.kernel.ts",
+    "./kernels/replicad/annotations": "./src/kernels/replicad/annotations/index.ts",
     "./kernels/jscad": "./src/kernels/jscad/jscad.kernel.ts",
     "./kernels/manifold": "./src/kernels/manifold/manifold.kernel.ts",
     "./kernels/opencascade": "./src/kernels/opencascade/opencascade.kernel.ts",
@@ -215,6 +216,11 @@
         "types": "./dist/kernels/replicad/replicad.kernel.d.ts",
         "import": "./dist/kernels/replicad/replicad.kernel.js",
         "default": "./dist/kernels/replicad/replicad.kernel.js"
+      },
+      "./kernels/replicad/annotations": {
+        "types": "./dist/kernels/replicad/annotations/index.d.ts",
+        "import": "./dist/kernels/replicad/annotations/index.js",
+        "default": "./dist/kernels/replicad/annotations/index.js"
       },
       "./kernels/jscad": {
         "types": "./dist/kernels/jscad/jscad.kernel.d.ts",

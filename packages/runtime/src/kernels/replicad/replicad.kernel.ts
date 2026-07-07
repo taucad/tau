@@ -56,8 +56,12 @@ import {
   classifyLibraryFrames,
 } from '#framework/error-enrichment.js';
 import { render, renderOutput } from '#kernels/replicad/utils/render-output.js';
+import * as tauReplicadAnnotations from '#kernels/replicad/annotations/index.js';
+import { exportSTEP } from '#kernels/replicad/export/interface-export.js';
+import { resolveEntryInterfaces, rotateNativeEntryToYup } from '#kernels/replicad/interface-resolution.js';
+import type { NativeHandleEntry } from '#kernels/replicad/interface-resolution.js';
 import { convertReplicadGeometriesToGltf } from '#kernels/replicad/utils/replicad-to-gltf.js';
-import type { InputShape, MainResultShapes } from '#kernels/replicad/utils/render-output.js';
+import type { MainResultShapes } from '#kernels/replicad/utils/render-output.js';
 import type { GeometryReplicad } from '#kernels/replicad/replicad.types.js';
 import { replicadDetectPattern } from '#kernels/replicad/replicad.constants.js';
 import { loadReplicadSingleWasm } from '#kernels/replicad/replicad-wasm-single-loader.js';
@@ -172,6 +176,7 @@ type ReplicadContext = {
 };
 
 type ReplicadLibrary = typeof ReplicadModule;
+
 type ReplicadBatchTelemetry = {
   backend: 'native' | 'js-direct';
   operation: 'fuse' | 'cut' | 'common';
@@ -206,12 +211,12 @@ const loadReplicadLibrary = async (): Promise<ReplicadLibrary> => {
 };
 
 // Match both the public package name (`replicad/`) and the aliased pnpm path
-// (`@taucad/replicad/`) — the package.json aliases `replicad: npm:@taucad/replicad`,
-// so the actual on-disk file lives at `node_modules/.pnpm/.../@taucad/replicad/dist/replicad.js`
+// (`@taulabs/replicad/`) — the package.json aliases `replicad` to the Tau fork,
+// so the actual on-disk file lives at `node_modules/.pnpm/.../@taulabs/replicad/dist/replicad.js`
 // while still being importable as `replicad`. Both patterns map to the `replicad`
 // display name so source-mapped paths render as `replicad/src/...`.
 const libraryPatterns = [
-  { pattern: '@taucad/replicad/', moduleName: 'replicad' },
+  { pattern: '@taulabs/replicad/', moduleName: 'replicad' },
   { pattern: 'node_modules/replicad/', moduleName: 'replicad' },
 ];
 
@@ -420,6 +425,12 @@ function registerReplicadModule(runtime: KernelRuntime, replicadLibrary: Replica
     version: '0.19.1',
     globalName: 'replicad',
   });
+  registerKernelModule(runtime, {
+    name: '@taucad/runtime/kernels/replicad/annotations',
+    exports: { ...tauReplicadAnnotations },
+    version: '0.19.1',
+    globalName: 'tauReplicadAnnotations',
+  });
 }
 
 // =============================================================================
@@ -501,7 +512,7 @@ export const replicadKernel = defineKernel({
   id: 'replicad',
   extensions: ['ts', 'js'],
   detectImport: replicadDetectPattern,
-  builtinModuleNames: ['replicad'],
+  builtinModuleNames: ['replicad', '@taucad/runtime/kernels/replicad/annotations'],
   name: 'ReplicadKernel',
   version: '1.0.0',
   optionsSchema: replicadOptionsSchema,
@@ -704,7 +715,7 @@ export const replicadKernel = defineKernel({
 
       const { tessellation } = options;
 
-      let nativeHandle: InputShape[] = [];
+      let nativeHandle: NativeHandleEntry[] = [];
       let renderMode: 'flat' | 'tessellation-instanced' | 'mixed' = 'flat';
       const renderOutputSpan = tracer.startSpan('replicad.render-output', {
         phase: 'computingGeometry',
@@ -718,7 +729,7 @@ export const replicadKernel = defineKernel({
               renderOutput({
                 shapes,
                 beforeRender(shapesArray) {
-                  nativeHandle = shapesArray;
+                  nativeHandle = shapesArray.map((entry) => resolveEntryInterfaces(entry, context.replicadLibrary));
                   return shapesArray;
                 },
                 defaultName,
@@ -806,6 +817,15 @@ export const replicadKernel = defineKernel({
               severity: 'error',
             },
           ]);
+        const stepExportError = (error: unknown) =>
+          createKernelError([
+            {
+              message: error instanceof Error ? error.message : String(error),
+              code: 'RUNTIME',
+              type: 'runtime',
+              severity: 'error',
+            },
+          ]);
 
         switch (format) {
           case 'glb':
@@ -860,10 +880,9 @@ export const replicadKernel = defineKernel({
             }
 
             const { coordinateSystem } = options;
+
             const shapes =
-              coordinateSystem === 'y-up'
-                ? nativeHandle.map((s) => ({ ...s, shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]) }))
-                : nativeHandle;
+              coordinateSystem === 'y-up' ? nativeHandle.map((entry) => rotateNativeEntryToYup(entry)) : nativeHandle;
 
             const stepShapes = shapes.map((s) => ({
               shape: s.shape,
@@ -873,8 +892,14 @@ export const replicadKernel = defineKernel({
               metalness: s.metalness,
               roughness: s.roughness,
               density: s.density,
+              resolvedInterfaces: s.resolvedInterfaces,
             }));
-            const stepBlob: Blob = context.replicadLibrary.exportSTEP(stepShapes);
+            let stepBlob: Blob;
+            try {
+              stepBlob = exportSTEP(context.openCascade, stepShapes);
+            } catch (error) {
+              return stepExportError(error);
+            }
             const stepBytes = new Uint8Array(await stepBlob.arrayBuffer());
             return createKernelSuccess([createExportFile('step', 'assembly', stepBytes)]);
           }
@@ -932,6 +957,7 @@ export const replicadKernel = defineKernel({
         metalness: entry.metalness,
         roughness: entry.roughness,
         density: entry.density,
+        resolvedInterfaces: entry.resolvedInterfaces,
       },
     }));
   },

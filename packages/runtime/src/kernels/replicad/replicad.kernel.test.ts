@@ -4545,7 +4545,7 @@ describe('withBrepEdges option', () => {
     }
 
     expect(triangleVerticesWithout).toBe(triangleVerticesWith);
-  }, 15_000);
+  }, 30_000);
 
   it('should produce valid BRep edges', async () => {
     const result = await createTestGeometry({

@@ -32,8 +32,9 @@ export function RuntimeFixture<Runtime extends AnyRuntimeDefinition>({
     initialParameters: { radius: 10, height: 24 },
     ...(mode === 'file' ? { source: { path: mainFile } } : { source: { files: { [mainFile]: cylinderSource } } }),
   });
-  const radius = Number(runtimeState.parameters.radius ?? 10);
-  const height = Number(runtimeState.parameters.height ?? 24);
+  const parameters = runtimeState.parameters as { radius?: unknown; height?: unknown };
+  const radius = Number(parameters.radius ?? 10);
+  const height = Number(parameters.height ?? 24);
 
   useEffect(() => {
     window.__tauReactE2eState = {

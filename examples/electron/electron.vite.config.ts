@@ -32,7 +32,7 @@ export default defineConfig({
       /* `kernel-host` is the utility-process runtime entry forked by main. */
       rollupOptions: {
         input: {
-          index: resolve(import.meta.dirname, 'src/main/index.ts'),
+          index: resolve(import.meta.dirname, 'src/main/main.ts'),
           'kernel-host': resolve(import.meta.dirname, 'src/tau/kernel-host.ts'),
         },
         output: {
@@ -49,9 +49,8 @@ export default defineConfig({
     build: {
       outDir: 'dist/preload',
       lib: {
-        entry: resolve(import.meta.dirname, 'src/preload/index.ts'),
+        entry: resolve(import.meta.dirname, 'src/preload/preload.ts'),
         formats: ['es'],
-        fileName: () => 'index.js',
       },
       rollupOptions: { external: ['electron'] },
     },

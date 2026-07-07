@@ -4,7 +4,7 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import { runtime } from '@taucad/runtime/vite';
 import type { Plugin } from 'vite';
 
-const repoRoot = resolve(import.meta.dirname, '../../../../..');
+const repoRoot = resolve(import.meta.dirname, '../../../..');
 const replicadWasmRoot = resolve(repoRoot, 'packages/runtime/src/kernels/replicad/wasm');
 const mainWasmOutput = resolve(import.meta.dirname, 'dist/main/wasm');
 
@@ -43,7 +43,7 @@ export default defineConfig({
       outDir: 'dist/main',
       rollupOptions: {
         input: {
-          index: resolve(import.meta.dirname, 'src/main/index.ts'),
+          index: resolve(import.meta.dirname, 'src/main/main.ts'),
           'kernel-host': resolve(import.meta.dirname, 'src/main/kernel-host.ts'),
         },
         output: {
@@ -60,9 +60,8 @@ export default defineConfig({
     build: {
       outDir: 'dist/preload',
       lib: {
-        entry: resolve(import.meta.dirname, 'src/preload/index.ts'),
+        entry: resolve(import.meta.dirname, 'src/preload/preload.ts'),
         formats: ['es'],
-        fileName: () => 'index.js',
       },
       rollupOptions: { external: ['electron'] },
     },

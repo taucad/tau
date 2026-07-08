@@ -54,4 +54,16 @@ describe('shape names', () => {
     expect(uniqueShapeName('Planet Gear', usedNames)).toBe('Planet Gear 2');
     expect(uniqueShapeName('Planet Gear', usedNames)).toBe('Planet Gear 3');
   });
+
+  it('should not collide when a suffixed name matches an authored name', () => {
+    const usedNames = new Map<string, number>();
+    const results = ['Foo', 'Foo', 'Foo 2'].map((name) => uniqueShapeName(name, usedNames));
+    expect(results).toContain('Foo');
+    expect(results).toContain('Foo 2');
+    expect(new Set(results).size).toBe(3);
+
+    const pair = new Map<string, number>();
+    expect(uniqueShapeName('A', pair)).toBe('A');
+    expect(uniqueShapeName('A', pair)).toBe('A 2');
+  });
 });

@@ -77,7 +77,19 @@ export function resolveShapeName({ index, name, source = 'authored' }: ResolveSh
  * @returns The original name or a suffixed duplicate label.
  */
 export function uniqueShapeName(name: string, usedNames: Map<string, number>): string {
-  const count = (usedNames.get(name) ?? 0) + 1;
+  let count = (usedNames.get(name) ?? 0) + 1;
   usedNames.set(name, count);
-  return count === 1 ? name : `${name} ${count}`;
+  if (count === 1) {
+    return name;
+  }
+
+  // Skip suffixes that collide with an authored name already emitted this scope.
+  let candidate = `${name} ${count}`;
+  while (usedNames.has(candidate)) {
+    count += 1;
+    candidate = `${name} ${count}`;
+  }
+  usedNames.set(name, count);
+  usedNames.set(candidate, 1);
+  return candidate;
 }

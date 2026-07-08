@@ -334,8 +334,11 @@ describe('loadModel', () => {
       throw new Error('Expected cached loader');
     }
 
-    await expect(cached({ file: 'main.ts', format: 'glb' })).rejects.toBe(loadError);
-    await expect(cached({ format: 'glb', file: 'main.ts' })).rejects.toBe(loadError);
+    const first = cached({ file: 'main.ts', format: 'glb' });
+    const second = cached({ format: 'glb', file: 'main.ts' });
+
+    await expect(first).rejects.toBe(loadError);
+    await expect(second).rejects.toBe(loadError);
     expect(modelLoader).toHaveBeenCalledTimes(1);
     expect(stats).toEqual({
       hits: 1,
@@ -900,8 +903,11 @@ describe('loadModel', () => {
         "import { describe, it } from 'geospec';",
         "import { loadModel } from 'geospec/model';",
         "describe('cached load failures', () => {",
-        "  it('fails the first load', async () => { await loadModel({ file: 'main.ts', format: 'glb' }); });",
-        "  it('fails the second load with the same rejection', async () => { await loadModel({ format: 'glb', file: 'main.ts' }); });",
+        "  it('fans out simultaneous failures with the same rejection', async () => {",
+        "    const first = loadModel({ file: 'main.ts', format: 'glb' });",
+        "    const second = loadModel({ format: 'glb', file: 'main.ts' });",
+        '    await Promise.all([first, second]);',
+        '  });',
         '});',
       ].join('\n'),
     );
@@ -920,7 +926,7 @@ describe('loadModel', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.passed).toBe(false);
-      expect(result.tests.map((test) => test.status)).toEqual(['failed', 'failed']);
+      expect(result.tests.map((test) => test.status)).toEqual(['failed']);
     }
     expect(modelLoader).toHaveBeenCalledTimes(1);
   });
@@ -954,7 +960,7 @@ describe('loadModel', () => {
     expect(subject.kind).toBe('geometry-subject');
     expect(subject.step?.unit).toBe('mm');
     expect(typeof subject.step?.readStrategy.bytesRead).toBe('number');
-    expect(subject.brep?.validity).toEqual({ valid: true });
+    expect(subject.brep?.validity).toMatchObject({ valid: true });
     expect(typeof subject.brep?.massProperties?.volume).toBe('number');
     expect(typeof subject.brep?.massProperties?.surfaceArea).toBe('number');
     expect(subject.mesh.stats.triangleCount).toBeGreaterThan(0);

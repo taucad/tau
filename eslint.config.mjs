@@ -45,6 +45,13 @@ const workspacePackageDirectories = () => {
   return [...directories];
 };
 
+const dreiDeepJsImportRestriction = {
+  group: ['@react-three/drei/*/*.js'],
+  allowTypeImports: true,
+  message:
+    'Do not value-import Drei deep .js modules from app code. Netlify SSR can classify typeless Drei .js files as CommonJS; import from the Drei barrel or a direct dependency instead. See docs/research/netlify-drei-camera-controls-ssr-crash.md.',
+};
+
 /**
  * Minimal ESLint config -- only rules that cannot run in oxlint.
  *
@@ -238,7 +245,6 @@ const config = [
             'eslint.config.mjs',
             'examples/electron/electron.vite.config.ts',
             'apps/api/vitest.config.ts',
-            'apps/ui/scripts/check-ssr-bundle-budget.mts',
           ],
         },
         tsconfigRootDir: import.meta.dirname,
@@ -560,7 +566,7 @@ const config = [
   },
 
   /**
-   * Quarantine `monaco-editor` runtime to `*.client.{ts,tsx}` modules.
+   * Quarantine SSR-hostile runtime imports from shared app modules.
    *
    * `monaco-editor/esm/*` transitively imports `codicon/codicon.css`, which
    * Node's ESM loader cannot resolve during the React Router v7 SSR build
@@ -570,8 +576,10 @@ const config = [
    * replaces those modules with empty exports during the server build,
    * terminating the static graph at the boundary.
    *
-   * Type-only imports (`import type * as Monaco from 'monaco-editor'`) are
-   * erased at compile time and remain legal everywhere.
+   * Drei deep `.js` value imports have a similar runtime hazard on Netlify
+   * functions when the package lacks `"type": "module"` / `exports`.
+   *
+   * Type-only imports are erased at compile time and remain legal everywhere.
    *
    * See docs/policy/ssr-bundle-policy.md and docs/research/ssr-bundle-audit.md.
    */
@@ -602,7 +610,30 @@ const config = [
               message:
                 'Static value imports of `monaco-editor` pull `languageFeatures.js` → `codicon.css` into the SSR build (Node ESM loader rejects `.css`). Put runtime monaco usage in a `*.client.ts`/`*.client.tsx` module so React Router v7 replaces it with empty exports on the server. See docs/policy/ssr-bundle-policy.md.',
             },
+            dreiDeepJsImportRestriction,
           ],
+        },
+      ],
+    },
+  },
+
+  {
+    files: [
+      'apps/ui/app/**/*.client.ts',
+      'apps/ui/app/**/*.client.tsx',
+      'apps/ui/app/**/*.worker.ts',
+      'apps/ui/app/**/*.worker.tsx',
+      'apps/ui/app/**/*.test.ts',
+      'apps/ui/app/**/*.test.tsx',
+      'apps/ui/app/**/*.spec.ts',
+      'apps/ui/app/**/*.spec.tsx',
+      'apps/ui/app/**/*.test-d.ts',
+    ],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [dreiDeepJsImportRestriction],
         },
       ],
     },

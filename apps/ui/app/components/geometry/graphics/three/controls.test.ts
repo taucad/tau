@@ -1,4 +1,4 @@
-import { CameraControlsImpl } from '@react-three/drei/core/CameraControls.js';
+import CameraControlsImpl from 'camera-controls';
 import { describe, expect, it } from 'vitest';
 import { resolveCameraControlMouseButtons } from '#components/geometry/graphics/three/controls.js';
 

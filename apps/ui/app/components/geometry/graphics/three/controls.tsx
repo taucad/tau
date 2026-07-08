@@ -1,4 +1,4 @@
-import { CameraControlsImpl } from '@react-three/drei/core/CameraControls.js';
+import CameraControlsImpl from 'camera-controls';
 import React, { useMemo } from 'react';
 import type * as THREE from 'three';
 import { TauCameraControls } from '#components/geometry/graphics/three/controls/tau-camera-controls.js';

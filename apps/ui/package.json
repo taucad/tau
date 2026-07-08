@@ -36,6 +36,7 @@
     "@taucad/vm": "workspace:*",
     "better-auth": "catalog:",
     "bowser": "catalog:",
+    "camera-controls": "3.1.2",
     "class-variance-authority": "catalog:",
     "date-fns": "catalog:",
     "dompurify": "^3.4.11",

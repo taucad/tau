@@ -3,7 +3,7 @@ import type { EventDispatcher, OrthographicCamera, PerspectiveCamera } from 'thr
 import { forwardRef, useEffect, useMemo } from 'react';
 import { extend, useFrame, useThree } from '@react-three/fiber';
 import type { EventManager, ThreeElement } from '@react-three/fiber';
-import { CameraControlsImpl } from '@react-three/drei/core/CameraControls.js';
+import CameraControlsImpl from 'camera-controls';
 import { useViewportGizmoInteractionLock } from '#components/geometry/graphics/three/controls/viewport-gizmo-interaction-lock.js';
 import type { ViewportGizmoInteractionLock } from '#components/geometry/graphics/three/controls/viewport-gizmo-interaction-lock.js';
 

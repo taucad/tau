@@ -11,6 +11,7 @@ const baseConfig: Options = {
     'src/dispose.utils.ts',
     'src/error.utils.ts',
     'src/cache.utils.ts',
+    'src/hash.utils.ts',
   ],
   sourcemap: false,
   clean: ['dist'],

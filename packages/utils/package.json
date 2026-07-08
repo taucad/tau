@@ -27,7 +27,8 @@
     "./schema": "./src/schema.utils.ts",
     "./dispose": "./src/dispose.utils.ts",
     "./error": "./src/error.utils.ts",
-    "./cache": "./src/cache.utils.ts"
+    "./cache": "./src/cache.utils.ts",
+    "./hash": "./src/hash.utils.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -71,6 +72,11 @@
         "types": "./dist/cache.utils.d.ts",
         "import": "./dist/cache.utils.js",
         "default": "./dist/cache.utils.js"
+      },
+      "./hash": {
+        "types": "./dist/hash.utils.d.ts",
+        "import": "./dist/hash.utils.js",
+        "default": "./dist/hash.utils.js"
       }
     }
   },

@@ -74,6 +74,17 @@ function deriveStatus(cadState: string): CadPreviewStatus {
 }
 
 /**
+ * Whether `prepareFiles` should (re)mount the preview-owned ephemeral prefix.
+ *
+ * A retry after a post-mount failure (e.g. `client.writeFiles` rejected) re-runs
+ * `prepareFiles` with the same prefix already mounted. Re-mounting the same
+ * prefix would register a second, duplicate mount on the worker; skip it when the
+ * prefix is already the one this provider registered.
+ */
+export const shouldMountPreviewPrefix = (mountedPrefix: string | undefined, previewPrefix: string): boolean =>
+  mountedPrefix !== previewPrefix;
+
+/**
  * Combines CAD machine phase and initialization errors into the preview status
  * exposed by {@link useCadPreview}.
  */
@@ -243,8 +254,13 @@ export function CadPreviewProvider({
             const previewOwnsMount = fmProjectId !== input.projectId;
             if (previewOwnsMount) {
               const previewPrefix = joinPath('/projects', input.projectId);
-              await workspace.mount(previewPrefix, { backend: 'memory', preservePath: true });
-              mountedPrefixRef.current = previewPrefix;
+              // Only mount when this prefix isn't already registered. A retry
+              // after a post-mount write failure re-runs prepareFiles with the
+              // prefix still mounted — remounting would duplicate the mount.
+              if (shouldMountPreviewPrefix(mountedPrefixRef.current, previewPrefix)) {
+                await workspace.mount(previewPrefix, { backend: 'memory', preservePath: true });
+                mountedPrefixRef.current = previewPrefix;
+              }
               signal.throwIfAborted();
               await client.writeFiles(projectFiles);
             } else {

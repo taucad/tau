@@ -93,7 +93,7 @@ vi.mock('#machines/graphics.machine.js', async () => {
 });
 
 // Dynamic import after mocks are registered.
-const { CadPreviewProvider } = await import('#hooks/use-cad-preview.js');
+const { CadPreviewProvider, shouldMountPreviewPrefix } = await import('#hooks/use-cad-preview.js');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -112,6 +112,22 @@ function makeFiles(
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+describe('shouldMountPreviewPrefix', () => {
+  const prefix = '/projects/import-preview-X';
+
+  it('mounts when no prefix is registered yet (first prepare)', () => {
+    expect(shouldMountPreviewPrefix(undefined, prefix)).toBe(true);
+  });
+
+  it('does NOT re-mount when the same prefix is already registered (retry after post-mount failure)', () => {
+    expect(shouldMountPreviewPrefix(prefix, prefix)).toBe(false);
+  });
+
+  it('mounts when the registered prefix differs', () => {
+    expect(shouldMountPreviewPrefix('/projects/other', prefix)).toBe(true);
+  });
+});
 
 describe('CadPreviewProvider filesystem two-mode contract', () => {
   beforeEach(() => {

@@ -19,13 +19,16 @@ export const wrapAsTransferables = <T>(value: T): WithTransferables<T> | T => {
   return { value, transferables } satisfies WithTransferables<T>;
 };
 
-export const serializeBridgeError = (error: unknown): BridgeError => ({
-  message: error instanceof Error ? error.message : String(error),
-  name: error instanceof Error ? error.constructor.name : 'Error',
-  stack: error instanceof Error ? error.stack : undefined,
-  code: (error as { code?: string }).code,
-  metadata: (error as Record<string, unknown>)['metadata'] as Record<string, unknown> | undefined,
-});
+export const serializeBridgeError = (error: unknown): BridgeError => {
+  const record = error !== null && typeof error === 'object' ? (error as Record<string, unknown>) : {};
+  return {
+    message: error instanceof Error ? error.message : String(error),
+    name: error instanceof Error ? error.constructor.name : 'Error',
+    stack: error instanceof Error ? error.stack : undefined,
+    code: record['code'] as string | undefined,
+    metadata: record['metadata'] as Record<string, unknown> | undefined,
+  };
+};
 
 export const reconstructError = (
   bridgeError: BridgeError,

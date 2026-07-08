@@ -158,6 +158,8 @@ export const createCachedModelLoader = (
         if (stats) {
           stats.failures += 1;
         }
+        // Evict rejected loads so a later call can retry instead of replaying the failure.
+        cache.delete(key);
         throw error;
       }
     })();

@@ -46,7 +46,7 @@ import { MetricsService } from '#telemetry/metrics.js';
 import { buildPublicationViewUrl } from '#email/email-link-builder.js';
 
 const maxBytesPerFile = 25 * 1024 * 1024;
-const maxTotalBytes = 50 * 1024 * 1024;
+export const maxTotalBytes = 50 * 1024 * 1024;
 const maxFiles = 200;
 type ProjectShareCurrentPublication = NonNullable<ProjectShareEnvelope['currentPublication']>;
 type ProjectShareProject = ProjectShareEnvelope['project'];

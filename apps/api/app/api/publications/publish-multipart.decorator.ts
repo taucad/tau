@@ -1,9 +1,11 @@
 /* eslint-disable @typescript-eslint/naming-convention -- decorators are not constructors */
 /* oxlint-disable new-cap -- decorators are not constructors */
-import { createParamDecorator } from '@nestjs/common';
+import { BadRequestException, createParamDecorator } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
+import { publicationApiCode } from '@taucad/types/constants';
 import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
+import { maxTotalBytes } from '#api/publications/publications.service.js';
 
 export type MultipartIteratorPart =
   | {
@@ -40,8 +42,12 @@ export async function collectFileIterable(
   return concatUint8Arrays(chunks);
 }
 
-export async function collectPublishMultipart(request: MultipartRequest): Promise<PublishMultipartRaw> {
+export async function collectPublishMultipart(
+  request: MultipartRequest,
+  totalByteLimit: number = maxTotalBytes,
+): Promise<PublishMultipartRaw> {
   let manifest: string | undefined;
+  let totalBytes = 0;
   const files = new Map<string, Uint8Array<ArrayBuffer>>();
 
   for await (const part of request.parts()) {
@@ -52,7 +58,16 @@ export async function collectPublishMultipart(request: MultipartRequest): Promis
 
     if (part.type === 'file') {
       const relativePath = part.fieldname.replaceAll('\\', '/').replace(/^\.\/+/, '');
-      files.set(relativePath, await collectFileIterable(part.file));
+      const collected = await collectFileIterable(part.file);
+      totalBytes += collected.byteLength;
+      // Fail fast once the running total trips the cap so we stop pulling (and buffering) further parts.
+      if (totalBytes > totalByteLimit) {
+        throw new BadRequestException({
+          code: publicationApiCode.PAYLOAD_TOO_LARGE,
+          message: 'Total upload exceeds limit',
+        });
+      }
+      files.set(relativePath, collected);
     }
   }
 

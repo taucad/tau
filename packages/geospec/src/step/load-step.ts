@@ -401,13 +401,17 @@ const brepCapabilities: GeometryCapability[] = [
   { kind: 'brep', feature: 'circular-hole-patterns' },
   { kind: 'brep', feature: 'chamfer-features' },
   { kind: 'brep', feature: 'fillet-features' },
-  { kind: 'brep', feature: 'wall-thickness' },
 ];
 
 const stepCapabilities = (options: { brep: BrepEvidence | undefined; hasMesh: boolean }): GeometryCapability[] => [
   ...(options.hasMesh ? meshCapabilities : []),
   ...stepEvidenceCapabilities,
-  ...(options.brep ? brepCapabilities : []),
+  ...(options.brep
+    ? [
+        ...brepCapabilities,
+        ...(options.brep.minimumWallThickness ? ([{ kind: 'brep', feature: 'wall-thickness' }] as const) : []),
+      ]
+    : []),
 ];
 
 const axisIndices = { x: 0, y: 1, z: 2 } as const;
@@ -835,9 +839,16 @@ export const loadStep = async (options: LoadStepOptions): Promise<GeometrySubjec
   }
   options.onProgress?.({ phase: 'mesh-brep', bytesRead: bytes.bytes.byteLength });
   const xdeRead = forensicSync('load.native.xdeReader', () => readNativeXde({ text: bytes.text, module }));
-  return forensicAsync('load.buildSubject', async () =>
-    buildStepSubject({ bytes, loadOptions: options, payload: native.payload, strategy: native.strategy, xdeRead }),
-  );
+  try {
+    return await forensicAsync('load.buildSubject', async () =>
+      buildStepSubject({ bytes, loadOptions: options, payload: native.payload, strategy: native.strategy, xdeRead }),
+    );
+  } catch (error) {
+    // The subject takes ownership of the native XDE handle on success; on a
+    // build failure it never receives it, so delete it here to avoid a leak.
+    xdeRead?.nativeXde?.delete?.();
+    throw error;
+  }
 };
 
 /**

@@ -145,6 +145,35 @@ describe('loadStep', () => {
     expect(unlink).toHaveBeenCalledOnce();
   });
 
+  it('should delete the native XDE handle when subject construction throws', async () => {
+    const xdeDelete = vi.fn();
+    const nativeXde: GeoSpecNativeXdeReadResult = {
+      isSuccess: () => true,
+      resultJson: () => JSON.stringify({ occurrences: [], subshapeNames: [], datumPlacements: [], freeShapeCount: 0 }),
+      extrema: () => '{}',
+      classifyPoints: () => '{"states":[]}',
+      commonVolume: () => '{"volume":0}',
+      faceFacts: () => '{"faces":[]}',
+      delete: xdeDelete,
+    };
+    // A non-iterable `diagnostics` makes buildStepSubject throw after the XDE
+    // read has produced a live native handle, exercising the leak path.
+    const backend: GeoSpecNativeStepBackend = {
+      GeoSpecStepStreamReader: {
+        readText: vi.fn(() => createResult({ brep: { validity: { valid: true } }, diagnostics: 5 as unknown as [] })),
+      },
+      GeoSpecXdeReader: { readText: vi.fn(() => nativeXde) },
+    };
+
+    await expect(
+      loadStep({
+        source: new TextEncoder().encode('ISO-10303-21; HEADER; ENDSEC; END-ISO-10303-21;'),
+        nativeStepBackend: backend,
+      }),
+    ).rejects.toThrow();
+    expect(xdeDelete).toHaveBeenCalledOnce();
+  });
+
   it('should preserve BRep evidence without advertising mesh capabilities when mesh loading is disabled', async () => {
     let parsedOptions: unknown;
     const reader = {
@@ -284,7 +313,9 @@ describe('WS-E feature re-derivation', () => {
 
   it('tolerates a faceFacts payload that carries no faces array', async () => {
     const backend: GeoSpecNativeStepBackend = {
-      [stepReaderKey]: { readText: vi.fn(() => createResult({ brep: { validity: { valid: true } }, diagnostics: [] })) },
+      [stepReaderKey]: {
+        readText: vi.fn(() => createResult({ brep: { validity: { valid: true } }, diagnostics: [] })),
+      },
       [xdeReaderKey]: {
         readText: vi.fn(() => ({
           ...makeXdeResult([]),
@@ -421,13 +452,15 @@ describe('WS-E feature re-derivation', () => {
     // Through-holes along X spread over the part; boundingBox lets the loader
     // recompute through-state from axisRange.
     const windows: BrepEvidence['circularHoles'] = [0, 200, 400].flatMap((x) =>
-      [30, -30].map((y): Hole => ({
-        diameter: 28,
-        through: true,
-        axis: 'x',
-        center: [x, y, 45],
-        axisRange: { min: -1, max: 493 },
-      })),
+      [30, -30].map(
+        (y): Hole => ({
+          diameter: 28,
+          through: true,
+          axis: 'x',
+          center: [x, y, 45],
+          axisRange: { min: -1, max: 493 },
+        }),
+      ),
     );
     const subject = await loadWithFaceFacts(
       {
@@ -446,13 +479,15 @@ describe('WS-E feature re-derivation', () => {
   it('preserves through-holes lacking a bounding box', async () => {
     // Two through-holes with no boundingBox: through-state falls through to the
     // native flag (rangeThrough undefined), and they still form one pattern.
-    const throughHoles: BrepEvidence['circularHoles'] = [-20, 20].map((x): Hole => ({
-      diameter: 12,
-      through: true,
-      axis: 'z',
-      center: [x, 0, 0],
-      axisRange: { min: -5, max: 5 },
-    }));
+    const throughHoles: BrepEvidence['circularHoles'] = [-20, 20].map(
+      (x): Hole => ({
+        diameter: 12,
+        through: true,
+        axis: 'z',
+        center: [x, 0, 0],
+        axisRange: { min: -5, max: 5 },
+      }),
+    );
     const subject = await loadWithFaceFacts({ validity: { valid: true }, circularHoles: throughHoles }, []);
     expect(subject.brep?.circularHoles?.every((hole) => hole.through)).toBe(true);
     expect(subject.brep?.circularHolePatterns).toHaveLength(1);
@@ -493,13 +528,15 @@ describe('WS-E feature re-derivation', () => {
 
   it('detects a shallow blind tap pad (no depth/aspect floor drops it)', async () => {
     // 3 very shallow M6 taps (axisRange spans only 3mm) still form a pad.
-    const shallow: BrepEvidence['circularHoles'] = [-20, 0, 20].map((x): Hole => ({
-      diameter: 6,
-      through: false,
-      axis: 'z',
-      center: [x, 40, -35],
-      axisRange: { min: -38, max: -35 },
-    }));
+    const shallow: BrepEvidence['circularHoles'] = [-20, 0, 20].map(
+      (x): Hole => ({
+        diameter: 6,
+        through: false,
+        axis: 'z',
+        center: [x, 40, -35],
+        axisRange: { min: -38, max: -35 },
+      }),
+    );
     const subject = await loadWithFaceFacts({ validity: { valid: true }, circularHoles: shallow }, []);
 
     const patterns = subject.brep?.circularHolePatterns ?? [];

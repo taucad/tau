@@ -7,7 +7,10 @@ import {
   resolveModelMaterialBaseTintHex,
   resolveModelComponentEmphasis,
 } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
-import { createVertexColoredSectionCapMaterial } from '#components/geometry/graphics/three/materials/striped-material-vertex-colored.js';
+import {
+  createVertexColoredSectionCapMaterial,
+  markVertexColoredSectionCapMaterialInUse,
+} from '#components/geometry/graphics/three/materials/striped-material-vertex-colored.js';
 import {
   createSegmentScratch,
   extractSectionContours,
@@ -116,6 +119,9 @@ type SectionHelperRecord = {
   borderBackend: ResolvedGraphicsBackend | undefined;
   geometryKey: string | undefined;
   materialKey: string | undefined;
+  // Backend + stripe params of the currently-bound fill material, so it can be
+  // unpinned from the shared cache's in-use set on rebind / teardown.
+  fillMaterialInUse: { backend: ResolvedGraphicsBackend; stripeFrequency: number; stripeWidth: number } | undefined;
   capBuild: SectionSourceCapBuild | undefined;
   packedGeometryArena: SectionCapPackedGeometryArena;
 };
@@ -644,6 +650,7 @@ function createHelperRecord(root: THREE.Group): SectionHelperRecord {
     borderBackend: undefined,
     geometryKey: undefined,
     materialKey: undefined,
+    fillMaterialInUse: undefined,
     capBuild: undefined,
     packedGeometryArena: createSectionCapPackedGeometryArena(),
   };
@@ -666,6 +673,10 @@ function disposeHelperRecord(root: THREE.Group, helper: SectionHelperRecord): vo
   root.remove(helper.fillMesh);
   disposeBorderSegments(root, helper);
   helper.fillMesh.geometry.dispose();
+  if (helper.fillMaterialInUse) {
+    markVertexColoredSectionCapMaterialInUse(helper.fillMaterialInUse.backend, helper.fillMaterialInUse, false);
+    helper.fillMaterialInUse = undefined;
+  }
 }
 
 function updateHelperMatrix(helper: SectionHelperRecord, mesh: THREE.Mesh): void {
@@ -704,10 +715,22 @@ function updateFillMaterial(
       }
     }
 
-    helper.fillMesh.material = createVertexColoredSectionCapMaterial(parameters.backend, {
+    const nextInUse = {
+      backend: parameters.backend,
       stripeFrequency: parameters.stripeFrequency,
       stripeWidth: parameters.stripeWidth,
+    };
+    helper.fillMesh.material = createVertexColoredSectionCapMaterial(nextInUse.backend, {
+      stripeFrequency: nextInUse.stripeFrequency,
+      stripeWidth: nextInUse.stripeWidth,
     });
+    // Pin the new material and release the previous one so cache eviction
+    // never disposes a material still bound to this mesh.
+    markVertexColoredSectionCapMaterialInUse(nextInUse.backend, nextInUse, true);
+    if (helper.fillMaterialInUse) {
+      markVertexColoredSectionCapMaterialInUse(helper.fillMaterialInUse.backend, helper.fillMaterialInUse, false);
+    }
+    helper.fillMaterialInUse = nextInUse;
     helper.materialKey = nextMaterialKey;
   }
 }

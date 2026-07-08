@@ -6,6 +6,9 @@ import type { StripedMaterialProperties } from '#components/geometry/graphics/th
 const materialCacheCapacity = 16;
 const materialCache = new Map<string, THREE.Material>();
 const recencyGenerationByKey = new Map<string, number>();
+// Keys pinned by a live mesh; eviction must skip these or it disposes a
+// material that is still rendering.
+const inUseKeys = new Set<string>();
 let recencyCounter = 0;
 
 const keyForVertexColoredStripedMaterial = (
@@ -27,6 +30,9 @@ const evictStaleMaterialIfNeeded = (forNewKey: string): void => {
   let oldestKey: string | undefined;
   let oldestGeneration = Infinity;
   for (const key of materialCache.keys()) {
+    if (inUseKeys.has(key)) {
+      continue;
+    }
     const generation = recencyGenerationByKey.get(key);
     if (generation !== undefined && generation < oldestGeneration) {
       oldestGeneration = generation;
@@ -34,6 +40,8 @@ const evictStaleMaterialIfNeeded = (forNewKey: string): void => {
     }
   }
 
+  // Every entry is pinned in-use — grow past capacity rather than dispose a
+  // material a live mesh still references.
   if (oldestKey === undefined) {
     return;
   }
@@ -61,6 +69,24 @@ export const createVertexColoredSectionCapMaterial = (
   return material;
 };
 
+/**
+ * Pin or unpin a cached cap material as in-use so LRU eviction never disposes
+ * a material still bound to a live mesh. Callers mark on assign and unmark when
+ * the mesh releases the material (or is torn down).
+ */
+export const markVertexColoredSectionCapMaterialInUse = (
+  backend: ResolvedGraphicsBackend,
+  properties: StripedMaterialProperties | undefined,
+  inUse: boolean,
+): void => {
+  const key = keyForVertexColoredStripedMaterial(backend, properties);
+  if (inUse) {
+    inUseKeys.add(key);
+  } else {
+    inUseKeys.delete(key);
+  }
+};
+
 export const disposeVertexColoredSectionCapMaterialCache = (): void => {
   for (const material of materialCache.values()) {
     material.dispose();
@@ -68,5 +94,6 @@ export const disposeVertexColoredSectionCapMaterialCache = (): void => {
 
   materialCache.clear();
   recencyGenerationByKey.clear();
+  inUseKeys.clear();
   recencyCounter = 0;
 };

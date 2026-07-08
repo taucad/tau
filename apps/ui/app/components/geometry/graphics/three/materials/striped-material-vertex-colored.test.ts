@@ -1,11 +1,12 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
   createVertexColoredSectionCapMaterial,
   disposeVertexColoredSectionCapMaterialCache,
+  markVertexColoredSectionCapMaterialInUse,
 } from '#components/geometry/graphics/three/materials/striped-material-vertex-colored.js';
 import { createVertexColoredStripedMaterial } from '#components/geometry/graphics/three/materials/striped-material.js';
 import { getSectionCapDepthBias } from '#components/geometry/graphics/three/materials/section-cap-depth-state.js';
@@ -31,6 +32,30 @@ describe('createVertexColoredSectionCapMaterial', () => {
     });
 
     expect(second).toBe(first);
+  });
+
+  it('should not evict an in-use material even when it is the LRU-oldest', () => {
+    // Oldest entry, but pinned in-use (bound to a live mesh).
+    const pinned = createVertexColoredSectionCapMaterial('webgl', { stripeFrequency: 0, stripeWidth: 0 });
+    markVertexColoredSectionCapMaterialInUse('webgl', { stripeFrequency: 0, stripeWidth: 0 }, true);
+    const disposePinned = vi.spyOn(pinned, 'dispose');
+
+    // Second-oldest, unpinned: the eviction victim once the cache overflows.
+    const stale = createVertexColoredSectionCapMaterial('webgl', { stripeFrequency: 1, stripeWidth: 1 });
+    const disposeStale = vi.spyOn(stale, 'dispose');
+
+    // Fill to exactly capacity (16 total: pinned + stale + 14 fillers). No
+    // eviction yet — the guard only fires once an insert would exceed capacity.
+    for (let index = 2; index <= 15; index++) {
+      createVertexColoredSectionCapMaterial('webgl', { stripeFrequency: index, stripeWidth: index });
+    }
+
+    // This 17th distinct key overflows and must evict the oldest *evictable*
+    // entry (stale), skipping the pinned one.
+    createVertexColoredSectionCapMaterial('webgl', { stripeFrequency: 99, stripeWidth: 99 });
+
+    expect(disposePinned).not.toHaveBeenCalled();
+    expect(disposeStale).toHaveBeenCalledTimes(1);
   });
 
   it('should create opaque depth-owned WebGL cap materials with vertex-color attributes', () => {

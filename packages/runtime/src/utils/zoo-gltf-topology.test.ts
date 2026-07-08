@@ -103,6 +103,46 @@ describe('enrichZooGltfTopology', () => {
     });
   });
 
+  it('should keep entity indices stable when arrays contain non-record holes', async () => {
+    const document = new Document();
+    const buffer = document.createBuffer();
+    const mesh = document
+      .createMesh('Solid')
+      .addPrimitive(document.createPrimitive().setAttribute('POSITION', createPositionAccessor(document, buffer, 0)));
+    const node = document.createNode('Solid').setMesh(mesh);
+    document.createScene('Scene').addChild(node);
+
+    const kittyCadBrep = document.createExtension(KittyCadBoundaryRepresentation);
+    document.getRoot().setExtension(
+      kittyCadBoundaryRepresentationExtension,
+      kittyCadBrep.createRoot().setPayload({
+        // Solid references shell index 1; a null hole sits before it. A shifting
+        // compaction would bind the solid to the wrong shell (faces [1] not [0]).
+        solids: [{ shells: [1], mesh: 0 }],
+        shells: [null, { faces: [0] }, { faces: [1] }],
+        faces: [{ loops: [0] }, { loops: [1] }],
+        loops: [{ edges: [0] }, { edges: [1] }],
+        edges: [{}, {}],
+      }),
+    );
+    node.setExtension(kittyCadBoundaryRepresentationExtension, kittyCadBrep.createNode().setSolid(0));
+
+    const io = registerTauGltfExtensions(new NodeIO());
+    const input = await io.writeBinary(document);
+    const output = await enrichZooGltfTopology(input, { format: 'glb' });
+    const result = await io.readBinary(output);
+    const payload = result.getRoot().getExtension<TauCadTopologyRoot>(tauCadTopologyExtension)?.getPayload();
+
+    // Shell 1 owns face 0, so the single face component must be face-0, not face-1.
+    expect(payload).toMatchObject({
+      components: [
+        { id: 'component:zoo-solid-0', childIds: ['component:zoo-solid-0:face-0'] },
+        { id: 'component:zoo-solid-0:face-0', kind: 'face' },
+      ],
+    });
+    expect(payload?.['warnings']).toEqual([]);
+  });
+
   it('should leave GLBs without Zoo BREP topology unchanged', async () => {
     const document = new Document();
     const buffer = document.createBuffer();

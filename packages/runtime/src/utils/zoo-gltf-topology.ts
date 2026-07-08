@@ -35,11 +35,11 @@ type KittyCadEdge = {
 };
 
 type KittyCadBrepPayload = {
-  solids: KittyCadSolid[];
-  shells: KittyCadShell[];
-  faces: KittyCadFace[];
-  loops: KittyCadLoop[];
-  edges: KittyCadEdge[];
+  solids: Array<KittyCadSolid | undefined>;
+  shells: Array<KittyCadShell | undefined>;
+  faces: Array<KittyCadFace | undefined>;
+  loops: Array<KittyCadLoop | undefined>;
+  edges: Array<KittyCadEdge | undefined>;
   vertices?: unknown[];
   surfaces?: unknown[];
   curves3D?: unknown[];
@@ -118,12 +118,14 @@ const asKittyCadBrepPayload = (payload: JSONObject): KittyCadBrepPayload | undef
     return undefined;
   }
 
+  // Preserve original indices: non-record holes map to undefined so per-lookup
+  // guards fire instead of shifting every later entity onto the wrong reference.
   return {
-    solids: payload['solids'].filter(isRecord) as KittyCadSolid[],
-    shells: payload['shells'].filter(isRecord) as KittyCadShell[],
-    faces: payload['faces'].filter(isRecord) as KittyCadFace[],
-    loops: payload['loops'].filter(isRecord) as KittyCadLoop[],
-    edges: payload['edges'].filter(isRecord) as KittyCadEdge[],
+    solids: payload['solids'].map((v) => (isRecord(v) ? (v as KittyCadSolid) : undefined)),
+    shells: payload['shells'].map((v) => (isRecord(v) ? (v as KittyCadShell) : undefined)),
+    faces: payload['faces'].map((v) => (isRecord(v) ? (v as KittyCadFace) : undefined)),
+    loops: payload['loops'].map((v) => (isRecord(v) ? (v as KittyCadLoop) : undefined)),
+    edges: payload['edges'].map((v) => (isRecord(v) ? (v as KittyCadEdge) : undefined)),
     vertices: Array.isArray(payload['vertices']) ? payload['vertices'] : undefined,
     surfaces: Array.isArray(payload['surfaces']) ? payload['surfaces'] : undefined,
     curves3D: Array.isArray(payload['curves3D']) ? payload['curves3D'] : undefined,
@@ -271,6 +273,11 @@ const buildTopologyPayload = ({
   const bodyComponentIdsByNode = new Map<number, string>();
 
   for (const [solidIndex, solid] of payload.solids.entries()) {
+    if (!solid) {
+      warnings.push({ code: 'KBR_INVALID_SOLID_REF', solidIndex });
+      continue;
+    }
+
     const meshIndex = typeof solid.mesh === 'number' ? solid.mesh : solidNodeBySolidIndex.get(solidIndex)?.meshIndex;
     const nodeIndex = solidNodeBySolidIndex.get(solidIndex)?.nodeIndex;
     if (meshIndex === undefined || nodeIndex === undefined) {

@@ -83,4 +83,4 @@ export const geoSpecRunFilterInputSchema = z
  */
 export const testModelInputSchema = geoSpecRunFilterInputSchema;
 /** @public */
-export type TestModelInput = z.infer<typeof testModelInputSchema>;
+export type TestModelInput = z.input<typeof testModelInputSchema>;

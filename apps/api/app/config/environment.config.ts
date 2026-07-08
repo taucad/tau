@@ -138,6 +138,22 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       path: ['TAU_S3_PUBLIC_BASE_URL'],
     });
   }
+
+  // Never boot production on the checked-in dev S3 credentials (MinIO defaults).
+  if (data.TAU_S3_ACCESS_KEY_ID === 'tau-api') {
+    context.addIssue({
+      code: 'custom',
+      message: 'TAU_S3_ACCESS_KEY_ID must not use the default dev credential in production',
+      path: ['TAU_S3_ACCESS_KEY_ID'],
+    });
+  }
+  if (data.TAU_S3_SECRET_ACCESS_KEY === 'tau-api-dev-secret') {
+    context.addIssue({
+      code: 'custom',
+      message: 'TAU_S3_SECRET_ACCESS_KEY must not use the default dev credential in production',
+      path: ['TAU_S3_SECRET_ACCESS_KEY'],
+    });
+  }
 });
 
 export const getEnvironment = (): Environment => {

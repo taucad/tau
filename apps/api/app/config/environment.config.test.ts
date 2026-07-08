@@ -83,6 +83,23 @@ describe('environmentSchema', () => {
     }
   });
 
+  it('should reject checked-in dev S3 credentials in production mode', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'production',
+      TAU_S3_ENDPOINT: 'https://000000000000000000000000.r2.cloudflarestorage.com',
+      TAU_S3_PUBLIC_BASE_URL: 'https://cdn.tau.new',
+      TAU_S3_ACCESS_KEY_ID: 'tau-api',
+      TAU_S3_SECRET_ACCESS_KEY: 'tau-api-dev-secret',
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.join('.') === 'TAU_S3_ACCESS_KEY_ID')).toBe(true);
+      expect(result.error.issues.some((issue) => issue.path.join('.') === 'TAU_S3_SECRET_ACCESS_KEY')).toBe(true);
+    }
+  });
+
   it('should parse TAU_S3_* with non-local URLs in production mode', () => {
     const { TAU_S3_FORCE_PATH_STYLE: _omitForcePathStyle, ...envBase } = withRequiredCookieSecret(process.env);
     void _omitForcePathStyle;

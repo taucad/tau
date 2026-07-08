@@ -251,13 +251,21 @@ const isEmptyResultPayload = (toolNameValue: string, content: string): boolean =
   return false;
 };
 
-const extractTargetFile = (args: Record<string, unknown> | undefined): string | undefined => {
+export const extractTargetFile = (args: Record<string, unknown> | undefined): string | undefined => {
   if (!args) {
     return undefined;
   }
   const candidate =
     args['targetFile'] ?? args['path'] ?? args['filePath'] ?? args['filepath'] ?? args['file'] ?? args['target'];
-  return typeof candidate === 'string' ? candidate : undefined;
+  if (typeof candidate === 'string') {
+    return candidate;
+  }
+  // `test_model` (testModelInputSchema) targets files via a `files: string[]` arg — track the first entry.
+  const files = args['files'];
+  if (Array.isArray(files) && typeof files[0] === 'string') {
+    return files[0];
+  }
+  return undefined;
 };
 
 type ToolCallInfo = { name: string; args: Record<string, unknown> | undefined };

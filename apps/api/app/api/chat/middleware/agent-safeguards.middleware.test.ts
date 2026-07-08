@@ -17,6 +17,7 @@ import {
   defaultThresholds,
   emptyResultReminder,
   errorHash,
+  extractTargetFile,
   identicalCallReminder,
   identicalErrorReminder,
   noForwardProgressReminder,
@@ -155,6 +156,30 @@ describe('errorHash', () => {
 
   it('should differ when only the errorCode differs', () => {
     expect(errorHash('boom', 'TOOL_EXECUTION_ERROR')).not.toBe(errorHash('boom', 'TOOL_EXECUTION_TIMEOUT'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractTargetFile
+// ---------------------------------------------------------------------------
+
+describe('extractTargetFile', () => {
+  it('should read the first entry of a `files` array (test_model)', () => {
+    expect(extractTargetFile({ files: ['a.geospec', 'b.geospec'] })).toBe('a.geospec');
+  });
+
+  it('should still resolve singular file keys', () => {
+    expect(extractTargetFile({ targetFile: 'main.scad' })).toBe('main.scad');
+    expect(extractTargetFile({ path: 'lib/x.ts' })).toBe('lib/x.ts');
+  });
+
+  it('should return undefined for an empty `files` array', () => {
+    expect(extractTargetFile({ files: [] })).toBeUndefined();
+  });
+
+  it('should return undefined when no recognised key is present', () => {
+    expect(extractTargetFile({ files: [123] })).toBeUndefined();
+    expect(extractTargetFile(undefined)).toBeUndefined();
   });
 });
 

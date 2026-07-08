@@ -14,8 +14,25 @@ const disposeSequentially = async (disposables: readonly Disposable[], index = 0
   if (!disposable) {
     return;
   }
-  await disposable();
-  await disposeSequentially(disposables, index + 1);
+  let firstError: unknown;
+  let caught = false;
+  try {
+    await disposable();
+  } catch (error) {
+    firstError = error;
+    caught = true;
+  }
+  try {
+    await disposeSequentially(disposables, index + 1);
+  } catch (error) {
+    if (!caught) {
+      firstError = error;
+      caught = true;
+    }
+  }
+  if (caught) {
+    throw firstError;
+  }
 };
 
 /**

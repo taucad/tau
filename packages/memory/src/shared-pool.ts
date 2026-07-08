@@ -14,16 +14,13 @@
  * @public
  */
 
-/* eslint-disable @typescript-eslint/naming-convention -- FNV-1a constants and default pool limits use conventional UPPER_SNAKE names */
+/* eslint-disable @typescript-eslint/naming-convention -- default pool limits use conventional UPPER_SNAKE names */
 
 import { SharedMemoryArena, ARENA_ENTRY_STATE } from '#shared-memory-arena.js';
+import { fnv1a64 } from '#fnv1a64.js';
 
 const DEFAULT_MAX_ENTRY_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_ENTRIES = 4096;
-
-const FNV1A_OFFSET_HI = 0xcb_f2_9c_e4;
-const FNV1A_OFFSET_LO = 0x84_22_23_25;
-const FNV1A_PRIME = 0x01_00_01_93;
 
 /**
  * Options for constructing a {@link SharedPool}.
@@ -225,29 +222,4 @@ export class SharedPool {
   public get buffer(): SharedArrayBuffer {
     return this._buffer;
   }
-}
-
-/**
- * FNV-1a 64-bit hash split into two u32 values for {@link Atomics} compatibility.
- *
- * @param input - UTF-16 string key to hash.
- * @returns Upper and lower 32-bit halves of the hash as unsigned numbers.
- */
-function fnv1a64(input: string): [hi: number, lo: number] {
-  // oxlint-disable no-bitwise, unicorn/prefer-math-trunc, unicorn/prefer-code-point -- FNV-1a hash requires bitwise operations
-  let hi = FNV1A_OFFSET_HI >>> 0;
-  let lo = FNV1A_OFFSET_LO >>> 0;
-
-  for (let i = 0; i < input.length; i++) {
-    const byte = input.charCodeAt(i) & 0xff;
-    lo = (lo ^ byte) >>> 0;
-    const loProduct = Math.imul(lo, FNV1A_PRIME) >>> 0;
-    const hiProduct = (Math.imul(hi, FNV1A_PRIME) + Math.imul(lo, 0)) >>> 0;
-    lo = loProduct;
-    hi = hiProduct ^ (byte * 31);
-    hi >>>= 0;
-  }
-
-  // oxlint-enable no-bitwise, unicorn/prefer-math-trunc, unicorn/prefer-code-point
-  return [hi, lo];
 }

@@ -1,4 +1,5 @@
 import { kernelIssueCodeValues } from '@taucad/runtime/types';
+import { hashString } from '@taucad/utils/hash';
 import { rpcNames } from '#constants/rpc.constants.js';
 import { rpcClientErrorCodeSchema, rpcSchemasRegistry } from '#schemas/rpc.schema.js';
 
@@ -35,25 +36,13 @@ const stableJson = (value: unknown): string => {
   return JSON.stringify(value);
 };
 
-const stableHash = (value: string): string => {
-  const modulus = 4_294_967_291n;
-  const prime = 16_777_619n;
-  let hash = 2_166_136_261n;
-
-  for (const character of value) {
-    hash = (hash * prime + BigInt(character.codePointAt(0) ?? 0)) % modulus;
-  }
-
-  return hash.toString(16).padStart(8, '0');
-};
-
 /**
  * Current chat RPC protocol version sent by browser tabs during Socket.IO
  * room registration.
  *
  * @public
  */
-export const chatRpcProtocolVersion = `chat-rpc-v1-${stableHash(stableJson(chatRpcProtocolManifest))}` as const;
+export const chatRpcProtocolVersion = `chat-rpc-v1-${hashString(stableJson(chatRpcProtocolManifest))}` as const;
 
 /** @public */
 export type ChatRpcProtocolVersion = typeof chatRpcProtocolVersion;

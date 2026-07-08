@@ -1,4 +1,5 @@
 import type { SkillMetadata } from '@taucad/chat';
+import { hashString } from '@taucad/utils/hash';
 
 const frontmatterMatch = /^---\n([\S\s]*?)\n---/;
 const skillFileSuffix = /\/SKILL\.md$/;
@@ -35,16 +36,12 @@ function parseBoolean(frontmatter: string, key: string): boolean | undefined {
   return undefined;
 }
 
+/**
+ * Content fingerprint used for skill change-detection. Delegates to the
+ * canonical djb2 `hashString`; the value is compared only for equality.
+ */
 export function fingerprintSkillContent(content: string): string {
-  let hash = 2_166_136_261n;
-  const prime = 16_777_619n;
-  const modulo = 4_294_967_296n;
-
-  for (const char of content) {
-    hash = ((hash + BigInt(char.codePointAt(0) ?? 0)) * prime) % modulo;
-  }
-
-  return hash.toString(16).padStart(8, '0');
+  return hashString(content);
 }
 
 /**

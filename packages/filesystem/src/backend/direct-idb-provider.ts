@@ -172,7 +172,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
             name,
             type: 'file',
             size: cachedSize,
-            mtimeMs: this._mtimes.get(fullPath) ?? Date.now(),
+            mtimeMs: this._mtimes.get(fullPath) ?? 0,
             ...cachedMetadata,
           });
         } else {

@@ -429,5 +429,27 @@ describe('DirectIdbProvider', () => {
       const entry = entries.find((entryItem) => entryItem.name === 'cached.txt');
       expect(entry!.size).toBe(5);
     });
+
+    it('should report mtimeMs 0 (stable) for a hydrated file with no mtime entry', async () => {
+      await provider.writeFile('/hydrated.txt', 'hello');
+      const dbName = (provider as unknown as { _dbName: string })._dbName;
+      provider.dispose();
+
+      const provider2 = new DirectIdbProvider('unused');
+      (provider2 as unknown as { _dbName: string })._dbName = dbName;
+      await provider2.initialize();
+      // Prime the size/metadata caches (readFile does not populate _mtimes).
+      await provider2.readFile('/hydrated.txt');
+
+      const first = await provider2.readdirWithStats('/');
+      const second = await provider2.readdirWithStats('/');
+      const firstEntry = first.find((entry) => entry.name === 'hydrated.txt');
+      const secondEntry = second.find((entry) => entry.name === 'hydrated.txt');
+
+      expect(firstEntry!.mtimeMs).toBe(0);
+      expect(secondEntry!.mtimeMs).toBe(0);
+
+      provider2.dispose();
+    });
   });
 });

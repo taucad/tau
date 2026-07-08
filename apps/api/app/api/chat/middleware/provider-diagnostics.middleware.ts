@@ -1,5 +1,6 @@
 import { createMiddleware } from 'langchain';
 import type { AgentMiddleware } from 'langchain';
+import { AIMessage } from '@langchain/core/messages';
 import type { ProviderDiagnosticsContext, ProviderModelCallSummary } from '#api/chat/utils/provider-diagnostics.js';
 import { summarizeModelCallForDebugLog, summarizeModelCallMessages } from '#api/chat/utils/provider-diagnostics.js';
 
@@ -72,6 +73,22 @@ function findDuplicateAnthropicToolUseId(summary: ProviderModelCallSummary): Rec
   return undefined;
 }
 
+function assertNoInvalidToolCalls(message: AIMessage): void {
+  const invalidToolCalls = message.invalid_tool_calls ?? [];
+  if (invalidToolCalls.length === 0) {
+    return;
+  }
+
+  const details = invalidToolCalls
+    .map((toolCall) => {
+      const name = toolCall.name.length > 0 ? toolCall.name : '<unknown>';
+      const error = toolCall.error ?? 'invalid tool call';
+      return `${name}: ${error}`;
+    })
+    .join('; ');
+  throw new Error(`Provider returned malformed tool calls: ${details}`);
+}
+
 export const createProviderDiagnosticsMiddleware = (context: ProviderDiagnosticsContext): AgentMiddleware =>
   createMiddleware({
     name: 'ProviderDiagnostics',
@@ -123,6 +140,11 @@ export const createProviderDiagnosticsMiddleware = (context: ProviderDiagnostics
         );
       }
 
-      return handler(request);
+      const response = await handler(request);
+      if (AIMessage.isInstance(response)) {
+        assertNoInvalidToolCalls(response);
+      }
+
+      return response;
     },
   });

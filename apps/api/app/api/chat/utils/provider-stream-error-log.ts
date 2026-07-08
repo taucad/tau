@@ -42,10 +42,11 @@ export async function* logProviderStreamErrors<T>(options: ProviderStreamErrorLo
       yield event;
     }
   } catch (error) {
-    if (!(abortSignal.aborted && isChatAbortError(abortSignal.reason))) {
-      logProviderStreamFailure(logger, context, error);
+    if (abortSignal.aborted && isChatAbortError(abortSignal.reason)) {
+      return;
     }
 
+    logProviderStreamFailure(logger, context, error);
     throw error;
   }
 }

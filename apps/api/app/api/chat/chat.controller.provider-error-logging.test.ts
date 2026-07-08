@@ -107,14 +107,14 @@ describe('provider stream failure logging', () => {
     expect(serializedPayload).not.toContain('SECRET PROMPT SHOULD NOT LOG');
   });
 
-  it('should skip provider failure logging for branded client cancellation', async () => {
+  it('should skip provider failure logging and close cleanly for branded client cancellation', async () => {
     const logger = { error: vi.fn() };
     const abortController = new AbortController();
     const abortError = new ChatAbortError('chat_cancelled');
     abortController.abort(abortError);
 
-    try {
-      await consumeStream(
+    await expect(
+      consumeStream(
         logProviderStreamErrors({
           abortSignal: abortController.signal,
           context: {
@@ -125,15 +125,8 @@ describe('provider stream failure logging', () => {
           logger,
           stream: createFailingStream(abortError),
         }),
-      );
-      expect.fail('Expected branded chat cancellation to be rethrown');
-    } catch (error) {
-      expect(error).toBe(abortError);
-      expect(error).toBeInstanceOf(ChatAbortError);
-      expect((error as Error).name).toBe('AbortError');
-      expect((error as Error).message).toBe('Chat chat_cancelled was cancelled by client');
-      expect((error as ChatAbortError).code).toBe('CHAT_CLIENT_ABORT');
-    }
+      ),
+    ).resolves.toEqual([]);
 
     expect(logger.error).not.toHaveBeenCalled();
   });

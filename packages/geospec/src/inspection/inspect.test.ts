@@ -73,7 +73,9 @@ describe('inspectGeometry unmatched diagnostics', () => {
     // Selectors 0 and 2 miss; selector 1 matches the sole occurrence.
     const result = inspectGeometry({ subject, selectors: ['no-such-a', /match/u, 'no-such-b'] });
 
-    const indices = result.diagnostics.map((diagnostic) => diagnostic.details?.['selectorIndex']);
+    const indices = result.diagnostics.map(
+      (diagnostic) => (diagnostic.details as { selectorIndex?: number } | undefined)?.selectorIndex,
+    );
     const messages = result.diagnostics.map((diagnostic) => diagnostic.message);
 
     // The bug reports post-filter indices [0, 1]; the fix reports the real [0, 2].

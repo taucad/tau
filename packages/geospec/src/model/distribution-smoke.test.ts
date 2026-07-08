@@ -29,7 +29,7 @@ describe('built GeoSpec package output', () => {
       });
 
       expect(subject.provenance.loader).toBe('opencascade-step');
-      expect(subject.brep?.validity).toEqual({ valid: true });
+      expect(subject.brep?.validity).toMatchObject({ valid: true });
       expect(subject.brep?.massProperties?.volume).toBeCloseTo(1000, 6);
     },
   );

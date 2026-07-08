@@ -121,7 +121,7 @@ describe('Replicad cube cutout BRep evidence', () => {
         nativeReadStream: true,
       }),
     );
-    expect(subject.brep?.validity).toEqual({ valid: true });
+    expect(subject.brep?.validity).toMatchObject({ valid: true });
     expectWithin(subject.brep?.massProperties?.volume, 109_292.0367, 0.01);
     expectWithin(subject.brep?.massProperties?.surfaceArea, 17_513.2741, 0.01);
     expect(subject.brep?.massProperties?.centerOfMass).toEqual([

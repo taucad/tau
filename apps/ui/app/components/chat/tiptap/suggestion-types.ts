@@ -28,6 +28,7 @@ export type SlashCommandItem = {
   fullDescription?: string;
   group: string;
   source?: string;
+  enabled?: boolean;
 };
 
 export type SuggestionPopupState<I> = {

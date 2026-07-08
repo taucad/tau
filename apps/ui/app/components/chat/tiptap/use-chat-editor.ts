@@ -19,7 +19,11 @@ import { ContextChipNode } from '#components/chat/tiptap/context-chip-node.js';
 import { SubmitOnEnter } from '#components/chat/tiptap/submit-on-enter.js';
 import { ChatInputDropHandler } from '#components/chat/tiptap/chat-input-drop-handler.js';
 import { ContextMention } from '#components/chat/tiptap/context-suggestion.js';
-import { SlashCommand, defaultCommands } from '#components/chat/tiptap/slash-command-suggestion.js';
+import {
+  SlashCommand,
+  defaultCommands,
+  getEnabledSlashCommandItems,
+} from '#components/chat/tiptap/slash-command-suggestion.js';
 import { buildContextItemsFromSearch } from '#components/chat/tiptap/context-suggestion.utils.js';
 import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import type {
@@ -255,7 +259,7 @@ export function useChatEditor({
   }, []);
 
   const getSlashCommandItems = useCallback((query: string): SlashCommandItem[] => {
-    const all = [...(slashCommandItemsRef.current ?? []), ...defaultCommands];
+    const all = getEnabledSlashCommandItems([...(slashCommandItemsRef.current ?? []), ...defaultCommands]);
     if (!query) {
       return all;
     }
@@ -331,7 +335,9 @@ export function useChatEditor({
 
         const lazyTree: Map<string, FileEntry> =
           treeServiceRef.current?.getTreeSnapshot() ?? new Map<string, FileEntry>();
-        const knownSkillIds = new Set((slashCommandItemsRef.current ?? []).map((item) => item.id));
+        const knownSkillIds = new Set(
+          getEnabledSlashCommandItems(slashCommandItemsRef.current ?? []).map((item) => item.id),
+        );
         const segments = buildPastedContent(text, {
           fileTree: lazyTree,
           chats: chatsRef.current,

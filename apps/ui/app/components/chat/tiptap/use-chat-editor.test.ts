@@ -32,11 +32,17 @@ function createDefaultOptions(overrides?: Partial<UseChatEditorOptions>): UseCha
 }
 
 describe('useChatEditor', () => {
-  it('should keep /compress and omit /plan from default slash commands', () => {
-    expect(defaultCommands.map((command) => command.id)).toEqual(['compress']);
+  it('should register /compress as a disabled default slash command', () => {
+    expect(defaultCommands).toEqual([
+      expect.objectContaining({
+        id: 'compress',
+        label: '/compress',
+        enabled: false,
+      }),
+    ]);
   });
 
-  it('should open slash command suggestions after existing text and whitespace', async () => {
+  it('should hide disabled slash commands while showing enabled skill suggestions', async () => {
     const { result } = renderHook(() =>
       useChatEditor(
         createDefaultOptions({
@@ -48,6 +54,15 @@ describe('useChatEditor', () => {
               description: 'Create or update a skill',
               group: 'Skills',
               source: 'system',
+            },
+            {
+              id: 'hidden-skill',
+              label: '/hidden-skill',
+              title: 'Hidden Skill',
+              description: 'Do not show this skill',
+              group: 'Skills',
+              source: 'system',
+              enabled: false,
             },
           ],
         }),
@@ -64,7 +79,7 @@ describe('useChatEditor', () => {
     });
 
     await waitFor(() => {
-      expect(result.current.slashCommandState?.items.map((item) => item.id)).toContain('create-skill');
+      expect(result.current.slashCommandState?.items.map((item) => item.id)).toEqual(['create-skill']);
     });
   });
 
@@ -341,6 +356,17 @@ const createFileTree = (entries: Array<[string, Partial<FileEntry>]>): Map<strin
       return [path, entry] as const;
     }),
   );
+
+const createTextPasteEvent = (text: string): ClipboardEvent => {
+  const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+  const clipboardData: Pick<DataTransfer, 'getData'> = {
+    getData: (type: string) => (type === 'text/plain' ? text : ''),
+  };
+  Object.defineProperty(event, 'clipboardData', {
+    value: clipboardData,
+  });
+  return event;
+};
 
 describe('useChatEditor — image paste delegation', () => {
   /**
@@ -704,6 +730,54 @@ describe('draft content restoration with chip rehydration', () => {
       }),
     );
     expect(content.text).toBe('/woodworking make this joinery manufacturable');
+  });
+
+  it('should not rehydrate disabled slash items from pasted text', async () => {
+    const { result } = renderHook(() =>
+      useChatEditor(
+        createDefaultOptions({
+          slashCommandItems: [
+            {
+              id: 'visible-skill',
+              label: '/visible-skill',
+              title: 'Visible Skill',
+              description: 'Visible skill',
+              group: 'Skills',
+            },
+            {
+              id: 'hidden-skill',
+              label: '/hidden-skill',
+              title: 'Hidden Skill',
+              description: 'Hidden skill',
+              group: 'Skills',
+              enabled: false,
+            },
+          ],
+        }),
+      ),
+    );
+
+    await waitFor(() => {
+      expect(result.current.editor).not.toBeNull();
+    });
+
+    const editor = result.current.editor!;
+
+    await act(async () => {
+      editor.commands.focus();
+      editor.view.dom.dispatchEvent(createTextPasteEvent('/visible-skill /hidden-skill'));
+    });
+
+    const content = extractContent(editor);
+    expect(content.contextChips).toHaveLength(1);
+    expect(content.contextChips[0]).toEqual(
+      expect.objectContaining({
+        id: 'visible-skill',
+        label: '/visible-skill',
+        chipType: 'skill',
+      }),
+    );
+    expect(content.text).toBe('/visible-skill /hidden-skill');
   });
 
   it('should produce skill chip without path in buildEditorContentJson', () => {

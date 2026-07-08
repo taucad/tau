@@ -17,8 +17,19 @@ import type {
 const slashCommandPluginKey = new PluginKey('slashCommand');
 
 export const defaultCommands: SlashCommandItem[] = [
-  { id: 'compress', label: '/compress', description: 'Compress conversation context', group: 'Commands' },
+  {
+    id: 'compress',
+    label: '/compress',
+    description: 'Compress conversation context',
+    group: 'Commands',
+    enabled: false,
+  },
 ];
+
+export const isEnabledSlashCommandItem = (item: SlashCommandItem): boolean => item.enabled !== false;
+
+export const getEnabledSlashCommandItems = (items: readonly SlashCommandItem[]): SlashCommandItem[] =>
+  items.filter((item) => isEnabledSlashCommandItem(item));
 
 export type SlashCommandOptions = {
   getItems?: (query: string) => SlashCommandItem[];
@@ -60,7 +71,7 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
     const { getItems, renderCallbacks, onCommand } = this.options;
 
     const defaultGetItems = (query: string): SlashCommandItem[] => {
-      const all = [...defaultCommands];
+      const all = getEnabledSlashCommandItems(defaultCommands);
       if (!query) {
         return all;
       }
@@ -81,6 +92,10 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
         allow: ({ state, range }) => shouldAllowSlashCommandTrigger({ state, range }),
         command: ({ editor, range, props }) => {
           const item = props as SlashCommandItem;
+          if (!isEnabledSlashCommandItem(item)) {
+            return;
+          }
+
           if (item.group === 'Commands') {
             editor.chain().focus().deleteRange(range).run();
             onCommand?.(item);
@@ -226,7 +241,7 @@ export const SlashCommandDropdown = memo(function SlashCommandDropdown({
   const selectItem = useCallback(
     (index: number) => {
       const item = items[index];
-      if (item) {
+      if (item && isEnabledSlashCommandItem(item)) {
         command(item);
       }
     },

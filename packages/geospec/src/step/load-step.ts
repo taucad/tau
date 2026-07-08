@@ -846,7 +846,7 @@ export const loadStep = async (options: LoadStepOptions): Promise<GeometrySubjec
   } catch (error) {
     // The subject takes ownership of the native XDE handle on success; on a
     // build failure it never receives it, so delete it here to avoid a leak.
-    xdeRead?.nativeXde?.delete?.();
+    xdeRead.nativeXde?.delete?.();
     throw error;
   }
 };

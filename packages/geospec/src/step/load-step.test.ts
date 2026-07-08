@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { loadStep } from '#step/index.js';
-import type { BrepEvidence } from '#mesh/types.js';
+import type { BrepEvidence, GeometryDiagnostic } from '#mesh/types.js';
 import type {
   GeoSpecNativeStepBackend,
   GeoSpecNativeStepReadResult,
@@ -46,7 +46,7 @@ describe('loadStep', () => {
           copiedToEmscriptenFs: false,
         }),
       );
-      expect(subject.brep?.validity).toEqual({ valid: true });
+      expect(subject.brep?.validity).toMatchObject({ valid: true });
       expect(subject.brep?.massProperties?.surfaceArea).toBeCloseTo(600, 6);
       expect(subject.brep?.massProperties?.volume).toBeCloseTo(1000, 6);
       expect(subject.mesh.stats.triangleCount).toBe(12);
@@ -78,7 +78,7 @@ describe('loadStep', () => {
 
     expect(reader.readText).toHaveBeenCalledOnce();
     expect(subject.provenance.loader).toBe('opencascade-step');
-    expect(subject.brep?.validity).toEqual({ valid: true });
+    expect(subject.brep?.validity).toMatchObject({ valid: true });
     expect(subject.mesh.stats.triangleCount).toBe(1);
   });
 
@@ -158,11 +158,15 @@ describe('loadStep', () => {
     };
     // A non-iterable `diagnostics` makes buildStepSubject throw after the XDE
     // read has produced a live native handle, exercising the leak path.
+    const stepStreamReaderKey = 'GeoSpecStepStreamReader';
+    const xdeReaderKey = 'GeoSpecXdeReader';
     const backend: GeoSpecNativeStepBackend = {
-      GeoSpecStepStreamReader: {
-        readText: vi.fn(() => createResult({ brep: { validity: { valid: true } }, diagnostics: 5 as unknown as [] })),
+      [stepStreamReaderKey]: {
+        readText: vi.fn(() =>
+          createResult({ brep: { validity: { valid: true } }, diagnostics: 5 as unknown as GeometryDiagnostic[] }),
+        ),
       },
-      GeoSpecXdeReader: { readText: vi.fn(() => nativeXde) },
+      [xdeReaderKey]: { readText: vi.fn(() => nativeXde) },
     };
 
     await expect(

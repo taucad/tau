@@ -1,14 +1,15 @@
 ---
 title: 'GeoSpec Policy'
-description: 'Rules for GeoSpec matcher API design, evidence naming, diagnostics, failure messages, and high-assurance geometry test authoring.'
+description: 'Rules for GeoSpec matcher API design, evidence naming, diagnostics, failure messages, C++/WASM implementation, and high-assurance geometry test authoring.'
 status: active
 created: '2026-06-23'
-updated: '2026-06-25'
+updated: '2026-07-07'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/testing-policy.md
   - docs/policy/brep-policy.md
   - docs/policy/geometry-naming-policy.md
+  - docs/research/geospec-hybrid-wasm-matcher-architecture.md
   - docs/research/geospec-production-assertions-audit.md
   - docs/research/geospec-production-assertions-catalog.md
   - docs/research/v8-engine-brep-current-manufacturability-audit.md
@@ -16,7 +17,7 @@ related:
 
 # GeoSpec Policy
 
-Internal reference for designing and authoring GeoSpec geometry assertions. GeoSpec is a geometry specification testing library for agents and engineers, so its APIs must be semantically small, evidence-backed, and diagnostic-rich. A failing GeoSpec assertion should tell the next agent exactly what failed, where it failed, and which geometry relationship should be repaired.
+Internal reference for designing and authoring GeoSpec geometry assertions. GeoSpec is a geometry specification testing library for agents and engineers, spanning **mesh-only kernels** (e.g. OpenSCAD, JSCAD) and **exact-BRep kernels** (e.g. replicad/OpenCascade). Its APIs must be semantically small, evidence-backed, and diagnostic-rich. A failing GeoSpec assertion should tell the next agent exactly what failed, where it failed, and which geometry relationship should be repaired.
 
 ## Rationale
 
@@ -293,3 +294,129 @@ High-assurance fixture suites must include:
 7. Failure diagnostics that an agent can act on without screenshots.
 
 Explicit bounding-box assertions are envelope checks only. AABB evidence is broad-phase or diagnostic-only for relationships and must never be cited as proof of contact, clearance, containment, mating, manufacturability, or assembly readiness.
+
+## 16. Optimize For Accuracy First, Performance Second
+
+Choose the most accurate and robust algorithm for a matcher first; make it fast second. A faster wrong or unfalsifiable verdict is worse than a slower correct one, and an operation that fails, hangs, or silently degrades on valid input yields no verdict at all — the least accurate outcome. Robustness and determinism are part of accuracy, not separate concerns: the same input must always produce the same verdict, and valid input must never crash or stall the run.
+
+**Why**: GeoSpec is a proof engine whose verdicts gate high-assurance manufacturing decisions, so correctness and reliability dominate speed.
+
+CORRECT:
+
+```typescript
+// A robust, exact/near-exact geometry operation, even at higher cost.
+const verdict = native.proveVoidTopology({ material, region, path, minCrossSection });
+```
+
+INCORRECT:
+
+```typescript
+// A fast discretized approximation that can silently pass a too-narrow void.
+const open = voxelFloodFill(region, resolution); // resolution-dependent; unfalsifiable at tight passages
+```
+
+## 17. Prefer Exact Geometry Over Discretized Sampling
+
+Answer a geometric or topological question with exact geometric operations — boolean, connected-component decomposition, planar section, point classification — not with voxel grids, uniform lattices, or image processing over a discretized field. Discretized sampling is broad-phase or last-resort evidence only, held to the same standard as AABB (§6): it may prune candidates or provide diagnostics, but must carry an explicit resolution/tolerance contract and must never be the default proof for connectivity, cross-section, interference, or clearance.
+
+**Why**: Sampling approximates an exact question, introducing resolution-dependence and aliasing — a sub-cell wall tunnels through, a sub-cell void disappears — while the exact operation is both more correct and, done in C++, faster.
+
+CORRECT:
+
+```typescript
+// Void topology by exact boolean + connected components.
+const voidSpace = region.subtract(fuse(material));
+const components = voidSpace.decompose();
+```
+
+INCORRECT:
+
+```typescript
+// Void topology by 3-D voxel flood-fill — cubic cost for a 1-D/2-D question.
+for (const cell of grid) open[cell] = classify(cell.center) === 'out';
+```
+
+## 18. Do Heavy Geometry In C++/WASM, Minimizing Boundary Crossings
+
+Perform heavy geometry in compiled C++/WASM, and treat every JS↔WASM crossing as a first-order cost. A matcher's native entry point must accept a whole claim and return a whole verdict in one coarse-grained call named by the eigenquestion it answers (§1) — not stream per-point or per-pair queries across the boundary. Maximize the work done per crossing; minimize both the count of crossings and the volume of marshalled JSON. Intermediate geometry stays in C++.
+
+**Why**: Boundary crossings and serialization dominate the cost of fine-grained native APIs; one `proveX(...)` call keeps the algorithm and its intermediate geometry where they belong.
+
+**Enforced by**: extends §13 (shared analysis records) — the native surface is the primary performance lever, not JS-side cleverness.
+
+CORRECT:
+
+```typescript
+// One coarse call; all intermediate geometry stays in C++.
+const verdict = native.proveVoidTopology({ material, region, path, isolatedFrom, minCrossSection });
+```
+
+INCORRECT:
+
+```typescript
+// Millions of fine-grained crossings marshalling point lists per occurrence.
+for (const occurrence of material) states.push(native.classifyPoints(occurrence, centersJson));
+```
+
+## 19. Use A Hybrid Geometry Kernel, Each Engine Where Strongest
+
+GeoSpec's native module may embed more than one geometry engine and select per operation by strength. Perform interop (e.g. tessellation → mesh) inside C++, never by round-tripping geometry through JS.
+
+| Concern                                                                                   | Engine                     | Why                                                                                                |
+| ----------------------------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------- |
+| AP242 read, `faceFacts`, exact measurement (classification, extrema, interference volume) | Exact BRep (OCCT)          | Sub-tolerance analytic exactness governs fits and clearances.                                      |
+| Void construction, connected components, planar section, whole-assembly booleans          | Robust mesh CSG (Manifold) | Boolean/topology-heavy work where exact-BRep booleans are slow or fail on B-spline-heavy castings. |
+
+**Why**: No single kernel is best at everything — exact-BRep booleans are fragile on complex geometry, while a mesh-CSG engine is robust and fast but not analytically exact; pairing them yields both exactness and robustness.
+
+For an exact-BRep kernel, the mesh a CSG engine operates on must be **derived from the AP242-read BRep** (tessellated after the STEP round-trip), preserving the AP242 substrate (§21). For a mesh-only kernel, the kernel mesh is the substrate directly.
+
+## 20. Evolve The Native Surface To Fit The Matcher
+
+Grow the native binding surface to fit what matchers need; do not contort a matcher into JS gymnastics to avoid a native change. Exposing an additional OCCT operation, adding a second engine, or rebuilding the wasm is an expected, first-class lever when it improves accuracy or collapses boundary crossings (§16, §18). The binding set is a design choice, not a fixed constraint.
+
+**Why**: Re-implementing exact geometry in JS around a frozen native surface produces slow, approximate matchers (the voxel void-continuity sampler); the correct fix is usually a coarser, more capable native call.
+
+CORRECT:
+
+```text
+// Add the native op the matcher actually needs, then call it once.
+geospec.single.yml: expose Manifold Decompose/Slice; add a proveVoidTopology binding.
+```
+
+INCORRECT:
+
+```typescript
+// Re-implement boolean/topology in JS by sampling, to avoid touching the wasm build.
+const voidField = voxelize(region).floodFill();
+```
+
+## 21. Match The Evidence Substrate To The Kernel; Never Bypass AP242 For Exact BRep
+
+GeoSpec tests multiple geometry kernels, and the evidence substrate follows each kernel's capability. Mesh proofs are first-class, not a fallback.
+
+| Kernel class                         | Primary substrate | Rule                                                                                                                                                                              |
+| ------------------------------------ | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mesh-only (OpenSCAD, JSCAD, …)       | Rendered mesh     | The kernel mesh **is** the substrate — proofs run on it directly; there is no BRep to require.                                                                                    |
+| Exact-BRep (replicad/OpenCascade, …) | AP242 STEP BRep   | Exact-geometry proofs run on geometry round-tripped through **AP242 STEP** — the interchange is part of what is certified. Mesh evidence is also available for mesh-grade checks. |
+
+For an exact-BRep kernel, never substitute a kernel-native serialization — OCCT `.brep`, a kernel's internal solid format, or a pre-STEP tessellation — to make the load cheaper: it certifies the kernel, not the AP242 exchange the shop floor receives, so the AP242 round-trip cost is inherent to that assurance and must be reduced by serializing less (minimal per-proof evidence), never by leaving AP242. Mesh (GLB) evidence — whether primary (mesh-only kernels) or derived (BRep kernels, tessellated from the STEP-read BRep, §19) — is first-class for mesh-grade integrity, spatial localization, and topology/CSG compute, but it does not substitute for the AP242 exact-BRep substrate where exactness is asserted (§10).
+
+**Why**: GeoSpec must certify what each kernel actually delivers — a mesh from a mesh-only kernel, the AP242 interchange from a BRep kernel; bypassing AP242 for a faster kernel-native format would certify geometry no downstream consumer receives.
+
+CORRECT:
+
+```typescript
+// Mesh-only kernel: prove on the kernel mesh — that is the substrate.
+expectGeo(openscadGlb).toHaveMeshIntegrity({ watertight: true });
+
+// Exact-BRep kernel: exact proofs run on the AP242-round-tripped BRep.
+expectGeo(await loadModel({ file, format: 'step', mesh: false })).toBeValidBrep({ maxTolerance: 0.01 });
+```
+
+INCORRECT:
+
+```typescript
+// A kernel-native BRep format is faster but certifies the kernel, not the AP242 interchange.
+const subject = await loadModel({ file, format: 'brep' });
+```

@@ -31,7 +31,7 @@ export class ViewerIdentityService {
     }
 
     const cookieRaw = request.cookies[publicationViewCookieName];
-    let visitorToken: string;
+    let visitorToken = '';
 
     if (cookieRaw !== undefined && cookieRaw !== '') {
       const unsigned = reply.unsignCookie(cookieRaw);
@@ -44,9 +44,9 @@ export class ViewerIdentityService {
 
       visitorToken = unsigned.value;
     } else {
-      visitorToken = generatePrefixedId(idPrefix.publicationViewer);
+      const freshToken = generatePrefixedId(idPrefix.publicationViewer);
       const nodeEnv = this.configService.get('NODE_ENV', { infer: true });
-      void reply.setCookie(publicationViewCookieName, visitorToken, {
+      void reply.setCookie(publicationViewCookieName, freshToken, {
         signed: true,
         httpOnly: true,
         path: '/',
@@ -58,7 +58,11 @@ export class ViewerIdentityService {
     }
 
     return {
-      viewerHash: this.hashViewerMaterial(`anon:${visitorToken}`),
+      // Fold request.ip (Fastify honours trustProxy) into the material so an absent cookie still yields a
+      // stable per-client identity instead of a fresh id every request, preserving view dedup/rate-limit.
+      // The freshly-minted cookie token is deliberately NOT hashed here — hashing it would make every
+      // cookie-less request unique again; the cookie takes over as the primary signal from the next request.
+      viewerHash: this.hashViewerMaterial(`anon:${visitorToken}:${request.ip}`),
     };
   }
 

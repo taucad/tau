@@ -40,9 +40,10 @@ function createReply(): ReplyMock {
   return { setCookie, unsignCookie } as unknown as ReplyMock;
 }
 
-function createRequest(args: { cookie?: string }): FastifyRequest {
+function createRequest(args: { cookie?: string; ip?: string }): FastifyRequest {
   return {
     cookies: args.cookie === undefined ? {} : { [publicationViewCookieName]: args.cookie },
+    ip: args.ip ?? '203.0.113.7',
   } as unknown as FastifyRequest;
 }
 
@@ -66,15 +67,21 @@ describe('ViewerIdentityService', () => {
     const service = new ViewerIdentityService(createConfigService());
     const reply1 = createReply();
     const request1 = createRequest({});
-    const first = service.resolveForRequest({ request: request1, reply: reply1 });
+    service.resolveForRequest({ request: request1, reply: reply1 });
     const issued = reply1.setCookie.mock.calls[0]?.[1] as string;
 
     const reply2 = createReply();
-    const request2 = createRequest({ cookie: `__valid:${issued}` });
-    const second = service.resolveForRequest({ request: request2, reply: reply2 });
+    const first = service.resolveForRequest({ request: createRequest({ cookie: `__valid:${issued}` }), reply: reply2 });
+
+    const reply3 = createReply();
+    const second = service.resolveForRequest({
+      request: createRequest({ cookie: `__valid:${issued}` }),
+      reply: reply3,
+    });
 
     expect(second.viewerHash).toBe(first.viewerHash);
     expect(reply2.setCookie).not.toHaveBeenCalled();
+    expect(reply3.setCookie).not.toHaveBeenCalled();
   });
 
   it('should reject tampered cookies with INVALID_VIEW_COOKIE', () => {
@@ -89,6 +96,26 @@ describe('ViewerIdentityService', () => {
       const body = (error as UnauthorizedException).getResponse() as { code?: string };
       expect(body.code).toBe(publicationApiCode.INVALID_VIEW_COOKIE);
     }
+  });
+
+  it('should derive a stable anonymous hash from request.ip when the cookie is absent', () => {
+    const service = new ViewerIdentityService(createConfigService());
+
+    const first = service.resolveForRequest({
+      request: createRequest({ ip: '198.51.100.4' }),
+      reply: createReply(),
+    });
+    const second = service.resolveForRequest({
+      request: createRequest({ ip: '198.51.100.4' }),
+      reply: createReply(),
+    });
+    const other = service.resolveForRequest({
+      request: createRequest({ ip: '198.51.100.5' }),
+      reply: createReply(),
+    });
+
+    expect(second.viewerHash).toBe(first.viewerHash);
+    expect(other.viewerHash).not.toBe(first.viewerHash);
   });
 
   it('should not issue a cookie when authenticated', () => {

@@ -26,6 +26,10 @@
 command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx build ui && pnpm nx run ui:sourcemaps"
 publish = "build/client"
 
+[build.environment]
+# Temporary: current Netlify plan cannot create Builds-scoped secrets.
+NX_NO_CLOUD = "true"
+
 [context.production]
 command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx build ui && pnpm nx run ui:sourcemaps"
 

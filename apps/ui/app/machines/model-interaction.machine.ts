@@ -75,6 +75,18 @@ const createEmptyUnitState = (): ModelInteractionUnitState => ({
   opacityByComponentId: {},
 });
 
+// Shared frozen singleton for absent units so `getModelInteractionUnitState`
+// returns a stable reference — `useSelector`'s `Object.is` then short-circuits
+// re-renders. Frozen (incl. nested empties) because every action spreads it
+// into a fresh object and never mutates it in place.
+const emptyUnitState: ModelInteractionUnitState = Object.freeze({
+  ...createEmptyUnitState(),
+  selectedComponentIds: Object.freeze([]) as string[],
+  hiddenComponentIds: Object.freeze([]) as string[],
+  isolatedComponentIds: Object.freeze([]) as string[],
+  opacityByComponentId: Object.freeze({}) as Record<string, number>,
+});
+
 const createUnitStateFromPersisted = (
   unit: PersistedModelComponentDisplayUnitState | undefined,
 ): ModelInteractionUnitState => ({
@@ -138,7 +150,7 @@ export function getModelInteractionUnitState(
   context: ModelInteractionContext,
   unitId: string,
 ): ModelInteractionUnitState {
-  return context.unitsById[unitId] ?? createEmptyUnitState();
+  return context.unitsById[unitId] ?? emptyUnitState;
 }
 
 function hasComponent(unit: ModelInteractionUnitState, componentId: string | undefined): componentId is string {

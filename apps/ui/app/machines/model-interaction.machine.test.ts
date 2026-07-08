@@ -104,6 +104,23 @@ describe('modelInteractionMachine', () => {
     actor.stop();
   });
 
+  it('should return a stable empty-state reference for absent units', () => {
+    const actor = createActor(modelInteractionMachine, { input: {} });
+    actor.start();
+    actor.send({ type: 'loadManifest', unitId: mainUnitId, manifest: createManifest() });
+    const { context } = actor.getSnapshot();
+
+    const firstAbsent = getModelInteractionUnitState(context, 'file:absent');
+    const secondAbsent = getModelInteractionUnitState(context, 'file:absent');
+    // Same reference ⇒ `useSelector`'s `Object.is` short-circuits re-renders.
+    expect(firstAbsent).toBe(secondAbsent);
+    expect(firstAbsent.selectedComponentIds).toEqual([]);
+
+    // Present units still resolve to their real state.
+    expect(getModelInteractionUnitState(context, mainUnitId).manifest?.rootId).toBe('root');
+    actor.stop();
+  });
+
   it('should support hover, selection, visibility, opacity, and focus actions per unit', () => {
     const actor = createActor(modelInteractionMachine, { input: {} });
     actor.start();

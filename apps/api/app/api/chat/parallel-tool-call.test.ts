@@ -1,5 +1,6 @@
+/* eslint-disable @typescript-eslint/naming-convention -- LangChain message constructors expose snake_case tool fields. */
 import { describe, expect, it } from 'vitest';
-import { HumanMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
 import { createAgent, FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
@@ -86,5 +87,69 @@ describe('LangGraph parallel tool dispatch', () => {
 
     const toolCallIds = toolMessages.map((message) => message.tool_call_id).sort();
     expect(toolCallIds).toEqual(['call_city', 'call_weather']);
+  });
+
+  it('runs a current tool call when history contains an old deterministic Gemini tool id', async () => {
+    let invocationCount = 0;
+    const historicalToolCallId = 'call_ad6083d2';
+    const currentToolCallId = 'lc-tool-call-current-stream-0';
+
+    const readFile = tool(
+      async ({ targetFile }: { targetFile: string }) => {
+        invocationCount += 1;
+        return `read:${targetFile}`;
+      },
+      {
+        name: 'read_file',
+        description: 'Read a file.',
+        schema: z.object({ targetFile: z.string() }),
+      },
+    );
+
+    const llm = new FakeToolCallingModel({
+      toolCalls: [[{ id: currentToolCallId, name: 'read_file', args: { targetFile: 'main.scad' } }], []],
+    });
+
+    const agent = createAgent({
+      model: llm,
+      tools: [readFile],
+    });
+
+    const result = (await agent.invoke(
+      {
+        messages: [
+          new HumanMessage('read the old file'),
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: historicalToolCallId,
+                name: 'read_file',
+                args: { targetFile: 'old.scad' },
+                type: 'tool_call',
+              },
+            ],
+          }),
+          new ToolMessage({
+            content: 'read:old.scad',
+            name: 'read_file',
+            tool_call_id: historicalToolCallId,
+          }),
+          new HumanMessage('continue'),
+        ],
+      },
+      { recursionLimit: 10 },
+    )) as { messages: unknown[] };
+
+    const toolMessages: ToolMessage[] = [];
+    for (const message of result.messages) {
+      if (message instanceof ToolMessage) {
+        // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- ToolMessage's generic parameter widens to `any` after instanceof narrowing; the value is already runtime-validated.
+        toolMessages.push(message as ToolMessage);
+      }
+    }
+
+    expect(invocationCount).toBe(1);
+    expect(toolMessages.map((message) => message.tool_call_id)).toContain(currentToolCallId);
   });
 });

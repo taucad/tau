@@ -1,9 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import {
-  clearPromptSkillListingCacheForTesting,
-  createSkillResolver,
-  type SkillResolverDirectoryEntry,
-} from '#lib/skill-resolver.js';
+import { describe, expect, it } from 'vitest';
+import type { SkillResolverDirectoryEntry } from '#lib/skill-resolver.js';
+import { createSkillResolver } from '#lib/skill-resolver.js';
 
 const encoder = new TextEncoder();
 
@@ -58,10 +55,6 @@ function createMemoryResolver(files: MemoryTree) {
 }
 
 describe('createSkillResolver', () => {
-  beforeEach(() => {
-    clearPromptSkillListingCacheForTesting();
-  });
-
   it('should expose the built-in create-skill as a virtual system resource', async () => {
     const resolver = createMemoryResolver({});
 
@@ -118,7 +111,7 @@ describe('createSkillResolver', () => {
     );
   });
 
-  it('should freeze prompt listing per chat while live resolution sees edited content', async () => {
+  it('should reflect edited content on the next prompt listing (no per-chat freeze)', async () => {
     const files: MemoryTree = {
       '.agents/skills/mine/SKILL.md': skillMarkdown({
         name: 'mine',
@@ -128,19 +121,21 @@ describe('createSkillResolver', () => {
     };
     const resolver = createMemoryResolver(files);
 
-    const initialPromptListing = await resolver.getPromptSkillListing('chat_1');
+    const initialPromptListing = await resolver.getPromptSkillListing();
+    expect(initialPromptListing).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'mine', description: 'Initial description' })]),
+    );
+
     files['.agents/skills/mine/SKILL.md'] = skillMarkdown({
       name: 'mine',
       description: 'Edited description',
       body: '# Edited Mine',
     });
 
-    const repeatedPromptListing = await resolver.getPromptSkillListing('chat_1');
-    const newChatPromptListing = await resolver.getPromptSkillListing('chat_2');
+    const editedPromptListing = await resolver.getPromptSkillListing();
     const resolved = await resolver.resolveSkill('mine');
 
-    expect(repeatedPromptListing).toEqual(initialPromptListing);
-    expect(newChatPromptListing).toEqual(
+    expect(editedPromptListing).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: 'mine', description: 'Edited description' })]),
     );
     expect(resolved).toEqual(

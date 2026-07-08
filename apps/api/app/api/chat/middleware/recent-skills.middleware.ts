@@ -3,6 +3,7 @@ import type { AgentMiddleware } from 'langchain';
 import type { BaseStore } from '@langchain/langgraph';
 import { HumanMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
+import type { ContextPayload } from '@taucad/chat';
 import { recentSkillsIndexKey, recentSkillsRootNamespace } from '#api/chat/recent-skills-namespace.js';
 import type { RecentSkillValue } from '#api/chat/recent-skills-namespace.js';
 import { withTauInternalMetadata } from '#api/chat/utils/tau-internal-message.js';
@@ -15,6 +16,8 @@ export type LoadRecentSkillsMessageInput = {
   readonly store?: BaseStore | undefined;
   readonly chatId?: string | undefined;
   readonly includeContent: boolean;
+  /** Current per-skill fingerprints from the client listing, used to evict stale cached content. */
+  readonly currentFingerprints?: ReadonlyMap<string, string | undefined> | undefined;
 };
 
 const recentSkillsSource = 'recent_skills';
@@ -57,8 +60,43 @@ ${lines.join('\n')}
 </recently_used_skills>`;
 }
 
+/**
+ * R2/R4 — keep only recent skills whose stored fingerprint still matches the
+ * current client-listing fingerprint; evict the rest from the store so their
+ * stale content is neither re-injected nor resurrected on the next turn.
+ */
+async function reconcileRecentSkills(args: {
+  readonly store: BaseStore;
+  readonly namespace: string[];
+  readonly names: readonly string[];
+  readonly recentSkills: readonly RecentSkillValue[];
+  readonly currentFingerprints: ReadonlyMap<string, string | undefined>;
+}): Promise<RecentSkillValue[]> {
+  const { store, namespace, names, recentSkills, currentFingerprints } = args;
+  const fresh: RecentSkillValue[] = [];
+  const evicted = new Set<string>();
+
+  for (const skill of recentSkills) {
+    const currentFingerprint = currentFingerprints.get(skill.skillName);
+    if (currentFingerprint !== undefined && currentFingerprint === skill.fingerprint) {
+      fresh.push(skill);
+    } else {
+      evicted.add(skill.skillName);
+    }
+  }
+
+  if (evicted.size > 0) {
+    await Promise.all([...evicted].map(async (name) => store.delete(namespace, name)));
+    await store.put(namespace, recentSkillsIndexKey, {
+      names: names.filter((name) => !evicted.has(name)),
+    });
+  }
+
+  return fresh;
+}
+
 export async function loadRecentSkillsMessage(input: LoadRecentSkillsMessageInput): Promise<HumanMessage | undefined> {
-  const { store, chatId } = input;
+  const { store, chatId, currentFingerprints } = input;
   if (!store || !chatId || typeof store.get !== 'function') {
     return undefined;
   }
@@ -75,13 +113,20 @@ export async function loadRecentSkillsMessage(input: LoadRecentSkillsMessageInpu
     .map((item) => item?.value)
     .filter((value): value is RecentSkillValue => isRecentSkillValue(value));
 
-  if (recentSkills.length === 0) {
+  // Reconcile against the current listing only when it is present; without a
+  // listing there is nothing to compare against, so preserve existing behaviour.
+  const effectiveSkills =
+    currentFingerprints !== undefined && currentFingerprints.size > 0
+      ? await reconcileRecentSkills({ store, namespace, names, recentSkills, currentFingerprints })
+      : recentSkills;
+
+  if (effectiveSkills.length === 0) {
     return undefined;
   }
 
   return new HumanMessage({
     id: `tau:recent-skills:${chatId}:${input.includeContent ? 'content' : 'summary'}`,
-    content: formatRecentSkills(recentSkills, { includeContent: input.includeContent }),
+    content: formatRecentSkills(effectiveSkills, { includeContent: input.includeContent }),
     // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain metadata is snake_case.
     additional_kwargs: withTauInternalMetadata(
       {
@@ -119,8 +164,13 @@ export function replaceRecentSkillsMessage(
   return recentSkillsMessage ? [recentSkillsMessage, ...withoutExisting] : withoutExisting;
 }
 
-export const createRecentSkillsMiddleware = (): AgentMiddleware =>
-  createMiddleware({
+export const createRecentSkillsMiddleware = (contextPayload?: ContextPayload): AgentMiddleware => {
+  const currentFingerprints =
+    contextPayload?.skills && contextPayload.skills.length > 0
+      ? new Map(contextPayload.skills.map((skill) => [skill.name, skill.fingerprint]))
+      : undefined;
+
+  return createMiddleware({
     name: 'RecentSkills',
 
     async wrapModelCall(request, handler) {
@@ -131,7 +181,7 @@ export const createRecentSkillsMiddleware = (): AgentMiddleware =>
       const { store } = runtime;
       const chatId = typeof runtime.context?.chatId === 'string' ? runtime.context.chatId : undefined;
       const includeContent = runtime.context?.skillContentRestoreNeeded === true;
-      const recentSkillsMessage = await loadRecentSkillsMessage({ store, chatId, includeContent });
+      const recentSkillsMessage = await loadRecentSkillsMessage({ store, chatId, includeContent, currentFingerprints });
       if (!recentSkillsMessage) {
         return handler(request);
       }
@@ -142,3 +192,4 @@ export const createRecentSkillsMiddleware = (): AgentMiddleware =>
       });
     },
   });
+};

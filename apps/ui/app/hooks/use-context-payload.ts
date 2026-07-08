@@ -14,11 +14,11 @@ const decoder = new TextDecoder();
  *
  * @returns ContextPayload to attach to message metadata, or undefined if nothing to send
  */
-export function useContextPayload(chatId = 'composer'): ContextPayload | undefined {
+export function useContextPayload(): ContextPayload | undefined {
   const { readFile, treeService } = useFileManager();
   const [hasAgentsMd, setHasAgentsMd] = useState(false);
   const [memory, setMemory] = useState<Record<string, string> | undefined>();
-  const skills = usePromptSkillsCatalog(chatId);
+  const skills = usePromptSkillsCatalog();
 
   useEffect(() => {
     if (!treeService) {

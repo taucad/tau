@@ -23,7 +23,6 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 }));
 
 const { useContextPayload } = await import('#hooks/use-context-payload.js');
-const { clearPromptSkillListingCacheForTesting } = await import('#lib/skill-resolver.js');
 
 const encoder = new TextEncoder();
 
@@ -59,7 +58,6 @@ function makeFileEntry(path: string, type: 'file' | 'dir' = 'file'): FileEntry {
 describe('useContextPayload', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clearPromptSkillListingCacheForTesting();
     mockListDirectory.mockResolvedValue([]);
     mockGetEntry.mockResolvedValue(undefined);
     mockReadFile.mockRejectedValue(new Error('not found'));

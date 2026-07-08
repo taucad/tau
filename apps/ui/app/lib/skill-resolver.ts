@@ -28,7 +28,7 @@ export type SkillResolverDependencies = {
 export type SkillResolver = {
   readonly listSkills: () => Promise<SkillMetadata[]>;
   readonly resolveSkill: (skillName: string) => Promise<ResolveSkillRpcResult>;
-  readonly getPromptSkillListing: (chatId: string) => Promise<SkillMetadata[]>;
+  readonly getPromptSkillListing: () => Promise<SkillMetadata[]>;
 };
 
 type InstalledPluginManifest = {
@@ -44,12 +44,6 @@ type InstalledPluginManifest = {
     }
   >;
 };
-
-const promptListingCache = new Map<string, SkillMetadata[]>();
-
-export function clearPromptSkillListingCacheForTesting(): void {
-  promptListingCache.clear();
-}
 
 export function createSkillResolver(deps: SkillResolverDependencies): SkillResolver {
   async function listSkills(): Promise<SkillMetadata[]> {
@@ -129,15 +123,9 @@ export function createSkillResolver(deps: SkillResolverDependencies): SkillResol
         };
       }
     },
-    async getPromptSkillListing(chatId: string): Promise<SkillMetadata[]> {
-      const cached = promptListingCache.get(chatId);
-      if (cached) {
-        return cached;
-      }
-
-      const listing = (await listSkills()).slice(0, promptSkillLimit).map(normalizePromptSkillMetadata);
-      promptListingCache.set(chatId, listing);
-      return listing;
+    async getPromptSkillListing(): Promise<SkillMetadata[]> {
+      const discovered = await listSkills();
+      return discovered.slice(0, promptSkillLimit).map((skill) => normalizePromptSkillMetadata(skill));
     },
   };
 }

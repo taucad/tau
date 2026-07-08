@@ -213,7 +213,7 @@ export class ChatService {
         // --- Recent skills and prompt caching ---
         // These mutate the effective ModelRequest, so compaction evaluates them
         // before deciding whether the provider-facing payload needs rewriting.
-        createRecentSkillsMiddleware(),
+        createRecentSkillsMiddleware(contextPayload),
         createPromptCachingMiddleware(providerId),
 
         // --- Context compaction ---

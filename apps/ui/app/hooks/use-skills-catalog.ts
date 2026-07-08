@@ -54,8 +54,8 @@ export function useSkillsCatalog(): SkillMetadata[] {
     }
 
     return createSkillResolver({
-      readFile: (path) => readFileRef.current(path),
-      listDirectory: (path) => treeService.listDirectory(path),
+      readFile: async (path) => readFileRef.current(path),
+      listDirectory: async (path) => treeService.listDirectory(path),
     });
   }, [treeService]);
 
@@ -94,9 +94,10 @@ export function useSkillsCatalog(): SkillMetadata[] {
   return useMemo(() => skills, [skills]);
 }
 
-export function usePromptSkillsCatalog(chatId: string): SkillMetadata[] {
+export function usePromptSkillsCatalog(): SkillMetadata[] {
   const { readFile, treeService } = useFileManager();
   const [skills, setSkills] = useState<SkillMetadata[]>([]);
+  const [treeRevision, setTreeRevision] = useState(0);
   const readFileRef = useRef(readFile);
   readFileRef.current = readFile;
 
@@ -106,8 +107,18 @@ export function usePromptSkillsCatalog(chatId: string): SkillMetadata[] {
     }
 
     return createSkillResolver({
-      readFile: (path) => readFileRef.current(path),
-      listDirectory: (path) => treeService.listDirectory(path),
+      readFile: async (path) => readFileRef.current(path),
+      listDirectory: async (path) => treeService.listDirectory(path),
+    });
+  }, [treeService]);
+
+  useEffect(() => {
+    if (!treeService) {
+      return;
+    }
+
+    return treeService.subscribeTree(() => {
+      setTreeRevision((revision) => revision + 1);
     });
   }, [treeService]);
 
@@ -120,7 +131,7 @@ export function usePromptSkillsCatalog(chatId: string): SkillMetadata[] {
         return;
       }
 
-      const listing = await resolver.getPromptSkillListing(chatId);
+      const listing = await resolver.getPromptSkillListing();
       if (!cancelled) {
         setSkills(listing);
       }
@@ -130,7 +141,7 @@ export function usePromptSkillsCatalog(chatId: string): SkillMetadata[] {
     return () => {
       cancelled = true;
     };
-  }, [chatId, resolver]);
+  }, [resolver, treeRevision]);
 
   return useMemo(() => skills, [skills]);
 }

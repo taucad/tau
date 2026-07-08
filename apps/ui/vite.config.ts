@@ -22,6 +22,34 @@ import { optimizeDepsFromCache } from '@taucad/vite/optimize-deps-from-cache';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
 
+const toOriginOrRaw = (value: string | undefined): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return value;
+  }
+};
+
+const resolveBuildFrontendUrl = (environment: NodeJS.ProcessEnv): string | undefined => {
+  if (environment.TAU_FRONTEND_URL) {
+    return undefined;
+  }
+
+  if (environment.NETLIFY !== 'true' || environment.CONTEXT === 'production') {
+    return undefined;
+  }
+
+  return (
+    toOriginOrRaw(environment.DEPLOY_PRIME_URL) ??
+    toOriginOrRaw(environment.DEPLOY_URL) ??
+    toOriginOrRaw(environment.NETLIFY_AI_GATEWAY_URL)
+  );
+};
+
 const createUiSourceAliasPlugin = (): Plugin => ({
   name: 'tau-ui-source-alias',
   enforce: 'pre',
@@ -69,10 +97,14 @@ const enableSpriteGeneration = false;
 export default defineConfig(({ mode }) => {
   const isTest = mode === 'test';
   const isNetlify = process.env['NETLIFY'] === 'true';
+  const buildFrontendUrl = resolveBuildFrontendUrl(process.env);
 
   return {
     root: __dirname,
     cacheDir: '../../node_modules/.vite/apps/ui',
+    define: {
+      tauBuildFrontendUrl: JSON.stringify(buildFrontendUrl ?? ''),
+    },
     plugins: [
       createUiSourceAliasPlugin(),
 

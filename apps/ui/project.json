@@ -24,6 +24,15 @@
           "env": "NETLIFY"
         },
         {
+          "env": "CONTEXT"
+        },
+        {
+          "env": "DEPLOY_PRIME_URL"
+        },
+        {
+          "env": "DEPLOY_URL"
+        },
+        {
           "env": "NETLIFY_AI_GATEWAY_URL"
         },
         {

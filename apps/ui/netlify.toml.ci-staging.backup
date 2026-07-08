@@ -22,12 +22,14 @@
 # in sync; only endpoints diverge.
 #
 # TAU_FRONTEND_URL on `deploy-preview` and `branch-deploy` is intentionally
-# unset so it auto-derives from `NETLIFY_AI_GATEWAY_URL` at runtime
-# (apps/ui/app/environment.config.ts strips the `/.netlify/ai` suffix). This
-# makes each preview report its own per-PR URL without per-branch config.
+# unset so the UI build derives and embeds the preview origin from Netlify's
+# `DEPLOY_PRIME_URL`. This makes each preview report its own per-PR URL without
+# per-branch config.
 #
 # Netlify auto-provides these system variables at build time:
-# - NETLIFY_AI_GATEWAY_URL : runtime AI gateway URL (contains the deployment URL)
+# - DEPLOY_PRIME_URL       : primary deploy URL for previews and branch deploys
+# - DEPLOY_URL             : unique URL for this deploy
+# - NETLIFY_AI_GATEWAY_URL : legacy fallback only
 # - CONTEXT                : deploy context (production, deploy-preview, branch-deploy)
 # - NETLIFY                : "true" when building on Netlify
 #
@@ -61,7 +63,7 @@ command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx build ui"
 NODE_ENV = "production"
 TAU_API_URL = "https://api.taucad.dev"
 TAU_WEBSOCKET_URL = "wss://api.taucad.dev"
-# TAU_FRONTEND_URL intentionally unset — auto-derived from NETLIFY_AI_GATEWAY_URL.
+# TAU_FRONTEND_URL intentionally unset — derived from DEPLOY_PRIME_URL.
 
 # Branch deploy context (non-production branches). Currently no branches outside
 # `main` are auto-built (`build_settings.allowed_branches = ["main"]` on the

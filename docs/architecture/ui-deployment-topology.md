@@ -86,20 +86,20 @@ Investigation narrative: **[docs/research/netlify-ui-deployment-strategy.md](../
 - `repos/cloud-infra/stacks/cloud/staging/terraform.auto.tfvars`
 - `repos/cloud-infra/stacks/cloud/prod-us/terraform.auto.tfvars`
 
-`NODE_ENV` for Functions/SSR is **never** scoped to `builds` (pnpm would skip devDependencies and break the Vite build). `TAU_*` URLs use `builds+functions+runtime` so server pre-render matches runtime.
+`NODE_ENV` for Functions/SSR is **never** scoped to `builds` (pnpm would skip devDependencies and break the Vite build). `TAU_*` URLs use `builds+functions+runtime` so server pre-render matches runtime. Deploy previews do not get a static `TAU_FRONTEND_URL`; the UI build derives and embeds the preview origin from Netlify's `DEPLOY_PRIME_URL`.
 
 `NX_CLOUD_ACCESS_TOKEN` comes from HCP variable `nx_cloud_access_token_read_only`; Terraform exposes it as a read-only Netlify Builds-only secret. Netlify deploy previews may read Nx Cloud cache, but remote-cache writes stay with GitHub protected-branch CI.
 
 ### Staging site (`taucad`)
 
-| Variable                | Notes                                                                |
-| ----------------------- | -------------------------------------------------------------------- |
-| `TAU_API_URL`           | `https://api.taucad.dev` (`context = all` in tfvars)                 |
-| `TAU_WEBSOCKET_URL`     | `wss://api.taucad.dev`                                               |
-| `TAU_FRONTEND_URL`      | `https://taucad.dev` for production context; previews derive per-URL |
-| `NODE_ENV`              | `production` for Functions + runtime only                            |
-| `POSTHOG_CLI_*`         | Source maps on **main** builds (same toml includes `ui:sourcemaps`)  |
-| `NX_CLOUD_ACCESS_TOKEN` | Read-only Nx Cloud token, Builds scope only                          |
+| Variable                | Notes                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------ |
+| `TAU_API_URL`           | `https://api.taucad.dev` (`context = all` in tfvars)                                 |
+| `TAU_WEBSOCKET_URL`     | `wss://api.taucad.dev`                                                               |
+| `TAU_FRONTEND_URL`      | `https://taucad.dev` for production context; previews derive from `DEPLOY_PRIME_URL` |
+| `NODE_ENV`              | `production` for Functions + runtime only                                            |
+| `POSTHOG_CLI_*`         | Source maps on **main** builds (same toml includes `ui:sourcemaps`)                  |
+| `NX_CLOUD_ACCESS_TOKEN` | Read-only Nx Cloud token, Builds scope only                                          |
 
 ### Production site (`taucad-prod-us`)
 

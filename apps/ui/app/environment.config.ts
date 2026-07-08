@@ -5,19 +5,42 @@
  */
 import { z } from 'zod';
 
+type RawEnvironment = Record<string, string | undefined>;
+
+const toOriginOrRaw = (value: string | undefined): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return value;
+  }
+};
+
+export const resolveFrontendUrl = (rawEnvironment: RawEnvironment): string | undefined => {
+  if (rawEnvironment['TAU_FRONTEND_URL']) {
+    return rawEnvironment['TAU_FRONTEND_URL'];
+  }
+
+  if (rawEnvironment['NETLIFY'] !== 'true' || rawEnvironment['CONTEXT'] === 'production') {
+    return undefined;
+  }
+
+  return (
+    toOriginOrRaw(typeof tauBuildFrontendUrl === 'string' ? tauBuildFrontendUrl : undefined) ??
+    toOriginOrRaw(rawEnvironment['DEPLOY_PRIME_URL']) ??
+    toOriginOrRaw(rawEnvironment['DEPLOY_URL']) ??
+    toOriginOrRaw(rawEnvironment['NETLIFY_AI_GATEWAY_URL'])
+  );
+};
+
 // Define the schema for environment variables
 const environmentSchema = z.preprocess(
   (environment) => {
-    const rawEnvironment = environment as Record<string, string | undefined>;
-
-    // Extract base URL from NETLIFY_AI_GATEWAY_URL if TAU_FRONTEND_URL not set
-    // NETLIFY_AI_GATEWAY_URL format: https://deploy-preview-XX--site.netlify.app/.netlify/ai
-    let frontendUrl = rawEnvironment['TAU_FRONTEND_URL'];
-    if (!frontendUrl && rawEnvironment['NETLIFY_AI_GATEWAY_URL']) {
-      // Use URL constructor to reliably extract origin (protocol + host)
-      const url = new URL(rawEnvironment['NETLIFY_AI_GATEWAY_URL']);
-      frontendUrl = url.origin;
-    }
+    const rawEnvironment = environment as RawEnvironment;
+    const frontendUrl = resolveFrontendUrl(rawEnvironment);
 
     return {
       ...rawEnvironment,

@@ -1,47 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { hashCode, hashCodeSecure, generateSecureId, constantTimeEqual } from '#utils/crypto.utils.js';
-
-describe('hashCode', () => {
-  it('should return a consistent hash for the same input', () => {
-    const input = 'test string';
-    const hash1 = hashCode(input);
-    const hash2 = hashCode(input);
-    expect(hash1).toBe(hash2);
-  });
-
-  it('should return different hashes for different inputs', () => {
-    const hash1 = hashCode('test1');
-    const hash2 = hashCode('test2');
-    expect(hash1).not.toBe(hash2);
-  });
-
-  it('should return a hex string of consistent length', () => {
-    const hash = hashCode('test');
-    expect(hash).toMatch(/^[\da-f]{8}$/);
-  });
-
-  it('should handle empty string', () => {
-    const hash = hashCode('');
-    expect(hash).toMatch(/^[\da-f]{8}$/);
-  });
-
-  it('should handle unicode characters', () => {
-    const hash = hashCode('🚀 test 你好');
-    expect(hash).toMatch(/^[\da-f]{8}$/);
-  });
-
-  it('should handle very long strings', () => {
-    const longString = 'a'.repeat(10_000);
-    const hash = hashCode(longString);
-    expect(hash).toMatch(/^[\da-f]{8}$/);
-  });
-
-  it('should be case sensitive', () => {
-    const hash1 = hashCode('Test');
-    const hash2 = hashCode('test');
-    expect(hash1).not.toBe(hash2);
-  });
-});
+import { hashString } from '@taucad/utils/hash';
+import { hashCodeSecure, generateSecureId, constantTimeEqual } from '#utils/crypto.utils.js';
 
 describe('hashCodeSecure', () => {
   it('should return a SHA-256 hash', async () => {
@@ -154,7 +113,7 @@ describe('crypto utilities integration', () => {
     const data = 'sensitive data';
 
     // Generate a quick cache key
-    const cacheKey = hashCode(data);
+    const cacheKey = hashString(data);
     expect(cacheKey).toMatch(/^[\da-f]{8}$/);
 
     // Generate a secure hash for verification

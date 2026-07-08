@@ -1,27 +1,4 @@
 /**
- * Fast non-cryptographic hash function using djb2 algorithm
- * Good for cache keys, checksums, and non-security use cases.
- *
- * Uses 5381 as the initial seed - chosen by Dan Bernstein through empirical testing
- * for optimal distribution and minimal collisions on typical string datasets.
- */
-export function hashCode(input: string): string {
-  let hash = 5381;
-
-  for (let index = 0; index < input.length; index++) {
-    const char = input.codePointAt(index) ?? 0;
-    // Djb2: hash * 33 + char (avoiding bitwise operations)
-    hash = hash * 33 + char;
-    // Keep within 32-bit range
-    hash %= 2 ** 32;
-  }
-
-  // Ensure positive value and convert to hex
-  const unsignedHash = hash < 0 ? hash + 2 ** 32 : hash;
-  return unsignedHash.toString(16).padStart(8, '0');
-}
-
-/**
  * Cryptographically secure hash function using SHA-256
  * Use for security-sensitive applications
  */

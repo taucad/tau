@@ -351,9 +351,10 @@ export const inspectGeometry = (options: InspectGeometryOptions): InspectGeometr
   const selections = options.selectors.map((selector) => inspectSelector(options.subject, selector));
   const available = occurrenceEntities(options.subject).map((entity) => entity.name);
   const diagnostics = selections
-    .filter((selection) => selection.matches.length === 0)
+    .map((selection, index) => ({ selection, index }))
+    .filter(({ selection }) => selection.matches.length === 0)
     .map(
-      (selection, index): GeometryDiagnostic => ({
+      ({ selection, index }): GeometryDiagnostic => ({
         code: 'GEOSPEC_SELECTOR_UNMATCHED',
         severity: 'error',
         message: `Geometry selector ${index} matched no entities.`,

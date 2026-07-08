@@ -418,20 +418,21 @@ export type GeometrySelection = {
  *
  * @public
  */
-export type SerializedRegExp = { pattern: string; flags: string };
+export type SerializedRegExp = { __isRegExp: true; pattern: string; flags: string };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const isSerializedRegExp = (value: unknown): value is SerializedRegExp =>
   isRecord(value) &&
+  value['__isRegExp'] === true &&
   typeof value['pattern'] === 'string' &&
   typeof value['flags'] === 'string' &&
-  Object.keys(value).length === 2;
+  Object.keys(value).length === 3;
 
 const serializeValue = (value: unknown): unknown => {
   if (value instanceof RegExp) {
-    return { pattern: value.source, flags: value.flags } satisfies SerializedRegExp;
+    return { __isRegExp: true, pattern: value.source, flags: value.flags } satisfies SerializedRegExp;
   }
   if (Array.isArray(value)) {
     return value.map((entry) => serializeValue(entry));

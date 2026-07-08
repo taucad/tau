@@ -10,7 +10,7 @@ describe('selector serialization', () => {
 
     expect(serialized).toEqual({
       kind: 'face',
-      of: { pattern: 'cube[AB]', flags: 'iu' },
+      of: { __isRegExp: true, pattern: 'cube[AB]', flags: 'iu' },
       query: { surfaceType: 'plane' },
     });
     expect(() => JSON.stringify(serialized)).not.toThrow();
@@ -36,6 +36,19 @@ describe('selector serialization', () => {
     expect(roundTripped).toEqual(selector);
     const { of } = roundTripped as FaceSelector;
     expect(of).toBeInstanceOf(RegExp);
+  });
+
+  it('should not resurrect a plain { pattern, flags } data object as a RegExp', () => {
+    const plain = { pattern: 'x', flags: 'g' };
+    const selector = { kind: 'face', of: /cube/u, query: { metadata: plain } } as unknown as GeometrySelector;
+
+    const roundTripped = deserializeSelector(JSON.parse(JSON.stringify(serializeSelector(selector))));
+
+    const { query, of } = roundTripped as FaceSelector & { query: { metadata: unknown } };
+    expect(of).toBeInstanceOf(RegExp);
+    expect((of as RegExp).source).toBe('cube');
+    expect(query.metadata).not.toBeInstanceOf(RegExp);
+    expect(query.metadata).toEqual(plain);
   });
 
   it('should pass string shorthand selectors through serialization unchanged', () => {

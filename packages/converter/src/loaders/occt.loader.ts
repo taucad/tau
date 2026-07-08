@@ -74,7 +74,7 @@ export class OcctLoader extends BaseLoader<OcctImportResult, OcctOptions> {
     // Create new glTF document using gltf-transform
     const document = new Document();
     const scene = document.createScene();
-    const rootName = parseResult.root.name.trim();
+    const rootName = (parseResult.root.name ?? '').trim();
     if (rootName) {
       scene.setName(rootName);
     }

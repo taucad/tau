@@ -121,6 +121,23 @@ describe('isFeatureEnabled', () => {
   });
 });
 
+// Gates the e2e-only `SectionViewTestBridge` mount in stage.tsx. Off by
+// default ⇒ the bridge is never mounted/executed in prod; the e2e suite turns
+// it on via `TAU_DEBUG=true` (apps/ui-e2e/playwright.config.ts).
+describe('tauDebug gate for SectionViewTestBridge', () => {
+  it('should be disabled by default so the test bridge is not mounted in prod', () => {
+    const storage = createMockStorage();
+    expect(isFeatureEnabled('tauDebug', storage)).toBe(false);
+  });
+
+  it('should be enabled when the debug override is set so the bridge mounts under e2e', () => {
+    const storage = createMockStorage({
+      'tau:flags': JSON.stringify({ tauDebug: true }),
+    });
+    expect(isFeatureEnabled('tauDebug', storage)).toBe(true);
+  });
+});
+
 describe('getAllFlags', () => {
   it('should return all defaults when no overrides exist', () => {
     const storage = createMockStorage();

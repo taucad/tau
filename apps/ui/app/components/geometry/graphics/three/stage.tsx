@@ -6,6 +6,7 @@ import { Lights } from '#components/geometry/graphics/three/react/lights.js';
 import { SectionContourFills } from '#components/geometry/graphics/three/react/section-contour-fill.js';
 import { SectionClippingGroup } from '#components/geometry/graphics/three/react/section-clipping-group.js';
 import { SectionViewTestBridge } from '#components/geometry/graphics/three/react/section-view-test-bridge.js';
+import { useFeature } from '#flags/use-feature.js';
 import { useSectionView } from '#components/geometry/graphics/three/use-section-view.js';
 import { useGeometryBounds } from '#components/geometry/graphics/three/use-geometry-bounds.js';
 import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
@@ -78,6 +79,11 @@ export function Stage({
   const environmentPreset = useGraphicsSelector((state) => state.context.environmentPreset);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
 
+  // Gate the e2e test bridge behind the debug flag so it is never mounted or
+  // executed in prod. The e2e suite runs with `TAU_DEBUG=true` (see
+  // apps/ui-e2e/playwright.config.ts), which resolves this flag on.
+  const isTauDebugEnabled = useFeature('tauDebug');
+
   const sectionView = useSectionView();
 
   const { geometryRadius, geometryCenter } = useGeometryBounds(innerRef, outer, { enableCentering });
@@ -87,7 +93,7 @@ export function Stage({
   return (
     <group {...properties}>
       <PerspectiveCamera makeDefault />
-      <SectionViewTestBridge />
+      {isTauDebugEnabled ? <SectionViewTestBridge /> : undefined}
       <group ref={outer}>
         <SectionClippingGroup
           enableLines={sectionView.enableLines}

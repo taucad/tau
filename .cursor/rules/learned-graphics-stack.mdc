@@ -17,6 +17,7 @@ cleanup; they may exceed the 200-char cap.
 
 ## Learned Workspace Facts
 
+- App value imports from Drei deep `.js` files are SSR-hostile; use the Drei barrel or direct packages like `camera-controls`, while keeping type-only helper imports legal.
 - Runtime/React operation inputs keep runtime keys top-level and plugin keys nested (`renderOptions`/`exportOptions`); destructured hook returns must avoid reserved words like `export`.
 - Section-view base caps and their primary black outlines are current-plane synchronous products; exact red/yellow overlap diagnostics are async refinements and must never own base cap responsiveness.
 - Model component highlight appearance is renderer-owned and shared by GLTF exterior materials plus section caps; derive cap tint from owner state, not mutated material channels.

@@ -1795,9 +1795,6 @@ importers:
       bowser:
         specifier: 'catalog:'
         version: 2.14.1
-      camera-controls:
-        specifier: 3.1.2
-        version: 3.1.2(three@0.184.0)
       class-variance-authority:
         specifier: 'catalog:'
         version: 0.7.1
@@ -6074,7 +6071,7 @@ packages:
     engines: {node: '>=20'}
 
   '@langchain/google-common@file:tarballs/langchain-fork/langchain-google-common-2.2.0-beta.0.tgz':
-    resolution: {integrity: sha512-WVFACXgrL8xmrUpoQMmqnhxvwcGFT0qamgbcZaQ2XOdYN22BmFC/zxs2aPnYwWMI17aLt/eAsJEcyKxKEtRAAg==, tarball: file:tarballs/langchain-fork/langchain-google-common-2.2.0-beta.0.tgz}
+    resolution: {integrity: sha512-sqojVHnippAexjwQwtrICtB9N+0xk4lWapLww6h3sPdJNmZqZpfTKHd9exO4wK1sT5rPJkz96HFDRU/hUn/2wg==, tarball: file:tarballs/langchain-fork/langchain-google-common-2.2.0-beta.0.tgz}
     version: 2.2.0-beta.0
     engines: {node: '>=20'}
     peerDependencies:

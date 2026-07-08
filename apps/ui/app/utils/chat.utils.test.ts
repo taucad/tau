@@ -598,7 +598,7 @@ describe('finalizeInterruptedToolParts', () => {
 
   it.each<{
     cause: RequestTerminationCause;
-    expectedCode: 'USER_INTERRUPTED' | 'CLIENT_DISCONNECTED' | 'STREAM_ERROR';
+    expectedCode: 'USER_INTERRUPTED' | 'CLIENT_DISCONNECTED' | 'STREAM_ERROR' | 'ORPHANED_TOOL_CALL';
     expectedMessage: string;
   }>([
     {
@@ -620,6 +620,11 @@ describe('finalizeInterruptedToolParts', () => {
       cause: 'error',
       expectedCode: 'STREAM_ERROR',
       expectedMessage: 'The chat stream ended before this tool could finish.',
+    },
+    {
+      cause: 'success',
+      expectedCode: 'ORPHANED_TOOL_CALL',
+      expectedMessage: 'The chat stream ended before this tool produced a result.',
     },
   ])(
     'demotes in-flight tools to the fallback error for cause $cause when ledger is unavailable',

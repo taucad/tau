@@ -47,6 +47,8 @@ const errorIcons = {
   // eslint-disable-next-line @typescript-eslint/naming-convention -- error code
   STREAM_ERROR: OctagonAlert,
   // eslint-disable-next-line @typescript-eslint/naming-convention -- error code
+  ORPHANED_TOOL_CALL: OctagonAlert,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- error code
   TOOL_NO_RESULTS: SearchX,
 } as const;
 

@@ -471,7 +471,10 @@ function fallbackInterruptedToolError(cause: RequestTerminationCause): { errorCo
     }
 
     case 'success': {
-      return { errorCode: 'USER_INTERRUPTED', message: 'Interrupted by user.' };
+      return {
+        errorCode: 'ORPHANED_TOOL_CALL',
+        message: 'The chat stream ended before this tool produced a result.',
+      };
     }
 
     default: {

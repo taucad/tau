@@ -137,6 +137,18 @@ export type ToolStreamError = {
 };
 
 /**
+ * Structured error for a streamed tool call whose input reached the UI but whose
+ * provider turn ended without a matching tool output.
+ * @public
+ */
+export type ToolOrphanedToolCallError = {
+  errorCode: 'ORPHANED_TOOL_CALL';
+  message: string;
+  toolName: string;
+  toolCallId: string;
+};
+
+/**
  * Structured error for when a tool completes successfully but returns no results.
  * Common with web extraction (blocked pages, JS-rendered content, auth-gated sites).
  * Treated as a recoverable, expected case rather than a failure.
@@ -162,6 +174,7 @@ export type ToolExecutionError =
   | ToolGenericExecutionError
   | ToolUserInterruptedError
   | ToolStreamError
+  | ToolOrphanedToolCallError
   | ToolNoResultsError;
 
 // =============================================================================

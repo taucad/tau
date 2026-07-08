@@ -69,7 +69,7 @@ import type { z } from 'zod';
 import { createKernelError } from '#kernels/kernel-helpers.js';
 import { cooperativeYield } from '#framework/async-polyfills.js';
 import { parameterDebounce, fileChangeDebounce } from '#framework/runtime-framework.constants.js';
-import { hashBytes, hashString } from '#utils/hash.utils.js';
+import { hashBytes, hashString } from '@taucad/utils/hash';
 import { RuntimeTracer } from '#framework/runtime-tracer.js';
 import { WorkerTelemetryCollector } from '#framework/worker-telemetry.js';
 import type { KernelMiddleware } from '#middleware/runtime-middleware.js';

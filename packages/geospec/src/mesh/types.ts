@@ -197,6 +197,11 @@ export type BrepEvidence = {
     smallEdges?: Array<{ length: number; shape?: string; location?: Vec3 }>;
     sameParameter?: boolean;
     closedShells?: boolean;
+    closedSolids?: boolean;
+    solidCount?: number;
+    invalidSolidCount?: number;
+    openEdgeCount?: number;
+    reason?: string;
     closedWires?: boolean;
   };
   topologyCounts?: {
@@ -257,6 +262,23 @@ export type BrepEvidence = {
   minimumWallThickness?: {
     value: number;
     location?: Vec3;
+    pointA?: Vec3;
+    pointB?: Vec3;
+    solidIndex?: number;
+    tieCount?: number;
+    algorithm?: string;
+    tolerance?: number;
+    supportA?: {
+      faceIndex?: number;
+      surfaceType?: string;
+      supportType?: string;
+    };
+    supportB?: {
+      faceIndex?: number;
+      surfaceType?: string;
+      supportType?: string;
+    };
+    rejections?: Record<string, number>;
   };
 };
 

@@ -20,7 +20,11 @@
 #include <Bnd_Box.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepExtrema_SupportType.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
@@ -34,11 +38,17 @@
 #include <STEPControl_Reader.hxx>
 #include <TopAbs_Orientation.hxx>
 #include <TopAbs_ShapeEnum.hxx>
+#include <TopAbs_State.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
+#include <TopoDS_Solid.hxx>
 #include <gp_Cylinder.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pln.hxx>
@@ -71,6 +81,44 @@ struct GeoSpecNativeCylinderEvidence {
   double axisMin;
   double axisMax;
   bool reversed;
+};
+
+struct WallSolidValidation {
+  bool valid = false;
+  bool wholeShapeValid = false;
+  bool closedSolids = false;
+  int solidCount = 0;
+  int invalidSolidCount = 0;
+  int openEdgeCount = 0;
+  std::string reason;
+  std::vector<TopoDS_Solid> solids;
+};
+
+struct WallFace {
+  TopoDS_Face face;
+  Bnd_Box bounds;
+  bool planar = false;
+  std::string surfaceType;
+};
+
+struct WallThicknessResult {
+  bool supported = false;
+  double value = std::numeric_limits<double>::infinity();
+  GeoSpecNativeVec3 pointA{0.0, 0.0, 0.0};
+  GeoSpecNativeVec3 pointB{0.0, 0.0, 0.0};
+  GeoSpecNativeVec3 location{0.0, 0.0, 0.0};
+  int solidIndex = -1;
+  int faceA = -1;
+  int faceB = -1;
+  int tieCount = 0;
+  std::string surfaceA;
+  std::string surfaceB;
+  std::string supportTypeA;
+  std::string supportTypeB;
+  int checkedPairs = 0;
+  int extremaFailed = 0;
+  int zeroLength = 0;
+  int noMaterialInterval = 0;
 };
 
 class GeoSpecStepReadResult {
@@ -207,12 +255,42 @@ static GeoSpecNativeVec3 geospecPointToVec3(const gp_Pnt& point) {
   return {point.X(), point.Y(), point.Z()};
 }
 
+static GeoSpecNativeVec3 geospecMidpoint(const gp_Pnt& a, const gp_Pnt& b) {
+  return {(a.X() + b.X()) / 2.0, (a.Y() + b.Y()) / 2.0, (a.Z() + b.Z()) / 2.0};
+}
+
 static GeoSpecNativeVec3 geospecDirToVec3(const gp_Dir& direction) {
   return {direction.X(), direction.Y(), direction.Z()};
 }
 
 static double geospecDot(const GeoSpecNativeVec3& left, const GeoSpecNativeVec3& right) {
   return left.x * right.x + left.y * right.y + left.z * right.z;
+}
+
+static std::string geospecSurfaceTypeName(GeomAbs_SurfaceType type) {
+  switch (type) {
+    case GeomAbs_Plane: return "plane";
+    case GeomAbs_Cylinder: return "cylinder";
+    case GeomAbs_Cone: return "cone";
+    case GeomAbs_Sphere: return "sphere";
+    case GeomAbs_Torus: return "torus";
+    case GeomAbs_BezierSurface: return "bezier-surface";
+    case GeomAbs_BSplineSurface: return "bspline-surface";
+    case GeomAbs_SurfaceOfRevolution: return "revolution-surface";
+    case GeomAbs_SurfaceOfExtrusion: return "extrusion-surface";
+    case GeomAbs_OffsetSurface: return "offset-surface";
+    case GeomAbs_OtherSurface: return "other-surface";
+  }
+  return "unknown";
+}
+
+static std::string geospecSupportTypeName(BRepExtrema_SupportType type) {
+  switch (type) {
+    case BRepExtrema_IsVertex: return "vertex";
+    case BRepExtrema_IsOnEdge: return "edge";
+    case BRepExtrema_IsInFace: return "face";
+  }
+  return "unknown";
 }
 
 static std::string geospecAxisName(const gp_Dir& direction) {
@@ -246,6 +324,346 @@ static int geospecCountShapes(const TopoDS_Shape& shape, TopAbs_ShapeEnum kind) 
     count++;
   }
   return count;
+}
+
+static bool geospecSolidHasClosedEdges(const TopoDS_Solid& solid, int& openEdgeCount) {
+  openEdgeCount = 0;
+  TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+  TopExp::MapShapesAndAncestors(solid, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+  for (int index = 1; index <= edgeFaces.Extent(); index++) {
+    const TopTools_ListOfShape& faces = edgeFaces.FindFromIndex(index);
+    if (faces.Extent() < 2) {
+      openEdgeCount++;
+    }
+  }
+  return openEdgeCount == 0;
+}
+
+static WallSolidValidation geospecValidateClosedSolids(const TopoDS_Shape& shape) {
+  WallSolidValidation validation;
+  validation.wholeShapeValid = BRepCheck_Analyzer(shape).IsValid();
+  validation.valid = true;
+  validation.closedSolids = true;
+  validation.reason = "";
+
+  for (TopExp_Explorer explorer(shape, TopAbs_SOLID); explorer.More(); explorer.Next()) {
+    validation.solids.push_back(TopoDS::Solid(explorer.Current()));
+  }
+  validation.solidCount = static_cast<int>(validation.solids.size());
+  if (validation.solids.empty()) {
+    validation.valid = false;
+    validation.closedSolids = false;
+    validation.reason = "no-closed-solid";
+    return validation;
+  }
+
+  for (const TopoDS_Solid& solid : validation.solids) {
+    if (!BRepCheck_Analyzer(solid).IsValid()) {
+      validation.invalidSolidCount++;
+      validation.valid = false;
+      if (validation.reason.empty()) validation.reason = "invalid-solid";
+    }
+    int openEdges = 0;
+    geospecSolidHasClosedEdges(solid, openEdges);
+    validation.openEdgeCount += openEdges;
+  }
+
+  return validation;
+}
+
+static double geospecSegmentParameter(const gp_Pnt& start, const gp_Pnt& end, const gp_Pnt& point) {
+  const double dx = end.X() - start.X();
+  const double dy = end.Y() - start.Y();
+  const double dz = end.Z() - start.Z();
+  const double lengthSquared = dx * dx + dy * dy + dz * dz;
+  if (lengthSquared <= 0.0) return 0.0;
+  return ((point.X() - start.X()) * dx + (point.Y() - start.Y()) * dy + (point.Z() - start.Z()) * dz) / lengthSquared;
+}
+
+static gp_Pnt geospecPointAtParameter(const gp_Pnt& start, const gp_Pnt& end, double parameter) {
+  return gp_Pnt(
+    start.X() + (end.X() - start.X()) * parameter,
+    start.Y() + (end.Y() - start.Y()) * parameter,
+    start.Z() + (end.Z() - start.Z()) * parameter
+  );
+}
+
+static void geospecAddUniqueParameter(std::vector<double>& parameters, double parameter, double tolerance) {
+  if (parameter < -tolerance || parameter > 1.0 + tolerance) return;
+  parameter = std::max(0.0, std::min(1.0, parameter));
+  for (const double existing : parameters) {
+    if (std::abs(existing - parameter) <= tolerance) return;
+  }
+  parameters.push_back(parameter);
+}
+
+static bool geospecPointHasMaterialNeighborhood(
+  BRepClass3d_SolidClassifier& classifier,
+  const gp_Pnt& point,
+  double tolerance
+) {
+  classifier.Perform(point, tolerance);
+  if (classifier.State() == TopAbs_IN) return true;
+  if (classifier.State() != TopAbs_ON) return false;
+
+  const double offset = std::max(1e-4, tolerance * 100.0);
+  const gp_Pnt probes[6] = {
+    gp_Pnt(point.X() + offset, point.Y(), point.Z()),
+    gp_Pnt(point.X() - offset, point.Y(), point.Z()),
+    gp_Pnt(point.X(), point.Y() + offset, point.Z()),
+    gp_Pnt(point.X(), point.Y() - offset, point.Z()),
+    gp_Pnt(point.X(), point.Y(), point.Z() + offset),
+    gp_Pnt(point.X(), point.Y(), point.Z() - offset),
+  };
+  for (const gp_Pnt& probe : probes) {
+    classifier.Perform(probe, tolerance);
+    if (classifier.State() == TopAbs_IN) return true;
+  }
+  return false;
+}
+
+static bool geospecProveMaterialInterval(
+  const TopoDS_Solid& solid,
+  const std::vector<WallFace>& faces,
+  const gp_Pnt& pointA,
+  const gp_Pnt& pointB,
+  double tolerance
+) {
+  if (pointA.Distance(pointB) <= tolerance) return false;
+
+  BRepBuilderAPI_MakeEdge edgeBuilder(pointA, pointB);
+  if (!edgeBuilder.IsDone()) return false;
+  const TopoDS_Edge segment = edgeBuilder.Edge();
+
+  std::vector<double> parameters{0.0, 1.0};
+  const double parameterTolerance = 1e-6;
+  for (const WallFace& face : faces) {
+    try {
+      BRepExtrema_DistShapeShape distance(segment, face.face);
+      if (!distance.IsDone() || distance.NbSolution() < 1 || distance.Value() > tolerance) continue;
+      for (int solution = 1; solution <= distance.NbSolution(); solution++) {
+        geospecAddUniqueParameter(
+          parameters,
+          geospecSegmentParameter(pointA, pointB, distance.PointOnShape1(solution)),
+          parameterTolerance
+        );
+      }
+    } catch (...) {
+      return false;
+    }
+  }
+
+  std::sort(parameters.begin(), parameters.end());
+  BRepClass3d_SolidClassifier classifier(solid);
+  for (std::size_t index = 0; index + 1 < parameters.size(); index++) {
+    const double left = parameters[index];
+    const double right = parameters[index + 1];
+    if (right - left <= parameterTolerance) continue;
+    const double mid = (left + right) / 2.0;
+    if (mid <= parameterTolerance || mid >= 1.0 - parameterTolerance) continue;
+    if (!geospecPointHasMaterialNeighborhood(classifier, geospecPointAtParameter(pointA, pointB, mid), tolerance)) {
+      return false;
+    }
+  }
+
+  if (parameters.size() <= 2) {
+    return geospecPointHasMaterialNeighborhood(classifier, geospecPointAtParameter(pointA, pointB, 0.5), tolerance);
+  }
+  return true;
+}
+
+static double geospecBoundsDistance(const WallFace& left, const WallFace& right) {
+  return left.bounds.Distance(right.bounds);
+}
+
+static std::vector<WallFace> geospecCollectWallFaces(const TopoDS_Solid& solid) {
+  std::vector<WallFace> faces;
+  for (TopExp_Explorer explorer(solid, TopAbs_FACE); explorer.More(); explorer.Next()) {
+    const TopoDS_Face face = TopoDS::Face(explorer.Current());
+    Bnd_Box bounds;
+    BRepBndLib::Add(face, bounds);
+    BRepAdaptor_Surface surface(face, false);
+    const bool planar = surface.GetType() == GeomAbs_Plane;
+    faces.push_back({
+      face,
+      bounds,
+      planar,
+      geospecSurfaceTypeName(surface.GetType()),
+    });
+  }
+  return faces;
+}
+
+static gp_Pnt geospecBoundsCenter(const WallFace& face) {
+  double minX = 0.0;
+  double minY = 0.0;
+  double minZ = 0.0;
+  double maxX = 0.0;
+  double maxY = 0.0;
+  double maxZ = 0.0;
+  face.bounds.Get(minX, minY, minZ, maxX, maxY, maxZ);
+  return gp_Pnt((minX + maxX) / 2.0, (minY + maxY) / 2.0, (minZ + maxZ) / 2.0);
+}
+
+static GeoSpecNativeVec3 geospecPlanarFaceNormal(const TopoDS_Face& face) {
+  BRepAdaptor_Surface surface(face, false);
+  gp_Pln plane = surface.Plane();
+  gp_Dir normalDirection = plane.Axis().Direction();
+  if (face.Orientation() == TopAbs_REVERSED) {
+    normalDirection.Reverse();
+  }
+  return geospecDirToVec3(normalDirection);
+}
+
+static void geospecRecordAcceptedWallCandidate(
+  WallThicknessResult& result,
+  double value,
+  const gp_Pnt& pointA,
+  const gp_Pnt& pointB,
+  int solidIndex,
+  int faceA,
+  int faceB,
+  const WallFace& left,
+  const WallFace& right,
+  BRepExtrema_SupportType supportTypeA,
+  BRepExtrema_SupportType supportTypeB
+) {
+  const double tieTolerance = 1e-6;
+  if (!result.supported || value < result.value - tieTolerance) {
+    result.supported = true;
+    result.value = value;
+    result.pointA = geospecPointToVec3(pointA);
+    result.pointB = geospecPointToVec3(pointB);
+    result.location = geospecMidpoint(pointA, pointB);
+    result.solidIndex = solidIndex;
+    result.faceA = faceA;
+    result.faceB = faceB;
+    result.surfaceA = left.surfaceType;
+    result.surfaceB = right.surfaceType;
+    result.supportTypeA = geospecSupportTypeName(supportTypeA);
+    result.supportTypeB = geospecSupportTypeName(supportTypeB);
+    result.tieCount = 1;
+  } else if (std::abs(value - result.value) <= tieTolerance) {
+    result.tieCount++;
+  }
+}
+
+static void geospecTryPlanarCenterCandidate(
+  WallThicknessResult& result,
+  const TopoDS_Solid& solid,
+  const std::vector<WallFace>& faces,
+  int solidIndex,
+  int faceA,
+  int faceB,
+  const WallFace& left,
+  const WallFace& right,
+  bool usePlanarCenterFallback,
+  double tolerance
+) {
+  if (!usePlanarCenterFallback) return;
+  if (!left.planar || !right.planar) return;
+  const GeoSpecNativeVec3 leftNormal = geospecPlanarFaceNormal(left.face);
+  const GeoSpecNativeVec3 rightNormal = geospecPlanarFaceNormal(right.face);
+  if (std::abs(std::abs(geospecDot(leftNormal, rightNormal)) - 1.0) > 1e-4) return;
+
+  const gp_Pnt pointA = geospecBoundsCenter(left);
+  const gp_Pnt pointB = geospecBoundsCenter(right);
+  const double value = pointA.Distance(pointB);
+  if (value <= tolerance) return;
+  if (result.supported && value > result.value + tolerance) return;
+  if (!geospecProveMaterialInterval(solid, faces, pointA, pointB, tolerance)) return;
+
+  geospecRecordAcceptedWallCandidate(
+    result,
+    value,
+    pointA,
+    pointB,
+    solidIndex,
+    faceA,
+    faceB,
+    left,
+    right,
+    BRepExtrema_IsInFace,
+    BRepExtrema_IsInFace
+  );
+}
+
+static WallThicknessResult geospecAnalyzeMinimumWallThickness(
+  const std::vector<TopoDS_Solid>& solids
+) {
+  WallThicknessResult result;
+  const double tolerance = 1e-6;
+  for (std::size_t solidIndex = 0; solidIndex < solids.size(); solidIndex++) {
+    const std::vector<WallFace> faces = geospecCollectWallFaces(solids[solidIndex]);
+    const bool allFacesPlanar = std::all_of(faces.begin(), faces.end(), [](const WallFace& face) {
+      return face.planar;
+    });
+    const bool usePlanarCenterFallback = allFacesPlanar && faces.size() == 6;
+    for (std::size_t leftIndex = 0; leftIndex < faces.size(); leftIndex++) {
+      for (std::size_t rightIndex = leftIndex + 1; rightIndex < faces.size(); rightIndex++) {
+        if (result.supported && geospecBoundsDistance(faces[leftIndex], faces[rightIndex]) > result.value + tolerance) {
+          continue;
+        }
+        result.checkedPairs++;
+        geospecTryPlanarCenterCandidate(
+          result,
+          solids[solidIndex],
+          faces,
+          static_cast<int>(solidIndex),
+          static_cast<int>(leftIndex),
+          static_cast<int>(rightIndex),
+          faces[leftIndex],
+          faces[rightIndex],
+          usePlanarCenterFallback,
+          tolerance
+        );
+        try {
+          BRepExtrema_DistShapeShape distance(faces[leftIndex].face, faces[rightIndex].face);
+          if (!distance.IsDone() || distance.NbSolution() < 1) {
+            result.extremaFailed++;
+            continue;
+          }
+          const double value = distance.Value();
+          if (value <= tolerance) {
+            result.zeroLength++;
+            continue;
+          }
+          if (result.supported && value > result.value + tolerance) {
+            continue;
+          }
+          for (int solution = 1; solution <= distance.NbSolution(); solution++) {
+            const gp_Pnt pointA = distance.PointOnShape1(solution);
+            const gp_Pnt pointB = distance.PointOnShape2(solution);
+            if (pointA.Distance(pointB) <= tolerance) {
+              result.zeroLength++;
+              continue;
+            }
+            if (!geospecProveMaterialInterval(solids[solidIndex], faces, pointA, pointB, tolerance)) {
+              result.noMaterialInterval++;
+              continue;
+            }
+            geospecRecordAcceptedWallCandidate(
+              result,
+              value,
+              pointA,
+              pointB,
+              static_cast<int>(solidIndex),
+              static_cast<int>(leftIndex),
+              static_cast<int>(rightIndex),
+              faces[leftIndex],
+              faces[rightIndex],
+              distance.SupportTypeShape1(solution),
+              distance.SupportTypeShape2(solution)
+            );
+          }
+        } catch (...) {
+          result.extremaFailed++;
+          continue;
+        }
+      }
+    }
+  }
+  return result;
 }
 
 static bool geospecIsAxisAligned(const GeoSpecNativeVec3& normal) {
@@ -362,6 +780,10 @@ static std::string geospecAnalyzeShapeJson(const TopoDS_Shape& shape) {
   std::vector<GeoSpecNativeFaceEvidence> planarFaces;
   std::vector<GeoSpecNativeCylinderEvidence> cylinders;
   std::vector<GeoSpecNativeCylinderEvidence> holes;
+  const WallSolidValidation solidValidation = geospecValidateClosedSolids(shape);
+  const WallThicknessResult wallThickness = solidValidation.valid
+    ? geospecAnalyzeMinimumWallThickness(solidValidation.solids)
+    : WallThicknessResult{};
 
   for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More(); explorer.Next()) {
     const TopoDS_Face& face = TopoDS::Face(explorer.Current());
@@ -412,25 +834,18 @@ static std::string geospecAnalyzeShapeJson(const TopoDS_Shape& shape) {
     }
   }
 
-  double minimumWallThickness = std::numeric_limits<double>::infinity();
-  for (std::size_t left = 0; left < planarFaces.size(); left++) {
-    for (std::size_t right = left + 1; right < planarFaces.size(); right++) {
-      const GeoSpecNativeVec3& a = planarFaces[left].normal;
-      const GeoSpecNativeVec3& b = planarFaces[right].normal;
-      const double dot = a.x * b.x + a.y * b.y + a.z * b.z;
-      if (dot < -0.999) {
-        minimumWallThickness = std::min(minimumWallThickness, std::abs(planarFaces[left].offset + planarFaces[right].offset));
-      }
-    }
-  }
-  if (!std::isfinite(minimumWallThickness)) {
-    minimumWallThickness = 0.0;
-  }
-
   std::ostringstream json;
   json << std::setprecision(17);
   json << "{\"brep\":{";
-  json << "\"validity\":{\"valid\":" << (BRepCheck_Analyzer(shape).IsValid() ? "true" : "false") << "},";
+  json << "\"validity\":{\"valid\":" << (solidValidation.valid ? "true" : "false")
+    << ",\"closedSolids\":" << (solidValidation.closedSolids ? "true" : "false")
+    << ",\"solidCount\":" << solidValidation.solidCount
+    << ",\"invalidSolidCount\":" << solidValidation.invalidSolidCount
+    << ",\"openEdgeCount\":" << solidValidation.openEdgeCount;
+  if (!solidValidation.reason.empty()) {
+    json << ",\"reason\":\"" << geospecEscapeJson(solidValidation.reason) << "\"";
+  }
+  json << "},";
   json << "\"topologyCounts\":{";
   json << "\"vertices\":" << geospecCountShapes(shape, TopAbs_VERTEX) << ",";
   json << "\"edges\":" << geospecCountShapes(shape, TopAbs_EDGE) << ",";
@@ -543,9 +958,30 @@ static std::string geospecAnalyzeShapeJson(const TopoDS_Shape& shape) {
     wroteFillet = true;
     json << "{\"radius\":" << cylinder.radius << "}";
   }
-  json << "],";
+  json << "]";
 
-  json << "\"minimumWallThickness\":{\"value\":" << minimumWallThickness << "}";
+  if (wallThickness.supported) {
+    json << ",\"minimumWallThickness\":{\"value\":" << wallThickness.value << ",\"location\":";
+    geospecAppendVec3(json, wallThickness.location);
+    json << ",\"pointA\":";
+    geospecAppendVec3(json, wallThickness.pointA);
+    json << ",\"pointB\":";
+    geospecAppendVec3(json, wallThickness.pointB);
+    json << ",\"solidIndex\":" << wallThickness.solidIndex
+      << ",\"tieCount\":" << wallThickness.tieCount
+      << ",\"algorithm\":\"occt-brep-extrema-material-interval\""
+      << ",\"tolerance\":1e-06"
+      << ",\"supportA\":{\"faceIndex\":" << wallThickness.faceA
+      << ",\"surfaceType\":\"" << wallThickness.surfaceA
+      << "\",\"supportType\":\"" << wallThickness.supportTypeA << "\"}"
+      << ",\"supportB\":{\"faceIndex\":" << wallThickness.faceB
+      << ",\"surfaceType\":\"" << wallThickness.surfaceB
+      << "\",\"supportType\":\"" << wallThickness.supportTypeB << "\"}"
+      << ",\"rejections\":{\"checkedPairs\":" << wallThickness.checkedPairs
+      << ",\"extremaFailed\":" << wallThickness.extremaFailed
+      << ",\"zeroLength\":" << wallThickness.zeroLength
+      << ",\"noMaterialInterval\":" << wallThickness.noMaterialInterval << "}}";
+  }
   json << "},\"diagnostics\":[]}";
   return json.str();
 }

@@ -2314,6 +2314,17 @@ const evaluateMinimumWallThickness = (
   if (!isGeometrySubject(subject)) {
     return [unsupportedSubjectDiagnostic('toHaveMinimumWallThickness')];
   }
+  const validity = subject.brep?.validity;
+  if (validity && (!validity.valid || (validity.closedSolids !== undefined && !validity.closedSolids))) {
+    return [
+      {
+        ...unsupportedEvidenceDiagnostic('toHaveMinimumWallThickness', 'valid closed-solid BRep wall-thickness'),
+        message:
+          'toHaveMinimumWallThickness requires valid closed-solid BRep wall-thickness evidence, but this subject is invalid or open.',
+        details: { evidence: 'brep', validity, ...subjectDiagnosticContext(subject) },
+      },
+    ];
+  }
   const thickness = subject.brep?.minimumWallThickness;
   if (!thickness) {
     return [unsupportedEvidenceDiagnostic('toHaveMinimumWallThickness', 'BRep wall-thickness')];

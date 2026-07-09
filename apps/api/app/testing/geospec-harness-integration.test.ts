@@ -475,18 +475,16 @@ describe('GeoSpec headless API harness integration', () => {
       }>;
     };
     const overlap = details.overlaps?.[0];
-    expect(overlap).toBeDefined();
-    if (!overlap) {
-      throw new Error('Expected one component-overlap detail');
-    }
-    expect(overlap.leftLabel).toBe('sun#0');
-    expect(overlap.rightLabel).toBe('ring#0');
     // Color evidence (leftColor/rightColor) is optional and geospec only
     // populates it for GLB-backed subjects (buildRecordFromGltf); the triangle-
     // soup path this synthetic mesh-buffer fixture exercises does not carry per-
     // primitive color. Tracked separately — see the spawned color-propagation task.
-    expect(overlap.intersectionVolume).toBeCloseTo(600, 2);
-    expect(overlap.penetration).toBe('positive-volume');
+    expect(overlap).toMatchObject({
+      leftLabel: 'sun#0',
+      rightLabel: 'ring#0',
+      intersectionVolume: expect.closeTo(600, 2),
+      penetration: 'positive-volume',
+    });
   });
 
   it('should pass test_model filters through the API harness into the in-process GeoSpec runner', async () => {

@@ -925,10 +925,13 @@ describe('rpc-handlers', () => {
         if (!result.success) {
           expect(result.errorCode).toBe('RENDER_TIMEOUT');
           expect(result.message).toContain('main.scad');
-          expect(result.message).not.toMatch(/simpler|simplify|wait and retry/i);
-          expect(result.message).toMatch(/inspect recent model changes/i);
-          expect(result.message).toMatch(/fix the render blocker/i);
-          expect(result.message).toMatch(/increase render timeout/i);
+          const lowerMessage = result.message.toLowerCase();
+          expect(lowerMessage).not.toContain('simpler');
+          expect(lowerMessage).not.toContain('simplify');
+          expect(lowerMessage).not.toContain('wait and retry');
+          expect(result.message).toContain('Inspect recent model changes');
+          expect(result.message).toContain('fix the render blocker');
+          expect(result.message).toContain('increase render timeout');
           expect(rpcClientErrorCodeSchema.safeParse(result.errorCode).success).toBe(true);
         }
       });

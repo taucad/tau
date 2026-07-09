@@ -83,3 +83,29 @@ describe('inspectGeometry unmatched diagnostics', () => {
     expect(messages).toEqual(['Geometry selector 0 matched no entities.', 'Geometry selector 2 matched no entities.']);
   });
 });
+
+describe('inspectGeometry STEP occurrence fallback', () => {
+  it('keeps a mesh component selectable when no STEP product name matches it', () => {
+    const subject = {
+      ...subjectFromTriangles([
+        ...trianglesFromFlat('housing', boxPositions),
+        ...trianglesFromFlat('gear_1', boxPositions),
+      ]),
+      step: {
+        productStructure: [
+          { name: 'housing', path: '/housing' },
+          // The exported mesh component is 'gear_1'; this product name does not
+          // match it exactly, so it must not swallow the mesh occurrence.
+          { name: 'gear', path: '/gear' },
+        ],
+      },
+    } as unknown as GeometrySubject;
+
+    const matched = inspectGeometry({ subject, selectors: ['gear_1'] });
+    expect(matched.selections[0]!.matches.map((entity) => entity.name)).toContain('gear_1');
+
+    // The matched product still resolves under its STEP name.
+    const housing = inspectGeometry({ subject, selectors: ['housing'] });
+    expect(housing.selections[0]!.matches.map((entity) => entity.name)).toContain('housing');
+  });
+});

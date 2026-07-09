@@ -125,9 +125,12 @@ const meshOccurrenceEntities = (subject: GeometrySubject): GeometryInspectionOcc
   }));
 };
 
-const stepOccurrenceEntities = (subject: GeometrySubject): GeometryInspectionOccurrenceEntity[] =>
+const stepOccurrenceEntities = (
+  subject: GeometrySubject,
+  meshEntities: GeometryInspectionOccurrenceEntity[],
+): GeometryInspectionOccurrenceEntity[] =>
   (subject.step?.productStructure ?? []).flatMap((product) => {
-    const meshMatch = meshOccurrenceEntities(subject).find((entity) => entity.name === product.name);
+    const meshMatch = meshEntities.find((entity) => entity.name === product.name);
     if (!meshMatch) {
       return [];
     }
@@ -135,8 +138,16 @@ const stepOccurrenceEntities = (subject: GeometrySubject): GeometryInspectionOcc
   });
 
 const occurrenceEntities = (subject: GeometrySubject): GeometryInspectionOccurrenceEntity[] => {
-  const stepEntities = stepOccurrenceEntities(subject);
-  return stepEntities.length > 0 ? stepEntities : meshOccurrenceEntities(subject);
+  const meshEntities = meshOccurrenceEntities(subject);
+  const stepEntities = stepOccurrenceEntities(subject, meshEntities);
+  if (stepEntities.length === 0) {
+    return meshEntities;
+  }
+  // A STEP product whose exported mesh component was renamed/suffixed produces
+  // no step match; keep those unclaimed mesh occurrences selectable instead of
+  // dropping them once any other product matches.
+  const claimed = new Set(stepEntities.map((entity) => entity.name));
+  return [...stepEntities, ...meshEntities.filter((entity) => !claimed.has(entity.name))];
 };
 
 const componentSelectorFromGeometrySelector = (

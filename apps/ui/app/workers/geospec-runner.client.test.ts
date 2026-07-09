@@ -31,7 +31,7 @@ const successResult = (requestId: string): GeoSpecRunnerWorkerResponse => ({
 
 class FakeGeoSpecWorker {
   public readonly postMessage = vi.fn((message: GeoSpecRunnerWorkerRequest, _transfer?: Transferable[]) => {
-    if (message.type === 'initialize') {
+    if (message.type === 'initialize' && this.autoInitialize) {
       queueMicrotask(() => {
         this.emitMessage({
           type: 'initialized',
@@ -60,6 +60,7 @@ class FakeGeoSpecWorker {
 
   public readonly terminate = vi.fn();
   public autoResolveRuns = true;
+  public autoInitialize = true;
   private messageListener: WorkerMessageListener | undefined;
   private errorListener: WorkerErrorListener | undefined;
 
@@ -363,5 +364,60 @@ describe('createGeoSpecWorkerRpcClient', () => {
     expect(firstWorker.terminate).toHaveBeenCalledTimes(1);
     expect(secondWorker.terminate).not.toHaveBeenCalled();
     await client.close();
+  });
+
+  it('should fail in-flight runs when the worker closes unexpectedly', async () => {
+    const fileManagerWorker = new FakeFileManagerWorker();
+    const geoSpecWorker = new FakeGeoSpecWorker();
+    geoSpecWorker.autoResolveRuns = false;
+    const client = createGeoSpecWorkerRpcClient({
+      openFileSystemBridge: createOpenFileSystemBridge(fileManagerWorker),
+      projectRootPath: '/projects/proj-vase',
+      runtimeConfig,
+      createWorker: () => geoSpecWorker as unknown as Worker,
+    });
+
+    const runPromise = client.runTests({ files: ['main.geospec.ts'] });
+    await vi.waitFor(() => {
+      expect(geoSpecWorker.postMessage.mock.calls.some((call) => call[0].type === 'run')).toBe(true);
+    });
+
+    // Unsolicited close: no close() request is in flight, so the run must fail rather than hang.
+    geoSpecWorker.emitMessage({ type: 'closed', requestId: 'unsolicited-close' });
+
+    await expect(runPromise).resolves.toEqual({
+      success: false,
+      errorCode: 'UNKNOWN',
+      message: 'GeoSpec worker closed unexpectedly.',
+    });
+    expect(geoSpecWorker.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it('should fail runTests when worker initialization times out', async () => {
+    vi.useFakeTimers();
+    try {
+      const fileManagerWorker = new FakeFileManagerWorker();
+      const geoSpecWorker = new FakeGeoSpecWorker();
+      geoSpecWorker.autoInitialize = false;
+      const client = createGeoSpecWorkerRpcClient({
+        openFileSystemBridge: createOpenFileSystemBridge(fileManagerWorker),
+        projectRootPath: '/projects/proj-vase',
+        runtimeConfig,
+        initTimeout: 50,
+        createWorker: () => geoSpecWorker as unknown as Worker,
+      });
+
+      const runPromise = client.runTests({ files: ['main.geospec.ts'] });
+      await vi.advanceTimersByTimeAsync(51);
+
+      await expect(runPromise).resolves.toEqual({
+        success: false,
+        errorCode: 'UNKNOWN',
+        message: 'GeoSpec worker initialization timed out after 50ms.',
+      });
+      expect(geoSpecWorker.terminate).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

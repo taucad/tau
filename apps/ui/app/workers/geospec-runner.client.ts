@@ -15,6 +15,8 @@ export type GeoSpecWorkerRpcClientOptions = {
   createWorker?: CreateGeoSpecWorker;
   /** Milliseconds. */
   runnerTimeout?: number;
+  /** Milliseconds to wait for worker initialization before failing in-flight runs. */
+  initTimeout?: number;
   /** Milliseconds to wait after cooperative abort before hard-resetting the worker. */
   abortGrace?: number;
 };
@@ -61,10 +63,12 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
   let rejectInitialize: ((error: Error) => void) | undefined;
   let closeRequestId: string | undefined;
   let resolveClose: (() => void) | undefined;
+  let initTimeoutId: ReturnType<typeof globalThis.setTimeout> | undefined;
   let closed = false;
   const pendingRuns = new Map<string, PendingRun>();
 
   const runnerTimeout = options.runnerTimeout ?? defaultTimeout;
+  const initTimeout = options.initTimeout ?? defaultTimeout;
   const abortGrace = options.abortGrace ?? defaultAbortGrace;
 
   const requireSessionId = (): string => {
@@ -107,6 +111,10 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
   };
 
   const clearInitialize = (): void => {
+    if (initTimeoutId !== undefined) {
+      globalThis.clearTimeout(initTimeoutId);
+      initTimeoutId = undefined;
+    }
     initializePromise = undefined;
     initializeRequestId = undefined;
     resolveInitialize = undefined;
@@ -144,7 +152,13 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
     }
 
     if (message.type === 'closed') {
-      if (closeRequestId !== undefined && message.requestId !== closeRequestId) {
+      if (closeRequestId === undefined) {
+        // Unsolicited close: the worker went away without a close() request, so
+        // fail any in-flight runs instead of leaving their promises unresolved.
+        terminateWorker('GeoSpec worker closed unexpectedly.');
+        return;
+      }
+      if (message.requestId !== closeRequestId) {
         return;
       }
       resolveClose?.();
@@ -198,6 +212,9 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
       resolveInitialize = resolve;
       rejectInitialize = reject;
     });
+    initTimeoutId = globalThis.setTimeout(() => {
+      terminateWorker(`GeoSpec worker initialization timed out after ${initTimeout}ms.`);
+    }, initTimeout);
 
     try {
       const request: GeoSpecRunnerWorkerRequest = {

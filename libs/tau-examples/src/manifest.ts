@@ -46,8 +46,7 @@ export type ExampleManifest = {
     | 't-slot-rail'
     | 'table'
     | 'tray'
-    | 'v8-engine-block'
-    | 'v8-engine-brep'
+    | 'v8-engine-rev2'
     | 'vase'
     | 'wavy-vase'
     | 'wedge-door-stopper';

@@ -45,10 +45,4 @@ describe('geospec example suites (regression backbone)', () => {
     expect(report.failed).toBe(0);
     expect(report.success).toBe(true);
   });
-
-  it('v8-engine-brep geospec suite passes', { timeout: 600_000 }, async () => {
-    const report = await runGeoSpecSuite('libs/tau-examples/src/kernels/replicad/v8-engine-brep');
-    expect(report.failed).toBe(0);
-    expect(report.success).toBe(true);
-  });
 });

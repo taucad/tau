@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import type { Model } from '@taucad/chat';
 import { resolveKernel } from '@taucad/types/constants';
 import type { ResolvedModel } from '#hooks/use-models.js';
@@ -72,6 +72,13 @@ const modelCatalogue: Model[] = [
     provider: { id: 'openai', name: 'OpenAI' },
     details: { family: 'gpt' },
   } as unknown as Model,
+  {
+    id: 'xai-grok-4.5',
+    name: 'Grok 4.5',
+    description: '',
+    provider: { id: 'xai', name: 'xAI' },
+    details: { family: 'grok' },
+  } as unknown as Model,
 ];
 
 // The selector must NOT read selectedModel/setSelectedModelId from
@@ -99,14 +106,23 @@ vi.mock('#hooks/use-models.js', () => ({
 
 // Capture the props passed to ComboBoxResponsive so we can drive its
 // onSelect callback in tests without rendering a real popover.
-const capturedComboBox: { onSelect?: (id: string) => void; value?: unknown } = {};
+const capturedComboBox: {
+  groupedItems?: Array<{ name: string; items: Model[] }>;
+  onSelect?: (id: string) => void;
+  renderLabel?: (item: Model, selectedItem?: Model) => React.ReactNode;
+  value?: unknown;
+} = {};
 vi.mock('#components/ui/combobox-responsive.js', () => ({
   ComboBoxResponsive: (properties: {
+    readonly groupedItems?: Array<{ name: string; items: Model[] }>;
     readonly onSelect?: (id: string) => void;
+    readonly renderLabel?: (item: Model, selectedItem?: Model) => React.ReactNode;
     readonly value?: unknown;
     readonly children?: React.ReactNode;
   }): React.JSX.Element => {
+    capturedComboBox.groupedItems = properties.groupedItems;
     capturedComboBox.onSelect = properties.onSelect;
+    capturedComboBox.renderLabel = properties.renderLabel;
     capturedComboBox.value = properties.value;
     return <div data-testid='combobox'>{properties.children}</div>;
   },
@@ -141,6 +157,7 @@ describe('ChatModelSelector — chat-scoped read + dual-write', () => {
     vi.clearAllMocks();
     chatModelState.current = stubModel;
     capturedComboBox.onSelect = undefined;
+    capturedComboBox.renderLabel = undefined;
     capturedComboBox.value = undefined;
   });
 
@@ -182,5 +199,23 @@ describe('ChatModelSelector — chat-scoped read + dual-write', () => {
     renderSelector();
     capturedComboBox.onSelect?.('does-not-exist');
     expect(setActiveModel).not.toHaveBeenCalled();
+  });
+
+  it('renders the Grok family icon for xAI models', () => {
+    renderSelector();
+    const grok = capturedComboBox.groupedItems
+      ?.flatMap((group) => group.items)
+      .find((model) => model.id === 'xai-grok-4.5');
+
+    if (!grok) {
+      throw new Error('Expected Grok model in selector items');
+    }
+    const label = capturedComboBox.renderLabel?.(grok, undefined);
+    if (!label) {
+      throw new Error('Expected Grok model label renderer output');
+    }
+    render(label);
+
+    expect(screen.getAllByTestId('svg-icon').map((icon) => icon.textContent)).toContain('grok');
   });
 });

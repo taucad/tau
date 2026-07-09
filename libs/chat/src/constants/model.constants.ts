@@ -11,6 +11,7 @@ export const modelProviders = [
   'cerebras',
   'together',
   'morph',
+  'xai',
 ] as const;
 
 /**
@@ -27,4 +28,5 @@ export const modelFamilies = [
   'qwen',
   'llama',
   'minimax',
+  'grok',
 ] as const;

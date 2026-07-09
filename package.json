@@ -84,6 +84,7 @@
     "@langchain/ollama": "catalog:",
     "@langchain/openai": "catalog:",
     "@langchain/tavily": "catalog:",
+    "@langchain/xai": "catalog:",
     "@monaco-editor/react": "^4.7.0",
     "@morphllm/morphsdk": "^0.2.180",
     "@msgpack/msgpack": "catalog:",

@@ -260,11 +260,11 @@ const embedGltfResources = (
 const buildTopologyPayload = ({
   payload,
   meshPrimitiveCounts,
-  solidNodeBySolidIndex,
+  solidNodesBySolidIndex,
 }: {
   payload: KittyCadBrepPayload;
   meshPrimitiveCounts: readonly number[];
-  solidNodeBySolidIndex: ReadonlyMap<number, { nodeIndex: number; meshIndex: number | undefined }>;
+  solidNodesBySolidIndex: ReadonlyMap<number, ReadonlyArray<{ nodeIndex: number; meshIndex: number | undefined }>>;
 }): BuildTopologyResult | undefined => {
   const warnings: JSONObject[] = [];
   const components: TauTopologyComponent[] = [];
@@ -278,8 +278,10 @@ const buildTopologyPayload = ({
       continue;
     }
 
-    const meshIndex = typeof solid.mesh === 'number' ? solid.mesh : solidNodeBySolidIndex.get(solidIndex)?.meshIndex;
-    const nodeIndex = solidNodeBySolidIndex.get(solidIndex)?.nodeIndex;
+    const bindings = solidNodesBySolidIndex.get(solidIndex) ?? [];
+    const primaryBinding = bindings[0];
+    const meshIndex = typeof solid.mesh === 'number' ? solid.mesh : primaryBinding?.meshIndex;
+    const nodeIndex = primaryBinding?.nodeIndex;
     if (meshIndex === undefined || nodeIndex === undefined) {
       warnings.push({ code: 'KBR_SOLID_NOT_BOUND_TO_NODE_OR_MESH', solidIndex });
       continue;
@@ -304,7 +306,11 @@ const buildTopologyPayload = ({
     }
 
     const bodyId = formatBodyComponentId(solidIndex);
-    bodyComponentIdsByNode.set(nodeIndex, bodyId);
+    // Every node referencing this solid (all instances) shares the one body
+    // component, so bind them all rather than only the representative node.
+    for (const binding of bindings) {
+      bodyComponentIdsByNode.set(binding.nodeIndex, bodyId);
+    }
     const edgeUses = buildEdgeUses(payload, faceIndices, warnings);
     const adjacencyByFace = buildAdjacencyByFace(edgeUses);
     const faceComponentIds = faceIndices.map((faceIndex) => formatFaceComponentId(solidIndex, faceIndex));
@@ -453,7 +459,7 @@ export async function enrichZooGltfTopology(
     return bytes;
   }
 
-  const solidNodeBySolidIndex = new Map<number, { nodeIndex: number; meshIndex: number | undefined }>();
+  const solidNodesBySolidIndex = new Map<number, Array<{ nodeIndex: number; meshIndex: number | undefined }>>();
   for (const [nodeIndex, node] of root.listNodes().entries()) {
     const brepNode = node.getExtension<KittyCadBrepNode>(kittyCadBoundaryRepresentationExtension);
     const solidIndex = brepNode?.getSolid();
@@ -462,14 +468,19 @@ export async function enrichZooGltfTopology(
     }
 
     const mesh = node.getMesh();
-    solidNodeBySolidIndex.set(solidIndex, {
-      nodeIndex,
-      meshIndex: mesh ? root.listMeshes().indexOf(mesh) : undefined,
-    });
+    const binding = { nodeIndex, meshIndex: mesh ? root.listMeshes().indexOf(mesh) : undefined };
+    // Instanced solids are referenced by more than one node; accumulate every
+    // referencing node so none of them lose their body binding.
+    const bindings = solidNodesBySolidIndex.get(solidIndex);
+    if (bindings) {
+      bindings.push(binding);
+    } else {
+      solidNodesBySolidIndex.set(solidIndex, [binding]);
+    }
   }
 
   const meshPrimitiveCounts = root.listMeshes().map((mesh: GltfTransformMesh) => mesh.listPrimitives().length);
-  const topology = buildTopologyPayload({ payload: brepPayload, meshPrimitiveCounts, solidNodeBySolidIndex });
+  const topology = buildTopologyPayload({ payload: brepPayload, meshPrimitiveCounts, solidNodesBySolidIndex });
   if (!topology) {
     return bytes;
   }

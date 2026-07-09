@@ -103,6 +103,48 @@ describe('enrichZooGltfTopology', () => {
     });
   });
 
+  it('should bind every node that references the same instanced solid', async () => {
+    const document = new Document();
+    const buffer = document.createBuffer();
+    const mesh = document.createMesh('Solid');
+    mesh.addPrimitive(document.createPrimitive().setAttribute('POSITION', createPositionAccessor(document, buffer, 0)));
+    mesh.addPrimitive(document.createPrimitive().setAttribute('POSITION', createPositionAccessor(document, buffer, 1)));
+
+    const kittyCadBrep = document.createExtension(KittyCadBoundaryRepresentation);
+    document.getRoot().setExtension(
+      kittyCadBoundaryRepresentationExtension,
+      kittyCadBrep.createRoot().setPayload({
+        solids: [{ shells: [0], mesh: 0 }],
+        shells: [{ faces: [0, 1] }],
+        faces: [{ loops: [0] }, { loops: [1] }],
+        loops: [{ edges: [[0, false], 1] }, { edges: [1, 2] }],
+        edges: [{}, {}, {}],
+      }),
+    );
+
+    // Two nodes reference the same solid (index 0) — glTF instancing.
+    const scene = document.createScene('Scene');
+    for (const label of ['InstanceA', 'InstanceB']) {
+      const node = document.createNode(label).setMesh(mesh);
+      node.setExtension(kittyCadBoundaryRepresentationExtension, kittyCadBrep.createNode().setSolid(0));
+      scene.addChild(node);
+    }
+
+    const io = registerTauGltfExtensions(new NodeIO());
+    const output = await enrichZooGltfTopology(await io.writeBinary(document), { format: 'glb' });
+    const result = await io.readBinary(output);
+
+    const nodes = result.getRoot().listNodes();
+    expect(nodes).toHaveLength(2);
+    // Both instances must carry the body binding; the first must not be dropped.
+    for (const node of nodes) {
+      expect(node.getExtras()).toMatchObject({
+        tauComponentId: 'component:zoo-solid-0',
+        tauComponentKind: 'body',
+      });
+    }
+  });
+
   it('should keep entity indices stable when arrays contain non-record holes', async () => {
     const document = new Document();
     const buffer = document.createBuffer();

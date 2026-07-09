@@ -23,6 +23,7 @@ export const modelConfigurationSchema = z.object({
   streaming: z.boolean().describe('Whether the model is streaming'),
   temperature: z.number().describe('The temperature of the model').optional(),
   maxTokens: z.number().describe('The maximum number of tokens to generate').optional(),
+  maxOutputTokens: z.number().describe('The maximum number of output tokens to generate').optional(),
   topP: z.number().describe('The top P of the model').optional(),
   thinking: z
     .union([

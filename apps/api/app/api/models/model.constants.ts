@@ -712,6 +712,47 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
   },
 
+  xai: {
+    'grok-4.5': {
+      enabled: true,
+      id: 'xai-grok-4.5',
+      name: 'Grok 4.5',
+      slug: 'grok-4.5',
+      recommended: false,
+      description: 'Strong xAI reasoning model for complex CAD planning and long agentic tool loops.',
+      provider: {
+        id: 'xai',
+        name: 'xAI',
+      },
+      model: 'grok-4.5',
+      support: {
+        tools: true,
+        toolChoice: false,
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'grok',
+        families: ['grok'],
+        contextWindow: 200_000,
+        maxTokens: 64_000,
+        cost: {
+          inputTokens: 2,
+          outputTokens: 6,
+          cacheReadTokens: 0.5,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        maxOutputTokens: 64_000,
+        reasoning: {
+          effort: 'high',
+          summary: 'auto',
+        },
+      },
+    },
+  },
+
   cerebras: {
     'qwen-3-235b': {
       enabled: false,

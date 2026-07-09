@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+// oxlint-disable-next-line typescript/consistent-type-imports -- Nest DI needs runtime constructor metadata.
 import { ConfigService } from '@nestjs/config';
 import { ChatOpenAI } from '@langchain/openai';
 import type { ChatOpenAIFields } from '@langchain/openai';
@@ -8,13 +9,15 @@ import { ChatOllama } from '@langchain/ollama';
 import type { ChatOllamaInput } from '@langchain/ollama';
 import { ChatAnthropic } from '@langchain/anthropic';
 import type { ChatAnthropicCallOptions } from '@langchain/anthropic';
-import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { ChatCerebras } from '@langchain/cerebras';
 import type { ChatCerebrasInput } from '@langchain/cerebras';
 import type { Environment } from '#config/environment.config.ts';
 import type { ProviderId, Provider } from '#api/providers/provider.schema.js';
 import type { ProviderDiagnosticsContext } from '#api/chat/utils/provider-diagnostics.js';
 import { createGoogleProviderDiagnosticsFetch } from '#api/chat/utils/provider-diagnostics.js';
+import { TauChatXaiResponses } from '#api/providers/xai-responses.adapter.js';
+import type { TauChatXaiResponsesInput } from '#api/providers/xai-responses.adapter.js';
 
 // Type for mapping provider IDs to their option types
 type ProviderOptionsMap = {
@@ -33,6 +36,7 @@ type ProviderOptionsMap = {
       summary?: 'auto' | 'concise' | 'detailed';
     };
   };
+  xai: TauChatXaiResponsesInput;
 };
 
 type ProviderRuntimeOptions = {
@@ -44,6 +48,7 @@ type ProviderType<T extends ProviderId> = Provider & {
   createClass: (options: ProviderOptionsMap[T], runtimeOptions?: ProviderRuntimeOptions) => BaseChatModel;
 };
 
+// oxlint-disable-next-line new-cap -- NestJS decorators are invoked by decorator syntax.
 @Injectable()
 export class ProviderService {
   public constructor(private readonly configService: ConfigService<Environment, true>) {}
@@ -195,6 +200,23 @@ export class ProviderService {
         createClass: (options) =>
           new ChatOpenAI({
             outputVersion: 'v1',
+            ...options,
+          }),
+      },
+      xai: {
+        provider: 'xai',
+        otelProviderName: 'xai',
+        configuration: {
+          apiKey: configService.get('XAI_API_KEY', { infer: true }),
+          baseURL: 'https://api.x.ai/v1',
+        },
+        inputTokensIncludesCacheReadTokens: true,
+        inputTokensIncludesCacheWriteTokens: false,
+        createClass: (options, runtimeOptions) =>
+          new TauChatXaiResponses({
+            apiKey: configService.get('XAI_API_KEY', { infer: true }),
+            baseURL: 'https://api.x.ai/v1',
+            conversationId: runtimeOptions?.diagnosticsContext?.chatId,
             ...options,
           }),
       },

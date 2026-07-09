@@ -174,13 +174,15 @@ function hasValidResponsesId(value: unknown): boolean {
 
 function rebuildAiMessage(
   message: AIMessage,
-  content: AIMessage['content'],
-  responseMetadata: AIMessage['response_metadata'] = message.response_metadata,
   options: {
+    readonly content: AIMessage['content'];
+    readonly responseMetadata?: AIMessage['response_metadata'];
     readonly toolCalls?: AIMessage['tool_calls'];
     readonly additionalKwargs?: AIMessage['additional_kwargs'];
-  } = {},
+  },
 ): AIMessage {
+  const { content } = options;
+  const responseMetadata = options.responseMetadata ?? message.response_metadata;
   const toolCallOverride = options.toolCalls === undefined ? {} : { toolCalls: options.toolCalls };
   const additionalKwargsOverride =
     options.additionalKwargs === undefined ? {} : { additionalKwargs: options.additionalKwargs };
@@ -279,7 +281,10 @@ function stripToolCallBlocksForGoogle(message: AIMessage): AIMessage {
     return message;
   }
 
-  return rebuildAiMessage(message, nextContent, dropOutputVersion(message.response_metadata));
+  return rebuildAiMessage(message, {
+    content: nextContent,
+    responseMetadata: dropOutputVersion(message.response_metadata),
+  });
 }
 
 function canonicalizeLegacyToolMetadataForGoogle(message: AIMessage): AIMessage {
@@ -296,7 +301,9 @@ function canonicalizeLegacyToolMetadataForGoogle(message: AIMessage): AIMessage 
       return message;
     }
 
-    return rebuildAiMessage(message, message.content, responseMetadata, {
+    return rebuildAiMessage(message, {
+      content: message.content,
+      responseMetadata,
       additionalKwargs: hasLegacyToolMetadata ? withoutLegacyToolMetadata : message.additional_kwargs,
       toolCalls: normalizeCanonicalToolCallTypes(message.tool_calls),
     });
@@ -308,21 +315,20 @@ function canonicalizeLegacyToolMetadataForGoogle(message: AIMessage): AIMessage 
       return message;
     }
 
-    return rebuildAiMessage(message, message.content, message.response_metadata, {
+    return rebuildAiMessage(message, {
+      content: message.content,
+      responseMetadata: message.response_metadata,
       additionalKwargs: withoutLegacyToolMetadata,
       toolCalls: [],
     });
   }
 
-  return rebuildAiMessage(
-    message,
-    message.content,
-    dropGoogleReplayOutputVersion(message.response_metadata, replaySafeToolCalls),
-    {
-      additionalKwargs: withoutLegacyToolMetadata,
-      toolCalls: replaySafeToolCalls,
-    },
-  );
+  return rebuildAiMessage(message, {
+    content: message.content,
+    responseMetadata: dropGoogleReplayOutputVersion(message.response_metadata, replaySafeToolCalls),
+    additionalKwargs: withoutLegacyToolMetadata,
+    toolCalls: replaySafeToolCalls,
+  });
 }
 
 /**
@@ -376,7 +382,7 @@ function healEmptyToolCallArgs(message: AIMessage): AIMessage {
     return message;
   }
 
-  return rebuildAiMessage(message, nextContent);
+  return rebuildAiMessage(message, { content: nextContent });
 }
 
 function toolCallPayloadScore(block: Record<string, unknown>): number {
@@ -471,11 +477,13 @@ function dedupeAnthropicToolCallBlocks(message: AIMessage): AIMessage {
   const canonicalizedContent = nextContent.map((block) => canonicalizeAnthropicV1ToolCallBlock(block, message));
   const canonicalized = canonicalizedContent.some((block, index) => block !== nextContent[index]);
 
-  return changed || canonicalized ? rebuildAiMessage(message, canonicalizedContent as typeof content) : message;
+  return changed || canonicalized
+    ? rebuildAiMessage(message, { content: canonicalizedContent as typeof content })
+    : message;
 }
 
 /**
- * Drops `reasoning` content blocks that cannot be validly replayed to the OpenAI
+ * Drops `reasoning` content blocks that cannot be validly replayed to the
  * Responses API.
  *
  * `convertResponsesMessageToAIMessage` persists an OpenAI reasoning item as a
@@ -489,7 +497,7 @@ function dedupeAnthropicToolCallBlocks(message: AIMessage): AIMessage {
  * contract that reasoning traces are dropped — not text-downgraded — across
  * turns). Reasoning blocks that DO carry a valid id pass through unchanged.
  */
-function dropUnreplayableReasoningForOpenai(message: AIMessage): AIMessage {
+function dropUnreplayableReasoningForResponses(message: AIMessage): AIMessage {
   const { content } = message;
 
   if (!Array.isArray(content)) {
@@ -508,7 +516,7 @@ function dropUnreplayableReasoningForOpenai(message: AIMessage): AIMessage {
     return message;
   }
 
-  return rebuildAiMessage(message, nextContent);
+  return rebuildAiMessage(message, { content: nextContent });
 }
 
 /**
@@ -524,7 +532,7 @@ function dropUnreplayableReasoningForOpenai(message: AIMessage): AIMessage {
  * content part). The shape mirrors the converter's own legacy assistant path
  * (`{ type: 'output_text', text, annotations: [] }`).
  */
-function buildOpenaiAssistantTextItem(text: string): Record<string, unknown> {
+function buildResponsesAssistantTextItem(text: string): Record<string, unknown> {
   return {
     type: 'non_standard',
     value: {
@@ -554,7 +562,7 @@ function buildOpenaiAssistantTextItem(text: string): Record<string, unknown> {
  * `tool_call` / `reasoning` blocks are left in place: the v1 converter handles
  * them natively (`convertFunctionCall` / `convertReasoningBlock`).
  */
-function rewriteAssistantTextForOpenai(message: AIMessage): AIMessage {
+function rewriteAssistantTextForResponses(message: AIMessage): AIMessage {
   const { content } = message;
 
   if (!Array.isArray(content)) {
@@ -583,7 +591,7 @@ function rewriteAssistantTextForOpenai(message: AIMessage): AIMessage {
       return;
     }
     if (textBuffer.length > 0) {
-      nextContent.push(buildOpenaiAssistantTextItem(textBuffer));
+      nextContent.push(buildResponsesAssistantTextItem(textBuffer));
     }
     textBuffer = '';
     bufferOpen = false;
@@ -607,10 +615,13 @@ function rewriteAssistantTextForOpenai(message: AIMessage): AIMessage {
   }
   flushText();
 
-  return rebuildAiMessage(message, nextContent as AIMessage['content'], {
-    ...responseMetadata,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    model_provider: 'openai',
+  return rebuildAiMessage(message, {
+    content: nextContent as AIMessage['content'],
+    responseMetadata: {
+      ...responseMetadata,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+      model_provider: 'openai',
+    },
   });
 }
 
@@ -633,7 +644,7 @@ function rewriteAssistantTextForOpenai(message: AIMessage): AIMessage {
  * Required because `isProviderNativeContent` demands a homogeneously-`input_*`
  * array; leaving a single `text` block would still trigger `JSON.stringify`.
  */
-function normalizeToolMessageForOpenai(message: ToolMessage): ToolMessage {
+function normalizeToolMessageForResponses(message: ToolMessage): ToolMessage {
   const { content } = message;
 
   if (!Array.isArray(content)) {
@@ -714,16 +725,21 @@ function normalizeAiMessage(message: AIMessage, targetProvider: ProviderId): Bas
   const nextContent = content.map((block) => normalizeContentBlock(block, targetIsAnthropic));
   let result = nextContent.every((block, index) => block === content[index])
     ? message
-    : rebuildAiMessage(message, nextContent as typeof content);
+    : rebuildAiMessage(message, { content: nextContent as typeof content });
 
   if (targetProvider === 'vertexai') {
     result = stripToolCallBlocksForGoogle(result);
     result = canonicalizeLegacyToolMetadataForGoogle(result);
   }
 
-  // Anthropic, OpenAI, and OpenRouter (OpenAI-compatible chat completions) format
+  // Anthropic, Responses API providers, and OpenRouter (OpenAI-compatible chat completions) format
   // assistant tool calls from the content block — recover empty args from tool_calls.
-  if (targetProvider === 'anthropic' || targetProvider === 'openai' || targetProvider === 'morph') {
+  if (
+    targetProvider === 'anthropic' ||
+    targetProvider === 'openai' ||
+    targetProvider === 'morph' ||
+    targetProvider === 'xai'
+  ) {
     result = healEmptyToolCallArgs(result);
   }
 
@@ -731,9 +747,9 @@ function normalizeAiMessage(message: AIMessage, targetProvider: ProviderId): Bas
     result = dedupeAnthropicToolCallBlocks(result);
   }
 
-  if (targetProvider === 'openai') {
-    result = dropUnreplayableReasoningForOpenai(result);
-    result = rewriteAssistantTextForOpenai(result);
+  if (targetProvider === 'openai' || targetProvider === 'xai') {
+    result = dropUnreplayableReasoningForResponses(result);
+    result = rewriteAssistantTextForResponses(result);
   }
 
   return result;
@@ -748,13 +764,13 @@ function normalizeAiMessage(message: AIMessage, targetProvider: ProviderId): Bas
  *   provider-visible legacy tool metadata before LangChain's Google formatter can replay it.
  * - **anthropic**: heals empty V1 `tool_call` / `tool_use` args from `message.tool_calls`
  *   and collapses duplicate `tool_call` / `tool_use` ids that Anthropic rejects.
- * - **openai**: heals empty `tool_call` args, drops `reasoning` blocks lacking a
- *   valid id (the converter would otherwise emit an API-rejected `id: ''`), then
- *   rewrites V1 assistant `text` blocks into native Responses `output_text`
- *   message items so the API accepts them for the assistant role — while
- *   preserving `output_version: 'v1'`.
+ * - **openai/xai**: heals empty `tool_call` args, drops `reasoning` blocks lacking
+ *   a valid id (the converter would otherwise emit an API-rejected `id: ''`),
+ *   then rewrites V1 assistant `text` blocks into native Responses `output_text`
+ *   message items so the API accepts them for the assistant role — while preserving
+ *   `output_version: 'v1'`.
  *
- * For OpenAI targets, also rewrites `ToolMessage` content blocks from the generic
+ * For Responses API targets, also rewrites `ToolMessage` content blocks from the generic
  * LangChain V1 shape (`text` / `image_url`) into the OpenAI Responses API native
  * shape (`input_text` / `input_image`) so screenshots reach the model as real
  * pixels instead of a `JSON.stringify`'d base64 blob.
@@ -762,7 +778,7 @@ function normalizeAiMessage(message: AIMessage, targetProvider: ProviderId): Bas
  * Runs before {@link messageContentSanitizerMiddleware}, which assumes `reasoning` blocks where needed.
  */
 export const createCrossProviderContentNormalizerMiddleware = (targetProvider: ProviderId): AgentMiddleware => {
-  const targetIsOpenai = targetProvider === 'openai';
+  const targetIsResponsesProvider = targetProvider === 'openai' || targetProvider === 'xai';
 
   return createMiddleware({
     name: 'CrossProviderContentNormalizer',
@@ -772,8 +788,8 @@ export const createCrossProviderContentNormalizerMiddleware = (targetProvider: P
         if (isAiMessageLike(message)) {
           return normalizeAiMessage(toAiMessage(message), targetProvider);
         }
-        if (targetIsOpenai && ToolMessage.isInstance(message)) {
-          return normalizeToolMessageForOpenai(message);
+        if (targetIsResponsesProvider && ToolMessage.isInstance(message)) {
+          return normalizeToolMessageForResponses(message);
         }
         return message;
       });

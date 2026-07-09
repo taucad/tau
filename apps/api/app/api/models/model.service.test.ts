@@ -24,6 +24,7 @@ const cappedModelIds = [
   'together-llama-4-maverick',
   'morph-qwen-3.5-397b',
   'morph-deepseek-v4-flash',
+  'xai-grok-4.5',
 ] as const;
 
 const getCloudCatalogEntries = () => Object.values(modelList).flatMap((modelsBySlug) => Object.values(modelsBySlug));
@@ -74,6 +75,24 @@ describe('ModelService', () => {
     expect(glm?.support?.tools).toBe(true);
     expect(modelSupportsInput(glm?.support, 'text')).toBe(true);
     expect(modelSupportsInput(glm?.support, 'image')).toBe(false);
+  });
+
+  it('lists Grok 4.5 as an enabled text-only tool-capable model', async () => {
+    const service = createModelService();
+    const listedModels = await service.getModels();
+    const grok = listedModels.find((model) => model.id === 'xai-grok-4.5');
+
+    expect(grok).toBeDefined();
+    expect(grok?.support?.tools).toBe(true);
+    expect(modelSupportsInput(grok?.support, 'text')).toBe(true);
+    expect(modelSupportsInput(grok?.support, 'image')).toBe(false);
+    expect(service.getContextWindow('xai-grok-4.5')).toBe(maxEffectiveContextWindow);
+    expect(service.getProviderId('xai-grok-4.5')).toBe('xai');
+    expect(service.getModelSupport('xai-grok-4.5')).toMatchObject({
+      tools: true,
+      toolChoice: false,
+      modalities: { input: ['text'], output: ['text'] },
+    });
   });
 
   it('filters screenshot from GLM-5.2 while preserving text-only spatial tools', async () => {

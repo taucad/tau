@@ -773,6 +773,74 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
       expect(blocks.find((block) => block.type === 'reasoning')).toEqual(reasoningWithId);
     });
 
+    it('heals empty tool_call args from tool_calls for xai target', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('xai');
+      const healedArgs = { targetFile: 'main.ts' };
+      const aiMessage = new AIMessage({
+        content: [{ type: 'tool_call', id: 'call_read_1', name: 'read_file', args: '' }],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        response_metadata: { output_version: 'v1', model_provider: 'openai' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: [{ id: 'call_read_1', name: 'read_file', args: healedArgs, type: 'tool_call' }],
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      expect((out.content as Array<{ args?: unknown }>)[0]?.args).toEqual(healedArgs);
+    });
+
+    it('drops idless reasoning and rewrites assistant text for xai Responses replay', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('xai');
+      const aiMessage = new AIMessage({
+        content: [
+          { type: 'reasoning', reasoning: 'summary without provider id' },
+          { type: 'text', text: 'Answer.' },
+        ],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        response_metadata: { output_version: 'v1', model_provider: 'anthropic' },
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const out = request.messages[0] as AIMessage;
+      expect(out.response_metadata.model_provider).toBe('openai');
+      expect(out.content).toEqual([
+        {
+          type: 'non_standard',
+          value: {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'Answer.', annotations: [] }],
+          },
+        },
+      ]);
+    });
+
+    it('normalizes tool message image blocks for xai Responses replay', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('xai');
+      const toolMessage = new ToolMessage({
+        content: [
+          { type: 'text', text: 'screenshot' },
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain image blocks use snake_case.
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } },
+        ],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_call_id: 'call_screenshot',
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [toolMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      expect((request.messages[0] as ToolMessage).content).toEqual([
+        { type: 'input_text', text: 'screenshot' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI/xAI Responses image blocks use snake_case.
+        { type: 'input_image', image_url: 'data:image/png;base64,abc', detail: 'auto' },
+      ]);
+    });
+
     it('leaves V1 assistant message without text blocks untouched for openai target', async () => {
       const middleware = createCrossProviderContentNormalizerMiddleware('openai');
       const aiMessage = new AIMessage({
@@ -934,7 +1002,7 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
       expect(out.additional_kwargs).toEqual({});
     });
 
-    it.each(['anthropic', 'vertexai', 'openai', 'together', 'cerebras', 'ollama'] as const)(
+    it.each(['anthropic', 'vertexai', 'openai', 'together', 'cerebras', 'ollama', 'xai'] as const)(
       'leaves tool-free AIMessage byte-identical for %s when no rewrite applies',
       async (provider) => {
         const middleware = createCrossProviderContentNormalizerMiddleware(provider);

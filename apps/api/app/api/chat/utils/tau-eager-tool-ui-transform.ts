@@ -16,6 +16,26 @@ type TauEagerOutputPayload = {
   output: unknown;
 };
 
+type ToolInputChunk = UIMessageChunk & {
+  type: 'tool-input-start' | 'tool-input-delta' | 'tool-input-available';
+  toolCallId: string;
+};
+
+type ToolOutputChunk = UIMessageChunk & {
+  type: 'tool-output-available' | 'tool-output-error';
+  toolCallId: string;
+};
+
+function isToolInputChunk(chunk: UIMessageChunk): chunk is ToolInputChunk {
+  return (
+    chunk.type === 'tool-input-start' || chunk.type === 'tool-input-delta' || chunk.type === 'tool-input-available'
+  );
+}
+
+function isToolOutputChunk(chunk: UIMessageChunk): chunk is ToolOutputChunk {
+  return chunk.type === 'tool-output-available' || chunk.type === 'tool-output-error';
+}
+
 /**
  * Maps LangGraph `custom` writer payloads from `{@link EagerToolDispatchHandler}` into canonical
  * `tool-input-available` / `tool-output-available` chunks, then **first-wins dedupes** the late
@@ -59,11 +79,14 @@ export function createTauEagerToolUiTransform(): TransformStream<UIMessageChunk,
         return;
       }
 
-      if (chunk.type === 'tool-input-available' && inputAvailableFirst.has(chunk.toolCallId)) {
+      if (
+        isToolInputChunk(chunk) &&
+        (inputAvailableFirst.has(chunk.toolCallId) || outputAvailableFirst.has(chunk.toolCallId))
+      ) {
         return;
       }
 
-      if (chunk.type === 'tool-output-available' && outputAvailableFirst.has(chunk.toolCallId)) {
+      if (isToolOutputChunk(chunk) && outputAvailableFirst.has(chunk.toolCallId)) {
         return;
       }
 

@@ -3,7 +3,9 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { Server as SocketIoServer } from 'socket.io';
+import type { ServerOptions, Socket } from 'socket.io';
 import { io as ioClient } from 'socket.io-client';
+import type { ManagerOptions } from 'socket.io-client';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { collectStreamChunks, collectFinalMessage } from '#testing/stream-consumer.js';
@@ -11,6 +13,7 @@ import {
   expectHasToolCall,
   expectToolCallSucceeded,
   expectIncrementalToolInput,
+  expectCompleteToolInput,
   expectNoErrors,
   expectMultipleSteps,
   extractUsageData,
@@ -21,6 +24,7 @@ import type { TestApp } from '#testing/create-test-app.js';
 import { buildCadAgent, providerEnvForModelId, requiresEnv } from '#testing/skip-helpers.js';
 
 const modelId = process.env['TEST_MODEL_ID'] ?? 'anthropic-claude-sonnet-4.6';
+const modelStreamsToolInputDeltas = !modelId.startsWith('xai-');
 
 // Live test — requires the provider key derived from `TEST_MODEL_ID` (default
 // `anthropic-claude-sonnet-4.6` => `ANTHROPIC_API_KEY`). Skips cleanly when
@@ -198,7 +202,7 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
       }
     }, 120_000);
 
-    it('should stream tool call arguments incrementally', async () => {
+    it('should surface provider-supported streamed tool call arguments', async () => {
       const response = await fetch(`${testApp.baseUrl}/v1/chat`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -255,7 +259,11 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
       const message = await collectFinalMessage(chunks);
 
       expectHasToolCall(message, 'create_file');
-      expectIncrementalToolInput(chunks, 'create_file');
+      if (modelStreamsToolInputDeltas) {
+        expectIncrementalToolInput(chunks, 'create_file');
+      } else {
+        expectCompleteToolInput(chunks, 'create_file');
+      }
     });
 
     it('should normalize cache tokens in usage data (inputTokens excludes cached)', async () => {
@@ -382,7 +390,7 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     await Promise.all(pending.map(async (teardown) => teardown()));
   });
 
-  const createTestServer = (options?: Partial<import('socket.io').ServerOptions>) => {
+  const createTestServer = (options?: Partial<ServerOptions>) => {
     const httpServer = createServer();
     const serverIo = new SocketIoServer(httpServer, {
       transports: ['websocket'],
@@ -415,7 +423,7 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     return { httpServer, serverIo, listen };
   };
 
-  const createTestClient = (port: number, options?: Partial<import('socket.io-client').ManagerOptions>) => {
+  const createTestClient = (port: number, options?: Partial<ManagerOptions>) => {
     const client = ioClient(`http://localhost:${port}`, {
       transports: ['websocket'],
       autoConnect: false,
@@ -589,7 +597,7 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
   it('should receive disconnect reason when server force-disconnects', async () => {
     const { serverIo, listen } = createTestServer();
 
-    let serverSocket: import('socket.io').Socket | undefined;
+    let serverSocket: Socket | undefined;
 
     serverIo.on('connection', (socket) => {
       serverSocket = socket;

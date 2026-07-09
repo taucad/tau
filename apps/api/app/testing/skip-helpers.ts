@@ -110,6 +110,9 @@ export const providerEnvForModelId = (modelId: string): string | undefined => {
     case 'morph': {
       return 'MORPH_API_KEY';
     }
+    case 'xai': {
+      return 'XAI_API_KEY';
+    }
     default: {
       return undefined;
     }

@@ -71,6 +71,42 @@ describe('TokenBudgetService', () => {
     expect(componentTokens(decision, 'provider_overhead')).toBeGreaterThan(0);
   });
 
+  it('should not double-count tool call args carried as native tool_use content blocks', () => {
+    const service = new TokenBudgetService();
+    const args = { path: '/tmp/a.ts', detail: 'A'.repeat(500) };
+    const tool_calls = [{ id: 'tc1', name: 'read_file', args }];
+
+    const stringShape = service.evaluateModelRequest({
+      modelId: 'anthropic-claude-haiku-4.5',
+      providerId: 'anthropic',
+      contextWindow: 100_000,
+      request: createModelRequest({
+        messages: [new AIMessage({ content: 'I will call a tool', tool_calls })],
+      }),
+    });
+
+    // Same call, but the args also arrive as a native Anthropic tool_use block
+    // in content (the shape LangChain produces for Anthropic responses).
+    const blockShape = service.evaluateModelRequest({
+      modelId: 'anthropic-claude-haiku-4.5',
+      providerId: 'anthropic',
+      contextWindow: 100_000,
+      request: createModelRequest({
+        messages: [
+          new AIMessage({
+            content: [
+              { type: 'text', text: 'I will call a tool' },
+              { type: 'tool_use', id: 'tc1', name: 'read_file', input: args },
+            ],
+            tool_calls,
+          }),
+        ],
+      }),
+    });
+
+    expect(componentTokens(blockShape, 'tool_call_args')).toBe(componentTokens(stringShape, 'tool_call_args'));
+  });
+
   it('should trigger from previous provider input usage independent of the estimate', () => {
     const service = new TokenBudgetService();
     const decision = service.evaluateModelRequest({

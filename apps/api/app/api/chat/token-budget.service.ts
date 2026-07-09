@@ -179,7 +179,11 @@ export class TokenBudgetService {
     };
 
     for (const message of input.request.messages) {
-      const estimate = estimateContent(message.content);
+      // Anthropic responses carry tool-call args both as native tool_use content
+      // blocks and in the normalized tool_calls array; skip the blocks so their
+      // args are counted once, via tool_calls below.
+      const hasToolCalls = message instanceof AIMessage && (message.tool_calls?.length ?? 0) > 0;
+      const estimate = estimateContent(message.content, hasToolCalls);
       totals.message_content += estimate.textTokens;
       totals.media += estimate.mediaTokens;
       totals.tool_call_args += estimate.structuredTokens;
@@ -277,7 +281,10 @@ function getSystemMessageContent(systemMessage: BaseMessage | string | undefined
   return systemMessage.content;
 }
 
-function estimateContent(content: BaseMessage['content']): {
+function estimateContent(
+  content: BaseMessage['content'],
+  skipToolUseArgs = false,
+): {
   textTokens: number;
   structuredTokens: number;
   mediaTokens: number;
@@ -310,9 +317,10 @@ function estimateContent(content: BaseMessage['content']): {
   let cacheControlledBlockCount = 0;
 
   for (const block of content as MaybeContentBlock[]) {
+    const isRedundantToolUse = skipToolUseArgs && block['type'] === 'tool_use';
     if (isImageBlock(block)) {
       mediaTokens += IMAGE_TOKEN_ESTIMATE;
-    } else {
+    } else if (!isRedundantToolUse) {
       const text = block['text'] ?? block['reasoning'] ?? block['thinking'];
       if (typeof text === 'string') {
         textTokens += estimateStringTokens(text);

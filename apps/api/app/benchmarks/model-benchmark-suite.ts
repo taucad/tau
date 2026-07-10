@@ -116,6 +116,7 @@ export function filterModels(options?: FilterOptions): { active: FlatModel[]; sk
 // =============================================================================
 
 const scadMainFile = 'main.scad';
+const geospecMainFile = 'main.geospec.ts';
 const cubePattern = /cube\s*\(/;
 const cylinderPattern = /cylinder\s*\(/;
 const spherePattern = /sphere\s*\(/;
@@ -224,6 +225,47 @@ const smoke: ModelBenchmarkCase[] = [
 ];
 
 const toolUse: ModelBenchmarkCase[] = [
+  {
+    name: 'geospec-direct-parameters',
+    category: 'tool-use',
+    prompt: [
+      'Create a centered OpenSCAD cube with a centered square through-cutout in main.scad.',
+      'Use cube_size=10 and cutout_size=4 as the model defaults.',
+      'Create main.geospec.ts with one bounds test that calls loadModel({ file: "main.scad" }) and expects a 10mm cube.',
+      'Add a second bounds test in the same suite that passes parameters { cube_size: 20, cutout_size: 4 } directly to loadModel and expects a 20mm cube.',
+      'Use the file tools to create both files, then call test_model.',
+    ].join('\n'),
+    grader(outcome) {
+      const checks = [
+        checkToolCalled(outcome, 'create_file'),
+        checkToolCalled(outcome, 'test_model'),
+        checkFileCreated(outcome, scadMainFile),
+        checkFileCreated(outcome, geospecMainFile),
+        checkFileContains(
+          { outcome, filename: geospecMainFile, pattern: /loadModel\(\{\s*file:\s*['"]main\.scad['"]\s*\}\)/u },
+          'has_default_load_model',
+        ),
+        checkFileContains(
+          {
+            outcome,
+            filename: geospecMainFile,
+            pattern: /parameters:\s*\{\s*cube_size:\s*20,\s*cutout_size:\s*4\s*\}/u,
+          },
+          'has_explicit_parameters',
+        ),
+        checkFileContains(
+          { outcome, filename: geospecMainFile, pattern: /size:\s*\{\s*x:\s*10,\s*y:\s*10,\s*z:\s*10\s*\}/u },
+          'has_default_bounds',
+        ),
+        checkFileContains(
+          { outcome, filename: geospecMainFile, pattern: /size:\s*\{\s*x:\s*20,\s*y:\s*20,\s*z:\s*20\s*\}/u },
+          'has_explicit_bounds',
+        ),
+      ];
+      return computeGraderResult(checks, 1);
+    },
+    geometryExpectations: { boundingBox: { size: { x: 10, y: 10, z: 10 } }, connectedComponents: 1 },
+  },
   {
     name: 'create-with-params',
     category: 'tool-use',

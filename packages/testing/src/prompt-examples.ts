@@ -31,6 +31,19 @@ describe('main geometry', () => {
     });
   });
 
+  it('should render an explicit parameter variant', async () => {
+    const width = 120;
+    const height = 40;
+    const model = await loadModel({
+      file: '<file>',
+      parameters: { width, height },
+    });
+    expectGeo(model).toHaveBoundingBox({
+      size: { x: width, z: height },
+      tolerance: 1,
+    });
+  });
+
   it('should be centered at the XY origin', async () => {
     const model = await loadModel({ file: '<file>' });
     expectGeo(model).toHaveBoundingBox({
@@ -260,40 +273,3 @@ export const renderAvailableChecksCopy = (options: RenderCanonicalExampleOptions
  * @public
  */
 export const availableChecksCopy = renderAvailableChecksCopy({ includeBrepFeatures: true });
-
-/**
- * Agent-facing note for the new GeoSpec-style parameter testing workflow.
- *
- * @public
- */
-export const geospecParameterTestingCopy = `Parameter-aware GeoSpec tests are available for repeatable geometry checks outside the Tau UI.
-Parameters are real test inputs: import the existing \`.tau/parameters/<entry>.json\` file through \`#params/*.json\`, resolve groups with \`geospec/model\` helpers, mutate values intentionally, render each case with \`loadModel\`, and assert the resulting geometry with \`expectGeo\`.
-
-Do not import named \`values\` from JSON. Tau parameter files default-export the full file shape: \`activeGroup\`, \`order\`, and \`groups[groupName].values\`. Stored group values are overrides, so merge them with source \`defaultParams\` through \`parameterGroups(...)\` or \`params(...)\` before testing.
-
-The \`#params/*.json\` import must be backed by project \`package.json\` imports: \`{ "type": "module", "imports": { "#params/*.json": "./.tau/parameters/*.json" } }\`.
-
-\`\`\`ts
-import { describe, expectGeo, it } from 'geospec';
-import { loadModel, parameterGroups } from 'geospec/model';
-import mainParams from '#params/main.ts.json' with { type: 'json' };
-
-const groups = parameterGroups(mainParams, { defaults: defaultParams });
-
-describe('parameter variants', () => {
-  for (const group of groups) {
-    it(\`should render \${group.name} with expected bounds\`, async () => {
-      const model = await loadModel({
-        file: 'main.ts',
-        parameters: group.values,
-        parameterSource: group,
-      });
-
-      expectGeo(model).toHaveBoundingBox({
-        size: { x: group.values.base.width },
-        tolerance: 1,
-      });
-    });
-  }
-});
-\`\`\``;

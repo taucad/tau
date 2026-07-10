@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createInitialProject } from '#constants/project.constants.js';
 
 describe('createInitialProject', () => {
-  it('returns fresh file buffers for each project template instance', () => {
+  it('should return fresh file buffers and a minimal module manifest', () => {
     const firstInput = new TextEncoder().encode('export default 1;');
     const secondInput = new TextEncoder().encode('export default 1;');
 
@@ -35,6 +35,6 @@ describe('createInitialProject', () => {
     expect(firstPackageJson).toEqual(secondPackageJson);
     expect(firstPackageJson).not.toBe(secondPackageJson);
     expect(firstPackageJson?.buffer).not.toBe(secondPackageJson?.buffer);
-    expect(new TextDecoder().decode(firstPackageJson)).toContain('"#params/*.json"');
+    expect(JSON.parse(new TextDecoder().decode(firstPackageJson))).toEqual({ type: 'module' });
   });
 });

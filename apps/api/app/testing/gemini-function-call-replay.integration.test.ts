@@ -20,10 +20,7 @@ const cubeCutoutFiles = Object.fromEntries([
   [
     'package.json',
     `{
-  "type": "module",
-  "imports": {
-    "#params/*.json": "./.tau/parameters/*.json"
-  }
+  "type": "module"
 }
 `,
   ],

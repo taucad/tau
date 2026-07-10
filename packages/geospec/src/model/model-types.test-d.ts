@@ -7,37 +7,19 @@ import type {
   LoadModelCodeOptions,
   LoadModelFileOptions,
 } from '#model/types.js';
-import { activeParams, createModelLoader, loadModel, parameterGroups, params } from '#model/index.js';
+import { createModelLoader, loadModel } from '#model/index.js';
 import type { RuntimeClient } from '@taucad/runtime/client';
 
-const parameterEntry = {
-  activeGroup: 'wide',
-  groups: {
-    wide: { values: { height: 30, base: { width: 40 } } },
-  },
-};
-
 describe('geospec/model public types', () => {
-  it('should preserve parameter value types from defaults', () => {
-    const defaults: { height: number; base: { width: number; depth: number } } = {
-      height: 20,
-      base: { width: 10, depth: 5 },
-    };
-
-    const resolved = params(parameterEntry, { defaults });
-    const groups = parameterGroups(parameterEntry, { defaults });
-    const active = activeParams(parameterEntry, { defaults });
-
-    expectTypeOf(resolved.active.values.height).toEqualTypeOf<number>();
-    expectTypeOf(groups[0]!.values.base.depth).toEqualTypeOf<number>();
-    expectTypeOf(active.base.width).toEqualTypeOf<number>();
-  });
-
-  it('should keep override-only parameter values unknown without defaults', () => {
-    const groups = parameterGroups(parameterEntry);
-
-    expectTypeOf(groups[0]!.values).toEqualTypeOf<Record<string, unknown>>();
-    expectTypeOf(groups[0]!.values['height']).toEqualTypeOf<unknown>();
+  it('should accept direct parameters for source, code, and file loads', () => {
+    const code = Object.fromEntries([['main.ts', '']]);
+    expectTypeOf(loadModel({ source: new Uint8Array(), parameters: { width: 10 } })).toEqualTypeOf<
+      Promise<GeometrySubject>
+    >();
+    expectTypeOf(loadModel({ code, file: 'main.ts', parameters: { width: 20 } })).toEqualTypeOf<
+      Promise<GeometrySubject>
+    >();
+    expectTypeOf(loadModel({ file: 'main.ts', parameters: { width: 30 } })).toEqualTypeOf<Promise<GeometrySubject>>();
   });
 
   it('should keep unit options on direct sources only', () => {

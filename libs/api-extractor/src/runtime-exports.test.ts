@@ -93,16 +93,21 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     const runnerDiscoveryTypes = files['runner/discovery.d.ts'] ?? '';
     const runnerTypes = files['runner/types.d.ts'] ?? '';
     const runnerIndexTypes = files['runner/index.d.ts'] ?? '';
-    const runnerNodeTypes = files['runner/node/index.d.ts'] ?? '';
-    const runnerWebTypes = files['runner/web/index.d.ts'] ?? '';
-    const runnerWorkerTypes = files['runner/worker/index.d.ts'] ?? '';
+    const runnerNodeTypes = files['runner/node/node-runner.d.ts'] ?? '';
+    const runnerWebTypes = files['runner/web/web-runner.d.ts'] ?? '';
+    const runnerWorkerTypes = files['runner/worker/runner-types.d.ts'] ?? '';
     const stepTypes = files['step/index.d.ts'] ?? '';
     const stepLoaderTypes = files['step/load-step.d.ts'] ?? '';
 
     expect(modelTypes).toContain("export { createModelLoader, loadModel } from './load-model.js';");
+    expect(files['model/parameters.d.ts']).toBeUndefined();
+    expect(modelTypes).not.toContain('parameterGroups');
+    expect(modelTypes).not.toContain('activeParams');
     expect(modelLoaderTypes).toContain('Load a CAD model into GeoSpec evidence.');
     expect(modelLoaderTypes).toContain('export declare function loadModel');
     expect(modelOptionTypes).toContain("'step' | 'stp'");
+    expect(modelOptionTypes).toContain('parameters?: Record<string, unknown>');
+    expect(modelOptionTypes).not.toContain('parameterSource');
     expect(modelOptionTypes).not.toContain('kernel?:');
     expect(modelOptionTypes).not.toContain('CAD kernel hint');
     expect(modelTypes).toContain('GeoSpecModelLoadError');

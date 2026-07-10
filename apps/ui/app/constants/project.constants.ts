@@ -14,7 +14,6 @@ export type CreateInitialProjectResult = {
 const defaultPackageJsonText = JSON.stringify(
   {
     type: 'module',
-    imports: Object.fromEntries([['#params/*.json', './.tau/parameters/*.json']]),
   },
   null,
   2,

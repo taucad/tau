@@ -1,6 +1,5 @@
 import type { UIMessage, UIMessageChunk } from 'ai';
 import { collectStreamChunks, collectFinalMessage } from '#testing/stream-consumer.js';
-import { extractUsageData } from '#testing/stream-assertions.js';
 import { createTestApp } from '#testing/create-test-app.js';
 import type { TestApp } from '#testing/create-test-app.js';
 import type { ModelBenchmarkCase, FlatModel, ModelRunOutcome, GraderCheck } from '#benchmarks/model-benchmark-suite.js';
@@ -80,6 +79,15 @@ export type ModelBenchmarkRunResult = {
     geometryFailed: number;
   };
 };
+
+const extractUsageData = (chunks: UIMessageChunk[]): Array<Record<string, unknown>> =>
+  chunks.flatMap((chunk) => {
+    if (!('data' in chunk) || typeof chunk.data !== 'object' || chunk.data === null) {
+      return [];
+    }
+    const data = chunk.data as Record<string, unknown>;
+    return data['type'] === 'usage' ? [data] : [];
+  });
 
 export type ProgressInfo = {
   current: number;

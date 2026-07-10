@@ -2,7 +2,7 @@
 
 Working backlog for the Tau-facing geometry testing adapter and the new standalone **GeoSpec** core.
 
-Naming update: the previous **Tau Gauge** nickname is superseded by **GeoSpec**. GeoSpec lives in `packages/geospec` as a standalone CAD testing library. `@taucad/testing` remains the Tau adapter, compatibility layer, parameter-aware render harness, and CAD-agent bridge over GeoSpec.
+Naming update: the previous **Tau Gauge** nickname is superseded by **GeoSpec**. GeoSpec lives in `packages/geospec` as a standalone CAD testing library. `@taucad/testing` remains the Tau adapter, render harness, and CAD-agent bridge over GeoSpec.
 
 See `docs/research/geospec-standalone-cad-testing-blueprint.md` for the current architecture blueprint.
 
@@ -17,7 +17,7 @@ See `docs/research/geospec-standalone-cad-testing-blueprint.md` for the current 
 - [ ] Decide the unit contract.
   - Answer to preserve: public testing APIs speak millimeters by default. Internally preserve raw units and transforms, but normalize reported measurements through an explicit `UnitContext`.
 - [ ] Decide whether tests validate a generated artifact or source intent.
-  - Answer to preserve: assertions validate observable geometry, but expected values should derive from source parameters or saved parameter groups whenever the design is parametric.
+  - Answer to preserve: assertions validate observable geometry. Tests use source defaults by omitting `parameters`, or derive expected values from an explicit `loadModel({ parameters })` variant.
 - [ ] Decide whether "Chamfer distance" means CAD chamfer features or point-cloud/mesh Chamfer distance.
   - Answer to preserve: use `chamferDistance` only for bidirectional shape-distance metrics. Use `edgeChamfer` / `featureChamfer` for CAD chamfer features.
 
@@ -26,7 +26,7 @@ See `docs/research/geospec-standalone-cad-testing-blueprint.md` for the current 
 - [x] Use **GeoSpec** as the standalone package/product name.
 - [x] Keep `@taucad/testing` as the Tau-specific adapter instead of absorbing it into GeoSpec immediately.
 - [x] Move standalone P0 mesh geometry algorithms into `geospec`.
-- [ ] Keep Tau chat result schemas, parameter helpers, and runtime render harnesses in `@taucad/testing`; do not restore legacy JSON requirement-file authoring compatibility.
+- [x] Keep Tau chat result schemas and runtime render harnesses in `@taucad/testing`; parameter variants are passed directly to `loadModel`.
 
 ## Package Shape
 
@@ -41,7 +41,7 @@ See `docs/research/geospec-standalone-cad-testing-blueprint.md` for the current 
   - [ ] Keep `streaming: 'filesystem'` only as an explicit compatibility/debug strategy.
 - [x] Add `geospec/runner` for VM runner APIs.
 - [x] Add `geospec/config` for `defineGeoSpecConfig`.
-- [x] Keep Tau-aware render/parameter helper adapters in `@taucad/testing`.
+- [x] Keep the Tau-aware render adapter in `@taucad/testing`.
 - [ ] Remove any remaining legacy requirement-file migration notes after active GeoSpec adoption is complete.
 - [ ] Keep runtime-heavy initialization out of the root export; root authoring symbols must remain lazy.
 
@@ -68,7 +68,7 @@ See `docs/research/geospec-standalone-cad-testing-blueprint.md` for the current 
 - [ ] Support artifact provenance:
   - kernel id and version
   - source file and dependency hash
-  - parameter hash and active group name
+  - parameter hash
   - tessellation options
   - coordinate-system transform
 - [x] Expose adapter `analyze({ file, parameters, renderer })` and `render({ file, parameters, renderer })` paths that work with geometry bytes.
@@ -78,11 +78,6 @@ See `docs/research/geospec-standalone-cad-testing-blueprint.md` for the current 
 
 - [x] `render({ file, parameters, renderer })`
 - [x] `analyze({ file, parameters, renderer })`
-- [x] `parameterCases(defaults, cases)`
-- [x] `parameterGroups({ file, readFile, defaults })`
-- [ ] `parameters.defaults(file)`
-- [ ] `parameters.active(file)`
-- [ ] `parameters.groups(file)`
 - [ ] `select(artifact, query)` for named features, topology selectors, and occurrence paths.
 - [ ] `measure(artifact)` fluent helper for derived measurements.
 - [ ] `compare(left, right, options?)` for regression/reference metrics.
@@ -273,7 +268,7 @@ See `docs/research/geospec-standalone-cad-testing-blueprint.md` for the current 
 
 - [ ] P0: environment-neutral `analyzeGlb` and mesh matcher parity.
 - [ ] P0: embedded Vitest-style collector and Node/browser runners.
-- [ ] P0: parameter-aware render cases and virtual parameter modules.
+- [x] P0: direct-parameter render cases through `loadModel({ parameters })`.
 - [ ] P0: mesh distance metrics: Chamfer, Hausdorff, volume/bbox deltas.
 - [ ] P1: runtime-emitted topology/B-rep evidence manifest.
 - [ ] P1: B-rep facts and selector/mate APIs.

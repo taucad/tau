@@ -21,7 +21,6 @@ export default function main() {
 const packageJson = JSON.stringify(
   {
     type: 'module',
-    imports: Object.fromEntries([['#params/*.json', './.tau/parameters/*.json']]),
   },
   null,
   2,

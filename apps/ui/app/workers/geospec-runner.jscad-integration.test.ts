@@ -231,6 +231,18 @@ describe('cube with cylinder cutout', () => {
     });
   });
 
+  it('should use explicit parameters for alternate bounds', async () => {
+    const subject = await loadModel({
+      file: 'main.ts',
+      parameters: { cubeSize: 80, cylinderRadius: 10, cylinderHeight: 90 },
+    });
+    expectGeo(subject).toHaveBoundingBox({
+      size: { x: 80, y: 80, z: 80 },
+      center: { x: 0, y: 0, z: 40 },
+      tolerance: 0.5,
+    });
+  });
+
   it('should be watertight', async () => {
     const subject = await loadModel({ file: 'main.ts' });
     expectGeo(subject).toBeWatertight();
@@ -310,17 +322,22 @@ const exportProjectWithNodeRuntime = async (options: {
       files: options.files,
     });
 
-    const file =
-      typeof options.input === 'object' && options.input !== null && 'file' in options.input
-        ? String((options.input as { file: unknown }).file)
-        : 'main.ts';
+    const input =
+      typeof options.input === 'object' && options.input !== null
+        ? (options.input as { source?: { path?: unknown }; parameters?: Record<string, unknown> })
+        : {};
+    const sourcePath = typeof input.source?.path === 'string' ? input.source.path : 'main.ts';
+    const file = sourcePath.startsWith(options.projectRootPath)
+      ? relative(options.projectRootPath, sourcePath)
+      : sourcePath;
     const script = `
       import { createNodeClient } from ${JSON.stringify(runtimeNodeModuleUrl)};
       const client = await createNodeClient(${JSON.stringify(projectPath)});
       const result = await client.export(${JSON.stringify(options.format)}, {
         source: {
-          path: ${JSON.stringify(file.startsWith(options.projectRootPath) ? relative(options.projectRootPath, file) : file)},
+          path: ${JSON.stringify(file)},
         },
+        parameters: ${JSON.stringify(input.parameters)},
         exportOptions: {
           coordinateSystem: 'z-up',
           unit: { length: 'millimeter' },
@@ -466,20 +483,31 @@ describe('geospec-runner.worker JSCAD integration', () => {
     }
 
     expect(resultMessage.result.failures).toEqual([]);
-    expect(resultMessage.result.passed).toBe(3);
-    expect(resultMessage.result.total).toBe(3);
+    expect(resultMessage.result.passed).toBe(4);
+    expect(resultMessage.result.total).toBe(4);
     expect(resultMessage.result.passes.map((pass) => pass.requirement)).toEqual([
       'cube with cylinder cutout > should have cube outer bounds',
+      'cube with cylinder cutout > should use explicit parameters for alternate bounds',
       'cube with cylinder cutout > should be watertight',
       'cube with cylinder cutout > should be one connected component',
     ]);
     expect(resultMessage.result.passes.every((pass) => pass.targetFile === 'main.geospec.ts')).toBe(true);
-    expect(exportCalls).toHaveLength(1);
-    expect(exportCalls[0]?.format).toBe('glb');
-    expect(exportCalls[0]?.input).toMatchObject({
+    expect(exportCalls).toHaveLength(2);
+    const [defaultExport, parameterizedExport] = exportCalls;
+    if (!defaultExport || !parameterizedExport) {
+      throw new Error('Expected default and parameterized runtime exports.');
+    }
+    expect(defaultExport.format).toBe('glb');
+    expect(defaultExport.input).toMatchObject({
       source: { path: `${projectRootPath}/main.ts` },
     });
-    expect(exportCalls[0]?.bytes).toBeGreaterThan(1000);
+    expect((defaultExport.input as { parameters?: unknown }).parameters).toBeUndefined();
+    expect(parameterizedExport.input).toMatchObject({
+      source: { path: `${projectRootPath}/main.ts` },
+      parameters: { cubeSize: 80, cylinderRadius: 10, cylinderHeight: 90 },
+    });
+    expect(defaultExport.bytes).toBeGreaterThan(1000);
+    expect(parameterizedExport.bytes).toBeGreaterThan(1000);
     expect(JSON.stringify(resultMessage.result)).not.toContain('MODEL_EXPORT_FAILED');
     expect(JSON.stringify(resultMessage.result)).not.toContain('Tau runtime did not produce geometry bytes');
   }, 90_000);

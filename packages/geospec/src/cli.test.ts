@@ -278,16 +278,22 @@ describe('runGeoSpecCli', () => {
     expect(stdout).toEqual(['0 passed, 1 failed']);
   });
 
-  it('should run Replicad source-file GeoSpec tests from Node with CLI filters', { timeout: 120_000 }, async () => {
+  it('should run parameterized Replicad connected-component tests from Node', { timeout: 120_000 }, async () => {
     const projectPath = await createTemporaryProject();
     const stdout: string[] = [];
     await writeFile(
       join(projectPath, 'main.ts'),
       [
-        "import { makeBaseBox } from 'replicad';",
+        "import { makeBaseBox, type ShapeConfig } from 'replicad';",
         '',
-        'export default function main() {',
-        '  return makeBaseBox(10, 20, 30);',
+        'export const defaultParams = { componentCount: 1 };',
+        '',
+        'export default function main(p = defaultParams): ShapeConfig[] {',
+        '  const parameters = { ...defaultParams, ...p };',
+        '  return Array.from({ length: parameters.componentCount }, (_, index) => ({',
+        '    shape: makeBaseBox(10, 10, 10).translate([index * 20, 0, 0]),',
+        "    name: 'Block ' + (index + 1),",
+        '  }));',
         '}',
       ].join('\n'),
       'utf8',
@@ -297,14 +303,14 @@ describe('runGeoSpecCli', () => {
       [
         "import { describe, expectGeo, it } from 'geospec';",
         "import { loadModel } from 'geospec/model';",
-        "describe('Replicad cuboid', () => {",
-        "  it('should check the width in millimeters', async () => {",
+        "describe('Replicad parameterized components', () => {",
+        "  it('should have one connected component by default', async () => {",
         "    const model = await loadModel({ file: 'main.ts' });",
-        '    expectGeo(model).toHaveBoundingBox({ size: { x: 10 }, tolerance: 0.1 });',
+        '    expectGeo(model).toHaveConnectedComponents({ count: 1 });',
         '  });',
-        "  it('should check the height in millimeters', async () => {",
-        "    const model = await loadModel({ file: 'main.ts' });",
-        '    expectGeo(model).toHaveBoundingBox({ size: { z: 30 }, tolerance: 0.1 });',
+        "  it('should have three connected components with explicit parameters', async () => {",
+        "    const model = await loadModel({ file: 'main.ts', parameters: { componentCount: 3 } });",
+        '    expectGeo(model).toHaveConnectedComponents({ count: 3 });',
         '  });',
         '});',
       ].join('\n'),
@@ -312,7 +318,7 @@ describe('runGeoSpecCli', () => {
     );
 
     const exitCode = await runGeoSpecCli({
-      argv: ['run', '.', '--file', 'main.geospec.ts', '--test-name-pattern', 'height', '--test-timeout', '120000'],
+      argv: ['run', '.', '--file', 'main.geospec.ts', '--test-timeout', '120000'],
       cwd: projectPath,
       stderr() {
         return undefined;
@@ -323,7 +329,7 @@ describe('runGeoSpecCli', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout).toEqual(['1 passed, 0 failed']);
+    expect(stdout).toEqual(['2 passed, 0 failed']);
   });
 
   it(

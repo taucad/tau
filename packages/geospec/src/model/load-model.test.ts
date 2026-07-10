@@ -1,7 +1,12 @@
 import { Accessor, Document, WebIO } from '@gltf-transform/core';
 import { describe, expect, it, vi } from 'vitest';
-import { GeoSpecModelLoadError, createModelLoader, loadModel, parameterGroups, params } from '#model/index.js';
-import type { GeoSpecModelLoader, GeoSpecRuntimeClient, GeoSpecRuntimeSourceAdapter } from '#model/index.js';
+import { GeoSpecModelLoadError, createModelLoader, loadModel } from '#model/index.js';
+import type {
+  GeoSpecModelLoader,
+  GeoSpecRuntimeClient,
+  GeoSpecRuntimeSourceAdapter,
+  LoadModelOptions,
+} from '#model/index.js';
 import type { GeometryDiagnostic, GeometrySubject } from '#mesh/types.js';
 import { clearCollectorGlobals, createCollector, installCollector } from '#runner/collector.js';
 import {
@@ -29,9 +34,12 @@ const openscadCubeCutoutCode = `
 $fa = 2;
 $fs = 0.4;
 
+cube_size = 10;
+cutout_size = 4;
+
 difference() {
-  cube([50, 50, 50], center = true);
-  cylinder(h = 60, r = 10, center = true);
+  cube([cube_size, cube_size, cube_size], center = true);
+  cube([cutout_size, cutout_size, cube_size + 2], center = true);
 }
 `;
 const jscadCubeCutoutCode = `
@@ -418,9 +426,9 @@ describe('loadModel', () => {
     expect(subject.kind).toBe('geometry-subject');
     expect(subject.provenance.source.format).toBe('glb');
     expect(subject.provenance.unit).toBe('mm');
-    expect(subject.mesh.stats.boundingBox?.size[0]).toBeCloseTo(50, 1);
-    expect(subject.mesh.stats.boundingBox?.size[1]).toBeCloseTo(50, 1);
-    expect(subject.mesh.stats.boundingBox?.size[2]).toBeCloseTo(50, 1);
+    expect(subject.mesh.stats.boundingBox?.size[0]).toBeCloseTo(10, 1);
+    expect(subject.mesh.stats.boundingBox?.size[1]).toBeCloseTo(10, 1);
+    expect(subject.mesh.stats.boundingBox?.size[2]).toBeCloseTo(10, 1);
     expect(subject.mesh.stats.boundingBox?.center[0]).toBeCloseTo(0, 1);
     expect(subject.mesh.stats.boundingBox?.center[1]).toBeCloseTo(0, 1);
     expect(subject.mesh.stats.boundingBox?.center[2]).toBeCloseTo(0, 1);
@@ -726,54 +734,63 @@ describe('loadModel', () => {
         [
           "import { describe, expectGeo, it } from 'geospec';",
           "import { loadModel } from 'geospec/model';",
-          "describe('cube with cylinder cutout', () => {",
-          "  it('should have bounding box approximately 50mm cubic', async () => {",
+          "describe('cube with square cutout', () => {",
+          "  it('should have a 10mm bounding box by default', async () => {",
           "    const model = await loadModel({ file: 'main.scad' });",
-          '    expectGeo(model).toHaveBoundingBox({ size: { x: 50, y: 50, z: 50 }, tolerance: 1 });',
+          '    expectGeo(model).toHaveBoundingBox({ size: { x: 10, y: 10, z: 10 }, tolerance: 0.1 });',
           '  });',
-          "  it('should be centered at origin', async () => {",
+          "  it('should be centered at the origin', async () => {",
           "    const model = await loadModel({ file: 'main.scad' });",
-          '    expectGeo(model).toHaveBoundingBox({ center: { x: 0, y: 0, z: 0 }, tolerance: 0.5 });',
-          '  });',
-          "  it('should be a single watertight solid', async () => {",
-          "    const model = await loadModel({ file: 'main.scad' });",
-          '    expectGeo(model).toBeWatertight();',
+          '    expectGeo(model).toHaveBoundingBox({ center: { x: 0, y: 0, z: 0 }, tolerance: 0.1 });',
           '  });',
           "  it('should be one connected component', async () => {",
           "    const model = await loadModel({ file: 'main.scad' });",
           '    expectGeo(model).toHaveConnectedComponents({ count: 1 });',
           '  });',
+          "  it('should be watertight', async () => {",
+          "    const model = await loadModel({ file: 'main.scad' });",
+          '    expectGeo(model).toBeWatertight();',
+          '  });',
+          "  it('should have a 20mm bounding box with explicit parameters', async () => {",
+          "    const model = await loadModel({ file: 'main.scad', parameters: { cube_size: 20, cutout_size: 4 } });",
+          '    expectGeo(model).toHaveBoundingBox({ size: { x: 20, y: 20, z: 20 }, tolerance: 0.1 });',
+          '  });',
           '});',
         ].join('\n'),
       );
 
-      let subjectPromise: Promise<Awaited<ReturnType<typeof loadModel>>> | undefined;
+      const explicitParameters = Object.fromEntries([
+        ['cube_size', 20],
+        ['cutout_size', 4],
+      ]);
+      const modelLoaderInputs: LoadModelOptions[] = [];
       const result = await runGeoSpecModule({
         filesystem,
         projectPath: '/project',
         entryPath: '/project/main.geospec.ts',
         modelLoader: async (input) => {
+          modelLoaderInputs.push(input);
           if ('source' in input) {
             return loadModel(input);
           }
           if ('code' in input) {
             return loadModel(input);
           }
-          subjectPromise ??= loadModel({
+          return loadModel({
             code: { [openscadFile]: openscadCubeCutoutCode },
             file: openscadFile,
             format: input.format,
             parameters: input.parameters,
             sourceAdapters: [createOpenScadSourceAdapter()],
           });
-          return subjectPromise;
         },
       });
 
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.tests.map((test) => test.status)).toEqual(['passed', 'passed', 'passed', 'passed']);
+        expect(result.tests.map((test) => test.status)).toEqual(['passed', 'passed', 'passed', 'passed', 'passed']);
       }
+      expect(modelLoaderInputs).toEqual([{ file: 'main.scad' }, { file: 'main.scad', parameters: explicitParameters }]);
     },
   );
 
@@ -1057,45 +1074,6 @@ describe('loadModel', () => {
     },
   );
 
-  it('should expose merged parameter groups for model tests', () => {
-    const groups = parameterGroups(
-      {
-        activeGroup: 'wide',
-        order: ['wide', 'narrow'],
-        groups: {
-          wide: { values: { base: { width: 20 } } },
-          narrow: { values: { base: { width: 10 } } },
-        },
-      },
-      { defaults: { base: { width: 5, depth: 7 } }, parameterFile: '.tau/parameters/main.ts.json' },
-    );
-
-    expect(groups).toEqual([
-      {
-        name: 'wide',
-        active: true,
-        values: { base: { width: 20, depth: 7 } },
-        overrides: { base: { width: 20 } },
-        provenance: {
-          parameterFile: '.tau/parameters/main.ts.json',
-          activeGroup: 'wide',
-          groupName: 'wide',
-        },
-      },
-      {
-        name: 'narrow',
-        active: false,
-        values: { base: { width: 10, depth: 7 } },
-        overrides: { base: { width: 10 } },
-        provenance: {
-          parameterFile: '.tau/parameters/main.ts.json',
-          activeGroup: 'wide',
-          groupName: 'narrow',
-        },
-      },
-    ]);
-  });
-
   it('should expose a typed model-load error for instanceof checks', async () => {
     await expect(
       loadModel({
@@ -1172,28 +1150,6 @@ describe('loadModel', () => {
     expect(subject.provenance.unit).toBe('cm');
     expect(subject.provenance.parameters).toEqual({ case: 'factory' });
     expect(subject.mesh.stats.triangleCount).toBe(1);
-  });
-
-  it('should deep-clone parameter defaults and overrides for isolated test cases', () => {
-    const entry = {
-      activeGroup: 'wide',
-      groups: {
-        wide: { values: { base: { width: 20 } } },
-      },
-    };
-    const defaults = { base: { width: 5, depth: 7 } };
-
-    const resolved = params(entry, { defaults });
-    (resolved.active.values as { base: { depth: number } }).base.depth = 99;
-    (resolved.active.overrides as { base: { width: number } }).base.width = 99;
-
-    expect(defaults).toEqual({ base: { width: 5, depth: 7 } });
-    expect(entry.groups.wide.values).toEqual({ base: { width: 20 } });
-    expect(params(entry, { defaults }).active.values).toEqual({ base: { width: 20, depth: 7 } });
-  });
-
-  it('should reject path-like parameter strings before JSON parsing', () => {
-    expect(() => params('.tau/parameters/main.ts.json')).toThrow('pass parsed JSON or raw JSON text');
   });
 
   it('should reject runtime-backed unit and scale workarounds with structured diagnostics', async () => {

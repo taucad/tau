@@ -2,6 +2,7 @@
 // Every change to this prompt must cite before/after eval evidence.
 // Format: // EVAL(<case>): <before> → <after> via <change description>
 // Example: // EVAL(cube-20mm): 80% → 95% via anti-gold-plating rules
+// EVAL(geospec-direct-parameters): 99% mean / 12-of-12 geometry / 37.5s / $0.423 → 99% mean / 12-of-12 geometry / 32.8s / $0.345 across all 12 active model-harness pairs via one canonical default/direct-parameters example. A confirmation run followed one MiniMax malformed-OpenSCAD outlier (98%, 11-of-12 geometry) and restored full geometry parity.
 // EVAL(geospec-first-testing): pending benchmark — replaces legacy requirement-file editing with GeoSpec files (`*.geospec.ts` / `*.geospec.js`) and browser-runner `test_model`. Validates the agent creates executable GeoSpec tests before implementation and no longer attempts legacy test-file edits.
 // EVAL(diagnose-before-switching): pending benchmark-2026-04-20 — replaces "stop after 1-2 retries" with claude-code's diagnose-before-switching guidance in <error_handling>. Validates that the agent stops blindly retrying identical actions but does not abandon viable approaches after a single failure.
 // EVAL(faithful-reporting): pending benchmark-2026-04-20 — adds faithful-reporting bullet to <constraints>. Validates that the agent stops claiming "all tests pass" when output shows failures and does not characterise incomplete work as done.
@@ -32,7 +33,7 @@
 import type { KernelProvider } from '@taucad/runtime';
 import { toolName } from '@taucad/chat/constants';
 import type { ChatMode } from '@taucad/chat/constants';
-import { geospecParameterTestingCopy, renderAvailableChecksCopy, renderCanonicalExample } from '@taucad/testing';
+import { renderAvailableChecksCopy, renderCanonicalExample } from '@taucad/testing';
 import type { KernelConfig } from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.types.js';
 import { getKernelConfig } from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.js';
 import { createSectionRegistry } from '#api/chat/prompts/prompt-section-registry.js';
@@ -132,9 +133,7 @@ Write deterministic measurement requirements. Each should test one measurable pr
 
 Coverage floor: for production or high-fidelity assemblies, a whole-model bounding box plus physical properties is never sufficient. Create coverage for every major component and named visible feature: per-component dimensions or positions, connectedComponents where part count or spatial separation matters, watertightness for renderable solids, BRep/feature checks for holes, fillets, chamfers, wall thickness, and planar/cylindrical faces when supported, and parameter variants for adjustable designs. If the current matchers cannot test a requirement directly, state the missing coverage explicitly and add the closest measurable proxy rather than pretending the model is fully verified.
 
-GeoSpec tests live in files named \`*.geospec.ts\` or \`*.geospec.js\`. Import \`describe\`, \`it\`, and \`expectGeo\` from \`geospec\`; import \`loadModel\` and parameter helpers from \`geospec/model\`; import parameter files through \`#params/...json\` as default JSON imports with \`with { type: 'json' }\`.
-
-If a test imports \`#params/*.json\`, ensure project \`package.json\` contains \`"type": "module"\` and \`"imports": { "#params/*.json": "./.tau/parameters/*.json" }\`. Preserve existing package fields when adding or repairing this mapping.
+GeoSpec tests live in files named \`*.geospec.ts\` or \`*.geospec.js\`. Import \`describe\`, \`it\`, and \`expectGeo\` from \`geospec\`; import \`loadModel\` from \`geospec/model\`.
 
 Example:
 ${renderCanonicalExample(config.fileExtension, {
@@ -149,7 +148,6 @@ ${renderAvailableChecksCopy({
   includeBrepFeatures: config.testingProfile.includeBrepFeatureExamples,
 })}
 
-${geospecParameterTestingCopy}
 </test_requirements>`
     : '';
 

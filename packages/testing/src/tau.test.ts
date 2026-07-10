@@ -1,6 +1,6 @@
 import { Accessor, Document, WebIO } from '@gltf-transform/core';
 import { describe, expect, it } from 'vitest';
-import { activeParams, analyzeTauModel, parameterGroups, params, renderTauModel, runTauGeoSpecTests } from '#tau.js';
+import { analyzeTauModel, renderTauModel, runTauGeoSpecTests } from '#tau.js';
 import type { GeometrySubject } from 'geospec';
 import type { GeoSpecModelFormat } from 'geospec/model';
 import type { WatertightResult } from '#geometry/types.js';
@@ -93,112 +93,22 @@ const createGeometrySubject = (sizeX: number): GeometrySubject =>
     },
   }) as unknown as GeometrySubject;
 
-describe('Tau parameter helpers', () => {
-  it('should resolve active and ordered groups from the existing .tau parameter shape', () => {
-    const resolved = params(
-      {
-        activeGroup: 'wide',
-        order: ['wide', 'compact'],
-        groups: {
-          compact: { values: { base: { width: 20 } } },
-          wide: { values: { base: { width: 60 } } },
-        },
-      },
-      {
-        defaults: { base: { width: 30, depth: 20 }, profile: { height: 10 } },
-        parameterFile: '.tau/parameters/main.ts.json',
-      },
-    );
-
-    expect(resolved.active).toEqual(
-      expect.objectContaining({
-        name: 'wide',
-        active: true,
-        values: { base: { width: 60, depth: 20 }, profile: { height: 10 } },
-        overrides: { base: { width: 60 } },
-        provenance: {
-          parameterFile: '.tau/parameters/main.ts.json',
-          activeGroup: 'wide',
-          groupName: 'wide',
-        },
-      }),
-    );
-    expect(resolved.groups.map((group) => group.name)).toEqual(['wide', 'compact']);
-  });
-
-  it('should expose activeParams and parameterGroups as focused convenience helpers', () => {
-    const entry = {
-      activeGroup: 'small',
-      groups: {
-        large: { values: { width: 50 } },
-        small: { values: { width: 10 } },
-      },
-    };
-
-    expect(activeParams(entry, { defaults: { height: 20 } })).toEqual({ width: 10, height: 20 });
-    expect(parameterGroups(entry).map((group) => [group.name, group.active])).toEqual([
-      ['small', true],
-      ['large', false],
-    ]);
-  });
-
-  it('should throw a useful error when the active group is missing', () => {
-    expect(() =>
-      params({
-        activeGroup: 'missing',
-        groups: {
-          default: { values: {} },
-        },
-      }),
-    ).toThrow("active group 'missing' is missing");
-  });
-
-  it('should deep-clone defaults and overrides for isolated Tau parameter cases', () => {
-    const entry = {
-      activeGroup: 'wide',
-      groups: {
-        wide: { values: { base: { width: 60 } } },
-      },
-    };
-    const defaults = { base: { width: 30, depth: 20 } };
-
-    const resolved = params(entry, { defaults });
-    (resolved.active.values as { base: { depth: number } }).base.depth = 99;
-    (resolved.active.overrides as { base: { width: number } }).base.width = 99;
-
-    expect(defaults).toEqual({ base: { width: 30, depth: 20 } });
-    expect(entry.groups.wide.values).toEqual({ base: { width: 60 } });
-    expect(params(entry, { defaults }).active.values).toEqual({ base: { width: 60, depth: 20 } });
-  });
-
-  it('should reject path-like parameter strings before JSON parsing', () => {
-    expect(() => params('.tau/parameters/main.ts.json')).toThrow('pass parsed JSON or raw JSON text');
-  });
-});
-
 describe('Tau model render helpers', () => {
   it('should require an explicit renderer outside a Tau GeoSpec runner', async () => {
     await expect(renderTauModel({ file: 'main.ts' })).rejects.toThrow('requires a Tau test renderer');
   });
 
-  it('should render with explicit parameters and preserve parameter source', async () => {
+  it('should render with explicit parameters and preserve provenance', async () => {
     const bytes = await createTriangleGlb();
-    const source = params({
-      activeGroup: 'wide',
-      groups: {
-        wide: { values: { width: 60 } },
-      },
-    }).active;
     const calls: Array<{
       file: string;
       format?: string;
       parameters?: Record<string, unknown>;
-      parameterSource?: unknown;
     }> = [];
 
     const subject = await renderTauModel({
       file: 'main.ts',
-      parameterSource: source,
+      parameters: { width: 60 },
       renderer: async (input) => {
         calls.push(input);
         return bytes;
@@ -207,7 +117,7 @@ describe('Tau model render helpers', () => {
 
     expect(subject.kind).toBe('geometry-subject');
     expect(subject.provenance.parameters).toEqual({ width: 60 });
-    expect(calls).toEqual([{ file: 'main.ts', format: 'glb', parameters: { width: 60 }, parameterSource: source }]);
+    expect(calls).toEqual([{ file: 'main.ts', format: 'glb', parameters: { width: 60 } }]);
   });
 
   it('should analyze rendered geometry with GeoSpec provenance parameters', async () => {

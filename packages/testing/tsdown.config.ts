@@ -2,7 +2,7 @@ import { defineConfig } from 'tsdown';
 import type { Options } from 'tsdown';
 
 const baseConfig: Options = {
-  entry: ['src/index.ts', 'src/geometry/index.ts', 'src/parameters.ts', 'src/tau.ts'],
+  entry: ['src/index.ts', 'src/geometry/index.ts', 'src/tau.ts'],
   sourcemap: false,
   clean: ['dist'],
   dts: true,

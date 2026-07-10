@@ -3,7 +3,6 @@ import {
   availableChecksCopy,
   canonicalBrepGeoSpecTestExample,
   canonicalGeoSpecTestExample,
-  geospecParameterTestingCopy,
   renderAvailableChecksCopy,
   renderCanonicalExample,
 } from '#prompt-examples.js';
@@ -27,6 +26,12 @@ describe('canonicalGeoSpecTestExample', () => {
     expect(canonicalGeoSpecTestExample).toContain('toHaveSurfaceArea');
     expect(canonicalGeoSpecTestExample).toContain('toHaveVolume');
     expect(canonicalGeoSpecTestExample).toContain('toHaveCenterOfMass');
+  });
+
+  it('should show default and explicit parameter loads in the canonical suite', () => {
+    expect(canonicalGeoSpecTestExample).toContain("loadModel({ file: '<file>' })");
+    expect(canonicalGeoSpecTestExample).toContain('parameters: { width, height }');
+    expect(canonicalGeoSpecTestExample).toContain('size: { x: width, z: height }');
   });
 
   it('should never reference legacy requirement-file or deprecated checks', () => {
@@ -138,32 +143,12 @@ describe('availableChecksCopy', () => {
   });
 });
 
-describe('geospecParameterTestingCopy', () => {
-  it('should teach the agent that parameters are mutable GeoSpec test inputs', () => {
-    expect(geospecParameterTestingCopy).toContain('Parameter-aware GeoSpec tests');
-    expect(geospecParameterTestingCopy).toContain("import { loadModel, parameterGroups } from 'geospec/model'");
-    expect(geospecParameterTestingCopy).toContain(
-      "import mainParams from '#params/main.ts.json' with { type: 'json' }",
-    );
-    expect(geospecParameterTestingCopy).toContain('Do not import named `values` from JSON');
-    expect(geospecParameterTestingCopy).toContain('Parameters are real test inputs');
-    expect(geospecParameterTestingCopy).toContain('"#params/*.json": "./.tau/parameters/*.json"');
-    expect(geospecParameterTestingCopy).toContain("import { describe, expectGeo, it } from 'geospec'");
-    expect(geospecParameterTestingCopy).not.toContain('@taucad/testing/tau');
-  });
-});
-
 describe('GeoSpec matcher vocabulary is real (anti-drift guard)', () => {
   // Every `toHave*` / `toBe*` token the agent-facing copy teaches must be a
   // matcher that actually exists on geospec's live surface. This is the guard
   // that would have caught the toHaveNoComponentOverlap -> ...Interference
   // rename drift instead of the old hardcoded-name asserts protecting it.
-  const corpus = [
-    canonicalGeoSpecTestExample,
-    canonicalBrepGeoSpecTestExample,
-    availableChecksCopy,
-    geospecParameterTestingCopy,
-  ].join('\n');
+  const corpus = [canonicalGeoSpecTestExample, canonicalBrepGeoSpecTestExample, availableChecksCopy].join('\n');
   const referencedMatchers = [...new Set(corpus.match(/to(?:Have|Be)[A-Za-z]+/g) ?? [])];
 
   it('references at least the core matchers (sanity that parsing works)', () => {
@@ -184,7 +169,6 @@ describe('agent-facing GeoSpec copy', () => {
     const corpus = [
       availableChecksCopy,
       canonicalGeoSpecTestExample,
-      geospecParameterTestingCopy,
       renderCanonicalExample('scad'),
       renderCanonicalExample('ts'),
       renderCanonicalExample('ts', { includeBrepFeatures: true }),
@@ -200,7 +184,6 @@ describe('agent-facing GeoSpec copy', () => {
       availableChecksCopy,
       canonicalGeoSpecTestExample,
       canonicalBrepGeoSpecTestExample,
-      geospecParameterTestingCopy,
       renderCanonicalExample('scad'),
       renderCanonicalExample('kcl'),
       renderCanonicalExample('ts'),

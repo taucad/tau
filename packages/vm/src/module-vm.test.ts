@@ -98,50 +98,25 @@ describe('createEsbuildModuleVm', () => {
     }
   });
 
-  it('should bundle package imports that resolve to Tau parameter JSON files', async () => {
+  it('should return a structured bundle issue for unsupported private package imports', async () => {
     const filesystem = new MemoryFileSystem();
-    filesystem.setText(
-      '/project/package.json',
-      JSON.stringify({
-        type: 'module',
-        imports: {
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- package.json imports use package import specifier keys
-          '#params/*.json': './.tau/parameters/*.json',
-        },
-      }),
-    );
-    filesystem.setText(
-      '/project/.tau/parameters/lib/part.ts.json',
-      JSON.stringify({
-        activeGroup: 'wide',
-        groups: {
-          wide: { values: { width: 42 } },
-        },
-      }),
-    );
-    filesystem.setText(
-      '/project/model.geospec.ts',
-      [
-        "import partParams from '#params/lib/part.ts.json' with { type: 'json' };",
-        'export const active = partParams.activeGroup;',
-        'export const width = partParams.groups.wide.values.width;',
-      ].join('\n'),
-    );
+    filesystem.setText('/project/model.ts', "import value from '#internal'; export const result = value;");
 
     const vm = await createEsbuildModuleVm({ filesystem, projectPath: '/project' });
     activeVm = vm;
 
-    const bundled = await vm.bundle('/project/model.geospec.ts');
-    expect(bundled.success).toBe(true);
-    expect(bundled.dependencies).toEqual(
-      expect.arrayContaining(['/project/model.geospec.ts', '/project/.tau/parameters/lib/part.ts.json']),
-    );
-
-    const executed = await vm.execute<{ active: string; width: number }>(bundled.code);
-    expect(executed.success).toBe(true);
-    if (executed.success) {
-      expect(executed.value).toEqual(expect.objectContaining({ active: 'wide', width: 42 }));
-    }
+    const result = await vm.bundle('/project/model.ts');
+    expect(result).toMatchObject({
+      success: false,
+      issues: [
+        expect.objectContaining({
+          code: 'BUNDLER_FAILED',
+          severity: 'error',
+          type: 'compilation',
+          message: "Private package import '#internal' is not supported.",
+        }),
+      ],
+    });
   });
 
   it('should resolve production dependencies and unresolved import paths', async () => {

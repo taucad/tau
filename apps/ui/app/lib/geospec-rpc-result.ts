@@ -115,7 +115,7 @@ export const runnerResultToTestModelOutput = (
         id: `${fileResult.file}:bundle`,
         requirement: `GeoSpec module ${fileResult.file} must bundle and execute`,
         reason: fileResult.result.issues.map((issue) => issue.message).join('\n'),
-        suggestion: 'Fix the GeoSpec syntax, imports, package imports mapping, or referenced project files.',
+        suggestion: 'Fix the GeoSpec syntax, imports, or referenced project files.',
         targetFile: fileResult.file,
       });
       continue;

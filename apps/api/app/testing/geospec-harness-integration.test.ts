@@ -20,6 +20,12 @@ type TestVmFileSystem = {
   ensureDir(path: string): Promise<void>;
 };
 
+type HarnessRenderInput = {
+  file: string;
+  format?: string;
+  parameters?: Record<string, unknown>;
+};
+
 class MemoryGeoSpecFileSystem implements TestVmFileSystem {
   private readonly files = new Map<string, string>();
 
@@ -262,6 +268,31 @@ const createBrepSubject = (): TauModelRendererOutput => {
   return subject as unknown as TauModelRendererOutput;
 };
 
+const createParameterizedBoundsSubject = (size: number): TauModelRendererOutput => {
+  const subject = createBrepSubject();
+  if (subject instanceof Uint8Array) {
+    throw new TypeError('Expected an in-memory geometry subject.');
+  }
+  return {
+    ...subject,
+    provenance: {
+      ...subject.provenance,
+      parameters: { cubeSize: size },
+    },
+    mesh: {
+      ...subject.mesh,
+      stats: {
+        ...subject.mesh.stats,
+        boundingBox: {
+          center: [0, 0, 0],
+          size: [size, size, size],
+          primitives: [],
+        },
+      },
+    },
+  };
+};
+
 const setBrepGeoSpecTest = (filesystem: MemoryGeoSpecFileSystem): void => {
   filesystem.setText(
     '/project/main.geospec.ts',
@@ -302,13 +333,31 @@ const setComponentOverlapGeoSpecTest = (filesystem: MemoryGeoSpecFileSystem): vo
   );
 };
 
+const setParameterizedBoundsGeoSpecTest = (filesystem: MemoryGeoSpecFileSystem): void => {
+  filesystem.setText(
+    '/project/main.geospec.ts',
+    [
+      "import { describe, expectGeo, it } from 'geospec';",
+      "import { loadModel } from 'geospec/model';",
+      "describe('api harness parameterized bounds', () => {",
+      "  it('should use model defaults when parameters are omitted', async () => {",
+      "    const model = await loadModel({ file: 'main.ts' });",
+      '    expectGeo(model).toHaveBoundingBox({ size: { x: 10, y: 10, z: 10 }, tolerance: 0.1 });',
+      '  });',
+      "  it('should use explicit parameters for alternate bounds', async () => {",
+      "    const model = await loadModel({ file: 'main.ts', parameters: { cubeSize: 20 } });",
+      '    expectGeo(model).toHaveBoundingBox({ size: { x: 20, y: 20, z: 20 }, tolerance: 0.1 });',
+      '  });',
+      '});',
+    ].join('\n'),
+  );
+};
+
 const createHarnessGeoSpecClient = (
   filesystem: MemoryGeoSpecFileSystem,
-  renderCalls: Array<{ file: string; format?: string }> = [],
-  renderer: (input: {
-    file: string;
-    format?: string;
-  }) => Promise<TauModelRendererOutput> | TauModelRendererOutput = () => createBrepSubject(),
+  renderCalls: HarnessRenderInput[] = [],
+  renderer: (input: HarnessRenderInput) => Promise<TauModelRendererOutput> | TauModelRendererOutput = () =>
+    createBrepSubject(),
 ): RpcGeoSpecClient => ({
   async runTests(args) {
     const discovery = await discoverGeoSpecFiles({
@@ -401,6 +450,35 @@ describe('GeoSpec headless API harness integration', () => {
     );
   });
 
+  it('should forward default and explicit parameters through the test_model bridge', async () => {
+    const filesystem = new MemoryGeoSpecFileSystem();
+    setParameterizedBoundsGeoSpecTest(filesystem);
+    const renderCalls: HarnessRenderInput[] = [];
+    testApp = await createTestApp({
+      geospecStub: createHarnessGeoSpecClient(filesystem, renderCalls, (input) =>
+        createParameterizedBoundsSubject(
+          typeof input.parameters?.['cubeSize'] === 'number' ? input.parameters['cubeSize'] : 10,
+        ),
+      ),
+    });
+
+    const result = (await callTestModel(testApp)) as {
+      failures: unknown[];
+      passes: Array<{ requirement: string; targetFile: string }>;
+      passed: number;
+      total: number;
+    };
+
+    expect(result.failures).toEqual([]);
+    expect(result.passed).toBe(2);
+    expect(result.total).toBe(2);
+    expect(result.passes.map((pass) => pass.targetFile)).toEqual(['main.geospec.ts', 'main.geospec.ts']);
+    expect(renderCalls).toEqual([
+      { file: 'main.ts', format: 'glb' },
+      { file: 'main.ts', format: 'glb', parameters: { cubeSize: 20 } },
+    ]);
+  });
+
   it('should run component-overlap GeoSpec matchers through test_model using in-process RPC', async () => {
     const filesystem = new MemoryGeoSpecFileSystem();
     setComponentOverlapGeoSpecTest(filesystem);
@@ -482,9 +560,9 @@ describe('GeoSpec headless API harness integration', () => {
     expect(overlap).toMatchObject({
       leftLabel: 'sun#0',
       rightLabel: 'ring#0',
-      intersectionVolume: expect.closeTo(600, 2),
       penetration: 'positive-volume',
     });
+    expect(overlap?.intersectionVolume).toBeCloseTo(600, 2);
   });
 
   it('should pass test_model filters through the API harness into the in-process GeoSpec runner', async () => {

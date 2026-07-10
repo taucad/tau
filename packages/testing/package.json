@@ -24,7 +24,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./geometry": "./src/geometry/index.ts",
-    "./parameters": "./src/parameters.ts",
     "./tau": "./src/tau.ts"
   },
   "publishConfig": {
@@ -39,11 +38,6 @@
         "types": "./dist/geometry/index.d.ts",
         "import": "./dist/geometry/index.js",
         "default": "./dist/geometry/index.js"
-      },
-      "./parameters": {
-        "types": "./dist/parameters.d.ts",
-        "import": "./dist/parameters.js",
-        "default": "./dist/parameters.js"
       },
       "./tau": {
         "types": "./dist/tau.d.ts",

@@ -88,9 +88,6 @@ const stepLoadFailure = (error: unknown): ModelLoadFailure => ({
   ],
 });
 
-const getParameters = (options: LoadModelOptions): Record<string, unknown> | undefined =>
-  options.parameters ?? ('parameterSource' in options ? options.parameterSource?.values : undefined);
-
 const forbiddenRuntimeBackedOptionKeys = ['unit', 'sourceUnit', 'scale', 'coordinateSystem'] as const;
 
 const validateRuntimeBackedOptions = (
@@ -243,7 +240,7 @@ const exportRuntimeFormat = async (options: {
     return exportIntent;
   }
 
-  const parameters = getParameters(options.loadOptions);
+  const { parameters } = options.loadOptions;
   const input = buildRuntimeExportInput({
     loadOptions: options.loadOptions,
     parameters,
@@ -523,7 +520,7 @@ const loadModelResult = async <Code extends Record<string, string> = Record<stri
     return unsupportedFormat(format);
   }
 
-  const parameters = getParameters(options);
+  const { parameters } = options;
   if (isSourceOptions(options)) {
     return loadSourceModelResult({
       loadOptions: options,

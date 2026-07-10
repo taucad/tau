@@ -48,7 +48,7 @@ The CLI and Tau `test_model` tool share the same execution filters:
 - `testNamePattern`: JavaScript regular expression matched against full `suite > test` names
 - `testTimeout`: async test timeout in milliseconds (`--test-timeout` in the CLI)
 
-The Tau runtime contract remains file/bytes based: render or export geometry, then pass GLB/glTF or STEP bytes into GeoSpec loaders. `geospec/model` is built on `@taucad/runtime` as a package dependency for CAD-source loading, while direct GLB/glTF and STEP loaders remain usable for already-exported evidence. Tau project tests should use `loadModel` and parameter helpers from `geospec/model`; `@taucad/testing/tau` remains an internal compatibility adapter for Tau runners.
+The Tau runtime contract remains file/bytes based: render or export geometry, then pass GLB/glTF or STEP bytes into GeoSpec loaders. `geospec/model` is built on `@taucad/runtime` as a package dependency for CAD-source loading, while direct GLB/glTF and STEP loaders remain usable for already-exported evidence. Tau project tests should use `loadModel` from `geospec/model`; `@taucad/testing/tau` remains an internal compatibility adapter for Tau runners.
 
 Runtime-originated diagnostics keep their runtime issue codes, such as `GEOMETRY_INVALID`, inside `GeometrySubject.diagnostics`. GeoSpec adds matcher-facing facets and spatial evidence around those diagnostics instead of remapping them into kernel-specific or GeoSpec-only aliases.
 
@@ -186,38 +186,26 @@ The custom C++ wrapper and Docker build config live in
 triangle-distance fallback; native backend failures are returned as structured
 diagnostics.
 
-Tau projects import existing parameter files as real JSON modules through project `package.json#imports`:
-
-```json
-{
-  "type": "module",
-  "imports": {
-    "#params/*.json": "./.tau/parameters/*.json"
-  }
-}
-```
+When a geometry assertion needs a parameter variant, pass that variant directly to `loadModel`. Omitting `parameters` exercises the defaults authored by the model:
 
 ```ts
 import { describe, expectGeo, it } from 'geospec';
-import { loadModel, parameterGroups } from 'geospec/model';
-import mainParams from '#params/main.ts.json' with { type: 'json' };
-
-const groups = parameterGroups(mainParams, { defaults: defaultParams });
+import { loadModel } from 'geospec/model';
 
 describe('parameter variants', () => {
-  for (const group of groups) {
-    it(`should render ${group.name}`, async () => {
-      const model = await loadModel({
-        file: 'main.ts',
-        parameters: group.values,
-        parameterSource: group,
-      });
+  it('uses the model defaults', async () => {
+    const model = await loadModel({ file: 'main.ts' });
+    expectGeo(model).toHaveBoundingBox({ size: { x: 40 }, tolerance: 1 });
+  });
 
-      expectGeo(model).toHaveBoundingBox({
-        size: { x: group.values.base.width },
-        tolerance: 1,
-      });
+  it('accepts an explicit width', async () => {
+    const width = 80;
+    const model = await loadModel({
+      file: 'main.ts',
+      parameters: { width },
     });
-  }
+
+    expectGeo(model).toHaveBoundingBox({ size: { x: width }, tolerance: 1 });
+  });
 });
 ```

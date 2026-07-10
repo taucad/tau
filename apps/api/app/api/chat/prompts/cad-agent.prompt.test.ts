@@ -1383,7 +1383,8 @@ describe('getCadSystemPrompt', () => {
       expect(block).toContain('*.geospec.ts');
       expect(block).toContain("import { describe, expectGeo, it } from 'geospec'");
       expect(block).toContain("import { loadModel } from 'geospec/model'");
-      expect(block).toContain("with { type: 'json' }");
+      expect(block).toContain('parameters: { width, height }');
+      expect(countOccurrences(block, 'parameters: { width, height }')).toBe(1);
       expect(block).not.toMatch(/^\s*{\s*"requirements"\s*:/);
       expect(block).not.toContain('@taucad/testing/tau');
     });

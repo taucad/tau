@@ -62,46 +62,6 @@ export const expectGeo = (subject) => getCollector().expectGeo(subject);
 
 const createGeospecModelBuiltinCode = (runToken: string): string => `
 ${createBindingAccessorCode(runToken)}
-const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
-const cloneValue = (value) => value === undefined || value === null ? value : structuredClone(value);
-
-const mergeParameters = (defaults, overrides) => {
-  const merged = cloneValue(defaults);
-  for (const [key, value] of Object.entries(overrides ?? {})) {
-    const current = merged[key];
-    merged[key] = isRecord(current) && isRecord(value) ? mergeParameters(current, value) : cloneValue(value);
-  }
-  return merged;
-};
-
-const parseParameterEntry = (entry) => {
-  if (typeof entry === 'string' && !entry.trimStart().startsWith('{')) {
-    throw new Error('Invalid GeoSpec parameter file input: pass parsed JSON or raw JSON text, not a filesystem path.');
-  }
-  const parsed = typeof entry === 'string' ? JSON.parse(entry) : entry;
-  if (!isRecord(parsed) || typeof parsed.activeGroup !== 'string' || !isRecord(parsed.groups)) {
-    throw new Error('Invalid GeoSpec parameter file: expected activeGroup and groups.');
-  }
-  for (const [name, group] of Object.entries(parsed.groups)) {
-    if (!isRecord(group) || !isRecord(group.values)) {
-      throw new Error(\`Invalid GeoSpec parameter file: group '\${name}' must contain a values object.\`);
-    }
-  }
-  return parsed;
-};
-
-const groupNames = (entry) => {
-  const ordered = entry.order ?? [entry.activeGroup, ...Object.keys(entry.groups).filter((name) => name !== entry.activeGroup)];
-  const seen = new Set();
-  const names = [];
-  for (const name of [...ordered, ...Object.keys(entry.groups)]) {
-    if (seen.has(name) || entry.groups[name] === undefined) continue;
-    seen.add(name);
-    names.push(name);
-  }
-  return names;
-};
-
 export class GeoSpecModelLoadError extends Error {
   constructor(diagnostics) {
     const snapshot = diagnostics.map((diagnostic) => {
@@ -119,33 +79,6 @@ export class GeoSpecModelLoadError extends Error {
     this.diagnostics = Object.freeze(snapshot);
   }
 }
-
-export const params = (entry, options = {}) => {
-  const parsed = parseParameterEntry(entry);
-  const defaults = cloneValue(options.defaults ?? {});
-  const groups = groupNames(parsed).map((name) => {
-    const overrides = cloneValue(parsed.groups[name]?.values ?? {});
-    return {
-      name,
-      active: name === parsed.activeGroup,
-      values: mergeParameters(defaults, overrides),
-      overrides,
-      provenance: {
-        ...(options.parameterFile ? { parameterFile: options.parameterFile } : {}),
-        activeGroup: parsed.activeGroup,
-        groupName: name,
-      },
-    };
-  });
-  const active = groups.find((group) => group.active);
-  if (!active) {
-    throw new Error(\`Invalid GeoSpec parameter file: active group '\${parsed.activeGroup}' is missing.\`);
-  }
-  return { active, groups, defaults: cloneValue(defaults) };
-};
-
-export const activeParams = (entry, options = {}) => params(entry, options).active.values;
-export const parameterGroups = (entry, options = {}) => params(entry, options).groups;
 
 export const loadModel = async (options) => {
   const loader = getRunBinding().modelLoader;

@@ -3,7 +3,7 @@ title: 'Filesystem Policy'
 description: 'Standards for filesystem access, data transfer, caching, concurrency, and watcher architecture in the Tau application. Covers ZenFS, bridge RPC, and kernel/UI watch planes.'
 status: active
 created: '2026-03-05'
-updated: '2026-06-05'
+updated: '2026-07-10'
 related:
   - docs/research/filesystem-architecture.md
   - docs/research/fs-capabilities.md
@@ -11,6 +11,7 @@ related:
   - docs/research/vscode-fs-performance.md
   - docs/research/origin-client-id-propagation-audit.md
   - docs/research/project-updated-at-activity-boundary.md
+  - docs/research/revision-restore-runtime-watcher-gap.md
 ---
 
 # Filesystem Policy
@@ -137,6 +138,23 @@ await resourceQueue.queueFor(path, () => provider.writeFile(path, data));
 // INCORRECT: Global serialization (unnecessarily blocks independent writes)
 await globalQueue.serialized(() => provider.writeFile(path, data));
 ```
+
+### Rule 5a: Batch mutations preserve canonical per-resource semantics
+
+Implement batch and composite mutations by delegating each resource to the canonical primitive mutation unless the provider exposes a real transaction contract. Every committed resource must retain the primitive's path normalization, mount/backend resolution, queue and cross-tab lock, writer-owned cache invalidation, in-memory index update, exact change event, and origin metadata.
+
+Delivery coalescers may batch exact mutation facts after commit. They must not replace affected paths with a lossy root-directory summary.
+
+```typescript
+// CORRECT: one RPC, canonical semantics for every path
+await Promise.all(Object.entries(files).map(async ([path, file]) => writeFile(path, file.content, context)));
+
+// INCORRECT: duplicate a subset of writeFile and summarize the batch at root
+await Promise.all(Object.entries(files).map(([path, file]) => provider.writeFile(path, file.content)));
+eventBus.emit({ type: 'directoryChanged', path: '/', backend: rootBackend });
+```
+
+**Why**: A successful provider write is incomplete while writer caches retain old bytes or exact-path watchers cannot observe the committed path.
 
 ### Rule 6: Transfer, don't clone
 

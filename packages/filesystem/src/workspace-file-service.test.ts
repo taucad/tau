@@ -7,6 +7,7 @@ import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { MountTable } from '#mount-table.js';
+import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 import { SharedPool } from '@taucad/memory';
 import type { ChangeEvent, FileSystemProvider, WatchEvent } from '#types.js';
 import { getEventOrigin } from '#event-origin-registry.js';
@@ -35,7 +36,7 @@ async function waitFor(predicate: () => boolean, waitTimeout = 2000, pollInterva
   }
 }
 
-async function createWorkspaceFileService() {
+async function createWorkspaceFileService(options?: { crossTabCoordinator?: CrossTabCoordinator }) {
   const providerRegistry = new ProviderRegistry();
   const provider = await providerRegistry.createMountProvider({ backend: 'memory' });
 
@@ -49,6 +50,7 @@ async function createWorkspaceFileService() {
     providerRegistry,
     resourceQueue,
     eventBus,
+    crossTabCoordinator: options?.crossTabCoordinator,
     mountTable,
   });
 
@@ -819,7 +821,7 @@ describe('WorkspaceFileService', () => {
   // ---------------------------------------------------------------------------
 
   describe('writeFiles', () => {
-    it('should write multiple files atomically', async () => {
+    it('should write multiple files through one batch call', async () => {
       const pathA = '/batch/a.txt';
       const pathB = '/batch/b.txt';
       await service.writeFiles({
@@ -839,6 +841,70 @@ describe('WorkspaceFileService', () => {
       });
       expect(await service.readFile(pathA, 'utf8')).toBe('deep-a');
       expect(await service.readFile(pathB, 'utf8')).toBe('deep-b');
+    });
+
+    it('should notify an exact-path watcher when restoring a file', async () => {
+      vi.useFakeTimers();
+      const path = '/main.scad';
+      const received: WatchEvent[] = [];
+      const unsubscribe = service.watch({ paths: [path] }, (event) => {
+        received.push(event);
+      });
+
+      try {
+        await service.writeFiles({ [path]: { content: 'plain-cube' } });
+        await vi.advanceTimersByTimeAsync(75);
+
+        expect(received).toEqual([{ type: 'change', path, correlationId: undefined }]);
+      } finally {
+        unsubscribe();
+        vi.useRealTimers();
+      }
+    });
+
+    it('should use the cross-tab write lock for every batch path', async () => {
+      const coordinator = new CrossTabCoordinator();
+      const withWriteLock = vi.spyOn(coordinator, 'withWriteLock');
+      const { service: svc } = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+      const pathA = '/batch/a.txt';
+      const pathB = '/batch/b.txt';
+
+      try {
+        await svc.writeFiles({
+          [pathA]: { content: 'a' },
+          [pathB]: { content: 'b' },
+        });
+
+        expect(withWriteLock).toHaveBeenCalledTimes(2);
+        expect(withWriteLock).toHaveBeenCalledWith(pathA, expect.any(Function));
+        expect(withWriteLock).toHaveBeenCalledWith(pathB, expect.any(Function));
+      } finally {
+        svc.dispose();
+        coordinator.dispose();
+      }
+    });
+
+    it('should perform no provider, lock, or event work for an empty batch', async () => {
+      const coordinator = new CrossTabCoordinator();
+      const withWriteLock = vi.spyOn(coordinator, 'withWriteLock');
+      const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+      const providerWrite = vi.spyOn(context.provider, 'writeFile');
+      const events: ChangeEvent[] = [];
+      const unsubscribe = context.eventBus.subscribe((event) => {
+        events.push(event);
+      });
+
+      try {
+        await context.service.writeFiles({});
+
+        expect(providerWrite).not.toHaveBeenCalled();
+        expect(withWriteLock).not.toHaveBeenCalled();
+        expect(events).toEqual([]);
+      } finally {
+        unsubscribe();
+        context.service.dispose();
+        coordinator.dispose();
+      }
     });
   });
 
@@ -1166,18 +1232,41 @@ describe('WorkspaceFileService', () => {
       expect(types.has('fileWritten')).toBe(true);
       expect(types.has('fileRenamed')).toBe(true);
       expect(types.has('fileDeleted')).toBe(true);
-      expect(types.has('directoryChanged')).toBe(true);
     });
 
-    it('should emit directoryChanged on writeFiles', async () => {
+    it('should emit one exact fileWritten event per batch path with the caller origin', async () => {
       const events: ChangeEvent[] = [];
-      eventBus.subscribe((event) => events.push(event));
+      const unsubscribe = eventBus.subscribe((event) => events.push(event));
+      const pathA = '/batch/a.txt';
+      const pathB = '/batch/b.txt';
 
-      const filePath = '/batch/f.txt';
-      await service.writeFiles({ [filePath]: { content: 'x' } });
+      try {
+        await service.writeFiles(
+          {
+            [pathA]: { content: 'a' },
+            [pathB]: { content: 'b' },
+          },
+          { originClientId: 'batch_author' },
+        );
 
-      const directoryEvents = events.filter((event) => event.type === 'directoryChanged');
-      expect(directoryEvents.length).toBeGreaterThanOrEqual(1);
+        const writtenEvents = events
+          .filter((event) => event.type === 'fileWritten')
+          .map((event) => ({ event, origin: getEventOrigin(event) }))
+          .sort((a, b) => a.event.path.localeCompare(b.event.path));
+        expect(writtenEvents).toEqual([
+          {
+            event: { type: 'fileWritten', path: pathA, backend: 'memory' },
+            origin: 'batch_author',
+          },
+          {
+            event: { type: 'fileWritten', path: pathB, backend: 'memory' },
+            origin: 'batch_author',
+          },
+        ]);
+        expect(events).not.toContainEqual(expect.objectContaining({ type: 'directoryChanged', path: '/' }));
+      } finally {
+        unsubscribe();
+      }
     });
 
     it('should emit directoryCreated on mkdir', async () => {
@@ -1692,6 +1781,19 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
 
       await svc.writeFile('/update.txt', 'updated');
       expect(pool.has('/update.txt')).toBe(false);
+    });
+
+    it('should invalidate pooled content when writeFiles restores a file', async () => {
+      const { service: svc, pool } = await createWorkspaceFileServiceWithPool();
+      const path = '/main.scad';
+      await svc.writeFile(path, 'cube-with-cutout');
+      await svc.readFile(path);
+      expect(decoder.decode(pool.resolveCopy(path))).toBe('cube-with-cutout');
+
+      await svc.writeFiles({ [path]: { content: 'plain-cube' } });
+
+      expect(pool.has(path)).toBe(false);
+      expect(await svc.readFile(path, 'utf8')).toBe('plain-cube');
     });
 
     it('should invalidate pool entries on rename', async () => {

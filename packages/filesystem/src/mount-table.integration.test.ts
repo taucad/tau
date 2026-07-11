@@ -1,3 +1,5 @@
+// oxlint-disable-next-line import/no-unassigned-import -- Side-effect import to polyfill IndexedDB for tests
+import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { MountTable } from '#mount-table.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
@@ -5,6 +7,8 @@ import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { createMemoryProvider } from '#backend/memory-provider.js';
+import { getEventOrigin } from '#event-origin-registry.js';
+import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 import type { ChangeEvent, FileSystemProvider } from '#types.js';
 
 async function createMountedWorkspaceFileService() {
@@ -369,33 +373,67 @@ describe('MountTable integration', () => {
     it('should route bulk writeFiles across sibling mount prefixes to the correct providers', async () => {
       const providerRegistry = new ProviderRegistry();
       const rootProvider = await providerRegistry.createMountProvider({ backend: 'memory' });
+      const firstProjectProvider = await providerRegistry.createMountProvider({ backend: 'indexeddb' });
+      const secondProjectProvider = await providerRegistry.createMountProvider({ backend: 'memory' });
       const siblingMountTable = new MountTable();
       siblingMountTable.mount('/', rootProvider, { backend: 'memory' });
+      siblingMountTable.mount('/projects/proj_A', firstProjectProvider, {
+        backend: 'indexeddb',
+        preservePath: true,
+      });
+      siblingMountTable.mount('/projects/proj_B', secondProjectProvider, {
+        backend: 'memory',
+        preservePath: true,
+      });
+      const siblingEventBus = new ChangeEventBus();
+      const crossTabCoordinator = new CrossTabCoordinator();
       const siblingService = new WorkspaceFileService({
         providerRegistry,
         resourceQueue: new ResourceQueue(),
-        eventBus: new ChangeEventBus(),
+        eventBus: siblingEventBus,
+        crossTabCoordinator,
         mountTable: siblingMountTable,
       });
-
-      await siblingService.mount('/projects/proj_A', { backend: 'memory', preservePath: true });
-      await siblingService.mount('/projects/proj_B', { backend: 'memory', preservePath: true });
+      const events: ChangeEvent[] = [];
+      const unsubscribe = siblingEventBus.subscribe((event) => {
+        events.push(event);
+      });
 
       const firstMain = '/projects/proj_A/main.ts';
       const firstUtility = '/projects/proj_A/lib/util.ts';
       const secondMain = '/projects/proj_B/main.ts';
-      await siblingService.writeFiles({
-        [firstMain]: { content: 'A main' },
-        [firstUtility]: { content: 'A util' },
-        [secondMain]: { content: 'B main' },
-      });
 
-      // Each file lands under its own mount prefix; cross-isolation holds.
-      expect(await siblingService.readFile('/projects/proj_A/main.ts', 'utf8')).toBe('A main');
-      expect(await siblingService.readFile('/projects/proj_A/lib/util.ts', 'utf8')).toBe('A util');
-      expect(await siblingService.readFile('/projects/proj_B/main.ts', 'utf8')).toBe('B main');
-      expect(await siblingService.exists('/projects/proj_A/B-main.ts')).toBe(false);
-      expect(await siblingService.exists('/projects/proj_B/lib/util.ts')).toBe(false);
+      try {
+        await siblingService.writeFiles(
+          {
+            [firstMain]: { content: 'A main' },
+            [firstUtility]: { content: 'A util' },
+            [secondMain]: { content: 'B main' },
+          },
+          { originClientId: 'batch_author' },
+        );
+
+        // Each file lands under its own mount prefix; cross-isolation holds.
+        expect(await siblingService.readFile(firstMain, 'utf8')).toBe('A main');
+        expect(await siblingService.readFile(firstUtility, 'utf8')).toBe('A util');
+        expect(await siblingService.readFile(secondMain, 'utf8')).toBe('B main');
+        expect(await siblingService.exists('/projects/proj_A/B-main.ts')).toBe(false);
+        expect(await siblingService.exists('/projects/proj_B/lib/util.ts')).toBe(false);
+
+        const writtenEvents = events
+          .filter((event) => event.type === 'fileWritten')
+          .map((event) => ({ path: event.path, backend: event.backend, origin: getEventOrigin(event) }))
+          .sort((a, b) => a.path.localeCompare(b.path));
+        expect(writtenEvents).toEqual([
+          { path: firstUtility, backend: 'indexeddb', origin: 'batch_author' },
+          { path: firstMain, backend: 'indexeddb', origin: 'batch_author' },
+          { path: secondMain, backend: 'memory', origin: 'batch_author' },
+        ]);
+      } finally {
+        unsubscribe();
+        siblingService.dispose();
+        crossTabCoordinator.dispose();
+      }
     });
   });
 });

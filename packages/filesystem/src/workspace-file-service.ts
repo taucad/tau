@@ -409,7 +409,7 @@ export class WorkspaceFileService {
   }
 
   /**
-   * Write multiple files atomically within a single serialized operation.
+   * Write multiple files through the canonical per-file mutation path.
    *
    * @param files - Map of absolute path to content.
    * @param context - Optional mutation source metadata for change-bus subscribers.
@@ -419,35 +419,7 @@ export class WorkspaceFileService {
     files: Record<string, { content: Uint8Array<ArrayBuffer> | string }>,
     context?: WorkspaceMutationContext,
   ): Promise<void> {
-    const entries = Object.entries(files);
-    if (entries.length === 0) {
-      return;
-    }
-
-    const resolvedBackend = this._mountTable.resolve('/').backend;
-    await Promise.all(
-      entries.map(async ([path, file]) =>
-        this._resourceQueue.queueFor(path, async () => {
-          const { provider, path: resolvedPath } = this._resolveProvider(path);
-          await this._ensureParentDir(provider, resolvedPath);
-          const bytes = typeof file.content === 'string' ? new TextEncoder().encode(file.content) : file.content;
-          await provider.writeFile(resolvedPath, bytes);
-          this._inMemoryTreeAddFile(path, {
-            size: bytes.byteLength,
-            ...getFileContentMetadata(bytes),
-          });
-        }),
-      ),
-    );
-
-    this._emitChangeEvent(
-      {
-        type: 'directoryChanged',
-        path: '/',
-        backend: resolvedBackend,
-      },
-      context,
-    );
+    await Promise.all(Object.entries(files).map(async ([path, file]) => this.writeFile(path, file.content, context)));
   }
 
   /**

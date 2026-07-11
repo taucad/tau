@@ -1,7 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { Port } from '@taucad/rpc';
-import { ChangeEventBus, tagEventOrigin, WorkspaceMutationError } from '@taucad/filesystem';
+import {
+  ChangeEventBus,
+  CrossTabCoordinator,
+  MountTable,
+  ProviderRegistry,
+  ResourceQueue,
+  tagEventOrigin,
+  WorkspaceFileService,
+  WorkspaceMutationError,
+} from '@taucad/filesystem';
+import type { WatchEvent } from '@taucad/filesystem';
 import type { ChangeEvent } from '@taucad/types';
 import {
   bindMutationContextForPort,
@@ -630,6 +640,84 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     chB.port2.close();
   });
 
+  it('should deliver a batch write to a peer exact watcher while suppressing the author echo', async () => {
+    const providerRegistry = new ProviderRegistry();
+    const provider = await providerRegistry.createMountProvider({ backend: 'memory' });
+    const mountTable = new MountTable();
+    mountTable.mount('/', provider, { backend: 'memory' });
+    const bus = new ChangeEventBus();
+    const crossTabCoordinator = new CrossTabCoordinator();
+    const service = new WorkspaceFileService({
+      providerRegistry,
+      resourceQueue: new ResourceQueue(),
+      eventBus: bus,
+      crossTabCoordinator,
+      mountTable,
+    });
+    const handle = exposeFileSystem(service, { changeEventBus: bus, watchHandler: service });
+    const fireConnect = (port: MessagePort): void => {
+      const messageHandler = messageHandlers[0];
+      expect(messageHandler).toBeDefined();
+      messageHandler!(new MessageEvent('message', { data: { type: filesystemBridgeConnectMessageType, port } }));
+    };
+    const channelA = new MessageChannel();
+    const channelB = new MessageChannel();
+    fireConnect(channelA.port1);
+    fireConnect(channelB.port1);
+
+    const clientA = createFileSystemBridgeProxy<Pick<WorkspaceFileService, 'writeFiles'>>({
+      port: channelA.port2,
+      dispose: () => {
+        channelA.port2.close();
+      },
+    });
+    const clientB = createFileSystemBridgeProxy<Pick<WorkspaceFileService, 'writeFiles'>>({
+      port: channelB.port2,
+      dispose: () => {
+        channelB.port2.close();
+      },
+    });
+    const authorEvents: unknown[] = [];
+    const peerEvents: unknown[] = [];
+    const peerWatchEvents: WatchEvent[] = [];
+    const path = '/main.scad';
+    const stopAuthorEvents = clientA.listen('fileChanged', (event) => {
+      authorEvents.push(event);
+    });
+    const stopPeerEvents = clientB.listen('fileChanged', (event) => {
+      peerEvents.push(event);
+    });
+    const stopPeerWatch = clientB.watch({ paths: [path], correlationId: 'runtime-main' }, (event) => {
+      peerWatchEvents.push(event);
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(service.watchRegistry.subscriptionCount).toBe(1);
+      });
+      await clientA.writeFiles({ [path]: { content: 'cube([10, 10, 10]);' } });
+      await vi.waitFor(() => {
+        expect(peerWatchEvents).toEqual([{ type: 'change', path, correlationId: 'runtime-main' }]);
+        expect(peerEvents).toEqual([{ type: 'fileWritten', path, backend: 'memory' }]);
+      });
+
+      expect(authorEvents).toEqual([]);
+    } finally {
+      stopPeerWatch();
+      stopAuthorEvents();
+      stopPeerEvents();
+      clientA.dispose();
+      clientB.dispose();
+      handle.cleanup();
+      service.dispose();
+      crossTabCoordinator.dispose();
+      channelA.port1.close();
+      channelA.port2.close();
+      channelB.port1.close();
+      channelB.port2.close();
+    }
+  });
+
   /**
    * Parameterised echo-suppression matrix.
    *
@@ -670,7 +758,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     {
       name: 'writeFiles',
       args: [Object.fromEntries([['/a.txt', { content: 'hi' }]])],
-      handler: buildEmitter(() => ({ type: 'directoryChanged', path: '/', backend: 'memory' })),
+      handler: buildEmitter(() => ({ type: 'fileWritten', path: '/a.txt', backend: 'memory' })),
     },
     {
       name: 'mkdir',

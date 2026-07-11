@@ -15,6 +15,8 @@ import { ProjectShareAction } from '#routes/projects_.$id/project-share-action.j
 import { FileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { ChatRpcSocketProvider } from '#hooks/use-chat-rpc-socket.js';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
+import { RevisionProvider } from '#routes/projects_.$id/revision-provider.js';
+import { RevisionChip } from '#routes/projects_.$id/active-revision-indicator.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { useBlockBrowserNavigation } from '#hooks/use-block-browser-navigation.js';
 // Chat persistence + draft flush is handled centrally by `<GlobalChatFlushGuard>`
@@ -32,7 +34,9 @@ function RouteProvider({ children }: { readonly children?: React.ReactNode }): R
         <ChatRpcSocketProvider>
           <WebglContextTrackerProvider>
             <ProjectProvider projectId={id!} kernelOptionsFactory={debugKernelOptions}>
-              <MonacoModelServiceProvider>{children}</MonacoModelServiceProvider>
+              <MonacoModelServiceProvider>
+                <RevisionProvider>{children}</RevisionProvider>
+              </MonacoModelServiceProvider>
             </ProjectProvider>
           </WebglContextTrackerProvider>
         </ChatRpcSocketProvider>
@@ -55,6 +59,7 @@ export const handle: Handle = {
   actions() {
     return (
       <>
+        <RevisionChip />
         <ProjectShareAction />
         <ProjectExportAction />
       </>

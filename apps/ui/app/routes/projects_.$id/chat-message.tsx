@@ -418,6 +418,8 @@ function AssistantParts({
 
 type ChatMessageProperties = {
   readonly messageId: string;
+  /** Rendered after this message's content, before its action row (e.g. the turn's revision marker). */
+  readonly footer?: React.ReactNode;
 };
 
 function selectLastUserMessageId(state: CombinedChatState): string | undefined {
@@ -432,7 +434,7 @@ function selectLastUserMessageId(state: CombinedChatState): string | undefined {
 }
 
 // oxlint-disable-next-line complexity -- split render paths for user collapse/edit vs assistant tools would churn without UX benefit
-export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties): React.JSX.Element {
+export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProperties): React.JSX.Element {
   const userMessageCollapseRowThreshold = 8;
   const userMessageCollapseCharacterThreshold = 900;
 
@@ -647,6 +649,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
           </div>
         </When>
         <ChatMessagePlanning messageId={messageId} className='-my-1' />
+        {footer}
         <When shouldRender={!isUser}>
           <div className='mt-1 flex flex-row items-start justify-start text-muted-foreground'>
             <CopyButton

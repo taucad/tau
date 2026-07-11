@@ -41,6 +41,7 @@ export const panelIds = [
   'editor',
   'converter',
   'details',
+  'revisions',
 ] as const;
 
 /**
@@ -76,6 +77,7 @@ export const allotmentPanelOrder = [
   'editor',
   'converter',
   'details',
+  'revisions',
 ] as const;
 
 // ============================================================================
@@ -346,6 +348,7 @@ export const defaultPanelState = {
     editor: 300,
     converter: 300,
     details: 300,
+    revisions: 320,
   },
   mobileActiveTab: 'chat',
   kernelPaneview: {},

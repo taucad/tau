@@ -1,4 +1,4 @@
-import { Clipboard, Download, GalleryThumbnails, ImageDown } from 'lucide-react';
+import { Clipboard, Download, GalleryThumbnails, History, ImageDown, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useRef } from 'react';
 import { useSelector } from '@xstate/react';
 import { createActor } from 'xstate';
@@ -11,6 +11,9 @@ import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
+import { useRevisions } from '#hooks/use-revisions.js';
+import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
+import { useRevisionPane } from '#routes/projects_.$id/revision-pane-context.js';
 
 export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
   const { geometryUnits, mainEntryFile, updateThumbnail, projectRef, editorRef } = useProject();
@@ -24,6 +27,11 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
 
   const isScreenshotReady = useSelector(mainGraphicsRef, (state) => state?.context.isScreenshotReady ?? false);
   const fileCount = fileTree.size;
+
+  // Chat-restore time-travel (R13) — keyboard-first discovery of the pane + redo.
+  const { setOpen: setRevisionPaneOpen } = useRevisionPane();
+  const { returnToLatest } = useRestoreToPoint();
+  const { canReturnToLatest } = useRevisions();
 
   // Track active screenshot actors for lifecycle cleanup
   const activeScreenshotActorsRef = useRef(new Set<{ stop: () => void }>());
@@ -256,6 +264,23 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
   useCommandPaletteItems(
     match.id,
     (): CommandPaletteItem[] => [
+      {
+        id: 'revision-history',
+        label: 'Open revision history',
+        group: 'Revisions',
+        icon: <History />,
+        action: () => {
+          setRevisionPaneOpen(true);
+        },
+      },
+      {
+        id: 'restore-latest-revision',
+        label: 'Restore to latest revision',
+        group: 'Revisions',
+        icon: <RotateCcw />,
+        action: returnToLatest,
+        disabled: !canReturnToLatest,
+      },
       {
         id: 'export',
         label: 'Export',

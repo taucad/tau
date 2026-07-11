@@ -4,7 +4,10 @@ import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
 import { XIcon, MessageCircle } from 'lucide-react';
 import { messageRole } from '@taucad/chat/constants';
 import { ChatMessage } from '#routes/projects_.$id/chat-message.js';
+import { ChatRevisionMarker } from '#routes/projects_.$id/chat-revision-marker.js';
 import { buildTurnGroups } from '#routes/projects_.$id/chat-turn-groups.js';
+import { RevisionSeams } from '#routes/projects_.$id/revision-seams.js';
+import { ForkDivider } from '#routes/projects_.$id/fork-divider.js';
 import { ScrollDownButton } from '#routes/projects_.$id/scroll-down-button.js';
 import { ChatError } from '#routes/projects_.$id/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
@@ -82,8 +85,12 @@ const TurnGroup = memo(function ({
 }) {
   return (
     <div className={cn('py-1 gap-1 flex flex-col', isLast && 'min-h-(--chat-live-turn-min-h)')}>
-      {messageIds.map((id) => (
-        <ChatMessage key={id} messageId={id} />
+      {messageIds.map((id, index) => (
+        <ChatMessage
+          key={id}
+          messageId={id}
+          footer={index === messageIds.length - 1 ? <ChatRevisionMarker userMessageId={messageIds[0]!} /> : undefined}
+        />
       ))}
       {isLast ? <ChatError className='mx-4' /> : null}
     </div>
@@ -270,6 +277,9 @@ export const ChatHistory = memo(function (props: {
           />
         )}
       >
+        {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
+        <RevisionSeams />
+        <ForkDivider />
         {/* Header with chat selector */}
         <FloatingPanelContentHeader>
           <ChatHistorySelector

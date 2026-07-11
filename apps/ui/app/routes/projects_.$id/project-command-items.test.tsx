@@ -49,6 +49,18 @@ vi.mock('#hooks/use-file-tree.js', () => ({
   useFileTreeMap: () => new Map([['main.ts', {}]]),
 }));
 
+vi.mock('#hooks/use-revisions.js', () => ({
+  useRevisions: () => ({ canReturnToLatest: false }),
+}));
+
+vi.mock('#hooks/use-restore-to-point.js', () => ({
+  useRestoreToPoint: () => ({ returnToLatest: vi.fn() }),
+}));
+
+vi.mock('#routes/projects_.$id/revision-pane-context.js', () => ({
+  useRevisionPane: () => ({ setOpen: vi.fn() }),
+}));
+
 vi.mock('#components/layout/command-palette.js', () => ({
   useCommandPaletteItems: (_matchId: string, factory: () => CommandPaletteItem[]) => {
     registeredItems = factory();

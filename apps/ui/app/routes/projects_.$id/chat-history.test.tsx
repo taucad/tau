@@ -116,8 +116,20 @@ vi.mock('#routes/projects_.$id/chat-message.js', () => ({
   ),
 }));
 
+vi.mock('#routes/projects_.$id/chat-revision-marker.js', () => ({
+  ChatRevisionMarker: () => null,
+}));
+
 vi.mock('#routes/projects_.$id/scroll-down-button.js', () => ({
   ScrollDownButton: () => null,
+}));
+
+vi.mock('#routes/projects_.$id/revision-seams.js', () => ({
+  RevisionSeams: () => null,
+}));
+
+vi.mock('#routes/projects_.$id/fork-divider.js', () => ({
+  ForkDivider: () => null,
 }));
 
 vi.mock('#routes/projects_.$id/chat-error.js', () => ({

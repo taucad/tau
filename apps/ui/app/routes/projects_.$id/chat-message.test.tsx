@@ -340,6 +340,19 @@ describe('ChatMessage column wrapper layout', () => {
     expect(planning.dataset['messageId']).toBe('msg-1');
   });
 
+  it('renders footer after ChatMessagePlanning and before the assistant action row', () => {
+    setMessages([assistantMessage('msg-1', 'Hello there')]);
+
+    render(<ChatMessage messageId='msg-1' footer={<div data-testid='revision-footer'>marker</div>} />);
+
+    const planning = screen.getByTestId('chat-message-planning');
+    const footer = screen.getByTestId('revision-footer');
+    const copyButton = screen.getByTestId('copy-button');
+
+    expect(planning.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(footer.compareDocumentPosition(copyButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('should cap collapsed long user bubbles at max-h-58.5 for parity with focused ChatTextarea, without nested Virtuoso scroll', () => {
     const longText = Array.from({ length: 12 }, (_, i) => `line ${i}`).join('\n');
     setMessages([userMessage('msg-1', longText)]);

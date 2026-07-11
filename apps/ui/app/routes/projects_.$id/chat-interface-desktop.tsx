@@ -11,6 +11,8 @@ import { ChatExplorerTree, ChatExplorerTrigger } from '#routes/projects_.$id/cha
 import { ChatKernel, ChatKernelTrigger } from '#routes/projects_.$id/chat-kernel.js';
 import { ChatDetails, ChatDetailsTrigger } from '#routes/projects_.$id/chat-details.js';
 import { ChatConverter, ChatConverterTrigger } from '#routes/projects_.$id/chat-converter.js';
+import { ChatRevisions, ChatRevisionsTrigger } from '#routes/projects_.$id/chat-revisions.js';
+import { useRevisionPane } from '#routes/projects_.$id/revision-pane-context.js';
 import { ProjectUnavailableOverlay } from '#routes/projects_.$id/project-unavailable-overlay.js';
 import { cn } from '#utils/ui.utils.js';
 import { SidebarOffset } from '#components/layout/sidebar-offset.js';
@@ -50,6 +52,11 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
     setChatResize,
   } = useChatInterfaceState();
 
+  // Revisions pane open-state lives in the RevisionProvider context so the
+  // top-bar chip and command palette (mounted outside this layout) can toggle
+  // the same pane the overlay trigger does.
+  const { isOpen: isRevisionsOpen, setOpen: setRevisionsOpen } = useRevisionPane();
+
   const isTauDebugEnabled = useFeature('tauDebug');
   const isExplorerPaneVisible = isExplorerOpen;
   const isKernelPaneVisible = isTauDebugEnabled && isKernelOpen;
@@ -66,7 +73,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
 
   // Determine if any left/right panels are open for center pane edge treatment
   const isAnyLeftPanelOpen = isChatOpen || isFileTreeOpen || isExplorerPaneVisible || isKernelPaneVisible;
-  const isAnyRightPanelOpen = isParametersOpen || isEditorOpen || isConverterOpen || isDetailsOpen;
+  const isAnyRightPanelOpen = isParametersOpen || isEditorOpen || isConverterOpen || isDetailsOpen || isRevisionsOpen;
 
   // Map panel IDs to their visibility states
   // Viewer is always visible, toggleable panes use their respective state
@@ -80,6 +87,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
     editor: isEditorOpen,
     converter: isConverterOpen,
     details: isDetailsOpen,
+    revisions: isRevisionsOpen,
   };
 
   // Apply saved panel sizes after Allotment has completed its initial layout.
@@ -155,6 +163,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
     isEditorOpen,
     isConverterOpen,
     isDetailsOpen,
+    isRevisionsOpen,
   ]);
 
   // Update position attributes on visible panes for performant CSS selectors
@@ -354,6 +363,12 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
                       setIsDetailsOpen((previous) => !previous);
                     }}
                   />
+                  <ChatRevisionsTrigger
+                    isOpen={isRevisionsOpen}
+                    onToggle={() => {
+                      setRevisionsOpen((previous) => !previous);
+                    }}
+                  />
                 </div>
 
                 {/* Viewer - DockviewReact manages tabs, splits, and per-view overlays */}
@@ -411,6 +426,16 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
                 visible={isDetailsOpen}
               >
                 <ChatDetails isExpanded={isDetailsOpen} setIsExpanded={setIsDetailsOpen} />
+              </Allotment.Pane>
+
+              <Allotment.Pane
+                className='rs-right'
+                minSize={panelMinSizeStandard}
+                preferredSize={panelSizes.revisions}
+                priority={LayoutPriority.Low}
+                visible={isRevisionsOpen}
+              >
+                <ChatRevisions isExpanded={isRevisionsOpen} setIsExpanded={setRevisionsOpen} />
               </Allotment.Pane>
             </Allotment>
           </SidebarOffset>

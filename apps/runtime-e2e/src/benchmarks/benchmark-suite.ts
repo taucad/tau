@@ -249,16 +249,6 @@ const examples: BenchmarkCase[] = [
 ];
 
 const stress: BenchmarkCase[] = [
-  {
-    name: 'v8-engine-block',
-    category: 'stress',
-    ...loadFixture('replicad', 'v8-engine-block'),
-  },
-  {
-    name: 'v8-engine-brep',
-    category: 'stress',
-    ...loadFixture('replicad', 'v8-engine-brep'),
-  },
   inlineCase(
     'deep-boolean-chain',
     'stress',

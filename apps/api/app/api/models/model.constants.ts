@@ -237,13 +237,126 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
   },
   openai: {
+    'gpt-5.6-sol': {
+      enabled: true,
+      id: 'openai-gpt-5.6-sol',
+      name: 'GPT-5.6 Sol',
+      slug: 'gpt-5.6-sol',
+      recommended: true,
+      description:
+        "OpenAI's frontier model for complex CAD design, strong at planning multi-part assemblies and verifying its own work.",
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+      },
+      model: 'gpt-5.6-sol',
+      support: {
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'gpt',
+        families: ['GPT-5.6'],
+        contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-02',
+        cost: {
+          inputTokens: 5,
+          outputTokens: 30,
+          cacheReadTokens: 0.5,
+          cacheWriteTokens: 6.25,
+        },
+      },
+      configuration: {
+        streaming: true,
+        temperature: 1,
+        reasoning: {
+          effort: 'high',
+          summary: 'auto',
+        },
+      },
+    },
+    'gpt-5.6-terra': {
+      enabled: true,
+      id: 'openai-gpt-5.6-terra',
+      name: 'GPT-5.6 Terra',
+      slug: 'gpt-5.6-terra',
+      recommended: true,
+      description: 'Strong balance of intelligence and cost for everyday CAD design, iteration, and multi-file edits.',
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+      },
+      model: 'gpt-5.6-terra',
+      support: {
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'gpt',
+        families: ['GPT-5.6'],
+        contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-02',
+        cost: {
+          inputTokens: 2.5,
+          outputTokens: 15,
+          cacheReadTokens: 0.25,
+          cacheWriteTokens: 3.125,
+        },
+      },
+      configuration: {
+        streaming: true,
+        temperature: 1,
+        reasoning: {
+          effort: 'high',
+          summary: 'auto',
+        },
+      },
+    },
+    'gpt-5.6-luna': {
+      enabled: true,
+      id: 'openai-gpt-5.6-luna',
+      name: 'GPT-5.6 Luna',
+      slug: 'gpt-5.6-luna',
+      recommended: true,
+      description: 'Fast, cost-efficient model for high-volume CAD iterations and small design changes.',
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+      },
+      model: 'gpt-5.6-luna',
+      support: {
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'gpt',
+        families: ['GPT-5.6'],
+        contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-02',
+        cost: {
+          inputTokens: 1,
+          outputTokens: 6,
+          cacheReadTokens: 0.1,
+          cacheWriteTokens: 1.25,
+        },
+      },
+      configuration: {
+        streaming: true,
+        temperature: 1,
+        reasoning: {
+          effort: 'high',
+          summary: 'auto',
+        },
+      },
+    },
     'gpt-5.5': {
+      enabled: true,
       id: 'openai-gpt-5.5',
       name: 'GPT-5.5',
       slug: 'gpt-5.5',
-      recommended: true,
+      recommended: false,
       description:
-        "OpenAI's frontier long-context capable model, strong at planning multi-part assemblies and verifying its own work.",
+        "OpenAI's previous frontier model for complex CAD planning, multi-part assemblies, and design verification.",
       provider: {
         id: 'openai',
         name: 'OpenAI',
@@ -255,7 +368,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       details: {
         family: 'gpt',
         families: ['GPT-5.5'],
-        contextWindow: 200_000,
+        contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
         maxTokens: 128_000,
         knowledgeCutoff: '2025-12',
         cost: {

@@ -13,6 +13,9 @@ const cappedModelIds = [
   'anthropic-claude-fable-5',
   'anthropic-claude-opus-4.8',
   'anthropic-claude-sonnet-5',
+  'openai-gpt-5.6-sol',
+  'openai-gpt-5.6-terra',
+  'openai-gpt-5.6-luna',
   'openai-gpt-5.5',
   'openai-gpt-5.3-codex',
   'openai-gpt-4.1',
@@ -64,6 +67,17 @@ describe('ModelService', () => {
     for (const modelId of cappedModelIds) {
       expect(service.getContextWindow(modelId), modelId).toBe(maxEffectiveContextWindow);
     }
+  });
+
+  it('lists every GPT-5.6 tier and keeps GPT-5.5 non-recommended', async () => {
+    const service = createModelService();
+    const listedModels = await service.getModels();
+    const gpt56ModelIds = ['openai-gpt-5.6-sol', 'openai-gpt-5.6-terra', 'openai-gpt-5.6-luna'];
+    const listedModelIds = listedModels.map((model) => model.id);
+
+    expect(service.models.map((model) => model.id)).toEqual(expect.arrayContaining(gpt56ModelIds));
+    expect(listedModelIds).toEqual(expect.arrayContaining([...gpt56ModelIds, 'openai-gpt-5.5']));
+    expect(modelList.openai['gpt-5.5'].recommended).toBe(false);
   });
 
   it('lists GLM-5.2 as an enabled text-only tool-capable model', async () => {

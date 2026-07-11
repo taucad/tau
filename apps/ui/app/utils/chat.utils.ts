@@ -570,6 +570,37 @@ export function finalizeInterruptedToolParts(
   return [...messages.slice(0, -1), { ...lastMessage, parts: updatedParts }];
 }
 
+/**
+ * Stamp `metadata.createdAt` (epoch ms) onto any message that lacks it — the
+ * single idempotent stamp site at the persist boundary.
+ *
+ * User messages are normally stamped at submit time (`use-cad-chat-client`, the
+ * `chat-session-store` draft/edit builders) and assistant messages have never
+ * carried one until here; this stamps whichever rows arrive without a
+ * `createdAt` (defense in depth for legacy / round-tripped rows). `createdAt` is
+ * a display/sort key only — revision identity keys on `messageId`
+ * (docs/research/revision-anchor-identity-collapse.md) — but a stable timestamp
+ * keeps ordering deterministic. `persistMessagesActor` routes every persist
+ * (milestone / final / stop) through here, so each message acquires a
+ * `createdAt` exactly once and it never changes on re-persist. `status` and any
+ * other metadata are preserved.
+ *
+ * Returns the original array when every message is already stamped.
+ * @param messages - Chat messages about to be persisted.
+ */
+export function stampMessageCreatedAt(messages: MyUIMessage[]): MyUIMessage[] {
+  const needsStamp = messages.some((message) => message.metadata?.createdAt === undefined);
+  if (!needsStamp) {
+    return messages;
+  }
+  const now = Date.now();
+  return messages.map((message) =>
+    message.metadata?.createdAt === undefined
+      ? { ...message, metadata: { ...message.metadata, createdAt: now } }
+      : message,
+  );
+}
+
 // Helper function to create a new message
 export function createMessage({
   id,

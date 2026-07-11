@@ -6,6 +6,7 @@ import {
   finalizeInterruptedToolParts,
   serializeMessage,
   serializeTranscript,
+  stampMessageCreatedAt,
 } from '#utils/chat.utils.js';
 import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
 import { clearLedger, recordRpcOutcome } from '#services/rpc-ledger.js';
@@ -806,5 +807,69 @@ describe('createMessage', () => {
       metadata: {},
     });
     expect((message.parts[0] as { type: 'text'; text: string }).text).toBe('trimmed');
+  });
+});
+
+describe('stampMessageCreatedAt', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should stamp createdAt on an assistant message that lacks it', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1000);
+    const messages: MyUIMessage[] = [{ id: 'a', role: 'assistant', parts: [{ type: 'text', text: 'reply' }] }];
+
+    const stamped = stampMessageCreatedAt(messages);
+
+    expect(stamped[0]?.metadata?.createdAt).toBe(1000);
+    expect(stamped).not.toBe(messages); // A mutation returns a fresh array.
+  });
+
+  it('should stamp createdAt on a user message that lacks it (defense in depth, R5)', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1500);
+    const messages: MyUIMessage[] = [{ id: 'u', role: 'user', parts: [{ type: 'text', text: 'prompt' }] }];
+
+    const stamped = stampMessageCreatedAt(messages);
+
+    expect(stamped[0]?.metadata?.createdAt).toBe(1500);
+    expect(stamped).not.toBe(messages);
+  });
+
+  it('should return the same reference when every message is already stamped', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(2000);
+    const messages: MyUIMessage[] = [
+      { id: 'u', role: 'user', parts: [{ type: 'text', text: 'prompt' }], metadata: { createdAt: 5 } },
+      { id: 'a', role: 'assistant', parts: [{ type: 'text', text: 'reply' }], metadata: { createdAt: 7 } },
+    ];
+
+    const result = stampMessageCreatedAt(messages);
+
+    expect(result).toBe(messages); // No-op → original reference.
+    expect(result[0]?.metadata?.createdAt).toBe(5); // User untouched.
+    expect(result[1]?.metadata?.createdAt).toBe(7); // Existing assistant stamp not overwritten.
+  });
+
+  it('should be idempotent and stable across re-persists even as the clock advances', () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(3000);
+    const messages: MyUIMessage[] = [{ id: 'a', role: 'assistant', parts: [{ type: 'text', text: 'reply' }] }];
+
+    const first = stampMessageCreatedAt(messages);
+    now.mockReturnValue(9999); // Clock advances before the next persist.
+    const second = stampMessageCreatedAt(first);
+
+    expect(first[0]?.metadata?.createdAt).toBe(3000);
+    expect(second).toBe(first); // Second persist is a no-op.
+    expect(second[0]?.metadata?.createdAt).toBe(3000); // Value never changes.
+  });
+
+  it('should preserve existing metadata (status) when stamping createdAt', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(4000);
+    const messages: MyUIMessage[] = [
+      { id: 'a', role: 'assistant', parts: [{ type: 'text', text: 'reply' }], metadata: { status: 'success' } },
+    ];
+
+    const stamped = stampMessageCreatedAt(messages);
+
+    expect(stamped[0]?.metadata).toEqual({ status: 'success', createdAt: 4000 });
   });
 });

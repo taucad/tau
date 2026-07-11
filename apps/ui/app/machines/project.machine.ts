@@ -1,7 +1,7 @@
 import { assign, assertEvent, setup, emit, enqueueActions } from 'xstate';
 import type { ActorRefFrom, AnyStateMachine } from 'xstate';
 import { produce } from 'immer';
-import type { FileParameterEntry, Project } from '@taucad/types';
+import type { FileParameterEntry, PersistedRevisionState, Project } from '@taucad/types';
 import { normalizePath } from '@taucad/utils/path';
 import { isBrowser } from '#constants/browser.constants.js';
 import { defaultProjectName } from '#constants/project-names.js';
@@ -137,6 +137,7 @@ type ProjectEventInternal =
   | { type: 'updateDescription'; description: string }
   | { type: 'updateTags'; tags: string[] }
   | { type: 'updateThumbnail'; thumbnail: string }
+  | { type: 'updateRevisionState'; revisionState: PersistedRevisionState }
   | {
       type: 'updateCodeParameters';
       files: Record<string, { content: Uint8Array<ArrayBuffer> }>;
@@ -309,6 +310,20 @@ export const projectMachine = setup({
       return produce(context, (draft) => {
         draft.project!.thumbnail = event.thumbnail;
         // Don't update updatedAt for thumbnails - they're metadata
+      });
+    }),
+    updateRevisionState: assign(({ context, event }) => {
+      assertEvent(event, 'updateRevisionState');
+      if (!context.project) {
+        return {};
+      }
+
+      return produce(context, (draft) => {
+        // Chat-restore pointer (R16). Persisted through the project machine — the
+        // single writer of the project document — so its full-document write always
+        // carries a fresh slice. No updatedAt bump: the restore's own file activity
+        // already stamps recency. See docs/research/revision-state-atomic-persistence.md.
+        draft.project!.revisionState = event.revisionState;
       });
     }),
     updateCodeParametersInContext: enqueueActions(({ enqueue, context, event }) => {
@@ -1013,6 +1028,9 @@ export const projectMachine = setup({
             updateThumbnail: {
               actions: ['updateThumbnail'],
             },
+            updateRevisionState: {
+              actions: ['updateRevisionState'],
+            },
             updateCodeParameters: {
               actions: ['updateCodeParametersInContext'],
             },
@@ -1095,6 +1113,9 @@ export const projectMachine = setup({
                 updateThumbnail: {
                   target: 'writing',
                 },
+                updateRevisionState: {
+                  target: 'writing',
+                },
                 updateCodeParameters: {
                   target: 'writing',
                 },
@@ -1131,6 +1152,10 @@ export const projectMachine = setup({
                   reenter: true,
                 },
                 updateThumbnail: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                updateRevisionState: {
                   target: 'pending',
                   reenter: true,
                 },
@@ -1181,6 +1206,9 @@ export const projectMachine = setup({
                   target: 'pending',
                 },
                 updateThumbnail: {
+                  target: 'pending',
+                },
+                updateRevisionState: {
                   target: 'pending',
                 },
                 updateCodeParameters: {

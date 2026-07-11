@@ -44,7 +44,7 @@ import { resizeImageActor } from '#hooks/resize-image.actor.js';
 import { inspect } from '#machines/inspector.js';
 import { clearLedger } from '#services/rpc-ledger.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
-import { extractMimeTypeFromDataUrl, finalizeInterruptedToolParts } from '#utils/chat.utils.js';
+import { extractMimeTypeFromDataUrl, finalizeInterruptedToolParts, stampMessageCreatedAt } from '#utils/chat.utils.js';
 import { createChatInstance } from '#chat-clients/_internal/shared-chat-transport.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 
@@ -449,7 +449,7 @@ export class ChatSessionStore {
             return { type: 'chatRetrieved', chat: hydratedChat };
           }),
           persistMessagesActor: fromSafeAsync(async ({ input }) => {
-            await depsRef().patchChat(input.chatId, 'messages', input.messages);
+            await depsRef().patchChat(input.chatId, 'messages', stampMessageCreatedAt(input.messages));
           }),
           persistErrorActor: fromSafeAsync(async ({ input }) => {
             await depsRef().patchChat(input.chatId, 'error', input.error);

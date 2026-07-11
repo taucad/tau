@@ -371,6 +371,28 @@ describe('projectMachine', () => {
       actor.stop();
     });
 
+    it('should persist revisionState through the store and emit projectUpdated (R1)', async () => {
+      const actor = await startAndLoad({
+        writeResult: async () => {
+          /* No-op — resolves the single-writer store immediately */
+        },
+      });
+
+      const emittedProjects: Project[] = [];
+      actor.on('projectUpdated', (event) => emittedProjects.push(event.project));
+
+      const revisionState = { headTurnId: 'u5', supersededTurnIds: ['u2'], dirty: false };
+      actor.send({ type: 'updateRevisionState', revisionState });
+      // Reaching storing.idle means the write ran; projectUpdated only emits from
+      // storing.writing.onDone, so its presence proves the slice was persisted.
+      await waitFor(actor, (s) => s.matches({ ready: { storing: 'idle' } }));
+
+      expect(actor.getSnapshot().context.project?.revisionState).toEqual(revisionState);
+      expect(emittedProjects).toHaveLength(1);
+      expect(emittedProjects[0]?.revisionState).toEqual(revisionState);
+      actor.stop();
+    });
+
     it('should update tags with deduplication', async () => {
       const actor = await startAndLoad();
       actor.send({ type: 'updateTags', tags: ['x', 'y', 'x', 'z', 'y'] });

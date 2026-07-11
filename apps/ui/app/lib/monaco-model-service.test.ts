@@ -382,6 +382,160 @@ describe('MonacoModelService', () => {
   });
 
   describe('handleContentChange', () => {
+    it('should preserve filesystem provenance during a machine-restored held-model edit', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('cube([20,20,20]);'));
+      await service.acquireModel('main.scad');
+
+      const model = models.get('file:///main.scad');
+      expect(model).toBeDefined();
+      let observedInboundRestore = false;
+      model?.pushEditOperations.mockImplementation(() => {
+        observedInboundRestore = service.isApplyingFilesystemContent('main.scad');
+      });
+
+      contentService.peek.mockReturnValueOnce(new TextEncoder().encode('cube([10,10,10]);'));
+      contentService._handler?.({
+        type: 'batchWritten',
+        paths: ['main.scad'],
+        source: 'machine',
+      });
+
+      expect(model?.pushEditOperations).toHaveBeenCalledOnce();
+      expect(observedInboundRestore).toBe(true);
+      expect(service.isApplyingFilesystemContent('main.scad')).toBe(false);
+    });
+
+    it('should preserve filesystem provenance while refreshing a held file model', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('cube([20,20,20]);'));
+      await service.acquireModel('main.scad');
+
+      const model = models.get('file:///main.scad');
+      let observedInboundRefresh = false;
+      model?.pushEditOperations.mockImplementation(() => {
+        observedInboundRefresh = service.isApplyingFilesystemContent('main.scad');
+      });
+      contentService.resolve.mockResolvedValueOnce(textResult('cube([10,10,10]);'));
+
+      await service.refreshContent(monaco.Uri.file('/main.scad'));
+
+      expect(model?.pushEditOperations).toHaveBeenCalledOnce();
+      expect(observedInboundRefresh).toBe(true);
+      expect(service.isApplyingFilesystemContent('main.scad')).toBe(false);
+    });
+
+    it('should clear filesystem provenance when a held-model mutation throws', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('before'));
+      await service.acquireModel('main.scad');
+
+      const model = models.get('file:///main.scad');
+      model?.pushEditOperations.mockImplementation(() => {
+        expect(service.isApplyingFilesystemContent('main.scad')).toBe(true);
+        throw new Error('Monaco mutation failed');
+      });
+
+      expect(() => {
+        service.applyContentChange({
+          type: 'written',
+          path: 'main.scad',
+          data: new TextEncoder().encode('after'),
+          source: 'machine',
+        });
+      }).toThrow('Monaco mutation failed');
+      expect(service.isApplyingFilesystemContent('main.scad')).toBe(false);
+    });
+
+    it('should restore the outer path after nested filesystem model mutations', async () => {
+      contentService.resolve
+        .mockResolvedValueOnce(textResult('outer before'))
+        .mockResolvedValueOnce(textResult('inner before'));
+      await service.acquireModel('outer.ts');
+      await service.acquireModel('inner.ts');
+
+      const outerModel = models.get('file:///outer.ts');
+      const innerModel = models.get('file:///inner.ts');
+      innerModel?.pushEditOperations.mockImplementation(() => {
+        expect(service.isApplyingFilesystemContent('inner.ts')).toBe(true);
+        expect(service.isApplyingFilesystemContent('outer.ts')).toBe(false);
+      });
+      outerModel?.pushEditOperations.mockImplementation(() => {
+        expect(service.isApplyingFilesystemContent('outer.ts')).toBe(true);
+        service.applyContentChange({
+          type: 'written',
+          path: 'inner.ts',
+          data: new TextEncoder().encode('inner after'),
+          source: 'machine',
+        });
+        expect(service.isApplyingFilesystemContent('outer.ts')).toBe(true);
+        expect(service.isApplyingFilesystemContent('inner.ts')).toBe(false);
+      });
+
+      service.applyContentChange({
+        type: 'written',
+        path: 'outer.ts',
+        data: new TextEncoder().encode('outer after'),
+        source: 'machine',
+      });
+
+      expect(outerModel?.pushEditOperations).toHaveBeenCalledOnce();
+      expect(innerModel?.pushEditOperations).toHaveBeenCalledOnce();
+      expect(service.isApplyingFilesystemContent('outer.ts')).toBe(false);
+      expect(service.isApplyingFilesystemContent('inner.ts')).toBe(false);
+    });
+
+    it('should preserve the outer guard during a nested same-path mutation', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('before'));
+      await service.acquireModel('main.ts');
+
+      const model = models.get('file:///main.ts');
+      let nested = false;
+      model?.pushEditOperations.mockImplementation(() => {
+        expect(service.isApplyingFilesystemContent('main.ts')).toBe(true);
+        if (!nested) {
+          nested = true;
+          service.applyContentChange({
+            type: 'written',
+            path: 'main.ts',
+            data: new TextEncoder().encode('nested'),
+            source: 'machine',
+          });
+          expect(service.isApplyingFilesystemContent('main.ts')).toBe(true);
+        }
+      });
+
+      service.applyContentChange({
+        type: 'written',
+        path: 'main.ts',
+        data: new TextEncoder().encode('outer'),
+        source: 'machine',
+      });
+
+      expect(model?.pushEditOperations).toHaveBeenCalledTimes(2);
+      expect(service.isApplyingFilesystemContent('main.ts')).toBe(false);
+    });
+
+    it('should retain background setValue synchronization with scoped provenance', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('before'));
+      await service.getOrEnsureModel('background.ts');
+
+      const model = models.get('file:///background.ts');
+      let observedInboundUpdate = false;
+      model?.setValue.mockImplementation(() => {
+        observedInboundUpdate = service.isApplyingFilesystemContent('background.ts');
+      });
+
+      service.applyContentChange({
+        type: 'written',
+        path: 'background.ts',
+        data: new TextEncoder().encode('after'),
+        source: 'machine',
+      });
+
+      expect(model?.setValue).toHaveBeenCalledWith('after');
+      expect(model?.pushEditOperations).not.toHaveBeenCalled();
+      expect(observedInboundUpdate).toBe(true);
+      expect(service.isApplyingFilesystemContent('background.ts')).toBe(false);
+    });
+
     it('should create a model for machine-sourced .scad files', () => {
       contentService._handler?.({
         type: 'written',

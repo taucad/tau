@@ -58,6 +58,9 @@ export class MonacoModelService {
   /** Set of paths that have been touched in the current session */
   private readonly syncedPaths = new Set<string>();
 
+  /** Workspace path whose filesystem content is synchronously mutating a model. */
+  private currentFilesystemContentPath: string | undefined;
+
   /** Dev-mode metrics */
   private readonly metrics = {
     totalModelsCreated: 0,
@@ -201,7 +204,7 @@ export class MonacoModelService {
         return;
       }
       const newContent = decodeTextFile(result.content);
-      this.applyNewContentToModel(model, newContent, this.editorHolds.has(path));
+      this.applyWorkspaceContentToModel(path, model, newContent);
       return;
     }
 
@@ -237,6 +240,14 @@ export class MonacoModelService {
    */
   public applyContentChange(event: ContentChangeEvent): void {
     this.handleContentChange(event);
+  }
+
+  /**
+   * Whether the current synchronous Monaco callback for `path` was caused by
+   * filesystem content already being applied by this service.
+   */
+  public isApplyingFilesystemContent(path: string): boolean {
+    return this.currentFilesystemContentPath === path;
   }
 
   /**
@@ -403,7 +414,7 @@ export class MonacoModelService {
     const existingModel = this.monaco.editor.getModel(uri);
 
     if (existingModel) {
-      this.applyNewContentToModel(existingModel, newContent, this.editorHolds.has(path));
+      this.applyWorkspaceContentToModel(path, existingModel, newContent);
     } else if (source === 'user') {
       const language = this.detectLanguage(path);
       if (language) {
@@ -423,6 +434,20 @@ export class MonacoModelService {
         this.syncedPaths.add(path);
         this.backgroundAccessTimes.set(path, Date.now());
       }
+    }
+  }
+
+  private applyWorkspaceContentToModel(
+    path: string,
+    existingModel: Monaco.editor.ITextModel,
+    newContent: string,
+  ): void {
+    const previousPath = this.currentFilesystemContentPath;
+    this.currentFilesystemContentPath = path;
+    try {
+      this.applyNewContentToModel(existingModel, newContent, this.editorHolds.has(path));
+    } finally {
+      this.currentFilesystemContentPath = previousPath;
     }
   }
 

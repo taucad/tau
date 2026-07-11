@@ -211,6 +211,41 @@ describe('FileContentService', () => {
     }
   });
 
+  it('should preserve A→C→A write intent while the committed cache still contains A', async () => {
+    const initial = new TextEncoder().encode('A');
+    const intermediate = new TextEncoder().encode('C');
+    service.populateText('main.ts', initial);
+
+    const intermediateWrite = Promise.withResolvers<void>();
+    const finalWrite = Promise.withResolvers<void>();
+    vi.mocked(proxy.writeFile).mockReturnValueOnce(intermediateWrite.promise).mockReturnValueOnce(finalWrite.promise);
+    const events: ContentChangeEvent[] = [];
+    service.onDidContentChange((event) => {
+      events.push(event);
+    });
+
+    const persistIntermediate = service.write('main.ts', intermediate, 'editor');
+    const persistFinal = service.write('main.ts', initial, 'editor');
+
+    expect(proxy.writeFile).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(proxy.writeFile).mock.calls.map(([path, data]) => [path, data])).toEqual([
+      ['/project/main.ts', intermediate],
+      ['/project/main.ts', initial],
+    ]);
+    expect(service.peek('main.ts')).toEqual(initial);
+
+    intermediateWrite.resolve();
+    await persistIntermediate;
+    expect(service.peek('main.ts')).toEqual(intermediate);
+
+    finalWrite.resolve();
+    await persistFinal;
+    expect(service.peek('main.ts')).toEqual(initial);
+    expect(events.flatMap((event) => (event.type === 'written' ? [new TextDecoder().decode(event.data)] : []))).toEqual(
+      ['C', 'A'],
+    );
+  });
+
   it('should update cache on rename', async () => {
     const data = new Uint8Array([1, 2, 3]);
     vi.mocked(proxy.readFile).mockResolvedValue(data);

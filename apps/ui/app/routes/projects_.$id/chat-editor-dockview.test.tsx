@@ -6,6 +6,14 @@ import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 
 const mockResolve = vi.fn();
 const mockWriteFile = vi.fn();
+const mockAcquireModel = vi.fn(async () => undefined);
+const mockReleaseModel = vi.fn();
+const mockIsApplyingFilesystemContent = vi.fn(() => false);
+const mockModelService = {
+  acquireModel: mockAcquireModel,
+  releaseModel: mockReleaseModel,
+  isApplyingFilesystemContent: mockIsApplyingFilesystemContent,
+};
 
 const mockUseFileContent = vi.fn<(path: string | undefined) => FileContentResult>();
 
@@ -42,7 +50,7 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 
 vi.mock('#hooks/use-monaco-model-service.js', () => ({
-  useMonacoServices: () => ({ modelService: undefined, markerService: undefined }),
+  useMonacoServices: () => ({ modelService: mockModelService, markerService: undefined }),
 }));
 
 vi.mock('#hooks/use-kernel-diagnostics.js', () => ({
@@ -84,6 +92,9 @@ const mockPanelApi = {
 describe('FileEditor routing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    editorMachineSnapshot.context.openFiles = [];
+    mockIsApplyingFilesystemContent.mockReturnValue(false);
+    mockResolveViewer.mockReturnValue(defaultViewer);
   });
 
   it('should render the loader when outcome is loading', () => {
@@ -222,6 +233,32 @@ describe('FileEditor routing', () => {
   // R16 (F20): after a rename, a code change must target the new path
   // resolved through `paneId`, not the path the panel was created with.
   describe('handleCodeChange paneId resolution (R16)', () => {
+    it('should suppress a write while filesystem content is being applied to the live path', async () => {
+      editorMachineSnapshot.context.openFiles = [{ paneId: 'pane-1', path: 'src/main.ts' }];
+      mockIsApplyingFilesystemContent.mockReturnValue(true);
+      mockUseFileContent.mockReturnValue({
+        kind: 'text',
+        content: new TextEncoder().encode('restored content'),
+      });
+      mockResolveViewer.mockReturnValueOnce(({ onChange }: { readonly onChange: (value: string) => void }) => (
+        <button
+          type='button'
+          data-testid='trigger-change'
+          onClick={() => {
+            onChange('restored content');
+          }}
+        >
+          change
+        </button>
+      ));
+
+      render(<FileEditor paneId='pane-1' filePath='src/main.ts' panelApi={mockPanelApi} />);
+      await userEvent.click(screen.getByTestId('trigger-change'));
+
+      expect(mockIsApplyingFilesystemContent).toHaveBeenCalledWith('src/main.ts');
+      expect(mockWriteFile).not.toHaveBeenCalled();
+    });
+
     it('should write to the live path resolved via paneId, not the stale params filePath', async () => {
       // Mount with the original path; immediately rewrite openFiles to
       // simulate a rename that updated the openFiles entry in place
@@ -257,6 +294,10 @@ describe('FileEditor routing', () => {
       render(<FileEditor paneId='pane-1' filePath='src/original.ts' panelApi={mockPanelApi} />);
       await userEvent.click(screen.getByTestId('trigger-change'));
       expect(captured).toEqual(['src/renamed.ts']);
+      expect(mockIsApplyingFilesystemContent).toHaveBeenCalledWith('src/renamed.ts');
+      expect(mockWriteFile).toHaveBeenCalledWith('src/renamed.ts', new TextEncoder().encode('new content'), {
+        source: 'editor',
+      });
     });
 
     it('should suppress writes when the tab is no longer in openFiles', async () => {
@@ -280,6 +321,31 @@ describe('FileEditor routing', () => {
 
       render(<FileEditor paneId='pane-orphan' filePath='src/ghost.ts' panelApi={mockPanelApi} />);
       await userEvent.click(screen.getByTestId('trigger-change'));
+      expect(mockWriteFile).not.toHaveBeenCalled();
+    });
+
+    it('should suppress writes from a read-only editor', async () => {
+      editorMachineSnapshot.context.openFiles = [{ paneId: 'pane-readonly', path: 'src/read-only.ts' }];
+      mockUseFileContent.mockReturnValue({
+        kind: 'text',
+        content: new TextEncoder().encode('read only'),
+      });
+      mockResolveViewer.mockReturnValueOnce(({ onChange }: { readonly onChange: (value: string) => void }) => (
+        <button
+          type='button'
+          data-testid='trigger-change'
+          onClick={() => {
+            onChange('changed');
+          }}
+        >
+          change
+        </button>
+      ));
+
+      render(<FileEditor paneId='pane-readonly' filePath='src/read-only.ts' readOnly panelApi={mockPanelApi} />);
+      await userEvent.click(screen.getByTestId('trigger-change'));
+
+      expect(mockIsApplyingFilesystemContent).not.toHaveBeenCalled();
       expect(mockWriteFile).not.toHaveBeenCalled();
     });
   });

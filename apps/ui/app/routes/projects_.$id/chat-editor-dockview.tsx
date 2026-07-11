@@ -183,12 +183,15 @@ export const FileEditor = memo(function ({
       if (!liveEntry) {
         return;
       }
+      if (modelService?.isApplyingFilesystemContent(liveEntry.path)) {
+        return;
+      }
       const encoded = encodeTextFile(value ?? '');
       void fileManager.writeFile(liveEntry.path, encoded, {
         source: 'editor',
       });
     },
-    [readOnly, fileManager, paneId, editorRef],
+    [readOnly, fileManager, paneId, editorRef, modelService],
   );
 
   // Acquire/release ref-counted editor model hold

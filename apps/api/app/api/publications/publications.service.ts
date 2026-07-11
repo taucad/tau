@@ -34,7 +34,7 @@ import type {
 } from '#api/publications/publications.dto.js';
 import { storedPublicationManifestSchema } from '#api/publications/publications.dto.js';
 import type { ResolvedViewerIdentity } from '#api/publications/viewer-identity.types.js';
-import { ViewRateLimiterService } from '#api/publications/view-rate-limiter.service.js';
+import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { DatabaseService } from '#database/database.service.js';
 import { EmailService } from '#email/email.service.js';
 import { RedisService } from '#redis/redis.service.js';
@@ -83,7 +83,7 @@ export class PublicationsService {
     private readonly storage: ObjectStorageService,
     private readonly configService: ConfigService<Environment, true>,
     private readonly redisService: RedisService,
-    private readonly viewRateLimiter: ViewRateLimiterService,
+    private readonly publicationRateLimiter: PublicationRateLimiterService,
     private readonly metrics: MetricsService,
     private readonly emailService: EmailService,
   ) {}
@@ -306,6 +306,8 @@ export class PublicationsService {
     const viewUrl = buildPublicationViewUrl({ frontendURL: frontendUrl, publicationId });
     if (manifest.notifyRecipients === true && sharedEmails.length > 0) {
       await this.sendPublicationInviteNotifications({
+        ownerId,
+        trigger: 'publish',
         recipientEmails: sharedEmails,
         ownerName: ownerSnapshot?.name ?? 'A Tau user',
         publicationTitle: manifest.title,
@@ -643,6 +645,8 @@ export class PublicationsService {
       const ownerSnapshot = await this.resolveOwnerSnapshot(publication);
       const frontendUrl = this.configService.get('TAU_FRONTEND_URL', { infer: true }).replace(/\/$/u, '');
       await this.sendPublicationInviteNotifications({
+        ownerId: args.ownerId,
+        trigger: 'invite',
         recipientEmails: [recipientEmail],
         ownerName: ownerSnapshot?.name ?? 'A Tau user',
         publicationTitle: publication.title,
@@ -714,7 +718,7 @@ export class PublicationsService {
       return;
     }
 
-    const limit = await this.viewRateLimiter.consumePublicationViewSlot({
+    const limit = await this.publicationRateLimiter.consumePublicationViewSlot({
       publicationId: publication.id,
       viewerHash: identity.viewerHash,
     });
@@ -833,11 +837,43 @@ export class PublicationsService {
   }
 
   private async sendPublicationInviteNotifications(args: {
+    readonly ownerId: string;
+    readonly trigger: 'publish' | 'invite';
     readonly recipientEmails: readonly string[];
     readonly ownerName: string;
     readonly publicationTitle: string;
     readonly url: string;
   }): Promise<void> {
+    const emailCount = args.recipientEmails.length;
+
+    let limit: { allowed: boolean; count: number };
+    try {
+      limit = await this.publicationRateLimiter.consumeInviteEmailSlots({ ownerId: args.ownerId, count: emailCount });
+    } catch (error) {
+      // Fail closed: notification is best-effort, but sender reputation is not — if the
+      // limiter is unavailable we drop the emails rather than risk unbounded sending.
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Invite email rate limiter unavailable; suppressing ${emailCount} notification(s) for owner ${args.ownerId}: ${message}`,
+      );
+      this.metrics.publicationInviteEmailsSuppressedTotal.add(emailCount, {
+        trigger: args.trigger,
+        reason: 'limiter_unavailable',
+      });
+      return;
+    }
+
+    if (!limit.allowed) {
+      this.logger.warn(
+        `Owner ${args.ownerId} exceeded the daily invite email cap (${limit.count} consumed); suppressing ${emailCount} notification(s)`,
+      );
+      this.metrics.publicationInviteEmailsSuppressedTotal.add(emailCount, {
+        trigger: args.trigger,
+        reason: 'cap_exceeded',
+      });
+      return;
+    }
+
     await Promise.all(
       args.recipientEmails.map(async (recipientEmail) => {
         try {
@@ -847,9 +883,11 @@ export class PublicationsService {
             publicationTitle: args.publicationTitle,
             url: args.url,
           });
+          this.metrics.publicationInviteEmailsTotal.add(1, { trigger: args.trigger, outcome: 'sent' });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           this.logger.warn(`Publication invite email failed for ${this.describeRecipient(recipientEmail)}: ${message}`);
+          this.metrics.publicationInviteEmailsTotal.add(1, { trigger: args.trigger, outcome: 'failed' });
         }
       }),
     );

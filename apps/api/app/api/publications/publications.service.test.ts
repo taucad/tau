@@ -30,10 +30,11 @@ function createStubService(): PublicationsService {
 }
 
 function createMetricsStub(): PublicationsServiceDeps[5] {
-  const counter = { add: vi.fn() };
   return {
-    publicationViewsTotal: counter,
-    publicationViewsRejectedTotal: counter,
+    publicationViewsTotal: { add: vi.fn() },
+    publicationViewsRejectedTotal: { add: vi.fn() },
+    publicationInviteEmailsTotal: { add: vi.fn() },
+    publicationInviteEmailsSuppressedTotal: { add: vi.fn() },
   } as unknown as PublicationsServiceDeps[5];
 }
 
@@ -52,12 +53,19 @@ function createRedisStub(args?: { pfaddReturns?: number }): PublicationsServiceD
   } as unknown as PublicationsServiceDeps[3];
 }
 
-function createRateLimiterStub(args?: { allowed?: boolean }): PublicationsServiceDeps[4] {
+function createRateLimiterStub(args?: {
+  allowed?: boolean;
+  inviteAllowed?: boolean;
+  inviteThrows?: boolean;
+}): PublicationsServiceDeps[4] {
   return {
     consumePublicationViewSlot: vi.fn().mockResolvedValue({
       allowed: args?.allowed ?? true,
       count: 1,
     }),
+    consumeInviteEmailSlots: args?.inviteThrows
+      ? vi.fn().mockRejectedValue(new Error('redis unavailable'))
+      : vi.fn().mockResolvedValue({ allowed: args?.inviteAllowed ?? true, count: 1 }),
   } as unknown as PublicationsServiceDeps[4];
 }
 
@@ -402,13 +410,15 @@ describe('PublicationsService.publishFromUpload validation', () => {
       },
     } as unknown as PublicationsServiceDeps[0];
 
+    const rateLimiter = createRateLimiterStub();
+    const metrics = createMetricsStub();
     const service = new PublicationsService(
       databaseService,
       storage,
       createConfigStub(),
       createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
+      rateLimiter,
+      metrics,
       email,
     );
 
@@ -441,6 +451,86 @@ describe('PublicationsService.publishFromUpload validation', () => {
         url: result.urls.view,
       }),
     );
+    // The whole recipient batch is debited from the owner's daily budget in one call.
+    expect(rateLimiter.consumeInviteEmailSlots).toHaveBeenCalledWith({ ownerId: 'user_1', count: 2 });
+    expect(metrics.publicationInviteEmailsTotal.add).toHaveBeenCalledTimes(2);
+    expect(metrics.publicationInviteEmailsTotal.add).toHaveBeenCalledWith(1, { trigger: 'publish', outcome: 'sent' });
+  });
+
+  it('should still publish successfully when the owner is over the invite-email cap', async () => {
+    const email = createEmailStub();
+    const metrics = createMetricsStub();
+    const tx = {
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      }),
+      insert: vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
+        }),
+      }),
+      update: vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(undefined),
+        }),
+      }),
+    };
+
+    const databaseService = {
+      database: {
+        select: vi.fn().mockReturnValue({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([]),
+            }),
+          }),
+        }),
+        insert: vi.fn().mockReturnValue({
+          values: vi.fn().mockReturnValue({
+            onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
+          }),
+        }),
+        transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<void>) => {
+          await callback(tx);
+        }),
+      },
+    } as unknown as PublicationsServiceDeps[0];
+
+    const service = new PublicationsService(
+      databaseService,
+      createStorageStub(),
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub({ inviteAllowed: false }),
+      metrics,
+      email,
+    );
+
+    const result = await service.publishFromUpload({
+      ownerId: 'user_1',
+      manifest: {
+        projectId: 'proj_1',
+        projectName: 'Demo',
+        entryFile: 'main.ts',
+        visibility: 'private',
+        title: 'Hello',
+        sharedEmails: ['friend@example.com', 'team@example.com'],
+        notifyRecipients: true,
+      },
+      files: new Map([['main.ts', encodeUtf8('export default () => {}')]]),
+    });
+
+    // Publish completes and returns a coherent result; only the over-cap emails are dropped.
+    expect(result.urls.view).toBe(`http://app/v/${result.id}`);
+    expect(email.sendPublicationInvite).not.toHaveBeenCalled();
+    expect(metrics.publicationInviteEmailsSuppressedTotal.add).toHaveBeenCalledWith(2, {
+      trigger: 'publish',
+      reason: 'cap_exceeded',
+    });
   });
 
   it('should reject when total payload exceeds limit', async () => {
@@ -1108,6 +1198,91 @@ describe('PublicationsService access grants', () => {
       ownerName: 'Owner',
       publicationTitle: 'T',
       url: 'http://app/v/pub_access',
+    });
+  });
+
+  it('should suppress the invite notification and record it when the owner is over the daily cap', async () => {
+    const ownerLimit = vi.fn().mockResolvedValue([publicationRow]);
+    const ownerWhere = vi.fn().mockReturnValue({ limit: ownerLimit });
+    const ownerFrom = vi.fn().mockReturnValue({ where: ownerWhere });
+
+    const existingLimit = vi.fn().mockResolvedValue([]);
+    const existingWhere = vi.fn().mockReturnValue({ limit: existingLimit });
+    const existingFrom = vi.fn().mockReturnValue({ where: existingWhere });
+
+    const select = vi.fn().mockReturnValueOnce({ from: ownerFrom }).mockReturnValueOnce({ from: existingFrom });
+    const returning = vi.fn().mockResolvedValue([accessRow]);
+    const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
+    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
+    const insert = vi.fn().mockReturnValue({ values });
+    const database = { database: { select, insert } } as unknown as PublicationsServiceDeps[0];
+    const email = createEmailStub();
+    const metrics = createMetricsStub();
+    const service = new PublicationsService(
+      database,
+      createStorageStub(),
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub({ inviteAllowed: false }),
+      metrics,
+      email,
+    );
+
+    const result = await service.inviteAccess({
+      publicationId: 'pub_access',
+      ownerId: 'user_owner',
+      recipientEmail: 'friend@example.com',
+      notifyRecipient: true,
+    });
+
+    // The access grant is still created — only the notification is withheld.
+    expect(result.recipientEmail).toBe('friend@example.com');
+    expect(email.sendPublicationInvite).not.toHaveBeenCalled();
+    expect(metrics.publicationInviteEmailsSuppressedTotal.add).toHaveBeenCalledWith(1, {
+      trigger: 'invite',
+      reason: 'cap_exceeded',
+    });
+  });
+
+  it('should fail closed and still grant access when the rate limiter is unavailable', async () => {
+    const ownerLimit = vi.fn().mockResolvedValue([publicationRow]);
+    const ownerWhere = vi.fn().mockReturnValue({ limit: ownerLimit });
+    const ownerFrom = vi.fn().mockReturnValue({ where: ownerWhere });
+
+    const existingLimit = vi.fn().mockResolvedValue([]);
+    const existingWhere = vi.fn().mockReturnValue({ limit: existingLimit });
+    const existingFrom = vi.fn().mockReturnValue({ where: existingWhere });
+
+    const select = vi.fn().mockReturnValueOnce({ from: ownerFrom }).mockReturnValueOnce({ from: existingFrom });
+    const returning = vi.fn().mockResolvedValue([accessRow]);
+    const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
+    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
+    const insert = vi.fn().mockReturnValue({ values });
+    const database = { database: { select, insert } } as unknown as PublicationsServiceDeps[0];
+    const email = createEmailStub();
+    const metrics = createMetricsStub();
+    const service = new PublicationsService(
+      database,
+      createStorageStub(),
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub({ inviteThrows: true }),
+      metrics,
+      email,
+    );
+
+    const result = await service.inviteAccess({
+      publicationId: 'pub_access',
+      ownerId: 'user_owner',
+      recipientEmail: 'friend@example.com',
+      notifyRecipient: true,
+    });
+
+    expect(result.recipientEmail).toBe('friend@example.com');
+    expect(email.sendPublicationInvite).not.toHaveBeenCalled();
+    expect(metrics.publicationInviteEmailsSuppressedTotal.add).toHaveBeenCalledWith(1, {
+      trigger: 'invite',
+      reason: 'limiter_unavailable',
     });
   });
 });

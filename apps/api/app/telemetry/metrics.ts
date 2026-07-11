@@ -161,6 +161,22 @@ export class MetricsService {
     },
   );
 
+  public readonly publicationInviteEmailsTotal = this.apiMeter.createCounter(
+    TauMetrics.publicationInviteEmailsTotal.name,
+    {
+      description: TauMetrics.publicationInviteEmailsTotal.description,
+      unit: TauMetrics.publicationInviteEmailsTotal.unit,
+    },
+  );
+
+  public readonly publicationInviteEmailsSuppressedTotal = this.apiMeter.createCounter(
+    TauMetrics.publicationInviteEmailsSuppressedTotal.name,
+    {
+      description: TauMetrics.publicationInviteEmailsSuppressedTotal.description,
+      unit: TauMetrics.publicationInviteEmailsSuppressedTotal.unit,
+    },
+  );
+
   // Client-reported metrics (ingested via TelemetryController)
   public readonly kernelExecutionDuration = this.clientMeter.createHistogram(TauMetrics.kernelExecutionDuration.name, {
     description: TauMetrics.kernelExecutionDuration.description,

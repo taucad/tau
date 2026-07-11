@@ -356,6 +356,28 @@ const toolResultTrimmers: Record<string, (result: unknown) => unknown> = {
   }),
 
   /**
+   * Trims delete_file result by removing the captured pre-deletion content from
+   * diffStats. The full content is retained on the persisted record for the
+   * restore timeline (R7), but the LLM doesn't need to re-read a file it just
+   * deleted — only the line counts. diffStats is absent for missing/binary/
+   * legacy deletes, in which case the result is returned unchanged.
+   */
+  [toolName.deleteFile]: createTrimmer(toolName.deleteFile, (result) => {
+    if (!hasDefined(result, 'diffStats')) {
+      return result;
+    }
+
+    return {
+      message: result.message,
+      diffStats: {
+        linesAdded: result.diffStats.linesAdded,
+        linesRemoved: result.diffStats.linesRemoved,
+        // REMOVED: originalContent, modifiedContent - captured for restore, not for the LLM
+      },
+    };
+  }),
+
+  /**
    * Trims screenshot results by stripping base64 dataUrl from each image.
    * Older screenshots don't need the full image data — only view names are kept.
    */

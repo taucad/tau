@@ -2,7 +2,13 @@ import { ToolMessage, HumanMessage, AIMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { toolName } from '@taucad/chat/constants';
 import type { TestModelOutput, TestFailure } from '@taucad/testing';
-import type { CreateFileOutput, EditFileOutput, GetKernelResultOutput, ScreenshotOutput } from '@taucad/chat';
+import type {
+  CreateFileOutput,
+  DeleteFileOutput,
+  EditFileOutput,
+  GetKernelResultOutput,
+  ScreenshotOutput,
+} from '@taucad/chat';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createToolResultTrimmerMiddleware } from '#api/chat/middleware/tool-result-trimmer.middleware.js';
 
@@ -549,6 +555,62 @@ describe('createToolResultTrimmerMiddleware', () => {
           linesRemoved: 5,
         },
       });
+    });
+  });
+
+  describe('delete_file trimmer', () => {
+    function createDeleteFileOutput(): DeleteFileOutput {
+      return {
+        message: 'File deleted: src/old.ts',
+        diffStats: {
+          linesAdded: 0,
+          linesRemoved: 3,
+          originalContent: 'line1\nline2\nline3',
+          modifiedContent: '',
+        },
+      };
+    }
+
+    it('should remove captured originalContent and modifiedContent from diffStats while keeping message and line counts', async () => {
+      const output = createDeleteFileOutput();
+      const toolMessage = new ToolMessage({
+        content: JSON.stringify(output),
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_call_id: 'call_delete_1',
+        name: toolName.deleteFile,
+      });
+
+      await callWrapModelCall({ messages: [toolMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [TestRequest];
+      const trimmedMessage = request.messages[0] as ToolMessage;
+      const parsed = JSON.parse(trimmedMessage.content as string) as unknown;
+
+      expect(parsed).toEqual({
+        message: 'File deleted: src/old.ts',
+        diffStats: {
+          linesAdded: 0,
+          linesRemoved: 3,
+        },
+      });
+    });
+
+    it('should leave a delete result without diffStats unchanged (missing/binary/legacy)', async () => {
+      const output: DeleteFileOutput = { message: 'File deleted: gone.ts' };
+      const toolMessage = new ToolMessage({
+        content: JSON.stringify(output),
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_call_id: 'call_delete_2',
+        name: toolName.deleteFile,
+      });
+
+      await callWrapModelCall({ messages: [toolMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [TestRequest];
+      const trimmedMessage = request.messages[0] as ToolMessage;
+      const parsed = JSON.parse(trimmedMessage.content as string) as unknown;
+
+      expect(parsed).toEqual({ message: 'File deleted: gone.ts' });
     });
   });
 

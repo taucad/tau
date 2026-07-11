@@ -45,9 +45,11 @@ export const deleteFileTool: ChatTool<
     clientErrorMessage: `Cannot delete file "${args.targetFile}"`,
   });
 
-  // Return success output
+  // Return success output. `diffStats` carries the pre-deletion content (R7)
+  // for the restore timeline; it is undefined for missing/binary/legacy deletes.
   const output: DeleteFileOutput = {
     message: result.message,
+    diffStats: result.diffStats,
   };
   return output;
 }, deleteFileToolDefinition);

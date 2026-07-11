@@ -155,6 +155,7 @@ const deleteFileRpc = defineRpc({
   }),
   success: zod.object({
     message: zod.string(),
+    diffStats: diffStatsWithContentSchema.optional(),
   }),
 });
 

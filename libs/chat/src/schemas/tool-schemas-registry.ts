@@ -3,6 +3,7 @@ import type { ListDirectoryOutput } from '#schemas/tools/list-directory.tool.sch
 import type { ReadFileOutput } from '#schemas/tools/read-file.tool.schema.js';
 import type { UseSkillOutput } from '#schemas/tools/use-skill.tool.schema.js';
 import type { CreateFileOutput } from '#schemas/tools/create-file.tool.schema.js';
+import type { DeleteFileOutput } from '#schemas/tools/delete-file.tool.schema.js';
 import type { GrepOutput } from '#schemas/tools/grep.tool.schema.js';
 import type { GlobSearchOutput } from '#schemas/tools/glob-search.tool.schema.js';
 import type { GetKernelResultOutput } from '#schemas/tools/get-kernel-result.tool.schema.js';
@@ -21,6 +22,7 @@ import type { ScreenshotOutput } from '#schemas/tools/screenshot.tool.schema.js'
 export type ToolOutputRegistry = {
   [toolName.testModel]: TestModelOutput;
   [toolName.createFile]: CreateFileOutput;
+  [toolName.deleteFile]: DeleteFileOutput;
   [toolName.editFile]: EditFileOutput;
   [toolName.getKernelResult]: GetKernelResultOutput;
   [toolName.useSkill]: UseSkillOutput;

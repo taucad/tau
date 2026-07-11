@@ -5,7 +5,7 @@ import { defineCounter, defineHistogram, defineGauge, defineUpDownCounter } from
 /**
  * Canonical metric registry for Tau.
  *
- * All 21 metrics with OTEL-compliant names. Renames from legacy:
+ * All 33 metrics with OTEL-compliant names. Renames from legacy:
  * - `ws.connections.total` -> `ws.disconnections` (counters must not use `.total`)
  * - `sse.events.total` -> `sse.events` (counters must not use `.total`)
  * - `kernel.execution.total` -> `kernel.executions` (counters must be pluralized, no `.total`)
@@ -349,6 +349,26 @@ export const TauMetrics = {
       reason: z
         .enum(['cap_exceeded', 'owner_self_view', 'rate_limited', 'bad_cookie', 'invalid_publication'])
         .optional(),
+    }),
+  }),
+
+  publicationInviteEmailsTotal: defineCounter({
+    name: 'publication.invite_emails',
+    unit: '{email}',
+    description: 'Publication invite notification email send attempts by outcome',
+    attributes: z.object({
+      trigger: z.enum(['publish', 'invite']).optional(),
+      outcome: z.enum(['sent', 'failed']).optional(),
+    }),
+  }),
+
+  publicationInviteEmailsSuppressedTotal: defineCounter({
+    name: 'publication.invite_emails.suppressions',
+    unit: '{email}',
+    description: 'Invite notification emails suppressed before send, by reason',
+    attributes: z.object({
+      trigger: z.enum(['publish', 'invite']).optional(),
+      reason: z.enum(['cap_exceeded', 'limiter_unavailable']).optional(),
     }),
   }),
 

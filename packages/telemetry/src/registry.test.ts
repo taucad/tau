@@ -5,7 +5,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(31);
+    expect(metrics).toHaveLength(33);
   });
 
   it('should expose the tool-result offload counter with the canonical OTEL name', () => {

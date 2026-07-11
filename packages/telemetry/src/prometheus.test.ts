@@ -58,6 +58,8 @@ describe('PrometheusNames', () => {
     expect(PrometheusNames.sseEvents).toBe('sse_events_total');
     expect(PrometheusNames.publicationViewsTotal).toBe('publication_views_total');
     expect(PrometheusNames.publicationViewsRejectedTotal).toBe('publication_views_rejections_total');
+    expect(PrometheusNames.publicationInviteEmailsTotal).toBe('publication_invite_emails_total');
+    expect(PrometheusNames.publicationInviteEmailsSuppressedTotal).toBe('publication_invite_emails_suppressions_total');
   });
 });
 

@@ -98,6 +98,8 @@
     "tau-lint/no-bare-time-identifier": "error",
     "tau-lint/no-async-iife": "error",
     "tau-lint/no-monaco-create-model": "error",
+    // Storage-policy Rule 0: direct indexedDB access only in allowlisted storage providers.
+    "tau-lint/no-direct-indexeddb": "error",
     "tau-lint/no-bare-rpc-error-code": "error",
     "tau-lint/no-scene-override-material": "error",
     "tau-lint/no-impl-in-index": "error",

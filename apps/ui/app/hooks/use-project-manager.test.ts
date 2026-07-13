@@ -334,7 +334,7 @@ describe('useProjectManager', () => {
     // Audit R15 happy-path regression: webaccess with a resolved + permitted
     // default workspace MUST bind the project to that workspaceId in
     // `configs[projectId]` and mount with `'webaccess'`. Silent downgrade
-    // is forbidden (Rule 13a).
+    // is forbidden (`docs/policy/filesystem-authority-policy.md` Rule 10).
     it('should bind webaccess project to the default workspaceId and mount webaccess', async () => {
       mockIsFileSystemAccessSupported = true;
       const defaultEntry = {

@@ -10,8 +10,8 @@
  * connected directory the user has linked. Identity is a `wsp_*` id minted
  * via `generatePrefixedId(idPrefix.workspace)` — the runtime `wsp_*` shape
  * is enforced by `createWorkspace` being the only mint site (per the
- * workspaces-foundation policy in `docs/policy/filesystem-policy.md`
- * Rule 13b).
+ * workspaces-foundation policy in `docs/policy/filesystem-authority-policy.md`
+ * Rule 11).
  *
  * **Handles store** (`handles`, key = `workspaceId`):
  * Stores the actual `FileSystemDirectoryHandle` per workspace. Structured
@@ -53,7 +53,7 @@ const dbVersion = 3;
  * is the only authority for the project ↔ workspace binding — workspace
  * picks happen via `bindProjectToWorkspace` on `useFileManager`, which
  * writes that row first and then triggers an FM machine reload (see
- * `docs/policy/filesystem-policy.md` Rule 13b).
+ * `docs/policy/filesystem-authority-policy.md` Rule 11).
  */
 export type Workspace = {
   /** `wsp_<nanoid21>` — minted via `generatePrefixedId(idPrefix.workspace)`. */
@@ -141,7 +141,7 @@ async function openHandleDbRaw(): Promise<IDBDatabase> {
  * under the new key, and drop the legacy `'root'` key. Legacy projects
  * without an explicit `workspaceId` in `configs` are prompted via the
  * recovery overlay on first load; picks persist via the FM self-persist
- * invariant (Rule 13b).
+ * invariant (`docs/policy/filesystem-authority-policy.md` Rule 11).
  *
  * Returns synchronously; the chained `success` handlers run within the
  * upgrade transaction and commit atomically with the schema changes.

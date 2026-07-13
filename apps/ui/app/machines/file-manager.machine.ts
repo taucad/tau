@@ -71,7 +71,7 @@ type FileManagerContext = {
    * `ProjectFileSystemConfig.workspaceId` is the authority for the
    * project ↔ workspace binding; this field is a projection of it
    * surfaced to UI consumers (chat details, recovery overlay). See
-   * `docs/policy/filesystem-policy.md` Rule 13b.
+   * `docs/policy/filesystem-authority-policy.md` Rule 11.
    */
   activeWorkspaceId: string | undefined;
   /**
@@ -275,7 +275,7 @@ const initializeServicesActor = fromSafeAsync<
     // `bindProjectToWorkspace` on `useFileManager`) and then dispatch
     // `reloadWorkspace`. Missing/stale bindings surface
     // `WebAccessUnavailableEvent` so the recovery overlay can prompt
-    // the user (Rule 13b in `docs/policy/filesystem-policy.md`).
+    // the user (Rule 11 in `docs/policy/filesystem-authority-policy.md`).
     const requestedWorkspaceId = projectConfig?.backend === 'webaccess' ? projectConfig.workspaceId : undefined;
 
     const entry = requestedWorkspaceId ? await getWorkspace(requestedWorkspaceId) : undefined;
@@ -445,7 +445,7 @@ type FileManagerEventLifecycle =
    *
    * Emitted by `bindProjectToWorkspace` (the binding-transaction helper on
    * `useFileManager`) after `setProjectFileSystemConfig` resolves. See
-   * `docs/policy/filesystem-policy.md` Rule 13b.
+   * `docs/policy/filesystem-authority-policy.md` Rule 11.
    */
   | { type: 'reloadWorkspace' };
 

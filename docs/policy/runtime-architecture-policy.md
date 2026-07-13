@@ -3,7 +3,12 @@ title: 'Kernel Architecture Policy'
 description: 'CAD runtime worker architecture from editor to geometry computation. Covers ProjectMachine, CadMachine, RuntimeClient, plugin model, transport, and lifecycle.'
 status: active
 created: '2026-02-18'
-updated: '2026-06-03'
+updated: '2026-07-13'
+related:
+  - docs/policy/worker-policy.md
+  - docs/policy/filesystem-authority-policy.md
+  - docs/research/headless-thumbnail-rendering-architecture-v4.md
+  - docs/research/filesystem-first-policy-alignment.md
 ---
 
 # Kernel Architecture Policy
@@ -346,13 +351,14 @@ Key methods:
 
 ### `defineKernel`
 
-Kernel modules define geometry computation logic. Each kernel is an ES module loaded via `import(kernelModuleUrl)`:
+Kernel modules define geometry computation logic. Each kernel is an ES module loaded via `import(kernelModuleUrl)`. The pipeline has three phases — build, mesh (display), export — each a pure `native → X` transform:
 
-- `onInitialize(options, runtime)` — load WASM, register builtin modules. `options` is type-safe via the `Options` generic inferred from `optionsSchema`
-- `onGetDependencies(input, runtime, ctx)` — return file dependencies
-- `onGetParameters(input, runtime, ctx)` — extract parameters from code
-- `onCreateGeometry(input, runtime, ctx)` — compute geometry + return nativeHandle. `input.tessellation` provides preview quality when specified
-- `onExportGeometry(input, runtime, ctx, nativeHandle)` — export using stored handle. `input.tessellation` provides export quality when specified
+- `initialize(options, runtime)` — load WASM, register builtin modules. `options` is type-safe via the `Options` generic inferred from `optionsSchema`
+- `getDependencies(input, runtime, ctx)` — return file dependencies
+- `getParameters(input, runtime, ctx)` — extract parameters from code
+- `createGeometry(input, runtime, ctx)` — evaluate source → `{ nativeHandle, geometry? }`. The nativeHandle carries **all export-facing evidence** (shapes, resolved interfaces, datum frames). Mesh-native kernels (manifold, jscad, tau) return inline `geometry`; BRep kernels (replicad, opencascade, zoo) omit it and implement `meshGeometry`
+- `meshGeometry(input, runtime, ctx)` _(optional)_ — nativeHandle → display artifact (`GeometryResponse`) at preview tessellation. Runs **only on the display path**, at the kernel boundary; a BRep-only export never calls it. Contract invariant: a kernel provides a display path either via inline `geometry` or via `meshGeometry` — the orchestrator rejects display renders when neither exists
+- `exportGeometry(input, runtime, ctx)` — export using the framework-materialized nativeHandle. Mesh formats tessellate internally at export quality; BRep formats (STEP/IGES) never tessellate
 
 ### MessagePort Protocol
 
@@ -422,7 +428,7 @@ createRuntimeClient({
 });
 ```
 
-Two explicit slots (`preview` and `export`) make the quality distinction visible and intentional. Preview tessellation is used by `render()`, export tessellation is used by `export()`.
+Two explicit slots (`preview` and `export`) make the quality distinction visible and intentional. Preview tessellation is used by the display path (`meshGeometry` for kernels that defer it, inline `createGeometry` otherwise); export tessellation is used by `exportGeometry` for mesh formats. BRep exports (STEP/IGES) tessellate nothing.
 
 2. **Per-call overrides** — passed as `callOptions` to individual methods:
 
@@ -447,7 +453,7 @@ If no tessellation is specified at any level, each kernel applies its own intern
 
 | Kernel       | Preview Default | Export Default | Mechanism                                                                                                                              |
 | ------------ | --------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| **Replicad** | `0.1 / 30°`     | `0.01 / 30°`   | Passed to `.mesh()` and `.meshEdges()`                                                                                                 |
+| **Replicad** | `0.02 / 20°`    | `0.01 / 20°`   | Passed to `.mesh()` and `.meshEdges()`; locked by `occt-tessellation-defaults.test.ts`                                                 |
 | **Manifold** | ignored         | ignored        | Uses Manifold's own tessellation; fixed by model/API output                                                                            |
 | **OpenSCAD** | none            | n/a            | Injected as `$fs` (linear) and `$fa` (angular) CLI arguments at render time. Export reuses baked geometry — override logged as warning |
 | **Zoo/KCL**  | ignored         | ignored        | Tessellation is server-side; future integration point                                                                                  |
@@ -461,12 +467,14 @@ RuntimeClient.render({ source, parameters, renderOptions? })
     → RuntimeWorkerClient.openFile(..., renderOptions?)
       → RuntimeCommand { type: 'openFile', options? }
         → dispatcher → KernelWorker.handleOpenFile(..., options?)
-          → KernelWorker.createGeometry(..., options?)
+          → KernelWorker.createGeometry(..., options?)          // publish path
             → CreateGeometryInput { options? }
-              → KernelDefinition.onCreateGeometry(input, runtime, ctx)
+              → KernelDefinition.createGeometry(input, runtime, ctx)
+            → MeshGeometryInput { nativeHandle, options }        // when geometry deferred
+              → KernelDefinition.meshGeometry(input, runtime, ctx)
 ```
 
-Export follows the same pattern via `exportGeometry` → `ExportGeometryInput { tessellation? }`.
+Export follows the same pattern via `exportGeometry` → `ExportGeometryInput { tessellation? }` — without the mesh phase.
 
 ## Plugin Options & Validation
 
@@ -481,6 +489,18 @@ All plugins use Zod schemas for option validation via a common `optionsSchema` p
 Consumer-facing input uses `options` naming; validated output uses `config` internally within `defineX` implementations. The `Options` generic type is inferred from the Zod schema, giving plugin authors type-safe access in their callbacks without manual casting.
 
 ## Caching Strategy
+
+### Geometry Caches (mesh/build/export split)
+
+The `geometryCache()` middleware persists three role-aligned entries under `.tau/cache/geometry/`:
+
+| Cache      | File                | Wraps            | Stores                                                                       |
+| ---------- | ------------------- | ---------------- | ---------------------------------------------------------------------------- |
+| **build**  | `{hash}.bin`        | `createGeometry` | `serializedNativeHandle` (+ inline display geometry for mesh-native kernels) |
+| **mesh**   | `mesh-{hash}.bin`   | `meshGeometry`   | Display `GeometryResponse` at preview tessellation                           |
+| **export** | `export-{hash}.bin` | `exportGeometry` | `ExportFile[]`                                                               |
+
+A warm export deserializes the build entry's native handle instead of reheating; a headless BRep export writes no mesh entry at all. Cache temperature must not change export output: live, reheated, and deserialized handles produce structurally identical STEP (verified by the replicad conformance suite), and `exportSTEP` pins its `Interface_Static` state on every call so unit statics cannot leak between exports sharing a wasm instance.
 
 ### File-Level Caches (persist across render cycles)
 
@@ -497,6 +517,34 @@ Consumer-facing input uses `options` naming; validated output uses `config` inte
 | ----------------------- | ----------------------------------------------------------------- |
 | `renderDependencyCache` | Reuse dependency computation between getParams and createGeometry |
 | `cachedDetectionDeps`   | Reuse deps from detectImports for getDependencies (zero cost)     |
+
+## Multi-Client Topology & Cache Parity
+
+One project filesystem serves **N runtime clients**: the interactive worker (viewport), the thumbnail worker, the agent capture worker, and the CLI — peers over the same files and the same L2 geometry cache (`.tau/cache/geometry`). The single-client-per-project assumption is retired.
+
+```mermaid
+flowchart LR
+    IW[Interactive worker\nRuntimeClient] --> L2[(L2 geometry cache\n.tau/cache/geometry)]
+    TW[Thumbnail worker\nRuntimeClient] --> L2
+    CW[Capture worker\nRuntimeClient] --> L2
+    CLI[CLI / headless agent\ncreateNodeClient + presets] --> L2
+    L2 --- FS[(Project filesystem\nsingle authority)]
+```
+
+### Hash-Parity Rule
+
+Clients that intend to share cache entries MUST be byte-identical everywhere the hash looks. `dependencyHash` folds in file hashes, kernel options (e.g. `withBrepEdges`), parameters, render/export options, and the **middleware chain identity** — `{name, version, index, options}` per enabled middleware (`computeBaseDependencies` in `kernel-worker.ts`). A mismatched client does not error — it silently forks the cache and recomputes everything, invisible except as CPU time. Any new runtime client MUST land with a parity test proving that a warm render on one client is a cache hit on the other.
+
+### Middleware Placement Rules
+
+- The middleware array is an onion: earlier entries are **outer** layers; the cache stores what inner layers return _after_ transforms have run on the way back up.
+- Transform middleware (`gltfCoordinateTransform`, `gltfEdgeDetection`) wraps the create/mesh phases only, never export — the display artifact is Z-up/mm with edges for every kernel; export GLBs get neither.
+- **No per-client middleware.** Chain identity is hashed (see above), so a middleware added for one client's needs forks the very cache that client depends on. Per-client behavior — writing a thumbnail, capturing bytes for an agent — lives _outside_ the chain, in plain worker code around the runtime client's calls (render → consume result → write over the fs-bridge). See `docs/research/headless-thumbnail-rendering-architecture-v4.md` Finding 9.
+- `geometryCache`'s position is deliberate: it stores post-transform artifacts. Do not reorder the shared chain without re-deriving every consumer's expectations — reordering is also a hash change for everyone.
+
+### Mesh-Artifact Sourcing for Image Transcodes
+
+Image outputs (thumbnails, agent captures, `taucad export --ext=webp`) consume the **mesh-phase artifact** — the cached, middleware-enriched GLB the viewport shows (render tessellation, Z-up/mm, kernel + fallback edges) — never the export leg. The export leg exists for interop downloads (STEP/STL/GLB at export tessellation, no display transforms). Render (`0.02/20°`) and export (`0.01/20°`) tessellation defaults deliberately differ, so an image pipeline riding the export leg can never share the display cache (see `docs/research/headless-thumbnail-rendering-architecture-v4.md`, Findings 2–3).
 
 ## Future Work -- Render Pipeline Cancellation
 

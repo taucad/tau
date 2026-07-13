@@ -1,13 +1,16 @@
 ---
 title: 'Storage Policy'
-description: 'Rules for atomic read-modify-write semantics, field-scoped patches, and concurrent-writer safety in client-side persistent storage providers (IndexedDB, OPFS, etc.).'
+description: 'Store-selection boundary (what belongs in IndexedDB at all) plus rules for atomic read-modify-write semantics, field-scoped patches, and concurrent-writer safety in client-side persistent storage providers.'
 status: active
 created: '2026-04-20'
-updated: '2026-06-05'
+updated: '2026-07-13'
 related:
+  - docs/policy/project-manifest-policy.md
+  - docs/policy/filesystem-authority-policy.md
   - docs/policy/xstate-policy.md
   - docs/policy/filesystem-policy.md
   - docs/policy/testing-policy.md
+  - docs/research/filesystem-first-policy-alignment.md
   - docs/research/chat-draft-resurrection-race.md
   - docs/research/project-updated-at-activity-boundary.md
 ---
@@ -23,6 +26,22 @@ Two independent XState actors (`persistDraftActor`, `persistMessagesActor`) used
 This policy locks the fix in and prevents the same shape of bug recurring in future storage primitives or new fields on `Chat`/`Project`.
 
 ## Rules
+
+### 0. Store-selection boundary: does this data belong in IndexedDB at all?
+
+Before applying any rule below, put the data in the right store. Project-scoped or agent-relevant state never lands in IndexedDB — the object store is a black box to agents, headless CLIs, and users managing webaccess workspaces on disk.
+
+| Data                                                                                                                       | Store                                             | Governed by                                                           |
+| -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------- |
+| Project-scoped or agent-relevant (metadata, thumbnails, parameters, caches — anything a CLI/agent/on-disk user must reach) | Project filesystem (`tau.json` + canonical paths) | `docs/policy/project-manifest-policy.md`                              |
+| Browser-local, non-project UI state (chats, editor layout, resource links — until a migration is scheduled)                | Object store via `IndexedDbStorageProvider`       | This policy's RMW rules                                               |
+| Per-device configuration (workspace handles, `ProjectFileSystemConfig`)                                                    | Dedicated IDB schema (`tau-fs-handles`)           | This policy's RMW rules + `filesystem-authority-policy.md` Rules 9/11 |
+
+The `projects` object store is **retired** once the `tau.json` migration lands (thumbnail v4 R1); until then it is frozen — no new fields. Adding a new object store requires a documented parity exemption in the PR description: state why no agent, CLI, or on-disk consumer will ever need the data.
+
+**Why**: Nothing else in this policy answers "should this be in IndexedDB?" — that gap is exactly how project metadata became unreachable by the agent.
+
+**Enforced by**: `tau-lint/no-direct-indexeddb` (error) — direct `indexedDB` access outside the allowlisted provider modules fails lint, so a new store cannot appear without deliberately extending the allowlist and answering this rule.
 
 ### 1. Read-modify-write must be a single transaction
 
@@ -195,6 +214,7 @@ const patchChat = useCallback(
 
 ## Anti-Patterns
 
+- Creating a new object store (or new fields on the frozen `projects` store) for project-scoped or agent-relevant data. Per Rule 0 that data lives in the project filesystem.
 - Calling `await getChat(id)` followed by `await updateChat(id, mutated)` from a hook or actor. Use a field-scoped helper instead — the manual `read → mutate → write` re-introduces the original race even though the storage layer is now atomic.
 - Adding a new option flag to `updateChat`/`updateProject` to "preserve" or "skip" a field. Add a field-scoped helper instead.
 - Adding project-recency preservation flags to storage or filesystem APIs. Add a semantic domain operation instead.
@@ -220,6 +240,7 @@ const patchChat = useCallback(
 
 Before merging a storage-layer change:
 
+- [ ] The data belongs in this store per Rule 0 — project-scoped/agent-relevant data goes to the project filesystem.
 - [ ] Read and write happen inside one transaction; outer promise resolves on `transaction.oncomplete`.
 - [ ] All public mutators go through `KeyedMutex.run(rowId, …)`.
 - [ ] New multi-writer fields have field-scoped helpers, not extra `updateChat` options.

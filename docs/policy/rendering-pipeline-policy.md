@@ -127,13 +127,13 @@ Source color (sRGB) --> GLTF baseColorFactor (linear via spec) --> Three.js line
 
 Current defaults per kernel:
 
-| Kernel            | Linear Tolerance | Angular Tolerance | Notes                                    |
-| ----------------- | ---------------- | ----------------- | ---------------------------------------- |
-| Replicad          | 0.1mm            | 30deg             | Configurable via `meshConfiguration`     |
-| Replicad (export) | 0.01mm           | 30deg             | Higher quality for file export           |
-| JSCAD             | N/A              | N/A               | Fan triangulation of CSG output polygons |
-| OpenSCAD          | N/A              | N/A               | Manifold backend defaults                |
-| OCCT (converter)  | OCCT defaults    | OCCT defaults     | `undefined` passed to `ReadStepFile`     |
+| Kernel            | Linear Tolerance | Angular Tolerance | Notes                                          |
+| ----------------- | ---------------- | ----------------- | ---------------------------------------------- |
+| Replicad          | 0.02mm           | 20deg             | Locked by `occt-tessellation-defaults.test.ts` |
+| Replicad (export) | 0.01mm           | 20deg             | Higher quality for file export                 |
+| JSCAD             | N/A              | N/A               | Fan triangulation of CSG output polygons       |
+| OpenSCAD          | N/A              | N/A               | Manifold backend defaults                      |
+| OCCT (converter)  | OCCT defaults    | OCCT defaults     | `undefined` passed to `ReadStepFile`           |
 
 **Known limitation**: The OCCT converter does not expose tessellation quality parameters. This means curved surfaces may appear faceted on high-detail models. Future work: expose `linearDeflection` and `angularDeflection` options.
 

@@ -3,7 +3,7 @@ title: 'Vision Policy'
 description: "Tau's long-term vision for connecting hardware engineering through code, AI agents, and verification as the reward function."
 status: active
 created: '2026-03-04'
-updated: '2026-06-29'
+updated: '2026-07-13'
 ---
 
 # Vision Policy
@@ -117,6 +117,7 @@ Open adoption funds the mission; the assurance layer and the dataset are what ma
 
 - **Code is the interface.** Every engineering artifact — geometry, circuits, firmware, test specs, requirements — is represented as code. Code is versionable, diffable, reviewable, and agent-accessible.
 - **Everything is pluggable.** The `defineKernel()` pattern scales to any engineering domain. New solvers, languages, and tools plug into the same runtime, transport, and middleware stack.
+- **Hosts are peers.** Any capability the browser offers an agent or user must be achievable headlessly through the same files and pathways — browser, CLI, and CI produce identical artifacts.
 - **Verification is the reward function.** Generation is commoditizing; trusted verification is the scarce resource. GeoSpec is the oracle that closes the agentic loop and the connective layer across every pillar — a first-class concern, not a test harness bolted onto CAD.
 - **Build the oracle, rent the physics.** Own the geometric/manufacturability/tolerance verification engine and the data it produces; orchestrate third-party physics solvers rather than rebuilding them.
 - **AI agents are collaborators.** Agents don't replace engineers — they handle the thousands of micro-problems that make up a system design, while humans make the architectural decisions.

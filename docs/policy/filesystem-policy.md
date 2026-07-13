@@ -1,10 +1,12 @@
 ---
 title: 'Filesystem Policy'
-description: 'Standards for filesystem access, data transfer, caching, concurrency, and watcher architecture in the Tau application. Covers ZenFS, bridge RPC, and kernel/UI watch planes.'
+description: 'Standards for filesystem access, data transfer, caching, concurrency, and watcher architecture in the Tau application. Covers read/write semantics, bridge RPC, and kernel/UI watch planes.'
 status: active
 created: '2026-03-05'
-updated: '2026-07-10'
+updated: '2026-07-13'
 related:
+  - docs/policy/filesystem-authority-policy.md
+  - docs/research/filesystem-first-policy-alignment.md
   - docs/research/filesystem-architecture.md
   - docs/research/fs-capabilities.md
   - docs/research/large-repo-import-performance.md
@@ -16,11 +18,11 @@ related:
 
 # Filesystem Policy
 
-Internal reference for filesystem access, data transfer, caching, and concurrency in the Tau application. Applies to all code that reads or writes user project data, cache files, or metadata through ZenFS.
+Internal reference for filesystem access, data transfer, caching, and concurrency in the Tau application. Applies to all code that reads or writes user project data, cache files, or metadata through the file-manager worker's provider stack. Topology — authority, providers, mounts, discovery, cross-tab coherence — lives in `docs/policy/filesystem-authority-policy.md`.
 
 ## Rationale
 
-A single-writer topology with zero-copy binary transfer and bounded caches prevents ZenFS directory corruption and memory bloat. Separate kernel and UI watch planes avoid coupling render invalidation to tree refresh, and explicit overflow handling ensures deterministic behavior under load.
+A single-writer topology with zero-copy binary transfer and bounded caches prevents backend index corruption and memory bloat. Separate kernel and UI watch planes avoid coupling render invalidation to tree refresh, and explicit overflow handling ensures deterministic behavior under load.
 
 ## Core Principles
 
@@ -56,9 +58,9 @@ Main Thread                       File Manager Worker              Kernel Worker
      │   readShallowDirectory            │   exists, readdir             │
      │   mount, readBackendFileTree      │   writeFile (cache only)      │
      │                                   │                               │
-     │                                   │         ZenFS                 │
-     │                                   │   IndexedDB / WebAccess /    │
-     │                                   │   OPFS / Memory              │
+     │                                   │   MountTable + providers      │
+     │                                   │   (DirectIdb / WebAccess /   │
+     │                                   │   OPFS / Memory)             │
 ```
 
 All filesystem I/O runs on the file manager worker. The main thread and kernel workers access it exclusively via MessagePort RPC using the **same bridge mechanism** (`createFileSystemBridge` → `MessageChannel` → `createBridgeProxy`). The only difference is the TypeScript type used for the proxy:
@@ -66,7 +68,7 @@ All filesystem I/O runs on the file manager worker. The main thread and kernel w
 - **Main thread**: `createBridgeProxy<FileManagerProtocol>` — full API including worker management (`mount(prefix, MountConfig)`, `unmount`, `invalidateStandaloneProvider`), workspace-scoped operations via the `{ scope }` options bag (`readFile`, `unlink`, `rmdir`, `getZippedDirectory`, `readShallowDirectory`), diagnostics (`readBackendFileTree`), and higher-level operations (`copyDirectory`)
 - **Kernel worker**: `createBridgeProxy<RuntimeFileSystemBase>` — 11 base primitives only (`readFile`, `writeFile`, `stat`, `readdir`, `exists`, etc.)
 
-This is the Interface Segregation Principle (ISP): kernels receive a narrow API surface matching their needs. Both proxies talk to the same worker, same `fileManager` object, same bridge server. No thread may import or use ZenFS directly outside the worker.
+This is the Interface Segregation Principle (ISP): kernels receive a narrow API surface matching their needs. Both proxies talk to the same worker, same `fileManager` object, same bridge server. No thread may instantiate providers or touch backing stores outside the worker (`docs/policy/filesystem-authority-policy.md` Rule 1).
 
 ## Read Rules
 
@@ -88,7 +90,7 @@ Deep reads are permitted only for: `getDirectoryContents` (ZIP/copy), startup-on
 
 When listing a single directory, `readdir` + parallel `Promise.all(stat(...))` is preferred over sequential `stat` calls. Recursive traversal (when needed) should be sequential at the directory level to avoid overwhelming the storage backend.
 
-**ZenFS performance context:** Each `StoreFS.stat()` creates a new `WrappedTransaction` → `IndexedDBStore.transaction()` → `db.transaction('tau-fs', 'readwrite')`. Even though `IndexedDBStore.cache` serves data from memory (populated during mount preload), IDB transaction creation has fixed overhead (~0.1–0.3ms each). Parallelizing stat calls within a directory allows the browser to pipeline IDB transactions instead of sequentially awaiting each one.
+**Backend performance context:** IndexedDB transaction creation has fixed overhead (~0.1–0.3ms each) regardless of payload size. Parallelizing stat calls within a directory lets the browser pipeline IDB transactions instead of sequentially awaiting each one.
 
 ```typescript
 // CORRECT: Parallel stat for one directory
@@ -101,17 +103,17 @@ for (const entry of entries) {
 }
 ```
 
-**For metadata-only queries (tree display, file counts):** Prefer the in-memory tree at the `FileService` layer over ZenFS stat calls. See Rule 33.
+**For metadata-only queries (tree display, file counts):** Prefer the in-memory tree at the `FileService` layer over provider stat calls. See Rule 33.
 
 ### Rule 3: Read caching expectations
 
-| Layer                    | Cache                          | Eviction                      | Notes                                  |
-| ------------------------ | ------------------------------ | ----------------------------- | -------------------------------------- |
-| File manager `openFiles` | `Map<path, Uint8Array>`        | Must have max size + TTL      | Stores recently accessed file contents |
-| Monaco `syncedPaths`     | Internal set                   | TTL 1h, max 200               | Background-synced JS/TS models         |
-| Kernel geometry cache    | `.tau/cache/geometry/*.bin`    | Max age + max entries         | MessagePack serialized meshes          |
-| Kernel parameter cache   | `.tau/cache/parameters/*.json` | None currently                | JSON parameter snapshots               |
-| Standalone FS instances  | Per-backend                    | Must be reused, not recreated | One per backend, cached in worker      |
+| Layer                    | Cache                          | Eviction                      | Notes                                       |
+| ------------------------ | ------------------------------ | ----------------------------- | ------------------------------------------- |
+| File manager `openFiles` | `Map<path, Uint8Array>`        | Must have max size + TTL      | Stores recently accessed file contents      |
+| Monaco `syncedPaths`     | Internal set                   | TTL 1h, max 200               | Background-synced JS/TS models              |
+| Kernel geometry cache    | `.tau/cache/geometry/*.bin`    | Max age + max entries         | MessagePack serialized meshes               |
+| Kernel parameter cache   | `.tau/cache/parameters/*.json` | None currently                | JSON parameter snapshots                    |
+| Standalone providers     | Per storage root               | Must be reused, not recreated | `filesystem-authority-policy.md` Rules 8/14 |
 
 ### Rule 4: File size awareness
 
@@ -214,82 +216,9 @@ if (loadingPaths.has(path)) return; // State may be stale
 
 If a directory load fails, do not cache the failure. Allow retry on the next expand attempt. Optionally collapse the failed node (VS Code pattern).
 
-## Backend & Provider Rules
+## Backend & Provider Rules (moved)
 
-### Rule 11: Backend isolation
-
-Each backend (`indexeddb`, `webaccess`, `opfs`, `memory`) is an independent storage system. Operations on one backend must not affect another. The files route shows backends side-by-side; each column maintains its own state.
-
-### Rule 12: Standalone FS instance safety and reuse
-
-Standalone `FileSystem` instances (created via `resolveMountConfig`) are used to read from specific backends without affecting the main mount (e.g., the files route grid showing all backends side-by-side).
-
-**Safety**: Standalone read-only instances are safe to use alongside the main mounted FS. ZenFS's TOCTOU bug (zen-fs/core#256) only affects concurrent _writers_ — the read-modify-write cycle on directory listings. A standalone instance that only calls `readdir` + `stat` cannot trigger this corruption. The main risk is stale reads (file deleted between `readdir` and `stat`), which is handled by try/catch around individual stat calls.
-
-**Reuse**: Cache the standalone `FileSystem` instance per backend in the worker. Each `resolveMountConfig` call creates a new `IDBDatabase` connection via `indexedDB.open('tau-fs')` and then **preloads every key-value pair** (`getAllKeys()` + `get(id)` for each key) into `IndexedDBStore.cache`. For a project with 6265 files, this means ~12,530 `get` operations on mount (inode + data per file). Creating one per call is extremely wasteful — each instance pays this full preload cost. (Set `disableAsyncCache: true` in options to skip preload, but then every read hits IDB.)
-
-```typescript
-// CORRECT: Cache and reuse
-const standaloneInstances = new Map<string, FileSystem>();
-function getStandaloneFs(backend): FileSystem {
-  /* create or reuse */
-}
-
-// INCORRECT: Create per call
-const fs = await resolveMountConfig({ backend: IndexedDB, storeName }); // New connection + full preload
-```
-
-**Write prohibition**: Standalone instances must never be used for writes. All writes must go through the main mounted FS and its serialization queue.
-
-### Rule 13: WebAccess handle lifecycle is workspace-scoped
-
-The `webaccess` backend is multi-workspace: every `FileSystemDirectoryHandle` lives behind a first-class `workspaceId` (plain `string`, `wsp_*` prefix) and is owned by the multi-store `tau-fs-handles` IndexedDB schema (`workspaces`, `handles`, `configs`, `meta`). The legacy single-`'root'` handle pattern is forbidden.
-
-- Hand-off to the worker still uses structured clone (handles are not transferable). The FM machine resolves the project's bound `workspaceId` from `configs[projectId]`, reads its handle from `handles[workspaceId]`, then mounts the webaccess prefix in a single discriminated call: `proxy.mount(prefix, { backend: 'webaccess', directoryHandle, workspaceId, preservePath: true })`. The worker is stateless w.r.t. webaccess identity — there is no `setDirectoryHandle` knob and no ambient "active handle" between RPCs.
-- Permission must be re-requested from a user gesture after page reload. The FM machine surfaces a structured `unavailableReason` (`'missing' | 'permission'`) — silent downgrade to IndexedDB is forbidden (see Rule 13a).
-- Cross-workspace project access is forbidden. If a project's bound `workspaceId` does not match the currently active workspace, the FM machine must refuse to open and route through the `webAccessUnavailable` state (no implicit re-binding).
-
-### Rule 13a: No silent backend downgrade
-
-Every code path that fails to resolve a webaccess workspace (handle missing from IDB, permission revoked, `showDirectoryPicker` unsupported, picker aborted) must throw `WorkspaceDirectoryRequiredError` with one of the typed `code`s (`'missing' | 'permission' | 'unsupported'`). Call sites translate the error to actionable UI:
-
-- `/projects/new`: `toast.error` with a "Manage Workspaces" action, plus an inline `WorkspaceDirectoryPanel` that prevents submission until the workspace is connected.
-- `/projects/$id`: the `ProjectUnavailableOverlay` indirection renders `WorkspaceUnavailableRecovery` (full-shell overlay, not a banner — the dockview underneath must be fully covered).
-- Settings + `/files`: the relevant workspace row renders `WorkspaceDirectoryPanel` (row / banner variant) with `[Connect]` / `[Grant Access]` / `[Change Folder]` controls scoped to that workspace.
-
-It is forbidden to catch a `WorkspaceDirectoryRequiredError` and fall back to `indexeddb` — a project's backend binding is immutable once written to `configs[projectId]`.
-
-### Rule 13b: Workspace IDs are generated; project bindings live in one place
-
-Workspace identifiers must be minted via `generatePrefixedId(idPrefix.workspace)` from `@taucad/utils`. They are plain `string`s — there is no branded `WorkspaceId` type. Treat them as opaque identifiers: do not derive them from `handle.name`, content hashes, or any other property of the underlying directory (those values change as the user re-points or renames the folder).
-
-`ProjectFileSystemConfig.workspaceId` is the **single source of truth** for the project ↔ workspace binding. The `fileManagerMachine` MUST NOT carry that identity as ambient context; the machine's `activeWorkspaceId` / `activeWorkspaceName` fields are per-init _outputs_ populated by `initializeServicesActor` and cleared on every `setRoot` transition. The machine MUST NOT mutate `ProjectFileSystemConfig` directly — there is no actor-side self-persist branch.
-
-Any user-driven workspace change MUST go through the binding-transaction helper `bindProjectToWorkspace` on `useFileManager` (currently the only caller is `WorkspaceUnavailableRecovery`; the deferred Phase 10 per-project switcher will use the same helper). The helper performs three steps in order: (1) write `ProjectFileSystemConfig` with the new `{ projectId, backend: 'webaccess', workspaceId }`, (2) emit the `workspaceSwap` telemetry event, (3) dispatch `reloadWorkspace` (no payload) on the FM machine. The machine then re-runs `initializeServicesActor`, which reads the fresh persistent record. Subsequent project loads (or back-nav across projects) are silent because the persistent record already has the right binding.
-
-Missing or stale bindings surface `WorkspaceDirectoryRequiredError('missing')` via the recovery overlay; legacy projects without an explicit `workspaceId` are prompted on first load. The v2 → v3 IDB migration only promotes the legacy `'root'` handle to a regular workspace row — it does not auto-bind projects.
-
-### Rule 13c: Project creation is a single mount → write → unmount transaction
-
-Project creation MUST mount the project prefix on the workspace's storage, persist the file set, then unmount — atomically, inside `useProjectManager.createProject`. Webaccess creation MUST pass `(directoryHandle, workspaceId)` together via `MountConfig`; there is no separate handle-priming step. `memory` is rejected outright with `WorkspaceDirectoryRequiredError('unsupported')` — projects must commit to a durable backend at creation.
-
-The transaction is the only legitimate way to write a project's seed files. UI surfaces (`/projects/new`, "duplicate", remix-from-publication) MUST go through `createProject`; ad-hoc `fileManager.mount` + `writeFiles` flows from non-creation call sites are forbidden because they don't perform the `setProjectFileSystemConfig` write that binds the project to its backend.
-
-### Rule 13d: Root FM is pinned to `indexeddb`; `initialBackend` is required
-
-The root `<FileManagerProvider rootDirectory='/'>` MUST be instantiated with `initialBackend='indexeddb'`. `initialBackend` is a required prop; the provider's TypeScript surface compile-time-rejects `webaccess` without an accompanying `projectId` (Audit R15) so a workspace-bound FM can only be mounted inside a project route.
-
-The root provider MUST NOT consume the `filesystem-backend` cookie at mount time. The cookie is a _project-creation default_ read by `/projects/new` and `/files`, never the seed for the root machine. Cross-tab cookie flips therefore cannot break the root FM, and a stale `memory` cookie value is coerced back to `indexeddb` via `coerceFilesystemBackendCookie` at every selector read site.
-
-### Rule 13e: Standalone provider cache is keyed by `workspaceId`; invalidation has a typed contract
-
-`ProviderRegistry` caches one standalone provider per `(backend, workspaceId)` pair. Webaccess entries MUST NOT be keyed by `handle.name` — two workspaces pointing at folders with the same name would collide. The registry exposes `invalidateStandaloneProvider(backend, workspaceId?)`:
-
-- `invalidateStandaloneProvider('webaccess', workspaceId)` drops exactly one entry; required by `/files` "Change Folder", `forgetWorkspace`, and `bindProjectToWorkspace` (recovery binding) so the next standalone read uses the fresh handle.
-- `invalidateStandaloneProvider('webaccess')` drops every webaccess entry; reserved for the worker boot path.
-- `invalidateStandaloneProvider(non-webaccess)` drops the single backend entry.
-
-Failure to invalidate after a handle swap is a bug — the registry will silently serve reads against the previous handle until the cache entry is replaced by reload.
+Former Rules 11–13e (backend isolation, standalone instance safety and reuse, webaccess handle lifecycle, backend downgrade, workspace binding, creation transaction, root FM pinning, provider cache keying) live in `docs/policy/filesystem-authority-policy.md`, which also states the single-filesystem-authority invariant they serve; a rule-number mapping table there resolves old citations. The ZenFS-era mechanics formerly prescribed by Rules 11–12 (`resolveMountConfig`, full-data mount preload) are retired — the live architecture is `MountTable` + `ProviderRegistry` + direct providers.
 
 ## RPC Pattern Rules
 
@@ -527,73 +456,43 @@ When a bridge proxy is disposed, the main-thread port (`port2`) is closed. The w
 
 All bridge calls have a 30-second timeout. Long-running operations (large file writes, directory copies) should not exceed this. If they might, the operation should be split into chunks or the timeout extended per-call.
 
-## ZenFS Performance Rules
+## Provider Performance Rules
 
 ### Rule 33: In-memory file tree for metadata queries
 
-`FileService.getDirectoryStat` and related metadata queries must use an in-memory file tree at the `FileService` layer, not ZenFS stat/readdir calls. ZenFS's `StoreFS.stat()` and `StoreFS.readdir()` each create a new browser `IDBTransaction` via `IndexedDBStore.transaction()` → `db.transaction('tau-fs', 'readwrite')`, even though data is served from the in-memory `IndexedDBStore.cache`. IDB transaction creation has fixed overhead (~0.1–0.3ms each); for 6265 files this accumulates to ~2 seconds.
+`FileService.getDirectoryStat` and related metadata queries must use an in-memory file tree at the `FileService` layer, not per-path provider stat/readdir calls. Backend metadata calls pay per-operation IndexedDB transaction overhead (~0.1–0.3ms each); for 6265 files this accumulates to seconds.
 
-The in-memory tree should be built from ZenFS's internal `StoreFS._ids: Map<string, number>` (path → inode ID map, always in memory) or by reading all directory listing blobs on init. It should be maintained incrementally on writes (not rebuilt).
+The in-memory tree seeds from the provider's hydrated path index (`DirectIdbProvider._paths`) and is maintained incrementally on writes (not rebuilt).
 
 ```typescript
 // CORRECT: Metadata from in-memory tree (O(1))
 const stat = inMemoryTree.stat(path);
 const entries = inMemoryTree.readdir(path);
 
-// INCORRECT: Metadata via ZenFS (1 IDB transaction per call)
+// INCORRECT: Metadata via provider (1 IDB transaction per call)
 const stat = await provider.stat(path);
 const entries = await provider.readdir(path);
 ```
 
-### Rule 34: Bulk import bypasses ZenFS
+### Rule 34: Bulk import uses batched transactions
 
-For bulk import operations (GitHub import, ZIP upload), bypass ZenFS and write directly to the `tau-fs` IndexedDB object store in a single `IDBTransaction`. ZenFS produces ~5 IDB transactions per `writeFile` call (exists + stat + createFile/commitNew + write + touch), totaling ~25,000–30,000 IDB transactions for 6265 files. A single batched IDB transaction with ~12,530 `put` requests (inode + data per file, plus directory listings) reduces this by 4 orders of magnitude.
+For bulk import operations (GitHub import, ZIP upload), write file batches in as few IndexedDB transactions as possible — per-write transaction overhead dominates at thousands of files. After a batched write, the provider's in-memory path index and the in-memory file tree (Rule 33) must be updated (or re-hydrated) before the next read.
 
-After bulk write, invalidate `StoreFS._ids` and `IndexedDBStore.cache` (or remount the filesystem). The in-memory file tree (Rule 33) must also be rebuilt.
+### Rule 35: Provider hydration awareness
 
-### Rule 35: ZenFS mount preload awareness
-
-ZenFS's `@zenfs/dom` IndexedDB backend **eagerly preloads all data** on mount: `getAllKeys()` + `get(id)` for every key in the store, populating `IndexedDBStore.cache`. For a project with 6265 files, this reads ~12,530 key-value pairs (inode + data per file). This preload is the reason subsequent reads are fast (cache hit), but it also means:
-
-- Mount time scales linearly with total stored data
-- Creating standalone `FileSystem` instances (Rule 12) repeats this preload
-- The `disableAsyncCache` option skips preload but makes every read hit IDB
-
-Design decisions should account for this preload cost when considering multiple mounts, backend switches, or standalone instances.
-
-## ZenFS Internals Reference
-
-Quick reference for ZenFS internals that affect performance decisions. Verified from `repos/zenfs/core` and `repos/zenfs/dom` source.
-
-| Aspect                                 | Fact                                                                                                                                                   |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **IDB key format**                     | Numeric inode IDs (not path strings). `put(data, id)` / `get(id)`                                                                                      |
-| **IDB value format**                   | `Uint8Array` — packed binary inodes and raw file content                                                                                               |
-| **Directory listings**                 | UTF-8 JSON blob at key `inode.data`: `Record<string, number>` (filename → child inode ID)                                                              |
-| **In-memory path map**                 | `StoreFS._ids: Map<string, number>` (path → inode ID). Always in memory.                                                                               |
-| **In-memory data cache**               | `IndexedDBStore.cache: Map<number, Uint8Array>`. Populated during mount preload.                                                                       |
-| **`findInode` (with id tables)**       | `_ids.get(path)` → `tx.get(ino)` — 1 store read. O(1) path resolution.                                                                                 |
-| **`findInode` (no id tables)**         | Recursive walk from `/` via parent dir listings. Multiple store reads.                                                                                 |
-| **IDB tx per `stat()`**                | 1 new `db.transaction('tau-fs', 'readwrite')` + 1 `get` for inode bytes                                                                                |
-| **IDB tx per `readdir()`**             | 1 new `IDBTransaction` + 2 `get` ops (inode + directory listing blob)                                                                                  |
-| **IDB tx per `writeFile()`**           | ~5 transactions: exists/stat(1) + stat(1) + commitNew(1, 3 puts) + write(1) + touch(1)                                                                 |
-| **`WrappedTransaction.commit()`**      | Only sets `done = true`. Does NOT flush to IDB. Persistence is via IDB request completion.                                                             |
-| **`IndexedDBTransaction` sync bridge** | `setSync`/`removeSync` queue async IDB ops on a chained `asyncDone` promise                                                                            |
-| **Mount preload**                      | `getAllKeys()` + `get(id)` for every key → fills `IndexedDBStore.cache`                                                                                |
-| **DB/store name**                      | Both database and object store are named `storeName` param (Tau: `'tau-fs'`)                                                                           |
-| **TOCTOU scope**                       | `commitNew` read-modify-writes parent directory listing. Concurrent writes to same parent dir can lose entries. Different parent dirs are independent. |
+`DirectIdbProvider` hydrates a path index once per instance at initialization (`getAllKeys()`, ~26ms for 10k entries) — a metadata index, not a full-data preload. Hydration cost and index divergence are why provider instances are per-storage-root singletons (`filesystem-authority-policy.md` Rule 2): every extra instance repeats hydration and holds an index that never learns of the others' writes. (The ZenFS-era full-data mount preload this rule previously described is retired.)
 
 ## Performance Budget
 
-| Operation                           | Target              | Current                     |
-| ----------------------------------- | ------------------- | --------------------------- |
-| Shallow directory read (20 entries) | < 50ms              | ~30ms (IndexedDB)           |
-| Single file read (source, <100KB)   | < 20ms              | ~10ms (IndexedDB)           |
-| File tree initial load (root only)  | < 100ms             | ~2s (full recursive)        |
-| Background refresh after mutation   | < 200ms (debounced) | ~500ms-5s (immediate, full) |
-| Folder expand (lazy load)           | < 100ms perceived   | N/A (not implemented)       |
-| Watch event -> kernel invalidate    | < 25ms p95          | N/A (not implemented)       |
-| Watch event -> UI tree patch        | < 75ms p95          | N/A (not implemented)       |
-| Sustained edit burst (100 events)   | 0 silent drops      | N/A (not implemented)       |
-| Bulk import (6265 files)            | < 5s                | ~143s (sequential ZenFS)    |
-| `getDirectoryStat` (6265 files)     | < 10ms (in-memory)  | ~2s (sequential IDB tx)     |
+| Operation                           | Target              | Current                           |
+| ----------------------------------- | ------------------- | --------------------------------- |
+| Shallow directory read (20 entries) | < 50ms              | ~30ms (IndexedDB)                 |
+| Single file read (source, <100KB)   | < 20ms              | ~10ms (IndexedDB)                 |
+| File tree initial load (root only)  | < 100ms             | ~2s (full recursive)              |
+| Background refresh after mutation   | < 200ms (debounced) | ~500ms-5s (immediate, full)       |
+| Folder expand (lazy load)           | < 100ms perceived   | N/A (not implemented)             |
+| Watch event -> kernel invalidate    | < 25ms p95          | N/A (not implemented)             |
+| Watch event -> UI tree patch        | < 75ms p95          | N/A (not implemented)             |
+| Sustained edit burst (100 events)   | 0 silent drops      | N/A (not implemented)             |
+| Bulk import (6265 files)            | < 5s                | ~143s (sequential, pre-DirectIdb) |
+| `getDirectoryStat` (6265 files)     | < 10ms (in-memory)  | ~2s (sequential IDB tx)           |

@@ -14,6 +14,9 @@
       "path": "./packages/converter"
     },
     {
+      "path": "./packages/render"
+    },
+    {
       "path": "./libs/tau-examples"
     },
     {

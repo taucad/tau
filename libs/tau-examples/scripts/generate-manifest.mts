@@ -17,17 +17,19 @@ const kernelsDirectory = join(sourceDirectory, 'kernels');
 type ManifestEntry = {
   kernel: string;
   name: string;
-  mainFile: string;
+  mainFile?: string;
   files: string[];
 };
 
-const candidateMainFiles = ['main.ts', 'main.py'] as const;
+const candidateMainFiles = ['main.ts', 'main.py', 'main.scad', 'main.cpp'] as const;
+const excludedDirectories = new Set(['.tau', '__pycache__']);
+const excludedFiles = new Set(['thumbnail.webp']);
 
 function scanFiles(directory: string, prefix = ''): string[] {
   const files: string[] = [];
 
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (entry.name.startsWith('.')) {
+    if (entry.name.startsWith('.') || excludedDirectories.has(entry.name)) {
       continue;
     }
 
@@ -39,7 +41,7 @@ function scanFiles(directory: string, prefix = ''): string[] {
       continue;
     }
 
-    if (entry.isFile()) {
+    if (entry.isFile() && !excludedFiles.has(entry.name)) {
       files.push(relativePath);
     }
   }
@@ -71,10 +73,11 @@ function scanFixtures(): ManifestEntry[] {
         continue;
       }
 
+      const mainFile = candidateMainFiles.find((candidate) => files.includes(candidate));
       entries.push({
         kernel: kernelEntry.name,
         name: exampleEntry.name,
-        mainFile: candidateMainFiles.find((candidate) => files.includes(candidate)) ?? candidateMainFiles[0],
+        ...(mainFile ? { mainFile } : {}),
         files,
       });
     }

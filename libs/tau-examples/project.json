@@ -10,6 +10,29 @@
       "options": {
         "cwd": "{projectRoot}"
       }
+    },
+    "generate-thumbnails": {
+      "command": "tsx scripts/generate-thumbnails.mts",
+      "dependsOn": ["generate-manifest"],
+      "inputs": ["default", "^default"],
+      "outputs": ["{projectRoot}/src/kernels/**/thumbnail.webp", "{projectRoot}/src/thumbnail.assets.ts"],
+      "options": {
+        "cwd": "{projectRoot}"
+      }
+    },
+    "check-thumbnails": {
+      "command": "tsx scripts/generate-thumbnails.mts --check",
+      "dependsOn": ["generate-manifest"],
+      "inputs": ["default", "^default"],
+      "options": {
+        "cwd": "{projectRoot}"
+      }
+    },
+    "test": {
+      "command": "vitest --run",
+      "options": {
+        "cwd": "{projectRoot}"
+      }
     }
   }
 }

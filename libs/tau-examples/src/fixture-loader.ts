@@ -21,13 +21,15 @@ export type Fixture = {
   mainFile: string;
 };
 
-const candidateMainFiles = ['main.ts', 'main.py'] as const;
+const candidateMainFiles = ['main.ts', 'main.py', 'main.scad', 'main.cpp'] as const;
+const excludedDirectories = new Set(['.tau', '__pycache__']);
+const excludedFiles = new Set(['thumbnail.webp']);
 
 function readFixtureFiles(directoryUrl: URL, prefix = ''): Record<string, string> {
   const files: Record<string, string> = {};
 
   for (const entry of readdirSync(directoryUrl, { withFileTypes: true })) {
-    if (entry.name.startsWith('.')) {
+    if (entry.name.startsWith('.') || excludedDirectories.has(entry.name)) {
       continue;
     }
 
@@ -39,7 +41,7 @@ function readFixtureFiles(directoryUrl: URL, prefix = ''): Record<string, string
       continue;
     }
 
-    if (entry.isFile()) {
+    if (entry.isFile() && !excludedFiles.has(entry.name)) {
       files[relativePath] = readFileSync(entryUrl, 'utf8');
     }
   }
@@ -58,7 +60,10 @@ function readFixtureFiles(directoryUrl: URL, prefix = ''): Record<string, string
 export function loadFixture<K extends KernelName>(kernel: K, name: ExampleName<K>): Fixture {
   const fixtureUrl = new URL(`${kernel}/${name}/`, baseUrl);
   const files = readFixtureFiles(fixtureUrl);
-  const mainFile = candidateMainFiles.find((candidate) => Object.hasOwn(files, candidate)) ?? candidateMainFiles[0];
+  const mainFile = candidateMainFiles.find((candidate) => Object.hasOwn(files, candidate));
+  if (!mainFile) {
+    throw new Error(`Fixture ${kernel}/${name} has no supported main entrypoint`);
+  }
 
   return { files, mainFile };
 }

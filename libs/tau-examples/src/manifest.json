@@ -3,7 +3,7 @@
     "kernel": "build123d",
     "name": "v8-engine-brep",
     "mainFile": "main.py",
-    "files": ["__pycache__/main.cpython-313.pyc", "main.py"]
+    "files": ["main.py"]
   },
   {
     "kernel": "jscad",
@@ -74,7 +74,7 @@
   {
     "kernel": "occt",
     "name": "v8-engine-brep",
-    "mainFile": "main.ts",
+    "mainFile": "main.cpp",
     "files": ["Makefile", "main.cpp", "v8-engine-brep-native"]
   },
   {
@@ -86,7 +86,7 @@
   {
     "kernel": "openscad",
     "name": "kitchen-sink",
-    "mainFile": "main.ts",
+    "mainFile": "main.scad",
     "files": ["main.scad"]
   },
   {
@@ -242,7 +242,6 @@
   {
     "kernel": "replicad",
     "name": "v8-engine-rev2",
-    "mainFile": "main.ts",
     "files": [
       "README.md",
       "geospec/census.geospec.ts",

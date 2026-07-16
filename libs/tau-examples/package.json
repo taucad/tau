@@ -7,13 +7,19 @@
   "exports": {
     ".": "./src/index.ts",
     "./fixtures": "./src/fixture-loader.ts",
-    "./manifest": "./src/manifest.ts"
+    "./manifest": "./src/manifest.ts",
+    "./thumbnails": "./src/thumbnail.assets.ts"
   },
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
+  "dependencies": {
+    "@taucad/openscad": "workspace:*",
+    "@taucad/runtime": "workspace:*"
+  },
   "devDependencies": {
-    "geospec": "workspace:*"
+    "geospec": "workspace:*",
+    "sharp": "^0.34.5"
   }
 }

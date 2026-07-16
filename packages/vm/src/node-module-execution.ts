@@ -41,7 +41,14 @@ export async function executeCodeInNode(code: string): Promise<{ value: unknown;
     importNodeBuiltin<typeof NodeUrl>('node:url'),
   ]);
 
-  const temporaryFile = path.join(os.tmpdir(), `${nodeExecFilePrefix}${nodeProcess.pid}-${++nodeExecuteCounter}.mjs`);
+  // The name must be unique across WORKER THREADS, not just processes: pool
+  // workers share the pid and each thread has its own module counter, so
+  // `pid-counter` alone collides (one thread's unlink races another's import).
+  const uniqueSuffix = Math.random().toString(36).slice(2, 10);
+  const temporaryFile = path.join(
+    os.tmpdir(),
+    `${nodeExecFilePrefix}${nodeProcess.pid}-${++nodeExecuteCounter}-${uniqueSuffix}.mjs`,
+  );
   const entryUrl = url.pathToFileURL(temporaryFile).href;
   fs.writeFileSync(temporaryFile, stripInlineSourceMap(code), 'utf8');
   try {

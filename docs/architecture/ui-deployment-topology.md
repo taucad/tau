@@ -120,6 +120,7 @@ Investigation narrative: **[docs/research/netlify-ui-deployment-strategy.md](../
 | ------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | `TAU_FRONTEND_URL`        | `https://taucad.dev`                                                            | `https://tau.new`                                                 |
 | `AUTH_URL`                | `https://api.taucad.dev`                                                        | `https://api.tau.new`                                             |
+| `TAU_API_URL`             | `https://api.taucad.dev`                                                        | `https://api.tau.new`                                             |
 | `ADDITIONAL_CORS_ORIGINS` | `["https://deploy-preview-*--taucad.netlify.app","https://taucad.netlify.app"]` | _(unset — `https://tau.new` matches `TAU_FRONTEND_URL` directly)_ |
 
 Do **not** broaden the deploy-preview glob beyond that pattern — it would allow unintentional Netlify host classes.

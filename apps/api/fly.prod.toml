@@ -18,6 +18,9 @@ LANGSMITH_TRACING = true
 LANGSMITH_ENDPOINT = 'https://api.smith.langchain.com'
 LANGSMITH_PROJECT = 'tau-api-prod'
 AUTH_URL = 'https://api.tau.new'
+# Browser-facing origin of this API, used to build authenticated publication file
+# proxy URLs. Required by the env schema with no default.
+TAU_API_URL = 'https://api.tau.new'
 LOG_SERVICE = 'fly'
 LOG_LEVEL = 'info'
 OTEL_METRICS_PORT = '9464'

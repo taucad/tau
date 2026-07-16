@@ -1,0 +1,21 @@
+[package]
+name = "render-wasm"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+render-core = { path = "../render-core" }
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+
+# rustc 1.88 emits bulk-memory/sign-ext/nontrapping-fptoint by default;
+# wasm-pack's bundled binaryen needs them enabled explicitly. No simd128:
+# benched 2026-07-12 at ±0% for the codecs (entropy coding doesn't
+# auto-vectorize) and relaxed SIMD lacks Safari support.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz", "--enable-bulk-memory", "--enable-sign-ext", "--enable-nontrapping-float-to-int"]

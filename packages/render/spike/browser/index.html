@@ -1,0 +1,122 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>render-wasm spike</title>
+<style>
+  body {
+    font: 14px/1.4 monospace;
+    margin: 2rem;
+  }
+  img {
+    border: 1px dashed #999;
+    background: repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 0 0 / 16px 16px;
+  }
+</style>
+<h1>render-wasm spike</h1>
+<pre id="status">starting worker…</pre>
+<img id="out" alt="" />
+<script type="module">
+  const status = document.getElementById('status');
+  const result = {};
+
+  const toBase64 = (bytes) => {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(binary);
+  };
+
+  async function report() {
+    window.__result = result;
+    status.textContent = JSON.stringify(
+      {
+        ...result,
+        pngBase64: result.pngBase64 ? `<${result.pngBytes} bytes>` : undefined,
+        webpBase64: result.webpBase64 ? `<${result.webpBytes} bytes>` : undefined,
+        jpegBase64: result.jpegBase64 ? `<${result.jpegBytes} bytes>` : undefined,
+      },
+      null,
+      2,
+    );
+    try {
+      await fetch('/result', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(result),
+      });
+    } catch {
+      // Standalone open without harness server — page display is enough.
+    }
+  }
+
+  if (!('gpu' in navigator)) {
+    result.ok = false;
+    result.error = 'navigator.gpu missing on the page (WebGPU unsupported or disabled)';
+    report();
+  }
+
+  const parameters = new URLSearchParams(location.search);
+  const bench = parameters.has('bench');
+  const fixture = parameters.get('fixture') ?? 'gear-12.glb';
+  const worker = new Worker('./worker.mjs', { type: 'module' });
+  worker.onmessage = (event) => {
+    if (event.data.ready) {
+      status.textContent = bench ? 'worker ready, benchmarking…' : 'worker ready, rendering…';
+      worker.postMessage({ glbUrl: `/fixtures/${fixture}`, width: 768, height: 432, bench });
+      return;
+    }
+    if (event.data.bench) {
+      Object.assign(result, {
+        ok: event.data.ok,
+        adapter: event.data.adapter,
+        initTime: event.data.initTime,
+        bench: event.data.bench,
+        codecConformance: event.data.codecConformance,
+        multiView: event.data.multiView,
+      });
+      report();
+      return;
+    }
+    const {
+      ok,
+      adapter,
+      png,
+      webp,
+      jpeg,
+      error,
+      initTime,
+      renderTime,
+      secondRenderTime,
+      codecTime,
+      batchViews,
+      analysis,
+      invalidGlbError,
+    } = event.data;
+    Object.assign(result, {
+      ok,
+      adapter,
+      error,
+      initTime,
+      renderTime,
+      secondRenderTime,
+      codecTime,
+      batchViews,
+      analysis,
+      invalidGlbError,
+      pngBytes: png?.length ?? 0,
+      webpBytes: webp?.length ?? 0,
+      jpegBytes: jpeg?.length ?? 0,
+    });
+    if (ok) {
+      document.getElementById('out').src = URL.createObjectURL(new Blob([png], { type: 'image/png' }));
+      result.pngBase64 = toBase64(png);
+      result.webpBase64 = toBase64(webp);
+      result.jpegBase64 = toBase64(jpeg);
+    }
+    report();
+  };
+  worker.onerror = (event) => {
+    Object.assign(result, { ok: false, error: `worker error: ${event.message}` });
+    report();
+  };
+</script>

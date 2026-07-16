@@ -1,0 +1,17 @@
+[package]
+name = "render-napi"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+render-core = { path = "../render-core" }
+napi = { version = "3", default-features = false, features = ["napi8"] }
+napi-derive = "3"
+pollster = "1.0.1"
+
+[build-dependencies]
+napi-build = "2"

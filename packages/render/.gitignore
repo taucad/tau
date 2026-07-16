@@ -1,0 +1,14 @@
+rust/target/
+spike/browser/pkg/
+spike/out/
+spike/*.node
+
+# TS build output
+out-tsc/
+dist/
+
+# Large built binaries (regenerate with `pnpm build:wasm` / `pnpm build:napi`).
+# The wasm-bindgen JS glue + .d.ts are tracked so typecheck and bundling work
+# without a Rust build; only the binary payloads are ignored.
+src/wasm/*.wasm
+src/native/*.node

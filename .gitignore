@@ -67,3 +67,7 @@ test-results
 
 # Graphify generated graphs and extraction caches
 **/graphify-out/
+
+# Tau
+.tau/*
+!.tau/parameters

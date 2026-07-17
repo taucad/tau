@@ -3,19 +3,22 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Points, Group } from 'three';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
-import { createMorphingPointsNodeMaterial } from '#routes/auth.$/splashback/morphing-points-material.node.js';
+import { createMorphingPointsNodeMaterial } from '#components/geometry/splash/morphing-points-material.node.js';
 import {
   createMorphingPointsMaterial,
   updateMorphProgress,
   updateMorphTime,
   updateMorphOpacity,
-} from '#routes/auth.$/splashback/morphing-points-material.js';
-import { updateMorphAnimation, resetMorphAnimationOnTargetChange } from '#routes/auth.$/splashback/morph-animation.js';
-import type { SampledPoints } from '#routes/auth.$/splashback/point-sampler.js';
+} from '#components/geometry/splash/morphing-points-material.js';
+import {
+  updateMorphAnimation,
+  resetMorphAnimationOnTargetChange,
+} from '#components/geometry/splash/morph-animation.js';
+import type { SampledPoints } from '#components/geometry/splash/point-sampler.js';
 import {
   assemblySplitRatio as defaultAssemblySplitRatio,
   gearRatio as defaultGearRatio,
-} from '#routes/auth.$/splashback/auth-splashback.constants.js';
+} from '#components/geometry/splash/auth-splashback.constants.js';
 
 export type SplitMorphingPointsProperties = {
   /**

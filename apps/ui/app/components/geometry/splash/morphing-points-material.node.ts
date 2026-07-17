@@ -6,7 +6,11 @@ import {
   add,
   attribute,
   clamp,
+  cross,
+  div,
+  exp,
   float,
+  length,
   mix,
   mul,
   normalize,
@@ -17,7 +21,7 @@ import {
   vec3,
 } from 'three/tsl';
 
-import type { MorphingPointsMaterialOptions } from '#routes/auth.$/splashback/morphing-points-material.js';
+import type { MorphingPointsMaterialOptions } from '#components/geometry/splash/morphing-points-material.js';
 
 const defaultMorphOptions: Required<Omit<MorphingPointsMaterialOptions, 'targetColor'>> = {
   color: '#14b8a6',
@@ -33,6 +37,12 @@ export type MorphingPointsNodeUniformHandles = {
   readonly uSourceRgb: ReturnType<typeof uniform>;
   readonly uTargetRgb: ReturnType<typeof uniform>;
   readonly uHasTargetColor: ReturnType<typeof uniform>;
+  /** Pointer position in the points' local/object space (MorphingPoints converts from world space). */
+  readonly uPointer: ReturnType<typeof uniform>;
+  /** Repulsion displacement magnitude; 0 disables the effect (reduced motion). */
+  readonly uPointerStrength: ReturnType<typeof uniform>;
+  /** Radius (local units) over which pointer repulsion falls off to zero. */
+  readonly uPointerRadius: ReturnType<typeof uniform>;
 };
 
 /**
@@ -55,6 +65,13 @@ export function createMorphingPointsNodeMaterial(options?: MorphingPointsMateria
   const targetColor = new THREE.Color(targetColorInput);
   const uSourceRgb = uniform(sourceColor);
   const uTargetRgb = uniform(targetColor);
+
+  // Pointer repulsion (scatter⇄converge): the cursor pushes nearby points off
+  // the converged surface. Defaults keep the effect inert (strength 0) until the
+  // hero canvas drives `uPointer`/`uPointerStrength` per frame.
+  const uPointer = uniform(new THREE.Vector3(0, 0, 0));
+  const uPointerStrength = uniform(0, 'float');
+  const uPointerRadius = uniform(3, 'float');
 
   // Second argument must stay a literal `'vec3' | 'float'` for TSL generics; grouping under one `as const`
   // object satisfies `tau-lint(no-literal-const-assertion)` while preserving tsgo narrowing (bare `'vec3'`
@@ -88,9 +105,30 @@ export function createMorphingPointsNodeMaterial(options?: MorphingPointsMateria
       sin(add(mul(aRandomOffset, float(20)), mul(uTime, float(0.6)), float(2))),
     );
     const noiseTerm = mul(mul(noiseVec, transitionIntensity), float(0.15));
-    const morphed = mix(midExploded, vec3(aTargetPosition), uProgress);
+    const morphed = add(mix(midExploded, vec3(aTargetPosition), uProgress), noiseTerm);
 
-    return add(morphed, noiseTerm);
+    // Pointer interaction applied after the morph so points rest on the
+    // verified surface and only stir under the cursor. Gaussian falloff (no
+    // hard shell), displacement bounded by uPointerStrength, per-point time
+    // wobble for turbulence — mirrors the GLSL variant (sin stands in for its
+    // composite noise, as with the swirl above). Branch-free direction via
+    // `toPointer / (dist + eps)` avoids a normalize NaN at coincidence.
+    const toPointer = sub(morphed, uPointer);
+    const pointerDistance = length(toPointer);
+    const pointerDirection = div(toPointer, add(pointerDistance, float(0.0001)));
+    const pointerNorm = div(pointerDistance, uPointerRadius);
+    const pointerFalloff = exp(mul(float(-3), mul(pointerNorm, pointerNorm)));
+    const pointerWobble = add(
+      float(0.75),
+      mul(sin(add(mul(aRandomOffset, float(40)), mul(uTime, float(3)))), float(0.25)),
+    );
+    const pointerCurl = cross(pointerDirection, vec3(0, 0, 1));
+    const pointerOffset = mul(
+      add(pointerDirection, mul(pointerCurl, float(0.4))),
+      mul(pointerFalloff, mul(pointerWobble, uPointerStrength)),
+    );
+
+    return add(morphed, pointerOffset);
   })();
 
   const sizePulse = sub(float(1), mul(abs(sub(uProgress, float(0.5))), float(2)));
@@ -110,6 +148,9 @@ export function createMorphingPointsNodeMaterial(options?: MorphingPointsMateria
       uSourceRgb,
       uTargetRgb,
       uHasTargetColor,
+      uPointer,
+      uPointerStrength,
+      uPointerRadius,
     },
   };
 }

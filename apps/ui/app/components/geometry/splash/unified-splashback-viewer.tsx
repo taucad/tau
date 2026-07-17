@@ -4,18 +4,18 @@ import { Center, OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import type { Group } from 'three';
 import type { Geometry } from '@taucad/types';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
-import { MorphingPoints } from '#routes/auth.$/splashback/morphing-points.js';
-import { SplitMorphingPoints } from '#routes/auth.$/splashback/split-morphing-points.js';
-import { PreviewLights } from '#routes/auth.$/splashback/preview-lights.js';
-import { updateCrossfade, startCrossfade } from '#routes/auth.$/splashback/crossfade-animation.js';
-import { usePreloadedMeshes } from '#routes/auth.$/splashback/use-preloaded-meshes.js';
-import type { LoadedMesh } from '#routes/auth.$/splashback/use-preloaded-meshes.js';
-import type { SampledPoints } from '#routes/auth.$/splashback/point-sampler.js';
+import { MorphingPoints } from '#components/geometry/splash/morphing-points.js';
+import { SplitMorphingPoints } from '#components/geometry/splash/split-morphing-points.js';
+import { PreviewLights } from '#components/geometry/splash/preview-lights.js';
+import { updateCrossfade, startCrossfade } from '#components/geometry/splash/crossfade-animation.js';
+import { usePreloadedMeshes } from '#components/geometry/splash/use-preloaded-meshes.js';
+import type { LoadedMesh } from '#components/geometry/splash/use-preloaded-meshes.js';
+import type { SampledPoints } from '#components/geometry/splash/point-sampler.js';
 import {
   gear12Teeth as gear12TeethConstant,
   gear8Teeth as gear8TeethConstant,
   assemblySplitRatio as assemblySplitRatioConstant,
-} from '#routes/auth.$/splashback/auth-splashback.constants.js';
+} from '#components/geometry/splash/auth-splashback.constants.js';
 import { cn } from '#utils/ui.utils.js';
 import {
   probeWebGpuSupport,

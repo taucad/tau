@@ -55,6 +55,9 @@ const vertexShader = /* glsl */ `
   uniform float uExplosionStrength;
   uniform float uTime;
   uniform float uPointSize;
+  uniform vec3 uPointer;
+  uniform float uPointerStrength;
+  uniform float uPointerRadius;
 
   varying float vProgress;
   varying float vRandomOffset;
@@ -100,6 +103,24 @@ const vertexShader = /* glsl */ `
       t = t * t * (3.0 - 2.0 * t);
       morphed = mix(midPoint, aTargetPosition, t);
     }
+
+    // Pointer interaction: a soft breeze that brushes nearby points off the
+    // surface, with a tangential swirl for organic drift. Gaussian falloff has
+    // no hard shell (a linear falloff folds every inner point onto one radius,
+    // which reads as a solid saturated ring under additive blending), and the
+    // displacement is bounded by uPointerStrength. Per-point time wobble breaks
+    // the displaced region into turbulence instead of a stamped dent.
+    // Branch-free direction (toPointer / (dist + eps)) avoids a normalize NaN
+    // at coincidence. uPointer is in local/object space (MorphingPoints
+    // converts from world space each frame).
+    vec3 toPointer = morphed - uPointer;
+    float pointerDist = length(toPointer);
+    vec3 pointerDir = toPointer / (pointerDist + 0.0001);
+    float pointerNorm = pointerDist / uPointerRadius;
+    float pointerFalloff = exp(-3.0 * pointerNorm * pointerNorm);
+    float pointerWobble = 0.75 + 0.25 * noise(aRandomOffset * 40.0 + uTime * 3.0);
+    vec3 pointerCurl = cross(pointerDir, vec3(0.0, 0.0, 1.0));
+    morphed += (pointerDir + pointerCurl * 0.4) * pointerFalloff * pointerWobble * uPointerStrength;
 
     // Dynamic point size - larger at midpoint for visual impact
     float sizeFactor = 1.0 + transitionIntensity * 0.3;
@@ -182,6 +203,9 @@ export function createMorphingPointsMaterial(options?: MorphingPointsMaterialOpt
       uTime: { value: 0 },
       uExplosionStrength: { value: explosionStrength },
       uPointSize: { value: pointSize },
+      uPointer: { value: new THREE.Vector3(0, 0, 0) },
+      uPointerStrength: { value: 0 },
+      uPointerRadius: { value: 3 },
       uColor: { value: new THREE.Color(color) },
       uTargetColor: { value: new THREE.Color(targetColor ?? color) },
       uHasTargetColor: { value: targetColor !== undefined },
@@ -243,5 +267,23 @@ export function updateMorphColors(material: THREE.ShaderMaterial, color: string,
 export function updateMorphOpacity(material: THREE.ShaderMaterial, opacity: number): void {
   if (material.uniforms['uOpacity']) {
     material.uniforms['uOpacity'].value = opacity;
+  }
+}
+
+/**
+ * Updates the pointer repulsion uniforms of a morphing points material.
+ * Pass `strength = 0` to disable the effect (e.g. reduced-motion).
+ *
+ * @param material - The morphing points material
+ * @param pointer - Pointer position in the points' local/object space
+ * @param strength - Repulsion displacement magnitude (0 disables)
+ */
+export function updateMorphPointer(material: THREE.ShaderMaterial, pointer: THREE.Vector3, strength: number): void {
+  if (material.uniforms['uPointer']) {
+    (material.uniforms['uPointer'].value as THREE.Vector3).copy(pointer);
+  }
+
+  if (material.uniforms['uPointerStrength']) {
+    material.uniforms['uPointerStrength'].value = strength;
   }
 }

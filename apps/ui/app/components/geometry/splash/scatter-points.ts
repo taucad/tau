@@ -1,4 +1,4 @@
-import type { SampledPoints } from '#routes/auth.$/splashback/point-sampler.js';
+import type { SampledPoints } from '#components/geometry/splash/point-sampler.js';
 
 /**
  * Generates a uniformly-distributed scatter cloud of `pointCount` random points

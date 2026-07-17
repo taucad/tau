@@ -1,17 +1,38 @@
 import { useRef, useMemo, useEffect } from 'react';
+import type { RefObject } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Points, Group } from 'three';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
-import { createMorphingPointsNodeMaterial } from '#routes/auth.$/splashback/morphing-points-material.node.js';
+import { createMorphingPointsNodeMaterial } from '#components/geometry/splash/morphing-points-material.node.js';
 import {
   createMorphingPointsMaterial,
   updateMorphProgress,
   updateMorphTime,
   updateMorphOpacity,
-} from '#routes/auth.$/splashback/morphing-points-material.js';
-import { updateMorphAnimation, resetMorphAnimationOnTargetChange } from '#routes/auth.$/splashback/morph-animation.js';
-import type { SampledPoints } from '#routes/auth.$/splashback/point-sampler.js';
+  updateMorphPointer,
+} from '#components/geometry/splash/morphing-points-material.js';
+import {
+  updateMorphAnimation,
+  resetMorphAnimationOnTargetChange,
+} from '#components/geometry/splash/morph-animation.js';
+import type { SampledPoints } from '#components/geometry/splash/point-sampler.js';
+
+/**
+ * Per-frame pointer repulsion state, in **world space** — the component
+ * converts into the point cloud's local space each frame, so the effect stays
+ * under the cursor while the cloud auto-rotates. Passed by reference so the
+ * driver (e.g. the hero canvas) can mutate it each frame without triggering
+ * React re-renders. `strength: 0` disables the effect.
+ */
+export type MorphingPointerState = {
+  position: THREE.Vector3;
+  strength: number;
+  radius: number;
+};
+
+/** Scratch vector for the per-frame world→local pointer conversion. */
+const localPointerScratch = new THREE.Vector3();
 
 export type MorphingPointsProperties = {
   /**
@@ -62,7 +83,7 @@ export type MorphingPointsProperties = {
    */
   readonly initialRotationY?: number;
   /**
-   * Enable automatic rotation around Y axis during morph.
+   * Enable automatic rotation during morph.
    * @default false
    */
   readonly enableAutoRotate?: boolean;
@@ -71,6 +92,13 @@ export type MorphingPointsProperties = {
    * @default 0.5
    */
   readonly autoRotateSpeed?: number;
+  /**
+   * Axis for the auto-rotation. `y` tumbles the cloud (auth splash); `z` spins
+   * a camera-facing disc in-plane about its own axis (hero gear) so a flat
+   * model never presents edge-on.
+   * @default 'y'
+   */
+  readonly autoRotateAxis?: 'y' | 'z';
   /**
    * Opacity of the point cloud (0 to 1).
    * Used for crossfade transitions.
@@ -82,6 +110,12 @@ export type MorphingPointsProperties = {
    * Provides the final Y rotation value for syncing with target mesh.
    */
   readonly onMorphComplete?: (finalRotationY: number) => void;
+  /**
+   * Optional pointer repulsion state, read every frame. Omit (or keep
+   * `strength: 0`) to disable — the auth splashback does not pass this, so its
+   * behaviour is unchanged.
+   */
+  readonly pointerRef?: RefObject<MorphingPointerState | undefined>;
 };
 
 /**
@@ -119,8 +153,10 @@ export function MorphingPoints({
   initialRotationY = 0,
   enableAutoRotate = false,
   autoRotateSpeed = 0.5,
+  autoRotateAxis = 'y',
   opacity = 1,
   onMorphComplete,
+  pointerRef,
 }: MorphingPointsProperties): React.JSX.Element {
   const backend = useThreeGraphicsBackend();
   const nodeHandlesRef = useRef<ReturnType<typeof createMorphingPointsNodeMaterial>['handles'] | undefined>(undefined);
@@ -207,10 +243,10 @@ export function MorphingPoints({
       return;
     }
 
-    // Auto-rotate around Y axis
+    // Auto-rotate around the configured axis
     if (enableAutoRotate) {
       currentRotationYaxisRef.current += autoRotateSpeed * delta;
-      rotationGroupRef.current.rotation.y = currentRotationYaxisRef.current;
+      rotationGroupRef.current.rotation[autoRotateAxis] = currentRotationYaxisRef.current;
     }
 
     // Animate progress towards target
@@ -228,14 +264,36 @@ export function MorphingPoints({
       },
     });
 
+    const pointer = pointerRef?.current;
+
+    // The shader displaces in object space, but the pointer arrives in world
+    // space — convert through the (auto-rotating) group chain so the effect
+    // tracks the cursor instead of smearing around the rotation.
+    if (pointer) {
+      pointsRef.current.updateWorldMatrix(true, false);
+      pointsRef.current.worldToLocal(localPointerScratch.copy(pointer.position));
+    }
+
     if (nodeHandlesRef.current) {
       nodeHandlesRef.current.uProgress.value = currentProgress;
       nodeHandlesRef.current.uTime.value = state.clock.elapsedTime;
       nodeHandlesRef.current.uOpacity.value = opacity;
+      if (pointer) {
+        (nodeHandlesRef.current.uPointer.value as THREE.Vector3).copy(localPointerScratch);
+        nodeHandlesRef.current.uPointerStrength.value = pointer.strength;
+        nodeHandlesRef.current.uPointerRadius.value = pointer.radius;
+      }
     } else {
-      updateMorphProgress(material as THREE.ShaderMaterial, currentProgress);
-      updateMorphTime(material as THREE.ShaderMaterial, state.clock.elapsedTime);
-      updateMorphOpacity(material as THREE.ShaderMaterial, opacity);
+      const shaderMaterial = material as THREE.ShaderMaterial;
+      updateMorphProgress(shaderMaterial, currentProgress);
+      updateMorphTime(shaderMaterial, state.clock.elapsedTime);
+      updateMorphOpacity(shaderMaterial, opacity);
+      if (pointer) {
+        updateMorphPointer(shaderMaterial, localPointerScratch, pointer.strength);
+        if (shaderMaterial.uniforms['uPointerRadius']) {
+          shaderMaterial.uniforms['uPointerRadius'].value = pointer.radius;
+        }
+      }
     }
   });
 

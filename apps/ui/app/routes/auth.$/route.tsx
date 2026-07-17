@@ -10,7 +10,7 @@ import type { Handle } from '#types/matches.types.js';
 import { ClientOnly } from '#components/ui/utils/client-only.js';
 
 const AuthSplashbackLazy = lazy(async () => {
-  const m = await import('#routes/auth.$/splashback/auth-splashback.js');
+  const m = await import('#components/geometry/splash/auth-splashback.js');
   return { default: m.AuthSplashback };
 });
 

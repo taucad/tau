@@ -46,8 +46,11 @@ export function updateMorphAnimation({
   animationSpeed: number;
   onComplete?: (progress: number) => void;
 }): number {
-  // Animate progress towards target using lerp
-  state.progressRef.current = lerp(state.progressRef.current, targetProgress, animationSpeed * delta);
+  // Animate progress towards target using lerp. The factor must be clamped to
+  // 1: RAF deltas can span minutes (tab-hidden / off-viewport pauses), and an
+  // unclamped factor extrapolates progress far past the target — the shader's
+  // cubic easing then flings every point out of the frustum.
+  state.progressRef.current = lerp(state.progressRef.current, targetProgress, Math.min(animationSpeed * delta, 1));
 
   // Clamp to exact values when very close
   if (Math.abs(state.progressRef.current - targetProgress) < 0.001) {

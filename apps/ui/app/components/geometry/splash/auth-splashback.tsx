@@ -10,19 +10,19 @@ import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { jscad } from '@taucad/runtime/kernels';
 import { parameterCache, geometryCache, gltfCoordinateTransform } from '@taucad/runtime/middleware';
 import { esbuild } from '@taucad/runtime/bundler';
-import { authSplashbackMachine, timing as machineTiming } from '#routes/auth.$/splashback/auth-splashback.machine.js';
-import { UnifiedSplashbackViewer } from '#routes/auth.$/splashback/unified-splashback-viewer.js';
-import type { SplashbackPhase } from '#routes/auth.$/splashback/unified-splashback-viewer.js';
-import { useSampledPoints } from '#routes/auth.$/splashback/use-sampled-points.js';
-import { generateScatterPoints, sliceSampledPoints } from '#routes/auth.$/splashback/scatter-points.js';
+import { authSplashbackMachine, timing as machineTiming } from '#components/geometry/splash/auth-splashback.machine.js';
+import { UnifiedSplashbackViewer } from '#components/geometry/splash/unified-splashback-viewer.js';
+import type { SplashbackPhase } from '#components/geometry/splash/unified-splashback-viewer.js';
+import { useSampledPoints } from '#components/geometry/splash/use-sampled-points.js';
+import { generateScatterPoints, sliceSampledPoints } from '#components/geometry/splash/scatter-points.js';
 import { Loader } from '#components/ui/loader.js';
 import { useRuntime } from '@taucad/react';
-import gearJscad from '#routes/auth.$/splashback/gear.jscad.js?raw';
+import gearJscad from '#components/geometry/splash/gear.jscad.js?raw';
 import {
   morphPointCount,
   assemblySplitRatio as defaultAssemblySplitRatio,
   loadingScatterRadius,
-} from '#routes/auth.$/splashback/auth-splashback.constants.js';
+} from '#components/geometry/splash/auth-splashback.constants.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key
 const gearCode = { 'main.js': gearJscad };

@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons';
 import type { Geometry } from '@taucad/types';
-import { sampleMeshSurface } from '#routes/auth.$/splashback/point-sampler.js';
-import type { SampledPoints } from '#routes/auth.$/splashback/point-sampler.js';
+import { sampleMeshSurface } from '#components/geometry/splash/point-sampler.js';
+import type { SampledPoints } from '#components/geometry/splash/point-sampler.js';
 
 /**
  * Gear assembly constants calculated from circularPitch = 5

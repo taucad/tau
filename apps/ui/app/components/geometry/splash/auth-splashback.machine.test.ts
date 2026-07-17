@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor } from 'xstate';
-import { authSplashbackMachine, timing } from '#routes/auth.$/splashback/auth-splashback.machine.js';
+import { authSplashbackMachine, timing } from '#components/geometry/splash/auth-splashback.machine.js';
 
 // ---------------------------------------------------------------------------
 // Factory helpers

@@ -9,6 +9,7 @@
     "**/dist/**",
     "**/generated/**",
     "**/native/opencascade/geospec_opencascade_single.*",
+    "**/wasm/**",
     "**/out-tsc/**",
     "**/coverage/**",
     "**/.nx/**",
@@ -22,6 +23,7 @@
     "**/content/docs/**",
     "tarballs/**",
     "experiments/**",
+    "packages/render/spike/**",
     "**/*.jscad.js",
     "**/fixtures/scripts/**"
   ],

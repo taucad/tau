@@ -222,6 +222,7 @@ const config = [
       '**/vitest.integration.config.ts',
       'tarballs/**',
       'experiments/**',
+      'packages/render/spike/**',
       '**/wasm/**',
       'repos/**',
       '**/reports/**',

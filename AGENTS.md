@@ -57,10 +57,11 @@ Tau is the AI-native CAD platform for the web (`tau.new`), built as an Nx monore
 
 ## Skills
 
-Project skills in `.agent/skills/` provide guided workflows. Read the relevant `SKILL.md` when performing these tasks:
+Project skills in `.agents/skills/` provide guided workflows. Read the relevant `SKILL.md` when performing these tasks:
 
 | Skill                   | When to use                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------------------ |
+| `adversarial-review`    | Red-teaming `docs/research` blueprints before `/superplan`; apply only by explicit request |
 | `create-policy`         | Writing or updating `docs/policy/*.md` documents                                           |
 | `create-research`       | Writing or updating `docs/research/*.md` investigation documents                           |
 | `adding-tools`          | Adding new tools to the AI chat system                                                     |

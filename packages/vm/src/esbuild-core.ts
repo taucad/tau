@@ -18,7 +18,7 @@ import {
   isNodeModulesPath,
   parsePackageSpecifier,
   getCdnCachePath,
-  resolveRelativePath,
+  resolveImportPath,
 } from '@taucad/utils/import';
 import { base64ToString } from 'uint8array-extras';
 import type { VmIssue, VmFileSystem, VmExecuteResult } from '#types.js';
@@ -589,7 +589,7 @@ export function createVfsPlugin(options: VfsPluginOptions): Plugin {
         const { cleanPath, suffix } = splitQuerySuffix(args.path);
 
         try {
-          const resolvedPath = resolveRelativePath(cleanPath, importerAbsolute);
+          const resolvedPath = resolveImportPath(cleanPath, importerAbsolute);
           // Suffixed imports always carry the full filename — skip extension probing.
           const withExtension = suffix ? resolvedPath : await resolveFileExtension(filesystem, resolvedPath);
 
@@ -1101,7 +1101,7 @@ export function createDetectionPlugin({ filesystem, projectPath }: DetectionPlug
         const { cleanPath, suffix } = splitQuerySuffix(args.path);
 
         try {
-          const resolvedPath = resolveRelativePath(cleanPath, importerAbsolute);
+          const resolvedPath = resolveImportPath(cleanPath, importerAbsolute);
           const withExtension = suffix ? resolvedPath : await resolveFileExtension(filesystem, resolvedPath);
           return {
             path: toRelative(withExtension),

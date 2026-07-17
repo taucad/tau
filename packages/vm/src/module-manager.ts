@@ -3,8 +3,7 @@
  *
  * Minimal CDN module cache manager for kernel workers.
  * Fetches ESM bundles from CDN and caches them at the root-level `/node_modules/`
- * directory in the filesystem. Cached modules persist in IndexedDB across builds and are
- * shared across all projects.
+ * directory in the project-local filesystem. Persistence is supplied by the host filesystem.
  *
  * Key responsibilities:
  * - Fetch self-contained ESM bundles from esm.sh (with jsdelivr fallback)
@@ -74,6 +73,13 @@ const maxResponseSizeBytes = 10 * 1024 * 1024;
 /** Minimum time between retry attempts for failed fetches. Milliseconds. */
 const retryDelay = 60_000;
 
+class RetryableCdnError extends Error {
+  public constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'RetryableCdnError';
+  }
+}
+
 // =============================================================================
 // Module Manager Class
 // =============================================================================
@@ -91,7 +97,7 @@ export class ModuleManager {
   private readonly pendingFetches = new Map<string, Promise<void>>();
 
   /** Track failed fetches with timestamp for retry backoff */
-  private readonly failedPackages = new Map<string, number>();
+  private readonly failedPackages = new Map<string, { readonly at: number; readonly error: RetryableCdnError }>();
 
   public constructor(filesystem: VmFileSystem) {
     this.filesystem = filesystem;
@@ -115,12 +121,8 @@ export class ModuleManager {
     const cachePath = getCdnCachePath(name, subpath);
 
     // Fast path: already cached (check file exists in FS)
-    try {
-      if (await this.filesystem.exists(cachePath)) {
-        return;
-      }
-    } catch {
-      // Filesystem error -- proceed to fetch
+    if (await this.filesystem.exists(cachePath)) {
+      return;
     }
 
     // Dedup: return existing in-flight promise
@@ -131,16 +133,19 @@ export class ModuleManager {
 
     // Retry guard: skip if recently failed
     const lastFailure = this.failedPackages.get(cacheKey);
-    if (lastFailure !== undefined && Date.now() - lastFailure < retryDelay) {
-      return;
+    if (lastFailure !== undefined && Date.now() - lastFailure.at < retryDelay) {
+      throw lastFailure.error;
     }
 
     const promise = (async () => {
       try {
         await this.fetchAndCache(name, subpath);
         this.failedPackages.delete(cacheKey);
-      } catch {
-        this.failedPackages.set(cacheKey, Date.now());
+      } catch (error) {
+        if (error instanceof RetryableCdnError) {
+          this.failedPackages.set(cacheKey, { at: Date.now(), error });
+        }
+        throw error;
       }
     })();
 
@@ -187,8 +192,10 @@ export class ModuleManager {
     // Try esm.sh first
     try {
       return await this.fetchFromEsmSh(specifier);
-    } catch {
-      // Fallback to jsdelivr
+    } catch (error) {
+      if (!(error instanceof RetryableCdnError)) {
+        throw error;
+      }
       return this.fetchFromJsdelivr(specifier);
     }
   }
@@ -242,7 +249,12 @@ export class ModuleManager {
     }, fetchTimeout);
 
     try {
-      const response = await fetch(url, { signal: controller.signal });
+      let response: Response;
+      try {
+        response = await fetch(url, { signal: controller.signal });
+      } catch (error) {
+        throw new RetryableCdnError(`Failed to fetch ${url}`, { cause: error });
+      }
 
       if (!response.ok) {
         throw new Error(`Failed to fetch ${url}: ${response.status}`);
@@ -310,13 +322,8 @@ export class ModuleManager {
     };
 
     // Only write package.json if it doesn't already exist (don't overwrite for subpath fetches)
-    try {
-      const exists = await this.filesystem.exists(packageJsonPath);
-      if (!exists) {
-        await this.filesystem.writeFile(packageJsonPath, JSON.stringify(packageJson, undefined, 2));
-      }
-    } catch {
-      // First fetch for this package -- write it
+    const exists = await this.filesystem.exists(packageJsonPath);
+    if (!exists) {
       await this.filesystem.writeFile(packageJsonPath, JSON.stringify(packageJson, undefined, 2));
     }
   }

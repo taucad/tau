@@ -62,7 +62,7 @@ describe('ModuleManager', () => {
 
     it('should fetch and cache when module is not cached', async () => {
       filesystem.mocks.exists.mockResolvedValue(false);
-      mockFetch.mockResolvedValue(createMockResponse('/* esm.sh - lodash@4.17.21 */\nexport default {};'));
+      mockFetch.mockImplementation(async () => createMockResponse('/* esm.sh - lodash@4.17.21 */\nexport default {};'));
 
       await manager.ensureCdnModule('lodash');
 
@@ -209,12 +209,12 @@ describe('ModuleManager', () => {
       mockFetch.mockRejectedValue(new Error('Network error'));
 
       // First call: fails (esm.sh + jsdelivr fallback = 2 fetches)
-      await manager.ensureCdnModule('bad-package');
+      await expect(manager.ensureCdnModule('bad-package')).rejects.toThrow('Failed to fetch');
       const firstCallCount = mockFetch.mock.calls.length;
       expect(firstCallCount).toBe(2);
 
-      // Second call: should be skipped (within retry delay)
-      await manager.ensureCdnModule('bad-package');
+      // Second call rethrows the retained failure without another fetch.
+      await expect(manager.ensureCdnModule('bad-package')).rejects.toThrow('Failed to fetch');
       expect(mockFetch).toHaveBeenCalledTimes(firstCallCount); // No new calls
     });
 
@@ -223,7 +223,7 @@ describe('ModuleManager', () => {
       mockFetch.mockRejectedValue(new Error('Network error'));
 
       // First call: fails (esm.sh + jsdelivr fallback)
-      await manager.ensureCdnModule('bad-package');
+      await expect(manager.ensureCdnModule('bad-package')).rejects.toThrow('Failed to fetch');
       const firstCallCount = mockFetch.mock.calls.length;
 
       // Advance past retry delay (60 seconds)
@@ -242,7 +242,7 @@ describe('ModuleManager', () => {
       mockFetch.mockRejectedValue(new Error('Network error'));
 
       // First call: fails
-      await manager.ensureCdnModule('recovered-package');
+      await expect(manager.ensureCdnModule('recovered-package')).rejects.toThrow('Failed to fetch');
       const firstCallCount = mockFetch.mock.calls.length;
 
       // Advance past retry delay
@@ -279,21 +279,20 @@ describe('ModuleManager', () => {
         throw new Error('Simulated timeout');
       });
 
-      await manager.ensureCdnModule('slow-package');
+      await expect(manager.ensureCdnModule('slow-package')).rejects.toThrow('Failed to fetch');
 
       // Verify fetch was called with an AbortSignal
       expect(mockFetch).toHaveBeenCalled();
       expect(capturedSignal).toBeInstanceOf(AbortSignal);
     });
 
-    it('should handle aborted fetch gracefully', async () => {
+    it('should propagate an aborted fetch without writing', async () => {
       filesystem.mocks.exists.mockResolvedValue(false);
 
       // Simulate an abort error (what happens when timeout fires)
       mockFetch.mockRejectedValue(new DOMException('The operation was aborted', 'AbortError'));
 
-      // Should not throw
-      await expect(manager.ensureCdnModule('aborted-package')).resolves.toBeUndefined();
+      await expect(manager.ensureCdnModule('aborted-package')).rejects.toThrow('Failed to fetch');
 
       // Should not have written anything
       expect(filesystem.mocks.writeFile).not.toHaveBeenCalled();
@@ -311,7 +310,7 @@ describe('ModuleManager', () => {
       // Respond with Content-Length exceeding 10 MB
       mockFetch.mockResolvedValue(createMockResponse('huge module', { 'Content-Length': '20000000' }));
 
-      await manager.ensureCdnModule('huge-package');
+      await expect(manager.ensureCdnModule('huge-package')).rejects.toThrow('Response too large');
 
       // Should not have written anything (both esm.sh and jsdelivr will fail)
       expect(filesystem.mocks.writeFile).not.toHaveBeenCalled();
@@ -339,23 +338,22 @@ describe('ModuleManager', () => {
   });
 
   // ===========================================================================
-  // Offline Resilience
+  // Offline Failures
   // ===========================================================================
 
-  describe('offline resilience', () => {
-    it('should not throw when fetch fails', async () => {
+  describe('offline failures', () => {
+    it('should propagate when both CDN fetches fail', async () => {
       filesystem.mocks.exists.mockResolvedValue(false);
       mockFetch.mockRejectedValue(new TypeError('Failed to fetch'));
 
-      // Should not throw
-      await expect(manager.ensureCdnModule('any-package')).resolves.toBeUndefined();
+      await expect(manager.ensureCdnModule('any-package')).rejects.toThrow('Failed to fetch');
     });
 
     it('should not write to filesystem when fetch fails', async () => {
       filesystem.mocks.exists.mockResolvedValue(false);
       mockFetch.mockRejectedValue(new TypeError('Failed to fetch'));
 
-      await manager.ensureCdnModule('offline-package');
+      await expect(manager.ensureCdnModule('offline-package')).rejects.toThrow('Failed to fetch');
 
       expect(filesystem.mocks.writeFile).not.toHaveBeenCalled();
     });
@@ -364,11 +362,11 @@ describe('ModuleManager', () => {
       filesystem.mocks.exists.mockResolvedValue(false);
       mockFetch.mockRejectedValue(new TypeError('Failed to fetch'));
 
-      await manager.ensureCdnModule('offline-package');
+      await expect(manager.ensureCdnModule('offline-package')).rejects.toThrow('Failed to fetch');
 
       // Immediate retry should be skipped
       mockFetch.mockClear();
-      await manager.ensureCdnModule('offline-package');
+      await expect(manager.ensureCdnModule('offline-package')).rejects.toThrow('Failed to fetch');
       expect(mockFetch).not.toHaveBeenCalled();
     });
   });
@@ -413,14 +411,14 @@ describe('ModuleManager', () => {
 
       mockFetch.mockRejectedValueOnce(new Error('esm.sh down')).mockRejectedValueOnce(new Error('jsdelivr down'));
 
-      await manager.ensureCdnModule('unreachable-package');
+      await expect(manager.ensureCdnModule('unreachable-package')).rejects.toThrow('Failed to fetch');
 
       // Should not have written anything
       expect(filesystem.mocks.writeFile).not.toHaveBeenCalled();
 
       // Immediate retry should be skipped
       mockFetch.mockClear();
-      await manager.ensureCdnModule('unreachable-package');
+      await expect(manager.ensureCdnModule('unreachable-package')).rejects.toThrow('Failed to fetch');
       expect(mockFetch).not.toHaveBeenCalled();
     });
   });
@@ -448,7 +446,7 @@ describe('ModuleManager', () => {
     it('should not overwrite package.json for subpath fetches', async () => {
       // First fetch the main module
       filesystem.mocks.exists.mockResolvedValue(false);
-      mockFetch.mockResolvedValue(createMockResponse('/* esm.sh - lodash@4.17.21 */\nexport default {};'));
+      mockFetch.mockImplementation(async () => createMockResponse('/* esm.sh - lodash@4.17.21 */\nexport default {};'));
 
       await manager.ensureCdnModule('lodash');
 
@@ -482,7 +480,7 @@ describe('ModuleManager', () => {
       mockFetch.mockRejectedValue(new Error('Network error'));
 
       // First call: fails (esm.sh + jsdelivr fallback)
-      await manager.ensureCdnModule('clear-test');
+      await expect(manager.ensureCdnModule('clear-test')).rejects.toThrow('Failed to fetch');
       const firstCallCount = mockFetch.mock.calls.length;
       expect(firstCallCount).toBe(2);
 

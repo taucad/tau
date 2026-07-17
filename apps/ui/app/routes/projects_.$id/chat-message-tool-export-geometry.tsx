@@ -6,7 +6,6 @@ import { toast } from 'sonner';
 import type { ToolInvocation } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import type { FileExtension } from '@taucad/types';
-import { downloadBlob } from '@taucad/utils/file';
 
 import {
   ChatToolCard,
@@ -29,6 +28,7 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
 import { cn } from '#utils/ui.utils.js';
+import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 
 /** Matches {@link chat-tool-file-operation.tsx} action buttons — label hidden until `@xs/code`. */
 const exportActionLabelClassName = '**:data-[slot=label]:hidden @xs/code:**:data-[slot=label]:flex';
@@ -53,15 +53,6 @@ function filenameBaseFromTargetFile(targetFile: string): string {
   return basename.slice(0, extensionIndex);
 }
 
-function artifactDownloadName(artifactPath: string): string {
-  const index = artifactPath.lastIndexOf('/');
-  if (index === -1) {
-    return artifactPath;
-  }
-
-  return artifactPath.slice(index + 1);
-}
-
 function ExportTargetLink({ targetFile }: { readonly targetFile: string }): React.JSX.Element {
   const basename = getBasename(targetFile);
 
@@ -73,13 +64,16 @@ function ExportTargetLink({ targetFile }: { readonly targetFile: string }): Reac
 }
 
 function ExportGeometryDownloadSplitButton({
-  artifactPath,
-  mimeType,
+  files,
   targetFile,
   exportedFormat,
 }: {
-  readonly artifactPath: string;
-  readonly mimeType: string;
+  readonly files: ReadonlyArray<{
+    readonly name: string;
+    readonly artifactPath: string;
+    readonly mimeType: string;
+    readonly byteLength: number;
+  }>;
   readonly targetFile: string;
   readonly exportedFormat: FileExtension;
 }): React.JSX.Element {
@@ -133,14 +127,19 @@ function ExportGeometryDownloadSplitButton({
     setIsArtifactDownloadBusy(true);
 
     try {
-      const bytes = await fileManager.readFile(artifactPath);
-      downloadBlob(new Blob([bytes], { type: mimeType }), artifactDownloadName(artifactPath));
+      const artifacts = await Promise.all(
+        files.map(async (file) => ({ ...file, bytes: await fileManager.readFile(file.artifactPath) })),
+      );
+      await downloadExportArtifactSet(artifacts, {
+        singleFileName: files[0]!.name,
+        archiveName: `${filenameBase}-${exportedFormat}.zip`,
+      });
     } catch {
       toast.error('Failed to read exported file');
     } finally {
       setIsArtifactDownloadBusy(false);
     }
-  }, [artifactPath, cadActor, exportToDisk, exportedFormat, fileManager.readFile, mimeType, selectedFormat]);
+  }, [cadActor, exportToDisk, exportedFormat, fileManager, filenameBase, files, selectedFormat]);
 
   const handleFormatSelect = useCallback((formatValue: string) => {
     setSelectedFormat(formatValue as FileExtension);
@@ -285,9 +284,8 @@ export function ChatMessageToolExportGeometry({
               </ChatToolLabel>
             </ChatToolCardTitle>
             <ExportGeometryDownloadSplitButton
-              artifactPath={output.artifactPath}
               exportedFormat={output.format}
-              mimeType={output.mimeType}
+              files={output.files}
               targetFile={input.targetFile}
             />
           </ChatToolCardHeader>

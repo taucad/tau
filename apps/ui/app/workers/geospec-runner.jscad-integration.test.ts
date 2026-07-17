@@ -311,7 +311,7 @@ const exportProjectWithNodeRuntime = async (options: {
   files: Record<string, string>;
 }): Promise<{
   success: boolean;
-  data?: { bytes: Uint8Array<ArrayBuffer>; name?: string; mimeType?: string };
+  data?: Array<{ bytes: Uint8Array<ArrayBuffer>; name?: string; mimeType?: string }>;
   issues?: unknown[];
 }> => {
   const projectPath = await mkdtemp(join(tmpdir(), 'tau-ui-geospec-jscad-runtime-'));
@@ -347,11 +347,15 @@ const exportProjectWithNodeRuntime = async (options: {
       if (!result.success) {
         console.log(JSON.stringify({ success: false, issues: result.issues }));
       } else {
+        if (result.data.length !== 1) {
+          throw new Error('Expected exactly one runtime export artifact, received ' + result.data.length);
+        }
+        const file = result.data[0];
         console.log(JSON.stringify({
           success: true,
-          name: result.data.name,
-          mimeType: result.data.mimeType,
-          bytes: Buffer.from(result.data.bytes).toString('base64'),
+          name: file.name,
+          mimeType: file.mimeType,
+          bytes: Buffer.from(file.bytes).toString('base64'),
         }));
       }
     `;
@@ -376,11 +380,13 @@ const exportProjectWithNodeRuntime = async (options: {
     const bytes = Uint8Array.from(Buffer.from(payload.bytes ?? '', 'base64'));
     return {
       success: true,
-      data: {
-        bytes,
-        name: payload.name,
-        mimeType: payload.mimeType,
-      },
+      data: [
+        {
+          bytes,
+          name: payload.name ?? 'model.glb',
+          mimeType: payload.mimeType ?? 'model/gltf-binary',
+        },
+      ],
       issues: [],
     };
   } finally {
@@ -424,7 +430,7 @@ describe('geospec-runner.worker JSCAD integration', () => {
         exportCalls.push({
           format,
           input,
-          bytes: exported.data?.bytes.byteLength ?? 0,
+          bytes: exported.success ? (exported.data[0]?.bytes.byteLength ?? 0) : 0,
         });
         return exported;
       },

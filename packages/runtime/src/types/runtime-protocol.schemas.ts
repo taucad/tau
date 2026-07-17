@@ -69,14 +69,15 @@ const exportFileSchema = z
   .object({
     name: z.string(),
     bytes: z.instanceof(Uint8Array),
+    mimeType: z.string().refine((mimeType) => mimeType.trim().length > 0),
   })
-  .catchall(z.unknown());
+  .strict();
 
-const exportGeometryResultSchema = z.union([
+const exportGeometryResultSchema = z.discriminatedUnion('success', [
   z
     .object({
       success: z.literal(true),
-      data: z.array(exportFileSchema),
+      data: z.array(exportFileSchema).min(1),
       issues: z.array(kernelIssueSchema),
       serializedNativeHandle: z.unknown().optional(),
     })

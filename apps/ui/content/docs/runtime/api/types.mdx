@@ -113,7 +113,8 @@ const result = await client.export('glb', {
 });
 
 if (result.success) {
-  console.log(`Exported ${result.data.bytes.byteLength} bytes`);
+  console.log(`Exported ${result.data.length} artifact(s)`);
+  for (const file of result.data) console.log(file.name, file.bytes.byteLength);
 } else {
   console.error(result.issues);
 }

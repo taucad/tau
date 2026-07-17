@@ -1,10 +1,10 @@
 import { useCallback, useState } from 'react';
 import type { ActorRefFrom } from 'xstate';
 import type { FileExtension } from '@taucad/types';
-import { asBuffer, downloadBlob } from '@taucad/utils/file';
 import { toast } from '#components/ui/sonner.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { AppRuntimeExportFormat } from '#types/runtime-client.alias.js';
+import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 
 export type UseExportToDiskResult = {
   /**
@@ -46,7 +46,7 @@ export function useExportToDisk(filenameBase: string): UseExportToDiskResult {
           return;
         }
         const exportFormat = route.targetFormat as AppRuntimeExportFormat;
-        const options = route?.defaults ?? {};
+        const options = route.defaults;
         const result = await kernelClient.export(exportFormat, { exportOptions: options });
 
         if (!result.success) {
@@ -55,8 +55,10 @@ export function useExportToDisk(filenameBase: string): UseExportToDiskResult {
           return;
         }
 
-        const blob = new Blob([asBuffer(result.data.bytes)]);
-        downloadBlob(blob, `${filenameBase}.${exportFormat}`);
+        await downloadExportArtifactSet(result.data, {
+          singleFileName: `${filenameBase}.${exportFormat}`,
+          archiveName: `${filenameBase}-${exportFormat}.zip`,
+        });
         toast.success(`Exported ${exportFormat.toUpperCase()}`);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Export failed';

@@ -931,7 +931,7 @@ export function createMockRuntimeClient(): RuntimeClient {
     setOptions: vi.fn().mockResolvedValue({ superseded: true }),
     export: vi.fn().mockResolvedValue({
       success: true,
-      data: { bytes: new Uint8Array([1, 2, 3]), mimeType: 'model/stl' },
+      data: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.stl', mimeType: 'model/stl' }],
       issues: [],
     }),
     routesFor: vi.fn((format: FileExtension) => [createRoute(format)]),

@@ -183,7 +183,7 @@ function isGltfResponse(response: GeometryResponse): response is { format: 'gltf
  * Used at the kernel level (when calling `kernel.createGeometry(...)` directly
  * via the kernel-worker testing harness). For client-level tests using
  * `client.export('glb', ...)`, prefer {@link extractGltfFromExportResult}
- * which unwraps the single-file `ExportResult` shape.
+ * which validates the exact-one GLB contract.
  *
  * @param result - The geometry result to extract from
  * @returns The GLB binary content, or `undefined` if the render geometry is not GLTF
@@ -200,10 +200,8 @@ export function extractGltfFromResult(result: CreateGeometryResult): Uint8Array<
 /**
  * Extracts the GLB bytes from an `ExportResult` returned by `client.export('glb', ...)`.
  *
- * The `ExportResult` from `RuntimeClient.export(...)` is a single-file shape
- * (`result.data.bytes`) — this helper exists for symmetry with
- * {@link extractGltfFromResult} and to return a typed `undefined` on failure
- * rather than forcing every callsite to repeat the success guard.
+ * Returns `undefined` for a failed export and throws when a successful export
+ * violates the format-specific exact-one GLB contract.
  *
  * @param result - The export result returned from `client.export('glb', ...)`
  * @returns The GLB binary content, or `undefined` if the export failed
@@ -232,7 +230,17 @@ export function extractGltfFromExportResult(result: ExportResult): Uint8Array<Ar
   if (!result.success) {
     return undefined;
   }
-  return result.data.bytes;
+  const names = result.data.map(({ name }) => name);
+  if (result.data.length !== 1) {
+    throw new Error(
+      `GLB export expected exactly 1 artifact, received ${result.data.length}: ${names.join(', ') || '(none)'}`,
+    );
+  }
+  const file = result.data[0]!;
+  if (!file.name.toLowerCase().endsWith('.glb') || file.mimeType !== 'model/gltf-binary') {
+    throw new Error(`GLB export returned ${file.name} (${file.mimeType}); expected one .glb (model/gltf-binary)`);
+  }
+  return file.bytes;
 }
 
 // =============================================================================

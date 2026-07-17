@@ -26,10 +26,18 @@ export const exportGeometryInputSchema = z.object({
 
 /** @public */
 export const exportGeometryOutputSchema = z.object({
-  artifactPath: z.string().describe('Project-relative path to the written artifact under .tau/artifacts/.'),
   format: exportGeometryFormatSchema.describe('The extension/format that was exported.'),
-  mimeType: z.string().describe('MIME type of the exported file.'),
-  byteLength: z.number().int().nonnegative().describe('Exported file size in bytes.'),
+  files: z
+    .array(
+      z.object({
+        name: z.string().describe('Producer-authored relative file name.'),
+        artifactPath: z.string().describe('Project-relative path to the written artifact under .tau/artifacts/.'),
+        mimeType: z.string().describe('MIME type of the exported file.'),
+        byteLength: z.number().int().nonnegative().describe('Exported file size in bytes.'),
+      }),
+    )
+    .min(1)
+    .describe('Complete ordered export artifact set; the first file is the primary artifact.'),
 });
 
 /** @public */

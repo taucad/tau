@@ -480,8 +480,7 @@ function createBrowserGraphicsClient(
           return { success: false, errorCode: rpcClientErrorCode.unknown, message };
         }
 
-        const { bytes, mimeType } = exportResult.data;
-        return { success: true, bytes, mimeType };
+        return { success: true, files: exportResult.data };
       } catch (error) {
         return {
           success: false,

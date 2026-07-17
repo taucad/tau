@@ -123,23 +123,22 @@ function normaliseIssueForWire<T extends { code?: unknown }>(issue: T): T & { co
   return isKernelIssueCode(issue.code) ? (issue as T & { code: KernelIssueCode }) : { ...issue, code: 'UNKNOWN' };
 }
 
-function extractExportTransferables(
+function prepareExportTransfer(
   result: ExportGeometryResult,
-  encodeFile: FileBytesEncoder | undefined,
+  _encodeFile: FileBytesEncoder | undefined,
   outTransferables: Transferable[],
-): void {
-  if (!result.success || !encodeFile) {
-    return;
+): ExportGeometryResult {
+  const issues = result.issues.map(normaliseIssueForWire);
+  if (!result.success) {
+    return { ...result, issues };
   }
 
-  const seen = new Set<Transferable>();
-  for (const file of result.data) {
-    const encoded = encodeFile(file.bytes);
-    for (const t of encoded.transferables) {
-      seen.add(t);
-    }
-  }
-  outTransferables.push(...seen);
+  const data = result.data.map((file) => {
+    const bytes = new Uint8Array(file.bytes);
+    outTransferables.push(bytes.buffer);
+    return { ...file, bytes };
+  });
+  return { ...result, data, issues };
 }
 
 /**
@@ -397,9 +396,9 @@ export function createWorkerDispatcher(
         case 'export': {
           const result = await handleExport(args as RuntimeProtocol['calls']['export']['args']);
           const transferables: Transferable[] = [];
-          extractExportTransferables(result, encodeFile, transferables);
+          const value = prepareExportTransfer(result, encodeFile, transferables);
           const envelope: WithTransferables<unknown> = {
-            value: result,
+            value,
             transferables,
           };
           return envelope as unknown as CallResult;
@@ -407,9 +406,9 @@ export function createWorkerDispatcher(
         case 'exportModel': {
           const result = await handleExportModel(args as RuntimeProtocol['calls']['exportModel']['args']);
           const transferables: Transferable[] = [];
-          extractExportTransferables(result, encodeFile, transferables);
+          const value = prepareExportTransfer(result, encodeFile, transferables);
           const envelope: WithTransferables<unknown> = {
-            value: result,
+            value,
             transferables,
           };
           return envelope as unknown as CallResult;

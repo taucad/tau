@@ -20,6 +20,11 @@ const exportResult: ExportGeometryResult = {
       name: 'model.glb',
       mimeType: 'model/gltf-binary',
     },
+    {
+      bytes: new Uint8Array([4, 5]),
+      name: 'buffers/model.bin',
+      mimeType: 'application/octet-stream',
+    },
   ],
   issues: [],
 };
@@ -126,6 +131,12 @@ describe('RuntimeClient request-scoped export', () => {
       exportOptions: { binary: true },
     });
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.map(({ name, mimeType, bytes }) => ({ name, mimeType, bytes: [...bytes] }))).toEqual([
+        { name: 'model.glb', mimeType: 'model/gltf-binary', bytes: [1, 2, 3] },
+        { name: 'buffers/model.bin', mimeType: 'application/octet-stream', bytes: [4, 5] },
+      ]);
+    }
     client.terminate();
   });
 
@@ -145,6 +156,9 @@ describe('RuntimeClient request-scoped export', () => {
     });
 
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.map(({ name }) => name)).toEqual(['model.glb', 'buffers/model.bin']);
+    }
     expect(exportModelCall).toHaveBeenCalledOnce();
     const request = exportModelCall.mock.calls.at(0)?.[0];
     expect(request?.stage?.['/main.ts']).toBeInstanceOf(Uint8Array);

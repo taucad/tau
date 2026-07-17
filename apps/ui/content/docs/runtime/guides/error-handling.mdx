@@ -63,7 +63,9 @@ const result = await client.export('glb', {
 });
 
 if (result.success) {
-  console.log(`Exported ${result.data.bytes.byteLength} bytes`);
+  for (const file of result.data) {
+    console.log(`Exported ${file.name}: ${file.bytes.byteLength} bytes`);
+  }
 } else {
   console.error('Export failed:', result.issues.map((i) => i.message).join('; '));
 }
@@ -139,9 +141,10 @@ const result = await client.export('glb', {
 });
 
 if (result.success) {
-  const { bytes, name, mimeType } = result.data;
-  const blob = new Blob([bytes], { type: mimeType });
-  console.log(`Exported: ${name} (${blob.size} bytes)`);
+  for (const { bytes, name, mimeType } of result.data) {
+    const blob = new Blob([bytes], { type: mimeType });
+    console.log(`Exported: ${name} (${blob.size} bytes)`);
+  }
 } else {
   for (const issue of result.issues) {
     console.error(`[${issue.severity}] ${issue.message}`);

@@ -119,7 +119,9 @@ const result = await client.export('glb', {
 });
 
 if (result.success) {
-  console.log(`Exported ${result.data.bytes.byteLength} bytes`);
+  for (const file of result.data) {
+    console.log(`Exported ${file.name}: ${file.bytes.byteLength} bytes`);
+  }
 }
 ```
 

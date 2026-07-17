@@ -25,11 +25,13 @@ const importedRuntime = async () =>
 
 const buildSuccessResult = (bytes: Uint8Array<ArrayBuffer>): ExportResult => ({
   success: true,
-  data: {
-    name: 'model.glb',
-    bytes,
-    mimeType: 'model/gltf-binary',
-  },
+  data: [
+    {
+      name: 'model.glb',
+      bytes,
+      mimeType: 'model/gltf-binary',
+    },
+  ],
   issues: [],
 });
 
@@ -101,6 +103,60 @@ describe('exportCommand', () => {
     expect(terminate).toHaveBeenCalledOnce();
   });
 
+  it('should rename only the primary artifact and preserve nested companion paths', async () => {
+    exportFunction.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { name: 'model.gltf', bytes: new Uint8Array([1]), mimeType: 'model/gltf+json' },
+        {
+          name: 'buffers/model.bin',
+          bytes: new Uint8Array([2, 3]),
+          mimeType: 'application/octet-stream',
+        },
+      ],
+      issues: [],
+    });
+    const command = await importExportCommand();
+    const outputPath = join(workspace, 'renamed.gltf');
+    await runCommand(command, { rawArgs: [inputPath, '--ext=gltf', `--output=${outputPath}`] });
+    await expect(readFile(outputPath)).resolves.toEqual(Buffer.from([1]));
+    await expect(readFile(join(workspace, 'buffers/model.bin'))).resolves.toEqual(Buffer.from([2, 3]));
+  });
+
+  it('should reject unsafe companion paths before writing the primary artifact', async () => {
+    exportFunction.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { name: 'model.gltf', bytes: new Uint8Array([1]), mimeType: 'model/gltf+json' },
+        { name: '../model.bin', bytes: new Uint8Array([2]), mimeType: 'application/octet-stream' },
+      ],
+      issues: [],
+    });
+    const command = await importExportCommand();
+    const outputPath = join(workspace, 'safe.gltf');
+    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=gltf', `--output=${outputPath}`] })).rejects.toThrow(
+      'Export returned an unsafe relative artifact path: ../model.bin',
+    );
+    await expect(readFile(outputPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('should reject resolved path collisions before writing any artifact', async () => {
+    exportFunction.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { name: 'model.gltf', bytes: new Uint8Array([1]), mimeType: 'model/gltf+json' },
+        { name: 'model.bin', bytes: new Uint8Array([2]), mimeType: 'application/octet-stream' },
+      ],
+      issues: [],
+    });
+    const command = await importExportCommand();
+    const outputPath = join(workspace, 'model.bin');
+    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=gltf', `--output=${outputPath}`] })).rejects.toThrow(
+      `Export artifact paths collide under ${workspace}`,
+    );
+    await expect(readFile(outputPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('should aggregate every issue message when the export result is a failure', async () => {
     exportFunction.mockResolvedValueOnce(buildFailureResult(['boom', 'kaboom']));
     const command = await importExportCommand();
@@ -147,11 +203,13 @@ describe('exportCommand', () => {
   it('should warn through consola for every warning issue in a successful export', async () => {
     const result: ExportResult = {
       success: true,
-      data: {
-        name: 'warn.glb',
-        bytes: new Uint8Array([0]),
-        mimeType: 'model/gltf-binary',
-      },
+      data: [
+        {
+          name: 'warn.glb',
+          bytes: new Uint8Array([0]),
+          mimeType: 'model/gltf-binary',
+        },
+      ],
       issues: [{ severity: 'warning', message: 'mild concern', code: 'RUNTIME' }],
     };
     exportFunction.mockResolvedValueOnce(result);

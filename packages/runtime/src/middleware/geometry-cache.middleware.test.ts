@@ -46,7 +46,7 @@ function createSerializedCacheContent(
  * Create serialized export cache content (MessagePack binary format, v1).
  */
 function createSerializedExportCacheContent(
-  bytes: Uint8Array<ArrayBuffer>,
+  files: Array<{ bytes: Uint8Array<ArrayBuffer>; name: string; mimeType: string }>,
   issues: KernelIssue[] = [],
 ): Uint8Array<ArrayBuffer> {
   return msgpackEncode({
@@ -54,7 +54,7 @@ function createSerializedExportCacheContent(
     kind: 'export',
     result: {
       success: true,
-      data: [{ bytes, name: 'cached.step', mimeType: 'application/step' }],
+      data: files,
       issues,
     },
   });
@@ -896,7 +896,10 @@ describe('geometryCacheMiddleware', () => {
   describe('wrapExportGeometry', () => {
     const createExportSuccess = (bytes: Uint8Array<ArrayBuffer>, issues: KernelIssue[] = []): ExportGeometryResult => ({
       success: true,
-      data: [{ bytes, name: 'model.step', mimeType: 'application/step' }],
+      data: [
+        { bytes, name: 'model.gltf', mimeType: 'model/gltf+json' },
+        { bytes: new Uint8Array([9, 8]), name: 'buffers/model.bin', mimeType: 'application/octet-stream' },
+      ],
       issues,
     });
 
@@ -904,7 +907,14 @@ describe('geometryCacheMiddleware', () => {
       const cachedBytes = new Uint8Array([1, 2, 3, 4]);
       const { input, runtime } = createExportCacheTestContext({
         cacheExists: true,
-        serializedContent: createSerializedExportCacheContent(cachedBytes),
+        serializedContent: createSerializedExportCacheContent([
+          { bytes: cachedBytes, name: 'cached.gltf', mimeType: 'model/gltf+json' },
+          {
+            bytes: new Uint8Array([5, 6]),
+            name: 'buffers/cached.bin',
+            mimeType: 'application/octet-stream',
+          },
+        ]),
       });
       const handler: ExportGeometryHandler = vi.fn();
 
@@ -913,7 +923,14 @@ describe('geometryCacheMiddleware', () => {
       expect(handler).not.toHaveBeenCalled();
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data[0]?.bytes).toEqual(cachedBytes);
+        expect(result.data).toEqual([
+          { bytes: cachedBytes, name: 'cached.gltf', mimeType: 'model/gltf+json' },
+          {
+            bytes: new Uint8Array([5, 6]),
+            name: 'buffers/cached.bin',
+            mimeType: 'application/octet-stream',
+          },
+        ]);
       }
     });
 
@@ -933,7 +950,10 @@ describe('geometryCacheMiddleware', () => {
       expect(runtime.filesystem.mocks.writeFile).not.toHaveBeenCalled();
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data[0]?.bytes).toEqual(new Uint8Array([5, 6, 7]));
+        expect(result.data.map(({ name, mimeType, bytes }) => ({ name, mimeType, bytes: [...bytes] }))).toEqual([
+          { name: 'model.gltf', mimeType: 'model/gltf+json', bytes: [5, 6, 7] },
+          { name: 'buffers/model.bin', mimeType: 'application/octet-stream', bytes: [9, 8] },
+        ]);
       }
     });
 
@@ -965,7 +985,17 @@ describe('geometryCacheMiddleware', () => {
       ];
       const { input, runtime } = createExportCacheTestContext({
         cacheExists: true,
-        serializedContent: createSerializedExportCacheContent(new Uint8Array([1, 2]), cachedIssues),
+        serializedContent: createSerializedExportCacheContent(
+          [
+            { bytes: new Uint8Array([1, 2]), name: 'cached.gltf', mimeType: 'model/gltf+json' },
+            {
+              bytes: new Uint8Array([3, 4]),
+              name: 'buffers/cached.bin',
+              mimeType: 'application/octet-stream',
+            },
+          ],
+          cachedIssues,
+        ),
       });
       const handler: ExportGeometryHandler = vi.fn();
 
@@ -977,7 +1007,7 @@ describe('geometryCacheMiddleware', () => {
       }
     });
 
-    it('should clone cached export bytes after the returned buffer is transferred', async () => {
+    it('should clone every cached export buffer after returned buffers are transferred', async () => {
       const originalBytes = new Uint8Array([1, 2, 3]);
       const handlerResult = createExportSuccess(originalBytes);
       const { input, runtime } = createExportCacheTestContext({ cacheExists: false });
@@ -985,7 +1015,7 @@ describe('geometryCacheMiddleware', () => {
 
       const first = await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
       if (first.success) {
-        structuredClone(first.data[0]!.bytes, { transfer: [first.data[0]!.bytes.buffer] });
+        structuredClone(first.data, { transfer: first.data.map((file) => file.bytes.buffer) });
       }
 
       const second = await geometryCacheMiddleware.wrapExportGeometry!(input, handler, runtime);
@@ -993,8 +1023,12 @@ describe('geometryCacheMiddleware', () => {
       expect(handler).toHaveBeenCalledOnce();
       expect(second.success).toBe(true);
       if (second.success) {
-        expect(second.data[0]?.bytes).toEqual(new Uint8Array([1, 2, 3]));
+        expect(second.data.map(({ name, bytes }) => ({ name, bytes: [...bytes] }))).toEqual([
+          { name: 'model.gltf', bytes: [1, 2, 3] },
+          { name: 'buffers/model.bin', bytes: [9, 8] },
+        ]);
         expect(second.data[0]?.bytes.buffer).not.toBe(originalBytes.buffer);
+        expect(second.data[1]?.bytes.byteLength).toBe(2);
       }
     });
 

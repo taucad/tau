@@ -63,7 +63,7 @@ const mockKernelClient = {
   },
   export: vi.fn().mockResolvedValue({
     success: true,
-    data: { bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' },
+    data: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
     issues: [],
   }),
 };
@@ -359,6 +359,32 @@ describe('ChatConverter', () => {
     });
   });
 
+  it('should persist every dependent artifact when saving one format to the project', async () => {
+    mockKernelClient.export.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { bytes: new Uint8Array([1]), name: 'model.gltf', mimeType: 'model/gltf+json' },
+        { bytes: new Uint8Array([2]), name: 'buffers/model.bin', mimeType: 'application/octet-stream' },
+      ],
+      issues: [],
+    });
+    render(<ChatConverter isExpanded />);
+
+    fireEvent.click(screen.getByRole('button', { name: /gltf/i }));
+    fireEvent.click(screen.getByLabelText('Download to disk'));
+    fireEvent.click(screen.getByLabelText('Save to project'));
+    fireEvent.click(screen.getByRole('button', { name: /export gltf/i }));
+
+    const primaryPath = 'exports/model.gltf';
+    const companionPath = 'exports/buffers/model.bin';
+    await vi.waitFor(() => {
+      expect(mockWriteFiles).toHaveBeenCalledWith({
+        [primaryPath]: { content: new Uint8Array([1]) },
+        [companionPath]: { content: new Uint8Array([2]) },
+      });
+    });
+  });
+
   it('should show "Select a destination" when both toggles are unchecked', () => {
     render(<ChatConverter isExpanded />);
 
@@ -556,7 +582,6 @@ describe('ChatConverter', () => {
       });
 
       render(<ChatConverter isExpanded />);
-
       const stlButton = screen.getByRole('button', { name: /stl/i });
       fireEvent.click(stlButton);
 

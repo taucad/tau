@@ -104,7 +104,9 @@ const result = await client.export('glb', {
 });
 
 if (result.success) {
-  console.log(`Rendered ${result.data.bytes.byteLength} bytes (${result.data.mimeType})`);
+  for (const file of result.data) {
+    console.log(`Rendered ${file.name}: ${file.bytes.byteLength} bytes (${file.mimeType})`);
+  }
 } else {
   for (const issue of result.issues) {
     console.error(`[${issue.severity}] ${issue.message}`);
@@ -112,9 +114,9 @@ if (result.success) {
 }
 ```
 
-`export(format, input)` self-renders the input and resolves a single
-`ExportResult` -- the `success` discriminant narrows the payload so you can
-safely access `result.data.bytes` in the `true` branch. If rendering fails, the
+`export(format, input)` self-renders the input and resolves an ordered, non-empty
+artifact array -- the `success` discriminant narrows the payload so you can
+safely iterate `result.data` in the `true` branch. If rendering fails, the
 `issues` array contains structured errors with messages, locations, and
 severity levels.
 
@@ -155,8 +157,9 @@ const stepResult = await client.export('step', {
 });
 
 if (stepResult.success) {
-  const { name, bytes, mimeType } = stepResult.data;
-  console.log(`Exported: ${name} (${bytes.byteLength} bytes, ${mimeType})`);
+  for (const { name, bytes, mimeType } of stepResult.data) {
+    console.log(`Exported: ${name} (${bytes.byteLength} bytes, ${mimeType})`);
+  }
 } else {
   console.error('Export failed:', stepResult.issues);
 }
@@ -190,7 +193,7 @@ const result = await client.export('glb', {
     },
   },
 });
-console.log(`Rendered ${result.success ? result.data.bytes.byteLength : 0} bytes`);
+console.log(`Rendered ${result.success ? result.data.reduce((sum, file) => sum + file.bytes.byteLength, 0) : 0} bytes`);
 
 client.terminate();
 ```

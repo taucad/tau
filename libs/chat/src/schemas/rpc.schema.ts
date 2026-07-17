@@ -272,10 +272,17 @@ const exportGeometryRpc = defineRpc({
     format: exportGeometryFormatSchema,
   }),
   success: zod.object({
-    artifactPath: zod.string(),
     format: exportGeometryFormatSchema,
-    mimeType: zod.string(),
-    byteLength: zod.number().int().nonnegative(),
+    files: zod
+      .array(
+        zod.object({
+          name: zod.string(),
+          artifactPath: zod.string(),
+          mimeType: zod.string(),
+          byteLength: zod.number().int().nonnegative(),
+        }),
+      )
+      .min(1),
   }),
 });
 

@@ -10,6 +10,7 @@ import { inProcessTransport } from '#transport/in-process-transport.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { activateOccParallelism } from '#kernels/occt/oc-threading.js';
 import { createIncrementalMesh, meshShapesToGltf } from '#kernels/opencascade/opencascade-mesh.js';
+import { extractGltfFromExportResult } from '#testing/kernel-geometry-testing.utils.js';
 
 type Oc = any;
 type Owned = { delete(): void };
@@ -1036,7 +1037,11 @@ const opencascadeKernelExportGlb = async (context: BenchContext): Promise<number
     const messages = result.issues.map((issue) => issue.message).join('; ');
     throw new Error(`OpenCascade kernel export failed: ${messages}`);
   }
-  return result.data.bytes.byteLength;
+  const glb = extractGltfFromExportResult(result);
+  if (!glb) {
+    throw new Error('OpenCascade kernel GLB export unexpectedly failed');
+  }
+  return glb.byteLength;
 };
 
 const makeDistanceTargets = (oc: Oc): any[] => {

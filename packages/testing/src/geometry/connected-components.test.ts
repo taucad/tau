@@ -27,7 +27,12 @@ async function renderGlb(filename: string, code: string): Promise<Uint8Array<Arr
     if (!result.success) {
       throw new Error(`Export failed: ${result.issues.map((issue) => issue.message).join('; ')}`);
     }
-    return result.data.bytes;
+    if (result.data.length !== 1 || result.data[0]?.name.endsWith('.glb') !== true) {
+      throw new Error(
+        `GLB export expected exactly one .glb artifact, received: ${result.data.map(({ name }) => name).join(', ')}`,
+      );
+    }
+    return result.data[0].bytes;
   } finally {
     client.terminate();
   }

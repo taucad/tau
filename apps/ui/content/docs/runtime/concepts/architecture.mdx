@@ -124,7 +124,7 @@ The active [transport](../api/client) owns the abort channel end-to-end. The run
 
 ### One-shot Export Mode
 
-For programmatic one-shot pipelines, `client.export(format, input)` self-renders and resolves a single `ExportResult`. The client sends the command, the worker renders, exports the geometry, and returns the bytes. The single-argument form `client.export(format)` reuses the most recent render result — calling it without one throws `NoRenderOutcomeError`.
+For programmatic one-shot pipelines, `client.export(format, input)` self-renders and resolves an `ExportResult` whose success payload is an ordered, non-empty array of files. The client sends the command, the worker renders, exports the geometry, and returns the complete artifact set; companion files such as glTF + BIN or OBJ + MTL are never discarded. The single-argument form `client.export(format)` reuses the most recent render result — calling it without one throws `NoRenderOutcomeError`.
 
 ## Autonomous Data Flow
 

@@ -28,7 +28,7 @@ function directnessRank(route: ExportRoute): number {
 
 const mockExport = vi.fn().mockResolvedValue({
   success: true,
-  data: { bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' },
+  data: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
   issues: [],
 });
 

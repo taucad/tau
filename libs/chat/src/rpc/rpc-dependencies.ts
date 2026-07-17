@@ -21,7 +21,7 @@ import type {
   RunGeoSpecTestsRpcResult,
   ResolveSkillRpcResult,
 } from '#schemas/rpc.schema.js';
-import type { FileContentMetadata } from '@taucad/types';
+import type { ExportFile, FileContentMetadata } from '@taucad/types';
 
 /** @public */
 export type RpcDirectoryEntry =
@@ -109,7 +109,7 @@ export type RpcRuntimeClient = {
  * @public
  */
 export type RpcGraphicsExportGeometryResult =
-  | { success: true; bytes: Uint8Array<ArrayBuffer>; mimeType: string }
+  | { success: true; files: ExportFile[] }
   | {
       success: false;
       errorCode: RpcClientErrorCode;

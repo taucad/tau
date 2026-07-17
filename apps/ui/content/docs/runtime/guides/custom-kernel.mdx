@@ -146,7 +146,9 @@ const result = await client.export('glb', {
 });
 
 if (result.success) {
-  console.log(`Custom kernel exported ${result.data.bytes.byteLength} bytes`);
+  for (const file of result.data) {
+    console.log(`Custom kernel exported ${file.name}: ${file.bytes.byteLength} bytes`);
+  }
 }
 ```
 

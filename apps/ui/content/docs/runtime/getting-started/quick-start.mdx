@@ -55,7 +55,9 @@ const result = await client.export('glb', {
 });
 
 if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
-console.log(`Exported ${result.data.bytes.byteLength} bytes (${result.data.mimeType})`);
+for (const file of result.data) {
+  console.log(`Exported ${file.name}: ${file.bytes.byteLength} bytes (${file.mimeType})`);
+}
 client.terminate();
 ```
 
@@ -95,10 +97,10 @@ const client = createRuntimeClient({
 ## Expected Output
 
 ```
-Exported 5824 bytes (model/gltf-binary)
+Exported model.glb: 5824 bytes (model/gltf-binary)
 ```
 
-`result.data.bytes` is a `Uint8Array` containing a glTF binary (GLB) that you can write to disk, stream over HTTP, or hand to a 3D viewer like Three.js. The exact byte count depends on the model and tessellation settings.
+`result.data` is an ordered, non-empty array of export files. A GLB route normally returns one `model.glb`; dependent formats may return companions such as glTF + BIN or OBJ + MTL. Each file's `bytes` is a `Uint8Array` that you can write to disk, stream over HTTP, or hand to a compatible viewer. The exact byte count depends on the model and tessellation settings.
 
 > **Want live re-rendering?** This snippet runs a single render-and-export
 > cycle. For UI viewers that need to react to parameter changes or file edits,

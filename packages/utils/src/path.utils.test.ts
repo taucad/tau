@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { joinPath, joinRelativePath, normalizePath, parentDirectory, canonicalizePath } from '#path.utils.js';
+import {
+  canonicalizePath,
+  isSafeRelativePath,
+  joinPath,
+  joinRelativePath,
+  normalizePath,
+  parentDirectory,
+} from '#path.utils.js';
 
 describe('normalizePath', () => {
   it('should normalize a simple path', () => {
@@ -153,6 +160,29 @@ describe('joinRelativePath', () => {
     it('should handle root-level entries (empty parent)', () => {
       expect(joinRelativePath('', 'main.ts')).toBe('main.ts');
     });
+  });
+});
+
+describe('isSafeRelativePath', () => {
+  it('should accept nested producer-authored paths and spaces unchanged', () => {
+    expect(isSafeRelativePath('model.gltf')).toBe(true);
+    expect(isSafeRelativePath('textures/base color.png')).toBe(true);
+  });
+
+  it.each([
+    '',
+    '/model.gltf',
+    String.raw`C:\\model.gltf`,
+    String.raw`textures\\base.png`,
+    './model.gltf',
+    '../model.gltf',
+    'a//b',
+  ])('should reject unsafe path %j', (path) => {
+    expect(isSafeRelativePath(path)).toBe(false);
+  });
+
+  it('should reject embedded NUL bytes', () => {
+    expect(isSafeRelativePath('model\0.gltf')).toBe(false);
   });
 });
 

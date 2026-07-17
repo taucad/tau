@@ -14,12 +14,12 @@
 
 /* oxlint-disable no-barrel-files/no-barrel-files -- public client entrypoint facade */
 
-import type { FileExtension, GeometryFile, ExportFile, LogEntry } from '@taucad/types';
+import type { FileExtension, GeometryFile, LogEntry } from '@taucad/types';
 import { Topic } from '@taucad/events';
 import type {
   HashedGeometryResult,
   GetParametersResult,
-  KernelResult,
+  ExportGeometryResult,
   KernelIssue,
   CapabilitiesManifest,
   ExportRoute,
@@ -190,14 +190,10 @@ export type RuntimeExportOptions<
 };
 
 /**
- * Consumer-facing export result with a single `ExportFile` (unwrapped).
- *
- * Internally, the kernel pipeline produces `ExportFile[]`, but every current
- * kernel produces exactly one file. The client unwraps the first element for
- * a cleaner consumer API: `result.data.bytes` instead of `result.data[0].bytes`.
+ * Consumer-facing complete ordered export artifact set.
  * @public
  */
-export type ExportResult = KernelResult<ExportFile>;
+export type ExportResult = ExportGeometryResult;
 
 /**
  * Discriminated union returned by `render`/`updateParameters`/`setOptions`.
@@ -837,7 +833,7 @@ export type RuntimeClient<
    *
    * @param format - Export format identifier (e.g., 'stl', 'step', '3mf')
    * @param options - Per-call source and format-specific export options
-   * @returns Export result with a single ExportFile
+   * @returns Export result with an ordered, non-empty ExportFile array
    * @public
    */
   export<
@@ -1498,13 +1494,6 @@ export function createRuntimeClientWithTransport(
               client.exportGeometry(format, resolvedExportOptions).then(resolve).catch(reject);
             }),
           );
-        }
-        if (internalResult.success) {
-          return {
-            success: true,
-            data: internalResult.data[0]!,
-            issues: internalResult.issues,
-          };
         }
         return internalResult;
       } finally {

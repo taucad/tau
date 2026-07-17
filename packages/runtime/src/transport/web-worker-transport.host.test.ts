@@ -32,7 +32,14 @@ const createMockKernelWorker = (): KernelWorker => {
   const base = {
     initialize: vi.fn().mockResolvedValue(undefined),
     render: vi.fn().mockResolvedValue({ success: true, data: testGeometry, issues: [] }),
-    exportGeometry: vi.fn().mockResolvedValue({ success: true, data: [] }),
+    exportGeometry: vi.fn().mockResolvedValue({
+      success: true,
+      data: [
+        { name: 'model.gltf', mimeType: 'model/gltf+json', bytes: new Uint8Array([1]) },
+        { name: 'model.bin', mimeType: 'application/octet-stream', bytes: new Uint8Array([2]) },
+      ],
+      issues: [],
+    }),
     cleanup: vi.fn().mockResolvedValue(undefined),
     notifyFileChanged: vi.fn().mockResolvedValue(undefined),
     handleOpenFile: vi.fn(),

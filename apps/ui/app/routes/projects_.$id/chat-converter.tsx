@@ -3,8 +3,8 @@ import { useCallback, memo, useState, useMemo, useEffect, useRef } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { JSONSchema7 } from '@taucad/json-schema';
-import type { FileExtension } from '@taucad/types';
-import { asBuffer, downloadBlob } from '@taucad/utils/file';
+import type { ExportFile, FileExtension } from '@taucad/types';
+import { downloadBlob } from '@taucad/utils/file';
 import Form from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
 import type { IChangeEvent } from '@rjsf/core';
@@ -44,8 +44,8 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import { widgets, templates as rjsfTemplates } from '#components/geometry/parameters/rjsf-theme.js';
 import { rjsfIdPrefix, rjsfIdSeparator } from '#components/geometry/parameters/rjsf-utils.js';
 import { deleteValueAtPath, extractModifiedProperties } from '#utils/object.utils.js';
-import JSZip from 'jszip';
 import type { AppRuntimeClient, AppRuntimeExportFormat } from '#types/runtime-client.alias.js';
+import { createExportArtifactZip, downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 
 const toggleConverterKeyCombination = {
   key: 'd',
@@ -302,7 +302,7 @@ function FormatGrid({
   );
 }
 
-type DownloadEntry = { filename: string; bytes: Uint8Array<ArrayBuffer> };
+type DownloadEntry = { format: FileExtension; files: ExportFile[] };
 
 async function downloadExports(
   queue: DownloadEntry[],
@@ -313,20 +313,17 @@ async function downloadExports(
   }
 
   if (zipMultiple && queue.length > 1) {
-    const zip = new JSZip();
-    for (const { filename, bytes } of queue) {
-      zip.file(filename, asBuffer(bytes));
-    }
-    const zipBlob = await zip.generateAsync({ type: 'blob' });
-    const zipFilename = `${projectName}-export.zip`;
-    console.debug(`[Exporter] Downloading ZIP: ${zipFilename} (${zipBlob.size} bytes)`);
-    downloadBlob(zipBlob, zipFilename);
-  } else {
-    for (const { filename, bytes } of queue) {
-      const blob = new Blob([asBuffer(bytes)]);
-      console.debug(`[Exporter] Downloading ${filename} (${blob.size} bytes)`);
-      downloadBlob(blob, filename);
-    }
+    const zipBlob = await createExportArtifactZip(queue.map(({ format, files }) => ({ directory: format, files })));
+    downloadBlob(zipBlob, `${projectName}-export.zip`);
+    return;
+  }
+
+  for (const { format, files } of queue) {
+    // oxlint-disable-next-line no-await-in-loop -- Multiple browser downloads are intentionally serialized.
+    await downloadExportArtifactSet(files, {
+      singleFileName: `${projectName}.${format}`,
+      archiveName: `${projectName}-${format}.zip`,
+    });
   }
 }
 
@@ -683,19 +680,20 @@ export const ChatConverter = memo(function (properties: {
             continue;
           }
 
-          const { data } = result;
+          const files = result.data;
           console.debug(
-            `[Exporter] Export result for ${format}: success, name=${data.name}, bytes=${data.bytes.byteLength}`,
+            `[Exporter] Export result for ${format}: success, artifacts=${files.length}, bytes=${files.reduce((total, file) => total + file.bytes.byteLength, 0)}`,
           );
 
           if (shouldDownload) {
-            downloadQueue.push({ filename: `${projectName}.${format}`, bytes: data.bytes });
+            downloadQueue.push({ format, files });
           }
 
           if (shouldSaveToProject) {
-            const exportPath = `exports/${data.name}`;
-            console.debug(`[Exporter] Saving to project filesystem: ${exportPath}`);
-            await fileManager.writeFiles({ [exportPath]: { content: data.bytes } });
+            const prefix = selectedFormats.length === 1 ? 'exports' : `exports/${format}`;
+            await fileManager.writeFiles(
+              Object.fromEntries(files.map((file) => [`${prefix}/${file.name}`, { content: file.bytes }])),
+            );
           }
 
           succeeded.push(format);

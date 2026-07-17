@@ -251,10 +251,10 @@ const toolSerializers = {
     input: (input) => joinLines(`targetFile: ${input.targetFile}`, `format: ${input.format}`),
     output: (output) =>
       joinLines(
-        `artifactPath: ${output.artifactPath}`,
         `format: ${output.format}`,
-        `${output.mimeType}`,
-        `${output.byteLength} bytes`,
+        ...output.files.map(
+          (file) => `${file.name}: ${file.artifactPath} (${file.mimeType}, ${file.byteLength} bytes)`,
+        ),
       ),
   },
   [toolName.screenshot]: {

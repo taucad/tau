@@ -111,6 +111,25 @@ export function joinRelativePath(...paths: string[]): string {
 }
 
 /**
+ * Returns whether a path is already a safe relative POSIX path.
+ *
+ * This validator deliberately does not normalize. Callers use it at artifact
+ * boundaries where changing a producer-authored name could break sidecar
+ * references.
+ *
+ * @param path - Candidate producer-authored relative path.
+ * @returns `true` for a non-empty relative POSIX path without traversal.
+ * @public
+ */
+export function isSafeRelativePath(path: string): boolean {
+  if (path.length === 0 || path.startsWith('/') || path.includes('\\') || path.includes('\0')) {
+    return false;
+  }
+
+  return path.split('/').every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
+}
+
+/**
  * Canonical path normalization for watch matching.
  * Normalizes separators, removes duplicate slashes, ensures leading slash,
  * and strips trailing slash (except for root '/').

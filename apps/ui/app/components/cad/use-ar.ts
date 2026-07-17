@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { Geometry } from '@taucad/types';
+import { mimeTypes } from '@taucad/types/constants';
 import { toast } from '#components/ui/sonner.js';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 
@@ -84,8 +85,18 @@ export function useAr(geometry: Geometry | undefined, kernelClient?: AppRuntimeC
         throw new Error(result.issues[0]?.message ?? 'USDZ export failed');
       }
 
-      const { data } = result;
-      blobUrl = URL.createObjectURL(new Blob([data.bytes], { type: data.mimeType }));
+      if (
+        result.data.length !== 1 ||
+        result.data[0]?.name.endsWith('.usdz') !== true ||
+        result.data[0].mimeType !== mimeTypes.usdz
+      ) {
+        throw new Error(
+          `USDZ export expected exactly one .usdz artifact (${mimeTypes.usdz}), received ${result.data.length}: ${result.data.map((file) => `${file.name} (${file.mimeType})`).join(', ')}`,
+        );
+      }
+
+      const file = result.data[0];
+      blobUrl = URL.createObjectURL(new Blob([file.bytes], { type: file.mimeType }));
 
       launchQuickLook(blobUrl);
     } catch (error) {

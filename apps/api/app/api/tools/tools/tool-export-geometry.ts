@@ -15,7 +15,7 @@ Give explicit \`targetFile\` and \`format\` (extension only, matching the Tau MI
 
 Examples: \`format: "stl"\`, \`format: "step"\`, \`format: "glb"\`, \`format: "3mf"\`. The runtime must expose an export route for that extension on the user's active kernel — when it does not, the tool surfaces an RPC error explaining the rejection.
 
-Returns \`artifactPath\` plus \`mimeType\` and \`byteLength\` so callers can correlate with on-disk downloads.
+Returns an ordered \`files\` array with each producer name, persisted \`artifactPath\`, \`mimeType\`, and \`byteLength\`. The first entry is the primary artifact and later entries are required companions.
 
 For deterministic measurement runs, create or edit \`*.geospec.ts\` tests and use \`${toolName.testModel}\` instead.`,
   schema: exportGeometryInputSchema,
@@ -45,9 +45,7 @@ export const exportGeometryTool: ChatTool<
   });
 
   return {
-    artifactPath: result.artifactPath,
     format: result.format,
-    mimeType: result.mimeType,
-    byteLength: result.byteLength,
+    files: result.files,
   };
 }, exportGeometryToolDefinition);

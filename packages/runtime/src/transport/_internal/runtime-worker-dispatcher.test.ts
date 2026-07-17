@@ -142,10 +142,15 @@ describe('createWorkerDispatcher', () => {
     it('settles `export` with the worker export result', async () => {
       const exportBytes = new Uint8Array([1, 2, 3, 4]);
       const expectedSnapshot = new Uint8Array(exportBytes);
+      const companionBytes = new Uint8Array([5, 6]);
+      const companionSnapshot = new Uint8Array(companionBytes);
       const worker = createMockWorker({
         exportGeometry: vi.fn().mockResolvedValue({
           success: true,
-          data: [{ bytes: exportBytes, mimeType: 'model/stl' }],
+          data: [
+            { name: 'model.obj', bytes: exportBytes, mimeType: 'model/obj' },
+            { name: 'model.mtl', bytes: companionBytes, mimeType: 'model/mtl' },
+          ],
           issues: [],
         }),
       });
@@ -154,20 +159,29 @@ describe('createWorkerDispatcher', () => {
       const result = await fixture.client.call('export', { format: 'stl' });
 
       expect(result).toMatchObject({ success: true });
-      const data = (result as { data: Array<{ bytes: Uint8Array; mimeType: string }> }).data;
+      const data = (result as { data: Array<{ name: string; bytes: Uint8Array; mimeType: string }> }).data;
       // Export bytes are transferred — compare against an unrelated snapshot so the
       // detached source buffer doesn't blow up the structural equality check.
       expect(data[0]?.bytes).toEqual(expectedSnapshot);
-      expect(data[0]?.mimeType).toBe('model/stl');
+      expect(data[1]?.bytes).toEqual(companionSnapshot);
+      expect(data.map(({ name, mimeType }) => ({ name, mimeType }))).toEqual([
+        { name: 'model.obj', mimeType: 'model/obj' },
+        { name: 'model.mtl', mimeType: 'model/mtl' },
+      ]);
       expect(worker.flushTelemetry).toHaveBeenCalledOnce();
     });
 
     it('should settle `exportModel` with the worker request-scoped export result', async () => {
       const exportBytes = new Uint8Array([8, 7, 6]);
       const expectedSnapshot = new Uint8Array(exportBytes);
+      const companionBytes = new Uint8Array([5, 4]);
+      const companionSnapshot = new Uint8Array(companionBytes);
       const exportModel = vi.fn().mockResolvedValue({
         success: true,
-        data: [{ bytes: exportBytes, mimeType: 'model/gltf-binary' }],
+        data: [
+          { name: 'model.gltf', bytes: exportBytes, mimeType: 'model/gltf+json' },
+          { name: 'buffer.bin', bytes: companionBytes, mimeType: 'application/octet-stream' },
+        ],
         issues: [],
       });
       const worker = createMockWorker({ exportModel });
@@ -189,10 +203,26 @@ describe('createWorkerDispatcher', () => {
         exportOptions: { binary: true },
       });
       expect(result).toMatchObject({ success: true });
-      const data = (result as { data: Array<{ bytes: Uint8Array; mimeType: string }> }).data;
+      const data = (result as { data: Array<{ name: string; bytes: Uint8Array; mimeType: string }> }).data;
       expect(data[0]?.bytes).toEqual(expectedSnapshot);
-      expect(data[0]?.mimeType).toBe('model/gltf-binary');
+      expect(data[1]?.bytes).toEqual(companionSnapshot);
+      expect(data.map(({ name }) => name)).toEqual(['model.gltf', 'buffer.bin']);
       expect(worker.flushTelemetry).toHaveBeenCalledOnce();
+    });
+
+    it('should normalize unknown export issue codes before wire validation', async () => {
+      const worker = createMockWorker({
+        exportGeometry: vi.fn().mockResolvedValue({
+          success: false,
+          issues: [{ severity: 'error', type: 'kernel', message: 'failed', code: 'UPSTREAM_CODE' }],
+        }),
+      });
+      fixture = await buildFixture(worker);
+
+      await expect(fixture.client.call('export', { format: 'stl' })).resolves.toEqual({
+        success: false,
+        issues: [{ severity: 'error', type: 'kernel', message: 'failed', code: 'UNKNOWN' }],
+      });
     });
 
     it('forwards memoryHandle SABs to the worker setters', async () => {

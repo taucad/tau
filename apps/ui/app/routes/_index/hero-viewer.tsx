@@ -8,7 +8,6 @@ import { openscad } from '@taucad/openscad';
 import { parameterCache, geometryCache, gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/runtime/middleware';
 import { esbuild } from '@taucad/runtime/bundler';
 import { converterTranscoder } from '@taucad/runtime/transcoder';
-import { downloadBlob } from '@taucad/utils/file';
 import { deriveExportFormatOptions } from '#routes/_index/hero-viewer.utils.js';
 import type { ExportFormatOption } from '#routes/_index/hero-viewer.utils.js';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
@@ -23,6 +22,7 @@ import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { Loader } from '#components/ui/loader.js';
 import type { Units } from '#components/geometry/parameters/rjsf-context.js';
 import qrcodeScad from '#routes/_index/qrcode.scad?raw';
+import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 
 const heroProjectId = 'hero-qrcode-v2';
 const heroMainFile = 'main.scad';
@@ -85,9 +85,11 @@ export function HeroViewer(): React.JSX.Element {
       try {
         const result = await exportGeometry(activeFormat.format);
         if (result.success) {
-          const blob = new Blob([result.data.bytes]);
           const filename = `qrcode.${activeFormat.format}`;
-          downloadBlob(blob, filename);
+          await downloadExportArtifactSet(result.data, {
+            singleFileName: filename,
+            archiveName: `qrcode-${activeFormat.format}.zip`,
+          });
           toast.success(`Downloaded ${filename}`);
         } else {
           const message = result.issues[0]?.message ?? 'Export failed';

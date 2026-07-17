@@ -14,7 +14,11 @@ import { jscad as jscadKernel } from '#kernels/jscad/jscad.kernel.js';
 import { resolveJscadModeling } from '#kernels/jscad/jscad-modeling.js';
 import { jscadToGltf } from '#kernels/jscad/jscad-to-gltf.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
-import { createGeometryTestHelpers, extractGltfFromResult } from '#testing/kernel-geometry-testing.utils.js';
+import {
+  createGeometryTestHelpers,
+  extractGltfFromExportResult,
+  extractGltfFromResult,
+} from '#testing/kernel-geometry-testing.utils.js';
 import {
   createGeometryFile,
   createMockKernelRuntime,
@@ -2180,7 +2184,7 @@ describe('serializeNativeHandle', () => {
       if (!coldExport.success) {
         return;
       }
-      expect(coldExport.data.bytes.byteLength).toBeGreaterThan(0);
+      expect(extractGltfFromExportResult(coldExport)?.byteLength).toBeGreaterThan(0);
 
       geometryMemoryCache.clear();
       exportMemoryCache.clear();
@@ -2197,8 +2201,8 @@ describe('serializeNativeHandle', () => {
       if (!restoredExport.success) {
         return;
       }
-      expect(restoredExport.data.name).toBe('model.glb');
-      expect(restoredExport.data.bytes.byteLength).toBeGreaterThan(0);
+      expect(restoredExport.data.map(({ name }) => name)).toEqual(['model.glb']);
+      expect(extractGltfFromExportResult(restoredExport)?.byteLength).toBeGreaterThan(0);
     } finally {
       geometryMemoryCache.clear();
       exportMemoryCache.clear();

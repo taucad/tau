@@ -35,7 +35,7 @@ describe('GeoSpec Node invocation context', () => {
       connect: vi.fn(async () => undefined),
       export: vi.fn(async () => ({
         success: true,
-        data: { bytes, name: 'main.glb' },
+        data: [{ bytes, name: 'main.glb', mimeType: 'model/gltf-binary' }],
       })),
       terminate: vi.fn(),
     } as unknown as GeoSpecRuntimeClient;
@@ -115,7 +115,7 @@ describe('GeoSpec Node invocation context', () => {
       connect: vi.fn(async () => undefined),
       export: vi.fn(async () => ({
         success: true,
-        data: { bytes, name: 'main.glb' },
+        data: [{ bytes, name: 'main.glb', mimeType: 'model/gltf-binary' }],
       })),
       terminate: vi.fn(),
     } as unknown as GeoSpecRuntimeClient;
@@ -196,7 +196,11 @@ describe('GeoSpec Node invocation context', () => {
                 // Never settles: simulates a hung native build/serialization.
               });
             }
-            return { success: true, data: { bytes, name: 'main.glb' } };
+            return {
+              success: true,
+              data: [{ bytes, name: 'main.glb', mimeType: 'model/gltf-binary' }],
+              issues: [],
+            };
           }),
           terminate: vi.fn(),
         } as unknown as GeoSpecRuntimeClient;

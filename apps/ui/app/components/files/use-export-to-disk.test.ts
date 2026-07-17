@@ -33,7 +33,11 @@ vi.mock('#components/ui/sonner.js', () => ({
 const { useExportToDisk } = await import('./use-export-to-disk.js');
 
 type ExportResult =
-  | { success: true; data: { bytes: Uint8Array<ArrayBuffer>; name: string; mimeType: string }; issues: never[] }
+  | {
+      success: true;
+      data: Array<{ bytes: Uint8Array<ArrayBuffer>; name: string; mimeType: string }>;
+      issues: never[];
+    }
   | { success: false; issues: Array<{ message: string }> };
 
 function createCapabilities(): CapabilitiesManifest {
@@ -70,7 +74,7 @@ function createCadActor(options: {
   const defaultExport = vi.fn(
     async (): Promise<ExportResult> => ({
       success: true,
-      data: { bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' },
+      data: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
       issues: [],
     }),
   );
@@ -164,7 +168,7 @@ describe('useExportToDisk', () => {
         });
         return {
           success: true,
-          data: { bytes: new Uint8Array([1]), name: 'model.glb', mimeType: 'model/gltf-binary' },
+          data: [{ bytes: new Uint8Array([1]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
           issues: [],
         };
       },

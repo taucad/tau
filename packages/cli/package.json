@@ -53,6 +53,7 @@
     "@taucad/runtime": "workspace:*",
     "@taucad/types": "workspace:*",
     "citty": "catalog:",
+    "@taucad/utils": "workspace:*",
     "consola": "catalog:"
   }
 }

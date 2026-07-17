@@ -269,10 +269,33 @@ const exportRuntimeFormat = async (options: {
         ],
       };
     }
+    const expectedExtensions = options.format === 'glb' ? ['.glb'] : ['.step', '.stp'];
+    const expectedMimeTypes = options.format === 'glb' ? ['model/gltf-binary'] : ['application/step', 'model/step'];
+    const names = exported.data.map((file) => file.name);
+    const file = exported.data[0];
+    if (
+      exported.data.length !== 1 ||
+      !file ||
+      (!expectedExtensions.some((extension) => file.name.toLowerCase().endsWith(extension)) &&
+        !expectedMimeTypes.includes(file.mimeType))
+    ) {
+      return {
+        success: false,
+        diagnostics: [
+          {
+            code: 'MODEL_EXPORT_FAILED',
+            severity: 'error',
+            message: `GeoSpec ${options.format} evidence requires exactly one ${expectedExtensions.join('/')} artifact (or canonical ${expectedMimeTypes.join('/')} MIME); received ${exported.data.length}: ${names.join(', ')}`,
+            suggestion: runtimeExportFailureSuggestion,
+            details: { file: options.loadOptions.file, format: options.format, names },
+          },
+        ],
+      };
+    }
     return {
       success: true,
-      bytes: exported.data.bytes,
-      name: exported.data.name,
+      bytes: file.bytes,
+      name: file.name,
       sourceUnit: exportIntent.sourceUnit,
       exportIntent: exportIntent.provenance,
       diagnostics: runtimeIssueDiagnostics({
@@ -304,6 +327,11 @@ const exportRuntimeFormat = async (options: {
 const exportWithRuntime = async (
   options: LoadModelCodeOptions | LoadModelFileOptions,
 ): Promise<RuntimeExportBundle | ModelLoadFailure> => {
+  const format = options.format ?? 'glb';
+  if (format === 'mesh-buffer' || format === 'gltf') {
+    return unsupportedFormat(format);
+  }
+
   const runtimeResult = await resolveRuntimeForModelLoad({
     runtime: options.runtime,
     sourceAdapters: options.sourceAdapters,
@@ -314,10 +342,6 @@ const exportWithRuntime = async (
     return runtimeResult;
   }
 
-  const format = options.format ?? 'glb';
-  if (format === 'mesh-buffer') {
-    return unsupportedFormat(format);
-  }
   const runtimeFormat = format satisfies RuntimeBackedModelFormat;
   try {
     await runtimeResult.runtime.connect();

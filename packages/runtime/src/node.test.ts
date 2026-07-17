@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- file map keys are filesystem paths, not symbols */
 import { describe, it, expect } from 'vitest';
 import { createNodeClient } from '#node.js';
+import { extractGltfFromExportResult } from '#testing/kernel-geometry-testing.utils.js';
 
 describe('createNodeClient', () => {
   it('should return a client with the command surface', async () => {
@@ -56,9 +57,9 @@ describe('createNodeClient', () => {
     expect(client.lifecycleState).toBe('connected');
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.bytes).toBeInstanceOf(Uint8Array);
-      expect(result.data.bytes.byteLength).toBeGreaterThan(0);
-      expect(result.data.mimeType).toBe('model/gltf-binary');
+      expect(result.data).toHaveLength(1);
+      expect(extractGltfFromExportResult(result)).toBeInstanceOf(Uint8Array);
+      expect(result.data[0]?.mimeType).toBe('model/gltf-binary');
     }
 
     client.terminate();
@@ -83,8 +84,8 @@ describe('createNodeClient', () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.bytes.byteLength).toBeGreaterThan(0);
-      expect(result.data.mimeType).toBe('model/gltf-binary');
+      expect(extractGltfFromExportResult(result)?.byteLength).toBeGreaterThan(0);
+      expect(result.data[0]?.mimeType).toBe('model/gltf-binary');
     }
 
     client.terminate();

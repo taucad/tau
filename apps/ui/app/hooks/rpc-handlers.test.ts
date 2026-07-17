@@ -1003,7 +1003,7 @@ describe('rpc-handlers', () => {
           })),
           export: vi.fn<(format: FileExtension | string) => Promise<unknown>>().mockResolvedValue({
             success: true,
-            data: { bytes: stepBytes, name: 'mesh.step', mimeType: 'application/step' },
+            data: [{ bytes: stepBytes, name: 'mesh.step', mimeType: 'application/step' }],
             issues: [],
           }),
         };
@@ -1024,8 +1024,7 @@ describe('rpc-handlers', () => {
         expect(kernelClient.export).toHaveBeenCalledWith('step');
         expect(result).toEqual({
           success: true,
-          bytes: stepBytes,
-          mimeType: 'application/step',
+          files: [{ bytes: stepBytes, name: 'mesh.step', mimeType: 'application/step' }],
         });
       });
 

@@ -7,7 +7,7 @@
 
 import { describe, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
-import type { GeometryFile, GeometryResponse } from '@taucad/types';
+import type { ExportFile, GeometryFile, GeometryResponse } from '@taucad/types';
 import { createRuntimeClient } from '#client/runtime-client.js';
 import type {
   ExportResult,
@@ -224,6 +224,11 @@ describe('RuntimeClient.setOptions input types', () => {
 });
 
 describe('RuntimeClient.export input types', () => {
+  it('should expose only the ordered plural export success shape', () => {
+    expectTypeOf<Extract<ExportResult, { success: true }>['data']>().toEqualTypeOf<ExportFile[]>();
+    expectTypeOf<Extract<ExportResult, { success: true }>['data']>().not.toEqualTypeOf<ExportFile>();
+  });
+
   it('should accept format-only and nested export options', () => {
     expectTypeOf(client.export('step')).toEqualTypeOf<Promise<ExportResult>>();
     expectTypeOf(client.export('step', { exportOptions: { tolerance: 0.01 } })).toEqualTypeOf<Promise<ExportResult>>();

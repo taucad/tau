@@ -91,6 +91,7 @@ import type {
   SerializedNativeHandleSlot,
 } from '#framework/render-artifact.js';
 import { createRenderIdentityKey } from '#framework/render-artifact.js';
+import { finalizeExportArtifactSet } from '#framework/export-artifact-finalizer.js';
 const tauVersion = '0.1.0';
 
 type FileSystemProxy = WorkerFileSystemProxy;
@@ -1029,7 +1030,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     exportSpan.end();
 
-    return result;
+    return finalizeExportArtifactSet(result);
   }
 
   /**
@@ -1118,16 +1119,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       };
 
       if (activeMiddleware.length === 0) {
-        return await renderExactRequest(plan.input);
+        return finalizeExportArtifactSet(await renderExactRequest(plan.input));
       }
 
-      return await this.runExportMiddlewarePipeline({
-        plan,
-        renderIdentity,
-        renderArtifact: this.getPublishedRenderForIdentity(renderIdentity),
-        activeMiddleware,
-        onCacheMiss: renderExactRequest,
-      });
+      return finalizeExportArtifactSet(
+        await this.runExportMiddlewarePipeline({
+          plan,
+          renderIdentity,
+          renderArtifact: this.getPublishedRenderForIdentity(renderIdentity),
+          activeMiddleware,
+          onCacheMiss: renderExactRequest,
+        }),
+      );
     } finally {
       this._updateWatchSetFromCaches();
       exportSpan.end();

@@ -848,73 +848,6 @@ describe('cadMachine', () => {
   });
 
   // =========================================================================
-  // Export handling
-  // =========================================================================
-  describe('export', () => {
-    it('should handle export via dispatchExport in idle', async () => {
-      const { actor, mockClient } = await startAndConnect();
-
-      const emitted: unknown[] = [];
-      actor.on('geometryExported', (event) => emitted.push(event));
-
-      actor.send({ type: 'exportGeometry', format: 'stl', exportOptions: { binary: true } });
-
-      // Wait for the async export to complete
-      await waitFor(actor, (s) => s.context.exportedBlob !== undefined);
-
-      expect(mockClient.export).toHaveBeenCalledWith('stl', { exportOptions: { binary: true } });
-      expect(actor.getSnapshot().context.exportedBlob).toBeDefined();
-      expect(emitted).toHaveLength(1);
-      actor.stop();
-    });
-
-    it('should handle export failure', async () => {
-      const mockClient = createMockRuntimeClient() as AppRuntimeClient;
-      vi.mocked(mockClient.export).mockResolvedValue({
-        success: false,
-        issues: [{ message: 'Export failed', code: 'RUNTIME', type: 'runtime', severity: 'error' }],
-      });
-
-      const { actor } = await startAndConnect({
-        connectResult: async () => {
-          return { type: 'kernelConnected', client: mockClient, cleanups: [] as Array<() => void> };
-        },
-      });
-
-      const emitted: unknown[] = [];
-      actor.on('exportFailed', (event) => emitted.push(event));
-
-      actor.send({ type: 'exportGeometry', format: 'stl' });
-
-      await waitFor(actor, () => emitted.length > 0);
-
-      expect(emitted).toHaveLength(1);
-      actor.stop();
-    });
-
-    it('should handle export exception', async () => {
-      const mockClient = createMockRuntimeClient() as AppRuntimeClient;
-      vi.mocked(mockClient.export).mockRejectedValue(new Error('Network error'));
-
-      const { actor } = await startAndConnect({
-        connectResult: async () => {
-          return { type: 'kernelConnected', client: mockClient, cleanups: [] as Array<() => void> };
-        },
-      });
-
-      const emitted: unknown[] = [];
-      actor.on('exportFailed', (event) => emitted.push(event));
-
-      actor.send({ type: 'exportGeometry', format: 'stl' });
-
-      await waitFor(actor, () => emitted.length > 0);
-
-      expect(emitted).toHaveLength(1);
-      actor.stop();
-    });
-  });
-
-  // =========================================================================
   // Cleanup (destroyKernel exit action)
   // =========================================================================
   describe('cleanup', () => {
@@ -961,7 +894,6 @@ describe('cadMachine', () => {
       expect(context.geometry).toBeUndefined();
       expect(context.kernelIssues.size).toBe(0);
       expect(context.codeIssues).toEqual([]);
-      expect(context.exportedBlob).toBeUndefined();
       expect(context.kernelClient).toBeUndefined();
       expect(context.eventCleanups).toEqual([]);
       expect(context.renderPhase).toBeUndefined();

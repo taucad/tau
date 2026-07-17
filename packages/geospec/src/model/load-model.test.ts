@@ -457,11 +457,29 @@ describe('loadModel', () => {
     });
   });
 
+  it.each(['gltf', 'mesh-buffer'] as const)(
+    'should reject runtime-backed %s evidence before creating or connecting a runtime',
+    async (format) => {
+      const runtime = runtimeMock({ export: vi.fn() });
+      const runtimeFactory = vi.fn(async () => runtime);
+
+      await expect(
+        loadModel({ code: { [mainFile]: replicadBoxCode }, file: mainFile, format, runtime: runtimeFactory }),
+      ).rejects.toMatchObject({
+        name: 'GeoSpecModelLoadError',
+        diagnostics: [expect.objectContaining({ code: 'UNSUPPORTED_MODEL_FORMAT', severity: 'error' })],
+      });
+      expect(runtimeFactory).not.toHaveBeenCalled();
+      expect(runtime.connect).not.toHaveBeenCalled();
+      expect(runtime.export).not.toHaveBeenCalled();
+    },
+  );
+
   it('should request canonical z-up millimeter exports from runtime route metadata', async () => {
     const bytes = await createTriangleGlb();
     const exportMock = vi.fn(async (_format: string, _input: unknown) => ({
       success: true,
-      data: { bytes, name: 'model.glb' },
+      data: [{ bytes, name: 'model.glb', mimeType: 'model/gltf-binary' }],
       issues: [],
     }));
     const runtime = runtimeMock({
@@ -515,7 +533,7 @@ describe('loadModel', () => {
     const bytes = await createTriangleGlb();
     const exportMock = vi.fn(async (_format: string, _input: unknown) => ({
       success: true,
-      data: { bytes, name: 'model.glb' },
+      data: [{ bytes, name: 'model.glb', mimeType: 'model/gltf-binary' }],
       issues: [],
     }));
 
@@ -574,7 +592,7 @@ describe('loadModel', () => {
       runtime: runtimeMock({
         export: vi.fn(async () => ({
           success: true,
-          data: { bytes, name: 'model.glb' },
+          data: [{ bytes, name: 'model.glb', mimeType: 'model/gltf-binary' }],
           issues: [runtimeIssue],
         })),
       }),
@@ -987,7 +1005,7 @@ describe('loadModel', () => {
     const stepBytes = new TextEncoder().encode('ISO-10303-21; HEADER; ENDSEC; END-ISO-10303-21;');
     const exportMock = vi.fn(async () => ({
       success: true,
-      data: { bytes: stepBytes, name: 'assembly.step' },
+      data: [{ bytes: stepBytes, name: 'assembly.step', mimeType: 'model/step' }],
       issues: [],
     }));
     let parsedOptions: unknown;
@@ -1157,7 +1175,7 @@ describe('loadModel', () => {
     const runtime = runtimeMock({
       export: vi.fn(async () => ({
         success: true,
-        data: { bytes, name: 'model.glb' },
+        data: [{ bytes, name: 'model.glb', mimeType: 'model/gltf-binary' }],
         issues: [],
       })),
     });

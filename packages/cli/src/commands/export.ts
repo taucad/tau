@@ -1,10 +1,11 @@
 import { defineCommand } from 'citty';
 import { consola } from 'consola';
 import { resolve, basename, dirname, extname } from 'node:path';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import type { FileExtension } from '@taucad/types';
 import { fileExtensionSet } from '@taucad/types/constants';
 import { createNodeClient } from '@taucad/runtime/node';
+import { isSafeRelativePath } from '@taucad/utils/path';
 
 /**
  * `taucad export` command.
@@ -95,8 +96,25 @@ export const exportCommand = defineCommand({
         }
       }
 
-      await writeFile(outputPath, result.data.bytes);
-      consola.success(`Wrote ${result.data.bytes.byteLength} bytes → ${outputPath}`);
+      const outputDirectory = dirname(outputPath);
+      const targetPaths = result.data.map((file, index) => {
+        if (!isSafeRelativePath(file.name)) {
+          throw new Error(`Export returned an unsafe relative artifact path: ${file.name}`);
+        }
+        return index === 0 ? outputPath : resolve(outputDirectory, file.name);
+      });
+      if (new Set(targetPaths).size !== targetPaths.length) {
+        throw new Error(`Export artifact paths collide under ${outputDirectory}`);
+      }
+
+      for (const [index, file] of result.data.entries()) {
+        const targetPath = targetPaths[index]!;
+        // oxlint-disable-next-line no-await-in-loop -- Preflight completes before ordered filesystem writes begin.
+        await mkdir(dirname(targetPath), { recursive: true });
+        // oxlint-disable-next-line no-await-in-loop -- Ordered writes preserve producer artifact order in logs.
+        await writeFile(targetPath, file.bytes);
+        consola.success(`Wrote ${file.bytes.byteLength} bytes → ${targetPath}`);
+      }
     } finally {
       client.terminate();
     }

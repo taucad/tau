@@ -6,8 +6,8 @@ client, send a command, consume the result.
 ## Quick start
 
 `client.export(format, { source })` self-provisions an in-memory
-filesystem, connects on first call, runs the render, and resolves a single
-`ExportResult`.
+filesystem, connects on first call, runs the render, and resolves an ordered,
+non-empty export artifact set.
 
 ```typescript
 import { createRuntimeClient, presets } from '@taucad/runtime';
@@ -25,7 +25,9 @@ const result = await client.export('glb', {
 });
 
 if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
-console.log(`Exported ${result.data.bytes.byteLength} bytes (${result.data.mimeType})`);
+for (const file of result.data) {
+  console.log(`Exported ${file.name}: ${file.bytes.byteLength} bytes (${file.mimeType})`);
+}
 client.terminate();
 ```
 

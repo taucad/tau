@@ -76,4 +76,40 @@ describe('runtime-protocol schema coverage (C15)', () => {
       }).success,
     ).toBe(false);
   });
+
+  it('should require a non-empty strict export artifact set with MIME types', () => {
+    const schema = runtimeProtocolSchemas.calls.export.result;
+    const valid = {
+      success: true,
+      data: [
+        { name: 'model.gltf', mimeType: 'model/gltf+json', bytes: new Uint8Array([1]) },
+        { name: 'buffer.bin', mimeType: 'application/octet-stream', bytes: new Uint8Array([2]) },
+      ],
+      issues: [],
+    };
+
+    expect(schema.safeParse(valid).success).toBe(true);
+    expect(schema.safeParse({ ...valid, data: [] }).success).toBe(false);
+    expect(schema.safeParse({ ...valid, data: [{ name: 'model.glb', bytes: new Uint8Array([1]) }] }).success).toBe(
+      false,
+    );
+    expect(
+      schema.safeParse({
+        ...valid,
+        data: [{ name: 'model.glb', mimeType: '', bytes: new Uint8Array([1]) }],
+      }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({
+        ...valid,
+        data: [{ name: 'model.glb', mimeType: '   ', bytes: new Uint8Array([1]) }],
+      }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({
+        ...valid,
+        data: [{ ...valid.data[0], unrelated: true }],
+      }).success,
+    ).toBe(false);
+  });
 });

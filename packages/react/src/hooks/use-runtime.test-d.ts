@@ -1,6 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import { defineRuntime } from '@taucad/runtime/worker';
+import type { ExportResult } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { replicad } from '@taucad/runtime/kernels/replicad';
@@ -203,6 +204,7 @@ describe('useRuntime source input types', () => {
     });
 
     void exportGeometry('stl', { exportOptions: { binary: true } });
+    expectTypeOf(exportGeometry('glb')).toEqualTypeOf<Promise<ExportResult>>();
     void exportGeometry('glb', { exportOptions: { coordinateSystem: 'y-up' } });
 
     // @ts-expect-error -- exportGeometry owns source/parameters and accepts only exportOptions.

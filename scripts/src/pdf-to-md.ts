@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 import { load as yamlLoad } from 'js-yaml';
 import { PDFParse } from 'pdf-parse';
@@ -74,13 +75,15 @@ const resolveRepoPath = (path: string): string => {
   return resolve(repoRoot, path);
 };
 
+// oxlint-disable-next-line no-control-regex -- PDF extraction can emit non-whitespace ASCII control characters.
+const pdfControlCharacters = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu;
+
 const normalizeText = (text: string): string =>
   text
-    .replace(/\r\n?/g, '\n')
-    .replace(/\u0000/g, '')
-    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
+    .replaceAll(/\r\n?/gu, '\n')
+    .replaceAll(pdfControlCharacters, '')
+    .replaceAll(/[\t ]+\n/gu, '\n')
+    .replaceAll(/\n{3,}/gu, '\n\n')
     .trim();
 
 const stableStringify = (value: unknown): string => {
@@ -107,11 +110,11 @@ const manifestHash = (id: string, entry: ReferenceEntry): string =>
         authors: entry.authors,
         year: entry.year,
         venue: entry.venue,
-        source_url: entry.source_url,
-        pdf_url: entry.pdf_url,
+        source_url: entry.source_url, // eslint-disable-line @typescript-eslint/naming-convention -- YAML field
+        pdf_url: entry.pdf_url, // eslint-disable-line @typescript-eslint/naming-convention -- YAML field
         pdf: entry.pdf,
         markdown: entry.markdown,
-        used_by: entry.used_by ?? [],
+        used_by: entry.used_by ?? [], // eslint-disable-line @typescript-eslint/naming-convention -- YAML field
         tags: entry.tags ?? [],
         description: entry.description ?? '',
         citation: entry.citation,
@@ -127,7 +130,7 @@ const assertArrayOfStrings = (value: unknown, path: string, errors: string[]): s
     errors.push(`${path} must be a non-empty string array`);
     return [];
   }
-  return value;
+  return value.map(String);
 };
 
 const validateManifest = (manifest: unknown): ReferenceManifest => {
@@ -170,10 +173,10 @@ const validateManifest = (manifest: unknown): ReferenceManifest => {
       continue;
     }
 
-    const refs = assertArrayOfStrings(group['references'], `groups.${groupName}.references`, errors);
-    for (const ref of refs) {
-      if (!references[ref]) {
-        errors.push(`groups.${groupName}.references includes unknown reference "${ref}"`);
+    const referenceIds = assertArrayOfStrings(group['references'], `groups.${groupName}.references`, errors);
+    for (const referenceId of referenceIds) {
+      if (!references[referenceId]) {
+        errors.push(`groups.${groupName}.references includes unknown reference "${referenceId}"`);
       }
     }
   }
@@ -244,9 +247,7 @@ const validateManifest = (manifest: unknown): ReferenceManifest => {
       markdownPaths.set(entry.markdown, id);
     }
 
-    if (!isRecord(entry.citation)) {
-      errors.push(`references.${id}.citation must be an object`);
-    } else {
+    if (isRecord(entry.citation)) {
       if (entry.citation.format !== 'bibtex') {
         errors.push(`references.${id}.citation.format must be "bibtex"`);
       }
@@ -264,6 +265,8 @@ const validateManifest = (manifest: unknown): ReferenceManifest => {
       } else if (typeof entry.citation.key === 'string' && !entry.citation.bibtex.includes(`{${entry.citation.key},`)) {
         errors.push(`references.${id}.citation.bibtex must contain citation key "${entry.citation.key}"`);
       }
+    } else {
+      errors.push(`references.${id}.citation must be an object`);
     }
 
     for (const usedBy of entry.used_by ?? []) {
@@ -335,34 +338,66 @@ const extractManifestHash = (markdown: string): string | undefined => {
   return match?.groups?.['hash'];
 };
 
+const extractPdfSha256 = (markdown: string): string | undefined => {
+  const match = /^> PDF SHA-256: `(?<hash>[a-f0-9]{64})`$/mu.exec(markdown);
+  return match?.groups?.['hash'];
+};
+
+/** SHA-256 of a file's bytes, matching `shasum -a 256` and the Git LFS oid. */
+export const sha256File = (path: string): string => createHash('sha256').update(readFileSync(path)).digest('hex');
+
+/**
+ * Why a generated Markdown is out of date, or undefined when it is fresh. Compares recorded content
+ * hashes rather than mtimes: `git lfs checkout` and re-downloads rewrite mtimes on identical bytes.
+ */
+export const staleReason = (options: {
+  markdown: string;
+  manifestHash: string;
+  pdfSha256: string | undefined;
+}): string | undefined => {
+  if (extractManifestHash(options.markdown) !== options.manifestHash) {
+    return 'manifest changed';
+  }
+
+  if (options.pdfSha256 !== undefined && extractPdfSha256(options.markdown) !== options.pdfSha256) {
+    return 'pdf changed';
+  }
+
+  return undefined;
+};
+
 const getState = (id: string, entry: ReferenceEntry): ReferenceState => {
   const pdfPath = resolveRepoPath(entry.pdf);
   const markdownPath = resolveRepoPath(entry.markdown);
   const pdfExists = existsSync(pdfPath);
   const markdownExists = existsSync(markdownPath);
-  const hash = manifestHash(id, entry);
 
   if (!markdownExists) {
     return { id, pdfPath, markdownPath, pdfExists, markdownExists, markdownStale: true, reason: 'markdown missing' };
   }
 
-  const markdown = readFileSync(markdownPath, 'utf8');
-  const existingHash = extractManifestHash(markdown);
-  if (existingHash !== hash) {
-    return { id, pdfPath, markdownPath, pdfExists, markdownExists, markdownStale: true, reason: 'manifest changed' };
-  }
+  const reason = staleReason({
+    markdown: readFileSync(markdownPath, 'utf8'),
+    manifestHash: manifestHash(id, entry),
+    pdfSha256: pdfExists ? sha256File(pdfPath) : undefined,
+  });
 
-  if (pdfExists && statSync(pdfPath).mtimeMs > statSync(markdownPath).mtimeMs) {
-    return { id, pdfPath, markdownPath, pdfExists, markdownExists, markdownStale: true, reason: 'pdf newer' };
-  }
-
-  return { id, pdfPath, markdownPath, pdfExists, markdownExists, markdownStale: false, reason: 'fresh' };
+  return {
+    id,
+    pdfPath,
+    markdownPath,
+    pdfExists,
+    markdownExists,
+    markdownStale: reason !== undefined,
+    reason: reason ?? 'fresh',
+  };
 };
 
-const buildMarkdown = (options: {
+export const buildMarkdown = (options: {
   id: string;
   entry: ReferenceEntry;
   pageCount: number | undefined;
+  pdfSha256: string;
   text: string;
 }): string => {
   const { id, entry } = options;
@@ -376,6 +411,7 @@ const buildMarkdown = (options: {
     `> Source URL: ${entry.source_url}`,
     `> PDF URL: ${entry.pdf_url}`,
     `> Cached PDF: \`${entry.pdf}\``,
+    `> PDF SHA-256: \`${options.pdfSha256}\``,
     `> Citation: \`${entry.citation.key}\` (${entry.citation.format})`,
     `> Manifest hash: \`${manifestHash(id, entry)}\``,
     `> Pages: ${pages}`,
@@ -407,9 +443,9 @@ const downloadReference = async (id: string, entry: ReferenceEntry, force: boole
   }
 
   mkdirSync(dirname(pdfPath), { recursive: true });
-  const tempPath = `${pdfPath}.tmp-${process.pid}`;
-  if (existsSync(tempPath)) {
-    unlinkSync(tempPath);
+  const temporaryPath = `${pdfPath}.tmp-${process.pid}`;
+  if (existsSync(temporaryPath)) {
+    unlinkSync(temporaryPath);
   }
 
   const response = await fetch(entry.pdf_url);
@@ -422,8 +458,8 @@ const downloadReference = async (id: string, entry: ReferenceEntry, force: boole
     throw new Error(`${id}: downloaded content is not a PDF: ${entry.pdf_url}`);
   }
 
-  writeFileSync(tempPath, buffer);
-  renameSync(tempPath, pdfPath);
+  writeFileSync(temporaryPath, buffer);
+  renameSync(temporaryPath, pdfPath);
   console.log(`${id}: downloaded ${asRelativePath(pdfPath)}`);
 };
 
@@ -455,6 +491,7 @@ const convertReference = async (id: string, entry: ReferenceEntry, force: boolea
       id,
       entry,
       pageCount: result.total,
+      pdfSha256: sha256File(state.pdfPath),
       text,
     }),
   );
@@ -503,6 +540,29 @@ const validateGeneratedOutputs = (references: Array<[string, ReferenceEntry]>): 
   console.log(`Validated ${references.length} reference${references.length === 1 ? '' : 's'}.`);
 };
 
+/**
+ * Run every reference to completion, then fail with the collected errors. Aborting on the first
+ * failure would silently skip every reference after it.
+ */
+export const runBatch = async <T>(items: readonly T[], run: (item: T) => Promise<void>): Promise<void> => {
+  const errors: string[] = [];
+
+  for (const item of items) {
+    try {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Reference I/O stays sequential for deterministic logs and bounded load.
+      await run(item);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(
+      `${errors.length} of ${items.length} references failed:\n${errors.map((error) => `  - ${error}`).join('\n')}`,
+    );
+  }
+};
+
 const main = async (): Promise<void> => {
   const parsedArgs = parsePdfToMdArgs(process.argv.slice(2));
   if (parsedArgs.kind === 'help') {
@@ -510,7 +570,7 @@ const main = async (): Promise<void> => {
     return;
   }
 
-  const options = parsedArgs.options;
+  const { options } = parsedArgs;
   const manifest = readManifest();
   const references = selectReferences(manifest, options);
 
@@ -528,27 +588,22 @@ const main = async (): Promise<void> => {
     }
 
     case 'download': {
-      for (const [id, entry] of references) {
-        await downloadReference(id, entry, options.force);
-      }
+      await runBatch(references, async ([id, entry]) => downloadReference(id, entry, options.force));
       break;
     }
 
     case 'convert': {
-      for (const [id, entry] of references) {
-        await convertReference(id, entry, options.force);
-      }
+      await runBatch(references, async ([id, entry]) => convertReference(id, entry, options.force));
       break;
     }
 
     case 'sync': {
-      for (const [id, entry] of references) {
-        const state = getState(id, entry);
-        if (!state.pdfExists || options.force) {
+      await runBatch(references, async ([id, entry]) => {
+        if (!getState(id, entry).pdfExists || options.force) {
           await downloadReference(id, entry, options.force);
         }
         await convertReference(id, entry, options.force);
-      }
+      });
       break;
     }
 
@@ -559,8 +614,15 @@ const main = async (): Promise<void> => {
   }
 };
 
-void main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`pdf-to-md failed: ${message}`);
-  process.exit(1);
-});
+const isDirectRun = (): boolean =>
+  process.argv[1] ? fileURLToPath(import.meta.url) === resolve(process.argv[1]) : false;
+
+if (isDirectRun()) {
+  try {
+    await main();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`pdf-to-md failed: ${message}`);
+    process.exit(1);
+  }
+}

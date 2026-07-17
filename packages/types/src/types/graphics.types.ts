@@ -11,13 +11,13 @@ export type GridSizes = {
  */
 export type CameraAngle = {
   /**
-   * Theta angle of the camera. This is the angle from the XZ plane.
+   * Right-handed azimuth around the selected up axis, degrees.
    * @default undefined (uses current camera angle)
    */
   theta?: number;
 
   /**
-   * Phi angle of the camera. This is the angle from the XY plane.
+   * Polar angle from the selected up axis, degrees.
    * @default undefined (uses current camera angle)
    */
   phi?: number;

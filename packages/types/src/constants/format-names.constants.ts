@@ -86,6 +86,25 @@ export const formatConfigurations = {
     description:
       'Developed by the Khronos Group for use in transmitting 3D models and scenes efficiently, particularly in web applications and real-time rendering.',
   },
+  png: {
+    name: 'Portable Network Graphics (PNG)',
+    description:
+      'Lossless raster image format with transparency; produced by the runtime image transcoder for project thumbnails and headless render captures.',
+  },
+  webp: {
+    name: 'WebP Image (WEBP)',
+    description:
+      'Modern raster image format with lossless alpha; the default thumbnail encoding written by the runtime image transcoder in every environment.',
+  },
+  jpeg: {
+    name: 'JPEG Image (JPEG)',
+    description:
+      'Lossy raster image format without transparency; produced by the runtime image transcoder for opaque render captures.',
+  },
+  jpg: {
+    name: 'JPEG Image (JPG)',
+    description: 'Conventional file-extension alias for JPEG raster images produced by the runtime image transcoder.',
+  },
   ifc: {
     name: 'Industry Foundation Classes (IFC)',
     description:

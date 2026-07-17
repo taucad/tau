@@ -1,5 +1,4 @@
 /* eslint-disable @typescript-eslint/naming-convention -- file format names don't follow camelCase */
-import type { ExportFile } from '#types/file.types.js';
 
 /**
  * Canonical MIME types for 3D file formats.
@@ -13,6 +12,12 @@ export const mimeTypes = {
   // GlTF
   glb: 'model/gltf-binary',
   gltf: 'model/gltf+json',
+
+  // Raster images (runtime `image` transcoder output: thumbnails, agent vision)
+  png: 'image/png',
+  webp: 'image/webp',
+  jpeg: 'image/jpeg',
+  jpg: 'image/jpeg',
 
   // CAD interchange
   step: 'application/step',

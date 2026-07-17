@@ -9,6 +9,7 @@
  */
 
 import { parsePackage, CDN_URLS } from 'cdn-resolve';
+import { parentDirectory, resolveVirtualPath } from '@taucad/utils/path';
 
 // =============================================================================
 // Types
@@ -27,8 +28,8 @@ export type PackageInfo = {
 
 /**
  * Root directory for the CDN module cache in the virtual filesystem.
- * Lives at the filesystem root (`/`), outside any project directory (`/projects/xyz/`),
- * so cached modules are shared across all projects and persist across projects.
+ * Lives at the root of the project-local filesystem capability. Persistence and
+ * sharing are properties of the filesystem supplied by the host.
  */
 const nodeModulesRoot = '/node_modules';
 
@@ -252,27 +253,15 @@ export function parsePackageSpecifier(specifier: string): PackageInfo {
  * @returns Resolved absolute path
  * @public
  */
-export function resolveRelativePath(specifier: string, fromPath: string): string {
-  const directory = fromPath.slice(0, fromPath.lastIndexOf('/'));
-
-  if (specifier.startsWith('./')) {
-    return `${directory}/${specifier.slice(2)}`;
+export function resolveImportPath(specifier: string, fromPath: string): string {
+  const importer = resolveVirtualPath(fromPath);
+  if (specifier.startsWith('/')) {
+    return resolveVirtualPath(specifier);
   }
-
-  if (specifier.startsWith('../')) {
-    const parts = directory.split('/');
-    let upCount = 0;
-    let remaining = specifier;
-
-    while (remaining.startsWith('../')) {
-      upCount++;
-      remaining = remaining.slice(3);
-    }
-
-    const newParts = parts.slice(0, -upCount);
-    return `${newParts.join('/')}/${remaining}`;
+  if (specifier.startsWith('./') || specifier.startsWith('../')) {
+    const directory = parentDirectory(importer);
+    return resolveVirtualPath(`${directory === '/' ? '' : directory}/${specifier}`);
   }
-
   return specifier;
 }
 
@@ -288,7 +277,8 @@ export function resolveRelativePath(specifier: string, fromPath: string): string
  * @public
  */
 export function getNodeModulesPath(packageName: string): string {
-  return `${nodeModulesRoot}/${packageName}`;
+  validatePackageName(packageName);
+  return assertNodeModulesPath(`${nodeModulesRoot}/${packageName}`);
 }
 
 /**
@@ -305,7 +295,12 @@ export function getNodeModulesPath(packageName: string): string {
  * @public
  */
 export function isNodeModulesPath(path: string): boolean {
-  return path.includes(`${nodeModulesRoot}/`);
+  try {
+    const canonical = resolveVirtualPath(path);
+    return canonical === nodeModulesRoot || canonical.startsWith(`${nodeModulesRoot}/`);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -321,8 +316,59 @@ export function isNodeModulesPath(path: string): boolean {
 export function getCdnCachePath(packageName: string, subpath?: string): string {
   const basePath = getNodeModulesPath(packageName);
   if (subpath) {
-    return `${basePath}/${subpath}.js`;
+    validatePackageSubpath(subpath);
+    return assertNodeModulesPath(`${basePath}/${subpath}.js`);
   }
 
-  return `${basePath}/index.js`;
+  return assertNodeModulesPath(`${basePath}/index.js`);
 }
+
+const invalidPackageValue = (kind: 'name' | 'subpath', value: string): never => {
+  throw new TypeError(`Invalid package ${kind}: ${JSON.stringify(value)}`);
+};
+
+const validateRawPackageValue = (kind: 'name' | 'subpath', value: string): void => {
+  if (value.length === 0 || value.includes('\\') || value.includes('%')) {
+    invalidPackageValue(kind, value);
+  }
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint !== undefined && (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f))) {
+      invalidPackageValue(kind, value);
+    }
+  }
+};
+
+const validatePackageName = (packageName: string): void => {
+  validateRawPackageValue('name', packageName);
+  const segments = packageName.split('/');
+  const scoped = packageName.startsWith('@');
+  if ((scoped && segments.length !== 2) || (!scoped && segments.length !== 1)) {
+    invalidPackageValue('name', packageName);
+  }
+  for (const segment of segments) {
+    if (segment.length === 0 || segment === '.' || segment === '..') {
+      invalidPackageValue('name', packageName);
+    }
+  }
+};
+
+const validatePackageSubpath = (subpath: string): void => {
+  validateRawPackageValue('subpath', subpath);
+  if (subpath.startsWith('/')) {
+    invalidPackageValue('subpath', subpath);
+  }
+  for (const segment of subpath.split('/')) {
+    if (segment.length === 0 || segment === '.' || segment === '..') {
+      invalidPackageValue('subpath', subpath);
+    }
+  }
+};
+
+const assertNodeModulesPath = (path: string): string => {
+  const canonical = resolveVirtualPath(path);
+  if (!isNodeModulesPath(canonical)) {
+    throw new TypeError(`Package cache path escaped ${nodeModulesRoot}: ${JSON.stringify(path)}`);
+  }
+  return canonical;
+};

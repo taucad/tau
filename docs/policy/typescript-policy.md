@@ -3,7 +3,7 @@ title: 'TypeScript Policy'
 description: 'Type assertion rules, mock typing patterns, generic inference, and common gotchas for safe TypeScript usage across the Tau monorepo.'
 status: active
 created: '2026-03-09'
-updated: '2026-04-10'
+updated: '2026-07-14'
 related:
   - docs/policy/testing-policy.md
   - docs/research/typescript-overloads.md
@@ -145,7 +145,7 @@ machine.provide({
 
 ### 6. Preserve Generic Type Information
 
-Generic-aware libraries (notably `@taucad/runtime`'s `RuntimeClient`/`CapabilitiesManifest`/`ExportRoute`/`KernelRenderSchema` and the `KernelPlugin`/`TranscoderPlugin` carrier types) propagate phantom plugin tuples through every leaf field. Four common patterns silently erode that propagation; this rule blocks all four.
+Generic-aware libraries (notably `@taucad/runtime`'s `RuntimeClient`/`CapabilitiesManifest`/`ExportRoute` and the `KernelPlugin`/`MiddlewarePlugin`/`TranscoderPlugin` carrier types) propagate phantom plugin tuples through every leaf field. Four common patterns silently erode that propagation; this rule blocks all four.
 
 **Why**: Type information lost at one seam cascades — every downstream consumer falls back to wide-default unions (`FileExtension`, `string`, `Record<string, unknown>`), and the loss is invisible at the call site. Sentinel tests in [`packages/runtime/src/types/define-plugin.test-d.ts`](../../packages/runtime/src/types/define-plugin.test-d.ts) (`describe('Type-info preservation invariants (audit-R4)')`) lock in the invariants. Violations of any sub-rule below will trip those sentinels.
 
@@ -158,10 +158,13 @@ When a TypeScript variance failure blocks a structural assignment between a narr
 CORRECT — inline expansion at the carrier:
 
 ```typescript
-renderSchemas: {
+renderCapabilities: {
   [K in CollectKernelIds<Kernels>]?: {
-    schema: JSONSchema7;
-    defaults: RenderOptionsFor<Kernels, K>;
+    renderOptions: {
+      schema: JSONSchema7;
+      defaults: RenderOptionsFor<Kernels, K>;
+    };
+    content?: ContentCapability<RenderContentFor<Kernels, Middleware, K>>;
   };
 };
 ```
@@ -169,7 +172,12 @@ renderSchemas: {
 INCORRECT — `unknown`/`any` fallback that erases the per-kernel narrowing:
 
 ```typescript
-renderSchemas: { [K in string]?: { schema: JSONSchema7; defaults: unknown } };
+renderCapabilities: {
+  [K in string]?: {
+    renderOptions: { schema: JSONSchema7; defaults: unknown };
+    content?: ContentCapability<Record<string, boolean>>;
+  };
+};
 ```
 
 #### 6b. Never use `ReturnType<typeof genericFn>` for long-lived bindings

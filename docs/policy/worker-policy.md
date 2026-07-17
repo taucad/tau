@@ -3,12 +3,11 @@ title: 'Worker Lifecycle Policy'
 description: 'Standard patterns for creating, managing, and terminating Web Workers in Tau, plus worker topology: when a feature warrants its own worker, runtime-client consumers, and bridge writes. Covers lazy creation, termination, cleanup, mobile budgets, XState/React integration.'
 status: active
 created: '2026-03-04'
-updated: '2026-07-13'
+updated: '2026-07-14'
 related:
   - docs/policy/runtime-architecture-policy.md
   - docs/research/worker-management.md
   - docs/research/headless-thumbnail-rendering-architecture-v4.md
-  - docs/research/filesystem-first-policy-alignment.md
 ---
 
 # Worker Lifecycle Policy
@@ -25,7 +24,7 @@ Workers consume significant memory (120+ MB each for WASM kernels). Unmanaged wo
 2. **Termination must be guaranteed** — cleanup must survive errors, aborts, and race conditions
 3. **Resources must be explicitly released** — workers, MessagePorts, Blob URLs, event listeners
 4. **Mobile-first worker budgets** — design for constrained devices; desktop gets the surplus
-5. **Worker-per-feature isolation** — independent features get independent workers; the main thread orchestrates and renders UI, it does not process bytes (Rules 13–15)
+5. **Worker-per-feature isolation** — independent compute features get independent workers; orchestration and authoritative project writes remain with the owner (Rules 13–15)
 
 ## Worker Lifecycle Phases
 
@@ -97,6 +96,8 @@ URL.revokeObjectURL(url); // Worker has already loaded the script
 | Desktop (8+ cores) | `hardwareConcurrency`  | Default                              |
 
 Kernel workers consume 120+ MB each (WASM heap). On mobile Safari, exceeding ~200 MB total page memory causes silent tab crashes.
+
+The headless image feature is one lazy worker shared by thumbnails and plain image captures. Its owner terminates it after 60 seconds without queued or active work. This is the budget control for the initial implementation; measuring whether a shorter adaptive timeout is worthwhile is post-implementation work, not a prerequisite abstraction.
 
 ---
 
@@ -454,40 +455,45 @@ Adding a worker is always acceptable. It is **mandatory** when any row below say
 | Situation                                                                                                          | Verdict                               |
 | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------- |
 | The feature's compute would serialize behind another feature's compute (thumbnail render vs parameter-edit render) | New worker                            |
-| An agent-facing capability must stay responsive during interactive compute (agent capture vs thumbnail generation) | New worker                            |
+| An agent-facing capability must stay responsive during interactive compute                                         | New worker                            |
 | Byte processing (encode/decode/transcode) would otherwise land on the main thread                                  | New worker                            |
 | Sequential phases of one feature (a kernel's build → mesh → export pipeline)                                       | Reuse                                 |
 | Same feature, too infrequent to justify a resident worker                                                          | Reuse, or lazy spawn + idle terminate |
 
 Worker count is the cheap resource; main-thread latency and interactive-render latency are the scarce ones. Budgets (Rule 4) still bound totals on constrained devices — pair every new worker with lazy creation (Rule 1) and idle termination.
 
+Thumbnails and plain agent captures are two requests of the same infrequent **headless image** feature. They share one serialized queue, runtime client, file-pool buffer, lazy worker, and idle timeout. They do not justify separate WASM workers merely because their callers differ.
+
 **Why**: JavaScript is single-threaded per realm; two features sharing a worker serialize even when logically independent.
 
 ### Rule 14: Feature workers may embed a full runtime client
 
-A feature worker may consume `createRuntimeClient` with the shared runtime definition (kernels + middleware), becoming a peer of the interactive worker rather than a bespoke pipeline. Clients that intend to share the content-addressed geometry cache MUST satisfy the hash-parity rule in `docs/policy/runtime-architecture-policy.md`: a **byte-identical middleware chain** (chain identity — name, version, position, options — is hashed) plus matching kernel options and parameters. Per-client behavior lives outside the chain, in plain worker code around the client call — never as a client-specific middleware.
+A feature worker may consume `createRuntimeClient` with the shared runtime definition (kernels + middleware), becoming a peer of the interactive worker rather than a bespoke pipeline. Cache identity includes kernel inputs and the selected **mutative** middleware participants for the phase and route: stable plugin ID, version, options, and selected order. Non-mutative per-client taps (`mutates: false`) are allowed because they cannot alter cached bytes and are excluded from artifact identity. A mutative middleware that participates in a selected phase or route must be hashed even when it happens to make no byte change for one request.
 
 **Why**: Dogfooding the runtime keeps one pathway across browser/CLI/agent hosts; any chain difference silently forks the cache instead of hitting it.
 
-### Rule 15: Bridge writes are first-class; results travel as change events
+### Rule 15: Encoded results return to the authoritative writer
 
-A worker that produces a project artifact writes it to the project filesystem through its filesystem bridge (`KernelFileSystem`), and consumers learn of it via filesystem change events. Never ship result bytes to the main thread so it can perform the write.
+A feature worker may return a bounded, owned encoded artifact (`Uint8Array<ArrayBuffer>`) to its main-thread orchestrator with ownership transfer. The orchestrator writes that artifact through the one authoritative `FileManager` instance, and consumers learn of it through ordinary filesystem change events. Geometry buffers and intermediate kernel state must not make this hop.
 
-**Why**: The main thread must not process bytes (Principle 5), and bridge writes serialize through the single filesystem authority — watchers, cross-tab propagation, and caches observe the artifact for free.
+**Why**: Encoding stays off the main thread while durable project mutation stays behind one filesystem authority. The bounded transfer avoids copying, and the authoritative write ensures watchers, cross-tab propagation, caches, and activity rules observe one mutation path.
 
 CORRECT:
 
 ```typescript
-// In-worker: render → encode → write through the bridge; the UI reacts to the change event
+// Worker: render → encode → transfer ownership to the orchestrator
 const webp = await renderGlbToImage(meshArtifact, options);
-await filesystem.writeFile(thumbnailPath, webp);
+postMessage({ type: 'imageReady', bytes: webp }, [webp.buffer]);
+
+// Main-thread owner: one authoritative project write
+await fileManager.client.writeFile(thumbnailPath, webp);
 ```
 
 INCORRECT:
 
 ```typescript
-// Byte hop: worker → main thread → main thread performs the write
-postMessage({ type: 'thumbnailReady', bytes: webp }, [webp.buffer]);
+// Incorrect: a feature worker creates a second durable project writer
+await bridgedFilesystem.writeFile(thumbnailPath, webp);
 ```
 
 ---

@@ -137,8 +137,8 @@ Attributes are `Record<string, string | number | boolean>` only. No objects, no 
 | `{kernelId}.wasm-init`           | --                                                            | `{ wasm }`                                                                |
 | `{kernelId}.run-main`            | --                                                            | `{ stage }`                                                               |
 | `{kernelId}.render-output`       | `{ stage }`                                                   | --                                                                        |
-| `{kernelId}.tessellate.faces`    | `{ shapeName, linearTolerance, angularToleranceDeg, output }` | `{ withBrepEdges }`                                                       |
-| `{kernelId}.tessellate.edges`    | `{ shapeName, linearTolerance, angularToleranceDeg, output }` | `{ withBrepEdges }`                                                       |
+| `{kernelId}.tessellate.faces`    | `{ shapeName, linearTolerance, angularToleranceDeg, output }` | `{ includeEdges, includeTopology }`                                       |
+| `{kernelId}.tessellate.edges`    | `{ shapeName, linearTolerance, angularToleranceDeg, output }` | `{ includeEdges, includeTopology }`                                       |
 | `{kernelId}.mesh-to-gltf`        | `{ stage, shapeCount }`                                       | --                                                                        |
 | `{kernelId}.library.summary`     | `{ library, total.calls, total.ms, operations }`              | `{ {operation}.calls, {operation}.ms, {operation}.errors }` per operation |
 | `{kernelId}.library.{operation}` | `{ library, scope, memberPath, operation, callType }`         | --                                                                        |

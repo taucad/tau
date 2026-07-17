@@ -3,10 +3,11 @@ title: 'Filesystem Context Policy'
 description: 'Rules for the filesystem-backed context management pipeline: transcripts, tool offloading, skills, memory, compaction, and middleware ordering.'
 status: active
 created: '2026-03-24'
-updated: '2026-06-22'
+updated: '2026-07-10'
 related:
   - docs/policy/context-engineering-policy.md
   - docs/research/transcript-search-architecture.md
+  - docs/research/harness-cache-hygiene-audit.md
 ---
 
 # Filesystem Context Policy
@@ -92,12 +93,13 @@ Never increase the offloading threshold without measuring the impact on context 
 
 ### 5. Skills and Memory via Filesystem
 
-| Feature | Path             | Middleware               | Loading                        |
-| ------- | ---------------- | ------------------------ | ------------------------------ |
-| Skills  | `.tau/skills/`   | `createSkillsMiddleware` | Per-invocation from filesystem |
-| Memory  | `.tau/AGENTS.md` | `createMemoryMiddleware` | Per-invocation from filesystem |
+| Feature       | Source                                                       | Middleware                      | Loading                                                              |
+| ------------- | ------------------------------------------------------------ | ------------------------------- | -------------------------------------------------------------------- |
+| Skills        | `.agents/skills/` (client-assembled catalog)                 | `createClientContextMiddleware` | Metadata block on the system channel; body on `use_skill` activation |
+| Memory        | Client-assembled AGENTS.md payload (`contextPayload.memory`) | `createClientContextMiddleware` | HumanMessage on the message channel, per request                     |
+| Recent skills | LangGraph store, per-chat namespace                          | `createRecentSkillsMiddleware`  | Fingerprint-reconciled; content restored after compaction            |
 
-Do not add static skill or memory content to the system prompt. Let the middleware load it from files so users can edit, version, and customize it.
+Do not add static skill or memory content to the system prompt. Let the middleware load it from the client payload / filesystem so users can edit, version, and customize it.
 
 ### 6. Context Compaction Pipeline
 
@@ -122,20 +124,22 @@ The compaction transcript renderer is provider-neutral. It preserves user-visibl
 
 ### 7. Middleware Ordering
 
-The middleware chain order in `chat.service.ts` is load-bearing:
+The middleware chain order in `chat.service.ts` is load-bearing (earlier entries wrap outer and mutate the effective request first):
 
 ```
-1. Tool metrics + error handling     (observe tool calls)
-2. Tool offloading + result trimmer  (reduce context before compaction)
-3. Compaction                        (compress if needed)
-4. Message sanitization              (clean content)
-5. Prompt caching                    (must follow compaction)
-6. Logging + observability           (observe final state)
-7. Transcript                        (capture final events)
-8. Skills + memory                   (load from filesystem)
+1. Tool metrics + error handling + input compat   (observe tool calls)
+2. Tool offloading → result budget → trimmer      (reduce results before budgeting)
+3. Token-usage context + agent safeguards         (reminders counted by compaction)
+4. Interrupt recovery + message sanitization      (clean content)
+5. Client context (skills + memory) + recent skills
+6. Prompt caching (modelSettings cache_control)
+7. Compaction                                      (sees the final effective request)
+8. Cross-provider content normalizer               (after compaction rebuilds AIMessages)
+9. Logging + observability
+10. Transcript                                     (captures final events)
 ```
 
-**Why**: Transcript middleware must run after compaction and observability — it captures the final state of each model turn. Moving it earlier would miss compaction events or record pre-sanitized content.
+**Why**: every middleware that mutates the effective ModelRequest (result trimming, reminders, skills/memory injection, cache settings) runs **before** compaction so the budget decision evaluates exactly the payload the provider would receive; the normalizer runs **after** compaction because LangChain rebuilds AIMessages when rewriting history; transcript runs last to capture the final state of each turn. See `docs/research/harness-cache-hygiene-audit.md` for the durability semantics of each mutation channel (`wrapToolCall` = durable, `wrapModelCall` = ephemeral, `Command` update = durable rewrite) — pick the channel to match the intended durability.
 
 ### 8. Most Context Writes Are Non-Blocking
 

@@ -3,10 +3,12 @@ title: 'glTF Construction Policy'
 description: 'Rules for constructing glTF/GLB binaries in the runtime, governing the direct writer, buffer layout, material encoding, and kernel integration patterns'
 status: active
 created: '2026-03-24'
-updated: '2026-06-30'
+updated: '2026-07-16'
 related:
   - docs/policy/geometry-naming-policy.md
   - docs/policy/rendering-pipeline-policy.md
+  - docs/research/headless-gltf-interleaved-accessor-corruption-v2.md
+  - docs/research/headless-thumbnail-coordinate-orientation-parity.md
   - docs/research/runtime-overhead-forensics.md
   - docs/architecture/runtime-topology.md
 ---
@@ -101,6 +103,14 @@ Additionally, the edge detection and coordinate transform middleware re-serializ
 
 Three.js `GLTFLoader` handles both layouts. The UI code (`gltf-edges.ts`) has explicit `InterleavedBufferAttribute` handling for the middleware-interleaved path, and regular `BufferAttribute` handling for the direct-writer non-interleaved path.
 
+### 2.1 Consumer Layout and Instantiation Contract
+
+The direct-writer rule is a producer optimization, not a restriction on standards-compliant consumers. `@taucad/render` delegates GLB framing, glTF schema validation, accessor offsets, `byteStride`, and sparse-accessor decoding to pinned `gltf-rs`. Within its documented static render profile, it accepts packed, accessor-offset, interleaved, and sparse physical layouts.
+
+The headless renderer also evaluates the selected glTF scene's complete core node hierarchy. It composes matrix/TRS transforms, decodes and uploads each reachable mesh asset once, draws every node instance from the shared buffers, applies the same model transform to surface and line primitives, uses an inverse-transpose normal transform, and fits the camera from exact transformed vertices.
+
+This does not imply reference-viewer coverage. The consumer rejects unsupported required extensions and render features before GPU setup. JSON `.gltf` resource resolution, texture-backed PBR, compressed or quantized geometry, skins, morph targets, animations, `EXT_mesh_gpu_instancing`, and unsupported primitive modes remain outside the current render profile. Producers must not depend on silent degradation.
+
 ## 3. GLB Binary Format Requirements
 
 All GLB output must comply with the glTF 2.0 specification. The direct writer must produce:
@@ -128,15 +138,19 @@ All GLB output must comply with the glTF 2.0 specification. The direct writer mu
 
 ### 3.3 Material Encoding
 
-Follow `cadMaterialDefaults` from `@taucad/types/constants` (see `docs/policy/rendering-pipeline-policy.md`):
+Follow `cadMaterialDefaults` and `cadEdgeOverlayMaterialDefaults` from `@taucad/types/constants` (see `docs/policy/rendering-pipeline-policy.md`):
 
-| Property          | Surface primitives                       | Edge/line primitives                                                                                                          |
-| ----------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `metallicFactor`  | `0.0`                                    | `0`                                                                                                                           |
-| `roughnessFactor` | `0.35`                                   | `1`                                                                                                                           |
-| `doubleSided`     | `true`                                   | `true`                                                                                                                        |
-| `alphaMode`       | `"OPAQUE"` or `"BLEND"` (based on alpha) | `"OPAQUE"`                                                                                                                    |
-| `baseColorFactor` | Source color or `[0.8, 0.8, 0.8, 1]`     | Kernel-specific edge color; generated edge materials remain unnamed unless the geometry naming policy permits a semantic role |
+| Property                 | Surface primitives                       | Tau-generated auxiliary edge overlays |
+| ------------------------ | ---------------------------------------- | ------------------------------------- |
+| `metallicFactor`         | `0.0`                                    | `0`                                   |
+| `roughnessFactor`        | `0.35`                                   | `1`                                   |
+| `doubleSided`            | `true`                                   | `true`                                |
+| `alphaMode`              | `"OPAQUE"` or `"BLEND"` (based on alpha) | `"OPAQUE"`                            |
+| `baseColorFactor`        | Source color or `[0.8, 0.8, 0.8, 1]`     | `[0, 0, 0, 1]`                        |
+| `KHR_materials_unlit`    | Not required                             | Required in `extensionsUsed`          |
+| `extensionsRequired` use | Format-specific                          | Do not require the unlit extension    |
+
+This is a provenance rule, not a global `LINES` rule. Tau-generated auxiliary overlays use the canonical black, opaque, unlit material. Authored or imported line primitives preserve their source materials in artifacts and headless rendering. Writers must not traverse arbitrary input glTF and recolor existing lines.
 
 ### 3.4 Primitive Modes
 
@@ -194,14 +208,17 @@ Low-level parsers that intentionally accept arbitrary byte views before runtime 
 
 ## 5. Coordinate System
 
-All GLB output must use the glTF coordinate system:
+Canonical render geometry and internal GLB source artifacts use the glTF-native **Y-up/metres** convention. Direct GLB/glTF export routes may also honor another coordinate system or unit when that route explicitly advertises the option. Every artifact boundary must convert from its declared input convention to its declared output convention **exactly once**.
 
-- **Y-up** (glTF spec requires Y-up; CAD kernels use Z-up)
-- **Meters** (glTF spec requires meters; CAD kernels use millimeters)
+For the canonical Z-up/millimetres to Y-up/metres conversion:
 
-Transform vertex data before writing to GLB using `transformVertexArray()` (positions: rotate + scale) and `transformNormalArray()` (normals: rotate only, preserve unit length) from `packages/runtime/src/framework/common.ts`.
+```text
+(x, y, z) -> (x / 1000, z / 1000, -y / 1000)
+```
 
-Do not apply coordinate transforms inside the GLB writer itself — the writer accepts pre-transformed data.
+Apply the matching rotation without scale to normals so they remain unit length and preserve handedness. Kernel mapping and export-boundary code use `transformVertexArray()` and `transformNormalArray()` from `packages/runtime/src/framework/common.ts` for this conversion.
+
+Do not apply coordinate transforms inside the GLB writer itself. The writer serializes already-prepared data and is unaware of kernel-native conventions. In particular, a kernel must not pre-rotate geometry and then ask its mapping/writer boundary to perform the same conversion again.
 
 ## 6. Kernel Integration
 
@@ -221,7 +238,7 @@ The kernel-specific mapping file (not the GLB writer) is responsible for:
 
 - Extracting mesh data from kernel-native types
 - Color normalization (hex to RGBA, opacity handling)
-- Coordinate transformation (Z-up/mm to Y-up/m)
+- Coordinate transformation from the kernel-native convention to the route's declared output convention, exactly once
 - Triangulation or export-only normalization of non-triangle faces before GLB writing
 - Normal computation when not provided by the kernel
 - Owner-local edge primitive extraction when the kernel has better topology than generic triangle-soup detection
@@ -241,7 +258,7 @@ JSCAD GLB output must not rely on generic middleware edge detection for normal r
 
 JSCAD assemblies should be written as one GLB scene with one named node/mesh per normalized part descriptor. Part names come from upstream-compatible `shape.name` metadata with deterministic one-indexed `Shape N` fallbacks and duplicate-name suffixes.
 
-This export evidence must not mutate the original JSCAD object or its private retessellation flag. Shape-level material/color extraction remains based on the original shape. JSCAD edge primitives use black `[0,0,0,1]`, `roughnessFactor: 1`, `metallicFactor: 0`, `alphaMode: "OPAQUE"`, and `KHR_materials_unlit`; generated edge materials remain unnamed.
+This export evidence must not mutate the original JSCAD object or its private retessellation flag. Shape-level material/color extraction remains based on the original shape. JSCAD edge primitives use the shared `cadEdgeOverlayMaterialDefaults` and `KHR_materials_unlit`; generated edge materials remain unnamed. JSCAD-specific topology ownership does not change the framework-wide generated-overlay material contract.
 
 ## 7. glTF JSON Export
 
@@ -255,13 +272,16 @@ Test GLB output by parsing it with `NodeIO().readBinary()` from `@gltf-transform
 
 - Accessor counts (vertex count, index count)
 - Material properties (baseColorFactor, alphaMode, metallicFactor, roughnessFactor)
-- Coordinate values (round-trip verification of transform correctness)
+- Generated-edge `KHR_materials_unlit` and conditional `extensionsUsed` metadata
+- Preservation of a distinct authored/imported line material across middleware processing
+- Coordinate values on asymmetric, translated fixtures (round-trip verification of transform correctness)
+- Component centroids, normals, winding/handedness, and applied node transforms for every advertised coordinate/unit route
 - Edge line segment coordinates when a kernel emits owner-local LINES primitives
 - Node names
 - Primitive modes (TRIANGLES vs LINES)
 - POSITION accessor `min`/`max` bounds
 
-Do not assert only byte length or `instanceof Uint8Array` — these are existence checks, not behavioral assertions. Parse and verify structure.
+Do not assert only byte length, byte inequality, or `instanceof Uint8Array` — these are existence checks, not behavioral assertions. Parse world-space evidence and verify structure and semantics. Symmetric cubes and unordered dimension triples are insufficient coordinate fixtures because they can hide axis relabeling or duplicate rotations.
 
 **Why**: Testing policy requires asserting observable behavior. A GLB that is the right size but has wrong accessor types, missing normals, or incorrect coordinate transforms would pass an existence check but produce broken rendering.
 
@@ -269,6 +289,8 @@ Do not assert only byte length or `instanceof Uint8Array` — these are existenc
 
 - Using `@gltf-transform/core` `Document` + `NodeIO().writeBinary()` for new render-path GLB construction
 - Applying coordinate transforms inside the GLB writer (transforms belong in kernel mapping code)
+- Pre-rotating kernel geometry and then requesting the same conversion again from its mapping/export boundary
+- Adding renderer-side kernel correction tables or rotating final image pixels to compensate for malformed source geometry
 - Interleaving vertex attributes with `byteStride` in the direct writer
 - Producing GLB without `asset.generator: "tau-runtime"` (breaks traceability)
 - Testing GLB output with only `expect(result).toBeInstanceOf(Uint8Array)` without parsing
@@ -282,13 +304,18 @@ Do not assert only byte length or `instanceof Uint8Array` — these are existenc
 - [ ] Render-path GLB uses `writeGlb()` from `glb-writer.ts`, not `@gltf-transform/core`
 - [ ] `GeometryGltf.content` is an exact `Uint8Array<ArrayBuffer>` before crossing runtime/client boundaries
 - [ ] Buffer layout is non-interleaved (separate bufferViews per attribute)
+- [ ] Consumers treat the writer layout as an implementation choice and accept supported packed, offset, interleaved, and sparse accessor layouts
+- [ ] Headless scene consumption preserves core node transforms and repeated mesh references for both surfaces and lines
 - [ ] `asset.generator` is `"tau-runtime"`
 - [ ] POSITION accessors have `min`/`max`
 - [ ] `bufferView.target` is set (34962 for vertex, 34963 for index)
 - [ ] Materials use `cadMaterialDefaults` from `@taucad/types/constants`
+- [ ] Tau-generated auxiliary edges use `cadEdgeOverlayMaterialDefaults` and `KHR_materials_unlit`
+- [ ] Authored/imported line materials remain unchanged in artifacts and headless rendering
 - [ ] Names follow `docs/policy/geometry-naming-policy.md`
-- [ ] Coordinates are Y-up meters (transformed before writing)
-- [ ] Tests parse output with `NodeIO().readBinary()` and assert structure
+- [ ] Canonical render/source GLB is Y-up/metres; direct exports match their explicitly declared convention
+- [ ] Each boundary applies its declared coordinate/unit conversion exactly once
+- [ ] Coordinate tests parse asymmetric world-space evidence and assert positions, centroids, normals, handedness, and node transforms
 - [ ] Tests include at least one offset-view fixture proving runtime normalizes GLB bytes to an exact view
 - [ ] New kernels map to `GlbInput` rather than building `Document` objects
 

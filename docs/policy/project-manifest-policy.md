@@ -1,155 +1,241 @@
 ---
 title: 'Project Manifest Policy'
-description: 'Contract for tau.json project manifests and all Tau-owned on-disk file formats: placement, Zod schema source of truth, schemaVersion migrations, single-writer + watch-reload discipline, loop guards, and canonical artifact paths.'
-status: draft
+description: 'Authority contract for the strict first-release tau.json manifest, host-local project library state, lifecycle overlays, and filesystem-first discovery.'
+status: active
 created: '2026-07-13'
-updated: '2026-07-13'
+updated: '2026-07-17'
 related:
   - docs/policy/filesystem-authority-policy.md
   - docs/policy/filesystem-policy.md
+  - docs/policy/library-api-policy.md
   - docs/policy/storage-policy.md
   - docs/policy/vision-policy.md
   - docs/research/headless-thumbnail-rendering-architecture-v4.md
-  - docs/research/filesystem-first-policy-alignment.md
+  - docs/research/project-updated-at-activity-boundary.md
+  - docs/research/tau-json-project-library-state-boundary.md
 ---
 
 # Project Manifest Policy
 
-Internal reference for the `tau.json` project manifest and for every on-disk file format Tau owns: where formats live, how they are schematized and versioned, who writes them, and how consumers converge on external changes.
+Internal reference for the `tau.json` project manifest and its boundary with host-local project library state. It defines which facts are portable project content, which facts are local application state, and how filesystem discovery and the local overlay compose without creating two project authorities.
 
-> **Status: draft** — codifies the contract established by `docs/research/headless-thumbnail-rendering-architecture-v4.md` (R1–R3). Flips to `active` when that implementation lands. The rules are binding for that implementation and for any interim code touching project metadata or introducing a new on-disk format.
+> **Status: active** — this is the first-release v1 contract. The unreleased draft implementation cuts directly to it as specified by `docs/research/tau-json-project-library-state-boundary.md`; no manifest-version migration or compatibility layer ships.
 
 ## Rationale
 
-Project metadata in the IndexedDB object store is a black box: the agent cannot edit a title, a headless CLI shares the filesystem but not the browser's IndexedDB, and a webaccess user cannot manage projects from their own disk. Per `docs/policy/vision-policy.md` ("Files are the interface", "Hosts are peers"), anything an agent, CLI, or user must read or write lives in the project filesystem as a file with a schema. Files that multiple hosts write need explicit contracts — versioning, a single reload discipline, and loop guards — or they silently corrupt and self-trigger. This policy is that contract.
+Tau's filesystem-first model makes project intent reachable to users, agents, CLIs, Git, and every host. That does not mean every browser-library fact belongs in a portable file. Trash state, semantic recent-project ordering, and chat revision pointers have no faithful filesystem representation and are meaningless to a headless consumer without the corresponding local application state.
+
+The governing invariant is:
+
+> `tau.json` is the sole portable authority for project existence and declarative content. `ProjectLibraryState` is a narrow host-local overlay for lifecycle and application state that the filesystem cannot express. Neither source mirrors the other's fields, and only a valid discovered manifest can establish a project.
+
+## Authority Table
+
+| Concern                             | Authoritative home                                      | Examples                                                            |
+| ----------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------- |
+| Portable project declaration        | `/tau.json`                                             | schema URL, logical ID, name, description, tags, and the main asset |
+| Authored or generated project files | Project filesystem                                      | entry files, `.tau/parameters/<entryFile>.json`, asset thumbnails   |
+| Host-local library lifecycle        | `projectLibraryStates` object store                     | `lastActivityAt`, `deletedAt`                                       |
+| Host-local revision pointer         | `projectLibraryStates` object store                     | `revisionState` while chats remain browser-local                    |
+| Physical storage binding            | `ProjectFileSystemConfig` in `tau-fs-handles`           | backend, workspace ID, storage root                                 |
+| Rebuildable presentation cache      | Memory only unless separately justified by measurements | React Query project results, thumbnail object URLs                  |
 
 ## Rules
 
-### 1. The manifest is the project (content-addressed existence)
+### 1. A valid manifest establishes project existence
 
-A directory containing a valid `tau.json` on a configured storage root **is** a project. Discovery is a scan (`/projects/*/tau.json` per root), not a registry lookup. A project directory dropped into a bound webaccess workspace must appear in the UI without an import step; the import wizard is a convenience for fetching content, never the source of existence.
+A directory containing a valid `tau.json` on a configured storage root **is** a project. Discovery scans `/projects/*/tau.json`; no object-store row may create a project, suppress discovery of an active project, or substitute for a missing manifest.
 
-**Why**: Any registry that must be told about a project locks out disk-level management and agent-driven project creation — the two hosts that never see the browser UI.
+After discovery, the UI may left-join `ProjectLibraryState` by validated logical project ID to sort the library, hide a soft-deleted project, or initialize revision state. This overlay affects local presentation and lifecycle only. A stale row without a discovered manifest is not a project.
+
+**Why**: Disk-level project creation and external edits must work without registering content through one browser profile. The local overlay remembers browser intent but never becomes content authority.
+
+### 2. `tau.json` is portable, declarative, and user-visible
+
+The manifest lives at the project root, not under `.tau/`. A field belongs in it only when all of the following are true:
+
+1. a user, agent, CLI, or another host needs the value to understand or operate on the project;
+2. the value remains meaningful when the project directory is copied, checked out, or opened in another profile;
+3. the value cannot be derived unambiguously from another canonical project file;
+4. Tau can define stable validation semantics for it.
+
+Operational timestamps, local trash status, cached projections, chat-row pointers, and browser storage locators fail this test and stay out of `tau.json`.
+
+### 3. Manifest and runtime types are separate
+
+`ProjectManifest`, `ProjectLibraryState`, and the UI's composed project view are distinct types. A manifest serializer accepts only `ProjectManifest` and constructs its output field by field. It must never spread a runtime project object or persist a composed view wholesale.
+
+The manifest schema and every nested object are strict. Unknown properties in a document claiming the v1 schema are validation errors; they are not silently retained. A future extension requires a deliberately revised contract or a separately designed explicit extension point.
+
+**Why**: The pre-release draft's combination of `.loose()` schemas, `ProjectManifest = Project & …`, and `{ ...project }` serialization let top-level `thumbnail` and later runtime fields leak onto disk despite not being part of the typed contract.
+
+CORRECT:
+
+```typescript
+const manifest: ProjectManifest = {
+  $schema: projectManifestSchemaUrl,
+  id: project.id,
+  name: project.name,
+  description: project.description,
+  tags: project.tags,
+  assets: project.assets,
+};
+```
 
 INCORRECT:
 
 ```typescript
-// Existence gated on a store row — a directory on disk "doesn't exist" until registered
-const projects = await objectStore.getProjects();
+const manifest = { ...project, $schema: projectManifestSchemaUrl };
 ```
 
-CORRECT:
+### 4. `$schema` is the manifest's sole on-disk version discriminator
 
-```typescript
-// Existence is the manifest on disk
-const projects = await discovery.scanProjectRoots(); // parses /projects/*/tau.json per storage root
-```
+The current and only supported URL is `https://tau.new/schemas/tau-schema-v1.json`. `tau.json` carries that URL in `$schema` and does not duplicate the same fact in `schemaVersion`.
 
-### 2. Placement: `tau.json` at the project root, user-visible
+Because no manifest contract has shipped, Tau replaces the draft implementation at that URL before release. Readers accept the exact v1 URL and strict v1 shape; an unknown or malformed URL returns a structured unsupported-schema issue without mutating bytes. No old-manifest parser, forward-migration branch, or second schema URL exists in the first release.
 
-The manifest lives at `/projects/<id>/tau.json` — top level, not under `.tau/`. It is user-visible and user-editable by design; treat external edits as a feature, not a hazard to hide from.
+The published JSON Schema is generated from the strict Zod schema. Once v1 is released, its URL and bytes are immutable. A future incompatible contract receives a new URL only when that contract is actually designed.
 
-**Why**: A hidden or nested manifest defeats the point — users and agents manage projects by managing files.
+This URL rule applies to Tau-owned, user-visible JSON documents that expose `$schema`. Other durable formats still require one explicit version discriminator appropriate to their format, but must not carry two synchronized representations of the same version.
 
-### 3. The Zod schema in `packages/types` is the single source of truth
+### 5. V1 declares exactly one first-class main asset
 
-The manifest shape is defined once as `projectManifestSchema` (Zod) in `packages/types`. A JSON Schema is **generated** from it (`z.toJSONSchema`) and published so external editors get validation and autocomplete via the manifest's `$schema` field. Never hand-edit the generated JSON Schema; never re-declare manifest fields in app code, worker code, or tests — import the schema.
+`assets` is a strict object with exactly one required `main` property. `main` declares:
 
-**Why**: Two definitions of one on-disk format drift; the drift surfaces as data corruption on the next write, not as a type error.
+- `entryFile`: the normalized project-relative file that starts evaluation;
+- optional `thumbnail`: the unique Tau-managed project-relative WebP output slot associated with that asset.
 
-### 4. Versioning: integer `schemaVersion`, forward-only migrations, structured rejection
+`entryFile` is preferred over `entry`, `file`, `source`, or `path`: it matches Tau's established public vocabulary and describes both the file kind and its role. Tau currently supports one first-class entry and mechanical projects only. Additional asset keys, a `discipline` constant, and an arbitrary asset map have no current consumer and are forbidden. They may be deliberately designed when a second entry or non-mechanical workflow actually requires them.
 
-Every Tau-owned on-disk format carries an integer `schemaVersion` (manifests start at `1`). Changes to the shape require:
+The canonical v1 asset shape is:
 
-- a new `schemaVersion`,
-- a pure migration function `vN → vN+1` in the format's migration registry, applied on read and persisted on the next write,
-- readers **rejecting** documents with a `schemaVersion` above their maximum with a structured "newer Tau required" error — never a best-effort partial parse.
-
-**Why**: A best-effort parse of a newer document destroys the fields it didn't understand on the next write; a structured rejection preserves the file and tells the user what to do.
-
-CORRECT:
-
-```typescript
-if (raw.schemaVersion > latestManifestVersion) {
-  throw new ManifestVersionError({ found: raw.schemaVersion, supported: latestManifestVersion });
+```json
+{
+  "assets": {
+    "main": {
+      "entryFile": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
 }
-const manifest = projectManifestSchema.parse(migrateManifest(raw));
 ```
 
-INCORRECT:
+Parameters are not embedded and no `parametersFile` pointer is added. The sidecar path is derived canonically as `.tau/parameters/<entryFile>.json`. Asset `version` and `dependencies` fields require a real resolution contract before they may return; speculative or derived values do not belong in the manifest.
+
+The strict schema validates each declared path as a normalized project-relative POSIX path. It deliberately performs no speculative cross-field or filesystem-existence validation. The thumbnail owner may apply the narrower safety checks required before replacing the declared output bytes. Authored previews that Tau must preserve require a different future field.
+
+**Why**: The draft `assets.mechanical` shape conflated classification with identity. `assets.main` describes the one real entry without repeating an unused classification or prematurely designing multi-entry behavior. The thumbnail belongs beside the entry that owns it instead of at the manifest root.
+
+### 6. Local library state is minimal and field-scoped
+
+The UI may persist exactly one `ProjectLibraryState` row per logical project ID with this responsibility:
 
 ```typescript
-// Silent tolerance of unknown versions — data loss on next write
-const manifest = projectManifestSchema.passthrough().safeParse(raw).data ?? defaultManifest;
+type ProjectLibraryState = {
+  projectId: string;
+  lastActivityAt: number;
+  deletedAt?: number;
+  revisionState?: PersistedRevisionState;
+};
 ```
 
-### 5. Single in-app writer; external writers converge via watch-reload
+Do not add manifest-derived name, description, author, tags, assets, entry files, thumbnails, physical locators, or file bytes to this row. Do not add a generic partial-update API. Mutations use field-scoped atomic operations such as `touchProjectActivity`, `trashProject`, `restoreProject`, and `setProjectRevisionState` under the storage policy's keyed-transaction rules.
 
-In-app, exactly one owner writes each format — for `tau.json`, the project machine. Components, hooks, and other machines request changes through that owner; they never write the file directly. External writers (agent, CLI, `$EDITOR` on a webaccess directory) write the file itself; the app converges by watching the path, re-parsing, validating, and hot-reloading state — the same participant pattern parameter files use.
+`createdAt` is intentionally absent. Tau currently has no product behavior that needs a portable project-creation claim, and filesystem birth time is not portable. If a future feature needs “added to this library,” name it `addedAt` and keep it local; if it needs authored provenance, define that separate portable concept explicitly.
 
-**Why**: One writer means one serialization point and one validation path; watch-reload means external edits are first-class instead of being overwritten by stale in-app state.
+### 7. Project recency is semantic, never inferred from raw mtimes
 
-### 6. Loop guards are mandatory
+`lastActivityAt` means the most recent material project-domain activity. It is updated by the existing project activity boundary for authored file changes, meaningful metadata edits, parameter changes, and committed chat operations. Generated thumbnails, manifest persistence, cache writes, route hydration, generated labels, and no-op repairs do not affect it.
 
-A format whose owner both writes and watches the same path must break the cycle explicitly:
+Filesystem mtimes may be used as reconciliation or cache-invalidation observations. They are never the authority for project creation or semantic recency, never require recursive project scans on library listing, and never bypass the project-domain classifier.
 
-- **Self-reload suppression**: machine-origin writes carry the origin (`source`/origin-tagging mechanism) and are excluded from triggering their own reload.
-- **Activity exclusion**: `tau.json`, `thumbnail.webp`, and other generated artifacts are excluded from user-activity recency (`updatedAt` bumping, "Recent Projects" ordering).
+When a valid project is discovered without local state, first discovery may seed `lastActivityAt` to the discovery time. The one-off pre-release workspace cutover quiesces normal discovery and preserves each known project's semantic draft `updatedAt` as `lastActivityAt` before that fallback can run.
 
-**Why**: Without both guards, manifest persistence re-triggers itself (write → watch event → reload → write), and thumbnail regeneration reorders the project list as fake user activity.
+### 8. Soft deletion is a local tombstone; permanent deletion removes bytes
 
-### 7. Canonical artifact paths, not pointer fields
+Soft delete sets `ProjectLibraryState.deletedAt` and leaves the project directory, manifest, chats, editor state, and storage binding intact so the project can be restored. Restore clears the tombstone. The UI must describe this as recoverable local trash, not permanent filesystem deletion.
 
-Well-known project artifacts live at canonical paths. Consumers resolve them by convention; the manifest carries **no pointer fields** duplicating a path the convention already fixes (there is no `thumbnail` field — presence of `/thumbnail.webp` is the contract).
+Permanent deletion is a separate confirmed operation. It uses the existing crash-resumable project-operation journal to remove the project directory and associated chat, editor, locator, legacy, and library-state records.
 
-| Path                            | Artifact                              | Writer                                        |
-| ------------------------------- | ------------------------------------- | --------------------------------------------- |
-| `/tau.json`                     | Project manifest                      | Project machine (in-app); any host (external) |
-| `/thumbnail.webp`               | Project thumbnail                     | Thumbnail worker (browser); CLI export        |
-| `/.tau/cache/**`                | Derived caches (geometry, parameters) | Runtime workers                               |
-| `/.tau/export/preferences.json` | Export form preferences               | Exporter                                      |
+If local library state is lost, a still-valid manifest is rediscovered as active. This fail-open behavior favors data recovery. A disconnected or inaccessible storage root must never be mistaken for permanent deletion and must not cause local-state garbage collection.
 
-**Why**: A pointer field and a path convention describing the same artifact inevitably disagree; conventions cannot dangle.
+### 9. Revision state follows its authoritative chat history
 
-### 8. Non-project spaces carry no manifest
+`revisionState` remains host-local while restore depends on browser-local `Chat` rows and full file-operation snapshots. Sparse `.tau/transcripts/*.jsonl` logs do not contain enough information to reconstruct those revisions. Copying a project to a host without its chats initializes revision state at the existing clean tip default.
 
-Ephemeral mounts (`CadPreviewProvider`'s `{ backend: 'memory' }` scratch spaces, the converter's working directories) and server-rendered surfaces (the publication viewer) are **not** projects and must not write manifests. Manifest presence is the discriminator Rule 1 depends on; polluting scratch space with manifests corrupts discovery.
+If Tau later promotes a lossless on-disk chat archive to authority, the archive and revision state migrate together under a new policy. Moving only dangling turn IDs into `tau.json` is forbidden.
 
-### 9. Manifests are untrusted input
+### 10. Single writers, watch convergence, and loop guards remain mandatory
 
-Discovery parses arbitrary bytes from disk (webaccess directories especially). Readers must bound the parse (size cap before `JSON.parse`), validate through the schema before using any field, and **never derive filesystem paths from manifest contents** — a project's path identity is where the manifest was _found_, never what its `id` field claims. Invalid manifests quarantine that one project with a visible reason — salvage over silent hiding.
+In-app manifest writes are serialized by the project manager/project machine boundary. Creation, duplication, import, legacy object-store conversion, and live metadata changes all use the same strict v1 serializer. Components and feature workers request changes through that owner and never write `tau.json` directly.
 
-**Why**: `joinPath('/projects', manifest.id)` with a hostile `id` escapes the project root; a silently skipped manifest looks like data loss to the user.
+External writers edit the manifest itself. The app converges by watching, re-parsing, and replacing only the manifest slice of the composed project view; local library state remains untouched. Machine-origin write guards and coalescing prevent write/watch loops.
 
-### 10. New on-disk formats adopt this policy wholesale
+The thumbnail owner writes bytes to the path declared by the target asset. Parameter owners write only canonical sidecars. Neither generated write counts as project activity.
 
-Any future Tau-owned file format (geospec evidence files, export presets, on-disk chat archives if that migration is ever scheduled) follows Rules 3–6: Zod source of truth in a shared package, published JSON Schema when the file is user-editable, integer `schemaVersion` with a migration registry and structured rejection, a single in-app writer with watch-reload, and loop guards when the owner watches its own writes.
+### 11. Listing optimization is measured and cannot become authority
 
-**Why**: The manifest machinery (versioning, migration, rejection, reload) is the reusable heavy lifting; formats that skip it re-learn each failure mode separately.
+The current Projects query uses React Query for in-memory caching/deduplication and filesystem events plus polling for convergence. The first-release cutover adds no second discovery cache. Measure cold and repeated listing before adding another layer; a performance miss is separate work, not permission to mirror manifest content into local lifecycle state.
+
+A persistent manifest projection is not part of the current design. If measured cold-start scale later justifies one, it must be explicitly rebuildable, fingerprinted against the manifest, and unable to establish existence or overwrite filesystem content. It remains distinct from authoritative `ProjectLibraryState`.
+
+### 12. The pre-release draft cuts over once; no manifest migration subsystem ships
+
+No manifest contract has been released, so the repository replaces the draft shape directly with strict v1. Repository fixtures, generated schemas, constructors, and consumers switch together. Runtime code does not retain a draft parser, compatibility aliases, migration journal, recovery UI, content-addressed manifest backup format, or a second schema URL.
+
+The known user workspace is handled as an explicit one-off implementation task against its exact browser origin/profile. Quiesce normal discovery and writes; take an exact-byte backup outside the projects tree; snapshot every available draft `updatedAt`, `deletedAt`, and `revisionState`; and reject duplicate logical IDs, unsafe paths, and destination collisions. Before mutation, preflight every source manifest and proposed strict-v1 output. Missing files referenced by an already-broken draft are reported and preserved as declarations; the cutover neither guesses replacements nor adds cross-field validation.
+
+After a successful preflight, seed exact local rows before discovery can create fallback timestamps, preserve valid parameter sidecars, and replace every manifest through temporary-file writes. Verify every manifest and per-project local value—not only aggregate counts—before deleting temporary artifacts and resuming discovery. On failure, restore original manifest bytes and prior local rows and remove only sidecars created by the task. None of this becomes a production import or migration API.
+
+The existing object-store-to-filesystem conversion is a separate legacy-storage concern. While legacy rows remain, it emits the final strict v1 shape through the ordinary serializer and maps legacy `updatedAt`, `deletedAt`, and `revisionState` to `ProjectLibraryState`. It verifies both destinations before clearing the old row. It must not introduce a manifest-to-manifest migration path.
+
+### 13. Non-project spaces carry no manifest
+
+Ephemeral preview/converter mounts and server-rendered publication surfaces are not projects and must not write `tau.json`. Manifest presence is the discriminator Rule 1 depends on; scratch spaces use purpose-specific inputs instead of a fake project record.
+
+### 14. Manifests are untrusted input and paths come from discovery
+
+Readers bound bytes before `JSON.parse`, validate through the selected strict schema, and quarantine only the invalid entry with a structured reason. Physical provider paths come exclusively from the discovery `ProjectLocator`. A validated manifest `id` is logical identity and may name a virtual route only after duplicate-ID detection; it is never joined into a provider path.
 
 ## Anti-Patterns
 
-- Mirroring manifest fields into an IndexedDB row "for faster listing" — that recreates the dual-source-of-truth this policy exists to end. Cache parse results in memory (the discovery service), never in a second persistent store.
-- Writing `tau.json` from a component, hook, or test helper instead of routing through the project machine.
-- Adding a manifest field that duplicates a canonical path (Rule 7) or embeds bytes (thumbnails are files, not base64 fields).
-- Catching a schema-version rejection and substituting defaults — surface the structured error.
-- Shipping a shape change without a migration function and version bump because "the field is optional".
-- Registering scratch/preview directories in discovery by giving them manifests (Rule 8).
-- Joining a manifest-declared `id` (or any manifest field) into a filesystem path — path identity comes from the manifest's location (Rule 9).
+- Reintroducing `schemaVersion` beside a versioned `$schema` URL.
+- Defining `ProjectManifest` as an intersection with a runtime/UI project type.
+- Using `.loose()`, `.passthrough()`, or spread serialization for a known manifest version.
+- Persisting manifest-derived fields in `projectLibraryStates` “for convenience” or using a local row to establish project existence.
+- Deriving project recency from directory mtime, max descendant mtime, Git checkout time, or thumbnail writes.
+- Keeping `createdAt` without a named, consumed semantic.
+- Embedding parameters or adding a sidecar pointer that duplicates the canonical parameter path.
+- Using a classification such as `mechanical` as an asset ID, or adding a classification field before a non-mechanical consumer exists.
+- Keeping revision turn IDs portable while their authoritative chats remain local.
+- Treating a missing workspace as deletion or clearing local state after an incomplete discovery scan.
+- Shipping a parser, migration framework, or recovery UI for the unreleased draft manifest.
+- Clearing a legacy object-store row before its final strict v1 filesystem project and mapped local state both verify successfully.
 
 ## Summary Checklist
 
-- [ ] Format shape defined once in `packages/types` (Zod); JSON Schema generated, not hand-written.
-- [ ] `schemaVersion` present; migration registry updated; newer-version reads rejected with a structured error.
-- [ ] Exactly one in-app writer; all other in-app call sites route through it.
-- [ ] Watch-reload participant converges external edits; machine-origin writes suppressed from self-reload.
-- [ ] Generated artifacts excluded from activity recency.
-- [ ] No pointer fields for canonical paths; no manifests in non-project spaces.
+- [ ] Valid `tau.json` remains the only project-existence authority.
+- [ ] Manifest, library-state, and composed UI types are separate; serialization is explicit.
+- [ ] `$schema` is the sole manifest version field; strict v1 is generated and becomes immutable when released.
+- [ ] The v1 schema and every nested object reject unknown properties.
+- [ ] `assets` contains exactly `main`; `assets.main.entryFile` is required and `thumbnail` is optional.
+- [ ] `author`, `discipline`, and speculative additional asset keys are absent.
+- [ ] The thumbnail owner alone performs overwrite-safety checks for a declared thumbnail path.
+- [ ] Parameters live only in canonical per-entry sidecars.
+- [ ] Local state contains only `lastActivityAt`, `deletedAt`, and revision state.
+- [ ] Activity is decided by project-domain events, never raw filesystem timestamps.
+- [ ] Soft delete leaves files recoverable; permanent delete is journaled and explicit.
+- [ ] The one-off workspace cutover quiesces the target origin, rejects duplicate IDs, globally preflights without mutation, and verifies strict v1 files plus exact seeded state before cleanup.
+- [ ] No draft parser, manifest migration/recovery subsystem, or second schema URL ships.
+- [ ] Legacy object-store conversion emits strict v1 plus mapped local state and clears a row only after both verify.
+- [ ] No new listing cache or persistent projection is added without measurements and a separate authority contract.
 
 ## References
 
-- Research: `docs/research/headless-thumbnail-rendering-architecture-v4.md` (R1 manifest, R2 discovery, R14 activity hygiene, Finding 4)
-- Research: `docs/research/filesystem-first-policy-alignment.md` (themes T1/T4/T6)
-- Related: `docs/policy/storage-policy.md` (Rule 0 — what belongs in IndexedDB at all)
-- Related: `docs/policy/filesystem-authority-policy.md` (discovery/watch plane, mount routing)
-- Related: `docs/policy/vision-policy.md` ("Files are the interface", "Hosts are peers")
+- Research: `docs/research/tau-json-project-library-state-boundary.md`
+- Research: `docs/research/project-updated-at-activity-boundary.md`
+- Research: `docs/research/headless-thumbnail-rendering-architecture-v4.md`
+- Related: `docs/policy/storage-policy.md`
+- Related: `docs/policy/filesystem-authority-policy.md`
+- Related: `docs/policy/library-api-policy.md`
+- Related: `docs/policy/vision-policy.md`

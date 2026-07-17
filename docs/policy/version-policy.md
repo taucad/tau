@@ -3,7 +3,7 @@ title: 'Version Policy'
 description: 'Versioning, stability tiers, breaking change management, and developer experience for @taucad/* packages. SemVer, experimental/future-flag/stable tiers, deprecation protocol, codemods.'
 status: active
 created: '2026-03-10'
-updated: '2026-03-10'
+updated: '2026-07-14'
 related:
   - docs/policy/release-policy.md
   - docs/policy/library-api-policy.md
@@ -45,7 +45,7 @@ All `@taucad/*` packages follow [SemVer 2.0.0](https://semver.org/) with [semver
 
 ### Pre-1.0 Convention
 
-While packages are below `1.0.0`, minor versions may include breaking changes. The API is not considered stable until `1.0.0`. Even during pre-1.0, breaking changes are communicated via deprecation warnings and changelog entries.
+While published packages are below `1.0.0`, minor versions may include breaking changes. The API is not considered stable until `1.0.0`; published beta changes are communicated in the release version plan/changelog. A contract that has never shipped may be replaced atomically across the repository without deprecation aliases, codemods, or a consumer migration guide. Do not create compatibility machinery for users who cannot exist; record the resulting API in the first applicable beta release note instead.
 
 ### TypeScript Version Support
 

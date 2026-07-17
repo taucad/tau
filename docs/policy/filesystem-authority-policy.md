@@ -1,15 +1,16 @@
 ---
 title: 'Filesystem Authority Policy'
-description: 'The single-filesystem-authority invariant: one FM-worker authority per host, one provider instance per storage root, mounts as pure routing from persistent config, content-addressed discovery, cross-tab coherence, and webaccess handle lifecycle rules.'
+description: 'The single-filesystem-authority invariant: one FM-worker authority per host, one provider instance per storage root, mounts as pure routing from persistent config, manifest-based discovery, cross-tab coherence, and webaccess handle lifecycle rules.'
 status: active
 created: '2026-07-13'
-updated: '2026-07-13'
+updated: '2026-07-17'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/project-manifest-policy.md
   - docs/policy/storage-policy.md
   - docs/research/headless-thumbnail-rendering-architecture-v4.md
-  - docs/research/filesystem-first-policy-alignment.md
+  - docs/research/runtime-model-load-project-root-regression-v3.md
+  - docs/research/tau-json-project-library-state-boundary.md
 ---
 
 # Filesystem Authority Policy
@@ -26,14 +27,14 @@ The thumbnail refresh-loss bug class (v3 forensics) had two structural causes: e
 
 Requirements the filesystem must satisfy at all times:
 
-| Req | Statement                                                                                                                                   |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| A   | One canonical absolute namespace (`/projects/<id>/…`) resolvable at any time from any consumer — never dependent on which page is open      |
-| B   | Heterogeneous storage roots: IndexedDB database(s), the OPFS root, N webaccess directory handles, ephemeral memory scratch                  |
-| C   | Coherence: two reads of the same path through any route observe the same bytes; a write is immediately visible to every consumer in the tab |
-| D   | Reactivity: watchers fire for all writers — in-app, cross-tab, external-on-disk — including the appearance of new projects                  |
-| E   | All consumers (main thread, kernel workers, feature workers) reach storage through one authority via bridges                                |
-| F   | Cross-tab safety: serialized writes and change propagation                                                                                  |
+| Req | Statement                                                                                                                                     |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| A   | One canonical absolute namespace (`/projects/<id>/…`) resolvable at any time from any consumer — never dependent on which page is open        |
+| B   | Heterogeneous storage roots: IndexedDB database(s), the OPFS root, N webaccess directory handles, ephemeral memory scratch                    |
+| C   | Coherence: two reads of the same path through any route observe the same bytes; a write is immediately visible to every consumer in the tab   |
+| D   | Reactivity: watchers fire for all writers — in-app, cross-tab, external-on-disk — including the appearance of new projects                    |
+| E   | All consumers reach storage through one authority; runtime consumers receive only writable rooted views, never the authority-global namespace |
+| F   | Cross-tab safety: serialized writes and change propagation                                                                                    |
 
 The invariant that satisfies them: **one provider instance per storage root, shared by every mount routing into that root; mounts are pure routing entries registered from persistent config at authority boot, never from page lifecycle.**
 
@@ -41,50 +42,50 @@ The invariant that satisfies them: **one provider instance per storage root, sha
 
 ### 1. Single filesystem authority per host
 
-All filesystem I/O runs in one place per host — the file-manager worker in the browser, the runtime filesystem in the CLI. Every consumer (main thread, kernel workers, thumbnail/capture workers) reaches it via MessagePort bridges. No thread outside the authority may instantiate providers, open backing stores, or import backend modules.
+All filesystem I/O runs in one place per host — the file-manager worker in the browser, or the caller-supplied rooted filesystem in CLI/Node environments. Trusted administration uses the authority-global namespace to select and configure project routes. Runtime, GeoSpec, preview, chat, and headless consumers receive only an opaque, fully writable rooted filesystem whose virtual `/` is one selected project. No feature worker may instantiate providers, open backing stores, inspect global routes, or receive the authority-global shared file pool. The main thread remains the writer of asset thumbnail files declared by `tau.json`.
 
 **Why**: Requirement C is unenforceable with more than one writer topology; every coherence mechanism in this policy assumes a single chokepoint.
 
 ### 2. One provider instance per storage root
 
-A storage root is an IndexedDB database, the OPFS root, or one webaccess directory handle. Exactly one provider instance exists per root, keyed as the `ProviderRegistry` standalone cache already keys them (`webaccess:<workspaceId>` for webaccess, else the backend id). Mount resolution must reuse that instance — per-mount fresh instances are forbidden.
+A storage root is one IndexedDB database, the origin's OPFS root, one webaccess directory entry, or an explicitly named memory root. Exactly one provider instance exists per `storageRootKey`: `indexeddb:<database-prefix>`, `opfs:origin`, `webaccess:<workspaceId>`, or a caller-supplied `memory:<scope>`. Mount resolution and scoped reads reuse that instance — per-mount fresh instances are forbidden. Webaccess workspace creation uses `FileSystemDirectoryHandle.isSameEntry()` to preserve the existing `workspaceId` when the user selects the same physical directory again; folder names are never identity.
 
 **Why**: Providers hydrate in-memory indexes once per instance (`DirectIdbProvider._paths`); two instances over one database means one instance's writes are invisible to the other's index — the ENOENT-despite-row-exists class.
-
-> **Adoption**: the standalone-provider cache complies today; `createMountProvider`'s deliberately-uncached contract (`provider-registry.ts`) is retired by v4 R3, which extends the cache keying to mount providers.
 
 CORRECT:
 
 ```typescript
 // Mount resolution and standalone reads share the per-root instance
-const provider = registry.getProvider(scopeKey); // 'webaccess:<workspaceId>' | backend id
+const provider = registry.getProvider(scope); // scope carries the canonical storageRootKey
 ```
 
 INCORRECT:
 
 ```typescript
 // Fresh provider per mount — second instance never sees the first's writes
-const provider = registry.createMountProvider(scope);
+const provider = createProvider(scope);
 mountTable.mount(prefix, provider, config);
 ```
 
 ### 3. Mounts are pure routing, registered from persistent config
 
-`MountTable` entries map a path prefix to `(provider, subpath)` by longest-prefix match — nothing else. Routing is registered at FM-worker boot (and on `ProjectFileSystemConfig` change) from the persisted config for all known projects. Page navigation must not mount or unmount routing; page lifecycle governs watch scopes and UI services only.
+`MountTable` entries map a virtual path prefix to `(provider, providerBasePath)` by longest-prefix match — nothing else. Routing is registered at FM-worker boot and replaced from `ProjectRootConfiguration` whenever persisted project bindings change. Discovery returns physical locators; the main-thread project manager persists any newly discovered logical route and calls `syncProjectRoots()`. Page navigation must not mount or unmount routing; page lifecycle governs watch scopes and UI services only. Creating a rooted view captures the exact resolved mount entry, provider, and provider base path; later operations on that view never re-enter global longest-prefix routing.
 
 **Why**: Requirement A — a path that resolves only while its page is open is not a filesystem, and every consumer that outlives the page (thumbnail worker, discovery, cross-tab events) breaks.
 
 > **Adoption**: project mounts are page-lifecycle-coupled today (`file-manager.machine.ts` mounts on project open); v4 R3 moves registration to worker boot.
 
-### 4. Absolute canonical paths everywhere
+### 4. Use the namespace owned by each boundary
 
-All cross-boundary filesystem APIs take absolute canonical paths (`/projects/<id>/…`). No consumer may depend on a "current project" ambient context for path resolution; normalization (separators, duplicate slashes) happens at the authority boundary.
+Trusted authority and administration APIs take canonical global paths such as `/projects/<id>/…`. A rooted filesystem takes canonical project-local absolute paths such as `/src/main.ts`, with virtual `cwd = /`. Neither boundary accepts relative paths, backslashes, URLs, drive-letter paths, control characters, or traversal above its own `/`. Do not infer a project root from a filename or ambient "current project" state.
 
-**Why**: Relative or context-dependent paths reintroduce requirement-A failures through the back door.
+**Why**: Global paths select authority routes; local paths operate inside an already-selected filesystem. Mixing those namespaces leaks routing and authorization concerns into runtime code.
 
-### 5. Project discovery is content-addressed
+### 5. Project discovery is manifest-based
 
-The authority owns a discovery plane: scan configured storage roots for `/projects/*/tau.json`, parse and validate manifests as untrusted input (`docs/policy/project-manifest-policy.md` Rules 4 and 9), serve the project list, and emit change events when projects appear or disappear — `FileSystemObserver` where available, visibility-aware polling otherwise. An invalid manifest quarantines that project (structured error surfaced); it must never sink the whole list.
+The authority owns a discovery plane: scan configured storage roots for `/projects/*/tau.json`, parse and validate manifests as untrusted input (`docs/policy/project-manifest-policy.md` Rules 4 and 14), preserve the physical `ProjectLocator`, detect duplicate logical IDs, serve the project list, and emit change events when projects appear or disappear. Use `FileSystemObserver` where available and visibility-aware polling otherwise. An invalid manifest, adoption-required directory, or duplicate ID quarantines only that entry with a structured status; it must never sink the whole list.
+
+After discovery, the UI may left-join host-local `ProjectLibraryState` for recency, soft-delete visibility, and revision initialization. That row never establishes existence, supplies manifest content, or changes the physical locator. A missing row is seeded only after a valid manifest is discovered; an inaccessible root does not prove absence and must not trigger local-state cleanup. React Query remains the current listing cache. The authority gains no additional memory or persistent manifest projection without a measured need and a separately reviewed rebuild/invalidation contract.
 
 **Why**: Existence is the manifest on disk (manifest policy Rule 1); a registry that must be told about projects locks out disk-level and agent-driven creation.
 
@@ -96,11 +97,11 @@ Cross-tab writes serialize via Web Locks (`tau-fs-write:<path>`) and propagate v
 
 Each backend (`indexeddb`, `webaccess`, `opfs`, `memory`) is an independent storage system. A provider must never reach into another provider's storage root; operations on one backend must not affect another.
 
-### 8. Standalone read instances are cached and never write
+### 8. Scoped providers are cached; only authority operations may mutate them
 
-Standalone providers (used to browse a backend without mounting it, e.g. the files route grid) are read-only consumers of the same per-root instances (Rule 2), obtained through the `ProviderRegistry` cache. All writes go through the authority's mounted path and its serialization queue — a standalone handle must never be used for mutation.
+Standalone providers (used to browse or discover a backend without mounting it, e.g. the files route grid) reuse the same per-root instances from `ProviderRegistry` (Rule 2). Feature code receives read-only discovery results, never a raw provider. Mutations normally use a mounted authority path. The narrow exceptions—project adoption/remint, creation at an allocated physical basename, and confirmed permanent deletion at an observed `ProjectLocator`—remain named `WorkspaceFileService` authority operations. They take an explicit storage scope and exact physical path, acquire logical-project and physical-directory locks, re-establish identity where applicable, and publish the ordinary authority invalidation/events.
 
-**Why**: Reads through a shared instance are coherent by construction; writes outside the queue bypass locks, invalidation, and change events.
+**Why**: Reads through a shared instance are coherent by construction. Raw provider mutation would bypass locks, invalidation, and change events; a named authority operation preserves those guarantees when no mounted logical route can safely identify the target.
 
 ### 9. WebAccess handle lifecycle is workspace-scoped
 
@@ -130,11 +131,11 @@ Any user-driven workspace change MUST go through the binding-transaction helper 
 
 Missing or stale bindings surface `WorkspaceDirectoryRequiredError('missing')` via the recovery overlay; legacy projects without an explicit `workspaceId` are prompted on first load. The v2 → v3 IDB migration only promotes the legacy `'root'` handle to a regular workspace row — it does not auto-bind projects.
 
-### 12. Project creation is a single mount → write → unmount transaction
+### 12. Project creation is a single bind → route-sync → write → verify transaction
 
-Project creation MUST mount the project prefix on the workspace's storage, persist the file set, then unmount — atomically, inside `useProjectManager.createProject`. Webaccess creation MUST pass `(directoryHandle, workspaceId)` together via `MountConfig`; there is no separate handle-priming step. `memory` is rejected outright with `WorkspaceDirectoryRequiredError('unsupported')` — projects must commit to a durable backend at creation.
+Project creation MUST persist the project's backend binding, synchronize authority routes, write the seed file set and `tau.json`, then read back and validate the manifest — as one serialized transaction inside `useProjectManager.createProject`. Webaccess creation resolves `(directoryHandle, workspaceId)` before persisting the binding; there is no ambient handle-priming step. `memory` is rejected with `WorkspaceDirectoryRequiredError('unsupported')` — durable projects must commit to a durable backend at creation.
 
-The transaction is the only legitimate way to write a project's seed files. UI surfaces (`/projects/new`, "duplicate", remix-from-publication) MUST go through `createProject`; ad-hoc `fileManager.mount` + `writeFiles` flows from non-creation call sites are forbidden because they don't perform the `setProjectFileSystemConfig` write that binds the project to its backend. Creation writes the project's `tau.json` as part of the same transaction (manifest policy Rule 1).
+The transaction is the only legitimate way to write a project's seed files. UI surfaces (`/projects/new`, duplicate, remix-from-publication) MUST go through the project manager; ad-hoc mount/write flows are forbidden because they omit persistent binding, route synchronization, or manifest verification. Creation writes `tau.json` last so discovery never observes a half-created project.
 
 ### 13. Root FM is pinned to `indexeddb`; `initialBackend` is required
 
@@ -142,24 +143,31 @@ The root `<FileManagerProvider rootDirectory='/'>` MUST be instantiated with `in
 
 The root provider MUST NOT consume the `filesystem-backend` cookie at mount time. The cookie is a _project-creation default_ read by `/projects/new` and `/files`, never the seed for the root machine. Cross-tab cookie flips therefore cannot break the root FM, and a stale `memory` cookie value is coerced back to `indexeddb` via `coerceFilesystemBackendCookie` at every selector read site.
 
-### 14. Standalone provider cache is keyed by `workspaceId`; invalidation has a typed contract
+### 14. Provider disposal is keyed by canonical `storageRootKey`
 
-`ProviderRegistry` caches one standalone provider per `(backend, workspaceId)` pair. Webaccess entries MUST NOT be keyed by `handle.name` — two workspaces pointing at folders with the same name would collide. The registry exposes `invalidateStandaloneProvider(backend, workspaceId?)`:
+`ProviderRegistry` caches one provider per canonical `storageRootKey`. Webaccess entries MUST NOT be keyed by `handle.name` — two folders can share a name and one physical directory may be renamed. The filesystem client exposes `disposeStorageRoot(storageRootKey)`, which disposes exactly that provider. Changing or forgetting a workspace disposes `webaccess:<workspaceId>` before the next route sync/read; whole-authority teardown uses `disposeAll()`.
 
-- `invalidateStandaloneProvider('webaccess', workspaceId)` drops exactly one entry; required by `/files` "Change Folder", `forgetWorkspace`, and `bindProjectToWorkspace` (recovery binding) so the next standalone read uses the fresh handle.
-- `invalidateStandaloneProvider('webaccess')` drops every webaccess entry; reserved for the worker boot path.
-- `invalidateStandaloneProvider(non-webaccess)` drops the single backend entry.
+Failure to dispose after replacing a handle is a bug — the registry would otherwise continue serving the previous provider instance under the stable root key.
 
-Failure to invalidate after a handle swap is a bug — the registry will silently serve reads against the previous handle until the cache entry is replaced by reload.
+### 15. Rooted views are the runtime reachability boundary
+
+`WorkspaceFileService.createRootedFileSystem(authorityRoot)` must resolve `authorityRoot` once to an exact project mount and return the ordinary full read/write/watch filesystem surface rebased to local `/`. Reads, writes, directory operations, rename operands, existence checks, and watches all resolve segment-by-segment inside that captured subtree. `..` may collapse local segments but may never ascend above `/`; a mount replacement invalidates the captured view instead of retargeting it.
+
+The view is not read-only. Source files, generated files, `/.tau/cache`, and project-local `/node_modules` are all writable and persist through the underlying provider. No rights matrix, write allowlist, grant lifecycle, route generation, receipt, or service worker participates in this boundary. Runtime and headless code receive the opaque filesystem and local path only; project selection and authority-global routing remain in trusted composition code.
+
+**Why**: Reachability is enforced once, before provider I/O, without asking every runtime layer to reproduce authorization logic.
 
 ## Anti-Patterns
 
 - Creating a provider per mount, per page, or per call. One instance per storage root, always (Rule 2).
 - Mounting project routing from page/component lifecycle, or unmounting it on navigation (Rule 3).
 - ZenFS-era patterns: `resolveMountConfig`, per-instance data preloads, the `tau-fs` single-store schema. The API is removed; any doc or comment prescribing it is stale.
-- Keying anything webaccess by `handle.name` (Rule 14) or holding an ambient "active handle" in the worker (Rule 9).
+- Keying anything webaccess by `handle.name` (Rules 2 and 14) or holding an ambient "active handle" in the worker (Rule 9).
 - Catching `WorkspaceDirectoryRequiredError` and falling back to another backend (Rule 10).
 - Adding a second cross-tab coherence channel instead of using `CrossTabCoordinator` (Rule 6).
+- Treating `ProjectLibraryState` as a discovery registry or using it to recover manifest fields (Rule 5).
+- Passing an authority-global bridge, global file-pool buffer, project id, or global `/projects/<id>` path into runtime/headless code instead of issuing a rooted view (Rules 4 and 15).
+- Reintroducing read-only source views or cache-only write allowlists; a rooted runtime filesystem is fully writable inside its virtual tree (Rule 15).
 
 ## Rule Mapping (former filesystem-policy numbering)
 
@@ -178,6 +186,7 @@ Code and docs citing the old numbers resolve here:
 
 ## References
 
-- Implementation: `packages/filesystem/src/{mount-table.ts,provider-registry.ts,cross-tab-coordinator.ts}`, `packages/filesystem/src/backend/direct-idb-provider.ts`, `apps/ui/app/filesystem/{handle-store.ts,workspace-errors.ts}`, `apps/ui/app/machines/file-manager.{machine,worker}.ts`
+- Implementation: `packages/filesystem/src/{mount-table.ts,provider-registry.ts,cross-tab-coordinator.ts,workspace-file-service.ts}`, `packages/filesystem/src/backend/direct-idb-provider.ts`, `apps/ui/app/filesystem/{handle-store.ts,workspace-errors.ts}`, `apps/ui/app/machines/file-manager.{machine,worker}.ts`
 - Research: `docs/research/headless-thumbnail-rendering-architecture-v4.md` (Finding 5, R3)
+- Research: `docs/research/runtime-model-load-project-root-regression-v3.md` (rooted runtime filesystem boundary)
 - Related: `docs/policy/filesystem-policy.md` (read/write/watch/RPC rules), `docs/policy/project-manifest-policy.md` (discovery contract)

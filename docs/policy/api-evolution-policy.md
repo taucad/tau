@@ -3,7 +3,7 @@ title: 'API Evolution Policy'
 description: 'Rules for evolving library APIs over time: future flags, stability tiers, API surface management, advanced error patterns, and provider abstractions.'
 status: active
 created: '2026-03-10'
-updated: '2026-03-10'
+updated: '2026-07-14'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/version-policy.md
@@ -417,6 +417,12 @@ describe('createRuntimeClient', () => {
 - Type tests catch regressions that runtime tests miss: return type narrowing, generic inference, conditional types, and discriminated union exhaustiveness.
 
 **Why**: The semver-ts specification requires that minor releases don't introduce new type errors. Type-level tests are the only reliable way to enforce this. The AI SDK uses this pattern extensively — every `tool()`, `generateText()`, and schema utility has corresponding type tests that would catch breaking type changes before they ship.
+
+Capability-driven APIs require positive and negative route tests. For every independently declared capability property, type tests must prove that capable routes accept the property, incapable routes reject it, composed routes preserve only the supported intersection, and route selectors/capability manifests infer the same surface exposed at runtime. A generic catch-all options bag is not a substitute for route inference.
+
+### Pre-release contract replacement
+
+Before a public package's first release, an internally consumed authoring or RPC contract may be replaced atomically without aliases, overload bridges, codemods, deprecation warnings, or migration guides. The repository must migrate every first-party producer and consumer in the same change, remove the old names, and retain type/runtime coverage for the resulting contract. This exception does not apply once any affected version has been published.
 
 ## 10. Flexible Schema Acceptance
 

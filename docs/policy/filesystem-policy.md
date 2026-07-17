@@ -3,10 +3,10 @@ title: 'Filesystem Policy'
 description: 'Standards for filesystem access, data transfer, caching, concurrency, and watcher architecture in the Tau application. Covers read/write semantics, bridge RPC, and kernel/UI watch planes.'
 status: active
 created: '2026-03-05'
-updated: '2026-07-13'
+updated: '2026-07-17'
 related:
   - docs/policy/filesystem-authority-policy.md
-  - docs/research/filesystem-first-policy-alignment.md
+  - docs/research/runtime-model-load-project-root-regression-v3.md
   - docs/research/filesystem-architecture.md
   - docs/research/fs-capabilities.md
   - docs/research/large-repo-import-performance.md
@@ -26,7 +26,7 @@ A single-writer topology with zero-copy binary transfer and bounded caches preve
 
 ## Core Principles
 
-1. **Single writer, many readers** — all mutating FS operations flow through one worker with one serialization queue
+1. **Registry-owned providers, one mutation authority** — `ProviderRegistry` is the sole provider owner; non-owning mounts only route; all mutations flow through `WorkspaceFileService` queues
 2. **Zero-copy binary transfer** — `Uint8Array` payloads must use `postMessage` transfer lists, never structured clone alone
 3. **Lazy loading over eager recursion** — never traverse a directory tree deeper than the consumer needs
 4. **Bounded caches** — every in-memory cache must have an eviction policy (TTL, max size, or LRU)
@@ -36,6 +36,8 @@ A single-writer topology with zero-copy binary transfer and bounded caches preve
 8. **Loss-aware event streams** — watcher overflow/dropped-event conditions must trigger explicit resync behavior
 9. **Bridge skip-originator is internal** — when a filesystem bridge port initiates a mutation, the resulting `ChangeEvent` may carry an originating port id for intra-process routing only (`tagEventOrigin` / `getEventOrigin` on `@taucad/filesystem`). The filesystem bridge adapter (`@taucad/fs-bridge` `exposeFileSystem`) skips delivering `fileChanged` back to that port. This metadata is **not** part of the wire shape of `ChangeEvent`, is **not** passed as a second argument to `ChangeEventBus.emit`, and **must not** surface in consumer-facing UI APIs.
 10. **Filesystem transport reports facts, not project recency** — filesystem APIs emit typed content-change facts; project-domain participants and machines decide whether those facts are activity.
+11. **Virtual routes are projections, not physical identity** — `/projects/<id>` resolves through a persisted locator; provider paths come from `{ storageRootKey, providerBasePath }`, never from manifest fields.
+12. **Runtime reachability is filesystem-owned** — issue one fully writable rooted view per selected project; runtime receives only that filesystem and local paths.
 
 ## Bridge self-write suppression (skip-originator)
 
@@ -56,19 +58,33 @@ Main Thread                       File Manager Worker              Kernel Worker
      │    (MessagePort)                  │              (MessagePort)        │
      │   readFile, writeFile, stat       │   readFile, readFiles, stat   │
      │   readShallowDirectory            │   exists, readdir             │
-     │   mount, readBackendFileTree      │   writeFile (cache only)      │
+     │   configureProjectRoots           │   full read/write/watch       │
      │                                   │                               │
      │                                   │   MountTable + providers      │
      │                                   │   (DirectIdb / WebAccess /   │
      │                                   │   OPFS / Memory)             │
 ```
 
-All filesystem I/O runs on the file manager worker. The main thread and kernel workers access it exclusively via MessagePort RPC using the **same bridge mechanism** (`createFileSystemBridge` → `MessageChannel` → `createBridgeProxy`). The only difference is the TypeScript type used for the proxy:
+All browser filesystem I/O runs on the file manager worker. The main thread and kernel workers access it via the **same bridge mechanism** (`createFileSystemBridge` → `MessageChannel` → `createBridgeProxy`), but not through the same namespace:
 
-- **Main thread**: `createBridgeProxy<FileManagerProtocol>` — full API including worker management (`mount(prefix, MountConfig)`, `unmount`, `invalidateStandaloneProvider`), workspace-scoped operations via the `{ scope }` options bag (`readFile`, `unlink`, `rmdir`, `getZippedDirectory`, `readShallowDirectory`), diagnostics (`readBackendFileTree`), and higher-level operations (`copyDirectory`)
-- **Kernel worker**: `createBridgeProxy<RuntimeFileSystemBase>` — 11 base primitives only (`readFile`, `writeFile`, `stat`, `readdir`, `exists`, etc.)
+- **Main thread**: `createBridgeProxy<FileManagerProtocol>` — full API including root configuration (`configureProjectRoots`), discovery (`listProjectManifests`), canonical-root disposal (`disposeStorageRoot`), workspace-scoped operations via the `{ scope }` options bag, diagnostics, and higher-level copy/move operations
+- **Kernel worker**: `createBridgeProxy<RuntimeFileSystemBase>` over a `WorkspaceFileService.createRootedFileSystem('/projects/<id>')` handler — full primitive read/write/watch access, with `/` rebased to that project and no global file-pool shortcut
 
-This is the Interface Segregation Principle (ISP): kernels receive a narrow API surface matching their needs. Both proxies talk to the same worker, same `fileManager` object, same bridge server. No thread may instantiate providers or touch backing stores outside the worker (`docs/policy/filesystem-authority-policy.md` Rule 1).
+This is both interface segregation and reachability confinement: kernels receive the narrow API surface they need, and every path they can express resolves only inside the captured project mount. Both proxies talk to the same worker and provider authority, but scoped connections dispatch to a rooted handler instead of the global `fileManager`. No thread may instantiate providers or touch backing stores outside the worker (`docs/policy/filesystem-authority-policy.md` Rules 1 and 15).
+
+## Rooted runtime filesystem rules
+
+### Rule 0a: Canonicalize before routing or provider I/O
+
+Use `resolveVirtualPath` as the single virtual-path boundary. Require an absolute POSIX path; reject URLs, backslashes, drive-like paths, control characters, and traversal above `/`. Apply the same contract in `MountTable`, WFS, fs-bridge root selection, browser adapters, Node adapters, and fs-client path resolution.
+
+### Rule 0b: Capture one exact mount for each rooted view
+
+`createRootedFileSystem(authorityRoot)` resolves the selected mount once and captures its provider and base path. Every operation joins a canonical local path to that captured base directly; it must not call the global mount table again. If the mount is replaced, reject later admissions with `ESTALE` instead of silently switching storage. Rename validates both local operands before either provider call.
+
+### Rule 0c: Preserve full write and watch semantics inside the view
+
+A rooted view supports the same writes, queues, cache invalidation, persistence, and events as global WFS operations. Do not add cache-only writes, read-only source trees, or path allowlists. Rebase watch requests and emitted events to local `/`, and never deliver sibling-project events. Scoped runtime bridges use transfer/copy delivery and must not receive the authority-global shared file pool, because a pool hit would bypass rooted RPC dispatch.
 
 ## Read Rules
 
@@ -158,6 +174,12 @@ eventBus.emit({ type: 'directoryChanged', path: '/', backend: rootBackend });
 
 **Why**: A successful provider write is incomplete while writer caches retain old bytes or exact-path watchers cannot observe the committed path.
 
+### Rule 5b: Provider projections change only after durable commit
+
+Providers that maintain in-memory path, directory, size, mtime, or content-metadata projections update them only after the backing mutation commits. `FileSystemAccessProvider` aborts the writable stream when write or close fails. `DirectIdbProvider` performs same-store file rename as one put+delete transaction and stages write, bulk-import, and rename projection changes until transaction completion. A failed or aborted transaction leaves the prior projection intact; if commit state is uncertain, rehydrate before serving another metadata read.
+
+**Why**: Mutating the projection before durable completion turns a failed write into a false successful `stat`/`readdir`, which is data corruption at the API boundary.
+
 ### Rule 6: Transfer, don't clone
 
 Binary data sent to the worker for writes must use `extractTransferables` to build a transfer list. The sender's buffer is detached after transfer — do not reference it after `postMessage`.
@@ -185,9 +207,13 @@ loadColumnTree(backend); // Full recursive traversal
 
 ### Rule 7a: No project-recency flags in filesystem APIs
 
-Filesystem packages and UI file facades must not accept options that decide whether `Project.updatedAt` changes. They should emit precise events (`written`, `batchWritten`, `fileCopied`, `directoryCopied`, `renamed`, `deleted`, etc.) with workspace-relative affected paths. The project route participant forwards those facts to `project.machine`, and the project machine applies the content-path classifier and owns the timestamp decision.
+Filesystem packages and UI file facades must not accept options that decide whether `ProjectLibraryState.lastActivityAt` changes. They should emit precise events (`written`, `batchWritten`, `fileCopied`, `directoryCopied`, `renamed`, `deleted`, etc.) with workspace-relative affected paths. The project route participant forwards those facts to `project.machine`, and the project machine applies the content-path classifier and owns the activity decision.
 
 **Why**: A filesystem layer cannot distinguish navigation repair, derived metadata, hydration, housekeeping, and user-visible content activity reliably after intent has been erased. Pushing project recency into file APIs creates per-callsite debate and reintroduces recent-project list jumps.
+
+### Rule 7b: System-artifact visibility is a UI projection
+
+`tau.json`, `thumbnail.webp`, and `.tau/**` are real filesystem entries and remain readable through ordinary APIs. File-tree presentation may hide or decorate them as system artifacts, but must do so in its projection layer. Providers, discovery, copy/export, and publication code must not pretend these files do not exist; callers that omit them do so through explicit artifact filters.
 
 ## Tree Refresh Rules
 
@@ -359,9 +385,11 @@ External changes (outside Tau writes) are handled in this order:
 
 1. `FileSystemObserver` when available and stable for the active backend/browser
 2. visibility-aware polling fallback when observer is unavailable
-3. periodic reconcile scan only when event quality is uncertain (`unknown`/overflow paths)
+3. one coalesced root reconcile scan whenever event quality is uncertain (`unknown`, `errored`, reset, or overflow)
 
 Treat `FileSystemObserver` as progressive enhancement, not a universal baseline.
+
+Every successful local or remote mutation, and every concrete observer event, enters the same invalidation plane: invalidate shared file-pool bytes and provider/file-tree projections, repair a DirectIDB index miss from backing storage when necessary, emit the ordinary change event, and refresh discovery when a project manifest may have appeared or disappeared. Web Locks serialize multi-path mutations when available; BroadcastChannel notification and invalidation still occur when locks are unavailable.
 
 ### Rule 26: Exclude self-generated churn from kernel watch streams
 
@@ -415,23 +443,6 @@ Expose watcher diagnostics from worker internals:
 
 A watcher path that cannot be observed cannot be trusted at scale.
 
-## Plan Update Requirements (for next implementation plan)
-
-The next implementation plan is incomplete unless all of the following are explicitly covered:
-
-1. **Watch contract upgrade**: request shape includes `recursive/includes/excludes/filter/correlationId`.
-2. **Ref-counted watch dedup**: identical requests share one subscription.
-3. **Event coalescer**: canonicalization rules for add/delete/update/rename bursts.
-4. **Overflow protocol**: explicit reset/resync event and consumer behavior.
-5. **Kernel fast-path migration**: remove `use-project.tsx` relay and render-time `changedPaths` dependency.
-6. **Incremental dependency watch set diffing**: avoid full resubscribe churn.
-7. **Incremental tree patching**: no mutation-triggered full recursive tree scans.
-8. **Self-churn exclusion**: explicit ignore patterns for generated cache paths.
-9. **Lifecycle cleanup guarantees**: disconnect/unmount cleanup of watches and queues.
-10. **Performance acceptance gates**: concrete watch latency/throughput/flood tests.
-
-If one of these items is absent, the plan is not ready for "best-in-class" watcher implementation.
-
 ## Required Watch Test Matrix
 
 Minimum required test coverage for watcher correctness and performance:
@@ -481,6 +492,10 @@ For bulk import operations (GitHub import, ZIP upload), write file batches in as
 ### Rule 35: Provider hydration awareness
 
 `DirectIdbProvider` hydrates a path index once per instance at initialization (`getAllKeys()`, ~26ms for 10k entries) — a metadata index, not a full-data preload. Hydration cost and index divergence are why provider instances are per-storage-root singletons (`filesystem-authority-policy.md` Rule 2): every extra instance repeats hydration and holds an index that never learns of the others' writes. (The ZenFS-era full-data mount preload this rule previously described is retired.)
+
+## Project-root configuration sync
+
+The main thread owns persisted `ProjectFileSystemConfig` and storage-root handles. It sends a cloneable `ProjectRootConfiguration` to the file-manager worker at boot and after a binding/discovery change. The worker atomically replaces non-owning project routes while reusing registry-owned providers. Reads and writes may proceed only after that sync resolves; page navigation is not a configuration event.
 
 ## Performance Budget
 

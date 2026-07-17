@@ -3,12 +3,12 @@ title: 'Kernel Architecture Policy'
 description: 'CAD runtime worker architecture from editor to geometry computation. Covers ProjectMachine, CadMachine, RuntimeClient, plugin model, transport, and lifecycle.'
 status: active
 created: '2026-02-18'
-updated: '2026-07-13'
+updated: '2026-07-16'
 related:
   - docs/policy/worker-policy.md
   - docs/policy/filesystem-authority-policy.md
   - docs/research/headless-thumbnail-rendering-architecture-v4.md
-  - docs/research/filesystem-first-policy-alignment.md
+  - docs/research/runtime-model-load-project-root-regression-v3.md
 ---
 
 # Kernel Architecture Policy
@@ -69,6 +69,8 @@ Concrete option placement MUST be enforced by **per-transport Zod schemas**. The
 
 Third-party transports pick the descriptor row matching their wire; avoid `@taucad/runtime/testing` in any production bundle (ESLint bans it).
 
+For persisted browser projects, trusted application composition selects the authority-global route and supplies a writable rooted filesystem. Runtime transports, workers, kernels, bundlers, middleware, GeoSpec, and headless rendering receive only that opaque filesystem plus project-local absolute paths. Their virtual working directory is always `/`; none may receive a project id, `projectRootPath`, global mount table, global `/projects/<id>` path, grant/rights object, or authority-global file-pool buffer.
+
 ## Entity Model
 
 | Entity                     | Purpose                                                                                                                                                                                                                                                                                                                                   | Layer         |
@@ -78,7 +80,7 @@ Third-party transports pick the descriptor row matching their wire; avoid `@tauc
 | **RuntimeTransportClient** | Fat consumer-facing transport handle. Owns SAB, abort, geometry pool, FS bridge. `client.connect()` takes no arguments — every wire concern is closed over by the transport at construction.                                                                                                                                              | Framework     |
 | **RuntimeWorkerClient**    | Protocol client wrapping a `RuntimeTransportClient` with request/response correlation and typed callbacks.                                                                                                                                                                                                                                | Framework     |
 | **KernelRuntimeWorker**    | Worker-side orchestrator. Manages kernel selection, middleware chain, bundler routing.                                                                                                                                                                                                                                                    | Worker        |
-| **RuntimeFileSystem**      | Opaque consumer-facing filesystem value produced by `fromMemoryFs`, `fromNodeFs`, `fromBrowserFs`, `fromFsLikeOpaque`, `fromWorkerOpaque`, etc. Passed into **`webWorkerTransport({ fileSystem })`** / **`inProcessTransport({ runtime, fileSystem })`**. Internal handle representation lives under `transport/_internal`.               | Consumer      |
+| **RuntimeFileSystem**      | Opaque consumer-facing filesystem value produced by `fromMemoryFs`, `fromNodeFs`, `fromBrowserFs`, `fromFsLike`, or `fromFileSystemBridge`. Passed into **`webWorkerTransport({ fileSystem })`** / **`inProcessTransport({ runtime, fileSystem })`**. Internal handle representation lives under `transport/_internal`.                   | Consumer      |
 | **KernelDefinition**       | Kernel plugin contract (author API, via `defineKernel`). Runs in worker.                                                                                                                                                                                                                                                                  | Plugin Author |
 | **BundlerDefinition**      | Bundler plugin contract (author API, via `defineBundler`). Declares supported `extensions`.                                                                                                                                                                                                                                               | Plugin Author |
 | **KernelMiddleware**       | Middleware plugin contract (author API, via `defineMiddleware`). Wraps kernel operations.                                                                                                                                                                                                                                                 | Plugin Author |
@@ -158,7 +160,7 @@ The `render()` method accepts two input shapes via generic overloads:
 
 **Inline source mode** (`InlineRuntimeSource<Files>`): A filename-to-content map under `source.files`. When the map has a single key, `entry` is optional (the runtime picks the only key). When multiple keys exist, `entry` is required to specify the entry point. The runtime stages files into the transport-owned filesystem, then connects and renders. High-level helpers provide a filesystem automatically; raw transports require `fileSystem`.
 
-**Filesystem mode** (`FilesystemRuntimeSource`): Renders from a connected filesystem. `source.path` can be a string shorthand (e.g., `'/src/main.ts'`) or a `GeometryFile` object. File-change invalidation is owned by the worker's filesystem watch path, not a public render-input field.
+**Filesystem mode** (`FilesystemRuntimeSource`): Renders from a connected filesystem. `source.path` can be a project-local string shorthand (e.g., `'/src/main.ts'`) or a `GeometryFile` object. File-change invalidation is owned by the worker's filesystem watch path, not a public render-input field. Persisted projects expose source, `/.tau/cache`, generated files, and project-local `/node_modules` through one fully writable rooted tree.
 
 ### Geometry Event
 
@@ -192,7 +194,9 @@ The framework builds higher-level operations from these primitives internally:
 - `getDirectoryContents(dir)` via `readdir(dir)` + `Promise.all(names.map(readFile))`
 - `getDirectoryStat(dir)` via `readdir(dir)` + `Promise.all(names.map(stat))`
 
-Convenience constructors (all opaque, transport-ready): `fromNodeFs(basePath)`, `fromMemoryFs()`, `fromFsLikeOpaque(fsLike, rootPath?)`, `fromBrowserFs(...)`, `fromWorkerOpaque(worker)`.
+Convenience constructors (all opaque, transport-ready): `fromNodeFs(basePath)`, `fromMemoryFs()`, `fromFsLike(fsLike, rootPath?)`, `fromBrowserFs(...)`, and `fromFileSystemBridge(openConnection)`. The bridge factory opens a fresh scoped connection for each runtime binding or initialize retry.
+
+Runtime filesystem access is intentionally authorization-blind. It resolves, reads, writes, watches, bundles, caches, and renders paths exposed by the supplied filesystem. Confinement belongs to the filesystem implementation; `cwd = /` is lookup context, not an authorization check. Node lexical/symlink containment protects the adapter boundary, but direct malicious `node:fs` access requires a separate OS/container sandbox.
 
 ## Transport Abstraction
 
@@ -356,8 +360,8 @@ Kernel modules define geometry computation logic. Each kernel is an ES module lo
 - `initialize(options, runtime)` — load WASM, register builtin modules. `options` is type-safe via the `Options` generic inferred from `optionsSchema`
 - `getDependencies(input, runtime, ctx)` — return file dependencies
 - `getParameters(input, runtime, ctx)` — extract parameters from code
-- `createGeometry(input, runtime, ctx)` — evaluate source → `{ nativeHandle, geometry? }`. The nativeHandle carries **all export-facing evidence** (shapes, resolved interfaces, datum frames). Mesh-native kernels (manifold, jscad, tau) return inline `geometry`; BRep kernels (replicad, opencascade, zoo) omit it and implement `meshGeometry`
-- `meshGeometry(input, runtime, ctx)` _(optional)_ — nativeHandle → display artifact (`GeometryResponse`) at preview tessellation. Runs **only on the display path**, at the kernel boundary; a BRep-only export never calls it. Contract invariant: a kernel provides a display path either via inline `geometry` or via `meshGeometry` — the orchestrator rejects display renders when neither exists
+- `createGeometry(input, runtime, ctx)` — evaluate source → `{ nativeHandle, geometry? }`. The nativeHandle carries **all export-facing evidence** (shapes, resolved interfaces, datum frames). Manifold and Tau return display-ready inline `geometry`; Replicad, OpenCascade, Zoo, and JSCAD return reusable native evidence and implement `meshGeometry`
+- `meshGeometry(input, runtime, ctx)` _(optional)_ — nativeHandle → display artifact (`GeometryResponse`) at preview tessellation or display packing. Runs **only on the display path**, at the kernel boundary; export-only requests never call it. Contract invariant: a kernel provides a display path either via inline `geometry` or via `meshGeometry` — the orchestrator rejects display renders when neither exists
 - `exportGeometry(input, runtime, ctx)` — export using the framework-materialized nativeHandle. Mesh formats tessellate internally at export quality; BRep formats (STEP/IGES) never tessellate
 
 ### MessagePort Protocol
@@ -387,7 +391,7 @@ During detection, bare specifiers appear as external imports in `metafile.output
 ## Package Exports
 
 ```
-@taucad/runtime          → createRuntimeClient, types, presets, fromNodeFs, fromMemoryFs, fromFsLikeOpaque, fromBrowserFs
+@taucad/runtime          → createRuntimeClient, types, presets, fromMemoryFs, fromFsLike, fromFileSystemBridge
 @taucad/runtime/transport → defineRuntimeTransport, inProcessTransport, webWorkerTransport, nodeWorkerTransport
 @taucad/runtime/kernels  → replicad(), manifold(), zoo(), openscad(), jscad(), tau()
 @taucad/runtime/middleware → parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()
@@ -494,13 +498,13 @@ Consumer-facing input uses `options` naming; validated output uses `config` inte
 
 The `geometryCache()` middleware persists three role-aligned entries under `.tau/cache/geometry/`:
 
-| Cache      | File                | Wraps            | Stores                                                                       |
-| ---------- | ------------------- | ---------------- | ---------------------------------------------------------------------------- |
-| **build**  | `{hash}.bin`        | `createGeometry` | `serializedNativeHandle` (+ inline display geometry for mesh-native kernels) |
-| **mesh**   | `mesh-{hash}.bin`   | `meshGeometry`   | Display `GeometryResponse` at preview tessellation                           |
-| **export** | `export-{hash}.bin` | `exportGeometry` | `ExportFile[]`                                                               |
+| Cache      | File                | Wraps            | Stores                                                                          |
+| ---------- | ------------------- | ---------------- | ------------------------------------------------------------------------------- |
+| **build**  | `{hash}.bin`        | `createGeometry` | `serializedNativeHandle` (+ inline display geometry when the kernel returns it) |
+| **mesh**   | `mesh-{hash}.bin`   | `meshGeometry`   | Display `GeometryResponse` at preview tessellation                              |
+| **export** | `export-{hash}.bin` | Final export leg | Target `ExportFile[]` after selected content contributors/transcoders           |
 
-A warm export deserializes the build entry's native handle instead of reheating; a headless BRep export writes no mesh entry at all. Cache temperature must not change export output: live, reheated, and deserialized handles produce structurally identical STEP (verified by the replicad conformance suite), and `exportSTEP` pins its `Interface_Static` state on every call so unit statics cannot leak between exports sharing a wasm instance.
+A source-scoped build key has one operation-invariant create-result shape: request-specific display packing belongs in `meshGeometry`, while file encoding belongs in `exportGeometry`. A warm export deserializes the build entry's native handle instead of reheating, and any export-only request writes no mesh entry. Cache temperature must not change export output: live, reheated, and deserialized handles produce structurally identical STEP (verified by the replicad conformance suite), and `exportSTEP` pins its `Interface_Static` state on every call so unit statics cannot leak between exports sharing a wasm instance.
 
 ### File-Level Caches (persist across render cycles)
 
@@ -520,31 +524,32 @@ A warm export deserializes the build entry's native handle instead of reheating;
 
 ## Multi-Client Topology & Cache Parity
 
-One project filesystem serves **N runtime clients**: the interactive worker (viewport), the thumbnail worker, the agent capture worker, and the CLI — peers over the same files and the same L2 geometry cache (`.tau/cache/geometry`). The single-client-per-project assumption is retired.
+One project filesystem serves **N runtime clients**: the interactive worker, one shared headless-image worker for thumbnails and plain captures, and CLI/headless clients — peers over the same files and the same L2 geometry cache (`.tau/cache/geometry`). The single-client-per-project assumption is retired.
 
 ```mermaid
 flowchart LR
     IW[Interactive worker\nRuntimeClient] --> L2[(L2 geometry cache\n.tau/cache/geometry)]
-    TW[Thumbnail worker\nRuntimeClient] --> L2
-    CW[Capture worker\nRuntimeClient] --> L2
+    HW[Headless image worker\nthumbnails + captures] --> L2
     CLI[CLI / headless agent\ncreateNodeClient + presets] --> L2
     L2 --- FS[(Project filesystem\nsingle authority)]
 ```
 
 ### Hash-Parity Rule
 
-Clients that intend to share cache entries MUST be byte-identical everywhere the hash looks. `dependencyHash` folds in file hashes, kernel options (e.g. `withBrepEdges`), parameters, render/export options, and the **middleware chain identity** — `{name, version, index, options}` per enabled middleware (`computeBaseDependencies` in `kernel-worker.ts`). A mismatched client does not error — it silently forks the cache and recomputes everything, invisible except as CPU time. Any new runtime client MUST land with a parity test proving that a warm render on one client is a cache hit on the other.
+Clients that intend to share cache entries MUST be byte-identical everywhere the selected phase/route identity looks. `dependencyHash` folds in file hashes, kernel options, parameters, operation options including `content`, and each selected mutative middleware participant's stable plugin ID, version, options, and selected order. Non-mutative taps (`mutates: false`) are excluded. A mismatched client does not error — it forks the cache and recomputes. Any new runtime client MUST land with a parity test proving that a warm compatible operation on one client is a cache hit on the other.
 
 ### Middleware Placement Rules
 
 - The middleware array is an onion: earlier entries are **outer** layers; the cache stores what inner layers return _after_ transforms have run on the way back up.
-- Transform middleware (`gltfCoordinateTransform`, `gltfEdgeDetection`) wraps the create/mesh phases only, never export — the display artifact is Z-up/mm with edges for every kernel; export GLBs get neither.
-- **No per-client middleware.** Chain identity is hashed (see above), so a middleware added for one client's needs forks the very cache that client depends on. Per-client behavior — writing a thumbnail, capturing bytes for an agent — lives _outside_ the chain, in plain worker code around the runtime client's calls (render → consume result → write over the fs-bridge). See `docs/research/headless-thumbnail-rendering-architecture-v4.md` Finding 9.
+- Transform and content-contributor middleware declares the phases/routes and content properties it supports. Display transforms remain on the mesh leg; an export route may select an export-leg contributor such as glTF edge inclusion without making all exports display artifacts.
+- Per-client non-mutative taps are permitted. Per-client byte-changing middleware is not cache-transparent and therefore participates in the selected identity instead of relying on a blanket chain hash.
 - `geometryCache`'s position is deliberate: it stores post-transform artifacts. Do not reorder the shared chain without re-deriving every consumer's expectations — reordering is also a hash change for everyone.
 
-### Mesh-Artifact Sourcing for Image Transcodes
+### Content-Aware Export Sourcing
 
-Image outputs (thumbnails, agent captures, `taucad export --ext=webp`) consume the **mesh-phase artifact** — the cached, middleware-enriched GLB the viewport shows (render tessellation, Z-up/mm, kernel + fallback edges) — never the export leg. The export leg exists for interop downloads (STEP/STL/GLB at export tessellation, no display transforms). Render (`0.02/20°`) and export (`0.01/20°`) tessellation defaults deliberately differ, so an image pipeline riding the export leg can never share the display cache (see `docs/research/headless-thumbnail-rendering-architecture-v4.md`, Findings 2–3).
+`content` is the framework-level request for semantic output content, independently inferred per selected route property. `includeEdges` is supported only where the selected route can preserve edge primitives; `includeTopology` is independently advertised and inferred. Rendering defaults `includeTopology` to `true`; exports default it to `false`. Unsupported properties are rejected by route-aware types and runtime validation rather than broadcast to every kernel.
+
+Image routes use the export leg so callers can select export tessellation and content without overloading renderer options. On a final-cache miss, the runtime materializes the selected source artifact once, applies selected content contributors and transcoders, and caches only the final target. Direct glTF routes may request edges; image transcoders consume the resulting glTF source. Interop routes retain their own coordinate/unit/tessellation conventions and do not receive display-only mesh middleware. A separately persisted source stage requires evidence and an explicit lifecycle contract; it is not part of the current middleware API.
 
 ## Future Work -- Render Pipeline Cancellation
 

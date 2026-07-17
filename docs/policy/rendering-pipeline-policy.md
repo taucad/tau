@@ -3,7 +3,10 @@ title: 'Rendering Pipeline Policy'
 description: 'Unified PBR defaults, material policy, tone mapping, AO, environment strategy, and performance patterns for the CAD viewer.'
 status: active
 created: '2026-02-15'
-updated: '2026-06-18'
+updated: '2026-07-16'
+related:
+  - docs/research/headless-gltf-interleaved-accessor-corruption-v2.md
+  - docs/research/project-card-thumbnail-preview-parity.md
 ---
 
 # Rendering Pipeline Policy
@@ -25,18 +28,21 @@ baseColorFactor:  [0.8, 0.8, 0.8, 1]  (fallback when no source color)
 doubleSided:      true
 ```
 
-These values are defined in `libs/types/src/constants/material.constants.ts` as `cadMaterialDefaults` and imported by all conversion pipelines.
+These values are defined in `packages/types/src/constants/material.constants.ts` as `cadMaterialDefaults` and imported by all conversion pipelines.
 
 ### Pipelines Covered
 
-| Pipeline              | Source               | File                                        |
-| --------------------- | -------------------- | ------------------------------------------- |
-| OCCT (STEP/IGES/BREP) | `packages/converter` | `loaders/occt.loader.ts`                    |
-| Replicad Kernel       | `apps/ui`            | `kernel/replicad/utils/replicad-to-gltf.ts` |
-| JSCAD Kernel          | `apps/ui`            | `kernel/jscad/jscad-to-gltf.ts`             |
-| OpenSCAD Kernel       | `apps/ui`            | `kernel/utils/export-glb.ts`                |
+| Pipeline              | Source                  | File                                                                |
+| --------------------- | ----------------------- | ------------------------------------------------------------------- |
+| OCCT (STEP/IGES/BREP) | `packages/converter`    | `packages/converter/src/loaders/occt.loader.ts`                     |
+| Replicad Kernel       | `packages/runtime`      | `packages/runtime/src/kernels/replicad/utils/replicad-to-gltf.ts`   |
+| JSCAD Kernel          | `packages/runtime`      | `packages/runtime/src/kernels/jscad/jscad-to-gltf.ts`               |
+| OpenSCAD/shared mesh  | `packages/runtime`      | `packages/runtime/src/utils/export-glb.ts`                          |
+| Fallback edge overlay | Runtime glTF middleware | `packages/runtime/src/middleware/gltf-edge-detection.middleware.ts` |
 
-Edge/line materials use `metallicFactor: 0`, `roughnessFactor: 1`, as they are rendered as flat-shaded `LineMaterial` and do not participate in PBR lighting.
+Tau-generated auxiliary edge overlays use `cadEdgeOverlayMaterialDefaults`: linear `baseColorFactor: [0, 0, 0, 1]`, `metallicFactor: 0`, `roughnessFactor: 1`, `doubleSided: true`, `alphaMode: "OPAQUE"`, and explicit `KHR_materials_unlit`. Direct writers list the extension in `extensionsUsed` only when line primitives exist and do not add it to `extensionsRequired`.
+
+Authored and imported line primitives preserve their source materials in artifacts and headless rendering. `@taucad/render` uses a dedicated line pipeline that returns `baseColorFactor` directly and is therefore unlit by construction. The interactive viewport separately replaces loaded line materials with its existing theme-owned presentation material; that display behavior does not change artifact ownership.
 
 ## Material Policy
 
@@ -44,6 +50,19 @@ Edge/line materials use `metallicFactor: 0`, `roughnessFactor: 1`, as they are r
 - **Semi-glossy roughness**: `roughnessFactor: 0.35` produces a glossy CAD sheen with visible specular highlights under studio lighting, closely matching professional CAD viewers like Onshape.
 - **Source colors preserved**: When the source provides a color (STEP color, `colorize()`, etc.), it overrides the default `baseColorFactor`. Roughness and metalness remain at defaults unless the source format provides PBR data (only Rhino 3DM currently does).
 - **Fallback material**: Meshes with no source color receive a unified neutral grey material (`[0.8, 0.8, 0.8, 1]`) across all pipelines rather than inheriting Three.js defaults.
+- **Generated-edge provenance**: Apply `cadEdgeOverlayMaterialDefaults` only to auxiliary overlays Tau creates. Never use the convention to normalize or recolor arbitrary source `LINES`.
+
+## Headless GLB Render Profile
+
+`@taucad/render` is a static matcap renderer with an explicit glTF profile, not a general PBR reference viewer. `gltf-rs` owns GLB and glTF structural parsing and validation; Tau maps only the supported render semantics and rejects unsupported features before GPU setup.
+
+- Surface shading projects each primitive's `baseColorFactor` through the existing matcap pipeline. Metallic/roughness values and texture-backed materials are not rendered as PBR in this profile; texture-backed material content is rejected rather than silently approximated.
+- LINES use the dedicated unlit line pipeline and preserve their supplied `baseColorFactor`, whether authored or Tau-generated.
+- A glTF node's composed model transform applies equally to its surface and line primitives. Normals use the inverse-transpose transform for non-uniform scaling.
+- Repeated core node references share decoded and uploaded mesh buffers and issue one draw per node instance. Hardware draw batching and `EXT_mesh_gpu_instancing` are separate future optimizations/features.
+- Camera framing uses exact world-space bounds accumulated from the referenced vertices after every selected node transform.
+
+The public GLB-to-image API therefore accepts standard packed, accessor-offset, interleaved, and sparse physical accessor layouts inside this profile without adding consumer options or a normalization stage. JSON `.gltf` resources, textures/PBR, compression/quantization, skins, morph targets, animations, and unsupported primitive modes remain unsupported.
 
 ## Tone Mapping Policy
 
@@ -136,6 +155,21 @@ Current defaults per kernel:
 | OCCT (converter)  | OCCT defaults    | OCCT defaults     | `undefined` passed to `ReadStepFile`           |
 
 **Known limitation**: The OCCT converter does not expose tessellation quality parameters. This means curved surfaces may appear faceted on high-detail models. Future work: expose `linearDeflection` and `angularDeflection` options.
+
+## Camera Framing Policy
+
+Use one two-stage framing contract for non-empty CAD geometry in both interactive Stage viewers and headless image rendering:
+
+1. Derive camera distance, perspective relationship, clipping range, lighting scale, and scene radius from the geometry's bounding sphere.
+2. Derive final screen occupancy from all eight projected AABB corners, the actual viewport aspect, an explicit camera-up vector, and the configured fit margin.
+
+Do not use the sphere as the final fit primitive, add a fit-mode branch, or restore portrait-only distance compensation. A projected axis with zero extent is unconstrained; the other axis still determines the fit. Fall back only when neither projected axis can constrain the frame or the projection inputs are invalid.
+
+Treat `StageOptions.zoomLevel` as a perspective/distance selector and `StageOptions.fitMargin` as the occupancy control. Scale-dependent consumers such as grids and section stripes must use effective perspective FOV, including `PerspectiveCamera.zoom`, rather than raw FOV alone.
+
+When CameraControls owns the active camera, synchronize an imperative projection-zoom change through `zoomTo()` before synchronizing position and target. Directly assigning `camera.zoom` is insufficient because the controls update loop can restore its stale internal zoom on the next frame.
+
+**Why**: This contract keeps WGPU thumbnails, Three.js resets, resize resets, and manual resets geometrically comparable without caller-specific zoom compensation or renderer-specific fitting algorithms.
 
 ## Testing Notes (Future Reference)
 

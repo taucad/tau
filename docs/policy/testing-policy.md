@@ -3,7 +3,7 @@ title: 'Testing Policy'
 description: 'Writing high-quality tests across the Tau monorepo. Assert observable behavior, error assertions, resource cleanup, mock factories, and async patterns. Covers Vitest, kernel tests, and API tests.'
 status: active
 created: '2026-03-09'
-updated: '2026-06-25'
+updated: '2026-07-14'
 related:
   - docs/policy/react-testing-policy.md
   - docs/policy/typescript-policy.md
@@ -387,6 +387,20 @@ The agent-facing geometry-test surface is GeoSpec: Vitest-style `*.geospec.ts` /
 5. **AABB is broad-phase only for relationships.** Axis-aligned bounding boxes may prune candidates, assert explicit envelopes, and enrich diagnostics, but they must not decide production contact, clearance, containment, mate, shaft/bore, fastener, port, or manufacturability relationships. Return an unsupported-evidence diagnostic when relationship-grade evidence is unavailable.
 6. **Adversarial false-positive fixtures are mandatory.** Every new geometric matcher must include a fixture where the tempting broad-phase or approximate shortcut would pass while the real relationship fails, such as overlapping AABBs with separated mating faces or aligned envelopes with misaligned analytic axes. Relationship matcher tests must assert the diagnostic evidence type, not only pass/fail status.
 7. **Kernel-author surface stays separate.** Raw mesh-count / vertex-count assertions remain available to kernel authors via `expectMeshCount` / `expectVertexCount` in `@taucad/runtime/testing` for Vitest-based kernel tests. The two surfaces intentionally do not share a vocabulary; do not mirror low-level helpers back into the agent surface.
+
+## 13. Cross-Layer Contract Changes
+
+A change that crosses a public operation, plugin authoring contract, worker RPC, cache identity, generated artifact, or durable migration is not covered by one unit-test layer. Its plan must name and run the applicable gates:
+
+- runtime unit tests for normalization, capability composition, route selection, participant identity, and failure behavior;
+- `.test-d.ts` positive and negative tests for exact public inference;
+- first-party provider/kernel conformance tests for every migrated implementation;
+- integration tests across middleware/transcoder routes and cache hits/misses;
+- failure-injection and restart tests for durable or cross-store migrations;
+- deterministic generator checks for checked-in artifacts;
+- browser/renderer tests when the result depends on workers, WebGPU, codecs, or pixels.
+
+Omitting a layer requires an explicit reason tied to the change's observable boundary. `bytes.length > 0` is insufficient when semantic, round-trip, byte-equality, or pixel evidence is available.
 
 ## Summary Checklist
 

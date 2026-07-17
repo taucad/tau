@@ -3,7 +3,7 @@ title: 'Library API Policy'
 description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, flat options, max 3 params, naming, subpath exports, events, plugins, lazy init, escape hatches.'
 status: active
 created: '2026-02-23'
-updated: '2026-07-01'
+updated: '2026-07-17'
 related:
   - docs/policy/api-evolution-policy.md
   - docs/policy/resource-cleanup-policy.md
@@ -95,7 +95,7 @@ render(file, parameters, tessellation);
 // CORRECT: clear subject + optional config
 exposeFileSystem(fileSystem, options?)
 on(event, handler)
-fromFsLikeOpaque(fsLike, rootPath?)
+fromFsLike(fsLike, rootPath?)
 ```
 
 **3 params (distinct architectural concerns)** -- Only when each parameter represents a genuinely different concern in a consistent interface contract. All methods on the same interface must use the same positional convention.
@@ -212,6 +212,23 @@ type KernelWorkerEntry = {
 
 **Avoid overloading terms.** If a word is already used for one concept, don't reuse it for another. For example, "entry" was previously overloaded as both "item in a registration list" (`MiddlewareEntry`) and "method entry point" (`renderEntry`), which motivated the rename to `MiddlewareRegistration` and `render()`.
 
+**Keep logical identity, physical location, and content roles distinct.** An ID answers “which object?”, a locator answers “where was it observed?”, and a content field answers “what should a consumer open?”. Do not overload one string or options bag to mean all three, and do not reconstruct a physical path from a logical ID.
+
+```typescript
+// CORRECT: explicit roles and no ambient/defaulted location
+type ProjectLocator = {
+  storageRootKey: string;
+  providerBasePath: string;
+};
+
+const entryFile = manifest.assets.main.entryFile;
+
+// INCORRECT: one ambiguous string inferred differently by each caller
+openProject(project.id);
+```
+
+Use a specific compound name where the shorter word is already overloaded. `entryFile` is clearer than `entry`, `file`, `source`, or `path` for the file that starts project evaluation. Exact-location operations require an explicit locator object; optional locator fields, inferred storage roots, and logical-ID path reconstruction are forbidden.
+
 ### Consistent prefixes by role
 
 Each naming prefix signals a specific role:
@@ -221,7 +238,7 @@ Each naming prefix signals a specific role:
 | `create`\* | Factory function                | `createRuntimeClient`, `createBridgePort`           |
 | `define*`  | Plugin definition               | `defineKernel`, `defineMiddleware`, `defineBundler` |
 | `is*`      | Type guard                      | `isGeometryFile`, `isKernelPlugin`                  |
-| `from*`    | Conversion constructor          | `fromNodeFs`, `fromMemoryFs`, `fromFsLikeOpaque`    |
+| `from*`    | Conversion constructor          | `fromNodeFs`, `fromMemoryFs`, `fromFsLike`          |
 | `on*`      | Framework hook / event callback | `onInitialize`, `onLog`, `onProgress`               |
 
 ### Callback and hook naming
@@ -638,12 +655,14 @@ CORRECT:
 await client.render({
   source: { files: { 'main.ts': code } },
   parameters,
+  content: { includeEdges: true },
   renderOptions: { tessellation: { linearTolerance: 0.05 } },
 });
 
 await client.export('glb', {
   source: { files: { 'main.ts': code } },
   parameters,
+  content: { includeEdges: true, includeTopology: false },
   exportOptions: { coordinateSystem: 'y-up' },
 });
 ```
@@ -665,6 +684,8 @@ await client.export('glb', {
 ```
 
 This rule refines the flat-options preference in §3. Plugin factory configuration should still stay flat (`replicad({ wasm, linearTolerance })`), because the plugin owns that entire options object. Operation inputs are different: the runtime owns the operation envelope, while kernels/transcoders own nested option bags.
+
+Framework-wide semantic requirements belong in a stable runtime-owned parent such as `content`, not in plugin option bags and not as phase selectors. Each property is independently capability-declared and route-inferred: supporting `includeEdges` does not imply support for `includeTopology`. Unsupported keys must disappear from exact inferred operation types and be rejected by runtime validation. Authors declare what a route can fulfill; consumers never choose an internal source phase.
 
 Hook return objects follow the same ownership rule and must avoid reserved-word member names when consumers are expected to destructure the result. Prefer `exportGeometry` over a hook member named `export`, because `const { export } = useRuntime()` is a syntax error.
 
@@ -854,9 +875,7 @@ For older Node targets, ship an inline shim — eight lines, well-understood Def
 INCORRECT:
 
 ```typescript
-export type ConnectOptions =
-  | { fileSystem: RuntimeFileSystemBase; filePoolBuffer?: SharedArrayBuffer }
-  | { port: MessagePort; filePoolBuffer?: SharedArrayBuffer };
+export type ConnectOptions = { fileSystem: RuntimeFileSystemBase } | { port: MessagePort };
 ```
 
 `MessagePort` is a `MessageChannel`-shaped primitive. A WebSocket transport cannot synthesise one. An Electron IPC transport cannot synthesise one. An FFI transport cannot synthesise one. Yet the public surface accepts it — the runtime client therefore advertises a coupling to one specific wire choice.
@@ -873,16 +892,15 @@ export type RuntimeFileSystem = { readonly [opaqueBrand]: unique symbol };
 export const fromMemoryFs: () => RuntimeFileSystem;
 export const fromNodeFs: (basePath: string) => RuntimeFileSystem;
 export const fromBrowserFs: (...) => RuntimeFileSystem;
-export const fromFsLikeOpaque: (fsLike: FsLike, rootPath?: string) => RuntimeFileSystem;
-export const fromWorkerOpaque: (worker: Worker) => RuntimeFileSystem;
+export const fromFsLike: (fsLike: FsLike, rootPath?: string) => RuntimeFileSystem;
+export const fromFileSystemBridge: (open: () => FileSystemBridgeConnection) => RuntimeFileSystem;
 
 // The wired transport callable is the only surface that binds wire primitives from options.
 const runtime = presets.all();
 const client = createRuntimeClient<typeof runtime>({
   transport: webWorkerTransport({
-    url: kernelWorkerUrl,
-    fileSystem,            // opaque RuntimeFileSystem
-    filePoolBuffer,        // optional SAB allocated upstream
+    createWorker,
+    fileSystem, // opaque RuntimeFileSystem
   }),
 });
 await client.connect();    // no arguments

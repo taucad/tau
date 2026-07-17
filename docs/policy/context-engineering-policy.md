@@ -3,7 +3,7 @@ title: 'Context Engineering Policy'
 description: 'Comprehensive guide to optimizing system prompts, tool definitions, and context pipelines for LLM agents. Covers foundational principles, placement framework, cache economics, compaction safety, subagent criteria, untrusted content, and eval discipline.'
 status: active
 created: '2026-03-09'
-updated: '2026-07-03'
+updated: '2026-07-10'
 related:
   - docs/policy/filesystem-context-policy.md
   - docs/research/transcript-search-architecture.md
@@ -12,6 +12,7 @@ related:
   - docs/research/harness-tool-description-rewrite-spec.md
   - docs/research/harness-skills-extraction-plan.md
   - docs/research/harness-missing-capabilities.md
+  - docs/research/harness-cache-hygiene-audit.md
 ---
 
 # Context Engineering Policy

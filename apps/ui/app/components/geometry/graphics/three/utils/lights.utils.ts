@@ -38,7 +38,7 @@ export const environmentBaseIntensity = 0.9;
 // ~30% luminance reduction matches typical dark-mode surround adaptation.
 
 /** Overall intensity multiplier applied to all lights in dark mode. */
-export const darkModeIntensityScale = 0.5;
+export const darkModeIntensityScale = 1;
 
 /** Ambient floor boost in dark mode to prevent shadows from becoming unreadably dark. */
 export const darkModeAmbientBoost = 1.15;

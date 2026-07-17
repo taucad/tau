@@ -35,6 +35,7 @@ export {
 // Gltf-transform I/O utilities for downstream consumers (e.g. runtime middleware)
 export { createNodeIo } from '#gltf.utils.js';
 export { allExtensions } from '#gltf.extensions.js';
+export { extractReferencedGltfUris } from '#gltf.dependencies.js';
 
 // File resolver for on-demand sidecar asset loading
 export type { FileResolver } from '#file-resolver.js';

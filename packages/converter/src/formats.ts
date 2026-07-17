@@ -11,8 +11,12 @@
 import type { FileExtension } from '@taucad/types';
 import { fileExtensions } from '@taucad/types/constants';
 
-/** Extensions present in `mimeTypes` that have no Assimp/OCCT/specialized loader. */
-const unsupportedImportExtensions = ['usdc'] as const satisfies readonly FileExtension[];
+/**
+ * Extensions present in `mimeTypes` that have no Assimp/OCCT/specialized loader.
+ * The raster image formats (png/webp/jpeg/jpg) are render *outputs* of the
+ * runtime image transcoder, not 3D import sources, so they are excluded here.
+ */
+const unsupportedImportExtensions = ['usdc', 'png', 'webp', 'jpeg', 'jpg'] as const satisfies readonly FileExtension[];
 
 type UnsupportedImportExtension = (typeof unsupportedImportExtensions)[number];
 

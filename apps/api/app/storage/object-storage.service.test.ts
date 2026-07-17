@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { Readable as NodeReadable } from 'node:stream';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -179,5 +180,83 @@ describe('ObjectStorageService', () => {
       expect(typeof result.size).toBe('number');
       expect(STORAGE_HEALTH_PROBE_KEY).toBe('__health/probe.txt');
     }
+  });
+
+  describe('private tier', () => {
+    beforeAll(async () => {
+      // Self-provision the fail-closed bucket for MinIO volumes created before
+      // the bootstrap grew `tau-content-private` (mirrors infra/docker-compose.yml).
+      const config = moduleRef.get(ConfigService);
+      const client = new S3Client({
+        region: config.get<string>('TAU_S3_REGION', { infer: true }) ?? 'us-east-1',
+        endpoint: config.get<string>('TAU_S3_ENDPOINT', { infer: true }),
+        forcePathStyle: true,
+        credentials: {
+          accessKeyId: config.get<string>('TAU_S3_ACCESS_KEY_ID', { infer: true }) ?? '',
+          secretAccessKey: config.get<string>('TAU_S3_SECRET_ACCESS_KEY', { infer: true }) ?? '',
+        },
+      });
+      try {
+        await client.send(
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- AWS SDK PascalCase input
+          new CreateBucketCommand({ Bucket: config.get<string>('TAU_S3_PRIVATE_BUCKET', { infer: true }) }),
+        );
+      } catch {
+        // Bucket already exists — the only acceptable failure; reachability is
+        // asserted below via headPrivateBucket.
+      } finally {
+        client.destroy();
+      }
+    });
+
+    it('should report the private bucket reachable via headPrivateBucket', async () => {
+      await expect(service.headPrivateBucket()).resolves.toBe(true);
+    });
+
+    it('should isolate private-tier objects from the public bucket', async () => {
+      const payload = randomPayload(24);
+      const key = blobKeyFromSha256Hex(sha256HexFromBytes(payload));
+      await service.putBlob({
+        namespace: 'blobs',
+        key,
+        body: payload,
+        contentType: 'application/octet-stream',
+        ifNoneMatch: '*',
+        tier: 'private',
+      });
+
+      try {
+        const publicHead = await service.headBlob({ namespace: 'blobs', key });
+        expect(publicHead).toBeUndefined();
+
+        const privateHead = await service.headBlob({ namespace: 'blobs', key, tier: 'private' });
+        expect(privateHead).toBeDefined();
+        expect(privateHead?.size).toBe(payload.byteLength);
+      } finally {
+        await service.deleteBlob({ namespace: 'blobs', key, tier: 'private' });
+      }
+    });
+
+    it('should round-trip private-tier put → get with byte-equal body and contentLength', async () => {
+      const payload = randomPayload(64);
+      const key = blobKeyFromSha256Hex(sha256HexFromBytes(payload));
+      await service.putBlob({
+        namespace: 'blobs',
+        key,
+        body: payload,
+        contentType: 'application/octet-stream',
+        ifNoneMatch: '*',
+        tier: 'private',
+      });
+
+      try {
+        const fetched = await service.getBlob({ namespace: 'blobs', key, tier: 'private' });
+        const bytes = await collectReadable(fetched.body);
+        expect(bytes).toStrictEqual(payload);
+        expect(fetched.contentLength).toBe(payload.byteLength);
+      } finally {
+        await service.deleteBlob({ namespace: 'blobs', key, tier: 'private' });
+      }
+    });
   });
 });

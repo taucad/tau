@@ -194,9 +194,6 @@ describe('publicationRowSchema', () => {
     ownerId: 'user_1',
     parentPublicationId: null,
     visibility: 'public',
-    manifestKey: 'm.json',
-    ogImageKey: null,
-    thumbnailKey: null,
     runtimePin: '~1',
     kernels: ['replicad'],
     entryFile: 'main.ts',
@@ -215,11 +212,25 @@ describe('publicationRowSchema', () => {
       publicationRowSchema.safeParse({
         ...baseRow,
         parentPublicationId: 'parent_pub',
-        ogImageKey: 'og.png',
-        thumbnailKey: 't.webp',
         description: 'hello',
       }).success,
     ).toBe(true);
+  });
+
+  it('should strip internal storage keys from the wire row (no raw-layout disclosure)', () => {
+    const parsed = publicationRowSchema.safeParse({
+      ...baseRow,
+      manifestKey: 'publications/pub_1/manifest.json',
+      ogImageKey: 'defaults/og.png',
+      thumbnailKey: 'defaults/thumb.webp',
+    });
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data).not.toHaveProperty('manifestKey');
+      expect(parsed.data).not.toHaveProperty('ogImageKey');
+      expect(parsed.data).not.toHaveProperty('thumbnailKey');
+    }
   });
 
   it('accepts populated ownerSnapshot', () => {

@@ -39,7 +39,12 @@ export function PublicationShell({ publication, publicationFiles }: PublicationS
 
   return (
     <div className='grid h-[calc(100dvh-var(--publication-topbar-h))] min-h-0 shrink-0 grid-cols-[260px_minmax(0,1fr)_320px]'>
-      <PublicationFilesPane entryFile={publication.entryFile} files={publicationFiles} className='border-r' />
+      <PublicationFilesPane
+        entryFile={publication.entryFile}
+        files={publicationFiles}
+        visibility={publication.visibility}
+        className='border-r'
+      />
       <div className='relative flex min-h-0 flex-col'>
         <PublicationViewerPane className='min-h-0 flex-1' />
         <PublicationHeroStrip publication={publication} className='border-t' />

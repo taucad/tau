@@ -112,12 +112,73 @@ describe('environmentSchema', () => {
       TAU_S3_ACCESS_KEY_ID: 'key',
       TAU_S3_SECRET_ACCESS_KEY: 'secret',
       TAU_S3_FORCE_PATH_STYLE: false,
+      TAU_API_URL: 'https://api.tau.new',
     });
 
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.TAU_S3_PUBLIC_BASE_URL).toBe('https://cdn.tau.new');
       expect(result.data.TAU_S3_FORCE_PATH_STYLE).toBe(false);
+    }
+  });
+
+  it('should default TAU_S3_PRIVATE_BUCKET to tau-content-private when omitted', () => {
+    const envWithoutPrivateBucket = Object.fromEntries(
+      Object.entries(withRequiredCookieSecret(process.env)).filter(([key]) => key !== 'TAU_S3_PRIVATE_BUCKET'),
+    );
+    const result = environmentSchema.safeParse(envWithoutPrivateBucket);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.TAU_S3_PRIVATE_BUCKET).toBe('tau-content-private');
+    }
+  });
+
+  it('should reject TAU_S3_PRIVATE_BUCKET equal to TAU_S3_BUCKET in production mode', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'production',
+      TAU_S3_ENDPOINT: 'https://000000000000000000000000.r2.cloudflarestorage.com',
+      TAU_S3_PUBLIC_BASE_URL: 'https://cdn.tau.new',
+      TAU_S3_ACCESS_KEY_ID: 'key',
+      TAU_S3_SECRET_ACCESS_KEY: 'secret',
+      TAU_API_URL: 'https://api.tau.new',
+      TAU_S3_BUCKET: 'tau-prod-content',
+      TAU_S3_PRIVATE_BUCKET: 'tau-prod-content',
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.join('.') === 'TAU_S3_PRIVATE_BUCKET')).toBe(true);
+    }
+  });
+
+  it('should reject localhost TAU_API_URL in production mode', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'production',
+      TAU_S3_ENDPOINT: 'https://000000000000000000000000.r2.cloudflarestorage.com',
+      TAU_S3_PUBLIC_BASE_URL: 'https://cdn.tau.new',
+      TAU_S3_ACCESS_KEY_ID: 'key',
+      TAU_S3_SECRET_ACCESS_KEY: 'secret',
+      TAU_API_URL: 'http://localhost:3000',
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.join('.') === 'TAU_API_URL')).toBe(true);
+    }
+  });
+
+  it('should reject a missing TAU_API_URL because it has no default', () => {
+    const envWithoutApiUrl = Object.fromEntries(
+      Object.entries(withRequiredCookieSecret(process.env)).filter(([key]) => key !== 'TAU_API_URL'),
+    );
+    const result = environmentSchema.safeParse(envWithoutApiUrl);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.join('.') === 'TAU_API_URL')).toBe(true);
     }
   });
 });

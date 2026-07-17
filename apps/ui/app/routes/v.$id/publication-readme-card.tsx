@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { publicationRehypeSanitize } from '#components/markdown/markdown-sanitize.js';
+import { publicationFileFetchInit } from '#routes/v.$id/parsed-publication.js';
+import type { ParsedPublication } from '#routes/v.$id/parsed-publication.js';
 import { cn } from '#utils/ui.utils.js';
 
 type PublicationReadmeCardProps = {
   readonly files: Record<string, string>;
+  readonly visibility: ParsedPublication['visibility'];
   readonly className?: string;
 };
 
@@ -18,7 +21,11 @@ const findReadmePath = (files: Record<string, string>): string | undefined => {
   return undefined;
 };
 
-export const PublicationReadmeCard = ({ files, className }: PublicationReadmeCardProps): React.ReactNode => {
+export const PublicationReadmeCard = ({
+  files,
+  visibility,
+  className,
+}: PublicationReadmeCardProps): React.ReactNode => {
   const [content, setContent] = useState<string | undefined>();
   const readmePath = findReadmePath(files);
   const readmeUrl = readmePath === undefined ? undefined : files[readmePath];
@@ -32,7 +39,7 @@ export const PublicationReadmeCard = ({ files, className }: PublicationReadmeCar
     let cancelled = false;
     const load = async (): Promise<void> => {
       try {
-        const response = await fetch(readmeUrl);
+        const response = await fetch(readmeUrl, publicationFileFetchInit(visibility));
         if (!response.ok) {
           return;
         }
@@ -51,7 +58,7 @@ export const PublicationReadmeCard = ({ files, className }: PublicationReadmeCar
     return () => {
       cancelled = true;
     };
-  }, [readmeUrl]);
+  }, [readmeUrl, visibility]);
 
   if (readmePath === undefined) {
     return null;

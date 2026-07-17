@@ -10,9 +10,11 @@ const probeResult = { etag: 'abc', size: 2, contentType: 'text/plain', cacheCont
 describe('S3HealthIndicator', () => {
   let indicator: S3HealthIndicator;
   let mockHeadProbe: ReturnType<typeof vi.fn>;
+  let mockHeadPrivateBucket: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     mockHeadProbe = vi.fn().mockResolvedValue(probeResult);
+    mockHeadPrivateBucket = vi.fn().mockResolvedValue(true);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -20,7 +22,7 @@ describe('S3HealthIndicator', () => {
         HealthIndicatorService,
         {
           provide: ObjectStorageService,
-          useValue: { headProbeObject: mockHeadProbe },
+          useValue: { headProbeObject: mockHeadProbe, headPrivateBucket: mockHeadPrivateBucket },
         },
       ],
     }).compile();
@@ -41,6 +43,14 @@ describe('S3HealthIndicator', () => {
     expect(result['s3']?.status).toBe('down');
     expect(typeof result['s3']?.['message']).toBe('string');
     expect(result['s3']?.['message']).toContain('Probe object missing');
+  });
+
+  it('should report down when the fail-closed private bucket is unprovisioned', async () => {
+    mockHeadPrivateBucket.mockResolvedValue(false);
+
+    const result = await indicator.isHealthy();
+    expect(result['s3']?.status).toBe('down');
+    expect(result['s3']?.['message']).toContain('Private bucket missing');
   });
 
   it('should report down when headProbeObject throws', async () => {

@@ -23,6 +23,16 @@ export class S3HealthIndicator {
         return indicator.down({ responseTimeMs, message: 'Probe object missing — run scripts/seed-r2-defaults.sh' });
       }
 
+      // The private-publication serving path is gated on this bucket existing;
+      // fail readiness rather than 500 on the first private publish.
+      const privateBucketReachable = await this.objectStorage.headPrivateBucket();
+      if (!privateBucketReachable) {
+        return indicator.down({
+          responseTimeMs,
+          message: 'Private bucket missing — provision TAU_S3_PRIVATE_BUCKET (repos/cloud-infra pairing)',
+        });
+      }
+
       if (responseTimeMs > 500) {
         return indicator.down({ responseTimeMs, message: 'Response time exceeds 500ms threshold' });
       }

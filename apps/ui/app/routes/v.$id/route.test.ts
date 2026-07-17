@@ -56,7 +56,6 @@ const sampleLoaderData: PublicationRouteLoaderData = {
     share: 'https://tau.example/v/pub_1',
     og: 'https://cdn.example/defaults/og.png',
     thumbnail: 'https://cdn.example/defaults/thumb.webp',
-    manifest: 'https://cdn.example/pub_1/manifest.json',
   },
   manifest: {
     version: 1,

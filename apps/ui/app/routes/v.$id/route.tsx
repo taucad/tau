@@ -13,7 +13,7 @@ import { ErrorPage } from '#components/error-page.js';
 import type { Handle } from '#types/matches.types.js';
 import { PublicationLockScreen, parsePublicationLockPayload } from '#routes/v.$id/publication-lock-screen.js';
 import type { PublicationLockReason, PublicationLockScreenVariant } from '#routes/v.$id/publication-lock-screen.js';
-import { parsePublicationRecord } from '#routes/v.$id/parsed-publication.js';
+import { parsePublicationRecord, publicationFileFetchInit } from '#routes/v.$id/parsed-publication.js';
 import type { ParsedPublication } from '#routes/v.$id/parsed-publication.js';
 import { PublicationTopbar } from '#routes/v.$id/publication-topbar.js';
 import { PublicationShell } from '#routes/v.$id/publication-shell.js';
@@ -42,7 +42,6 @@ export type PublicationRouteLoaderData = {
     share: string;
     og: string;
     thumbnail: string;
-    manifest: string;
   };
   manifest: {
     version: 1;
@@ -211,7 +210,7 @@ const PublicationLayout = ({
       <PublicationViewPingMount publicationId={publication.id} />
       <PublicationTopbar publication={publication} files={files} />
       <PublicationShell publication={publication} publicationFiles={data.files} />
-      <PublicationReadmeCard files={data.files} />
+      <PublicationReadmeCard files={data.files} visibility={publication.visibility} />
       <PublicationMobileSheet publication={publication} />
     </div>
   );
@@ -238,7 +237,7 @@ const PublicationInteractiveSurface = ({
       try {
         const pairs = await Promise.all(
           Object.entries(data.files).map(async ([path, blobUrl]) => {
-            const response = await fetch(blobUrl);
+            const response = await fetch(blobUrl, publicationFileFetchInit(publication.visibility));
             if (!response.ok) {
               throw new Error(`Failed to fetch ${path} (${response.status})`);
             }
@@ -266,7 +265,7 @@ const PublicationInteractiveSurface = ({
     return () => {
       cancelled = true;
     };
-  }, [data.files]);
+  }, [data.files, publication.visibility]);
 
   const filesMap = useMemo(() => {
     const map = new Map<string, { filename: string; content: Uint8Array<ArrayBuffer> }>();

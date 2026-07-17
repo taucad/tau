@@ -2,11 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { File, Folder, Tree } from '#components/magicui/file-tree.js';
 import type { TreeViewElement } from '#components/magicui/file-tree.js';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '#components/ui/dialog.js';
+import { publicationFileFetchInit } from '#routes/v.$id/parsed-publication.js';
+import type { ParsedPublication } from '#routes/v.$id/parsed-publication.js';
 import { cn } from '#utils/ui.utils.js';
 
 type PublicationFilesPaneProps = {
   readonly entryFile: string;
   readonly files: Record<string, string>;
+  readonly visibility: ParsedPublication['visibility'];
   readonly className?: string;
 };
 
@@ -103,7 +106,12 @@ const renderNodes = (nodes: TreeNode[], entryFile: string, onSelect: (path: stri
  * Replaces the old centered-card `PublicationFileExplorer`. Designed to fill its
  * grid cell vertically (`h-full min-h-0`) so the tree scrolls inside the pane.
  */
-export const PublicationFilesPane = ({ entryFile, files, className }: PublicationFilesPaneProps): React.JSX.Element => {
+export const PublicationFilesPane = ({
+  entryFile,
+  files,
+  visibility,
+  className,
+}: PublicationFilesPaneProps): React.JSX.Element => {
   const tree = useMemo(() => buildTree(Object.keys(files)), [files]);
   const expanded = useMemo(() => collectFolderIds(tree), [tree]);
   const [open, setOpen] = useState<string | undefined>();
@@ -123,7 +131,7 @@ export const PublicationFilesPane = ({ entryFile, files, className }: Publicatio
     let cancelled = false;
     const load = async (): Promise<void> => {
       try {
-        const response = await fetch(url);
+        const response = await fetch(url, publicationFileFetchInit(visibility));
         if (!response.ok) {
           return;
         }
@@ -142,7 +150,7 @@ export const PublicationFilesPane = ({ entryFile, files, className }: Publicatio
     return () => {
       cancelled = true;
     };
-  }, [files, open]);
+  }, [files, open, visibility]);
 
   return (
     <section

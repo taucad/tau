@@ -2,6 +2,7 @@ import type { Readable } from 'node:stream';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -10,13 +11,18 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Environment } from '#config/environment.config.js';
-import {
-  STORAGE_HEALTH_PROBE_KEY,
-  STORAGE_NAMESPACE_PREFIXES,
-  type StorageNamespace,
-} from '#storage/storage.constants.js';
+import { STORAGE_HEALTH_PROBE_KEY, STORAGE_NAMESPACE_PREFIXES } from '#storage/storage.constants.js';
+import type { StorageNamespace } from '#storage/storage.constants.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- AWS SDK command inputs use PascalCase fields */
+
+/**
+ * Physical bucket selector. `public` is the CDN-served content bucket
+ * (anonymous read); `private` is the fail-closed bucket with no custom
+ * domain — readable only through the API's S3 credentials, so private
+ * publication bytes are never anonymously fetchable.
+ */
+export type StorageTier = 'public' | 'private';
 
 export type PutBlobArgs = {
   namespace: StorageNamespace;
@@ -25,6 +31,7 @@ export type PutBlobArgs = {
   contentType: string;
   cacheControl?: string;
   ifNoneMatch?: '*' | string;
+  tier?: StorageTier;
 };
 
 export type PutBlobResult = { etag: string; alreadyExisted: boolean };
@@ -35,8 +42,9 @@ export type ObjectStorageServiceContract = {
     namespace: StorageNamespace;
     key: string;
     range?: { start: number; end: number };
-  }): Promise<{ body: Readable; contentType: string; etag: string }>;
-  headBlob(args: { namespace: StorageNamespace; key: string }): Promise<
+    tier?: StorageTier;
+  }): Promise<{ body: Readable; contentType: string; etag: string; contentLength?: number }>;
+  headBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier }): Promise<
     | {
         contentType: string;
         size: number;
@@ -45,7 +53,7 @@ export type ObjectStorageServiceContract = {
       }
     | undefined
   >;
-  deleteBlob(args: { namespace: StorageNamespace; key: string }): Promise<void>;
+  deleteBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier }): Promise<void>;
   presignGet(args: { namespace: StorageNamespace; key: string; expiresInSeconds: number }): Promise<string>;
   presignPut(args: {
     namespace: StorageNamespace;
@@ -63,6 +71,7 @@ export type ObjectStorageServiceContract = {
       }
     | undefined
   >;
+  headPrivateBucket(): Promise<boolean>;
 };
 
 export const isPreconditionFailed = (error: unknown): boolean =>
@@ -86,6 +95,8 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
 
   private readonly bucket: string;
 
+  private readonly privateBucket: string;
+
   private readonly publicBaseUrl: string;
 
   public constructor(private readonly configService: ConfigService<Environment, true>) {
@@ -96,6 +107,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     const forcePathStyle = this.configService.get('TAU_S3_FORCE_PATH_STYLE', { infer: true });
 
     this.bucket = this.configService.get('TAU_S3_BUCKET', { infer: true });
+    this.privateBucket = this.configService.get('TAU_S3_PRIVATE_BUCKET', { infer: true });
     this.publicBaseUrl = this.configService.get('TAU_S3_PUBLIC_BASE_URL', { infer: true }).replace(/\/$/u, '');
 
     this.client = new S3Client({
@@ -115,7 +127,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     try {
       const response = await this.client.send(
         new PutObjectCommand({
-          Bucket: this.bucket,
+          Bucket: this.resolveBucket(args.tier),
           Key: resolvedKey,
           Body: args.body,
           ContentType: args.contentType,
@@ -140,12 +152,13 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     namespace: StorageNamespace;
     key: string;
     range?: { start: number; end: number };
-  }): Promise<{ body: Readable; contentType: string; etag: string }> {
+    tier?: StorageTier;
+  }): Promise<{ body: Readable; contentType: string; etag: string; contentLength?: number }> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
 
     const response = await this.client.send(
       new GetObjectCommand({
-        Bucket: this.bucket,
+        Bucket: this.resolveBucket(args.tier),
         Key: resolvedKey,
         ...(args.range ? { Range: `bytes=${String(args.range.start)}-${String(args.range.end)}` } : {}),
       }),
@@ -159,10 +172,11 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
       body: response.Body as Readable,
       contentType: response.ContentType ?? 'application/octet-stream',
       etag: response.ETag?.replaceAll('"', '') ?? '',
+      ...(response.ContentLength === undefined ? {} : { contentLength: Number(response.ContentLength) }),
     };
   }
 
-  public async headBlob(args: { namespace: StorageNamespace; key: string }): Promise<
+  public async headBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier }): Promise<
     | {
         contentType: string;
         size: number;
@@ -176,7 +190,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     try {
       const response = await this.client.send(
         new HeadObjectCommand({
-          Bucket: this.bucket,
+          Bucket: this.resolveBucket(args.tier),
           Key: resolvedKey,
         }),
       );
@@ -196,12 +210,12 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     }
   }
 
-  public async deleteBlob(args: { namespace: StorageNamespace; key: string }): Promise<void> {
+  public async deleteBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier }): Promise<void> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
 
     await this.client.send(
       new DeleteObjectCommand({
-        Bucket: this.bucket,
+        Bucket: this.resolveBucket(args.tier),
         Key: resolvedKey,
       }),
     );
@@ -286,12 +300,35 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
   }
 
   /**
+   * Verifies the fail-closed private bucket is provisioned and reachable.
+   * Used by `S3HealthIndicator` so a deploy missing the paired
+   * `repos/cloud-infra` private-bucket change fails readiness instead of
+   * 500ing on the first private publish.
+   */
+  public async headPrivateBucket(): Promise<boolean> {
+    try {
+      await this.client.send(new HeadBucketCommand({ Bucket: this.privateBucket }));
+      return true;
+    } catch (error) {
+      if (isS3ObjectMissing(error)) {
+        return false;
+      }
+
+      throw error;
+    }
+  }
+
+  /**
    * Resolves a namespace + namespace-relative key to the physical bucket key.
    * Prefix already ends with `/`, so concatenation is always correct:
    * `blobs/` + `ab/cde...` → `blobs/ab/cde...`
    */
   private resolveKey(namespace: StorageNamespace, key: string): { resolvedKey: string } {
     return { resolvedKey: `${STORAGE_NAMESPACE_PREFIXES[namespace]}${key}` };
+  }
+
+  private resolveBucket(tier: StorageTier | undefined): string {
+    return tier === 'private' ? this.privateBucket : this.bucket;
   }
 }
 /* eslint-enable @typescript-eslint/naming-convention -- end AWS SDK PascalCase inputs scope */

@@ -8,6 +8,11 @@ const environmentSchemaBase = z.object({
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string(),
   TAU_FRONTEND_URL: z.string(),
+  TAU_API_URL: z
+    .string()
+    .describe(
+      'Browser-facing origin of this API (e.g. https://api.tau.new); used to build authenticated publication file proxy URLs. No default — startup validation must fail when it is unset.',
+    ),
   ADDITIONAL_CORS_ORIGINS: jsonCodec(z.array(z.string()).describe('Additional CORS origin glob patterns to allow.'))
     .optional()
     .default([]),
@@ -93,6 +98,12 @@ const environmentSchemaBase = z.object({
     .string()
     .default('http://localhost:9000/tau-content')
     .describe('Canonical CDN/host prefix for browser GETs (never *.r2.cloudflarestorage.com in prod UI)'),
+  TAU_S3_PRIVATE_BUCKET: z
+    .string()
+    .default('tau-content-private')
+    .describe(
+      'Fail-closed bucket for private publications (blobs) and all publication manifests; no custom domain, no anonymous read — served only via the authenticated file proxy',
+    ),
 
   // OpenTelemetry
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional().describe('OTLP endpoint for traces and logs'),
@@ -137,6 +148,32 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       code: 'custom',
       message: 'TAU_S3_PUBLIC_BASE_URL must be a valid URL',
       path: ['TAU_S3_PUBLIC_BASE_URL'],
+    });
+  }
+
+  // A shared bucket would put private publication bytes on the anonymous CDN origin.
+  if (data.TAU_S3_PRIVATE_BUCKET === data.TAU_S3_BUCKET) {
+    context.addIssue({
+      code: 'custom',
+      message: 'TAU_S3_PRIVATE_BUCKET must differ from TAU_S3_BUCKET in production',
+      path: ['TAU_S3_PRIVATE_BUCKET'],
+    });
+  }
+
+  try {
+    const apiHost = new URL(data.TAU_API_URL).hostname;
+    if (apiHost === 'localhost' || apiHost === '127.0.0.1') {
+      context.addIssue({
+        code: 'custom',
+        message: 'TAU_API_URL must not target localhost in production',
+        path: ['TAU_API_URL'],
+      });
+    }
+  } catch {
+    context.addIssue({
+      code: 'custom',
+      message: 'TAU_API_URL must be a valid URL',
+      path: ['TAU_API_URL'],
     });
   }
 

@@ -48,6 +48,16 @@ const parseOwnerSnapshot = (value: unknown): ParsedPublicationOwnerSnapshot | nu
 };
 /* oxlint-enable typescript-eslint/no-restricted-types -- end null window */
 
+/**
+ * Fetch init for publication file URLs. Private publications serve files
+ * through the authenticated API proxy, which authorizes via the session
+ * cookie — so the request must include credentials. Public publications use
+ * anonymous CDN URLs where a credentialed CORS request would be rejected
+ * (`Access-Control-Allow-Origin: *` forbids credentials), so none are sent.
+ */
+export const publicationFileFetchInit = (visibility: ParsedPublication['visibility']): RequestInit | undefined =>
+  visibility === 'private' ? { credentials: 'include' } : undefined;
+
 export const parsePublicationRecord = (
   raw: Record<string, unknown>,
   viewerRoleRaw: unknown = 'public',

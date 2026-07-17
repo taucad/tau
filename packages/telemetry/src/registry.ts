@@ -372,6 +372,15 @@ export const TauMetrics = {
     }),
   }),
 
+  publicationFileRequestsTotal: defineCounter({
+    name: 'publication.file_requests',
+    unit: '{request}',
+    description: 'Authenticated publication file proxy requests by outcome',
+    attributes: z.object({
+      outcome: z.enum(['served', 'revalidated', 'denied', 'not_found', 'error']).optional(),
+    }),
+  }),
+
   // --- Client-reported (ingested via TelemetryController) ---
 
   kernelExecutionDuration: defineHistogram({

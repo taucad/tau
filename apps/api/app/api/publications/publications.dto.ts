@@ -92,9 +92,6 @@ export const publicationRowSchema = z
     ownerId: z.string(),
     parentPublicationId: z.string().nullable(),
     visibility: publicationVisibilitySchema,
-    manifestKey: z.string(),
-    ogImageKey: z.string().nullable(),
-    thumbnailKey: z.string().nullable(),
     runtimePin: z.string(),
     kernels: z.array(z.string()),
     entryFile: z.string(),
@@ -114,7 +111,6 @@ export const publicationUrlsSchema = z
     share: z.url(),
     og: z.url(),
     thumbnail: z.url(),
-    manifest: z.url(),
   })
   .meta({ id: 'PublicationUrls' });
 

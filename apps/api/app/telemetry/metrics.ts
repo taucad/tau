@@ -177,6 +177,14 @@ export class MetricsService {
     },
   );
 
+  public readonly publicationFileRequestsTotal = this.apiMeter.createCounter(
+    TauMetrics.publicationFileRequestsTotal.name,
+    {
+      description: TauMetrics.publicationFileRequestsTotal.description,
+      unit: TauMetrics.publicationFileRequestsTotal.unit,
+    },
+  );
+
   // Client-reported metrics (ingested via TelemetryController)
   public readonly kernelExecutionDuration = this.clientMeter.createHistogram(TauMetrics.kernelExecutionDuration.name, {
     description: TauMetrics.kernelExecutionDuration.description,

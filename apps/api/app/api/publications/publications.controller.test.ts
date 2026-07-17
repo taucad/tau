@@ -1,12 +1,19 @@
+import { Readable } from 'node:stream';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { FastifyRequest } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { mockDeep } from 'vitest-mock-extended';
+import { ForbiddenException, GoneException, HttpException, NotFoundException, StreamableFile } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { ZodValidationException, ZodValidationPipe } from 'nestjs-zod';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { ProjectShareController } from '#api/publications/project-share.controller.js';
-import { PublicationsController } from '#api/publications/publications.controller.js';
+import {
+  PublicationsController,
+  fileRequestFailureOutcome,
+  ifNoneMatchSatisfied,
+} from '#api/publications/publications.controller.js';
 import { PublicationsService } from '#api/publications/publications.service.js';
 import { ViewerIdentityInterceptor } from '#api/publications/viewer-identity.interceptor.js';
 import { ViewerIdentityService } from '#api/publications/viewer-identity.service.js';
@@ -14,6 +21,7 @@ import type { MultipartRequest } from '#api/publications/publish-multipart.decor
 import { collectPublishMultipart } from '#api/publications/publish-multipart.decorator.js';
 import type { PublicationWireRow } from '#api/publications/publications.dto.js';
 import { PublishUploadDto } from '#api/publications/publications.dto.js';
+import { MetricsService } from '#telemetry/metrics.js';
 
 const validationPipe = new ZodValidationPipe();
 
@@ -26,6 +34,7 @@ describe('PublicationsController', () => {
   let controller: PublicationsController;
   let projectShareController: ProjectShareController;
   let service: PublicationsService;
+  let fileRequestMetricAdd: ReturnType<typeof vi.fn>;
   let module: TestingModule;
 
   beforeEach(async () => {
@@ -38,7 +47,11 @@ describe('PublicationsController', () => {
       revokeAccess: vi.fn(),
       updateVisibility: vi.fn(),
       recordView: vi.fn(),
+      resolvePublicationFile: vi.fn(),
+      openPublicationFile: vi.fn(),
     };
+
+    fileRequestMetricAdd = vi.fn();
 
     module = await Test.createTestingModule({
       controllers: [PublicationsController, ProjectShareController],
@@ -46,6 +59,10 @@ describe('PublicationsController', () => {
         {
           provide: PublicationsService,
           useValue: mockService,
+        },
+        {
+          provide: MetricsService,
+          useValue: { publicationFileRequestsTotal: { add: fileRequestMetricAdd } },
         },
         {
           provide: ViewerIdentityService,
@@ -85,7 +102,6 @@ describe('PublicationsController', () => {
         share: 'https://example/v/pub_test',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
-        manifest: 'https://cdn.example/manifest.json',
       },
     });
 
@@ -120,9 +136,6 @@ describe('PublicationsController', () => {
       ownerId: 'owner-1',
       parentPublicationId: null,
       visibility: 'public',
-      manifestKey: 'm.json',
-      ogImageKey: null,
-      thumbnailKey: null,
       runtimePin: 'x',
       kernels: ['replicad'],
       entryFile: entryPath,
@@ -143,7 +156,6 @@ describe('PublicationsController', () => {
         share: 'https://example/v/pub_x',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
-        manifest: 'https://cdn.example/manifest.json',
       },
       manifest: {
         version: 1,
@@ -176,9 +188,6 @@ describe('PublicationsController', () => {
         ownerId: 'owner-1',
         parentPublicationId: null,
         visibility: 'public',
-        manifestKey: 'm.json',
-        ogImageKey: null,
-        thumbnailKey: null,
         runtimePin: 'x',
         kernels: [],
         entryFile: entryPath,
@@ -196,7 +205,6 @@ describe('PublicationsController', () => {
         share: 'https://example/v/pub_x',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
-        manifest: 'https://cdn.example/manifest.json',
       },
       manifest: {
         version: 1,
@@ -324,6 +332,107 @@ describe('PublicationsController', () => {
 
     expect(service.getProjectShareEnvelope).toHaveBeenCalledWith({ projectId: 'proj_x', ownerId: 'owner-1' });
     expect(response.project.id).toBe('proj_x');
+  });
+
+  describe('getPublicationFile (authenticated file proxy)', () => {
+    const sha = 'a'.repeat(64);
+
+    it('should stream the resolved blob with strong ETag and revalidation Cache-Control headers', async () => {
+      vi.mocked(service.resolvePublicationFile).mockResolvedValue({
+        sha256Hex: sha,
+        etag: `"${sha}"`,
+        path: 'main.ts',
+      });
+      vi.mocked(service.openPublicationFile).mockResolvedValue({
+        body: Readable.from([new TextEncoder().encode('bytes')]),
+        contentType: 'application/octet-stream',
+        contentLength: 5,
+      });
+      const reply = mockDeep<FastifyReply>();
+
+      const result = await controller.getPublicationFile('pub_x', 'main.ts', 'viewer-1', undefined, reply);
+
+      expect(service.resolvePublicationFile).toHaveBeenCalledWith({
+        publicationId: 'pub_x',
+        viewerUserId: 'viewer-1',
+        path: 'main.ts',
+      });
+      expect(reply.header).toHaveBeenCalledWith('etag', `"${sha}"`);
+      expect(reply.header).toHaveBeenCalledWith('cache-control', 'private, no-cache');
+      expect(result).toBeInstanceOf(StreamableFile);
+      expect(result?.options).toEqual({ type: 'application/octet-stream', length: 5 });
+      expect(fileRequestMetricAdd).toHaveBeenCalledWith(1, { outcome: 'served' });
+    });
+
+    it('should return 304 without opening the blob when If-None-Match matches the manifest sha', async () => {
+      vi.mocked(service.resolvePublicationFile).mockResolvedValue({
+        sha256Hex: sha,
+        etag: `"${sha}"`,
+        path: 'main.ts',
+      });
+      const reply = mockDeep<FastifyReply>();
+
+      const result = await controller.getPublicationFile('pub_x', 'main.ts', 'viewer-1', `"${sha}"`, reply);
+
+      expect(result).toBeUndefined();
+      expect(reply.status).toHaveBeenCalledWith(304);
+      expect(service.openPublicationFile).not.toHaveBeenCalled();
+      expect(fileRequestMetricAdd).toHaveBeenCalledWith(1, { outcome: 'revalidated' });
+    });
+
+    it('should re-check authorization before revalidating and record denied when the grant is revoked', async () => {
+      vi.mocked(service.resolvePublicationFile).mockRejectedValue(
+        new ForbiddenException({ code: 'FORBIDDEN', message: 'Publication is private' }),
+      );
+      const reply = mockDeep<FastifyReply>();
+
+      await expect(controller.getPublicationFile('pub_x', 'main.ts', 'revoked-1', `"${sha}"`, reply)).rejects.toThrow(
+        'Publication is private',
+      );
+      expect(service.openPublicationFile).not.toHaveBeenCalled();
+      expect(fileRequestMetricAdd).toHaveBeenCalledWith(1, { outcome: 'denied' });
+    });
+
+    it('should record not_found when the path is not in the publication manifest', async () => {
+      vi.mocked(service.resolvePublicationFile).mockRejectedValue(
+        new NotFoundException({ code: 'NOT_FOUND', message: 'File not found in publication' }),
+      );
+      const reply = mockDeep<FastifyReply>();
+
+      await expect(controller.getPublicationFile('pub_x', 'nope.ts', 'viewer-1', undefined, reply)).rejects.toThrow(
+        'File not found in publication',
+      );
+      expect(fileRequestMetricAdd).toHaveBeenCalledWith(1, { outcome: 'not_found' });
+    });
+  });
+});
+
+describe('ifNoneMatchSatisfied', () => {
+  const etag = `"${'b'.repeat(64)}"`;
+
+  it('should match the exact strong ETag, a weak variant, a list member, and the wildcard', () => {
+    expect(ifNoneMatchSatisfied(etag, etag)).toBe(true);
+    expect(ifNoneMatchSatisfied(`W/${etag}`, etag)).toBe(true);
+    expect(ifNoneMatchSatisfied(`"other", ${etag}`, etag)).toBe(true);
+    expect(ifNoneMatchSatisfied('*', etag)).toBe(true);
+  });
+
+  it('should not match a different ETag', () => {
+    expect(ifNoneMatchSatisfied('"nope"', etag)).toBe(false);
+    expect(ifNoneMatchSatisfied('"a", "b"', etag)).toBe(false);
+  });
+});
+
+describe('fileRequestFailureOutcome', () => {
+  it('should map authorization failures to denied and missing/gone content to not_found', () => {
+    expect(fileRequestFailureOutcome(new ForbiddenException())).toBe('denied');
+    expect(fileRequestFailureOutcome(new NotFoundException())).toBe('not_found');
+    expect(fileRequestFailureOutcome(new GoneException())).toBe('not_found');
+  });
+
+  it('should map unexpected failures to error', () => {
+    expect(fileRequestFailureOutcome(new HttpException('boom', 500))).toBe('error');
+    expect(fileRequestFailureOutcome(new Error('io'))).toBe('error');
   });
 });
 

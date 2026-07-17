@@ -24,31 +24,56 @@ afterEach(() => {
 
 /* eslint-disable @typescript-eslint/naming-convention -- file-path keys can't be camelCase */
 describe('PublicationReadmeCard', () => {
-  it('renders null when no readme.md exists in files', () => {
-    const { container } = render(<PublicationReadmeCard files={{ 'main.ts': 'https://x' }} />);
+  it('should render null when no readme.md exists in files', () => {
+    const { container } = render(<PublicationReadmeCard files={{ 'main.ts': 'https://x' }} visibility='public' />);
     expect(container.firstChild).toBeNull();
   });
 
-  it('matches readme.md case-insensitively (README.md)', async () => {
+  it('should match readme.md case-insensitively (README.md)', async () => {
     fetchMock.mockResolvedValue({ ok: true, text: async () => '# Hello' });
-    render(<PublicationReadmeCard files={{ 'README.md': 'https://blob/readme' }} />);
+    render(<PublicationReadmeCard files={{ 'README.md': 'https://blob/readme' }} visibility='public' />);
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('https://blob/readme');
+      expect(fetchMock).toHaveBeenCalledWith('https://blob/readme', undefined);
     });
   });
 
-  it('matches readme.md case-insensitively (Readme.MD)', () => {
+  it('should match readme.md case-insensitively (Readme.MD)', () => {
     fetchMock.mockResolvedValue({ ok: true, text: async () => '# Hi' });
-    render(<PublicationReadmeCard files={{ 'Readme.MD': 'https://blob/case' }} />);
-    expect(fetchMock).toHaveBeenCalledWith('https://blob/case');
+    render(<PublicationReadmeCard files={{ 'Readme.MD': 'https://blob/case' }} visibility='public' />);
+    expect(fetchMock).toHaveBeenCalledWith('https://blob/case', undefined);
   });
 
-  it('renders MarkdownViewer with fetched content once loaded', async () => {
+  it('should render MarkdownViewer with fetched content once loaded', async () => {
     fetchMock.mockResolvedValue({ ok: true, text: async () => '# Title' });
-    render(<PublicationReadmeCard files={{ 'readme.md': 'https://blob/raw' }} />);
+    render(<PublicationReadmeCard files={{ 'readme.md': 'https://blob/raw' }} visibility='public' />);
 
     await waitFor(() => {
       expect(screen.getByText('# Title')).toBeDefined();
+    });
+  });
+
+  it('should send session credentials when fetching a private publication readme', async () => {
+    fetchMock.mockResolvedValue({ ok: true, text: async () => '# Secret' });
+    render(
+      <PublicationReadmeCard
+        files={{ 'README.md': 'https://api.test/v1/publications/pub_1/files?path=README.md' }}
+        visibility='private'
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('https://api.test/v1/publications/pub_1/files?path=README.md', {
+        credentials: 'include',
+      });
+    });
+  });
+
+  it('should not send credentials for public CDN readme fetches', async () => {
+    fetchMock.mockResolvedValue({ ok: true, text: async () => '# Open' });
+    render(<PublicationReadmeCard files={{ 'README.md': 'https://cdn.example/blobs/ab' }} visibility='public' />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('https://cdn.example/blobs/ab', undefined);
     });
   });
 });

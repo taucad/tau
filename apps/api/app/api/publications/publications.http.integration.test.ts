@@ -2,7 +2,14 @@
 /* eslint-disable @typescript-eslint/naming-convention -- decorators are not constructors */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
-import { Injectable, Module, VersioningType } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Module,
+  UnauthorizedException,
+  VersioningType,
+} from '@nestjs/common';
 import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE, Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -25,6 +32,7 @@ import { ViewerIdentityService } from '#api/publications/viewer-identity.service
 import { AuthGuard } from '#auth/auth.guard.js';
 import { isOptionalAuth } from '#constants/auth.constant.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
+import { MetricsService } from '#telemetry/metrics.js';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
@@ -70,7 +78,13 @@ class PublicationsHttpTestAuthGuard implements CanActivate {
         revokeAccess: vi.fn(),
         updateVisibility: vi.fn(),
         recordView: vi.fn(),
+        resolvePublicationFile: vi.fn(),
+        openPublicationFile: vi.fn(),
       },
+    },
+    {
+      provide: MetricsService,
+      useValue: { publicationFileRequestsTotal: { add: vi.fn() } },
     },
     {
       provide: ConfigService,
@@ -109,6 +123,8 @@ describe('Publications HTTP integration', () => {
     revokeAccess: ReturnType<typeof vi.fn>;
     updateVisibility: ReturnType<typeof vi.fn>;
     recordView: ReturnType<typeof vi.fn>;
+    resolvePublicationFile: ReturnType<typeof vi.fn>;
+    openPublicationFile: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
@@ -120,6 +136,8 @@ describe('Publications HTTP integration', () => {
     publicationService.revokeAccess.mockClear();
     publicationService.updateVisibility.mockClear();
     publicationService.recordView.mockClear();
+    publicationService.resolvePublicationFile.mockReset();
+    publicationService.openPublicationFile.mockReset();
   });
 
   beforeAll(async () => {
@@ -176,7 +194,6 @@ describe('Publications HTTP integration', () => {
         share: 'https://app.example/v/pub_integration',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
-        manifest: 'https://cdn.example/manifest.json',
       },
       extraLeak: 'must-not-serialize',
     });
@@ -298,7 +315,8 @@ describe('Publications HTTP integration', () => {
         id: string;
         // oxlint-disable-next-line typescript-eslint/no-restricted-types -- DTO mirrors API wire shape which uses null
         ownerSnapshot?: { id: string; name: string; image: string | null } | null;
-      };
+      } & Record<string, unknown>;
+      urls: Record<string, unknown>;
       extraLeak?: string;
     };
     expect(body.publication.id).toBe('pub_view');
@@ -308,6 +326,11 @@ describe('Publications HTTP integration', () => {
       image: 'https://cdn.example/ada.png',
     });
     expect(body.extraLeak).toBeUndefined();
+    // Raw storage layout must never reach the wire, even if the service leaks it.
+    expect(body.publication['manifestKey']).toBeUndefined();
+    expect(body.publication['ogImageKey']).toBeUndefined();
+    expect(body.publication['thumbnailKey']).toBeUndefined();
+    expect(body.urls['manifest']).toBeUndefined();
 
     expect(publicationService.getPublicationForViewer).toHaveBeenCalledWith({
       publicationId: 'pub_view',
@@ -323,9 +346,6 @@ describe('Publications HTTP integration', () => {
         ownerId: 'owner',
         parentPublicationId: null,
         visibility: 'public',
-        manifestKey: 'm.json',
-        ogImageKey: null,
-        thumbnailKey: null,
         runtimePin: 'x',
         kernels: [],
         entryFile: 'main.ts',
@@ -343,7 +363,6 @@ describe('Publications HTTP integration', () => {
         share: 'https://app.example/v/pub_auth',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
-        manifest: 'https://cdn.example/manifest.json',
       },
       manifest: {
         version: 1,
@@ -570,6 +589,88 @@ describe('Publications HTTP integration', () => {
     expect(recordViewCall.identity.sessionUserId).toBe('user-owner');
   });
 
+  it('GET /v1/publications/:id/files streams bytes with strong ETag and private revalidation Cache-Control', async () => {
+    const sha = 'd'.repeat(64);
+    publicationService.resolvePublicationFile.mockResolvedValue({ sha256Hex: sha, etag: `"${sha}"` });
+    publicationService.openPublicationFile.mockImplementation(async () => {
+      const { Readable } = await import('node:stream');
+      return { body: Readable.from([new TextEncoder().encode('blob-bytes')]), contentLength: 10 };
+    });
+
+    const response = await fetch(
+      `${baseUrl}/v1/publications/pub_files/files?path=${encodeURIComponent('src/main.ts')}`,
+      {
+        headers: { Authorization: 'Bearer owner-token' },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('etag')).toBe(`"${sha}"`);
+    expect(response.headers.get('cache-control')).toBe('private, no-cache');
+    expect(response.headers.get('content-type')).toBe('application/octet-stream');
+    await expect(response.text()).resolves.toBe('blob-bytes');
+
+    expect(publicationService.resolvePublicationFile).toHaveBeenCalledWith({
+      publicationId: 'pub_files',
+      viewerUserId: 'user-owner',
+      path: 'src/main.ts',
+    });
+  });
+
+  it('GET /v1/publications/:id/files returns 304 without a body when If-None-Match matches', async () => {
+    const sha = 'e'.repeat(64);
+    publicationService.resolvePublicationFile.mockResolvedValue({ sha256Hex: sha, etag: `"${sha}"` });
+
+    const response = await fetch(`${baseUrl}/v1/publications/pub_files/files?path=main.ts`, {
+      headers: { Authorization: 'Bearer owner-token', 'If-None-Match': `"${sha}"` },
+    });
+
+    expect(response.status).toBe(304);
+    expect(response.headers.get('etag')).toBe(`"${sha}"`);
+    await expect(response.text()).resolves.toBe('');
+    expect(publicationService.openPublicationFile).not.toHaveBeenCalled();
+  });
+
+  it('GET /v1/publications/:id/files surfaces UNAUTHORIZED 401 for anonymous private access', async () => {
+    publicationService.resolvePublicationFile.mockRejectedValue(
+      new UnauthorizedException({ code: publicationApiCode.UNAUTHORIZED, message: 'Authentication required' }),
+    );
+
+    const response = await fetch(`${baseUrl}/v1/publications/pub_files/files?path=main.ts`);
+
+    expect(response.status).toBe(401);
+    const body = (await response.json()) as { code: string };
+    expect(body.code).toBe(publicationApiCode.UNAUTHORIZED);
+  });
+
+  it('GET /v1/publications/:id/files surfaces FORBIDDEN 403 for revoked grantees', async () => {
+    publicationService.resolvePublicationFile.mockRejectedValue(
+      new ForbiddenException({ code: publicationApiCode.FORBIDDEN, message: 'Publication is private' }),
+    );
+
+    const response = await fetch(`${baseUrl}/v1/publications/pub_files/files?path=main.ts`, {
+      headers: { Authorization: 'Bearer owner-token' },
+    });
+
+    expect(response.status).toBe(403);
+    const body = (await response.json()) as { code: string };
+    expect(body.code).toBe(publicationApiCode.FORBIDDEN);
+  });
+
+  it('GET /v1/publications/:id/files surfaces INVALID_PATH 400 when the path query is missing', async () => {
+    publicationService.resolvePublicationFile.mockRejectedValue(
+      new BadRequestException({ code: publicationApiCode.INVALID_PATH, message: 'Missing path query' }),
+    );
+
+    const response = await fetch(`${baseUrl}/v1/publications/pub_files/files`, {
+      headers: { Authorization: 'Bearer owner-token' },
+    });
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { code: string };
+    expect(body.code).toBe(publicationApiCode.INVALID_PATH);
+  });
+
   it('PATCH /v1/publications/:id/views surfaces RATE_LIMITED 429 when service throws', async () => {
     const { HttpException, HttpStatus } = await import('@nestjs/common');
     publicationService.recordView.mockRejectedValue(
@@ -623,6 +724,10 @@ type BarePublicationsServiceDeps = ConstructorParameters<typeof PublicationsServ
           return '';
         },
       },
+    },
+    {
+      provide: MetricsService,
+      useValue: { publicationFileRequestsTotal: { add: vi.fn() } },
     },
     ViewerIdentityService,
     ViewerIdentityInterceptor,

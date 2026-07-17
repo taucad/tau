@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { parsePublicationRecord } from '#routes/v.$id/parsed-publication.js';
+import { parsePublicationRecord, publicationFileFetchInit } from '#routes/v.$id/parsed-publication.js';
+
+describe('publicationFileFetchInit', () => {
+  it('should include session credentials for private publications (authenticated file proxy)', () => {
+    expect(publicationFileFetchInit('private')).toEqual({ credentials: 'include' });
+  });
+
+  it('should omit credentials for public publications (anonymous CDN CORS)', () => {
+    expect(publicationFileFetchInit('public')).toBeUndefined();
+  });
+});
 
 describe('parsePublicationRecord', () => {
   const baseRecord = {

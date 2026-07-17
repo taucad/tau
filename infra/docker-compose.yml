@@ -92,6 +92,7 @@ services:
         mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD";
         mc mb --ignore-existing local/tau-content;
         mc anonymous set download local/tau-content;
+        mc mb --ignore-existing local/tau-content-private;
         mc admin user add local tau-api tau-api-dev-secret || true;
         mc admin policy attach local readwrite --user tau-api || true;
         mc cp /seed/default-og.png local/tau-content/defaults/og.png;

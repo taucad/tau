@@ -13,6 +13,7 @@ import type { PublicationApiCode } from '@taucad/types/constants';
 import { publicationRowSchema } from '#api/publications/publications.dto.js';
 import { PublicationsService } from '#api/publications/publications.service.js';
 import type { ObjectStorageServiceContract } from '#storage/object-storage.service.js';
+import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
 import * as schema from '#database/schema.js';
 
 type PublicationsServiceDeps = ConstructorParameters<typeof PublicationsService>;
@@ -119,6 +120,7 @@ function createStorageStub(): PublicationsServiceDeps[1] {
     presignPut: vi.fn(async () => 'https://example.invalid/put'),
     publicUrl: vi.fn(() => 'https://example.invalid/public'),
     headProbeObject: vi.fn(async () => undefined),
+    headPrivateBucket: vi.fn(async () => true),
   };
 
   return storage as PublicationsServiceDeps[1];
@@ -131,9 +133,38 @@ function createConfigStub(): PublicationsServiceDeps[2] {
         return 'http://app/';
       }
 
+      if (key === 'TAU_API_URL') {
+        return 'http://api.test/';
+      }
+
       return '';
     }),
   } as unknown as PublicationsServiceDeps[2];
+}
+
+const testManifestSha = 'a'.repeat(64);
+
+const testManifestDocument = {
+  version: 1,
+  projectId: 'proj_x',
+  entryFile: 'main.ts',
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- file-path keys can't be camelCase
+  files: { 'main.ts': `sha256:${testManifestSha}` },
+  kernels: [],
+  runtime: '@taucad/runtime@x',
+  parameters: {},
+  createdAt: '2020-01-01T00:00:00.000Z',
+} as const;
+
+/** Storage stub whose getBlob yields a fresh valid manifest stream per call. */
+function createManifestStorageStub(): PublicationsServiceDeps[1] {
+  const storage = createStorageStub();
+  vi.mocked(storage.getBlob).mockImplementation(async () => ({
+    body: Readable.from([Buffer.from(JSON.stringify(testManifestDocument))]),
+    contentType: 'application/json',
+    etag: 'etag',
+  }));
+  return storage;
 }
 
 function isBadRequestWithCode(error: unknown, code: PublicationApiCode): boolean {
@@ -155,6 +186,10 @@ function encodeUtf8(text: string): Uint8Array<ArrayBuffer> {
 
 function allocZeros(byteLength: number): Uint8Array<ArrayBuffer> {
   return new Uint8Array(byteLength);
+}
+
+function validWebpSignature(): Uint8Array<ArrayBuffer> {
+  return new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
 }
 
 describe('PublicationsService.publishFromUpload validation', () => {
@@ -387,15 +422,15 @@ describe('PublicationsService.publishFromUpload validation', () => {
         }),
       }),
       insert: vi.fn().mockImplementation((table: unknown) => ({
-        values: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+        values: vi.fn().mockImplementation((payload: Record<string, unknown> | Array<Record<string, unknown>>) => {
           if (table === schema.publicationAccess) {
-            accessPayloads.push(payload);
+            accessPayloads.push(...(Array.isArray(payload) ? payload : [payload]));
             return {
               onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
             };
           }
 
-          if ('manifestKey' in payload) {
+          if (!Array.isArray(payload) && 'manifestKey' in payload) {
             return undefined;
           }
 
@@ -809,6 +844,45 @@ describe('PublicationsService.getPublicationForViewer', () => {
     expect(result.publication.unpublishedAt).toBeNull();
   });
 
+  it('resolves default thumbnail/og URLs without double-prefixing the namespace', async () => {
+    const storage = createStorageForManifest();
+    const service = new PublicationsService(
+      createDatabaseChainReturning([{ ...publicationRow, ownerSnapshot: { id: 'user_owner', name: 'Owner' } }]),
+      storage as unknown as PublicationsServiceDeps[1],
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+    );
+
+    await service.getPublicationForViewer({ publicationId: 'pub_test' });
+
+    // Null keys fall back to the default namespace with a bare key — not the
+    // previously double-prefixed `defaults/defaults/thumb.webp`.
+    expect(storage.publicUrl).toHaveBeenCalledWith({ namespace: 'defaults', key: 'thumb.webp' });
+    expect(storage.publicUrl).toHaveBeenCalledWith({ namespace: 'defaults', key: 'og.png' });
+  });
+
+  it('resolves an uploaded thumbnail from the blobs namespace', async () => {
+    const storage = createStorageForManifest();
+    const service = new PublicationsService(
+      createDatabaseChainReturning([
+        { ...publicationRow, thumbnailKey: 'blobs/ab/cdef', ownerSnapshot: { id: 'user_owner', name: 'Owner' } },
+      ]),
+      storage as unknown as PublicationsServiceDeps[1],
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+    );
+
+    await service.getPublicationForViewer({ publicationId: 'pub_test' });
+
+    expect(storage.publicUrl).toHaveBeenCalledWith({ namespace: 'blobs', key: 'ab/cdef' });
+  });
+
   it('marks the publication owner with viewerRole owner', async () => {
     const entryRelativePath = 'main.ts';
     const manifestDocument = {
@@ -975,10 +1049,12 @@ describe('PublicationsService.updateVisibility', () => {
   function createServiceWithVisibilityUpdate(args: {
     readonly ownerRows: unknown[];
     readonly updatedRows?: unknown[];
+    readonly storage?: PublicationsServiceDeps[1];
   }): {
     readonly service: PublicationsService;
     readonly update: ReturnType<typeof vi.fn>;
     readonly set: ReturnType<typeof vi.fn>;
+    readonly storage: PublicationsServiceDeps[1];
   } {
     const ownerLimit = vi.fn().mockResolvedValue(args.ownerRows);
     const ownerWhere = vi.fn().mockReturnValue({ limit: ownerLimit });
@@ -990,9 +1066,11 @@ describe('PublicationsService.updateVisibility', () => {
     const set = vi.fn().mockReturnValue({ where });
     const update = vi.fn().mockReturnValue({ set });
 
+    const storage = args.storage ?? createManifestStorageStub();
+
     const service = new PublicationsService(
       { database: { select, update } } as unknown as PublicationsServiceDeps[0],
-      createStorageStub(),
+      storage,
       createConfigStub(),
       createRedisStub(),
       createRateLimiterStub(),
@@ -1000,7 +1078,7 @@ describe('PublicationsService.updateVisibility', () => {
       createEmailStub(),
     );
 
-    return { service, update, set };
+    return { service, update, set, storage };
   }
 
   it('switches private publications to public without mutating access grants', async () => {
@@ -1080,6 +1158,87 @@ describe('PublicationsService.updateVisibility', () => {
         visibility: 'public',
       }),
     ).rejects.toBeInstanceOf(GoneException);
+  });
+
+  describe('storage tier reconciliation (R7)', () => {
+    it('should copy manifest blobs to the public tier with immutable caching before flipping private → public', async () => {
+      const { service, update, storage } = createServiceWithVisibilityUpdate({
+        ownerRows: [publicationRow],
+        updatedRows: [{ id: 'pub_access', visibility: 'public' }],
+      });
+
+      await service.updateVisibility({ publicationId: 'pub_access', ownerId: 'user_owner', visibility: 'public' });
+
+      const blobPuts = vi
+        .mocked(storage.putBlob)
+        .mock.calls.map(([callArgs]) => callArgs)
+        .filter((callArgs) => callArgs.namespace === 'blobs');
+      expect(blobPuts).toEqual([
+        expect.objectContaining({
+          tier: 'public',
+          cacheControl: 'public, max-age=31536000, immutable',
+          ifNoneMatch: '*',
+        }),
+      ]);
+      // Storage reconciliation completes before the DB visibility flip.
+      const firstUpdateOrder = update.mock.invocationCallOrder[0] ?? Number.NEGATIVE_INFINITY;
+      const lastPutOrder = vi.mocked(storage.putBlob).mock.invocationCallOrder.at(-1) ?? Number.POSITIVE_INFINITY;
+      expect(lastPutOrder).toBeLessThan(firstUpdateOrder);
+    });
+
+    it('should dual-home blobs into the private tier and delete the public manifest object on public → private', async () => {
+      const { service, storage } = createServiceWithVisibilityUpdate({
+        ownerRows: [{ ...publicationRow, visibility: 'public' }],
+        updatedRows: [{ id: 'pub_access', visibility: 'private' }],
+      });
+
+      await service.updateVisibility({ publicationId: 'pub_access', ownerId: 'user_owner', visibility: 'private' });
+
+      const blobPuts = vi
+        .mocked(storage.putBlob)
+        .mock.calls.map(([callArgs]) => callArgs)
+        .filter((callArgs) => callArgs.namespace === 'blobs');
+      expect(blobPuts).toEqual([expect.objectContaining({ tier: 'private', cacheControl: 'private, no-cache' })]);
+
+      // The share-link-derivable public manifest key is removed from the anonymous origin.
+      expect(vi.mocked(storage.deleteBlob)).toHaveBeenCalledWith({
+        namespace: 'derivatives',
+        key: 'm.json',
+      });
+    });
+
+    it('should skip blob copies that already exist in the target tier', async () => {
+      const storage = createManifestStorageStub();
+      vi.mocked(storage.headBlob).mockImplementation(async (callArgs) =>
+        callArgs.namespace === 'blobs' || callArgs.tier === 'private'
+          ? { contentType: 'application/octet-stream', size: 1, etag: 'e', cacheControl: '' }
+          : undefined,
+      );
+      const { service } = createServiceWithVisibilityUpdate({
+        ownerRows: [publicationRow],
+        updatedRows: [{ id: 'pub_access', visibility: 'public' }],
+        storage,
+      });
+
+      await service.updateVisibility({ publicationId: 'pub_access', ownerId: 'user_owner', visibility: 'public' });
+
+      expect(vi.mocked(storage.putBlob)).not.toHaveBeenCalled();
+    });
+
+    it('should keep the current visibility when storage reconciliation fails', async () => {
+      const storage = createManifestStorageStub();
+      vi.mocked(storage.putBlob).mockRejectedValue(new Error('bucket unavailable'));
+      const { service, update } = createServiceWithVisibilityUpdate({
+        ownerRows: [publicationRow],
+        storage,
+      });
+
+      await expect(
+        service.updateVisibility({ publicationId: 'pub_access', ownerId: 'user_owner', visibility: 'public' }),
+      ).rejects.toThrow('bucket unavailable');
+
+      expect(update).not.toHaveBeenCalled();
+    });
   });
 });
 
@@ -1466,5 +1625,564 @@ describe('PublicationsService.recordView', () => {
 
     expect(update).not.toHaveBeenCalled();
     expect(metrics.publicationViewsTotal.add).toHaveBeenCalledWith(1, { deduped: 'duplicate' });
+  });
+});
+
+// === Private publication storage tiers ===
+
+describe('PublicationsService.publishFromUpload storage tiers (R2/R8)', () => {
+  function createPublishHarness(args?: { readonly transactionRejects?: boolean }): {
+    readonly storage: PublicationsServiceDeps[1];
+    readonly databaseService: PublicationsServiceDeps[0];
+    readonly txInserts: Array<{ table: unknown; payload: Record<string, unknown> }>;
+    readonly outerInsert: ReturnType<typeof vi.fn>;
+    readonly service: PublicationsService;
+  } {
+    const txInserts: Array<{ table: unknown; payload: Record<string, unknown> }> = [];
+
+    const tx = {
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      }),
+      insert: vi.fn().mockImplementation((table: unknown) => ({
+        values: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+          txInserts.push({ table, payload });
+          return { onConflictDoUpdate: vi.fn().mockResolvedValue(undefined) };
+        }),
+      })),
+      update: vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(undefined),
+        }),
+      }),
+    };
+
+    const outerInsert = vi.fn().mockReturnValue({
+      values: vi.fn().mockReturnValue({
+        onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
+      }),
+    });
+
+    const databaseService = {
+      database: {
+        select: vi.fn().mockReturnValue({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([]),
+            }),
+          }),
+        }),
+        insert: outerInsert,
+        transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<void>) => {
+          if (args?.transactionRejects === true) {
+            throw new Error('transaction failed');
+          }
+
+          await callback(tx);
+        }),
+      },
+    } as unknown as PublicationsServiceDeps[0];
+
+    const storage = createStorageStub();
+    const service = new PublicationsService(
+      databaseService,
+      storage,
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+    );
+
+    return { storage, databaseService, txInserts, outerInsert, service };
+  }
+
+  const publishArgs = (visibility: 'private' | 'public', files: Map<string, Uint8Array<ArrayBuffer>>) =>
+    ({
+      ownerId: 'user_1',
+      manifest: {
+        projectId: 'proj_1',
+        projectName: 'Demo',
+        entryFile: 'main.ts',
+        visibility,
+        title: 'Hello',
+      },
+      files,
+    }) as const;
+
+  it('should write private publication blobs and the manifest to the fail-closed private tier', async () => {
+    const { storage, service } = createPublishHarness();
+
+    await service.publishFromUpload(publishArgs('private', new Map([['main.ts', encodeUtf8('code')]])));
+
+    const putCalls = vi.mocked(storage.putBlob).mock.calls.map(([callArgs]) => callArgs);
+    expect(putCalls.filter((callArgs) => callArgs.namespace === 'blobs')).toEqual([
+      expect.objectContaining({ tier: 'private', cacheControl: 'private, no-cache', ifNoneMatch: '*' }),
+    ]);
+    expect(putCalls.filter((callArgs) => callArgs.namespace === 'derivatives')).toEqual([
+      expect.objectContaining({ tier: 'private', cacheControl: 'private, no-cache' }),
+    ]);
+  });
+
+  it('should keep public publication blobs on the CDN tier while the manifest stays private', async () => {
+    const { storage, service } = createPublishHarness();
+
+    await service.publishFromUpload(publishArgs('public', new Map([['main.ts', encodeUtf8('code')]])));
+
+    const putCalls = vi.mocked(storage.putBlob).mock.calls.map(([callArgs]) => callArgs);
+    expect(putCalls.filter((callArgs) => callArgs.namespace === 'blobs')).toEqual([
+      expect.objectContaining({ tier: 'public', cacheControl: 'public, max-age=31536000, immutable' }),
+    ]);
+    // The manifest is the path→sha keyring at a share-link-derivable key; it
+    // never lands on the anonymous origin regardless of visibility.
+    expect(putCalls.filter((callArgs) => callArgs.namespace === 'derivatives')).toEqual([
+      expect.objectContaining({ tier: 'private' }),
+    ]);
+  });
+
+  it('should exclude tau.json and thumbnail.webp from the 200-user-file limit and preserve their bytes', async () => {
+    const { storage, service } = createPublishHarness();
+    const thumbnail = validWebpSignature();
+    const tauManifest = encodeUtf8('{"schemaVersion":1}');
+    const files = new Map<string, Uint8Array<ArrayBuffer>>([['main.ts', encodeUtf8('code')]]);
+    for (let index = 0; index < 199; index++) {
+      files.set(`user-${index}.ts`, encodeUtf8(`file-${index}`));
+    }
+    files.set('tau.json', tauManifest);
+    files.set('thumbnail.webp', thumbnail);
+
+    await service.publishFromUpload(publishArgs('private', files));
+
+    const blobCalls = vi
+      .mocked(storage.putBlob)
+      .mock.calls.map(([callArgs]) => callArgs)
+      .filter((callArgs) => callArgs.namespace === 'blobs');
+    expect(blobCalls).toHaveLength(202);
+    expect(blobCalls).toContainEqual(
+      expect.objectContaining({ body: tauManifest, contentType: 'application/octet-stream' }),
+    );
+    expect(blobCalls).toContainEqual(expect.objectContaining({ body: thumbnail, contentType: 'image/webp' }));
+  });
+
+  it('should repair stale same-key thumbnail metadata without changing bytes', async () => {
+    const { storage, service } = createPublishHarness();
+    const thumbnail = validWebpSignature();
+    vi.mocked(storage.putBlob).mockImplementation(async (args) => ({
+      etag: 'etag',
+      alreadyExisted: args.contentType === 'image/webp' && args.ifNoneMatch === '*',
+    }));
+    vi.mocked(storage.headBlob).mockResolvedValue({
+      contentType: 'application/octet-stream',
+      size: thumbnail.byteLength,
+      etag: 'etag',
+      cacheControl: 'private, no-cache',
+    });
+
+    await service.publishFromUpload(
+      publishArgs(
+        'private',
+        new Map([
+          ['main.ts', encodeUtf8('code')],
+          ['thumbnail.webp', thumbnail],
+        ]),
+      ),
+    );
+
+    const thumbnailWrites = vi
+      .mocked(storage.putBlob)
+      .mock.calls.map(([callArgs]) => callArgs)
+      .filter((callArgs) => callArgs.namespace === 'blobs' && callArgs.contentType === 'image/webp');
+    expect(thumbnailWrites).toHaveLength(2);
+    expect(thumbnailWrites[0]?.body).toBe(thumbnail);
+    expect(thumbnailWrites[1]?.body).toBe(thumbnail);
+    expect(thumbnailWrites[1]).not.toHaveProperty('ifNoneMatch');
+  });
+
+  it('should upsert blob refcounts inside the publish transaction, aggregated per sha', async () => {
+    const { txInserts, outerInsert, service } = createPublishHarness();
+
+    await service.publishFromUpload(
+      publishArgs(
+        'public',
+        new Map([
+          ['main.ts', encodeUtf8('same-bytes')],
+          ['copy.ts', encodeUtf8('same-bytes')],
+          ['other.ts', encodeUtf8('different-bytes')],
+        ]),
+      ),
+    );
+
+    const refInserts = txInserts.filter((entry) => entry.table === schema.blobRef);
+    expect(refInserts).toHaveLength(2);
+
+    const sameSha = sha256HexFromBytes(encodeUtf8('same-bytes'));
+    const duplicated = refInserts.find((entry) => entry.payload['sha256'] === sameSha);
+    expect(duplicated?.payload).toEqual(
+      expect.objectContaining({ refcount: 2, sizeBytes: BigInt(encodeUtf8('same-bytes').byteLength) }),
+    );
+
+    const otherSha = sha256HexFromBytes(encodeUtf8('different-bytes'));
+    const single = refInserts.find((entry) => entry.payload['sha256'] === otherSha);
+    expect(single?.payload).toEqual(expect.objectContaining({ refcount: 1 }));
+
+    // No refcount writes bypass the transaction.
+    expect(outerInsert).not.toHaveBeenCalled();
+  });
+
+  it('should reject the publish and issue no out-of-transaction refcount writes when the transaction fails', async () => {
+    const { outerInsert, service } = createPublishHarness({ transactionRejects: true });
+
+    await expect(
+      service.publishFromUpload(publishArgs('public', new Map([['main.ts', encodeUtf8('code')]]))),
+    ).rejects.toThrow('transaction failed');
+
+    expect(outerInsert).not.toHaveBeenCalled();
+  });
+});
+
+// === Publication file proxy resolution ===
+
+describe('PublicationsService.resolvePublicationFile (R3)', () => {
+  const privateRow = {
+    id: 'pub_test',
+    projectId: 'proj_x',
+    ownerId: 'user_owner',
+    visibility: 'private',
+    manifestKey: 'm.json',
+    ogImageKey: null,
+    thumbnailKey: null,
+    unpublishedAt: null,
+    parentPublicationId: null,
+    kernels: ['replicad'],
+    entryFile: 'main.ts',
+    title: 'T',
+    description: null,
+    forkCount: 0,
+    viewCount: 0,
+    ownerSnapshot: { id: 'user_owner', name: 'Owner' },
+    createdAt: new Date(),
+    runtimePin: '~0.1.0',
+  };
+
+  function createFileService(args: {
+    readonly database: PublicationsServiceDeps[0];
+    readonly storage?: PublicationsServiceDeps[1];
+  }): { readonly service: PublicationsService; readonly storage: PublicationsServiceDeps[1] } {
+    const storage = args.storage ?? createManifestStorageStub();
+    const service = new PublicationsService(
+      args.database,
+      storage,
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+    );
+    return { service, storage };
+  }
+
+  function createGranteeDatabase(args: { readonly accessRows: unknown[] }): PublicationsServiceDeps[0] {
+    const publicationLimit = vi.fn().mockResolvedValue([privateRow]);
+    const publicationFrom = vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: publicationLimit }) });
+
+    const userLimit = vi.fn().mockResolvedValue([{ email: 'friend@example.com', emailVerified: true }]);
+    const userFrom = vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: userLimit }) });
+
+    const accessLimit = vi.fn().mockResolvedValue(args.accessRows);
+    const accessFrom = vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: accessLimit }) });
+
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({ from: publicationFrom })
+      .mockReturnValueOnce({ from: userFrom })
+      .mockReturnValueOnce({ from: accessFrom });
+
+    return { database: { select } } as unknown as PublicationsServiceDeps[0];
+  }
+
+  it('should resolve the manifest sha as a strong quoted ETag for the owner', async () => {
+    const { service } = createFileService({ database: createDatabaseChainReturning([privateRow]) });
+
+    const resolved = await service.resolvePublicationFile({
+      publicationId: 'pub_test',
+      viewerUserId: 'user_owner',
+      path: 'main.ts',
+    });
+
+    expect(resolved).toEqual({ sha256Hex: testManifestSha, etag: `"${testManifestSha}"`, path: 'main.ts' });
+  });
+
+  it('should resolve for an active email grantee', async () => {
+    const { service } = createFileService({ database: createGranteeDatabase({ accessRows: [{ id: 'pva_1' }] }) });
+
+    await expect(
+      service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_friend', path: 'main.ts' }),
+    ).resolves.toEqual({ sha256Hex: testManifestSha, etag: `"${testManifestSha}"`, path: 'main.ts' });
+  });
+
+  it('should reject anonymous private requests with 401 before touching storage', async () => {
+    const { service, storage } = createFileService({ database: createDatabaseChainReturning([privateRow]) });
+
+    await expect(service.resolvePublicationFile({ publicationId: 'pub_test', path: 'main.ts' })).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    expect(vi.mocked(storage.getBlob)).not.toHaveBeenCalled();
+  });
+
+  it('should reject viewers without an active grant with 403 (revocation is immediate)', async () => {
+    const { service } = createFileService({ database: createGranteeDatabase({ accessRows: [] }) });
+
+    await expect(
+      service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_revoked', path: 'main.ts' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('should return 404 for a path outside the publication manifest (no cross-publication re-scoping)', async () => {
+    const { service } = createFileService({ database: createDatabaseChainReturning([privateRow]) });
+
+    await expect(
+      service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: 'stolen.ts' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('should reject an empty path with INVALID_PATH', async () => {
+    const { service } = createFileService({ database: createDatabaseChainReturning([privateRow]) });
+
+    await expect(
+      service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: '' }),
+    ).rejects.toSatisfy((error: unknown) => isBadRequestWithCode(error, publicationApiCode.INVALID_PATH));
+  });
+
+  it('should return 410 for unpublished publications', async () => {
+    const { service } = createFileService({
+      database: createDatabaseChainReturning([{ ...privateRow, unpublishedAt: new Date() }]),
+    });
+
+    await expect(
+      service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: 'main.ts' }),
+    ).rejects.toBeInstanceOf(GoneException);
+  });
+
+  it('should serve public publications to anonymous viewers through the proxy too', async () => {
+    const { service } = createFileService({
+      database: createDatabaseChainReturning([{ ...privateRow, visibility: 'public' }]),
+    });
+
+    await expect(service.resolvePublicationFile({ publicationId: 'pub_test', path: 'main.ts' })).resolves.toEqual({
+      sha256Hex: testManifestSha,
+      etag: `"${testManifestSha}"`,
+      path: 'main.ts',
+    });
+  });
+
+  it('should normalize ./-prefixed request paths against manifest keys', async () => {
+    const { service } = createFileService({ database: createDatabaseChainReturning([privateRow]) });
+
+    await expect(
+      service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: './main.ts' }),
+    ).resolves.toEqual({ sha256Hex: testManifestSha, etag: `"${testManifestSha}"`, path: 'main.ts' });
+  });
+
+  it('should serve repeat resolutions from the manifest cache without re-reading storage', async () => {
+    const { service, storage } = createFileService({ database: createDatabaseChainReturning([privateRow]) });
+
+    await service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: 'main.ts' });
+    await service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: 'main.ts' });
+
+    expect(vi.mocked(storage.getBlob)).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('PublicationsService.openPublicationFile (R3)', () => {
+  it('should stream from the private tier first and fall back to the public bucket for legacy blobs', async () => {
+    const storage = createStorageStub();
+    vi.mocked(storage.getBlob)
+      .mockRejectedValueOnce({ name: 'NoSuchKey' })
+      .mockResolvedValueOnce({
+        body: Readable.from([Buffer.from('legacy-bytes')]),
+        contentType: 'application/octet-stream',
+        etag: 'e',
+        contentLength: 12,
+      });
+
+    const service = new PublicationsService(
+      {} as unknown as PublicationsServiceDeps[0],
+      storage,
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+    );
+
+    const sha = 'f'.repeat(64);
+    const opened = await service.openPublicationFile(sha, 'main.ts');
+
+    expect(opened.contentLength).toBe(12);
+    expect(vi.mocked(storage.getBlob)).toHaveBeenNthCalledWith(1, {
+      namespace: 'blobs',
+      key: blobKeyFromSha256Hex(sha),
+      tier: 'private',
+    });
+    expect(vi.mocked(storage.getBlob)).toHaveBeenNthCalledWith(2, {
+      namespace: 'blobs',
+      key: blobKeyFromSha256Hex(sha),
+    });
+  });
+
+  it('should propagate non-missing storage errors without falling back', async () => {
+    const storage = createStorageStub();
+    vi.mocked(storage.getBlob).mockRejectedValue(Object.assign(new Error('denied'), { name: 'AccessDenied' }));
+
+    const service = new PublicationsService(
+      {} as unknown as PublicationsServiceDeps[0],
+      storage,
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+    );
+
+    await expect(service.openPublicationFile('f'.repeat(64), 'main.ts')).rejects.toThrow('denied');
+    expect(vi.mocked(storage.getBlob)).toHaveBeenCalledTimes(1);
+  });
+
+  it('should sniff legacy canonical thumbnails with stale object metadata', async () => {
+    const storage = createStorageStub();
+    const thumbnail = validWebpSignature();
+    vi.mocked(storage.getBlob).mockResolvedValue({
+      body: Readable.from([thumbnail]),
+      contentType: 'application/octet-stream',
+      etag: 'e',
+      contentLength: thumbnail.byteLength,
+    });
+    const service = new PublicationsService(
+      {} as unknown as PublicationsServiceDeps[0],
+      storage,
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+    );
+
+    const opened = await service.openPublicationFile('f'.repeat(64), 'thumbnail.webp');
+
+    expect(opened.contentType).toBe('image/webp');
+    expect(opened.contentLength).toBe(thumbnail.byteLength);
+  });
+});
+
+// === Tier-aware viewer URLs and wire hardening ===
+
+describe('PublicationsService.getPublicationForViewer tiered file URLs (R4/R6)', () => {
+  const baseRow = {
+    id: 'pub_test',
+    projectId: 'proj_x',
+    ownerId: 'user_owner',
+    visibility: 'private',
+    manifestKey: 'm.json',
+    ogImageKey: null,
+    thumbnailKey: null,
+    unpublishedAt: null,
+    parentPublicationId: null,
+    kernels: ['replicad'],
+    entryFile: 'main.ts',
+    title: 'T',
+    description: null,
+    forkCount: 0,
+    viewCount: 0,
+    ownerSnapshot: { id: 'user_owner', name: 'Owner' },
+    createdAt: new Date(),
+    runtimePin: '~0.1.0',
+  };
+
+  function createViewerService(args: {
+    readonly row: Record<string, unknown>;
+    readonly manifestFiles?: Record<string, string>;
+  }): { readonly service: PublicationsService; readonly storage: PublicationsServiceDeps[1] } {
+    const storage = createStorageStub();
+    const manifestDocument = {
+      ...testManifestDocument,
+      files: args.manifestFiles ?? testManifestDocument.files,
+    };
+    vi.mocked(storage.getBlob).mockImplementation(async () => ({
+      body: Readable.from([Buffer.from(JSON.stringify(manifestDocument))]),
+      contentType: 'application/json',
+      etag: 'etag',
+    }));
+
+    const service = new PublicationsService(
+      createDatabaseChainReturning([args.row]),
+      storage,
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+    );
+
+    return { service, storage };
+  }
+
+  it('should emit authenticated proxy URLs with encoded paths for private publication files', async () => {
+    const { service, storage } = createViewerService({
+      row: baseRow,
+      /* eslint-disable @typescript-eslint/naming-convention -- file-path keys can't be camelCase */
+      manifestFiles: {
+        'main.ts': `sha256:${testManifestSha}`,
+        'src/deep file.ts': `sha256:${'b'.repeat(64)}`,
+      },
+      /* eslint-enable @typescript-eslint/naming-convention -- end file-path window */
+    });
+
+    const result = await service.getPublicationForViewer({ publicationId: 'pub_test', viewerUserId: 'user_owner' });
+
+    expect(result.files['main.ts']).toBe('http://api.test/v1/publications/pub_test/files?path=main.ts');
+    expect(result.files['src/deep file.ts']).toBe(
+      'http://api.test/v1/publications/pub_test/files?path=src%2Fdeep%20file.ts',
+    );
+    // No unsigned blob URL is ever emitted for private bytes.
+    expect(vi.mocked(storage.publicUrl)).not.toHaveBeenCalledWith(expect.objectContaining({ namespace: 'blobs' }));
+  });
+
+  it('should keep direct CDN URLs for public publication files', async () => {
+    const { service, storage } = createViewerService({ row: { ...baseRow, visibility: 'public' } });
+
+    const result = await service.getPublicationForViewer({ publicationId: 'pub_test' });
+
+    expect(result.files['main.ts']).toBe('https://example.invalid/public');
+    expect(vi.mocked(storage.publicUrl)).toHaveBeenCalledWith({
+      namespace: 'blobs',
+      key: blobKeyFromSha256Hex(testManifestSha),
+    });
+  });
+
+  it('should expose neither raw storage keys nor a manifest URL on the wire', async () => {
+    const { service } = createViewerService({ row: baseRow });
+
+    const result = await service.getPublicationForViewer({ publicationId: 'pub_test', viewerUserId: 'user_owner' });
+
+    expect(result.publication).not.toHaveProperty('manifestKey');
+    expect(result.publication).not.toHaveProperty('ogImageKey');
+    expect(result.publication).not.toHaveProperty('thumbnailKey');
+    expect(result.urls).not.toHaveProperty('manifest');
+  });
+
+  it('should read the manifest from the private tier before falling back to the public bucket', async () => {
+    const { service, storage } = createViewerService({ row: baseRow });
+
+    await service.getPublicationForViewer({ publicationId: 'pub_test', viewerUserId: 'user_owner' });
+
+    expect(vi.mocked(storage.getBlob)).toHaveBeenCalledWith({
+      namespace: 'derivatives',
+      key: 'm.json',
+      tier: 'private',
+    });
   });
 });

@@ -2,6 +2,7 @@
 import assimpjsExporter from 'assimpjs/exporter';
 import { lookupMimeType } from '@taucad/types/constants';
 import type { ExportFile } from '@taucad/types';
+import { resolveAssimpFactory } from '#assimp-interop.js';
 import { BaseExporter } from '#exporters/base.exporter.js';
 
 /** Tuple of all export format identifiers supported by the Assimp backend. */
@@ -66,7 +67,7 @@ export class AssimpExporter extends BaseExporter<AssimpExporterOptions> {
 
     try {
       // Initialize assimpjs exporter
-      const ajs = await assimpjsExporter({
+      const ajs = await resolveAssimpFactory(assimpjsExporter)({
         locateFile() {
           // Universal pattern for browsers and bundlers
           // @see https://web.dev/articles/bundling-non-js-resources#universal_pattern_for_browsers_and_bundlers

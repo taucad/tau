@@ -2,6 +2,7 @@
 import assimpjs from 'assimpjs/all';
 import type { AssimpResult } from 'assimpjs/all';
 import type { FileExtension, FileInput } from '@taucad/types';
+import { resolveAssimpFactory } from '#assimp-interop.js';
 import type { FileResolver } from '#file-resolver.js';
 import { BaseLoader } from '#loaders/base.loader.js';
 
@@ -21,7 +22,7 @@ type AssimpOptions = {
  */
 export class AssimpLoader extends BaseLoader<Uint8Array<ArrayBuffer>, AssimpOptions> {
   protected async parseAsync(files: FileInput[], options: AssimpOptions): Promise<Uint8Array<ArrayBuffer>> {
-    const ajs = await assimpjs({
+    const ajs = await resolveAssimpFactory(assimpjs)({
       locateFile() {
         const wasmPath = new URL('../assets/assimpjs/assimpjs-all.wasm', import.meta.url).href;
 

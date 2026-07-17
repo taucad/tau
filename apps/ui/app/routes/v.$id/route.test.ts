@@ -37,6 +37,7 @@ vi.mock('#environment.config.js', async (importOriginal) => {
 });
 
 const mockedGetEnvironment = vi.mocked(getEnvironment);
+const thumbnailPath = 'thumbnail.webp';
 
 const sampleLoaderData: PublicationRouteLoaderData = {
   publication: {
@@ -341,6 +342,45 @@ describe('public viewer loader', () => {
 });
 
 describe('public viewer meta', () => {
+  it('emits social image metadata only when the canonical thumbnail is present in files', () => {
+    const thumbnail = 'https://cdn.example/blobs/thumb.webp';
+    const loaderData = {
+      ...sampleLoaderData,
+      files: { ...sampleLoaderData.files, [thumbnailPath]: thumbnail },
+    };
+
+    const tags = meta({
+      data: loaderData,
+      loaderData,
+      params: { id: 'pub_1' },
+      location: {} as unknown as Parameters<typeof meta>[0]['location'],
+      matches: [],
+    });
+
+    expect(tags).toEqual(
+      expect.arrayContaining([
+        { property: 'og:image', content: thumbnail },
+        { name: 'twitter:card', content: 'summary_large_image' },
+        { name: 'twitter:image', content: thumbnail },
+      ]),
+    );
+  });
+
+  it('does not treat the API fallback thumbnail URL as evidence of a published thumbnail', () => {
+    const tags = meta({
+      data: sampleLoaderData,
+      loaderData: sampleLoaderData,
+      params: { id: 'pub_1' },
+      location: {} as unknown as Parameters<typeof meta>[0]['location'],
+      matches: [],
+    });
+
+    expect(tags?.some((tag) => 'property' in tag && tag.property === 'og:image')).toBe(false);
+    expect(tags?.some((tag) => 'name' in tag && typeof tag.name === 'string' && tag.name.startsWith('twitter:'))).toBe(
+      false,
+    );
+  });
+
   it('adds noindex and no-referrer for private publications', () => {
     const tags = meta({
       data: sampleLoaderData,

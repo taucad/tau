@@ -15,6 +15,8 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PublicationOwnerSnapshot } from '@taucad/types';
 import {
   idPrefix,
+  isPublicationSystemArtifact,
+  publicationMaxUserFiles,
   publicationApiCode,
   publishForbiddenPathPrefixes,
   isPublishableTauPath,
@@ -41,13 +43,13 @@ import { RedisService } from '#redis/redis.service.js';
 import * as schema from '#database/schema.js';
 import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { StorageNamespace } from '#storage/storage.constants.js';
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { buildPublicationViewUrl } from '#email/email-link-builder.js';
 
 const maxBytesPerFile = 25 * 1024 * 1024;
 export const maxTotalBytes = 50 * 1024 * 1024;
-const maxFiles = 200;
 type ProjectShareCurrentPublication = NonNullable<ProjectShareEnvelope['currentPublication']>;
 type ProjectShareProject = ProjectShareEnvelope['project'];
 
@@ -72,6 +74,22 @@ const assertAllowedRelativePath = (relativePathValue: string): void => {
       message: `Path not allowed: ${relativePathValue}`,
     });
   }
+};
+
+const isWebp = (bytes: Uint8Array<ArrayBuffer>): boolean =>
+  bytes.byteLength >= 12 &&
+  new TextDecoder().decode(bytes.subarray(0, 4)) === 'RIFF' &&
+  new TextDecoder().decode(bytes.subarray(8, 12)) === 'WEBP';
+
+const publicationContentType = (path: string): string =>
+  path === 'thumbnail.webp' ? 'image/webp' : 'application/octet-stream';
+
+const splitNamespaceKey = (storedKey: string): { namespace: StorageNamespace; key: string } => {
+  const slash = storedKey.indexOf('/');
+  if (slash === -1) {
+    return { namespace: 'defaults', key: storedKey };
+  }
+  return { namespace: storedKey.slice(0, slash) as StorageNamespace, key: storedKey.slice(slash + 1) };
 };
 
 @Injectable()
@@ -129,16 +147,25 @@ export class PublicationsService {
       });
     }
 
-    if (files.size > maxFiles) {
+    const userFileCount = [...files.keys()].filter(
+      (path) => !isPublicationSystemArtifact(normalizeRelativePath(path)),
+    ).length;
+    if (userFileCount > publicationMaxUserFiles) {
       throw new BadRequestException({
         code: publicationApiCode.TOO_MANY_FILES,
-        message: `Maximum ${maxFiles} files exceeded`,
+        message: `Maximum ${publicationMaxUserFiles} files exceeded`,
       });
     }
 
     let totalBytes = 0;
     for (const [path, buf] of files) {
       assertAllowedRelativePath(path);
+      if (normalizeRelativePath(path) === 'thumbnail.webp' && !isWebp(buf)) {
+        throw new BadRequestException({
+          code: publicationApiCode.INVALID_THUMBNAIL_WEBP,
+          message: 'thumbnail.webp is not a valid WebP file',
+        });
+      }
       if (buf.byteLength > maxBytesPerFile) {
         throw new BadRequestException({
           code: publicationApiCode.FILE_TOO_LARGE,
@@ -171,7 +198,6 @@ export class PublicationsService {
 
     const manifestKey = `publications/${publicationId}/manifest.json`;
     const ogImageKey = 'defaults/og.png';
-    const thumbnailKey = 'defaults/thumb.webp';
 
     const ownerSnapshot = await this.loadOwnerSnapshot(ownerId);
 
@@ -187,18 +213,38 @@ export class PublicationsService {
         });
     };
 
+    const uploads = [...files.entries()].map(([path, buf]) => ({
+      path: normalizeRelativePath(path),
+      buf,
+      sha: sha256HexFromBytes(new Uint8Array(buf)),
+      contentType: publicationContentType(normalizeRelativePath(path)),
+    }));
+    const thumbnailUpload = uploads.find((upload) => upload.path === 'thumbnail.webp');
+    const thumbnailKey = thumbnailUpload ? `blobs/${blobKeyFromSha256Hex(thumbnailUpload.sha)}` : 'defaults/thumb.webp';
+
     await Promise.all(
-      [...files.entries()].map(async ([, buf]) => {
-        const sha = sha256HexFromBytes(new Uint8Array(buf));
+      uploads.map(async ({ buf, sha, contentType }) => {
         const key = blobKeyFromSha256Hex(sha);
-        await this.storage.putBlob({
+        const stored = await this.storage.putBlob({
           namespace: 'blobs',
           key,
           body: buf,
-          contentType: 'application/octet-stream',
+          contentType,
           ifNoneMatch: '*',
           cacheControl: 'public, max-age=31536000, immutable',
         });
+        if (stored.alreadyExisted && contentType === 'image/webp') {
+          const existing = await this.storage.headBlob({ namespace: 'blobs', key });
+          if (existing?.contentType !== contentType) {
+            await this.storage.putBlob({
+              namespace: 'blobs',
+              key,
+              body: buf,
+              contentType,
+              cacheControl: 'public, max-age=31536000, immutable',
+            });
+          }
+        }
         await incrementBlobRef(sha, buf.byteLength);
       }),
     );
@@ -208,9 +254,7 @@ export class PublicationsService {
       projectId: manifest.projectId,
       entryFile: manifest.entryFile,
       files: Object.fromEntries(
-        [...files.entries()]
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([path, buf]) => [path, `sha256:${sha256HexFromBytes(new Uint8Array(buf))}`]),
+        [...uploads].sort((a, b) => a.path.localeCompare(b.path)).map(({ path, sha }) => [path, `sha256:${sha}`]),
       ),
       kernels,
       runtime: `@taucad/runtime@${runtimePin}`,
@@ -320,8 +364,8 @@ export class PublicationsService {
       urls: {
         view: viewUrl,
         share: viewUrl,
-        og: this.storage.publicUrl({ namespace: 'defaults', key: 'og.png' }),
-        thumbnail: this.storage.publicUrl({ namespace: 'defaults', key: 'thumb.webp' }),
+        og: this.storage.publicUrl(splitNamespaceKey(ogImageKey)),
+        thumbnail: this.storage.publicUrl(splitNamespaceKey(thumbnailKey)),
         manifest: this.storage.publicUrl({ namespace: 'derivatives', key: manifestKey }),
       },
     };
@@ -388,14 +432,8 @@ export class PublicationsService {
     const urls = {
       view: buildPublicationViewUrl({ frontendURL: frontendUrl, publicationId: publication.id }),
       share: buildPublicationViewUrl({ frontendURL: frontendUrl, publicationId: publication.id }),
-      og: this.storage.publicUrl({
-        namespace: 'defaults',
-        key: ogImageKey ?? 'og.png',
-      }),
-      thumbnail: this.storage.publicUrl({
-        namespace: 'defaults',
-        key: thumbnailKey ?? 'thumb.webp',
-      }),
+      og: this.storage.publicUrl(splitNamespaceKey(ogImageKey ?? 'defaults/og.png')),
+      thumbnail: this.storage.publicUrl(splitNamespaceKey(thumbnailKey ?? 'defaults/thumb.webp')),
       manifest: this.storage.publicUrl({ namespace: 'derivatives', key: manifestKey }),
     };
 

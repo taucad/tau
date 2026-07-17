@@ -200,6 +200,27 @@ describe('PublicationsService.publishFromUpload validation', () => {
     ).rejects.toSatisfy((error: unknown) => isBadRequestWithCode(error, publicationApiCode.TOO_MANY_FILES));
   });
 
+  it('should reject a canonical thumbnail whose bytes are not WebP', async () => {
+    const service = createStubService();
+
+    await expect(
+      service.publishFromUpload({
+        ownerId: 'user_1',
+        manifest: {
+          projectId: 'proj_1',
+          projectName: 'Demo',
+          entryFile: 'main.ts',
+          visibility: 'private',
+          title: 'Hello',
+        },
+        files: new Map([
+          ['main.ts', encodeUtf8('export default () => {}')],
+          ['thumbnail.webp', encodeUtf8('not-webp')],
+        ]),
+      }),
+    ).rejects.toSatisfy((error: unknown) => isBadRequestWithCode(error, publicationApiCode.INVALID_THUMBNAIL_WEBP));
+  });
+
   it('should reject paths under node_modules', async () => {
     const service = createStubService();
 

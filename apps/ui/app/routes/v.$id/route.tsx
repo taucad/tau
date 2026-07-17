@@ -144,7 +144,14 @@ export const meta: MetaFunction<typeof loader> = ({ loaderData }) => {
     { property: 'og:title', content: publication.title },
   ];
 
-  tags.push({ property: 'og:image', content: dataRecord.urls.og });
+  const thumbnail = dataRecord.files['thumbnail.webp'];
+  if (thumbnail) {
+    tags.push(
+      { property: 'og:image', content: thumbnail },
+      { name: 'twitter:card', content: 'summary_large_image' },
+      { name: 'twitter:image', content: thumbnail },
+    );
+  }
 
   if (publication.description) {
     tags.push({ property: 'og:description', content: publication.description });

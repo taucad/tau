@@ -10,7 +10,12 @@ import { FastifyAdapter } from '@nestjs/platform-fastify';
 import multipart from '@fastify/multipart';
 import cookie from '@fastify/cookie';
 import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod';
-import { idPrefix, publicationApiCode, publicationViewCookieName } from '@taucad/types/constants';
+import {
+  idPrefix,
+  publicationApiCode,
+  publicationMaxMultipartFiles,
+  publicationViewCookieName,
+} from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { ProjectShareController } from '#api/publications/project-share.controller.js';
 import { PublicationsController } from '#api/publications/publications.controller.js';
@@ -144,7 +149,7 @@ describe('Publications HTTP integration', () => {
       limits: {
         fieldSize: 1024 * 1024,
         fileSize: 25 * 1024 * 1024,
-        files: 200,
+        files: publicationMaxMultipartFiles,
       },
     });
 
@@ -659,7 +664,7 @@ describe('Publications HTTP integration publish multipart path rules', () => {
       limits: {
         fieldSize: 1024 * 1024,
         fileSize: 25 * 1024 * 1024,
-        files: 200,
+        files: publicationMaxMultipartFiles,
       },
     });
 

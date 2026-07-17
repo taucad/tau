@@ -11,6 +11,7 @@ export const publicationApiCode = {
   TOO_MANY_FILES: 'TOO_MANY_FILES',
   FILE_TOO_LARGE: 'FILE_TOO_LARGE',
   PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
+  INVALID_THUMBNAIL_WEBP: 'INVALID_THUMBNAIL_WEBP',
   PROJECT_FORBIDDEN: 'PROJECT_FORBIDDEN',
   NOT_FOUND: 'NOT_FOUND',
   GONE: 'GONE',
@@ -31,6 +32,19 @@ export const publicationApiCode = {
  * @public
  */
 export const publicationViewCookieName = 'tau_view_id';
+
+/** Maximum user-authored files in one publication. */
+export const publicationMaxUserFiles = 200;
+
+/** Canonical root files that do not count against the user-file limit. */
+export const publicationSystemArtifactPaths = ['tau.json', 'thumbnail.webp'] as const;
+
+/** Multipart transport ceiling including both canonical system artifacts. */
+export const publicationMaxMultipartFiles = publicationMaxUserFiles + publicationSystemArtifactPaths.length;
+
+/** Return whether a normalized publication path is a canonical system artifact. */
+export const isPublicationSystemArtifact = (path: string): boolean =>
+  publicationSystemArtifactPaths.some((candidate) => candidate === path);
 
 /**
  * @public

@@ -10,6 +10,7 @@ import { Logger as PinoLogger } from 'nestjs-pino';
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
+import { publicationMaxMultipartFiles } from '@taucad/types/constants';
 import { FastifyOtelInstrumentation } from '@fastify/otel';
 import { apiHeaders } from '@taucad/runtime/cross-origin-isolation';
 import { idPrefix } from '@taucad/types/constants';
@@ -74,7 +75,7 @@ async function createApiApp() {
     limits: {
       fieldSize: 1024 * 1024,
       fileSize: 25 * 1024 * 1024,
-      files: 200,
+      files: publicationMaxMultipartFiles,
     },
   });
 

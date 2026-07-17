@@ -1,7 +1,13 @@
 import type { PublicationCollectFailureCode } from '@taucad/types/constants';
-import { publicationApiCode, publishForbiddenPathPrefixes, isPublishableTauPath } from '@taucad/types/constants';
+import {
+  publicationApiCode,
+  publicationMaxUserFiles,
+  publishForbiddenPathPrefixes,
+  isPublicationSystemArtifact,
+  isPublishableTauPath,
+} from '@taucad/types/constants';
 
-export const publishMaxFiles = 200;
+export const publishMaxFiles = publicationMaxUserFiles;
 
 /** Bytes */
 export const publishMaxTotalBytes = 50 * 1024 * 1024;
@@ -38,7 +44,10 @@ export function validateCollectedPublishFiles(args: {
     return { ok: false, reason: publicationApiCode.MISSING_ENTRY_FILE };
   }
 
-  if (files.size > publishMaxFiles) {
+  const userFileCount = [...files.keys()].filter(
+    (path) => !isPublicationSystemArtifact(normalizePublishRelativePath(path)),
+  ).length;
+  if (userFileCount > publishMaxFiles) {
     return { ok: false, reason: publicationApiCode.TOO_MANY_FILES };
   }
 

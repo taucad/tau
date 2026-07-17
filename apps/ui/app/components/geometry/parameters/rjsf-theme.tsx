@@ -300,6 +300,14 @@ function ArrayFieldTemplate(
     }
   }, [formContext.searchTerm, shouldShowArray]);
 
+  if (Array.isArray(schema.items)) {
+    return (
+      <div aria-label={`Invalid Field: ${title}`} className='rounded-md border border-warning bg-warning/10 p-2.5'>
+        Fixed-length tuple fields are not supported.
+      </div>
+    );
+  }
+
   // Don't render the array if it wouldn't be visible
   if (!shouldShowArray) {
     return null;

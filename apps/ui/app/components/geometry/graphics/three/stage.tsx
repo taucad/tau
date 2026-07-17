@@ -1,7 +1,6 @@
 import React from 'react';
 import type { ReactNode } from 'react';
 import type * as THREE from 'three';
-import { PerspectiveCamera } from '@react-three/drei';
 import { Lights } from '#components/geometry/graphics/three/react/lights.js';
 import { SectionContourFills } from '#components/geometry/graphics/three/react/section-contour-fill.js';
 import { SectionClippingGroup } from '#components/geometry/graphics/three/react/section-clipping-group.js';
@@ -30,9 +29,12 @@ export type StageOptions = {
    */
   farPlaneRadiusMultiplier?: number;
   /**
-   * The zoom level of the camera.
+   * Perspective selector used to derive the radius-relative camera distance.
+   * Final screen occupancy is controlled by projected-corner fitting.
    */
   zoomLevel?: number;
+  /** Fractional outer margin applied by projected-corner fitting. */
+  fitMargin?: number;
   rotation?: {
     /**
      * The initial z-axis rotation of the camera in radians.
@@ -53,6 +55,7 @@ export const defaultStageOptions = {
   minimumFarPlane: 10_000_000_000,
   farPlaneRadiusMultiplier: 5,
   zoomLevel: 1,
+  fitMargin: 0.1,
   rotation: {
     side: -Math.PI / 4, // Default rotation is 45 degrees counter-clockwise
     vertical: Math.PI / 6, // Default rotation is 30 degrees upwards
@@ -86,13 +89,14 @@ export function Stage({
 
   const sectionView = useSectionView();
 
-  const { geometryRadius, geometryCenter } = useGeometryBounds(innerRef, outer, { enableCentering });
+  const { geometryRadius, geometryCenter, geometryBounds } = useGeometryBounds(innerRef, outer, {
+    enableCentering,
+  });
 
-  useCameraFraming(geometryRadius, geometryCenter, stageOptions);
+  useCameraFraming({ geometryRadius, geometryCenter, geometryBounds, stageOptions });
 
   return (
     <group {...properties}>
-      <PerspectiveCamera makeDefault />
       {isTauDebugEnabled ? <SectionViewTestBridge /> : undefined}
       <group ref={outer}>
         <SectionClippingGroup

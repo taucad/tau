@@ -30,6 +30,7 @@ export type CameraControlsLike = {
   setLookAt?: (...args: SetLookAtArguments) => Promise<unknown> | void;
   setPosition?: (...args: SetPositionArguments) => Promise<unknown> | void;
   setTarget?: (...args: SetTargetArguments) => Promise<unknown> | void;
+  zoomTo?: (zoom: number, enableTransition?: boolean) => Promise<unknown> | void;
   updateCameraUp?: () => void;
   applyCameraUp?: () => void;
   update?: (delta?: number) => boolean | void;
@@ -119,6 +120,16 @@ export const syncControlsLookAt = ({
   readonly transition?: boolean;
 }): void => {
   if (isCameraControls(controls)) {
+    if (
+      (camera instanceof THREE.PerspectiveCamera || camera instanceof THREE.OrthographicCamera) &&
+      typeof controls.zoomTo === 'function'
+    ) {
+      // CameraControls owns its own zoom state and writes it back during
+      // `update()`. Synchronize the fitted projection before target/position
+      // state so the next frame cannot restore the constructor default.
+      void controls.zoomTo(camera.zoom, transition);
+    }
+
     if (typeof controls.setLookAt === 'function') {
       void controls.setLookAt(
         camera.position.x,

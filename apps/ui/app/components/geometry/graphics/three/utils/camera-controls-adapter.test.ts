@@ -41,15 +41,19 @@ describe('camera-controls-adapter', () => {
   it('should sync CameraControls with setLookAt', () => {
     const camera = new THREE.PerspectiveCamera();
     camera.position.set(1, 2, 3);
+    camera.zoom = 1.625;
     const target = new THREE.Vector3(4, 5, 6);
     const controls = {
       getTarget: vi.fn((nextTarget: THREE.Vector3): THREE.Vector3 => nextTarget.copy(target)),
+      zoomTo: vi.fn(),
       setLookAt: vi.fn(),
     };
 
     syncControlsLookAt({ camera, controls, target, transition: false });
 
+    expect(controls.zoomTo).toHaveBeenCalledWith(1.625, false);
     expect(controls.setLookAt).toHaveBeenCalledWith(1, 2, 3, 4, 5, 6, false);
+    expect(controls.zoomTo.mock.invocationCallOrder[0]).toBeLessThan(controls.setLookAt.mock.invocationCallOrder[0]!);
   });
 
   it('should call updateCameraUp after assigning camera up', () => {

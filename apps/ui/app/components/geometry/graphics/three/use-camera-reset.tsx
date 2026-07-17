@@ -22,8 +22,10 @@ type ResetPerspective = {
 type ResetCameraParameters = {
   geometryRadius: number;
   geometryCenter: THREE.Vector3;
+  geometryBounds: THREE.Box3;
   rotation: ResetRotation;
   perspective: ResetPerspective;
+  fitMargin: number;
   setSceneRadius: (radius: number) => void;
   originalDistanceReference?: RefObject<number | undefined>;
   cameraFovAngle: number;
@@ -42,7 +44,7 @@ export function useCameraReset(parameters: ResetCameraParameters): (options?: {
    */
   enableConfiguredAngles?: boolean;
 }) => void {
-  const { camera, controls, invalidate, size } = useThree();
+  const { camera, get, invalidate, size } = useThree();
   const viewportAspect = size.width > 0 && size.height > 0 ? size.width / size.height : 1;
   const cameraCapabilityActor = useCameraCapability();
   const resetCameraRef = useRef<(options?: { enableConfiguredAngles?: boolean }) => void>(() => undefined);
@@ -56,8 +58,10 @@ export function useCameraReset(parameters: ResetCameraParameters): (options?: {
   const {
     geometryRadius,
     geometryCenter,
+    geometryBounds,
     rotation,
     perspective,
+    fitMargin,
     setSceneRadius,
     originalDistanceReference,
     cameraFovAngle,
@@ -74,24 +78,28 @@ export function useCameraReset(parameters: ResetCameraParameters): (options?: {
         camera,
         geometryRadius,
         geometryCenter,
+        geometryBounds,
         rotation,
         perspective,
+        fitMargin,
         setSceneRadius,
         invalidate,
         enableConfiguredAngles: options?.enableConfiguredAngles,
         cameraFovAngle,
-        controls: controls ?? undefined,
+        controls: get().controls ?? undefined,
         viewportAspect: viewportAspectRef.current,
       });
     },
     [
       originalDistanceReference,
       camera,
-      controls,
+      get,
       geometryRadius,
       geometryCenter,
+      geometryBounds,
       rotation,
       perspective,
+      fitMargin,
       setSceneRadius,
       invalidate,
       cameraFovAngle,

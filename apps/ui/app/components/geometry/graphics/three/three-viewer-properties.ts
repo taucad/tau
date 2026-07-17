@@ -25,4 +25,4 @@ export type ThreeViewerProperties = {
   readonly gizmoContainer?: HTMLElement | string;
 };
 
-export type ThreeContextProperties = CanvasProps & ThreeViewerProperties;
+export type ThreeContextProperties = Omit<CanvasProps, 'camera' | 'orthographic'> & ThreeViewerProperties;

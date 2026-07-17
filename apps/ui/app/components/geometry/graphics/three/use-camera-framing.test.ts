@@ -1,6 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { Vector3 } from 'three';
+import { Box3, Vector3 } from 'three';
 import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
 import { defaultStageOptions } from '#components/geometry/graphics/three/stage.js';
 import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
@@ -28,6 +28,7 @@ const mockResetCamera = vi.fn();
 type CapturedResetParameters = {
   geometryRadius: number;
   geometryCenter: Vector3;
+  geometryBounds: Box3;
   setSceneRadius: (radius: number) => void;
   rotation: { side: number; vertical: number };
   perspective: {
@@ -37,6 +38,7 @@ type CapturedResetParameters = {
     minimumFarPlane: number;
     farPlaneRadiusMultiplier: number;
   };
+  fitMargin: number;
   cameraFovAngle: number;
 };
 
@@ -56,6 +58,16 @@ vi.mock('#components/geometry/graphics/three/use-camera-reset.js', () => ({
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const origin = new Vector3(0, 0, 0);
+const boundsForRadius = (radius: number, center = origin): Box3 =>
+  new Box3(center.clone().addScalar(-radius), center.clone().addScalar(radius));
+
+const useFraming = (radius: number, center = origin, stageOptions?: StageOptions) =>
+  useCameraFraming({
+    geometryRadius: radius,
+    geometryCenter: center,
+    geometryBounds: boundsForRadius(radius, center),
+    stageOptions,
+  });
 
 // ── Setup ────────────────────────────────────────────────────────────────────
 
@@ -72,7 +84,7 @@ describe('useCameraFraming', () => {
 
   describe('initial reset behavior', () => {
     it('calls resetCamera on first render with geometryRadius > 0', () => {
-      renderHook(() => useCameraFraming(10, origin));
+      renderHook(() => useFraming(10));
 
       expect(mockResetCamera).toHaveBeenCalledTimes(1);
       // Initial reset uses configured angles (called with no arguments)
@@ -80,18 +92,14 @@ describe('useCameraFraming', () => {
     });
 
     it('calls resetCamera when geometryRadius is 0 but does not mark initial reset done', () => {
-      renderHook(() => useCameraFraming(0, origin));
+      renderHook(() => useFraming(0));
 
-      // Called twice: once because sceneRadius starts as undefined (always
-      // significant), and a second time because sceneRadius === 0 is also
-      // treated as significant to ensure the camera is positioned after
-      // PerspectiveCamera makeDefault swaps the active camera.
-      expect(mockResetCamera).toHaveBeenCalledTimes(2);
+      expect(mockResetCamera).toHaveBeenCalledOnce();
       expect(mockResetCamera).toHaveBeenCalledWith();
     });
 
     it('uses initial reset (configured angles) when transitioning from zero to positive radius', () => {
-      const { rerender } = renderHook(({ radius }) => useCameraFraming(radius, origin), {
+      const { rerender } = renderHook(({ radius }) => useFraming(radius), {
         initialProps: { radius: 0 },
       });
 
@@ -113,7 +121,7 @@ describe('useCameraFraming', () => {
 
   describe('significant geometry change detection', () => {
     it('triggers direction-preserving reset when radius changes by more than 10%', () => {
-      const { rerender } = renderHook(({ radius }) => useCameraFraming(radius, origin), {
+      const { rerender } = renderHook(({ radius }) => useFraming(radius), {
         initialProps: { radius: 10 },
       });
 
@@ -125,7 +133,7 @@ describe('useCameraFraming', () => {
     });
 
     it('does not reset when radius changes by less than 10%', () => {
-      const { rerender } = renderHook(({ radius }) => useCameraFraming(radius, origin), {
+      const { rerender } = renderHook(({ radius }) => useFraming(radius), {
         initialProps: { radius: 10 },
       });
 
@@ -137,7 +145,7 @@ describe('useCameraFraming', () => {
     });
 
     it('does not reset at the exact 10% boundary (strict > comparison)', () => {
-      const { rerender } = renderHook(({ radius }) => useCameraFraming(radius, origin), {
+      const { rerender } = renderHook(({ radius }) => useFraming(radius), {
         initialProps: { radius: 10 },
       });
 
@@ -149,7 +157,7 @@ describe('useCameraFraming', () => {
     });
 
     it('resets just above the 10% threshold', () => {
-      const { rerender } = renderHook(({ radius }) => useCameraFraming(radius, origin), {
+      const { rerender } = renderHook(({ radius }) => useFraming(radius), {
         initialProps: { radius: 10 },
       });
 
@@ -161,7 +169,7 @@ describe('useCameraFraming', () => {
     });
 
     it('handles multiple successive significant changes', () => {
-      const { rerender } = renderHook(({ radius }) => useCameraFraming(radius, origin), {
+      const { rerender } = renderHook(({ radius }) => useFraming(radius), {
         initialProps: { radius: 10 },
       });
 
@@ -176,13 +184,41 @@ describe('useCameraFraming', () => {
       expect(mockResetCamera).toHaveBeenCalledTimes(1);
       expect(mockResetCamera).toHaveBeenCalledWith({ enableConfiguredAngles: false });
     });
+
+    it('resets when bounds change materially at the same radius', () => {
+      const initialBounds = new Box3(new Vector3(-5, -1, -1), new Vector3(5, 1, 1));
+      const nextBounds = new Box3(new Vector3(-1, -5, -1), new Vector3(1, 5, 1));
+      const { rerender } = renderHook(
+        ({ geometryBounds }) => useCameraFraming({ geometryRadius: 5, geometryCenter: origin, geometryBounds }),
+        { initialProps: { geometryBounds: initialBounds } },
+      );
+
+      mockResetCamera.mockClear();
+      rerender({ geometryBounds: nextBounds });
+
+      expect(mockResetCamera).toHaveBeenCalledWith({ enableConfiguredAngles: false });
+    });
+
+    it('ignores sub-tolerance bounds noise at the same radius', () => {
+      const initialBounds = new Box3(new Vector3(-5, -1, -1), new Vector3(5, 1, 1));
+      const noisyBounds = new Box3(new Vector3(-5.01, -1, -1), new Vector3(5.01, 1, 1));
+      const { rerender } = renderHook(
+        ({ geometryBounds }) => useCameraFraming({ geometryRadius: 5, geometryCenter: origin, geometryBounds }),
+        { initialProps: { geometryBounds: initialBounds } },
+      );
+
+      mockResetCamera.mockClear();
+      rerender({ geometryBounds: noisyBounds });
+
+      expect(mockResetCamera).not.toHaveBeenCalled();
+    });
   });
 
   // ── Aspect ratio change detection ───────────────────────────────────────
 
   describe('aspect ratio change detection', () => {
     it('triggers reset when viewport aspect changes by more than 10%', () => {
-      const { rerender } = renderHook(({ radius }) => useCameraFraming(radius, origin), {
+      const { rerender } = renderHook(({ radius }) => useFraming(radius), {
         initialProps: { radius: 10 },
       });
 
@@ -195,7 +231,7 @@ describe('useCameraFraming', () => {
     });
 
     it('does not reset for small aspect changes', () => {
-      const { rerender } = renderHook(({ radius }) => useCameraFraming(radius, origin), {
+      const { rerender } = renderHook(({ radius }) => useFraming(radius), {
         initialProps: { radius: 10 },
       });
 
@@ -208,7 +244,7 @@ describe('useCameraFraming', () => {
     });
 
     it('ignores aspect changes before initial geometry reset is complete', () => {
-      const { rerender } = renderHook(({ radius }) => useCameraFraming(radius, origin), {
+      const { rerender } = renderHook(({ radius }) => useFraming(radius), {
         initialProps: { radius: 0 },
       });
 
@@ -226,13 +262,13 @@ describe('useCameraFraming', () => {
 
   describe('edge cases', () => {
     it('returns the resetCamera function for manual use', () => {
-      const { result } = renderHook(() => useCameraFraming(10, origin));
+      const { result } = renderHook(() => useFraming(10));
 
       expect(result.current).toBe(mockResetCamera);
     });
 
     it('uses defaultStageOptions when none provided', () => {
-      renderHook(() => useCameraFraming(10, origin));
+      renderHook(() => useFraming(10));
 
       expect(latestResetParameters.perspective.offsetRatio).toBe(defaultStageOptions.offsetRatio);
       expect(latestResetParameters.perspective.nearPlane).toBe(defaultStageOptions.nearPlane);
@@ -241,6 +277,7 @@ describe('useCameraFraming', () => {
         defaultStageOptions.farPlaneRadiusMultiplier,
       );
       expect(latestResetParameters.perspective.zoomLevel).toBe(defaultStageOptions.zoomLevel);
+      expect(latestResetParameters.fitMargin).toBe(defaultStageOptions.fitMargin);
       expect(latestResetParameters.rotation.side).toBe(defaultStageOptions.rotation.side);
       expect(latestResetParameters.rotation.vertical).toBe(defaultStageOptions.rotation.vertical);
     });
@@ -251,7 +288,7 @@ describe('useCameraFraming', () => {
         rotation: { side: 0 },
       };
 
-      renderHook(() => useCameraFraming(10, origin, customOptions));
+      renderHook(() => useFraming(10, origin, customOptions));
 
       // Custom values applied
       expect(latestResetParameters.perspective.zoomLevel).toBe(2);
@@ -262,7 +299,7 @@ describe('useCameraFraming', () => {
     });
 
     it('forwards cameraFovAngle from graphics context', () => {
-      renderHook(() => useCameraFraming(10, origin));
+      renderHook(() => useFraming(10));
 
       expect(latestResetParameters.cameraFovAngle).toBe(50);
     });
@@ -270,9 +307,10 @@ describe('useCameraFraming', () => {
     it('forwards geometryCenter to useCameraReset', () => {
       const center = new Vector3(1, 2, 3);
 
-      renderHook(() => useCameraFraming(10, center));
+      renderHook(() => useFraming(10, center));
 
       expect(latestResetParameters.geometryCenter).toBe(center);
+      expect(latestResetParameters.geometryBounds).toEqual(boundsForRadius(10, center));
     });
   });
 });

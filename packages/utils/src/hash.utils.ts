@@ -43,3 +43,43 @@ export function hashString(input: string): string {
 
   return hash.toString(16).padStart(8, '0');
 }
+
+/**
+ * Serialize JSON-compatible data with object keys sorted recursively.
+ * Array order is preserved; object properties whose value is `undefined`
+ * follow `JSON.stringify` semantics and are omitted.
+ *
+ * @param value - JSON-compatible value to serialize.
+ * @returns Stable canonical JSON text.
+ * @public
+ */
+export function canonicalJson(value: unknown): string {
+  const canonicalize = (input: unknown): unknown => {
+    if (Array.isArray(input)) {
+      return input.map((entry) => canonicalize(entry));
+    }
+    if (input === null || typeof input !== 'object') {
+      return input;
+    }
+    return Object.fromEntries(
+      Object.entries(input as Record<string, unknown>)
+        .filter(([, entry]) => entry !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, canonicalize(entry)]),
+    );
+  };
+
+  const serialized = JSON.stringify(canonicalize(value));
+  return serialized;
+}
+
+/** Compute lowercase hexadecimal SHA-256 with the host Web Crypto implementation. @public */
+export async function sha256Bytes(data: Uint8Array<ArrayBuffer>): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/** Compute lowercase hexadecimal SHA-256 for UTF-8 text. @public */
+export async function sha256String(input: string): Promise<string> {
+  return sha256Bytes(new TextEncoder().encode(input));
+}

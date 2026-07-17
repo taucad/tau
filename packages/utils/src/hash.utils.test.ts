@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hashBytes, hashString } from '@taucad/utils/hash';
+import { canonicalJson, hashBytes, hashString, sha256Bytes, sha256String } from '@taucad/utils/hash';
 
 const hex8 = /^[0-9a-f]{8}$/u;
 
@@ -71,5 +71,19 @@ describe('hash.utils', () => {
       const bytes = new Uint8Array(new TextEncoder().encode(multibyte));
       expect(hashBytes(bytes)).not.toBe(hashString(multibyte));
     });
+  });
+});
+
+describe('canonical hashing', () => {
+  it('canonicalizes nested object keys while preserving array order', () => {
+    expect(canonicalJson({ z: 1, a: { y: 2, x: 3 }, list: [{ b: 2, a: 1 }] })).toBe(
+      '{"a":{"x":3,"y":2},"list":[{"a":1,"b":2}],"z":1}',
+    );
+  });
+
+  it('uses SHA-256 for strings and bytes', async () => {
+    const expected = '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08';
+    await expect(sha256String('test')).resolves.toBe(expected);
+    await expect(sha256Bytes(new TextEncoder().encode('test'))).resolves.toBe(expected);
   });
 });

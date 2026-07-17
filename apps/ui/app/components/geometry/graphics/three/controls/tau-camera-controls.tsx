@@ -1,6 +1,6 @@
 import { Box3, MathUtils, Matrix4, Quaternion, Raycaster, Sphere, Spherical, Vector2, Vector3, Vector4 } from 'three';
 import type { EventDispatcher, OrthographicCamera, PerspectiveCamera } from 'three';
-import { forwardRef, useEffect, useMemo } from 'react';
+import { forwardRef, useEffect, useLayoutEffect, useMemo } from 'react';
 import { extend, useFrame, useThree } from '@react-three/fiber';
 import type { EventManager, ThreeElement } from '@react-three/fiber';
 import CameraControlsImpl from 'camera-controls';
@@ -195,7 +195,7 @@ export const TauCameraControls = forwardRef<CameraControlsImpl, TauCameraControl
       regress,
     ]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
       if (!makeDefault) {
         return undefined;
       }

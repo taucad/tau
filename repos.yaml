@@ -36,6 +36,7 @@ groups:
       - PicoGK
       - PicoGKRuntime
       - openvdb
+      - picogk-js
   slicers:
     description: 3D printer slicer applications
     repos:
@@ -74,6 +75,9 @@ groups:
       - three-mesh-bvh
       - three-cad-viewer
       - drei
+      - gltf
+      - easy-gltf
+      - gltf_kun
   dev-tools:
     description: Development tools and frameworks
     repos:
@@ -108,6 +112,11 @@ groups:
       - elysia
       - VSCode_SysML_Extension
       - vscode-wasm
+      - isomorphic-git
+      - jj
+      - gitbutler
+      - wasm-git
+      - cdn-resolve
   tscircuit:
     description: tscircuit EDA ecosystem
     repos:
@@ -140,6 +149,10 @@ groups:
   brain:
     repos:
       - tau-brain
+  oss-biz:
+    repos:
+      - postiz-app
+      - carbon
 repos:
   langchainjs:
     upstream: langchain-ai/langchainjs
@@ -557,3 +570,44 @@ repos:
   openvdb:
     upstream: mjurczyk/openvdb
     description: Web implementation of volumetric grids
+  isomorphic-git:
+    upstream: isomorphic-git/isomorphic-git
+    description: A pure JavaScript implementation of git for node and browsers!
+  jj:
+    upstream: jj-vcs/jj
+    description: A Git-compatible VCS that is both simple and powerful
+  gitbutler:
+    upstream: gitbutlerapp/gitbutler
+    description: The GitButler version control client, backed by Git, powered by Tauri/Rust/Svelte
+  wasm-git:
+    upstream: petersalomonsen/wasm-git
+    description: WebAssembly build of libgit2 for browser Git
+    fork: taucad/wasm-git
+  gltf:
+    upstream: gltf-rs/gltf
+    description: gltf-rs — Rust glTF 2.0 loader and JSON model
+  easy-gltf:
+    upstream: flomonster/easy-gltf
+    description: easy-gltf — high-level Rust glTF scene loader built on gltf-rs
+  gltf_kun:
+    upstream: unavi-xyz/gltf_kun
+    description: gltf_kun — graph-based Rust glTF processing library
+  meshoptimizer:
+    upstream: zeux/meshoptimizer
+    description: meshoptimizer — glTF mesh optimization and EXT_meshopt_compression reference decoder
+  draco-rust:
+    upstream: Filyus/draco-rust
+    description: draco-rust — pure Rust Draco codec and glTF integration
+  postiz-app:
+    upstream: gitroomhq/postiz-app
+    description: 📨 The ultimate agentic social media scheduling tool 🤖
+  carbon:
+    upstream: crbnos/carbon
+    description: Carbon is an open source ERP, MES and QMS for manufacturing. Perfect for complex assembly, contract manufacturing, and configure to order manufacturing.
+  cdn-resolve:
+    upstream: luxass/cdn-resolve
+    branch: main
+    description: Resolve npm package specifiers and CDN URLs
+  picogk-js:
+    upstream: taucad/picogk-js
+    description: PicoGK compiled to WebAssembly - implicit/voxel CAD kernel for the browser

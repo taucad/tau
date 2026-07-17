@@ -7,6 +7,8 @@ description: Investigate dependency source code and manage external repos via re
 
 Tau tracks ~47 external dependency repos via `repos.yaml` at the workspace root. Repos are cloned into `repos/` (gitignored). The manifest defines upstream URLs, taucad forks, branches, groups, and descriptions.
 
+**Git LFS:** some repos track large binaries via Git LFS — notably `tau-brain` (backs `docs/research` and `docs/reference`), whose reference PDFs are LFS-tracked. Run `git lfs install` once before cloning, or pointers won't rehydrate. `tau-brain` ships a `.lfsconfig` with `lfs.fetchexclude` so clones stay light (PDFs come down as pointers); fetch one to read it with `git lfs pull --include="reference/pdf/<slug>.pdf"`. See `docs/research/tau-brain-pdf-git-lfs-migration.md`.
+
 ## Quick Reference
 
 ```bash

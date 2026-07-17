@@ -10,10 +10,10 @@ Create durable research references through `docs/reference/_index.yaml`. The man
 ## Canonical Files
 
 - `docs/reference/_index.yaml`: tracked reference manifest.
-- `docs/reference/pdf/`: gitignored PDF cache for human reading.
-- `docs/reference/<id>.md`: tracked Markdown text extraction.
+- `docs/reference/pdf/`: **Git LFS-tracked** PDF cache. `docs/reference` symlinks into the `tau-brain` repo, where `*.pdf` is tracked via Git LFS — a lightweight pointer commits to git, the blob lives in the LFS store. Clones set `lfs.fetchexclude` (pull-on-demand), so after a fresh clone a PDF is a pointer until `git lfs pull --include=<path>`.
+- `docs/reference/<id>.md`: tracked Markdown text extraction — the durable, diffable source of truth research docs cite.
 
-No PDFs should be tracked in git, including under `docs/reference/pdf/`.
+PDFs are committed as Git LFS pointers, never raw blobs (see `docs/research/tau-brain-pdf-git-lfs-migration.md`). The markdown extraction, not the PDF, is the source of truth.
 
 ## Manifest Entry
 
@@ -106,8 +106,8 @@ Run before finalizing:
 ```bash
 pnpm nx run scripts:pdf-to-md -- validate
 pnpm docs:validate
-git check-ignore docs/reference/pdf/example.pdf
-git ls-files 'docs/reference/**/*.pdf'
+( cd repos/tau-brain && git lfs ls-files | grep <slug> )                 # new PDF is LFS-tracked
+( cd repos/tau-brain && git check-attr filter reference/pdf/<slug>.pdf )  # -> filter: lfs
 find docs/reference -maxdepth 1 -type f -name '*.pdf' -print
 find docs/reference -maxdepth 1 -type f -name '*.md' -exec perl -0ne 'if (/\0/) { print "$ARGV\n" }' {} +
 ```
@@ -115,9 +115,8 @@ find docs/reference -maxdepth 1 -type f -name '*.md' -exec perl -0ne 'if (/\0/) 
 Expected results:
 
 - `_index.yaml` validates.
-- Cached PDFs are ignored.
-- No PDFs are tracked by git.
-- No PDFs exist directly under `docs/reference`.
+- New PDF is Git LFS-tracked in tau-brain (`git lfs ls-files` lists it; `git check-attr filter` reports `lfs`) — a pointer, not a raw blob.
+- No PDFs exist directly under `docs/reference` (they live under `docs/reference/pdf/`).
 - Generated Markdown has no NUL bytes.
 - `pnpm docs:validate` passes.
 

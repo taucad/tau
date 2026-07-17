@@ -15,5 +15,5 @@ Follow `docs/policy/agents-md-policy.md` for the full policy. Key rules:
 - No secrets, tokens, branch names, or transient details
 - `Learned User Preferences` / `Learned Workspace Facts` in **both** `AGENTS.md` (cross-cutting fallback buffer) and `.cursor/rules/learned-*.mdc` (per-project) are maintained by the `agents-memory-updater` subagent — do not hand-edit
 - New learned bullets are capped at **200 chars** per bullet and **12 bullets** per section
-- `AGENTS.md` Skills table must reflect current `.agent/skills/` contents
+- `AGENTS.md` Skills table must reflect current `.agents/skills/` contents
 - `.cursor/rules/learned-*.mdc` files use `alwaysApply: false` with project-scoped globs and only the two `Learned ...` H2 sections

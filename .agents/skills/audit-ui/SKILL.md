@@ -130,7 +130,7 @@ Lighthouse will emit `lh-<route>-<viewport>.report.json` and `.report.html`. Ext
 Run after Lighthouse completes:
 
 ```bash
-node ../../.agent/skills/audit-ui/scripts/lh-summary.mjs lh-*.report.json
+node ../../.agents/skills/audit-ui/scripts/lh-summary.mjs lh-*.report.json
 ```
 
 Outputs a markdown-ready table of `perf | a11y | bp | seo | FCP | LCP | TBT | CLS | TTI` per report.
@@ -140,7 +140,7 @@ Outputs a markdown-ready table of `perf | a11y | bp | seo | FCP | LCP | TBT | CL
 Drive axe through Playwright across routes × viewports with WCAG 2.2 AA + best-practice tags. Use `scripts/axe-audit.mjs` (template provided in this skill).
 
 ```bash
-node ../../.agent/skills/audit-ui/scripts/axe-audit.mjs
+node ../../.agents/skills/audit-ui/scripts/axe-audit.mjs
 ```
 
 The script emits `axe-violations.json` (full node list per rule, per URL, per viewport) and `axe-summary.json` (counts). Cite **all critical** + **serious** rule IDs in the research doc; mention moderate but do not list every node.

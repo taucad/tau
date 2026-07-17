@@ -6,7 +6,40 @@ import {
   joinRelativePath,
   normalizePath,
   parentDirectory,
+  resolveVirtualPath,
 } from '#path.utils.js';
+import type { VirtualPathError } from '#path.utils.js';
+
+describe('resolveVirtualPath', () => {
+  it.each([
+    ['/', '/'],
+    ['/src//./model.ts', '/src/model.ts'],
+    ['/src/lib/../model.ts', '/src/model.ts'],
+    ['/προσχέδιο/部品.ts', '/προσχέδιο/部品.ts'],
+  ])('should resolve %j to %j', (input, expected) => {
+    expect(resolveVirtualPath(input)).toBe(expected);
+  });
+
+  it.each([
+    '',
+    'src/model.ts',
+    '//server/share',
+    '/C:/model.ts',
+    'file:///model.ts',
+    String.raw`/src\model.ts`,
+    '/a\0b',
+  ])('should reject invalid host path %j', (input) => {
+    expect(() => resolveVirtualPath(input)).toThrow(
+      expect.objectContaining<Partial<VirtualPathError>>({ code: 'INVALID_PATH', metadata: { input } }),
+    );
+  });
+
+  it.each(['/../secret', '/src/../../secret'])('should reject traversal above root for %j', (input) => {
+    expect(() => resolveVirtualPath(input)).toThrow(
+      expect.objectContaining<Partial<VirtualPathError>>({ code: 'PATH_OUTSIDE_ROOT', metadata: { input } }),
+    );
+  });
+});
 
 describe('normalizePath', () => {
   it('should normalize a simple path', () => {
@@ -172,8 +205,8 @@ describe('isSafeRelativePath', () => {
   it.each([
     '',
     '/model.gltf',
-    String.raw`C:\\model.gltf`,
-    String.raw`textures\\base.png`,
+    String.raw`C:\model.gltf`,
+    String.raw`textures\base.png`,
     './model.gltf',
     '../model.gltf',
     'a//b',

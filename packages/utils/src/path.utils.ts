@@ -1,4 +1,66 @@
 /**
+ * Error raised when an untrusted virtual filesystem path is invalid.
+ * @public
+ */
+export class VirtualPathError extends Error {
+  public readonly code: 'INVALID_PATH' | 'PATH_OUTSIDE_ROOT';
+  public readonly metadata: { readonly input: string };
+
+  public constructor(code: 'INVALID_PATH' | 'PATH_OUTSIDE_ROOT', input: string) {
+    super(code === 'PATH_OUTSIDE_ROOT' ? 'Virtual path escapes the filesystem root.' : 'Invalid virtual path.');
+    this.name = 'VirtualPathError';
+    this.code = code;
+    this.metadata = { input };
+  }
+}
+
+/**
+ * Resolve an untrusted absolute POSIX path inside a virtual filesystem root.
+ *
+ * Unlike the permissive display/path-formatting helpers below, this is a
+ * filesystem authority boundary. It rejects host-platform path forms and any
+ * traversal that would escape virtual `/`.
+ *
+ * @param input - Candidate absolute virtual path.
+ * @returns One canonical absolute POSIX path.
+ * @throws {@link VirtualPathError} When the path is invalid or escapes `/`.
+ * @public
+ */
+export function resolveVirtualPath(input: string): string {
+  const invalid = (): never => {
+    throw new VirtualPathError('INVALID_PATH', input);
+  };
+
+  if (input.length === 0 || !input.startsWith('/') || input.startsWith('//') || input.includes('\\')) {
+    return invalid();
+  }
+  if (input.slice(0, 5).toLowerCase() === 'file:' || /(?:^|\/)[A-Za-z]:(?:\/|$)/u.test(input)) {
+    return invalid();
+  }
+  for (const character of input) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint !== undefined && (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f))) {
+      return invalid();
+    }
+  }
+
+  const segments: string[] = [];
+  for (const segment of input.split('/')) {
+    if (segment.length === 0 || segment === '.') {
+      continue;
+    }
+    if (segment === '..') {
+      if (segments.pop() === undefined) {
+        throw new VirtualPathError('PATH_OUTSIDE_ROOT', input);
+      }
+      continue;
+    }
+    segments.push(segment);
+  }
+  return `/${segments.join('/')}`;
+}
+
+/**
  * Normalizes a path by removing redundant slashes and ensuring a single leading slash.
  *
  * @param path - The path to normalize.

@@ -33,7 +33,6 @@ describe('formatOcRuntimeError', () => {
     const sourceMap = buildSourceMap(blobUrl, 'main.ts');
 
     const issue = formatOcRuntimeError(error, emptyOcInstance, {
-      basePath: '/project',
       bundleSourceMap: sourceMap,
       entryUrl: blobUrl,
     });
@@ -54,9 +53,7 @@ describe('formatOcRuntimeError', () => {
     const blobUrl = 'blob:http://localhost:3000/no-map';
     const error = buildErrorWithStack(blobUrl);
 
-    const issue = formatOcRuntimeError(error, emptyOcInstance, {
-      basePath: '/project',
-    });
+    const issue = formatOcRuntimeError(error, emptyOcInstance, {});
 
     expect(issue.message).toContain('synthetic-boom');
     const blobFrame = issue.stackFrames!.find((f) => f.fileName?.startsWith('blob:'));
@@ -70,7 +67,6 @@ describe('formatOcRuntimeError', () => {
 
     let received: KernelStackFrame[] | undefined;
     const issue = formatOcRuntimeError(error, emptyOcInstance, {
-      basePath: '/project',
       bundleSourceMap: sourceMap,
       entryUrl: blobUrl,
       applySecondarySourceMaps: (frames) => {

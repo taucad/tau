@@ -21,7 +21,7 @@ const memoryFs = (): KernelFileSystem =>
 
 describe('KclUtilities execute serialization', () => {
   it('serializes concurrent executeProgram calls — second waits for first Context.execute', async () => {
-    const fs = new FileSystemManager(memoryFs(), '/');
+    const fs = new FileSystemManager(memoryFs());
     const utils = new KclUtilities({ fileSystemManager: fs });
     await utils.initializeWasm();
     const { program } = await utils.parseKcl('x = 1\n');

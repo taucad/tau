@@ -66,7 +66,6 @@ export const replicadOptionsSchema = z.object({
     .default('auto'),
   ocTracing: z.enum(['off', 'summary', 'per-call']).optional().default('summary'),
   libraryTracing: z.enum(['off', 'summary', 'per-call']).optional().default('off'),
-  withBrepEdges: z.boolean().optional().default(false),
   withSourceMapping: z.boolean().optional().default(false),
   tessellationInstancing: z.boolean().optional().default(true),
 });

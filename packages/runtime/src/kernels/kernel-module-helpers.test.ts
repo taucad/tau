@@ -8,7 +8,7 @@ import {
   getModuleRegistry,
   createKernelModuleShim,
   extractDefaultParameters,
-  resolveToRelative,
+  toVmEntryPath,
   convertRawIssuesToKernelIssues,
   enrichIssueLocation,
   loadBinaryFile,
@@ -113,21 +113,13 @@ describe('extractDefaultParameters', () => {
   });
 });
 
-describe('resolveToRelative', () => {
-  it('should strip the base path prefix', () => {
-    expect(resolveToRelative('/project/src/main.ts', '/project')).toBe('src/main.ts');
+describe('toVmEntryPath', () => {
+  it('converts a canonical local path to the VM entry spelling', () => {
+    expect(toVmEntryPath('/src/main.ts')).toBe('src/main.ts');
   });
 
-  it('should handle base paths with trailing slash', () => {
-    expect(resolveToRelative('/project/src/main.ts', '/project/')).toBe('src/main.ts');
-  });
-
-  it('should return original path when base does not match', () => {
-    expect(resolveToRelative('/other/file.ts', '/project')).toBe('/other/file.ts');
-  });
-
-  it('should handle root base path', () => {
-    expect(resolveToRelative('/file.ts', '/')).toBe('file.ts');
+  it('rejects traversal above the virtual root', () => {
+    expect(() => toVmEntryPath('/../secret.ts')).toThrow('escapes');
   });
 });
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { NodeIO } from '@gltf-transform/core';
+import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { tauCadTopologyExtension } from '@taucad/types/constants';
 import { convertReplicadGeometriesToGltf } from '#kernels/replicad/utils/replicad-to-gltf.js';
 import type { GeometryReplicad } from '#kernels/replicad/replicad.types.js';
@@ -44,6 +45,7 @@ function readGlbJsonAndBin(glb: Uint8Array<ArrayBuffer>) {
     bufferViews: Array<{ byteOffset: number; byteLength: number }>;
     extensions?: Record<string, { topologyBufferView?: number }>;
     extensionsUsed?: string[];
+    extensionsRequired?: string[];
   };
   return {
     json,
@@ -298,7 +300,7 @@ describe('convertReplicadGeometriesToGltf', () => {
     });
 
     const glb = convertReplicadGeometriesToGltf({ geometries: [geometry], format: 'glb' });
-    const document = await new NodeIO().readBinary(glb);
+    const document = await new NodeIO().registerExtensions([KHRMaterialsUnlit]).readBinary(glb);
     const primitives = document.getRoot().listMeshes()[0]!.listPrimitives();
     const materialNames = document
       .getRoot()
@@ -309,6 +311,18 @@ describe('convertReplicadGeometriesToGltf', () => {
     expect(primitives[0]!.getMode()).toBe(4);
     expect(primitives[1]!.getMode()).toBe(1);
     expect(materialNames).toEqual(['', '']);
+
+    const lineMaterial = primitives[1]!.getMaterial()!;
+    expect(lineMaterial.getBaseColorFactor()).toEqual([0, 0, 0, 1]);
+    expect(lineMaterial.getMetallicFactor()).toBe(0);
+    expect(lineMaterial.getRoughnessFactor()).toBe(1);
+    expect(lineMaterial.getDoubleSided()).toBe(true);
+    expect(lineMaterial.getAlphaMode()).toBe('OPAQUE');
+    expect(lineMaterial.getExtension('KHR_materials_unlit')).not.toBeNull();
+
+    const { json } = readGlbJsonAndBin(glb);
+    expect(json.extensionsUsed).toEqual([tauCadTopologyExtension, 'KHR_materials_unlit']);
+    expect(json.extensionsRequired).toBeUndefined();
   });
 
   it('should annotate nodes and primitives with stable Tau component metadata', () => {
@@ -366,7 +380,8 @@ describe('convertReplicadGeometriesToGltf', () => {
     const glb = convertReplicadGeometriesToGltf({ geometries: [geometry], format: 'glb' });
     const { json, payload } = readTopologyPayload(glb);
     const extension = json.extensions?.[tauCadTopologyExtension];
-    expect(json.extensionsUsed).toEqual([tauCadTopologyExtension]);
+    expect(json.extensionsUsed).toEqual([tauCadTopologyExtension, 'KHR_materials_unlit']);
+    expect(json.extensionsRequired).toBeUndefined();
     expect(extension?.topologyBufferView).toBeDefined();
 
     expect(payload.schemaVersion).toBe(1);
@@ -404,7 +419,8 @@ describe('convertReplicadGeometriesToGltf', () => {
     });
     const { json } = readGlbJsonAndBin(glb);
 
-    expect(json.extensionsUsed).toBeUndefined();
+    expect(json.extensionsUsed).toEqual(['KHR_materials_unlit']);
+    expect(json.extensionsRequired).toBeUndefined();
     expect(json.extensions?.[tauCadTopologyExtension]).toBeUndefined();
     expect(json.nodes[0]!.extras).toBeUndefined();
     expect(json.meshes[0]!.primitives[0]!.extras).toBeUndefined();

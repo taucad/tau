@@ -27,8 +27,6 @@ import type { KernelIssue, KernelStackFrame } from '#types/runtime.types.js';
  * source-mapped {@link KernelIssue}.
  */
 export type OcErrorContext = {
-  /** Project base path used by `resolveSourcePath` to produce relative source paths. */
-  basePath: string;
   /**
    * Inline source-map JSON returned by `EsbuildBundler.bundle` for the user's
    * code. When present, blob/data-URL frames are remapped back to original
@@ -77,11 +75,10 @@ export function formatOcRuntimeError(
         classifyFrame: frameClassifier,
         sourceMap: context.bundleSourceMap,
         lastEntryName: context.entryUrl,
-        resolveSourcePath: (s) => resolveSourcePath(s, context.basePath),
+        resolveSourcePath,
       }),
     applySourceMaps: context.applySecondarySourceMaps ?? identityFrames,
-    deriveLocation: (frames) =>
-      deriveLocationFromFrames(frames, context.bundleSourceMap, (s) => resolveSourcePath(s, context.basePath)),
+    deriveLocation: (frames) => deriveLocationFromFrames(frames, context.bundleSourceMap, resolveSourcePath),
     sourceMap: context.bundleSourceMap,
   });
 }

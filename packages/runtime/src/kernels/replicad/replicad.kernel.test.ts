@@ -11,6 +11,7 @@ import type { Document } from '@gltf-transform/core';
 import { replicadDetectPattern } from '#kernels/replicad/replicad.constants.js';
 import { replicad as replicadKernel } from '#kernels/replicad/replicad.kernel.js';
 import { createGeometryTestHelpers, extractGltfFromResult } from '#testing/kernel-geometry-testing.utils.js';
+import { mapZupMillimetersToYupMeters, readCoordinateEvidence } from '#testing/coordinate-testing.utils.js';
 import {
   assertFailure,
   assertSuccess,
@@ -97,6 +98,48 @@ const readGltfNodeMeshNames = async (
       .getRoot()
       .listMeshes()
       .map((mesh) => mesh.getName()),
+  };
+};
+
+type StlPoint = [number, number, number];
+
+const readBinaryStlEvidence = (bytes: Uint8Array<ArrayBuffer>): { normals: StlPoint[]; vertices: StlPoint[] } => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const triangleCount = view.getUint32(80, true);
+  const normals: StlPoint[] = [];
+  const vertices: StlPoint[] = [];
+  const round = (value: number): number => {
+    const rounded = Math.round(value * 1e6) / 1e6;
+    return Object.is(rounded, -0) ? 0 : rounded;
+  };
+  const readPoint = (offset: number): StlPoint => [
+    round(view.getFloat32(offset, true)),
+    round(view.getFloat32(offset + 4, true)),
+    round(view.getFloat32(offset + 8, true)),
+  ];
+  for (let triangle = 0; triangle < triangleCount; triangle++) {
+    const offset = 84 + triangle * 50;
+    normals.push(readPoint(offset));
+    vertices.push(readPoint(offset + 12), readPoint(offset + 24), readPoint(offset + 36));
+  }
+  const compare = (left: StlPoint, right: StlPoint): number =>
+    left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
+  return { normals: normals.sort(compare), vertices: vertices.sort(compare) };
+};
+
+const mapStlEvidenceToYUp = ({
+  normals,
+  vertices,
+}: {
+  normals: StlPoint[];
+  vertices: StlPoint[];
+}): { normals: StlPoint[]; vertices: StlPoint[] } => {
+  const map = ([x, y, z]: StlPoint): StlPoint => [x, z, y === 0 ? 0 : -y];
+  const compare = (left: StlPoint, right: StlPoint): number =>
+    left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
+  return {
+    normals: normals.map((normal) => map(normal)).sort(compare),
+    vertices: vertices.map((vertex) => map(vertex)).sort(compare),
   };
 };
 
@@ -2439,6 +2482,53 @@ export default function main() {
       expect(importedShape.faces.length).toBe(originalShape.faces.length);
     });
 
+    it('should rotate asymmetric STEP geometry from z-up to y-up exactly once', async () => {
+      const { importSTEP, isShape3D } = await import('replicad');
+      const worker = await createWorker({
+        'step-coordinate.ts': `
+          import { makeBox } from 'replicad';
+          export default function main() {
+            return makeBox([0, 0, 0], [10, 20, 30]).translate([7, 11, 13]);
+          }
+        `,
+      });
+      await worker.createGeometry({ file: createGeometryFile('step-coordinate.ts'), parameters: {} });
+      const zUp = await worker.exportGeometry('step', { coordinateSystem: 'z-up' });
+      const yUp = await worker.exportGeometry('step', { coordinateSystem: 'y-up' });
+      assertSuccess(zUp);
+      assertSuccess(yUp);
+
+      const zShape = await importSTEP(new Blob([zUp.data[0]!.bytes], { type: 'application/step' }));
+      const yShape = await importSTEP(new Blob([yUp.data[0]!.bytes], { type: 'application/step' }));
+      try {
+        expect(isShape3D(zShape)).toBe(true);
+        expect(isShape3D(yShape)).toBe(true);
+        if (!isShape3D(zShape) || !isShape3D(yShape)) {
+          throw new Error('Expected imported STEP solids');
+        }
+        const zBounds = zShape.boundingBox;
+        const yBounds = yShape.boundingBox;
+        try {
+          const [[xmin, ymin, zmin], [xmax, ymax, zmax]] = zBounds.bounds;
+          const expected = [
+            [xmin, zmin, -ymax],
+            [xmax, zmax, -ymin],
+          ];
+          const actualValues = yBounds.bounds.flat();
+          const expectedValues = expected.flat();
+          for (const [index, value] of actualValues.entries()) {
+            expect(value).toBeCloseTo(expectedValues[index]!, 6);
+          }
+        } finally {
+          zBounds.delete();
+          yBounds.delete();
+        }
+      } finally {
+        zShape.delete();
+        yShape.delete();
+      }
+    });
+
     it('should export to STL format', async () => {
       const worker = await createWorker({
         'box.ts': `
@@ -2475,6 +2565,26 @@ export default function main() {
 
       const exportResult = await worker.exportGeometry('stl', { binary: true });
       assertSuccess(exportResult);
+    });
+
+    it('should rotate asymmetric binary STL vertices and normals to y-up exactly once', async () => {
+      const worker = await createWorker({
+        'stl-coordinate.ts': `
+          import { makeBox } from 'replicad';
+          export default function main() {
+            return makeBox([0, 0, 0], [10, 20, 30]).translate([7, 11, 13]);
+          }
+        `,
+      });
+      await worker.createGeometry({ file: createGeometryFile('stl-coordinate.ts'), parameters: {} });
+      const zUp = await worker.exportGeometry('stl', { binary: true, coordinateSystem: 'z-up' });
+      const yUp = await worker.exportGeometry('stl', { binary: true, coordinateSystem: 'y-up' });
+      assertSuccess(zUp);
+      assertSuccess(yUp);
+
+      expect(readBinaryStlEvidence(yUp.data[0]!.bytes)).toEqual(
+        mapStlEvidenceToYUp(readBinaryStlEvidence(zUp.data[0]!.bytes)),
+      );
     });
 
     it('should export to GLTF format', async () => {
@@ -2574,6 +2684,48 @@ export default function main() {
       expect(size[1]).toBeCloseTo(30, 4);
       expect(size[2]).toBeCloseTo(10, 4);
     });
+
+    it.each(['glb', 'gltf'] as const)(
+      'should convert asymmetric %s geometry from z-up millimeters to y-up meters exactly once',
+      async (format) => {
+        const worker = await createWorker({
+          'coordinate-evidence.ts': `
+            import { makeBox } from 'replicad';
+
+            export default function main() {
+              return [
+                {
+                  shape: makeBox([0, 0, 0], [10, 20, 30]).translate([7, 11, 13]),
+                  name: 'First Box',
+                  color: '#ff0000',
+                },
+                {
+                  shape: makeBox([0, 0, 0], [4, 6, 8]).translate([-17, 23, 31]),
+                  name: 'Second Box',
+                  color: '#0000ff',
+                },
+              ];
+            }
+          `,
+        });
+        await worker.createGeometry({ file: createGeometryFile('coordinate-evidence.ts'), parameters: {} });
+
+        const zUp = await worker.exportGeometry(format, {
+          coordinateSystem: 'z-up',
+          unit: { length: 'millimeter' },
+        });
+        const yUp = await worker.exportGeometry(format, {
+          coordinateSystem: 'y-up',
+          unit: { length: 'meter' },
+        });
+        assertSuccess(zUp);
+        assertSuccess(yUp);
+
+        const zUpEvidence = await readCoordinateEvidence({ bytes: zUp.data[0]!.bytes, format });
+        const yUpEvidence = await readCoordinateEvidence({ bytes: yUp.data[0]!.bytes, format });
+        expect(yUpEvidence).toEqual(mapZupMillimetersToYupMeters(zUpEvidence));
+      },
+    );
 
     it('should export STEP assembly with geometry for each shape', async () => {
       const worker = await createWorker({
@@ -3352,7 +3504,7 @@ export default function main() {
       // fromMemoryFS, which disconnects from the bridge the worker reads through).
       const fs1 = getTestFileSystem();
       await fs1.writeFile(
-        '/projects/test/main.ts',
+        '/main.ts',
         `
           import { drawRoundedRectangle } from 'replicad';
           export default function main() {
@@ -3362,7 +3514,7 @@ export default function main() {
       );
 
       // Notify worker about the change
-      await worker.notifyFileChanged(['/projects/test/main.ts']);
+      await worker.notifyFileChanged(['/main.ts']);
 
       // Second render should use updated code
       const result2 = await worker.createGeometry({
@@ -3399,7 +3551,7 @@ export default function main() {
       // Modify file content (write to existing FS to preserve bridge connection)
       const fs2 = getTestFileSystem();
       await fs2.writeFile(
-        '/projects/test/main.ts',
+        '/main.ts',
         `
           import { drawRoundedRectangle } from 'replicad';
           export default function main() {
@@ -3409,7 +3561,7 @@ export default function main() {
       );
 
       // Notify with ABSOLUTE path (matching production behavior from use-project.tsx)
-      await worker.notifyFileChanged(['/projects/test/main.ts']);
+      await worker.notifyFileChanged(['/main.ts']);
 
       // Second render should use updated code
       const result2 = await worker.createGeometry({
@@ -3469,6 +3621,38 @@ export default function main() {
       await geometryHelpers.expectValidGltf(result2);
     });
 
+    it('resolves a nested entry import against virtual cwd /', async () => {
+      const worker = await createTestWorker(
+        replicadKernel,
+        {
+          'examples/entry.ts': `
+            import { makeFrame } from '../lib/frame';
+            export default function main() {
+              return makeFrame();
+            }
+          `,
+          'lib/frame.ts': `
+            import { makeBaseBox } from 'replicad';
+            export function makeFrame() {
+              return makeBaseBox(20, 10, 5);
+            }
+          `,
+        },
+        {
+          detectImport: replicadDetectPattern.source,
+          builtinModuleNames: ['replicad'],
+        },
+      );
+
+      const result = await worker.createGeometry({
+        file: createGeometryFile('examples/entry.ts'),
+        parameters: {},
+      });
+
+      assertSuccess(result);
+      await geometryHelpers.expectValidGltf(result);
+    });
+
     it('should recover when a single dependency has a syntax error that is then fixed', async () => {
       const worker = await createWorker({
         'main.ts': `
@@ -3499,7 +3683,7 @@ export default function main() {
       // Fix the syntax error (write to existing FS to preserve bridge connection)
       const fs3 = getTestFileSystem();
       await fs3.writeFile(
-        '/projects/test/main.ts',
+        '/main.ts',
         `
           import { makeBox } from './lib/box';
           export default function main() {
@@ -3508,7 +3692,7 @@ export default function main() {
         `,
       );
       await fs3.writeFile(
-        '/projects/test/lib/box.ts',
+        '/lib/box.ts',
         `
           import { makeBaseBox } from 'replicad';
           const pattern = /valid-regex/;
@@ -3519,7 +3703,7 @@ export default function main() {
       );
 
       // Notify that the dependency changed
-      await worker.notifyFileChanged(['/projects/test/lib/box.ts']);
+      await worker.notifyFileChanged(['/lib/box.ts']);
 
       // Second render should succeed with the fixed dependency
       const result2 = await worker.createGeometry({
@@ -3565,7 +3749,7 @@ export default function main() {
       // Fix the syntax error in the transitive dependency (write to existing FS to preserve bridge connection)
       const fs4 = getTestFileSystem();
       await fs4.writeFile(
-        '/projects/test/main.ts',
+        '/main.ts',
         `
           import { makeAssembly } from './lib/assembly';
           export default function main() {
@@ -3574,7 +3758,7 @@ export default function main() {
         `,
       );
       await fs4.writeFile(
-        '/projects/test/lib/assembly.ts',
+        '/lib/assembly.ts',
         `
           import { makeBox } from './shapes';
           export function makeAssembly() {
@@ -3583,7 +3767,7 @@ export default function main() {
         `,
       );
       await fs4.writeFile(
-        '/projects/test/lib/shapes.ts',
+        '/lib/shapes.ts',
         `
           import { makeBaseBox } from 'replicad';
           export function makeBox() {
@@ -3593,7 +3777,7 @@ export default function main() {
       );
 
       // Notify that the transitive dependency changed
-      await worker.notifyFileChanged(['/projects/test/lib/shapes.ts']);
+      await worker.notifyFileChanged(['/lib/shapes.ts']);
 
       // Second render should succeed
       const result2 = await worker.createGeometry({
@@ -3640,7 +3824,7 @@ export default function main() {
       // Fix the syntax error in cylinder (write to existing FS to preserve bridge connection)
       const fs5 = getTestFileSystem();
       await fs5.writeFile(
-        '/projects/test/main.ts',
+        '/main.ts',
         `
           import { makeBox } from './lib/box';
           import { makeCylinder } from './lib/cylinder';
@@ -3650,7 +3834,7 @@ export default function main() {
         `,
       );
       await fs5.writeFile(
-        '/projects/test/lib/box.ts',
+        '/lib/box.ts',
         `
           import { makeBaseBox } from 'replicad';
           export function makeBox() {
@@ -3659,7 +3843,7 @@ export default function main() {
         `,
       );
       await fs5.writeFile(
-        '/projects/test/lib/cylinder.ts',
+        '/lib/cylinder.ts',
         `
           import { makeBaseBox } from 'replicad';
           export function makeCylinder() {
@@ -3669,7 +3853,7 @@ export default function main() {
       );
 
       // Notify that the fixed dependency changed
-      await worker.notifyFileChanged(['/projects/test/lib/cylinder.ts']);
+      await worker.notifyFileChanged(['/lib/cylinder.ts']);
 
       // Second render should succeed
       const result2 = await worker.createGeometry({
@@ -3699,7 +3883,7 @@ export default function main() {
 
       const geometryFile = createGeometryFile('main.ts');
 
-      // Use render() which calls _updateWatchSetFromCaches in its finally block
+      // Use render() which reconciles retained observed paths in its finally block
       const result = await worker.render({
         file: geometryFile,
         parameters: {},
@@ -3709,8 +3893,8 @@ export default function main() {
       // Verify that the worker's watch set includes the dependency file,
       // even though the build failed
       const watchedPaths = worker.getWatchedPaths();
-      expect(watchedPaths).toContain('/projects/test/main.ts');
-      expect(watchedPaths).toContain('/projects/test/lib/box.ts');
+      expect(watchedPaths).toContain('/main.ts');
+      expect(watchedPaths).toContain('/lib/box.ts');
     });
 
     it('should watch unresolved imports and re-render when missing files are created', async () => {
@@ -3735,16 +3919,16 @@ export default function main() {
       // The watch set should include extension variants for the unresolved
       // imports so that creating the files later triggers a re-render
       const watchedPaths = worker.getWatchedPaths();
-      expect(watchedPaths).toContain('/projects/test/main.ts');
-      expect(watchedPaths).toContain('/projects/test/lib/box.ts');
-      expect(watchedPaths).toContain('/projects/test/lib/cylinder.ts');
+      expect(watchedPaths).toContain('/main.ts');
+      expect(watchedPaths).toContain('/lib/box.ts');
+      expect(watchedPaths).toContain('/lib/cylinder.ts');
 
       // Write missing files directly to the live filesystem (seedTestFileSystem
       // replaces the instance, but the bridge port is bound to the original)
       const fs = getTestFileSystem();
-      await fs.mkdir('/projects/test/lib', { recursive: true });
+      await fs.mkdir('/lib', { recursive: true });
       await fs.writeFile(
-        '/projects/test/lib/box.ts',
+        '/lib/box.ts',
         `
           import { makeBaseBox } from 'replicad';
           export function makeBox() {
@@ -3753,7 +3937,7 @@ export default function main() {
         `,
       );
       await fs.writeFile(
-        '/projects/test/lib/cylinder.ts',
+        '/lib/cylinder.ts',
         `
           import { makeBaseBox } from 'replicad';
           export function makeCylinder() {
@@ -3762,7 +3946,7 @@ export default function main() {
         `,
       );
 
-      await worker.notifyFileChanged(['/projects/test/lib/box.ts']);
+      await worker.notifyFileChanged(['/lib/box.ts']);
 
       const result2 = await worker.createGeometry({
         file: geometryFile,
@@ -3860,6 +4044,7 @@ describe('OC API Call Tracing', () => {
     const result = await worker.createGeometry({
       file: createGeometryFile('box.ts'),
       parameters: {},
+      content: { includeEdges: false, includeTopology: false },
     });
     await collectTelemetry(worker);
 
@@ -3888,7 +4073,7 @@ describe('OC API Call Tracing', () => {
       shapeName: 'Shape 1',
       linearTolerance: 0.02,
       angularToleranceDeg: 20,
-      withBrepEdges: false,
+      collectBrepEdges: false,
       output: 'faces',
     });
     expect(facesSpan.detail?.['phase']).toBeUndefined();
@@ -3903,7 +4088,6 @@ describe('OC API Call Tracing', () => {
       replicadKernel,
       { 'box.ts': boxCode },
       {
-        workerOptions: { withBrepEdges: true },
         onTelemetry: (entries) => telemetryBatches.push(entries),
       },
     );
@@ -3911,6 +4095,7 @@ describe('OC API Call Tracing', () => {
     const result = await worker.createGeometry({
       file: createGeometryFile('box.ts'),
       parameters: {},
+      content: { includeEdges: true, includeTopology: false },
     });
     await collectTelemetry(worker);
 
@@ -3924,7 +4109,7 @@ describe('OC API Call Tracing', () => {
       shapeName: 'Shape 1',
       linearTolerance: 0.02,
       angularToleranceDeg: 20,
-      withBrepEdges: true,
+      collectBrepEdges: true,
       output: 'edges',
     });
     expect(edgesSpan.detail?.['phase']).toBeUndefined();
@@ -4023,7 +4208,7 @@ describe('OC API Call Tracing', () => {
       replicadKernel,
       { 'shafts.ts': repeatedCylinderCode },
       {
-        workerOptions: { ocTracing: 'off', withBrepEdges: true },
+        workerOptions: { ocTracing: 'off' },
         onTelemetry: (entries) => telemetryBatches.push(entries),
       },
     );
@@ -4031,6 +4216,7 @@ describe('OC API Call Tracing', () => {
     const result = await worker.createGeometry({
       file: createGeometryFile('shafts.ts'),
       parameters: {},
+      content: { includeEdges: true, includeTopology: false },
     });
     await collectTelemetry(worker);
 
@@ -4044,7 +4230,7 @@ describe('OC API Call Tracing', () => {
     expect(edgeSpans[0]!.detail).toMatchObject({
       instanceCount: 3,
       shapeNames: 'shaft-0,shaft-1,shaft-2',
-      withBrepEdges: true,
+      collectBrepEdges: true,
       output: 'edges',
     });
     expect(edgeSpans[0]!.detail?.['parentSpanId']).toBe(renderOutputSpan.detail?.['spanId']);
@@ -4447,7 +4633,7 @@ describe('OC API Call Tracing', () => {
   }, 15_000);
 });
 
-describe('withBrepEdges option', () => {
+describe('includeEdges content', () => {
   const boxCode = `
     import { drawRoundedRectangle } from 'replicad';
     export default function main() {
@@ -4474,7 +4660,7 @@ describe('withBrepEdges option', () => {
     return lineCount;
   }
 
-  it('should not include BRep edge lines when withBrepEdges is false (default)', async () => {
+  it('should not include BRep edge lines when includeEdges is false (default)', async () => {
     const result = await createTestGeometry({
       definition: replicadKernel,
       files: { 'box.ts': boxCode },
@@ -4487,13 +4673,13 @@ describe('withBrepEdges option', () => {
     expect(lineCount).toBe(0);
   });
 
-  it('should include BRep edge lines when withBrepEdges is true', async () => {
+  it('should include BRep edge lines when includeEdges is true', async () => {
     const result = await createTestGeometry({
       definition: replicadKernel,
       files: { 'box.ts': boxCode },
       mainFile: 'box.ts',
       parameters: {},
-      options: { workerOptions: { withBrepEdges: true } },
+      content: { includeEdges: true },
     });
 
     assertSuccess(result);
@@ -4501,20 +4687,20 @@ describe('withBrepEdges option', () => {
     expect(lineCount).toBeGreaterThan(0);
   });
 
-  it('should produce identical surface geometry regardless of withBrepEdges setting', async () => {
+  it('should produce identical surface geometry regardless of includeEdges setting', async () => {
     const withoutEdges = await createTestGeometry({
       definition: replicadKernel,
       files: { 'box.ts': boxCode },
       mainFile: 'box.ts',
       parameters: {},
-      options: { workerOptions: { withBrepEdges: false } },
+      content: { includeEdges: false },
     });
     const withEdges = await createTestGeometry({
       definition: replicadKernel,
       files: { 'box.ts': boxCode },
       mainFile: 'box.ts',
       parameters: {},
-      options: { workerOptions: { withBrepEdges: true } },
+      content: { includeEdges: true },
     });
 
     assertSuccess(withoutEdges);
@@ -4553,7 +4739,8 @@ describe('withBrepEdges option', () => {
       files: { 'box.ts': boxCode },
       mainFile: 'box.ts',
       parameters: {},
-      options: { workerOptions: { wasm: 'single', withBrepEdges: true } },
+      content: { includeEdges: true },
+      options: { workerOptions: { wasm: 'single' } },
     });
 
     assertSuccess(result);

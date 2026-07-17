@@ -92,18 +92,3 @@ export function lookupMimeType(extension: string): (typeof mimeTypes)[keyof type
 
   return 'application/octet-stream';
 }
-
-/**
- * Create an {@link ExportFile} with the MIME type auto-resolved from the format extension.
- * Uses direct indexing into {@link mimeTypes} since the `format` parameter is constrained
- * to valid file extensions at compile time.
- *
- * @public
- */
-export function createExportFile(
-  format: keyof typeof mimeTypes,
-  name: string,
-  bytes: Uint8Array<ArrayBuffer>,
-): ExportFile {
-  return { name, bytes, mimeType: mimeTypes[format] };
-}

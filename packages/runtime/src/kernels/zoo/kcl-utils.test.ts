@@ -24,7 +24,7 @@ const memoryFs = (files: Map<string, string>): KernelFileSystem =>
 
 describe('KclUtilities execution normalization', () => {
   it('partitions issues into errors vs warnings on executeMockKcl', async () => {
-    const fs = new FileSystemManager(memoryFs(new Map([['/main.kcl', 'x = 1\n']])), '/');
+    const fs = new FileSystemManager(memoryFs(new Map([['/main.kcl', 'x = 1\n']])));
     const utils = new KclUtilities({ fileSystemManager: fs });
     await utils.initializeWasm();
     const { program } = await utils.parseKcl('x = 1\n');

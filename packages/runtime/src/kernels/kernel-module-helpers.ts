@@ -12,6 +12,7 @@ import type { KernelRuntime } from '#types/runtime-kernel.types.js';
 import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isNode, resolveFileUrl } from '#framework/environment.js';
 import { asBuffer } from '@taucad/utils/file';
+import { resolveVirtualPath } from '@taucad/utils/path';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- module-level constant
 export const KERNEL_MODULES_KEY = '__KERNEL_MODULES__';
@@ -181,17 +182,10 @@ export function extractDefaultParameters(module: unknown): Record<string, unknow
 }
 
 /**
- * Convert an absolute path to a relative path by stripping the base prefix.
- * @public
+ * Convert a canonical project-local file path to the leading-slash-free entry
+ * spelling required by the JavaScript VM adapter.
  */
-export function resolveToRelative(absolutePath: string, basePath: string): string {
-  const normalizedBase = basePath.endsWith('/') ? basePath.slice(0, -1) : basePath;
-  if (absolutePath.startsWith(`${normalizedBase}/`)) {
-    return absolutePath.slice(normalizedBase.length + 1);
-  }
-
-  return absolutePath;
-}
+export const toVmEntryPath = (absolutePath: string): string => resolveVirtualPath(absolutePath).slice(1);
 
 /**
  * Convert raw build issues (from bundler/execute) to `KernelIssue` objects

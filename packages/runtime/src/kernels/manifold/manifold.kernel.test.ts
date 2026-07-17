@@ -5,6 +5,7 @@ import type { JSONSchema7 } from '@taucad/json-schema';
 import type { GeometryResponse } from '@taucad/types';
 import { manifold as manifoldKernel } from '#kernels/manifold/manifold.kernel.js';
 import { createGeometryTestHelpers } from '#testing/kernel-geometry-testing.utils.js';
+import { mapZupMillimetersToYupMeters, readCoordinateEvidence } from '#testing/coordinate-testing.utils.js';
 import {
   createGeometryFile,
   createMockKernelRuntime,
@@ -364,6 +365,40 @@ describe('ManifoldWorker', () => {
         expect(nodeNames).toEqual(['Shape 1']);
         expect(meshNames).toEqual(['Shape 1']);
       }
+    });
+
+    it('should convert asymmetric GLB geometry from z-up millimeters to y-up meters exactly once', async () => {
+      const worker = await createWorker({
+        'coordinate-evidence.ts': `
+          import { Manifold } from 'manifold-3d/manifoldCAD';
+
+          export default function main() {
+            return Manifold.cube([10, 20, 30], false).translate([7, 11, 13]);
+          }
+        `,
+      });
+      const createResult = await worker.createGeometry({
+        file: createGeometryFile('coordinate-evidence.ts'),
+        parameters: {},
+      });
+      expect(createResult.success).toBe(true);
+      const zUp = await worker.exportGeometry('glb', {
+        coordinateSystem: 'z-up',
+        unit: { length: 'millimeter' },
+      });
+      const yUp = await worker.exportGeometry('glb', {
+        coordinateSystem: 'y-up',
+        unit: { length: 'meter' },
+      });
+      expect(zUp.success).toBe(true);
+      expect(yUp.success).toBe(true);
+      if (!zUp.success || !yUp.success) {
+        return;
+      }
+
+      const zUpEvidence = await readCoordinateEvidence({ bytes: zUp.data[0]!.bytes });
+      const yUpEvidence = await readCoordinateEvidence({ bytes: yUp.data[0]!.bytes });
+      expect(yUpEvidence).toEqual(mapZupMillimetersToYupMeters(zUpEvidence));
     });
 
     it('should export an empty GLB after an empty render', async () => {

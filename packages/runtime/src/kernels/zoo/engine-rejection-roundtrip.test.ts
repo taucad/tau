@@ -102,7 +102,7 @@ describe('KCL WASM engine rejection round-trip (JSON-string reject → visible e
   it('surfaces precondition_failed / plane not found from the bridge; not the generic send promise string', async () => {
     const transport = new FirstCommandFailsTransport();
     const bridge = new ZooEngineBridge(transport.asTransport());
-    const fs = new FileSystemManager(memoryFs(), '/');
+    const fs = new FileSystemManager(memoryFs());
 
     // oxlint-disable-next-line @typescript-eslint/await-thenable -- wasm-bindgen Context constructor is Promise-like
     const context = await new wasm.Context(bridge, fs);

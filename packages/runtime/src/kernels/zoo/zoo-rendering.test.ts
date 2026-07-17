@@ -34,13 +34,13 @@ describe('Zoo / KCL — color rendering observation', () => {
 
   it('exposes a kernel definition with at least one export schema', () => {
     expect(zooDefinition.name).toBe('ZooKernel');
-    expect(zooDefinition.exportSchemas).toBeTruthy();
-    const formats = Object.keys(zooDefinition.exportSchemas ?? {});
+    expect(zooDefinition.exportFormats).toBeTruthy();
+    const formats = Object.keys(zooDefinition.exportFormats);
     expect(formats.length).toBeGreaterThan(0);
   });
 
   it('declares glb as a supported export format (color-bearing)', () => {
-    const formats = Object.keys(zooDefinition.exportSchemas ?? {});
+    const formats = Object.keys(zooDefinition.exportFormats);
     expect(formats).toContain('glb');
   });
 });

@@ -9,6 +9,7 @@ import { createMockKernelRuntime, createTestWorker, createGeometryFile } from '#
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import { writeGlb, writeGltfJson } from '#utils/glb-writer.js';
 import type { GlbPrimitive } from '#utils/glb-writer.js';
+import { mapZupMillimetersToYupMeters, readCoordinateEvidence } from '#testing/coordinate-testing.utils.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- File names use extensions like 'main.kcl' */
 
@@ -56,6 +57,27 @@ const createNamedGlb = async (
   const io = new NodeIO();
   const document = await io.readBinary(glb);
   document.getRoot().listScenes()[0]!.setName(options.sceneName);
+  return io.writeBinary(document);
+};
+
+const createCoordinateGlb = async (): Promise<Uint8Array<ArrayBuffer>> => {
+  const glb = writeGlb({
+    nodes: [
+      {
+        name: 'Asymmetric Triangle',
+        primitives: [
+          {
+            ...createTrianglePrimitive(),
+            positions: new Float32Array([0, 0, 0, 0.01, 0, 0, 0, 0.02, -0.03]),
+            normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]),
+          },
+        ],
+      },
+    ],
+  });
+  const io = new NodeIO();
+  const document = await io.readBinary(glb);
+  document.getRoot().listNodes()[0]!.setTranslation([0.007, 0.013, -0.011]);
   return io.writeBinary(document);
 };
 
@@ -887,8 +909,7 @@ cone = startSketchOn(XZ)
       };
       const result = await zooDefinition.createGeometry(
         {
-          filePath: '/projects/test/main.kcl',
-          basePath: '/projects/test',
+          filePath: '/main.kcl',
           parameters: {},
           options: {},
         },
@@ -897,8 +918,8 @@ cone = startSketchOn(XZ)
       );
 
       expect(result.nativeHandle).toEqual({ kind: 'zoo-live-engine-session', hasGeometry: false });
-      expect(result.geometry.format).toBe('gltf');
-      if (result.geometry.format === 'gltf') {
+      expect(result.geometry?.format).toBe('gltf');
+      if (result.geometry?.format === 'gltf') {
         const document = await new NodeIO().readBinary(result.geometry.content);
         expect(document.getRoot().listMeshes()).toHaveLength(0);
       }
@@ -1039,6 +1060,47 @@ cone = startSketchOn(XZ)
           sceneNames: [''],
         });
       }
+    });
+
+    it('should convert canonical y-up meter GLB evidence to z-up millimeters exactly once', async () => {
+      const sourceGlb = await createCoordinateGlb();
+      const exportFromMemory = vi.fn().mockResolvedValue([{ contents: sourceGlb }]);
+      const context: Parameters<typeof zooDefinition.exportGeometry>[2] = {
+        baseUrl: 'ws://fake.example/modeling-commands',
+        fileSystemManager: undefined,
+        kclUtils: {
+          initializeEngine: vi.fn().mockResolvedValue(undefined),
+          exportFromMemory,
+        } as unknown as KclUtilities,
+      };
+      const nativeHandle = { kind: 'zoo-live-engine-session', hasGeometry: true } as const;
+      const yUp = await zooDefinition.exportGeometry(
+        {
+          format: 'glb',
+          nativeHandle,
+          options: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
+        },
+        createMockKernelRuntime(),
+        context,
+      );
+      const zUp = await zooDefinition.exportGeometry(
+        {
+          format: 'glb',
+          nativeHandle,
+          options: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+        },
+        createMockKernelRuntime(),
+        context,
+      );
+      expect(yUp.success).toBe(true);
+      expect(zUp.success).toBe(true);
+      if (!yUp.success || !zUp.success) {
+        return;
+      }
+
+      const yUpEvidence = await readCoordinateEvidence({ bytes: yUp.data[0]!.bytes });
+      const zUpEvidence = await readCoordinateEvidence({ bytes: zUp.data[0]!.bytes });
+      expect(yUpEvidence).toEqual(mapZupMillimetersToYupMeters(zUpEvidence));
     });
 
     it('should normalize generated embedded glTF names from the KCL engine', async () => {

@@ -28,7 +28,7 @@ import {
   isRecordObject,
   extractDefaultParameters,
   registerKernelModule,
-  resolveToRelative,
+  toVmEntryPath,
   convertRawIssuesToKernelIssues,
   loadBinaryFile,
 } from '#kernels/kernel-module-helpers.js';
@@ -44,7 +44,11 @@ import type { OcctModuleFactory } from '#kernels/occt/oc-init.js';
 import { detectMultiThreadSupport, activateOccParallelism } from '#kernels/occt/oc-threading.js';
 import { resolveCjsDefault } from '#kernels/replicad/utils/resolve-cjs-default.js';
 import { formatOcRuntimeError } from '#kernels/occt/oc-error-formatter.js';
-import { RenderArtifactFinalizationError, finalizeRenderOutput } from '#framework/render-artifact-finalizer.js';
+import {
+  RenderArtifactFinalizationError,
+  finalizeMeshOutput,
+  finalizeRenderOutput,
+} from '#framework/render-artifact-finalizer.js';
 import type { OcErrorContext } from '#kernels/occt/oc-error-formatter.js';
 import { runOcMain } from '#kernels/occt/oc-run-main.js';
 import { wrapOcWithTracing, wrapOcForExceptions } from '#kernels/occt/oc-tracing.js';
@@ -55,7 +59,7 @@ import {
   demangleStackFrames,
   classifyLibraryFrames,
 } from '#framework/error-enrichment.js';
-import { render, renderOutput } from '#kernels/replicad/utils/render-output.js';
+import { normalizeRenderShapes, render } from '#kernels/replicad/utils/render-output.js';
 import * as tauReplicadAnnotations from '#kernels/replicad/annotations/index.js';
 import { exportSTEP } from '#kernels/replicad/export/interface-export.js';
 import { resolveEntryInterfaces, rotateNativeEntryToYup } from '#kernels/replicad/interface-resolution.js';
@@ -165,7 +169,6 @@ async function resolveWasm(wasm: WasmOption, logger: RuntimeLogger, tracer?: Run
 type ReplicadContext = {
   openCascade: OpenCascadeInstance;
   replicadLibrary: ReplicadLibrary;
-  withBrepEdges: boolean;
   tessellationInstancing: boolean;
   replicadInitialised: boolean;
   librarySourceMapCache: Map<string, SourceMapConsumer | undefined>;
@@ -365,10 +368,9 @@ function resolveLibraryFrames(frames: KernelStackFrame[], context: ReplicadConte
 
 function buildErrorContext(
   context: ReplicadContext,
-  options: { basePath: string; bundleSourceMap?: string; entryUrl?: string },
+  options: { bundleSourceMap?: string; entryUrl?: string },
 ): OcErrorContext {
   return {
-    basePath: options.basePath,
     bundleSourceMap: options.bundleSourceMap,
     entryUrl: options.entryUrl,
     applySecondarySourceMaps: (frames) => resolveLibraryFrames(frames, context),
@@ -488,8 +490,6 @@ export type ReplicadOptions = {
   ocTracing?: 'off' | 'summary' | 'per-call';
   /** Replicad library call tracing mode for user code. Defaults to `off`. */
   libraryTracing?: KernelLibraryTraceMode;
-  /** Include Boundary Representation (BRep) edge lines in the generated GLTF geometry. Defaults to `false`. */
-  withBrepEdges?: boolean;
   /**
    * Reuse prototype tessellation for repeated transformed Replicad shapes.
    *
@@ -524,7 +524,7 @@ export const replicadKernel = defineKernel({
     const { mangledToOriginal: exportNameMap, exportNames: libraryExportNames } = preserveExportNames(replicadLibrary);
 
     const { logger, tracer } = runtime;
-    const { ocTracing, libraryTracing, withBrepEdges, withSourceMapping, tessellationInstancing, wasm } = options;
+    const { ocTracing, libraryTracing, withSourceMapping, tessellationInstancing, wasm } = options;
 
     const wasmLabel = typeof wasm === 'string' ? wasm : 'custom';
     logger.debug(
@@ -608,7 +608,6 @@ export const replicadKernel = defineKernel({
     return {
       openCascade,
       replicadLibrary,
-      withBrepEdges,
       tessellationInstancing,
       replicadInitialised: true,
       librarySourceMapCache,
@@ -623,8 +622,8 @@ export const replicadKernel = defineKernel({
     return runtime.bundler.resolveDependencies(filePath);
   },
 
-  async getParameters({ filePath, basePath }, runtime, context) {
-    const relativeFilePath = resolveToRelative(filePath, basePath);
+  async getParameters({ filePath }, runtime, context) {
+    const relativeFilePath = toVmEntryPath(filePath);
     let bundleSourceMap: string | undefined;
     let entryUrl: string | undefined;
     try {
@@ -648,15 +647,15 @@ export const replicadKernel = defineKernel({
       const issue = formatOcRuntimeError(
         error,
         context.openCascade,
-        buildErrorContext(context, { basePath, bundleSourceMap, entryUrl }),
+        buildErrorContext(context, { bundleSourceMap, entryUrl }),
       );
       return createKernelError([issue]);
     }
   },
 
-  async createGeometry({ filePath, basePath, parameters, options }, runtime, context) {
+  async createGeometry({ filePath, parameters }, runtime, context) {
     const { tracer } = runtime;
-    const relativeFilePath = resolveToRelative(filePath, basePath);
+    const relativeFilePath = toVmEntryPath(filePath);
     let bundleSourceMap: string | undefined;
     let entryUrl: string | undefined;
 
@@ -678,7 +677,7 @@ export const replicadKernel = defineKernel({
         phase: 'computingGeometry',
         stage: 'brep',
       });
-      const mainResult = await (async () => {
+      const mainResult = await forensicPhase('create.runOcMain', async () => {
         try {
           return await context.libraryTrace.runInScope({
             scope: 'user-main',
@@ -687,7 +686,7 @@ export const replicadKernel = defineKernel({
                 module,
                 parameters,
                 ocInstance: context.openCascade,
-                errorContext: buildErrorContext(context, { basePath, bundleSourceMap, entryUrl }),
+                errorContext: buildErrorContext(context, { bundleSourceMap, entryUrl }),
                 firstArg: getReplicadFirstArgument(),
               }),
           });
@@ -696,7 +695,7 @@ export const replicadKernel = defineKernel({
           context.tracingSummary?.flush();
           mainSpan.end();
         }
-      })();
+      });
 
       if (!mainResult.success) {
         throw new ReplicadBuildError(mainResult.issues);
@@ -713,28 +712,67 @@ export const replicadKernel = defineKernel({
 
       const defaultName = extractDefaultName(module);
 
-      const { tessellation } = options;
+      // Build phase ends here: normalize main() output and resolve GeoSpec
+      // interfaces (pure BRep queries) onto the nativeHandle. The handle carries
+      // all export-facing evidence — tessellation is deferred to meshGeometry
+      // and never runs on a BRep-only export path.
+      const interfaceSpan = tracer.startSpan('replicad.resolve-interfaces', {
+        phase: 'computingGeometry',
+        stage: 'brep',
+      });
+      const nativeHandle: NativeHandleEntry[] = await forensicPhase('create.resolveInterfaces', () => {
+        try {
+          return normalizeRenderShapes(shapes, defaultName).map((entry) =>
+            resolveEntryInterfaces(entry, context.replicadLibrary),
+          );
+        } finally {
+          interfaceSpan.end();
+        }
+      });
 
-      let nativeHandle: NativeHandleEntry[] = [];
+      return { nativeHandle };
+    } catch (error) {
+      if (error instanceof ReplicadBuildError || error instanceof RenderArtifactFinalizationError) {
+        throw error;
+      }
+
+      const issue = formatOcRuntimeError(
+        error,
+        context.openCascade,
+        buildErrorContext(context, { bundleSourceMap, entryUrl }),
+      );
+      throw new ReplicadBuildError([issue]);
+    }
+  },
+
+  async meshGeometry({ nativeHandle, options, content }, runtime, context) {
+    const { tracer } = runtime;
+    if (nativeHandle.length === 0) {
+      return { geometry: createEmptyGltfGeometry() };
+    }
+
+    try {
+      const { tessellation } = options;
+      const includeEdges = content?.includeEdges === true;
+      const includeTopology = content?.includeTopology === true;
+      const namedShapes = nativeHandle.map((entry, index) => ({
+        ...entry,
+        name: resolveShapeName({ index, name: entry.name, source: 'authored' }),
+      }));
+
       let renderMode: 'flat' | 'tessellation-instanced' | 'mixed' = 'flat';
       const renderOutputSpan = tracer.startSpan('replicad.render-output', {
         phase: 'computingGeometry',
         stage: 'render-output',
       });
-      const renderedShapes = (() => {
+      const renderedShapes = await forensicPhase('mesh.renderDisplayTessellation', () => {
         try {
           return context.libraryTrace.runInScope({
             scope: 'render-output',
             operation: () =>
-              renderOutput({
-                shapes,
-                beforeRender(shapesArray) {
-                  nativeHandle = shapesArray.map((entry) => resolveEntryInterfaces(entry, context.replicadLibrary));
-                  return shapesArray;
-                },
-                defaultName,
+              render(namedShapes, {
                 tessellation,
-                withBrepEdges: context.withBrepEdges,
+                collectBrepEdges: includeEdges || includeTopology,
                 openCascade: context.openCascade,
                 tessellationInstancing: context.tessellationInstancing,
                 tracer,
@@ -746,20 +784,19 @@ export const replicadKernel = defineKernel({
         } finally {
           renderOutputSpan.end({ renderMode });
         }
-      })();
+      });
 
       const shapes3d = renderedShapes.filter((shape): shape is GeometryReplicad => shape.format === 'replicad');
       const shapes2d = renderedShapes.filter((shape): shape is GeometrySvg => shape.format === 'svg');
 
       if (shapes3d.length === 0 && shapes2d.length === 0) {
-        runtime.logger.warn('createGeometry returning empty: render-output-filtered-empty', {
+        runtime.logger.warn('meshGeometry returning empty: render-output-filtered-empty', {
           data: {
-            filePath: relativeFilePath,
-            rawShapeCount: Array.isArray(shapes) ? shapes.length : 1,
+            rawShapeCount: nativeHandle.length,
             renderedShapeCount: renderedShapes.length,
           },
         });
-        return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
+        return { geometry: createEmptyGltfGeometry() };
       }
 
       const artifacts: Array<GeometryGltf | GeometrySvg> = [];
@@ -769,28 +806,31 @@ export const replicadKernel = defineKernel({
           phase: 'computingGeometry',
           stage: 'gltf-pack',
         });
-        const gltfBlob = (() => {
+        const gltfBlob = await forensicPhase('mesh.packGltf', () => {
           try {
-            return convertReplicadGeometriesToGltf({ geometries: shapes3d, format: 'glb', logger: runtime.logger });
+            return convertReplicadGeometriesToGltf({
+              geometries: includeEdges
+                ? shapes3d
+                : shapes3d.map((geometry) => ({ ...geometry, edges: { ...geometry.edges, lines: [] } })),
+              format: 'glb',
+              includeTauTopology: includeTopology,
+              logger: runtime.logger,
+            });
           } finally {
             gltfSpan.end();
           }
-        })();
+        });
         artifacts.push({ format: 'gltf', content: gltfBlob });
       }
       artifacts.push(...shapes2d);
 
-      return finalizeRenderOutput({ artifacts, nativeHandle });
+      return finalizeMeshOutput({ artifacts });
     } catch (error) {
-      if (error instanceof ReplicadBuildError || error instanceof RenderArtifactFinalizationError) {
+      if (error instanceof RenderArtifactFinalizationError) {
         throw error;
       }
 
-      const issue = formatOcRuntimeError(
-        error,
-        context.openCascade,
-        buildErrorContext(context, { basePath, bundleSourceMap, entryUrl }),
-      );
+      const issue = formatOcRuntimeError(error, context.openCascade, buildErrorContext(context, {}));
       throw new ReplicadBuildError([issue]);
     }
   },
@@ -799,7 +839,7 @@ export const replicadKernel = defineKernel({
     return context.libraryTrace.runInScope({
       scope: 'export',
       operation: async () => {
-        const { format, nativeHandle, options } = input;
+        const { format, nativeHandle, options, content } = input;
         const emptyGltfExport = () =>
           createKernelSuccess([
             createExportFile(
@@ -836,23 +876,19 @@ export const replicadKernel = defineKernel({
 
             const { linearTolerance, angularTolerance } = options.tessellation;
             const { coordinateSystem, unit } = options;
-            const outputCoordinateSystem = coordinateSystem;
-            const shapes =
-              outputCoordinateSystem === 'y-up'
-                ? nativeHandle.map((s) => ({ ...s, shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]) }))
-                : nativeHandle;
-
-            const namedShapes = shapes.map((shapeConfig, index) => ({
+            const namedShapes = nativeHandle.map((shapeConfig, index) => ({
               ...shapeConfig,
               name: resolveShapeName({ index, name: shapeConfig.name, source: 'generated' }),
             }));
-            const renderedShapes = render(namedShapes, {
-              tessellation: { linearTolerance, angularTolerance },
-              withBrepEdges: false,
-              openCascade: context.openCascade,
-              tessellationInstancing: context.tessellationInstancing,
-              tracer: runtime.tracer,
-            });
+            const renderedShapes = await forensicPhase('export.renderGlbTessellation', () =>
+              render(namedShapes, {
+                tessellation: { linearTolerance, angularTolerance },
+                collectBrepEdges: content?.includeEdges === true || content?.includeTopology === true,
+                openCascade: context.openCascade,
+                tessellationInstancing: context.tessellationInstancing,
+                tracer: runtime.tracer,
+              }),
+            );
             const temporaryShapes = renderedShapes.filter(
               (shape): shape is GeometryReplicad => shape.format === 'replicad',
             );
@@ -861,14 +897,22 @@ export const replicadKernel = defineKernel({
               return emptyGltfExport();
             }
 
-            const gltfData = convertReplicadGeometriesToGltf({
-              geometries: temporaryShapes,
-              format,
-              includeTauTopology: false,
-              logger: runtime.logger,
-              coordinateSystem,
-              unit,
-            });
+            const gltfData = await forensicPhase('export.packGltf', () =>
+              convertReplicadGeometriesToGltf({
+                geometries:
+                  content?.includeEdges === true
+                    ? temporaryShapes
+                    : temporaryShapes.map((geometry) => ({
+                        ...geometry,
+                        edges: { ...geometry.edges, lines: [] },
+                      })),
+                format,
+                includeTauTopology: content?.includeTopology === true,
+                logger: runtime.logger,
+                coordinateSystem,
+                unit,
+              }),
+            );
             return createKernelSuccess([
               createExportFile(format, format === 'glb' ? 'model.glb' : 'model.gltf', asBuffer(gltfData)),
             ]);
@@ -896,7 +940,7 @@ export const replicadKernel = defineKernel({
             }));
             let stepBlob: Blob;
             try {
-              stepBlob = exportSTEP(context.openCascade, stepShapes);
+              stepBlob = await forensicPhase('export.exportSTEP', () => exportSTEP(context.openCascade, stepShapes));
             } catch (error) {
               return stepExportError(error);
             }
@@ -948,18 +992,14 @@ export const replicadKernel = defineKernel({
   },
 
   serializeNativeHandle({ nativeHandle }) {
-    return nativeHandle.map((entry) => ({
-      brep: entry.shape.serialize(),
-      metadata: {
-        name: entry.name,
-        color: entry.color,
-        opacity: entry.opacity,
-        metalness: entry.metalness,
-        roughness: entry.roughness,
-        density: entry.density,
-        resolvedInterfaces: entry.resolvedInterfaces,
-      },
-    }));
+    const start = forensicEnabled ? performance.now() : undefined;
+    try {
+      return serializeReplicadHandle(nativeHandle);
+    } finally {
+      if (start !== undefined) {
+        console.error(`[FORENSIC] create.serializeNativeHandle\t${(performance.now() - start).toFixed(1)}`);
+      }
+    }
   },
 
   deserializeNativeHandle({ serializedNativeHandle }, _runtime, context) {
@@ -969,6 +1009,20 @@ export const replicadKernel = defineKernel({
     }));
   },
 });
+
+const serializeReplicadHandle = (nativeHandle: NativeHandleEntry[]) =>
+  nativeHandle.map((entry) => ({
+    brep: entry.shape.serialize(),
+    metadata: {
+      name: entry.name,
+      color: entry.color,
+      opacity: entry.opacity,
+      metalness: entry.metalness,
+      roughness: entry.roughness,
+      density: entry.density,
+      resolvedInterfaces: entry.resolvedInterfaces,
+    },
+  }));
 
 export { replicadKernel as replicad };
 

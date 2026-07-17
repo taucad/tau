@@ -1,6 +1,6 @@
 import * as jscadModelingImport from '@jscad/modeling';
 import type { geometries as JscadGeometries, maths as JscadMaths } from '@jscad/modeling';
-import { cadMaterialDefaults } from '@taucad/types/constants';
+import { cadEdgeOverlayMaterialDefaults, cadMaterialDefaults } from '@taucad/types/constants';
 import { transformNormalArray, transformVertexArray } from '#framework/common.js';
 import type { GeometryOutputTransformOptions } from '#framework/common.js';
 import { srgbTupleToLinear } from '#utils/color-space.js';
@@ -314,7 +314,7 @@ function createSequentialIndices(vertexCount: number): Uint32Array<ArrayBuffer> 
  */
 function buildNodeFromJscadPart(
   part: JscadPartDescriptor,
-  transformOptions: GeometryOutputTransformOptions,
+  transformOptions: GeometryOutputTransformOptions & { includeEdges?: boolean },
 ): GlbNode | undefined {
   const { shape } = part;
   const color = extractColorFromShape(shape);
@@ -350,7 +350,7 @@ function buildNodeFromJscadPart(
   };
 
   const primitives: GlbPrimitive[] = [primitive];
-  const edgeVertices = extractTopologyEdgePositions(meshData);
+  const edgeVertices = transformOptions.includeEdges === true ? extractTopologyEdgePositions(meshData) : [];
   if (edgeVertices.length > 0) {
     const linePositions = transformVertexArray(edgeVertices, transformOptions);
     primitives.push({
@@ -358,11 +358,8 @@ function buildNodeFromJscadPart(
       positions: linePositions,
       indices: createSequentialIndices(linePositions.length / 3),
       material: {
-        baseColorFactor: [0, 0, 0, 1],
-        metallicFactor: 0,
-        roughnessFactor: 1,
-        doubleSided: true,
-        alphaMode: 'OPAQUE',
+        ...cadEdgeOverlayMaterialDefaults,
+        baseColorFactor: [...cadEdgeOverlayMaterialDefaults.baseColorFactor],
         extensions: {
           [khrMaterialsUnlitExtension]: {},
         },
@@ -433,7 +430,7 @@ function buildNodeFromJscadPart(
  */
 export function jscadToGltf(
   shape: unknown,
-  transformOptions: GeometryOutputTransformOptions = {},
+  transformOptions: GeometryOutputTransformOptions & { includeEdges?: boolean } = {},
 ): Uint8Array<ArrayBuffer> {
   const parts = getRenderableJscadParts(shape);
 

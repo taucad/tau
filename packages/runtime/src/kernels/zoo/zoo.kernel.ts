@@ -14,14 +14,13 @@ import type { GeometryGltf } from '@taucad/types';
 import type { CompilationIssue as CompilationError } from '@taucad/kcl-wasm-lib/bindings/CompilationIssue';
 import type { System } from '@taucad/kcl-wasm-lib/bindings/ModelingCmd';
 import { asBuffer } from '@taucad/utils/file';
-import { joinPath } from '@taucad/utils/path';
+import { resolveVirtualPath } from '@taucad/utils/path';
 import { createExportFile } from '@taucad/types/constants';
 import type { KernelErrorResult, KernelIssue } from '#types/runtime.types.js';
 import type { KernelFileSystem, RuntimeLogger } from '#types/runtime-kernel.types.js';
 import { defineKernel } from '#types/runtime-kernel.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import { zooOptionsSchema, zooExportSchemas } from '#kernels/zoo/zoo.schemas.js';
-import { resolveToRelative } from '#kernels/kernel-module-helpers.js';
 import { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { KclUtilities } from '#kernels/zoo/kcl-utils.js';
 import { isKclError } from '#kernels/zoo/kcl-errors.js';
@@ -105,13 +104,7 @@ const mapCoordinateSystemToKclCoords = (coordinateSystem: 'y-up' | 'z-up' | unde
   };
 };
 
-// =============================================================================
-// Path helpers
-// =============================================================================
-
-function resolveFromRoot(relativePath: string, basePath: string): string {
-  return joinPath(basePath, relativePath);
-}
+const toKclEnginePath = (filePath: string): string => resolveVirtualPath(filePath).slice(1);
 
 // =============================================================================
 // Error helpers
@@ -157,12 +150,8 @@ function logKernelIssues(errors: KernelIssue[], logger: RuntimeLogger): void {
 // KCL Utils management
 // =============================================================================
 
-function ensureFileSystemManager(
-  context: ZooContext,
-  basePath: string,
-  filesystem: KernelFileSystem,
-): FileSystemManager {
-  context.fileSystemManager = new FileSystemManager(filesystem, basePath);
+function ensureFileSystemManager(context: ZooContext, filesystem: KernelFileSystem): FileSystemManager {
+  context.fileSystemManager ??= new FileSystemManager(filesystem);
   return context.fileSystemManager;
 }
 
@@ -224,24 +213,19 @@ export const zoo = defineKernel({
     };
   },
 
-  async getDependencies({ filePath, basePath }, { filesystem }, context) {
-    ensureFileSystemManager(context, basePath, filesystem);
+  async getDependencies({ filePath }, { filesystem }, context) {
+    ensureFileSystemManager(context, filesystem);
     const utilities = await getKclUtils(context);
-    const relativeFilePath = resolveToRelative(filePath, basePath);
-    const { resolved, unresolved } = await discoverKclDependencies(
-      relativeFilePath,
-      async (path) => filesystem.readFile(resolveFromRoot(path, basePath), 'utf8'),
+    return discoverKclDependencies(
+      resolveVirtualPath(filePath),
+      async (path) => filesystem.readFile(path, 'utf8'),
       async (code) => utilities.parseKcl(code),
     );
-    return {
-      resolved: resolved.map((relativePath) => resolveFromRoot(relativePath, basePath)),
-      unresolved: unresolved.map((relativePath) => resolveFromRoot(relativePath, basePath)),
-    };
   },
 
-  async getParameters({ filePath, basePath }, { filesystem, logger }, context) {
-    ensureFileSystemManager(context, basePath, filesystem);
-    const relativeFilePath = resolveToRelative(filePath, basePath);
+  async getParameters({ filePath }, { filesystem, logger }, context) {
+    ensureFileSystemManager(context, filesystem);
+    const relativeFilePath = toKclEnginePath(filePath);
     const code = await filesystem.readFile(filePath, 'utf8');
     try {
       const utilities = await getKclUtils(context);
@@ -272,9 +256,9 @@ export const zoo = defineKernel({
     }
   },
 
-  async createGeometry({ filePath, basePath, parameters }, { filesystem, logger }, context) {
-    ensureFileSystemManager(context, basePath, filesystem);
-    const relativeFilePath = resolveToRelative(filePath, basePath);
+  async createGeometry({ filePath, parameters }, { filesystem, logger }, context) {
+    ensureFileSystemManager(context, filesystem);
+    const relativeFilePath = toKclEnginePath(filePath);
     const code = await filesystem.readFile(filePath, 'utf8');
     try {
       const trimmedCode = code.trim();
@@ -304,33 +288,10 @@ export const zoo = defineKernel({
         );
       }
 
-      const exportResult = await utilities.exportFromMemory({
-        type: 'gltf',
-        storage: 'binary',
-      });
-      if (exportResult.length === 0) {
-        return finalizeRenderOutput({
-          artifacts: [createEmptyGltfGeometry()],
-          nativeHandle: createZooNativeHandle(false),
-        });
-      }
-
-      const gltf = exportResult[0];
-      if (!gltf) {
-        throw new KclBuildError([{ message: 'No GLTF file in export result', code: 'RUNTIME', severity: 'error' }]);
-      }
-
-      const normalizedGltf = await normalizeGltfGeometryNames(gltf.contents, {
-        format: 'glb',
-        rewriteLegacyGeneratedShapeNames: true,
-        materialNamePolicy: 'clear-generated',
-        materialNameSource: 'external-generated',
-        sceneNamePolicy: 'clear-generated',
-        sceneNameSource: 'external-generated',
-      });
-      const enrichedGltf = await enrichZooGltfTopology(normalizedGltf, { format: 'glb' });
-      const geometry: GeometryGltf = { format: 'gltf', content: enrichedGltf };
-      return finalizeRenderOutput({ artifacts: [geometry], nativeHandle: createZooNativeHandle(true) });
+      // Display GLTF fetch is deferred to meshGeometry so a BRep-only export
+      // skips the engine round-trip. An executed-but-empty scene is discovered
+      // at fetch/export time; exportGeometry's per-format empty guards cover it.
+      return { nativeHandle: createZooNativeHandle(true) };
     } catch (error) {
       if (error instanceof KclBuildError || error instanceof RenderArtifactFinalizationError) {
         throw error;
@@ -342,8 +303,44 @@ export const zoo = defineKernel({
     }
   },
 
+  async meshGeometry({ nativeHandle, content }, { logger }, context) {
+    if (!nativeHandle.hasGeometry) {
+      return { geometry: createEmptyGltfGeometry() };
+    }
+
+    try {
+      const utilities = await getKclUtilitiesWithEngine(context);
+      const exportResult = await utilities.exportFromMemory({
+        type: 'gltf',
+        storage: 'binary',
+      });
+      const gltf = exportResult[0];
+      if (!gltf) {
+        return { geometry: createEmptyGltfGeometry() };
+      }
+
+      const normalizedGltf = await normalizeGltfGeometryNames(gltf.contents, {
+        format: 'glb',
+        rewriteLegacyGeneratedShapeNames: true,
+        materialNamePolicy: 'clear-generated',
+        materialNameSource: 'external-generated',
+        sceneNamePolicy: 'clear-generated',
+        sceneNameSource: 'external-generated',
+      });
+      const outputGltf = content?.includeTopology
+        ? await enrichZooGltfTopology(normalizedGltf, { format: 'glb' })
+        : normalizedGltf;
+      const geometry: GeometryGltf = { format: 'gltf', content: outputGltf };
+      return { geometry };
+    } catch (error) {
+      const kclErrorResult = handleError(error);
+      logKernelIssues(kclErrorResult.issues, logger);
+      throw new KclBuildError(kclErrorResult.issues);
+    }
+  },
+
   async exportGeometry(input, { logger }, context) {
-    const { format, nativeHandle, options } = input;
+    const { format, nativeHandle, options, content } = input;
 
     if (!nativeHandle.hasGeometry) {
       return createNoGeometryZooExportResult(format);
@@ -404,7 +401,8 @@ export const zoo = defineKernel({
             sceneNamePolicy: 'clear-generated',
             sceneNameSource: 'external-generated',
           });
-          return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(glb))]);
+          const output = content?.includeTopology ? await enrichZooGltfTopology(glb, { format: 'glb' }) : glb;
+          return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(output))]);
         }
 
         case 'gltf': {
@@ -432,7 +430,8 @@ export const zoo = defineKernel({
             sceneNamePolicy: 'clear-generated',
             sceneNameSource: 'external-generated',
           });
-          return createKernelSuccess([createExportFile('gltf', 'model.gltf', asBuffer(gltf))]);
+          const output = content?.includeTopology ? await enrichZooGltfTopology(gltf, { format: 'gltf' }) : gltf;
+          return createKernelSuccess([createExportFile('gltf', 'model.gltf', asBuffer(output))]);
         }
 
         default: {

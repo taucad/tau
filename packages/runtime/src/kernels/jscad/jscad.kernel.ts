@@ -21,13 +21,13 @@ import {
   isRecordObject,
   extractDefaultParameters,
   registerKernelModule,
-  resolveToRelative,
+  toVmEntryPath,
   enrichIssueLocation,
 } from '#kernels/kernel-module-helpers.js';
 import type { KernelIssue } from '#types/runtime.types.js';
 import { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { parseStackTrace, resolveSourcePath, deriveLocationFromFrames } from '#framework/error-enrichment.js';
-import { finalizeRenderOutput } from '#framework/render-artifact-finalizer.js';
+import { finalizeMeshOutput } from '#framework/render-artifact-finalizer.js';
 import { jscadToGltf } from '#kernels/jscad/jscad-to-gltf.js';
 import { collectJscadPartIssues } from '#kernels/jscad/jscad-diagnostics.js';
 import { resolveJscadModeling } from '#kernels/jscad/jscad-modeling.js';
@@ -259,8 +259,8 @@ export const jscad = defineKernel({
     return runtime.bundler.resolveDependencies(filePath);
   },
 
-  async getParameters({ filePath, basePath }, runtime) {
-    const relativeFilePath = resolveToRelative(filePath, basePath);
+  async getParameters({ filePath }, runtime) {
+    const relativeFilePath = toVmEntryPath(filePath);
     try {
       const bundleResult = await runtime.bundler.bundle(filePath);
       if (!bundleResult.success) {
@@ -307,9 +307,8 @@ export const jscad = defineKernel({
     }
   },
 
-  async createGeometry({ filePath, basePath, parameters }, runtime) {
-    const relativeFilePath = resolveToRelative(filePath, basePath);
-    const { logger } = runtime;
+  async createGeometry({ filePath, parameters }, runtime) {
+    const relativeFilePath = toVmEntryPath(filePath);
 
     const bundleResult = await runtime.bundler.bundle(filePath);
     if (!bundleResult.success) {
@@ -330,12 +329,10 @@ export const jscad = defineKernel({
     } catch (error) {
       const stackFrames = parseStackTrace(error, {
         sourceMap: bundleResult.sourceMap,
-        resolveSourcePath: (s) => resolveSourcePath(s, basePath),
+        resolveSourcePath,
         lastEntryName: executeResult.entryUrl,
       });
-      const location = deriveLocationFromFrames(stackFrames, bundleResult.sourceMap, (s) =>
-        resolveSourcePath(s, basePath),
-      );
+      const location = deriveLocationFromFrames(stackFrames, bundleResult.sourceMap, resolveSourcePath);
       throw new JscadBuildError([
         {
           message: error instanceof Error ? error.message : String(error),
@@ -349,29 +346,32 @@ export const jscad = defineKernel({
     }
 
     if (shapes === undefined) {
-      return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
+      return { nativeHandle: [] };
     }
 
     const parts = normalizeJscadParts(shapes);
     const issues = collectJscadPartIssues(parts);
 
-    if (parts.length === 0) {
-      return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [], issues });
-    }
+    return { nativeHandle: parts, issues };
+  },
 
+  async meshGeometry({ nativeHandle, content }, runtime) {
     const artifacts: GeometryResponse[] = [];
-    const renderableParts = parts.filter((part) => isRenderableJscadPart(part));
+    const renderableParts = nativeHandle.filter((part) => isRenderableJscadPart(part));
     if (renderableParts.length > 0) {
       try {
-        artifacts.push({ format: 'gltf', content: jscadToGltf(renderableParts) });
+        artifacts.push({
+          format: 'gltf',
+          content: jscadToGltf(renderableParts, { includeEdges: content?.includeEdges === true }),
+        });
       } catch (error) {
-        logger.warn('Failed to convert JSCAD assembly to GLTF', { data: error });
+        runtime.logger.warn('Failed to convert JSCAD assembly to GLTF', { data: error });
       }
     } else {
       artifacts.push(createEmptyGltfGeometry());
     }
 
-    return finalizeRenderOutput({ artifacts, nativeHandle: parts, issues });
+    return finalizeMeshOutput({ artifacts });
   },
 
   serializeNativeHandle({ nativeHandle }) {
@@ -429,7 +429,7 @@ export const jscad = defineKernel({
   },
 
   async exportGeometry(input, _runtime, _context) {
-    const { format, nativeHandle, options } = input;
+    const { format, nativeHandle, options, content } = input;
 
     switch (format) {
       // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- exhaustive switch for future format expansion
@@ -445,7 +445,11 @@ export const jscad = defineKernel({
           return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))], issues);
         }
 
-        const gltfData = jscadToGltf(renderableParts, { coordinateSystem, unit });
+        const gltfData = jscadToGltf(renderableParts, {
+          coordinateSystem,
+          unit,
+          includeEdges: content?.includeEdges === true,
+        });
         return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(gltfData))], issues);
       }
 

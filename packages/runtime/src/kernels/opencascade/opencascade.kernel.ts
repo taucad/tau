@@ -25,7 +25,7 @@ import {
   getModuleRegistry,
   isRecordObject,
   extractDefaultParameters,
-  resolveToRelative,
+  toVmEntryPath,
   convertRawIssuesToKernelIssues,
 } from '#kernels/kernel-module-helpers.js';
 import type { RuntimeModuleExports } from '#kernels/kernel-module-helpers.js';
@@ -564,8 +564,8 @@ export const opencascade = defineKernel({
     return runtime.bundler.resolveDependencies(filePath);
   },
 
-  async getParameters({ filePath, basePath }, runtime, context) {
-    const relativeFilePath = resolveToRelative(filePath, basePath);
+  async getParameters({ filePath }, runtime, context) {
+    const relativeFilePath = toVmEntryPath(filePath);
     let bundleSourceMap: string | undefined;
     let entryUrl: string | undefined;
     try {
@@ -586,14 +586,14 @@ export const opencascade = defineKernel({
 
       return createKernelSuccess({ defaultParameters, jsonSchema });
     } catch (error) {
-      const issue = formatOcRuntimeError(error, context.oc, { basePath, bundleSourceMap, entryUrl });
+      const issue = formatOcRuntimeError(error, context.oc, { bundleSourceMap, entryUrl });
       return createKernelError([issue]);
     }
   },
 
-  async createGeometry({ filePath, basePath, parameters, options }, runtime, context) {
+  async createGeometry({ filePath, parameters }, runtime, context) {
     const { logger, tracer } = runtime;
-    const relativeFilePath = resolveToRelative(filePath, basePath);
+    const relativeFilePath = toVmEntryPath(filePath);
     let bundleSourceMap: string | undefined;
     let entryUrl: string | undefined;
 
@@ -625,7 +625,7 @@ export const opencascade = defineKernel({
         module,
         parameters,
         ocInstance: context.oc,
-        errorContext: { basePath, bundleSourceMap, entryUrl },
+        errorContext: { bundleSourceMap, entryUrl },
         firstArg: context.oc,
       });
       mainSpan.end();
@@ -646,28 +646,48 @@ export const opencascade = defineKernel({
         return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
       }
 
-      const meshSpan = tracer.startSpan('opencascade.mesh-to-gltf', {
-        shapeCount: shapeEntries.length,
-        phase: 'computingGeometry',
-      });
-
-      const { tessellation } = options;
-      const { linearTolerance, angularTolerance } = tessellation;
-      const gltfData = await meshShapesToGltf(context.oc, shapeEntries, {
-        linearTolerance,
-        angularTolerance: angularTolerance * (Math.PI / 180),
-        inParallel: context.isParallelMeshing,
-      });
-      meshSpan.end();
-
-      const geometry: GeometryGltf = { format: 'gltf', content: gltfData };
-      return finalizeRenderOutput({ artifacts: [geometry], nativeHandle: shapeEntries });
+      // Tessellation is deferred to meshGeometry — the raw TopoDS shapes are the
+      // nativeHandle, and a BRep-only export never pays for a display mesh.
+      return { nativeHandle: shapeEntries };
     } catch (error) {
       if (error instanceof OcctBuildError || error instanceof RenderArtifactFinalizationError) {
         throw error;
       }
 
-      const issue = formatOcRuntimeError(error, context.oc, { basePath, bundleSourceMap, entryUrl });
+      const issue = formatOcRuntimeError(error, context.oc, { bundleSourceMap, entryUrl });
+      throw new OcctBuildError([issue]);
+    }
+  },
+
+  async meshGeometry({ nativeHandle, options }, runtime, context) {
+    if (nativeHandle.length === 0) {
+      return { geometry: createEmptyGltfGeometry() };
+    }
+
+    try {
+      const meshSpan = runtime.tracer.startSpan('opencascade.mesh-to-gltf', {
+        shapeCount: nativeHandle.length,
+        phase: 'computingGeometry',
+      });
+
+      const { tessellation } = options;
+      const { linearTolerance, angularTolerance } = tessellation;
+      const gltfData = await (async () => {
+        try {
+          return await meshShapesToGltf(context.oc, nativeHandle, {
+            linearTolerance,
+            angularTolerance: angularTolerance * (Math.PI / 180),
+            inParallel: context.isParallelMeshing,
+          });
+        } finally {
+          meshSpan.end();
+        }
+      })();
+
+      const geometry: GeometryGltf = { format: 'gltf', content: gltfData };
+      return { geometry };
+    } catch (error) {
+      const issue = formatOcRuntimeError(error, context.oc, {});
       throw new OcctBuildError([issue]);
     }
   },

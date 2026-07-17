@@ -8,6 +8,9 @@
 import type { Node } from '@taucad/kcl-wasm-lib/bindings/Node';
 import type { Program } from '@taucad/kcl-wasm-lib/bindings/Program';
 import type { BodyItem } from '@taucad/kcl-wasm-lib/bindings/BodyItem';
+import { resolveImportPath } from '@taucad/utils/import';
+import { resolveVirtualPath } from '@taucad/utils/path';
+import { isNotFoundError } from '#filesystem/filesystem-errors.js';
 
 /**
  * Parse function interface - matches KclUtils.parseKcl signature
@@ -79,20 +82,17 @@ function extractImportPath(item: BodyItem & { type: 'ImportStatement' }): string
  * @param importPath - The relative import path (e.g., 'bench-parts.kcl')
  * @returns The resolved path relative to the project root
  */
-function resolveRelativeImportPath(currentFilePath: string, importPath: string): string {
-  // Get directory of current file
-  const lastSlashIndex = currentFilePath.lastIndexOf('/');
-  const directory = lastSlashIndex === -1 ? '' : currentFilePath.slice(0, lastSlashIndex + 1);
-
-  // Join with the import path
-  return `${directory}${importPath}`;
-}
+const resolveKclImportPath = (currentFilePath: string, importPath: string): string =>
+  resolveImportPath(
+    importPath.startsWith('/') || importPath.startsWith('.') ? importPath : `./${importPath}`,
+    currentFilePath,
+  );
 
 /**
  * Recursively discover all file dependencies for a KCL program.
  * Reads imported files and traverses their imports.
  *
- * @param entryFile - The entry file path (relative to basePath)
+ * @param entryFile - Canonical project-local absolute entry path
  * @param readFile - Function to read file contents
  * @param parseKcl - Function to parse KCL code into AST
  * @returns Array of file paths that are dependencies (including the entry file)
@@ -107,31 +107,6 @@ export async function discoverKclDependencies(
   const unresolved: string[] = [];
 
   /**
-   * Normalize and canonicalize a file path.
-   * Removes leading slashes and resolves `.` and `..` segments to ensure
-   * consistent path representation for deduplication and cache key stability.
-   *
-   * @param path - the raw file path to normalize
-   * @returns the canonicalized path without leading slashes or `.`/`..` segments
-   */
-  const normalizePath = (path: string): string => {
-    // Remove leading slashes
-    const normalized = path.replace(/^\/+/, '');
-    // Resolve . and .. segments
-    const parts = normalized.split('/');
-    const resolved: string[] = [];
-    for (const part of parts) {
-      if (part === '..') {
-        resolved.pop();
-      } else if (part !== '.' && part !== '') {
-        resolved.push(part);
-      }
-    }
-
-    return resolved.join('/');
-  };
-
-  /**
    * Maximum import depth limit.
    * 50 levels of import depth should handle any reasonable project structure
    * while preventing infinite loops from circular imports that somehow bypass
@@ -140,7 +115,7 @@ export async function discoverKclDependencies(
   const maxDepth = 50;
 
   const resolveFile = async (filePath: string, depth: number): Promise<void> => {
-    const normalizedPath = normalizePath(filePath);
+    const normalizedPath = resolveVirtualPath(filePath);
 
     // Check depth limit
     if (depth >= maxDepth) {
@@ -158,9 +133,12 @@ export async function discoverKclDependencies(
     let code: string;
     try {
       code = await readFile(normalizedPath);
-    } catch {
-      unresolved.push(normalizedPath);
-      return;
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        unresolved.push(normalizedPath);
+        return;
+      }
+      throw error;
     }
 
     resolved.push(normalizedPath);
@@ -179,7 +157,7 @@ export async function discoverKclDependencies(
     const importPaths = extractLocalImportPaths(program);
 
     for (const importPath of importPaths) {
-      const resolvedPath = resolveRelativeImportPath(normalizedPath, importPath);
+      const resolvedPath = resolveKclImportPath(normalizedPath, importPath);
       // oxlint-disable-next-line no-await-in-loop -- Sequential processing required for proper depth tracking
       await resolveFile(resolvedPath, depth + 1);
     }

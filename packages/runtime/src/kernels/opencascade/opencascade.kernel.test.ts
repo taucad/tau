@@ -10,6 +10,7 @@ import { getModuleRegistry } from '#kernels/kernel-module-helpers.js';
 import type { OpenCascadeInstance } from '#kernels/opencascade/wasm/opencascade_full.js';
 import { assertFailure, assertSuccess, createGeometryFile, createTestWorker } from '#testing/kernel-testing.utils.js';
 import { createGeometryTestHelpers } from '#testing/kernel-geometry-testing.utils.js';
+import { mapZupMillimetersToYupMeters, readCoordinateEvidence } from '#testing/coordinate-testing.utils.js';
 import type { KernelDefinition } from '#types/runtime-kernel.types.js';
 
 // =============================================================================
@@ -187,6 +188,16 @@ import { BRepPrimAPI_MakeBox } from 'opencascade.js';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 20, 30);
   return box.Shape();
+}`,
+      'coordinate.ts': `
+import { BRepPrimAPI_MakeBox, gp_Pnt } from 'opencascade.js';
+export default function main() {
+  const origin = new gp_Pnt(7, 11, 13);
+  const box = new BRepPrimAPI_MakeBox(origin, 10, 20, 30);
+  const shape = box.Shape();
+  origin.delete();
+  box.delete();
+  return [{ shape, name: 'Asymmetric Box', color: '#ff0000' }];
 }`,
       'multi.ts': `
 import { BRepPrimAPI_MakeBox } from 'opencascade.js';
@@ -749,19 +760,25 @@ export default function main() {
 
     // -- Coordinate system --
 
-    it('should produce different GLB output for y-up vs z-up coordinate system', async () => {
-      const geometryFile = createGeometryFile('box.ts');
+    it('should convert asymmetric GLB geometry from z-up millimeters to y-up meters exactly once', async () => {
+      const geometryFile = createGeometryFile('coordinate.ts');
       await worker.createGeometry({ file: geometryFile, parameters: {} });
 
-      const yUpExport = await worker.exportGeometry('glb', { coordinateSystem: 'y-up' });
-      const zUpExport = await worker.exportGeometry('glb', { coordinateSystem: 'z-up' });
+      const yUpExport = await worker.exportGeometry('glb', {
+        coordinateSystem: 'y-up',
+        unit: { length: 'meter' },
+      });
+      const zUpExport = await worker.exportGeometry('glb', {
+        coordinateSystem: 'z-up',
+        unit: { length: 'millimeter' },
+      });
 
       assertSuccess(yUpExport, 'y-up GLB export');
       assertSuccess(zUpExport, 'z-up GLB export');
 
-      const yUpBytes = yUpExport.data[0]!.bytes;
-      const zUpBytes = zUpExport.data[0]!.bytes;
-      expect(yUpBytes).not.toEqual(zUpBytes);
+      const yUpEvidence = await readCoordinateEvidence({ bytes: yUpExport.data[0]!.bytes });
+      const zUpEvidence = await readCoordinateEvidence({ bytes: zUpExport.data[0]!.bytes });
+      expect(yUpEvidence).toEqual(mapZupMillimetersToYupMeters(zUpEvidence));
     });
 
     it('should export GLB in z-up millimeters when unit length is millimeter', async () => {

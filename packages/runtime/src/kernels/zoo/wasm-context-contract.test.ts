@@ -81,7 +81,7 @@ describe('KCL WASM Context ↔ EngineCommandManager contract', () => {
 
   it('invokes fire/send with four string parameters (id, rangeStr, commandStr, idToRangeStr)', async () => {
     const engine = new RecordingEngineCommandManager();
-    const fs = new FileSystemManager(memoryFs(), '/');
+    const fs = new FileSystemManager(memoryFs());
 
     // oxlint-disable-next-line @typescript-eslint/await-thenable -- wasm-bindgen Context constructor is Promise-like
     const context = await new wasm.Context(engine, fs);

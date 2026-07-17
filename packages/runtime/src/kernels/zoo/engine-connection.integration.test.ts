@@ -59,7 +59,7 @@ describe('EngineConnection (transport + session wiring)', () => {
     const conn = new EngineConnection({
       baseUrl: 'ws://fake.example/modeling-commands',
       wasmModule,
-      fileSystemManager: new FileSystemManager(noopFs(), '/'),
+      fileSystemManager: new FileSystemManager(noopFs()),
     });
 
     const init = conn.initialize();
@@ -100,7 +100,7 @@ describe('EngineConnection (transport + session wiring)', () => {
     const conn = new EngineConnection({
       baseUrl: 'ws://fake.example/modeling-commands',
       wasmModule,
-      fileSystemManager: new FileSystemManager(noopFs(), '/'),
+      fileSystemManager: new FileSystemManager(noopFs()),
     });
 
     const init = conn.initialize();
@@ -121,7 +121,7 @@ describe('EngineConnection (transport + session wiring)', () => {
     const conn = new EngineConnection({
       baseUrl: 'ws://fake.example/modeling-commands',
       wasmModule,
-      fileSystemManager: new FileSystemManager(noopFs(), '/'),
+      fileSystemManager: new FileSystemManager(noopFs()),
     });
     const unsub = conn.onSessionClosed(() => {
       /* No Session */
@@ -144,7 +144,7 @@ describe('EngineConnection (transport + session wiring)', () => {
     const conn = new EngineConnection({
       baseUrl: 'ws://fake.example/modeling-commands',
       wasmModule,
-      fileSystemManager: new FileSystemManager(noopFs(), '/'),
+      fileSystemManager: new FileSystemManager(noopFs()),
     });
 
     const first = conn.initialize();

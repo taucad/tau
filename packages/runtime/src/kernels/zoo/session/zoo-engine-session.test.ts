@@ -82,7 +82,7 @@ describe('ZooEngineSession', () => {
 
     const bridge = new ZooEngineBridge(transport);
 
-    const fileSystemManager = new FileSystemManager(noopKernelFs(), '/');
+    const fileSystemManager = new FileSystemManager(noopKernelFs());
     const session = new ZooEngineSession({ transport, bridge, fileSystemManager, wasmModule });
 
     await session.openContext();
@@ -111,7 +111,7 @@ describe('ZooEngineSession', () => {
     const stub = createTransportStub({ connected: false });
     const transport = stub as unknown as ZooWebSocketTransport;
     const bridge = new ZooEngineBridge(transport);
-    const fileSystemManager = new FileSystemManager(noopKernelFs(), '/');
+    const fileSystemManager = new FileSystemManager(noopKernelFs());
     const wasmModule = {} as unknown as WasmModule;
     const session = new ZooEngineSession({ transport, bridge, fileSystemManager, wasmModule });
 

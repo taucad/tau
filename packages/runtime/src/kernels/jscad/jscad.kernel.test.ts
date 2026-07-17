@@ -19,6 +19,7 @@ import {
   extractGltfFromExportResult,
   extractGltfFromResult,
 } from '#testing/kernel-geometry-testing.utils.js';
+import { mapZupMillimetersToYupMeters, readCoordinateEvidence } from '#testing/coordinate-testing.utils.js';
 import {
   createGeometryFile,
   createMockKernelRuntime,
@@ -26,7 +27,7 @@ import {
   createTestGeometry,
   getTestParameters,
 } from '#testing/kernel-testing.utils.js';
-import { geometryMemoryCache, exportMemoryCache } from '#middleware/geometry-cache.middleware.js';
+import { geometryMemoryCache, meshMemoryCache, exportMemoryCache } from '#middleware/geometry-cache.middleware.js';
 import { createNodeClient } from '#node.js';
 
 // =============================================================================
@@ -446,8 +447,9 @@ describe('JscadWorker', () => {
       });
 
       it('should handle multiple shapes returned as array', async () => {
-        const result = await createGeometry(
-          {
+        const result = await createTestGeometry({
+          definition: jscadKernel,
+          files: {
             'multi.ts': `
               import { primitives, transforms } from '@jscad/modeling';
 
@@ -465,8 +467,9 @@ describe('JscadWorker', () => {
               }
             `,
           },
-          'multi.ts',
-        );
+          mainFile: 'multi.ts',
+          content: { includeEdges: true },
+        });
 
         expect(result.success).toBe(true);
         if (result.success) {
@@ -1295,6 +1298,39 @@ module.exports = { main, getParameterDefinitions }
         expect(nodeNames).toEqual(['Base', 'Cap']);
         expect(meshNames).toEqual(nodeNames);
       }
+    });
+
+    it('should convert asymmetric GLB geometry from z-up millimeters to y-up meters exactly once', async () => {
+      const worker = await createWorker({
+        'coordinate-evidence.ts': `
+          import { primitives } from '@jscad/modeling';
+
+          export default function main() {
+            return Object.assign(
+              primitives.cuboid({ size: [10, 20, 30], center: [12, 23, 34] }),
+              { name: 'Asymmetric Box' },
+            );
+          }
+        `,
+      });
+      await worker.createGeometry({ file: createGeometryFile('coordinate-evidence.ts'), parameters: {} });
+      const zUp = await worker.exportGeometry('glb', {
+        coordinateSystem: 'z-up',
+        unit: { length: 'millimeter' },
+      });
+      const yUp = await worker.exportGeometry('glb', {
+        coordinateSystem: 'y-up',
+        unit: { length: 'meter' },
+      });
+      expect(zUp.success).toBe(true);
+      expect(yUp.success).toBe(true);
+      if (!zUp.success || !yUp.success) {
+        return;
+      }
+
+      const zUpEvidence = await readCoordinateEvidence({ bytes: zUp.data[0]!.bytes });
+      const yUpEvidence = await readCoordinateEvidence({ bytes: yUp.data[0]!.bytes });
+      expect(yUpEvidence).toEqual(mapZupMillimetersToYupMeters(zUpEvidence));
     });
 
     it('should preserve JSCAD invalid-geometry warnings during direct GLB export', async () => {
@@ -2205,6 +2241,89 @@ describe('serializeNativeHandle', () => {
       expect(extractGltfFromExportResult(restoredExport)?.byteLength).toBeGreaterThan(0);
     } finally {
       geometryMemoryCache.clear();
+      exportMemoryCache.clear();
+      await rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('should render a named assembly after a cold export restores the source-scoped L2 create cache', async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), 'tau-jscad-export-then-render-'));
+    const source = `
+      import { primitives, transforms } from '@jscad/modeling';
+
+      export default function main() {
+        const housing = Object.assign(primitives.cube({ size: 10 }), { name: 'Housing' });
+        const carrier = Object.assign(
+          transforms.translate([20, 0, 0], primitives.cube({ size: 6 })),
+          { name: 'Carrier' },
+        );
+        return [housing, carrier];
+      }
+    `;
+    let coldClient: Awaited<ReturnType<typeof createNodeClient>> | undefined;
+    let restoredClient: Awaited<ReturnType<typeof createNodeClient>> | undefined;
+
+    try {
+      await writeFile(join(projectPath, 'main.ts'), source);
+      await writeFile(join(projectPath, 'package.json'), '{"type":"module"}\n');
+      geometryMemoryCache.clear();
+      meshMemoryCache.clear();
+      exportMemoryCache.clear();
+
+      coldClient = await createNodeClient(projectPath);
+      const coldExport = await coldClient.export('glb', {
+        source: { path: 'main.ts' },
+        exportOptions: jscadGlbExportOptions,
+        content: { includeEdges: true },
+      });
+      expect(coldExport.success).toBe(true);
+      if (!coldExport.success) {
+        return;
+      }
+      const exportedGlb = extractGltfFromExportResult(coldExport);
+      expect(exportedGlb).toBeDefined();
+      expect(await readNodeMeshNames(exportedGlb!)).toEqual({
+        nodeNames: ['Housing', 'Carrier'],
+        meshNames: ['Housing', 'Carrier'],
+      });
+
+      coldClient.terminate();
+      coldClient = undefined;
+      geometryMemoryCache.clear();
+      meshMemoryCache.clear();
+      exportMemoryCache.clear();
+
+      restoredClient = await createNodeClient(projectPath);
+      const display = await restoredClient.render({
+        source: { path: 'main.ts' },
+        content: { includeEdges: true },
+      });
+      expect(display.superseded).toBe(false);
+      if (display.superseded) {
+        return;
+      }
+      expect(display.geometry.success).toBe(true);
+      if (!display.geometry.success) {
+        return;
+      }
+      expect(display.geometry.data.format).toBe('gltf');
+      if (display.geometry.data.format !== 'gltf') {
+        return;
+      }
+
+      expect(await readNodeMeshNames(display.geometry.data.content)).toEqual({
+        nodeNames: ['Housing', 'Carrier'],
+        meshNames: ['Housing', 'Carrier'],
+      });
+      expect(await readPrimitiveModes(display.geometry.data.content)).toEqual([
+        [primitiveModeTriangles, primitiveModeLines],
+        [primitiveModeTriangles, primitiveModeLines],
+      ]);
+    } finally {
+      coldClient?.terminate();
+      restoredClient?.terminate();
+      geometryMemoryCache.clear();
+      meshMemoryCache.clear();
       exportMemoryCache.clear();
       await rm(projectPath, { recursive: true, force: true });
     }

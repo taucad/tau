@@ -14,7 +14,7 @@ describe('runOcMain', () => {
       module,
       parameters: {},
       ocInstance: emptyOcInstance,
-      errorContext: { basePath: '/project' },
+      errorContext: {},
       firstArg: 'unused',
     });
 
@@ -32,7 +32,7 @@ describe('runOcMain', () => {
       module,
       parameters: { width: 10 },
       ocInstance: emptyOcInstance,
-      errorContext: { basePath: '/project' },
+      errorContext: {},
       firstArg: 'should-not-be-used',
     });
 
@@ -49,7 +49,7 @@ describe('runOcMain', () => {
       module,
       parameters: { size: 5 },
       ocInstance: emptyOcInstance,
-      errorContext: { basePath: '/project' },
+      errorContext: {},
       firstArg: { ocSentinel: true },
     });
 
@@ -79,7 +79,7 @@ describe('runOcMain', () => {
       module,
       parameters: {},
       ocInstance: emptyOcInstance,
-      errorContext: { basePath: '/project', bundleSourceMap: sourceMap, entryUrl: blobUrl },
+      errorContext: { bundleSourceMap: sourceMap, entryUrl: blobUrl },
       firstArg: undefined,
     });
 
@@ -101,7 +101,7 @@ describe('runOcMain', () => {
       module,
       parameters: {},
       ocInstance: emptyOcInstance,
-      errorContext: { basePath: '/project' },
+      errorContext: {},
       firstArg: undefined,
     });
 

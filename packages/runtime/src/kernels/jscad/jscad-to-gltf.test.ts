@@ -27,6 +27,15 @@ type JscadShapeIntrospection = {
 
 const createNodeIo = (): NodeIO => new NodeIO().registerExtensions([KHRMaterialsUnlit]);
 
+const readGlbExtensionsRequired = (glb: Uint8Array<ArrayBuffer>): string[] | undefined => {
+  const view = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+  const jsonChunkLength = view.getUint32(12, true);
+  const json = JSON.parse(new TextDecoder().decode(glb.slice(20, 20 + jsonChunkLength)).trim()) as {
+    extensionsRequired?: string[];
+  };
+  return json.extensionsRequired;
+};
+
 const readBoundingBox = async (
   glb: Uint8Array<ArrayBuffer>,
 ): Promise<{ min: [number, number, number]; max: [number, number, number] }> => {
@@ -358,6 +367,7 @@ describe('jscadToGltf', () => {
     const glb = jscadToGltf(shape, {
       coordinateSystem: 'z-up',
       unit: { length: 'millimeter' },
+      includeEdges: true,
     });
 
     const primitiveModes = await readPrimitiveModes(glb);
@@ -366,6 +376,37 @@ describe('jscadToGltf', () => {
     const segments = await readLineSegments(glb);
     expect(segments).toHaveLength(12);
     expect(hasSegment(segments, [-5, -5, -5], [5, -5, -5])).toBe(true);
+
+    const document = await createNodeIo().readBinary(glb);
+    const linePrimitive = document
+      .getRoot()
+      .listMeshes()[0]!
+      .listPrimitives()
+      .find((primitive) => primitive.getMode() === primitiveModeLines)!;
+    const material = linePrimitive.getMaterial()!;
+    expect(material.getBaseColorFactor()).toEqual([0, 0, 0, 1]);
+    expect(material.getMetallicFactor()).toBe(0);
+    expect(material.getRoughnessFactor()).toBe(1);
+    expect(material.getDoubleSided()).toBe(true);
+    expect(material.getAlphaMode()).toBe('OPAQUE');
+    expect(material.getExtension('KHR_materials_unlit')).not.toBeNull();
+    expect(
+      document
+        .getRoot()
+        .listExtensionsUsed()
+        .map((extension) => extension.extensionName),
+    ).toEqual(['KHR_materials_unlit']);
+    expect(readGlbExtensionsRequired(glb)).toBeUndefined();
+  });
+
+  it('should omit line primitives unless edges are requested', async () => {
+    const shape = primitives.cuboid({ size: [10, 10, 10] });
+    const glb = jscadToGltf(shape, {
+      coordinateSystem: 'z-up',
+      unit: { length: 'millimeter' },
+    });
+
+    expect(await readPrimitiveModes(glb)).toEqual([[primitiveModeTriangles]]);
   });
 
   it('should name assembly nodes and meshes from JSCAD part names with deterministic fallbacks', async () => {
@@ -383,6 +424,7 @@ describe('jscadToGltf', () => {
     const glb = jscadToGltf([[housing, [firstPlanet, secondPlanet]], unnamedCarrier], {
       coordinateSystem: 'z-up',
       unit: { length: 'millimeter' },
+      includeEdges: true,
     });
 
     const { nodeNames, meshNames } = await readNodeMeshNames(glb);
@@ -450,6 +492,7 @@ describe('jscadToGltf', () => {
     const glb = jscadToGltf(shape, {
       coordinateSystem: 'z-up',
       unit: { length: 'millimeter' },
+      includeEdges: true,
     });
 
     const segments = await readLineSegments(glb);
@@ -472,6 +515,7 @@ describe('jscadToGltf', () => {
     const glb = jscadToGltf(shape, {
       coordinateSystem: 'z-up',
       unit: { length: 'millimeter' },
+      includeEdges: true,
     });
 
     const segments = await readLineSegments(glb);
@@ -517,6 +561,7 @@ describe('jscadToGltf', () => {
     const glb = jscadToGltf(shape, {
       coordinateSystem: 'z-up',
       unit: { length: 'millimeter' },
+      includeEdges: true,
     });
 
     const primitiveModes = await readPrimitiveModes(glb);
@@ -572,6 +617,7 @@ describe('jscadToGltf', () => {
     const glb = jscadToGltf(originalShape, {
       coordinateSystem: 'z-up',
       unit: { length: 'millimeter' },
+      includeEdges: true,
     });
 
     expect(originalShape.isRetesselated).toBe(originalRetessellationFlag);
@@ -605,6 +651,7 @@ describe('jscadToGltf', () => {
     const glb = jscadToGltf(shape, {
       coordinateSystem: 'z-up',
       unit: { length: 'millimeter' },
+      includeEdges: true,
     });
 
     const segments = await readLineSegments(glb);
@@ -664,10 +711,12 @@ describe('jscadToGltf', () => {
     const firstGlb = jscadToGltf(shape, {
       coordinateSystem: 'z-up',
       unit: { length: 'millimeter' },
+      includeEdges: true,
     });
     const secondGlb = jscadToGltf(shape, {
       coordinateSystem: 'z-up',
       unit: { length: 'millimeter' },
+      includeEdges: true,
     });
     const firstSegments = await readLineSegments(firstGlb);
     const secondSegments = await readLineSegments(secondGlb);

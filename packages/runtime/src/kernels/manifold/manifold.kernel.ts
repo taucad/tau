@@ -19,7 +19,7 @@ import {
   isRecordObject,
   extractDefaultParameters,
   registerKernelModule,
-  resolveToRelative,
+  toVmEntryPath,
   enrichIssueLocation,
 } from '#kernels/kernel-module-helpers.js';
 import type { RuntimeModuleExports } from '#kernels/kernel-module-helpers.js';
@@ -231,8 +231,8 @@ export const manifold = defineKernel({
     return runtime.bundler.resolveDependencies(filePath);
   },
 
-  async getParameters({ filePath, basePath }, runtime) {
-    const relativeFilePath = resolveToRelative(filePath, basePath);
+  async getParameters({ filePath }, runtime) {
+    const relativeFilePath = toVmEntryPath(filePath);
 
     try {
       const bundleResult = await runtime.bundler.bundle(filePath);
@@ -268,8 +268,8 @@ export const manifold = defineKernel({
     }
   },
 
-  async createGeometry({ filePath, basePath, parameters }, runtime, context) {
-    const relativeFilePath = resolveToRelative(filePath, basePath);
+  async createGeometry({ filePath, parameters }, runtime, context) {
+    const relativeFilePath = toVmEntryPath(filePath);
 
     await cleanupManifoldRuntime();
 
@@ -292,12 +292,10 @@ export const manifold = defineKernel({
     } catch (error) {
       const stackFrames = parseStackTrace(error, {
         sourceMap: bundleResult.sourceMap,
-        resolveSourcePath: (sourcePath) => resolveSourcePath(sourcePath, basePath),
+        resolveSourcePath,
         lastEntryName: executeResult.entryUrl,
       });
-      const location = deriveLocationFromFrames(stackFrames, bundleResult.sourceMap, (sourcePath) =>
-        resolveSourcePath(sourcePath, basePath),
-      );
+      const location = deriveLocationFromFrames(stackFrames, bundleResult.sourceMap, resolveSourcePath);
       throw new ManifoldBuildError([
         {
           message: error instanceof Error ? error.message : String(error),
@@ -332,12 +330,10 @@ export const manifold = defineKernel({
     } catch (error) {
       const stackFrames = parseStackTrace(error, {
         sourceMap: bundleResult.sourceMap,
-        resolveSourcePath: (sourcePath) => resolveSourcePath(sourcePath, basePath),
+        resolveSourcePath,
         lastEntryName: executeResult.entryUrl,
       });
-      const location = deriveLocationFromFrames(stackFrames, bundleResult.sourceMap, (sourcePath) =>
-        resolveSourcePath(sourcePath, basePath),
-      );
+      const location = deriveLocationFromFrames(stackFrames, bundleResult.sourceMap, resolveSourcePath);
       throw new ManifoldBuildError([
         {
           message: error instanceof Error ? error.message : String(error),

@@ -1,26 +1,23 @@
-import { joinPath } from '@taucad/utils/path';
+import { resolveVirtualPath } from '@taucad/utils/path';
 import type { KernelFileSystem } from '#types/runtime-kernel.types.js';
 
 /**
  * Stateless adapter that provides filesystem operations to the WASM context.
- * Resolves relative paths to absolute using the provided basePath.
+ * Resolves engine paths inside the project-local filesystem root.
  */
 export class FileSystemManager {
   /* oxlint-disable-next-line @typescript-eslint/parameter-properties -- parameter properties are non-erasable TypeScript */
   private readonly filesystem: KernelFileSystem;
   /* oxlint-disable-next-line @typescript-eslint/parameter-properties -- parameter properties are non-erasable TypeScript */
-  private readonly basePath: string;
-
-  public constructor(filesystem: KernelFileSystem, basePath: string) {
+  public constructor(filesystem: KernelFileSystem) {
     this.filesystem = filesystem;
-    this.basePath = basePath;
   }
 
   /**
    * Called from WASM.
-   * Reads a file using a path relative to basePath.
+   * Reads a file using a project-local virtual path.
    *
-   * @param path - the file path relative to basePath
+   * @param path - the file path to resolve within virtual `/`
    * @returns the file contents as a byte array
    */
   public async readFile(path: string): Promise<Uint8Array<ArrayBuffer>> {
@@ -30,9 +27,9 @@ export class FileSystemManager {
 
   /**
    * Called from WASM.
-   * Checks if a file exists using a path relative to basePath.
+   * Checks if a project-local virtual file exists.
    *
-   * @param path - the file path relative to basePath
+   * @param path - the file path to resolve within virtual `/`
    * @returns whether the file exists
    */
   public async exists(path: string): Promise<boolean> {
@@ -42,9 +39,9 @@ export class FileSystemManager {
 
   /**
    * Called from WASM.
-   * Lists all files in a directory using a path relative to basePath.
+   * Lists all files in a project-local virtual directory.
    *
-   * @param path - the directory path relative to basePath
+   * @param path - the directory path to resolve within virtual `/`
    * @returns JSON array string of file names — matches kcl-lib WASM `getAllFiles` (`value.as_string` + `serde_json::from_str`)
    */
   public async getAllFiles(path: string): Promise<string> {
@@ -62,12 +59,12 @@ export class FileSystemManager {
   }
 
   /**
-   * Resolve a relative path to an absolute path using basePath.
+   * Resolve a path against canonical virtual `/`.
    *
-   * @param relativePath - the path to resolve against basePath
+   * @param relativePath - the path to resolve within virtual `/`
    * @returns the absolute path
    */
   private resolvePath(relativePath: string): string {
-    return joinPath(this.basePath, relativePath);
+    return resolveVirtualPath(relativePath.startsWith('/') ? relativePath : `/${relativePath}`);
   }
 }

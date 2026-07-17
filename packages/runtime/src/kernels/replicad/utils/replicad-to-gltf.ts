@@ -1,4 +1,4 @@
-import { cadMaterialDefaults, tauCadTopologyExtension } from '@taucad/types/constants';
+import { cadEdgeOverlayMaterialDefaults, cadMaterialDefaults, tauCadTopologyExtension } from '@taucad/types/constants';
 import { normalizeColor } from '#kernels/replicad/utils/normalize-color.js';
 import { transformNormalArray, transformVertexArray } from '#framework/common.js';
 import type { GeometryOutputTransformOptions } from '#framework/common.js';
@@ -15,6 +15,8 @@ import { writeGlb, writeGltfJson } from '#utils/glb-writer.js';
 import type { GlbInput, GlbNode, GlbPrimitive } from '#utils/glb-writer.js';
 import { resolveShapeName, uniqueShapeName } from '#utils/shape-names.js';
 import type { JSONObject } from '@taucad/types';
+
+const khrMaterialsUnlitExtension = 'KHR_materials_unlit';
 
 type ReplicadTopologyComponent = {
   id: string;
@@ -143,11 +145,11 @@ function buildNodeFromReplicadGeometry({
           }
         : {}),
       material: {
-        baseColorFactor: [0.141, 0.259, 0.141, 1],
-        metallicFactor: 0,
-        roughnessFactor: 1,
-        doubleSided: true,
-        alphaMode: 'OPAQUE',
+        ...cadEdgeOverlayMaterialDefaults,
+        baseColorFactor: [...cadEdgeOverlayMaterialDefaults.baseColorFactor],
+        extensions: {
+          [khrMaterialsUnlitExtension]: {},
+        },
       },
     });
   }
@@ -240,11 +242,16 @@ export function convertReplicadGeometriesToGltf(options: ReplicadGltfOptions): U
     components: topologyComponents,
   };
   const topologyData = new TextEncoder().encode(JSON.stringify(topologyPayload));
+  const hasLinePrimitives = nodes.some((node) => node.primitives.some((primitive) => primitive.mode === 1));
+  const extensionsUsed = [
+    ...(topologyComponents.length > 0 ? [tauCadTopologyExtension] : []),
+    ...(hasLinePrimitives ? [khrMaterialsUnlitExtension] : []),
+  ];
   const input: GlbInput = {
     nodes,
+    ...(extensionsUsed.length > 0 ? { extensionsUsed } : {}),
     ...(topologyComponents.length > 0
       ? {
-          extensionsUsed: [tauCadTopologyExtension],
           extraBufferViews: [{ key: 'topology', data: topologyData }],
           extensions: (bufferViews): Record<string, JSONObject> => {
             const topologyBufferView = bufferViews['topology'];

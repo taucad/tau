@@ -10,12 +10,12 @@ const policyDirectory = join(root, 'docs/policy');
 const researchDirectory = join(root, 'docs/research');
 const stalenessDays = 180;
 
-// docs/research and docs/reference are symlinks into the private tau-brain repo
-// (repos/tau-brain, gitignored). On a public clone without tau-brain the symlink
-// target is absent: skip listing/validating those dirs and skip existence checks
+// Docs/research and docs/reference are symlinks into the private tau-brain repo.
+// Repos/tau-brain is gitignored. On a public clone without tau-brain, the symlink
+// target is absent: skip listing/validating those directories and existence checks
 // for references into them, so public CI stays green without a private-repo secret.
-const relocatableDirs = ['docs/research', 'docs/reference'];
-const unavailableRelocatable = relocatableDirs.filter((d) => !existsSync(join(root, d)));
+const relocatableDirectories = ['docs/research', 'docs/reference'];
+const unavailableRelocatable = relocatableDirectories.filter((directory) => !existsSync(join(root, directory)));
 const skipsMissingReference = (reference: string): boolean =>
   unavailableRelocatable.some((d) => reference === d || reference.startsWith(`${d}/`));
 

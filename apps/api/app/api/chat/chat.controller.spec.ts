@@ -6,6 +6,7 @@ import type { TestingModule } from '@nestjs/testing';
 import { Reflector } from '@nestjs/core';
 import type { FastifyReply } from 'fastify';
 import type { StreamTextResult as StreamTextResultType, ToolSet, UIMessage, UIMessageChunk } from 'ai';
+import { convertToModelMessages } from 'ai';
 import { toBaseMessages, toUIMessageStream } from '@ai-sdk/langchain';
 import type { ChatUsageTokens, MyUIMessage, ChatSnapshot, AgentConfig } from '@taucad/chat';
 import { ChatController } from '#api/chat/chat.controller.js';
@@ -350,6 +351,62 @@ describe('ChatController', () => {
       expect(chatService.getBuildNameGenerator).toHaveBeenCalled();
       expect(chatService.createAgent).not.toHaveBeenCalled();
       expect(mockResponse.send).toHaveBeenCalled();
+    });
+
+    it('should preserve image-only prompt parts through the project-name conversion boundary', async () => {
+      const mockResponse = createMockResponse();
+      const imageMessage: MyUIMessage = {
+        id: 'msg_image_name',
+        role: 'user',
+        parts: [
+          {
+            type: 'file',
+            mediaType: 'image/webp',
+            filename: 'reference.webp',
+            url: 'data:image/webp;base64,UklGRg==',
+          },
+        ],
+      };
+      const body = {
+        id: 'chat_image_name_gen',
+        messages: [imageMessage],
+        agent: projectNameAgent,
+      } satisfies CreateChatDto;
+      vi.mocked(chatService.getBuildNameGenerator).mockReturnValue(createMockStreamResult());
+
+      await controller.createChat(body, mockResponse);
+
+      expect(convertToModelMessages).toHaveBeenCalledWith([imageMessage]);
+      expect(chatService.getBuildNameGenerator).toHaveBeenCalledWith([{ role: 'user', content: 'test' }]);
+      expect(mockResponse.send).toHaveBeenCalled();
+    });
+
+    it('should reject an oversized project-name image before conversion or model invocation', async () => {
+      const mockResponse = createMockResponse();
+      const body = {
+        id: 'chat_oversized_image_name_gen',
+        messages: [
+          {
+            id: 'msg_oversized_image_name',
+            role: 'user',
+            parts: [
+              {
+                type: 'file',
+                mediaType: 'image/webp',
+                filename: 'oversized.webp',
+                url: `data:image/webp;base64,${'A'.repeat(5 * 1024 * 1024 + 1)}`,
+              },
+            ],
+          },
+        ],
+        agent: projectNameAgent,
+      } satisfies CreateChatDto;
+
+      await expect(controller.createChat(body, mockResponse)).rejects.toThrow('Image exceeds 5 MB');
+
+      expect(convertToModelMessages).not.toHaveBeenCalled();
+      expect(chatService.getBuildNameGenerator).not.toHaveBeenCalled();
+      expect(mockResponse.send).not.toHaveBeenCalled();
     });
 
     it('should use commit message generator when agent.profile is commit_name', async () => {

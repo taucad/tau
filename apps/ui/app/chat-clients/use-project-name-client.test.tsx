@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { chatTurnRequestSchema } from '@taucad/chat/schemas';
-import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
+import { isUsableProjectName, useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 import type { NameGeneratorRequestError } from '#chat-clients/_internal/name-generator-client.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- ENV/TAU_API_URL mirror the SCREAMING_SNAKE_CASE keys exported by the real environment.config module
@@ -59,7 +59,7 @@ describe('useProjectNameClient', () => {
     const { result } = renderHook(() => useProjectNameClient());
 
     await act(async () => {
-      await result.current.generate('Design a desk lamp');
+      await result.current.generate({ text: 'Design a desk lamp' });
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -93,7 +93,7 @@ describe('useProjectNameClient', () => {
 
     let resolved: string | undefined;
     await act(async () => {
-      resolved = await result.current.generate('Hi');
+      resolved = await result.current.generate({ text: 'Hi' });
     });
 
     expect(resolved).toBe('Hello, world');
@@ -115,7 +115,7 @@ describe('useProjectNameClient', () => {
 
     let resolved: string | undefined;
     await act(async () => {
-      resolved = await result.current.generate('Hi');
+      resolved = await result.current.generate({ text: 'Hi' });
     });
 
     expect(resolved).toBe('Final');
@@ -128,7 +128,7 @@ describe('useProjectNameClient', () => {
 
     try {
       await act(async () => {
-        await result.current.generate('Hi');
+        await result.current.generate({ text: 'Hi' });
       });
       expect.fail('should have thrown');
     } catch (error) {
@@ -146,12 +146,37 @@ describe('useProjectNameClient', () => {
 
     try {
       await act(async () => {
-        await result.current.generate('Hi');
+        await result.current.generate({ text: 'Hi' });
       });
       expect.fail('should have thrown');
     } catch (error) {
       expect((error as Error).name).toBe('NameGeneratorRequestError');
       expect((error as Error).message).toMatch(/empty|body|stream/i);
     }
+  });
+
+  it('should preserve every supplied image as a model-visible file part without inventing text', async () => {
+    mountStreamingResponse([{ type: 'start' }, { type: 'finish' }]);
+    const { result } = renderHook(() => useProjectNameClient());
+    const first = 'data:image/png;base64,iVBORw0KGgo=';
+    const second = 'data:image/webp;base64,UklGRgQAAABXRUJQ';
+
+    await act(async () => {
+      await result.current.generate({ text: '', imageUrls: [first, second] });
+    });
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    const parsed = chatTurnRequestSchema.parse(JSON.parse(init.body as string));
+    expect(parsed.messages[0]?.parts).toEqual([
+      { type: 'file', url: first, mediaType: 'image/png' },
+      { type: 'file', url: second, mediaType: 'image/webp' },
+    ]);
+  });
+
+  it('should reject blank and generic durable project names', () => {
+    expect(isUsableProjectName('')).toBe(false);
+    expect(isUsableProjectName(' Image Project ')).toBe(false);
+    expect(isUsableProjectName('Untitled')).toBe(false);
+    expect(isUsableProjectName('Planetary Gear')).toBe(true);
   });
 });

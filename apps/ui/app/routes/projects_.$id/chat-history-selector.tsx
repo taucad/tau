@@ -86,7 +86,7 @@ export function ChatHistorySelector({
   const generateAndApplyChatName = useCallback(
     async (chatId: string, promptText: string): Promise<void> => {
       try {
-        const generatedName = await projectNameClient.generate(promptText);
+        const generatedName = await projectNameClient.generate({ text: promptText });
         if (generatedName.trim().length > 0) {
           await applyGeneratedChatName(chatId, generatedName.trim());
         }

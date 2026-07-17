@@ -27,6 +27,7 @@ export class NameGeneratorRequestError extends Error {
 type NameProfile = 'project_name' | 'commit_name';
 
 type GenerateName = (prompt: string) => Promise<string>;
+type GenerateNameFromParts = (parts: MyUIMessage['parts']) => Promise<string>;
 
 /**
  * Public surface of the simple-text name clients (project + commit). These
@@ -37,6 +38,11 @@ type GenerateName = (prompt: string) => Promise<string>;
  */
 export type NameGeneratorClient = {
   readonly generate: GenerateName;
+};
+
+/** @internal */
+export type NameGeneratorPartsClient = {
+  readonly generateFromParts: GenerateNameFromParts;
 };
 
 /**
@@ -85,15 +91,15 @@ const nameGeneratorTransport = new DefaultChatTransport<MyUIMessage>({
  *
  * @internal
  */
-export const useNameGeneratorClient = (profile: NameProfile): NameGeneratorClient => {
-  const generate = useCallback<GenerateName>(
-    async (prompt) => {
+export const useNameGeneratorPartsClient = (profile: NameProfile): NameGeneratorPartsClient => {
+  const generateFromParts = useCallback<GenerateNameFromParts>(
+    async (parts) => {
       const chatId = generatePrefixedId(idPrefix.chat);
       const messageId = generatePrefixedId(idPrefix.message);
       const userMessage: MyUIMessage = {
         id: messageId,
         role: messageRole.user,
-        parts: [{ type: 'text', text: prompt }],
+        parts,
       };
 
       const stream = await nameGeneratorTransport.sendMessages({
@@ -102,7 +108,7 @@ export const useNameGeneratorClient = (profile: NameProfile): NameGeneratorClien
         messages: [userMessage],
         trigger: 'submit-message',
         body: { agent: { profile } },
-        abortSignal: undefined,
+        abortSignal: AbortSignal.timeout(10_000),
       });
 
       let assembled: MyUIMessage | undefined;
@@ -110,9 +116,9 @@ export const useNameGeneratorClient = (profile: NameProfile): NameGeneratorClien
         assembled = message;
       }
 
-      const parts = assembled?.parts ?? [];
+      const responseParts = assembled?.parts ?? [];
       let text = '';
-      for (const part of parts) {
+      for (const part of responseParts) {
         if (part.type === 'text') {
           text += part.text;
         }
@@ -122,5 +128,14 @@ export const useNameGeneratorClient = (profile: NameProfile): NameGeneratorClien
     [profile],
   );
 
+  return { generateFromParts };
+};
+
+export const useNameGeneratorClient = (profile: NameProfile): NameGeneratorClient => {
+  const { generateFromParts } = useNameGeneratorPartsClient(profile);
+  const generate = useCallback<GenerateName>(
+    async (prompt) => generateFromParts([{ type: 'text', text: prompt }]),
+    [generateFromParts],
+  );
   return { generate };
 };

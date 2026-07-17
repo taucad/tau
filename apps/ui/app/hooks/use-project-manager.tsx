@@ -32,6 +32,7 @@ import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { defaultProjectName } from '#constants/project-names.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
+import { isUsableProjectName, useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 
 /**
  * Shared options for initial chat configuration.
@@ -148,6 +149,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const fileManager = useFileManager();
   const queryClient = useQueryClient();
   const [defaultBackend] = useCookie(cookieName.filesystemBackend, 'indexeddb' as FileSystemBackend);
+  const projectNameClient = useProjectNameClient();
 
   const invalidateProjectsList = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['projects'] });
@@ -189,10 +191,22 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       if ('kernel' in options) {
         // CreateProjectFromKernel: Generate from kernel template
         kernel = options.kernel;
+        const { projectName: requestedProjectName } = options;
+        let projectName = requestedProjectName;
+        if (!projectName && options.initialMessage) {
+          const generated = await projectNameClient.generate({
+            text: options.initialMessage.content,
+            imageUrls: options.initialMessage.imageUrls,
+          });
+          if (!isUsableProjectName(generated)) {
+            throw new Error('Project naming did not return a specific project name');
+          }
+          projectName = generated.trim();
+        }
         const mainFileName = getMainFile(options.kernel);
         const emptyCode = getEmptyCode(options.kernel);
         const result = createInitialProject({
-          projectName: options.projectName ?? defaultProjectName,
+          projectName: projectName ?? defaultProjectName,
           mainFileName,
           emptyCodeContent: encodeTextFile(emptyCode),
         });
@@ -355,7 +369,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
       return project;
     },
-    [getReadiedWorker, fileManager, defaultBackend],
+    [getReadiedWorker, fileManager, defaultBackend, projectNameClient],
   );
 
   const updateProject = useCallback(

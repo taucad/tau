@@ -86,6 +86,12 @@ const fakeProject: Project = {
 };
 
 const mockCreateProjectWithResources = vi.fn().mockResolvedValue({ project: fakeProject });
+const mockGenerateProjectName = vi.fn(async () => 'Tall Birdhouse');
+
+vi.mock('#chat-clients/use-project-name-client.js', () => ({
+  useProjectNameClient: () => ({ generate: mockGenerateProjectName }),
+  isUsableProjectName: (name: string) => name.trim().length > 0 && name.trim().toLowerCase() !== 'new project',
+}));
 
 vi.mock('#hooks/project-manager.machine.js', async () => {
   const xstate = await import('xstate');
@@ -126,11 +132,13 @@ vi.mock('#hooks/use-cookie.js', () => ({
   useCookie: (_name: string, defaultValue: string) => [defaultValue, vi.fn()],
 }));
 
+const mockCreateInitialProject = vi.fn((input: { projectName: string }) => ({
+  projectData: { name: input.projectName },
+  files: { [mainFile]: { content: new Uint8Array([1, 2, 3]) } },
+}));
+
 vi.mock('#constants/project.constants.js', () => ({
-  createInitialProject: () => ({
-    projectData: { name: 'Test Project' },
-    files: { [mainFile]: { content: new Uint8Array([1, 2, 3]) } },
-  }),
+  createInitialProject: (input: { projectName: string }) => mockCreateInitialProject(input),
 }));
 
 vi.mock('#utils/kernel.utils.js', () => ({
@@ -197,6 +205,61 @@ describe('useProjectManager', () => {
   });
 
   describe('createProject mount-based backend wiring', () => {
+    it('resolves a semantic multimodal name before creating durable project resources', async () => {
+      const imageUrl = 'data:image/png;base64,iVBORw0KGgo=';
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await result.current.createProject({
+          kernel: 'openscad',
+          initialMessage: { content: '', imageUrls: [imageUrl] },
+          backend: 'opfs',
+        });
+      });
+
+      expect(mockGenerateProjectName).toHaveBeenCalledWith({ text: '', imageUrls: [imageUrl] });
+      expect(mockCreateInitialProject).toHaveBeenCalledWith(
+        expect.objectContaining({ projectName: 'Tall Birdhouse' }),
+      );
+      expect(mockCreateProjectWithResources).toHaveBeenCalledWith(
+        expect.objectContaining({ project: expect.objectContaining({ name: 'Tall Birdhouse' }) }),
+      );
+      expect(mockGenerateProjectName.mock.invocationCallOrder[0]).toBeLessThan(
+        mockCreateProjectWithResources.mock.invocationCallOrder[0]!,
+      );
+    });
+
+    it('creates no durable project resources when semantic naming fails', async () => {
+      mockGenerateProjectName.mockRejectedValueOnce(new Error('naming unavailable'));
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await expect(
+        act(async () =>
+          result.current.createProject({
+            kernel: 'openscad',
+            initialMessage: { content: 'Build the object in this image' },
+            backend: 'opfs',
+          }),
+        ),
+      ).rejects.toThrow('naming unavailable');
+
+      expect(mockCreateInitialProject).not.toHaveBeenCalled();
+      expect(mockCreateProjectWithResources).not.toHaveBeenCalled();
+    });
+
+    it('creates no durable project resources for a generic generated name', async () => {
+      mockGenerateProjectName.mockResolvedValueOnce('New Project');
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await expect(
+        act(async () =>
+          result.current.createProject({ kernel: 'openscad', initialMessage: { content: 'Make this' } }),
+        ),
+      ).rejects.toThrow('Project naming did not return a specific project name');
+
+      expect(mockCreateProjectWithResources).not.toHaveBeenCalled();
+    });
+
     it('should call mount with resolvedBackend and project prefix', async () => {
       const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 

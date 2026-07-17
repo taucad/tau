@@ -1,61 +1,36 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
-import type { MyUIMessage, Chat } from '@taucad/chat';
-import { defaultProjectName } from '#constants/project-names.js';
+import { fireEvent, render, screen } from '@testing-library/react';
 
-const { mockGenerate, mockUpdateName, mockApplyGeneratedProjectName, mockGetChat } = vi.hoisted(() => ({
-  mockGenerate: vi.fn<(prompt: string) => Promise<string>>(),
+const { mockUpdateName } = vi.hoisted(() => ({
   mockUpdateName: vi.fn(),
-  mockApplyGeneratedProjectName: vi.fn(),
-  mockGetChat: vi.fn<(chatId: string) => Promise<Chat | undefined>>(),
 }));
 
-let mockProjectName = defaultProjectName;
+let mockProjectName = 'Birdhouse';
 let mockIsLoading = false;
-let mockActiveChatId: string | undefined = 'chat_first';
-
-vi.mock('#chat-clients/use-project-name-client.js', () => ({
-  useProjectNameClient: () => ({ generate: mockGenerate }),
-}));
-
-// Production code must no longer touch the AI SDK directly or the legacy
-// `useChatConstants` symbol — guard with throwing mocks so any regression
-// surfaces immediately.
-vi.mock('@ai-sdk/react', () => ({
-  useChat: () => {
-    throw new Error('project-name-editor should no longer call useChat directly — switch to useProjectNameClient');
-  },
-}));
+let mockIsProjectError = false;
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
     projectRef: { send: vi.fn() },
-    editorRef: { send: vi.fn() },
     updateName: mockUpdateName,
-    applyGeneratedProjectName: mockApplyGeneratedProjectName,
   }),
-}));
-
-vi.mock('#hooks/use-project-manager.js', () => ({
-  useProjectManager: () => ({ getChat: mockGetChat }),
 }));
 
 vi.mock('@xstate/react', () => ({
   useSelector: (
     _actor: unknown,
     selector: (state: {
-      context: { project?: { name: string }; isLoading: boolean; focusedChatId?: string };
-      matches: (s: string) => boolean;
+      context: { project?: { name: string }; isLoading: boolean };
+      matches: (state: string) => boolean;
     }) => unknown,
   ) =>
     selector({
       context: {
         project: { name: mockProjectName },
         isLoading: mockIsLoading,
-        focusedChatId: mockActiveChatId,
       },
-      matches: () => false,
+      matches: (state) => state === 'error' && mockIsProjectError,
     }),
 }));
 
@@ -70,84 +45,64 @@ vi.mock('#components/ui/loader.js', () => ({
 }));
 
 vi.mock('#components/inline-text-editor.js', () => ({
-  InlineTextEditor: ({ value }: { readonly value: string }) => <div data-testid='name'>{value}</div>,
+  InlineTextEditor: ({
+    value,
+    isDisabled,
+    renderDisplay,
+    onSave,
+  }: {
+    readonly value: string;
+    readonly isDisabled?: boolean;
+    readonly renderDisplay: (value: string) => React.ReactNode;
+    readonly onSave: (value: string) => void;
+  }) => (
+    <div>
+      <div data-testid='display'>{renderDisplay(value)}</div>
+      <button disabled={isDisabled} onClick={() => onSave('Renamed Project')}>
+        rename
+      </button>
+    </div>
+  ),
 }));
 
 const { ProjectNameEditor } = await import('#routes/projects_.$id/project-name-editor.js');
 
-const makeFirstMessage = (text: string): MyUIMessage => ({
-  id: 'msg_first',
-  role: 'user',
-  parts: [{ type: 'text', text }],
-});
-
-const makeChat = (overrides: Partial<Chat> = {}): Chat => ({
-  id: 'chat_first',
-  resourceId: 'project_test',
-  name: 'New chat',
-  messages: [makeFirstMessage('design a bracket')],
-  createdAt: Date.now(),
-  updatedAt: Date.now(),
-  ...overrides,
-});
-
-describe('ProjectNameEditor — name generation routes through useProjectNameClient', () => {
+describe('ProjectNameEditor', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockProjectName = defaultProjectName;
+    mockProjectName = 'Birdhouse';
     mockIsLoading = false;
-    mockActiveChatId = 'chat_first';
+    mockIsProjectError = false;
   });
 
-  it('calls projectNameClient.generate with the first user-message text and updates the project name with the result', async () => {
-    mockGenerate.mockResolvedValueOnce('Bracket Design');
-    mockGetChat.mockResolvedValueOnce(makeChat());
+  it('renames the already-created project only when the user saves an edit', () => {
+    render(<ProjectNameEditor />);
+
+    expect(screen.getByTestId('display')).toHaveTextContent('Birdhouse');
+    expect(mockUpdateName).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'rename' }));
+
+    expect(mockUpdateName).toHaveBeenCalledWith('Renamed Project');
+    expect(screen.getByTestId('display')).toHaveTextContent('Renamed Project');
+  });
+
+  it('shows the loader while the manifest name is unavailable', () => {
+    mockProjectName = '';
+    mockIsLoading = true;
 
     render(<ProjectNameEditor />);
 
-    await waitFor(() => {
-      expect(mockGenerate).toHaveBeenCalledWith('design a bracket');
-    });
-    await waitFor(() => {
-      expect(mockApplyGeneratedProjectName).toHaveBeenCalledWith('Bracket Design');
-    });
+    expect(screen.getByTestId('loader')).toBeInTheDocument();
   });
 
-  it('keeps the default project name and does not call updateName when the generator returns an empty string', async () => {
-    mockGenerate.mockResolvedValueOnce('   ');
-    mockGetChat.mockResolvedValueOnce(makeChat());
+  it('disables renaming and explains a missing project', () => {
+    mockIsProjectError = true;
 
     render(<ProjectNameEditor />);
 
-    await waitFor(() => {
-      expect(mockGenerate).toHaveBeenCalledOnce();
-    });
-    expect(mockApplyGeneratedProjectName).not.toHaveBeenCalled();
-  });
-
-  it('logs and recovers when the generator rejects so the editor stays renderable', async () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    mockGenerate.mockRejectedValueOnce(new Error('upstream timeout'));
-    mockGetChat.mockResolvedValueOnce(makeChat());
-
-    render(<ProjectNameEditor />);
-
-    await waitFor(() => {
-      expect(mockGenerate).toHaveBeenCalledOnce();
-    });
-    expect(consoleError).toHaveBeenCalled();
-    expect(mockApplyGeneratedProjectName).not.toHaveBeenCalled();
-    consoleError.mockRestore();
-  });
-
-  it('does not trigger generation when the project already has a custom name', async () => {
-    mockProjectName = 'My Custom Name';
-    mockGetChat.mockResolvedValueOnce(makeChat());
-
-    render(<ProjectNameEditor />);
-
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(mockGenerate).not.toHaveBeenCalled();
+    expect(screen.getByTestId('display')).toHaveTextContent('Project not found');
+    expect(screen.getByRole('button', { name: 'rename' })).toBeDisabled();
+    expect(screen.getByText('Project not found', { selector: 'div > div' })).toBeInTheDocument();
   });
 });

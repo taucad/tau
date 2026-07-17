@@ -77,6 +77,7 @@ export class ChatController {
 
     switch (body.agent.profile) {
       case 'project_name': {
+        validateImageParts(body.messages);
         const modelMessages = await convertToModelMessages(body.messages);
         const result = this.chatService.getBuildNameGenerator(modelMessages);
         return sendSimpleModelStream(response, result);

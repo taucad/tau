@@ -85,6 +85,14 @@ const explicitAxesOff = native.renderGlbToImage(
   JSON.stringify({ ...shared, phi: 60, theta: -45, includeAxes: false }),
 );
 const axes = native.renderGlbToImage(glb, JSON.stringify(axesRequest));
+const hiddenLabelA = native.renderGlbToImage(
+  glb,
+  JSON.stringify({ ...shared, phi: 60, theta: -45, includeLabel: false, label: 'A' }),
+);
+const hiddenLabelB = native.renderGlbToImage(
+  glb,
+  JSON.stringify({ ...shared, phi: 60, theta: -45, includeLabel: false, label: 'B' }),
+);
 const axesBatch = native.renderGlbToImages(
   glb,
   JSON.stringify({ ...shared, includeAxes: true, views: [{ id: 'isometric', phi: 60, theta: -45 }] }),
@@ -92,33 +100,100 @@ const axesBatch = native.renderGlbToImages(
 if (!explicitAxesOff.equals(png) || axes.equals(png) || axesBatch.length !== 1 || !axesBatch[0].equals(axes)) {
   throw new Error('axes output must differ from axes-off and match one-view batch bytes');
 }
+if (!hiddenLabelA.equals(png) || !hiddenLabelB.equals(png)) {
+  throw new Error('disabled labels must not affect output bytes');
+}
+const annotations = native.renderGlbToImage(
+  glb,
+  JSON.stringify({
+    width: 768,
+    height: 576,
+    format: 'png',
+    projection: 'orthographic',
+    label: 'Front — View From +Z',
+    phi: 90,
+    theta: 270,
+    includeAxes: true,
+    includeLabel: true,
+    includeScale: true,
+  }),
+);
+const visualCases = [
+  { name: '192', width: 192, height: 192, label: 'Isometric', phi: 60, theta: -45 },
+  { name: '800', width: 800, height: 800, label: 'Front — View From +Z', phi: 90, theta: 270 },
+  { name: '1600', width: 1600, height: 1600, label: 'Front — View From +Z', phi: 90, theta: 270 },
+  { name: '4k', width: 3840, height: 2160, label: 'Front — View From +Z', phi: 90, theta: 270 },
+  { name: '4096', width: 4096, height: 4096, label: 'Front — View From +Z', phi: 90, theta: 270 },
+].map((view) => ({
+  ...view,
+  bytes: native.renderGlbToImage(
+    glb,
+    JSON.stringify({
+      width: view.width,
+      height: view.height,
+      format: 'png',
+      projection: 'orthographic',
+      background: [0.94, 0.97, 0.96, 1],
+      label: view.label,
+      phi: view.phi,
+      theta: view.theta,
+      includeAxes: true,
+      includeLabel: true,
+      includeScale: true,
+    }),
+  ),
+}));
 
 const parityViews = [
-  { id: 'isometric', phi: 60, theta: -45 },
-  { id: 'front', phi: 90, theta: 0 },
-  { id: 'top', phi: 0, theta: 0 },
-  { id: 'right', phi: 90, theta: 90 },
+  { id: 'isometric', label: 'Isometric', phi: 60, theta: -45 },
+  { id: 'front', label: 'Front — View From +Z', phi: 90, theta: 270 },
+  { id: 'back', label: 'Back — View From −Z', phi: 90, theta: 90 },
+  { id: 'right', label: 'Right — View From +X', phi: 90, theta: 0 },
+  { id: 'left', label: 'Left — View From −X', phi: 90, theta: 180 },
+  { id: 'top', label: 'Top — View From +Y', phi: 0, theta: 0 },
+  { id: 'bottom', label: 'Bottom — View From −Y', phi: 180, theta: 0 },
 ];
 let parityCases = 0;
+const annotationCombinations = [
+  { includeAxes: false, includeLabel: false, includeScale: false },
+  { includeAxes: true, includeLabel: false, includeScale: false },
+  { includeAxes: false, includeLabel: true, includeScale: false },
+  { includeAxes: true, includeLabel: true, includeScale: false },
+  { includeAxes: false, includeLabel: false, includeScale: true },
+  { includeAxes: true, includeLabel: false, includeScale: true },
+  { includeAxes: false, includeLabel: true, includeScale: true },
+  { includeAxes: true, includeLabel: true, includeScale: true },
+];
 const parityOptions = ['png', 'webp', 'jpeg'].flatMap((format) =>
   ['perspective', 'orthographic'].flatMap((projection) =>
-    [undefined, false, true].map((includeAxes) => ({ format, projection, includeAxes })),
+    annotationCombinations.map((annotations) => ({
+      format,
+      projection,
+      ...annotations,
+    })),
   ),
 );
-for (const { format, projection, includeAxes } of parityOptions) {
+for (const { format, projection, includeAxes, includeLabel, includeScale } of parityOptions) {
   const common = {
-    width: 320,
-    height: 240,
+    width: 512,
+    height: 384,
     format,
     projection,
     ...(format === 'jpeg' ? { background: [1, 1, 1, 1] } : {}),
-    ...(includeAxes === undefined ? {} : { includeAxes }),
+    includeAxes,
+    includeLabel,
+    includeScale,
   };
   const images = native.renderGlbToImages(glb, JSON.stringify({ ...common, views: parityViews }));
   for (const [index, view] of parityViews.entries()) {
-    const one = native.renderGlbToImage(glb, JSON.stringify({ ...common, phi: view.phi, theta: view.theta }));
+    const one = native.renderGlbToImage(
+      glb,
+      JSON.stringify({ ...common, label: view.label, phi: view.phi, theta: view.theta }),
+    );
     if (!images[index].equals(one)) {
-      throw new Error(`${format}/${projection}/axes=${String(includeAxes)} view ${view.id} differs`);
+      throw new Error(
+        `${format}/${projection}/annotations=${Number(includeAxes)}${Number(includeLabel)}${Number(includeScale)} view ${view.id} differs`,
+      );
     }
     parityCases += 1;
   }
@@ -129,9 +204,39 @@ for (const { format, projection, includeAxes } of parityOptions) {
   ];
   const repeated = native.renderGlbToImages(glb, JSON.stringify({ ...common, views: reordered }));
   if (!repeated[0].equals(repeated[2])) {
-    throw new Error(`${format}/${projection}/axes=${String(includeAxes)} repeated view differs`);
+    throw new Error(`${format}/${projection} repeated annotated view differs`);
   }
 }
+const canonicalVisuals = native.renderGlbToImages(
+  glb,
+  JSON.stringify({
+    width: 800,
+    height: 800,
+    format: 'png',
+    projection: 'orthographic',
+    background: [0.94, 0.97, 0.96, 1],
+    includeAxes: true,
+    includeLabel: true,
+    includeScale: true,
+    views: parityViews.slice(1),
+  }),
+);
+const isometricPerspective = native.renderGlbToImage(
+  glb,
+  JSON.stringify({
+    width: 800,
+    height: 800,
+    format: 'png',
+    projection: 'perspective',
+    background: [0.94, 0.97, 0.96, 1],
+    label: 'Isometric',
+    phi: 60,
+    theta: -45,
+    includeAxes: true,
+    includeLabel: true,
+    includeScale: true,
+  }),
+);
 
 let validationError = '';
 try {
@@ -166,8 +271,16 @@ writeFileSync(join(here, 'out', 'napi.png'), png);
 writeFileSync(join(here, 'out', 'napi.webp'), webp);
 writeFileSync(join(here, 'out', 'napi.jpg'), jpeg);
 writeFileSync(join(here, 'out', 'napi-axes.png'), axes);
+writeFileSync(join(here, 'out', 'napi-annotations.png'), annotations);
+for (const visual of visualCases) {
+  writeFileSync(join(here, 'out', `napi-annotations-${visual.name}.png`), visual.bytes);
+}
+for (const [index, view] of parityViews.slice(1).entries()) {
+  writeFileSync(join(here, 'out', `napi-capture-${view.id}.png`), canonicalVisuals[index]);
+}
+writeFileSync(join(here, 'out', 'napi-capture-isometric.png'), isometricPerspective);
 writeFileSync(join(here, 'out', 'napi-interleaved.png'), interleavedPng);
 console.log(`webp ${webp.length}B, jpeg ${jpeg.length}B, transparent-jpeg rejected`);
 console.log(`batch ${batch.length} views matches singular bytes`);
 console.log(`${parityCases} singular/batch parity cases plus reordered/repeated batches passed`);
-console.log('PASS → spike/out/napi.{png,webp,jpg} + napi-axes.png + napi-interleaved.png');
+console.log('PASS → spike/out/napi.{png,webp,jpg} + napi-{axes,annotations,interleaved}.png + visual sizes');

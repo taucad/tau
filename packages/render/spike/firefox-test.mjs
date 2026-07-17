@@ -39,7 +39,7 @@ const timeout = async (duration, value) =>
  */
 const collectLeg = async (label, launch) => {
   const { server, port, nextResult } = await startServer();
-  const url = `http://127.0.0.1:${port}/`;
+  const url = `http://127.0.0.1:${port}/?presentation=1`;
   console.log(`[${label}] opening ${url} in Firefox…`);
   const child = launch(url);
 

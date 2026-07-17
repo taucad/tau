@@ -6,14 +6,64 @@
     font: 14px/1.4 monospace;
     margin: 2rem;
   }
-  img {
+  #out {
     border: 1px dashed #999;
     background: repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 0 0 / 16px 16px;
+  }
+  #presentation {
+    margin-top: 2rem;
+  }
+  .presentation-card {
+    container-type: inline-size;
+    margin-block: 1rem;
+    outline: 1px solid #bbb;
+  }
+  .presentation-card[data-width='447'] {
+    width: 447px;
+  }
+  .presentation-card[data-width='448'] {
+    width: 448px;
+  }
+  .presentation-content {
+    box-sizing: border-box;
+    padding-left: 6px;
+    width: 100%;
+  }
+  .presentation-grid {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .presentation-grid img,
+  .presentation-single img {
+    display: block;
+    height: auto;
+    max-width: 100%;
+    object-fit: contain;
+    width: 100%;
+  }
+  .presentation-single {
+    width: 216.5px;
+  }
+  @container (min-width: 448px) {
+    .presentation-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
   }
 </style>
 <h1>render-wasm spike</h1>
 <pre id="status">starting worker…</pre>
 <img id="out" alt="" />
+<section id="presentation" hidden>
+  <h2>Annotated capture presentation</h2>
+  <div class="presentation-single"><img id="presentation-single" alt="Isometric annotated capture" /></div>
+  <div class="presentation-card" data-width="447">
+    <div class="presentation-content"><div class="presentation-grid" data-grid="447"></div></div>
+  </div>
+  <div class="presentation-card" data-width="448">
+    <div class="presentation-content"><div class="presentation-grid" data-grid="448"></div></div>
+  </div>
+</section>
 <script type="module">
   const status = document.getElementById('status');
   const result = {};
@@ -49,6 +99,48 @@
     }
   }
 
+  const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+
+  const measureGrid = (grid, expectedColumns) => {
+    const images = [...grid.querySelectorAll('img')];
+    const lefts = new Set(images.map((image) => Math.round(image.getBoundingClientRect().left * 100) / 100));
+    const widths = images.map((image) => Math.round(image.getBoundingClientRect().width * 100) / 100);
+    const objectFits = images.map((image) => getComputedStyle(image).objectFit);
+    if (lefts.size !== expectedColumns) {
+      throw new Error(`presentation grid expected ${expectedColumns} columns, got ${lefts.size}`);
+    }
+    if (objectFits.some((value) => value !== 'contain')) {
+      throw new Error(`presentation grid object-fit drifted: ${objectFits.join(', ')}`);
+    }
+    return { columns: lefts.size, imageWidths: widths, objectFits };
+  };
+
+  const renderPresentation = async (images) => {
+    const section = document.getElementById('presentation');
+    section.hidden = false;
+    const single = document.getElementById('presentation-single');
+    single.src = URL.createObjectURL(new Blob([images.single], { type: 'image/png' }));
+    for (const grid of section.querySelectorAll('[data-grid]')) {
+      for (const view of images.views) {
+        const image = document.createElement('img');
+        image.alt = view.id;
+        image.src = URL.createObjectURL(new Blob([view.bytes], { type: 'image/png' }));
+        grid.append(image);
+      }
+    }
+    const allImages = [...section.querySelectorAll('img')];
+    await Promise.all(allImages.map((image) => image.decode()));
+    await nextFrame();
+    await nextFrame();
+    const narrow = measureGrid(section.querySelector('[data-grid="447"]'), 2);
+    const wide = measureGrid(section.querySelector('[data-grid="448"]'), 3);
+    return {
+      narrow,
+      wide,
+      singleObjectFit: getComputedStyle(single).objectFit,
+    };
+  };
+
   if (!('gpu' in navigator)) {
     result.ok = false;
     result.error = 'navigator.gpu missing on the page (WebGPU unsupported or disabled)';
@@ -57,12 +149,13 @@
 
   const parameters = new URLSearchParams(location.search);
   const bench = parameters.has('bench');
+  const presentation = parameters.has('presentation');
   const fixture = parameters.get('fixture') ?? 'gear-12.glb';
   const worker = new Worker('./worker.mjs', { type: 'module' });
-  worker.onmessage = (event) => {
+  worker.onmessage = async (event) => {
     if (event.data.ready) {
       status.textContent = bench ? 'worker ready, benchmarking…' : 'worker ready, rendering…';
-      worker.postMessage({ glbUrl: `/fixtures/${fixture}`, width: 768, height: 432, bench });
+      worker.postMessage({ glbUrl: `/fixtures/${fixture}`, width: 768, height: 432, bench, presentation });
       return;
     }
     if (event.data.bench) {
@@ -91,6 +184,7 @@
       batchViews,
       analysis,
       invalidGlbError,
+      presentationImages,
     } = event.data;
     Object.assign(result, {
       ok,
@@ -112,6 +206,16 @@
       result.pngBase64 = toBase64(png);
       result.webpBase64 = toBase64(webp);
       result.jpegBase64 = toBase64(jpeg);
+      if (presentationImages) {
+        try {
+          result.presentation = await renderPresentation(presentationImages);
+        } catch (presentationError) {
+          result.ok = false;
+          result.error = `presentation: ${String(
+            presentationError instanceof Error ? presentationError.message : presentationError,
+          )}`;
+        }
+      }
     }
     report();
   };

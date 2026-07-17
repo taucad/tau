@@ -3,10 +3,12 @@
 //! surface/canvas — works headless on native (Metal/Vulkan/DX12) and in the
 //! browser via WebGPU.
 //!
-//! Blueprint: docs/research/render-multi-view-images-and-axis-indicator.md
+//! Blueprints:
+//! - docs/research/render-multi-view-images-and-axis-indicator.md
+//! - docs/research/render-capture-overlay-annotations.md
 
-mod axis_indicator;
 mod bench;
+mod capture_overlay;
 mod encode;
 mod glb;
 mod options;
@@ -58,8 +60,16 @@ pub struct RenderOptions {
     /// Background clear color as sRGB straight-alpha `[r, g, b, a]` in 0..=1;
     /// `None` renders on transparent. JPEG output requires an opaque one.
     pub background: Option<[f32; 4]>,
+    /// Optional authored view label. It is drawn only when `include_label` is true.
+    pub label: Option<String>,
     /// Whether to stamp the bottom-right XYZ orientation indicator.
     pub include_axes: bool,
+    /// Whether to stamp the top-left view label.
+    pub include_label: bool,
+    /// Whether to stamp the bottom-left scale. Perspective labels identify
+    /// the subject-center plane with `@ center`; orthographic scale is
+    /// depth-invariant.
+    pub include_scale: bool,
 }
 
 pub(crate) const DEFAULT_HEIGHT: u32 = 432;
@@ -76,7 +86,10 @@ impl Default for RenderOptions {
             up: UpAxis::Y,
             projection: Projection::Perspective,
             background: None,
+            label: None,
             include_axes: false,
+            include_label: false,
+            include_scale: false,
         }
     }
 }
@@ -110,7 +123,7 @@ impl std::error::Error for RenderError {}
 pub struct RenderViewProfile {
     pub id: String,
     pub render_ms: f64,
-    pub axis_ms: f64,
+    pub overlay_ms: f64,
     pub encode_ms: f64,
 }
 
@@ -130,16 +143,26 @@ pub struct RenderBatchProfile {
     pub views: Vec<RenderViewProfile>,
 }
 
-const MIN_DIMENSION: u32 = 16;
-const MAX_DIMENSION: u32 = 4096;
-
 fn validate_options(options: &RenderOptions) -> Result<(), RenderError> {
-    if !(MIN_DIMENSION..=MAX_DIMENSION).contains(&options.width)
-        || !(MIN_DIMENSION..=MAX_DIMENSION).contains(&options.height)
+    if !(options::MIN_DIMENSION..=options::MAX_DIMENSION).contains(&options.width)
+        || !(options::MIN_DIMENSION..=options::MAX_DIMENSION).contains(&options.height)
     {
         return Err(RenderError::Parse(format!(
-            "dimensions {}x{} outside {MIN_DIMENSION}..={MAX_DIMENSION}",
-            options.width, options.height
+            "dimensions {}x{} outside {}..={}",
+            options.width,
+            options.height,
+            options::MIN_DIMENSION,
+            options::MAX_DIMENSION
+        )));
+    }
+    if (options.include_axes || options.include_label || options.include_scale)
+        && (options.width < options::ANNOTATED_MIN_DIMENSION
+            || options.height < options::ANNOTATED_MIN_DIMENSION)
+    {
+        return Err(RenderError::Parse(format!(
+            "annotated images must be at least {}x{}",
+            options::ANNOTATED_MIN_DIMENSION,
+            options::ANNOTATED_MIN_DIMENSION
         )));
     }
     if !options.phi_deg.is_finite() || !options.theta_deg.is_finite() {
@@ -170,11 +193,13 @@ pub async fn render_glb_to_rgba(
 ) -> Result<Rendered, RenderError> {
     validate_options(options)?;
     let scene = parse_glb(glb).map_err(RenderError::Parse)?;
+    let prepared = capture_overlay::prepare_view(&scene, options)?;
     let session = render::RenderSession::new(&scene, options).await?;
-    session
-        .render_view(&scene, options)
-        .await
-        .map(|(rendered, _)| rendered)
+    let mut rendered = session.render_view(prepared.camera, options).await?;
+    if options.include_axes || options.include_label || options.include_scale {
+        capture_overlay::stamp_capture_overlay(&mut rendered, &prepared, &mut Vec::new());
+    }
+    Ok(rendered)
 }
 
 /// Render a kernel GLB straight to encoded image bytes.
@@ -185,6 +210,7 @@ pub async fn render_glb_to_image(
 ) -> Result<Vec<u8>, RenderError> {
     let view = RenderView {
         id: String::new(),
+        label: options.label.clone(),
         phi_deg: options.phi_deg,
         theta_deg: options.theta_deg,
     };
@@ -234,39 +260,50 @@ async fn render_glb_to_images_inner(
     let scene = parse_glb(glb).map_err(RenderError::Parse)?;
     let parse_ms = now.map_or(0.0, |clock| clock() - parse_started);
     let setup_started = now.map_or(0.0, |clock| clock());
-    let session = render::RenderSession::new(&scene, options).await?;
-    let setup_ms = now.map_or(0.0, |clock| clock() - setup_started);
-    let mut images = Vec::with_capacity(views.len());
-    let mut axis_scratch = Vec::new();
-    let mut view_profiles = Vec::with_capacity(if now.is_some() { views.len() } else { 0 });
+    let mut prepared = Vec::with_capacity(views.len());
     for view in views {
         let mut view_options = options.clone();
         view_options.phi_deg = view.phi_deg;
         view_options.theta_deg = view.theta_deg;
+        view_options.label.clone_from(&view.label);
         validate_options(&view_options).map_err(|error| with_view(error, &view.id))?;
+        prepared.push(
+            capture_overlay::prepare_view(&scene, &view_options)
+                .map_err(|error| with_view(error, &view.id))?,
+        );
+    }
+    let session = render::RenderSession::new(&scene, options).await?;
+    let setup_ms = now.map_or(0.0, |clock| clock() - setup_started);
+    let mut images = Vec::with_capacity(views.len());
+    let mut overlay_scratch = Vec::new();
+    let mut view_profiles = Vec::with_capacity(if now.is_some() { views.len() } else { 0 });
+    for (view, prepared_view) in views.iter().zip(prepared) {
+        let mut view_options = options.clone();
+        view_options.phi_deg = view.phi_deg;
+        view_options.theta_deg = view.theta_deg;
+        view_options.label.clone_from(&view.label);
         let render_started = now.map_or(0.0, |clock| clock());
-        let (mut rendered, camera) = session
-            .render_view(&scene, &view_options)
+        let mut rendered = session
+            .render_view(prepared_view.camera, &view_options)
             .await
             .map_err(|error| with_view(error, &view.id))?;
         let render_ms = now.map_or(0.0, |clock| clock() - render_started);
-        let axis_started = now.map_or(0.0, |clock| clock());
-        if view_options.include_axes {
-            axis_indicator::stamp_axis_indicator(
+        let overlay_started = now.map_or(0.0, |clock| clock());
+        if view_options.include_axes || view_options.include_label || view_options.include_scale {
+            capture_overlay::stamp_capture_overlay(
                 &mut rendered,
-                camera,
-                view_options.projection,
-                &mut axis_scratch,
+                &prepared_view,
+                &mut overlay_scratch,
             );
         }
-        let axis_ms = now.map_or(0.0, |clock| clock() - axis_started);
+        let overlay_ms = now.map_or(0.0, |clock| clock() - overlay_started);
         let encode_started = now.map_or(0.0, |clock| clock());
         images.push(encode(&rendered, format).map_err(|error| with_view(error, &view.id))?);
         if let Some(clock) = now {
             view_profiles.push(RenderViewProfile {
                 id: view.id.clone(),
                 render_ms,
-                axis_ms,
+                overlay_ms,
                 encode_ms: clock() - encode_started,
             });
         }

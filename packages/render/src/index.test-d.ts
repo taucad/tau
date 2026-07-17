@@ -21,16 +21,30 @@ expectTypeOf<
 
 const glb = new Uint8Array([1, 2, 3]);
 
-const singular = createRenderImageOptions({ format: 'webp', includeAxes: true });
-expectTypeOf(singular).toEqualTypeOf<{ readonly format: 'webp'; readonly includeAxes: true }>();
+const singular = createRenderImageOptions({
+  format: 'webp',
+  label: 'Isometric',
+  includeAxes: true,
+  includeLabel: true,
+  includeScale: true,
+});
+expectTypeOf(singular).toEqualTypeOf<{
+  readonly format: 'webp';
+  readonly label: 'Isometric';
+  readonly includeAxes: true;
+  readonly includeLabel: true;
+  readonly includeScale: true;
+}>();
 expectTypeOf(renderGlbToImage(glb, singular)).toEqualTypeOf<Promise<ExportFile>>();
 
 const options = createRenderImagesOptions({
   format: 'png',
   includeAxes: true,
+  includeLabel: true,
+  includeScale: true,
   views: [
-    { id: 'front', phi: 90, theta: 0 },
-    { id: 'top', phi: 0, theta: 0 },
+    { id: 'front', label: 'Front', phi: 90, theta: 0 },
+    { id: 'top', label: 'Top', phi: 0, theta: 0 },
   ],
 });
 const rendered = renderGlbToImages(glb, options);
@@ -46,6 +60,14 @@ expectTypeOf(dynamic).toEqualTypeOf<Promise<readonly renderModule.RenderedImage[
 void renderGlbToImages(glb, { format: 'png', views: [] });
 // @ts-expect-error includeAxes is shared, not per view
 void renderGlbToImages(glb, { format: 'png', views: [{ id: 'front', phi: 90, theta: 0, includeAxes: true }] });
+// @ts-expect-error includeLabel true requires a singular label
+createRenderImageOptions({ format: 'png', includeLabel: true });
+// @ts-expect-error includeLabel true requires every batch view label
+createRenderImagesOptions({ format: 'png', includeLabel: true, views: [{ id: 'front', phi: 90, theta: 0 }] });
+// @ts-expect-error includeScale is shared, not per view
+void renderGlbToImages(glb, { format: 'png', views: [{ id: 'front', phi: 90, theta: 0, includeScale: true }] });
+// @ts-expect-error singular label is not a batch-level property
+createRenderImagesOptions({ format: 'png', label: 'Front', views: [{ id: 'front', phi: 90, theta: 0 }] });
 // @ts-expect-error format is shared, not per view
 createRenderImagesOptions({ format: 'png', views: [{ id: 'front', phi: 90, theta: 0, format: 'png' }] });
 // @ts-expect-error plural angles belong on each view

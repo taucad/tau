@@ -25,6 +25,7 @@ pub(crate) struct CameraState {
     pub(crate) projection: Mat4,
     pub(crate) view: Mat4,
     pub(crate) forward: Vec3,
+    pub(crate) target_depth: f32,
 }
 
 struct GpuMesh {
@@ -134,6 +135,7 @@ pub(crate) fn camera_state(scene: &Scene, options: &RenderOptions) -> CameraStat
             projection,
             view,
             forward: (center - eye).normalize_or_zero(),
+            target_depth: -view.transform_point3(center).z,
         };
     }
 
@@ -156,6 +158,7 @@ pub(crate) fn camera_state(scene: &Scene, options: &RenderOptions) -> CameraStat
         projection,
         view,
         forward: (center - eye).normalize_or_zero(),
+        target_depth: -view.transform_point3(center).z,
     }
 }
 
@@ -165,7 +168,7 @@ fn stable_camera_up(offset: Vec3, world_up: Vec3) -> Vec3 {
         return world_up;
     }
     if world_up == Vec3::Y {
-        Vec3::NEG_Z
+        Vec3::Z
     } else {
         Vec3::Y
     }
@@ -196,7 +199,7 @@ fn orthographic_half_extents(
     (half_width, half_height)
 }
 
-fn aabb_corners(min: Vec3, max: Vec3) -> [Vec3; 8] {
+pub(crate) fn aabb_corners(min: Vec3, max: Vec3) -> [Vec3; 8] {
     std::array::from_fn(|index| {
         Vec3::new(
             if index & 1 != 0 { max.x } else { min.x },
@@ -802,10 +805,9 @@ impl RenderSession {
 
     pub(crate) async fn render_view(
         &self,
-        scene: &Scene,
+        camera: CameraState,
         options: &RenderOptions,
-    ) -> Result<(Rendered, CameraState), RenderError> {
-        let camera = camera_state(scene, options);
+    ) -> Result<Rendered, RenderError> {
         let mvp = camera.projection * camera.view;
         let line_width_px = options.line_width * options.height as f32 / DEFAULT_HEIGHT as f32;
         let mut frame_data = [0f32; 36];
@@ -916,20 +918,25 @@ impl RenderSession {
         }
         self.readback_buffer.unmap();
 
-        Ok((
-            Rendered {
-                rgba,
-                width: options.width,
-                height: options.height,
-            },
-            camera,
-        ))
+        Ok(Rendered {
+            rgba,
+            width: options.width,
+            height: options.height,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scene() -> Scene {
+        Scene {
+            meshes: Vec::new(),
+            instances: Vec::new(),
+            bounds: Some(([-1.0; 3], [1.0; 3])),
+        }
+    }
 
     fn assert_close(actual: Vec3, expected: Vec3) {
         assert!(
@@ -966,6 +973,68 @@ mod tests {
                 (UpAxis::Z, canonical),
             ] {
                 assert_close(spherical_eye(8.0, phi, theta, axis).0, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn polar_camera_uses_a_positive_screen_up_axis() {
+        for (up, world_up, expected_screen_up) in [
+            (UpAxis::X, Vec3::X, Vec3::Y),
+            (UpAxis::Y, Vec3::Y, Vec3::Z),
+            (UpAxis::Z, Vec3::Z, Vec3::Y),
+        ] {
+            for (phi_deg, expected_forward_sign) in [(0.0, -1.0), (180.0, 1.0)] {
+                for projection in [Projection::Perspective, Projection::Orthographic] {
+                    let camera = camera_state(
+                        &scene(),
+                        &RenderOptions {
+                            phi_deg,
+                            theta_deg: 0.0,
+                            up,
+                            projection,
+                            ..RenderOptions::default()
+                        },
+                    );
+                    let camera_up = camera.view.transform_vector3(expected_screen_up);
+                    assert!(
+                        (camera_up - Vec3::Y).length() < 1e-5,
+                        "{up:?}/{projection:?}/phi={phi_deg}: expected {expected_screen_up:?} to project screen-up, got {camera_up:?}"
+                    );
+                    assert!(
+                        (camera.forward.dot(world_up) - expected_forward_sign).abs() < 1e-5,
+                        "{up:?}/{projection:?}/phi={phi_deg}: unexpected forward {:?}",
+                        camera.forward
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn non_polar_camera_keeps_the_requested_up_axis() {
+        for up in [UpAxis::X, UpAxis::Y, UpAxis::Z] {
+            for projection in [Projection::Perspective, Projection::Orthographic] {
+                let camera = camera_state(
+                    &scene(),
+                    &RenderOptions {
+                        phi_deg: 60.0,
+                        theta_deg: -45.0,
+                        up,
+                        projection,
+                        ..RenderOptions::default()
+                    },
+                );
+                let requested_up = match up {
+                    UpAxis::X => Vec3::X,
+                    UpAxis::Y => Vec3::Y,
+                    UpAxis::Z => Vec3::Z,
+                };
+                let projected_up = camera.view.transform_vector3(requested_up);
+                assert!(
+                    projected_up.y > 0.0,
+                    "{up:?}/{projection:?}: {projected_up:?}"
+                );
             }
         }
     }

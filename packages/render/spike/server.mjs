@@ -27,6 +27,7 @@ const root = fileURLToPath(new URL('.', import.meta.url));
  * @property {object} [codecConformance] GPU-independent codec fingerprints.
  * @property {object} [multiView] Six-singular versus one-batch benchmark.
  * @property {number} [batchViews] Number of views proven against singular bytes.
+ * @property {{ narrow: { columns: number, imageWidths: number[], objectFits: string[] }, wide: { columns: number, imageWidths: number[], objectFits: string[] }, singleObjectFit: string }} [presentation]
  * @property {{ foregroundPixels: number, hasInteriorGap: boolean, leftPixels: number, rightPixels: number }} [analysis]
  * @property {string} [invalidGlbError]
  */

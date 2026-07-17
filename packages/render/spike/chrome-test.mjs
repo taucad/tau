@@ -52,6 +52,23 @@ const assertInterleavedFixture = (analysis) => {
   }
 };
 
+/** @param presentation Browser-measured responsive capture layout. */
+/** @type {(presentation: import('./server.mjs').SpikeResult['presentation']) => void} */
+const assertPresentation = (presentation) => {
+  const widthsMatch = (widths, expected) =>
+    Array.isArray(widths) && widths.length === 6 && widths.every((width) => Math.abs(width - expected) <= 0.25);
+  const { narrow, wide, singleObjectFit } = presentation ?? {};
+  if (
+    narrow?.columns !== 2 ||
+    wide?.columns !== 3 ||
+    !widthsMatch(narrow.imageWidths, 216.5) ||
+    !widthsMatch(wide.imageWidths, 142) ||
+    singleObjectFit !== 'contain'
+  ) {
+    throw new Error(`capture presentation layout drifted: ${JSON.stringify(presentation)}`);
+  }
+};
+
 /** @type {(options: (typeof launchAttempts)[number]) => Promise<(import('./server.mjs').SpikeResult & { options?: object }) | undefined>} */
 const runAttempt = async (options) => {
   const browser = await chromium.launch(options);
@@ -61,12 +78,13 @@ const runAttempt = async (options) => {
       console.log(`  [page] ${message.text()}`);
     });
     let reported = nextResult();
-    await page.goto(`http://127.0.0.1:${port}/`);
+    await page.goto(`http://127.0.0.1:${port}/?presentation=1`);
     let result = await Promise.race([reported, timeoutResult()]);
     console.log(`attempt ${JSON.stringify(options)} → ${result.ok ? 'OK' : `FAIL: ${result.error}`}`);
     if (!result.ok) {
       return undefined;
     }
+    assertPresentation(result.presentation);
     const png = Buffer.from(result.pngBase64 ?? '', 'base64');
     assertPng(png, 768, 432);
     if (png.length < 5000) {
@@ -81,6 +99,7 @@ const runAttempt = async (options) => {
       throw new Error('jpeg output is not a JPEG');
     }
     await mkdir(outDirectory, { recursive: true });
+    await page.screenshot({ fullPage: true, path: `${outDirectory}/chrome-presentation.png` });
     await writeFile(`${outDirectory}/chrome.png`, png);
     await writeFile(`${outDirectory}/chrome.webp`, webp);
     await writeFile(`${outDirectory}/chrome.jpg`, jpeg);

@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import type { RenderImageOptions } from '#options.js';
+import type { RenderImageOptions, RenderImagesOptions } from '#options.js';
 import { imageFileName, imageViewFileName, toImageRequestJson, toImagesRequestJson } from '#options.js';
 
 const parse = (json: string): Record<string, unknown> => JSON.parse(json) as Record<string, unknown>;
 
 describe('image request serialization', () => {
-  it('should omit undefined fields and serialize includeAxes', () => {
-    expect(parse(toImageRequestJson({ format: 'webp', includeAxes: false }))).toEqual({
+  it('should omit undefined fields and serialize disabled includes', () => {
+    expect(
+      parse(toImageRequestJson({ format: 'webp', includeAxes: false, includeLabel: false, includeScale: false })),
+    ).toEqual({
       format: 'webp',
       includeAxes: false,
+      includeLabel: false,
+      includeScale: false,
     });
   });
 
@@ -24,7 +28,10 @@ describe('image request serialization', () => {
       up: 'z',
       projection: 'orthographic',
       background: '#FF800040',
+      label: 'Front',
       includeAxes: true,
+      includeLabel: true,
+      includeScale: true,
     };
 
     expect(parse(toImageRequestJson(options))).toEqual({
@@ -38,7 +45,10 @@ describe('image request serialization', () => {
       up: 'z',
       projection: 'orthographic',
       background: [1, 128 / 255, 0, 64 / 255],
+      label: 'Front',
       includeAxes: true,
+      includeLabel: true,
+      includeScale: true,
     });
   });
 
@@ -48,18 +58,20 @@ describe('image request serialization', () => {
         toImagesRequestJson({
           format: 'png',
           projection: 'orthographic',
+          includeLabel: true,
           views: [
-            { id: 'front', phi: 90, theta: 0 },
-            { id: 'top', phi: 0, theta: 0 },
+            { id: 'front', label: 'Front', phi: 90, theta: 0 },
+            { id: 'top', label: 'Top', phi: 0, theta: 0 },
           ],
         }),
       ),
     ).toEqual({
       format: 'png',
       projection: 'orthographic',
+      includeLabel: true,
       views: [
-        { id: 'front', phi: 90, theta: 0 },
-        { id: 'top', phi: 0, theta: 0 },
+        { id: 'front', label: 'Front', phi: 90, theta: 0 },
+        { id: 'top', label: 'Top', phi: 0, theta: 0 },
       ],
     });
   });
@@ -70,6 +82,9 @@ describe('image request serialization', () => {
       { format: 'png', phi: Number.NaN },
       { format: 'png', background: '#fff' },
       { format: 'png', includeAxes: 'yes' },
+      { format: 'png', includeLabel: true },
+      { format: 'png', includeScale: true, width: 191 },
+      { format: 'png', label: 'snowman ☃' },
       { format: 'png', extra: true },
     ];
     for (const options of invalid) {
@@ -91,6 +106,16 @@ describe('image request serialization', () => {
     for (const views of invalid) {
       expect(() => toImagesRequestJson({ format: 'png', views })).toThrow(TypeError);
     }
+  });
+
+  it('should reject a missing batch label with a precise path', () => {
+    expect(() =>
+      toImagesRequestJson({
+        format: 'png',
+        includeLabel: true,
+        views: [{ id: 'front', phi: 90, theta: 0 }],
+      } as unknown as RenderImagesOptions),
+    ).toThrow('views[0].label is required when includeLabel is true');
   });
 });
 

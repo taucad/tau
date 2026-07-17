@@ -24,25 +24,49 @@ export type RenderUpAxis = 'x' | 'y' | 'z';
  */
 export type RenderProjection = 'perspective' | 'orthographic';
 
+type RenderImageSharedOptions = {
+  readonly format: RenderImageFormat;
+  readonly width?: number;
+  readonly height?: number;
+  readonly quality?: number;
+  readonly margin?: number;
+  readonly up?: RenderUpAxis;
+  readonly projection?: RenderProjection;
+  readonly background?: readonly [number, number, number, number] | string;
+  /** Include the bottom-right camera-aware XYZ indicator and front-on depth marker. */
+  readonly includeAxes?: boolean;
+  /** Include the top-left caller-authored label verbatim. */
+  readonly includeLabel?: boolean;
+  /**
+   * Include a bottom-left physical scale. Perspective labels identify the
+   * subject-center measurement plane with `@ center`; orthographic scale is
+   * depth-invariant.
+   */
+  readonly includeScale?: boolean;
+};
+
+type RenderLabelOptions =
+  | {
+      readonly includeLabel: true;
+      /** Screen-upright caller-authored text rendered verbatim. */
+      readonly label: string;
+    }
+  | {
+      readonly includeLabel?: false;
+      /** Retained but not drawn when label inclusion is disabled. */
+      readonly label?: string;
+    };
+
 /**
  * Options for one rendered image.
  *
  * @public
  */
-export type RenderImageOptions = {
-  readonly format: RenderImageFormat;
-  readonly width?: number;
-  readonly height?: number;
-  readonly quality?: number;
-  readonly phi?: number;
-  readonly theta?: number;
-  readonly margin?: number;
-  readonly up?: RenderUpAxis;
-  readonly projection?: RenderProjection;
-  readonly background?: readonly [number, number, number, number] | string;
-  /** Include the bottom-right XYZ orientation indicator. */
-  readonly includeAxes?: boolean;
-};
+export type RenderImageOptions = RenderImageSharedOptions &
+  RenderLabelOptions & {
+    readonly phi?: number;
+    readonly theta?: number;
+  };
 
 /**
  * One identified camera in a multi-image request.
@@ -50,9 +74,16 @@ export type RenderImageOptions = {
  * @public
  */
 export type RenderImageView<Id extends string = string> = {
+  /** Stable result and filename identity. */
   readonly id: Id;
+  /** Screen-upright caller-authored text rendered verbatim. */
+  readonly label?: string;
   readonly phi: number;
   readonly theta: number;
+};
+
+type LabeledViews<Views extends readonly RenderImageView[]> = {
+  readonly [Index in keyof Views]: Views[Index] & { readonly label: string };
 };
 
 /**
@@ -60,12 +91,12 @@ export type RenderImageView<Id extends string = string> = {
  *
  * @public
  */
-export type RenderImagesOptions<Views extends readonly RenderImageView[] = readonly RenderImageView[]> = Omit<
-  RenderImageOptions,
-  'phi' | 'theta'
-> & {
-  readonly views: Views;
-};
+export type RenderImagesOptions<Views extends readonly RenderImageView[] = readonly RenderImageView[]> =
+  RenderImageSharedOptions &
+    (
+      | { readonly includeLabel: true; readonly views: LabeledViews<Views> }
+      | { readonly includeLabel?: false; readonly views: Views }
+    );
 
 /**
  * One identified rendered file.
@@ -142,7 +173,10 @@ const singularKeys = new Set([
   'up',
   'projection',
   'background',
+  'label',
   'includeAxes',
+  'includeLabel',
+  'includeScale',
 ]);
 
 const pluralKeys = new Set([
@@ -155,12 +189,17 @@ const pluralKeys = new Set([
   'projection',
   'background',
   'includeAxes',
+  'includeLabel',
+  'includeScale',
   'views',
 ]);
 
-const viewKeys = new Set(['id', 'phi', 'theta']);
+const viewKeys = new Set(['id', 'label', 'phi', 'theta']);
 const viewIdPattern = /^[\dA-Za-z][\w-]{0,63}$/;
 const viewIdDescription = '[A-Za-z0-9][A-Za-z0-9_-]{0,63}';
+const annotatedMinDimension = 192;
+const defaultWidth = 768;
+const defaultHeight = 432;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -188,6 +227,31 @@ const assertOptionalFinite = (value: unknown, name: string): void => {
   }
 };
 
+const assertOptionalBoolean = (value: unknown, name: string): void => {
+  if (value !== undefined && typeof value !== 'boolean') {
+    throw new TypeError(`${name} must be a boolean`);
+  }
+};
+
+type AssertLabel = (value: unknown, name: string) => asserts value is string;
+
+const assertLabel: AssertLabel = (value, name) => {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new TypeError(`${name} must be a non-empty string`);
+  }
+  const characters = [...value];
+  if (characters.length > 64) {
+    throw new TypeError(`${name} must contain at most 64 characters`);
+  }
+  const unsupported = characters.find((character) => {
+    const printableAscii = character >= ' ' && character <= '~';
+    return !printableAscii && !['µ', '—', '−'].includes(character);
+  });
+  if (unsupported !== undefined) {
+    throw new TypeError(`${name} contains unsupported character ${JSON.stringify(unsupported)}`);
+  }
+};
+
 const assertRange = (value: unknown, name: string, bounds: readonly [minimum: number, maximum: number]): void => {
   const [minimum, maximum] = bounds;
   assertFinite(value, name);
@@ -207,6 +271,35 @@ const parseHexColor = (value: string): readonly [number, number, number, number]
     Number.parseInt(hex.slice(4, 6), 16) / 255,
     hex.length === 8 ? Number.parseInt(hex.slice(6, 8), 16) / 255 : 1,
   ];
+};
+
+const validateAnnotatedDimensions = (options: Omit<RenderImageOptions, 'phi' | 'theta'>): void => {
+  if (![options.includeAxes, options.includeLabel, options.includeScale].includes(true)) {
+    return;
+  }
+  if (
+    (options.width ?? defaultWidth) < annotatedMinDimension ||
+    (options.height ?? defaultHeight) < annotatedMinDimension
+  ) {
+    throw new TypeError(`annotated images must be at least ${annotatedMinDimension}x${annotatedMinDimension}`);
+  }
+};
+
+const validateBackground = (background: unknown): void => {
+  if (typeof background === 'string') {
+    parseHexColor(background);
+    return;
+  }
+  if (
+    background !== undefined &&
+    (!isUnknownArray(background) ||
+      background.length !== 4 ||
+      background.some(
+        (channel) => typeof channel !== 'number' || !Number.isFinite(channel) || channel < 0 || channel > 1,
+      ))
+  ) {
+    throw new TypeError('background must contain four channels between 0 and 1');
+  }
 };
 
 const validateCommon = (options: Omit<RenderImageOptions, 'phi' | 'theta'>): void => {
@@ -231,23 +324,11 @@ const validateCommon = (options: Omit<RenderImageOptions, 'phi' | 'theta'>): voi
   if (options.projection !== undefined && !['perspective', 'orthographic'].includes(options.projection)) {
     throw new TypeError('projection must be perspective or orthographic');
   }
-  if (options.includeAxes !== undefined && typeof options.includeAxes !== 'boolean') {
-    throw new TypeError('includeAxes must be a boolean');
-  }
-  const { background: configuredBackground } = options;
-  const background: unknown = configuredBackground;
-  if (typeof background === 'string') {
-    parseHexColor(background);
-  } else if (
-    background !== undefined &&
-    (!isUnknownArray(background) ||
-      background.length !== 4 ||
-      background.some(
-        (channel) => typeof channel !== 'number' || !Number.isFinite(channel) || channel < 0 || channel > 1,
-      ))
-  ) {
-    throw new TypeError('background must contain four channels between 0 and 1');
-  }
+  assertOptionalBoolean(options.includeAxes, 'includeAxes');
+  assertOptionalBoolean(options.includeLabel, 'includeLabel');
+  assertOptionalBoolean(options.includeScale, 'includeScale');
+  validateAnnotatedDimensions(options);
+  validateBackground(options.background);
 };
 
 const normalizedBackground = (
@@ -270,6 +351,12 @@ export const toImageRequestJson = (options: RenderImageOptions): string => {
   }
   assertKnownKeys(input, singularKeys, 'options');
   validateCommon(options);
+  if (options.label !== undefined) {
+    assertLabel(options.label, 'label');
+  }
+  if (input['includeLabel'] === true && input['label'] === undefined) {
+    throw new TypeError('label is required when includeLabel is true');
+  }
   assertOptionalFinite(options.phi, 'phi');
   assertOptionalFinite(options.theta, 'theta');
   return JSON.stringify({
@@ -283,7 +370,10 @@ export const toImageRequestJson = (options: RenderImageOptions): string => {
     up: options.up,
     projection: options.projection,
     background: normalizedBackground(options.background),
+    label: options.label,
     includeAxes: options.includeAxes,
+    includeLabel: options.includeLabel,
+    includeScale: options.includeScale,
   });
 };
 
@@ -313,7 +403,7 @@ export const toImagesRequestJson = (options: RenderImagesOptions): string => {
       throw new TypeError(`views[${index}] must be an object`);
     }
     assertKnownKeys(view, viewKeys, `views[${index}]`);
-    const { id, phi, theta } = view;
+    const { id, label, phi, theta } = view;
     if (typeof id !== 'string' || !viewIdPattern.test(id)) {
       throw new TypeError(`views[${index}].id must match ${viewIdDescription}`);
     }
@@ -323,7 +413,13 @@ export const toImagesRequestJson = (options: RenderImagesOptions): string => {
     ids.add(id);
     assertFinite(phi, `views[${index}].phi`);
     assertFinite(theta, `views[${index}].theta`);
-    normalizedViews.push({ id, phi, theta });
+    if (label !== undefined) {
+      assertLabel(label, `views[${index}].label`);
+    }
+    if (options.includeLabel && label === undefined) {
+      throw new TypeError(`views[${index}].label is required when includeLabel is true`);
+    }
+    normalizedViews.push({ id, label, phi, theta });
   }
   return JSON.stringify({
     format: options.format,
@@ -335,6 +431,8 @@ export const toImagesRequestJson = (options: RenderImagesOptions): string => {
     projection: options.projection,
     background: normalizedBackground(options.background),
     includeAxes: options.includeAxes,
+    includeLabel: options.includeLabel,
+    includeScale: options.includeScale,
     views: normalizedViews,
   });
 };

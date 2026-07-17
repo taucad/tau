@@ -75,9 +75,11 @@ describe('renderGlbToImages', () => {
   const options = {
     format: 'png',
     includeAxes: true,
+    includeLabel: true,
+    includeScale: true,
     views: [
-      { id: 'front', phi: 90, theta: 0 },
-      { id: 'top', phi: 0, theta: 0 },
+      { id: 'front', label: 'Front', phi: 90, theta: 0 },
+      { id: 'top', label: 'Top', phi: 0, theta: 0 },
     ],
   } as const;
 

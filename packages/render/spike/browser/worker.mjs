@@ -67,6 +67,15 @@ const BENCH_SIZES = [
   [3840, 2160],
 ];
 
+const CAPTURE_VIEWS = [
+  { id: 'front', label: 'Front — View From +Z', phi: 90, theta: 270 },
+  { id: 'back', label: 'Back — View From −Z', phi: 90, theta: 90 },
+  { id: 'right', label: 'Right — View From +X', phi: 90, theta: 0 },
+  { id: 'left', label: 'Left — View From −X', phi: 90, theta: 180 },
+  { id: 'top', label: 'Top — View From +Y', phi: 0, theta: 0 },
+  { id: 'bottom', label: 'Bottom — View From −Y', phi: 180, theta: 0 },
+];
+
 /**
  * Failure-path diagnostic: report the raw WebGPU state of the worker scope so
  * a wasm-glue error can be attributed (missing API vs denied adapter vs a
@@ -93,9 +102,101 @@ const probeGpu = async () => {
   }
 };
 
+/**
+ * @param {{
+ *   glb: Uint8Array<ArrayBuffer>,
+ *   shared: { width: number, height: number, format: 'png' },
+ * }} request
+ * @returns {Promise<number>}
+ */
+const verifyAnnotatedParity = async ({ glb, shared }) => {
+  const views = [CAPTURE_VIEWS[0], CAPTURE_VIEWS[4]];
+  const options = {
+    ...shared,
+    projection: 'orthographic',
+    includeAxes: true,
+    includeLabel: true,
+    includeScale: true,
+  };
+  const batch = await render_glb_to_images(glb, JSON.stringify({ ...options, views }));
+  if (batch.length !== views.length) {
+    throw new Error('annotated batch output shape wrong');
+  }
+  for (const [index, view] of views.entries()) {
+    // oxlint-disable-next-line no-await-in-loop -- conformance compares each batch output with its singular operation
+    const singular = await render_glb_to_image(
+      glb,
+      JSON.stringify({ ...options, label: view.label, phi: view.phi, theta: view.theta }),
+    );
+    if (batch[index].length !== singular.length || batch[index].some((byte, offset) => byte !== singular[offset])) {
+      throw new Error(`annotated batch view ${view.id} differs from singular bytes`);
+    }
+  }
+  return batch.reduce((total, image) => total + image.length, 0);
+};
+
+/**
+ * Render the same annotated captures that exercise the chat presentation.
+ * The page owns responsive layout; the renderer only owns the image bytes.
+ *
+ * @param {Uint8Array<ArrayBuffer>} glb
+ */
+const renderPresentationImages = async (glb) => {
+  const shared = {
+    width: 800,
+    height: 800,
+    format: 'png',
+    background: [0.94, 0.97, 0.96, 1],
+    includeAxes: true,
+    includeLabel: true,
+    includeScale: true,
+  };
+  const single = await render_glb_to_image(
+    glb,
+    JSON.stringify({
+      ...shared,
+      projection: 'perspective',
+      label: 'Isometric',
+      phi: 60,
+      theta: -45,
+    }),
+  );
+  const batch = await render_glb_to_images(
+    glb,
+    JSON.stringify({ ...shared, projection: 'orthographic', views: CAPTURE_VIEWS }),
+  );
+  if (batch.length !== CAPTURE_VIEWS.length) {
+    throw new Error(`presentation batch returned ${batch.length} images, expected ${CAPTURE_VIEWS.length}`);
+  }
+  return {
+    single,
+    views: CAPTURE_VIEWS.map((view, index) => ({ id: view.id, bytes: batch[index] })),
+  };
+};
+
+/**
+ * @param {Uint8Array<ArrayBuffer>} glb
+ * @param {boolean | undefined} enabled
+ */
+const preparePresentation = async (glb, enabled) => {
+  if (!enabled) {
+    return { presentationImages: undefined, presentationTransfers: [] };
+  }
+  const presentationImages = await renderPresentationImages(glb);
+  return {
+    presentationImages,
+    presentationTransfers: [
+      presentationImages.single.buffer,
+      ...presentationImages.views.map((view) => view.bytes.buffer),
+    ],
+  };
+};
+
 globalThis.addEventListener('message', async (event) => {
-  const { glbUrl, width, height, bench } =
-    /** @type {{ glbUrl: string, width: number, height: number, bench?: boolean }} */ (event.data);
+  const { glbUrl, width, height, bench, presentation } =
+    /** @type {{ glbUrl: string, width: number, height: number, bench?: boolean, presentation?: boolean }} */ (
+      event.data
+    );
   let step = 'init';
   try {
     const t0 = performance.now();
@@ -182,6 +283,12 @@ globalThis.addEventListener('message', async (event) => {
       }
     }
 
+    step = 'annotated-batch';
+    const annotatedBytes = await verifyAnnotatedParity({ glb, shared });
+
+    step = 'presentation-images';
+    const { presentationImages, presentationTransfers } = await preparePresentation(glb, presentation);
+
     globalThis.postMessage(
       {
         ok: true,
@@ -194,10 +301,12 @@ globalThis.addEventListener('message', async (event) => {
         secondRenderTime,
         codecTime,
         batchViews: batch.length,
+        annotatedBytes,
         analysis,
         invalidGlbError,
+        presentationImages,
       },
-      [png.buffer, webp.buffer, jpeg.buffer],
+      [png.buffer, webp.buffer, jpeg.buffer, ...presentationTransfers],
     );
   } catch (error) {
     const diagnostic = await probeGpu();

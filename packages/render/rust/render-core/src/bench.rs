@@ -4,10 +4,9 @@
 //! images around.
 
 use crate::{
-    ImageFormat, Projection, RenderError, RenderOptions, RenderView, Rendered, encode,
-    render_glb_to_image, render_glb_to_images_profiled,
+    ImageFormat, RenderError, RenderOptions, RenderView, Rendered, encode, render_glb_to_image,
+    render_glb_to_images_profiled,
 };
-use glam::{Mat4, Vec3};
 
 /// FNV-1a 64 — enough to compare artifacts for equality across legs.
 pub fn fnv64(bytes: &[u8]) -> u64 {
@@ -56,32 +55,39 @@ pub fn codec_conformance() -> Result<serde_json::Value, RenderError> {
         width,
         height,
     };
-    let mut with_axes = Rendered {
-        rgba: base.rgba.clone(),
-        width,
-        height,
+    let scene = crate::glb::Scene {
+        meshes: Vec::new(),
+        instances: Vec::new(),
+        bounds: None,
     };
-    let eye = Vec3::new(3.0, 2.0, 4.0);
-    let forward = (-eye).normalize();
-    crate::axis_indicator::stamp_axis_indicator(
-        &mut with_axes,
-        crate::render::CameraState {
-            projection: Mat4::IDENTITY,
-            view: glam::camera::rh::view::look_at_mat4(eye, Vec3::ZERO, Vec3::Y),
-            forward,
-        },
-        Projection::Perspective,
-        &mut Vec::new(),
-    );
-    Ok(serde_json::json!({
+    let mut report = serde_json::json!({
         "width": width,
         "height": height,
         "base": codec_fingerprints(&base)?,
-        "withAxes": codec_fingerprints(&with_axes)?,
-    }))
+    });
+    for bits in 1..8 {
+        let options = RenderOptions {
+            width,
+            height,
+            label: Some("View".into()),
+            include_axes: bits & 1 != 0,
+            include_label: bits & 2 != 0,
+            include_scale: bits & 4 != 0,
+            ..Default::default()
+        };
+        let prepared = crate::capture_overlay::prepare_view(&scene, &options)?;
+        let mut rendered = Rendered {
+            rgba: base.rgba.clone(),
+            width,
+            height,
+        };
+        crate::capture_overlay::stamp_capture_overlay(&mut rendered, &prepared, &mut Vec::new());
+        report[format!("include{bits}")] = codec_fingerprints(&rendered)?;
+    }
+    Ok(report)
 }
 
-/// Compare six separate renders with one six-view batch, with and without axes.
+/// Compare six separate renders with one six-view batch for every annotation combination.
 pub async fn bench_multi_view(
     glb: &[u8],
     width: u32,
@@ -90,43 +96,54 @@ pub async fn bench_multi_view(
 ) -> Result<serde_json::Value, RenderError> {
     let views = [
         RenderView {
-            id: "isometric".into(),
-            phi_deg: 60.0,
-            theta_deg: -45.0,
-        },
-        RenderView {
             id: "front".into(),
+            label: Some("Front".into()),
             phi_deg: 90.0,
-            theta_deg: 0.0,
+            theta_deg: 270.0,
         },
         RenderView {
             id: "back".into(),
-            phi_deg: 90.0,
-            theta_deg: 180.0,
-        },
-        RenderView {
-            id: "right".into(),
+            label: Some("Back".into()),
             phi_deg: 90.0,
             theta_deg: 90.0,
         },
         RenderView {
+            id: "right".into(),
+            label: Some("Right".into()),
+            phi_deg: 90.0,
+            theta_deg: 0.0,
+        },
+        RenderView {
+            id: "left".into(),
+            label: Some("Left".into()),
+            phi_deg: 90.0,
+            theta_deg: 180.0,
+        },
+        RenderView {
             id: "top".into(),
+            label: Some("Top".into()),
             phi_deg: 0.0,
             theta_deg: 0.0,
         },
         RenderView {
             id: "bottom".into(),
+            label: Some("Bottom".into()),
             phi_deg: 180.0,
             theta_deg: 0.0,
         },
     ];
     let mut variants = Vec::new();
-    for include_axes in [false, true] {
+    for bits in 0..8 {
+        let include_axes = bits & 1 != 0;
+        let include_label = bits & 2 != 0;
+        let include_scale = bits & 4 != 0;
         let options = RenderOptions {
             width,
             height,
             background: Some([1.0, 1.0, 1.0, 1.0]),
             include_axes,
+            include_label,
+            include_scale,
             ..Default::default()
         };
         let singular_started = now();
@@ -136,6 +153,7 @@ pub async fn bench_multi_view(
             let mut view_options = options.clone();
             view_options.phi_deg = view.phi_deg;
             view_options.theta_deg = view.theta_deg;
+            view_options.label.clone_from(&view.label);
             let started = now();
             let bytes = render_glb_to_image(glb, &view_options, ImageFormat::WebP).await?;
             singular_ms.push(now() - started);
@@ -158,6 +176,8 @@ pub async fn bench_multi_view(
             .collect();
         variants.push(serde_json::json!({
             "includeAxes": include_axes,
+            "includeLabel": include_label,
+            "includeScale": include_scale,
             "singular": {
                 "wallMs": singular_wall_ms,
                 "viewMs": singular_ms,
@@ -256,8 +276,11 @@ mod tests {
         let first = codec_conformance().expect("conformance");
         let second = codec_conformance().expect("conformance");
         assert_eq!(first, second);
-        assert_ne!(first["base"]["pixelFnv"], first["withAxes"]["pixelFnv"]);
-        for fixture in ["base", "withAxes"] {
+        assert_ne!(first["base"]["pixelFnv"], first["include1"]["pixelFnv"]);
+        for fixture in [
+            "base", "include1", "include2", "include3", "include4", "include5", "include6",
+            "include7",
+        ] {
             for codec in ["png", "webp", "jpeg"] {
                 assert_eq!(
                     first[fixture][codec]["fnv"].as_str().map(str::len),

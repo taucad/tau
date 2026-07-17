@@ -5,8 +5,9 @@ use crate::{Projection, RenderError, RenderOptions, UpAxis};
 use serde::Deserialize;
 use std::collections::HashSet;
 
-const MIN_DIMENSION: u32 = 16;
-const MAX_DIMENSION: u32 = 4096;
+pub(crate) const MIN_DIMENSION: u32 = 16;
+pub(crate) const MAX_DIMENSION: u32 = 4096;
+pub(crate) const ANNOTATED_MIN_DIMENSION: u32 = 192;
 
 /// Wire shape for one image.
 #[derive(Debug, Default, Deserialize)]
@@ -22,7 +23,10 @@ pub struct RenderRequest {
     pub up: Option<String>,
     pub projection: Option<String>,
     pub background: Option<[f32; 4]>,
+    pub label: Option<String>,
     pub include_axes: Option<bool>,
+    pub include_label: Option<bool>,
+    pub include_scale: Option<bool>,
 }
 
 /// Wire shape for one identified camera in a batch.
@@ -30,6 +34,7 @@ pub struct RenderRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RenderImageViewRequest {
     pub id: String,
+    pub label: Option<String>,
     pub phi: f32,
     pub theta: f32,
 }
@@ -47,6 +52,8 @@ pub struct RenderImagesRequest {
     pub projection: Option<String>,
     pub background: Option<[f32; 4]>,
     pub include_axes: Option<bool>,
+    pub include_label: Option<bool>,
+    pub include_scale: Option<bool>,
     pub views: Vec<RenderImageViewRequest>,
 }
 
@@ -54,6 +61,7 @@ pub struct RenderImagesRequest {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderView {
     pub id: String,
+    pub label: Option<String>,
     pub phi_deg: f32,
     pub theta_deg: f32,
 }
@@ -68,6 +76,8 @@ struct CommonRequest<'a> {
     projection: Option<&'a str>,
     background: Option<[f32; 4]>,
     include_axes: Option<bool>,
+    include_label: Option<bool>,
+    include_scale: Option<bool>,
 }
 
 impl RenderRequest {
@@ -77,6 +87,13 @@ impl RenderRequest {
 
     pub fn resolve(&self) -> Result<(RenderOptions, ImageFormat), RenderError> {
         let (mut options, format) = resolve_common(self.common())?;
+        validate_optional_label(self.label.as_deref(), "label")?;
+        if options.include_label && self.label.is_none() {
+            return Err(RenderError::Parse(
+                "label is required when includeLabel is true".into(),
+            ));
+        }
+        options.label.clone_from(&self.label);
         options.phi_deg = finite_or_default(self.phi, options.phi_deg, "phi")?;
         options.theta_deg = finite_or_default(self.theta, options.theta_deg, "theta")?;
         Ok((options, format))
@@ -93,6 +110,8 @@ impl RenderRequest {
             projection: self.projection.as_deref(),
             background: self.background,
             include_axes: self.include_axes,
+            include_label: self.include_label,
+            include_scale: self.include_scale,
         }
     }
 }
@@ -133,8 +152,15 @@ impl RenderImagesRequest {
                     "views[{index}].theta must be finite"
                 )));
             }
+            validate_optional_label(view.label.as_deref(), &format!("views[{index}].label"))?;
+            if options.include_label && view.label.is_none() {
+                return Err(RenderError::Parse(format!(
+                    "views[{index}].label is required when includeLabel is true"
+                )));
+            }
             views.push(RenderView {
                 id: view.id.clone(),
+                label: view.label.clone(),
                 phi_deg: view.phi,
                 theta_deg: view.theta,
             });
@@ -153,6 +179,8 @@ impl RenderImagesRequest {
             projection: self.projection.as_deref(),
             background: self.background,
             include_axes: self.include_axes,
+            include_label: self.include_label,
+            include_scale: self.include_scale,
         }
     }
 }
@@ -166,6 +194,16 @@ fn resolve_common(request: CommonRequest<'_>) -> Result<(RenderOptions, ImageFor
     {
         return Err(RenderError::Parse(format!(
             "dimensions {width}x{height} outside {MIN_DIMENSION}..={MAX_DIMENSION}"
+        )));
+    }
+    let include_axes = request.include_axes.unwrap_or(false);
+    let include_label = request.include_label.unwrap_or(false);
+    let include_scale = request.include_scale.unwrap_or(false);
+    if (include_axes || include_label || include_scale)
+        && (width < ANNOTATED_MIN_DIMENSION || height < ANNOTATED_MIN_DIMENSION)
+    {
+        return Err(RenderError::Parse(format!(
+            "annotated images must be at least {ANNOTATED_MIN_DIMENSION}x{ANNOTATED_MIN_DIMENSION}"
         )));
     }
 
@@ -221,11 +259,38 @@ fn resolve_common(request: CommonRequest<'_>) -> Result<(RenderOptions, ImageFor
             up,
             projection,
             background: request.background,
-            include_axes: request.include_axes.unwrap_or(false),
+            include_axes,
+            include_label,
+            include_scale,
             ..defaults
         },
         format,
     ))
+}
+
+fn validate_optional_label(label: Option<&str>, name: &str) -> Result<(), RenderError> {
+    let Some(label) = label else {
+        return Ok(());
+    };
+    if label.trim().is_empty() {
+        return Err(RenderError::Parse(format!(
+            "{name} must be a non-empty string"
+        )));
+    }
+    if label.chars().count() > 64 {
+        return Err(RenderError::Parse(format!(
+            "{name} must contain at most 64 characters"
+        )));
+    }
+    if let Some(character) = label.chars().find(|character| {
+        let code = u32::from(*character);
+        !((0x20..=0x7e).contains(&code) || matches!(code, 0xb5 | 0x2014 | 0x2212))
+    }) {
+        return Err(RenderError::Parse(format!(
+            "{name} contains unsupported character {character:?}"
+        )));
+    }
+    Ok(())
 }
 
 fn finite_or_default(value: Option<f32>, default: f32, name: &str) -> Result<f32, RenderError> {
@@ -258,18 +323,23 @@ mod tests {
         assert_eq!((options.width, options.height), (768, 432));
         assert_eq!((options.phi_deg, options.theta_deg), (60.0, -45.0));
         assert!(!options.include_axes);
+        assert!(!options.include_label);
+        assert!(!options.include_scale);
         assert_eq!(format, ImageFormat::Png);
     }
 
     #[test]
     fn plural_resolves_shared_settings_and_ordered_views() {
         let (options, format, views) = RenderImagesRequest::from_json(
-            r#"{"format":"webp","includeAxes":true,"views":[{"id":"front","phi":90,"theta":0},{"id":"top","phi":0,"theta":0}]}"#,
+            r#"{"format":"webp","includeAxes":true,"includeLabel":true,"includeScale":true,"views":[{"id":"front","label":"Front","phi":90,"theta":0},{"id":"top","label":"Top","phi":0,"theta":0}]}"#,
         )
         .expect("parse")
         .resolve()
         .expect("resolve");
         assert!(options.include_axes);
+        assert!(options.include_label);
+        assert!(options.include_scale);
+        assert_eq!(views[0].label.as_deref(), Some("Front"));
         assert_eq!(format, ImageFormat::WebP);
         assert_eq!(views[0].id, "front");
         assert_eq!(views[1].id, "top");
@@ -286,6 +356,9 @@ mod tests {
             r#"{"format":"gif"}"#,
             r#"{"background":[2.0,0.0,0.0,1.0]}"#,
             r#"{"zoomLevel":1.8}"#,
+            r#"{"includeLabel":true}"#,
+            r#"{"includeAxes":true,"width":191}"#,
+            r#"{"label":"snowman ☃"}"#,
             "not json",
         ] {
             assert!(
@@ -305,6 +378,7 @@ mod tests {
             r#"{"views":[{"id":"front","phi":90,"theta":0},{"id":"front","phi":0,"theta":0}]}"#,
             r#"{"views":[{"id":"front","phi":90,"theta":0,"format":"png"}]}"#,
             r#"{"phi":90,"views":[{"id":"front","phi":90,"theta":0}]}"#,
+            r#"{"includeLabel":true,"views":[{"id":"front","phi":90,"theta":0}]}"#,
         ] {
             assert!(
                 RenderImagesRequest::from_json(json)

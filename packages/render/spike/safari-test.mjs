@@ -9,7 +9,7 @@ import { startServer } from '#spike/server.mjs';
 
 const outDirectory = fileURLToPath(new URL('out', import.meta.url));
 const { server, port, nextResult } = await startServer();
-const url = `http://127.0.0.1:${port}/`;
+const url = `http://127.0.0.1:${port}/?presentation=1`;
 
 console.log(`opening ${url} in Safari…`);
 execFile('open', ['-a', 'Safari', url]);

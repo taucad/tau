@@ -4,7 +4,9 @@
  * Picks the wasm (browser worker WebGPU) or napi (Node native) artifact and
  * renders one or many identified views with typed failures.
  *
- * Blueprint: docs/research/render-multi-view-images-and-axis-indicator.md
+ * Blueprints:
+ * - docs/research/render-multi-view-images-and-axis-indicator.md
+ * - docs/research/render-capture-overlay-annotations.md
  */
 
 export { renderGlbToImage } from '#render-glb-to-image.js';

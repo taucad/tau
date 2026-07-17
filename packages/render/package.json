@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Headless GLB renderer for one or many ordered image views, with optional XYZ orientation indicators.",
+  "description": "Headless GLB renderer for one or many ordered image views, with optional deterministic capture annotations.",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -15,6 +15,7 @@
   "scripts": {
     "test:rust": "cargo test --manifest-path rust/Cargo.toml -p render-core",
     "build:wasm": "wasm-pack build rust/render-wasm --release --target web --out-dir ../../src/wasm && rm -f src/wasm/.gitignore",
+    "check:wasm-size": "node spike/check-wasm-size.mjs",
     "build:napi": "cargo build --manifest-path rust/Cargo.toml --release -p render-napi && mkdir -p src/native && cp rust/target/release/librender_napi.dylib src/native/render-napi.node",
     "spike:native": "cargo run --manifest-path rust/Cargo.toml --release -p render-core --example render -- spike/fixtures/interleaved-instanced-lines.glb spike/out/native-interleaved.png",
     "spike:wasm": "wasm-pack build rust/render-wasm --release --target web --out-dir ../../spike/browser/pkg",

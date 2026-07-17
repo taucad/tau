@@ -3,7 +3,7 @@
 
 import { createExportFile } from '@taucad/types/constants';
 import { RenderError } from '#render-error.js';
-import type { RenderImagesOptions, RenderedImages, StrictRenderImagesOptions } from '#options.js';
+import type { RenderImageView, RenderImagesOptions, RenderedImages, StrictRenderImagesOptions } from '#options.js';
 import { imageViewFileName, toImagesRequestJson } from '#options.js';
 import { renderManyRaw } from '#renderer.js';
 
@@ -42,7 +42,7 @@ export const renderGlbToImages = async <const Options extends RenderImagesOption
     );
   }
 
-  return options.views.map((view, index) => ({
+  return (options.views as readonly RenderImageView[]).map((view, index) => ({
     id: view.id,
     file: createExportFile(
       options.format,

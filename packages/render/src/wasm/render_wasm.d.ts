@@ -44,11 +44,11 @@ export interface InitOutput {
   readonly bench_multi_view: (a: number, b: number, c: number, d: number) => number;
   readonly codec_conformance: (a: number) => void;
   readonly describe_adapter: () => number;
-  readonly __wasm_bindgen_func_elem_650: (a: number, b: number, c: number, d: number) => void;
-  readonly __wasm_bindgen_func_elem_650_1: (a: number, b: number, c: number, d: number) => void;
-  readonly __wasm_bindgen_func_elem_650_2: (a: number, b: number, c: number, d: number) => void;
-  readonly __wasm_bindgen_func_elem_650_3: (a: number, b: number, c: number, d: number) => void;
-  readonly __wasm_bindgen_func_elem_900: (a: number, b: number, c: number, d: number) => void;
+  readonly __wasm_bindgen_func_elem_662: (a: number, b: number, c: number, d: number) => void;
+  readonly __wasm_bindgen_func_elem_662_1: (a: number, b: number, c: number, d: number) => void;
+  readonly __wasm_bindgen_func_elem_662_2: (a: number, b: number, c: number, d: number) => void;
+  readonly __wasm_bindgen_func_elem_662_3: (a: number, b: number, c: number, d: number) => void;
+  readonly __wasm_bindgen_func_elem_912: (a: number, b: number, c: number, d: number) => void;
   readonly __wbindgen_export: (a: number, b: number) => number;
   readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_export3: (a: number) => void;

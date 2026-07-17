@@ -35,3 +35,6 @@ wgpu = { version = "30.0.0", default-features = false, features = ["std", "webgp
 [dev-dependencies]
 pollster = "1.0.1"
 zune-jpeg = "0.5.15"
+
+[build-dependencies]
+fontdue = { version = "=0.9.3", default-features = false, features = ["std"] }

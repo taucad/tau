@@ -1,4 +1,5 @@
 import type { KernelProvider } from '@taucad/runtime';
+import { jscadModelingTypes, replicadTypes } from '@taucad/api-extractor/kernel-types';
 import { describe, expect, it } from 'vitest';
 import {
   formatAddTopLevelExportRecovery,
@@ -6,6 +7,29 @@ import {
 } from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.js';
 
 const allKernels: readonly KernelProvider[] = ['openscad', 'replicad', 'jscad', 'manifold', 'opencascadejs', 'zoo'];
+
+describe('KernelConfig raw declaration prompts', () => {
+  it('should preserve JSCAD root and subpath declarations in the prompt', () => {
+    const rootDeclarations = jscadModelingTypes['@jscad/modeling'];
+    const colorDeclarations = jscadModelingTypes['@jscad/modeling/colors'];
+    if (rootDeclarations === undefined || colorDeclarations === undefined) {
+      throw new TypeError('Generated JSCAD declaration maps are incomplete.');
+    }
+
+    const { codeStandards } = getKernelConfig('jscad');
+    expect(codeStandards).toContain(rootDeclarations);
+    expect(codeStandards).toContain(colorDeclarations);
+  });
+
+  it('should preserve raw Replicad declarations in the prompt', () => {
+    const declarations = replicadTypes['replicad'];
+    if (declarations === undefined) {
+      throw new TypeError('Generated Replicad declarations are missing.');
+    }
+
+    expect(getKernelConfig('replicad').codeStandards).toContain(declarations);
+  });
+});
 
 describe('KernelConfig.topLevelExportExample', () => {
   describe.each(allKernels)('%s', (kernel) => {

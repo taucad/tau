@@ -95,6 +95,19 @@ describe('graphics view settings parsing', () => {
     expect(settings.graphicsBackend).toBe('webgl');
   });
 
+  it.each([3, 4, 5] as const)('should normalize persisted WebGPU from schema v%s to WebGL', (schemaVersion) => {
+    const settings = parseGraphicsViewSettings({
+      ...defaultGraphicsSettings,
+      schemaVersion,
+      graphicsBackend: 'webgpu',
+      enableGrid: false,
+    });
+
+    expect(settings.schemaVersion).toBe(5);
+    expect(settings.graphicsBackend).toBe('webgl');
+    expect(settings.enableGrid).toBe(false);
+  });
+
   it('should fall back to defaults for corrupt persisted settings', () => {
     const settings = parseGraphicsViewSettings({
       ...defaultGraphicsSettings,

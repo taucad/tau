@@ -253,19 +253,17 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
 
   const parsed = result.data;
   if (parsed.schemaVersion === 5) {
-    const persistedBackend = parsed.graphicsBackend;
     return {
       ...parsed,
       componentDisplay: omitEmptyComponentDisplayState(parsed.componentDisplay),
-      graphicsBackend: persistedBackend === 'webgpu' ? 'webgpu' : 'webgl',
+      graphicsBackend: 'webgl',
     };
   }
 
   if (parsed.schemaVersion === 4) {
-    const persistedBackend = parsed.graphicsBackend;
     return {
       ...parsed,
-      graphicsBackend: persistedBackend === 'webgpu' ? 'webgpu' : 'webgl',
+      graphicsBackend: 'webgl',
       schemaVersion: 5,
     };
   }
@@ -273,7 +271,7 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
   if (parsed.schemaVersion === 3) {
     return {
       ...parsed,
-      graphicsBackend: parsed.graphicsBackend === 'webgpu' ? 'webgpu' : 'webgl',
+      graphicsBackend: 'webgl',
       schemaVersion: 5,
     };
   }

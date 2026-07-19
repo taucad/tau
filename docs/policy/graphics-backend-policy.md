@@ -3,8 +3,9 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js stacks, TSL materials, snapshots, and e2e parity'
 status: active
 created: '2026-05-07'
-updated: '2026-06-17'
+updated: '2026-07-19'
 related:
+  - docs/research/viewer-webgpu-selector-removal.md
   - docs/research/webgpu-migration-graphics-stack.md
   - docs/research/screenshot-viewport-shared-material-state-bleed.md
   - docs/research/webgpu-gltf-edge-near-orthographic-occlusion.md
@@ -17,13 +18,15 @@ Internal reference for how Tau ships and validates the WebGL/WebGPU rendering st
 
 ## Rationale
 
-Users need predictable CAD rendering across browsers while moving the default toward WebGPU. Without policy, shaders drift silently (GLSL-only paths, missing snapshots, uncaught backend assumptions) and regressions slip past unit tests.
+Users need predictable CAD rendering across browsers. WebGL is the public interactive-viewer baseline while WebGPU remains an internal engineering path until a separate readiness review approves public support. Without policy, shaders drift silently (GLSL-only paths, missing snapshots, uncaught backend assumptions) and regressions slip past unit tests.
 
 ## Rules
 
 ### 1. Consume `resolvedGraphicsBackend`, never hardcode paths
 
-Interactive viewers must derive behavior from **`resolvedGraphicsBackend`**: **`'webgl' | 'webgpu'`**, after merging persisted preference, GPU probe, and optional **`?graphicsBackend=`** URL override (**`apps/ui/app/components/geometry/graphics/graphics-backend.ts`**). Avoid scattering raw **`new WebGLRenderer()`** calls except inside **`createTauRenderer`** (**`apps/ui/app/components/geometry/graphics/three/tau-renderer.ts`**) and other shared factories (`createTauR3fGlProp`, gizmo/`SharedRenderer` helpers) that already branch by backend + use-case.
+Public interactive viewers must use WebGL. Accept historical persisted backend values for backward compatibility, but normalize them to WebGL in **`parseGraphicsViewSettings()`**. Internal manual and e2e checks may select WebGPU through the optional **`?graphicsBackend=`** URL override in **`apps/ui/app/components/geometry/graphics/graphics-backend.ts`**; this override is not a public setting.
+
+Renderer consumers must derive behavior from **`resolvedGraphicsBackend`**: **`'webgl' | 'webgpu'`**. Avoid scattering raw **`new WebGLRenderer()`** calls except inside **`createTauRenderer`** (**`apps/ui/app/components/geometry/graphics/three/tau-renderer.ts`**) and other shared factories (`createTauR3fGlProp`, gizmo/`SharedRenderer` helpers) that already branch by backend + use-case.
 
 **Why**: Duplicate renderer construction bypasses tracking, fallback, post-processing wiring, and shared tuning (MSAA × log-depth × reversed-Z).
 

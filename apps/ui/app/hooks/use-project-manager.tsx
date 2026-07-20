@@ -32,7 +32,7 @@ import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { defaultProjectName } from '#constants/project-names.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
-import { isUsableProjectName, useProjectNameClient } from '#chat-clients/use-project-name-client.js';
+import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 
 /**
  * Shared options for initial chat configuration.
@@ -198,10 +198,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
             text: options.initialMessage.content,
             imageUrls: options.initialMessage.imageUrls,
           });
-          if (!isUsableProjectName(generated)) {
-            throw new Error('Project naming did not return a specific project name');
-          }
-          projectName = generated.trim();
+          projectName = generated.trim() || defaultProjectName;
         }
         const mainFileName = getMainFile(options.kernel);
         const emptyCode = getEmptyCode(options.kernel);

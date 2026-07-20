@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { chatTurnRequestSchema } from '@taucad/chat/schemas';
-import { isUsableProjectName, useProjectNameClient } from '#chat-clients/use-project-name-client.js';
+import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 import type { NameGeneratorRequestError } from '#chat-clients/_internal/name-generator-client.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- ENV/TAU_API_URL mirror the SCREAMING_SNAKE_CASE keys exported by the real environment.config module
@@ -171,12 +171,5 @@ describe('useProjectNameClient', () => {
       { type: 'file', url: first, mediaType: 'image/png' },
       { type: 'file', url: second, mediaType: 'image/webp' },
     ]);
-  });
-
-  it('should reject blank and generic durable project names', () => {
-    expect(isUsableProjectName('')).toBe(false);
-    expect(isUsableProjectName(' Image Project ')).toBe(false);
-    expect(isUsableProjectName('Untitled')).toBe(false);
-    expect(isUsableProjectName('Planetary Gear')).toBe(true);
   });
 });

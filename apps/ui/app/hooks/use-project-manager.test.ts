@@ -90,7 +90,6 @@ const mockGenerateProjectName = vi.fn(async () => 'Tall Birdhouse');
 
 vi.mock('#chat-clients/use-project-name-client.js', () => ({
   useProjectNameClient: () => ({ generate: mockGenerateProjectName }),
-  isUsableProjectName: (name: string) => name.trim().length > 0 && name.trim().toLowerCase() !== 'new project',
 }));
 
 vi.mock('#hooks/project-manager.machine.js', async () => {
@@ -154,10 +153,6 @@ vi.mock('#utils/chat.utils.js', () => ({
   createMessage: (options: Record<string, unknown>) => ({ id: 'msg-1', ...options }),
 }));
 
-vi.mock('#constants/project-names.js', () => ({
-  defaultProjectName: 'Untitled Project',
-}));
-
 // eslint-disable-next-line @typescript-eslint/naming-convention -- React component export
 const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-project-manager.js');
 
@@ -218,9 +213,7 @@ describe('useProjectManager', () => {
       });
 
       expect(mockGenerateProjectName).toHaveBeenCalledWith({ text: '', imageUrls: [imageUrl] });
-      expect(mockCreateInitialProject).toHaveBeenCalledWith(
-        expect.objectContaining({ projectName: 'Tall Birdhouse' }),
-      );
+      expect(mockCreateInitialProject).toHaveBeenCalledWith(expect.objectContaining({ projectName: 'Tall Birdhouse' }));
       expect(mockCreateProjectWithResources).toHaveBeenCalledWith(
         expect.objectContaining({ project: expect.objectContaining({ name: 'Tall Birdhouse' }) }),
       );
@@ -247,17 +240,23 @@ describe('useProjectManager', () => {
       expect(mockCreateProjectWithResources).not.toHaveBeenCalled();
     });
 
-    it('creates no durable project resources for a generic generated name', async () => {
-      mockGenerateProjectName.mockResolvedValueOnce('New Project');
+    it.each([
+      { generatedName: 'New Project', expectedName: 'New Project', outputKind: 'generic output' },
+      { generatedName: '   ', expectedName: 'New Project', outputKind: 'blank output' },
+    ])('should create with $expectedName when naming returns $outputKind', async ({ generatedName, expectedName }) => {
+      mockGenerateProjectName.mockResolvedValueOnce(generatedName);
       const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
-      await expect(
-        act(async () =>
-          result.current.createProject({ kernel: 'openscad', initialMessage: { content: 'Make this' } }),
-        ),
-      ).rejects.toThrow('Project naming did not return a specific project name');
+      await act(async () =>
+        result.current.createProject({
+          kernel: 'openscad',
+          initialMessage: { content: 'Make a cube' },
+          backend: 'opfs',
+        }),
+      );
 
-      expect(mockCreateProjectWithResources).not.toHaveBeenCalled();
+      expect(mockCreateInitialProject).toHaveBeenCalledWith(expect.objectContaining({ projectName: expectedName }));
+      expect(mockCreateProjectWithResources).toHaveBeenCalled();
     });
 
     it('should call mount with resolvedBackend and project prefix', async () => {

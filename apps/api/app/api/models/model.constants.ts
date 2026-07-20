@@ -1,7 +1,9 @@
 import type { Model, ModelModalities } from '#api/models/model.schema.js';
 import type { ProviderId } from '#api/providers/provider.schema.js';
 
-type CloudCatalogProviderId = Exclude<ProviderId, 'ollama'>;
+// 'ollama' (runtime-discovered) and 'tau' (TAU_TEST_MODE replay, runtime-appended)
+// are never part of the static cloud catalog.
+type CloudCatalogProviderId = Exclude<ProviderId, 'ollama' | 'tau'>;
 
 const textOnlyModalities = { input: ['text'], output: ['text'] } satisfies ModelModalities;
 const imageInputModalities = { input: ['text', 'image'], output: ['text'] } satisfies ModelModalities;
@@ -455,6 +457,39 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
       },
     },
+    // Off-catalog metering row (AD14): the name/commit generators bill their
+    // gpt-4o-mini calls through the credit ledger via getModelCost; never listed.
+    'gpt-4o-mini': {
+      enabled: false,
+      id: 'openai-gpt-4o-mini',
+      name: 'GPT-4o mini (generator metering)',
+      slug: 'openai-gpt-4o-mini',
+      description: 'Internal cost-metering entry for the project-name and commit-message generators.',
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+      },
+      model: 'gpt-4o-mini',
+      support: {
+        toolChoice: false,
+        modalities: textOnlyModalities,
+      },
+      details: {
+        family: 'gpt',
+        families: ['gpt'],
+        contextWindow: 128_000,
+        maxTokens: 16_384,
+        cost: {
+          inputTokens: 0.15,
+          outputTokens: 0.6,
+          cacheReadTokens: 0.075,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+      },
+    },
   },
   vertexai: {
     'gemini-3.1-pro': {
@@ -896,6 +931,39 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
+      },
+    },
+    // Off-catalog metering row (AD14): the code-completion service bills its
+    // Cerebras calls through the credit ledger via getModelCost; never listed.
+    'llama-3.3-70b': {
+      enabled: false,
+      id: 'cerebras-llama-3.3-70b',
+      name: 'Llama 3.3 70B (completion metering)',
+      slug: 'cerebras-llama-3.3-70b',
+      description: 'Internal cost-metering entry for the inline code-completion service.',
+      provider: {
+        id: 'cerebras',
+        name: 'Cerebras',
+      },
+      model: 'llama-3.3-70b',
+      support: {
+        toolChoice: false,
+        modalities: textOnlyModalities,
+      },
+      details: {
+        family: 'llama',
+        families: ['llama'],
+        contextWindow: 128_000,
+        maxTokens: 8192,
+        cost: {
+          inputTokens: 0.85,
+          outputTokens: 1.2,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: false,
       },
     },
   },

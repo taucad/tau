@@ -91,7 +91,7 @@ describe('ModelService', () => {
     expect(modelSupportsInput(glm?.support, 'image')).toBe(false);
   });
 
-  it('lists Grok 4.5 as an enabled text-only tool-capable model', async () => {
+  it('lists Grok 4.5 as an enabled image-capable tool-capable model', async () => {
     const service = createModelService();
     const listedModels = await service.getModels();
     const grok = listedModels.find((model) => model.id === 'xai-grok-4.5');
@@ -99,13 +99,13 @@ describe('ModelService', () => {
     expect(grok).toBeDefined();
     expect(grok?.support?.tools).toBe(true);
     expect(modelSupportsInput(grok?.support, 'text')).toBe(true);
-    expect(modelSupportsInput(grok?.support, 'image')).toBe(false);
+    expect(modelSupportsInput(grok?.support, 'image')).toBe(true);
     expect(service.getContextWindow('xai-grok-4.5')).toBe(maxEffectiveContextWindow);
     expect(service.getProviderId('xai-grok-4.5')).toBe('xai');
     expect(service.getModelSupport('xai-grok-4.5')).toMatchObject({
       tools: true,
       toolChoice: false,
-      modalities: { input: ['text'], output: ['text'] },
+      modalities: { input: ['text', 'image'], output: ['text'] },
     });
   });
 

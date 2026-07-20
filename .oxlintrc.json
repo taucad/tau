@@ -1014,6 +1014,7 @@
               "Res",
               "Req",
               "HttpCode",
+              "Ip",
               "Inject",
               "Global",
               "UseGuards",

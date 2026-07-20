@@ -388,12 +388,12 @@ function ParameterGroupSelector({
 // ---------------------------------------------------------------------------
 
 function GeometryUnitParameters({
-  entryFile,
+  entryPath,
   cadRef,
   enableSearch,
   isAllExpanded,
 }: {
-  readonly entryFile: string;
+  readonly entryPath: string;
   readonly cadRef: ActorRefFrom<typeof cadMachine>;
   readonly enableSearch: boolean;
   readonly isAllExpanded: boolean;
@@ -402,8 +402,8 @@ function GeometryUnitParameters({
   const graphicsActor = useMainGraphics();
 
   const parameters = useMemo(
-    () => getActiveGroupValues(parameterEntries.get(entryFile)),
-    [parameterEntries, entryFile],
+    () => getActiveGroupValues(parameterEntries.get(entryPath)),
+    [parameterEntries, entryPath],
   );
 
   const defaultParameters = useSelector(cadRef, (state) => state.context.defaultParameters);
@@ -414,9 +414,9 @@ function GeometryUnitParameters({
 
   const handleParametersChange = useCallback(
     (newParams: Record<string, unknown>) => {
-      setGeometryUnitParameters(entryFile, newParams);
+      setGeometryUnitParameters(entryPath, newParams);
     },
-    [setGeometryUnitParameters, entryFile],
+    [setGeometryUnitParameters, entryPath],
   );
 
   return (
@@ -437,7 +437,7 @@ function GeometryUnitParameters({
 // ---------------------------------------------------------------------------
 
 type ParametersPanelParams = {
-  entryFile: string;
+  entryPath: string;
   cadRef: ActorRefFrom<typeof cadMachine>;
   enableSearch: boolean;
   isAllExpanded: boolean;
@@ -446,7 +446,7 @@ type ParametersPanelParams = {
 function ParametersPanelBody({ params }: { readonly params: ParametersPanelParams }): React.JSX.Element {
   return (
     <GeometryUnitParameters
-      entryFile={params.entryFile}
+      entryPath={params.entryPath}
       cadRef={params.cadRef}
       enableSearch={params.enableSearch}
       isAllExpanded={params.isAllExpanded}
@@ -466,7 +466,7 @@ function ParametersPanelHeader({
   readonly params: ParametersPanelParams;
 }): React.JSX.Element {
   const { parameterEntries, setGeometryUnitParameters, projectRef, geometryUnits, editorRef } = useProject();
-  const entry = parameterEntries.get(params.entryFile);
+  const entry = parameterEntries.get(params.entryPath);
   const displayEntry = entry ?? createDefaultEntry();
   const jsonSchema = useSelector(params.cadRef, (state) => state.context.jsonSchema);
   const projectName = useSelector(projectRef, (state) => state.context.project?.name) ?? 'model';
@@ -480,8 +480,8 @@ function ParametersPanelHeader({
   const isLastGeometryUnit = geometryUnits.size <= 1;
 
   const handleReset = useCallback(() => {
-    setGeometryUnitParameters(params.entryFile, {});
-  }, [setGeometryUnitParameters, params.entryFile]);
+    setGeometryUnitParameters(params.entryPath, {});
+  }, [setGeometryUnitParameters, params.entryPath]);
 
   const handleToggleAllExpanded = useCallback(() => {
     api.updateParameters({ isAllExpanded: !params.isAllExpanded });
@@ -491,22 +491,22 @@ function ParametersPanelHeader({
     if (isLastGeometryUnit) {
       return;
     }
-    projectRef.send({ type: 'destroyGeometryUnit', entryFile: params.entryFile });
-  }, [projectRef, params.entryFile, isLastGeometryUnit]);
+    projectRef.send({ type: 'destroyGeometryUnit', entryPath: params.entryPath });
+  }, [projectRef, params.entryPath, isLastGeometryUnit]);
 
   const handleOpenInViewer = useCallback(() => {
-    projectRef.send({ type: 'openInViewer', entryFile: params.entryFile });
-  }, [projectRef, params.entryFile]);
+    projectRef.send({ type: 'openInViewer', entryPath: params.entryPath });
+  }, [projectRef, params.entryPath]);
 
   const handleOpenInEditor = useCallback(() => {
-    editorRef.send({ type: 'openFile', path: params.entryFile, source: 'user' });
-  }, [editorRef, params.entryFile]);
+    editorRef.send({ type: 'openFile', path: params.entryPath, source: 'user' });
+  }, [editorRef, params.entryPath]);
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div className='contents'>
-          <PaneviewHeader api={api} title={params.entryFile}>
+          <PaneviewHeader api={api} title={params.entryPath}>
             {hasModifiedParameters ? (
               <ModifiedIndicator
                 onReset={handleReset}
@@ -519,7 +519,7 @@ function ParametersPanelHeader({
               className='opacity-0 transition-opacity duration-150 [&:has([data-state=open])]:opacity-100 [.dv-pane:hover_&]:opacity-100'
             >
               <ParameterGroupSelector
-                filePath={params.entryFile}
+                filePath={params.entryPath}
                 groups={displayEntry.groups}
                 activeGroup={displayEntry.activeGroup}
               />
@@ -560,7 +560,7 @@ function ParametersPanelHeader({
                       <ExportSelector
                         cadActor={params.cadRef}
                         filenameBase={projectName}
-                        defaultEntryFile={params.entryFile}
+                        defaultEntryPath={params.entryPath}
                         variant='sub'
                       />
                     </DropdownMenuSubContent>
@@ -599,7 +599,7 @@ function ParametersPanelHeader({
             <ExportSelector
               cadActor={params.cadRef}
               filenameBase={projectName}
-              defaultEntryFile={params.entryFile}
+              defaultEntryPath={params.entryPath}
               variant='sub'
             />
           </ContextMenuSubContent>
@@ -623,17 +623,17 @@ const paneviewHeaderComponents = { parametersHeader: ParametersPanelHeader };
 
 function ParametersPaneview({
   entries,
-  mainEntryFile,
+  mainEntryPath,
   enableSearch,
 }: {
   readonly entries: Array<[string, ActorRefFrom<typeof cadMachine>]>;
-  readonly mainEntryFile: string;
+  readonly mainEntryPath: string;
   readonly enableSearch: boolean;
 }): React.JSX.Element {
   const { savedState, connectApi } = usePaneviewPersistence('parametersPaneview');
   const paneviewApiRef = useRef<PaneviewApi | undefined>(undefined);
 
-  const sortedEntries = useMemo(() => sortGeometryUnitEntries(entries, mainEntryFile), [entries, mainEntryFile]);
+  const sortedEntries = useMemo(() => sortGeometryUnitEntries(entries, mainEntryPath), [entries, mainEntryPath]);
 
   const paneviewKey = useMemo(() => sortedEntries.map(([file]) => file).join('\0'), [sortedEntries]);
 
@@ -642,26 +642,26 @@ function ParametersPaneview({
       paneviewApiRef.current = event.api;
       connectApi(event.api);
 
-      for (const [entryFile, cadRef] of sortedEntries) {
-        const isMain = entryFile === mainEntryFile;
-        const initial = getInitialPanelOptions(savedState, entryFile, {
+      for (const [entryPath, cadRef] of sortedEntries) {
+        const isMain = entryPath === mainEntryPath;
+        const initial = getInitialPanelOptions(savedState, entryPath, {
           isExpanded: isMain,
           size: isMain ? 200 : undefined,
         });
 
         event.api.addPanel({
-          id: entryFile,
-          title: entryFile,
+          id: entryPath,
+          title: entryPath,
           component: 'parametersPanel',
           headerComponent: 'parametersHeader',
           isExpanded: initial.isExpanded,
           minimumBodySize: 80,
           size: initial.size,
-          params: { entryFile, cadRef, enableSearch, isAllExpanded: true } satisfies ParametersPanelParams,
+          params: { entryPath, cadRef, enableSearch, isAllExpanded: true } satisfies ParametersPanelParams,
         });
       }
     },
-    [sortedEntries, mainEntryFile, enableSearch, savedState, connectApi],
+    [sortedEntries, mainEntryPath, enableSearch, savedState, connectApi],
   );
 
   useEffect(() => {
@@ -690,14 +690,14 @@ function ParametersPaneview({
 // ---------------------------------------------------------------------------
 
 function ParametersContent({ enableSearch }: { readonly enableSearch: boolean }): React.JSX.Element {
-  const { geometryUnits, mainEntryFile } = useProject();
+  const { geometryUnits, mainEntryPath } = useProject();
   const entries = useMemo(() => [...geometryUnits.entries()], [geometryUnits]);
 
   if (entries.length === 0) {
     return <p className='p-4 text-center text-xs text-muted-foreground'>No geometry units.</p>;
   }
 
-  return <ParametersPaneview entries={entries} mainEntryFile={mainEntryFile} enableSearch={enableSearch} />;
+  return <ParametersPaneview entries={entries} mainEntryPath={mainEntryPath} enableSearch={enableSearch} />;
 }
 
 // ---------------------------------------------------------------------------

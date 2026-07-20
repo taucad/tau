@@ -91,7 +91,7 @@ import { initializeWorkerForTesting, seedTestFileSystem } from '@taucad/runtime/
 import { replicad } from '@taucad/runtime/kernels';
 
 await seedTestFileSystem({
-  '/projects/test/main.ts': `export default function main() { return null; }`,
+  '/main.ts': `export default function main() { return null; }`,
 });
 
 const runtime = defineRuntime({
@@ -114,8 +114,8 @@ import { seedTestFileSystem, clearTestFileSystem } from '@taucad/runtime/testing
 describe('my kernel', () => {
   beforeEach(async () => {
     await seedTestFileSystem({
-      '/projects/test/main.ts': 'export default function main() { return null; }',
-      '/projects/test/lib/utils.ts': 'export const x = 1;',
+      '/main.ts': 'export default function main() { return null; }',
+      '/lib/utils.ts': 'export const x = 1;',
     });
   });
 
@@ -156,7 +156,7 @@ it('passes geometry through unchanged', async () => {
     dependencies: [],
     dependencyHash: 'abc123',
   });
-  const input = createMockInput({ filePath: '/projects/test/main.ts' });
+  const input = createMockInput({ entryPath: '/main.ts' });
   const handler = createMockCreateGeometryHandler(createSuccessResult([]));
 
   const result = await myMiddleware.wrapCreateGeometry!(input, handler, runtime);

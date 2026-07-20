@@ -383,7 +383,7 @@ function useModelComponentActions({
       graphicsRef.send({ type: 'selectModelComponent', unitId, componentId: node.id, source: 'viewer' });
       project.editorRef.send({
         type: 'revealModelComponentInExplorer',
-        entryFile: manifest.sourceFile,
+        entryPath: manifest.sourceFile,
         unitId,
         componentId: node.id,
       });

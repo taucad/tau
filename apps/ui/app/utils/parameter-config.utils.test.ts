@@ -348,7 +348,7 @@ describe('parameter-config.utils', () => {
       expect(parameterEntryPath('main.ts')).toBe(`${parametersDirectory}/main.ts.json`);
     });
 
-    it('should handle nested entry files', () => {
+    it('should handle nested entry paths', () => {
       expect(parameterEntryPath('src/box.ts')).toBe(`${parametersDirectory}/src/box.ts.json`);
     });
   });

@@ -44,7 +44,7 @@ type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
 
 type ModelComponentRevealTarget = {
-  readonly entryFile: string;
+  readonly entryPath: string;
   readonly unitId: string;
   readonly componentId: string;
   readonly requestId: number;
@@ -186,7 +186,7 @@ export function ChatExplorerTree({
       setIsSearchVisible(false);
       setQuery('');
       setRevealTarget((current) => ({
-        entryFile: event.entryFile,
+        entryPath: event.entryPath,
         unitId: event.unitId,
         componentId: event.componentId,
         requestId: (current?.requestId ?? 0) + 1,
@@ -255,17 +255,17 @@ function ChatGeometryExplorerContent({
   readonly revealTarget: ModelComponentRevealTarget | undefined;
   readonly onQueryChange: (query: string) => void;
 }): React.JSX.Element {
-  const [openByEntryFile, setOpenByEntryFile] = useState<Record<string, boolean>>({});
+  const [openByEntryPath, setOpenByEntryPath] = useState<Record<string, boolean>>({});
   const contentRef = useRef<HTMLDivElement>(null);
   const viewSettings = useSelector(project.editorRef, (state) => state.context.viewSettings);
   const entries = useMemo(
-    () => sortGeometryUnitEntries([...project.geometryUnits.entries()], project.mainEntryFile),
-    [project.geometryUnits, project.mainEntryFile],
+    () => sortGeometryUnitEntries([...project.geometryUnits.entries()], project.mainEntryPath),
+    [project.geometryUnits, project.mainEntryPath],
   );
   const resolveGraphicsForFile = useCallback(
-    (entryFile: string): GraphicsActorRef | undefined => {
+    (entryPath: string): GraphicsActorRef | undefined => {
       for (const [viewId, graphicsRef] of project.viewGraphics) {
-        if (viewSettings[viewId]?.entryFile === entryFile) {
+        if (viewSettings[viewId]?.entryPath === entryPath) {
           return graphicsRef;
         }
       }
@@ -273,15 +273,15 @@ function ChatGeometryExplorerContent({
     },
     [project.viewGraphics, viewSettings],
   );
-  const setSectionOpen = useCallback((entryFile: string, isOpen: boolean): void => {
-    setOpenByEntryFile((current) => ({ ...current, [entryFile]: isOpen }));
+  const setSectionOpen = useCallback((entryPath: string, isOpen: boolean): void => {
+    setOpenByEntryPath((current) => ({ ...current, [entryPath]: isOpen }));
   }, []);
   useEffect(() => {
-    if (!revealTarget || !entries.some(([entryFile]) => entryFile === revealTarget.entryFile)) {
+    if (!revealTarget || !entries.some(([entryPath]) => entryPath === revealTarget.entryPath)) {
       return;
     }
-    setOpenByEntryFile((current) =>
-      current[revealTarget.entryFile] ? current : { ...current, [revealTarget.entryFile]: true },
+    setOpenByEntryPath((current) =>
+      current[revealTarget.entryPath] ? current : { ...current, [revealTarget.entryPath]: true },
     );
   }, [entries, revealTarget]);
   useEffect(() => {
@@ -294,7 +294,7 @@ function ChatGeometryExplorerContent({
         candidate.dataset['modelComponentId'] === revealTarget.componentId,
     );
     row?.scrollIntoView({ block: 'center' });
-  }, [openByEntryFile, query, revealTarget]);
+  }, [openByEntryPath, query, revealTarget]);
 
   if (entries.length === 0) {
     return <ExplorerEmptyState />;
@@ -318,14 +318,14 @@ function ChatGeometryExplorerContent({
         </div>
       )}
       <div ref={contentRef} className='flex min-h-0 flex-1 flex-col'>
-        {entries.map(([entryFile]) => (
+        {entries.map(([entryPath]) => (
           <CompilationUnitExplorerSection
-            key={entryFile}
-            entryFile={entryFile}
-            graphicsRef={resolveGraphicsForFile(entryFile)}
+            key={entryPath}
+            entryPath={entryPath}
+            graphicsRef={resolveGraphicsForFile(entryPath)}
             query={query}
-            isMainEntryFile={entryFile === project.mainEntryFile}
-            openByEntryFile={openByEntryFile}
+            isMainEntryPath={entryPath === project.mainEntryPath}
+            openByEntryPath={openByEntryPath}
             onOpenChange={setSectionOpen}
           />
         ))}
@@ -335,28 +335,28 @@ function ChatGeometryExplorerContent({
 }
 
 function CompilationUnitExplorerSection({
-  entryFile,
+  entryPath,
   graphicsRef,
   query,
-  isMainEntryFile,
-  openByEntryFile,
+  isMainEntryPath,
+  openByEntryPath,
   onOpenChange,
 }: {
-  readonly entryFile: string;
+  readonly entryPath: string;
   readonly graphicsRef: GraphicsActorRef | undefined;
   readonly query: string;
-  readonly isMainEntryFile: boolean;
-  readonly openByEntryFile: Record<string, boolean>;
-  readonly onOpenChange: (entryFile: string, isOpen: boolean) => void;
+  readonly isMainEntryPath: boolean;
+  readonly openByEntryPath: Record<string, boolean>;
+  readonly onOpenChange: (entryPath: string, isOpen: boolean) => void;
 }): React.JSX.Element {
   if (!graphicsRef) {
     return (
       <ExplorerCollapsibleSection
-        title={entryFile}
+        title={entryPath}
         count={0}
-        isOpen={openByEntryFile[entryFile] ?? true}
+        isOpen={openByEntryPath[entryPath] ?? true}
         onOpenChange={(isOpen) => {
-          onOpenChange(entryFile, isOpen);
+          onOpenChange(entryPath, isOpen);
         }}
       >
         <ExplorerUnavailableState />
@@ -366,30 +366,30 @@ function CompilationUnitExplorerSection({
 
   return (
     <LiveCompilationUnitTree
-      entryFile={entryFile}
+      entryPath={entryPath}
       graphicsRef={graphicsRef}
       query={query}
-      isMainEntryFile={isMainEntryFile}
-      openByEntryFile={openByEntryFile}
+      isMainEntryPath={isMainEntryPath}
+      openByEntryPath={openByEntryPath}
       onOpenChange={onOpenChange}
     />
   );
 }
 
 function LiveCompilationUnitTree({
-  entryFile,
+  entryPath,
   graphicsRef,
   query,
-  isMainEntryFile,
-  openByEntryFile,
+  isMainEntryPath,
+  openByEntryPath,
   onOpenChange,
 }: {
-  readonly entryFile: string;
+  readonly entryPath: string;
   readonly graphicsRef: GraphicsActorRef;
   readonly query: string;
-  readonly isMainEntryFile: boolean;
-  readonly openByEntryFile: Record<string, boolean>;
-  readonly onOpenChange: (entryFile: string, isOpen: boolean) => void;
+  readonly isMainEntryPath: boolean;
+  readonly openByEntryPath: Record<string, boolean>;
+  readonly onOpenChange: (entryPath: string, isOpen: boolean) => void;
 }): React.JSX.Element {
   const modelRef = useSelector(
     graphicsRef,
@@ -399,11 +399,11 @@ function LiveCompilationUnitTree({
   if (!modelRef) {
     return (
       <ExplorerCollapsibleSection
-        title={entryFile}
+        title={entryPath}
         count={0}
-        isOpen={openByEntryFile[entryFile] ?? true}
+        isOpen={openByEntryPath[entryPath] ?? true}
         onOpenChange={(isOpen) => {
-          onOpenChange(entryFile, isOpen);
+          onOpenChange(entryPath, isOpen);
         }}
       >
         <ExplorerUnavailableState />
@@ -413,35 +413,35 @@ function LiveCompilationUnitTree({
 
   return (
     <LiveComponentTree
-      entryFile={entryFile}
+      entryPath={entryPath}
       graphicsRef={graphicsRef}
       modelRef={modelRef}
       query={query}
-      isMainEntryFile={isMainEntryFile}
-      openByEntryFile={openByEntryFile}
+      isMainEntryPath={isMainEntryPath}
+      openByEntryPath={openByEntryPath}
       onOpenChange={onOpenChange}
     />
   );
 }
 
 function LiveComponentTree({
-  entryFile,
+  entryPath,
   graphicsRef,
   modelRef,
   query,
-  isMainEntryFile,
-  openByEntryFile,
+  isMainEntryPath,
+  openByEntryPath,
   onOpenChange,
 }: {
-  readonly entryFile: string;
+  readonly entryPath: string;
   readonly graphicsRef: GraphicsActorRef;
   readonly modelRef: ModelInteractionRef;
   readonly query: string;
-  readonly isMainEntryFile: boolean;
-  readonly openByEntryFile: Record<string, boolean>;
-  readonly onOpenChange: (entryFile: string, isOpen: boolean) => void;
+  readonly isMainEntryPath: boolean;
+  readonly openByEntryPath: Record<string, boolean>;
+  readonly onOpenChange: (entryPath: string, isOpen: boolean) => void;
 }): React.JSX.Element {
-  const unitId = deriveModelInteractionUnitId({ sourceFile: entryFile });
+  const unitId = deriveModelInteractionUnitId({ sourceFile: entryPath });
   const unitState = useSelector(modelRef, (state) => getModelInteractionUnitState(state.context, unitId));
   const {
     manifest,
@@ -456,12 +456,12 @@ function LiveComponentTree({
   const childCount = root?.childIds.length ?? 0;
   const normalizedQuery = query.trim().toLowerCase();
   const matchingChildCount = manifest && root ? countMatchingChildren({ manifest, node: root, normalizedQuery }) : 0;
-  const isOpen = openByEntryFile[entryFile] ?? (isMainEntryFile || childCount > 0 || !manifest);
+  const isOpen = openByEntryPath[entryPath] ?? (isMainEntryPath || childCount > 0 || !manifest);
 
   if (!manifest || !root || childCount === 0) {
     return (
       <ExplorerCollapsibleSection
-        title={entryFile}
+        title={entryPath}
         count={0}
         hiddenComponentCount={hiddenComponentIds.length}
         onShowHiddenComponents={() => {
@@ -469,7 +469,7 @@ function LiveComponentTree({
         }}
         isOpen={isOpen}
         onOpenChange={(nextOpen) => {
-          onOpenChange(entryFile, nextOpen);
+          onOpenChange(entryPath, nextOpen);
         }}
       >
         <ExplorerUnavailableState />
@@ -479,7 +479,7 @@ function LiveComponentTree({
 
   return (
     <ExplorerCollapsibleSection
-      title={entryFile}
+      title={entryPath}
       count={childCount}
       hiddenComponentCount={hiddenComponentIds.length}
       onShowHiddenComponents={() => {
@@ -487,7 +487,7 @@ function LiveComponentTree({
       }}
       isOpen={isOpen}
       onOpenChange={(nextOpen) => {
-        onOpenChange(entryFile, nextOpen);
+        onOpenChange(entryPath, nextOpen);
       }}
     >
       {normalizedQuery && matchingChildCount === 0 ? (
@@ -568,11 +568,11 @@ function ComponentRows({
   readonly graphicsRef: GraphicsActorRef;
   readonly unitId: string;
   readonly hoveredComponentId: string | undefined;
-  readonly selectedComponentIds: string[];
-  readonly hiddenComponentIds: string[];
-  readonly isolatedComponentIds: string[];
+  readonly selectedComponentIds: readonly string[];
+  readonly hiddenComponentIds: readonly string[];
+  readonly isolatedComponentIds: readonly string[];
   readonly focusedComponentId: string | undefined;
-  readonly opacityByComponentId: Record<string, number>;
+  readonly opacityByComponentId: Readonly<Record<string, number>>;
   readonly rootDepth: number;
 }): React.JSX.Element {
   return (

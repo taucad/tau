@@ -83,7 +83,7 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
       manifestKey: `manifests/${publicationId}.json`,
       runtimePin: '~0.0.0',
       kernels: ['jscad'],
-      entryFile: 'main.ts',
+      entryPath: 'main.ts',
       title: 't',
       createdAt: new Date(),
     });
@@ -125,7 +125,7 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
       manifestKey: `manifests/${publicationId}.json`,
       runtimePin: '~0.0.0',
       kernels: ['jscad'],
-      entryFile: 'main.ts',
+      entryPath: 'main.ts',
       title: 't',
       createdAt: new Date(),
     });
@@ -202,7 +202,7 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
         manifestKey: `manifests/${publicationId}.json`,
         runtimePin: '~0.0.0',
         kernels: ['jscad'],
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
         title: 't',
         createdAt: new Date(),
       });
@@ -252,7 +252,7 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
       manifestKey: `manifests/${publicationId}.json`,
       runtimePin: '~0.0.0',
       kernels,
-      entryFile: 'main.ts',
+      entryPath: 'main.ts',
       title: 't',
       createdAt: new Date(),
     });
@@ -296,7 +296,7 @@ describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)
       manifestKey: `manifests/${publicationId}.json`,
       runtimePin: '~0.0.0',
       kernels: ['jscad'],
-      entryFile: 'main.ts',
+      entryPath: 'main.ts',
       title: 't',
       ownerSnapshot: snapshot,
       createdAt: new Date(),

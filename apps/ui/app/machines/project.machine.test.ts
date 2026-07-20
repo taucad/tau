@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
-import type { FileParameterEntry, Project } from '@taucad/types';
+import { projectToManifest } from '@taucad/types';
+import type { FileParameterEntry, ProjectManifest } from '@taucad/types';
 import { isProjectContentActivityPath, projectMachine } from '#machines/project.machine.js';
 import type { ProjectContext } from '#machines/project.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { createDefaultEntry, getActiveGroupValues } from '#utils/parameter-config.utils.js';
 import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
-import { defaultProjectName } from '#constants/project-names.js';
 
 vi.mock('#constants/browser.constants.js', () => ({
   isBrowser: true,
@@ -25,27 +25,15 @@ const createKernelOptionsFactory = (): LazyKernelOptionsFactory => async () => (
 // Stubs
 // ---------------------------------------------------------------------------
 
-const stubProject: Project = {
-  id: 'test-project',
+const stubProject: ProjectManifest = projectToManifest({
+  id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
   name: 'Test Project',
   description: 'A test project',
-  author: { name: 'Test', avatar: '' },
   tags: ['a', 'b'],
-  thumbnail: 'thumb.png',
-  createdAt: 1000,
-  updatedAt: 2000,
-  assets: {},
-} satisfies Project;
+  assets: { main: { entryPath: 'main.ts' } },
+});
 
-const stubProjectWithMechanical: Project = {
-  ...stubProject,
-  assets: {
-    mechanical: {
-      main: 'main.ts',
-      parameters: { width: 10 },
-    },
-  },
-};
+const stubProjectWithMechanical = stubProject;
 
 // ---------------------------------------------------------------------------
 // Factory helpers
@@ -54,7 +42,7 @@ const stubProjectWithMechanical: Project = {
 type WriteParameterInput = { projectId: string; filePath: string; entry: FileParameterEntry };
 
 function createTestActor(options?: {
-  loadResult?: Project | (() => Promise<Project>);
+  loadResult?: ProjectManifest | (() => Promise<ProjectManifest>);
   writeResult?: () => Promise<void>;
   writeParameterResult?: (input?: WriteParameterInput) => Promise<void>;
   parameterEntries?: Map<string, FileParameterEntry>;
@@ -109,7 +97,7 @@ function createTestActor(options?: {
 async function startAndLoad(options?: Parameters<typeof createTestActor>[0]) {
   const actor = createTestActor(options);
   actor.start();
-  actor.send({ type: 'loadProject', projectId: options?.projectId ?? 'test-project' });
+  actor.send({ type: 'reloadProject' });
   await waitFor(actor, (s) => s.matches({ ready: {} }));
   return actor;
 }
@@ -189,11 +177,11 @@ describe('projectMachine', () => {
   // State: idle
   // =========================================================================
   describe('idle', () => {
-    it('should transition to loading on loadProject', () => {
+    it('should transition to loading on reloadProject', () => {
       const actor = createTestActor();
       actor.start();
       expect(actor.getSnapshot().value).toBe('idle');
-      actor.send({ type: 'loadProject', projectId: 'test-project' });
+      actor.send({ type: 'reloadProject' });
       expect(actor.getSnapshot().value).toBe('loading');
       actor.stop();
     });
@@ -240,7 +228,7 @@ describe('projectMachine', () => {
         },
       });
       actor.start();
-      actor.send({ type: 'loadProject', projectId: 'test-project' });
+      actor.send({ type: 'reloadProject' });
       await waitFor(actor, (s) => s.value === 'error');
       expect(actor.getSnapshot().context.error?.message).toBe('load failed');
       actor.stop();
@@ -259,40 +247,26 @@ describe('projectMachine', () => {
       });
       actor.start();
 
-      actor.send({ type: 'loadProject', projectId: 'test-project' });
+      actor.send({ type: 'reloadProject' });
       await waitFor(actor, (s) => s.value === 'error');
       expect(actor.getSnapshot().context.error).toBeDefined();
 
-      actor.send({ type: 'loadProject', projectId: 'test-project' });
+      actor.send({ type: 'reloadProject' });
       await waitFor(actor, (s) => s.matches({ ready: {} }));
       expect(actor.getSnapshot().context.error).toBeUndefined();
       actor.stop();
     });
 
-    it('should emit projectLoaded event on successful load', async () => {
-      const actor = createTestActor();
-      actor.start();
-      const emitted: unknown[] = [];
-      actor.on('projectLoaded', (event) => emitted.push(event));
-
-      actor.send({ type: 'loadProject', projectId: 'test-project' });
-      await waitFor(actor, (s) => s.matches({ ready: {} }));
-
-      expect(emitted).toHaveLength(1);
-      expect(emitted[0]).toMatchObject({ type: 'projectLoaded', project: stubProject });
-      actor.stop();
-    });
-
     it('should accept view graphics events during loading', async () => {
-      let resolveLoad!: (value: Project) => void;
+      let resolveLoad!: (value: ProjectManifest) => void;
       const actor = createTestActor({
         loadResult: async () =>
-          new Promise<Project>((resolve) => {
+          new Promise<ProjectManifest>((resolve) => {
             resolveLoad = resolve;
           }),
       });
       actor.start();
-      actor.send({ type: 'loadProject', projectId: 'test-project' });
+      actor.send({ type: 'reloadProject' });
       expect(actor.getSnapshot().value).toBe('loading');
 
       actor.send({ type: 'createViewGraphics', viewId: 'v1' });
@@ -309,9 +283,9 @@ describe('projectMachine', () => {
   // State: ready – context initialization
   // =========================================================================
   describe('ready – initial context', () => {
-    it('should initialize with empty mainEntryFile when no mechanical asset', async () => {
+    it('should leave mainEntryPath empty until model loading is requested', async () => {
       const actor = await startAndLoad();
-      expect(actor.getSnapshot().context.mainEntryFile).toBe('');
+      expect(actor.getSnapshot().context.mainEntryPath).toBe('');
       actor.stop();
     });
 
@@ -325,12 +299,12 @@ describe('projectMachine', () => {
       actor.stop();
     });
 
-    it('should set mainEntryFile via initializeKernelIfNeeded when shouldLoadModelOnStart is true', async () => {
+    it('should set mainEntryPath via initializeKernelIfNeeded when shouldLoadModelOnStart is true', async () => {
       const actor = await startAndLoad({
         loadResult: stubProjectWithMechanical,
         shouldLoadModelOnStart: true,
       });
-      expect(actor.getSnapshot().context.mainEntryFile).toBe('main.ts');
+      expect(actor.getSnapshot().context.mainEntryPath).toBe('main.ts');
       expect(actor.getSnapshot().context.geometryUnits.has('main.ts')).toBe(true);
       actor.stop();
     });
@@ -364,32 +338,17 @@ describe('projectMachine', () => {
       actor.stop();
     });
 
-    it('should update project thumbnail', async () => {
+    it('should keep revisionState outside the manifest and emit a field-scoped persistence event', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'updateThumbnail', thumbnail: 'new-thumb.png' });
-      expect(actor.getSnapshot().context.project?.thumbnail).toBe('new-thumb.png');
-      actor.stop();
-    });
-
-    it('should persist revisionState through the store and emit projectUpdated (R1)', async () => {
-      const actor = await startAndLoad({
-        writeResult: async () => {
-          /* No-op — resolves the single-writer store immediately */
-        },
-      });
-
-      const emittedProjects: Project[] = [];
-      actor.on('projectUpdated', (event) => emittedProjects.push(event.project));
+      const emitted: unknown[] = [];
+      actor.on('revisionStateUpdated', (event) => emitted.push(event.revisionState));
 
       const revisionState = { headTurnId: 'u5', supersededTurnIds: ['u2'], dirty: false };
       actor.send({ type: 'updateRevisionState', revisionState });
-      // Reaching storing.idle means the write ran; projectUpdated only emits from
-      // storing.writing.onDone, so its presence proves the slice was persisted.
-      await waitFor(actor, (s) => s.matches({ ready: { storing: 'idle' } }));
 
-      expect(actor.getSnapshot().context.project?.revisionState).toEqual(revisionState);
-      expect(emittedProjects).toHaveLength(1);
-      expect(emittedProjects[0]?.revisionState).toEqual(revisionState);
+      expect(actor.getSnapshot().context.revisionState).toEqual(revisionState);
+      expect(actor.getSnapshot().context.project).toEqual(stubProject);
+      expect(emitted).toEqual([revisionState]);
       actor.stop();
     });
 
@@ -400,78 +359,32 @@ describe('projectMachine', () => {
       actor.stop();
     });
 
-    it('should update updatedAt on name change', async () => {
-      const actor = await startAndLoad();
-      const before = actor.getSnapshot().context.project!.updatedAt;
-      actor.send({ type: 'updateName', name: 'Trigger update' });
-      const after = actor.getSnapshot().context.project!.updatedAt;
-      expect(after).toBeGreaterThanOrEqual(before);
-      actor.stop();
-    });
-
-    it('should preserve updatedAt on generated name change', async () => {
-      const actor = await startAndLoad({ loadResult: { ...stubProject, name: defaultProjectName } });
-      const before = actor.getSnapshot().context.project!.updatedAt;
-      actor.send({ type: 'applyGeneratedProjectName', name: 'Generated Name' });
-      const snapshot = actor.getSnapshot().context.project;
-      expect(snapshot?.name).toBe('Generated Name');
-      expect(snapshot?.updatedAt).toBe(before);
-      actor.stop();
-    });
-
-    it('should ignore generated name changes once a project has a user name', async () => {
-      const actor = await startAndLoad();
-      actor.send({ type: 'applyGeneratedProjectName', name: 'Generated Name' });
-      const snapshot = actor.getSnapshot().context.project;
-      expect(snapshot?.name).toBe(stubProject.name);
-      expect(snapshot?.updatedAt).toBe(stubProject.updatedAt);
-      actor.stop();
-    });
-
-    it('should NOT update updatedAt on tag change', async () => {
-      const actor = await startAndLoad();
-      const before = actor.getSnapshot().context.project!.updatedAt;
-      actor.send({ type: 'updateTags', tags: ['new'] });
-      const after = actor.getSnapshot().context.project!.updatedAt;
-      expect(after).toBe(before);
-      actor.stop();
-    });
-
     it('should set main file path in project assets', async () => {
       const actor = await startAndLoad({ loadResult: stubProjectWithMechanical });
       actor.send({ type: 'setMainFile', path: 'other.ts' });
-      expect(actor.getSnapshot().context.project?.assets.mechanical?.main).toBe('other.ts');
+      expect(actor.getSnapshot().context.project?.assets.main.entryPath).toBe('other.ts');
       actor.stop();
     });
 
-    it('should no-op setMainFile when no mechanical asset', async () => {
+    it('should emit local activity for visible project file activity', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'setMainFile', path: 'other.ts' });
-      expect(actor.getSnapshot().context.project?.assets.mechanical).toBeUndefined();
-      actor.stop();
-    });
-
-    it('should bump updatedAt for visible project file activity', async () => {
-      const now = vi.spyOn(Date, 'now').mockReturnValue(3001);
-      const actor = await startAndLoad();
+      const emitted: string[] = [];
+      actor.on('projectActivity', (event) => emitted.push(event.type));
       actor.send({ type: 'projectFileActivity', operation: 'written', paths: ['main.ts'] });
-      const snapshot = actor.getSnapshot().context.project;
-      expect(snapshot?.updatedAt).toBe(3001);
-      now.mockRestore();
+      expect(emitted).toEqual(['projectActivity']);
       actor.stop();
     });
 
-    it('should preserve updatedAt for root and housekeeping file activity', async () => {
-      const now = vi.spyOn(Date, 'now').mockReturnValue(3001);
+    it('should not emit local activity for root and housekeeping file activity', async () => {
       const actor = await startAndLoad();
+      const emitted: string[] = [];
+      actor.on('projectActivity', (event) => emitted.push(event.type));
       actor.send({
         type: 'projectFileActivity',
         operation: 'batchWritten',
         paths: ['', '.tau/project.json', '.cache/render.bin', 'node_modules/pkg/index.d.ts'],
       });
-      const snapshot = actor.getSnapshot().context.project;
-      expect(snapshot?.updatedAt).toBe(stubProject.updatedAt);
-      now.mockRestore();
+      expect(emitted).toEqual([]);
       actor.stop();
     });
   });
@@ -482,33 +395,43 @@ describe('projectMachine', () => {
   describe('ready – geometry units', () => {
     it('should create a geometry unit', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
       expect(actor.getSnapshot().context.geometryUnits.has('main.ts')).toBe(true);
       actor.stop();
     });
 
-    it('should set mainEntryFile when it is currently empty', async () => {
+    it('should initialize a nested geometry unit with its exact entry path', async () => {
       const actor = await startAndLoad();
-      expect(actor.getSnapshot().context.mainEntryFile).toBe('');
-      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
-      expect(actor.getSnapshot().context.mainEntryFile).toBe('main.ts');
+      actor.send({ type: 'createGeometryUnit', entryPath: 'lib/cube.ts' });
+
+      const unit = actor.getSnapshot().context.geometryUnits.get('lib/cube.ts');
+
+      expect(unit?.getSnapshot().context.entryPath).toBe('lib/cube.ts');
       actor.stop();
     });
 
-    it('should NOT override mainEntryFile when it is already set', async () => {
+    it('should set mainEntryPath when it is currently empty', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryFile: 'first.ts' });
-      actor.send({ type: 'createGeometryUnit', entryFile: 'second.ts' });
-      expect(actor.getSnapshot().context.mainEntryFile).toBe('first.ts');
+      expect(actor.getSnapshot().context.mainEntryPath).toBe('');
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+      expect(actor.getSnapshot().context.mainEntryPath).toBe('main.ts');
+      actor.stop();
+    });
+
+    it('should NOT override mainEntryPath when it is already set', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryPath: 'first.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'second.ts' });
+      expect(actor.getSnapshot().context.mainEntryPath).toBe('first.ts');
       expect(actor.getSnapshot().context.geometryUnits.has('second.ts')).toBe(true);
       actor.stop();
     });
 
     it('should no-op when creating a geometry unit that already exists', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
       const unitBefore = actor.getSnapshot().context.geometryUnits.get('main.ts');
-      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
       const unitAfter = actor.getSnapshot().context.geometryUnits.get('main.ts');
       expect(unitAfter).toBe(unitBefore);
       actor.stop();
@@ -516,35 +439,35 @@ describe('projectMachine', () => {
 
     it('should destroy a geometry unit', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
       expect(actor.getSnapshot().context.geometryUnits.has('main.ts')).toBe(true);
-      actor.send({ type: 'destroyGeometryUnit', entryFile: 'main.ts' });
+      actor.send({ type: 'destroyGeometryUnit', entryPath: 'main.ts' });
       expect(actor.getSnapshot().context.geometryUnits.has('main.ts')).toBe(false);
       actor.stop();
     });
 
-    it('should clear mainEntryFile when destroying the main geometry unit', async () => {
+    it('should clear mainEntryPath when destroying the main geometry unit', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
-      expect(actor.getSnapshot().context.mainEntryFile).toBe('main.ts');
-      actor.send({ type: 'destroyGeometryUnit', entryFile: 'main.ts' });
-      expect(actor.getSnapshot().context.mainEntryFile).toBe('');
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+      expect(actor.getSnapshot().context.mainEntryPath).toBe('main.ts');
+      actor.send({ type: 'destroyGeometryUnit', entryPath: 'main.ts' });
+      expect(actor.getSnapshot().context.mainEntryPath).toBe('');
       actor.stop();
     });
 
-    it('should NOT clear mainEntryFile when destroying a non-main geometry unit', async () => {
+    it('should NOT clear mainEntryPath when destroying a non-main geometry unit', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
-      actor.send({ type: 'createGeometryUnit', entryFile: 'other.ts' });
-      expect(actor.getSnapshot().context.mainEntryFile).toBe('main.ts');
-      actor.send({ type: 'destroyGeometryUnit', entryFile: 'other.ts' });
-      expect(actor.getSnapshot().context.mainEntryFile).toBe('main.ts');
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'other.ts' });
+      expect(actor.getSnapshot().context.mainEntryPath).toBe('main.ts');
+      actor.send({ type: 'destroyGeometryUnit', entryPath: 'other.ts' });
+      expect(actor.getSnapshot().context.mainEntryPath).toBe('main.ts');
       actor.stop();
     });
 
     it('should no-op when destroying a non-existent geometry unit', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'destroyGeometryUnit', entryFile: 'nonexistent.ts' });
+      actor.send({ type: 'destroyGeometryUnit', entryPath: 'nonexistent.ts' });
       expect(actor.getSnapshot().context.geometryUnits.size).toBe(0);
       actor.stop();
     });
@@ -554,16 +477,16 @@ describe('projectMachine', () => {
       const emitted: unknown[] = [];
       actor.on('viewerFileRequested', (event) => emitted.push(event));
 
-      actor.send({ type: 'openInViewer', entryFile: 'viewer.ts' });
+      actor.send({ type: 'openInViewer', entryPath: 'viewer.ts' });
       expect(actor.getSnapshot().context.geometryUnits.has('viewer.ts')).toBe(true);
       expect(emitted).toHaveLength(1);
-      expect(emitted[0]).toMatchObject({ entryFile: 'viewer.ts' });
+      expect(emitted[0]).toMatchObject({ entryPath: 'viewer.ts' });
       actor.stop();
     });
 
     it('should add an exportable geometry unit path from a child availability event', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
       const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
       expect(unit).toBeDefined();
 
@@ -579,8 +502,8 @@ describe('projectMachine', () => {
 
     it('should track only the exportable secondary geometry unit when the main unit is unavailable', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
-      actor.send({ type: 'createGeometryUnit', entryFile: 'helper.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'helper.ts' });
       const mainUnit = actor.getSnapshot().context.geometryUnits.get('main.ts');
       const helperUnit = actor.getSnapshot().context.geometryUnits.get('helper.ts');
       expect(mainUnit).toBeDefined();
@@ -603,7 +526,7 @@ describe('projectMachine', () => {
 
     it('should remove an exportable geometry unit path when availability becomes false', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
       const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
       expect(unit).toBeDefined();
 
@@ -625,12 +548,12 @@ describe('projectMachine', () => {
 
     it('should clear exportability when destroying a geometry unit', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
       const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
       expect(unit).toBeDefined();
       actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: true });
 
-      actor.send({ type: 'destroyGeometryUnit', entryFile: 'main.ts' });
+      actor.send({ type: 'destroyGeometryUnit', entryPath: 'main.ts' });
 
       expect(actor.getSnapshot().context.exportableGeometryUnitPaths.size).toBe(0);
       actor.stop();
@@ -638,7 +561,7 @@ describe('projectMachine', () => {
 
     it('should rekey exportability when a geometry unit file moves', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
       const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
       expect(unit).toBeDefined();
       actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: true });
@@ -651,7 +574,7 @@ describe('projectMachine', () => {
 
     it('should clear exportability when a geometry unit file is deleted', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryFile: 'main.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
       const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
       expect(unit).toBeDefined();
       actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: true });
@@ -664,7 +587,7 @@ describe('projectMachine', () => {
 
     it('should clear exportability when a geometry unit directory is deleted', async () => {
       const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryFile: 'parts/main.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'parts/main.ts' });
       const unit = actor.getSnapshot().context.geometryUnits.get('parts/main.ts');
       expect(unit).toBeDefined();
       actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: true });
@@ -728,25 +651,22 @@ describe('projectMachine', () => {
   // State: ready – parameters
   // =========================================================================
   describe('ready – parameters', () => {
-    it('should update code parameters in project context', async () => {
-      const actor = await startAndLoad({ loadResult: stubProjectWithMechanical });
+    it('should update code parameters in the main entry sidecar state', async () => {
+      const entries = new Map<string, FileParameterEntry>([['main.ts', createDefaultEntry()]]);
+      const actor = await startAndLoad({
+        loadResult: stubProjectWithMechanical,
+        shouldLoadModelOnStart: true,
+        parameterEntries: entries,
+      });
       actor.send({
         type: 'updateCodeParameters',
         files: {},
         parameters: { height: 20 },
       });
-      expect(actor.getSnapshot().context.project?.assets.mechanical?.parameters).toEqual({ height: 20 });
-      actor.stop();
-    });
-
-    it('should no-op updateCodeParameters when no mechanical asset', async () => {
-      const actor = await startAndLoad();
-      actor.send({
-        type: 'updateCodeParameters',
-        files: {},
-        parameters: { height: 20 },
+      expect(getActiveGroupValues(actor.getSnapshot().context.parameterEntries.get('main.ts'))).toEqual({
+        height: 20,
       });
-      expect(actor.getSnapshot().context.project?.assets.mechanical).toBeUndefined();
+      expect(actor.getSnapshot().context.project).toEqual(stubProjectWithMechanical);
       actor.stop();
     });
 
@@ -766,13 +686,6 @@ describe('projectMachine', () => {
       expect(getActiveGroupValues(parameterEntries.get('main.ts'))).toEqual({ depth: 5 });
       actor.stop();
     });
-
-    it('should no-op setParameters when no mechanical asset', async () => {
-      const actor = await startAndLoad();
-      actor.send({ type: 'setParameters', parameters: { depth: 5 } });
-      expect(actor.getSnapshot().context.project?.assets.mechanical).toBeUndefined();
-      actor.stop();
-    });
   });
 
   // =========================================================================
@@ -784,14 +697,7 @@ describe('projectMachine', () => {
       expect(actor.getSnapshot().context.geometryUnits.has('main.ts')).toBe(false);
       actor.send({ type: 'loadModel' });
       expect(actor.getSnapshot().context.geometryUnits.has('main.ts')).toBe(true);
-      expect(actor.getSnapshot().context.mainEntryFile).toBe('main.ts');
-      actor.stop();
-    });
-
-    it('should no-op loadModel when no mechanical asset', async () => {
-      const actor = await startAndLoad();
-      actor.send({ type: 'loadModel' });
-      expect(actor.getSnapshot().context.geometryUnits.size).toBe(0);
+      expect(actor.getSnapshot().context.mainEntryPath).toBe('main.ts');
       actor.stop();
     });
   });
@@ -932,37 +838,28 @@ describe('projectMachine', () => {
   });
 
   // =========================================================================
-  // State: ready – project ID change
+  // State: ready – same-project reload
   // =========================================================================
-  describe('ready – project ID change', () => {
-    it('should reload with same projectId (no actor respawn)', async () => {
+  describe('ready – same-project reload', () => {
+    it('should reload without replacing the immutable project ID or stateful actors', async () => {
       const loadResults = [stubProject, { ...stubProject, name: 'Reloaded' }];
       let loadIndex = 0;
       const actor = await startAndLoad({
         loadResult: async () => loadResults[loadIndex++]!,
       });
 
-      actor.send({ type: 'loadProject', projectId: 'test-project' });
-      await waitFor(actor, (s) => s.matches({ ready: {} }));
-      expect(actor.getSnapshot().context.project?.name).toBe('Reloaded');
-      actor.stop();
-    });
-
-    it('should stop and respawn actors when projectId changes', async () => {
-      const actor = await startAndLoad();
-
-      actor.send({ type: 'createGeometryUnit', entryFile: 'old.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'old.ts' });
       actor.send({ type: 'createViewGraphics', viewId: 'old-view' });
-      expect(actor.getSnapshot().context.geometryUnits.size).toBe(1);
-      expect(actor.getSnapshot().context.viewGraphics.size).toBe(1);
+      const geometryUnit = actor.getSnapshot().context.geometryUnits.get('old.ts');
+      const viewGraphics = actor.getSnapshot().context.viewGraphics.get('old-view');
 
-      actor.send({ type: 'loadProject', projectId: 'new-project' });
+      actor.send({ type: 'reloadProject' });
       await waitFor(actor, (s) => s.matches({ ready: {} }));
 
-      expect(actor.getSnapshot().context.projectId).toBe('new-project');
-      expect(actor.getSnapshot().context.geometryUnits.size).toBe(0);
-      expect(actor.getSnapshot().context.viewGraphics.size).toBe(0);
-      expect(actor.getSnapshot().context.mainEntryFile).toBe('');
+      expect(actor.getSnapshot().context.projectId).toBe('test-project');
+      expect(actor.getSnapshot().context.project?.name).toBe('Reloaded');
+      expect(actor.getSnapshot().context.geometryUnits.get('old.ts')).toBe(geometryUnit);
+      expect(actor.getSnapshot().context.viewGraphics.get('old-view')).toBe(viewGraphics);
       actor.stop();
     });
   });
@@ -971,7 +868,7 @@ describe('projectMachine', () => {
   // State: error
   // =========================================================================
   describe('error', () => {
-    it('should transition to loading on loadProject', async () => {
+    it('should transition to loading on reloadProject', async () => {
       let loadIndex = 0;
       const actor = createTestActor({
         loadResult: async () => {
@@ -984,10 +881,10 @@ describe('projectMachine', () => {
       });
       actor.start();
 
-      actor.send({ type: 'loadProject', projectId: 'test-project' });
+      actor.send({ type: 'reloadProject' });
       await waitFor(actor, (s) => s.value === 'error');
 
-      actor.send({ type: 'loadProject', projectId: 'test-project' });
+      actor.send({ type: 'reloadProject' });
       await waitFor(actor, (s) => s.matches({ ready: {} }));
       expect(actor.getSnapshot().context.error).toBeUndefined();
       actor.stop();
@@ -1002,7 +899,7 @@ describe('projectMachine', () => {
         },
       });
       actor.start();
-      actor.send({ type: 'loadProject', projectId: 'test-project' });
+      actor.send({ type: 'reloadProject' });
       await waitFor(actor, (s) => s.value === 'error');
       expect(actor.getSnapshot().context.error?.message).toBe('Unknown error');
       actor.stop();
@@ -1021,7 +918,7 @@ describe('projectMachine', () => {
       expect(context.project).toBeUndefined();
       expect(context.error).toBeUndefined();
       expect(context.isLoading).toBe(true);
-      expect(context.mainEntryFile).toBe('');
+      expect(context.mainEntryPath).toBe('');
       expect(context.geometryUnits.size).toBe(0);
       expect(context.viewGraphics.size).toBe(0);
       actor.stop();
@@ -1151,7 +1048,7 @@ describe('projectMachine', () => {
       actor.stop();
     });
 
-    it('should write the correct geometry unit file path, not mainEntryFile', async () => {
+    it('should write the correct geometry unit file path, not mainEntryPath', async () => {
       const writtenPaths: string[] = [];
       const entries = new Map<string, FileParameterEntry>([
         ['main.ts', createDefaultEntry()],

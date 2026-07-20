@@ -24,6 +24,8 @@ export const user = pgTable('user', {
   image: text('image'),
   /** Whether the user allows their AI prompts and designs to be used for AI service improvement */
   allowsAiTraining: boolean('allows_ai_training').default(true).notNull(),
+  /** Stripe customer id, written by @better-auth/stripe on first billing action (lazy creation). */
+  stripeCustomerId: text('stripe_customer_id'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at')
     .defaultNow()
@@ -65,7 +67,7 @@ export const publication = pgTable(
     thumbnailKey: text('thumbnail_key'),
     runtimePin: text('runtime_pin').notNull(),
     kernels: text('kernels').array().notNull(),
-    entryFile: text('entry_file').notNull(),
+    entryPath: text('entry_file').notNull(),
     title: text('title').notNull(),
     description: text('description'),
     // oxlint-disable-next-line typescript-eslint/no-restricted-types -- Drizzle JSONB column distinguishes null (set) from undefined (unset)
@@ -197,3 +199,164 @@ export const apikey = pgTable(
     index('apikey_key_idx').on(table.key),
   ],
 );
+
+/**
+ * Subscription state mirrored from Stripe by `@better-auth/stripe` (hand-merged
+ * from the generated auth-schema.ts). `referenceId` is the user id at MVP
+ * (customerType 'user'); the plugin supports org references later.
+ */
+export const subscription = pgTable(
+  'subscription',
+  {
+    id: text('id').primaryKey(),
+    plan: text('plan').notNull(),
+    referenceId: text('reference_id').notNull(),
+    stripeCustomerId: text('stripe_customer_id'),
+    stripeSubscriptionId: text('stripe_subscription_id'),
+    status: text('status').default('incomplete').notNull(),
+    periodStart: timestamp('period_start'),
+    periodEnd: timestamp('period_end'),
+    trialStart: timestamp('trial_start'),
+    trialEnd: timestamp('trial_end'),
+    cancelAtPeriodEnd: boolean('cancel_at_period_end').default(false),
+    cancelAt: timestamp('cancel_at'),
+    canceledAt: timestamp('canceled_at'),
+    endedAt: timestamp('ended_at'),
+    seats: integer('seats'),
+    billingInterval: text('billing_interval'),
+    stripeScheduleId: text('stripe_schedule_id'),
+  },
+  (table) => [
+    index('subscription_reference_idx').on(table.referenceId),
+    index('subscription_stripe_idx').on(table.stripeSubscriptionId),
+  ],
+);
+
+/**
+ * Per-customer Enterprise limit overrides (blueprint Q28/E5). Merged over the
+ * tier's default entitlements at projection time; values are set by ops when a
+ * sales-led subscription is attached (see the stripe-iac runbook).
+ */
+export const subscriptionExtension = pgTable('subscription_extension', {
+  subscriptionId: text('subscription_id')
+    .primaryKey()
+    .references(() => subscription.id, { onDelete: 'cascade' }),
+  // oxlint-disable-next-line typescript-eslint/no-restricted-types -- Drizzle JSONB column distinguishes null (set) from undefined (unset)
+  overrides: jsonb('overrides').$type<Record<string, number | boolean> | null>(),
+  updatedAt: timestamp('updated_at')
+    .defaultNow()
+    .$onUpdate(() => /* @__PURE__ */ new Date())
+    .notNull(),
+});
+
+/**
+ * Credit-ledger account: materialised balances in microdollars (µ$, AD16 —
+ * 1 USD = 1e6 µ$, bigint columns). Split balances per AD10: monthly grants roll
+ * over against `rolloverCeilingMicro`; top-up credits never expire and are
+ * consumed first at commit time. Redis is the hot path; this row is the durable
+ * backstop written through by the ledger outbox.
+ */
+export const creditAccount = pgTable('credit_account', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  grantBalanceMicro: bigint('grant_balance_micro', { mode: 'bigint' })
+    .notNull()
+    .default(sql`0`),
+  topupBalanceMicro: bigint('topup_balance_micro', { mode: 'bigint' })
+    .notNull()
+    .default(sql`0`),
+  reservedMicro: bigint('reserved_micro', { mode: 'bigint' })
+    .notNull()
+    .default(sql`0`),
+  monthlyGrantMicro: bigint('monthly_grant_micro', { mode: 'bigint' })
+    .notNull()
+    .default(sql`0`),
+  rolloverCeilingMicro: bigint('rollover_ceiling_micro', { mode: 'bigint' })
+    .notNull()
+    .default(sql`0`),
+  /** Monotonic write-ordering guard: outbox flushes only apply snapshots with a newer version. */
+  version: bigint('version', { mode: 'bigint' })
+    .notNull()
+    .default(sql`0`),
+  /** Anchors the free-tier lazy monthly grant (paid grants anchor on invoice.paid). */
+  lastGrantedAt: timestamp('last_granted_at'),
+  /** Server-side dedup markers for the 80%/95% balance-consumed toasts (Q26). */
+  notified80At: timestamp('notified_80_at'),
+  notified95At: timestamp('notified_95_at'),
+  updatedAt: timestamp('updated_at')
+    .defaultNow()
+    .$onUpdate(() => /* @__PURE__ */ new Date())
+    .notNull(),
+});
+
+/**
+ * Append-only credit journal. Invariant (C12, audited with alerting):
+ * SUM(delta_micro) per user == credit_account.grant_balance_micro + topup_balance_micro.
+ * Reservations are deliberately NOT journaled — only settled money movements are.
+ * `category` is set on spend rows only (grants/top-ups are category-less credit).
+ */
+export const creditTransaction = pgTable(
+  'credit_transaction',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    deltaMicro: bigint('delta_micro', { mode: 'bigint' }).notNull(),
+    balanceAfterMicro: bigint('balance_after_micro', {
+      mode: 'bigint',
+    }).notNull(),
+    reason: text('reason').notNull(),
+    category: text('category'),
+    stripeEventId: text('stripe_event_id'),
+    chatId: text('chat_id'),
+    modelId: text('model_id'),
+    toolCallId: text('tool_call_id'),
+    note: text('note'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('credit_tx_user_idx').on(table.userId, desc(table.createdAt)),
+    // Webhook idempotency (Q11): a retried Stripe event inserts the same id and no-ops.
+    uniqueIndex('credit_tx_stripe_event_idx')
+      .on(table.stripeEventId)
+      .where(sql`${table.stripeEventId} IS NOT NULL`),
+    check(
+      'credit_tx_reason_check',
+      sql`${table.reason} IN ('monthly_grant', 'topup', 'commit', 'sweep_floor', 'adjustment')`,
+    ),
+    check(
+      'credit_tx_category_check',
+      sql`${table.category} IS NULL OR ${table.category} IN ('llm', 'zoo_engine', 'geospec_hosted', 'solver_orchestration')`,
+    ),
+  ],
+);
+
+/**
+ * In-flight model-call reservations (durable mirror of the Redis reservation
+ * hash). `inputFloorMicro` is the Q36 abort/error floor captured at reserve
+ * time so the sweeper can settle expired holds without re-estimating.
+ */
+export const creditReservation = pgTable(
+  'credit_reservation',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    reservedMicro: bigint('reserved_micro', { mode: 'bigint' }).notNull(),
+    inputFloorMicro: bigint('input_floor_micro', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    chatId: text('chat_id'),
+    turnId: text('turn_id').notNull(),
+    modelId: text('model_id').notNull(),
+    category: text('category').notNull().default('llm'),
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [index('credit_res_user_idx').on(table.userId, table.expiresAt)],
+);
+
+/* oxlint-enable @typescript-eslint/no-unsafe-return -- see file-leading disable */

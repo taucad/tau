@@ -2,7 +2,7 @@ import { Copy, Edit, Forward, History, MoreHorizontal, Trash2 } from 'lucide-rea
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router';
-import type { Project } from '@taucad/types';
+import type { ProjectListItem } from '#types/project.types.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,7 +34,7 @@ export function NavHistory(): ReactNode {
   const [visibleCount, setVisibleCount] = useState(projectsPerPage);
   const [editingId, setEditingId] = useState<string | undefined>(undefined);
   const [searchQuery, setSearchQuery] = useState('');
-  const { projects, isLoading, deleteProject, duplicateProject, updateName } = useProjects();
+  const { projects, isLoading, error, retry, deleteProject, duplicateProject, updateName } = useProjects();
   const navigate = useNavigate();
 
   // Filter projects based on search query
@@ -172,6 +172,22 @@ export function NavHistory(): ReactNode {
     );
   }
 
+  if (error && projects.length === 0) {
+    return (
+      <SidebarGroup className='group-data-[collapsible=icon]:hidden'>
+        <SidebarGroupLabel>Recent Projects</SidebarGroupLabel>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => void retry()}>
+              <span>Could not load projects</span>
+              <span className='text-xs text-muted-foreground'>Retry</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
+    );
+  }
+
   if (projects.length === 0) {
     return null;
   }
@@ -179,6 +195,15 @@ export function NavHistory(): ReactNode {
   return (
     <>
       {/* Search input */}
+      {error ? (
+        <SidebarGroup className='-mb-2 group-data-[collapsible=icon]:hidden'>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton onClick={() => void retry()}>Projects could not be refreshed. Retry</SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
+      ) : null}
       <SidebarGroup className='-mb-2 group-data-[collapsible=icon]:hidden'>
         <SidebarGroupLabel>Recent Projects</SidebarGroupLabel>
         <SearchInput
@@ -254,9 +279,9 @@ export function NavHistory(): ReactNode {
           projectId={publishTarget.id}
           projectName={publishTarget.name}
           projectDescription={publishTarget.description}
-          projectUpdatedAt={publishTarget.updatedAt}
-          entryFile={publishTarget.assets.mechanical?.main ?? 'main.ts'}
-          parameters={publishTarget.assets.mechanical?.parameters ?? {}}
+          projectUpdatedAt={publishTarget.lastActivityAt}
+          entryPath={publishTarget.assets.main.entryPath}
+          parameters={{}}
         />
       ) : null}
     </>
@@ -264,7 +289,7 @@ export function NavHistory(): ReactNode {
 }
 
 type NavHistoryItemProps = {
-  readonly project: Project;
+  readonly project: ProjectListItem;
   readonly isEditing: boolean;
   readonly onRename: (projectId: string) => void;
   readonly onRenameSubmit: (projectId: string, newName: string) => Promise<void>;

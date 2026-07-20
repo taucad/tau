@@ -107,7 +107,7 @@ export type LoadModelSourceOptions = {
 export type LoadModelCodeOptions<Code extends Record<string, string> = Record<string, string>> = {
   /** Source files keyed by project-relative path. */
   code: Code;
-  /** Entry file to render from {@link code}. */
+  /** Entry path to render from {@link code}. */
   file: keyof Code & string;
   /** Geometry format to export. Defaults to `glb`. */
   format?: GeoSpecModelFormat;

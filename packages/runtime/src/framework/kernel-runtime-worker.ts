@@ -29,6 +29,7 @@ import type {
   GetDependenciesResult,
   GetParametersInput,
   KernelDefinition,
+  KernelExportFormats,
   KernelRuntime,
 } from '#types/runtime-kernel.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
@@ -39,6 +40,7 @@ import { preserveMethodNames } from '#framework/named.js';
 import { isWebAssemblyException } from '#kernels/occt/wasm-exception.js';
 import { createKernelError } from '#kernels/kernel-helpers.js';
 import type { KernelPlugin } from '#plugins/plugin-types.js';
+import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 import { resolveRuntimeDefinition } from '#worker/runtime-definition.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
@@ -55,6 +57,7 @@ type LoadedKernel = {
   definition: KernelDefinition;
   ctx: unknown;
   initialized: boolean;
+  options: Record<string, unknown>;
 };
 
 type RuntimeKernelBinding = KernelBinding<LoadedKernel>;
@@ -101,8 +104,16 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     config?: unknown;
   }): Promise<void> {
     const resolvedRuntime = await resolveRuntimeDefinition(this.runtime, input.config);
+    this.assertUniquePluginIds('kernel', resolvedRuntime.kernels);
     this.kernelPlugins = resolvedRuntime.kernels;
     this.loadedKernels.clear();
+    this.kernelExportZodSchemasMap.clear();
+    this.kernelRenderZodSchemaMap.clear();
+    this.kernelExportContentMap.clear();
+    this.kernelRenderContentMap.clear();
+    this.kernelNativeHandleScopeMap.clear();
+    this.kernelInitOptionsMap.clear();
+    this.kernelImplementationAssetsMap.clear();
     this.activeKernelId = undefined;
     this.selectionCache.clear();
     this.selectionErrors.clear();
@@ -129,7 +140,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     input: GetDependenciesInput,
     runtime: KernelRuntime,
   ): Promise<GetDependenciesResult> {
-    const owner = await this.createLegacyOperationOwner(input, 'request', runtime);
+    const owner = await this.createRequestOperationOwner(input, 'request', runtime);
     return this.onGetDependenciesForOwner(owner, input, runtime);
   }
 
@@ -146,7 +157,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
     const kernel = this.getKernelForOwner(owner);
     if (!kernel) {
-      return { resolved: [input.filePath], unresolved: [] };
+      return { resolved: [input.entryPath], unresolved: [] };
     }
 
     return kernel.definition.getDependencies(input, runtime, kernel.ctx);
@@ -156,7 +167,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     input: GetParametersInput,
     runtime: KernelRuntime,
   ): Promise<GetParametersResult> {
-    const owner = await this.createLegacyOperationOwner(input, 'request', runtime);
+    const owner = await this.createRequestOperationOwner(input, 'request', runtime);
     return this.onGetParametersForOwner(owner, input, runtime);
   }
 
@@ -165,7 +176,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     input: GetParametersInput,
     runtime: KernelRuntime,
   ): Promise<GetParametersResult> {
-    const selectionError = this.selectionErrors.get(input.filePath);
+    const selectionError = this.selectionErrors.get(input.entryPath);
     if (selectionError) {
       return createKernelError([this.createKernelBindingIssue(selectionError)]);
     }
@@ -173,7 +184,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     const kernel = this.getKernelForOwner(owner);
     if (!kernel) {
       runtime.logger.warn('getParameters returning empty: kernel-not-selected', {
-        data: { filePath: input.filePath, loadedKernels: [...this.loadedKernels.keys()] },
+        data: { entryPath: input.entryPath, loadedKernels: [...this.loadedKernels.keys()] },
       });
       return {
         success: true,
@@ -189,7 +200,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     input: CreateGeometryInput,
     runtime: KernelRuntime,
   ): Promise<CreateGeometryResult> {
-    const owner = await this.createLegacyOperationOwner(input, 'request', runtime);
+    const owner = await this.createRequestOperationOwner(input, 'request', runtime);
     return this.onCreateGeometryForOwner(owner, input, runtime);
   }
 
@@ -198,16 +209,16 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     input: CreateGeometryInput,
     runtime: KernelRuntime,
   ): Promise<CreateGeometryResult> {
-    const selectionError = this.selectionErrors.get(input.filePath);
+    const selectionError = this.selectionErrors.get(input.entryPath);
     if (selectionError) {
-      this.selectionErrors.delete(input.filePath);
+      this.selectionErrors.delete(input.entryPath);
       return createKernelError([this.createKernelBindingIssue(selectionError)]);
     }
 
     const kernel = this.getKernelForOwner(owner);
     if (!kernel) {
       runtime.logger.warn('createGeometry failed: kernel-not-selected', {
-        data: { filePath: input.filePath, loadedKernels: [...this.loadedKernels.keys()] },
+        data: { entryPath: input.entryPath, loadedKernels: [...this.loadedKernels.keys()] },
       });
       return createKernelError([
         {
@@ -248,6 +259,67 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         };
       }
 
+      return {
+        success: true,
+        data: output.geometry,
+        issues: output.issues ?? [],
+      };
+    } catch (error) {
+      if (isRenderAbortedError(error)) {
+        throw error;
+      }
+
+      if (error instanceof Error && 'issues' in error && Array.isArray(error.issues)) {
+        return { success: false, issues: error.issues as KernelIssue[] };
+      }
+
+      let message: string;
+      if (error instanceof Error) {
+        message = error.message;
+      } else if (isWebAssemblyException(error)) {
+        message = 'KernelError: The geometry kernel threw an undecodable C++ exception';
+      } else {
+        message = String(error);
+      }
+
+      return {
+        success: false,
+        issues: [
+          {
+            message,
+            code: 'KERNEL_BINDING_FAILED',
+            type: 'kernel',
+            severity: 'error',
+          },
+        ],
+      };
+    }
+  }
+
+  protected override kernelHasMeshPhaseForOwner(owner: OperationOwner): boolean {
+    return this.getKernelForOwner(owner)?.definition.meshGeometry !== undefined;
+  }
+
+  protected override async onMeshGeometryForOwner(
+    owner: OperationOwner,
+    input: { nativeHandle: unknown; options: Record<string, unknown>; content?: RuntimeContentInput },
+    runtime: KernelRuntime,
+  ): Promise<CreateGeometryResult> {
+    const kernel = this.getKernelForOwner(owner);
+    const meshGeometry = kernel?.definition.meshGeometry;
+    if (!kernel || !meshGeometry) {
+      return createKernelError([
+        {
+          message: 'No runtime kernel with a meshGeometry phase selected for display render.',
+          code: 'KERNEL_CAPABILITY_MISSING',
+          type: 'kernel',
+          severity: 'error',
+        },
+      ]);
+    }
+
+    try {
+      const output = await meshGeometry(input, runtime, kernel.ctx);
       return {
         success: true,
         data: output.geometry,
@@ -357,12 +429,12 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   }
 
   protected override async resolveKernelBinding(
-    input: { filePath: string; basePath: string },
+    input: { entryPath: string },
     runtime: KernelRuntime,
   ): Promise<RuntimeKernelBinding | undefined> {
-    const span = runtime.tracer.startSpan('kernel.select', { file: input.filePath });
+    const span = runtime.tracer.startSpan('kernel.select', { file: input.entryPath });
     try {
-      const selection = await this.selectKernel(input.filePath, runtime);
+      const selection = await this.selectKernel(input.entryPath, runtime);
       if (!selection) {
         return undefined;
       }
@@ -370,11 +442,11 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       return {
         kernelId: selection.kernel.entry.id,
         kernelVersion: selection.kernel.definition.version,
-        filePath: input.filePath,
+        entryPath: input.entryPath,
         kernel: selection.kernel,
       };
     } catch (error) {
-      this.selectionErrors.set(input.filePath, error);
+      this.selectionErrors.set(input.entryPath, error);
       return undefined;
     } finally {
       span.end();
@@ -399,35 +471,45 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     return this.activeKernelId ? this.getActiveKernel().definition.version : undefined;
   }
 
-  protected override getAssetUrls(): string[] {
-    return [];
+  protected override onFileChanged(_changedPaths: readonly string[]): void {
+    this.clearFileDerivedKernelState();
   }
 
-  protected override onFileChanged(_changedPaths: readonly string[]): void {
+  protected override onVolatileFileCachesCleared(): void {
+    this.clearFileDerivedKernelState();
+  }
+
+  protected override onPublishedArtifactInvalidated(): void {
+    if (this.activeKernelId === undefined) {
+      return;
+    }
+    this.activeKernelId = undefined;
+    this.onActiveKernelChanged?.(undefined);
+  }
+
+  private clearFileDerivedKernelState(): void {
     this.selectionCache.clear();
     this.selectionErrors.clear();
     this.cachedDetectionDeps = undefined;
-    this.activeKernelId = undefined;
-    this.onActiveKernelChanged?.(undefined);
   }
 
   // =====================================================================
   // Private methods
   // =====================================================================
 
-  private async createLegacyOperationOwner(
+  private async createRequestOperationOwner(
     input: GetDependenciesInput | GetParametersInput | CreateGeometryInput,
     kind: OperationOwner['kind'],
     runtime: KernelRuntime,
   ): Promise<OperationOwner> {
-    const binding = await this.resolveKernelBinding({ filePath: input.filePath, basePath: input.basePath }, runtime);
+    const binding = await this.resolveKernelBinding({ entryPath: input.entryPath }, runtime);
+    const lastSlash = input.entryPath.lastIndexOf('/');
     return {
       kind,
       file: {
-        filename: KernelRuntimeWorker.resolveToRelative(input.filePath, input.basePath),
-        path: input.basePath,
+        filename: input.entryPath.slice(lastSlash + 1),
+        path: input.entryPath.slice(0, lastSlash) || '/',
       },
-      projectRootPath: input.basePath,
       binding,
     };
   }
@@ -464,21 +546,38 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       throw new Error(`Kernel module ${config.id} does not export a valid KernelDefinition`);
     }
 
+    const rawOptions = config.options ?? {};
+    const validatedOptions = definition.optionsSchema ? definition.optionsSchema.parse(rawOptions) : rawOptions;
+    const implementationAssets = definition.implementationAssets ?? [];
+    await this.verifyImplementationAssets(config.id, implementationAssets);
+
     const loaded: LoadedKernel = {
       entry: config,
       definition,
       ctx: undefined,
       initialized: false,
+      options: validatedOptions,
     };
 
     this.loadedKernels.set(config.id, loaded);
+    const exportFormats = definition.exportFormats as KernelExportFormats;
 
-    if (definition.exportSchemas) {
-      this.kernelExportZodSchemasMap.set(config.id, definition.exportSchemas);
-    }
-
-    if (definition.renderSchema) {
-      this.kernelRenderZodSchemaMap.set(config.id, definition.renderSchema);
+    this.kernelExportZodSchemasMap.set(
+      config.id,
+      Object.fromEntries(
+        Object.entries(exportFormats).map(([format, declaration]) => [format, declaration.optionsSchema]),
+      ),
+    );
+    this.kernelExportContentMap.set(
+      config.id,
+      Object.fromEntries(Object.entries(exportFormats).map(([format, declaration]) => [format, declaration.content])),
+    );
+    this.kernelRenderContentMap.set(config.id, definition.render.content);
+    this.kernelNativeHandleScopeMap.set(config.id, definition.nativeHandleScope ?? 'operation');
+    this.kernelInitOptionsMap.set(config.id, validatedOptions);
+    this.kernelImplementationAssetsMap.set(config.id, implementationAssets);
+    if (definition.render.optionsSchema) {
+      this.kernelRenderZodSchemaMap.set(config.id, definition.render.optionsSchema);
     }
 
     this.rebuildAndPushCapabilities();
@@ -493,28 +592,23 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
     this.logger.trace(`Initializing kernel: ${kernel.entry.id}`);
 
-    const rawOptions = kernel.entry.options ?? {};
-    const validatedOptions = kernel.definition.optionsSchema
-      ? kernel.definition.optionsSchema.parse(rawOptions)
-      : rawOptions;
-
-    kernel.ctx = await kernel.definition.initialize(validatedOptions, runtime);
+    kernel.ctx = await kernel.definition.initialize(kernel.options, runtime);
     kernel.initialized = true;
   }
 
   /**
    * Select the appropriate kernel for a file using three-pass detection:
-   * 1. Extension + regex fast path (entry file only)
+   * 1. Extension + regex fast path (entry path only)
    * 2. Bundler-assisted detection via detectImports (transitive, no stubs)
    * 3. Catch-all fallback (extensions: ['*'])
    *
-   * @param filePath - Full path to the file (used as cache key for collision safety)
+   * @param entryPath - Canonical path to the model entry (used as cache key for collision safety)
    * @param runtime - the kernel runtime context for initialization
    * @returns the selected kernel and selection method, or undefined if no kernel matches
    */
   // oxlint-disable-next-line complexity -- Multi-pass kernel selection requires sequential checks
-  private async selectKernel(filePath: string, runtime: KernelRuntime): Promise<KernelSelection | undefined> {
-    const cached = this.selectionCache.get(filePath);
+  private async selectKernel(entryPath: string, runtime: KernelRuntime): Promise<KernelSelection | undefined> {
+    const cached = this.selectionCache.get(entryPath);
     if (cached) {
       const kernel = this.loadedKernels.get(cached.id);
       if (kernel) {
@@ -522,8 +616,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       }
     }
 
-    const dotIndex = filePath.lastIndexOf('.');
-    const extension = dotIndex > 0 && dotIndex < filePath.length - 1 ? filePath.slice(dotIndex + 1).toLowerCase() : '';
+    const dotIndex = entryPath.lastIndexOf('.');
+    const extension =
+      dotIndex > 0 && dotIndex < entryPath.length - 1 ? entryPath.slice(dotIndex + 1).toLowerCase() : '';
     let catchAllEntry: KernelPluginEntry | undefined;
     const hasBundlerKernels = this.kernelPlugins.some((c) => c.builtinModuleNames && c.builtinModuleNames.length > 0);
 
@@ -545,7 +640,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       if (!config.detectImport) {
         const kernel = await this.loadKernelModule(config, runtime.tracer);
         await this.ensureKernelInitialized(kernel, runtime);
-        this.selectionCache.set(filePath, {
+        this.selectionCache.set(entryPath, {
           id: config.id,
           method: 'extension',
         });
@@ -556,7 +651,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         const detectSpan = runtime.tracer.startSpan('kernel.detect-import', {
           kernel: config.id,
         });
-        const code = await runtime.filesystem.readFile(filePath, 'utf8');
+        const code = await runtime.filesystem.readFile(entryPath, 'utf8');
         detectSpan.end();
         const importRegex = config.detectImport;
         if (!importRegex.test(code)) {
@@ -564,19 +659,19 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         }
       } catch (error) {
         runtime.logger.warn('selectKernel pass 1 (extension/regex) failed', {
-          data: { kernel: config.id, file: filePath, error: String(error) },
+          data: { kernel: config.id, entryPath, error: String(error) },
         });
         continue;
       }
 
       const kernel = await this.loadKernelModule(config, runtime.tracer);
       await this.ensureKernelInitialized(kernel, runtime);
-      this.selectionCache.set(filePath, { id: config.id, method: 'regex' });
+      this.selectionCache.set(entryPath, { id: config.id, method: 'regex' });
       return { kernel, method: 'regex' };
     }
 
     // Pass 2: Bundler-assisted detection via detectImports
-    const fileExtension = filePath.includes('.') ? filePath.slice(filePath.lastIndexOf('.') + 1).toLowerCase() : '';
+    const fileExtension = entryPath.includes('.') ? entryPath.slice(entryPath.lastIndexOf('.') + 1).toLowerCase() : '';
     const hasBundler = this.hasBundlerForExtension(fileExtension);
     if (hasBundler) {
       const configsWithBuiltins = this.kernelPlugins.filter(
@@ -589,12 +684,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         try {
           const bundler = await this.ensureBundlerForExtension(fileExtension);
           const detectSpan = runtime.tracer.startSpan('kernel.detect-bundle', {
-            file: filePath,
+            entryPath,
           });
-          const { detectedModules, dependencies } = await bundler.definition.detectImports(
-            { entryPath: filePath },
-            bundler.ctx,
-          );
+          const { detectedModules, dependencies } = await bundler.definition.detectImports({ entryPath }, bundler.ctx);
           detectSpan.end();
           this.cachedDetectionDeps = { resolved: dependencies, unresolved: [] };
 
@@ -606,7 +698,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         } catch (error) {
           runtime.logger.warn('selectKernel pass 2 (bundler-detect) failed', {
             data: {
-              file: filePath,
+              entryPath,
               configs: configsWithBuiltins.map((c) => c.id),
               error: String(error),
             },
@@ -624,7 +716,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
             await this.ensureKernelInitialized(kernel, runtime);
           }
 
-          this.selectionCache.set(filePath, {
+          this.selectionCache.set(entryPath, {
             id: primaryConfig.id,
             method: 'bundler',
           });
@@ -637,7 +729,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
     // Pass 3: Catch-all fallback
     if (catchAllEntry) {
-      return this.tryCatchAllKernel(catchAllEntry, { filePath, runtime });
+      return this.tryCatchAllKernel(catchAllEntry, { entryPath, runtime });
     }
 
     return undefined;
@@ -651,12 +743,12 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
    */
   private async tryCatchAllKernel(
     entry: KernelPluginEntry,
-    { filePath, runtime }: { filePath: string; runtime: KernelRuntime },
+    { entryPath, runtime }: { entryPath: string; runtime: KernelRuntime },
   ): Promise<KernelSelection> {
     const kernel = await this.loadKernelModule(entry, runtime.tracer);
     await this.ensureKernelInitialized(kernel, runtime);
 
-    this.selectionCache.set(filePath, { id: entry.id, method: 'catchall' });
+    this.selectionCache.set(entryPath, { id: entry.id, method: 'catchall' });
     return { kernel, method: 'catchall' };
   }
 

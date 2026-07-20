@@ -85,7 +85,7 @@ function EditorTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
   // ── Navigation actions ──
   const handleOpenInViewer = useCallback(() => {
     if (filePath) {
-      projectRef.send({ type: 'openInViewer', entryFile: filePath });
+      projectRef.send({ type: 'openInViewer', entryPath: filePath });
     }
   }, [projectRef, filePath]);
 

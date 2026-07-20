@@ -4,7 +4,7 @@
  * Subscribes to {@link FileContentService.onDidContentChange} and
  * routes filesystem events into editor + project state machine
  * intents. This is the single funnel that keeps **every** UI store
- * (open tabs, geometry actors, parameter entries, main entry file
+ * (open tabs, geometry actors, parameter entries, main entry path
  * pointer) consistent with the filesystem.
  *
  * Design (mirrors VS Code's `IWorkingCopyFileService` participants):
@@ -83,7 +83,7 @@ export function mountFileOperationParticipants(init: {
         // existing `renameFile` action handles both single-file and
         // prefix (directory) renames in one pass.
         editorRef.send({ type: 'renameFile', oldPath: event.oldPath, newPath: event.newPath });
-        // Project: rewrite path-keyed maps and `mainEntryFile` so
+        // Project: rewrite path-keyed maps and `mainEntryPath` so
         // open viewers / CAD actors / parameters survive the move.
         projectRef.send({ type: 'fileMoved', oldPath: event.oldPath, newPath: event.newPath });
         sendProjectFileActivity(projectRef, event.type, [event.oldPath, event.newPath]);

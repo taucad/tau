@@ -1,13 +1,13 @@
 /**
- * Sort geometry unit entries so that the main entry file appears first,
+ * Sort geometry unit entries so that the main entry path appears first,
  * with remaining entries sorted alphabetically.
  */
-export const sortGeometryUnitEntries = <T>(entries: Array<[string, T]>, mainEntryFile: string): Array<[string, T]> =>
+export const sortGeometryUnitEntries = <T>(entries: Array<[string, T]>, mainEntryPath: string): Array<[string, T]> =>
   [...entries].sort(([a], [b]) => {
-    if (a === mainEntryFile) {
+    if (a === mainEntryPath) {
       return -1;
     }
-    if (b === mainEntryFile) {
+    if (b === mainEntryPath) {
       return 1;
     }
     return a.localeCompare(b);

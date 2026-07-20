@@ -7,19 +7,21 @@
  * This is the reference implementation of the defineKernel pattern.
  */
 
-import { importToGlb } from '@taucad/converter';
+import { extractReferencedGltfUris, importToGlb } from '@taucad/converter';
 import { supportedImportFormats } from '@taucad/converter/formats';
 import type { SupportedImportFormat, FileResolver } from '@taucad/converter';
 import { defineKernel } from '#types/runtime-kernel.types.js';
 import { tauExportSchemas } from '#kernels/tau/tau.schemas.js';
 import type { KernelFileSystem } from '#types/runtime-kernel.types.js';
-import { resolveToRelative } from '#kernels/kernel-module-helpers.js';
 import type { KernelIssue } from '#types/runtime.types.js';
 import { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { createExportFile } from '@taucad/types/constants';
 import { finalizeRenderOutput } from '#framework/render-artifact-finalizer.js';
 import { normalizeGltfGeometryNames } from '#utils/gltf-geometry-name-normalizer.js';
-import { stripTauGltfMetadata } from '#utils/gltf-topology-metadata.js';
+import { transformGltfExportBytes } from '#utils/gltf-export-transform.js';
+import { resolveImportPath } from '@taucad/utils/import';
+import { parentDirectory, resolveVirtualPath } from '@taucad/utils/path';
+import { isNotFoundError } from '#filesystem/filesystem-errors.js';
 
 function getFileExtension(filename: string): string {
   const lastDotIndex = filename.lastIndexOf('.');
@@ -35,55 +37,106 @@ function getBasename(filename: string): string {
   return lastSlashIndex === -1 ? filename : filename.slice(lastSlashIndex + 1);
 }
 
-function getDirname(filepath: string): string {
-  const lastSlashIndex = filepath.lastIndexOf('/');
-  return lastSlashIndex === -1 ? '' : filepath.slice(0, lastSlashIndex);
-}
+type TauInventory = {
+  readonly entryBytes: Uint8Array<ArrayBuffer>;
+  readonly resolved: readonly string[];
+  readonly unresolved: readonly string[];
+  readonly resolver: FileResolver;
+};
 
-/**
- * Pre-load directory contents into a synchronous FileResolver.
- * The resolver is backed by a Map for instant lookups, satisfying
- * assimpjs's synchronous callback requirement.
- *
- * @param filesystem - the kernel filesystem to read directory contents from
- * @param directory - the directory path to pre-load
- * @returns a synchronous file resolver backed by the cached directory contents
- */
-async function createDirectoryResolver(filesystem: KernelFileSystem, directory: string): Promise<FileResolver> {
-  const fileCache = new Map<string, Uint8Array<ArrayBuffer>>();
-
+const resolveGltfUri = (uri: string, entryPath: string): string => {
+  if (
+    uri.includes('\\') ||
+    uri.includes('?') ||
+    uri.includes('#') ||
+    uri.startsWith('//') ||
+    /^[A-Za-z][A-Za-z\d+.-]*:/u.test(uri)
+  ) {
+    throw new TypeError(`Unsupported glTF filesystem URI: ${JSON.stringify(uri)}`);
+  }
+  let decoded: string;
   try {
-    const entries = await filesystem.readdir(directory);
-    await Promise.all(
-      entries.map(async (entry) => {
-        const fullPath = directory ? `${directory}/${entry}` : entry;
-        try {
-          const stat = await filesystem.stat(fullPath);
-          if (stat.type === 'file') {
-            const bytes = await filesystem.readFile(fullPath);
-            fileCache.set(entry, bytes);
-          }
-        } catch {
-          // Skip entries that can't be read (permissions, broken symlinks)
-        }
-      }),
-    );
-  } catch {
-    // Directory listing failed — resolver will have no cached files
+    decoded = decodeURIComponent(uri);
+  } catch (error) {
+    throw new TypeError(`Malformed glTF filesystem URI: ${JSON.stringify(uri)}`, { cause: error });
+  }
+  return resolveImportPath(decoded.startsWith('/') || decoded.startsWith('.') ? decoded : `./${decoded}`, entryPath);
+};
+
+const createTauInventory = async (filesystem: KernelFileSystem, rawEntryPath: string): Promise<TauInventory> => {
+  const entryPath = resolveVirtualPath(rawEntryPath);
+  const directory = parentDirectory(entryPath);
+  const names = [...(await filesystem.readdir(directory))].sort();
+  const bytesByPath = new Map<string, Uint8Array<ArrayBuffer>>();
+  const resolverBytes = new Map<string, Uint8Array<ArrayBuffer>>();
+
+  for (const name of names) {
+    const path = resolveVirtualPath(`${directory === '/' ? '' : directory}/${name}`);
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- deterministic provider access and race handling
+      const stat = await filesystem.stat(path);
+      if (stat.type !== 'file') {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- deterministic provider access and race handling
+      const bytes = await filesystem.readFile(path);
+      bytesByPath.set(path, bytes);
+      resolverBytes.set(name, bytes);
+    } catch (error) {
+      if (!isNotFoundError(error)) {
+        throw error;
+      }
+    }
   }
 
-  return {
-    exists: (filename: string) => fileCache.has(filename),
-    readFile(filename: string) {
-      const bytes = fileCache.get(filename);
+  let entryBytes = bytesByPath.get(entryPath);
+  if (!entryBytes) {
+    entryBytes = await filesystem.readFile(entryPath);
+    bytesByPath.set(entryPath, entryBytes);
+    resolverBytes.set(getBasename(entryPath), entryBytes);
+  }
+
+  const unresolved = new Set<string>();
+  if (getFileExtension(entryPath) === 'gltf') {
+    const uris = extractReferencedGltfUris(new TextDecoder().decode(entryBytes));
+    for (const uri of uris) {
+      const path = resolveGltfUri(uri, entryPath);
+      let bytes = bytesByPath.get(path);
+      if (!bytes) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- resolver inventory is deterministic
+          bytes = await filesystem.readFile(path);
+          bytesByPath.set(path, bytes);
+        } catch (error) {
+          if (isNotFoundError(error)) {
+            unresolved.add(path);
+            continue;
+          }
+          throw error;
+        }
+      }
+      resolverBytes.set(uri, bytes);
+    }
+  }
+
+  const resolver: FileResolver = {
+    exists: (filename) => resolverBytes.has(filename),
+    readFile(filename) {
+      const bytes = resolverBytes.get(filename);
       if (!bytes) {
         throw new Error(`File not found: ${filename}`);
       }
-
       return bytes;
     },
   };
-}
+
+  return {
+    entryBytes,
+    resolved: [...bytesByPath.keys()].sort(),
+    unresolved: [...unresolved].sort(),
+    resolver,
+  };
+};
 
 /** @public */
 export const tau = defineKernel({
@@ -91,14 +144,20 @@ export const tau = defineKernel({
   extensions: [...supportedImportFormats],
   name: 'TauKernel',
   version: '1.0.0',
-  exportSchemas: tauExportSchemas,
+  nativeHandleScope: 'source',
+  render: { content: [] },
+  exportFormats: {
+    glb: { optionsSchema: tauExportSchemas.glb, content: [] },
+    gltf: { optionsSchema: tauExportSchemas.gltf, content: [] },
+  },
 
   async initialize() {
     return {};
   },
 
-  async getDependencies({ filePath }) {
-    return { resolved: [filePath], unresolved: [] };
+  async getDependencies({ entryPath }, { filesystem }) {
+    const inventory = await createTauInventory(filesystem, entryPath);
+    return { resolved: [...inventory.resolved], unresolved: [...inventory.unresolved] };
   },
 
   async getParameters() {
@@ -112,12 +171,12 @@ export const tau = defineKernel({
     });
   },
 
-  async createGeometry({ filePath, basePath }, { filesystem, logger }) {
-    const relativeFilePath = resolveToRelative(filePath, basePath);
-    const filename = getBasename(filePath);
-    const directory = getDirname(filePath);
+  async createGeometry({ entryPath }, { filesystem, logger }) {
+    const canonicalFilePath = resolveVirtualPath(entryPath);
+    const relativeFilePath = canonicalFilePath.slice(1);
+    const filename = getBasename(entryPath);
     try {
-      const data = await filesystem.readFile(filePath);
+      const inventory = await createTauInventory(filesystem, canonicalFilePath);
       const format = getFileExtension(filename);
       const formattedFormat = String(format).toUpperCase();
       logger.log(`Converting ${formattedFormat} to GLB`);
@@ -125,9 +184,11 @@ export const tau = defineKernel({
       // Pre-load sibling files from the directory into a synchronous resolver.
       // Both assimpjs (sync callbacks) and gltf-transform (async readURI)
       // can use this resolver for on-demand sidecar file resolution.
-      const resolver = await createDirectoryResolver(filesystem, directory);
-
-      const glbData = await importToGlb([{ name: filename, bytes: data }], format as SupportedImportFormat, resolver);
+      const glbData = await importToGlb(
+        [{ name: filename, bytes: inventory.entryBytes }],
+        format as SupportedImportFormat,
+        inventory.resolver,
+      );
       const isGltfFamily = format === 'glb' || format === 'gltf';
       const normalizedGlbData = await normalizeGltfGeometryNames(glbData, {
         format: 'glb',
@@ -178,11 +239,21 @@ export const tau = defineKernel({
     }
 
     switch (format) {
-      case 'glb':
+      case 'glb': {
+        logger.log('Exporting geometry', { data: { format } });
+        const bytes = await transformGltfExportBytes(nativeHandle, {
+          format,
+          coordinateSystem: input.options.coordinateSystem,
+          unit: input.options.unit,
+        });
+        const file = createExportFile(format, `model.${format}`, bytes);
+        logger.log('Successfully exported geometry');
+        return createKernelSuccess([file]);
+      }
+
       case 'gltf': {
         logger.log('Exporting geometry', { data: { format } });
-        const cleanExport = await stripTauGltfMetadata(nativeHandle, { format: 'glb' });
-        const file = createExportFile(format, `model.${format}`, cleanExport);
+        const file = createExportFile(format, `model.${format}`, new Uint8Array(nativeHandle));
         logger.log('Successfully exported geometry');
         return createKernelSuccess([file]);
       }

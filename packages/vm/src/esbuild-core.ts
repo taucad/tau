@@ -68,7 +68,7 @@ export type BundlerOptions = {
   /** Enable source maps */
   sourceMaps?: boolean;
   /**
-   * Names to auto-export from CommonJS-style entry files.
+   * Names to auto-export from CommonJS-style entry paths.
    * When code defines these as globals but doesn't export them,
    * the bundler adds `export { ... }` statements to prevent tree-shaking.
    * Defaults to `['main', 'defaultParams']`.
@@ -137,7 +137,7 @@ export async function initializeEsbuild(): Promise<void> {
 // Shared Helpers
 // =============================================================================
 
-/** Default names to auto-export from CommonJS-style entry files */
+/** Default names to auto-export from CommonJS-style entry paths */
 const defaultAutoExportNames = ['main', 'defaultParams'];
 
 /** TypeScript ESM convention: `.js`/`.jsx` specifiers resolve to `.ts`/`.tsx` source files */
@@ -762,11 +762,11 @@ export function createVfsPlugin(options: VfsPluginOptions): Plugin {
             accessedProjectFiles?.add(absolutePath);
           }
 
-          // For the entry file (not node_modules), add CommonJS exports if needed
+          // For the entry path (not node_modules), add CommonJS exports if needed
           // This prevents esbuild from tree-shaking away unexported main/defaultParams
-          const isEntryFile = args.path === relativeEntryPath;
+          const isEntryPath = args.path === relativeEntryPath;
 
-          if (isEntryFile && !isNodeModules && (loader === 'js' || loader === 'ts')) {
+          if (isEntryPath && !isNodeModules && (loader === 'js' || loader === 'ts')) {
             content = addCommonJsExports(content, autoExportNames);
           }
 
@@ -857,7 +857,7 @@ export class EsbuildBundler {
   /**
    * Bundle a file and all its dependencies.
    *
-   * @param entryPath - Absolute path to the entry file
+   * @param entryPath - Canonical absolute entry path
    * @returns Bundle result with code and any issues
    */
   public async bundle(entryPath: string): Promise<BundleResult> {

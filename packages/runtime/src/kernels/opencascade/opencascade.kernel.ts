@@ -515,9 +515,15 @@ export const opencascade = defineKernel({
   builtinModuleNames: ['opencascade.js'],
   name: 'OpenCascadeKernel',
   version: '1.1.0',
+  nativeHandleScope: 'source',
   optionsSchema: opencascadeOptionsSchema,
-  renderSchema: opencascadeRenderSchema,
-  exportSchemas: opencascadeExportSchemas,
+  render: { optionsSchema: opencascadeRenderSchema, content: [] },
+  exportFormats: {
+    stl: { optionsSchema: opencascadeExportSchemas.stl, content: [] },
+    step: { optionsSchema: opencascadeExportSchemas.step, content: [] },
+    glb: { optionsSchema: opencascadeExportSchemas.glb, content: [] },
+    gltf: { optionsSchema: opencascadeExportSchemas.gltf, content: [] },
+  },
 
   async initialize(options, runtime) {
     const { logger, tracer } = runtime;
@@ -560,16 +566,16 @@ export const opencascade = defineKernel({
     return { oc, isParallelMeshing: resolved.variant === 'multi', tracingSummary } satisfies OpenCascadeContext;
   },
 
-  async getDependencies({ filePath }, runtime) {
-    return runtime.bundler.resolveDependencies(filePath);
+  async getDependencies({ entryPath }, runtime) {
+    return runtime.bundler.resolveDependencies(entryPath);
   },
 
-  async getParameters({ filePath }, runtime, context) {
-    const relativeFilePath = toVmEntryPath(filePath);
+  async getParameters({ entryPath }, runtime, context) {
+    const relativeFilePath = toVmEntryPath(entryPath);
     let bundleSourceMap: string | undefined;
     let entryUrl: string | undefined;
     try {
-      const bundleResult = await runtime.bundler.bundle(filePath);
+      const bundleResult = await runtime.bundler.bundle(entryPath);
       if (!bundleResult.success) {
         return createKernelError(convertRawIssuesToKernelIssues(bundleResult.issues, relativeFilePath));
       }
@@ -591,14 +597,14 @@ export const opencascade = defineKernel({
     }
   },
 
-  async createGeometry({ filePath, parameters }, runtime, context) {
+  async createGeometry({ entryPath, parameters }, runtime, context) {
     const { logger, tracer } = runtime;
-    const relativeFilePath = toVmEntryPath(filePath);
+    const relativeFilePath = toVmEntryPath(entryPath);
     let bundleSourceMap: string | undefined;
     let entryUrl: string | undefined;
 
     try {
-      const bundleResult = await runtime.bundler.bundle(filePath);
+      const bundleResult = await runtime.bundler.bundle(entryPath);
       if (!bundleResult.success) {
         throw new OcctBuildError(convertRawIssuesToKernelIssues(bundleResult.issues, relativeFilePath));
       }

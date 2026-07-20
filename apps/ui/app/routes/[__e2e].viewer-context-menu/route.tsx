@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router';
-import type { Project } from '@taucad/types';
+import type { ProjectManifest } from '@taucad/types';
 import { Loader } from '#components/ui/loader.js';
 import { getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
@@ -9,7 +9,7 @@ const encoder = new TextEncoder();
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => encoder.encode(text);
 
-const entryFile = 'src/main.ts';
+const entryPath = 'src/main.ts';
 
 const replicadModel = `import { makeBaseBox } from 'replicad';
 
@@ -28,22 +28,16 @@ const packageJson = JSON.stringify(
 
 const seedFiles = Object.fromEntries([
   ['package.json', { content: encode(packageJson) }],
-  [entryFile, { content: encode(replicadModel) }],
+  [entryPath, { content: encode(replicadModel) }],
 ]) as Record<string, { content: Uint8Array<ArrayBuffer> }>;
 
-const createSeedProject = (): Omit<Project, 'id' | 'createdAt' | 'updatedAt'> => ({
+const createSeedProject = (): Omit<ProjectManifest, '$schema' | 'id'> => ({
   name: 'viewer context menu e2e',
   description: 'Deterministic local seed for the chat viewer right-click context menu.',
-  author: {
-    name: 'Tau E2E',
-    avatar: '/avatar-sample.png',
-  },
   tags: ['e2e', 'replicad'],
-  thumbnail: '',
   assets: {
-    mechanical: {
-      main: entryFile,
-      parameters: {},
+    main: {
+      entryPath,
     },
   },
 });

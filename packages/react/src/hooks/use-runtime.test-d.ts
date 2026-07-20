@@ -36,7 +36,7 @@ describe('useRuntime source input types', () => {
     expectTypeOf(result.status).toEqualTypeOf<UseRuntimeResult['status']>();
   });
 
-  it('accepts explicit runtime typing with a named inline entry file', () => {
+  it('accepts explicit runtime typing with a named inline entry path', () => {
     const result = useRuntime<typeof runtime>({
       clientOptions,
       source: { files: { [mainPath]: 'export default () => null;' }, entry: mainPath },
@@ -77,12 +77,13 @@ describe('useRuntime source input types', () => {
   });
 
   it('rejects literal empty inline source maps', () => {
+    type EmptyFileOptions = UseRuntimeOptions<typeof runtime, typeof transport, Record<never, never>>;
     const invalid = {
       clientOptions,
       source: { files: {} },
     };
 
-    expectTypeOf(invalid).not.toExtend<UseRuntimeOptions<typeof runtime, typeof transport>>();
+    expectTypeOf(invalid).not.toExtend<EmptyFileOptions>();
   });
 
   it('accepts binary inline source content', () => {
@@ -102,6 +103,23 @@ describe('useRuntime source input types', () => {
     });
 
     expectTypeOf(result.status).toEqualTypeOf<UseRuntimeResult['status']>();
+  });
+
+  it('projects framework content onto render input from the composed runtime', () => {
+    useRuntime({
+      clientOptions,
+      source: { files: { [mainPath]: 'export default () => null;' } },
+      content: { includeEdges: true, includeTopology: true },
+    });
+
+    useRuntime({
+      clientOptions,
+      source: { files: { [mainPath]: 'export default () => null;' } },
+      content: {
+        // @ts-expect-error -- unknown framework content is rejected statically.
+        includeSketches: true,
+      },
+    });
   });
 
   it('exposes hook-owned parameter state and setters', () => {
@@ -135,25 +153,6 @@ describe('useRuntime source input types', () => {
     };
 
     expectTypeOf(invalid).toEqualTypeOf<UseRuntimeOptions<typeof runtime, typeof transport>>();
-  });
-
-  it('rejects the superseded single-file { path, content } shape', () => {
-    const invalid: UseRuntimeOptions<typeof runtime, typeof transport> = {
-      clientOptions,
-      // @ts-expect-error -- inline bytes must use source.files; source.path is filesystem-only.
-      source: { path: scadPath, content: 'cube(10);' },
-    };
-
-    expectTypeOf(invalid).toEqualTypeOf<UseRuntimeOptions<typeof runtime, typeof transport>>();
-  });
-
-  it('accepts geometry-file objects in filesystem source mode', () => {
-    const options: UseRuntimeOptions<typeof runtime, typeof transport> = {
-      clientOptions,
-      source: { path: { path: '/project', filename: 'main.scad' } },
-    };
-
-    expectTypeOf(options).toExtend<UseRuntimeOptions<typeof runtime, typeof transport>>();
   });
 
   it('accepts stable synchronous client option providers', () => {
@@ -206,6 +205,7 @@ describe('useRuntime source input types', () => {
     void exportGeometry('stl', { exportOptions: { binary: true } });
     expectTypeOf(exportGeometry('glb')).toEqualTypeOf<Promise<ExportResult>>();
     void exportGeometry('glb', { exportOptions: { coordinateSystem: 'y-up' } });
+    void exportGeometry('glb', { content: { includeEdges: true, includeTopology: true } });
 
     // @ts-expect-error -- exportGeometry owns source/parameters and accepts only exportOptions.
     void exportGeometry('glb', { source: { path: mainPath } });
@@ -215,5 +215,10 @@ describe('useRuntime source input types', () => {
 
     // @ts-expect-error -- options must be nested under exportOptions.
     void exportGeometry('glb', { binary: true });
+
+    void exportGeometry('stl', {
+      // @ts-expect-error -- STL does not advertise framework content.
+      content: { includeEdges: true },
+    });
   });
 });

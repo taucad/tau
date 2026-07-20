@@ -14,7 +14,7 @@ const publication: ParsedPublication = {
   title: 'Topbar fixture',
   visibility: 'public',
   viewerRole: 'public',
-  entryFile: 'main.ts',
+  entryPath: 'main.ts',
   ownerSnapshot: null,
   forkCount: 0,
   viewCount: 0,

@@ -46,7 +46,7 @@ export type PublicationRouteLoaderData = {
   manifest: {
     version: 1;
     projectId: string;
-    entryFile: string;
+    entryPath: string;
     files: Record<string, string>;
     kernels: string[];
     runtime: string;
@@ -296,7 +296,7 @@ const PublicationInteractiveSurface = ({
   return (
     <CadPreviewProvider
       projectId={viewProjectId}
-      mainFile={publication.entryFile}
+      mainFile={publication.entryPath}
       files={filesRecord}
       parameters={seededParameters}
     >
@@ -322,6 +322,7 @@ export default function PublicationViewRoute(): React.JSX.Element {
   return (
     <SharedWorkerGate>
       <FileManagerProvider
+        key={viewProjectId}
         projectId={viewProjectId}
         rootDirectory={`/projects/${viewProjectId}`}
         initialBackend='indexeddb'

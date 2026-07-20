@@ -40,6 +40,7 @@ import type { ResolvedViewerIdentity } from '#api/publications/viewer-identity.t
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { DatabaseService } from '#database/database.service.js';
 import { EmailService } from '#email/email.service.js';
+import { BillingService } from '#api/billing/billing.service.js';
 import { RedisService } from '#redis/redis.service.js';
 import * as schema from '#database/schema.js';
 import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
@@ -118,7 +119,39 @@ export class PublicationsService {
     private readonly publicationRateLimiter: PublicationRateLimiterService,
     private readonly metrics: MetricsService,
     private readonly emailService: EmailService,
+    private readonly billingService: BillingService,
   ) {}
+
+  /**
+   * Private publications are Pro-gated (tiers doc T4/AD11 — public sharing is
+   * never gated). Grandfathering (T16): a user who lost the entitlement may
+   * still republish content to a project whose current publication is ALREADY
+   * private; only newly-private visibility requires the entitlement.
+   */
+  private async assertPrivateVisibilityAllowed(args: { ownerId: string; projectId?: string }): Promise<void> {
+    const entitlements = await this.billingService.getEntitlements(args.ownerId);
+    if (entitlements.canCreatePrivateShares) {
+      return;
+    }
+
+    if (args.projectId !== undefined) {
+      const [existing] = await this.databaseService.database
+        .select({ visibility: schema.publication.visibility })
+        .from(schema.project)
+        .innerJoin(schema.publication, eq(schema.project.currentPublicationId, schema.publication.id))
+        .where(and(eq(schema.project.id, args.projectId), eq(schema.project.ownerId, args.ownerId)))
+        .limit(1);
+      if (existing?.visibility === 'private') {
+        // Content-only update to a grandfathered private publication.
+        return;
+      }
+    }
+
+    throw new ForbiddenException({
+      code: publicationApiCode.ENTITLEMENT_REQUIRED,
+      message: 'Private publications require the Pro plan',
+    });
+  }
 
   /**
    * Reads the current Better Auth `user` row and returns a denormalised snapshot suitable
@@ -154,10 +187,10 @@ export class PublicationsService {
     const { ownerId, manifest, files } = args;
     const sharedEmails = manifest.visibility === 'private' ? (manifest.sharedEmails ?? []) : [];
 
-    if (!files.has(manifest.entryFile)) {
+    if (!files.has(manifest.entryPath)) {
       throw new BadRequestException({
-        code: publicationApiCode.MISSING_ENTRY_FILE,
-        message: `Upload is missing entry file ${manifest.entryFile}`,
+        code: publicationApiCode.MISSING_ENTRY_PATH,
+        message: `Upload is missing entry path ${manifest.entryPath}`,
       });
     }
 
@@ -202,6 +235,10 @@ export class PublicationsService {
         code: publicationApiCode.FORBIDDEN,
         message: 'Shared emails can only be used with private publications',
       });
+    }
+
+    if (manifest.visibility === 'private') {
+      await this.assertPrivateVisibilityAllowed({ ownerId, projectId: manifest.projectId });
     }
 
     const frontendUrl = this.configService.get('TAU_FRONTEND_URL', { infer: true }).replace(/\/$/u, '');
@@ -276,7 +313,7 @@ export class PublicationsService {
     const manifestDocument = {
       version: 1,
       projectId: manifest.projectId,
-      entryFile: manifest.entryFile,
+      entryPath: manifest.entryPath,
       files: Object.fromEntries(
         [...uploads].sort((a, b) => a.path.localeCompare(b.path)).map(({ path, sha }) => [path, `sha256:${sha}`]),
       ),
@@ -358,7 +395,7 @@ export class PublicationsService {
         thumbnailKey,
         runtimePin,
         kernels,
-        entryFile: manifest.entryFile,
+        entryPath: manifest.entryPath,
         title: manifest.title,
         description: manifest.description,
         ownerSnapshot,
@@ -457,7 +494,7 @@ export class PublicationsService {
       visibility: publication.visibility as PublicationWireRow['visibility'],
       runtimePin: publication.runtimePin,
       kernels: publication.kernels,
-      entryFile: publication.entryFile,
+      entryPath: publication.entryPath,
       title: publication.title,
       description: publication.description,
       forkCount: publication.forkCount,
@@ -569,6 +606,12 @@ export class PublicationsService {
 
     if (publication.visibility === args.visibility) {
       return { id: publication.id, visibility: args.visibility };
+    }
+
+    // Changing TO private is the entitlement-gated direction (T4/T16); flipping
+    // back to public is always allowed.
+    if (args.visibility === 'private') {
+      await this.assertPrivateVisibilityAllowed({ ownerId: args.ownerId });
     }
 
     // Storage first, DB second: if any copy/delete fails the publication keeps

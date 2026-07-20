@@ -43,7 +43,7 @@ const mockCadRef2 = {
 } as unknown as ActorRefFrom<typeof cadMachine>;
 
 let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
-const mockMainEntryFile = 'main.ts';
+const mockMainEntryPath = 'main.ts';
 const mockSetParameters = vi.fn();
 const mockSetGeometryUnitParameters = vi.fn();
 const mockSwitchParameterGroup = vi.fn();
@@ -66,7 +66,7 @@ vi.mock('#hooks/use-project.js', () => ({
       send: mockEditorSend,
     },
     geometryUnits: mockGeometryUnits,
-    mainEntryFile: mockMainEntryFile,
+    mainEntryPath: mockMainEntryPath,
     setParameters: mockSetParameters,
     setGeometryUnitParameters: mockSetGeometryUnitParameters,
     switchParameterGroup: mockSwitchParameterGroup,
@@ -100,7 +100,7 @@ vi.mock('dockview-react', () => ({
       component: string;
       headerComponent?: string;
       isExpanded: boolean;
-      params: Record<string, unknown> & { entryFile: string };
+      params: Record<string, unknown> & { entryPath: string };
       api: { updateParameters: (newParams: Record<string, unknown>) => void };
     };
     const panels: MockPanel[] = [];
@@ -134,7 +134,7 @@ vi.mock('dockview-react', () => ({
           const HeaderComponent = p.headerComponent && headerComponents?.[p.headerComponent];
           return (
             <div key={p.id} data-testid={`param-pane-${p.id}`} data-expanded={p.isExpanded}>
-              {HeaderComponent ? <HeaderComponent api={mockPanelApi} params={p.params} /> : p.params.entryFile}
+              {HeaderComponent ? <HeaderComponent api={mockPanelApi} params={p.params} /> : p.params.entryPath}
               {Component ? <Component params={p.params} /> : null}
             </div>
           );

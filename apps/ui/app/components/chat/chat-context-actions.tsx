@@ -52,20 +52,20 @@ export function ChatContextActions({
   className,
   ...properties
 }: ChatContextActionsProperties): React.JSX.Element {
-  const { geometryUnits, mainEntryFile, viewGraphics, editorRef } = useProject();
+  const { geometryUnits, mainEntryPath, viewGraphics, editorRef } = useProject();
   const mainGraphicsRef = useMainGraphics();
-  const cadActor = geometryUnits.get(mainEntryFile);
+  const cadActor = geometryUnits.get(mainEntryPath);
 
   const isScreenshotReady = useSelector(mainGraphicsRef, (state) => state?.context.isScreenshotReady ?? false);
   const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
 
-  // Get the kernel error for the main entry file from its geometry unit
+  // Get the kernel error for the main entry path from its geometry unit
   const kernelIssue = useSelector(cadActor, (state) => {
-    if (!state || !mainEntryFile) {
+    if (!state || !mainEntryPath) {
       return undefined;
     }
 
-    return state.context.kernelIssues.get(mainEntryFile);
+    return state.context.kernelIssues.get(mainEntryPath);
   });
 
   const codeIssues = useSelector(cadActor, (state) => state?.context.codeIssues ?? []);
@@ -208,19 +208,19 @@ export function ChatContextActions({
   /** Resolve the overlay for the main entry — used by the main-view + composite handlers. */
   const resolveMainOverlay = useCallback((): ScreenshotOverlay | undefined => {
     return (
-      resolveScreenshotOverlay(cadActor) ?? (mainEntryFile ? buildScreenshotOverlayForPath(mainEntryFile) : undefined)
+      resolveScreenshotOverlay(cadActor) ?? (mainEntryPath ? buildScreenshotOverlayForPath(mainEntryPath) : undefined)
     );
-  }, [cadActor, mainEntryFile]);
+  }, [cadActor, mainEntryPath]);
 
   const handleViewScreenshot = useCallback(
-    (graphicsRef: ActorRefFrom<typeof graphicsMachine>, viewEntryFile: string | undefined) => {
+    (graphicsRef: ActorRefFrom<typeof graphicsMachine>, viewEntryPath: string | undefined) => {
       if (asPopoverMenu) {
         onClose?.();
       }
 
       const overlay =
-        resolveScreenshotOverlay(viewEntryFile ? geometryUnits.get(viewEntryFile) : undefined) ??
-        (viewEntryFile ? buildScreenshotOverlayForPath(viewEntryFile) : undefined);
+        resolveScreenshotOverlay(viewEntryPath ? geometryUnits.get(viewEntryPath) : undefined) ??
+        (viewEntryPath ? buildScreenshotOverlayForPath(viewEntryPath) : undefined);
 
       takeScreenshot(graphicsRef, {
         type: 'single',
@@ -368,12 +368,12 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
     if (imageInputSupported && viewGraphics.size >= 2) {
       for (const [viewId, graphicsRef] of viewGraphics) {
         const settings = viewSettings[viewId];
-        // Skip the main entry file view (already covered by "Current view screenshot")
-        if (settings?.entryFile === mainEntryFile) {
+        // Skip the main entry path view (already covered by "Current view screenshot")
+        if (settings?.entryPath === mainEntryPath) {
           continue;
         }
 
-        const fileName = settings?.entryFile?.split('/').pop() ?? 'Untitled';
+        const fileName = settings?.entryPath?.split('/').pop() ?? 'Untitled';
         const isReady = viewReadiness[viewId] ?? false;
         items.push({
           id: `view-screenshot-${viewId}`,
@@ -381,7 +381,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
           group: 'View Screenshots',
           icon: <Image />,
           action() {
-            handleViewScreenshot(graphicsRef, settings?.entryFile);
+            handleViewScreenshot(graphicsRef, settings?.entryPath);
           },
           disabled: !isReady,
         });
@@ -420,7 +420,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
     viewGraphics,
     viewSettings,
     viewReadiness,
-    mainEntryFile,
+    mainEntryPath,
     handleViewScreenshot,
   ]);
 

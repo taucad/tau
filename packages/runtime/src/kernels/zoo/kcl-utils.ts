@@ -543,7 +543,7 @@ export class KclUtilities {
    * Prefer {@link executeProgram} unless you need `newGraph` / `newObjects` / `invalidatesIds`.
    *
    * @param program - parsed KCL AST
-   * @param path - entry file path for the engine
+   * @param path - Entry path for the engine.
    * @param settings - optional KCL configuration overrides
    * @returns normalized scene-graph delta including `execOutcome`
    * @public

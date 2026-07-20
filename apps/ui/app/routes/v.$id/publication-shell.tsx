@@ -40,7 +40,7 @@ export function PublicationShell({ publication, publicationFiles }: PublicationS
   return (
     <div className='grid h-[calc(100dvh-var(--publication-topbar-h))] min-h-0 shrink-0 grid-cols-[260px_minmax(0,1fr)_320px]'>
       <PublicationFilesPane
-        entryFile={publication.entryFile}
+        entryPath={publication.entryPath}
         files={publicationFiles}
         visibility={publication.visibility}
         className='border-r'

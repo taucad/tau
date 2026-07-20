@@ -29,7 +29,7 @@ type TsExtractionContext = {
 // =============================================================================
 
 const jscadSourceDirectory = join(import.meta.dirname, '../../../node_modules/@jscad/modeling/src');
-const entryFile = join(jscadSourceDirectory, 'index.d.ts');
+const entryPath = join(jscadSourceDirectory, 'index.d.ts');
 
 /** Files containing cross-cutting foundation types referenced across namespaces. */
 const foundationTypeFiles = [
@@ -123,7 +123,7 @@ type FoundationType = {
 // =============================================================================
 
 function createJscadProgram(): ts.Program {
-  return ts.createProgram([entryFile], {
+  return ts.createProgram([entryPath], {
     target: ts.ScriptTarget.ESNext,
     module: ts.ModuleKind.CommonJS,
     moduleResolution: ts.ModuleResolutionKind.Node10,
@@ -802,14 +802,14 @@ export function buildApiData(): ApiData {
   const checker = program.getTypeChecker();
   const printer = ts.createPrinter({ removeComments: true });
 
-  const mainSourceFile = program.getSourceFile(entryFile);
+  const mainSourceFile = program.getSourceFile(entryPath);
   if (!mainSourceFile) {
-    throw new Error(`Could not load entry file: ${entryFile}`);
+    throw new Error(`Could not load entry path: ${entryPath}`);
   }
 
   const mainModuleSymbol = checker.getSymbolAtLocation(mainSourceFile);
   if (!mainModuleSymbol) {
-    throw new Error('Could not resolve module symbol for entry file');
+    throw new Error('Could not resolve module symbol for entry path');
   }
 
   const rootExports = checker.getExportsOfModule(mainModuleSymbol);
@@ -881,14 +881,14 @@ export function buildNamespaceBundle(): Record<string, string> {
   const printer = ts.createPrinter({ removeComments: true });
 
   // Get root module
-  const mainSourceFile = program.getSourceFile(entryFile);
+  const mainSourceFile = program.getSourceFile(entryPath);
   if (!mainSourceFile) {
-    throw new Error(`Could not load entry file: ${entryFile}`);
+    throw new Error(`Could not load entry path: ${entryPath}`);
   }
 
   const mainModuleSymbol = checker.getSymbolAtLocation(mainSourceFile);
   if (!mainModuleSymbol) {
-    throw new Error('Could not resolve module symbol for entry file');
+    throw new Error('Could not resolve module symbol for entry path');
   }
 
   const rootExports = checker.getExportsOfModule(mainModuleSymbol);

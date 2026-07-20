@@ -111,8 +111,8 @@ export const FileEditor = memo(function ({
   readonly panelApi: IDockviewPanelProps['api'];
 }): React.JSX.Element {
   const monaco = useMonaco();
-  const { editorRef, geometryUnits, mainEntryFile } = useProject();
-  const cadActor = geometryUnits.get(mainEntryFile);
+  const { editorRef, geometryUnits, mainEntryPath } = useProject();
+  const cadActor = geometryUnits.get(mainEntryPath);
   const fileManager = useFileManager();
   const { contentService } = fileManager;
   const { modelService, markerService } = useMonacoServices();
@@ -362,7 +362,7 @@ function EditorRightHeaderActions(properties: IDockviewHeaderActionsProps): Reac
  * - External file drops from the file tree
  */
 export const EditorDockview = memo(function (): React.JSX.Element {
-  const { editorRef, mainEntryFile } = useProject();
+  const { editorRef, mainEntryPath } = useProject();
   const { setIsEditorOpen } = useViewContext();
   const monaco = useMonaco();
   const [api, setApi] = useState<DockviewApi>();
@@ -580,7 +580,7 @@ export const EditorDockview = memo(function (): React.JSX.Element {
   // effect pass.
   //
   // For a fresh load with no openFiles, we dispatch an `openFile`
-  // intent for `mainEntryFile` — the reconciler then creates the
+  // intent for `mainEntryPath` — the reconciler then creates the
   // panel on the next effect pass, ensuring openFiles and Dockview
   // panels never diverge.
   const onReady = useCallback(
@@ -595,7 +595,7 @@ export const EditorDockview = memo(function (): React.JSX.Element {
         }
         // Without a persisted layout we leave Dockview empty; the
         // reconciler effect (above) will add panels for the machine's
-        // current `openFiles`. The mainEntryFile fallback is handled
+        // current `openFiles`. The mainEntryPath fallback is handled
         // by `chat-editor-file-tree.tsx`'s `tryOpenMainFile` flow at
         // editor mount, which dispatches `openFile` through the
         // machine — so we no longer mirror that here.
@@ -610,11 +610,11 @@ export const EditorDockview = memo(function (): React.JSX.Element {
       // If we have no openFiles AND no persisted layout, seed via the
       // machine so it stays the single source of truth.
       const snapshot = editorRef.getSnapshot();
-      if (snapshot.context.openFiles.length === 0 && !editorLayout && mainEntryFile) {
-        editorRef.send({ type: 'openFile', path: mainEntryFile, source: 'machine' });
+      if (snapshot.context.openFiles.length === 0 && !editorLayout && mainEntryPath) {
+        editorRef.send({ type: 'openFile', path: mainEntryPath, source: 'machine' });
       }
     },
-    [editorLayout, editorRef, mainEntryFile],
+    [editorLayout, editorRef, mainEntryPath],
   );
 
   // Handle external file drops and cross-dockview viewer panel drops
@@ -622,17 +622,17 @@ export const EditorDockview = memo(function (): React.JSX.Element {
     (event: DockviewDidDropEvent) => {
       const dataTransfer = getDragDataTransfer(event.nativeEvent);
 
-      // Handle viewer panel drag → open its entry file in the editor
+      // Handle viewer panel drag → open its entry path in the editor
       const viewerData = dataTransfer?.getData(tauViewerPanelDragMime);
       if (viewerData) {
         try {
-          const { entryFile } = JSON.parse(viewerData) as {
-            entryFile?: string;
+          const { entryPath } = JSON.parse(viewerData) as {
+            entryPath?: string;
           };
-          if (entryFile) {
+          if (entryPath) {
             editorRef.send({
               type: 'openFile',
-              path: entryFile,
+              path: entryPath,
               source: 'user',
             });
           }

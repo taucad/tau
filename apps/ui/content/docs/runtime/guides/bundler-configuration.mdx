@@ -94,7 +94,7 @@ export const myKernel = defineKernel({
   },
 
   async getDependencies(input) {
-    return { resolved: [input.filePath], unresolved: [] };
+    return { resolved: [input.entryPath], unresolved: [] };
   },
   async getParameters() {
     return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
@@ -129,9 +129,9 @@ const myBundler = defineBundler({
   version: '1.0.0',
   extensions: ['ts', 'js'],
 
-  async initialize({ filesystem, projectPath }) {
+  async initialize({ filesystem }) {
     const modules = new Map<string, BuiltinModule>();
-    return { filesystem, projectPath, modules };
+    return { filesystem, modules };
   },
 
   async detectImports({ entryPath }) {
@@ -174,7 +174,7 @@ export const runtime = defineRuntime({
 ## Variations
 
 - **Multiple bundlers**: Pass multiple bundlers when you have kernels with different extension needs. The framework selects the bundler that handles the file extension.
-- **Bundler selection**: The worker matches the entry file extension to `bundler.extensions`. The first matching bundler is used.
+- **Bundler selection**: The worker matches the entry path extension to `bundler.extensions`. The first matching bundler is used.
 - **Skip bundler in tests**: Use `skipBundler: true` in `createTestWorker` when testing kernel logic that does not need bundling.
 
 ## Related

@@ -247,7 +247,11 @@ export const jscad = defineKernel({
   builtinModuleNames: ['@jscad/modeling'],
   name: 'JscadKernel',
   version: '1.0.0',
-  exportSchemas: jscadExportSchemas,
+  nativeHandleScope: 'source',
+  render: { content: ['includeEdges'] },
+  exportFormats: {
+    glb: { optionsSchema: jscadExportSchemas.glb, content: ['includeEdges'] },
+  },
 
   async initialize(_options, runtime) {
     registerJscadModules(runtime);
@@ -255,14 +259,14 @@ export const jscad = defineKernel({
     return { modulesRegistered: true };
   },
 
-  async getDependencies({ filePath }, runtime) {
-    return runtime.bundler.resolveDependencies(filePath);
+  async getDependencies({ entryPath }, runtime) {
+    return runtime.bundler.resolveDependencies(entryPath);
   },
 
-  async getParameters({ filePath }, runtime) {
-    const relativeFilePath = toVmEntryPath(filePath);
+  async getParameters({ entryPath }, runtime) {
+    const relativeFilePath = toVmEntryPath(entryPath);
     try {
-      const bundleResult = await runtime.bundler.bundle(filePath);
+      const bundleResult = await runtime.bundler.bundle(entryPath);
       if (!bundleResult.success) {
         return createKernelError(enrichIssueLocation(bundleResult.issues, relativeFilePath));
       }
@@ -307,10 +311,10 @@ export const jscad = defineKernel({
     }
   },
 
-  async createGeometry({ filePath, parameters }, runtime) {
-    const relativeFilePath = toVmEntryPath(filePath);
+  async createGeometry({ entryPath, parameters }, runtime) {
+    const relativeFilePath = toVmEntryPath(entryPath);
 
-    const bundleResult = await runtime.bundler.bundle(filePath);
+    const bundleResult = await runtime.bundler.bundle(entryPath);
     if (!bundleResult.success) {
       throw new JscadBuildError(enrichIssueLocation(bundleResult.issues, relativeFilePath));
     }

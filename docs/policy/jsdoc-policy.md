@@ -14,7 +14,7 @@ related:
 Internal reference for writing JSDoc documentation on exported functions, types, and classes in `packages/` and `libs/`. Enforced by two tau-lint rules:
 
 - **`tau-lint/validate-jsdoc-codeblocks`** — validates codeblock formatting (language tags, shorthand expansion) and type-checks `@public` TypeScript codeblocks inline via `tsgolint` (typescript-go).
-- **`tau-lint/require-public-export-jsdoc`** — requires `@public` on symbols exported from package.json export entry files.
+- **`tau-lint/require-public-export-jsdoc`** — requires `@public` on symbols exported from package.json export entry paths.
 
 Both rules are **disabled for `apps/`** — only library and package code is enforced.
 

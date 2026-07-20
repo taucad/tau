@@ -425,8 +425,8 @@ function IssuesSummary({ counts }: { readonly counts: IssueCounts }): React.JSX.
 }
 
 type ChatStackTraceProps = React.HTMLAttributes<HTMLDivElement> & {
-  /** Entry file being rendered in this viewer */
-  readonly entryFile: string;
+  /** Entry path being rendered in this viewer */
+  readonly entryPath: string;
   /**
    * Which side to show the collapsible trigger.
    * - 'top': Trigger at the top, content expands below
@@ -435,7 +435,7 @@ type ChatStackTraceProps = React.HTMLAttributes<HTMLDivElement> & {
   readonly side: 'top' | 'bottom';
 };
 
-export function ChatStackTrace({ entryFile, className, side, ...props }: ChatStackTraceProps): React.ReactNode {
+export function ChatStackTrace({ entryPath, className, side, ...props }: ChatStackTraceProps): React.ReactNode {
   const { getMainFilename, editorRef, projectId, setFocusedChatId } = useProject();
   const fileManager = useFileManager();
   const { createChat } = useChats(projectId);
@@ -444,12 +444,12 @@ export function ChatStackTrace({ entryFile, className, side, ...props }: ChatSta
   // Guard against stale cadActor during project transitions.
   // CadProvider may still hold the previous project's actor while projectId has
   // already changed to the new project. Check that the actor ID matches the
-  // expected pattern "cad-{projectId}-{entryFile}" before reading its state.
+  // expected pattern "cad-{projectId}-{entryPath}" before reading its state.
   const cadRef = useCad();
   const isCadActorStale = cadRef ? !cadRef.id.includes(projectId) : true;
 
   // Get all kernel issues for this viewer's geometry unit via CadProvider context
-  const rawErrors = useCadSelector((state) => state.context.kernelIssues.get(entryFile), undefined);
+  const rawErrors = useCadSelector((state) => state.context.kernelIssues.get(entryPath), undefined);
   const errors = isCadActorStale ? undefined : rawErrors;
 
   // The chat-client composes the per-request `agent` payload (model, kernel,

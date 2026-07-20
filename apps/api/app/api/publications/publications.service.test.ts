@@ -18,6 +18,19 @@ import * as schema from '#database/schema.js';
 
 type PublicationsServiceDeps = ConstructorParameters<typeof PublicationsService>;
 
+/**
+ * Billing stub defaulting to a Pro projection so pre-existing private-flow
+ * tests exercise the storage/DB behaviour, not the entitlement gate; gate
+ * tests pass `canCreatePrivateShares: false` explicitly.
+ */
+function createBillingStub(args?: { canCreatePrivateShares?: boolean }): PublicationsServiceDeps[7] {
+  return {
+    getEntitlements: vi.fn().mockResolvedValue({
+      canCreatePrivateShares: args?.canCreatePrivateShares ?? true,
+    }),
+  } as unknown as PublicationsServiceDeps[7];
+}
+
 function createStubService(): PublicationsService {
   return new PublicationsService(
     {} as unknown as PublicationsServiceDeps[0],
@@ -27,6 +40,7 @@ function createStubService(): PublicationsService {
     {} as unknown as PublicationsServiceDeps[4],
     {} as unknown as PublicationsServiceDeps[5],
     {} as unknown as PublicationsServiceDeps[6],
+    createBillingStub(),
   );
 }
 
@@ -103,6 +117,7 @@ function createProjectShareService(args: { readonly selectRows: unknown[][] }): 
     createRateLimiterStub(),
     createMetricsStub(),
     createEmailStub(),
+    createBillingStub(),
   );
 }
 
@@ -147,7 +162,7 @@ const testManifestSha = 'a'.repeat(64);
 const testManifestDocument = {
   version: 1,
   projectId: 'proj_x',
-  entryFile: 'main.ts',
+  entryPath: 'main.ts',
   // eslint-disable-next-line @typescript-eslint/naming-convention -- file-path keys can't be camelCase
   files: { 'main.ts': `sha256:${testManifestSha}` },
   kernels: [],
@@ -193,7 +208,7 @@ function validWebpSignature(): Uint8Array<ArrayBuffer> {
 }
 
 describe('PublicationsService.publishFromUpload validation', () => {
-  it('should reject when entry file is missing from upload map', async () => {
+  it('should reject when entry path is missing from upload map', async () => {
     const service = createStubService();
 
     await expect(
@@ -202,13 +217,13 @@ describe('PublicationsService.publishFromUpload validation', () => {
         manifest: {
           projectId: 'proj_1',
           projectName: 'Demo',
-          entryFile: 'main.ts',
+          entryPath: 'main.ts',
           visibility: 'private',
           title: 'Hello',
         },
         files: new Map([['other.ts', encodeUtf8('// noop')]]),
       }),
-    ).rejects.toSatisfy((error: unknown) => isBadRequestWithCode(error, publicationApiCode.MISSING_ENTRY_FILE));
+    ).rejects.toSatisfy((error: unknown) => isBadRequestWithCode(error, publicationApiCode.MISSING_ENTRY_PATH));
   });
 
   it('should reject when file count exceeds limit', async () => {
@@ -226,7 +241,7 @@ describe('PublicationsService.publishFromUpload validation', () => {
         manifest: {
           projectId: 'proj_1',
           projectName: 'Demo',
-          entryFile: 'main.ts',
+          entryPath: 'main.ts',
           visibility: 'private',
           title: 'Hello',
         },
@@ -244,7 +259,7 @@ describe('PublicationsService.publishFromUpload validation', () => {
         manifest: {
           projectId: 'proj_1',
           projectName: 'Demo',
-          entryFile: 'main.ts',
+          entryPath: 'main.ts',
           visibility: 'private',
           title: 'Hello',
         },
@@ -265,7 +280,7 @@ describe('PublicationsService.publishFromUpload validation', () => {
         manifest: {
           projectId: 'proj_1',
           projectName: 'Demo',
-          entryFile: 'main.ts',
+          entryPath: 'main.ts',
           visibility: 'private',
           title: 'Hello',
         },
@@ -286,7 +301,7 @@ describe('PublicationsService.publishFromUpload validation', () => {
         manifest: {
           projectId: 'proj_1',
           projectName: 'Demo',
-          entryFile: 'main.ts',
+          entryPath: 'main.ts',
           visibility: 'private',
           title: 'Hello',
         },
@@ -307,7 +322,7 @@ describe('PublicationsService.publishFromUpload validation', () => {
         manifest: {
           projectId: 'proj_1',
           projectName: 'Demo',
-          entryFile: 'main.ts',
+          entryPath: 'main.ts',
           visibility: 'private',
           title: 'Hello',
         },
@@ -384,6 +399,7 @@ describe('PublicationsService.publishFromUpload validation', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
 
     await service.publishFromUpload({
@@ -391,7 +407,7 @@ describe('PublicationsService.publishFromUpload validation', () => {
       manifest: {
         projectId: 'proj_1',
         projectName: 'Demo',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
         visibility: 'private',
         title: 'Hello',
       },
@@ -476,6 +492,7 @@ describe('PublicationsService.publishFromUpload validation', () => {
       rateLimiter,
       metrics,
       email,
+      createBillingStub(),
     );
 
     const result = await service.publishFromUpload({
@@ -483,7 +500,7 @@ describe('PublicationsService.publishFromUpload validation', () => {
       manifest: {
         projectId: 'proj_1',
         projectName: 'Demo',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
         visibility: 'private',
         title: 'Hello',
         sharedEmails: ['friend@example.com', 'team@example.com'],
@@ -564,6 +581,7 @@ describe('PublicationsService.publishFromUpload validation', () => {
       createRateLimiterStub({ inviteAllowed: false }),
       metrics,
       email,
+      createBillingStub(),
     );
 
     const result = await service.publishFromUpload({
@@ -571,7 +589,7 @@ describe('PublicationsService.publishFromUpload validation', () => {
       manifest: {
         projectId: 'proj_1',
         projectName: 'Demo',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
         visibility: 'private',
         title: 'Hello',
         sharedEmails: ['friend@example.com', 'team@example.com'],
@@ -600,7 +618,7 @@ describe('PublicationsService.publishFromUpload validation', () => {
         manifest: {
           projectId: 'proj_1',
           projectName: 'Demo',
-          entryFile: 'main.ts',
+          entryPath: 'main.ts',
           visibility: 'private',
           title: 'Hello',
         },
@@ -769,7 +787,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
     unpublishedAt: null,
     parentPublicationId: null,
     kernels: ['replicad'],
-    entryFile: 'main.ts',
+    entryPath: 'main.ts',
     title: 'T',
     description: null,
     forkCount: 0,
@@ -784,7 +802,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
     const manifestDocument = {
       version: 1,
       projectId: 'proj_x',
-      entryFile: entryRelativePath,
+      entryPath: entryRelativePath,
       files: { [entryRelativePath]: `sha256:${'a'.repeat(64)}` },
       kernels: [],
       runtime: '@taucad/runtime@x',
@@ -811,7 +829,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
     const manifestDocument = {
       version: 1,
       projectId: 'proj_x',
-      entryFile: entryRelativePath,
+      entryPath: entryRelativePath,
       files: { [entryRelativePath]: `sha256:${'a'.repeat(64)}` },
       kernels: [],
       runtime: '@taucad/runtime@x',
@@ -834,6 +852,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
 
     const result = await service.getPublicationForViewer({ publicationId: 'pub_test' });
@@ -854,6 +873,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
 
     await service.getPublicationForViewer({ publicationId: 'pub_test' });
@@ -876,6 +896,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
 
     await service.getPublicationForViewer({ publicationId: 'pub_test' });
@@ -888,7 +909,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
     const manifestDocument = {
       version: 1,
       projectId: 'proj_x',
-      entryFile: entryRelativePath,
+      entryPath: entryRelativePath,
       files: { [entryRelativePath]: `sha256:${'a'.repeat(64)}` },
       kernels: [],
       runtime: '@taucad/runtime@x',
@@ -913,6 +934,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
 
     const result = await service.getPublicationForViewer({
@@ -934,6 +956,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
 
     await expect(service.getPublicationForViewer({ publicationId: 'pub_test' })).rejects.toBeInstanceOf(
@@ -975,6 +998,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
 
     const result = await service.getPublicationForViewer({ publicationId: 'pub_test', viewerUserId: 'user_friend' });
@@ -1016,6 +1040,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
 
     await expect(
@@ -1036,7 +1061,7 @@ describe('PublicationsService.updateVisibility', () => {
     unpublishedAt: null,
     parentPublicationId: null,
     kernels: ['replicad'],
-    entryFile: 'main.ts',
+    entryPath: 'main.ts',
     title: 'T',
     description: null,
     forkCount: 0,
@@ -1076,6 +1101,7 @@ describe('PublicationsService.updateVisibility', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
 
     return { service, update, set, storage };
@@ -1254,7 +1280,7 @@ describe('PublicationsService access grants', () => {
     unpublishedAt: null,
     parentPublicationId: null,
     kernels: ['replicad'],
-    entryFile: 'main.ts',
+    entryPath: 'main.ts',
     title: 'T',
     description: null,
     forkCount: 0,
@@ -1293,6 +1319,7 @@ describe('PublicationsService access grants', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
 
     const result = await service.listAccessGrants({ publicationId: 'pub_access', ownerId: 'user_owner' });
@@ -1479,7 +1506,7 @@ describe('PublicationsService.recordView', () => {
     unpublishedAt: null,
     parentPublicationId: null,
     kernels: ['replicad'],
-    entryFile: 'main.ts',
+    entryPath: 'main.ts',
     title: 'T',
     description: null,
     forkCount: 0,
@@ -1503,6 +1530,7 @@ describe('PublicationsService.recordView', () => {
       args.rateLimiter ?? createRateLimiterStub(),
       args.metrics ?? createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
   }
 
@@ -1696,6 +1724,7 @@ describe('PublicationsService.publishFromUpload storage tiers (R2/R8)', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
 
     return { storage, databaseService, txInserts, outerInsert, service };
@@ -1707,7 +1736,7 @@ describe('PublicationsService.publishFromUpload storage tiers (R2/R8)', () => {
       manifest: {
         projectId: 'proj_1',
         projectName: 'Demo',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
         visibility,
         title: 'Hello',
       },
@@ -1858,7 +1887,7 @@ describe('PublicationsService.resolvePublicationFile (R3)', () => {
     unpublishedAt: null,
     parentPublicationId: null,
     kernels: ['replicad'],
-    entryFile: 'main.ts',
+    entryPath: 'main.ts',
     title: 'T',
     description: null,
     forkCount: 0,
@@ -1881,6 +1910,7 @@ describe('PublicationsService.resolvePublicationFile (R3)', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
     return { service, storage };
   }
@@ -2017,6 +2047,7 @@ describe('PublicationsService.openPublicationFile (R3)', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
 
     const sha = 'f'.repeat(64);
@@ -2046,6 +2077,7 @@ describe('PublicationsService.openPublicationFile (R3)', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
 
     await expect(service.openPublicationFile('f'.repeat(64), 'main.ts')).rejects.toThrow('denied');
@@ -2069,6 +2101,7 @@ describe('PublicationsService.openPublicationFile (R3)', () => {
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
 
     const opened = await service.openPublicationFile('f'.repeat(64), 'thumbnail.webp');
@@ -2092,7 +2125,7 @@ describe('PublicationsService.getPublicationForViewer tiered file URLs (R4/R6)',
     unpublishedAt: null,
     parentPublicationId: null,
     kernels: ['replicad'],
-    entryFile: 'main.ts',
+    entryPath: 'main.ts',
     title: 'T',
     description: null,
     forkCount: 0,
@@ -2125,6 +2158,7 @@ describe('PublicationsService.getPublicationForViewer tiered file URLs (R4/R6)',
       createRateLimiterStub(),
       createMetricsStub(),
       createEmailStub(),
+      createBillingStub(),
     );
 
     return { service, storage };
@@ -2184,5 +2218,77 @@ describe('PublicationsService.getPublicationForViewer tiered file URLs (R4/R6)',
       key: 'm.json',
       tier: 'private',
     });
+  });
+});
+
+describe('PublicationsService private-visibility entitlement gate (T4/T16)', () => {
+  const privateManifest = {
+    projectId: 'proj_gate',
+    entryPath: 'main.ts',
+    title: 'Gate test',
+    visibility: 'private',
+  } as unknown as Parameters<PublicationsService['publishFromUpload']>[0]['manifest'];
+
+  const files = new Map<string, Uint8Array<ArrayBuffer>>([['main.ts', new Uint8Array([1])]]);
+
+  function createGateDatabase(parentRows: unknown[]): PublicationsServiceDeps[0] {
+    const limit = vi.fn().mockResolvedValue(parentRows);
+    const where = vi.fn().mockReturnValue({ limit });
+    const innerJoin = vi.fn().mockReturnValue({ where });
+    const from = vi.fn().mockReturnValue({ innerJoin, where });
+    const select = vi.fn().mockReturnValue({ from });
+    return { database: { select } } as unknown as PublicationsServiceDeps[0];
+  }
+
+  function createGateService(args: { entitled: boolean; parentRows: unknown[] }): PublicationsService {
+    return new PublicationsService(
+      createGateDatabase(args.parentRows),
+      createStorageStub(),
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+      createBillingStub({ canCreatePrivateShares: args.entitled }),
+    );
+  }
+
+  it('rejects a private publish from a free-tier user with ENTITLEMENT_REQUIRED', async () => {
+    const service = createGateService({ entitled: false, parentRows: [] });
+
+    const publishAttempt = service.publishFromUpload({ ownerId: 'user_free', manifest: privateManifest, files });
+
+    await expect(publishAttempt).rejects.toThrowError(ForbiddenException);
+    await expect(publishAttempt).rejects.toMatchObject({
+      response: { code: publicationApiCode.ENTITLEMENT_REQUIRED },
+    });
+  });
+
+  it('allows a grandfathered content-only republish when the current publication is already private (T16)', async () => {
+    const service = createGateService({ entitled: false, parentRows: [{ visibility: 'private' }] });
+
+    // The gate passes and the publish proceeds until it needs the real config
+    // plumbing — anything other than ENTITLEMENT_REQUIRED proves the gate opened.
+    await expect(
+      service.publishFromUpload({ ownerId: 'user_free', manifest: privateManifest, files }),
+    ).rejects.not.toMatchObject({ response: { code: publicationApiCode.ENTITLEMENT_REQUIRED } });
+  });
+
+  it('allows private publishes for entitled users without consulting grandfather state', async () => {
+    const database = createGateDatabase([]);
+    const service = new PublicationsService(
+      database,
+      createStorageStub(),
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+      createBillingStub({ canCreatePrivateShares: true }),
+    );
+
+    await expect(
+      service.publishFromUpload({ ownerId: 'user_pro', manifest: privateManifest, files }),
+    ).rejects.not.toMatchObject({ response: { code: publicationApiCode.ENTITLEMENT_REQUIRED } });
   });
 });

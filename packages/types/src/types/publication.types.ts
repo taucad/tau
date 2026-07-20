@@ -32,7 +32,7 @@ export type PublicationRecord = {
   thumbnailKey?: string;
   runtimePin: string;
   kernels: PublicationKernelId[];
-  entryFile: string;
+  entryPath: string;
   title: string;
   description?: string;
   forkCount: number;

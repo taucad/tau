@@ -35,7 +35,7 @@ export function isPublishUploadError(error: unknown): error is PublishUploadErro
 type ClientPublishManifest = {
   projectId: string;
   projectName: string;
-  entryFile: string;
+  entryPath: string;
   visibility: PublishVisibility;
   title: string;
   description?: string;
@@ -48,7 +48,7 @@ export type PublishMachineInput = {
   fileManagerRef: FileManagerRef;
   projectId: string;
   projectName: string;
-  entryFile: string;
+  entryPath: string;
   parameters?: Record<string, unknown>;
 };
 
@@ -64,7 +64,7 @@ type PublishContext = {
   fileManagerRef: FileManagerRef;
   projectId: string;
   projectName: string;
-  entryFile: string;
+  entryPath: string;
   parameters?: Record<string, unknown>;
 
   publishDraft?: PublishDraft;
@@ -129,10 +129,10 @@ const collectPublishFilesActor = fromSafeAsync<PublishFilesCollectedEvent, Publi
       files.set(relativePath, bytes);
     }
 
-    const validated = validateCollectedPublishFiles({ files, entryFile: input.entryFile });
+    const validated = validateCollectedPublishFiles({ files, entryPath: input.entryPath });
     if (!validated.ok) {
-      if (validated.reason === publicationApiCode.MISSING_ENTRY_FILE) {
-        throw new Error(publicationApiCode.MISSING_ENTRY_FILE);
+      if (validated.reason === publicationApiCode.MISSING_ENTRY_PATH) {
+        throw new Error(publicationApiCode.MISSING_ENTRY_PATH);
       }
 
       if (validated.reason === publicationApiCode.TOO_MANY_FILES) {
@@ -156,7 +156,7 @@ type PublishUploadInput = {
   draft: PublishDraft;
   projectId: string;
   projectName: string;
-  entryFile: string;
+  entryPath: string;
   parameters?: Record<string, unknown>;
 };
 
@@ -169,7 +169,7 @@ const uploadPublicationActor = fromSafeAsync<PublishUploadedEvent, PublishUpload
   const manifest: ClientPublishManifest = {
     projectId: input.projectId,
     projectName: input.projectName,
-    entryFile: input.entryFile,
+    entryPath: input.entryPath,
     visibility: input.draft.visibility,
     title: input.draft.title.trim(),
     ...(input.draft.description === undefined ? {} : { description: input.draft.description.trim() }),
@@ -308,7 +308,7 @@ export const publishMachine = setup({
     fileManagerRef: input.fileManagerRef,
     projectId: input.projectId,
     projectName: input.projectName,
-    entryFile: input.entryFile,
+    entryPath: input.entryPath,
     parameters: input.parameters,
   }),
   initial: 'idle',
@@ -338,7 +338,7 @@ export const publishMachine = setup({
             fileManagerRef: context.fileManagerRef,
             projectId: context.projectId,
             projectName: context.projectName,
-            entryFile: context.entryFile,
+            entryPath: context.entryPath,
             parameters: context.parameters,
             visibility: draft.visibility,
             title: draft.title,
@@ -375,7 +375,7 @@ export const publishMachine = setup({
             draft,
             projectId: context.projectId,
             projectName: context.projectName,
-            entryFile: context.entryFile,
+            entryPath: context.entryPath,
             parameters: context.parameters,
           };
         },

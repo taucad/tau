@@ -85,22 +85,20 @@ export type KernelBundler = {
 // =============================================================================
 
 /**
- * Filesystem and project path context for bundler initialization.
+ * Project-local filesystem context for bundler initialization.
  * @public
  */
 export type BundlerInitOptions = {
   /** Filesystem interface for reading project files */
   filesystem: KernelFileSystem;
-  /** Base path for the project (e.g., /projects/project) */
-  projectPath: string;
 };
 
 /**
- * Entry file path for bundler operations (detectImports, bundle, resolveDependencies).
+ * Entry path for bundler operations (detectImports, bundle, resolveDependencies).
  * @public
  */
 export type BundleInput = {
-  /** Absolute path to the entry file */
+  /** Canonical absolute entry path */
   entryPath: string;
 };
 
@@ -233,8 +231,8 @@ export type BundlerPluginFactory<Id extends string, Options = undefined> = Optio
  *   name: 'MyBundler',
  *   version: '1.0.0',
  *   extensions: ['ts', 'js'],
- *   async initialize({ filesystem, projectPath }) {
- *     return { projectPath };
+ *   async initialize({ filesystem }) {
+ *     return { filesystem };
  *   },
  *   async detectImports({ entryPath }, context) {
  *     return { detectedModules: [], dependencies: [entryPath] };

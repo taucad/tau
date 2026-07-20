@@ -169,7 +169,7 @@ Within the thread topology, four layers stack vertically. Each layer depends onl
 
 ### Client Layer (RuntimeClient)
 
-The [`RuntimeClient`](../api/client) is the consumer-facing API. `createRuntimeClient(options)` returns a client whose transport handle is materialized during construction (`TransportPlugin.materialize()`); worker spawn and the transport handshake remain lazy until `connect()` or an auto-connect command (`render` / `export`). Inline `source.files` input is staged into the transport-owned filesystem. High-level helpers provide that filesystem automatically; raw transports require `fileSystem`. Hosts that own a filesystem supply a wired transport plugin at construction (`transport: webWorkerTransport({ fileSystem: fromFileSystemBridge(connection) })`) and call `client.connect()` (no arguments); see [Embedding in a Host](../guides/embedding-in-a-host). `client.on(event, handler)` consumes the event stream, and the active transport owns the abort channel and `postMessage` event delivery — the client itself never touches `SharedArrayBuffer` or `Atomics`. See [Client API](../api/client) for the full reference.
+The [`RuntimeClient`](../api/client) is the consumer-facing API. `createRuntimeClient(options)` returns a client whose transport handle is materialized during construction (`TransportPlugin.materialize()`); worker spawn and the transport handshake remain lazy until `connect()` or an auto-connect command (`render` / `export`). Inline `source.files` input is staged into the transport-owned filesystem. High-level helpers provide that filesystem automatically; raw transports require `fileSystem`. Hosts that own a filesystem supply a wired transport plugin at construction (`transport: webWorkerTransport({ fileSystem: fromFileSystemBridge(openConnection) })`) and call `client.connect()` (no arguments); see [Embedding in a Host](../guides/embedding-in-a-host). For persisted projects, `openConnection` returns a fresh writable rooted bridge and all runtime paths are local to `/`. `client.on(event, handler)` consumes the event stream, and the active transport owns the abort channel and `postMessage` event delivery — the client itself never touches `SharedArrayBuffer` or `Atomics`. See [Client API](../api/client) for the full reference.
 
 ### Transport Layer (MessagePort)
 
@@ -181,7 +181,7 @@ The framework runs inside the kernel worker. [`KernelRuntimeWorker`](./worker-mo
 
 - **Kernel selection** -- selects the active kernel per file via extension, regex, or bundler-assisted detection. See [Kernel Selection](./kernel-selection).
 - **Middleware chain** -- onion-model wrappers around `createGeometry`, `getParameters`, and `exportGeometry`. See [Middleware Model](./middleware-model).
-- **Bundler** -- lazy-loaded for JS/TS kernels. Bundles entry files and dependencies, executes code.
+- **Bundler** -- lazy-loaded for JS/TS kernels. Bundles entry paths and dependencies, executes code.
 - **Autonomous render loop** -- `render` renders immediately; file changes debounce at 500ms; parameter changes debounce at 50ms. See [Render Lifecycle](./render-lifecycle).
 - **Abort infrastructure** -- Cooperative abort delivered via the transport's abort channel (SAB-backed where available, wire-format elsewhere) for cancelling superseded renders. The framework never owns the SAB itself.
 

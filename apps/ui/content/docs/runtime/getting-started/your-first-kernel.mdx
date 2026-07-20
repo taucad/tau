@@ -76,7 +76,7 @@ The `main` function is the entry point that the kernel calls. It receives a `par
 
 ## Step 3: Render and Export to glTF
 
-Hand the model code, entry file, and parameters to `client.export('glb', input)` -- this self-renders the model and returns the binary glTF in one call:
+Hand the model code, entry path, and parameters to `client.export('glb', input)` -- this self-renders the model and returns the binary glTF in one call:
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';

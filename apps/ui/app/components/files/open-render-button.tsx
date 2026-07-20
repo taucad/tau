@@ -10,7 +10,7 @@ export type OpenRenderButtonProperties = {
 } & React.ComponentProps<typeof Button>;
 
 /**
- * Ghost action that focuses the CAD viewer for an entry file.
+ * Ghost action that focuses the CAD viewer for an entry path.
  *
  * Mirrors {@link CopyButton} sizing in file-operation toolbars: optional
  * visible label plus trailing icon. Routes through `openInViewer` on the
@@ -33,7 +33,7 @@ export function OpenRenderButton({
         return;
       }
 
-      project.projectRef.send({ type: 'openInViewer', entryFile: path });
+      project.projectRef.send({ type: 'openInViewer', entryPath: path });
     },
     [project, path],
   );

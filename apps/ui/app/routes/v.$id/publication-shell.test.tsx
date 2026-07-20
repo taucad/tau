@@ -30,7 +30,7 @@ const publication: ParsedPublication = {
   title: 'Shell fixture',
   visibility: 'public',
   viewerRole: 'public',
-  entryFile: 'main.ts',
+  entryPath: 'main.ts',
   ownerSnapshot: null,
   forkCount: 0,
   viewCount: 0,

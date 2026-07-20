@@ -248,7 +248,7 @@ describe('KernelConfig.multiFileExample', () => {
       }
     });
 
-    it('should use the KCL `import … from "…"` idiom in the entry file', () => {
+    it('should use the KCL `import … from "…"` idiom in the entry path', () => {
       if (!example) {
         throw new Error('multiFileExample is required');
       }

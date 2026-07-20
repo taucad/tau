@@ -1,4 +1,15 @@
 import type { FileParameterEntry } from '@taucad/types';
+import {
+  parameterEntryPath as runtimeParameterEntryPath,
+  parametersDirectory as runtimeParametersDirectory,
+} from '@taucad/runtime/middleware/parameter-file-resolver';
+
+/** Canonical parameter-file path resolver shared with runtime middleware. */
+export const parameterEntryPath = (entryPath: string): string => runtimeParameterEntryPath(entryPath);
+
+/** Canonical project-relative parameter-file directory. */
+const sharedParametersDirectory = runtimeParametersDirectory;
+export const parametersDirectory = sharedParametersDirectory;
 
 const defaultParameterGroupName = 'default';
 
@@ -7,7 +18,6 @@ const defaultParameterGroupName = 'default';
  * All parameter file paths in the UI app must derive from this constant so that
  * the middleware, watchers, and persistence layers stay in sync.
  */
-export const parametersDirectory = '.tau/parameters';
 
 /**
  * Parse a JSON string into a validated FileParameterEntry.
@@ -28,6 +38,14 @@ export const createDefaultEntry = (): FileParameterEntry => ({
   activeGroup: defaultParameterGroupName,
   groups: {
     [defaultParameterGroupName]: { values: {} },
+  },
+});
+
+/** Create the canonical default parameter group populated with values. */
+export const createParameterEntry = (values: Record<string, unknown>): FileParameterEntry => ({
+  activeGroup: defaultParameterGroupName,
+  groups: {
+    [defaultParameterGroupName]: { values },
   },
 });
 
@@ -172,9 +190,3 @@ export const serializeParameterEntry = (entry: FileParameterEntry): string => {
   parseParameterEntry(json);
   return json;
 };
-
-/**
- * Compute the parameter file path for a given entry file.
- * Returns a project-relative path under `parametersDirectory`.
- */
-export const parameterEntryPath = (entryFile: string): string => `${parametersDirectory}/${entryFile}.json`;

@@ -15,7 +15,7 @@ describe('parsePublicationRecord', () => {
   const baseRecord = {
     id: 'pub_1',
     title: 'Sample',
-    entryFile: 'main.ts',
+    entryPath: 'main.ts',
     visibility: 'public',
     forkCount: 3,
     viewCount: 1234,
@@ -23,7 +23,7 @@ describe('parsePublicationRecord', () => {
     ownerSnapshot: { id: 'user_1', name: 'Ada Lovelace', image: 'https://cdn.example/ada.png' },
   };
 
-  it('should round-trip ownerSnapshot, forkCount, viewCount, createdAt, entryFile, visibility', () => {
+  it('should round-trip ownerSnapshot, forkCount, viewCount, createdAt, entryPath, visibility', () => {
     const parsed = parsePublicationRecord(baseRecord);
     expect(parsed).toEqual({
       id: 'pub_1',
@@ -31,7 +31,7 @@ describe('parsePublicationRecord', () => {
       description: undefined,
       visibility: 'public',
       viewerRole: 'public',
-      entryFile: 'main.ts',
+      entryPath: 'main.ts',
       ownerSnapshot: { id: 'user_1', name: 'Ada Lovelace', image: 'https://cdn.example/ada.png' },
       forkCount: 3,
       viewCount: 1234,

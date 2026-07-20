@@ -7,7 +7,7 @@ import type { ParsedPublication } from '#routes/v.$id/parsed-publication.js';
 import { cn } from '#utils/ui.utils.js';
 
 type PublicationFilesPaneProps = {
-  readonly entryFile: string;
+  readonly entryPath: string;
   readonly files: Record<string, string>;
   readonly visibility: ParsedPublication['visibility'];
   readonly className?: string;
@@ -71,17 +71,17 @@ const collectFolderIds = (nodes: TreeNode[], accumulator: string[] = []): string
   return accumulator;
 };
 
-const renderNodes = (nodes: TreeNode[], entryFile: string, onSelect: (path: string) => void): React.ReactNode => {
+const renderNodes = (nodes: TreeNode[], entryPath: string, onSelect: (path: string) => void): React.ReactNode => {
   return nodes.map((node) => {
     if (node.children !== undefined) {
       return (
         <Folder key={node.id} value={node.id} element={node.name}>
-          {renderNodes(node.children, entryFile, onSelect)}
+          {renderNodes(node.children, entryPath, onSelect)}
         </Folder>
       );
     }
 
-    const isEntry = node.path === entryFile;
+    const isEntry = node.path === entryPath;
     return (
       <File
         key={node.id}
@@ -107,7 +107,7 @@ const renderNodes = (nodes: TreeNode[], entryFile: string, onSelect: (path: stri
  * grid cell vertically (`h-full min-h-0`) so the tree scrolls inside the pane.
  */
 export const PublicationFilesPane = ({
-  entryFile,
+  entryPath,
   files,
   visibility,
   className,
@@ -162,7 +162,7 @@ export const PublicationFilesPane = ({
       <div className='shrink-0 border-b px-3 py-2 text-xs font-medium text-muted-foreground'>Files</div>
       <div className='min-h-0 flex-1 overflow-y-auto p-2'>
         <Tree initialExpandedItems={expanded} indicator role='tree'>
-          {renderNodes(tree, entryFile, setOpen)}
+          {renderNodes(tree, entryPath, setOpen)}
         </Tree>
       </div>
 

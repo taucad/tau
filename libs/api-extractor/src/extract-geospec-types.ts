@@ -28,12 +28,12 @@ const publicEntries = [
   ['step/index.d.ts', 'geospec/step'],
 ] as const;
 
-const entryFiles = publicEntries.map(([relativePath]) =>
+const entryPaths = publicEntries.map(([relativePath]) =>
   join(geospecSourceRoot, relativePath.replace(/\.d\.ts$/u, '.ts')),
 );
 
 const createProgram = (outDirectory: string): ts.Program =>
-  ts.createProgram(entryFiles, {
+  ts.createProgram(entryPaths, {
     allowSyntheticDefaultImports: true,
     declaration: true,
     emitDeclarationOnly: true,

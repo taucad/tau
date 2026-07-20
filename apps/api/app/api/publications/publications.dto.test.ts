@@ -19,7 +19,7 @@ describe('publishUploadSchema', () => {
   const validManifestJson = JSON.stringify({
     projectId: 'proj',
     projectName: 'Demo',
-    entryFile: 'main.ts',
+    entryPath: 'main.ts',
     visibility: 'private',
     title: 'T',
   });
@@ -45,7 +45,7 @@ describe('publishUploadSchema', () => {
     expect(result.error.issues.some((issue) => issue.message.includes('Manifest is not valid JSON'))).toBe(true);
   });
 
-  it('rejects manifest missing entryFile', () => {
+  it('rejects manifest missing entryPath', () => {
     const manifestJson = JSON.stringify({
       projectId: 'proj',
       projectName: 'Demo',
@@ -60,7 +60,7 @@ describe('publishUploadSchema', () => {
     const manifestJson = JSON.stringify({
       projectId: 'proj',
       projectName: 'Demo',
-      entryFile: 'main.ts',
+      entryPath: 'main.ts',
       visibility: 'secret',
       title: 'T',
     });
@@ -72,7 +72,7 @@ describe('publishUploadSchema', () => {
     const manifestJson = JSON.stringify({
       projectId: 'proj',
       projectName: 'Demo',
-      entryFile: 'main.ts',
+      entryPath: 'main.ts',
       visibility: 'private',
       title: '',
     });
@@ -85,7 +85,7 @@ describe('publishUploadSchema', () => {
     const result = publishUploadSchema.safeParse({ manifest: validManifestJson, files });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.manifest.entryFile).toBe('main.ts');
+      expect(result.data.manifest.entryPath).toBe('main.ts');
       expect(result.data.files.get('main.ts')).toBeDefined();
     }
   });
@@ -94,7 +94,7 @@ describe('publishUploadSchema', () => {
     const manifestJson = JSON.stringify({
       projectId: 'proj',
       projectName: 'Demo',
-      entryFile: 'main.ts',
+      entryPath: 'main.ts',
       visibility: 'private',
       title: 'T',
       sharedEmails: [' Friend@Example.com ', 'friend@example.com', 'TEAM@example.com'],
@@ -111,7 +111,7 @@ describe('publishUploadSchema', () => {
     const manifestJson = JSON.stringify({
       projectId: 'proj',
       projectName: 'Demo',
-      entryFile: 'main.ts',
+      entryPath: 'main.ts',
       visibility: 'public',
       title: 'T',
       sharedEmails: ['friend@example.com'],
@@ -125,7 +125,7 @@ describe('publishUploadSchema', () => {
     const manifestJson = JSON.stringify({
       projectId: 'proj',
       projectName: 'Demo',
-      entryFile: 'main.ts',
+      entryPath: 'main.ts',
       visibility: 'private',
       title: 'T',
       sharedEmails: Array.from({ length: 51 }, (_, index) => `friend${index.toString()}@example.com`),
@@ -196,7 +196,7 @@ describe('publicationRowSchema', () => {
     visibility: 'public',
     runtimePin: '~1',
     kernels: ['replicad'],
-    entryFile: 'main.ts',
+    entryPath: 'main.ts',
     title: 'T',
     description: null,
     forkCount: 0,
@@ -312,7 +312,7 @@ describe('publicationViewResponseSchema', () => {
   const manifest = storedPublicationManifestSchema.parse({
     version: 1,
     projectId: 'proj',
-    entryFile: entryRelativePath,
+    entryPath: entryRelativePath,
     files: { [entryRelativePath]: 'sha256:' + 'a'.repeat(64) },
     kernels: [],
     runtime: '@taucad/runtime@x',
@@ -333,7 +333,7 @@ describe('publicationViewResponseSchema', () => {
         thumbnailKey: null,
         runtimePin: 'x',
         kernels: [],
-        entryFile: entryRelativePath,
+        entryPath: entryRelativePath,
         title: 'T',
         description: null,
         forkCount: 0,

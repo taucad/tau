@@ -60,15 +60,15 @@ export function PublicationParamsPane({ publication, className }: PublicationPar
           className='flex flex-col gap-2 border-t pt-4'
         >
           <h2 className='text-sm font-medium'>Downloads</h2>
-          {!geometry ? (
-            <p className='text-xs text-muted-foreground'>Render the geometry to enable export.</p>
-          ) : (
+          {geometry ? (
             <ExportSelector
               cadActor={cadRef}
               filenameBase={publication.title}
-              defaultEntryFile={publication.entryFile}
+              defaultEntryPath={publication.entryPath}
               variant='inline'
             />
+          ) : (
+            <p className='text-xs text-muted-foreground'>Render the geometry to enable export.</p>
           )}
         </section>
       </div>

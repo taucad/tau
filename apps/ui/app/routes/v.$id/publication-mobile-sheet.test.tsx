@@ -18,7 +18,7 @@ const publication: ParsedPublication = {
   title: 'Mobile demo',
   visibility: 'public',
   viewerRole: 'public',
-  entryFile: 'main.ts',
+  entryPath: 'main.ts',
   ownerSnapshot: { id: 'user_1', name: 'Ada Lovelace', image: null },
   forkCount: 0,
   viewCount: 0,

@@ -1083,7 +1083,7 @@ describe('ReplicadWorker', () => {
     });
 
     describe('Multi-file imports', () => {
-      it('should handle transitive imports without direct replicad import in entry file', async () => {
+      it('should handle transitive imports without direct replicad import in entry path', async () => {
         const result = await createGeometry({
           files: {
             'main.ts': `

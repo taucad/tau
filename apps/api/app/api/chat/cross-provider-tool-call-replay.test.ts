@@ -344,7 +344,7 @@ describe('cross-provider tool-call replay (hermetic)', () => {
       new HumanMessage('a cube with holecutout'),
       new AIMessage({
         content: [
-          { type: 'reasoning', reasoning: 'Plan: inspect the workspace, then read the entry files.' },
+          { type: 'reasoning', reasoning: 'Plan: inspect the workspace, then read the entry paths.' },
           { type: 'text', text: 'Let me inspect the workspace first.' },
           { type: 'tool_call', id: callIds[0], name: 'list_directory', args: { path: '/' } },
           { type: 'tool_call', id: callIds[1], name: 'read_file', args: { targetFile: 'main.ts' } },

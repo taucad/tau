@@ -1,18 +1,33 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Share2 } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { useProject } from '#hooks/use-project.js';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { ProjectShareDialog } from '#components/publish/project-share-dialog.js';
+import { useProjectManager } from '#hooks/use-project-manager.js';
+import { getActiveGroupValues } from '#utils/parameter-config.utils.js';
 
 export function ProjectShareAction(): React.JSX.Element {
-  const { mainEntryFile, projectId, projectRef } = useProject();
+  const { mainEntryPath, parameterEntries, projectId, projectRef } = useProject();
+  const projectManager = useProjectManager();
   const project = useSelector(projectRef, (state) => state.context.project);
   const projectName = project?.name ?? 'Untitled';
   const projectDescription = project?.description ?? '';
-  const projectUpdatedAt = project?.updatedAt;
-  const parameters = project?.assets.mechanical?.parameters ?? {};
+  const parameters = getActiveGroupValues(parameterEntries.get(mainEntryPath));
+  const [projectUpdatedAt, setProjectUpdatedAt] = useState<number | undefined>();
+
+  useEffect(() => {
+    let cancelled = false;
+    void projectManager.getProjectLibraryState(projectId).then((state) => {
+      if (!cancelled) {
+        setProjectUpdatedAt(state?.lastActivityAt);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, projectManager]);
 
   const [shareOpen, setShareOpen] = useState(false);
 
@@ -21,14 +36,14 @@ export function ProjectShareAction(): React.JSX.Element {
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            variant='secondary'
+            variant='ghost'
             size='sm'
             className='max-md:size-8'
             onClick={() => {
               setShareOpen(true);
             }}
           >
-            <Share2 className='size-3.5' aria-hidden />
+            <Share2 className='size-3' aria-hidden />
             <span className='sr-only sm:hidden'>Share</span>
             <span className='hidden sm:inline'>Share</span>
           </Button>
@@ -42,7 +57,7 @@ export function ProjectShareAction(): React.JSX.Element {
         projectName={projectName}
         projectDescription={projectDescription}
         projectUpdatedAt={projectUpdatedAt}
-        entryFile={mainEntryFile}
+        entryPath={mainEntryPath}
         parameters={parameters}
       />
     </>

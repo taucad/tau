@@ -11,12 +11,11 @@ import type { JSONSchema7 } from '@taucad/json-schema';
 import type {
   FileExtension,
   GeometryResponse,
-  GeometryFile,
   OnWorkerLog,
   FileStat,
   FileStatEntry,
 } from '@taucad/types';
-import { parentDirectory, joinPath } from '@taucad/utils/path';
+import { parentDirectory, joinPath, resolveVirtualPath } from '@taucad/utils/path';
 import type { Mock } from 'vitest';
 import { expect, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -32,6 +31,7 @@ import type {
   ExportRoute,
 } from '#types/runtime.types.js';
 import type { TelemetryEntry } from '#types/runtime-protocol.types.js';
+import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type {
   RuntimeLogger,
   KernelRuntime,
@@ -183,7 +183,7 @@ export async function clearTestFileSystem(): Promise<void> {
 export type InitializeWorkerOptions = {
   /** Custom log handler */
   onLog?: OnWorkerLog;
-  /** Worker-specific options passed to initialize (e.g., ReplicadWorker: { withBrepEdges: true }) */
+  /** Worker-specific options passed to initialize. */
   workerOptions?: Record<string, unknown>;
   /** Runtime boot config passed through the initialize envelope. */
   config?: unknown;
@@ -201,7 +201,7 @@ export type InitializeWorkerOptions = {
  * so the fileManager's ensureFileSystemConfigured('indexeddb') just waits.
  *
  * @param worker - The runtime worker instance to initialize
- * @param options - Optional configuration (onLog, workerOptions for kernel-specific settings like withBrepEdges)
+ * @param options - Optional configuration (onLog and kernel-specific worker options)
  * @returns Promise resolving to the initialized worker
  * @public
  */
@@ -213,7 +213,13 @@ export async function initializeWorkerForTesting<T extends KernelWorker>(
     worker.setTelemetrySend(options.onTelemetry);
   }
 
-  const { port } = createBridgePort(getTestFileSystem());
+  const fileSystem = getTestFileSystem();
+  const { port } = createBridgePort(fileSystem, {
+    hello: {
+      capabilities: fileSystem.capabilities,
+      watchable: typeof fileSystem.watch === 'function',
+    },
+  });
 
   await worker.initialize({
     callbacks: {
@@ -381,7 +387,7 @@ export function createMockFileSystem(options?: MockFileSystemOptions): MockFileS
 
   return {
     id: 'runtime:mock-fs',
-    capabilities: { persistent: false, writable: true, quotaBased: false, caseSensitive: true },
+    capabilities: { persistent: false, writable: true, quotaBased: false },
     dispose() {
       /* The mock filesystem holds no resources beyond GC-managed maps. */
     },
@@ -461,8 +467,6 @@ export function createMockRuntime<
   filesystemOverrides?: MockFileSystemOptions;
   dependencies?: readonly Dependency[];
   dependencyHash?: string;
-  projectRootPath?: string;
-  basePath?: string;
   options?: Options;
 }): KernelMiddlewareRuntime<State, Options> & {
   logger: ReturnType<typeof createMockLogger>;
@@ -475,11 +479,8 @@ export function createMockRuntime<
     state: createMockState<State>(),
 
     options: (mockOptions?.options ?? {}) as Options,
-    projectRootPath: mockOptions?.projectRootPath ?? mockOptions?.basePath ?? '/projects/test-build',
-    basePath: mockOptions?.basePath ?? mockOptions?.projectRootPath ?? '/projects/test-build',
     dependencies: mockOptions?.dependencies ?? [],
     dependencyHash: mockOptions?.dependencyHash ?? defaultMockDependencyHash,
-    registerWatchPath: vi.fn(),
   };
 }
 
@@ -595,8 +596,7 @@ export function assertFailure<T>(result: KernelResult<T>, context?: string): ass
  */
 export function createMockInput(overrides?: Partial<CreateGeometryInput>): CreateGeometryInput {
   return {
-    filePath: '/projects/test-build/test.kcl',
-    basePath: '/projects/test-build',
+    entryPath: '/test.kcl',
     parameters: {},
     options: {},
     ...overrides,
@@ -604,17 +604,17 @@ export function createMockInput(overrides?: Partial<CreateGeometryInput>): Creat
 }
 
 /**
- * Creates a GeometryFile for use with worker methods (getParameters, createGeometry).
+ * Creates an internal worker locator for worker-level tests.
  *
  * @param filename - The file name (e.g. `'test.ts'`)
- * @param basePath - The project base path (defaults to `/projects/test`)
- * @returns A GeometryFile pointing to the given filename and path
+ * @returns a canonical directory and basename pair
  * @public
  */
-export function createGeometryFile(filename: string, basePath = '/projects/test'): GeometryFile {
+export function createGeometryFile(filename: string) {
+  const filePath = resolveVirtualPath(joinPath('/', filename));
   return {
-    filename,
-    path: basePath,
+    filename: filePath.slice(filePath.lastIndexOf('/') + 1),
+    path: parentDirectory(filePath),
   };
 }
 
@@ -627,7 +627,7 @@ export function createGeometryFile(filename: string, basePath = '/projects/test'
  * @public
  */
 export type CreateTestWorkerOptions = {
-  /** Worker-specific options passed to initialize (e.g., ReplicadWorker: { withBrepEdges: true }) */
+  /** Worker-specific options passed to initialize. */
   workerOptions?: Record<string, unknown>;
   /** Extensions the kernel handles (defaults to ['ts', 'js', 'scad', 'kcl', '*']) */
   extensions?: string[];
@@ -693,11 +693,9 @@ export async function createTestWorker(
   files: Record<string, string>,
   options?: CreateTestWorkerOptions,
 ): Promise<KernelRuntimeWorker> {
-  const basePath = '/projects/test';
-
   const absoluteFiles: Record<string, string> = {};
   for (const [path, content] of Object.entries(files)) {
-    absoluteFiles[joinPath(basePath, path)] = content;
+    absoluteFiles[joinPath('/', path)] = content;
   }
 
   await seedTestFileSystem(absoluteFiles);
@@ -811,8 +809,9 @@ export async function createTestGeometry(input: {
   files: Record<string, string>;
   mainFile: string;
   parameters?: Record<string, unknown>;
+  content?: RuntimeContentInput;
   options?: CreateTestWorkerOptions;
-}): Promise<CreateGeometryResult> {
+}): Promise<HashedGeometryResult> {
   const worker = await createTestWorker(input.definition, input.files, input.options);
   const geometryFile = createGeometryFile(input.mainFile);
 
@@ -830,7 +829,7 @@ export async function createTestGeometry(input: {
     }
   }
 
-  return worker.createGeometry({ file: geometryFile, parameters });
+  return worker.createGeometry({ file: geometryFile, parameters, content: input.content });
 }
 
 /**
@@ -916,9 +915,13 @@ export function createMockRuntimeClient(): RuntimeClient {
     kernelId: 'test-kernel',
     sourceFormat: 'gltf',
     fidelity: format === 'step' || format === 'stp' ? 'brep' : 'mesh',
-    schema: {},
-    defaults: {},
+    exportOptions: { schema: {}, defaults: {} },
   });
+
+  const routesFor = vi.fn((format: FileExtension) => [createRoute(format)]) as unknown as RuntimeClient['routesFor'];
+  const bestRouteFor = vi.fn((format: FileExtension) =>
+    createRoute(format),
+  ) as unknown as RuntimeClient['bestRouteFor'];
 
   return mock<RuntimeClient>({
     lifecycleState: 'connected',
@@ -929,16 +932,17 @@ export function createMockRuntimeClient(): RuntimeClient {
     render: vi.fn().mockResolvedValue({ superseded: true }),
     updateParameters: vi.fn().mockResolvedValue({ superseded: true }),
     setOptions: vi.fn().mockResolvedValue({ superseded: true }),
+    setRenderTimeout: vi.fn(),
     export: vi.fn().mockResolvedValue({
       success: true,
       data: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.stl', mimeType: 'model/stl' }],
       issues: [],
     }),
-    routesFor: vi.fn((format: FileExtension) => [createRoute(format)]),
-    bestRouteFor: vi.fn((format: FileExtension) => createRoute(format)),
+    routesFor,
+    bestRouteFor,
     terminate: vi.fn(),
     on: vi.fn<(event: string, handler: (...args: never[]) => void) => () => void>().mockReturnValue(noop),
-  });
+  }) as unknown as RuntimeClient;
 }
 
 // =============================================================================
@@ -970,6 +974,8 @@ export type MockKernelWorkerOptions = {
   renderZodSchema?: z.ZodType;
   /** Pre-set the nativeHandle on construction (simulates prior createGeometry) */
   nativeHandle?: unknown;
+  /** Native-handle reuse scope for the mock kernel (defaults to first-party `source` semantics). */
+  nativeHandleScope?: 'source' | 'operation';
   /** Worker-owned transcoder plugins to load during initialize. */
   transcoders?: readonly TranscoderPlugin[];
 };
@@ -1053,6 +1059,8 @@ export class MockKernelWorker extends KernelWorker {
 
     const zodSchemas = options.exportZodSchemas ?? { glb: z.object({}), gltf: z.object({}) };
     this.kernelExportZodSchemasMap.set('mock-kernel', zodSchemas);
+    this.kernelRenderContentMap.set('mock-kernel', []);
+    this.kernelNativeHandleScopeMap.set('mock-kernel', options.nativeHandleScope ?? 'source');
 
     if (options.renderZodSchema) {
       this.kernelRenderZodSchemaMap.set('mock-kernel', options.renderZodSchema);
@@ -1144,10 +1152,10 @@ export class MockKernelWorker extends KernelWorker {
   }
 
   protected override async onGetDependencies(
-    { filePath }: GetDependenciesInput,
+    { entryPath }: GetDependenciesInput,
     _runtime: KernelRuntime,
   ): Promise<GetDependenciesResult> {
-    return { resolved: [filePath], unresolved: [] };
+    return { resolved: [entryPath], unresolved: [] };
   }
 
   protected override getActiveKernelId(): string | undefined {
@@ -1175,7 +1183,7 @@ export function createMockDependencies(overrides?: Dependency[]): readonly Depen
     { type: 'file', path: 'test.kcl', contentHash: 'abc123' },
     {
       type: 'middleware',
-      name: 'TestMiddleware',
+      id: 'test-middleware',
       version: '1',
       index: 0,
       options: {},

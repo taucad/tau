@@ -22,7 +22,7 @@ afterEach(() => {
 });
 
 describe('OpenRenderButton', () => {
-  it('dispatches openInViewer for the entry file on click', async () => {
+  it('dispatches openInViewer for the entry path on click', async () => {
     const user = userEvent.setup();
     render(
       <TooltipProvider>
@@ -34,7 +34,7 @@ describe('OpenRenderButton', () => {
 
     expect(projectSend).toHaveBeenCalledWith({
       type: 'openInViewer',
-      entryFile: 'parts/wing.ts',
+      entryPath: 'parts/wing.ts',
     });
   });
 

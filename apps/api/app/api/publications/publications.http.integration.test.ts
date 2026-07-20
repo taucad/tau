@@ -201,7 +201,7 @@ describe('Publications HTTP integration', () => {
     const manifest = {
       projectId: 'proj_integration',
       projectName: 'Integration',
-      entryFile: 'main.ts',
+      entryPath: 'main.ts',
       visibility: 'public',
       title: 'Hello',
     };
@@ -277,7 +277,7 @@ describe('Publications HTTP integration', () => {
         thumbnailKey: null,
         runtimePin: 'x',
         kernels: [],
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
         title: 'T',
         description: null,
         forkCount: 0,
@@ -297,7 +297,7 @@ describe('Publications HTTP integration', () => {
       manifest: {
         version: 1,
         projectId: 'proj',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
         files: { 'main.ts': `sha256:${'b'.repeat(64)}` },
         kernels: [],
         runtime: '@taucad/runtime@x',
@@ -348,7 +348,7 @@ describe('Publications HTTP integration', () => {
         visibility: 'public',
         runtimePin: 'x',
         kernels: [],
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
         title: 'T',
         description: null,
         forkCount: 0,
@@ -367,7 +367,7 @@ describe('Publications HTTP integration', () => {
       manifest: {
         version: 1,
         projectId: 'proj',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
         files: { 'main.ts': `sha256:${'c'.repeat(64)}` },
         kernels: [],
         runtime: '@taucad/runtime@x',
@@ -707,6 +707,9 @@ type BarePublicationsServiceDeps = ConstructorParameters<typeof PublicationsServ
           {} as BarePublicationsServiceDeps[4],
           {} as BarePublicationsServiceDeps[5],
           {} as BarePublicationsServiceDeps[6],
+          {
+            getEntitlements: async () => ({ canCreatePrivateShares: true }),
+          } as BarePublicationsServiceDeps[7],
         ),
     },
     {
@@ -790,7 +793,7 @@ describe('Publications HTTP integration publish multipart path rules', () => {
     const manifest = {
       projectId: 'proj_path_rules',
       projectName: 'PathRules',
-      entryFile: 'main.ts',
+      entryPath: 'main.ts',
       visibility: 'private',
       title: 'Hello',
     };

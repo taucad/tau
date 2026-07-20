@@ -80,7 +80,7 @@ export function ViewerLink({ path, className, children, asChild = false }: Viewe
       return;
     }
 
-    project.projectRef.send({ type: 'openInViewer', entryFile: path });
+    project.projectRef.send({ type: 'openInViewer', entryPath: path });
   }, [project, path]);
 
   const handleClick = useCallback(

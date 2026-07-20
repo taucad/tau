@@ -75,7 +75,7 @@ export function ImportMainFileView({
                 selectedFile={selectedMainFile}
                 placeholder='Select main file...'
                 title='Select Main File'
-                description='Choose the main entry file for your project'
+                description='Choose the main entry path for your project'
                 emptyMessage='No files found'
                 onSelect={onSelectMainFile}
               />

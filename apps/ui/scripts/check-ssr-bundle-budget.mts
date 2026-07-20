@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 /** `du -sk build/server` total; ~10.1 MiB observed (hybrid `ssr.external`: `@taucad/runtime`, `@taucad/openscad` only). */
 const ssrBundleByteBudget = 11 * 1024 * 1024;
 
-/** Main SSR entry file — cap cold-parse surface even when code splits into `assets/`. */
+/** Main SSR entry path — cap cold-parse surface even when code splits into `assets/`. */
 const ssrIndexFileByteBudget = 3 * 1024 * 1024;
 const forbiddenDreiCoreImport = '@react-three/drei/core/';
 

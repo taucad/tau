@@ -56,7 +56,7 @@ When the file extension has a registered bundler (e.g., `.ts` with esbuild):
 2. Compare detected bare-specifier imports to each kernel's `builtinModuleNames`. A kernel matches if any of its builtin names appear (e.g., `replicad` or `replicad/utils`).
 3. The first matching kernel wins. Dependencies from the detection pass are cached for the subsequent `getDependencies` call to avoid re-running the bundler.
 
-This pass handles cases where the entry file does not directly import the kernel (e.g., it imports a local module that imports `replicad`). The regex in pass 1 would miss this; the bundler traces the full import graph.
+This pass handles cases where the entry path does not directly import the kernel (e.g., it imports a local module that imports `replicad`). The regex in pass 1 would miss this; the bundler traces the full import graph.
 
 ### Pass 3: Catch-All Fallback
 
@@ -67,7 +67,7 @@ If no kernel matches at all, selection returns `undefined`. The framework report
 ## Why This Layered Approach
 
 - **Performance** -- Extension and regex are cheap. Bundler detection is more expensive; it runs only when extension/regex fail or when multiple kernels share an extension.
-- **Correctness** -- Regex can only see the entry file. Transitive imports require the bundler. Catch-all ensures a fallback for unknown formats.
+- **Correctness** -- Regex can only see the entry path. Transitive imports require the bundler. Catch-all ensures a fallback for unknown formats.
 - **Priority** -- Kernel order in `defineRuntime({ kernels: [...] })` matters. When multiple kernels match, the first wins. Put specific kernels before catch-all.
 
 ## Caching of Selection Results

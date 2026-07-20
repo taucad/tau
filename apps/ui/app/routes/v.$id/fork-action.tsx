@@ -7,12 +7,14 @@ import { Button } from '#components/ui/button.js';
 import { useCadPreview } from '#hooks/use-cad-preview.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { toast } from '#components/ui/sonner.js';
+import { encodeTextFile } from '#utils/filesystem.utils.js';
+import { createParameterEntry, parameterEntryPath, serializeParameterEntry } from '#utils/parameter-config.utils.js';
 
 export type PublicationForkSource = {
   readonly id: string;
   readonly title: string;
   readonly description?: string;
-  readonly entryFile: string;
+  readonly entryPath: string;
 };
 
 type ForkActionProps = {
@@ -47,13 +49,15 @@ export function ForkAction({ publication, files }: ForkActionProps): React.JSX.E
         project: {
           name: `${publication.title} (fork)`,
           description: publication.description ?? '',
-          author: { name: 'You', avatar: '/avatar-sample.png' },
           tags: [],
-          thumbnail: '',
-          forkedFrom: publication.id,
-          assets: { mechanical: { main: publication.entryFile, parameters: mergedParameters } },
+          assets: { main: { entryPath: publication.entryPath } },
         },
-        files: Object.fromEntries([...files.entries()].map(([path, file]) => [path, { content: file.content }])),
+        files: {
+          ...Object.fromEntries([...files.entries()].map(([path, file]) => [path, { content: file.content }])),
+          [parameterEntryPath(publication.entryPath)]: {
+            content: encodeTextFile(serializeParameterEntry(createParameterEntry(mergedParameters))),
+          },
+        },
       });
 
       toast.success('Forked to your projects');
@@ -71,8 +75,7 @@ export function ForkAction({ publication, files }: ForkActionProps): React.JSX.E
     navigate,
     projectManager,
     publication.description,
-    publication.entryFile,
-    publication.id,
+    publication.entryPath,
     publication.title,
   ]);
 

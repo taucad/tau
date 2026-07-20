@@ -27,7 +27,7 @@ import { usePaneviewPersistence, getInitialPanelOptions } from '#routes/projects
 // ---------------------------------------------------------------------------
 
 type KernelPanelParams = {
-  entryFile: string;
+  entryPath: string;
   cadRef: ActorRefFrom<typeof cadMachine>;
 };
 
@@ -36,13 +36,13 @@ function KernelPanelBody({ params }: { readonly params: KernelPanelParams }): Re
     <div>
       <GeometryUnitTiming cadRef={params.cadRef} />
       <div className='mx-2 border-t border-border/20' />
-      <GeometryUnitLogs entryFile={params.entryFile} />
+      <GeometryUnitLogs entryPath={params.entryPath} />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Paneview panel header: entry file name + summary badge
+// Paneview panel header: entry path name + summary badge
 // ---------------------------------------------------------------------------
 
 function KernelPanelHeader({
@@ -53,7 +53,7 @@ function KernelPanelHeader({
   readonly params: KernelPanelParams;
 }): React.JSX.Element {
   return (
-    <PaneviewHeader api={api} title={params.entryFile}>
+    <PaneviewHeader api={api} title={params.entryPath}>
       <PaneviewHeaderControls>
         <GeometryUnitSummary cadRef={params.cadRef} />
       </PaneviewHeaderControls>
@@ -70,14 +70,14 @@ const paneviewHeaderComponents = { kernelHeader: KernelPanelHeader };
 
 function KernelPaneview({
   entries,
-  mainEntryFile,
+  mainEntryPath,
 }: {
   readonly entries: Array<[string, ActorRefFrom<typeof cadMachine>]>;
-  readonly mainEntryFile: string;
+  readonly mainEntryPath: string;
 }): React.JSX.Element {
   const { savedState, connectApi } = usePaneviewPersistence('kernelPaneview');
 
-  const sortedEntries = useMemo(() => sortGeometryUnitEntries(entries, mainEntryFile), [entries, mainEntryFile]);
+  const sortedEntries = useMemo(() => sortGeometryUnitEntries(entries, mainEntryPath), [entries, mainEntryPath]);
 
   const paneviewKey = useMemo(() => sortedEntries.map(([file]) => file).join('\0'), [sortedEntries]);
 
@@ -85,26 +85,26 @@ function KernelPaneview({
     (event: { api: PaneviewApi }) => {
       connectApi(event.api);
 
-      for (const [entryFile, cadRef] of sortedEntries) {
-        const isMain = entryFile === mainEntryFile;
-        const initial = getInitialPanelOptions(savedState, entryFile, {
+      for (const [entryPath, cadRef] of sortedEntries) {
+        const isMain = entryPath === mainEntryPath;
+        const initial = getInitialPanelOptions(savedState, entryPath, {
           isExpanded: isMain,
           size: isMain ? 200 : undefined,
         });
 
         event.api.addPanel({
-          id: entryFile,
-          title: entryFile,
+          id: entryPath,
+          title: entryPath,
           component: 'kernelPanel',
           headerComponent: 'kernelHeader',
           isExpanded: initial.isExpanded,
           minimumBodySize: 80,
           size: initial.size,
-          params: { entryFile, cadRef } satisfies KernelPanelParams,
+          params: { entryPath, cadRef } satisfies KernelPanelParams,
         });
       }
     },
-    [sortedEntries, mainEntryFile, savedState, connectApi],
+    [sortedEntries, mainEntryPath, savedState, connectApi],
   );
 
   return (
@@ -123,14 +123,14 @@ function KernelPaneview({
 // ---------------------------------------------------------------------------
 
 function KernelContent(): React.JSX.Element {
-  const { geometryUnits, mainEntryFile } = useProject();
+  const { geometryUnits, mainEntryPath } = useProject();
   const entries = useMemo(() => [...geometryUnits.entries()], [geometryUnits]);
 
   if (entries.length === 0) {
     return <p className='p-4 text-center text-xs text-muted-foreground'>No geometry units.</p>;
   }
 
-  return <KernelPaneview entries={entries} mainEntryFile={mainEntryFile} />;
+  return <KernelPaneview entries={entries} mainEntryPath={mainEntryPath} />;
 }
 
 // ---------------------------------------------------------------------------

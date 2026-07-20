@@ -14,7 +14,7 @@ import { withTabContextMenu } from '#components/panes/with-tab-context-menu.js';
 
 type ViewerPanelParameters = {
   viewId: string;
-  entryFile: string | undefined;
+  entryPath: string | undefined;
 };
 
 /**
@@ -27,7 +27,7 @@ function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
   const { api, containerApi } = properties;
   const { editorRef } = useProject();
 
-  const entryFile = (properties.params as ViewerPanelParameters | undefined)?.entryFile;
+  const entryPath = (properties.params as ViewerPanelParameters | undefined)?.entryPath;
 
   const { hasOthers, hasRight, hasLeft } = useMemo(() => {
     const { panels } = api.group;
@@ -63,10 +63,10 @@ function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
 
   // ── Copy path ──
   const handleCopyPath = useCallback(() => {
-    if (entryFile) {
-      void copyPathToClipboard(entryFile);
+    if (entryPath) {
+      void copyPathToClipboard(entryPath);
     }
-  }, [entryFile]);
+  }, [entryPath]);
 
   // ── Split actions ──
   const handleSplitRight = useCallback(() => {
@@ -85,16 +85,16 @@ function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
 
   // ── Navigation actions ──
   const handleOpenInEditor = useCallback(() => {
-    if (entryFile) {
-      editorRef.send({ type: 'openFile', path: entryFile, source: 'user' });
+    if (entryPath) {
+      editorRef.send({ type: 'openFile', path: entryPath, source: 'user' });
     }
-  }, [editorRef, entryFile]);
+  }, [editorRef, entryPath]);
 
   const handleRevealInFileTree = useCallback(() => {
-    if (entryFile) {
-      editorRef.send({ type: 'revealFileInTree', path: entryFile });
+    if (entryPath) {
+      editorRef.send({ type: 'revealFileInTree', path: entryPath });
     }
-  }, [editorRef, entryFile]);
+  }, [editorRef, entryPath]);
 
   return (
     <>
@@ -118,7 +118,7 @@ function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
       <ContextMenuSeparator />
 
       {/* ── Copy path ── */}
-      <ContextMenuItem disabled={!entryFile} onSelect={handleCopyPath}>
+      <ContextMenuItem disabled={!entryPath} onSelect={handleCopyPath}>
         <Copy />
         Copy Path
       </ContextMenuItem>
@@ -138,11 +138,11 @@ function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
       <ContextMenuSeparator />
 
       {/* ── Navigation group ── */}
-      <ContextMenuItem disabled={!entryFile} onSelect={handleOpenInEditor}>
+      <ContextMenuItem disabled={!entryPath} onSelect={handleOpenInEditor}>
         <FileCode />
         Open in Editor
       </ContextMenuItem>
-      <ContextMenuItem disabled={!entryFile} onSelect={handleRevealInFileTree}>
+      <ContextMenuItem disabled={!entryPath} onSelect={handleRevealInFileTree}>
         <FolderTree />
         Reveal in File Tree
       </ContextMenuItem>

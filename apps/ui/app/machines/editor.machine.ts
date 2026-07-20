@@ -1,4 +1,4 @@
-import { assign, assertEvent, setup, enqueueActions, emit, raise } from 'xstate';
+import { assign, assertEvent, setup, enqueueActions, raise } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
@@ -176,7 +176,7 @@ function rekeyViewSettingsForRename(
       viewId,
       {
         ...viewState,
-        entryFile: rewritePathIfMatched(viewState.entryFile, oldPath, newPath),
+        entryPath: rewritePathIfMatched(viewState.entryPath, oldPath, newPath),
         graphicsSettings: {
           ...viewState.graphicsSettings,
           componentDisplay: rekeyComponentDisplayForRename(
@@ -269,14 +269,13 @@ type EditorStateMachineInput = {
  */
 type EditorStateEvent =
   | { type: 'load' }
-  | { type: 'reload'; projectId: string }
   // File operations (consolidated from fileExplorerMachine)
   | { type: 'openFile'; path: string; source: FileOpenSource; lineNumber?: number; column?: number; readOnly?: boolean }
   | { type: 'registerMaterialiseModel'; materialiseModel: ((path: string) => Promise<void>) | undefined }
   | { type: 'closeFile'; path: string }
   | { type: 'setActiveFile'; path: string }
   | { type: 'revealFileInTree'; path: string; expandTarget?: boolean }
-  | { type: 'revealModelComponentInExplorer'; entryFile: string; unitId: string; componentId: string }
+  | { type: 'revealModelComponentInExplorer'; entryPath: string; unitId: string; componentId: string }
   | { type: 'renameFile'; oldPath: string; newPath: string }
   | { type: 'closeAll' }
   // Chat operations
@@ -305,7 +304,6 @@ type EditorStateEvent =
  * Editor state Machine Emitted Events
  */
 type EditorStateEmitted =
-  | { type: 'editorStateLoaded'; editorState: EditorState | undefined }
   | {
       type: 'fileOpened';
       path: string;
@@ -317,7 +315,7 @@ type EditorStateEmitted =
   | { type: 'fileOpening'; path: string }
   | { type: 'fileOpenFailed'; path: string; error: Error }
   | { type: 'fileRevealRequested'; path: string; expandTarget?: boolean }
-  | { type: 'modelComponentRevealRequested'; entryFile: string; unitId: string; componentId: string };
+  | { type: 'modelComponentRevealRequested'; entryPath: string; unitId: string; componentId: string };
 
 // Actors to be provided by the consumer
 const loadEditorStateActor = fromSafeAsync<
@@ -468,34 +466,7 @@ export const editorMachine = setup({
           readOnly: activeMeta.readOnly,
         });
       }
-
-      // Always emit editorStateLoaded so consumers know loading is complete
-      enqueue.emit({
-        type: 'editorStateLoaded',
-        editorState: loadedState,
-      });
     }),
-
-    updateProjectId: assign(({ event }) => {
-      assertEvent(event, 'reload');
-      return {
-        projectId: event.projectId,
-        openFiles: [],
-        activePaneId: undefined,
-        focusedChatId: undefined,
-        panelState: defaultPanelState,
-        editorLayout: undefined,
-        viewerLayout: undefined,
-        viewSettings: {},
-        materialiseModel: undefined,
-        pendingOpenFile: undefined,
-      };
-    }),
-
-    emitEditorStateLoadedEmpty: emit(() => ({
-      type: 'editorStateLoaded',
-      editorState: undefined,
-    })),
 
     setMaterialiseModel: assign(({ event }) => {
       assertEvent(event, 'registerMaterialiseModel');
@@ -690,7 +661,7 @@ export const editorMachine = setup({
 
       enqueue.emit({
         type: 'modelComponentRevealRequested',
-        entryFile: event.entryFile,
+        entryPath: event.entryPath,
         unitId: event.unitId,
         componentId: event.componentId,
       });
@@ -864,10 +835,6 @@ export const editorMachine = setup({
     clearPendingChanges: assign({ hasPendingChanges: false }),
   },
   guards: {
-    isProjectIdChanging({ context, event }) {
-      assertEvent(event, 'reload');
-      return context.projectId !== event.projectId;
-    },
     hasPendingChanges({ context }) {
       return context.hasPendingChanges;
     },
@@ -918,22 +885,11 @@ export const editorMachine = setup({
           target: 'loading',
           actions: 'setLoading',
         },
-        reload: {
-          target: 'loading',
-          actions: ['updateProjectId', 'setLoading'],
-        },
       },
     },
     loading: {
       entry: 'clearError',
       initial: 'hydrating',
-      on: {
-        reload: {
-          target: '.hydrating',
-          actions: ['updateProjectId', 'setLoading'],
-          reenter: true,
-        },
-      },
       states: {
         hydrating: {
           invoke: {
@@ -947,7 +903,7 @@ export const editorMachine = setup({
               // gate sees either a healed focusedChatId or a typed error
               // panel rather than a stuck spinner.
               target: 'ensuringFocusedChat',
-              actions: ['clearLoading', 'emitEditorStateLoadedEmpty'],
+              actions: 'clearLoading',
             },
           },
           on: {
@@ -1094,10 +1050,6 @@ export const editorMachine = setup({
             },
             pruneComponentDisplayForDeletedPath: {
               actions: 'pruneComponentDisplayForDeletedPathInContext',
-            },
-            reload: {
-              target: '#editor.loading',
-              actions: ['updateProjectId', 'setLoading'],
             },
           },
         },

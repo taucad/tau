@@ -120,7 +120,7 @@ Worker-side, before delivery to subscribers:
    → load WASM, configure bundler, set up bridge proxy
 
 2. setFile(file, params)
-   → store entry file + parameters
+   → store entry path + parameters
    → render() immediately
    → discover dependencies from bundler metafile
    → watch(dependencies) via filesystem bridge
@@ -178,13 +178,13 @@ No mutation-triggered full recursive tree scans.
 
 ## Compilation Unit Lifecycle
 
-A geometry unit is a single `cadMachine` actor managing one runtime worker for one entry file:
+A geometry unit is a single `cadMachine` actor managing one runtime worker for one entry path:
 
 ```
-projectMachine spawns cadMachine(entryFile, kernelType)
+projectMachine spawns cadMachine(entryPath, kernelType)
   → cadMachine enters 'connecting' state
   → creates RuntimeClient, connects to runtime worker
-  → sends setFile(entryFile, initialParams)
+  → sends setFile(entryPath, initialParams)
   → transitions to 'idle'
 
   [worker pushes stateChanged('rendering')]
@@ -196,7 +196,7 @@ projectMachine spawns cadMachine(entryFile, kernelType)
   [worker pushes error]
   → cadMachine transitions to 'error', shows diagnostics
 
-  [user changes entry file]
+  [user changes entry path]
   → cadMachine sends setFile(newFile)
 
   [build closes]

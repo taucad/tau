@@ -35,6 +35,7 @@ cleanup; they may exceed the 200-char cap.
 - `monaco-editor` runtime is quarantined to `*.client.{ts,tsx}` modules (React Router v7 erases them server-side); `import type * as Monaco from 'monaco-editor'` is unrestricted. Enforced by `no-restricted-imports` in `eslint.config.mjs`. See `docs/policy/ssr-bundle-policy.md` rule #7.
 - Prefer foreground/monochrome over primary/purple brand accent on functional surfaces (chat submit/stop button, viewer edge lines, docs syntax); keep it theme-aware (white in dark, dark in light).
 - Project recency belongs to the project domain boundary: filesystem transport emits facts, participants route them, and `project.machine` decides `updatedAt`; never add low-level recency flags.
+- Project navigation separates requested from committed identity: retain the inert committed session during access checks, then key resources by the access-confirmed ID.
 - Dialog carousels using Embla should open via creation-time `startIndex`; observe `select` for chrome only, and do not mirror selection back with `scrollTo`.
 - Export-geometry chat tool: split download adornment (left downloads selected format, right opens format picker without auto-download); "Open Exporter" footer matches `chat-model-selector`.
 - `combobox-responsive.tsx` active-search highlighting uses shared `highlight-text.tsx` — changes must cover all combobox consumers, not one-off callsites.
@@ -42,7 +43,10 @@ cleanup; they may exceed the 200-char cap.
 
 ## Learned Workspace Facts
 
-- Filesystem-backed derivatives copy the settled CAD actor's `context.file` unchanged; project IDs and entry filenames never reconstruct runtime sources or filesystem authority.
+- Billing hooks (`useEntitlements`/`useCredits`) pass the module-level `billingQueryClient` as useQuery's 2nd arg — no QueryClientProvider anywhere; consumer tests mock the HOOK seam (`#hooks/use-entitlements.js`), never wrap providers.
+- `@stripe/stripe-js` v9 renamed Embedded Checkout init to `stripe.createEmbeddedCheckoutPage(...)` (the old `initEmbeddedCheckout` name type-checks as `any` and lints as unsafe); mount into a ref via a phase-effect AFTER the container commits.
+- Marketing surfaces never say "GeoSpec" (landing OQ1 rule) — `tauPlanCatalog` copy uses verification language and its test pins /geospec/i-free; in-app settings labels may still say GeoSpec.
+- Filesystem-backed derivatives copy the settled CAD actor's `context.file` unchanged; project IDs and entry pathnames never reconstruct runtime sources or filesystem authority.
 - Home route `/` SSR is CDN-cached and must stay session-neutral: gate signed-in/out client-side via `useResolvedAuth` (SSR + first paint resolve anonymous to match), then refine post-hydration using the `tau-authed` first-paint hint cookie.
 - Session-aware page chrome: `Handle.enablePageWrapper` accepts `(ctx:{isAuthed,flags})=>boolean`; `Page` resolves the function form so `/` drops the app shell for anonymous marketing visitors only when the `marketingLanding` flag is on.
 - Filesystem-driven Monaco mutations carry synchronous path provenance through model callbacks; never dedupe submitted writes against a cache that can lag intent.

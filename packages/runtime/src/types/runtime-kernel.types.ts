@@ -20,6 +20,12 @@ import type { ExecuteResult, KernelBundler } from '#types/runtime-bundler.types.
 import type { KernelPlugin } from '#plugins/plugin-types.js';
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
+import type {
+  ContentInputFor,
+  ContentKeysOf,
+  RuntimeContentDeclaration,
+  RuntimeContentKey,
+} from '#types/runtime-content.types.js';
 
 // =============================================================================
 // Kernel Logging
@@ -151,21 +157,26 @@ export type KernelRuntime = {
 // Kernel Method Input Types
 // =============================================================================
 
+/** Host URL plus stable digest identity for a selected plugin implementation asset. @public */
+export type RuntimeImplementationAsset = {
+  readonly id: string;
+  readonly url: string;
+  readonly sha256: string;
+};
+
 /**
- * File and project path identifying the active document for parameter extraction.
+ * File path identifying the active document for parameter extraction.
  * @public
  */
 export type GetParametersInput = {
-  /** Absolute path to the active file */
-  filePath: string;
-  /** Absolute path to the project root directory */
-  basePath: string;
+  /** Absolute path to the active entry */
+  entryPath: string;
 };
 
 /**
  * File path, parameters, and kernel-specific options for geometry evaluation.
  *
- * When `RenderSchema` is a concrete Zod type (inferred from `renderSchema`),
+ * When `RenderSchema` is a concrete Zod type (inferred from `render.optionsSchema`),
  * `options` is typed via `z.infer<RenderSchema>`. When no schema is declared
  * (default), `options` is `Record<string, unknown>`. Always required — the
  * framework populates defaults via Zod `safeParse({})`.
@@ -173,26 +184,52 @@ export type GetParametersInput = {
  * @template RenderSchema - Zod schema type for render options, inferred from KernelDefinition
  * @public
  */
-export type CreateGeometryInput<RenderSchema extends z.ZodType = z.ZodType> = {
-  /** Absolute path to the active file */
-  filePath: string;
-  /** Absolute path to the project root directory */
-  basePath: string;
+export type KernelRenderDefinition<
+  Schema extends z.ZodType | undefined = z.ZodType | undefined,
+  Content extends RuntimeContentDeclaration = RuntimeContentDeclaration,
+> = {
+  /** Kernel-owned render options. */
+  readonly optionsSchema?: Schema;
+  /** Framework content properties fulfilled natively by this render route. */
+  readonly content: Content;
+};
+
+/** One native export format declared by a kernel author. @public */
+export type KernelExportFormatDefinition<
+  Schema extends z.ZodType = z.ZodType,
+  Content extends RuntimeContentDeclaration = RuntimeContentDeclaration,
+> = {
+  /** Kernel-owned export options for this format. */
+  readonly optionsSchema: Schema;
+  /** Framework content properties fulfilled natively by this format. */
+  readonly content: Content;
+};
+
+/** Native export formats keyed by file extension. @public */
+export type KernelExportFormats = Record<string, KernelExportFormatDefinition>;
+
+type RenderSchemaOf<Render extends KernelRenderDefinition> = Render['optionsSchema'];
+type RenderOptionsOutput<Render extends KernelRenderDefinition> =
+  RenderSchemaOf<Render> extends z.ZodType ? z.output<RenderSchemaOf<Render>> : Record<string, unknown>;
+type RenderOptionsInput<Render extends KernelRenderDefinition> =
+  RenderSchemaOf<Render> extends z.ZodType ? z.input<RenderSchemaOf<Render>> : Record<string, unknown>;
+
+export type CreateGeometryInput<Render extends KernelRenderDefinition = KernelRenderDefinition> = {
+  /** Absolute path to the active entry */
+  entryPath: string;
   /** User-provided parameters */
   parameters: Record<string, unknown>;
   /** Kernel-specific options (Zod-validated when schema declared, untyped fallback otherwise). */
-  options: z.ZodType extends RenderSchema ? Record<string, unknown> : z.infer<RenderSchema>;
-};
+  options: RenderOptionsOutput<Render>;
+} & ContentInputFor<ContentKeysOf<Render['content']>>;
 
 /**
- * File and project path identifying the active document for dependency resolution.
+ * File path identifying the active document for dependency resolution.
  * @public
  */
 export type GetDependenciesInput = {
-  /** Absolute path to the active file */
-  filePath: string;
-  /** Absolute path to the project root directory */
-  basePath: string;
+  /** Absolute path to the active entry */
+  entryPath: string;
 };
 
 /**
@@ -235,20 +272,22 @@ export type InitializeInput<Options = Record<string, unknown>> = {
  */
 export type ExportGeometryRequest<
   // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- empty default signals "no schemas declared"
-  ExportSchemas extends Record<string, z.ZodType> = {},
-> = [keyof ExportSchemas] extends [never]
+  ExportFormats extends KernelExportFormats = {},
+> = [keyof ExportFormats] extends [never]
   ? {
       format: FileExtension;
       /** Export options (untyped fallback). */
       options: Record<string, unknown>;
+      /** Framework-owned route content. */
+      content?: Record<string, boolean>;
     }
   : {
-      [K in Extract<keyof ExportSchemas, string>]: {
+      [K in Extract<keyof ExportFormats, string>]: {
         format: K;
         /** Per-format export options (Zod-validated, defaults applied by framework). */
-        options: z.infer<ExportSchemas[K]>;
-      };
-    }[Extract<keyof ExportSchemas, string>];
+        options: z.output<ExportFormats[K]['optionsSchema']>;
+      } & ContentInputFor<ContentKeysOf<ExportFormats[K]['content']>>;
+    }[Extract<keyof ExportFormats, string>];
 
 /**
  * Export request plus the kernel-native geometry handle.
@@ -262,15 +301,13 @@ export type ExportGeometryRequest<
  */
 export type KernelExportGeometryInput<
   NativeHandle = unknown,
-  // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- empty default signals "no schemas declared"
-  ExportSchemas extends Record<string, z.ZodType> = {},
-> = ExportGeometryRequest<ExportSchemas> & {
+  // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- empty default signals "no formats declared"
+  ExportFormats extends KernelExportFormats = {},
+> = ExportGeometryRequest<ExportFormats> & {
   nativeHandle: NativeHandle;
 };
 
 /**
- * Backwards-compatible alias for kernel export implementations.
- *
  * Middleware authors should use {@link ExportGeometryRequest}; kernel authors
  * continue to receive the native-handle-bearing input.
  *
@@ -280,25 +317,65 @@ export type KernelExportGeometryInput<
  */
 export type ExportGeometryInput<
   NativeHandle = unknown,
-  // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- empty default signals "no schemas declared"
-  ExportSchemas extends Record<string, z.ZodType> = {},
-> = KernelExportGeometryInput<NativeHandle, ExportSchemas>;
+  // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- empty default signals "no formats declared"
+  ExportFormats extends KernelExportFormats = {},
+> = KernelExportGeometryInput<NativeHandle, ExportFormats>;
 
 // =============================================================================
 // defineKernel API Types
 // =============================================================================
 
 /**
- * Tessellated geometry and opaque native handle produced by a kernel evaluation.
- * The singular geometry is transferred to the main thread for rendering, while
- * the native handle is retained in the worker for subsequent export operations.
+ * Opaque native handle plus optional inline display geometry produced by a kernel evaluation.
+ *
+ * The native handle is retained in the worker for subsequent mesh/export operations and
+ * must carry **all export-facing evidence** (shapes, names, resolved interfaces, datums) —
+ * after the mesh/build/export split, `meshGeometry` may never run before an export.
+ *
+ * `geometry` is the inline display artifact for kernels whose create result is already the
+ * display artifact (manifold, tau). Kernels with separately reusable native evidence — BRep
+ * kernels and JSCAD's normalized part list — omit it and implement
+ * {@link KernelDefinition.meshGeometry}, so exports never pay for discarded display packing.
+ *
+ * Contract invariant: a kernel must provide a display path — either `createGeometry`
+ * returns `geometry`, or the kernel implements `meshGeometry`. The orchestrator rejects
+ * display renders when neither exists.
  *
  * @template NativeHandle - Kernel-specific type for the native geometry representation
  * @public
  */
 export type CreateGeometryOutput<NativeHandle = unknown> = {
-  geometry: GeometryResponse;
+  geometry?: GeometryResponse;
   nativeHandle: NativeHandle;
+  issues?: KernelIssue[];
+};
+
+/**
+ * Native handle plus render options passed to the optional `meshGeometry` phase.
+ *
+ * Mirrors {@link CreateGeometryInput} option typing: when `RenderSchema` is a concrete
+ * Zod type, `options` is `z.infer<RenderSchema>`; otherwise an untyped record.
+ *
+ * @template NativeHandle - Kernel-specific native geometry representation
+ * @template RenderSchema - Zod schema type for render options
+ * @public
+ */
+export type MeshGeometryInput<
+  NativeHandle = unknown,
+  Render extends KernelRenderDefinition = KernelRenderDefinition,
+> = {
+  /** Kernel-native geometry handle produced by createGeometry (live or deserialized). */
+  nativeHandle: NativeHandle;
+  /** Kernel-specific render options (preview tessellation etc.), validated like createGeometry options. */
+  options: RenderOptionsOutput<Render>;
+} & ContentInputFor<ContentKeysOf<Render['content']>>;
+
+/**
+ * Display artifact produced by the `meshGeometry` phase for the live viewer.
+ * @public
+ */
+export type MeshGeometryOutput = {
+  geometry: GeometryResponse;
   issues?: KernelIssue[];
 };
 
@@ -350,15 +427,15 @@ type NativeHandleSnapshotHooks<Context, NativeHandle, SerializedNativeHandle> =
  * - NativeHandle from the nativeHandle field of createGeometry()'s return
  * - SerializedNativeHandle from the return type of serializeNativeHandle() (when the paired snapshot hooks are provided)
  * - Options from optionsSchema (when provided)
- * - ExportSchemas from exportSchemas (when provided)
- * - RenderSchema from renderSchema (when provided)
+ * - ExportFormats from exportFormats (when provided)
+ * - Render options from render.optionsSchema (when provided)
  *
  * @template Context - Kernel-specific context type, inferred from initialize() return
  * @template NativeHandle - Kernel-specific native geometry representation, inferred from createGeometry() return
  * @template SerializedNativeHandle - Durable cacheable snapshot of NativeHandle, inferred from serializeNativeHandle() return
  * @template Options - Validated options type, inferred from optionsSchema when provided
- * @template ExportSchemas - Map of format to Zod schema, inferred from exportSchemas when provided
- * @template RenderSchema - Zod schema for render options, inferred from renderSchema when provided
+ * @template ExportSchemas - Map of format definitions, inferred from exportFormats when provided
+ * @template RenderSchema - Zod schema for render options, inferred from render.optionsSchema when provided
  * @public
  */
 export type KernelDefinition<
@@ -366,9 +443,9 @@ export type KernelDefinition<
   NativeHandle = unknown,
   SerializedNativeHandle = unknown,
   Options extends Record<string, unknown> = Record<string, unknown>,
-  // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- empty default signals "no schemas declared"
-  ExportSchemas extends Record<string, z.ZodType> = {},
-  RenderSchema extends z.ZodType = z.ZodType,
+  // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- empty default signals "no formats declared"
+  ExportFormats extends KernelExportFormats = {},
+  Render extends KernelRenderDefinition = KernelRenderDefinition,
 > = {
   /** Human-readable kernel name, used in logs and error messages */
   name: string;
@@ -378,11 +455,17 @@ export type KernelDefinition<
   /** Zod schema for validating and typing kernel options. Options type is inferred from this schema. */
   optionsSchema?: z.ZodType<Options>;
 
-  /** Zod schema for kernel-specific render options. Type is inferred and threaded to createGeometry input. */
-  renderSchema?: RenderSchema;
+  /** Render options and natively fulfilled framework content. */
+  render: Render;
 
-  /** Zod schemas for per-format export options. Keys define supported formats; provides type-safe narrowing in exportGeometry. */
-  exportSchemas?: ExportSchemas;
+  /** Native export formats, their options, and natively fulfilled framework content. */
+  exportFormats: ExportFormats;
+
+  /** Native-handle reuse scope. The cache-safe default is `operation`. */
+  nativeHandleScope?: 'source' | 'operation';
+
+  /** Selected implementation assets whose declared digests participate in artifact identity. */
+  implementationAssets?: readonly RuntimeImplementationAsset[];
 
   /** Initialize kernel with typed options. Options type is inferred from optionsSchema. */
   initialize(options: Options, runtime: KernelRuntime): Promise<Context>;
@@ -395,15 +478,27 @@ export type KernelDefinition<
   ): Promise<GetDependenciesResult>;
   /** Extract user-facing parameters (and their JSON Schema) from the active file. */
   getParameters(input: GetParametersInput, runtime: KernelRuntime, context: Context): Promise<GetParametersResult>;
-  /** Evaluate the active file and produce tessellated geometry plus a native handle for export. */
+  /** Evaluate the active file and produce a native handle for mesh/export, plus optional inline display geometry. */
   createGeometry(
-    input: CreateGeometryInput<RenderSchema>,
+    input: CreateGeometryInput<NoInfer<Render>>,
     runtime: KernelRuntime,
     context: Context,
   ): Promise<CreateGeometryOutput<NativeHandle>>;
+  /**
+   * Produce the display artifact (native → mesh/SVG/stream) for the live viewer.
+   *
+   * Runs only on the display path, at the kernel boundary (like exportGeometry) — an
+   * export-only request never calls it. Implement it when `createGeometry` omits inline
+   * `geometry`; kernels whose create result is already display-ready keep returning it inline.
+   */
+  meshGeometry?(
+    input: MeshGeometryInput<NativeHandle, NoInfer<Render>>,
+    runtime: KernelRuntime,
+    context: Context,
+  ): Promise<MeshGeometryOutput>;
   /** Convert a previously created native geometry handle into one or more export file blobs. */
   exportGeometry(
-    input: ExportGeometryInput<NativeHandle, ExportSchemas>,
+    input: ExportGeometryInput<NativeHandle, NoInfer<ExportFormats>>,
     runtime: KernelRuntime,
     context: Context,
   ): Promise<ExportGeometryResult>;
@@ -440,17 +535,21 @@ type KernelDefinitionConfig<
   NativeHandle,
   SerializedNativeHandle,
   Options extends Record<string, unknown>,
-  ExportSchemas extends Record<string, z.ZodType>,
-  RenderSchema extends z.ZodType,
+  ExportFormats extends KernelExportFormats,
+  Render extends KernelRenderDefinition,
 > = KernelPluginMetadata<Id> & {
   /** Human-readable kernel name, used in logs and error messages */
   name: string;
   /** Semantic version string for cache-key computation and diagnostics */
   version: string;
-  /** Zod schema for kernel-specific render options. Type is inferred and threaded to createGeometry input. */
-  renderSchema?: RenderSchema;
-  /** Zod schemas for per-format export options. Keys define supported formats; provides type-safe narrowing in exportGeometry. */
-  exportSchemas?: ExportSchemas;
+  /** Render options and natively fulfilled framework content. */
+  render: Render;
+  /** Native export formats and natively fulfilled framework content. */
+  exportFormats: ExportFormats;
+  /** Native-handle reuse scope. */
+  nativeHandleScope?: 'source' | 'operation';
+  /** Selected implementation assets. */
+  implementationAssets?: readonly RuntimeImplementationAsset[];
   /** Initialize kernel with typed options. Options type is inferred from optionsSchema. */
   initialize(options: Options, runtime: KernelRuntime): Promise<Context>;
   /** Return resolved and unresolved dependency paths for change-detection, cache invalidation, and watch-set expansion. */
@@ -461,15 +560,21 @@ type KernelDefinitionConfig<
   ): Promise<GetDependenciesResult>;
   /** Extract user-facing parameters (and their JSON Schema) from the active file. */
   getParameters(input: GetParametersInput, runtime: KernelRuntime, context: Context): Promise<GetParametersResult>;
-  /** Evaluate the active file and produce tessellated geometry plus a native handle for export. */
+  /** Evaluate the active file and produce a native handle for mesh/export, plus optional inline display geometry. */
   createGeometry(
-    input: CreateGeometryInput<RenderSchema>,
+    input: CreateGeometryInput<Render>,
     runtime: KernelRuntime,
     context: Context,
   ): Promise<CreateGeometryOutput<NativeHandle>>;
+  /** Produce the display artifact from a native handle for the live viewer (display path only). */
+  meshGeometry?(
+    input: MeshGeometryInput<NativeHandle, Render>,
+    runtime: KernelRuntime,
+    context: Context,
+  ): Promise<MeshGeometryOutput>;
   /** Convert a previously created native geometry handle into one or more export file blobs. */
   exportGeometry(
-    input: ExportGeometryInput<NativeHandle, ExportSchemas>,
+    input: ExportGeometryInput<NativeHandle, ExportFormats>,
     runtime: KernelRuntime,
     context: Context,
   ): Promise<ExportGeometryResult>;
@@ -489,12 +594,14 @@ type KernelDefinitionConfig<
 } & NativeHandleSnapshotHooks<Context, NativeHandle, SerializedNativeHandle>;
 
 /** Resolve render options from a concrete Zod schema, preserving input-side defaults. */
-type ResolveKernelRenderOptions<RenderSchema extends z.ZodType> = z.ZodType extends RenderSchema
-  ? Record<string, unknown>
-  : z.input<RenderSchema>;
+type ResolveKernelRenderOptions<Render extends KernelRenderDefinition> = RenderOptionsInput<Render>;
 
-type InferKernelFormatMap<ExportSchemas extends Record<string, z.ZodType>> = {
-  [K in keyof ExportSchemas]: z.input<ExportSchemas[K]>;
+type InferKernelFormatMap<ExportFormats extends KernelExportFormats> = {
+  [K in keyof ExportFormats]: z.input<ExportFormats[K]['optionsSchema']>;
+};
+
+type InferKernelExportContentMap<ExportFormats extends KernelExportFormats> = {
+  [K in keyof ExportFormats]: ContentKeysOf<ExportFormats[K]['content']>;
 };
 
 /**
@@ -506,10 +613,10 @@ type InferKernelFormatMap<ExportSchemas extends Record<string, z.ZodType>> = {
 // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- Intentional widening for generic kernel acceptance
 export type AnyKernelDefinition = KernelDefinition<any, any, any, any, any, any>;
 
-// oxlint-disable @typescript-eslint/no-empty-object-type -- intentional: no exportSchemas means no concrete format map
-type ResolveKernelFormatMap<ExportSchemas extends Record<string, z.ZodType>> = {} extends ExportSchemas
+// oxlint-disable @typescript-eslint/no-empty-object-type -- intentional: no export formats means no concrete format map
+type ResolveKernelFormatMap<ExportFormats extends KernelExportFormats> = {} extends ExportFormats
   ? {}
-  : InferKernelFormatMap<ExportSchemas>;
+  : InferKernelFormatMap<ExportFormats>;
 // oxlint-enable @typescript-eslint/no-empty-object-type
 
 export type KernelPluginFactory<
@@ -518,11 +625,20 @@ export type KernelPluginFactory<
   RenderOptions,
   Options = undefined,
   Definition extends AnyKernelDefinition = AnyKernelDefinition,
+  RenderContent extends RuntimeContentKey = RuntimeContentKey,
+  ExportContent extends Record<string, RuntimeContentKey> = Record<string, RuntimeContentKey>,
 > = Options extends undefined
-  ? () => KernelPlugin<FormatMap, RenderOptions, Id> & RuntimePluginDefinitionCarrier<Definition>
+  ? () => KernelPlugin<FormatMap, RenderOptions, Id, RenderContent, ExportContent> &
+      RuntimePluginDefinitionCarrier<Definition>
   : Partial<Options> extends Options
-    ? (options?: Options) => KernelPlugin<FormatMap, RenderOptions, Id> & RuntimePluginDefinitionCarrier<Definition>
-    : (options: Options) => KernelPlugin<FormatMap, RenderOptions, Id> & RuntimePluginDefinitionCarrier<Definition>;
+    ? (
+        options?: Options,
+      ) => KernelPlugin<FormatMap, RenderOptions, Id, RenderContent, ExportContent> &
+        RuntimePluginDefinitionCarrier<Definition>
+    : (
+        options: Options,
+      ) => KernelPlugin<FormatMap, RenderOptions, Id, RenderContent, ExportContent> &
+        RuntimePluginDefinitionCarrier<Definition>;
 
 /**
  * Define a kernel module with full type inference.
@@ -531,8 +647,8 @@ export type KernelPluginFactory<
  * - NativeHandle from createGeometry() return type (nativeHandle field)
  * - SerializedNativeHandle from serializeNativeHandle() return type (when the paired snapshot hooks are provided)
  * - Options from optionsSchema (when provided)
- * - ExportSchemas from exportSchemas (when provided)
- * - RenderSchema from renderSchema (when provided)
+ * - ExportFormats from exportFormats (when provided)
+ * - Render options from render.optionsSchema (when provided)
  *
  * @param definition - The kernel definition object implementing all required lifecycle methods
  * @returns The same definition, typed as {@link KernelDefinition}
@@ -548,11 +664,13 @@ export type KernelPluginFactory<
  *   extensions: ['myext'],
  *   name: 'MyKernel',
  *   version: '1.0.0',
+ *   render: { content: [] },
+ *   exportFormats: {},
  *   async initialize(options, runtime) {
  *     return { myContext: true };
  *   },
  *   async getDependencies(input, runtime, context) {
- *     return { resolved: [input.filePath], unresolved: [] };
+ *     return { resolved: [input.entryPath], unresolved: [] };
  *   },
  *   async getParameters(input, runtime, context) {
  *     return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
@@ -573,9 +691,9 @@ export function defineKernel<
   NativeHandle,
   SerializedNativeHandle = unknown,
   OptionsSchema extends z.ZodType = z.ZodType,
-  // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- empty default signals "no schemas declared"
-  ExportSchemas extends Record<string, z.ZodType> = {},
-  RenderSchema extends z.ZodType = z.ZodType,
+  // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- empty default signals "no formats declared"
+  const ExportFormats extends KernelExportFormats = {},
+  const Render extends KernelRenderDefinition = KernelRenderDefinition,
 >(
   definition: KernelDefinitionConfig<
     Id,
@@ -583,31 +701,33 @@ export function defineKernel<
     NativeHandle,
     SerializedNativeHandle,
     z.output<OptionsSchema> & Record<string, unknown>,
-    ExportSchemas,
-    RenderSchema
+    ExportFormats,
+    Render
   > & { optionsSchema: OptionsSchema },
 ): KernelPluginFactory<
   Id,
-  ResolveKernelFormatMap<ExportSchemas>,
-  ResolveKernelRenderOptions<RenderSchema>,
+  ResolveKernelFormatMap<ExportFormats>,
+  ResolveKernelRenderOptions<Render>,
   z.input<OptionsSchema>,
   KernelDefinition<
     Context,
     NativeHandle,
     SerializedNativeHandle,
     z.output<OptionsSchema> & Record<string, unknown>,
-    ExportSchemas,
-    RenderSchema
-  >
+    ExportFormats,
+    Render
+  >,
+  ContentKeysOf<Render['content']>,
+  InferKernelExportContentMap<ExportFormats>
 >;
 export function defineKernel<
   const Id extends string,
   Context,
   NativeHandle,
   SerializedNativeHandle = unknown,
-  // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- empty default signals "no schemas declared"
-  ExportSchemas extends Record<string, z.ZodType> = {},
-  RenderSchema extends z.ZodType = z.ZodType,
+  // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- empty default signals "no formats declared"
+  const ExportFormats extends KernelExportFormats = {},
+  const Render extends KernelRenderDefinition = KernelRenderDefinition,
 >(
   definition: KernelDefinitionConfig<
     Id,
@@ -615,15 +735,17 @@ export function defineKernel<
     NativeHandle,
     SerializedNativeHandle,
     Record<string, unknown>,
-    ExportSchemas,
-    RenderSchema
+    ExportFormats,
+    Render
   > & { optionsSchema?: undefined },
 ): KernelPluginFactory<
   Id,
-  ResolveKernelFormatMap<ExportSchemas>,
-  ResolveKernelRenderOptions<RenderSchema>,
+  ResolveKernelFormatMap<ExportFormats>,
+  ResolveKernelRenderOptions<Render>,
   undefined,
-  KernelDefinition<Context, NativeHandle, SerializedNativeHandle, Record<string, unknown>, ExportSchemas, RenderSchema>
+  KernelDefinition<Context, NativeHandle, SerializedNativeHandle, Record<string, unknown>, ExportFormats, Render>,
+  ContentKeysOf<Render['content']>,
+  InferKernelExportContentMap<ExportFormats>
 >;
 export function defineKernel(
   definition: KernelDefinitionConfig<
@@ -632,8 +754,8 @@ export function defineKernel(
     unknown,
     unknown,
     Record<string, unknown>,
-    Record<string, z.ZodType>,
-    z.ZodType
+    KernelExportFormats,
+    KernelRenderDefinition
   >,
 ): KernelPluginFactory<string, Record<string, unknown>, unknown, unknown> {
   const { id, extensions, detectImport, builtinModuleNames, ...kernelDefinition } = definition;

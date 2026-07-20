@@ -202,8 +202,15 @@ export const zoo = defineKernel({
   extensions: ['kcl'],
   name: 'ZooKernel',
   version: '1.2.0',
-  exportSchemas: zooExportSchemas,
+  nativeHandleScope: 'source',
   optionsSchema: zooOptionsSchema,
+  render: { content: ['includeTopology'] },
+  exportFormats: {
+    stl: { optionsSchema: zooExportSchemas.stl, content: [] },
+    step: { optionsSchema: zooExportSchemas.step, content: [] },
+    glb: { optionsSchema: zooExportSchemas.glb, content: ['includeTopology'] },
+    gltf: { optionsSchema: zooExportSchemas.gltf, content: ['includeTopology'] },
+  },
 
   async initialize(options) {
     return {
@@ -213,20 +220,20 @@ export const zoo = defineKernel({
     };
   },
 
-  async getDependencies({ filePath }, { filesystem }, context) {
+  async getDependencies({ entryPath }, { filesystem }, context) {
     ensureFileSystemManager(context, filesystem);
     const utilities = await getKclUtils(context);
     return discoverKclDependencies(
-      resolveVirtualPath(filePath),
+      resolveVirtualPath(entryPath),
       async (path) => filesystem.readFile(path, 'utf8'),
       async (code) => utilities.parseKcl(code),
     );
   },
 
-  async getParameters({ filePath }, { filesystem, logger }, context) {
+  async getParameters({ entryPath }, { filesystem, logger }, context) {
     ensureFileSystemManager(context, filesystem);
-    const relativeFilePath = toKclEnginePath(filePath);
-    const code = await filesystem.readFile(filePath, 'utf8');
+    const relativeFilePath = toKclEnginePath(entryPath);
+    const code = await filesystem.readFile(entryPath, 'utf8');
     try {
       const utilities = await getKclUtils(context);
       const parseResult = await utilities.parseKcl(code);
@@ -256,10 +263,10 @@ export const zoo = defineKernel({
     }
   },
 
-  async createGeometry({ filePath, parameters }, { filesystem, logger }, context) {
+  async createGeometry({ entryPath, parameters }, { filesystem, logger }, context) {
     ensureFileSystemManager(context, filesystem);
-    const relativeFilePath = toKclEnginePath(filePath);
-    const code = await filesystem.readFile(filePath, 'utf8');
+    const relativeFilePath = toKclEnginePath(entryPath);
+    const code = await filesystem.readFile(entryPath, 'utf8');
     try {
       const trimmedCode = code.trim();
       if (trimmedCode === '') {

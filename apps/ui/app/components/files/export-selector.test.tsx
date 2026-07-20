@@ -42,7 +42,7 @@ const mockKernelClient = {
     }
     return mockCapabilities.routes.filter((route) => route.targetFormat === format);
   },
-  bestRouteFor(format: FileExtension, kernelId?: string): ExportRoute | undefined {
+  bestRouteFor(format: FileExtension, options?: { readonly kernelId?: string }): ExportRoute | undefined {
     if (!mockCapabilities) {
       return undefined;
     }
@@ -50,7 +50,7 @@ const mockKernelClient = {
     if (matches.length === 0) {
       return undefined;
     }
-    const kernelMatches = kernelId ? matches.filter((route) => route.kernelId === kernelId) : matches;
+    const kernelMatches = options?.kernelId ? matches.filter((route) => route.kernelId === options.kernelId) : matches;
     const candidates = kernelMatches.length > 0 ? kernelMatches : matches;
     const indexed = candidates.map((route, index) => ({ route, index }));
     indexed.sort((a, b) => {
@@ -160,27 +160,27 @@ function createCapabilities(overrides?: Partial<CapabilitiesManifest>): Capabili
         kernelId: 'replicad',
         sourceFormat: 'glb',
         fidelity: 'mesh',
-        schema: {},
-        defaults: {},
+        exportOptions: { schema: {}, defaults: {} },
       },
       {
         targetFormat: 'stl',
         kernelId: 'replicad',
         sourceFormat: 'stl',
         fidelity: 'mesh',
-        schema: { type: 'object', properties: { binary: { type: 'boolean', default: true } } },
-        defaults: { binary: true },
+        exportOptions: {
+          schema: { type: 'object', properties: { binary: { type: 'boolean', default: true } } },
+          defaults: { binary: true },
+        },
       },
       {
         targetFormat: 'step',
         kernelId: 'replicad',
         sourceFormat: 'step',
         fidelity: 'brep',
-        schema: {},
-        defaults: {},
+        exportOptions: { schema: {}, defaults: {} },
       },
     ],
-    renderSchemas: {},
+    renderCapabilities: {},
     ...overrides,
   };
 }
@@ -226,7 +226,7 @@ describe('ExportSelector', () => {
       <ExportSelector
         geometryUnits={geometryUnits}
         filenameBase='test-project'
-        mainEntryFile='main.ts'
+        mainEntryPath='main.ts'
         variant='inline'
       />,
     );
@@ -274,7 +274,7 @@ describe('ExportSelector', () => {
         cadActor={mockCadRef}
         filenameBase='test-project'
         variant='inline'
-        defaultEntryFile='main.ts'
+        defaultEntryPath='main.ts'
         onExport={onExport}
       />,
     );
@@ -303,7 +303,7 @@ describe('ExportSelector', () => {
       <ExportSelector
         geometryUnits={geometryUnits}
         filenameBase='test-project'
-        mainEntryFile='main.ts'
+        mainEntryPath='main.ts'
         variant='inline'
         onExport={onExport}
       />,

@@ -42,8 +42,8 @@ let mockCadViewerProps:
     }
   | undefined;
 
-const helperEntryFile = 'helper.scad';
-const helperUnitId = `file:${helperEntryFile}`;
+const helperEntryPath = 'helper.scad';
+const helperUnitId = `file:${helperEntryPath}`;
 const rightRimComponentId = 'component:right-rim';
 const mockGeometry = { format: 'gltf', content: new Uint8Array([0x67, 0x6c, 0x54, 0x46]) } satisfies Geometry;
 
@@ -60,7 +60,7 @@ const componentCapabilities = {
 function createManifest(): GeometryComponentManifest {
   return {
     schemaVersion: 1,
-    sourceFile: helperEntryFile,
+    sourceFile: helperEntryPath,
     rootId: 'root',
     nodeOrder: ['root', rightRimComponentId],
     capabilities: componentCapabilities,
@@ -222,7 +222,7 @@ vi.mock('#hooks/use-project.js', () => ({
     },
     viewGraphics: mockViewGraphics,
     geometryUnits: mockGeometryUnits,
-    mainEntryFile: 'main.scad',
+    mainEntryPath: 'main.scad',
   }),
 }));
 
@@ -234,7 +234,7 @@ vi.mock('#hooks/use-project.js', () => ({
 vi.mock('#hooks/use-file-tree.js', () => ({
   useFileTreeMap: () =>
     new Map<string, { type: 'file' | 'dir'; name: string }>([
-      [helperEntryFile, { type: 'file', name: helperEntryFile }],
+      [helperEntryPath, { type: 'file', name: helperEntryPath }],
     ]),
 }));
 
@@ -374,11 +374,11 @@ describe('ChatViewer reopen-renderer overlay', () => {
   });
 
   it('renders the Reopen renderer button when the geometry unit is closed', () => {
-    // `entryFile` is set, the file exists, but geometryUnits.get(entryFile) === undefined
+    // `entryPath` is set, the file exists, but geometryUnits.get(entryPath) === undefined
     render(
       <ChatViewer
         viewId='view-1'
-        entryFile={helperEntryFile}
+        entryPath={helperEntryPath}
         panelApi={mockPanelApi}
         containerApi={mockContainerApi}
       />,
@@ -391,7 +391,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     render(
       <ChatViewer
         viewId='view-1'
-        entryFile={helperEntryFile}
+        entryPath={helperEntryPath}
         panelApi={mockPanelApi}
         containerApi={mockContainerApi}
       />,
@@ -402,17 +402,17 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(mockProjectSend).toHaveBeenCalledTimes(1);
     expect(mockProjectSend).toHaveBeenCalledWith({
       type: 'createGeometryUnit',
-      entryFile: helperEntryFile,
+      entryPath: helperEntryPath,
     });
   });
 
-  it('does not render the overlay when a geometry unit exists for the entry file', () => {
-    mockGeometryUnits.set(helperEntryFile, createMockCadActor());
+  it('does not render the overlay when a geometry unit exists for the entry path', () => {
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
     render(
       <ChatViewer
         viewId='view-1'
-        entryFile={helperEntryFile}
+        entryPath={helperEntryPath}
         panelApi={mockPanelApi}
         containerApi={mockContainerApi}
       />,
@@ -422,12 +422,12 @@ describe('ChatViewer reopen-renderer overlay', () => {
   });
 
   it('lets empty bottom-control overlay space pass pointer events through to the canvas', () => {
-    mockGeometryUnits.set(helperEntryFile, createMockCadActor());
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
     render(
       <ChatViewer
         viewId='view-1'
-        entryFile={helperEntryFile}
+        entryPath={helperEntryPath}
         panelApi={mockPanelApi}
         containerApi={mockContainerApi}
       />,
@@ -440,12 +440,12 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
   it('should show the hovered component name under the pointer when the canvas has a hovered component', () => {
     mockHoveredComponentId = rightRimComponentId;
-    mockGeometryUnits.set(helperEntryFile, createMockCadActor());
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
     render(
       <ChatViewer
         viewId='view-1'
-        entryFile={helperEntryFile}
+        entryPath={helperEntryPath}
         panelApi={mockPanelApi}
         containerApi={mockContainerApi}
       />,
@@ -467,12 +467,12 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
   it('should hide the hovered component label when the pointer leaves the canvas region', () => {
     mockHoveredComponentId = rightRimComponentId;
-    mockGeometryUnits.set(helperEntryFile, createMockCadActor());
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
     render(
       <ChatViewer
         viewId='view-1'
-        entryFile={helperEntryFile}
+        entryPath={helperEntryPath}
         panelApi={mockPanelApi}
         containerApi={mockContainerApi}
       />,
@@ -488,12 +488,12 @@ describe('ChatViewer reopen-renderer overlay', () => {
   });
 
   it('should not render the hovered component label when no component is hovered', () => {
-    mockGeometryUnits.set(helperEntryFile, createMockCadActor());
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
     render(
       <ChatViewer
         viewId='view-1'
-        entryFile={helperEntryFile}
+        entryPath={helperEntryPath}
         panelApi={mockPanelApi}
         containerApi={mockContainerApi}
       />,
@@ -506,12 +506,12 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
   it('should not render the hovered component label when the hovered id is absent from the manifest', () => {
     mockHoveredComponentId = 'component:missing';
-    mockGeometryUnits.set(helperEntryFile, createMockCadActor());
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
     render(
       <ChatViewer
         viewId='view-1'
-        entryFile={helperEntryFile}
+        entryPath={helperEntryPath}
         panelApi={mockPanelApi}
         containerApi={mockContainerApi}
       />,
@@ -528,7 +528,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     render(
       <ChatViewer
         viewId='view-1'
-        entryFile={helperEntryFile}
+        entryPath={helperEntryPath}
         panelApi={mockPanelApi}
         containerApi={mockContainerApi}
       />,
@@ -541,12 +541,12 @@ describe('ChatViewer reopen-renderer overlay', () => {
   });
 
   it('should open the model component action menu from a viewer right-click', async () => {
-    mockGeometryUnits.set(helperEntryFile, createMockCadActor());
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
     render(
       <ChatViewer
         viewId='view-1'
-        entryFile={helperEntryFile}
+        entryPath={helperEntryPath}
         panelApi={mockPanelApi}
         containerApi={mockContainerApi}
       />,
@@ -588,19 +588,19 @@ describe('ChatViewer reopen-renderer overlay', () => {
     });
     expect(mockEditorSend).toHaveBeenCalledWith({
       type: 'revealModelComponentInExplorer',
-      entryFile: helperEntryFile,
+      entryPath: helperEntryPath,
       unitId: helperUnitId,
       componentId: rightRimComponentId,
     });
   });
 
   it('should keep a right-button drag as camera pan instead of opening model component actions', () => {
-    mockGeometryUnits.set(helperEntryFile, createMockCadActor());
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
     render(
       <ChatViewer
         viewId='view-1'
-        entryFile={helperEntryFile}
+        entryPath={helperEntryPath}
         panelApi={mockPanelApi}
         containerApi={mockContainerApi}
       />,
@@ -632,12 +632,12 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
   it('should not render model component actions when CadViewer suppresses a right-click gesture', () => {
     mockCadViewerSecondaryPointerMode = 'suppressed';
-    mockGeometryUnits.set(helperEntryFile, createMockCadActor());
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
     render(
       <ChatViewer
         viewId='view-1'
-        entryFile={helperEntryFile}
+        entryPath={helperEntryPath}
         panelApi={mockPanelApi}
         containerApi={mockContainerApi}
       />,
@@ -662,12 +662,12 @@ describe('ChatViewer reopen-renderer overlay', () => {
   });
 
   it('should suppress the browser context menu on the viewer surface without opening model actions', () => {
-    mockGeometryUnits.set(helperEntryFile, createMockCadActor());
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
     render(
       <ChatViewer
         viewId='view-1'
-        entryFile={helperEntryFile}
+        entryPath={helperEntryPath}
         panelApi={mockPanelApi}
         containerApi={mockContainerApi}
       />,

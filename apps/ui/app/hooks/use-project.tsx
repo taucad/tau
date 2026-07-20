@@ -5,7 +5,9 @@ import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Remote } from 'comlink';
 import { useQueryClient } from '@tanstack/react-query';
-import type { FileParameterEntry } from '@taucad/types';
+import { parseProjectManifestBytes, projectToManifest, serializeProjectManifest } from '@taucad/types';
+import type { FileParameterEntry, ProjectManifest } from '@taucad/types';
+import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
@@ -34,10 +36,10 @@ type ProjectContextType = {
   editorRef: ActorRefFrom<typeof editorMachine>;
   /** Per-viewer-panel graphics machines, keyed by Dockview panel ID */
   viewGraphics: Map<string, ActorRefFrom<typeof graphicsMachine>>;
-  /** Dynamic geometry units keyed by entry file path. Each is a headless CadMachine+KernelMachine. */
+  /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
   geometryUnits: Map<string, ActorRefFrom<typeof cadMachine>>;
-  /** The main entry file path from project.assets.mechanical.main. */
-  mainEntryFile: string;
+  /** The main entry path from project.assets.main.entryPath. */
+  mainEntryPath: string;
   logRef: ActorRefFrom<typeof logMachine>;
   setCodeParameters: (
     files: Record<string, { content: Uint8Array<ArrayBuffer> }>,
@@ -51,10 +53,8 @@ type ProjectContextType = {
   renameParameterGroup: (filePath: string, oldName: string, newName: string) => void;
   parameterEntries: Map<string, FileParameterEntry>;
   updateName: (name: string) => void;
-  applyGeneratedProjectName: (name: string) => void;
   updateDescription: (description: string) => void;
   updateTags: (tags: string[]) => void;
-  updateThumbnail: (thumbnail: string) => void;
   getMainFilename: () => Promise<string>;
   setFocusedChatId: (chatId: string | undefined) => void;
 };
@@ -98,6 +98,66 @@ export async function ensureFocusedChatForProject({
   return { type: 'focusedChatEnsured', focusedChatId: created.id };
 }
 
+export const createProjectManifestChangeObserver = ({
+  readManifest,
+  getCurrentProject,
+  reload,
+}: {
+  readonly readManifest: () => Promise<Uint8Array<ArrayBuffer>>;
+  readonly getCurrentProject: () => ProjectManifest | undefined;
+  readonly reload: () => void;
+}): { readonly check: () => Promise<void>; readonly dispose: () => void } => {
+  let disposed = false;
+  let lastObserved = '';
+
+  return {
+    check: async () => {
+      try {
+        const parsed = parseProjectManifestBytes(await readManifest());
+        if (!parsed.success || disposed) {
+          return;
+        }
+        const serialized = new TextDecoder().decode(serializeProjectManifest(parsed.data));
+        if (serialized === lastObserved) {
+          return;
+        }
+        lastObserved = serialized;
+        const current = getCurrentProject();
+        if (!current || new TextDecoder().decode(serializeProjectManifest(projectToManifest(current))) !== serialized) {
+          reload();
+        }
+      } catch {
+        // Invalid/inaccessible external manifests remain visible through discovery conflicts.
+      }
+    },
+    dispose: () => {
+      disposed = true;
+    },
+  };
+};
+
+export async function resolveScopedProjectManifest({
+  contentService,
+  projectId,
+}: {
+  readonly contentService: FileContentService;
+  readonly projectId: string;
+}): Promise<ProjectManifest> {
+  const outcome = await contentService.resolve('tau.json', { forceText: true });
+  if (outcome.kind !== 'text') {
+    throw new Error(`Cannot read tau.json for ${projectId}: ${outcome.kind}`);
+  }
+
+  const parsed = parseProjectManifestBytes(outcome.content);
+  if (!parsed.success) {
+    throw new Error(`Invalid tau.json for ${projectId}: ${parsed.issue.code}`);
+  }
+  if (parsed.data.id !== projectId) {
+    throw new Error(`Scoped tau.json project ID mismatch: expected ${projectId}, received ${parsed.data.id}`);
+  }
+  return parsed.data;
+}
+
 export function ProjectProvider({
   children,
   projectId,
@@ -123,18 +183,17 @@ export function ProjectProvider({
     projectMachine.provide({
       actors: {
         loadProjectActor: fromSafeAsync(async ({ input }) => {
-          const project = await projectManager.getProject(input.projectId);
-          if (!project) {
-            throw new Error(`Project not found: ${input.projectId}`);
-          }
-
           const readySnapshot = await waitFor(fileManager.fileManagerRef, (state) => state.matches('ready'));
 
           const parameterEntries = new Map<string, FileParameterEntry>();
           const { contentService, proxy, rootDirectory } = readySnapshot.context;
-          const mainFile = project.assets.mechanical?.main ?? 'main.ts';
+          if (!contentService) {
+            throw new Error(`Project content service is unavailable for ${input.projectId}`);
+          }
+          const project = await resolveScopedProjectManifest({ contentService, projectId: input.projectId });
+          const mainFile = project.assets.main.entryPath;
 
-          if (contentService && proxy) {
+          if (proxy) {
             const absoluteParamsDirectory = joinPath(rootDirectory, parametersDirectory);
             try {
               const allFiles = await proxy.getDirectoryContents(absoluteParamsDirectory);
@@ -142,10 +201,10 @@ export function ProjectProvider({
                 if (!relativePath.endsWith('.json')) {
                   continue;
                 }
-                const entryFile = relativePath.slice(0, -'.json'.length);
+                const entryPath = relativePath.slice(0, -'.json'.length);
                 try {
                   const text = new TextDecoder().decode(data);
-                  parameterEntries.set(entryFile, parseParameterEntry(text));
+                  parameterEntries.set(entryPath, parseParameterEntry(text));
                 } catch {
                   // Corrupt parameter file — skip
                 }
@@ -162,14 +221,20 @@ export function ProjectProvider({
             }
           }
 
+          const library = await projectManager.getProjectLibraryState(input.projectId);
           return {
             type: 'projectRetrieved',
             project,
+            revisionState: library?.revisionState,
             parameterEntries,
           };
         }),
         writeProjectActor: fromSafeAsync(async ({ input }) => {
-          await projectManager.updateProject(input.project.id, input.project);
+          const { contentService } = fileManager.fileManagerRef.getSnapshot().context;
+          if (!contentService) {
+            throw new Error('File manager content service is not ready');
+          }
+          await contentService.write('tau.json', serializeProjectManifest(projectToManifest(input.project)), 'machine');
         }),
         writeParameterFileActor: fromSafeAsync(async ({ input, signal }) => {
           if (signal.aborted) {
@@ -253,33 +318,17 @@ export function ProjectProvider({
   // Select state from the machine
   const viewGraphics = useSelector(actorRef, (state) => state.context.viewGraphics);
   const geometryUnits = useSelector(actorRef, (state) => state.context.geometryUnits);
-  const mainEntryFile = useSelector(
+  const mainEntryPath = useSelector(
     actorRef,
 
-    (state) => state.context.mainEntryFile,
+    (state) => state.context.mainEntryPath,
   );
   const logRef = useSelector(actorRef, (state) => state.context.logRef);
   const parameterEntries = useSelector(actorRef, (state) => state.context.parameterEntries);
 
   useEffect(() => {
-    // Load the new project when the projectId changes
-    actorRef.send({ type: 'loadProject', projectId });
-
-    // Reload Editor state for new project (also clears open files via closeAll in updateProjectId)
-    editorRef.send({ type: 'reload', projectId });
-  }, [actorRef, projectId, editorRef]);
-
-  // Coordinate: load Editor state after project loads
-  useEffect(() => {
-    const projectLoadedSub = actorRef.on('projectLoaded', () => {
-      // Project loaded, now load Editor state
-      editorRef.send({ type: 'load' });
-    });
-
-    return () => {
-      projectLoadedSub.unsubscribe();
-    };
-  }, [actorRef, editorRef]);
+    editorRef.send({ type: 'load' });
+  }, [editorRef]);
 
   useEffect(() => {
     const subscription = actorRef.on('projectUpdated', () => {
@@ -290,6 +339,42 @@ export function ProjectProvider({
       subscription.unsubscribe();
     };
   }, [actorRef, queryClient]);
+
+  useEffect(() => {
+    const activity = actorRef.on('projectActivity', async () => {
+      await projectManager.touchProject(projectId);
+      await queryClient.invalidateQueries({ queryKey: ['projects'] });
+    });
+    const revision = actorRef.on('revisionStateUpdated', (event) => {
+      void projectManager.setProjectRevisionState(projectId, event.revisionState);
+    });
+    return () => {
+      activity.unsubscribe();
+      revision.unsubscribe();
+    };
+  }, [actorRef, projectId, projectManager, queryClient]);
+
+  useEffect(() => {
+    const { contentService } = fileManager;
+    if (!contentService) {
+      return;
+    }
+
+    const observer = createProjectManifestChangeObserver({
+      readManifest: async () => fileManager.readFile('tau.json'),
+      getCurrentProject: () => actorRef.getSnapshot().context.project,
+      reload: () => {
+        actorRef.send({ type: 'reloadProject' });
+      },
+    });
+    const unsubscribe = contentService.subscribe('tau.json', () => {
+      void observer.check();
+    });
+    return () => {
+      observer.dispose();
+      unsubscribe();
+    };
+  }, [actorRef, fileManager]);
 
   // Subscribe to external parameter file changes (per-geometry-unit files under the parameters directory)
   useEffect(() => {
@@ -314,7 +399,7 @@ export function ProjectProvider({
     });
 
     return unsubscribe;
-  }, [fileManager, projectId, actorRef]);
+  }, [fileManager, actorRef]);
 
   // Memoize callbacks
   const setCodeParameters = useCallback(
@@ -373,13 +458,6 @@ export function ProjectProvider({
     [actorRef],
   );
 
-  const applyGeneratedProjectName = useCallback(
-    (name: string) => {
-      actorRef.send({ type: 'applyGeneratedProjectName', name });
-    },
-    [actorRef],
-  );
-
   const updateDescription = useCallback(
     (description: string) => {
       actorRef.send({ type: 'updateDescription', description });
@@ -394,13 +472,6 @@ export function ProjectProvider({
     [actorRef],
   );
 
-  const updateThumbnail = useCallback(
-    (thumbnail: string) => {
-      actorRef.send({ type: 'updateThumbnail', thumbnail });
-    },
-    [actorRef],
-  );
-
   const setFocusedChatId = useCallback(
     (chatId: string | undefined) => {
       editorRef.send({ type: 'setFocusedChatId', chatId });
@@ -409,13 +480,13 @@ export function ProjectProvider({
   );
 
   const getMainFilename = useCallback(async () => {
-    const snapshot = await waitFor(actorRef, (state) => Boolean(state.context.project?.assets.mechanical?.main));
+    const snapshot = await waitFor(actorRef, (state) => Boolean(state.context.project?.assets.main.entryPath));
 
-    if (!snapshot.context.project?.assets.mechanical?.main) {
+    if (!snapshot.context.project?.assets.main.entryPath) {
       throw new Error('Main file not found');
     }
 
-    return snapshot.context.project.assets.mechanical.main;
+    return snapshot.context.project.assets.main.entryPath;
   }, [actorRef]);
 
   const value = useMemo<ProjectContextType>(() => {
@@ -425,7 +496,7 @@ export function ProjectProvider({
       editorRef,
       viewGraphics,
       geometryUnits,
-      mainEntryFile,
+      mainEntryPath,
       logRef,
       parameterEntries,
       setCodeParameters,
@@ -436,10 +507,8 @@ export function ProjectProvider({
       deleteParameterGroup,
       renameParameterGroup,
       updateName,
-      applyGeneratedProjectName,
       updateDescription,
       updateTags,
-      updateThumbnail,
       setFocusedChatId,
       getMainFilename,
     };
@@ -449,7 +518,7 @@ export function ProjectProvider({
     editorRef,
     viewGraphics,
     geometryUnits,
-    mainEntryFile,
+    mainEntryPath,
     logRef,
     parameterEntries,
     setCodeParameters,
@@ -460,10 +529,8 @@ export function ProjectProvider({
     deleteParameterGroup,
     renameParameterGroup,
     updateName,
-    applyGeneratedProjectName,
     updateDescription,
     updateTags,
-    updateThumbnail,
     setFocusedChatId,
     getMainFilename,
   ]);
@@ -472,7 +539,7 @@ export function ProjectProvider({
 }
 
 /**
- * Find the graphics actor for the viewer panel displaying the main entry file.
+ * Find the graphics actor for the viewer panel displaying the main entry path.
  * Falls back to the first available graphics actor from viewGraphics.
  * Returns undefined when no viewGraphics exist (e.g. before any viewer panel mounts).
  * Used by external consumers (screenshot, RPC handlers, parameters) that are NOT inside a GraphicsProvider.
@@ -483,14 +550,14 @@ export function useMainGraphics(): ActorRefFrom<typeof graphicsMachine> | undefi
     throw new Error('useMainGraphics must be used within a ProjectProvider');
   }
 
-  const { viewGraphics, editorRef, mainEntryFile } = context;
+  const { viewGraphics, editorRef, mainEntryPath } = context;
 
   const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
 
-  // Find a viewer panel showing mainEntryFile
+  // Find a viewer panel showing mainEntryPath
   for (const [viewId, graphicsRef] of viewGraphics) {
     const settings = viewSettings[viewId];
-    if (settings?.entryFile === mainEntryFile) {
+    if (settings?.entryPath === mainEntryPath) {
       return graphicsRef;
     }
   }
@@ -512,7 +579,7 @@ export function useMainGraphics(): ActorRefFrom<typeof graphicsMachine> | undefi
  * latest viewer panel layout. Returns `undefined` when no panel displays the
  * requested file — agent-tool callers translate this into an
  * `UNKNOWN_GEOMETRY_UNIT` RPC error rather than silently falling back to
- * the project's `mainEntryFile`.
+ * the project's `mainEntryPath`.
  */
 export function useResolveGraphicsForFile(): (targetFile: string) => ActorRefFrom<typeof graphicsMachine> | undefined {
   const context = useContext(ProjectContext);
@@ -526,7 +593,7 @@ export function useResolveGraphicsForFile(): (targetFile: string) => ActorRefFro
     (targetFile: string) => {
       const { viewSettings } = editorRef.getSnapshot().context;
       for (const [viewId, graphicsRef] of viewGraphics) {
-        if (viewSettings[viewId]?.entryFile === targetFile) {
+        if (viewSettings[viewId]?.entryPath === targetFile) {
           return graphicsRef;
         }
       }

@@ -70,9 +70,9 @@ export const ChatTextarea = memo(function ({
   // Forward declaration — the actual screenshot-on-drop callback is defined
   // below (it depends on `projectContextRef`, `screenshotQualityRef` and the
   // active-actor set wired into the existing single-view branch).
-  const handleViewerScreenshotDropRef = useRef<(entryFile: string) => void>(() => undefined);
-  const handleViewerScreenshotDrop = useCallback((entryFile: string): void => {
-    handleViewerScreenshotDropRef.current(entryFile);
+  const handleViewerScreenshotDropRef = useRef<(entryPath: string) => void>(() => undefined);
+  const handleViewerScreenshotDrop = useCallback((entryPath: string): void => {
+    handleViewerScreenshotDropRef.current(entryPath);
   }, []);
 
   const logic = useChatTextareaLogic({
@@ -121,7 +121,7 @@ export const ChatTextarea = memo(function ({
   );
 
   const geometryUnits = projectContext?.geometryUnits;
-  const mainEntryFile = projectContext?.mainEntryFile;
+  const mainEntryPath = projectContext?.mainEntryPath;
   const screenshotActionItems = useMemo((): ContextSuggestionItem[] => {
     if (!geometryUnits || !logic.imageInputSupported) {
       return [];
@@ -146,23 +146,23 @@ export const ChatTextarea = memo(function ({
       },
     ];
 
-    for (const [entryFile] of geometryUnits) {
-      if (entryFile === mainEntryFile) {
+    for (const [entryPath] of geometryUnits) {
+      if (entryPath === mainEntryPath) {
         continue;
       }
-      const fileName = entryFile.split('/').pop() ?? 'Untitled';
+      const fileName = entryPath.split('/').pop() ?? 'Untitled';
       items.push({
-        id: `screenshot-view:${entryFile}`,
+        id: `screenshot-view:${entryPath}`,
         label: fileName,
         chipType: 'screenshot',
         group: takeScreenshotGroup,
         isAction: true,
-        screenshotAction: { type: 'view', entryFile },
+        screenshotAction: { type: 'view', entryPath },
       });
     }
 
     return items;
-  }, [geometryUnits, mainEntryFile, logic.imageInputSupported]);
+  }, [geometryUnits, mainEntryPath, logic.imageInputSupported]);
 
   const { quality: screenshotQuality } = useImageQuality();
 
@@ -191,27 +191,27 @@ export const ChatTextarea = memo(function ({
   screenshotQualityRef.current = screenshotQuality;
 
   /**
-   * Resolve the per-view graphics actor whose pane currently shows `entryFile`.
+   * Resolve the per-view graphics actor whose pane currently shows `entryPath`.
    * Falls back to the main entry's pane when no specific entry is requested,
    * and finally to the first registered view as a last resort.
    */
   const resolveGraphicsRefForEntry = useCallback(
-    (entryFile: string | undefined): ActorRefFrom<typeof graphicsMachine> | undefined => {
+    (entryPath: string | undefined): ActorRefFrom<typeof graphicsMachine> | undefined => {
       const currentProjectContext = projectContextRef.current;
       if (!currentProjectContext) {
         return undefined;
       }
-      const { viewGraphics, editorRef, mainEntryFile: mainEntry } = currentProjectContext;
+      const { viewGraphics, editorRef, mainEntryPath: mainEntry } = currentProjectContext;
       const { viewSettings } = editorRef.getSnapshot().context;
-      const target = entryFile ?? mainEntry;
+      const target = entryPath ?? mainEntry;
 
       for (const [viewId, gRef] of viewGraphics) {
-        if (viewSettings[viewId]?.entryFile === target) {
+        if (viewSettings[viewId]?.entryPath === target) {
           return gRef;
         }
       }
 
-      if (entryFile === undefined) {
+      if (entryPath === undefined) {
         return viewGraphics.values().next().value;
       }
       return undefined;
@@ -221,7 +221,7 @@ export const ChatTextarea = memo(function ({
 
   /**
    * Resolve the per-view CAD actor whose geometry unit corresponds to
-   * `entryFile`. Used to thread the screenshot overlay's file path + icon
+   * `entryPath`. Used to thread the screenshot overlay's file path + icon
    * key through to the screenshot pipeline (see
    * `docs/research/screenshot-overlay-watermark-architecture.md` Finding 3).
    *
@@ -229,17 +229,17 @@ export const ChatTextarea = memo(function ({
    * resolution above so chip + capture stay in lock-step.
    */
   const resolveCadRefForEntry = useCallback(
-    (entryFile: string | undefined): ActorRefFrom<typeof cadMachine> | undefined => {
+    (entryPath: string | undefined): ActorRefFrom<typeof cadMachine> | undefined => {
       const currentProjectContext = projectContextRef.current;
       if (!currentProjectContext) {
         return undefined;
       }
-      const { geometryUnits, mainEntryFile: mainEntry } = currentProjectContext;
-      const target = entryFile ?? mainEntry;
+      const { geometryUnits, mainEntryPath: mainEntry } = currentProjectContext;
+      const target = entryPath ?? mainEntry;
       if (target && geometryUnits.has(target)) {
         return geometryUnits.get(target);
       }
-      if (entryFile === undefined) {
+      if (entryPath === undefined) {
         return geometryUnits.values().next().value;
       }
       return undefined;
@@ -250,19 +250,19 @@ export const ChatTextarea = memo(function ({
   // Wire viewer-drop screenshots into the same active-actors set used by the
   // existing single-view + composite branches so unmount cleanup stays uniform.
   useEffect(() => {
-    handleViewerScreenshotDropRef.current = (entryFile: string): void => {
+    handleViewerScreenshotDropRef.current = (entryPath: string): void => {
       if (!imageInputSupportedRef.current) {
         rejectUnsupportedImageInputRef.current();
         return;
       }
 
-      const graphicsRef = resolveGraphicsRefForEntry(entryFile);
+      const graphicsRef = resolveGraphicsRefForEntry(entryPath);
       if (!graphicsRef) {
         toast.error('No graphics view available for screenshot');
         return;
       }
       const overlay =
-        resolveScreenshotOverlay(resolveCadRefForEntry(entryFile)) ?? buildScreenshotOverlayForPath(entryFile);
+        resolveScreenshotOverlay(resolveCadRefForEntry(entryPath)) ?? buildScreenshotOverlayForPath(entryPath);
       captureViewScreenshot({
         graphicsRef,
         quality: screenshotQualityRef.current,
@@ -291,7 +291,7 @@ export const ChatTextarea = memo(function ({
         return;
       }
 
-      const targetEntry = screenshotAction.type === 'view' ? screenshotAction.entryFile : undefined;
+      const targetEntry = screenshotAction.type === 'view' ? screenshotAction.entryPath : undefined;
       const graphicsRef = resolveGraphicsRefForEntry(targetEntry);
       if (!graphicsRef) {
         toast.error('No graphics view available for screenshot');

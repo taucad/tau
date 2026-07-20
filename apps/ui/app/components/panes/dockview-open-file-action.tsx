@@ -43,7 +43,7 @@ export function DockviewOpenFileAction({
     }
 
     const parameters = activePanel.params;
-    const filePath = (parameters?.['filePath'] ?? parameters?.['entryFile']) as string | undefined;
+    const filePath = (parameters?.['filePath'] ?? parameters?.['entryPath']) as string | undefined;
     if (!filePath) {
       return undefined;
     }

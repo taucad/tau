@@ -20,7 +20,8 @@ import type { JSONSchema7 } from '@taucad/json-schema';
 import type { GeometryGltf, LogLevel } from '@taucad/types';
 import { logLevels, createExportFile } from '@taucad/types/constants';
 import { asBuffer } from '@taucad/utils/file';
-import { joinPath, joinRelativePath } from '@taucad/utils/path';
+import { joinPath, resolveVirtualPath } from '@taucad/utils/path';
+import { resolveImportPath } from '@taucad/utils/import';
 import type {
   KernelIssue,
   KernelFileSystem,
@@ -36,10 +37,8 @@ import {
   createKernelError,
   createKernelSuccess,
   defineKernel,
-  finalizeRenderOutput,
+  finalizeMeshOutput,
   loadBinaryFile,
-  RenderArtifactFinalizationError,
-  resolveToRelative,
 } from '@taucad/runtime/kernel';
 import type { OpenScadParameterExport } from '#parse-parameters.js';
 import { processOpenScadParameters, flattenParametersForInjection } from '#parse-parameters.js';
@@ -58,9 +57,6 @@ const bundledManifoldWasmUrl = new URL('wasm/manifold.wasm', import.meta.url).hr
 type OpenScadContext = {
   fontCache: Map<string, Uint8Array<ArrayBuffer>>;
   manifoldModulePromise?: Promise<ManifoldToplevel>;
-  lastFilePath?: string;
-  lastBasePath?: string;
-  lastParameters?: Record<string, unknown>;
 };
 
 type OpenScadFormatMap = {
@@ -71,7 +67,6 @@ type OpenScadRenderOptions = z.input<typeof openscadRenderSchema>;
 
 const maxIncludeDepth = 50;
 const useIncludeRegex = /^\s*(?:use|include)\s*["<]([^">]+)[">]/gm;
-const tessellationSpecialVariables = ['$fn', '$fa', '$fs'] as const;
 
 const fontsConfig = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
@@ -88,9 +83,7 @@ const fontFiles = [
 // Path helpers
 // =============================================================================
 
-function resolveFromRoot(relativePath: string, basePath: string): string {
-  return joinPath(basePath, relativePath);
-}
+const toOpenScadPath = (filePath: string): string => resolveVirtualPath(filePath).slice(1);
 
 function getBasename(filename: string): string {
   const lastSlash = filename.lastIndexOf('/');
@@ -116,35 +109,22 @@ function parseUseIncludeStatements(code: string): string[] {
 }
 
 function resolveIncludePath(baseFilePath: string, relativePath: string): string {
-  const lastSlash = baseFilePath.lastIndexOf('/');
-  const baseDirectory = lastSlash === -1 ? '' : baseFilePath.slice(0, lastSlash);
-  const combinedPath = baseDirectory ? joinRelativePath(baseDirectory, relativePath) : relativePath;
-  const segments = combinedPath.split('/');
-  const resolved: string[] = [];
-  for (const segment of segments) {
-    if (segment === '..') {
-      resolved.pop();
-    } else if (segment !== '.' && segment !== '') {
-      resolved.push(segment);
-    }
-  }
-
-  return resolved.join('/');
+  const specifier = relativePath.startsWith('/') || relativePath.startsWith('.') ? relativePath : `./${relativePath}`;
+  return resolveImportPath(specifier, baseFilePath);
 }
 
 async function getReferencedScadFiles(options: {
   mainFile: string;
-  basePath: string;
   filesystem: KernelFileSystem;
   logger: RuntimeLogger;
 }): Promise<{ resolved: string[]; unresolved: string[] }> {
-  const { mainFile, basePath, filesystem, logger } = options;
+  const { mainFile, filesystem, logger } = options;
   const visited = new Set<string>();
   const resolved: string[] = [];
   const unresolved: string[] = [];
 
   const resolveFile = async (filePath: string, depth: number): Promise<void> => {
-    const normalizedPath = filePath.replace(/^\/+/, '');
+    const normalizedPath = resolveVirtualPath(filePath);
     if (depth >= maxIncludeDepth) {
       logger.debug(`Max include depth (${maxIncludeDepth}) reached for ${normalizedPath}`);
       return;
@@ -158,8 +138,16 @@ async function getReferencedScadFiles(options: {
 
     let code: string;
     try {
-      code = await filesystem.readFile(resolveFromRoot(normalizedPath, basePath), 'utf8');
-    } catch {
+      code = await filesystem.readFile(normalizedPath, 'utf8');
+    } catch (error) {
+      if (
+        typeof error !== 'object' ||
+        error === null ||
+        !('code' in error) ||
+        !['ENOENT', 'ENOTDIR'].includes(String((error as { code?: unknown }).code))
+      ) {
+        throw error;
+      }
       logger.debug(`Could not read file ${normalizedPath} for dependency resolution`);
       unresolved.push(normalizedPath);
       return;
@@ -290,14 +278,13 @@ async function mountFileSystem(
   instance: OpenSCAD,
   options: {
     mainFile: string;
-    basePath: string;
     filesystem: KernelFileSystem;
     logger: RuntimeLogger;
     fileContentCache: ReadonlyMap<string, Uint8Array<ArrayBuffer> | string>;
     fileContentsCache?: Map<string, string>;
   },
 ): Promise<void> {
-  const { mainFile, basePath, filesystem, logger, fileContentCache, fileContentsCache } = options;
+  const { mainFile, filesystem, logger, fileContentCache, fileContentsCache } = options;
 
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Emscripten FS.chdir() exists at runtime but lacks type declaration
   (instance.FS as unknown as { chdir(path: string): void }).chdir('/');
@@ -305,34 +292,31 @@ async function mountFileSystem(
 
   const { resolved: referencedFiles } = await getReferencedScadFiles({
     mainFile,
-    basePath,
     filesystem,
     logger,
   });
   logger.debug(`Mounting ${referencedFiles.length} referenced files`);
 
-  const uncachedAbsolutePaths = referencedFiles
-    .map((relativePath) => resolveFromRoot(relativePath, basePath))
-    .filter((abs) => !fileContentCache.has(abs));
+  const uncachedAbsolutePaths = referencedFiles.filter((path) => !fileContentCache.has(path));
 
   if (uncachedAbsolutePaths.length > 0) {
     logger.debug(`Batch-reading ${uncachedAbsolutePaths.length} uncached files`);
     await filesystem.readFiles(uncachedAbsolutePaths);
   }
 
-  for (const relativePath of referencedFiles) {
-    const absolutePath = resolveFromRoot(relativePath, basePath);
+  for (const absolutePath of referencedFiles) {
+    const enginePath = toOpenScadPath(absolutePath);
     const content =
       fileContentCache.get(absolutePath) ??
       // oxlint-disable-next-line no-await-in-loop -- sequential fallback for cache misses
       (await filesystem.readFile(absolutePath));
 
-    ensureDirectoryForFile(instance, relativePath);
-    instance.FS.writeFile(relativePath, content);
+    ensureDirectoryForFile(instance, enginePath);
+    instance.FS.writeFile(enginePath, content);
 
-    if (fileContentsCache && relativePath.endsWith('.scad')) {
+    if (fileContentsCache && enginePath.endsWith('.scad')) {
       const textContent = typeof content === 'string' ? content : new TextDecoder().decode(content);
-      fileContentsCache.set(relativePath, textContent);
+      fileContentsCache.set(enginePath, textContent);
     }
   }
 }
@@ -381,28 +365,27 @@ async function mountFonts(instance: OpenSCAD, context: OpenScadContext, logger: 
 async function getParametersFromFile(
   filePath: string,
   options: {
-    basePath: string;
     filesystem: KernelFileSystem;
     logger: RuntimeLogger;
     fileContentCache: ReadonlyMap<string, Uint8Array<ArrayBuffer> | string>;
     fontCache: Map<string, Uint8Array<ArrayBuffer>>;
   },
 ): Promise<OpenScadParameterExport | undefined> {
-  const { basePath, filesystem, logger, fileContentCache, fontCache } = options;
-  const parameterFile = `${filePath}.params.json`;
+  const { filesystem, logger, fileContentCache, fontCache } = options;
+  const engineFilePath = toOpenScadPath(filePath);
+  const parameterFile = `${engineFilePath}.params.json`;
 
   try {
     const instance = await createInstance({ logger });
     await mountFileSystem(instance, {
       mainFile: filePath,
-      basePath,
       filesystem,
       logger,
       fileContentCache,
     });
     await mountFonts(instance, { fontCache }, logger);
 
-    const result = instance.callMain([filePath, '-o', parameterFile, '--export-format=param']);
+    const result = instance.callMain([engineFilePath, '-o', parameterFile, '--export-format=param']);
     if (result !== 0) {
       logger.debug(`No parameters extracted from ${filePath} (exit code: ${result})`);
       return undefined;
@@ -465,78 +448,6 @@ function injectTessellationArgs(
 }
 
 // =============================================================================
-// OpenSCAD build pipeline
-// =============================================================================
-
-type OpenScadBuildOptions = {
-  filePath: string;
-  basePath: string;
-  parameters: Record<string, unknown>;
-  tessellationOverrides?: Record<string, number>;
-  filesystem: KernelFileSystem;
-  logger: RuntimeLogger;
-  fileContentCache: ReadonlyMap<string, Uint8Array<ArrayBuffer> | string>;
-  fontCache: Map<string, Uint8Array<ArrayBuffer>>;
-};
-
-/**
- * Run the OpenSCAD WASM pipeline and return the raw OFF output.
- * Shared between `createGeometry` (render) and `exportGeometry` (export re-render).
- *
- * @param options - build configuration including file paths, parameters, and tessellation overrides
- * @returns the raw OFF geometry string
- */
-async function runOpenScadBuild(options: OpenScadBuildOptions): Promise<string> {
-  const { filePath, basePath, parameters, tessellationOverrides, filesystem, logger, fileContentCache, fontCache } =
-    options;
-  const relativeFilePath = resolveToRelative(filePath, basePath);
-
-  const instance = await createInstance({ logger });
-  const fileContentsCache = new Map<string, string>();
-
-  await mountFileSystem(instance, {
-    mainFile: relativeFilePath,
-    basePath,
-    filesystem,
-    logger,
-    fileContentCache,
-    fileContentsCache,
-  });
-  await mountFonts(instance, { fontCache }, logger);
-
-  const code = await filesystem.readFile(filePath, 'utf8');
-  instance.FS.writeFile(relativeFilePath, code);
-
-  const args = [relativeFilePath, '-o', `${relativeFilePath}.off`, '--backend=manifold'];
-
-  const flattenedParameters = flattenParametersForInjection(parameters);
-
-  // Filter out $fn/$fa/$fs from user params when tessellationOverrides forces values
-  for (const [key, value] of Object.entries(flattenedParameters)) {
-    if (
-      tessellationOverrides &&
-      tessellationSpecialVariables.includes(key as (typeof tessellationSpecialVariables)[number])
-    ) {
-      continue;
-    }
-    args.push(`-D${key}=${formatValue(value)}`);
-  }
-
-  if (tessellationOverrides) {
-    for (const [key, value] of Object.entries(tessellationOverrides)) {
-      args.push(`-D${key}=${value}`);
-    }
-  }
-
-  const result = instance.callMain(args);
-  if (result !== 0) {
-    throw new Error('OpenSCAD build failed during export re-render');
-  }
-
-  return instance.FS.readFile(`${relativeFilePath}.off`, { encoding: 'utf8' });
-}
-
-// =============================================================================
 // Kernel module definition
 // =============================================================================
 
@@ -546,33 +457,29 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
   extensions: ['scad'],
   name: 'OpenScadKernel',
   version: '1.0.0',
-  renderSchema: openscadRenderSchema,
-  exportSchemas: openscadExportSchemas,
+  render: { optionsSchema: openscadRenderSchema, content: [] },
+  exportFormats: {
+    glb: { optionsSchema: openscadExportSchemas.glb, content: [] },
+    gltf: { optionsSchema: openscadExportSchemas.gltf, content: [] },
+  },
 
   async initialize(): Promise<OpenScadContext> {
     return { fontCache: new Map<string, Uint8Array<ArrayBuffer>>() };
   },
 
-  async getDependencies({ filePath, basePath }, { filesystem, logger }) {
-    const relativeFilePath = resolveToRelative(filePath, basePath);
-    const { resolved, unresolved } = await getReferencedScadFiles({
-      mainFile: relativeFilePath,
-      basePath,
+  async getDependencies({ entryPath }, { filesystem, logger }) {
+    return getReferencedScadFiles({
+      mainFile: resolveVirtualPath(entryPath),
       filesystem,
       logger,
     });
-    return {
-      resolved: resolved.map((relativePath) => resolveFromRoot(relativePath, basePath)),
-      unresolved: unresolved.map((relativePath) => resolveFromRoot(relativePath, basePath)),
-    };
   },
 
-  async getParameters({ filePath, basePath }, { filesystem, logger, fileContentCache }, context) {
+  async getParameters({ entryPath }, { filesystem, logger, fileContentCache }, context) {
     try {
-      const mainFilePath = resolveToRelative(filePath, basePath);
+      const mainFilePath = resolveVirtualPath(entryPath);
       const { resolved: referencedFiles } = await getReferencedScadFiles({
         mainFile: mainFilePath,
-        basePath,
         filesystem,
         logger,
       });
@@ -582,7 +489,6 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
       for (const scadFile of referencedFiles) {
         // oxlint-disable-next-line no-await-in-loop -- sequential: each file needs its own WASM instance
         const extractedParameters = await getParametersFromFile(scadFile, {
-          basePath,
           filesystem,
           logger,
           fileContentCache,
@@ -640,7 +546,7 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
       return createKernelSuccess({ defaultParameters, jsonSchema });
     } catch (error) {
       logger.error('Error extracting parameters', { data: error });
-      const relativeFilePath = resolveToRelative(filePath, basePath);
+      const relativeFilePath = toOpenScadPath(entryPath);
       return createKernelError([
         {
           message: error instanceof Error ? error.message : 'Unknown error',
@@ -656,12 +562,8 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
     }
   },
 
-  async createGeometry(
-    { filePath, basePath, parameters, options },
-    { filesystem, logger, fileContentCache, tracer },
-    context,
-  ) {
-    const relativeFilePath = resolveToRelative(filePath, basePath);
+  async createGeometry({ entryPath, parameters, options }, { filesystem, logger, fileContentCache, tracer }, context) {
+    const relativeFilePath = toOpenScadPath(entryPath);
     const fileContentsCache = new Map<string, string>();
     const getFileContents: GetFileContentsFunction = (fileName: string) => fileContentsCache.get(fileName);
 
@@ -671,9 +573,9 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
     };
 
     try {
-      const code = await filesystem.readFile(filePath, 'utf8');
+      const code = await filesystem.readFile(entryPath, 'utf8');
       if (code.trim() === '') {
-        return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: '' });
+        return { nativeHandle: '' };
       }
 
       const wasmSpan = tracer.startSpan('openscad.wasm-init');
@@ -686,8 +588,7 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
       wasmSpan.end();
 
       await mountFileSystem(instance, {
-        mainFile: relativeFilePath,
-        basePath,
+        mainFile: resolveVirtualPath(entryPath),
         filesystem,
         logger,
         fileContentCache,
@@ -725,11 +626,7 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
       if (result !== 0) {
         const hasActualErrors = collectedIssues.some((issue) => issue.severity === 'error');
         if (!hasActualErrors && collectedIssues.length > 0) {
-          return finalizeRenderOutput({
-            artifacts: [createEmptyGltfGeometry()],
-            nativeHandle: '',
-            issues: collectedIssues,
-          });
+          return { nativeHandle: '', issues: collectedIssues };
         }
 
         if (collectedIssues.length > 0) {
@@ -743,29 +640,8 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
         encoding: 'utf8',
       });
 
-      const convertSpan = tracer.startSpan('openscad.convert-geometry', {
-        phase: 'computingGeometry',
-      });
-      const manifoldModule = await getManifoldModule(context, { logger, tracer });
-      const gltfBlob = await convertOffToManifoldGltf(offData, {
-        format: 'glb',
-        coordinateSystem: 'y-up',
-        unit: { length: 'meter' },
-        manifoldModule,
-      });
-      convertSpan.end();
-
-      context.lastFilePath = filePath;
-      context.lastBasePath = basePath;
-      context.lastParameters = parameters;
-
-      const geometry: GeometryGltf = { format: 'gltf', content: gltfBlob };
-      return finalizeRenderOutput({ artifacts: [geometry], nativeHandle: offData, issues: collectedIssues });
+      return { nativeHandle: offData, issues: collectedIssues };
     } catch (error) {
-      if (error instanceof RenderArtifactFinalizationError) {
-        throw error;
-      }
-
       if (error instanceof OpenScadBuildError) {
         throw error;
       }
@@ -776,6 +652,27 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
 
       throw error;
     }
+  },
+
+  async meshGeometry({ nativeHandle }, { logger, tracer }, context) {
+    if (nativeHandle === '') {
+      return finalizeMeshOutput({ artifacts: [createEmptyGltfGeometry()] });
+    }
+
+    const convertSpan = tracer.startSpan('openscad.convert-geometry', {
+      phase: 'computingGeometry',
+    });
+    const manifoldModule = await getManifoldModule(context, { logger, tracer });
+    const gltfBlob = await convertOffToManifoldGltf(nativeHandle, {
+      format: 'glb',
+      coordinateSystem: 'y-up',
+      unit: { length: 'meter' },
+      manifoldModule,
+    });
+    convertSpan.end();
+
+    const geometry: GeometryGltf = { format: 'gltf', content: gltfBlob };
+    return finalizeMeshOutput({ artifacts: [geometry] });
   },
 
   async exportGeometry(input, runtime, context) {
@@ -814,34 +711,12 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
       ]);
     }
 
-    const { tessellation } = options;
-
-    // When export tessellation options are provided, re-render the geometry
-    // with forced overrides so the OFF output reflects export quality settings.
-    let offData = nativeHandle;
-    if (context.lastFilePath && context.lastBasePath) {
-      offData = await runOpenScadBuild({
-        filePath: context.lastFilePath,
-        basePath: context.lastBasePath,
-        parameters: context.lastParameters ?? {},
-        tessellationOverrides: {
-          $fn: tessellation.segments,
-          $fa: tessellation.minimumAngle,
-          $fs: tessellation.minimumSize,
-        },
-        filesystem: runtime.filesystem,
-        logger: runtime.logger,
-        fileContentCache: runtime.fileContentCache,
-        fontCache: context.fontCache,
-      });
-    }
-
     const { coordinateSystem, unit } = options;
     const manifoldModule = await getManifoldModule(context, runtime);
 
     switch (format) {
       case 'glb': {
-        const glbData = await convertOffToManifoldGltf(offData, {
+        const glbData = await convertOffToManifoldGltf(nativeHandle, {
           format: 'glb',
           coordinateSystem,
           unit,
@@ -851,7 +726,7 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
       }
 
       case 'gltf': {
-        const gltfData = await convertOffToManifoldGltf(offData, {
+        const gltfData = await convertOffToManifoldGltf(nativeHandle, {
           format: 'gltf',
           coordinateSystem,
           unit,

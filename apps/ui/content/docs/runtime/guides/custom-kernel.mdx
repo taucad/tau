@@ -36,6 +36,7 @@ Use `defineKernel` with a single config object. The helper returns a callable pl
 ```typescript
 import { defineKernel, createKernelSuccess, createKernelError } from '@taucad/runtime';
 import type { GeometryResponse } from '@taucad/types';
+import { z } from 'zod';
 
 type MyContext = {
   engine: unknown;
@@ -48,13 +49,17 @@ export const myKernel = defineKernel({
   extensions: ['myformat'],
   name: 'MyKernel',
   version: '1.0.0',
+  render: { content: [] },
+  exportFormats: {
+    glb: { optionsSchema: z.object({}).strict(), content: [] },
+  },
 
   async initialize(_options, _runtime): Promise<MyContext> {
     return { engine: null };
   },
 
-  async getDependencies({ filePath }, _runtime, _context) {
-    return { resolved: [filePath], unresolved: [] };
+  async getDependencies({ entryPath }, _runtime, _context) {
+    return { resolved: [entryPath], unresolved: [] };
   },
 
   async getParameters(input, runtime, _context) {
@@ -68,8 +73,8 @@ export const myKernel = defineKernel({
     });
   },
 
-  async createGeometry({ filePath }, { filesystem }, _context) {
-    const code = await filesystem.readFile(filePath, 'utf8');
+  async createGeometry({ entryPath }, { filesystem }, _context) {
+    const code = await filesystem.readFile(entryPath, 'utf8');
     const geometry: GeometryResponse = {
       format: 'svg',
       content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><text>${code.length}</text></svg>`,
@@ -160,6 +165,7 @@ Return all file paths that affect the geometry. The framework uses this for chan
 
 ```typescript
 import type { KernelFileSystem } from '@taucad/runtime/kernel';
+import { resolveImportPath } from '@taucad/utils/import';
 
 function parseImports(code: string): string[] {
   const out: string[] = [];
@@ -179,18 +185,23 @@ function parseImports(code: string): string[] {
 }
 
 async function getDependencies(
-  { filePath, basePath }: { filePath: string; basePath: string },
+  { entryPath }: { entryPath: string },
   { filesystem }: { filesystem: KernelFileSystem },
   _context: unknown,
-): Promise<string[]> {
-  const content = await filesystem.readFile(filePath, 'utf8');
-  const imports = parseImports(content);
-  const baseDir = basePath.endsWith('/') ? basePath : `${basePath}/`;
-  return [filePath, ...imports.map((p) => baseDir + p)];
+): Promise<{ resolved: string[]; unresolved: string[] }> {
+  const content = await filesystem.readFile(entryPath, 'utf8');
+  const candidates = parseImports(content).map((specifier) => resolveImportPath(specifier, entryPath));
+  const availability = await Promise.all(candidates.map((path) => filesystem.exists(path)));
+  return {
+    resolved: [entryPath, ...candidates.filter((_path, index) => availability[index])],
+    unresolved: candidates.filter((_path, index) => !availability[index]),
+  };
 }
 
 export { getDependencies };
 ```
+
+`entryPath` and every returned dependency path use the same canonical local namespace rooted at `/`. `entryPath` names the model's evaluation root; returned dependencies are ordinary paths. Do not accept a project root, strip the leading slash for dependency identity, or clamp traversal yourself; the shared resolver rejects paths that escape virtual `/`.
 
 ### 7. Implement getParameters for Parametric Models
 
@@ -220,11 +231,11 @@ function extractParameters(code: string): { defaultParameters: Record<string, un
 }
 
 async function getParameters(
-  { filePath }: { filePath: string },
+  { entryPath }: { entryPath: string },
   { filesystem }: { filesystem: KernelFileSystem },
   _context: unknown,
 ) {
-  const code = await filesystem.readFile(filePath, 'utf8');
+  const code = await filesystem.readFile(entryPath, 'utf8');
   const { defaultParameters, jsonSchema } = extractParameters(code);
   return createKernelSuccess({ defaultParameters, jsonSchema });
 }
@@ -235,6 +246,7 @@ export { getParameters };
 ## Variations
 
 - **optionsSchema**: Add a Zod schema to validate kernel options. The inferred `Options` type flows to `initialize(options)`.
+- **render / exportFormats**: Colocate plugin-owned option schemas and framework-owned content declarations with each logical route. Only declare content the route fulfills natively.
 - **cleanup**: Implement `cleanup(context)` to tear down WASM instances or temp files when the worker is disposed.
 - **detectImport / builtinModuleNames**: For JS/TS kernels, add `detectImport` (RegExp) or `builtinModuleNames` to the `KernelPlugin` so the framework can select your kernel based on imports.
 - **Bundler integration**: JS/TS kernels use `runtime.bundler` and `runtime.execute`. See the Replicad or JSCAD kernel source for examples.

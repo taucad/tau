@@ -122,9 +122,9 @@ export function NavProjects({
           projectId={publishTarget.id}
           projectName={publishTarget.name}
           projectDescription={publishTarget.description}
-          projectUpdatedAt={publishTarget.updatedAt}
-          entryFile={publishTarget.assets.mechanical?.main ?? 'main.ts'}
-          parameters={publishTarget.assets.mechanical?.parameters ?? {}}
+          projectUpdatedAt={publishTarget.lastActivityAt}
+          entryPath={publishTarget.assets.main.entryPath}
+          parameters={{}}
         />
       ) : null}
     </SidebarGroup>

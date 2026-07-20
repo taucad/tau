@@ -67,7 +67,7 @@ vi.mock('#hooks/use-project.js', async () => {
   return {
     useProject: () => ({
       geometryUnits: new Map([['main.ts', cadActor]]),
-      mainEntryFile: 'main.ts',
+      mainEntryPath: 'main.ts',
       projectId: 'proj_header',
       projectRef: projectActor,
     }),

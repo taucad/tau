@@ -1,30 +1,37 @@
-import type { GeometryFile } from '@taucad/types';
+import type { Geometry } from '@taucad/types';
 import type { Dependency } from '#types/runtime-dependency.types.js';
-import type { HashedGeometryResult } from '#types/runtime.types.js';
+import type { KernelResult } from '#types/runtime.types.js';
+import type { RuntimeContentInput } from '#types/runtime-content.types.js';
+import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 
 /**
  * Stable identity for one render request and its dependency graph.
  * @public
  */
 export type RenderIdentity = {
-  file: GeometryFile;
-  projectRootPath: string;
+  file: RuntimeFileLocator;
   selectedKernelId: string | undefined;
   selectedKernelVersion: string | undefined;
   parameters: Record<string, unknown>;
   renderOptions: Record<string, unknown>;
+  content: RuntimeContentInput;
+  /** Exact value inputs used to construct the native handle and replay it after cache restoration failure. */
+  createOptions: Record<string, unknown>;
+  createContent: RuntimeContentInput;
   dependencies: Dependency[];
   dependencyHash: string;
+  /** Scope-aware key for the reusable native handle/create-cache entry. */
+  nativeHandleKey: string;
 };
 
 /**
- * File-scoped kernel selection captured as operation data.
+ * File-scoped kernel selection captured for one request.
  * @public
  */
 export type KernelBinding<KernelHandle = unknown> = {
   kernelId: string;
   kernelVersion: string;
-  filePath: string;
+  entryPath: string;
   kernel?: KernelHandle;
 };
 
@@ -34,8 +41,7 @@ export type KernelBinding<KernelHandle = unknown> = {
  */
 export type OperationOwner<KernelHandle = unknown> = {
   kind: 'render-artifact' | 'request';
-  file: GeometryFile;
-  projectRootPath: string;
+  file: RuntimeFileLocator;
   binding?: KernelBinding<KernelHandle>;
 };
 
@@ -62,13 +68,25 @@ export type SerializedNativeHandleSlot = {
 };
 
 /**
+ * Render result held by a materialized render artifact.
+ *
+ * `data` is `undefined` only for export-scoped materializations (`publish: false`)
+ * of kernels that defer their display artifact to the `meshGeometry` phase — the
+ * export path consumes the native-handle slots, never the display geometry.
+ * Published (display) artifacts always carry `data`; the orchestrator enforces
+ * the display-path invariant before publishing.
+ * @public
+ */
+export type MaterializedRenderResult = KernelResult<Geometry | undefined>;
+
+/**
  * Materialized render output plus any native export artifacts available for the same identity.
  * @public
  */
 export type MaterializedRender = {
   identity: RenderIdentity;
   owner: OperationOwner;
-  result: HashedGeometryResult;
+  result: MaterializedRenderResult;
   liveNativeHandleSlot?: NativeHandleSlot;
   serializedNativeHandleSlot?: SerializedNativeHandleSlot;
 };
@@ -78,7 +96,8 @@ export type MaterializedRender = {
  * @public
  */
 export type DependencyResolutionContext = {
-  baseDependencies?: Dependency[];
+  /** Base dependencies cached independently for each concrete middleware execution list. */
+  baseDependenciesByExecutionList?: Map<string, Dependency[]>;
 };
 
 /**
@@ -89,10 +108,26 @@ export type DependencyResolutionContext = {
  */
 export function createRenderIdentityKey(identity: RenderIdentity): string {
   return [
-    identity.projectRootPath,
+    identity.file.path,
     identity.file.filename,
     identity.selectedKernelId ?? '<no-kernel>',
     identity.selectedKernelVersion ?? '<no-version>',
     identity.dependencyHash,
+  ].join('|');
+}
+
+/**
+ * Create the comparison key used only for native-handle compatibility.
+ * @param identity - Render identity carrying the precomputed scope-aware key.
+ * @returns Stable key for live and serialized native-handle slots.
+ * @public
+ */
+export function createNativeHandleIdentityKey(identity: RenderIdentity): string {
+  return [
+    identity.file.path,
+    identity.file.filename,
+    identity.selectedKernelId ?? '<no-kernel>',
+    identity.selectedKernelVersion ?? '<no-version>',
+    identity.nativeHandleKey,
   ].join('|');
 }

@@ -36,12 +36,12 @@ export function isForbiddenPublishRelativePath(relativePath: string): boolean {
 
 export function validateCollectedPublishFiles(args: {
   files: Map<string, Uint8Array<ArrayBuffer>>;
-  entryFile: string;
+  entryPath: string;
 }): { ok: true } | { ok: false; reason: PublicationCollectFailureCode; path?: string } {
-  const { files, entryFile } = args;
+  const { files, entryPath } = args;
 
-  if (!files.has(entryFile)) {
-    return { ok: false, reason: publicationApiCode.MISSING_ENTRY_FILE };
+  if (!files.has(entryPath)) {
+    return { ok: false, reason: publicationApiCode.MISSING_ENTRY_PATH };
   }
 
   const userFileCount = [...files.keys()].filter(

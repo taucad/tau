@@ -7,7 +7,7 @@
 export const publicationApiCode = {
   INVALID_PATH: 'INVALID_PATH',
   FORBIDDEN_PATH: 'FORBIDDEN_PATH',
-  MISSING_ENTRY_FILE: 'MISSING_ENTRY_FILE',
+  MISSING_ENTRY_PATH: 'MISSING_ENTRY_PATH',
   TOO_MANY_FILES: 'TOO_MANY_FILES',
   FILE_TOO_LARGE: 'FILE_TOO_LARGE',
   PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
@@ -23,6 +23,8 @@ export const publicationApiCode = {
   OWNER_SELF_VIEW: 'OWNER_SELF_VIEW',
   /** Signed `tau_view_id` cookie failed verification */
   INVALID_VIEW_COOKIE: 'INVALID_VIEW_COOKIE',
+  /** The caller's billing tier does not include the requested capability (e.g. private publications are Pro-gated) */
+  ENTITLEMENT_REQUIRED: 'ENTITLEMENT_REQUIRED',
 } as const;
 /* eslint-enable @typescript-eslint/naming-convention -- CONSTANT_CASE publicationApiCode ends here */
 
@@ -101,7 +103,7 @@ export function isPublishableTauPath(normalizedPath: string): boolean {
  * @public
  */
 export type PublicationCollectFailureCode =
-  | typeof publicationApiCode.MISSING_ENTRY_FILE
+  | typeof publicationApiCode.MISSING_ENTRY_PATH
   | typeof publicationApiCode.TOO_MANY_FILES
   | typeof publicationApiCode.FILE_TOO_LARGE
   | typeof publicationApiCode.PAYLOAD_TOO_LARGE;

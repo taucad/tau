@@ -45,7 +45,7 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
     editorRef: mockEditorRef,
     geometryUnits: new Map(),
-    mainEntryFile: 'main.ts',
+    mainEntryPath: 'main.ts',
   }),
 }));
 

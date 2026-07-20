@@ -92,13 +92,13 @@ const resolveKclImportPath = (currentFilePath: string, importPath: string): stri
  * Recursively discover all file dependencies for a KCL program.
  * Reads imported files and traverses their imports.
  *
- * @param entryFile - Canonical project-local absolute entry path
+ * @param entryPath - Canonical project-local absolute entry path
  * @param readFile - Function to read file contents
  * @param parseKcl - Function to parse KCL code into AST
- * @returns Array of file paths that are dependencies (including the entry file)
+ * @returns Array of file paths that are dependencies (including the entry path)
  */
 export async function discoverKclDependencies(
-  entryFile: string,
+  entryPath: string,
   readFile: ReadFileFunction,
   parseKcl: ParseKclFunction,
 ): Promise<{ resolved: string[]; unresolved: string[] }> {
@@ -163,7 +163,7 @@ export async function discoverKclDependencies(
     }
   };
 
-  await resolveFile(entryFile, 0);
+  await resolveFile(entryPath, 0);
 
   return { resolved, unresolved };
 }

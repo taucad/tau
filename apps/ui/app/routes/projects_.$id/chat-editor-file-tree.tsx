@@ -34,7 +34,6 @@ import {
   propMemoizationFeature,
 } from '@headless-tree/core';
 import { useTree, AssistiveTreeDescription } from '@headless-tree/react';
-import type { Project } from '@taucad/types';
 import { kernelConfigurations, tauFileDragMime } from '@taucad/types/constants';
 import type { KernelConfiguration } from '@taucad/types/constants';
 import type { FileItem } from '#types/editor.types.js';
@@ -190,8 +189,6 @@ const getFileTreeAssistiveDndLabel: FileTreeAssistiveDndLabel = (dnd, assistiveS
       return `Press ${keyboardDragStartLabel} to move selected items`;
     }
   }
-
-  return `Press ${keyboardDragStartLabel} to move selected items`;
 };
 
 function getForeignDropTargetFromEvent(event: DragEvent): Omit<ForeignDropTarget, 'dataTransfer'> {
@@ -202,8 +199,8 @@ function getForeignDropTargetFromEvent(event: DragEvent): Omit<ForeignDropTarget
   }
 
   return {
-    path: itemElement.dataset.fileTreePath ?? rootId,
-    isFolder: itemElement.dataset.fileTreeKind !== 'file',
+    path: itemElement.dataset['fileTreePath'] ?? rootId,
+    isFolder: itemElement.dataset['fileTreeKind'] !== 'file',
   };
 }
 
@@ -279,6 +276,13 @@ export const ChatEditorFileTree = memo(function ({
     canCreate,
     canDelete,
   } = fileManager;
+  const project = useSelector(projectRef, (state) => state.context.project);
+  const isEditorReady = useSelector(editorRef, (state) => state.matches('ready'));
+  const openFiles = useSelector(editorRef, (state) => state.context.openFiles);
+  const activeFilePath = useSelector(editorRef, (state) => {
+    const id = state.context.activePaneId;
+    return id === undefined ? undefined : state.context.openFiles.find((file) => file.paneId === id)?.path;
+  });
 
   useEffect(() => {
     // Editor → FileManager coordination (reading file content for the editor)
@@ -287,48 +291,6 @@ export const ChatEditorFileTree = memo(function ({
     const fileOpenedSub = editorRef.on('fileOpened', (event) => {
       // Read file content for the editor display
       void readFile(event.path);
-    });
-
-    // Track both project and Editor state loading to handle race condition
-    // Both must be loaded before we can decide whether to open the main file
-    let loadedProject: Project | undefined;
-    let loadedEditorState: { loaded: boolean; activeFilePath: string | undefined } | undefined;
-
-    const tryOpenMainFile = (): void => {
-      // Wait until both have loaded
-      if (!loadedProject || !loadedEditorState) {
-        return;
-      }
-
-      // If Editor state has an active file, the restoreFiles flow handles it
-      if (loadedEditorState.activeFilePath) {
-        return;
-      }
-
-      // No persisted active file - open main file as fallback
-      const mainFile = loadedProject.assets.mechanical?.main;
-      if (mainFile) {
-        editorRef.send({ type: 'openFile', path: mainFile, source: 'machine' });
-      }
-    };
-
-    // Project loaded → Store project and try to open main file
-    const projectLoadedSub = projectRef.on('projectLoaded', (event) => {
-      loadedProject = event.project;
-      tryOpenMainFile();
-    });
-
-    // Editor state loaded → Store Editor state and try to open main file
-    const editorStateLoadedSub = editorRef.on('editorStateLoaded', (event) => {
-      const persistedActivePaneId = event.editorState?.activePaneId;
-      const persistedActiveFilePath = persistedActivePaneId
-        ? event.editorState?.openFiles.find((f) => f.paneId === persistedActivePaneId)?.path
-        : undefined;
-      loadedEditorState = {
-        loaded: true,
-        activeFilePath: persistedActiveFilePath,
-      };
-      tryOpenMainFile();
     });
 
     // Mount file-operation participants. This is the single funnel
@@ -342,11 +304,16 @@ export const ChatEditorFileTree = memo(function ({
 
     return () => {
       fileOpenedSub.unsubscribe();
-      projectLoadedSub.unsubscribe();
-      editorStateLoadedSub.unsubscribe();
       participantDispose?.();
     };
   }, [projectRef, editorRef, contentService, readFile]);
+
+  useEffect(() => {
+    if (!project || !isEditorReady || activeFilePath) {
+      return;
+    }
+    editorRef.send({ type: 'openFile', path: project.assets.main.entryPath, source: 'machine' });
+  }, [activeFilePath, editorRef, isEditorReady, project]);
 
   const { treeService } = fileManager;
 
@@ -365,15 +332,6 @@ export const ChatEditorFileTree = memo(function ({
       isDirectory: entry.type === 'dir',
     }));
   }, [fileTreeMap]);
-
-  const openFiles = useSelector(editorRef, (state) => state.context.openFiles);
-  const activeFilePath = useSelector(editorRef, (state) => {
-    const id = state.context.activePaneId;
-    if (id === undefined) {
-      return undefined;
-    }
-    return state.context.openFiles.find((f) => f.paneId === id)?.path;
-  });
 
   // Tree state management
   const [expandedItems, setExpandedItemsRaw] = useState<string[]>(() => [rootId]);
@@ -1230,7 +1188,7 @@ export const ChatEditorFileTree = memo(function ({
 
   const handleOpenInViewer = useCallback(
     (path: string) => {
-      projectRef.send({ type: 'openInViewer', entryFile: path });
+      projectRef.send({ type: 'openInViewer', entryPath: path });
     },
     [projectRef],
   );

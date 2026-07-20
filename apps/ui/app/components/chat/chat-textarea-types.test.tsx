@@ -246,7 +246,7 @@ describe('useChatTextareaLogic — dragKind detection + drop routing', () => {
     expect(result.current.dragKind).toBeUndefined();
   });
 
-  it('routes a viewer drop to onViewerScreenshotDrop with the entryFile', () => {
+  it('routes a viewer drop to onViewerScreenshotDrop with the entryPath', () => {
     const onViewerScreenshotDrop = vi.fn();
     const onAddContextChips = vi.fn();
     const { result } = renderHook(() =>
@@ -262,7 +262,7 @@ describe('useChatTextareaLogic — dragKind detection + drop routing', () => {
       void result.current.handleDrop(
         buildDragEvent({
           types: [tauViewerPanelDragMime],
-          data: { [tauViewerPanelDragMime]: JSON.stringify({ entryFile: 'models/part.scad' }) },
+          data: { [tauViewerPanelDragMime]: JSON.stringify({ entryPath: 'models/part.scad' }) },
         }),
       );
     });

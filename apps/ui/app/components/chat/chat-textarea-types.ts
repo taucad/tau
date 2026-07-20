@@ -54,19 +54,19 @@ export const focusTrapAttribute = 'data-chat-textarea-focustrap';
 
 /**
  * Pure helper: parses a `tauViewerPanelDragMime` payload and returns the
- * `entryFile` if the payload is well-formed, else `undefined`.
+ * `entryPath` if the payload is well-formed, else `undefined`.
  */
-const parseViewerEntryFile = (raw: string): string | undefined => {
+const parseViewerEntryPath = (raw: string): string | undefined => {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (
       typeof parsed === 'object' &&
       parsed !== null &&
-      'entryFile' in parsed &&
-      typeof parsed.entryFile === 'string' &&
-      parsed.entryFile !== ''
+      'entryPath' in parsed &&
+      typeof parsed.entryPath === 'string' &&
+      parsed.entryPath !== ''
     ) {
-      return parsed.entryFile;
+      return parsed.entryPath;
     }
   } catch {
     // Malformed payload — caller should fall through to the next handler.
@@ -150,7 +150,7 @@ export type ChatTextareaLogicOptions = Pick<
   'ref' | 'onSubmit' | 'enableAutoFocus' | 'onEscapePressed' | 'onBlur' | 'mode'
 > & {
   /** Called when a viewer panel tab is dropped — the host should screenshot the matching pane. */
-  readonly onViewerScreenshotDrop?: (entryFile: string) => void;
+  readonly onViewerScreenshotDrop?: (entryPath: string) => void;
   /** Called when an editor tab or file-tree row is dropped — the host should insert file-link chips. */
   readonly onAddContextChips?: (paths: string[]) => void;
 };
@@ -410,14 +410,14 @@ export function useChatTextareaLogic({
 
       // 1. Viewer panel drop → request a screenshot of the matching pane
       const viewerData = dataTransfer.getData(tauViewerPanelDragMime);
-      const viewerEntryFile = viewerData ? parseViewerEntryFile(viewerData) : undefined;
-      if (viewerEntryFile !== undefined) {
+      const viewerEntryPath = viewerData ? parseViewerEntryPath(viewerData) : undefined;
+      if (viewerEntryPath !== undefined) {
         if (!imageInputSupported) {
           rejectUnsupportedImageInput();
           return;
         }
 
-        onViewerScreenshotDrop?.(viewerEntryFile);
+        onViewerScreenshotDrop?.(viewerEntryPath);
         return;
       }
 

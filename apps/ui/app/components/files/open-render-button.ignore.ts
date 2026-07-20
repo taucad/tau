@@ -1,5 +1,5 @@
 /**
- * Entry-file suffixes that must not show the file-operation "Open" action.
+ * Entry-path suffixes that must not show the file-operation "Open" action.
  *
  * GeoSpec test files are not CAD entry points — opening them in the viewer
  * would not focus a meaningful render.

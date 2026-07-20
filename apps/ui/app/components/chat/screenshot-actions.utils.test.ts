@@ -59,7 +59,7 @@ describe('createScreenshotContextHandler', () => {
 
     const item = createScreenshotItem(
       'screenshot-view:models/part.ts',
-      { type: 'view', entryFile: 'models/part.ts' },
+      { type: 'view', entryPath: 'models/part.ts' },
       'part.ts',
     );
     handler(item);
@@ -78,14 +78,14 @@ describe('createScreenshotContextHandler', () => {
 
     const viewItem = createScreenshotItem('screenshot-view:src/models/gear.ts', {
       type: 'view',
-      entryFile: 'src/models/gear.ts',
+      entryPath: 'src/models/gear.ts',
     });
     handler(viewItem);
 
     const passedItem = onScreenshotAction.mock.calls[0]?.[0] as ContextSuggestionItem;
     expect(passedItem.screenshotAction).toEqual({
       type: 'view',
-      entryFile: 'src/models/gear.ts',
+      entryPath: 'src/models/gear.ts',
     });
   });
 
@@ -101,7 +101,7 @@ describe('createScreenshotContextHandler', () => {
     const items = [
       createScreenshotItem('screenshot-current-view', { type: 'single' }),
       createScreenshotItem('screenshot-orthographic', { type: 'composite' }),
-      createScreenshotItem('screenshot-view:models/part.ts', { type: 'view', entryFile: 'models/part.ts' }),
+      createScreenshotItem('screenshot-view:models/part.ts', { type: 'view', entryPath: 'models/part.ts' }),
     ];
 
     for (const item of items) {

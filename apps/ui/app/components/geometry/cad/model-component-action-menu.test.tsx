@@ -253,7 +253,7 @@ describe('model component action menu', () => {
     });
     expect(mocks.editorSend).toHaveBeenCalledWith({
       type: 'revealModelComponentInExplorer',
-      entryFile: 'src/main.ts',
+      entryPath: 'src/main.ts',
       unitId,
       componentId,
     });

@@ -61,13 +61,13 @@ export const <id> = defineKernel({
   async initialize(options, runtime) {
     /* load WASM/SDK, register modules */
   },
-  async getDependencies({ filePath }, runtime) {
-    /* resolve deps — usually runtime.bundler.resolveDependencies(filePath) for JS/TS */
+  async getDependencies({ entryPath }, runtime) {
+    /* resolve deps — usually runtime.bundler.resolveDependencies(entryPath) for JS/TS */
   },
-  async getParameters({ filePath, basePath }, runtime, context) {
+  async getParameters({ entryPath }, runtime, context) {
     /* extract defaultParams and return JSON schema */
   },
-  async createGeometry({ filePath, basePath, parameters }, runtime, context) {
+  async createGeometry({ entryPath, parameters }, runtime, context) {
     /* bundle + execute user code; return { geometry, nativeHandle } */
   },
   async exportGeometry({ fileType, nativeHandle }, runtime, context) {
@@ -82,7 +82,7 @@ export const <id> = defineKernel({
 Key patterns:
 
 - `runtime.bundler.registerModule(name, { code, version })` for built-in module registration
-- `runtime.bundler.bundle(filePath)` + `runtime.execute(code)` for user code
+- `runtime.bundler.bundle(entryPath)` + `runtime.execute(code)` for user code
 - `createKernelSuccess(data)` / `createKernelError(issues)` for structured results in non-throw paths
 - Throw `Error` with `.issues` array (custom `*BuildError`) for fatal geometry failures so framework returns structured issues
 - Prefer stack enrichment utilities from `@taucad/runtime/kernel` for JS/TS kernels
@@ -117,7 +117,7 @@ All kernel tests MUST use helpers from `@taucad/runtime/testing`. Do NOT define 
 | `createTestWorker(definition, files, options?)`                   | Integration tests via `KernelRuntimeWorker` with a seeded filesystem                                         |
 | `getTestParameters(definition, files, mainFile)`                  | Extract parameters through the worker                                                                        |
 | `createTestGeometry({ definition, files, mainFile, parameters })` | Render geometry through the worker                                                                           |
-| `createGeometryFile(filename, basePath?)`                         | Build a `GeometryFile` for worker methods                                                                    |
+| `createGeometryFile(filename)`                                   | Build the normalized internal file locator used by worker test methods                                       |
 | `createGeometryTestHelpers()`                                     | GLTF validation (`expectValidGltf`, `expectVertexCount`, `expectBoundingBoxSize`)                            |
 | `createMockKernelRuntime(options?)`                               | Unit tests calling lifecycle methods directly (pair with `resolveRuntimePluginDefinition('kernel', <id>())`) |
 | `assertSuccess(result)`                                           | Type-narrowing assertion on `KernelResult`                                                                   |

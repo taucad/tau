@@ -157,20 +157,6 @@ describe('editorMachine', () => {
       actor.stop();
     });
 
-    it('should emit editorStateLoaded on successful load', async () => {
-      const actor = createTestActor({ loadResult: stubEditorState });
-      actor.start();
-      const emitted: unknown[] = [];
-      actor.on('editorStateLoaded', (event) => emitted.push(event));
-
-      actor.send({ type: 'load' });
-      await waitFor(actor, (s) => s.matches({ ready: {} }));
-
-      expect(emitted).toHaveLength(1);
-      expect(emitted[0]).toMatchObject({ type: 'editorStateLoaded' });
-      actor.stop();
-    });
-
     it('should transition to ready even on load error (graceful degradation)', async () => {
       const actor = createTestActor({
         loadResult: async () => {
@@ -240,7 +226,7 @@ describe('editorMachine', () => {
       actor.stop();
     });
 
-    it('should rekey viewer entry files and component display units on rename', async () => {
+    it('should rekey viewer entry paths and component display units on rename', async () => {
       const oldMainUnitId = 'file:src/main.ts';
       const newMainUnitId = 'file:src/index.ts';
       const otherUnitId = 'file:src/other.ts';
@@ -249,7 +235,7 @@ describe('editorMachine', () => {
           ...stubEditorState,
           viewSettings: {
             view1: {
-              entryFile: 'src/main.ts',
+              entryPath: 'src/main.ts',
               graphicsSettings: {
                 ...defaultGraphicsSettings,
                 componentDisplay: {
@@ -268,7 +254,7 @@ describe('editorMachine', () => {
       actor.send({ type: 'renameFile', oldPath: 'src/main.ts', newPath: 'src/index.ts' });
 
       const settings = actor.getSnapshot().context.viewSettings['view1'];
-      expect(settings?.entryFile).toBe('src/index.ts');
+      expect(settings?.entryPath).toBe('src/index.ts');
       expect(settings?.graphicsSettings.componentDisplay).toEqual({
         schemaVersion: 1,
         unitsById: {
@@ -297,14 +283,14 @@ describe('editorMachine', () => {
 
       actor.send({
         type: 'revealModelComponentInExplorer',
-        entryFile: 'src/main.ts',
+        entryPath: 'src/main.ts',
         unitId: 'file:src/main.ts',
         componentId: 'component:housing',
       });
       expect(emitted).toEqual([
         {
           type: 'modelComponentRevealRequested',
-          entryFile: 'src/main.ts',
+          entryPath: 'src/main.ts',
           unitId: 'file:src/main.ts',
           componentId: 'component:housing',
         },
@@ -322,7 +308,7 @@ describe('editorMachine', () => {
           ...stubEditorState,
           viewSettings: {
             view1: {
-              entryFile: 'src/foo/main.ts',
+              entryPath: 'src/foo/main.ts',
               graphicsSettings: {
                 ...defaultGraphicsSettings,
                 componentDisplay: {
@@ -341,7 +327,7 @@ describe('editorMachine', () => {
       actor.send({ type: 'renameFile', oldPath: 'src/foo', newPath: 'src/bar' });
 
       const settings = actor.getSnapshot().context.viewSettings['view1'];
-      expect(settings?.entryFile).toBe('src/bar/main.ts');
+      expect(settings?.entryPath).toBe('src/bar/main.ts');
       expect(settings?.graphicsSettings.componentDisplay).toEqual({
         schemaVersion: 1,
         unitsById: {
@@ -361,7 +347,7 @@ describe('editorMachine', () => {
           ...stubEditorState,
           viewSettings: {
             view1: {
-              entryFile: 'src/foo/main.ts',
+              entryPath: 'src/foo/main.ts',
               graphicsSettings: {
                 ...defaultGraphicsSettings,
                 componentDisplay: {
@@ -657,26 +643,6 @@ describe('editorMachine', () => {
       } finally {
         vi.useRealTimers();
       }
-    });
-  });
-
-  // =========================================================================
-  // State: ready – reload
-  // =========================================================================
-  describe('ready – reload', () => {
-    it('should reload with new projectId', async () => {
-      const loadResults = [stubEditorState, { ...stubEditorState, projectId: 'new-build', openFiles: [] }];
-      let loadIndex = 0;
-      const actor = await startAndLoad({
-        loadResult: async () => loadResults[loadIndex++],
-      });
-
-      expect(actor.getSnapshot().context.projectId).toBe('test-build');
-      actor.send({ type: 'reload', projectId: 'new-build' });
-      await waitFor(actor, (s) => s.matches({ ready: {} }));
-      expect(actor.getSnapshot().context.projectId).toBe('new-build');
-      expect(actor.getSnapshot().context.openFiles).toEqual([]);
-      actor.stop();
     });
   });
 

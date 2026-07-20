@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- filesystem fixture keys are canonical absolute paths */
 import process from 'node:process';
 import { MessageChannel } from 'node:worker_threads';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -18,13 +19,19 @@ import type {
 } from '#types/runtime-kernel.types.js';
 import type { TranscodeInput, TranscoderDefinition } from '#types/runtime-transcoder.types.js';
 import type { CapabilitiesManifest, ExportGeometryResult, KernelIssue } from '#types/runtime.types.js';
-import { seedTestFileSystem, initializeWorkerForTesting, createGeometryFile } from '#testing/kernel-testing.utils.js';
+import {
+  seedTestFileSystem,
+  initializeWorkerForTesting,
+  createGeometryFile,
+  getTestFileSystem,
+} from '#testing/kernel-testing.utils.js';
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import type { MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
 import { replicadDetectPattern } from '#kernels/replicad/replicad.constants.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { exportMemoryCache, geometryCache, geometryMemoryCache } from '#middleware/geometry-cache.middleware.js';
+import { defineMiddleware } from '#middleware/runtime-middleware.js';
 
 // ===================================================================
 // Helpers
@@ -37,8 +44,10 @@ function createMockKernelDefinition(id: string, overrides?: Partial<KernelDefini
   const definition = {
     name: id,
     version: '1.0.0',
+    render: { content: [] },
+    exportFormats: {},
     initialize: initSpy,
-    getDependencies: async (input: GetDependenciesInput) => ({ resolved: [input.filePath], unresolved: [] }),
+    getDependencies: async (input: GetDependenciesInput) => ({ resolved: [input.entryPath], unresolved: [] }),
     getParameters: async () => ({
       success: true,
       data: { defaultParameters: {}, jsonSchema: {} },
@@ -137,16 +146,53 @@ function handleLabel(nativeHandle: unknown): string {
 // Tests
 // ===================================================================
 
-describe('KernelRuntimeWorker kernel selection', () => {
-  const basePath = '/projects/test';
+describe('KernelRuntimeWorker middleware identity', () => {
+  it('keeps hooks, options, and loggers independent when display names match', async () => {
+    await seedTestFileSystem({ '/model.mock': 'mock geometry' });
 
+    const observations: Array<{ id: string; marker: string; logger: KernelRuntime['logger'] }> = [];
+    const createMiddleware = (id: 'first' | 'second') =>
+      defineMiddleware({
+        id,
+        name: 'Shared display name',
+        optionsSchema: z.object({ marker: z.string() }),
+        async wrapCreateGeometry(input, handler, runtime) {
+          observations.push({ id, marker: runtime.options.marker, logger: runtime.logger });
+          return handler(input);
+        },
+      });
+
+    const worker = await createMultiKernelWorker(
+      [
+        {
+          id: 'mock-kernel',
+          extensions: ['mock'],
+          definition: createMockKernelDefinition('mock-kernel'),
+        },
+      ],
+      [],
+      [createMiddleware('first')({ marker: 'alpha' }), createMiddleware('second')({ marker: 'beta' })],
+    );
+
+    const result = await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: {} });
+
+    expect(result.success).toBe(true);
+    expect(observations.map(({ id, marker }) => ({ id, marker }))).toEqual([
+      { id: 'first', marker: 'alpha' },
+      { id: 'second', marker: 'beta' },
+    ]);
+    expect(observations[0]!.logger).not.toBe(observations[1]!.logger);
+  });
+});
+
+describe('KernelRuntimeWorker kernel selection', () => {
   beforeEach(async () => {
     await seedTestFileSystem({
-      [`${basePath}/model.scad`]: 'cube([10, 10, 10]);',
-      [`${basePath}/main.ts`]: `import { draw } from 'replicad';\ndraw();`,
-      [`${basePath}/plain.ts`]: 'export const main = () => ({ type: "mesh" });',
-      [`${basePath}/data.xyz`]: 'some unknown format',
-      [`${basePath}/model.step`]: 'ISO-10303-21;',
+      '/model.scad': 'cube([10, 10, 10]);',
+      '/main.ts': `import { draw } from 'replicad';\ndraw();`,
+      '/plain.ts': 'export const main = () => ({ type: "mesh" });',
+      '/data.xyz': 'some unknown format',
+      '/model.step': 'ISO-10303-21;',
     });
   });
 
@@ -365,7 +411,7 @@ describe('KernelRuntimeWorker kernel selection', () => {
       await worker.createGeometry({ file: createGeometryFile('model.scad'), parameters: {} });
       expect(getInitSpy(scadDefinition)).toHaveBeenCalledOnce();
 
-      await worker.notifyFileChanged([`${basePath}/model.scad`]);
+      await worker.notifyFileChanged(['/model.scad']);
 
       await worker.createGeometry({ file: createGeometryFile('model.scad'), parameters: {} });
     });
@@ -396,13 +442,18 @@ describe('KernelRuntimeWorker kernel selection', () => {
       // @ts-expect-error - accessing private for test verification
       worker.fileSystem = { watch: mockWatch, dispose: vi.fn(), listen: vi.fn() };
 
-      worker.updateWatchSet([`${basePath}/model.scad`]);
-      expect(capturedWatchCallback).toBeDefined();
+      // @ts-expect-error - exercising the private observation handoff seam
+      void worker.reconcileWatchSet(new Map([['/model.scad', 50]]));
+      await vi.waitFor(() => {
+        expect(capturedWatchCallback).toBeDefined();
+      });
 
-      capturedWatchCallback!({ type: 'change', path: `${basePath}/model.scad` });
+      capturedWatchCallback!({ type: 'change', path: '/model.scad' });
 
-      // @ts-expect-error - accessing private for test verification
-      expect(worker.selectionCache.size).toBe(0);
+      await vi.waitFor(() => {
+        // @ts-expect-error - accessing private for test verification
+        expect(worker.selectionCache.size).toBe(0);
+      });
     });
   });
 
@@ -432,18 +483,16 @@ describe('KernelRuntimeWorker kernel selection', () => {
 // ===================================================================
 
 describe('lazy capabilities manifest', () => {
-  const basePath = '/projects/test';
-
   beforeEach(async () => {
     await seedTestFileSystem({
-      [`${basePath}/model.scad`]: 'cube([1,1,1]);',
+      '/model.scad': 'cube([1,1,1]);',
     });
   });
 
   it('should rebuild capabilities manifest after loading a kernel module', async () => {
     const definition = createMockKernelDefinition('openscad', {
-      exportSchemas: {
-        stl: z.object({ binary: z.boolean().default(true) }),
+      exportFormats: {
+        stl: { optionsSchema: z.object({ binary: z.boolean().default(true) }), content: [] },
       },
     });
 
@@ -462,7 +511,7 @@ describe('lazy capabilities manifest', () => {
   it('should include kernel export schemas in manifest after lazy load', async () => {
     const stlSchema = z.object({ binary: z.boolean().default(true) });
     const definition = createMockKernelDefinition('openscad', {
-      exportSchemas: { stl: stlSchema },
+      exportFormats: { stl: { optionsSchema: stlSchema, content: [] } },
     });
 
     const worker = await createMultiKernelWorker([{ id: 'openscad', extensions: ['scad'], definition }]);
@@ -478,9 +527,11 @@ describe('lazy capabilities manifest', () => {
       (route) => route.kernelId === 'openscad' && route.targetFormat === 'stl' && !route.transcoderId,
     );
     expect(stlExport).toBeDefined();
-    expect(stlExport!.schema).toHaveProperty('properties');
-    expect((stlExport!.schema as { properties: Record<string, unknown> }).properties).toHaveProperty('binary');
-    expect(stlExport!.defaults).toEqual({ binary: true });
+    expect(stlExport!.exportOptions.schema).toHaveProperty('properties');
+    expect((stlExport!.exportOptions.schema as { properties: Record<string, unknown> }).properties).toHaveProperty(
+      'binary',
+    );
+    expect(stlExport!.exportOptions.defaults).toEqual({ binary: true });
   });
 
   it('should include render option schema in manifest after lazy load', async () => {
@@ -488,7 +539,7 @@ describe('lazy capabilities manifest', () => {
       quality: z.enum(['low', 'high']).default('high'),
     });
     const definition = createMockKernelDefinition('openscad', {
-      renderSchema,
+      render: { optionsSchema: renderSchema, content: [] },
     });
 
     const worker = await createMultiKernelWorker([{ id: 'openscad', extensions: ['scad'], definition }]);
@@ -500,16 +551,16 @@ describe('lazy capabilities manifest', () => {
     });
 
     const manifest = worker.capabilitiesManifest;
-    const renderOption = manifest.renderSchemas['openscad'];
+    const renderOption = manifest.renderCapabilities['openscad'];
     expect(renderOption).toBeDefined();
-    expect(renderOption!.schema).toHaveProperty('properties');
-    expect(renderOption!.defaults).toEqual({ quality: 'high' });
+    expect(renderOption!.renderOptions.schema).toHaveProperty('properties');
+    expect(renderOption!.renderOptions.defaults).toEqual({ quality: 'high' });
   });
 
   it('should push capabilitiesUpdated when kernel module loads', async () => {
     const definition = createMockKernelDefinition('openscad', {
-      exportSchemas: {
-        stl: z.object({ binary: z.boolean().default(true) }),
+      exportFormats: {
+        stl: { optionsSchema: z.object({ binary: z.boolean().default(true) }), content: [] },
       },
     });
 
@@ -532,12 +583,12 @@ describe('lazy capabilities manifest', () => {
     expect(lastCall.routes.some((route) => route.kernelId === 'openscad' && !route.transcoderId)).toBe(true);
   });
 
-  it('should expose renderSchemas indexed by kernelId after lazy load', async () => {
+  it('should expose renderCapabilities indexed by kernelId after lazy load', async () => {
     const renderSchema = z.object({
       quality: z.enum(['low', 'high']).default('high'),
     });
     const definition = createMockKernelDefinition('openscad', {
-      renderSchema,
+      render: { optionsSchema: renderSchema, content: [] },
     });
 
     const worker = await createMultiKernelWorker([{ id: 'openscad', extensions: ['scad'], definition }]);
@@ -549,12 +600,14 @@ describe('lazy capabilities manifest', () => {
 
     const manifest = worker.capabilitiesManifest;
     /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- expect.objectContaining/expect.anything matchers return any */
-    expect(manifest.renderSchemas['openscad']).toEqual(
+    expect(manifest.renderCapabilities['openscad']).toEqual(
       expect.objectContaining({
-        schema: expect.objectContaining({
-          properties: expect.objectContaining({ quality: expect.anything() }),
+        renderOptions: expect.objectContaining({
+          schema: expect.objectContaining({
+            properties: expect.objectContaining({ quality: expect.anything() }),
+          }),
+          defaults: { quality: 'high' },
         }),
-        defaults: { quality: 'high' },
       }),
     );
     /* oxlint-enable @typescript-eslint/no-unsafe-assignment */
@@ -566,11 +619,9 @@ describe('lazy capabilities manifest', () => {
 // ===================================================================
 
 describe('native-handle snapshot restoration', () => {
-  const basePath = '/projects/test';
-
   beforeEach(async () => {
     await seedTestFileSystem({
-      [`${basePath}/model.mock`]: 'mock geometry',
+      '/model.mock': 'mock geometry',
     });
   });
 
@@ -587,7 +638,8 @@ describe('native-handle snapshot restoration', () => {
       issues: [] as KernelIssue[],
     });
     const definition = createMockKernelDefinition('snapshot-kernel', {
-      exportSchemas: { gltf: z.object({}) },
+      nativeHandleScope: 'source',
+      exportFormats: { gltf: { optionsSchema: z.object({}), content: [] } },
       createGeometry,
       exportGeometry,
       serializeNativeHandle: ({ nativeHandle }) => ({ snapshot: nativeHandle }),
@@ -639,7 +691,8 @@ describe('native-handle snapshot restoration', () => {
       issues: [] as KernelIssue[],
     });
     const definition = createMockKernelDefinition('snapshot-kernel', {
-      exportSchemas: { gltf: z.object({}) },
+      nativeHandleScope: 'source',
+      exportFormats: { gltf: { optionsSchema: z.object({}), content: [] } },
       createGeometry,
       exportGeometry,
       serializeNativeHandle: ({ nativeHandle }) => ({ snapshot: nativeHandle }),
@@ -727,9 +780,9 @@ describe('native-handle snapshot restoration', () => {
     });
 
     const definition = createMockKernelDefinition('volatile-kernel', {
-      exportSchemas: {
-        glb: z.object({}),
-        step: z.object({}),
+      exportFormats: {
+        glb: { optionsSchema: z.object({}), content: [] },
+        step: { optionsSchema: z.object({}), content: [] },
       },
       createGeometry,
       exportGeometry,
@@ -790,6 +843,81 @@ describe('native-handle snapshot restoration', () => {
     );
     /* oxlint-enable @typescript-eslint/no-unsafe-assignment */
   });
+
+  it('should use selected source options for transcoded native construction', async () => {
+    const createInputs: CreateGeometryInput[] = [];
+    const definition = createMockKernelDefinition('transcoded-construction-kernel', {
+      render: {
+        optionsSchema: z.object({ quality: z.number().default(8) }),
+        content: [],
+      },
+      exportFormats: {
+        glb: {
+          optionsSchema: z.object({
+            quality: z.number(),
+            sourceOnly: z.string().optional(),
+          }),
+          content: [],
+        },
+      },
+      createGeometry: async (input) => {
+        createInputs.push(input);
+        return {
+          nativeHandle: { label: `quality:${String(input.options['quality'])}` },
+          issues: [] as KernelIssue[],
+        };
+      },
+      exportGeometry: async (input: ExportGeometryInput) => ({
+        success: true,
+        data: [exportFile('source.glb', bytesFor(handleLabel(input.nativeHandle)), 'model/gltf-binary')],
+        issues: [] as KernelIssue[],
+      }),
+    });
+    const transcoderDefinition: TranscoderDefinition = {
+      name: 'Source Option Converter',
+      version: '1.0.0',
+      edges: [
+        {
+          from: 'glb',
+          to: 'usdz',
+          fidelity: 'mesh',
+          optionsSchema: z.object({ width: z.number() }),
+        },
+      ],
+      initialize: vi.fn().mockResolvedValue({}),
+      transcode: vi.fn().mockResolvedValue({
+        success: true,
+        data: [exportFile('model.usdz', new Uint8Array([1]), 'model/vnd.usdz+zip')],
+        issues: [] as KernelIssue[],
+      }),
+      cleanup: vi.fn().mockResolvedValue(undefined),
+    };
+    const transcoder = attachRuntimePluginDefinition({ id: 'source-option-converter' }, () => transcoderDefinition);
+    const worker = await createMultiKernelWorker(
+      [{ id: 'transcoded-construction-kernel', extensions: ['mock'], definition }],
+      [transcoder],
+    );
+
+    try {
+      const result = await worker.exportModel({
+        format: 'usdz',
+        file: createGeometryFile('model.mock'),
+        parameters: {},
+        exportOptions: {
+          quality: 64,
+          sourceOnly: 'kernel',
+          width: 2048,
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(createInputs).toHaveLength(1);
+      expect(createInputs[0]?.options).toEqual({ quality: 64 });
+      expect('operation' in createInputs[0]!).toBe(false);
+    } finally {
+      await worker.cleanup();
+    }
+  });
 });
 
 // ===================================================================
@@ -797,17 +925,49 @@ describe('native-handle snapshot restoration', () => {
 // ===================================================================
 
 describe('cache identity regressions', () => {
-  const basePath = '/projects/test';
-
   beforeEach(async () => {
     geometryMemoryCache.clear();
     exportMemoryCache.clear();
     await seedTestFileSystem({
-      [`${basePath}/model.mock`]: 'mock geometry',
-      [`${basePath}/a.mock`]: 'alpha',
-      [`${basePath}/b.mock`]: 'bravo',
-      [`${basePath}/b.other`]: 'other',
+      '/model.mock': 'mock geometry',
+      '/a.mock': 'alpha',
+      '/b.mock': 'bravo',
+      '/b.other': 'other',
     });
+  });
+
+  it('rereads changed dependency bytes on each explicit render when the filesystem has no watcher', async () => {
+    await seedTestFileSystem({ '/model.mock': 'first' });
+    const definition = createMockKernelDefinition('watcherless-kernel', {
+      createGeometry: async (input, runtime) => {
+        const source = await runtime.filesystem.readFile(input.entryPath, 'utf8');
+        return {
+          geometry: gltfGeometry(source),
+          nativeHandle: { label: source },
+          issues: [] as KernelIssue[],
+        };
+      },
+    });
+    const worker = await createMultiKernelWorker([{ id: 'watcherless-kernel', extensions: ['mock'], definition }]);
+
+    const first = await worker.render({ file: createGeometryFile('model.mock'), parameters: {} });
+    await getTestFileSystem().writeFile('/model.mock', 'second');
+    const second = await worker.render({ file: createGeometryFile('model.mock'), parameters: {} });
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    if (!first.success || !second.success) {
+      return;
+    }
+    expect(first.data.format).toBe('gltf');
+    expect(second.data.format).toBe('gltf');
+    if (first.data.format !== 'gltf' || second.data.format !== 'gltf') {
+      return;
+    }
+    expect(textFrom(first.data.content)).toBe('first');
+    expect(textFrom(second.data.content)).toBe('second');
+    expect(second.data.hash).not.toBe(first.data.hash);
+    expect(getInitSpy(definition)).toHaveBeenCalledOnce();
   });
 
   afterEach(() => {
@@ -833,7 +993,7 @@ describe('cache identity regressions', () => {
       };
     });
     const definition = createMockKernelDefinition('snapshot-kernel', {
-      exportSchemas: { usdz: z.object({}) },
+      exportFormats: { usdz: { optionsSchema: z.object({}), content: [] } },
       createGeometry,
       exportGeometry,
       serializeNativeHandle: ({ nativeHandle }) => ({ label: handleLabel(nativeHandle) }),
@@ -868,9 +1028,89 @@ describe('cache identity regressions', () => {
     expect(textFrom(exportResult.data[0]!.bytes)).toBe('bank:90');
   });
 
+  it('should reheat an L2 export build with its original construction values', async () => {
+    const createInputs: CreateGeometryInput[] = [];
+    const deserializeNativeHandle = vi.fn(() => {
+      throw new Error('Snapshot payload is corrupt');
+    });
+    const definition = createMockKernelDefinition('export-reheat-kernel', {
+      nativeHandleScope: 'operation',
+      render: {
+        optionsSchema: z.object({ quality: z.number().default(8) }),
+        content: [],
+      },
+      exportFormats: {
+        gltf: {
+          optionsSchema: z.object({ quality: z.number() }),
+          content: [],
+        },
+      },
+      createGeometry: async (input) => {
+        createInputs.push(input);
+        return {
+          nativeHandle: { label: `quality:${String(input.options['quality'])}` },
+          issues: [] as KernelIssue[],
+        };
+      },
+      exportGeometry: async (input: ExportGeometryInput) => ({
+        success: true,
+        data: [exportFile('model.gltf', bytesFor(handleLabel(input.nativeHandle)), 'model/gltf+json')],
+        issues: [] as KernelIssue[],
+      }),
+      serializeNativeHandle: ({ nativeHandle }) => ({ label: handleLabel(nativeHandle) }),
+      deserializeNativeHandle,
+    });
+    const modules = [{ id: 'export-reheat-kernel', extensions: ['mock'], definition }];
+    const firstWorker = await createMultiKernelWorker(modules, [], [geometryCache()]);
+    let secondWorker: KernelRuntimeWorker | undefined;
+
+    try {
+      const first = await firstWorker.exportModel({
+        format: 'gltf',
+        file: createGeometryFile('model.mock'),
+        parameters: {},
+        exportOptions: { quality: 64 },
+      });
+      expect(first.success).toBe(true);
+      if (first.success) {
+        expect(textFrom(first.data[0]!.bytes)).toBe('quality:64');
+      }
+      await firstWorker.cleanup();
+
+      geometryMemoryCache.clear();
+      exportMemoryCache.clear();
+      const filesystem = getTestFileSystem();
+      const cacheEntries = await filesystem.readdir('/.tau/cache/geometry');
+      await Promise.all(
+        cacheEntries
+          .filter((entry) => entry.startsWith('export-'))
+          .map(async (entry) => filesystem.unlink(`/.tau/cache/geometry/${entry}`)),
+      );
+
+      secondWorker = await createMultiKernelWorker(modules, [], [geometryCache()]);
+      const second = await secondWorker.exportModel({
+        format: 'gltf',
+        file: createGeometryFile('model.mock'),
+        parameters: {},
+        exportOptions: { quality: 64 },
+      });
+
+      expect(second.success).toBe(true);
+      if (second.success) {
+        expect(textFrom(second.data[0]!.bytes)).toBe('quality:64');
+      }
+      expect(deserializeNativeHandle).toHaveBeenCalledOnce();
+      expect(createInputs).toHaveLength(2);
+      expect(createInputs[1]?.options).toEqual({ quality: 64 });
+    } finally {
+      await firstWorker.cleanup();
+      await secondWorker?.cleanup();
+    }
+  });
+
   it('should invalidate staged exportModel file hashes before computing export cache keys', async () => {
     const createGeometry = vi.fn(async (input: CreateGeometryInput, runtime: KernelRuntime) => {
-      const source = await runtime.filesystem.readFile(input.filePath, 'utf8');
+      const source = await runtime.filesystem.readFile(input.entryPath, 'utf8');
       return {
         geometry: gltfGeometry(source),
         nativeHandle: { label: source },
@@ -886,7 +1126,7 @@ describe('cache identity regressions', () => {
       };
     });
     const definition = createMockKernelDefinition('stage-kernel', {
-      exportSchemas: { gltf: z.object({}) },
+      exportFormats: { gltf: { optionsSchema: z.object({}), content: [] } },
       createGeometry,
       exportGeometry,
       serializeNativeHandle: ({ nativeHandle }) => ({ label: handleLabel(nativeHandle) }),
@@ -909,14 +1149,14 @@ describe('cache identity regressions', () => {
     );
 
     await worker.exportModel({
-      stage: { [`${basePath}/model.mock`]: bytesFor('stage-a') },
+      stage: { '/model.mock': bytesFor('stage-a') },
       file: createGeometryFile('model.mock'),
       parameters: {},
       format: 'gltf',
     });
 
     const second = await worker.exportModel({
-      stage: { [`${basePath}/model.mock`]: bytesFor('stage-b') },
+      stage: { '/model.mock': bytesFor('stage-b') },
       file: createGeometryFile('model.mock'),
       parameters: {},
       format: 'gltf',
@@ -932,7 +1172,7 @@ describe('cache identity regressions', () => {
   it('should recompute base dependencies for consecutive direct createGeometry calls with different files', async () => {
     const definition = createMockKernelDefinition('dependency-kernel', {
       createGeometry: async (input: CreateGeometryInput, runtime: KernelRuntime) => {
-        const source = await runtime.filesystem.readFile(input.filePath, 'utf8');
+        const source = await runtime.filesystem.readFile(input.entryPath, 'utf8');
         return {
           geometry: gltfGeometry(source),
           nativeHandle: { label: source },
@@ -971,13 +1211,29 @@ describe('cache identity regressions', () => {
       };
     });
     const definition = createMockKernelDefinition('request-scope-kernel', {
-      exportSchemas: { gltf: z.object({}) },
+      exportFormats: { gltf: { optionsSchema: z.object({}), content: [] } },
       createGeometry,
       exportGeometry,
     });
     const worker = await createMultiKernelWorker([{ id: 'request-scope-kernel', extensions: ['mock'], definition }]);
 
     await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: { label: 'preview' } });
+    const internals = worker as unknown as {
+      currentPublishedRender: unknown;
+      nativeHandle: unknown;
+      nativeHandleSlot: unknown;
+      serializedNativeHandleSlot: unknown;
+      activeKernelId: string | undefined;
+      activeFilePath: string;
+    };
+    const previewOwnership = {
+      currentPublishedRender: internals.currentPublishedRender,
+      nativeHandle: internals.nativeHandle,
+      nativeHandleSlot: internals.nativeHandleSlot,
+      serializedNativeHandleSlot: internals.serializedNativeHandleSlot,
+      activeKernelId: internals.activeKernelId,
+      activeFilePath: internals.activeFilePath,
+    };
 
     const requestScoped = await worker.exportModel({
       file: createGeometryFile('model.mock'),
@@ -985,6 +1241,7 @@ describe('cache identity regressions', () => {
       format: 'gltf',
     });
     expect(requestScoped.success).toBe(true);
+    expect(internals).toMatchObject(previewOwnership);
 
     const currentStateExport = await worker.exportGeometry('gltf');
 
@@ -1018,14 +1275,15 @@ describe('cache identity regressions', () => {
       };
     });
     const sourceDefinition = createMockKernelDefinition('source-kernel', {
-      exportSchemas: { glb: z.object({}) },
+      nativeHandleScope: 'source',
+      exportFormats: { glb: { optionsSchema: z.object({}), content: [] } },
       createGeometry,
       exportGeometry,
       serializeNativeHandle: ({ nativeHandle }) => ({ label: handleLabel(nativeHandle) }),
       deserializeNativeHandle,
     });
     const otherDefinition = createMockKernelDefinition('other-kernel', {
-      exportSchemas: { glb: z.object({}) },
+      exportFormats: { glb: { optionsSchema: z.object({}), content: [] } },
       createGeometry: async () => ({
         geometry: gltfGeometry('other-preview'),
         nativeHandle: undefined,
@@ -1078,7 +1336,7 @@ describe('cache identity regressions', () => {
     expect(createGeometry).toHaveBeenCalledOnce();
     const cachedSourceRender = internals.currentPublishedRender;
 
-    await worker.notifyFileChanged([`${basePath}/unrelated.txt`]);
+    await worker.notifyFileChanged(['/unrelated.txt']);
     await worker.createGeometry({ file: createGeometryFile('b.other'), parameters: {} });
 
     internals.currentPublishedRender = cachedSourceRender;
@@ -1125,7 +1383,8 @@ describe('cache identity regressions', () => {
       issues: [] as KernelIssue[],
     }));
     const sourceDefinition = createMockKernelDefinition('source-kernel', {
-      exportSchemas: { glb: z.object({}) },
+      nativeHandleScope: 'source',
+      exportFormats: { glb: { optionsSchema: z.object({}), content: [] } },
       createGeometry,
       exportGeometry,
       serializeNativeHandle: ({ nativeHandle }) => ({ label: handleLabel(nativeHandle) }),
@@ -1165,7 +1424,7 @@ describe('cache identity regressions', () => {
     await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: { label: 'cached' } });
     expect(createGeometry).toHaveBeenCalledOnce();
 
-    await worker.notifyFileChanged([`${basePath}/unrelated.txt`]);
+    await worker.notifyFileChanged(['/unrelated.txt']);
 
     const exportResult = await worker.exportGeometry('3mf');
 
@@ -1187,7 +1446,7 @@ describe('cache identity regressions', () => {
 
   it('should select the request file kernel for exportModel after a different kernel was active', async () => {
     const sourceDefinition = createMockKernelDefinition('source-kernel', {
-      exportSchemas: { glb: z.object({}) },
+      exportFormats: { glb: { optionsSchema: z.object({}), content: [] } },
       createGeometry: async (input) => {
         const label = `source:${String(input.parameters['label'])}`;
         return {
@@ -1216,7 +1475,7 @@ describe('cache identity regressions', () => {
       issues: [] as KernelIssue[],
     }));
     const otherDefinition = createMockKernelDefinition('other-kernel', {
-      exportSchemas: { glb: z.object({}) },
+      exportFormats: { glb: { optionsSchema: z.object({}), content: [] } },
       createGeometry: otherCreateGeometry,
       exportGeometry: otherExportGeometry,
     });

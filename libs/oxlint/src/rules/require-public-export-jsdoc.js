@@ -255,7 +255,7 @@ export const requirePublicExportJsdocRule = {
   meta: {
     type: 'suggestion',
     docs: {
-      description: 'Requires @public JSDoc tag on symbols exported from package.json export entry files',
+      description: 'Requires @public JSDoc tag on symbols exported from package.json export entry paths',
     },
     messages: {
       missingPublicTag: 'Publicly exported symbol "{{name}}" must have a @public JSDoc tag',

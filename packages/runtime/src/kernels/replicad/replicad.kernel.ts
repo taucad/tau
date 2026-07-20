@@ -73,6 +73,22 @@ import { loadReplicadMultiWasm } from '#kernels/replicad/replicad-wasm-multi-loa
 import { createEmptyGlb, createEmptyGltf, createEmptyGltfGeometry } from '#utils/glb-writer.js';
 import { resolveShapeName } from '#utils/shape-names.js';
 
+/* Ponytail: stderr forensic markers, env-gated — mirrors geospec's runner/forensic.ts
+ * so `GEOSPEC_FORENSIC=1` cold-export runs show the kernel phase split. */
+const forensicEnabled = typeof process !== 'undefined' && Boolean(process.env['GEOSPEC_FORENSIC']);
+
+const forensicPhase = async <T>(label: string, operation: () => Promise<T> | T): Promise<T> => {
+  if (!forensicEnabled) {
+    return operation();
+  }
+  const start = performance.now();
+  try {
+    return await operation();
+  } finally {
+    console.error(`[FORENSIC] ${label}\t${(performance.now() - start).toFixed(1)}`);
+  }
+};
+
 const geistRegularUrl = new URL('fonts/Geist-Regular.ttf', import.meta.url).href;
 const replicadSourceMapUrl = new URL('sourcemaps/replicad.js.map', import.meta.url).href;
 const replicadSingleWasmUrl = new URL('wasm/replicad_single.wasm', import.meta.url).href;
@@ -516,8 +532,17 @@ export const replicadKernel = defineKernel({
   name: 'ReplicadKernel',
   version: '1.0.0',
   optionsSchema: replicadOptionsSchema,
-  renderSchema: replicadRenderSchema,
-  exportSchemas: replicadExportSchemas,
+  render: {
+    optionsSchema: replicadRenderSchema,
+    content: ['includeEdges', 'includeTopology'],
+  },
+  exportFormats: {
+    stl: { optionsSchema: replicadExportSchemas.stl, content: [] },
+    step: { optionsSchema: replicadExportSchemas.step, content: [] },
+    glb: { optionsSchema: replicadExportSchemas.glb, content: ['includeEdges', 'includeTopology'] },
+    gltf: { optionsSchema: replicadExportSchemas.gltf, content: ['includeEdges', 'includeTopology'] },
+  },
+  nativeHandleScope: 'source',
 
   async initialize(options, runtime) {
     const replicadLibrary = await loadReplicadLibrary();
@@ -618,16 +643,16 @@ export const replicadKernel = defineKernel({
     };
   },
 
-  async getDependencies({ filePath }, runtime) {
-    return runtime.bundler.resolveDependencies(filePath);
+  async getDependencies({ entryPath }, runtime) {
+    return runtime.bundler.resolveDependencies(entryPath);
   },
 
-  async getParameters({ filePath }, runtime, context) {
-    const relativeFilePath = toVmEntryPath(filePath);
+  async getParameters({ entryPath }, runtime, context) {
+    const relativeFilePath = toVmEntryPath(entryPath);
     let bundleSourceMap: string | undefined;
     let entryUrl: string | undefined;
     try {
-      const bundleResult = await runtime.bundler.bundle(filePath);
+      const bundleResult = await runtime.bundler.bundle(entryPath);
       if (!bundleResult.success) {
         return createKernelError(convertRawIssuesToKernelIssues(bundleResult.issues, relativeFilePath));
       }
@@ -653,14 +678,14 @@ export const replicadKernel = defineKernel({
     }
   },
 
-  async createGeometry({ filePath, parameters }, runtime, context) {
+  async createGeometry({ entryPath, parameters }, runtime, context) {
     const { tracer } = runtime;
-    const relativeFilePath = toVmEntryPath(filePath);
+    const relativeFilePath = toVmEntryPath(entryPath);
     let bundleSourceMap: string | undefined;
     let entryUrl: string | undefined;
 
     try {
-      const bundleResult = await runtime.bundler.bundle(filePath);
+      const bundleResult = await runtime.bundler.bundle(entryPath);
       if (!bundleResult.success) {
         throw new ReplicadBuildError(convertRawIssuesToKernelIssues(bundleResult.issues, relativeFilePath));
       }

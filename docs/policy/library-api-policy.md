@@ -95,7 +95,6 @@ render(file, parameters, tessellation);
 // CORRECT: clear subject + optional config
 exposeFileSystem(fileSystem, options?)
 on(event, handler)
-fromFsLike(fsLike, rootPath?)
 ```
 
 **3 params (distinct architectural concerns)** -- Only when each parameter represents a genuinely different concern in a consistent interface contract. All methods on the same interface must use the same positional convention.
@@ -221,13 +220,13 @@ type ProjectLocator = {
   providerBasePath: string;
 };
 
-const entryFile = manifest.assets.main.entryFile;
+const entryPath = manifest.assets.main.entryPath;
 
 // INCORRECT: one ambiguous string inferred differently by each caller
 openProject(project.id);
 ```
 
-Use a specific compound name where the shorter word is already overloaded. `entryFile` is clearer than `entry`, `file`, `source`, or `path` for the file that starts project evaluation. Exact-location operations require an explicit locator object; optional locator fields, inferred storage roots, and logical-ID path reconstruction are forbidden.
+Use a specific compound name where the shorter word is already overloaded. `entryPath` is clearer than `entry`, `file`, `source`, or `path` for the file that starts project evaluation. Exact-location operations require an explicit locator object; optional locator fields, inferred storage roots, and logical-ID path reconstruction are forbidden.
 
 ### Consistent prefixes by role
 
@@ -708,7 +707,7 @@ type CacheOptions = {
 };
 
 await sleep(250);
-client.setOptions({ renderTimeout: 60_000 });
+client.setRenderTimeout(60_000);
 ```
 
 INCORRECT:
@@ -721,7 +720,7 @@ type CacheOptions = {
 };
 
 await sleep(0.25); // ambiguous: seconds or milliseconds?
-client.setOptions({ renderTimeoutMs: 30_000 }); // suffix is forbidden
+client.setRenderTimeout(30_000); // `setRenderTimeoutMs` would be forbidden
 ```
 
 ### Documenting the unit
@@ -892,7 +891,8 @@ export type RuntimeFileSystem = { readonly [opaqueBrand]: unique symbol };
 export const fromMemoryFs: () => RuntimeFileSystem;
 export const fromNodeFs: (basePath: string) => RuntimeFileSystem;
 export const fromBrowserFs: (...) => RuntimeFileSystem;
-export const fromFsLike: (fsLike: FsLike, rootPath?: string) => RuntimeFileSystem;
+// fsLike is already confined to virtual `/`; raw Node roots use fromNodeFs.
+export const fromFsLike: (fsLike: FsLike) => RuntimeFileSystem;
 export const fromFileSystemBridge: (open: () => FileSystemBridgeConnection) => RuntimeFileSystem;
 
 // The wired transport callable is the only surface that binds wire primitives from options.
@@ -907,6 +907,8 @@ await client.connect();    // no arguments
 ```
 
 A Worker / in-process transport binds the FS bridge via `MessagePort` internally; a WebSocket transport multiplexes it over the same socket; an Electron IPC transport binds it via `MessagePortMain`. The runtime client never types against any wire primitive — that responsibility lives entirely inside the wired {@link TransportPlugin} callable and its `.materialize()` handle.
+
+The opaque filesystem is also the complete runtime reachability contract. Plugin callbacks accept canonical local absolute paths and the filesystem they can access; never add project roots, ids, grants, authorization callbacks, or wire-derived capability objects to kernel, bundler, middleware, or headless-service inputs. Exact source requests keep their operation ownership local instead of mutating the active preview's public state.
 
 ### Smell tests
 

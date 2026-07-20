@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { sortGeometryUnitEntries } from '#routes/projects_.$id/geometry-unit.utils.js';
 
 describe('sortGeometryUnitEntries', () => {
-  it('should place mainEntryFile first', () => {
+  it('should place mainEntryPath first', () => {
     const entries: Array<[string, number]> = [
       ['b.ts', 2],
       ['main.ts', 1],
@@ -28,7 +28,7 @@ describe('sortGeometryUnitEntries', () => {
     expect(sorted).toEqual([['main.ts', 1]]);
   });
 
-  it('should handle entries where mainEntryFile is not present', () => {
+  it('should handle entries where mainEntryPath is not present', () => {
     const entries: Array<[string, number]> = [
       ['b.ts', 2],
       ['a.ts', 1],

@@ -34,7 +34,7 @@ The governing invariant is:
 | Concern                             | Authoritative home                                      | Examples                                                            |
 | ----------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------- |
 | Portable project declaration        | `/tau.json`                                             | schema URL, logical ID, name, description, tags, and the main asset |
-| Authored or generated project files | Project filesystem                                      | entry files, `.tau/parameters/<entryFile>.json`, asset thumbnails   |
+| Authored or generated project files | Project filesystem                                      | entry paths, `.tau/parameters/<entryPath>.json`, asset thumbnails   |
 | Host-local library lifecycle        | `projectLibraryStates` object store                     | `lastActivityAt`, `deletedAt`                                       |
 | Host-local revision pointer         | `projectLibraryStates` object store                     | `revisionState` while chats remain browser-local                    |
 | Physical storage binding            | `ProjectFileSystemConfig` in `tau-fs-handles`           | backend, workspace ID, storage root                                 |
@@ -102,10 +102,10 @@ This URL rule applies to Tau-owned, user-visible JSON documents that expose `$sc
 
 `assets` is a strict object with exactly one required `main` property. `main` declares:
 
-- `entryFile`: the normalized project-relative file that starts evaluation;
+- `entryPath`: the normalized project-relative file that starts evaluation;
 - optional `thumbnail`: the unique Tau-managed project-relative WebP output slot associated with that asset.
 
-`entryFile` is preferred over `entry`, `file`, `source`, or `path`: it matches Tau's established public vocabulary and describes both the file kind and its role. Tau currently supports one first-class entry and mechanical projects only. Additional asset keys, a `discipline` constant, and an arbitrary asset map have no current consumer and are forbidden. They may be deliberately designed when a second entry or non-mechanical workflow actually requires them.
+`entryPath` is preferred over `entry`, `file`, `source`, or `path`: it matches Tau's established public vocabulary and describes both the file kind and its role. Tau currently supports one first-class entry and mechanical projects only. Additional asset keys, a `discipline` constant, and an arbitrary asset map have no current consumer and are forbidden. They may be deliberately designed when a second entry or non-mechanical workflow actually requires them.
 
 The canonical v1 asset shape is:
 
@@ -113,14 +113,14 @@ The canonical v1 asset shape is:
 {
   "assets": {
     "main": {
-      "entryFile": "main.ts",
+      "entryPath": "main.ts",
       "thumbnail": "thumbnail.webp"
     }
   }
 }
 ```
 
-Parameters are not embedded and no `parametersFile` pointer is added. The sidecar path is derived canonically as `.tau/parameters/<entryFile>.json`. Asset `version` and `dependencies` fields require a real resolution contract before they may return; speculative or derived values do not belong in the manifest.
+Parameters are not embedded and no `parametersFile` pointer is added. The sidecar path is derived canonically as `.tau/parameters/<entryPath>.json`. Asset `version` and `dependencies` fields require a real resolution contract before they may return; speculative or derived values do not belong in the manifest.
 
 The strict schema validates each declared path as a normalized project-relative POSIX path. It deliberately performs no speculative cross-field or filesystem-existence validation. The thumbnail owner may apply the narrower safety checks required before replacing the declared output bytes. Authored previews that Tau must preserve require a different future field.
 
@@ -139,7 +139,7 @@ type ProjectLibraryState = {
 };
 ```
 
-Do not add manifest-derived name, description, author, tags, assets, entry files, thumbnails, physical locators, or file bytes to this row. Do not add a generic partial-update API. Mutations use field-scoped atomic operations such as `touchProjectActivity`, `trashProject`, `restoreProject`, and `setProjectRevisionState` under the storage policy's keyed-transaction rules.
+Do not add manifest-derived name, description, author, tags, assets, entry paths, thumbnails, physical locators, or file bytes to this row. Do not add a generic partial-update API. Mutations use field-scoped atomic operations such as `touchProjectActivity`, `trashProject`, `restoreProject`, and `setProjectRevisionState` under the storage policy's keyed-transaction rules.
 
 `createdAt` is intentionally absent. Tau currently has no product behavior that needs a portable project-creation claim, and filesystem birth time is not portable. If a future feature needs “added to this library,” name it `addedAt` and keep it local; if it needs authored provenance, define that separate portable concept explicitly.
 
@@ -218,7 +218,7 @@ Readers bound bytes before `JSON.parse`, validate through the selected strict sc
 - [ ] Manifest, library-state, and composed UI types are separate; serialization is explicit.
 - [ ] `$schema` is the sole manifest version field; strict v1 is generated and becomes immutable when released.
 - [ ] The v1 schema and every nested object reject unknown properties.
-- [ ] `assets` contains exactly `main`; `assets.main.entryFile` is required and `thumbnail` is optional.
+- [ ] `assets` contains exactly `main`; `assets.main.entryPath` is required and `thumbnail` is optional.
 - [ ] `author`, `discipline`, and speculative additional asset keys are absent.
 - [ ] The thumbnail owner alone performs overwrite-safety checks for a declared thumbnail path.
 - [ ] Parameters live only in canonical per-entry sidecars.

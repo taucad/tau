@@ -21,7 +21,7 @@ const mockDependencies: readonly Dependency[] = [
   { type: 'file', path: 'test.kcl', contentHash: 'abc123' },
   {
     type: 'middleware',
-    name: 'TestMiddleware',
+    id: 'test-middleware',
     version: '1',
     index: 0,
     options: {},
@@ -278,26 +278,6 @@ describe('createMiddlewareRuntime', () => {
     expect(runtime.state.value).toEqual({});
     expect(runtime.dependencies).toBe(mockDependencies);
     expect(runtime.dependencyHash).toBe(mockDependencyHash);
-    expect(runtime.projectRootPath).toBe('');
-    expect(runtime.basePath).toBe('');
-  });
-
-  it('should expose projectRootPath and basePath to middleware hooks', () => {
-    const onLog = vi.fn();
-    const filesystem = createMockFileSystem();
-
-    const runtime = createMiddlewareRuntime({
-      onLog: onLog as OnWorkerLog,
-      middlewareName: 'PathAwareMiddleware',
-      filesystem,
-      dependencies: mockDependencies,
-      dependencyHash: mockDependencyHash,
-      projectRootPath: '/projects/path-aware',
-      basePath: '/projects/path-aware',
-    });
-
-    expect(runtime.projectRootPath).toBe('/projects/path-aware');
-    expect(runtime.basePath).toBe('/projects/path-aware');
   });
 
   it('should create a runtime with state schema validation', () => {
@@ -354,7 +334,7 @@ describe('wrap hook behavior', () => {
         const result = await handler(input);
 
         // Transform the result
-        if (result.success) {
+        if (result.success && result.data !== undefined) {
           return {
             ...result,
             data: { ...result.data, transformed: true },
@@ -382,8 +362,7 @@ describe('wrap hook behavior', () => {
     const definition = await resolveRuntimePluginDefinition('middleware', middleware());
     const result = await definition.wrapCreateGeometry!(
       {
-        filePath: '/projects/test/test.kcl',
-        basePath: '/projects/test',
+        entryPath: '/test.kcl',
         parameters: {},
         options: {},
       },
@@ -424,11 +403,10 @@ describe('wrap hook behavior', () => {
     const mockHandler = vi.fn();
 
     const input = {
-      filePath: '/projects/test/test.kcl',
-      basePath: '/projects/test',
+      entryPath: '/test.kcl',
       parameters: {},
       options: {},
-    };
+    } as const;
     const runtime = createMiddlewareRuntime({
       onLog: vi.fn() as OnWorkerLog,
       middlewareName: 'Test',
@@ -493,8 +471,7 @@ describe('wrap hook behavior', () => {
     const definition = await resolveRuntimePluginDefinition('middleware', middleware());
     await definition.wrapCreateGeometry!(
       {
-        filePath: '/projects/test/test.kcl',
-        basePath: '/projects/test',
+        entryPath: '/test.kcl',
         parameters: {},
         options: {},
       },

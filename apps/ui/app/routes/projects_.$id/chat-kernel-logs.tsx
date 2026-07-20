@@ -49,9 +49,9 @@ function VirtualizedLogList({
 }
 
 export const GeometryUnitLogs = memo(function GeometryUnitLogs({
-  entryFile,
+  entryPath,
 }: {
-  readonly entryFile: string;
+  readonly entryPath: string;
 }): React.JSX.Element {
   const { logRef } = useProject();
   const logVersion = useSelector(logRef, (state) => state.context.logVersion);
@@ -60,9 +60,9 @@ export const GeometryUnitLogs = memo(function GeometryUnitLogs({
 
   const cuLogs = useMemo(() => {
     const all = logRef.getSnapshot().context.logBuffer.toArray();
-    return all.filter((log: LogEntry) => log.origin?.file === entryFile);
+    return all.filter((log: LogEntry) => log.origin?.file === entryPath);
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- logVersion tracks buffer mutations
-  }, [logRef, logVersion, entryFile]);
+  }, [logRef, logVersion, entryPath]);
 
   const filteredLogs = useMemo(() => {
     if (!filter) {

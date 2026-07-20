@@ -30,12 +30,12 @@ const mockCadRef2 = {
 } as unknown as ActorRefFrom<typeof cadMachine>;
 
 let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
-const mockMainEntryFile = 'main.ts';
+const mockMainEntryPath = 'main.ts';
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
     geometryUnits: mockGeometryUnits,
-    mainEntryFile: mockMainEntryFile,
+    mainEntryPath: mockMainEntryPath,
     logRef: {
       getSnapshot: vi.fn(() => ({
         context: { logBuffer: { toArray: () => [] }, logVersion: 0 },
@@ -98,7 +98,7 @@ vi.mock('#routes/projects_.$id/chat-kernel-timing.js', () => ({
 }));
 
 vi.mock('#routes/projects_.$id/chat-kernel-logs.js', () => ({
-  GeometryUnitLogs: ({ entryFile }: { entryFile: string }) => <div data-testid='cu-logs'>{entryFile}</div>,
+  GeometryUnitLogs: ({ entryPath }: { entryPath: string }) => <div data-testid='cu-logs'>{entryPath}</div>,
 }));
 
 vi.mock('#routes/projects_.$id/use-chat-interface-state.js', () => ({

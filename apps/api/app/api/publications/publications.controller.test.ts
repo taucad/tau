@@ -90,7 +90,7 @@ describe('PublicationsController', () => {
     const manifest = {
       projectId: 'proj',
       projectName: 'Demo',
-      entryFile: entryPath,
+      entryPath: entryPath,
       visibility: 'private',
       title: 'Hello',
     };
@@ -138,7 +138,7 @@ describe('PublicationsController', () => {
       visibility: 'public',
       runtimePin: 'x',
       kernels: ['replicad'],
-      entryFile: entryPath,
+      entryPath: entryPath,
       title: 'T',
       description: null,
       forkCount: 0,
@@ -160,7 +160,7 @@ describe('PublicationsController', () => {
       manifest: {
         version: 1,
         projectId: 'proj',
-        entryFile: entryPath,
+        entryPath: entryPath,
         files: { [entryPath]: 'sha256:' + 'a'.repeat(64) },
         kernels: [],
         runtime: '@taucad/runtime@pin',
@@ -190,7 +190,7 @@ describe('PublicationsController', () => {
         visibility: 'public',
         runtimePin: 'x',
         kernels: [],
-        entryFile: entryPath,
+        entryPath: entryPath,
         title: 'T',
         description: null,
         forkCount: 0,
@@ -209,7 +209,7 @@ describe('PublicationsController', () => {
       manifest: {
         version: 1,
         projectId: 'proj',
-        entryFile: entryPath,
+        entryPath: entryPath,
         files: { [entryPath]: 'sha256:' + 'a'.repeat(64) },
         kernels: [],
         runtime: '@taucad/runtime@pin',
@@ -451,7 +451,7 @@ describe('PublishUploadDto validation (ZodValidationPipe)', () => {
     }).toThrow(ZodValidationException);
   });
 
-  it('rejects manifest missing entryFile', () => {
+  it('rejects manifest missing entryPath', () => {
     const manifestJson = JSON.stringify({
       projectId: 'proj',
       projectName: 'Demo',

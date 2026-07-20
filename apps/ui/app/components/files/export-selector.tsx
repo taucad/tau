@@ -18,7 +18,7 @@ import { sortGeometryUnitEntries } from '#routes/projects_.$id/geometry-unit.uti
 import type { cadMachine } from '#machines/cad.machine.js';
 
 type GeometryUnitEntry = {
-  entryFile: string;
+  entryPath: string;
   actor: ActorRefFrom<typeof cadMachine>;
 };
 
@@ -42,11 +42,11 @@ export type ExportSelectorProps = {
    */
   readonly filenameBase: string;
   /**
-   * Optional main entry file. Used in multi-geometry mode to mark the "Main" badge in the
+   * Optional main entry path. Used in multi-geometry mode to mark the "Main" badge in the
    * picker and to seed the initial selection. Ignored in single-geometry mode.
    */
-  readonly mainEntryFile?: string;
-  readonly defaultEntryFile?: string;
+  readonly mainEntryPath?: string;
+  readonly defaultEntryPath?: string;
   /**
    * Layout variant.
    * - `sub`: bare body, sized for a `DropdownMenuSubContent`/`ContextMenuSubContent`.
@@ -58,7 +58,7 @@ export type ExportSelectorProps = {
    * Optional callback fired after a successful export. Caller can use it to
    * close menus, show downstream UI, or extend the workflow.
    */
-  readonly onExport?: (entryFile: string, format: FileExtension) => void;
+  readonly onExport?: (entryPath: string, format: FileExtension) => void;
   /** `grid` (default) or vertical `list` for compact menus. */
   readonly layout?: ExportFormatLayout;
   /**
@@ -88,7 +88,7 @@ function getCuGroupedItems(entries: GeometryUnitEntry[]): Array<{ name: string; 
   return cached;
 }
 
-const getCuValue = (entry: GeometryUnitEntry): string => entry.entryFile;
+const getCuValue = (entry: GeometryUnitEntry): string => entry.entryPath;
 
 export const getExportFormatValue = (entry: FormatEntry): string => entry.format;
 
@@ -113,43 +113,43 @@ export function ExportFormatComboboxLabel({
 
 function GeometryUnitPicker({
   entries,
-  selectedEntryFile,
-  mainEntryFile,
+  selectedEntryPath,
+  mainEntryPath,
   onSelect,
 }: {
   readonly entries: GeometryUnitEntry[];
-  readonly selectedEntryFile: string;
-  readonly mainEntryFile: string | undefined;
-  readonly onSelect: (entryFile: string) => void;
+  readonly selectedEntryPath: string;
+  readonly mainEntryPath: string | undefined;
+  readonly onSelect: (entryPath: string) => void;
 }) {
   if (entries.length <= 1) {
     return null;
   }
 
   const groupedItems = getCuGroupedItems(entries);
-  const defaultValue = entries.find((entry) => entry.entryFile === selectedEntryFile);
+  const defaultValue = entries.find((entry) => entry.entryPath === selectedEntryPath);
 
   const renderLabel = useCallback(
     (item: GeometryUnitEntry, selectedItem: GeometryUnitEntry | undefined) => (
       <span className='flex w-full items-center justify-between gap-2'>
         <span className='flex min-w-0 items-center gap-2'>
-          <FileExtensionIcon filename={item.entryFile} className='size-3.5 shrink-0' />
+          <FileExtensionIcon filename={item.entryPath} className='size-3.5 shrink-0' />
           <span className='flex min-w-0 flex-col'>
-            <span className='truncate text-sm'>{item.entryFile}</span>
-            {item.entryFile === mainEntryFile && <span className='text-[10px] text-muted-foreground'>Main</span>}
+            <span className='truncate text-sm'>{item.entryPath}</span>
+            {item.entryPath === mainEntryPath && <span className='text-[10px] text-muted-foreground'>Main</span>}
           </span>
         </span>
-        {selectedItem?.entryFile === item.entryFile ? <Check className='size-3.5 shrink-0' /> : null}
+        {selectedItem?.entryPath === item.entryPath ? <Check className='size-3.5 shrink-0' /> : null}
       </span>
     ),
-    [mainEntryFile],
+    [mainEntryPath],
   );
 
   return (
     <div>
       <p className='mb-1.5 text-xs font-medium text-muted-foreground'>File</p>
       <ComboBoxResponsive<GeometryUnitEntry>
-        key={mainEntryFile}
+        key={mainEntryPath}
         groupedItems={groupedItems}
         renderLabel={renderLabel}
         getValue={getCuValue}
@@ -164,8 +164,8 @@ function GeometryUnitPicker({
       >
         <Button variant='outline' size='sm' className='w-full justify-between'>
           <span className='flex min-w-0 items-center gap-1.5'>
-            <FileExtensionIcon filename={selectedEntryFile} className='size-3.5 shrink-0' />
-            <span className='truncate'>{selectedEntryFile}</span>
+            <FileExtensionIcon filename={selectedEntryPath} className='size-3.5 shrink-0' />
+            <span className='truncate'>{selectedEntryPath}</span>
           </span>
           <ChevronDown className='size-3 shrink-0 text-muted-foreground' />
         </Button>
@@ -180,9 +180,9 @@ function GeometryUnitPicker({
 
 function ExportSelectorBody({
   entries,
-  selectedEntryFile,
-  mainEntryFile,
-  onEntryFileChange,
+  selectedEntryPath,
+  mainEntryPath,
+  onEntryPathChange,
   selectedActor,
   filenameBase,
   onExport,
@@ -192,12 +192,12 @@ function ExportSelectorBody({
   onFormatSelect,
 }: {
   readonly entries: GeometryUnitEntry[];
-  readonly selectedEntryFile: string;
-  readonly mainEntryFile: string | undefined;
-  readonly onEntryFileChange: (entryFile: string) => void;
+  readonly selectedEntryPath: string;
+  readonly mainEntryPath: string | undefined;
+  readonly onEntryPathChange: (entryPath: string) => void;
   readonly selectedActor: ActorRefFrom<typeof cadMachine> | undefined;
   readonly filenameBase: string;
-  readonly onExport?: (entryFile: string, format: FileExtension) => void;
+  readonly onExport?: (entryPath: string, format: FileExtension) => void;
   readonly layout: ExportFormatLayout;
   readonly isSelectOnly: boolean;
   readonly selectedFormat?: FileExtension;
@@ -225,18 +225,18 @@ function ExportSelectorBody({
         return;
       }
       await exportToDisk(selectedActor, format);
-      onExport?.(selectedEntryFile, format);
+      onExport?.(selectedEntryPath, format);
     },
-    [isSelectOnly, onFormatSelect, selectedActor, exportToDisk, onExport, selectedEntryFile],
+    [isSelectOnly, onFormatSelect, selectedActor, exportToDisk, onExport, selectedEntryPath],
   );
 
   return (
     <div className='flex flex-col gap-3'>
       <GeometryUnitPicker
         entries={entries}
-        selectedEntryFile={selectedEntryFile}
-        mainEntryFile={mainEntryFile}
-        onSelect={onEntryFileChange}
+        selectedEntryPath={selectedEntryPath}
+        mainEntryPath={mainEntryPath}
+        onSelect={onEntryPathChange}
       />
       {availableFormats.length > 0 ? (
         <ExportFormatGrid
@@ -261,7 +261,7 @@ function ExportSelectorBody({
  * Picks an export format and immediately downloads the result.
  *
  * Single-geometry unit mode: pass `cadActor` to lock the selector to one geometry unit.
- * Multi-geometry unit mode: pass `geometryUnits` (and optionally `mainEntryFile`) to
+ * Multi-geometry unit mode: pass `geometryUnits` (and optionally `mainEntryPath`) to
  * allow the user to pick which geometry unit to export.
  *
  * Variants:
@@ -273,8 +273,8 @@ export function ExportSelector({
   cadActor,
   geometryUnits,
   filenameBase,
-  mainEntryFile,
-  defaultEntryFile,
+  mainEntryPath,
+  defaultEntryPath,
   variant = 'inline',
   onExport,
   layout = 'grid',
@@ -288,33 +288,33 @@ export function ExportSelector({
     if (cadActor) {
       // Single-geometry unit mode — derive a synthetic entry from the actor. The picker
       // will be hidden because length === 1.
-      const entryFile = defaultEntryFile ?? mainEntryFile ?? filenameBase;
-      return [{ entryFile, actor: cadActor }];
+      const entryPath = defaultEntryPath ?? mainEntryPath ?? filenameBase;
+      return [{ entryPath, actor: cadActor }];
     }
     if (geometryUnits) {
-      const sorted = sortGeometryUnitEntries([...geometryUnits.entries()], mainEntryFile ?? '');
-      return sorted.map(([entryFile, actor]) => ({ entryFile, actor }));
+      const sorted = sortGeometryUnitEntries([...geometryUnits.entries()], mainEntryPath ?? '');
+      return sorted.map(([entryPath, actor]) => ({ entryPath, actor }));
     }
     return [];
-  }, [cadActor, geometryUnits, defaultEntryFile, mainEntryFile, filenameBase]);
+  }, [cadActor, geometryUnits, defaultEntryPath, mainEntryPath, filenameBase]);
 
-  const initialEntryFile = defaultEntryFile ?? mainEntryFile ?? entries[0]?.entryFile ?? '';
-  const [selectedEntryFile, setSelectedEntryFile] = useState(initialEntryFile);
+  const initialEntryPath = defaultEntryPath ?? mainEntryPath ?? entries[0]?.entryPath ?? '';
+  const [selectedEntryPath, setSelectedEntryPath] = useState(initialEntryPath);
 
   useEffect(() => {
-    if (!entries.some((entry) => entry.entryFile === selectedEntryFile)) {
-      setSelectedEntryFile(entries[0]?.entryFile ?? initialEntryFile);
+    if (!entries.some((entry) => entry.entryPath === selectedEntryPath)) {
+      setSelectedEntryPath(entries[0]?.entryPath ?? initialEntryPath);
     }
-  }, [entries, selectedEntryFile, initialEntryFile]);
+  }, [entries, selectedEntryPath, initialEntryPath]);
 
-  const selectedActor = entries.find((entry) => entry.entryFile === selectedEntryFile)?.actor ?? entries[0]?.actor;
+  const selectedActor = entries.find((entry) => entry.entryPath === selectedEntryPath)?.actor ?? entries[0]?.actor;
 
   const body = (
     <ExportSelectorBody
       entries={entries}
-      selectedEntryFile={selectedEntryFile}
-      mainEntryFile={mainEntryFile}
-      onEntryFileChange={setSelectedEntryFile}
+      selectedEntryPath={selectedEntryPath}
+      mainEntryPath={mainEntryPath}
+      onEntryPathChange={setSelectedEntryPath}
       selectedActor={selectedActor}
       filenameBase={filenameBase}
       onExport={onExport}

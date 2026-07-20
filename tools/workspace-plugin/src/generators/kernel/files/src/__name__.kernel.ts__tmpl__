@@ -61,7 +61,7 @@ export const <%= propertyName %>: KernelPluginFactory<'<%= name %>', <%= classNa
 
   async getDependencies() {
     // TODO: resolve the model's import graph — usually
-    // `runtime.bundler.resolveDependencies(filePath)` for JS/TS kernels.
+    // `runtime.bundler.resolveDependencies(entryPath)` for JS/TS kernels.
     return { resolved: [], unresolved: [] };
   },
 

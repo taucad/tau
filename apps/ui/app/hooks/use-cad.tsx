@@ -12,7 +12,7 @@ const CadContext = createContext<CadActorRef | undefined>(undefined);
  * Placed in ChatViewer alongside GraphicsProvider.
  *
  * Unlike GraphicsProvider, the value may be `undefined` when the geometry unit
- * has not yet been created for the current entry file.
+ * has not yet been created for the current entry path.
  */
 export function CadProvider({
   cadRef,

@@ -3,12 +3,14 @@ title: 'Kernel Architecture Policy'
 description: 'CAD runtime worker architecture from editor to geometry computation. Covers ProjectMachine, CadMachine, RuntimeClient, plugin model, transport, and lifecycle.'
 status: active
 created: '2026-02-18'
-updated: '2026-07-16'
+updated: '2026-07-21'
 related:
+  - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
   - docs/policy/filesystem-authority-policy.md
   - docs/research/headless-thumbnail-rendering-architecture-v4.md
   - docs/research/runtime-model-load-project-root-regression-v3.md
+  - docs/research/runtime-rooted-filesystem-residual-migration.md
 ---
 
 # Kernel Architecture Policy
@@ -28,8 +30,8 @@ Route (projects_.$id)
        ├─ EditorMachine (1 per project, UI state)
        ├─ ViewGraphics: Map<viewId, GraphicsMachine>
        │    └─ GraphicsMachine (1 per viewer panel, WebGL rendering)
-       └─ CompilationUnits: Map<entryFile, CadMachine>
-            └─ CadMachine (1 per entry file, headless computation)
+       └─ CompilationUnits: Map<entryPath, CadMachine>
+            └─ CadMachine (1 per entry path, headless computation)
                  └─ KernelMachine (1 per CadMachine)
                       └─ RuntimeClient → RuntimeTransport → Worker
                            └─ KernelRuntimeWorker (1 Web Worker per KernelMachine)
@@ -124,7 +126,7 @@ Multiple bundlers can be registered simultaneously. Each bundler declares the fi
 | ------------------- | ----------------------- | ---------------------- | ---------------------------------------------- |
 | ProjectMachine      | 1                       | --                     | Root state machine                             |
 | FileManagerMachine  | 1                       | --                     | Shared across all units                        |
-| CadMachine          | 1 per unique entry file | --                     | Shared when multiple panels view the same file |
+| CadMachine          | 1 per unique entry path | --                     | Shared when multiple panels view the same file |
 | KernelMachine       | 1 per CadMachine        | --                     | Always 1:1 with CadMachine                     |
 | RuntimeClient       | 1 per KernelMachine     | --                     | Manages Worker lifecycle                       |
 | KernelRuntimeWorker | 1 per RuntimeClient     | --                     | Single worker, loads kernel on demand          |
@@ -151,7 +153,8 @@ Previously, all 5 kernels were loaded eagerly (~90 MB per CadMachine).
 3. client.render({ source: { files: { 'box.ts': '...' } } }) → Stages files into the transport-owned filesystem, auto-connects, renders
 4. client.render({ source: { path }, parameters })      → Renders from the connected transport-owned filesystem
 5. client.connect()                                     → Explicit connection for worker bridges
-6. client.terminate()                                   → Worker terminated, resources cleaned up
+6. client.shutdown({ drain: true })                     → Admission closes, accepted work settles, cleanup is acknowledged, transport closes
+7. client.terminate()                                   → Hard stop; transport closes without claiming remote cleanup
 ```
 
 ### RenderInput Type
@@ -160,7 +163,7 @@ The `render()` method accepts two input shapes via generic overloads:
 
 **Inline source mode** (`InlineRuntimeSource<Files>`): A filename-to-content map under `source.files`. When the map has a single key, `entry` is optional (the runtime picks the only key). When multiple keys exist, `entry` is required to specify the entry point. The runtime stages files into the transport-owned filesystem, then connects and renders. High-level helpers provide a filesystem automatically; raw transports require `fileSystem`.
 
-**Filesystem mode** (`FilesystemRuntimeSource`): Renders from a connected filesystem. `source.path` can be a project-local string shorthand (e.g., `'/src/main.ts'`) or a `GeometryFile` object. File-change invalidation is owned by the worker's filesystem watch path, not a public render-input field. Persisted projects expose source, `/.tau/cache`, generated files, and project-local `/node_modules` through one fully writable rooted tree.
+**Filesystem mode** (`FilesystemRuntimeSource`): Renders from a connected filesystem. `source.path` is one complete project-local string (for example, `'/src/main.ts'`). `RuntimeClient` alone canonicalizes and splits that path into the runtime-owned worker locator. File-change invalidation is owned by the worker's filesystem watch path, not a public render-input field. Persisted projects expose source, `/.tau/cache`, generated files, and project-local `/node_modules` through one fully writable rooted tree.
 
 ### Geometry Event
 
@@ -169,6 +172,12 @@ When any render completes (success or failure), the `geometry` event fires with 
 ### Auto-Cancellation (Latest-Wins)
 
 When a follow-up render request arrives while a previous render is in-flight, the previous render is cooperatively superseded via the abort signal slot. The prior outcome resolves as `{ status: 'superseded' }` on the discriminated `RenderOutcome` returned from `render`/`updateParameters`/`setOptions` — never as a thrown exception. Only the latest render's result fires the `geometry` event. For pull consumers (CLI), renders are sequential so supersession never triggers.
+
+### Render Timeout Ownership
+
+Keep render timeout enforcement on the main-thread runtime client. Configure the initial value through `createRuntimeClient({ renderTimeout })`; configure a connected client through synchronous `client.setRenderTimeout(renderTimeout)`.
+
+Never place `renderTimeout` in kernel render options, worker runtime definitions, or worker protocol messages. A timeout update sends no render intent, performs no transport operation, and applies only to renders that begin after the call. An in-flight render retains the timeout captured when it began. Zero disables timeout enforcement.
 
 ## RuntimeFileSystem
 
@@ -194,7 +203,7 @@ The framework builds higher-level operations from these primitives internally:
 - `getDirectoryContents(dir)` via `readdir(dir)` + `Promise.all(names.map(readFile))`
 - `getDirectoryStat(dir)` via `readdir(dir)` + `Promise.all(names.map(stat))`
 
-Convenience constructors (all opaque, transport-ready): `fromNodeFs(basePath)`, `fromMemoryFs()`, `fromFsLike(fsLike, rootPath?)`, `fromBrowserFs(...)`, and `fromFileSystemBridge(openConnection)`. The bridge factory opens a fresh scoped connection for each runtime binding or initialize retry.
+Convenience constructors (all opaque, transport-ready): `fromNodeFs(basePath)`, `fromMemoryFs()`, `fromFsLike(fsLike)`, `fromBrowserFs(...)`, and `fromFileSystemBridge(openConnection)`. `fromFsLike` adapts an already-confined filesystem and does not accept an authority root. The bridge factory opens a fresh scoped connection for each runtime binding or initialize retry.
 
 Runtime filesystem access is intentionally authorization-blind. It resolves, reads, writes, watches, bundles, caches, and renders paths exposed by the supplied filesystem. Confinement belongs to the filesystem implementation; `cwd = /` is lookup context, not an authorization check. Node lexical/symlink containment protects the adapter boundary, but direct malicious `node:fs` access requires a separate OS/container sandbox.
 
@@ -265,17 +274,11 @@ The RuntimeClient creates the Worker lazily on first `connect()` or `render()`:
 
 Only the WASM runtime for the selected kernel is ever loaded.
 
-### Cleanup Chain
+### Cleanup Chains
 
-```
-ProjectMachine.stopStatefulActors()
-  → enqueue.stopChild(cadMachine)
-    → CadMachine stops
-      → KernelMachine exit action: destroyWorkers()
-        → kernelClient.terminate()
-          → workerClient.cleanup()
-          → transport.close()
-```
+Graceful shutdown closes client admission, waits for already-admitted intents, sends one acknowledged `cleanup` call that runs behind the worker FIFO, and closes the transport only after that call settles. Cleanup is idempotent.
+
+Hard `terminate()` and non-draining `shutdown()` reject pending work and close the transport promptly. They deliberately make no claim that worker cleanup ran before the transport disappeared.
 
 ## Kernel Selection (Three-Pass Detection)
 
@@ -285,9 +288,9 @@ ProjectMachine.stopStatefulActors()
 1. Check selectionCache (full file path as key) → hit? return immediately
 
 2. Pass 1: Extension + regex fast path
-   - Try each kernel config's detectImport regex against the entry file
+   - Try each kernel config's detectImport regex against the entry path
    - Extension-only kernels (openscad, zoo) match immediately
-   - Regex kernels (replicad, manifold, jscad) test entry file content
+   - Regex kernels (replicad, manifold, jscad) test entry path content
 
 3. Pass 2: Bundler-assisted detection (transitive)
    - If no kernel matched AND a bundler handles this file's extension:
@@ -312,9 +315,9 @@ Priority: openscad → zoo → replicad → manifold → jscad → tau
 | -------- | ----------------------------- | ----------------------- |
 | OpenScad | Extension: `.scad`            | Immediate               |
 | Zoo      | Extension: `.kcl`             | Immediate               |
-| Replicad | Regex + bundler detectImports | Entry file + transitive |
-| Manifold | Regex + bundler detectImports | Entry file + transitive |
-| Jscad    | Regex + bundler detectImports | Entry file + transitive |
+| Replicad | Regex + bundler detectImports | Entry path + transitive |
+| Manifold | Regex + bundler detectImports | Entry path + transitive |
+| Jscad    | Regex + bundler detectImports | Entry path + transitive |
 | Tau      | Extension: `*` (catch-all)    | Fallback                |
 
 ### Multi-Module Registration
@@ -360,7 +363,7 @@ Kernel modules define geometry computation logic. Each kernel is an ES module lo
 - `initialize(options, runtime)` — load WASM, register builtin modules. `options` is type-safe via the `Options` generic inferred from `optionsSchema`
 - `getDependencies(input, runtime, ctx)` — return file dependencies
 - `getParameters(input, runtime, ctx)` — extract parameters from code
-- `createGeometry(input, runtime, ctx)` — evaluate source → `{ nativeHandle, geometry? }`. The nativeHandle carries **all export-facing evidence** (shapes, resolved interfaces, datum frames). Manifold and Tau return display-ready inline `geometry`; Replicad, OpenCascade, Zoo, and JSCAD return reusable native evidence and implement `meshGeometry`
+- `createGeometry(input, runtime, ctx)` — evaluate source → `{ nativeHandle, geometry? }`. The nativeHandle carries **all export-facing evidence** (shapes, resolved interfaces, datum frames). Manifold and Tau return display-ready inline `geometry`; Replicad, OpenCascade, Zoo, JSCAD, and OpenSCAD return reusable native evidence and implement `meshGeometry`. The input carries framework-resolved construction values, never render/export route intent
 - `meshGeometry(input, runtime, ctx)` _(optional)_ — nativeHandle → display artifact (`GeometryResponse`) at preview tessellation or display packing. Runs **only on the display path**, at the kernel boundary; export-only requests never call it. Contract invariant: a kernel provides a display path either via inline `geometry` or via `meshGeometry` — the orchestrator rejects display renders when neither exists
 - `exportGeometry(input, runtime, ctx)` — export using the framework-materialized nativeHandle. Mesh formats tessellate internally at export quality; BRep formats (STEP/IGES) never tessellate
 
@@ -368,9 +371,10 @@ Kernel modules define geometry computation logic. Each kernel is an ES module lo
 
 The kernel machine communicates with the worker via typed MessagePort events through the `RuntimeTransport` interface:
 
-- All request/response commands carry a `requestId` for correlation
-- Fire-and-forget commands (`fileChanged`, `cleanup`) have no requestId
-- `cancel` command is used by auto-cancellation (latest-wins semantics) when a new `render()` supersedes an in-flight one
+- Request/response calls (`initialize`, `export`, `exportModel`, and `cleanup`) carry a `requestId` for correlation
+- Preview intent and mutation notifications (`openFile`, `stage-and-render`, `updateParameters`, `setOptions`, `fileChanged`, and `abort`) are fire-and-forget
+- `setRenderTimeout` is not a protocol notification; it is synchronous main-thread client control state
+- `abort` carries the preview token reservation used by latest-wins cooperative supersession; execution consumes that reservation without incrementing it again
 - `fileChanged` command is internal to filesystem watch delivery and is not exposed as a public render-input field
 - `progress` events stream render phase transitions to the UI
 - `telemetry` events batch performance entries for the kernel panel
@@ -381,7 +385,7 @@ The bundler produces a metafile with all resolved module paths:
 
 | Namespace   | Example Key                           | Description                      |
 | ----------- | ------------------------------------- | -------------------------------- |
-| `zenfs:`    | `zenfs:main.ts`                       | Project-relative file            |
+| `zenfs:`    | `zenfs:/main.ts`                      | Canonical project-local file     |
 | `zenfs:`    | `zenfs:/node_modules/lodash/index.js` | CDN-cached module                |
 | `builtin:`  | `builtin:replicad`                    | Runtime-registered kernel module |
 | `http-url:` | `http-url:https://esm.sh/...`         | HTTP-fetched module              |
@@ -432,7 +436,7 @@ createRuntimeClient({
 });
 ```
 
-Two explicit slots (`preview` and `export`) make the quality distinction visible and intentional. Preview tessellation is used by the display path (`meshGeometry` for kernels that defer it, inline `createGeometry` otherwise); export tessellation is used by `exportGeometry` for mesh formats. BRep exports (STEP/IGES) tessellate nothing.
+Two explicit slots (`preview` and `export`) make the quality distinction visible and intentional. Preview tessellation is used by the display path (`meshGeometry` for kernels that defer it, inline `createGeometry` otherwise); export tessellation is normally used by `exportGeometry` for mesh formats. When tessellation changes native construction, as in OpenSCAD, the framework projects source-export fields declared by the render schema over render defaults and passes the validated result to `createGeometry`. BRep exports (STEP/IGES) tessellate nothing.
 
 2. **Per-call overrides** — passed as `callOptions` to individual methods:
 
@@ -455,13 +459,13 @@ If no tessellation is specified at any level, each kernel applies its own intern
 
 ### Per-Kernel Interpretation
 
-| Kernel       | Preview Default | Export Default | Mechanism                                                                                                                              |
-| ------------ | --------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| **Replicad** | `0.02 / 20°`    | `0.01 / 20°`   | Passed to `.mesh()` and `.meshEdges()`; locked by `occt-tessellation-defaults.test.ts`                                                 |
-| **Manifold** | ignored         | ignored        | Uses Manifold's own tessellation; fixed by model/API output                                                                            |
-| **OpenSCAD** | none            | n/a            | Injected as `$fs` (linear) and `$fa` (angular) CLI arguments at render time. Export reuses baked geometry — override logged as warning |
-| **Zoo/KCL**  | ignored         | ignored        | Tessellation is server-side; future integration point                                                                                  |
-| **JSCAD**    | ignored         | ignored        | Uses fixed internal tessellation                                                                                                       |
+| Kernel       | Preview Default | Export Default | Mechanism                                                                                                                                                                        |
+| ------------ | --------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Replicad** | `0.02 / 20°`    | `0.01 / 20°`   | Passed to `.mesh()` and `.meshEdges()`; locked by `occt-tessellation-defaults.test.ts`                                                                                           |
+| **Manifold** | ignored         | ignored        | Uses Manifold's own tessellation; fixed by model/API output                                                                                                                      |
+| **OpenSCAD** | schema default  | schema default | Framework-resolved tessellation is injected as `$fn`/`$fa`/`$fs` before `callMain()`; create returns OFF, display conversion runs in `meshGeometry`, and export encodes that OFF |
+| **Zoo/KCL**  | ignored         | ignored        | Tessellation is server-side; future integration point                                                                                                                            |
+| **JSCAD**    | ignored         | ignored        | Uses fixed internal tessellation                                                                                                                                                 |
 
 ### Threading Path
 
@@ -472,7 +476,8 @@ RuntimeClient.render({ source, parameters, renderOptions? })
       → RuntimeCommand { type: 'openFile', options? }
         → dispatcher → KernelWorker.handleOpenFile(..., options?)
           → KernelWorker.createGeometry(..., options?)          // publish path
-            → CreateGeometryInput { options? }
+            → resolve schema-projected construction values
+              → CreateGeometryInput { options, content }        // values only; no route discriminator
               → KernelDefinition.createGeometry(input, runtime, ctx)
             → MeshGeometryInput { nativeHandle, options }        // when geometry deferred
               → KernelDefinition.meshGeometry(input, runtime, ctx)
@@ -506,14 +511,16 @@ The `geometryCache()` middleware persists three role-aligned entries under `.tau
 
 A source-scoped build key has one operation-invariant create-result shape: request-specific display packing belongs in `meshGeometry`, while file encoding belongs in `exportGeometry`. A warm export deserializes the build entry's native handle instead of reheating, and any export-only request writes no mesh entry. Cache temperature must not change export output: live, reheated, and deserialized handles produce structurally identical STEP (verified by the replicad conformance suite), and `exportSTEP` pins its `Interface_Static` state on every call so unit statics cannot leak between exports sharing a wasm instance.
 
-### File-Level Caches (persist across render cycles)
+### File-Level Caches
 
-| Cache               | Invalidation                                                         | Purpose                                             |
-| ------------------- | -------------------------------------------------------------------- | --------------------------------------------------- |
-| `fileHashCache`     | Worker-owned filesystem watch invalidation                           | Avoid re-hashing unchanged files                    |
-| `fileContentCache`  | Worker-owned filesystem watch invalidation                           | Avoid re-reading unchanged files                    |
-| `bundleResultCache` | Dependency-aware: only entries whose deps overlap with changed files | Avoid re-bundling when deps haven't changed         |
-| `selectionCache`    | Cleared entirely on any file change                                  | Ensure kernel detection re-runs when imports change |
+| Cache               | Invalidation                                                                                | Purpose                                             |
+| ------------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `fileHashCache`     | Concrete exact-path event, filesystem reset, or next source-bearing watcherless operation   | Avoid re-hashing unchanged observed files           |
+| `fileContentCache`  | Concrete exact-path event, filesystem reset, or next source-bearing watcherless operation   | Avoid re-reading unchanged observed files           |
+| `bundleResultCache` | Dependency-aware exact event; broadly on reset or next source-bearing watcherless operation | Avoid re-bundling when deps haven't changed         |
+| `selectionCache`    | Cleared on relevant exact change, reset, or next source-bearing watcherless operation       | Ensure kernel detection re-runs when imports change |
+
+Watched filesystems retain volatile entries only while the complete cache-observation subscription keeps them coherent. A watcherless filesystem has no evidence that retained bytes are current, so serialized `render()`, autonomous preview execution, and exact `exportModel()` clear volatile file-derived caches before dependency resolution. Kernel/WASM state and durable content-addressed `/.tau/cache/**` entries remain reusable.
 
 ### Per-Render Caches (cleared each render cycle)
 
@@ -536,7 +543,7 @@ flowchart LR
 
 ### Hash-Parity Rule
 
-Clients that intend to share cache entries MUST be byte-identical everywhere the selected phase/route identity looks. `dependencyHash` folds in file hashes, kernel options, parameters, operation options including `content`, and each selected mutative middleware participant's stable plugin ID, version, options, and selected order. Non-mutative taps (`mutates: false`) are excluded. A mismatched client does not error — it forks the cache and recomputes. Any new runtime client MUST land with a parity test proving that a warm compatible operation on one client is a cache hit on the other.
+Clients that intend to share cache entries MUST be byte-identical everywhere the selected phase/route identity looks. `dependencyHash` folds in file hashes, kernel options, parameters, selected route/export options including `content`, and each selected mutative middleware participant's stable plugin ID, version, options, and selected order. Non-mutative taps (`mutates: false`) are excluded. A mismatched client does not error — it forks the cache and recomputes. Any new runtime client MUST land with a parity test proving that a warm compatible operation on one client is a cache hit on the other.
 
 ### Middleware Placement Rules
 
@@ -551,75 +558,25 @@ Clients that intend to share cache entries MUST be byte-identical everywhere the
 
 Image routes use the export leg so callers can select export tessellation and content without overloading renderer options. On a final-cache miss, the runtime materializes the selected source artifact once, applies selected content contributors and transcoders, and caches only the final target. Direct glTF routes may request edges; image transcoders consume the resulting glTF source. Interop routes retain their own coordinate/unit/tessellation conventions and do not receive display-only mesh middleware. A separately persisted source stage requires evidence and an explicit lifecycle contract; it is not part of the current middleware API.
 
-## Future Work -- Render Pipeline Cancellation
+## Serialized Worker Ownership and Cooperative Supersession
 
-### Problem: Render Interleaving on the Worker
+One private promise tail serializes every operation that can mutate shared kernel or filesystem-derived state: staging, synchronous and autonomous render materialization, exact export, file-change routing, and cleanup. No second kernel context or scheduler abstraction exists. Request-local `OperationOwner` values keep exact exports from replacing the active preview, its published artifact, its native-handle ownership, or its rerender policy.
 
-The worker-side dispatcher (`runtime-worker-dispatcher.ts`) does not serialize render operations. When rapid parameter changes trigger back-to-back renders, the event loop processes the second render's `postMessage` at an `await` yield point of the first render. Both renders share mutable worker state (tracer, caches, `onProgress` callback), causing corruption.
+A preview intent reserves exactly one abort-generation token synchronously at admission. The SharedArrayBuffer path carries the reserved token on the wire; wire-only and direct paths reserve through the same contract. Queued execution adopts that value unchanged. A timeout may advance its separate local abort plane, but it does not reserve another preview generation. Stale queued generations can therefore neither publish geometry nor commit watch ownership.
 
-The tracer crash is fixed by epoch-scoped spans (see `RuntimeTracer`), but the broader interleaving problem remains: stale renders waste compute time running the full geometry pipeline even when superseded. Cooperative-abort signaling via the shared abort slot (`signalAbort('superseded')`) reaches the worker, but kernel-level cooperative checks are not yet wired through every long-running OCCT/Manifold call.
+### Current-Preview Observation
 
-### Proposed Architecture: Dispatcher Serialization with Cooperative Cancellation
+The current preview generation, not retained cache membership and not the last successful artifact, owns autonomous rerender paths. Opening an entry first installs and acknowledges an entry-only watch. Dependency discovery accumulates a complete candidate containing the entry plus resolved, unresolved, and middleware-declared paths, even when materialization later fails.
 
-The cancellation architecture has three layers, each targeting a different execution context:
+Reconciliation opens one complete multi-path replacement subscription while the old request remains live, awaits its acknowledgement, batch rereads and hashes newly added paths, rejects a candidate dirtied or superseded during validation, and atomically swaps only a clean candidate. The old handle is disposed after commitment. This keeps one steady-state bridge stream and closes the subscribe-versus-read window without per-path subscriptions.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Layer 1: Framework AbortSignal (async yield points)         │
-│ AbortController lives in dispatcher, signal passed to       │
-│ KernelWorker.render(). Checked via signal.throwIfAborted()  │
-│ at every await boundary.                                    │
-├─────────────────────────────────────────────────────────────┤
-│ Layer 2: WASM cooperative cancellation (sync compute)       │
-│ OpenCASCADE: Message_ProgressIndicator.UserBreak()          │
-│ Polled during long tessellation/boolean operations.         │
-│ Connected to AbortSignal via progress callback.             │
-├─────────────────────────────────────────────────────────────┤
-│ Layer 3: SharedArrayBuffer flag (cross-thread sync signal)  │
-│ Transport sets flag via signalAbort(reason); worker reads   │
-│ atomically. Bypasses postMessage latency for time-critical  │
-│ cancellation. Encapsulated by RuntimeTransport — runtime    │
-│ client never touches Atomics or SAB directly.               │
-└─────────────────────────────────────────────────────────────┘
-```
+All invalidation work remains serialized, but event truth determines the route. Explicit `fileChanged` notifications, staging writes, concrete watch events, and concrete handoff-validation mismatches enter the exact-path route. Only explicit reset, overflow, stale-root, backend-replacement, or summarized-loss signals enter conservative reset recovery. Exact routing invalidates and schedules only when a changed path intersects the active preview dependency set; unrelated project writes cannot supersede or rerender it. Runtime identity is never lowercased or otherwise folded. Concrete `/.tau/cache/**` events are excluded, while `/node_modules/**` stays observable because package files can be live bundle inputs; genuine loss signals cannot be excluded by path.
 
-### Dispatcher Serialization
+### Lifecycle
 
-The dispatcher should maintain a render lock and an `AbortController`:
+Hard termination closes promptly without a remote cleanup guarantee. Graceful drain closes admission, settles already-admitted work, awaits one acknowledged idempotent cleanup call behind the FIFO, then closes transport and owned resources exactly once.
 
-1. On `render` command: abort the previous controller, await the render lock (previous render exits fast via cooperative cancellation), create a new `AbortController`, pass `signal` to `worker.render()`
-2. On `cancel` command: call `currentAbort.abort()` instead of the current no-op
-3. Aborted renders are silently discarded (no response sent to main thread)
-4. Only the latest render's result is sent back as `geometryComputed`
-
-Key constraint: `AbortSignal` cannot be transferred via `postMessage` (not `Transferable`), so the `AbortController` must live on the worker side in the dispatcher. The main thread's `cancel` command triggers the abort.
-
-### Cooperative Cancellation in KernelWorker
-
-Add `signal?: AbortSignal` to `KernelWorker.render()` and insert `signal.throwIfAborted()` at every async yield point:
-
-- `render()`: before `getParameters()`, before `createGeometry()`
-- `getParameters()`: before middleware chain
-- `createGeometry()`: before middleware chain
-- `computeBaseDependencies()`: after `onGetDependencies()`
-
-Use `AbortSignal.any()` to combine the render cancellation signal with any future timeout or user-initiated cancel signals. Use the built-in `signal.throwIfAborted()` (throws `DOMException` with `name === 'AbortError'`) rather than a custom helper.
-
-### WASM Cancellation (OpenCASCADE)
-
-For kernels with long-running synchronous WASM operations (replicad/OpenCASCADE), connect the `AbortSignal` to the OpenCASCADE progress indicator:
-
-- `Message_ProgressIndicator.UserBreak()` is polled by the WASM runtime during tessellation and boolean operations
-- Return `true` from the progress callback when `signal.aborted` to trigger cooperative exit from WASM
-- This is the only way to interrupt synchronous WASM computation without terminating the worker
-
-### References
-
-- [MDN AbortController](https://developer.mozilla.org/en-US/docs/Web/API/AbortController) -- standard cooperative cancellation
-- [MDN AbortSignal.any()](https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/any_static) -- combining multiple signals
-- [MDN AbortSignal.throwIfAborted()](https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/throwIfAborted) -- built-in abort check
-- [Prioritized Task Scheduling API](https://wicg.github.io/scheduling-apis/) -- TaskController/AbortSignal integration pattern
-- [OpenCASCADE.js Progress Indicator](https://ocjs.org/docs/stable/usage/progress) -- WASM cooperative cancellation via `Message_ProgressIndicator`
+Kernel-level cancellation remains cooperative at safe yield points and inside kernels that expose a synchronous WASM cancellation hook. Serialization protects shared ownership even when a native call cannot stop immediately.
 
 ## Monaco IntelliSense Type Pipeline
 
@@ -627,31 +584,37 @@ The editor provides IntelliSense (autocompletion, hover, diagnostics) for kernel
 
 ### Architecture
 
-```
+```text
 Kernel package .d.ts files
   → extract-<id>-types.ts (extraction script)
     → <id>.bundled.json (JSON map: module path → raw .d.ts content)
-      → @taucad/api-extractor (parses JSON internally, exports typed KernelTypesMap)
-        → javascript-contribution.ts (iterates typed maps → addExtraLib per entry)
-          → Monaco TypeScript language service
+      → @taucad/api-extractor
+        ├─ raw KernelTypesMap → API prompt consumers
+        └─ package projection (root content + relative files)
+          → file-manager worker
+            → strict /node_modules mount
+              → recursive loadKernelStaticTypesFromMount
+                → TypeAcquisitionService
+                  → TypeScript and JavaScript Monaco defaults
 ```
 
 ### Why JSON Maps
 
 Each kernel exports a JSON map of `Record<string, string>` where keys are module paths (e.g. `@jscad/modeling`, `@jscad/modeling/primitives`) and values are raw `.d.ts` content. This uniform format exists because:
 
-- **Module identity = file path**: Monaco's TypeScript service resolves `import { cube } from '@jscad/modeling/primitives'` by looking for a virtual file at `file:///node_modules/@jscad/modeling/primitives/index.d.ts`. Each subpath export needs its own `addExtraLib` registration.
+- **Package identity and module identity remain distinct**: `@jscad/modeling` is the root package. Its `primitives` import subpath is stored at `/node_modules/@jscad/modeling/primitives/index.d.ts` and registered at the corresponding `file://` URI.
 - **No `declare module` wrappers**: Earlier versions wrapped content in `declare module '<pkg>' { ... }` blocks. This caused TS1038 errors (`'declare' modifier cannot be used in an already ambient context`) because the source `.d.ts` files already use `export declare`. Raw module files registered at the correct virtual path avoid this entirely.
-- **Uniform consumer code**: Every kernel uses the same format regardless of whether it has one entry point (replicad) or fifteen (JSCAD). The consumer in `javascript-contribution.ts` is a single `flatMap` over all kernel type maps.
-- **Typed exports**: `@taucad/api-extractor` parses the JSON internally and exports typed `KernelTypesMap` objects plus a pre-built `kernelTypeMaps` array. Consumers use these directly — no `JSON.parse` or type assertions needed.
+- **Filesystem containment**: `BundledTypesMountEntry.packageName` is always a root npm package. Subpath declarations live only in its validated relative `files` map.
+- **Two intentional projections**: Individual raw `KernelTypesMap` values remain available to prompt consumers. `kernelTypePackageMaps` groups the same strings into package-shaped filesystem payloads without regenerating artifacts.
+- **Canonical metadata**: Each package has one root `package.json`. `TypeAcquisitionService` registers that metadata once and receives the real content regardless of declaration enumeration order.
 
 ### Adding Types for a New Kernel
 
 1. Create `libs/api-extractor/src/extract-<id>-types.ts` with a `buildBundledTypes(): Record<string, string>` function
 2. Write output to `libs/api-extractor/src/generated/<id>/<id>.bundled.json`
 3. Also write individual `.d.ts` files under `generated/<id>/modules/` for type-level testing
-4. In `libs/api-extractor/src/index.ts`: import the raw JSON, parse it via `parseTypesMap`, export as a typed `KernelTypesMap`, and add it to the `kernelTypeMaps` array
-5. No changes needed in `javascript-contribution.ts` — it imports `kernelTypeMaps` which already includes all kernels
+4. In `libs/api-extractor/src/kernel-types.ts`, import the raw JSON, export its typed `KernelTypesMap`, and add the known package root to `kernelTypePackageMaps`
+5. Verify that root declarations become `content` and every import subpath becomes `<subpath>/index.d.ts` in `files`
 6. Add `.test-d.ts` type-level tests under `generated/<id>/` using `tsconfig.typetest.json` path mappings
 
 ### Type-Level Testing

@@ -28,7 +28,7 @@ import { DockviewOpenFileAction, DockviewFileActionProvider } from '#components/
  */
 type ViewerPanelParameters = {
   viewId: string;
-  entryFile: string | undefined;
+  entryPath: string | undefined;
 };
 
 function getDragDataTransfer(event: DragEvent | PointerEvent): DataTransfer | undefined {
@@ -39,11 +39,11 @@ function getDragDataTransfer(event: DragEvent | PointerEvent): DataTransfer | un
  * Viewer panel component rendered inside each Dockview panel.
  */
 function ViewerPanel(properties: IDockviewPanelProps<ViewerPanelParameters>): React.JSX.Element {
-  const { viewId, entryFile } = properties.params;
+  const { viewId, entryPath } = properties.params;
   return (
     <ChatViewer
       viewId={viewId}
-      entryFile={entryFile}
+      entryPath={entryPath}
       panelApi={properties.api}
       containerApi={properties.containerApi}
     />
@@ -69,19 +69,19 @@ function ViewerWatermark({ containerApi, group }: IWatermarkPanelProps): React.J
         id: viewId,
         component: 'viewer',
         title: fileName,
-        params: { viewId, entryFile: path },
+        params: { viewId, entryPath: path },
       });
 
       editorRef.send({
         type: 'setViewSettings',
         viewId,
         viewState: {
-          entryFile: path,
+          entryPath: path,
           graphicsSettings: { ...defaultGraphicsSettings },
         },
       });
 
-      projectRef.send({ type: 'createGeometryUnit', entryFile: path });
+      projectRef.send({ type: 'createGeometryUnit', entryPath: path });
     },
     [containerApi, projectRef, editorRef],
   );
@@ -130,7 +130,7 @@ function ViewerWatermark({ containerApi, group }: IWatermarkPanelProps): React.J
  * - Actor reconciliation on layout restore
  */
 export const ViewerDockview = memo(function (): React.JSX.Element {
-  const { projectRef, editorRef, mainEntryFile } = useProject();
+  const { projectRef, editorRef, mainEntryPath } = useProject();
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
   // Track the active (focused) viewer panel for settings inheritance
@@ -238,10 +238,10 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
     }
 
     const disposable = api.onWillDragPanel((event) => {
-      const entryFile = (event.panel.params as ViewerPanelParameters | undefined)?.entryFile;
+      const entryPath = (event.panel.params as ViewerPanelParameters | undefined)?.entryPath;
       const dataTransfer = getDragDataTransfer(event.nativeEvent);
-      if (entryFile) {
-        dataTransfer?.setData(tauViewerPanelDragMime, JSON.stringify({ entryFile }));
+      if (entryPath) {
+        dataTransfer?.setData(tauViewerPanelDragMime, JSON.stringify({ entryPath }));
       }
     });
 
@@ -281,8 +281,8 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
   // waits for the project to be ready and then ensures every panel has its
   // graphics actor and geometry unit. Both actions are idempotent.
   //
-  // It also assigns `mainEntryFile` to any panel that was seeded without an
-  // entryFile (happens when onReady fires before the project loads and the
+  // It also assigns `mainEntryPath` to any panel that was seeded without an
+  // entryPath (happens when onReady fires before the project loads and the
   // main file is unknown).
   const projectIsReady = useSelector(projectRef, (state) => state.matches('ready'));
   const hasReconciled = useRef(false);
@@ -308,33 +308,33 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
         settings: validatedSettings,
       });
 
-      let panelEntryFile = (panel.params as ViewerPanelParameters | undefined)?.entryFile;
+      let panelEntryPath = (panel.params as ViewerPanelParameters | undefined)?.entryPath;
 
-      // If the panel was created without an entry file (project was still loading),
-      // assign the main entry file now that the project is ready.
-      if (!panelEntryFile && mainEntryFile) {
-        panelEntryFile = mainEntryFile;
-        const fileName = mainEntryFile.split('/').pop() ?? mainEntryFile;
+      // If the panel was created without an entry path (project was still loading),
+      // assign the main entry path now that the project is ready.
+      if (!panelEntryPath && mainEntryPath) {
+        panelEntryPath = mainEntryPath;
+        const fileName = mainEntryPath.split('/').pop() ?? mainEntryPath;
         panel.api.setTitle(fileName);
-        panel.api.updateParameters({ entryFile: mainEntryFile });
+        panel.api.updateParameters({ entryPath: mainEntryPath });
         editorRef.send({
           type: 'setViewSettings',
           viewId: panelViewId,
           viewState: {
-            entryFile: mainEntryFile,
+            entryPath: mainEntryPath,
             graphicsSettings: validatedSettings,
           },
         });
       }
 
-      if (panelEntryFile) {
+      if (panelEntryPath) {
         projectRef.send({
           type: 'createGeometryUnit',
-          entryFile: panelEntryFile,
+          entryPath: panelEntryPath,
         });
       }
     }
-  }, [api, projectIsReady, projectRef, editorRef, mainEntryFile, viewSettings]);
+  }, [api, projectIsReady, projectRef, editorRef, mainEntryPath, viewSettings]);
 
   // Listen for "open in viewer" requests from file tree or editor tab context menus.
   // Creates a new viewer panel for the requested file if one doesn't already exist.
@@ -344,11 +344,11 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
     }
 
     const subscription = projectRef.on('viewerFileRequested', (event) => {
-      const { entryFile } = event;
+      const { entryPath } = event;
 
       // If a panel already exists for this file, activate it instead of creating a duplicate
       const existingPanel = api.panels.find(
-        (panel) => (panel.params as ViewerPanelParameters | undefined)?.entryFile === entryFile,
+        (panel) => (panel.params as ViewerPanelParameters | undefined)?.entryPath === entryPath,
       );
       if (existingPanel) {
         existingPanel.api.setActive();
@@ -357,13 +357,13 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
 
       // Create a new viewer panel
       const viewId = generatePrefixedId('view');
-      const fileName = entryFile.split('/').pop() ?? entryFile;
+      const fileName = entryPath.split('/').pop() ?? entryPath;
 
       api.addPanel({
         id: viewId,
         component: 'viewer',
         title: fileName,
-        params: { viewId, entryFile },
+        params: { viewId, entryPath },
       });
 
       // Persist view settings (inherit from active panel)
@@ -371,7 +371,7 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
         type: 'setViewSettings',
         viewId,
         viewState: {
-          entryFile,
+          entryPath,
           graphicsSettings: getInheritedSettings(),
         },
       });
@@ -394,13 +394,13 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
         if (viewerLayout) {
           dockApi.fromJSON(viewerLayout);
         } else {
-          // Seed default: single viewer panel for mainEntryFile
+          // Seed default: single viewer panel for mainEntryPath
           const viewId = generatePrefixedId('view');
           dockApi.addPanel({
             id: viewId,
             component: 'viewer',
-            title: mainEntryFile || 'Viewer',
-            params: { viewId, entryFile: mainEntryFile || undefined },
+            title: mainEntryPath || 'Viewer',
+            params: { viewId, entryPath: mainEntryPath || undefined },
           });
 
           // Persist view settings for the seeded panel
@@ -408,7 +408,7 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
             type: 'setViewSettings',
             viewId,
             viewState: {
-              entryFile: mainEntryFile || undefined,
+              entryPath: mainEntryPath || undefined,
               graphicsSettings: { ...defaultGraphicsSettings },
             },
           });
@@ -420,15 +420,15 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
         dockApi.addPanel({
           id: viewId,
           component: 'viewer',
-          title: mainEntryFile || 'Viewer',
-          params: { viewId, entryFile: mainEntryFile || undefined },
+          title: mainEntryPath || 'Viewer',
+          params: { viewId, entryPath: mainEntryPath || undefined },
         });
 
         editorRef.send({
           type: 'setViewSettings',
           viewId,
           viewState: {
-            entryFile: mainEntryFile || undefined,
+            entryPath: mainEntryPath || undefined,
             graphicsSettings: { ...defaultGraphicsSettings },
           },
         });
@@ -436,7 +436,7 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
         isRestoringLayout.current = false;
       }
     },
-    [viewerLayout, mainEntryFile, editorRef],
+    [viewerLayout, mainEntryPath, editorRef],
   );
 
   // Handle external file drops and cross-dockview editor panel drops
@@ -459,7 +459,7 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
               id: viewId,
               component: 'viewer',
               title: fileName,
-              params: { viewId, entryFile: droppedFile },
+              params: { viewId, entryPath: droppedFile },
               position: {
                 direction: positionToDirection(event.position),
                 referenceGroup: event.group ?? undefined,
@@ -470,14 +470,14 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
               type: 'setViewSettings',
               viewId,
               viewState: {
-                entryFile: droppedFile,
+                entryPath: droppedFile,
                 graphicsSettings: getInheritedSettings(),
               },
             });
 
             projectRef.send({
               type: 'createGeometryUnit',
-              entryFile: droppedFile,
+              entryPath: droppedFile,
             });
           }
         } catch {
@@ -509,7 +509,7 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
       const targetGroup = event.group;
       if (targetGroup) {
         const existing = targetGroup.panels.find(
-          (p) => (p.params as ViewerPanelParameters | undefined)?.entryFile === filePath,
+          (p) => (p.params as ViewerPanelParameters | undefined)?.entryPath === filePath,
         );
         if (existing) {
           existing.api.setActive();
@@ -524,7 +524,7 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
         id: viewId,
         component: 'viewer',
         title: fileName,
-        params: { viewId, entryFile: filePath },
+        params: { viewId, entryPath: filePath },
         position: {
           direction: positionToDirection(event.position),
           referenceGroup: event.group ?? undefined,
@@ -535,12 +535,12 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
         type: 'setViewSettings',
         viewId,
         viewState: {
-          entryFile: filePath,
+          entryPath: filePath,
           graphicsSettings: getInheritedSettings(),
         },
       });
 
-      projectRef.send({ type: 'createGeometryUnit', entryFile: filePath });
+      projectRef.send({ type: 'createGeometryUnit', entryPath: filePath });
     },
     [projectRef, editorRef, getInheritedSettings],
   );
@@ -555,7 +555,7 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
         id: viewId,
         component: 'viewer',
         title: fileName,
-        params: { viewId, entryFile: path },
+        params: { viewId, entryPath: path },
         position: {
           direction: 'within',
           referenceGroup: group,
@@ -567,12 +567,12 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
         type: 'setViewSettings',
         viewId,
         viewState: {
-          entryFile: path,
+          entryPath: path,
           graphicsSettings: getInheritedSettings(),
         },
       });
 
-      projectRef.send({ type: 'createGeometryUnit', entryFile: path });
+      projectRef.send({ type: 'createGeometryUnit', entryPath: path });
     },
     [projectRef, editorRef, getInheritedSettings],
   );

@@ -16,7 +16,7 @@ export type ParsedPublication = {
   description?: string;
   visibility: 'private' | 'public';
   viewerRole: 'owner' | 'grantee' | 'public';
-  entryFile: string;
+  entryPath: string;
   ownerSnapshot: ParsedPublicationOwnerSnapshot | null;
   forkCount: number;
   viewCount: number;
@@ -64,7 +64,7 @@ export const parsePublicationRecord = (
 ): ParsedPublication | undefined => {
   const id = isString(raw['id']) ? raw['id'] : undefined;
   const title = isString(raw['title']) ? raw['title'] : undefined;
-  const entryFile = isString(raw['entryFile']) ? raw['entryFile'] : undefined;
+  const entryPath = isString(raw['entryPath']) ? raw['entryPath'] : undefined;
   const visRaw = raw['visibility'];
   const visibility = visRaw === 'private' || visRaw === 'public' ? visRaw : undefined;
   const description = isString(raw['description']) ? raw['description'] : undefined;
@@ -74,7 +74,7 @@ export const parsePublicationRecord = (
   const viewerRole =
     viewerRoleRaw === 'owner' || viewerRoleRaw === 'grantee' || viewerRoleRaw === 'public' ? viewerRoleRaw : 'public';
 
-  if (!id || !title || !entryFile || !visibility || !createdAt) {
+  if (!id || !title || !entryPath || !visibility || !createdAt) {
     return undefined;
   }
 
@@ -84,7 +84,7 @@ export const parsePublicationRecord = (
     description,
     visibility,
     viewerRole,
-    entryFile,
+    entryPath,
     ownerSnapshot: parseOwnerSnapshot(raw['ownerSnapshot']),
     forkCount,
     viewCount,

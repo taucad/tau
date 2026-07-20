@@ -2,9 +2,9 @@ import { XIcon, Download, Info, Check, ChevronDown, ChevronRight, Settings2 } fr
 import { useCallback, memo, useState, useMemo, useEffect, useRef } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
+import type { RuntimeContentInput } from '@taucad/runtime';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { ExportFile, FileExtension } from '@taucad/types';
-import { downloadBlob } from '@taucad/utils/file';
 import Form from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
 import type { IChangeEvent } from '@rjsf/core';
@@ -38,14 +38,20 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '#compo
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { sortGeometryUnitEntries } from '#routes/projects_.$id/geometry-unit.utils.js';
 import type { FormatEntry } from '#utils/export-formats.utils.js';
-import { deriveAvailableFormats, getFormatInfo } from '#utils/export-formats.utils.js';
+import {
+  bestRouteForActiveKernel,
+  deriveAvailableFormats,
+  exportWithRuntimeValidatedInput,
+  getFormatInfo,
+} from '#utils/export-formats.utils.js';
 import { groupExportFormatsByFidelity } from '#components/files/export-format-groups.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { widgets, templates as rjsfTemplates } from '#components/geometry/parameters/rjsf-theme.js';
 import { rjsfIdPrefix, rjsfIdSeparator } from '#components/geometry/parameters/rjsf-utils.js';
 import { deleteValueAtPath, extractModifiedProperties } from '#utils/object.utils.js';
-import type { AppRuntimeClient, AppRuntimeExportFormat } from '#types/runtime-client.alias.js';
+import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { createExportArtifactZip, downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
+import { downloadBlob } from '@taucad/utils/file';
 
 const toggleConverterKeyCombination = {
   key: 'd',
@@ -80,11 +86,12 @@ export const ChatConverterTrigger = memo(function ({
 // =============================================================================
 
 type GeometryUnitEntry = {
-  entryFile: string;
+  entryPath: string;
   actor: ActorRefFrom<typeof cadMachine>;
 };
 
 type ExportPreferences = {
+  formatContent: Partial<Record<FileExtension, RuntimeContentInput>>;
   formatOptions: Partial<Record<FileExtension, Record<string, unknown>>>;
   selectedFormats: FileExtension[];
   shouldDownload: boolean;
@@ -95,6 +102,7 @@ type ExportPreferences = {
 const preferencesPath = '.tau/export/preferences.json';
 
 const defaultPreferences: ExportPreferences = {
+  formatContent: {},
   formatOptions: {},
   selectedFormats: [],
   shouldDownload: true,
@@ -111,29 +119,141 @@ type ResolvedSchema = {
   defaults: Record<string, unknown>;
 };
 
+type ResolvedFormatSettings = {
+  content?: ResolvedSchema;
+  exportOptions?: ResolvedSchema;
+};
+
 function isRecordObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function resolveFormatSchema(
+function schemaObject(schema: JSONSchema7 | boolean | undefined): JSONSchema7 | undefined {
+  return schema && typeof schema === 'object' ? schema : undefined;
+}
+
+function modeForSchema(schema: JSONSchema7): string | undefined {
+  const mode = schemaObject(schema.properties?.['mode']);
+  if (!mode) {
+    return undefined;
+  }
+  if (typeof mode.const === 'string') {
+    return mode.const;
+  }
+  return mode.enum?.length === 1 && typeof mode.enum[0] === 'string' ? mode.enum[0] : undefined;
+}
+
+function unionBranches(schema: JSONSchema7): JSONSchema7[] {
+  return [...(schema.anyOf ?? schema.oneOf ?? [])].flatMap((branch) => {
+    const object = schemaObject(branch);
+    return object ? [object] : [];
+  });
+}
+
+function schemaDefaults(schema: JSONSchema7): Record<string, unknown> {
+  if (!schema.properties) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(schema.properties).flatMap(([key, property]) => {
+      const object = schemaObject(property);
+      return object?.default === undefined ? [] : [[key, object.default]];
+    }),
+  );
+}
+
+function resolveActiveSchema(
+  schema: JSONSchema7,
+  input: Record<string, unknown>,
+  defaults: Record<string, unknown> = {},
+): { schema: JSONSchema7; defaults: Record<string, unknown> } {
+  const branches = unionBranches(schema);
+  if (branches.length === 0) {
+    return { schema, defaults };
+  }
+
+  const modes = branches.map((branch) => modeForSchema(branch)).filter((mode): mode is string => mode !== undefined);
+  const requestedMode =
+    typeof input['mode'] === 'string'
+      ? input['mode']
+      : typeof defaults['mode'] === 'string'
+        ? defaults['mode']
+        : modes[0];
+  const branch = branches.find((candidate) => modeForSchema(candidate) === requestedMode) ?? branches[0]!;
+  const { anyOf: _anyOf, oneOf: _oneOf, properties: rootProperties, required: rootRequired, ...root } = schema;
+  const modeSchema = schemaObject(branch.properties?.['mode']);
+  const properties = {
+    ...rootProperties,
+    ...branch.properties,
+    mode: {
+      ...modeSchema,
+      title: 'Mode',
+      enum: modes,
+      default: requestedMode,
+    },
+  } satisfies JSONSchema7['properties'];
+  const required = [...new Set([...(rootRequired ?? []), ...(branch.required ?? []), 'mode'])];
+  const activeSchema: JSONSchema7 = { ...root, ...branch, properties, required };
+  const activeDefaults = { ...defaults, ...schemaDefaults(branch), mode: requestedMode };
+  return { schema: activeSchema, defaults: sanitizeFormDelta(activeSchema, activeDefaults) };
+}
+
+function resolveFormatSettings(
   format: FileExtension,
   client: AppRuntimeClient | undefined,
   activeKernelId: string | undefined,
-): ResolvedSchema | undefined {
+): ResolvedFormatSettings | undefined {
   if (!client || !activeKernelId) {
     return undefined;
   }
 
-  const route = client.bestRouteFor(format, activeKernelId);
+  const route = bestRouteForActiveKernel(client, format, activeKernelId);
   if (!route || route.kernelId !== activeKernelId) {
     return undefined;
   }
 
-  if (Object.keys(route.schema).length === 0) {
+  const exportOptions =
+    Object.keys(route.exportOptions.schema).length > 0
+      ? {
+          schema: route.exportOptions.schema,
+          defaults: isRecordObject(route.exportOptions.defaults) ? route.exportOptions.defaults : {},
+        }
+      : undefined;
+  const content = route.content
+    ? { schema: route.content.schema, defaults: isRecordObject(route.content.defaults) ? route.content.defaults : {} }
+    : undefined;
+
+  if (!exportOptions && !content) {
     return undefined;
   }
+  return { content, exportOptions };
+}
 
-  return { schema: route.schema, defaults: isRecordObject(route.defaults) ? route.defaults : {} };
+function sanitizeFormDelta(schema: JSONSchema7, input: Record<string, unknown>): Record<string, unknown> {
+  const activeSchema = resolveActiveSchema(schema, input).schema;
+  if (!activeSchema.properties) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(input).filter(([key, value]) => {
+      const propertySchema = activeSchema.properties?.[key];
+      if (propertySchema === true) {
+        return true;
+      }
+      if (!propertySchema) {
+        return false;
+      }
+      return validator.isValid(propertySchema, value, activeSchema);
+    }),
+  );
+}
+
+function runtimeContentFromRecord(input: Record<string, unknown>): RuntimeContentInput {
+  return {
+    ...(typeof input['includeEdges'] === 'boolean' ? { includeEdges: input['includeEdges'] } : {}),
+    ...(typeof input['includeTopology'] === 'boolean' ? { includeTopology: input['includeTopology'] } : {}),
+  };
 }
 
 // =============================================================================
@@ -151,18 +271,18 @@ function getCuGroupedItems(entries: GeometryUnitEntry[]): Array<{ name: string; 
   return cached;
 }
 
-const getCuValue = (entry: GeometryUnitEntry): string => entry.entryFile;
+const getCuValue = (entry: GeometryUnitEntry): string => entry.entryPath;
 
 function GeometryUnitSelector({
   entries,
-  selectedEntryFile,
-  mainEntryFile,
+  selectedEntryPath,
+  mainEntryPath,
   onSelect,
 }: {
   readonly entries: GeometryUnitEntry[];
-  readonly selectedEntryFile: string;
-  readonly mainEntryFile: string;
-  readonly onSelect: (entryFile: string) => void;
+  readonly selectedEntryPath: string;
+  readonly mainEntryPath: string;
+  readonly onSelect: (entryPath: string) => void;
 }) {
   // Hidden when a single geometry unit — no need for a selector
   if (entries.length <= 1) {
@@ -170,29 +290,29 @@ function GeometryUnitSelector({
   }
 
   const groupedItems = getCuGroupedItems(entries);
-  const defaultValue = entries.find((entry) => entry.entryFile === selectedEntryFile);
+  const defaultValue = entries.find((entry) => entry.entryPath === selectedEntryPath);
 
   const renderLabel = useCallback(
     (item: GeometryUnitEntry, selectedItem: GeometryUnitEntry | undefined) => (
       <span className='flex w-full items-center justify-between gap-2'>
         <span className='flex min-w-0 items-center gap-2'>
-          <FileExtensionIcon filename={item.entryFile} className='size-3.5 shrink-0' />
+          <FileExtensionIcon filename={item.entryPath} className='size-3.5 shrink-0' />
           <span className='flex min-w-0 flex-col'>
-            <span className='truncate text-sm'>{item.entryFile}</span>
-            {item.entryFile === mainEntryFile && <span className='text-[10px] text-muted-foreground'>Main</span>}
+            <span className='truncate text-sm'>{item.entryPath}</span>
+            {item.entryPath === mainEntryPath && <span className='text-[10px] text-muted-foreground'>Main</span>}
           </span>
         </span>
-        {selectedItem?.entryFile === item.entryFile ? <Check className='size-3.5 shrink-0' /> : null}
+        {selectedItem?.entryPath === item.entryPath ? <Check className='size-3.5 shrink-0' /> : null}
       </span>
     ),
-    [mainEntryFile],
+    [mainEntryPath],
   );
 
   return (
     <div>
       <p className='mb-1.5 text-sm font-medium text-muted-foreground'>Select file to export</p>
       <ComboBoxResponsive<GeometryUnitEntry>
-        key={mainEntryFile}
+        key={mainEntryPath}
         groupedItems={groupedItems}
         renderLabel={renderLabel}
         getValue={getCuValue}
@@ -207,8 +327,8 @@ function GeometryUnitSelector({
       >
         <Button variant='outline' size='sm' className='w-full justify-between'>
           <span className='flex min-w-0 items-center gap-1.5'>
-            <FileExtensionIcon filename={selectedEntryFile} className='size-3.5 shrink-0' />
-            <span className='truncate'>{selectedEntryFile}</span>
+            <FileExtensionIcon filename={selectedEntryPath} className='size-3.5 shrink-0' />
+            <span className='truncate'>{selectedEntryPath}</span>
           </span>
           <ChevronDown className='size-3 shrink-0 text-muted-foreground' />
         </Button>
@@ -333,51 +453,108 @@ const exportFormContextBase = {
   allExpanded: true,
   shouldShowField: () => true,
   units: { length: { symbol: 'mm' satisfies string, factor: 1 } },
+  displayDescriptors: {
+    width: { descriptor: 'count', unit: 'px' },
+    height: { descriptor: 'count', unit: 'px' },
+    phi: { descriptor: 'angle', unit: 'deg' },
+    theta: { descriptor: 'angle', unit: 'deg' },
+    quality: { descriptor: 'count', unit: '' },
+    margin: { descriptor: 'count', unit: '' },
+  } as const,
 };
 
-function ExportFormatSettings({
-  format,
+function ExportSchemaForm({
+  idPrefix,
+  label,
   resolved,
-  formatOptions,
-  onOptionsChange,
+  value,
+  onChange,
 }: {
-  readonly format: FileExtension;
+  readonly idPrefix: string;
+  readonly label: string;
   readonly resolved: ResolvedSchema;
-  readonly formatOptions: Record<string, unknown>;
-  readonly onOptionsChange: (format: FileExtension, options: Record<string, unknown>) => void;
+  readonly value: Record<string, unknown>;
+  readonly onChange: (value: Record<string, unknown>) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
-
   const formData = useMemo(
-    () => deepmerge(resolved.defaults, formatOptions) as Record<string, unknown>,
-    [resolved.defaults, formatOptions],
+    () => deepmerge(resolved.defaults, value) as Record<string, unknown>,
+    [resolved.defaults, value],
+  );
+  const activeResolved = useMemo(
+    () => resolveActiveSchema(resolved.schema, formData, resolved.defaults),
+    [resolved.defaults, resolved.schema, formData],
+  );
+  const activeFormData = useMemo(
+    () => sanitizeFormDelta(activeResolved.schema, deepmerge(activeResolved.defaults, value)),
+    [activeResolved, value],
   );
 
   const handleChange = useCallback(
     (event: IChangeEvent<Record<string, unknown>>) => {
       const newData = event.formData ?? {};
-      const delta = extractModifiedProperties(newData, resolved.defaults);
-      onOptionsChange(format, delta);
+      const nextResolved = resolveActiveSchema(resolved.schema, newData, resolved.defaults);
+      const sanitized = sanitizeFormDelta(nextResolved.schema, newData);
+      const delta = extractModifiedProperties(sanitized, nextResolved.defaults);
+      const { mode } = sanitized;
+      onChange(typeof mode === 'string' && mode !== resolved.defaults['mode'] ? { ...delta, mode } : delta);
     },
-    [format, resolved.defaults, onOptionsChange],
+    [resolved.defaults, resolved.schema, onChange],
   );
 
   const resetSingleParameter = useCallback(
     (fieldPath: string[]) => {
-      const updated = deleteValueAtPath(formatOptions, fieldPath);
-      onOptionsChange(format, updated);
+      onChange(deleteValueAtPath(value, fieldPath));
     },
-    [format, formatOptions, onOptionsChange],
+    [value, onChange],
   );
 
   const formContext = useMemo(
     () => ({
       ...exportFormContextBase,
-      defaultParameters: resolved.defaults,
+      defaultParameters: activeResolved.defaults,
       resetSingleParameter,
     }),
-    [resolved.defaults, resetSingleParameter],
+    [activeResolved.defaults, resetSingleParameter],
   );
+
+  return (
+    <section aria-label={label}>
+      <h4 className='px-2.5 pt-2 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'>{label}</h4>
+      <Form
+        schema={activeResolved.schema}
+        formData={activeFormData}
+        // @ts-expect-error -- RJSF generic type mismatch with strict TypeScript
+        validator={validator}
+        widgets={widgets}
+        // @ts-expect-error -- RJSF generic type mismatch with strict TypeScript
+        templates={rjsfTemplates}
+        idPrefix={idPrefix}
+        idSeparator={rjsfIdSeparator}
+        formContext={formContext}
+        onChange={handleChange}
+        liveValidate
+        noHtml5Validate
+      />
+    </section>
+  );
+}
+
+function ExportFormatSettings({
+  format,
+  resolved,
+  formatContent,
+  formatOptions,
+  onContentChange,
+  onOptionsChange,
+}: {
+  readonly format: FileExtension;
+  readonly resolved: ResolvedFormatSettings;
+  readonly formatContent: RuntimeContentInput;
+  readonly formatOptions: Record<string, unknown>;
+  readonly onContentChange: (format: FileExtension, content: RuntimeContentInput) => void;
+  readonly onOptionsChange: (format: FileExtension, options: Record<string, unknown>) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
 
   return (
     <Collapsible open={isOpen} className='border-t border-border/40 first:border-t-0' onOpenChange={setIsOpen}>
@@ -399,21 +576,28 @@ function ExportFormatSettings({
           } as React.CSSProperties
         }
       >
-        <Form
-          schema={resolved.schema}
-          formData={formData}
-          // @ts-expect-error -- RJSF generic type mismatch with strict TypeScript
-          validator={validator}
-          widgets={widgets}
-          // @ts-expect-error -- RJSF generic type mismatch with strict TypeScript
-          templates={rjsfTemplates}
-          idPrefix={rjsfIdPrefix}
-          idSeparator={rjsfIdSeparator}
-          formContext={formContext}
-          onChange={handleChange}
-          liveValidate
-          noHtml5Validate
-        />
+        {resolved.content ? (
+          <ExportSchemaForm
+            idPrefix={`${rjsfIdPrefix}-${format}-content`}
+            label='Content'
+            resolved={resolved.content}
+            value={{ ...formatContent }}
+            onChange={(content) => {
+              onContentChange(format, runtimeContentFromRecord(content));
+            }}
+          />
+        ) : null}
+        {resolved.exportOptions ? (
+          <ExportSchemaForm
+            idPrefix={`${rjsfIdPrefix}-${format}-options`}
+            label='Format options'
+            resolved={resolved.exportOptions}
+            value={formatOptions}
+            onChange={(options) => {
+              onOptionsChange(format, options);
+            }}
+          />
+        ) : null}
       </CollapsibleContent>
     </Collapsible>
   );
@@ -423,19 +607,23 @@ function ExportSettings({
   selectedFormats,
   client,
   activeKernelId,
+  formatContent,
   formatOptions,
+  onContentChange,
   onOptionsChange,
 }: {
   readonly selectedFormats: FileExtension[];
   readonly client: AppRuntimeClient | undefined;
   readonly activeKernelId: string | undefined;
+  readonly formatContent: Partial<Record<FileExtension, RuntimeContentInput>>;
   readonly formatOptions: Partial<Record<FileExtension, Record<string, unknown>>>;
+  readonly onContentChange: (format: FileExtension, content: RuntimeContentInput) => void;
   readonly onOptionsChange: (format: FileExtension, options: Record<string, unknown>) => void;
 }) {
   const formatsWithSchemas = useMemo(() => {
-    const result: Array<{ format: FileExtension; resolved: ResolvedSchema }> = [];
+    const result: Array<{ format: FileExtension; resolved: ResolvedFormatSettings }> = [];
     for (const format of selectedFormats) {
-      const resolved = resolveFormatSchema(format, client, activeKernelId);
+      const resolved = resolveFormatSettings(format, client, activeKernelId);
       if (resolved) {
         result.push({ format, resolved });
       }
@@ -454,7 +642,9 @@ function ExportSettings({
           key={format}
           format={format}
           resolved={resolved}
+          formatContent={formatContent[format] ?? {}}
           formatOptions={formatOptions[format] ?? {}}
+          onContentChange={onContentChange}
           onOptionsChange={onOptionsChange}
         />
       ))}
@@ -556,28 +746,28 @@ export const ChatConverter = memo(function (properties: {
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }) {
   const { className, isExpanded = true, setIsExpanded } = properties;
-  const { geometryUnits, mainEntryFile, projectRef } = useProject();
+  const { geometryUnits, mainEntryPath, projectRef } = useProject();
   const fileManager = useFileManager();
   const projectName = useSelector(projectRef, (state) => state.context.project?.name) ?? 'model';
 
   const cuEntries = useMemo<GeometryUnitEntry[]>(() => {
-    const sorted = sortGeometryUnitEntries([...geometryUnits.entries()], mainEntryFile);
-    return sorted.map(([entryFile, actor]) => ({ entryFile, actor }));
-  }, [geometryUnits, mainEntryFile]);
+    const sorted = sortGeometryUnitEntries([...geometryUnits.entries()], mainEntryPath);
+    return sorted.map(([entryPath, actor]) => ({ entryPath, actor }));
+  }, [geometryUnits, mainEntryPath]);
 
-  const [selectedEntryFile, setSelectedEntryFile] = useState(mainEntryFile);
-
-  useEffect(() => {
-    setSelectedEntryFile(mainEntryFile);
-  }, [mainEntryFile]);
+  const [selectedEntryPath, setSelectedEntryPath] = useState(mainEntryPath);
 
   useEffect(() => {
-    if (!geometryUnits.has(selectedEntryFile)) {
-      setSelectedEntryFile(mainEntryFile);
+    setSelectedEntryPath(mainEntryPath);
+  }, [mainEntryPath]);
+
+  useEffect(() => {
+    if (!geometryUnits.has(selectedEntryPath)) {
+      setSelectedEntryPath(mainEntryPath);
     }
-  }, [geometryUnits, selectedEntryFile, mainEntryFile]);
+  }, [geometryUnits, selectedEntryPath, mainEntryPath]);
 
-  const selectedActor = geometryUnits.get(selectedEntryFile) ?? geometryUnits.get(mainEntryFile);
+  const selectedActor = geometryUnits.get(selectedEntryPath) ?? geometryUnits.get(mainEntryPath);
 
   const geometry = useSelector(selectedActor, (state) => state?.context.geometry);
   const capabilities = useSelector(selectedActor, (state) => state?.context.capabilities);
@@ -593,7 +783,8 @@ export const ChatConverter = memo(function (properties: {
   const [preferences, persistPreferences] = useExportPreferences(fileManager);
   const [isExporting, setIsExporting] = useState(false);
 
-  const { selectedFormats, shouldDownload, shouldSaveToProject, zipMultiple, formatOptions } = preferences;
+  const { selectedFormats, shouldDownload, shouldSaveToProject, zipMultiple, formatContent, formatOptions } =
+    preferences;
 
   const hasDestination = shouldDownload || shouldSaveToProject;
 
@@ -623,6 +814,58 @@ export const ChatConverter = memo(function (properties: {
     [preferences, persistPreferences],
   );
 
+  const handleContentChange = useCallback(
+    (format: FileExtension, content: RuntimeContentInput) => {
+      persistPreferences({
+        ...preferences,
+        formatContent: { ...preferences.formatContent, [format]: content },
+      });
+    },
+    [preferences, persistPreferences],
+  );
+
+  useEffect(() => {
+    if (!kernelClient || !activeKernelId) {
+      return;
+    }
+
+    let changed = false;
+    const nextOptions = { ...formatOptions };
+    const nextContent = { ...formatContent };
+
+    for (const [format, options] of Object.entries(formatOptions)) {
+      const route = bestRouteForActiveKernel(kernelClient, format as FileExtension, activeKernelId);
+      if (!route || route.kernelId !== activeKernelId) {
+        Reflect.deleteProperty(nextOptions, format);
+        changed = true;
+        continue;
+      }
+      const sanitized = sanitizeFormDelta(route.exportOptions.schema, options);
+      if (JSON.stringify(sanitized) !== JSON.stringify(options)) {
+        nextOptions[format as FileExtension] = sanitized;
+        changed = true;
+      }
+    }
+
+    for (const [format, content] of Object.entries(formatContent)) {
+      const route = bestRouteForActiveKernel(kernelClient, format as FileExtension, activeKernelId);
+      if (!route?.content || route.kernelId !== activeKernelId) {
+        Reflect.deleteProperty(nextContent, format);
+        changed = true;
+        continue;
+      }
+      const sanitized = runtimeContentFromRecord(sanitizeFormDelta(route.content.schema, { ...content }));
+      if (JSON.stringify(sanitized) !== JSON.stringify(content)) {
+        nextContent[format as FileExtension] = sanitized;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      persistPreferences({ ...preferences, formatContent: nextContent, formatOptions: nextOptions });
+    }
+  }, [activeKernelId, capabilities, formatContent, formatOptions, kernelClient, persistPreferences, preferences]);
+
   const handleDownloadToggle = useCallback(
     (checked: boolean | 'indeterminate') => {
       persistPreferences({ ...preferences, shouldDownload: checked === true });
@@ -649,7 +892,6 @@ export const ChatConverter = memo(function (properties: {
       return;
     }
 
-    console.debug('[Exporter] Starting export for formats:', selectedFormats);
     setIsExporting(true);
 
     const succeeded: FileExtension[] = [];
@@ -659,31 +901,28 @@ export const ChatConverter = memo(function (properties: {
     try {
       /* oxlint-disable no-await-in-loop -- Sequential: each export depends on shared kernel state */
       for (const format of selectedFormats) {
-        console.debug(`[Exporter] Exporting format: ${format}`);
-
         try {
-          const route = kernelClient.bestRouteFor(format, activeKernelId);
+          const route = bestRouteForActiveKernel(kernelClient, format, activeKernelId);
           if (!route || route.kernelId !== activeKernelId) {
-            console.debug(`[Exporter] Export result for ${format}: failed — unsupported format`);
             failed.push(format);
             continue;
           }
 
-          const exportFormat = route.targetFormat as AppRuntimeExportFormat;
-          const options = formatOptions[format] ?? {};
-          const result = await kernelClient.export(exportFormat, { exportOptions: options });
+          const options = sanitizeFormDelta(route.exportOptions.schema, formatOptions[format] ?? {});
+          const content = route.content
+            ? runtimeContentFromRecord(sanitizeFormDelta(route.content.schema, { ...formatContent[format] }))
+            : undefined;
+          const result = await exportWithRuntimeValidatedInput(kernelClient, route, {
+            ...(content && Object.keys(content).length > 0 ? { content } : {}),
+            exportOptions: options,
+          });
 
           if (!result.success) {
-            const message = result.issues[0]?.message ?? 'Export failed';
-            console.debug(`[Exporter] Export result for ${format}: failed — ${message}`);
             failed.push(format);
             continue;
           }
 
           const files = result.data;
-          console.debug(
-            `[Exporter] Export result for ${format}: success, artifacts=${files.length}, bytes=${files.reduce((total, file) => total + file.bytes.byteLength, 0)}`,
-          );
 
           if (shouldDownload) {
             downloadQueue.push({ format, files });
@@ -697,9 +936,7 @@ export const ChatConverter = memo(function (properties: {
           }
 
           succeeded.push(format);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'Export failed';
-          console.debug(`[Exporter] Export error for ${format}: ${message}`);
+        } catch {
           failed.push(format);
         }
       }
@@ -718,8 +955,6 @@ export const ChatConverter = memo(function (properties: {
       } else {
         toast.error(`Failed to export ${failed.map((f) => f.toUpperCase()).join(', ')}`);
       }
-
-      console.debug('[Exporter] Export complete', { succeeded, failed });
     } finally {
       setIsExporting(false);
     }
@@ -727,6 +962,7 @@ export const ChatConverter = memo(function (properties: {
     kernelClient,
     selectedFormats,
     formatOptions,
+    formatContent,
     projectName,
     shouldDownload,
     shouldSaveToProject,
@@ -766,9 +1002,9 @@ export const ChatConverter = memo(function (properties: {
           <div className='flex flex-col gap-3 px-1'>
             <GeometryUnitSelector
               entries={cuEntries}
-              selectedEntryFile={selectedEntryFile}
-              mainEntryFile={mainEntryFile}
-              onSelect={setSelectedEntryFile}
+              selectedEntryPath={selectedEntryPath}
+              mainEntryPath={mainEntryPath}
+              onSelect={setSelectedEntryPath}
             />
 
             {geometry ? (
@@ -784,7 +1020,9 @@ export const ChatConverter = memo(function (properties: {
                     selectedFormats={selectedFormats}
                     client={kernelClient}
                     activeKernelId={activeKernelId}
+                    formatContent={formatContent}
                     formatOptions={formatOptions}
+                    onContentChange={handleContentChange}
                     onOptionsChange={handleOptionsChange}
                   />
 
@@ -847,7 +1085,7 @@ export const ChatConverter = memo(function (properties: {
                 </div>
                 <h3 className='mb-1 text-base font-medium'>No geometry to export for this file</h3>
                 <p className='wrap-break-word text-muted-foreground'>
-                  Generate or compute geometry for {selectedEntryFile} to enable export options
+                  Generate or compute geometry for {selectedEntryPath} to enable export options
                 </p>
               </EmptyItems>
             )}

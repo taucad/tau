@@ -15,7 +15,7 @@ export const tauEditorPanelDragMime = 'application/x-tau-editor-panel';
 
 /**
  * MIME type set on viewer panel tab drags for cross-dockview identification.
- * Payload: JSON-encoded `{ entryFile: string }`.
+ * Payload: JSON-encoded `{ entryPath: string }`.
  */
 export const tauViewerPanelDragMime = 'application/x-tau-viewer-panel';
 

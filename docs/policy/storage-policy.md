@@ -34,7 +34,7 @@ Before applying any rule below, put the data in the right store. Portable projec
 | Data                                                                                  | Store                                         | Governed by                                          |
 | ------------------------------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------- |
 | Portable project declaration                                                          | Project filesystem (`tau.json`)               | `docs/policy/project-manifest-policy.md`             |
-| Entry files, thumbnails, parameter sidecars, caches                                   | Project filesystem                            | `docs/policy/project-manifest-policy.md`             |
+| Entry paths, thumbnails, parameter sidecars, caches                                   | Project filesystem                            | `docs/policy/project-manifest-policy.md`             |
 | Host-local project library lifecycle (`lastActivityAt`, `deletedAt`, `revisionState`) | Dedicated `projectLibraryStates` object store | This policy + manifest policy Rules 6–9              |
 | Browser-local application state (chats, editor layout, resource links)                | Object store via `IndexedDbStorageProvider`   | This policy's RMW rules                              |
 | Per-device filesystem configuration (`ProjectFileSystemConfig`, workspace handles)    | Dedicated `tau-fs-handles` database           | This policy + filesystem-authority policy Rules 9/11 |
@@ -223,7 +223,7 @@ const patchChat = useCallback(
 ## Anti-Patterns
 
 - Creating a new object store (or new fields on the frozen `projects` store) for portable project content. Per Rule 0 that data lives in the project filesystem.
-- Adding manifest-derived name, description, author, tags, assets, entry files, thumbnails, or locators to `projectLibraryStates`.
+- Adding manifest-derived name, description, author, tags, assets, entry paths, thumbnails, or locators to `projectLibraryStates`.
 - Using a `projectLibraryStates` row to make a project exist, or deleting the row because a workspace was temporarily inaccessible.
 - Calling `await getChat(id)` followed by `await updateChat(id, mutated)` from a hook or actor. Use a field-scoped helper instead — the manual `read → mutate → write` re-introduces the original race even though the storage layer is now atomic.
 - Adding a new option flag to `updateChat`/`updateProject` to "preserve" or "skip" a field. Add a field-scoped helper instead.

@@ -9,7 +9,7 @@ const publication: ParsedPublication = {
   description: 'A beautifully axe-shaped axe.',
   visibility: 'public',
   viewerRole: 'public',
-  entryFile: 'main.ts',
+  entryPath: 'main.ts',
   ownerSnapshot: { id: 'user_1', name: 'Ada Lovelace', image: null },
   forkCount: 12,
   viewCount: 345,

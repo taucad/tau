@@ -1,4 +1,4 @@
-// oxlint-disable no-barrel-files/no-barrel-files -- package entry file
+// oxlint-disable no-barrel-files/no-barrel-files -- package entry path
 /**
  * Public author surface for kernels living outside `@taucad/runtime`.
  *
@@ -47,10 +47,14 @@ export type {
 } from '#types/runtime.types.js';
 
 export type { KernelPlugin } from '#plugins/plugin-types.js';
-export { finalizeRenderOutput, RenderArtifactFinalizationError } from '#framework/render-artifact-finalizer.js';
-export type { RenderArtifactFinalizerInput } from '#framework/render-artifact-finalizer.js';
+export {
+  finalizeMeshOutput,
+  finalizeRenderOutput,
+  RenderArtifactFinalizationError,
+} from '#framework/render-artifact-finalizer.js';
+export type { MeshArtifactFinalizerInput, RenderArtifactFinalizerInput } from '#framework/render-artifact-finalizer.js';
 export { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
-export { loadBinaryFile, resolveToRelative } from '#kernels/kernel-module-helpers.js';
+export { loadBinaryFile } from '#kernels/kernel-module-helpers.js';
 export { createEmptyGlb, createEmptyGltf, createEmptyGltfGeometry } from '#utils/glb-writer.js';
 export { convertOffToGltf } from '#utils/off-to-gltf.js';
 export { canonicalizeOffWithManifold, convertOffToManifoldGltf } from '#utils/off-manifold-canonicalizer.js';

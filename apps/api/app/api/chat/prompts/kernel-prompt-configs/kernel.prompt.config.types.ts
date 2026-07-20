@@ -12,7 +12,7 @@ export type FileLayoutMode = 'full-nesting' | 'assembly-only';
  * `assembly-only` layout) so the agent never has to guess between
  * `include` / `use`, deep-relative TypeScript imports, etc.
  *
- * Authoring rule: keep this DEMO-MINIMAL — one entry file plus one
+ * Authoring rule: keep this DEMO-MINIMAL — one entry path plus one
  * library file is sufficient. Each file must carry the import statement
  * the agent should mirror; complex parametric models belong in
  * {@link KernelConfig.canonicalExample} instead.
@@ -101,7 +101,7 @@ export type KernelConfig = {
 
   /**
    * Minimal multi-file canonical example demonstrating the kernel's idiomatic
-   * library-import idiom (entry file + one library file). Wired into a
+   * library-import idiom (entry path + one library file). Wired into a
    * `<multi_file_pattern>` section in the system prompt so the agent mirrors
    * the correct import token instead of guessing between
    * `include <…>` / `use <…>` (OpenSCAD), `'./lib/x.js'` / `'./lib/x'` (TS),

@@ -909,7 +909,7 @@ cone = startSketchOn(XZ)
       };
       const result = await zooDefinition.createGeometry(
         {
-          filePath: '/main.kcl',
+          entryPath: '/main.kcl',
           parameters: {},
           options: {},
         },

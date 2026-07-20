@@ -217,7 +217,7 @@ describe('useRuntime', () => {
       });
     });
 
-    it('should forward single-file inline source without synthesizing an entry file', async () => {
+    it('should forward single-file inline source without synthesizing an entry path', async () => {
       const { client } = createConfiguredMockClient();
 
       renderHook(() => useRuntime(defaultOptions()));
@@ -981,6 +981,21 @@ describe('useRuntime', () => {
       expect(client.export).toHaveBeenCalledWith('stl', { exportOptions: { binary: true } });
     });
 
+    it('should forward route-scoped content when exporting the settled preview', async () => {
+      const { client } = createConfiguredMockClient();
+      const { result } = renderHook(() => useRuntime(defaultOptions()));
+
+      await waitFor(() => {
+        expect(result.current.status).toBe('ready');
+      });
+
+      await act(async () => {
+        await result.current.exportGeometry('glb', { content: { includeEdges: true } });
+      });
+
+      expect(client.export).toHaveBeenCalledWith('glb', { content: { includeEdges: true } });
+    });
+
     it('should request-scope export the hook source when preview rendering is disabled', async () => {
       const { client } = createConfiguredMockClient();
       const { result } = renderHook(() => useRuntime(defaultOptions({ enabled: false })));
@@ -998,6 +1013,33 @@ describe('useRuntime', () => {
         // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key in assertion
         source: { files: { 'main.ts': 'export default () => ({})' } },
         exportOptions: { binary: true },
+      });
+    });
+
+    it('should not leak preview content or render options into a request-scoped export', async () => {
+      const { client } = createConfiguredMockClient();
+      const { result } = renderHook(() =>
+        useRuntime(
+          defaultOptions({
+            enabled: false,
+            content: { includeEdges: true, includeTopology: true },
+            renderOptions: { tessellation: { linearTolerance: 0.1, angularTolerance: 12 } },
+          }),
+        ),
+      );
+
+      await waitFor(() => {
+        expect(createRuntimeClient).toHaveBeenCalledOnce();
+      });
+
+      await act(async () => {
+        await result.current.exportGeometry('glb', { content: { includeEdges: false } });
+      });
+
+      expect(client.export).toHaveBeenCalledWith('glb', {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key in assertion
+        source: { files: { 'main.ts': 'export default () => ({})' } },
+        content: { includeEdges: false },
       });
     });
 

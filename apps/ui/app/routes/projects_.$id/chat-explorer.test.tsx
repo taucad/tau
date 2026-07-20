@@ -106,7 +106,7 @@ type StaticActor<Snapshot> = {
 };
 
 type EditorTestActor = StaticActor<{
-  readonly context: { readonly viewSettings: Record<string, { readonly entryFile: string }> };
+  readonly context: { readonly viewSettings: Record<string, { readonly entryPath: string }> };
 }>;
 
 function createStaticActor<Snapshot>(snapshot: Snapshot): StaticActor<Snapshot> {
@@ -119,7 +119,7 @@ function createStaticActor<Snapshot>(snapshot: Snapshot): StaticActor<Snapshot> 
 }
 
 function createTestEditorActor(snapshot: {
-  readonly context: { readonly viewSettings: Record<string, { readonly entryFile: string }> };
+  readonly context: { readonly viewSettings: Record<string, { readonly entryPath: string }> };
 }): EditorTestActor & { readonly emit: (type: string, event: unknown) => void } {
   const listeners = new Map<string, Set<(event: unknown) => void>>();
   return {
@@ -143,7 +143,7 @@ function createTestEditorActor(snapshot: {
 }
 
 function createGraphicsRefForUnit(
-  entryFile: string,
+  entryPath: string,
   nodes: GeometryComponentNode[],
   {
     hiddenComponentIds = [],
@@ -155,8 +155,8 @@ function createGraphicsRefForUnit(
 ): ActorRefFrom<typeof graphicsMachine> {
   const modelRef = createActor(modelInteractionMachine, { input: {} });
   modelRef.start();
-  const modelUnitId = createSourceModelInteractionUnitId(entryFile);
-  modelRef.send({ type: 'loadManifest', unitId: modelUnitId, manifest: createManifest(nodes, entryFile) });
+  const modelUnitId = createSourceModelInteractionUnitId(entryPath);
+  modelRef.send({ type: 'loadManifest', unitId: modelUnitId, manifest: createManifest(nodes, entryPath) });
   for (const componentId of hiddenComponentIds) {
     modelRef.send({ type: 'hideComponent', unitId: modelUnitId, componentId });
   }
@@ -172,23 +172,23 @@ function createGraphicsRefForUnit(
 }
 
 function mockProjectForExplorer({
-  mainEntryFile,
+  mainEntryPath,
   viewSettings,
   viewGraphics,
   geometryUnitFiles,
   editorRef = createStaticActor({ context: { viewSettings } }),
 }: {
-  readonly mainEntryFile: string;
-  readonly viewSettings: Record<string, { readonly entryFile: string }>;
+  readonly mainEntryPath: string;
+  readonly viewSettings: Record<string, { readonly entryPath: string }>;
   readonly viewGraphics: Map<string, ActorRefFrom<typeof graphicsMachine>>;
   readonly geometryUnitFiles: readonly string[];
   readonly editorRef?: EditorTestActor;
 }): void {
   mocks.useProject.mockReturnValue({
-    mainEntryFile,
+    mainEntryPath,
     editorRef,
     viewGraphics,
-    geometryUnits: new Map(geometryUnitFiles.map((entryFile) => [entryFile, createStaticActor({})])),
+    geometryUnits: new Map(geometryUnitFiles.map((entryPath) => [entryPath, createStaticActor({})])),
   });
 }
 
@@ -235,11 +235,11 @@ describe('ChatExplorerTree', () => {
     const mainGraphicsRef = createGraphicsRefForUnit('src/main.ts', [mainNode]);
     const helperGraphicsRef = createGraphicsRefForUnit('src/helper.ts', [helperNode]);
     mockProjectForExplorer({
-      mainEntryFile: 'src/main.ts',
+      mainEntryPath: 'src/main.ts',
       geometryUnitFiles: ['src/helper.ts', 'src/main.ts'],
       viewSettings: {
-        mainView: { entryFile: 'src/main.ts' },
-        helperView: { entryFile: 'src/helper.ts' },
+        mainView: { entryPath: 'src/main.ts' },
+        helperView: { entryPath: 'src/helper.ts' },
       },
       viewGraphics: new Map([
         ['mainView', mainGraphicsRef],
@@ -286,18 +286,18 @@ describe('ChatExplorerTree', () => {
     const editorRef = createTestEditorActor({
       context: {
         viewSettings: {
-          mainView: { entryFile: 'src/main.ts' },
-          helperView: { entryFile: 'src/helper.ts' },
+          mainView: { entryPath: 'src/main.ts' },
+          helperView: { entryPath: 'src/helper.ts' },
         },
       },
     });
     try {
       mockProjectForExplorer({
-        mainEntryFile: 'src/main.ts',
+        mainEntryPath: 'src/main.ts',
         geometryUnitFiles: ['src/main.ts', 'src/helper.ts'],
         viewSettings: {
-          mainView: { entryFile: 'src/main.ts' },
-          helperView: { entryFile: 'src/helper.ts' },
+          mainView: { entryPath: 'src/main.ts' },
+          helperView: { entryPath: 'src/helper.ts' },
         },
         viewGraphics: new Map([
           ['mainView', createGraphicsRefForUnit('src/main.ts', [mainNode])],
@@ -322,7 +322,7 @@ describe('ChatExplorerTree', () => {
       act(() => {
         editorRef.emit('modelComponentRevealRequested', {
           type: 'modelComponentRevealRequested',
-          entryFile: 'src/helper.ts',
+          entryPath: 'src/helper.ts',
           unitId: helperUnitId,
           componentId: secondComponentId,
         });
@@ -352,15 +352,15 @@ describe('ChatExplorerTree', () => {
     const editorRef = createTestEditorActor({
       context: {
         viewSettings: {
-          mainView: { entryFile: 'src/main.ts' },
+          mainView: { entryPath: 'src/main.ts' },
         },
       },
     });
     mockProjectForExplorer({
-      mainEntryFile: 'src/main.ts',
+      mainEntryPath: 'src/main.ts',
       geometryUnitFiles: ['src/main.ts', 'src/unopened.ts'],
       viewSettings: {
-        mainView: { entryFile: 'src/main.ts' },
+        mainView: { entryPath: 'src/main.ts' },
       },
       viewGraphics: new Map([['mainView', createGraphicsRefForUnit('src/main.ts', [mainNode])]]),
       editorRef,
@@ -374,7 +374,7 @@ describe('ChatExplorerTree', () => {
     act(() => {
       editorRef.emit('modelComponentRevealRequested', {
         type: 'modelComponentRevealRequested',
-        entryFile: 'src/unopened.ts',
+        entryPath: 'src/unopened.ts',
         unitId: createSourceModelInteractionUnitId('src/unopened.ts'),
         componentId: secondComponentId,
       });
@@ -390,10 +390,10 @@ describe('ChatExplorerTree', () => {
     const mainNode = createNode(firstComponentId, 'main_part');
     const mainGraphicsRef = createGraphicsRefForUnit('src/main.ts', [mainNode]);
     mockProjectForExplorer({
-      mainEntryFile: 'src/main.ts',
+      mainEntryPath: 'src/main.ts',
       geometryUnitFiles: ['src/main.ts', 'src/unopened.ts'],
       viewSettings: {
-        mainView: { entryFile: 'src/main.ts' },
+        mainView: { entryPath: 'src/main.ts' },
       },
       viewGraphics: new Map([['mainView', mainGraphicsRef]]),
     });
@@ -412,10 +412,10 @@ describe('ChatExplorerTree', () => {
       hiddenComponentIds: [firstComponentId],
     });
     mockProjectForExplorer({
-      mainEntryFile: 'src/main.ts',
+      mainEntryPath: 'src/main.ts',
       geometryUnitFiles: ['src/main.ts'],
       viewSettings: {
-        mainView: { entryFile: 'src/main.ts' },
+        mainView: { entryPath: 'src/main.ts' },
       },
       viewGraphics: new Map([['mainView', mainGraphicsRef]]),
     });

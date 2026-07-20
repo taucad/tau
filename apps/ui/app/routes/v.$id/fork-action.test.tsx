@@ -68,7 +68,7 @@ describe('ForkAction', () => {
 
     render(
       <MemoryRouter>
-        <ForkAction publication={{ id: 'pub_1', title: 'Shared', entryFile: 'main.ts' }} files={files} />
+        <ForkAction publication={{ id: 'pub_1', title: 'Shared', entryPath: 'main.ts' }} files={files} />
       </MemoryRouter>,
     );
 
@@ -90,7 +90,7 @@ describe('ForkAction', () => {
 
     render(
       <MemoryRouter>
-        <ForkAction publication={{ id: 'pub_1', title: 'Shared', entryFile: 'main.ts' }} files={files} />
+        <ForkAction publication={{ id: 'pub_1', title: 'Shared', entryPath: 'main.ts' }} files={files} />
       </MemoryRouter>,
     );
 

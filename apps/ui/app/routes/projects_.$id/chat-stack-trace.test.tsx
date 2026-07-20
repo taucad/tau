@@ -151,7 +151,7 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
   });
 
   it('seeds activeModel and activeKernel on the new chat from the chat-client agent', async () => {
-    render(<ChatStackTrace entryFile='main.scad' side='top' />);
+    render(<ChatStackTrace entryPath='main.scad' side='top' />);
     fireEvent.click(await screen.findByTestId('fix-with-ai'));
 
     await waitFor(() => {
@@ -164,7 +164,7 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
   });
 
   it('focuses the newly created chat after seeding', async () => {
-    render(<ChatStackTrace entryFile='main.scad' side='top' />);
+    render(<ChatStackTrace entryPath='main.scad' side='top' />);
     fireEvent.click(await screen.findByTestId('fix-with-ai'));
 
     await waitFor(() => {
@@ -180,7 +180,7 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
   it('seeds the pending user message without per-field metadata stamping', async () => {
     mockAgent = { ...mockAgent, model: 'chat-local-model', kernel: 'manifold' };
 
-    render(<ChatStackTrace entryFile='main.scad' side='top' />);
+    render(<ChatStackTrace entryPath='main.scad' side='top' />);
     fireEvent.click(await screen.findByTestId('fix-with-ai'));
 
     await waitFor(() => {
@@ -225,7 +225,7 @@ describe('ChatStackTrace — in-place (shift not held) path', () => {
   });
 
   it('routes the fix prompt through cadChat.submit (no inline metadata stamping)', async () => {
-    render(<ChatStackTrace entryFile='main.scad' side='top' />);
+    render(<ChatStackTrace entryPath='main.scad' side='top' />);
     fireEvent.click(await screen.findByTestId('fix-with-ai'));
 
     await waitFor(() => {
@@ -244,7 +244,7 @@ describe('ChatStackTrace — in-place (shift not held) path', () => {
   // testingEnabled bug — all three fields previously needed to be hand-
   // stamped on the user message metadata and frequently drifted.
   it('produces a wire body satisfying chatTurnRequestSchema for the Fix-with-AI in-place path', async () => {
-    render(<ChatStackTrace entryFile='main.scad' side='top' />);
+    render(<ChatStackTrace entryPath='main.scad' side='top' />);
     fireEvent.click(await screen.findByTestId('fix-with-ai'));
 
     await waitFor(() => {

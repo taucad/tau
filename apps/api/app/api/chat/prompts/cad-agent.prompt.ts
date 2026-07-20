@@ -392,7 +392,7 @@ For an assembly whose parts are *deliberately* separate (e.g. two skids that do 
         .map(({ path, content }) => `\`${path}\`:\n\`\`\`\n${content.trim()}\n\`\`\``)
         .join('\n\n');
       return `<multi_file_pattern>
-Idiomatic multi-file layout for ${config.languageName}. Mirror the import statement and entry shape; the entry file (\`${config.multiFileExample.mainFile}\`) renders the assembled model.
+Idiomatic multi-file layout for ${config.languageName}. Mirror the import statement and entry shape; the entry path (\`${config.multiFileExample.mainFile}\`) renders the assembled model.
 
 ${blocks}
 </multi_file_pattern>`;

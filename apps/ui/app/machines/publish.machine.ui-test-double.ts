@@ -7,7 +7,7 @@ type UiTestPublishContext = {
   fileManagerRef: unknown;
   projectId: string;
   projectName: string;
-  entryFile: string;
+  entryPath: string;
   parameters?: Record<string, unknown>;
   publicationId?: string;
   shareUrl?: string;
@@ -29,7 +29,7 @@ type UiTestPublishInput = {
   fileManagerRef: unknown;
   projectId: string;
   projectName: string;
-  entryFile: string;
+  entryPath: string;
   parameters?: Record<string, unknown>;
 };
 
@@ -57,7 +57,7 @@ export const publishMachineForUiTests = setup({
     fileManagerRef: input.fileManagerRef,
     projectId: input.projectId,
     projectName: input.projectName,
-    entryFile: input.entryFile,
+    entryPath: input.entryPath,
     parameters: input.parameters,
     publicationId: undefined,
     shareUrl: undefined,

@@ -39,7 +39,7 @@ describe('publishMachine', () => {
         fileManagerRef: testDoubleFileManagerRef,
         projectId: 'proj',
         projectName: 'Demo',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
       },
     });
 
@@ -80,7 +80,7 @@ describe('publishMachine', () => {
         fileManagerRef: testDoubleFileManagerRef,
         projectId: 'proj',
         projectName: 'Demo',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
       },
     });
 
@@ -116,7 +116,7 @@ describe('publishMachine', () => {
         fileManagerRef: testDoubleFileManagerRef,
         projectId: 'proj',
         projectName: 'Demo',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
       },
     });
 
@@ -145,7 +145,7 @@ describe('publishMachine', () => {
         fileManagerRef: testDoubleFileManagerRef,
         projectId: 'proj',
         projectName: 'Demo',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
       },
     });
 
@@ -176,7 +176,7 @@ describe('publishMachine', () => {
         fileManagerRef: testDoubleFileManagerRef,
         projectId: 'proj',
         projectName: 'Demo',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
       },
     });
 
@@ -212,7 +212,7 @@ describe('publishMachine', () => {
         fileManagerRef: testDoubleFileManagerRef,
         projectId: 'proj',
         projectName: 'Demo',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
       },
     });
 
@@ -244,7 +244,7 @@ describe('publishMachine', () => {
         fileManagerRef: testDoubleFileManagerRef,
         projectId: 'proj',
         projectName: 'Demo',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
       },
     });
 
@@ -275,7 +275,7 @@ describe('publishMachine', () => {
         fileManagerRef: testDoubleFileManagerRef,
         projectId: 'proj',
         projectName: 'Demo',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
       },
     });
 
@@ -311,7 +311,7 @@ describe('publishMachine', () => {
         fileManagerRef: testDoubleFileManagerRef,
         projectId: 'proj',
         projectName: 'Demo',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
       },
     });
 
@@ -350,7 +350,7 @@ describe('publishMachine', () => {
         fileManagerRef: testDoubleFileManagerRef,
         projectId: 'proj',
         projectName: 'Demo',
-        entryFile: 'main.ts',
+        entryPath: 'main.ts',
       },
     });
 

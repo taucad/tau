@@ -43,7 +43,7 @@ const sampleLoaderData: PublicationRouteLoaderData = {
   publication: {
     id: 'pub_1',
     title: 'Demo Pub',
-    entryFile: 'main.ts',
+    entryPath: 'main.ts',
     visibility: 'private',
     forkCount: 0,
     viewCount: 0,
@@ -60,7 +60,7 @@ const sampleLoaderData: PublicationRouteLoaderData = {
   manifest: {
     version: 1,
     projectId: 'proj_x',
-    entryFile: 'main.ts',
+    entryPath: 'main.ts',
     // eslint-disable-next-line @typescript-eslint/naming-convention -- file-path keys can't be camelCase
     files: { 'main.ts': 'sha256:abc' },
     kernels: ['jscad'],

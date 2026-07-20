@@ -15,13 +15,13 @@ const cadActor = {
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown } | undefined, selector: (state: unknown) => unknown) =>
     selector(actor?.getSnapshot()),
+  useActorRef: () => ({ send: vi.fn() }),
 }));
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
     geometryUnits: new Map([['main.ts', cadActor]]),
-    mainEntryFile: 'main.ts',
-    updateThumbnail: vi.fn(),
+    mainEntryPath: 'main.ts',
     projectRef: {
       getSnapshot: () => ({
         context: {
@@ -42,6 +42,7 @@ vi.mock('#hooks/use-project.js', () => ({
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     getZippedDirectory: vi.fn(),
+    writeFile: vi.fn(),
   }),
 }));
 
@@ -50,7 +51,11 @@ vi.mock('#hooks/use-file-tree.js', () => ({
 }));
 
 vi.mock('#hooks/use-revisions.js', () => ({
-  useRevisions: () => ({ canReturnToLatest: false }),
+  useVisibleRevisions: () => ({ canReturnToLatest: false }),
+}));
+
+vi.mock('#hooks/use-thumbnail-generator.js', () => ({
+  useThumbnailGenerator: () => ({ regenerate: vi.fn() }),
 }));
 
 vi.mock('#hooks/use-restore-to-point.js', () => ({

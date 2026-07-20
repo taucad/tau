@@ -27,6 +27,9 @@ import { PublicationEmailTagsField, getPublicationEmailTagsError } from '#compon
 import { PublicationAccessPanel, type PublicationAccessGrant } from '#components/publish/publication-access-panel.js';
 import { ENV } from '#environment.config.js';
 import { cn } from '#utils/ui.utils.js';
+import { useEntitlements } from '#hooks/use-entitlements.js';
+import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { ProBadge } from '#components/tier-badge.js';
 
 export type ProjectShareDialogProps = {
   // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors Radix Dialog `open` prop on `<Dialog.Root>`
@@ -36,7 +39,7 @@ export type ProjectShareDialogProps = {
   readonly projectName: string;
   readonly projectDescription?: string;
   readonly projectUpdatedAt?: Date | number | string;
-  readonly entryFile: string;
+  readonly entryPath: string;
   readonly parameters?: Record<string, unknown>;
 };
 
@@ -229,7 +232,7 @@ function ProjectShareDialogBody(properties: ProjectShareDialogBodyProps): React.
     projectName,
     projectDescription = '',
     projectUpdatedAt,
-    entryFile,
+    entryPath,
     parameters,
     onRequestClose,
   } = properties;
@@ -240,7 +243,7 @@ function ProjectShareDialogBody(properties: ProjectShareDialogBodyProps): React.
       fileManagerRef,
       projectId,
       projectName,
-      entryFile,
+      entryPath,
       parameters,
     },
   });
@@ -254,6 +257,11 @@ function ProjectShareDialogBody(properties: ProjectShareDialogBodyProps): React.
   const [loadingEnvelope, setLoadingEnvelope] = useState(false);
   const [envelopeError, setEnvelopeError] = useState<string | undefined>();
   const [visibility, setVisibility] = useState<PublishVisibility>('private');
+  const entitlements = useEntitlements();
+  const { canCreatePrivateShares } = entitlements;
+  // Free tier publishes public-only (T4/T5/AD11); derived so an async
+  // entitlements load never strands a locked selection in form state.
+  const effectiveVisibility: PublishVisibility = canCreatePrivateShares ? visibility : 'public';
   const [title, setTitle] = useState(projectName);
   const [description, setDescription] = useState(projectDescription);
   const [sharedEmails, setSharedEmails] = useState<string[]>([]);
@@ -335,7 +343,7 @@ function ProjectShareDialogBody(properties: ProjectShareDialogBodyProps): React.
   }, [loadEnvelope, publishRef, publishShareUrl, triggerCopiedTick]);
 
   const busy = publishState === 'collectingFiles' || publishState === 'uploading';
-  const sharedEmailError = visibility === 'private' ? getPublicationEmailTagsError(sharedEmails) : undefined;
+  const sharedEmailError = effectiveVisibility === 'private' ? getPublicationEmailTagsError(sharedEmails) : undefined;
   const canPublish = title.trim().length > 0 && !sharedEmailError && !busy;
   const formattedError = formatPublishError(publishError);
   const snapshotState = useMemo(
@@ -346,16 +354,22 @@ function ProjectShareDialogBody(properties: ProjectShareDialogBodyProps): React.
   const handlePublish = (): void => {
     publishRef.send({
       type: 'publish',
-      visibility,
+      visibility: effectiveVisibility,
       title: title.trim(),
       ...(description.trim() === '' ? {} : { description: description.trim() }),
-      ...(visibility === 'private' && sharedEmails.length > 0 ? { sharedEmails } : {}),
+      ...(effectiveVisibility === 'private' && sharedEmails.length > 0 ? { sharedEmails } : {}),
     });
   };
 
   const handleVisibilityChange = async (nextVisibility: PublishVisibility): Promise<void> => {
     const publication = envelope?.currentPublication;
     if (!publication || publication.visibility === nextVisibility || visibilityMutating) {
+      return;
+    }
+    // Switching TO private is Pro-gated (T4/T5); the server 403s anyway — route
+    // the user to the upgrade surface instead of a failing request.
+    if (nextVisibility === 'private' && !canCreatePrivateShares) {
+      openSettingsDialog('billing');
       return;
     }
 
@@ -523,7 +537,7 @@ function ProjectShareDialogBody(properties: ProjectShareDialogBodyProps): React.
         <div className='flex flex-col gap-2'>
           <Label>Visibility</Label>
           <RadioGroup
-            value={visibility}
+            value={effectiveVisibility}
             disabled={busy}
             onValueChange={(value) => {
               setVisibility(value as PublishVisibility);
@@ -531,10 +545,25 @@ function ProjectShareDialogBody(properties: ProjectShareDialogBodyProps): React.
             className='flex flex-col gap-2'
           >
             <div className='flex items-center gap-2'>
-              <RadioGroupItem value='private' id='share-vis-private' />
-              <Label htmlFor='share-vis-private' className='font-normal'>
+              <RadioGroupItem value='private' id='share-vis-private' disabled={!canCreatePrivateShares} />
+              <Label
+                htmlFor='share-vis-private'
+                className={cn('font-normal', !canCreatePrivateShares && 'text-muted-foreground')}
+              >
                 Private (only you and people you share with)
               </Label>
+              {canCreatePrivateShares ? undefined : (
+                <button
+                  type='button'
+                  className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline'
+                  onClick={() => {
+                    openSettingsDialog('billing');
+                  }}
+                >
+                  <ProBadge />
+                  Upgrade
+                </button>
+              )}
             </div>
             <div className='flex items-center gap-2'>
               <RadioGroupItem value='public' id='share-vis-public' />
@@ -544,7 +573,7 @@ function ProjectShareDialogBody(properties: ProjectShareDialogBodyProps): React.
             </div>
           </RadioGroup>
         </div>
-        {visibility === 'private' ? (
+        {effectiveVisibility === 'private' ? (
           <PublicationEmailTagsField
             id='share-shared-emails'
             label='Share with specific emails (optional)'
@@ -630,7 +659,7 @@ export function ProjectShareDialog({
   projectName,
   projectDescription,
   projectUpdatedAt,
-  entryFile,
+  entryPath,
   parameters,
 }: ProjectShareDialogProps): React.JSX.Element {
   const handleRequestClose = useCallback(() => {
@@ -647,7 +676,7 @@ export function ProjectShareDialog({
             projectName={projectName}
             projectDescription={projectDescription}
             projectUpdatedAt={projectUpdatedAt}
-            entryFile={entryFile}
+            entryPath={entryPath}
             parameters={parameters}
             onRequestClose={handleRequestClose}
           />

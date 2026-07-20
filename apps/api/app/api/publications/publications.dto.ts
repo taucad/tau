@@ -14,7 +14,7 @@ export const publishManifestSchema = z
   .object({
     projectId: z.string().min(1),
     projectName: z.string().min(1),
-    entryFile: z.string().min(1),
+    entryPath: z.string().min(1),
     visibility: z.enum(['private', 'public']),
     title: z.string().min(1),
     description: z.string().optional(),
@@ -65,7 +65,7 @@ export class PublishUploadDto extends createZodDto(publishUploadSchema) {}
 export const storedPublicationManifestSchema = z.object({
   version: z.literal(1),
   projectId: z.string(),
-  entryFile: z.string(),
+  entryPath: z.string(),
   files: z.record(z.string(), z.string()),
   kernels: z.array(z.string()),
   runtime: z.string(),
@@ -94,7 +94,7 @@ export const publicationRowSchema = z
     visibility: publicationVisibilitySchema,
     runtimePin: z.string(),
     kernels: z.array(z.string()),
-    entryFile: z.string(),
+    entryPath: z.string(),
     title: z.string(),
     description: z.string().nullable(),
     forkCount: z.number().int().nonnegative(),

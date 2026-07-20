@@ -149,11 +149,11 @@ export function useKernelDiagnostics(options: UseKernelDiagnosticsOptions): UseK
     const currentFiles = new Set<string>();
 
     // Set markers for all files with issues.
-    // Issues may reference files different from the entry file (cross-file errors),
+    // Issues may reference files different from the entry path (cross-file errors),
     // so we group by location.fileName to place markers on the correct file.
     for (const [filePath, issues] of kernelIssues) {
       // Group issues by their actual source file (from location.fileName),
-      // falling back to the entry filePath for issues without location.
+      // falling back to the entry pathPath for issues without location.
       const issuesByFile = new Map<string, Monaco.editor.IMarkerData[]>();
 
       for (const issue of issues) {
@@ -185,7 +185,7 @@ export function useKernelDiagnostics(options: UseKernelDiagnosticsOptions): UseK
         markerService.setMarkers(uri, kernelMarkerOwner, markers);
       }
 
-      // If no issues had location, still track the entry file to clear stale markers
+      // If no issues had location, still track the entry path to clear stale markers
       if (issuesByFile.size === 0) {
         currentFiles.add(filePath);
       }

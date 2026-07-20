@@ -217,8 +217,12 @@ export const manifold = defineKernel({
   builtinModuleNames: ['manifold-3d', 'manifold-3d/manifoldCAD'],
   name: 'ManifoldKernel',
   version: '1.0.0',
+  nativeHandleScope: 'source',
   optionsSchema: manifoldOptionsSchema,
-  exportSchemas: manifoldExportSchemas,
+  render: { content: [] },
+  exportFormats: {
+    glb: { optionsSchema: manifoldExportSchemas.glb, content: [] },
+  },
 
   async initialize(options, runtime) {
     initManifoldWasm(options.wasmUrl);
@@ -227,15 +231,15 @@ export const manifold = defineKernel({
     return { manifoldCadModule };
   },
 
-  async getDependencies({ filePath }, runtime) {
-    return runtime.bundler.resolveDependencies(filePath);
+  async getDependencies({ entryPath }, runtime) {
+    return runtime.bundler.resolveDependencies(entryPath);
   },
 
-  async getParameters({ filePath }, runtime) {
-    const relativeFilePath = toVmEntryPath(filePath);
+  async getParameters({ entryPath }, runtime) {
+    const relativeFilePath = toVmEntryPath(entryPath);
 
     try {
-      const bundleResult = await runtime.bundler.bundle(filePath);
+      const bundleResult = await runtime.bundler.bundle(entryPath);
       if (!bundleResult.success) {
         return createKernelError(enrichIssueLocation(bundleResult.issues, relativeFilePath));
       }
@@ -268,12 +272,12 @@ export const manifold = defineKernel({
     }
   },
 
-  async createGeometry({ filePath, parameters }, runtime, context) {
-    const relativeFilePath = toVmEntryPath(filePath);
+  async createGeometry({ entryPath, parameters }, runtime, context) {
+    const relativeFilePath = toVmEntryPath(entryPath);
 
     await cleanupManifoldRuntime();
 
-    const bundleResult = await runtime.bundler.bundle(filePath);
+    const bundleResult = await runtime.bundler.bundle(entryPath);
     if (!bundleResult.success) {
       throw new ManifoldBuildError(enrichIssueLocation(bundleResult.issues, relativeFilePath));
     }

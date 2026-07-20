@@ -11,14 +11,15 @@ import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
-import { useRevisions } from '#hooks/use-revisions.js';
+import { useThumbnailGenerator } from '#hooks/use-thumbnail-generator.js';
+import { useVisibleRevisions } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import { useRevisionPane } from '#routes/projects_.$id/revision-pane-context.js';
 
 export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
-  const { geometryUnits, mainEntryFile, updateThumbnail, projectRef, editorRef } = useProject();
+  const { projectRef, editorRef } = useProject();
   const mainGraphicsRef = useMainGraphics();
-  const cadActor = geometryUnits.get(mainEntryFile);
+  const { regenerate: regenerateThumbnail } = useThumbnailGenerator();
   const fileManager = useFileManager();
   const fileTree = useFileTreeMap();
   const hasExportableGeometry = useSelector(projectRef, (state) => state.context.exportableGeometryUnitPaths.size > 0);
@@ -31,7 +32,7 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
   // Chat-restore time-travel (R13) — keyboard-first discovery of the pane + redo.
   const { setOpen: setRevisionPaneOpen } = useRevisionPane();
   const { returnToLatest } = useRestoreToPoint();
-  const { canReturnToLatest } = useRevisions();
+  const { canReturnToLatest } = useVisibleRevisions();
 
   // Track active screenshot actors for lifecycle cleanup
   const activeScreenshotActorsRef = useRef(new Set<{ stop: () => void }>());
@@ -161,41 +162,13 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
     [sendScreenshotRequest],
   );
 
-  const updateThumbnailScreenshot = useCallback(() => {
-    sendScreenshotRequest({
-      type: 'requestScreenshot',
-      options: {
-        output: {
-          format: 'image/webp',
-          quality: 0.92,
-        },
-        zoomLevel: 1.8,
-        cameraAngles: [{ phi: 60, theta: -45 }],
-      },
-      onSuccess(dataUrls) {
-        const dataUrl = dataUrls[0];
-        if (dataUrl) {
-          updateThumbnail(dataUrl);
-        }
-      },
-      onError(error) {
-        console.error('Thumbnail screenshot failed:', error);
-      },
-    });
-  }, [updateThumbnail, sendScreenshotRequest]);
-
   const handleUpdateThumbnail = useCallback(() => {
-    toast.promise(
-      async () => {
-        updateThumbnailScreenshot();
-      },
-      {
-        loading: 'Updating thumbnail...',
-        success: 'Thumbnail updated',
-        error: 'Failed to update thumbnail',
-      },
-    );
-  }, [updateThumbnailScreenshot]);
+    // Force a regeneration through the thumbnail machine (off the main thread
+    // via the runtime image transcoder); the render writes `thumbnail.webp` and
+    // repoints the project record when it settles.
+    regenerateThumbnail();
+    toast.success('Regenerating thumbnail…');
+  }, [regenerateThumbnail]);
 
   const handleCopyPngToClipboard = useCallback(async () => {
     toast.promise(
@@ -245,21 +218,6 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
       },
     );
   }, [projectName, sendScreenshotRequest]);
-
-  // Subscribe to the cadActor to update the thumbnail when geometry changes.
-  useEffect(() => {
-    if (!cadActor) {
-      return;
-    }
-
-    const subscription = cadActor.on('geometryEvaluated', () => {
-      // UpdateThumbnailScreenshot();
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [updateThumbnailScreenshot, cadActor]);
 
   useCommandPaletteItems(
     match.id,

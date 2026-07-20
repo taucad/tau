@@ -96,7 +96,7 @@ type ChatViewerProps = {
   /** Unique Dockview panel ID for this viewer instance */
   readonly viewId: string;
   /** File path being rendered in this viewer (undefined = empty state) */
-  readonly entryFile: string | undefined;
+  readonly entryPath: string | undefined;
   /** Dockview panel API for updating title, etc. */
   readonly panelApi: IDockviewPanelHeaderProps['api'];
   /** Dockview container API for layout-aware positioning */
@@ -105,7 +105,7 @@ type ChatViewerProps = {
 
 export const ChatViewer = memo(function ({
   viewId,
-  entryFile,
+  entryPath,
   panelApi,
   containerApi,
 }: ChatViewerProps): React.JSX.Element {
@@ -113,26 +113,26 @@ export const ChatViewer = memo(function ({
   // Get the per-view graphics machine
   const graphicsActor = viewGraphics.get(viewId);
 
-  // Get the geometry unit for this view's entry file
-  const cadActor = entryFile ? geometryUnits.get(entryFile) : undefined;
+  // Get the geometry unit for this view's entry path
+  const cadActor = entryPath ? geometryUnits.get(entryPath) : undefined;
 
   // Lazy tree snapshot for isDirectory checks (prefix / loaded dir entry)
   const fileTree = useFileTreeMap();
 
-  // Detect if the entry file is a directory.
+  // Detect if the entry path is a directory.
   // The fileTree only stores file entries (not directories), so we check
-  // whether entryFile is a prefix of any file path in the tree.
+  // whether entryPath is a prefix of any file path in the tree.
   const isDirectory = useMemo(() => {
-    if (!entryFile) {
+    if (!entryPath) {
       return false;
     }
 
-    const entry = fileTree.get(entryFile);
+    const entry = fileTree.get(entryPath);
     if (entry) {
       return entry.type === 'dir';
     }
 
-    const directoryPrefix = `${entryFile}/`;
+    const directoryPrefix = `${entryPath}/`;
     for (const key of fileTree.keys()) {
       if (key.startsWith(directoryPrefix)) {
         return true;
@@ -140,12 +140,12 @@ export const ChatViewer = memo(function ({
     }
 
     return false;
-  }, [entryFile, fileTree]);
+  }, [entryPath, fileTree]);
 
   // Derive isMissing from content service orphan outcome (VS Code pattern).
   // useFileContent auto-loads on cache miss; missing files resolve to the
   // 'orphaned' outcome via the discriminated FileContentResult contract.
-  const fileContent = useFileContent(entryFile);
+  const fileContent = useFileContent(entryPath);
   const isMissing = fileContent.kind === 'orphaned' && !isDirectory;
 
   // Get the current view settings from editor state for this panel
@@ -156,7 +156,7 @@ export const ChatViewer = memo(function ({
     (path: string) => {
       // Ensure geometry unit exists for the selected file
       if (!geometryUnits.has(path)) {
-        projectRef.send({ type: 'createGeometryUnit', entryFile: path });
+        projectRef.send({ type: 'createGeometryUnit', entryPath: path });
       }
 
       // Preserve existing view settings (FOV, visibility, environment preset, etc.)
@@ -167,7 +167,7 @@ export const ChatViewer = memo(function ({
         type: 'setViewSettings',
         viewId,
         viewState: {
-          entryFile: path,
+          entryPath: path,
           graphicsSettings: {
             ...(existingGraphics ?? defaultGraphicsSettings),
             // Clear geometry-dependent state on file switch
@@ -176,8 +176,8 @@ export const ChatViewer = memo(function ({
         },
       });
 
-      // Update Dockview panel params so the component re-renders with new entryFile
-      panelApi.updateParameters({ entryFile: path });
+      // Update Dockview panel params so the component re-renders with new entryPath
+      panelApi.updateParameters({ entryPath: path });
 
       // Update the Dockview panel title
       const fileName = path.split('/').pop() ?? path;
@@ -196,7 +196,7 @@ export const ChatViewer = memo(function ({
   }
 
   // If no file selected, render empty state with file selector
-  if (!entryFile) {
+  if (!entryPath) {
     return (
       <GraphicsProvider graphicsRef={graphicsActor}>
         <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
@@ -216,7 +216,7 @@ export const ChatViewer = memo(function ({
     );
   }
 
-  // If the entry file is a directory, show a friendly screen with a file selector
+  // If the entry path is a directory, show a friendly screen with a file selector
   if (isDirectory) {
     return (
       <GraphicsProvider graphicsRef={graphicsActor}>
@@ -225,7 +225,7 @@ export const ChatViewer = memo(function ({
           <p className='text-sm'>The viewer cannot display a directory.</p>
           <FileSelector
             selectedFile={undefined}
-            initialPath={entryFile}
+            initialPath={entryPath}
             placeholder='Select a file to render...'
             className='h-8 w-[200px]'
             title='Viewport File'
@@ -239,7 +239,7 @@ export const ChatViewer = memo(function ({
     );
   }
 
-  // If the entry file doesn't exist in the file tree, show a friendly "not found" screen
+  // If the entry path doesn't exist in the file tree, show a friendly "not found" screen
   if (isMissing) {
     return (
       <GraphicsProvider graphicsRef={graphicsActor}>
@@ -247,7 +247,7 @@ export const ChatViewer = memo(function ({
           <FileX className='size-12 stroke-1' />
           <div className='flex flex-col items-center gap-1'>
             <p className='text-sm font-medium'>File not found</p>
-            <p className='max-w-60 truncate text-xs'>{entryFile}</p>
+            <p className='max-w-60 truncate text-xs'>{entryPath}</p>
           </div>
           <FileSelector
             selectedFile={undefined}
@@ -267,7 +267,7 @@ export const ChatViewer = memo(function ({
   return (
     <CadProvider cadRef={cadActor}>
       <GraphicsProvider graphicsRef={graphicsActor}>
-        <ViewerContent viewId={viewId} entryFile={entryFile} panelApi={panelApi} containerApi={containerApi} />
+        <ViewerContent viewId={viewId} entryPath={entryPath} panelApi={panelApi} containerApi={containerApi} />
       </GraphicsProvider>
     </CadProvider>
   );
@@ -281,12 +281,12 @@ export const ChatViewer = memo(function ({
  */
 const ViewerContent = memo(function ({
   viewId,
-  entryFile,
+  entryPath,
   panelApi,
   containerApi,
 }: {
   readonly viewId: string;
-  readonly entryFile: string;
+  readonly entryPath: string;
   readonly panelApi: DockviewPanelApi;
   readonly containerApi: DockviewApi;
 }): React.JSX.Element {
@@ -302,8 +302,8 @@ const ViewerContent = memo(function ({
   // the cad actor without having to re-add the panel.
   const isGeometryUnitClosed = !cadRef;
   const handleReopenRenderer = useCallback(() => {
-    projectRef.send({ type: 'createGeometryUnit', entryFile });
-  }, [projectRef, entryFile]);
+    projectRef.send({ type: 'createGeometryUnit', entryPath });
+  }, [projectRef, entryPath]);
 
   // Bridge geometry data from the headless CadMachine to the per-view GraphicsMachine
   const graphicsActor = useGraphics();
@@ -313,10 +313,10 @@ const ViewerContent = memo(function ({
         type: 'updateGeometry',
         geometry,
         units,
-        sourceFile: entryFile,
+        sourceFile: entryPath,
       });
     }
-  }, [entryFile, graphicsActor, geometry, units]);
+  }, [entryPath, graphicsActor, geometry, units]);
 
   // Sync graphics + render timeout settings back to editor state for persistence
   useViewSettingsSync({
@@ -368,7 +368,7 @@ const ViewerContent = memo(function ({
   const [viewerPointerPosition, setViewerPointerPosition] = useState<ViewerPointerPosition | undefined>(undefined);
   const [viewerActionMenu, setViewerActionMenu] = useState<ViewerSecondaryGestureMenu | undefined>(undefined);
   const secondaryGestureRef = useRef<ViewerSecondaryGestureState>(idleViewerSecondaryGestureState);
-  const modelInteractionUnitId = useMemo(() => deriveModelInteractionUnitId({ sourceFile: entryFile }), [entryFile]);
+  const modelInteractionUnitId = useMemo(() => deriveModelInteractionUnitId({ sourceFile: entryPath }), [entryPath]);
   const componentNameForPointer = useModelInteractionSelector((state) => {
     const unit = getModelInteractionUnitState(state.context, modelInteractionUnitId);
     const { hoveredComponentId } = unit;
@@ -549,7 +549,7 @@ const ViewerContent = memo(function ({
             enableMatcap={enableMatcap}
             upDirection={upDirection}
             geometry={geometry}
-            sourceFile={entryFile}
+            sourceFile={entryPath}
             // Keep R3F on default offsetX/Y compute; eventPrefix='client'
             // is window-relative and mis-rays docked panels.
             eventSource={canvasEventSource}
@@ -596,7 +596,7 @@ const ViewerContent = memo(function ({
         className='pointer-events-none absolute bottom-2 left-2 z-10 flex max-w-[calc(100%-1rem)] shrink-0 flex-col items-start gap-2 [&>*]:pointer-events-auto'
       >
         <ChatInterfaceGraphics />
-        <ChatStackTrace entryFile={entryFile} side='bottom' />
+        <ChatStackTrace entryPath={entryPath} side='bottom' />
         <ChatViewerControls availableWidth={toolbarAvailableWidth} className='self-stretch' />
       </div>
     </div>

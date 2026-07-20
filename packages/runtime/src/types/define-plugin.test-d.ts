@@ -8,6 +8,7 @@ import { assertType, describe, expectTypeOf, it } from 'vitest';
 import type { GeometryResponse } from '@taucad/types';
 import { z } from 'zod';
 import type { RuntimeClientOptions } from '#client/runtime-client-core.js';
+import type { ExportRoute } from '#types/runtime.types.js';
 import { createRuntimeClient } from '#client/runtime-client.js';
 import type { BundlerPlugin, KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
 import { defineBundler } from '#types/runtime-bundler.types.js';
@@ -31,26 +32,37 @@ const makeKernel = () =>
       endpoint: z.string(),
       retries: z.number().default(2),
     }),
-    renderSchema: z.object({
-      tessellation: z.object({
-        linearTolerance: z.number(),
+    render: {
+      optionsSchema: z.object({
+        tessellation: z.object({
+          linearTolerance: z.number(),
+        }),
       }),
-    }),
-    exportSchemas: {
-      step: z.object({ tolerance: z.number().default(0.1) }),
-      stl: z.object({ binary: z.boolean() }),
+      content: [],
+    },
+    exportFormats: {
+      step: { optionsSchema: z.object({ tolerance: z.number().default(0.1) }), content: [] },
+      stl: { optionsSchema: z.object({ binary: z.boolean() }), content: [] },
     },
     async initialize(options) {
       return { endpoint: options.endpoint };
     },
-    async getDependencies() {
+    async getDependencies(input) {
+      expectTypeOf(input.entryPath).toEqualTypeOf<string>();
       return { resolved: [], unresolved: [] };
     },
-    async getParameters() {
+    async getParameters(input) {
+      expectTypeOf(input.entryPath).toEqualTypeOf<string>();
       return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
     },
     async createGeometry(input) {
-      return { geometry: testGeometry, nativeHandle: { id: input.filePath } };
+      expectTypeOf(input.entryPath).toEqualTypeOf<string>();
+      expectTypeOf(input.options).toEqualTypeOf<{
+        tessellation: { linearTolerance: number };
+      }>();
+      // @ts-expect-error -- kernel create inputs carry resolved values, not route intent.
+      void input.operation;
+      return { geometry: testGeometry, nativeHandle: { id: input.entryPath } };
     },
     async exportGeometry(_input) {
       return { success: true, data: [], issues: [] };
@@ -72,6 +84,8 @@ describe('defineKernel', () => {
       extensions: ['ts'],
       name: 'Bad',
       version: '1.0.0',
+      render: { content: [] },
+      exportFormats: {},
       // @ts-expect-error -- unknown authoring keys are rejected at definition time.
       worker: () => undefined,
       async initialize() {
@@ -98,6 +112,8 @@ describe('defineKernel', () => {
       extensions: ['snap'],
       name: 'SnapshotKernel',
       version: '1.0.0',
+      render: { content: [] },
+      exportFormats: {},
       async initialize() {
         return { contextValue: 'ready' };
       },
@@ -144,6 +160,8 @@ describe('defineKernel', () => {
       extensions: ['snap'],
       name: 'HalfSnapshotKernel',
       version: '1.0.0',
+      render: { content: [] },
+      exportFormats: {},
       async initialize() {
         return {};
       },
@@ -176,6 +194,7 @@ describe('defineMiddleware', () => {
         cacheTtl: z.number().default(60),
       }),
       async wrapCreateGeometry(input, handler, runtime) {
+        expectTypeOf(input.entryPath).toEqualTypeOf<string>();
         expectTypeOf(runtime.options).toEqualTypeOf<{ cacheTtl: number }>();
         return handler(input);
       },
@@ -199,10 +218,12 @@ describe('defineBundler', () => {
       async initialize(_init, _options) {
         return {};
       },
-      async detectImports() {
+      async detectImports(input) {
+        expectTypeOf(input.entryPath).toEqualTypeOf<string>();
         return { detectedModules: [], dependencies: [] };
       },
-      async bundle() {
+      async bundle(input) {
+        expectTypeOf(input.entryPath).toEqualTypeOf<string>();
         return { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] };
       },
       async execute() {
@@ -345,5 +366,186 @@ describe('defineRuntime and client projections', () => {
       transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
       config: { endpoint: 'https://example.test', retries: '3' },
     });
+  });
+});
+
+describe('route-scoped content projections', () => {
+  const contentKernel = defineKernel({
+    id: 'contentKernel',
+    extensions: ['content'],
+    name: 'ContentKernel',
+    version: '1.0.0',
+    render: {
+      optionsSchema: z.object({ detail: z.number().default(1) }),
+      content: ['includeEdges', 'includeTopology'],
+    },
+    exportFormats: {
+      glb: {
+        optionsSchema: z
+          .object({
+            coordinateSystem: z.enum(['y-up', 'z-up']).default('y-up'),
+            unit: z.object({ length: z.enum(['meter', 'millimeter']).default('meter') }).default({ length: 'meter' }),
+            tessellation: z.object({ linearTolerance: z.number().default(0.01) }).optional(),
+          })
+          .strict(),
+        content: ['includeEdges', 'includeTopology'],
+      },
+      step: { optionsSchema: z.object({ tolerance: z.number().default(0.01) }).strict(), content: [] },
+    },
+    async initialize() {
+      return {};
+    },
+    async getDependencies() {
+      return { resolved: [], unresolved: [] };
+    },
+    async getParameters() {
+      return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+    },
+    async createGeometry(input) {
+      expectTypeOf<typeof input.content>().toEqualTypeOf<
+        | {
+            readonly includeEdges?: boolean;
+            readonly includeTopology?: boolean;
+          }
+        | undefined
+      >();
+      return { geometry: testGeometry, nativeHandle: {} };
+    },
+    async exportGeometry(input) {
+      if (input.format === 'glb') {
+        expectTypeOf<typeof input.content>().toEqualTypeOf<
+          | {
+              readonly includeEdges?: boolean;
+              readonly includeTopology?: boolean;
+            }
+          | undefined
+        >();
+      }
+      if (input.format === 'step') {
+        expectTypeOf<typeof input.content>().toEqualTypeOf<undefined>();
+      }
+      return { success: true, data: [], issues: [] };
+    },
+  })();
+
+  const fallbackKernel = defineKernel({
+    id: 'fallbackKernel',
+    extensions: ['fallback'],
+    name: 'FallbackKernel',
+    version: '1.0.0',
+    render: { content: [] },
+    exportFormats: { glb: { optionsSchema: z.object({}), content: [] } },
+    async initialize() {
+      return {};
+    },
+    async getDependencies() {
+      return { resolved: [], unresolved: [] };
+    },
+    async getParameters() {
+      return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+    },
+    async createGeometry() {
+      return { geometry: testGeometry, nativeHandle: {} };
+    },
+    async exportGeometry() {
+      return { success: true, data: [], issues: [] };
+    },
+  })();
+
+  const edges = defineMiddleware({
+    id: 'typedEdges',
+    name: 'TypedEdges',
+    content: {
+      render: ['includeEdges'],
+      exportFormats: { glb: ['includeEdges'] },
+    },
+    async wrapCreateGeometry(input, handler) {
+      expectTypeOf<typeof input.content>().toEqualTypeOf<{ readonly includeEdges?: boolean } | undefined>();
+      return handler(input);
+    },
+  })();
+
+  const images = defineTranscoder({
+    id: 'typedImages',
+    name: 'TypedImages',
+    version: '1.0.0',
+    edges: [
+      {
+        from: 'glb',
+        to: 'webp',
+        fidelity: 'mesh',
+        optionsSchema: z.object({ width: z.number().default(768) }).strict(),
+        content: ['includeEdges'],
+        sourceOptions: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
+      },
+    ] as const,
+    async initialize() {
+      return {};
+    },
+    async transcode(input) {
+      expectTypeOf(input).not.toHaveProperty('content');
+      return { success: true, data: input.files, issues: [] };
+    },
+    async cleanup() {},
+  })();
+
+  const runtime = defineRuntime({
+    kernels: [contentKernel, fallbackKernel],
+    middleware: [edges],
+    transcoders: [images],
+  });
+  const client = createRuntimeClient({
+    transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+  });
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Runtime source maps are keyed by literal file paths.
+  const source = { files: { 'main.content': 'model' } } as const;
+
+  it('accepts only content reachable for the requested target', () => {
+    void client.render({ source, content: { includeEdges: true, includeTopology: true } });
+    void client.export('glb', { source, content: { includeEdges: true, includeTopology: true } });
+    void client.export('webp', {
+      source,
+      content: { includeEdges: true },
+      exportOptions: { tessellation: { linearTolerance: 0.005 }, width: 1920 },
+    });
+
+    void client.export('webp', {
+      source,
+      // @ts-expect-error -- the image edge fulfills edges, not Tau topology metadata.
+      content: { includeTopology: true },
+    });
+    void client.export('step', {
+      source,
+      // @ts-expect-error -- STEP does not advertise framework content.
+      content: { includeEdges: false },
+    });
+    void client.export('webp', {
+      source,
+      exportOptions: {
+        // @ts-expect-error -- the image route pins its intermediate coordinate system.
+        coordinateSystem: 'z-up',
+      },
+    });
+  });
+
+  it('narrows bestRouteFor by target, kernel, and requested content', () => {
+    const native = client.bestRouteFor('glb', { kernelId: 'contentKernel' });
+    expectTypeOf(native).toEqualTypeOf<
+      | ExportRoute<
+          readonly [typeof contentKernel, typeof fallbackKernel],
+          readonly [typeof edges],
+          readonly [typeof images],
+          'glb',
+          'contentKernel'
+        >
+      | undefined
+    >();
+    void client.bestRouteFor('glb', { kernelId: 'fallbackKernel', content: { includeEdges: true } });
+    void client.bestRouteFor('webp', { kernelId: 'contentKernel', content: { includeEdges: true } });
+
+    // @ts-expect-error -- kernel ids are projected from the runtime definition.
+    void client.bestRouteFor('glb', { kernelId: 'missingKernel' });
+    // @ts-expect-error -- WebP does not carry topology.
+    void client.bestRouteFor('webp', { content: { includeTopology: true } });
   });
 });

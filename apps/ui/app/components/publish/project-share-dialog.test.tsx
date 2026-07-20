@@ -10,6 +10,8 @@ import { publicationApiCode } from '@taucad/types/constants';
 import { ProjectShareDialog, formatPublishError } from '#components/publish/project-share-dialog.js';
 import { publishOversizedProjectId, publishStalledProjectId } from '#machines/publish.machine.ui-test-double.js';
 import * as publishMachineActual from '#machines/publish.machine.js';
+import type * as useEntitlementsModule from '#hooks/use-entitlements.js';
+import type * as useSettingsDialogModule from '#hooks/use-settings-dialog.js';
 import { TooltipProvider } from '#components/ui/tooltip.js';
 
 vi.mock('#environment.config.js', () => ({
@@ -25,6 +27,20 @@ vi.mock('#machines/publish.machine.js', async () => {
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({ fileManagerRef: {} }),
 }));
+
+// Pro entitlements by default so the pre-existing private-flow tests exercise
+// publish behaviour, not the tier gate; the gate suite flips this per-test.
+const useEntitlementsMock = vi.hoisted(() => vi.fn());
+vi.mock('#hooks/use-entitlements.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof useEntitlementsModule>();
+  return { ...actual, useEntitlements: useEntitlementsMock };
+});
+
+const openSettingsDialogMock = vi.hoisted(() => vi.fn());
+vi.mock('#hooks/use-settings-dialog.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof useSettingsDialogModule>();
+  return { ...actual, openSettingsDialog: openSettingsDialogMock };
+});
 
 const { PublishUploadError } = publishMachineActual;
 
@@ -96,7 +112,10 @@ const renderDialog = (ui: ReactElement): ReturnType<typeof render> =>
   );
 
 describe('ProjectShareDialog', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    const { entitlementsFromTier } = await import('@taucad/billing');
+    useEntitlementsMock.mockReturnValue(entitlementsFromTier('pro'));
+    openSettingsDialogMock.mockClear();
     Element.prototype.scrollIntoView = vi.fn();
     Element.prototype.hasPointerCapture = vi.fn(() => false);
     Element.prototype.setPointerCapture = vi.fn();
@@ -118,7 +137,7 @@ describe('ProjectShareDialog', () => {
 
   it('loads unpublished share state with private visibility selected', async () => {
     renderDialog(
-      <ProjectShareDialog open onOpenChange={vi.fn()} projectId='proj_ui' projectName='Demo' entryFile='main.ts' />,
+      <ProjectShareDialog open onOpenChange={vi.fn()} projectId='proj_ui' projectName='Demo' entryPath='main.ts' />,
     );
 
     expect(await screen.findByText(/publish a snapshot/i)).toBeInTheDocument();
@@ -138,7 +157,7 @@ describe('ProjectShareDialog', () => {
         projectId='proj_ui'
         projectName='Demo'
         projectDescription='a beautiful model'
-        entryFile='main.ts'
+        entryPath='main.ts'
       />,
     );
 
@@ -152,7 +171,7 @@ describe('ProjectShareDialog', () => {
       .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope));
 
     renderDialog(
-      <ProjectShareDialog open onOpenChange={vi.fn()} projectId='proj_ok' projectName='Demo' entryFile='main.ts' />,
+      <ProjectShareDialog open onOpenChange={vi.fn()} projectId='proj_ok' projectName='Demo' entryPath='main.ts' />,
     );
 
     await userEvent.click(await screen.findByRole('button', { name: /publish and copy link/i }));
@@ -184,7 +203,7 @@ describe('ProjectShareDialog', () => {
       .mockResolvedValueOnce(mockJsonResponse(reloadedEnvelope));
 
     renderDialog(
-      <ProjectShareDialog open onOpenChange={vi.fn()} projectId='proj_ui' projectName='Demo' entryFile='main.ts' />,
+      <ProjectShareDialog open onOpenChange={vi.fn()} projectId='proj_ui' projectName='Demo' entryPath='main.ts' />,
     );
 
     await userEvent.type(await screen.findByRole('textbox', { name: /share with emails/i }), 'Team@Example.com{Enter}');
@@ -220,7 +239,7 @@ describe('ProjectShareDialog', () => {
         projectId='proj_ui'
         projectName='Demo'
         projectUpdatedAt='2026-01-02T00:00:02.500Z'
-        entryFile='main.ts'
+        entryPath='main.ts'
       />,
     );
 
@@ -237,7 +256,7 @@ describe('ProjectShareDialog', () => {
       .mockResolvedValueOnce(mockJsonResponse(publicEnvelope));
 
     renderDialog(
-      <ProjectShareDialog open onOpenChange={vi.fn()} projectId='proj_ui' projectName='Demo' entryFile='main.ts' />,
+      <ProjectShareDialog open onOpenChange={vi.fn()} projectId='proj_ui' projectName='Demo' entryPath='main.ts' />,
     );
 
     const accessSelect = await screen.findByRole('combobox', { name: /general access/i });
@@ -268,7 +287,7 @@ describe('ProjectShareDialog', () => {
       .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope));
 
     renderDialog(
-      <ProjectShareDialog open onOpenChange={vi.fn()} projectId='proj_ui' projectName='Demo' entryFile='main.ts' />,
+      <ProjectShareDialog open onOpenChange={vi.fn()} projectId='proj_ui' projectName='Demo' entryPath='main.ts' />,
     );
 
     const accessSelect = await screen.findByRole('combobox', { name: /general access/i });
@@ -294,7 +313,7 @@ describe('ProjectShareDialog', () => {
       .mockResolvedValueOnce({ ok: false, status: 500 } as Response);
 
     renderDialog(
-      <ProjectShareDialog open onOpenChange={vi.fn()} projectId='proj_ui' projectName='Demo' entryFile='main.ts' />,
+      <ProjectShareDialog open onOpenChange={vi.fn()} projectId='proj_ui' projectName='Demo' entryPath='main.ts' />,
     );
 
     const accessSelect = await screen.findByRole('combobox', { name: /general access/i });
@@ -314,7 +333,7 @@ describe('ProjectShareDialog', () => {
         onOpenChange={vi.fn()}
         projectId='proj_invalid_email'
         projectName='Demo'
-        entryFile='main.ts'
+        entryPath='main.ts'
       />,
     );
 
@@ -334,7 +353,7 @@ describe('ProjectShareDialog', () => {
         onOpenChange={vi.fn()}
         projectId={publishStalledProjectId}
         projectName='Demo'
-        entryFile='main.ts'
+        entryPath='main.ts'
       />,
     );
 
@@ -352,7 +371,7 @@ describe('ProjectShareDialog', () => {
         onOpenChange={vi.fn()}
         projectId={publishOversizedProjectId}
         projectName='Huge'
-        entryFile='main.ts'
+        entryPath='main.ts'
       />,
     );
 
@@ -390,5 +409,35 @@ describe('formatPublishError', () => {
     expect(formatPublishError(new PublishUploadError('x', { status: 400 }))).toMatchObject({
       headline: 'Share payload was invalid',
     });
+  });
+});
+
+describe('ProjectShareDialog free-tier visibility gate (T5)', () => {
+  beforeEach(async () => {
+    const { entitlementsFromTier } = await import('@taucad/billing');
+    useEntitlementsMock.mockReturnValue(entitlementsFromTier('free'));
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(unpublishedEnvelope));
+  });
+
+  it('locks the private option and defaults free users to public', async () => {
+    renderDialog(
+      <ProjectShareDialog open onOpenChange={vi.fn()} projectId='proj_ui' projectName='Demo' entryPath='main.ts' />,
+    );
+
+    expect(await screen.findByText(/publish a snapshot/i)).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /private/i })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: /public/i })).toBeChecked();
+  });
+
+  it('routes the upgrade affordance to billing settings', async () => {
+    const user = userEvent.setup();
+    renderDialog(
+      <ProjectShareDialog open onOpenChange={vi.fn()} projectId='proj_ui' projectName='Demo' entryPath='main.ts' />,
+    );
+
+    await screen.findByText(/publish a snapshot/i);
+    await user.click(screen.getByRole('button', { name: /upgrade/i }));
+
+    expect(openSettingsDialogMock).toHaveBeenCalledWith('billing');
   });
 });

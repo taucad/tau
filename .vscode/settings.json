@@ -3,6 +3,8 @@
   "files.watcherExclude": {
     "**/repos/**": true
   },
+  "git.autoRepositoryDetection": "subFolders",
+  "git.scanRepositories": ["repos/tau-brain", "repos/opencascade.js", "repos/replicad"],
   "javascript.preferences.importModuleSpecifierEnding": "js",
   "typescript.preferences.importModuleSpecifierEnding": "js",
   "typescript.preferences.importModuleSpecifier": "non-relative",

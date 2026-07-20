@@ -4,7 +4,7 @@
     "**/repos/**": true
   },
   "git.autoRepositoryDetection": "subFolders",
-  "git.scanRepositories": ["repos/tau-brain", "repos/opencascade.js", "repos/replicad"],
+  "git.scanRepositories": ["repos/tau-brain", "repos/opencascade.js", "repos/replicad", "repos/picovoxel"],
   "javascript.preferences.importModuleSpecifierEnding": "js",
   "typescript.preferences.importModuleSpecifierEnding": "js",
   "typescript.preferences.importModuleSpecifier": "non-relative",

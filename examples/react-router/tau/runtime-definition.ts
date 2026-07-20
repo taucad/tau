@@ -8,5 +8,4 @@ export const runtime = defineRuntime({
   kernels: [replicad({ wasm: 'single' })],
   bundlers: [esbuild()],
   middleware: [parameterCache(), geometryCache()],
-  renderTimeout: 60_000,
 });

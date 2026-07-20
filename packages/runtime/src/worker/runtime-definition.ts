@@ -16,7 +16,6 @@ type RuntimePluginOptions<
   readonly middleware: Middleware;
   readonly bundlers: Bundlers;
   readonly transcoders: Transcoders;
-  readonly renderTimeout?: number;
 };
 
 type AwaitedRuntimeOptions<Runtime> = Awaited<Runtime>;
@@ -115,7 +114,6 @@ export type RuntimeDefinitionOptions<
   readonly middleware?: Middleware;
   readonly bundlers?: Bundlers;
   readonly transcoders?: Transcoders;
-  readonly renderTimeout?: number;
 };
 
 export type RuntimeKernels<Runtime> =
@@ -247,7 +245,6 @@ function normalizeRuntimeDefinition<
     middleware: (options.middleware ?? []) as unknown as Middleware,
     bundlers: (options.bundlers ?? []) as unknown as Bundlers,
     transcoders: (options.transcoders ?? []) as unknown as Transcoders,
-    ...(options.renderTimeout === undefined ? {} : { renderTimeout: options.renderTimeout }),
   };
 }
 

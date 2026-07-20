@@ -3,10 +3,9 @@ import { presets } from '#plugins/presets.js';
 
 describe('presets.all', () => {
   it('should return all 6 kernel plugins with correct IDs', () => {
-    const { kernels, renderTimeout } = presets.all();
+    const { kernels } = presets.all();
 
     expect(kernels).toHaveLength(6);
-    expect(renderTimeout).toBeUndefined();
 
     const ids = kernels.map((k) => k.id);
     expect(ids).toEqual(['zoo', 'replicad', 'opencascade', 'manifold', 'jscad', 'tau']);

@@ -90,6 +90,8 @@ This dual-bridge design means editor writes (Bridge A) trigger watch events to t
 
 For environments without a separate filesystem worker (e.g., Node.js or testing), the inline arms wire `createBridgePort(fileSystem)` internally and use the same protocol — `watch` is auto-propagated when the inlined object exposes a `watch` method.
 
+A [runtime path](./path-namespaces) identifies a file within the filesystem supplied to the client. Normalized worker-side paths begin with `/`, but that slash names the supplied filesystem's root rather than the host operating system's root. Runtime receives neither authority-global `/projects/<id>` paths nor host filesystem paths.
+
 ### Transport Abort Channel
 
 The abort signal must be readable during **synchronous WASM execution**, when the worker's event loop is blocked and cannot process messages. The active [transport](../api/client) owns this channel end-to-end — on SAB-capable transports it backs the channel with a `SharedArrayBuffer` so the kernel can see the abort generation while the event loop is blocked; on transports without shared memory (e.g. a future websocket transport) the same `signalAbort(reason)` API instead serialises a wire-format `'abort'` command. Either way, the runtime client and worker client never read `Atomics` or touch a SAB directly:

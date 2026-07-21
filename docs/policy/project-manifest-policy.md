@@ -3,11 +3,12 @@ title: 'Project Manifest Policy'
 description: 'Authority contract for the strict first-release tau.json manifest, host-local project library state, lifecycle overlays, and filesystem-first discovery.'
 status: active
 created: '2026-07-13'
-updated: '2026-07-17'
+updated: '2026-07-21'
 related:
   - docs/policy/filesystem-authority-policy.md
   - docs/policy/filesystem-policy.md
   - docs/policy/library-api-policy.md
+  - docs/policy/runtime-api-policy.md
   - docs/policy/storage-policy.md
   - docs/policy/vision-policy.md
   - docs/research/headless-thumbnail-rendering-architecture-v4.md
@@ -105,7 +106,7 @@ This URL rule applies to Tau-owned, user-visible JSON documents that expose `$sc
 - `entryPath`: the normalized project-relative file that starts evaluation;
 - optional `thumbnail`: the unique Tau-managed project-relative WebP output slot associated with that asset.
 
-`entryPath` is preferred over `entry`, `file`, `source`, or `path`: it matches Tau's established public vocabulary and describes both the file kind and its role. Tau currently supports one first-class entry and mechanical projects only. Additional asset keys, a `discipline` constant, and an arbitrary asset map have no current consumer and are forbidden. They may be deliberately designed when a second entry or non-mechanical workflow actually requires them.
+`entryPath` is preferred over `entry`, `file`, `source`, or `path`: it matches Tau's established public vocabulary and describes both the file kind and its role. This manifest value is project-relative and has no leading `/`. A runtime consumer may pass it as `source.path`; `RuntimeClient` later normalizes the same identity into the runtime `entryPath` seen by plugin authors. Tau currently supports one first-class entry and mechanical projects only. Additional asset keys, a `discipline` constant, and an arbitrary asset map have no current consumer and are forbidden. They may be deliberately designed when a second entry or non-mechanical workflow actually requires them.
 
 The canonical v1 asset shape is:
 

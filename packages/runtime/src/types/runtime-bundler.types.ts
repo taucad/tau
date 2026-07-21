@@ -29,9 +29,9 @@ export type BundleResult = {
   issues: KernelIssue[];
   /** Whether bundling succeeded */
   success: boolean;
-  /** Absolute paths of all project files that were resolved during bundling (transitive dependencies). */
+  /** Paths within the runtime filesystem resolved during bundling, including transitive dependencies. */
   dependencies: string[];
-  /** Absolute paths of imports that could not be resolved during bundling — used for watch-set expansion. */
+  /** Paths within the runtime filesystem that could not be resolved — used for watch-set expansion. */
   unresolvedPaths: string[];
 };
 
@@ -65,11 +65,12 @@ export type BuiltinModule = {
  * @public
  */
 export type KernelBundler = {
-  /** Bundle a file and all its transitive dependencies. */
+  /** Bundle the runtime entry at `entryPath` and all its transitive dependencies. The normalized path begins with `/`. */
   bundle(entryPath: string): Promise<BundleResult>;
   /**
    * Resolve all transitive dependencies without generating output code.
-   * Returns both resolved dependencies and unresolved import paths.
+   * `entryPath` is a normalized path within the runtime filesystem and begins with `/`.
+   * Returns both resolved dependencies and unresolved import paths in that filesystem.
    */
   resolveDependencies(entryPath: string): Promise<GetDependenciesResult>;
   /**
@@ -85,11 +86,12 @@ export type KernelBundler = {
 // =============================================================================
 
 /**
- * Project-local filesystem context for bundler initialization.
+ * Runtime filesystem context for bundler initialization. Runtime `/` is the
+ * supplied filesystem root, not the host operating system root.
  * @public
  */
 export type BundlerInitOptions = {
-  /** Filesystem interface for reading project files */
+  /** Filesystem interface for reading files by runtime path. */
   filesystem: KernelFileSystem;
 };
 
@@ -98,7 +100,7 @@ export type BundlerInitOptions = {
  * @public
  */
 export type BundleInput = {
-  /** Canonical absolute entry path */
+  /** Path of the entry within the runtime filesystem. The normalized path begins with `/`. */
   entryPath: string;
 };
 
@@ -110,7 +112,7 @@ export type BundleInput = {
 export type DetectImportsResult = {
   /** Bare specifiers imported transitively (e.g., 'replicad', '@jscad/modeling') */
   detectedModules: string[];
-  /** Project file dependencies discovered during detection (reusable by getDependencies) */
+  /** Runtime paths discovered during detection (reusable by getDependencies). */
   dependencies: string[];
 };
 

@@ -63,6 +63,10 @@ const client = createRuntimeClient({
 });
 ```
 
+## Kernel Entry Paths
+
+Kernel methods receive `entryPath` as a normalized [runtime path](../concepts/path-namespaces) beginning with `/`. It identifies the model's evaluation root inside the filesystem supplied to the runtime, not a host operating-system path. `getDependencies` returns ordinary `path` values in the same namespace.
+
 ## Related
 
 - [Choose a Kernel](../guides/choosing-a-kernel)

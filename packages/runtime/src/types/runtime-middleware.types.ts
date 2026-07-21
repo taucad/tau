@@ -65,7 +65,7 @@ export type KernelMiddlewareRuntime<
 > = {
   /** Logger with middleware name pre-configured as the component */
   logger: RuntimeLogger;
-  /** Filesystem for all file operations (uses absolute path methods for middleware) */
+  /** Filesystem capability for runtime-path operations. `/` is the supplied filesystem root. */
   filesystem: KernelFileSystem;
   /** Type-safe state for persisting data during the wrap hook execution */
   state: MiddlewareState<State>;
@@ -292,7 +292,7 @@ export type WrapGetParametersHook<
  * ```
  */
 export type MiddlewareDependencyDeclaration = Readonly<{
-  /** Canonical project-local absolute path. */
+  /** Path of the dependency within the runtime filesystem. */
   path: string;
   /** Milliseconds. */
   watchDebounce?: number;

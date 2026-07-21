@@ -12,7 +12,7 @@
  */
 export type FileDependency = {
   type: 'file';
-  /** Path to the file relative to the build directory */
+  /** Path of the dependency within the runtime filesystem. */
   path: string;
   /** SHA-256 hash of the file contents */
   contentHash: string;

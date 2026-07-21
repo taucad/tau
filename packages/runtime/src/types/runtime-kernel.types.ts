@@ -75,6 +75,8 @@ export type RuntimeLogger = {
  * authored for the runtime (e.g. `fromFsLike`, `fromMemoryFs`, `fromNodeFs`)
  * implement this shape; the runtime upgrades it into a {@link RuntimeFileSystem}
  * at the worker boundary via {@link createRuntimeFileSystem}.
+ * Paths identify locations within the supplied runtime filesystem. A leading
+ * `/` refers to that filesystem's root, not the host operating system's root.
  *
  * @public
  */
@@ -111,6 +113,7 @@ export type RuntimeWatchEvent = WatchEvent;
  * consumer-facing opaque brand. The `KernelFileSystem` name is exported
  * only from the kernel-author subpath `@taucad/runtime/kernel`; the
  * consumer barrel reserves `RuntimeFileSystem` for the opaque value.
+ * All methods operate on paths within the supplied runtime filesystem.
  *
  * @public
  */
@@ -136,11 +139,11 @@ export type KernelFileSystem = RuntimeFileSystemBase & {
  * @public
  */
 export type KernelRuntime = {
-  /** Filesystem interface (all paths are absolute) */
+  /** Filesystem capability exposed as runtime `/`; all paths are within this filesystem. */
   filesystem: KernelFileSystem;
   /** Logger with kernel name pre-configured */
   logger: RuntimeLogger;
-  /** Read-only view of cached file contents (absolute paths), populated during dependency computation */
+  /** Read-only view of file contents cached by normalized runtime path during dependency computation. */
   fileContentCache: ReadonlyMap<string, Uint8Array<ArrayBuffer> | string>;
   /** Esbuild bundler for JS/TS kernels. Lazily initialised on first access. */
   bundler: KernelBundler;
@@ -169,7 +172,7 @@ export type RuntimeImplementationAsset = {
  * @public
  */
 export type GetParametersInput = {
-  /** Absolute path to the active entry */
+  /** Path of the active entry within the runtime filesystem. The normalized path begins with `/`. */
   entryPath: string;
 };
 
@@ -215,7 +218,7 @@ type RenderOptionsInput<Render extends KernelRenderDefinition> =
   RenderSchemaOf<Render> extends z.ZodType ? z.input<RenderSchemaOf<Render>> : Record<string, unknown>;
 
 export type CreateGeometryInput<Render extends KernelRenderDefinition = KernelRenderDefinition> = {
-  /** Absolute path to the active entry */
+  /** Path of the active entry within the runtime filesystem. The normalized path begins with `/`. */
   entryPath: string;
   /** User-provided parameters */
   parameters: Record<string, unknown>;
@@ -228,7 +231,7 @@ export type CreateGeometryInput<Render extends KernelRenderDefinition = KernelRe
  * @public
  */
 export type GetDependenciesInput = {
-  /** Absolute path to the active entry */
+  /** Path of the active entry within the runtime filesystem. The normalized path begins with `/`. */
   entryPath: string;
 };
 
@@ -241,9 +244,9 @@ export type GetDependenciesInput = {
  * @public
  */
 export type GetDependenciesResult = {
-  /** Absolute paths of files that were successfully resolved and read. */
+  /** Paths within the runtime filesystem that were successfully resolved and read. */
   resolved: string[];
-  /** Absolute paths of imports that could not be resolved — used for watch-set expansion. */
+  /** Paths within the runtime filesystem that could not be resolved — used for watch-set expansion. */
   unresolved: string[];
 };
 

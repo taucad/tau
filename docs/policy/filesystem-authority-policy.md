@@ -3,9 +3,10 @@ title: 'Filesystem Authority Policy'
 description: 'The single-filesystem-authority invariant: one FM-worker authority per host, one provider instance per storage root, mounts as pure routing from persistent config, manifest-based discovery, cross-tab coherence, and webaccess handle lifecycle rules.'
 status: active
 created: '2026-07-13'
-updated: '2026-07-17'
+updated: '2026-07-21'
 related:
   - docs/policy/filesystem-policy.md
+  - docs/policy/runtime-api-policy.md
   - docs/policy/project-manifest-policy.md
   - docs/policy/storage-policy.md
   - docs/research/headless-thumbnail-rendering-architecture-v4.md
@@ -27,14 +28,14 @@ The thumbnail refresh-loss bug class (v3 forensics) had two structural causes: e
 
 Requirements the filesystem must satisfy at all times:
 
-| Req | Statement                                                                                                                                     |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| A   | One canonical absolute namespace (`/projects/<id>/…`) resolvable at any time from any consumer — never dependent on which page is open        |
-| B   | Heterogeneous storage roots: IndexedDB database(s), the OPFS root, N webaccess directory handles, ephemeral memory scratch                    |
-| C   | Coherence: two reads of the same path through any route observe the same bytes; a write is immediately visible to every consumer in the tab   |
-| D   | Reactivity: watchers fire for all writers — in-app, cross-tab, external-on-disk — including the appearance of new projects                    |
-| E   | All consumers reach storage through one authority; runtime consumers receive only writable rooted views, never the authority-global namespace |
-| F   | Cross-tab safety: serialized writes and change propagation                                                                                    |
+| Req | Statement                                                                                                                                      |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| A   | One canonical authority-global namespace (`/projects/<id>/…`) resolvable at any time from any consumer — never dependent on which page is open |
+| B   | Heterogeneous storage roots: IndexedDB database(s), the OPFS root, N webaccess directory handles, ephemeral memory scratch                     |
+| C   | Coherence: two reads of the same path through any route observe the same bytes; a write is immediately visible to every consumer in the tab    |
+| D   | Reactivity: watchers fire for all writers — in-app, cross-tab, external-on-disk — including the appearance of new projects                     |
+| E   | All consumers reach storage through one authority; runtime consumers receive only writable rooted views, never the authority-global namespace  |
+| F   | Cross-tab safety: serialized writes and change propagation                                                                                     |
 
 The invariant that satisfies them: **one provider instance per storage root, shared by every mount routing into that root; mounts are pure routing entries registered from persistent config at authority boot, never from page lifecycle.**
 
@@ -77,7 +78,7 @@ mountTable.mount(prefix, provider, config);
 
 ### 4. Use the namespace owned by each boundary
 
-Trusted authority and administration APIs take canonical global paths such as `/projects/<id>/…`. A rooted filesystem takes canonical project-local absolute paths such as `/src/main.ts`, with virtual `cwd = /`. Neither boundary accepts relative paths, backslashes, URLs, drive-letter paths, control characters, or traversal above its own `/`. Do not infer a project root from a filename or ambient "current project" state.
+Trusted authority and administration APIs take canonical authority-global virtual paths such as `/projects/<id>/…`. A rooted runtime filesystem takes normalized runtime paths such as `/src/main.ts`; its `/` is the already-selected filesystem root, not the authority-global or host OS root. Neither boundary accepts relative paths, backslashes, URLs, drive-letter paths, control characters, or traversal above its own `/`. Do not infer a project root from a filename or ambient "current project" state.
 
 **Why**: Global paths select authority routes; local paths operate inside an already-selected filesystem. Mixing those namespaces leaks routing and authorization concerns into runtime code.
 

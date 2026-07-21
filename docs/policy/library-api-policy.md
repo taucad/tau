@@ -3,10 +3,11 @@ title: 'Library API Policy'
 description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, flat options, max 3 params, naming, subpath exports, events, plugins, lazy init, escape hatches.'
 status: active
 created: '2026-02-23'
-updated: '2026-07-17'
+updated: '2026-07-21'
 related:
   - docs/policy/api-evolution-policy.md
   - docs/policy/resource-cleanup-policy.md
+  - docs/policy/runtime-api-policy.md
   - docs/research/typescript-overloads.md
   - docs/research/subpath-export-naming.md
   - docs/research/runtime-async-event-contract.md
@@ -83,10 +84,10 @@ Maximum **3 positional parameters**. Prefer fewer. Each positional parameter mus
 ```typescript
 // CORRECT: single object -- self-documenting, easy to extend
 createRuntimeClient({ transport: workerTransport });
-render({ file, parameters, tessellation });
+render({ source, parameters, renderOptions });
 
 // INCORRECT: positional args for same-concern data
-render(file, parameters, tessellation);
+render(source, parameters, renderOptions);
 ```
 
 **2 params (primary + config)** -- When there is one clear "subject" and a bag of optional configuration. The first param answers "what", the second answers "how".
@@ -174,7 +175,7 @@ Names should describe **what** the code does, not **how** the framework routes i
 
 ```typescript
 // CORRECT: describes the action
-client.render({ file, parameters });
+client.render({ source: { path: 'main.ts' }, parameters });
 worker.initialize(input);
 
 // INCORRECT: leaks internal dispatch architecture
@@ -384,7 +385,7 @@ Defer Worker creation, WASM loading, and network connections until first use. Th
 ```typescript
 const client = createRuntimeClient({ transport }); // instant, no Worker created
 await client.connect(); // Worker created here
-await client.render({ file, params }); // auto-connects if needed
+await client.render({ source: { path: 'main.ts' }, parameters }); // auto-connects if needed
 ```
 
 ## 10. High-Level Wrappers with Low-Level Escape Hatches
@@ -908,7 +909,7 @@ await client.connect();    // no arguments
 
 A Worker / in-process transport binds the FS bridge via `MessagePort` internally; a WebSocket transport multiplexes it over the same socket; an Electron IPC transport binds it via `MessagePortMain`. The runtime client never types against any wire primitive — that responsibility lives entirely inside the wired {@link TransportPlugin} callable and its `.materialize()` handle.
 
-The opaque filesystem is also the complete runtime reachability contract. Plugin callbacks accept canonical local absolute paths and the filesystem they can access; never add project roots, ids, grants, authorization callbacks, or wire-derived capability objects to kernel, bundler, middleware, or headless-service inputs. Exact source requests keep their operation ownership local instead of mutating the active preview's public state.
+The opaque filesystem is also the complete runtime reachability contract. Plugin callbacks accept normalized runtime paths within the supplied filesystem; never add project roots, ids, grants, authorization callbacks, or wire-derived capability objects to kernel, bundler, middleware, or headless-service inputs. A leading `/` names the supplied filesystem's root, not the host OS root. Exact source requests keep their operation ownership local instead of mutating the active preview's public state.
 
 ### Smell tests
 

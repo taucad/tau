@@ -6,11 +6,13 @@ icon: lucide:folder
 
 # Filesystem API
 
-Use the filesystem API when configuring how kernels read and write project files. The package provides constructors for Node.js, in-memory, and any fs-compatible backends, plus bridge utilities for cross-worker filesystem access.
+Use the filesystem API when configuring how kernels read and write project files. The package provides constructors for Node.js, browser directory handles, in-memory and already-confined fs-compatible backends, plus bridge utilities for cross-worker filesystem access.
 
 ## Filesystem Types
 
 <auto-type-table path='./props/filesystem.ts' name='RuntimeFileSystemBase' />
+
+<auto-type-table path='./props/filesystem.ts' name='KernelFileSystem' />
 
 <auto-type-table path='./props/filesystem.ts' name='RuntimeFileSystem' />
 
@@ -18,12 +20,16 @@ Use the filesystem API when configuring how kernels read and write project files
 
 ## Constructors
 
-| Function                        | Import Path                       | Description                                               |
-| ------------------------------- | --------------------------------- | --------------------------------------------------------- |
-| `fromNodeFs(basePath)`          | `@taucad/runtime/filesystem/node` | Node.js filesystem rooted at `basePath`                   |
-| `fromMemoryFs(files?)`          | `@taucad/runtime/filesystem`      | In-memory Map-backed filesystem, optionally seeded        |
-| `fromFsLike(fs, rootPath?)`     | `@taucad/runtime/filesystem`      | Any fs-compatible object (BrowserFS, memfs, polyfills)    |
-| `createRuntimeFileSystem(base)` | `@taucad/runtime/filesystem`      | Wrap `RuntimeFileSystemBase` with enhanced helper methods |
+| Function                        | Import Path                          | Description                                               |
+| ------------------------------- | ------------------------------------ | --------------------------------------------------------- |
+| `fromNodeFs(basePath)`          | `@taucad/runtime/filesystem/node`    | Node.js filesystem rooted at `basePath`                   |
+| `fromBrowserFs(root)`           | `@taucad/runtime/filesystem/browser` | Browser directory handle exposed as runtime `/`           |
+| `fromMemoryFs(files?)`          | `@taucad/runtime/filesystem`         | In-memory Map-backed filesystem, optionally seeded        |
+| `fromFsLike(fs)`                | `@taucad/runtime/filesystem`         | An already-confined virtual filesystem                    |
+| `fromFileSystemBridge(open)`    | `@taucad/runtime/filesystem`         | A fresh rooted bridge connection for each runtime binding |
+| `createRuntimeFileSystem(base)` | `@taucad/runtime/filesystem`         | Wrap `RuntimeFileSystemBase` with enhanced helper methods |
+
+Every constructor establishes the root of the [runtime-path namespace](../concepts/path-namespaces). Filesystem method arguments such as `/main.ts` refer to that supplied root, not the host operating system's root.
 
 ## Bridge Types
 
@@ -94,7 +100,7 @@ const client = createRuntimeClient({
   transport: inProcessTransport({
     runtime,
     fileSystem: fromMemoryFs({
-      'main.ts': 'export default function main() { return null; }',
+      '/main.ts': 'export default function main() { return null; }',
     }),
   }),
 });
@@ -102,25 +108,21 @@ const client = createRuntimeClient({
 
 ### Filesystem Bridge
 
+Trusted host code selects an authority route once and supplies a connection factory. The runtime sees only the rooted project's writable local namespace:
+
 ```typescript
-import { createBridgePort } from '@taucad/rpc/bridge';
-import { fromNodeFs } from '@taucad/runtime/filesystem/node';
+import { openFileSystemBridge } from '@taucad/fs-bridge';
+import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 
-const fileSystem = fromNodeFs('/path/to/project');
-const { port, dispose } = createBridgePort(fileSystem);
-
-const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
-worker.postMessage({ fsPort: port }, [port]);
-
-const cleanup = () => {
-  worker.terminate();
-  dispose();
-};
+const fileSystem = fromFileSystemBridge(() => openFileSystemBridge(fileManagerWorker, { root: '/projects/widget' }));
 ```
+
+Inside runtime, `/main.ts`, `/.tau/cache/**`, and `/node_modules/**` all belong to that project. The runtime receives no project id or authority-global root and performs no authorization checks; filesystem reachability is the authority boundary. `fromFsLike(fs)` follows the same local-path contract but assumes `fs` is already confined. Use `fromNodeFs(hostRoot)` for raw Node.js access so the adapter can enforce lexical and symlink containment.
 
 ## Related
 
 - [Set Up the Filesystem](../guides/filesystem-setup) -- Practical guide to filesystem configuration
 - [Worker Model](../concepts/worker-model) -- How the filesystem is bridged to the worker
+- [Path Namespaces](../concepts/path-namespaces) -- How adapters establish runtime `/`
 - [API: Client](./client) -- `createRuntimeClient` and wiring `transport` with a filesystem
-- [API: Types](./types) -- `RuntimeFileSystemBase`, `RuntimeFileSystem` (framework view), `RuntimeFileSystem` (opaque connect-time value)
+- [API: Types](./types) -- `RuntimeFileSystemBase`, `KernelFileSystem`, and the opaque `RuntimeFileSystem`

@@ -3,9 +3,10 @@ title: 'API Evolution Policy'
 description: 'Rules for evolving library APIs over time: future flags, stability tiers, API surface management, advanced error patterns, and provider abstractions.'
 status: active
 created: '2026-03-10'
-updated: '2026-07-14'
+updated: '2026-07-21'
 related:
   - docs/policy/library-api-policy.md
+  - docs/policy/runtime-api-policy.md
   - docs/policy/version-policy.md
 ---
 
@@ -273,7 +274,7 @@ export class WasmInitError extends KernelSDKError {
 
 ```typescript
 try {
-  await client.render({ file, parameters });
+  await client.render({ source: { path: 'main.ts' }, parameters });
 } catch (error) {
   if (WasmInitError.isInstance(error)) {
     console.error(`WASM failed to load from ${error.wasmUrl}:`, error.cause);

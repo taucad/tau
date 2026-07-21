@@ -72,6 +72,8 @@ The runtime worker entry owns `defineRuntime(...)`; the client imports only the 
 
 The host owns the filesystem bridge connection it opens and should dispose it with the runtime session that consumes it. Runtime consumes the bridge connection; it does not know whether the filesystem authority is a Worker, iframe, Electron utility process, or another port broker.
 
+When trusted host composition roots that bridge at an authority-global route such as `/projects/widget`, the authority file `/projects/widget/main.ts` appears to runtime as `/main.ts`. Kernels and bundlers receive only the runtime path. See [Path Namespaces](../concepts/path-namespaces) for the equivalent Node, browser-handle, memory, and inline-source mappings.
+
 ### In-process filesystems
 
 For tests, CLIs, and other same-thread scenarios, use `inProcessTransport` with an inline filesystem:

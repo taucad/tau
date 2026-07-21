@@ -136,6 +136,21 @@ Two complementary termination methods are exposed:
   as `terminate()`. Use this for orderly shutdown (e.g. `beforeunload`
   guards, server graceful-exit handlers). Both methods are idempotent.
 
+## Filesystem ownership
+
+A runtime path identifies a file within the filesystem supplied to one client.
+Normalized plugin paths begin with `/` (`/main.ts`, `/.tau/cache/**`,
+`/node_modules/**`), but that slash names the supplied filesystem's root rather
+than the host operating system's root. Consumer `source.path` accepts relative
+or `/`-prefixed input; inline `source.entry` selects a key in `source.files`.
+The filesystem authority chooses and confines a project root; kernels,
+bundlers, middleware, and headless services receive no project id,
+authority-global path, grant, or authorization callback. Rooted filesystems
+remain writable so caches and generated files persist inside the project tree.
+
+See [Path Namespaces](../../apps/ui/content/docs/runtime/concepts/path-namespaces.mdx)
+for consumer, plugin-author, and host-adapter examples.
+
 ## Transports
 
 `@taucad/runtime/transport` ships pluggable {@link RuntimeTransportPlugin}

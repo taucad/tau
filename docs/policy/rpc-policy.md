@@ -3,8 +3,9 @@ title: 'RPC & Filesystem Bridge Policy'
 description: 'MessagePort bridge architecture for connecting filesystem implementations to kernel workers across thread boundaries. Covers RuntimeFileSystemBase, the opaque RuntimeFileSystem, from* constructors, and Bridge RPC primitives.'
 status: active
 created: '2026-03-03'
-updated: '2026-07-16'
+updated: '2026-07-21'
 related:
+  - docs/policy/runtime-api-policy.md
   - docs/research/comlink-rpc-practices.md
   - docs/research/fs-bridge-port-migration.md
   - docs/research/runtime-model-load-project-root-regression-v3.md
@@ -118,21 +119,21 @@ Factory functions that create `RuntimeFileSystemBase` from various sources. Each
 | -------------------------------------- | -------------------------------------- | --------------------------------------------------- |
 | `fromNodeFs(basePath)`                 | Node.js `fs.promises`                  | CLI tools, benchmarks, SSR, tests                   |
 | `fromMemoryFs(files?)`                 | In-memory Map                          | Inline code rendering, unit tests                   |
-| `fromFsLike(fsLike, rootPath?)`        | Any `{ promises: ... }` object         | BrowserFS, memfs, or any fs.promises-compatible API |
+| `fromFsLike(fsLike)`                   | Already-confined `{ promises: ... }`   | BrowserFS, memfs, or another virtual filesystem     |
 | `fromBrowserFs(...)`                   | Browser FileSystem APIs                | OPFS or File System Access directory roots          |
 | `fromFileSystemBridge(openConnection)` | Fresh rooted bridge connection factory | Browser editor with a dedicated File Manager worker |
 
 All constructors return the opaque {@link RuntimeFileSystem} type — consumers cannot inspect or branch on its internals. The transport plugin reads it through internal helpers in `transport/_internal/` to set up the appropriate channel.
 
-**Naming convention:** All constructors use the `from*` prefix per the library API policy. The name describes _what the source is_, not _what library it comes from_.
+**Naming convention:** All constructors use the `from*` prefix per the library API policy. The name describes _what the source is_, not _what library it comes from_. Each constructor exposes a runtime filesystem whose paths use `/` as that supplied filesystem's root, not the host OS or authority-global root.
 
 #### `fromNodeFs` vs `fromFsLike`: why both exist
 
 These serve different environments with different constraints:
 
-- **`fromNodeFs(basePath)`** handles `require('node:fs/promises')` internally via dynamic require, preventing bundlers from including Node.js builtins in browser projects. It uses `path.resolve()` for OS-aware path resolution. This is genuinely Node.js-specific.
+- **`fromNodeFs(basePath)`** accepts a host filesystem directory and exposes it as runtime `/`. It handles `require('node:fs/promises')` internally via dynamic require, preventing bundlers from including Node.js builtins in browser projects, and uses `path.resolve()` for OS-aware resolution and containment. The host `basePath` is not exposed to runtime plugins.
 
-- **`fromFsLike(fsLike, rootPath?)`** accepts any object with a `promises` namespace matching the `FsLike` shape. This covers BrowserFS, memfs, polyfills, and any future fs-compatible library. The caller provides the fs object; the constructor normalizes return types and applies the canonical virtual-path boundary.
+- **`fromFsLike(fsLike)`** accepts an already-rooted/confined object with a `promises` namespace matching the `FsLike` shape. Calls use runtime paths within that supplied object. It normalizes return types and runtime paths but does not claim to sandbox an authority-global host filesystem. Use `fromNodeFs(hostRoot)` for raw Node.js access.
 
 They cannot be collapsed because `fromNodeFs` supplies Node-specific lexical and symlink containment, while `fromFsLike` accepts a caller-owned filesystem implementation.
 
@@ -287,4 +288,4 @@ Generic bridge primitives must not import filesystem or runtime code. Core files
 
 ### Should `fromFsLike` accept Node.js `fs` directly?
 
-Node.js `fs` has a `.promises` namespace matching `FsLike`, so `fromFsLike(fs)` can work for trusted adapters. Prefer `fromNodeFs(basePath)` for runtime execution because it adds OS-aware lexical containment and symlink-escape checks. Keep `fromFsLike` for browser/polyfill filesystems whose reachability is already defined by the supplied implementation.
+Node.js `fs` has a `.promises` namespace matching `FsLike`, but raw `fs` is not already confined. Use `fromNodeFs(basePath)` for runtime execution because it adds OS-aware lexical containment and symlink-escape checks. Keep `fromFsLike` for browser/polyfill filesystems whose reachability is already defined by the supplied implementation.

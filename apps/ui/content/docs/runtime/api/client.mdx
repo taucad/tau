@@ -135,6 +135,8 @@ Invalid config fails during `connect()` with `RuntimeConnectionError.causeKind =
 
 <auto-type-table path='./props/client.ts' name='ExportResult' />
 
+For filesystem sources, `source.path` accepts a relative path such as `models/main.ts` or a path beginning with `/`, such as `/models/main.ts`. Both identify a file within the supplied filesystem and normalize to the same [runtime path](../concepts/path-namespaces). For inline sources, `source.entry` is a key in `source.files` and may include directory segments.
+
 ## Presets
 
 `presets.all()` returns a runtime definition containing all built-in kernels, middleware, bundlers, and transcoders. Import it from the explicit presets subpath:
@@ -169,6 +171,8 @@ const client = createRuntimeClient({
 <auto-type-table path='./props/client.ts' name='RuntimeFileSystem' />
 
 `fromMemoryFs`, `fromNodeFs`, `fromFsLike`, `fromBrowserFs`, and `fromFileSystemBridge` all return an opaque `RuntimeFileSystem` value. Pass it into the wired transport callable (`webWorkerTransport({ fileSystem })`, `inProcessTransport({ runtime, fileSystem })`, …); the transport constructs the kernel-side bridge primitives internally. Consumers cannot inspect or branch on the handle's kind.
+
+A runtime path identifies a file inside the supplied filesystem. When a host exposes one project as runtime `/`, render `/main.ts` rather than an authority-global path such as `/projects/example/main.ts`. The leading slash does not mean the host operating system's root. The filesystem implementation—not runtime—defines what is reachable and writable. See [Path Namespaces](../concepts/path-namespaces).
 
 ### Transport plugins vs materialized handles
 

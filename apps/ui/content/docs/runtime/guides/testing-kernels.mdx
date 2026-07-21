@@ -107,6 +107,8 @@ await initializeWorkerForTesting(worker, {
 
 `seedTestFileSystem` resets the in-memory filesystem and writes files. `clearTestFileSystem` resets without seeding:
 
+Seed keys and mock `entryPath` values as [runtime paths](../concepts/path-namespaces). A leading `/` refers to the test filesystem's root.
+
 ```typescript
 import { describe, beforeEach, afterEach, it, expect } from 'vitest';
 import { seedTestFileSystem, clearTestFileSystem } from '@taucad/runtime/testing';

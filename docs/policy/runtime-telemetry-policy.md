@@ -3,8 +3,9 @@ title: 'Kernel Telemetry Policy'
 description: 'Kernel worker telemetry: span naming, hierarchy rules, attribute conventions, and performance contracts. Covers RuntimeTracer, OC API tracing, and WorkerTelemetryCollector.'
 status: active
 created: '2026-02-20'
-updated: '2026-06-19'
+updated: '2026-07-21'
 related:
+  - docs/policy/runtime-api-policy.md
   - docs/research/first-party-runtime-library-tracing-blueprint.md
   - docs/research/replicad-native-batch-operations-performance-blueprint.md
 ---
@@ -114,36 +115,39 @@ The `kernel.select` subtree is absent. The `kernel.bundler-init` subtree is abse
 
 Attributes are `Record<string, string | number | boolean>` only. No objects, no arrays.
 
-| Span                             | Required Attributes                                           | Optional Attributes                                                       |
-| -------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `kernel.bootstrap`               | --                                                            | `{ kernel }` (constructor name)                                           |
-| `kernel.render`                  | `{ file }`                                                    | --                                                                        |
-| `kernel.export`                  | `{ format }`                                                  | --                                                                        |
-| `kernel.select`                  | `{ file }`                                                    | --                                                                        |
-| `kernel.detect-import`           | `{ kernel }` (kernel ID being tested)                         | --                                                                        |
-| `kernel.init`                    | `{ kernel }`                                                  | --                                                                        |
-| `kernel.load-middleware`         | `{ count }`                                                   | --                                                                        |
-| `kernel.bundle`                  | `{ entryPath }`                                               | --                                                                        |
-| `kernel.bundler-init`            | --                                                            | --                                                                        |
-| `deps.discover`                  | --                                                            | --                                                                        |
-| `deps.read`                      | `{ fileCount }`                                               | --                                                                        |
-| `deps.hash`                      | `{ fileCount }`                                               | --                                                                        |
-| `fs.read`                        | `{ path }`                                                    | --                                                                        |
-| `fs.readBatch`                   | `{ fileCount }`                                               | --                                                                        |
-| `fs.exists`                      | `{ path }`                                                    | --                                                                        |
-| `fs.readdir`                     | `{ path }`                                                    | --                                                                        |
-| `wasm.compile`                   | `{ url }`                                                     | --                                                                        |
-| `middleware.wrap(...)`           | `{ middleware, phase }`                                       | --                                                                        |
-| `{kernelId}.wasm-init`           | --                                                            | `{ wasm }`                                                                |
-| `{kernelId}.run-main`            | --                                                            | `{ stage }`                                                               |
-| `{kernelId}.render-output`       | `{ stage }`                                                   | --                                                                        |
-| `{kernelId}.tessellate.faces`    | `{ shapeName, linearTolerance, angularToleranceDeg, output }` | `{ includeEdges, includeTopology }`                                       |
-| `{kernelId}.tessellate.edges`    | `{ shapeName, linearTolerance, angularToleranceDeg, output }` | `{ includeEdges, includeTopology }`                                       |
-| `{kernelId}.mesh-to-gltf`        | `{ stage, shapeCount }`                                       | --                                                                        |
-| `{kernelId}.library.summary`     | `{ library, total.calls, total.ms, operations }`              | `{ {operation}.calls, {operation}.ms, {operation}.errors }` per operation |
-| `{kernelId}.library.{operation}` | `{ library, scope, memberPath, operation, callType }`         | --                                                                        |
-| `oc.summary`                     | `{ total.calls, total.ms, classes }`                          | `{ {ClassName}.calls, {ClassName}.ms }` per class                         |
-| `oc.{ClassName}`                 | `{ method }` (`constructor` or `apply`)                       | --                                                                        |
+| Span                     | Required Attributes                   | Optional Attributes             |
+| ------------------------ | ------------------------------------- | ------------------------------- |
+| `kernel.bootstrap`       | --                                    | `{ kernel }` (constructor name) |
+| `kernel.render`          | `{ file }`                            | --                              |
+| `kernel.export`          | `{ format }`                          | --                              |
+| `kernel.select`          | `{ file }`                            | --                              |
+| `kernel.detect-import`   | `{ kernel }` (kernel ID being tested) | --                              |
+| `kernel.init`            | `{ kernel }`                          | --                              |
+| `kernel.load-middleware` | `{ count }`                           | --                              |
+| `kernel.bundle`          | `{ entryPath }`                       | --                              |
+| `kernel.bundler-init`    | --                                    | --                              |
+| `deps.discover`          | --                                    | --                              |
+| `deps.read`              | `{ fileCount }`                       | --                              |
+| `deps.hash`              | `{ fileCount }`                       | --                              |
+| `fs.read`                | `{ path }`                            | --                              |
+| `fs.readBatch`           | `{ fileCount }`                       | --                              |
+| `fs.exists`              | `{ path }`                            | --                              |
+| `fs.readdir`             | `{ path }`                            | --                              |
+| `wasm.compile`           | `{ url }`                             | --                              |
+| `middleware.wrap(...)`   | `{ middleware, phase }`               | --                              |
+
+| `{kernelId}.wasm-init` | -- | `{ wasm }` |
+| `{kernelId}.run-main` | -- | `{ stage }` |
+| `{kernelId}.render-output` | `{ stage }` | -- |
+| `{kernelId}.tessellate.faces` | `{ shapeName, linearTolerance, angularToleranceDeg, output }` | `{ includeEdges, includeTopology }` |
+| `{kernelId}.tessellate.edges` | `{ shapeName, linearTolerance, angularToleranceDeg, output }` | `{ includeEdges, includeTopology }` |
+| `{kernelId}.mesh-to-gltf` | `{ stage, shapeCount }` | -- |
+| `{kernelId}.library.summary` | `{ library, total.calls, total.ms, operations }` | `{ {operation}.calls, {operation}.ms, {operation}.errors }` per operation |
+| `{kernelId}.library.{operation}` | `{ library, scope, memberPath, operation, callType }` | -- |
+| `oc.summary` | `{ total.calls, total.ms, classes }` | `{ {ClassName}.calls, {ClassName}.ms }` per class |
+| `oc.{ClassName}` | `{ method }` (`constructor` or `apply`) | -- |
+
+`kernel.bundle.entryPath` and filesystem `path` attributes are runtime paths. They may identify `/lib/cube.scad` within the supplied runtime filesystem, but must never contain a host filesystem path or an authority-global `/projects/<id>/...` route. This qualification does not rename telemetry fields or change their schema.
 
 ### Guidelines
 

@@ -18,6 +18,8 @@ type EnhancedMethods = Pick<KernelFileSystem, 'readFiles' | 'readdirContents' | 
 
 /**
  * Create an enhanced `KernelFileSystem` from a base provider implementation.
+ * The provider is mounted as runtime `/`; all resulting filesystem methods
+ * operate on paths within that supplied filesystem.
  *
  * Internally constructs a single-mount {@link FileSystemService} so the kernel
  * facade gains routing, cache integration, and watch fan-out for free. Bases
@@ -25,7 +27,7 @@ type EnhancedMethods = Pick<KernelFileSystem, 'readFiles' | 'readdirContents' | 
  * `readdirStat`/`ensureDir`) keep them — overrides win over the service
  * defaults, exactly as before the refactor.
  *
- * @param base - Base filesystem (11 primitives) with optional enhanced overrides.
+ * @param base - Base filesystem mounted as runtime `/`, with optional enhanced overrides.
  * @returns Full KernelFileSystem with all enhanced methods guaranteed.
  * @public
  */

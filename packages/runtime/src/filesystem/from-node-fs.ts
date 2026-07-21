@@ -17,7 +17,9 @@ import { wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem
  * `inProcessTransport({ runtime, fileSystem })`,
  * `nodeWorkerTransport({ fileSystem })`, or `webWorkerTransport({ fileSystem })`.
  *
- * @param basePath - Root path for all filesystem operations.
+ * @param basePath - Host filesystem directory exposed as runtime `/`.
+ * Runtime paths are resolved within this directory; the host path itself is
+ * not exposed to kernels, bundlers, or middleware.
  * @public
  *
  * @example <caption>Server-side Node.js filesystem</caption>

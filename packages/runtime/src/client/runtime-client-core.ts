@@ -95,16 +95,16 @@ type KnownSourceKeys<Files extends RuntimeSourceFiles> = Extract<keyof Files, st
 type RuntimeSourceEntryField<Files extends RuntimeSourceFiles> =
   string extends KnownSourceKeys<Files>
     ? {
-        /** Entry point filename. Required when key count is unknown at compile time. */
+        /** Key in `source.files` that starts evaluation. Required when key count is unknown at compile time. */
         readonly entry: string;
       }
     : true extends IsUnion<KnownSourceKeys<Files>>
       ? {
-          /** Entry point filename. Required for multi-file source maps. */
+          /** Key in `source.files` that starts evaluation. Required for multi-file source maps. */
           readonly entry: KnownSourceKeys<Files>;
         }
       : {
-          /** Entry point filename. Optional for single-file source maps. */
+          /** Key in `source.files` that starts evaluation. Optional for single-file source maps. */
           readonly entry?: KnownSourceKeys<Files>;
         };
 
@@ -124,6 +124,7 @@ export type InlineRuntimeSource<Files extends RuntimeSourceFiles = RuntimeSource
  * @public
  */
 export type FilesystemRuntimeSource = {
+  /** Path within the runtime filesystem. May be relative or begin with `/`; RuntimeClient normalizes it before dispatch. */
   readonly path: string | GeometryFile;
   readonly files?: never;
   readonly entry?: never;

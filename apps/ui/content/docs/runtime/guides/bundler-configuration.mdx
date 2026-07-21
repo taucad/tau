@@ -171,6 +171,8 @@ export const runtime = defineRuntime({
 });
 ```
 
+`detectImports`, `bundle`, and dependency-resolution methods receive `entryPath` as a normalized [runtime path](../concepts/path-namespaces) beginning with `/`. Return dependency paths in the same namespace. Neither value is a host operating-system path.
+
 ## Variations
 
 - **Multiple bundlers**: Pass multiple bundlers when you have kernels with different extension needs. The framework selects the bundler that handles the file extension.

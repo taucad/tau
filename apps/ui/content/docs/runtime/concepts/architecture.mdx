@@ -137,7 +137,7 @@ sequenceDiagram
     participant Worker as Kernel Worker
     participant FSW as File Manager Worker
 
-    Editor->>Client: render(path, params)
+    Editor->>Client: render(source, parameters)
     Client->>Client: transport.signalAbort('superseded')
     Client->>Worker: render command
     Worker->>Worker: render immediately
@@ -169,7 +169,7 @@ Within the thread topology, four layers stack vertically. Each layer depends onl
 
 ### Client Layer (RuntimeClient)
 
-The [`RuntimeClient`](../api/client) is the consumer-facing API. `createRuntimeClient(options)` returns a client whose transport handle is materialized during construction (`TransportPlugin.materialize()`); worker spawn and the transport handshake remain lazy until `connect()` or an auto-connect command (`render` / `export`). Inline `source.files` input is staged into the transport-owned filesystem. High-level helpers provide that filesystem automatically; raw transports require `fileSystem`. Hosts that own a filesystem supply a wired transport plugin at construction (`transport: webWorkerTransport({ fileSystem: fromFileSystemBridge(openConnection) })`) and call `client.connect()` (no arguments); see [Embedding in a Host](../guides/embedding-in-a-host). For persisted projects, `openConnection` returns a fresh writable rooted bridge and all runtime paths are local to `/`. `client.on(event, handler)` consumes the event stream, and the active transport owns the abort channel and `postMessage` event delivery — the client itself never touches `SharedArrayBuffer` or `Atomics`. See [Client API](../api/client) for the full reference.
+The [`RuntimeClient`](../api/client) is the consumer-facing API. `createRuntimeClient(options)` returns a client whose transport handle is materialized during construction (`TransportPlugin.materialize()`); worker spawn and the transport handshake remain lazy until `connect()` or an auto-connect command (`render` / `export`). Inline `source.files` input is staged into the transport-owned filesystem. High-level helpers provide that filesystem automatically; raw transports require `fileSystem`. Hosts that own a filesystem supply a wired transport plugin at construction (`transport: webWorkerTransport({ fileSystem: fromFileSystemBridge(openConnection) })`) and call `client.connect()` (no arguments); see [Embedding in a Host](../guides/embedding-in-a-host). For persisted projects, `openConnection` returns a fresh writable rooted bridge. A [runtime path](./path-namespaces) is local to that supplied filesystem, so its leading `/` is not the host operating system's root. `client.on(event, handler)` consumes the event stream, and the active transport owns the abort channel and `postMessage` event delivery — the client itself never touches `SharedArrayBuffer` or `Atomics`. See [Client API](../api/client) for the full reference.
 
 ### Transport Layer (MessagePort)
 
@@ -212,4 +212,5 @@ Kernels are plain objects returned by `defineKernel`. They implement `getDepende
 - [API: Client](../api/client) -- `createRuntimeClient` and `RuntimeClient` types
 - [API: Transport](../api/client) -- `RuntimeTransport` and `createWorkerTransport`
 - [Set Up the Filesystem](../guides/filesystem-setup) -- Connecting a filesystem to the worker
+- [Path Namespaces](./path-namespaces) -- How consumer, plugin, and host paths relate
 - [Quick Start](../getting-started/quick-start) -- End-to-end setup

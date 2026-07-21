@@ -92,7 +92,7 @@ const resolveKclImportPath = (currentFilePath: string, importPath: string): stri
  * Recursively discover all file dependencies for a KCL program.
  * Reads imported files and traverses their imports.
  *
- * @param entryPath - Canonical project-local absolute entry path
+ * @param entryPath - Normalized runtime path of the KCL entry. Begins with `/`.
  * @param readFile - Function to read file contents
  * @param parseKcl - Function to parse KCL code into AST
  * @returns Array of file paths that are dependencies (including the entry path)

@@ -8,6 +8,7 @@ related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
   - docs/policy/filesystem-authority-policy.md
+  - docs/policy/runtime-api-policy.md
   - docs/research/headless-thumbnail-rendering-architecture-v4.md
   - docs/research/runtime-model-load-project-root-regression-v3.md
   - docs/research/runtime-rooted-filesystem-residual-migration.md
@@ -71,7 +72,7 @@ Concrete option placement MUST be enforced by **per-transport Zod schemas**. The
 
 Third-party transports pick the descriptor row matching their wire; avoid `@taucad/runtime/testing` in any production bundle (ESLint bans it).
 
-For persisted browser projects, trusted application composition selects the authority-global route and supplies a writable rooted filesystem. Runtime transports, workers, kernels, bundlers, middleware, GeoSpec, and headless rendering receive only that opaque filesystem plus project-local absolute paths. Their virtual working directory is always `/`; none may receive a project id, `projectRootPath`, global mount table, global `/projects/<id>` path, grant/rights object, or authority-global file-pool buffer.
+For persisted browser projects, trusted application composition selects the authority-global route and supplies a writable rooted filesystem. Runtime transports, workers, kernels, bundlers, middleware, GeoSpec, and headless rendering receive only that opaque filesystem plus runtime paths. Runtime `/` is the supplied filesystem's root, not the host OS root. None may receive a project id, `projectRootPath`, global mount table, global `/projects/<id>` path, grant/rights object, authority-global file-pool buffer, or host filesystem path.
 
 ## Entity Model
 
@@ -161,9 +162,9 @@ Previously, all 5 kernels were loaded eagerly (~90 MB per CadMachine).
 
 The `render()` method accepts two input shapes via generic overloads:
 
-**Inline source mode** (`InlineRuntimeSource<Files>`): A filename-to-content map under `source.files`. When the map has a single key, `entry` is optional (the runtime picks the only key). When multiple keys exist, `entry` is required to specify the entry point. The runtime stages files into the transport-owned filesystem, then connects and renders. High-level helpers provide a filesystem automatically; raw transports require `fileSystem`.
+**Inline source mode** (`InlineRuntimeSource<Files>`): A runtime-path-to-content map under `source.files`. Keys may include directory segments. When the map has a single key, `entry` is optional (the runtime picks the only key). When multiple keys exist, `entry` is required and selects one key from that map. The runtime stages files into the transport-owned filesystem, then connects and renders. High-level helpers provide a filesystem automatically; raw transports require `fileSystem`.
 
-**Filesystem mode** (`FilesystemRuntimeSource`): Renders from a connected filesystem. `source.path` is one complete project-local string (for example, `'/src/main.ts'`). `RuntimeClient` alone canonicalizes and splits that path into the runtime-owned worker locator. File-change invalidation is owned by the worker's filesystem watch path, not a public render-input field. Persisted projects expose source, `/.tau/cache`, generated files, and project-local `/node_modules` through one fully writable rooted tree.
+**Filesystem mode** (`FilesystemRuntimeSource`): Renders from a connected filesystem. `source.path` is a path within that runtime filesystem and may be relative or begin with `/` (for example, `'src/main.ts'` or `'/src/main.ts'`). `RuntimeClient` alone normalizes and splits that path into the runtime-owned worker locator. Plugin authoring APIs then receive the normalized runtime `entryPath`, which begins with `/`. File-change invalidation is owned by the worker's filesystem watch path, not a public render-input field. Persisted projects expose source, `/.tau/cache`, generated files, and runtime `/node_modules` through one fully writable rooted tree.
 
 ### Geometry Event
 
@@ -181,7 +182,7 @@ Never place `renderTimeout` in kernel render options, worker runtime definitions
 
 ## RuntimeFileSystem
 
-10 required methods matching Node.js `fs.promises.*`. All paths are absolute.
+10 required methods matching Node.js `fs.promises.*`. Every path is a runtime path within the supplied filesystem and begins with `/`; `/` is that filesystem's root, not the host OS root.
 
 | Method      | Signature                                           | Purpose                                 |
 | ----------- | --------------------------------------------------- | --------------------------------------- |
@@ -383,12 +384,12 @@ The kernel machine communicates with the worker via typed MessagePort events thr
 
 The bundler produces a metafile with all resolved module paths:
 
-| Namespace   | Example Key                           | Description                      |
-| ----------- | ------------------------------------- | -------------------------------- |
-| `zenfs:`    | `zenfs:/main.ts`                      | Canonical project-local file     |
-| `zenfs:`    | `zenfs:/node_modules/lodash/index.js` | CDN-cached module                |
-| `builtin:`  | `builtin:replicad`                    | Runtime-registered kernel module |
-| `http-url:` | `http-url:https://esm.sh/...`         | HTTP-fetched module              |
+| Namespace   | Example Key                           | Description                             |
+| ----------- | ------------------------------------- | --------------------------------------- |
+| `zenfs:`    | `zenfs:/main.ts`                      | Runtime path in the supplied filesystem |
+| `zenfs:`    | `zenfs:/node_modules/lodash/index.js` | CDN-cached module                       |
+| `builtin:`  | `builtin:replicad`                    | Runtime-registered kernel module        |
+| `http-url:` | `http-url:https://esm.sh/...`         | HTTP-fetched module                     |
 
 During detection, bare specifiers appear as external imports in `metafile.outputs[chunk].imports` rather than in `metafile.inputs`, since they are not resolved.
 

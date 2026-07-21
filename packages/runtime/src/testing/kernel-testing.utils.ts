@@ -8,13 +8,7 @@
 import deepmerge from 'deepmerge';
 import type { PartialDeep } from 'type-fest';
 import type { JSONSchema7 } from '@taucad/json-schema';
-import type {
-  FileExtension,
-  GeometryResponse,
-  OnWorkerLog,
-  FileStat,
-  FileStatEntry,
-} from '@taucad/types';
+import type { FileExtension, GeometryResponse, OnWorkerLog, FileStat, FileStatEntry } from '@taucad/types';
 import { parentDirectory, joinPath, resolveVirtualPath } from '@taucad/utils/path';
 import type { Mock } from 'vitest';
 import { expect, vi } from 'vitest';
@@ -143,7 +137,7 @@ export function getTestFileSystemHandle(): ReturnType<typeof fromMemoryFS> {
  * Resets to a fresh in-memory backend first (to prevent stale files from
  * prior tests interfering with import resolution), then seeds with provided files.
  *
- * @param files - Record of absolute paths to file contents
+ * @param files - Runtime-path-to-content map. Keys may be relative or begin with `/`.
  * @public
  */
 export async function seedTestFileSystem(files: Record<string, string | Uint8Array<ArrayBuffer>>): Promise<void> {
@@ -606,8 +600,8 @@ export function createMockInput(overrides?: Partial<CreateGeometryInput>): Creat
 /**
  * Creates an internal worker locator for worker-level tests.
  *
- * @param filename - The file name (e.g. `'test.ts'`)
- * @returns a canonical directory and basename pair
+ * @param filename - Runtime entry path (for example, `'test.ts'` or `'lib/test.ts'`).
+ * @returns An internal normalized directory-and-basename locator.
  * @public
  */
 export function createGeometryFile(filename: string) {
@@ -683,7 +677,7 @@ function inferExtensions(definition: AnyKernelDefinition): string[] {
  * Uses the production runtime worker path (defineKernel modules).
  *
  * @param definition - The kernel definition (from defineKernel())
- * @param files - Record of relative paths to file contents
+ * @param files - Paths within the test runtime filesystem mapped to file contents.
  * @param options - Optional worker options
  * @returns Promise resolving to the initialized runtime worker
  * @public
@@ -765,8 +759,8 @@ export async function createTestWorker(
  * Helper to extract parameters from a kernel and assert success.
  *
  * @param definition - The kernel definition to use
- * @param files - Record of relative paths to file contents
- * @param mainFile - The main file to extract parameters from
+ * @param files - Paths within the test runtime filesystem mapped to file contents.
+ * @param mainFile - Runtime entry path to extract parameters from.
  * @returns Promise resolving to the extracted parameters and JSON schema
  * @public
  */
@@ -797,8 +791,8 @@ export async function getTestParameters(
  *
  * @param input - Input containing kernel definition, files, main file, and optional parameters/options
  * @param input.definition - The kernel definition to use
- * @param input.files - Record of relative paths to file contents
- * @param input.mainFile - The main file to create geometry from
+ * @param input.files - Paths within the test runtime filesystem mapped to file contents.
+ * @param input.mainFile - Runtime entry path to create geometry from.
  * @param input.parameters - Optional parameters to pass to the geometry creation
  * @param input.options - Optional worker options
  * @returns Promise resolving to the geometry creation result

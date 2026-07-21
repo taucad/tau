@@ -47,7 +47,7 @@ const getDirectory = async (
  * opaque {@link RuntimeFileSystem} value passed to
  * `createRuntimeClient({ fileSystem })`.
  *
- * @param root - The root directory handle returned by
+ * @param root - Browser directory capability exposed as runtime `/`, returned by
  *   `window.showDirectoryPicker()` or
  *   `navigator.storage.getDirectory()`.
  *

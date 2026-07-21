@@ -28,6 +28,8 @@ Use the bundler API when configuring how JS/TS kernel inputs are bundled and exe
 
 `defineBundler` creates a bundler definition from a configuration object. Required methods: `initialize`, `detectImports`, `bundle`, `execute`, `registerModule`. Optional: `resolveDependencies`, `cleanup`.
 
+Bundler methods receive `entryPath` as a normalized [runtime path](../concepts/path-namespaces) beginning with `/`. Returned dependency paths use the same namespace. The leading slash refers to the supplied runtime filesystem, not the host operating system.
+
 ## Usage
 
 ```typescript
@@ -52,3 +54,4 @@ const client = createRuntimeClient({
 
 - [Configure the Bundler](../guides/bundler-configuration)
 - [Plugin System](../concepts/plugin-system)
+- [Path Namespaces](../concepts/path-namespaces)

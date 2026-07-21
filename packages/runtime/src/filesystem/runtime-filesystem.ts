@@ -63,7 +63,8 @@ export const isRuntimeFileSystem = (value: unknown): value is RuntimeFileSystem 
  * Create an opaque {@link RuntimeFileSystem} backed by an in-memory
  * `Map`. Suitable for tests, fixtures, and lightweight playgrounds.
  *
- * @param files - Optional initial path → content map.
+ * @param files - Optional runtime-path-to-content map. Relative keys and keys
+ * beginning with `/` are normalized within the in-memory filesystem.
  * @public
  *
  * @example <caption>Seed a runtime client with an in-memory FS</caption>

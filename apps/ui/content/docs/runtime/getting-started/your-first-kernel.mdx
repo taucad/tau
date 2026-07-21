@@ -42,7 +42,7 @@ const client = createRuntimeClient({
 });
 ```
 
-`createRuntimeClient` returns a high-level client that manages worker lifecycle, kernel selection, and middleware. Inline `source.files` input is staged into the transport-owned filesystem; raw transports need `fileSystem`, while high-level helpers provide one automatically.
+`createRuntimeClient` returns a high-level client that manages worker lifecycle, kernel selection, and middleware. Inline `source.files` input is staged into the transport-owned filesystem, and `source.entry` selects a key from that map. Raw transports need `fileSystem`, while high-level helpers provide one automatically. See [Path Namespaces](../concepts/path-namespaces) for the relationship between consumer source paths and normalized plugin entry paths.
 
 **Verify:** No output yet. The client initializes lazily -- the worker is only spawned on the first command call.
 

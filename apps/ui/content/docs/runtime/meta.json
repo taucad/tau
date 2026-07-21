@@ -28,6 +28,7 @@
 
     "---Concepts---",
     "concepts/architecture",
+    "concepts/path-namespaces",
     "concepts/plugin-system",
     "concepts/middleware-model",
     "concepts/kernel-selection",

@@ -60,10 +60,10 @@ import { replicad } from '@taucad/runtime/kernels/replicad';
 describe('kernel test', () => {
   it('renders geometry', async () => {
     const worker = await createTestWorker(replicad, {
-      '/projects/test/main.ts': 'export default () => null',
+      '/main.ts': 'export default () => null',
     });
     const result = await worker.createGeometry({
-      file: { filename: 'main.ts', path: '/projects/test' },
+      file: { filename: 'main.ts', path: '/' },
       parameters: {},
     });
     expect(result.success).toBe(true);

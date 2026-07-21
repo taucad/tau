@@ -3,9 +3,10 @@ title: 'Filesystem Policy'
 description: 'Standards for filesystem access, data transfer, caching, concurrency, and watcher architecture in the Tau application. Covers read/write semantics, bridge RPC, and kernel/UI watch planes.'
 status: active
 created: '2026-03-05'
-updated: '2026-07-17'
+updated: '2026-07-21'
 related:
   - docs/policy/filesystem-authority-policy.md
+  - docs/policy/runtime-api-policy.md
   - docs/research/runtime-model-load-project-root-regression-v3.md
   - docs/research/filesystem-architecture.md
   - docs/research/fs-capabilities.md
@@ -400,9 +401,9 @@ Kernel watchers must exclude non-user-source churn paths, at minimum:
 
 `node_modules/**` may be excluded from kernel watch streams when dependency resolution does not require runtime file-level invalidation there.
 
-### Rule 27: Path canonicalization and case behavior must be explicit
+### Rule 27: Path namespaces and canonicalization must be explicit
 
-All watch matching must use canonical absolute paths:
+All watch matching must use normalized paths in the namespace owned by the watched filesystem. Runtime watches therefore use runtime paths beginning with `/`; authority-global watches use explicitly qualified authority-global paths:
 
 - normalize separators and duplicate slashes
 - define case handling by backend capability (case-sensitive vs insensitive)

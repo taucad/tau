@@ -9,6 +9,7 @@ export type {
   SpanHandle,
   RuntimeSpanTracer,
   RuntimeFileSystemBase,
+  KernelFileSystem,
   KernelDefinition,
   FileDependency,
   MiddlewareDependency,

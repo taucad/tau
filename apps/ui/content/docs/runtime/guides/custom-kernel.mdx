@@ -201,7 +201,7 @@ async function getDependencies(
 export { getDependencies };
 ```
 
-`entryPath` and every returned dependency path use the same canonical local namespace rooted at `/`. `entryPath` names the model's evaluation root; returned dependencies are ordinary paths. Do not accept a project root, strip the leading slash for dependency identity, or clamp traversal yourself; the shared resolver rejects paths that escape virtual `/`.
+`entryPath` and every returned dependency path use the same [runtime-path namespace](../concepts/path-namespaces). The normalized `entryPath` begins with `/` and names the model's evaluation root inside the supplied filesystem; returned dependencies are ordinary paths in that namespace. Do not accept a host or authority project root, strip the leading slash for dependency identity, or clamp traversal yourself; the shared resolver rejects paths that escape runtime `/`.
 
 ### 7. Implement getParameters for Parametric Models
 

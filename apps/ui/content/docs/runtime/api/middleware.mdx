@@ -20,6 +20,18 @@ Use the middleware API when extending kernel behavior with caching, coordinate t
 
 `defineMiddleware` creates a middleware instance from a configuration object. Provide optional wrap hooks: `wrapGetParameters`, `wrapCreateGeometry`, `wrapExportGeometry`. Each hook receives `(input, handler, runtime)` where `runtime` is `KernelMiddlewareRuntime`.
 
+Middleware file inputs are declarative. `entryPath` and dependency `path` values are normalized [runtime paths](../concepts/path-namespaces) within the supplied filesystem. Return those paths from `getDependencies`:
+
+```typescript
+defineMiddleware({
+  id: 'settings',
+  name: 'settings',
+  getDependencies({ entryPath }) {
+    return [{ path: `/.tau/settings/${entryPath.slice(1)}.json`, watchDebounce: 0 }];
+  },
+});
+```
+
 ## Built-in Factories
 
 | Factory                     | Purpose                                           |
@@ -56,3 +68,4 @@ const client = createRuntimeClient({
 - [Use Middleware](../guides/using-middleware)
 - [Create Custom Middleware](../guides/custom-middleware)
 - [Middleware Model](../concepts/middleware-model)
+- [Path Namespaces](../concepts/path-namespaces)

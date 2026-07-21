@@ -32,10 +32,12 @@ id used by `<SvgIcon id="iconName" />`.
 The `generated/` directory contains the build output of the sprite generator
 (`sprite.svg` + `svg-icons.d.ts`). DO NOT edit these files directly.
 
-These files are checked into source control. To refresh them after editing or
-adding a raw icon, flip `enableSpriteGeneration` to `true` in
-[`apps/ui/vite.config.ts`](../../../vite.config.ts), run a Vite build, then flip
-the flag back off and commit the regenerated artefacts.
+These files are checked into source control. Refresh them after editing or adding
+a raw icon, then commit the regenerated artefacts:
+
+```bash
+pnpm nx run ui:generate-svg-sprite
+```
 
 ## Notes
 

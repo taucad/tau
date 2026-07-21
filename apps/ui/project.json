@@ -81,6 +81,14 @@
         "command": "node --import @oxc-node/core/register scripts/bench-section-cap-boolean-backends.mts"
       }
     },
+    "generate-svg-sprite": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "node --import @oxc-node/core/register scripts/generate-svg-sprite.mts"
+      }
+    },
     "bootstrap-https-certs": {
       "executor": "nx:run-commands",
       "cache": true,

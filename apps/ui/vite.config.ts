@@ -9,7 +9,6 @@ import devtoolsJson from '@silvenon/vite-plugin-devtools-json';
 import tailwindcss from '@tailwindcss/vite';
 import { visualizer } from 'rollup-plugin-visualizer';
 import mdx from 'fumadocs-mdx/vite';
-import svgSpriteWrapper from 'vite-svg-sprite-wrapper';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
 // oxlint-disable-next-line no-restricted-imports, import/extensions -- allowed for Fumadocs; .js for ESM
@@ -90,10 +89,6 @@ const createUiSourceAliasPlugin = (): Plugin => ({
   },
 });
 
-// Sprite generation can slow down the build time, so we disable it by default.
-// Enable it when adding a new icon to regenerate the sprite.
-const enableSpriteGeneration = false;
-
 export default defineConfig(({ mode }) => {
   const isTest = mode === 'test';
   const isNetlify = process.env['NETLIFY'] === 'true';
@@ -152,24 +147,6 @@ export default defineConfig(({ mode }) => {
         ? [
             visualizer({
               exclude: [{ file: '**/*?raw' }], // ignore raw files that are used for editor typings
-            }),
-          ]
-        : []),
-
-      // This plugin generates an SVG sprite to reduce the number of requests to the server.
-      // An SVG sprite is a single SVG file that contains all the SVG icons,
-      // inlined as <use> elements.
-      // This provides better caching performance.
-      // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- allowed for quick switching of sprite generation.
-      ...(enableSpriteGeneration
-        ? [
-            svgSpriteWrapper({
-              icons: path.resolve(__dirname, './app/components/icons/raw/**/*.svg'),
-              outputDir: path.resolve(__dirname, './app/components/icons/generated'),
-              generateType: true,
-              typeOutputDir: path.resolve(__dirname, './app/components/icons/generated'),
-              // Ensure the sprite retains the original svg attributes
-              sprite: { shape: {} },
             }),
           ]
         : []),

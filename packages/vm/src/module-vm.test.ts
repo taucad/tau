@@ -143,6 +143,32 @@ describe('createEsbuildModuleVm', () => {
     );
   });
 
+  it('should include query-suffixed and attribute-imported assets in resolved dependencies', async () => {
+    // Cache-participation guard (tau-examples OQ6): assets loaded via TC39
+    // `with { type }` attributes and Vite-style `?raw` suffixes must appear in
+    // resolved dependencies so asset-only edits rotate the geometry cache key.
+    const filesystem = new MemoryFileSystem();
+    filesystem.setText(
+      '/project/main.ts',
+      [
+        "import attributeText from './assets/part.step' with { type: 'text' };",
+        "import rawText from './assets/other.step?raw';",
+        'export const result = attributeText.length + rawText.length;',
+      ].join('\n'),
+    );
+    filesystem.setText('/project/assets/part.step', 'ISO-10303-21;');
+    filesystem.setText('/project/assets/other.step', 'ISO-10303-21;');
+
+    const vm = await createEsbuildModuleVm({ filesystem, projectPath: '/project' });
+    activeVm = vm;
+
+    const result = await vm.resolveDependencies('/project/main.ts');
+
+    expect(result.resolved).toEqual(
+      expect.arrayContaining(['/project/main.ts', '/project/assets/part.step', '/project/assets/other.step']),
+    );
+  });
+
   it('should return structured bundle issues when a builtin module is missing', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText('/project/model.test.ts', "import { describe } from 'geospec'; export const result = describe;");

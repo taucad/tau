@@ -36,7 +36,15 @@ groups:
       - PicoGK
       - PicoGKRuntime
       - openvdb
-      - picogk-js
+      - picovoxel
+      - LEAP71_ShapeKernel
+      - LEAP71_RoverWheel
+      - LEAP71_HelixHeatX
+      - PicoGK_Examples
+      - LEAP71_LatticeLibrary
+      - PicoGKUnitTests
+      - LEAP71_QuasiCrystals
+      - PicoGK_SimulationExample
   slicers:
     description: 3D printer slicer applications
     repos:
@@ -608,6 +616,28 @@ repos:
     upstream: luxass/cdn-resolve
     branch: main
     description: Resolve npm package specifiers and CDN URLs
-  picogk-js:
-    upstream: taucad/picogk-js
+  picovoxel:
+    upstream: taucad/picovoxel
     description: PicoGK compiled to WebAssembly - implicit/voxel CAD kernel for the browser
+  LEAP71_ShapeKernel:
+    upstream: leap71/LEAP71_ShapeKernel
+    description: A framework for building complex computational geometry based on PicoGK
+  LEAP71_RoverWheel:
+    upstream: leap71/LEAP71_RoverWheel
+    description: A library to create rover-wheel-like objects with several layers of structures
+  LEAP71_HelixHeatX:
+    upstream: leap71/LEAP71_HelixHeatX
+    description: A helical heat exchanger built on the LEAP 71 Shape Kernel and PicoGK
+  PicoGK_Examples:
+    upstream: leap71/PicoGK_Examples
+    description: A repository containing examples of how to use PicoGK
+  LEAP71_LatticeLibrary:
+    upstream: leap71/LEAP71_LatticeLibrary
+    description: A rich library for creating lattices using PicoGK and the LEAP71 ShapeKernel
+  PicoGKUnitTests:
+    upstream: leap71/PicoGKUnitTests
+    description: Suite of Unit Tests for PicoGK
+  LEAP71_QuasiCrystals:
+    upstream: leap71/LEAP71_QuasiCrystals
+  PicoGK_SimulationExample:
+    upstream: leap71/PicoGK_SimulationExample

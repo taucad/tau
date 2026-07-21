@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
-import { projectToManifest } from '@taucad/types';
+import { getActiveGroupValues, projectToManifest } from '@taucad/types';
 import type { FileParameterEntry, ProjectManifest } from '@taucad/types';
 import { isProjectContentActivityPath, projectMachine } from '#machines/project.machine.js';
 import type { ProjectContext } from '#machines/project.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import { createDefaultEntry, getActiveGroupValues } from '#utils/parameter-config.utils.js';
+import { createDefaultEntry } from '#utils/parameter-config.utils.js';
 import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
 vi.mock('#constants/browser.constants.js', () => ({

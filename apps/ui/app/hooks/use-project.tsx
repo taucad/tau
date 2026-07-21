@@ -5,7 +5,13 @@ import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Remote } from 'comlink';
 import { useQueryClient } from '@tanstack/react-query';
-import { parseProjectManifestBytes, projectToManifest, serializeProjectManifest } from '@taucad/types';
+import {
+  parameterEntryPath,
+  parametersDirectory,
+  parseProjectManifestBytes,
+  projectToManifest,
+  serializeProjectManifest,
+} from '@taucad/types';
 import type { FileParameterEntry, ProjectManifest } from '@taucad/types';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -22,13 +28,7 @@ import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { StorageProvider } from '#types/storage.types.js';
 import { defaultKernelOptions } from '#constants/kernel-options.presets.js';
 import { joinPath } from '@taucad/utils/path';
-import {
-  parseParameterEntry,
-  createDefaultEntry,
-  serializeParameterEntry,
-  parameterEntryPath,
-  parametersDirectory,
-} from '#utils/parameter-config.utils.js';
+import { parseParameterEntry, createDefaultEntry, serializeParameterEntry } from '#utils/parameter-config.utils.js';
 
 type ProjectContextType = {
   projectId: string;

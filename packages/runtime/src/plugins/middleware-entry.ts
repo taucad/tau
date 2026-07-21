@@ -1,5 +1,6 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- package subpath entry point */
 export { defineMiddleware } from '#middleware/runtime-middleware.js';
+export { parameterFileResolver } from '#middleware/parameter-file-resolver.middleware.js';
 export { parameterCache } from '#middleware/parameter-cache.middleware.js';
 export { geometryCache } from '#middleware/geometry-cache.middleware.js';
 export { gltfCoordinateTransform } from '#middleware/gltf-coordinate-transform.middleware.js';

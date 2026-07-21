@@ -16,3 +16,11 @@ export type * from '#types/mime-types.types.js';
 export type * from '#types/project.types.js';
 export type * from '#types/publication.types.js';
 export type * from '#types/schema.types.js';
+export { projectRelativePathSchema } from '#schemas/project-manifest.schema.js';
+export {
+  fileParameterEntrySchema,
+  getActiveGroupValues,
+  parameterEntryPath,
+  parametersDirectory,
+} from '#schemas/file-parameter-entry.schema.js';
+export type { FileParameterEntry, ParameterGroup } from '#schemas/file-parameter-entry.schema.js';

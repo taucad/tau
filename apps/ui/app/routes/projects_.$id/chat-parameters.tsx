@@ -72,7 +72,8 @@ import { formatKeyCombination } from '#utils/keys.utils.js';
 import { useProject, useMainGraphics } from '#hooks/use-project.js';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
 import type { cadMachine } from '#machines/cad.machine.js';
-import { createDefaultEntry, getActiveGroupValues } from '#utils/parameter-config.utils.js';
+import { getActiveGroupValues } from '@taucad/types';
+import { createDefaultEntry } from '#utils/parameter-config.utils.js';
 import { sortGeometryUnitEntries } from '#routes/projects_.$id/geometry-unit.utils.js';
 import { usePaneviewPersistence, getInitialPanelOptions } from '#routes/projects_.$id/use-chat-interface-state.js';
 

@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router';
 import { useSelector } from '@xstate/react';
 import deepmerge from 'deepmerge';
 import { GitFork } from 'lucide-react';
+import { parameterEntryPath } from '@taucad/types';
 import { Button } from '#components/ui/button.js';
 import { useCadPreview } from '#hooks/use-cad-preview.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { toast } from '#components/ui/sonner.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
-import { createParameterEntry, parameterEntryPath, serializeParameterEntry } from '#utils/parameter-config.utils.js';
+import { createParameterEntry, serializeParameterEntry } from '#utils/parameter-config.utils.js';
 
 export type PublicationForkSource = {
   readonly id: string;

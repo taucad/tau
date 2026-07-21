@@ -1,18 +1,16 @@
 import { describe, it, expect } from 'vitest';
+import { ZodError } from 'zod';
 import type { FileParameterEntry } from '@taucad/types';
 import {
   parseParameterEntry,
   createDefaultEntry,
-  getActiveGroupValues,
+  createParameterEntry,
   updateGroupValues,
   createGroup,
   deleteGroup,
   renameGroup,
   switchActiveGroup,
   serializeParameterEntry,
-  validateParameterEntry,
-  parameterEntryPath,
-  parametersDirectory,
 } from '#utils/parameter-config.utils.js';
 
 const createTestEntry = (): FileParameterEntry => ({
@@ -33,15 +31,11 @@ describe('parameter-config.utils', () => {
     });
 
     it('should throw on invalid JSON', () => {
-      expect(() => parseParameterEntry('{')).toThrow();
+      expect(() => parseParameterEntry('{')).toThrow(SyntaxError);
     });
 
-    it('should throw on missing activeGroup', () => {
-      expect(() => parseParameterEntry('{"groups":{}}')).toThrow('Invalid parameter entry');
-    });
-
-    it('should throw on missing groups', () => {
-      expect(() => parseParameterEntry('{"activeGroup":"default"}')).toThrow('Invalid parameter entry');
+    it('should throw a schema error for structurally invalid JSON', () => {
+      expect(() => parseParameterEntry('{"activeGroup":"default","groups":null}')).toThrow(ZodError);
     });
   });
 
@@ -54,25 +48,18 @@ describe('parameter-config.utils', () => {
     });
   });
 
-  describe('getActiveGroupValues', () => {
-    it('should return values of the active group', () => {
-      const entry = createTestEntry();
-      expect(getActiveGroupValues(entry)).toEqual({
-        width: 10,
-        height: 20,
+  describe('createParameterEntry', () => {
+    it('should create a default group containing nested JSON values', () => {
+      const values = { width: 10, options: { enabled: true, sizes: [1, 2, null] } };
+
+      expect(createParameterEntry(values)).toEqual({
+        activeGroup: 'default',
+        groups: { default: { values } },
       });
     });
 
-    it('should return empty object for undefined entry', () => {
-      expect(getActiveGroupValues(undefined)).toEqual({});
-    });
-
-    it('should return empty object when active group is missing', () => {
-      const entry: FileParameterEntry = {
-        activeGroup: 'nonexistent',
-        groups: {},
-      };
-      expect(getActiveGroupValues(entry)).toEqual({});
+    it('should reject JSON-unsafe values before returning an entry', () => {
+      expect(() => createParameterEntry({ width: undefined })).toThrow(ZodError);
     });
   });
 
@@ -112,6 +99,12 @@ describe('parameter-config.utils', () => {
       expect(updated).not.toBe(original);
       expect(updated.groups).not.toBe(original.groups);
     });
+
+    it('should reject JSON-unsafe values before returning an update', () => {
+      expect(() =>
+        updateGroupValues(createTestEntry(), { groupName: 'default', values: { width: Number.NaN } }),
+      ).toThrow(ZodError);
+    });
   });
 
   describe('createGroup', () => {
@@ -148,6 +141,15 @@ describe('parameter-config.utils', () => {
 
       expect(updated.groups['small']).toBeUndefined();
       expect(updated.groups['default']).toBeDefined();
+    });
+
+    it('should remove a deleted group from the persisted order', () => {
+      const entry: FileParameterEntry = {
+        ...createTestEntry(),
+        order: ['default', 'small'],
+      };
+
+      expect(deleteGroup(entry, 'small').order).toEqual(['default']);
     });
 
     it('should throw when deleting the active group', () => {
@@ -218,6 +220,10 @@ describe('parameter-config.utils', () => {
       expect(() => renameGroup(entry, { oldName: 'small', newName: 'default' })).toThrow('already exists');
     });
 
+    it('should reject an empty replacement group name', () => {
+      expect(() => renameGroup(createTestEntry(), { oldName: 'small', newName: '' })).toThrow(ZodError);
+    });
+
     it('should not mutate the original entry', () => {
       const original = createTestEntry();
       renameGroup(original, { oldName: 'small', newName: 'medium' });
@@ -247,50 +253,6 @@ describe('parameter-config.utils', () => {
     });
   });
 
-  describe('validateParameterEntry', () => {
-    it('should pass for a valid entry', () => {
-      expect(() => {
-        validateParameterEntry(createTestEntry());
-      }).not.toThrow();
-    });
-
-    it('should throw on undefined', () => {
-      expect(() => {
-        validateParameterEntry(undefined);
-      }).toThrow('expected a non-null object');
-    });
-
-    it('should throw on null', () => {
-      expect(() => {
-        validateParameterEntry(null);
-      }).toThrow('expected a non-null object');
-    });
-
-    it('should throw on non-object', () => {
-      expect(() => {
-        validateParameterEntry('string');
-      }).toThrow('expected a non-null object');
-    });
-
-    it('should throw on missing activeGroup', () => {
-      expect(() => {
-        validateParameterEntry({ groups: {} });
-      }).toThrow('missing or invalid activeGroup');
-    });
-
-    it('should throw on missing groups', () => {
-      expect(() => {
-        validateParameterEntry({ activeGroup: 'default' });
-      }).toThrow('missing or invalid groups object');
-    });
-
-    it('should throw on null groups', () => {
-      expect(() => {
-        validateParameterEntry({ activeGroup: 'default', groups: null });
-      }).toThrow('missing or invalid groups object');
-    });
-  });
-
   describe('serializeParameterEntry', () => {
     it('should produce valid JSON that round-trips through parse', () => {
       const entry = createTestEntry();
@@ -308,28 +270,14 @@ describe('parameter-config.utils', () => {
       expect(json).toContain('  ');
     });
 
-    it('should throw on undefined input', () => {
-      expect(() => serializeParameterEntry(undefined as unknown as FileParameterEntry)).toThrow(
-        'expected a non-null object',
-      );
-    });
+    it('should reject JSON-unsafe values before serializing', () => {
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- intentionally invalid persisted entry for the error path
+      const invalidEntry = {
+        activeGroup: 'default',
+        groups: { default: { values: { width: undefined } } },
+      } as unknown as FileParameterEntry;
 
-    it('should throw on null input', () => {
-      expect(() => serializeParameterEntry(null as unknown as FileParameterEntry)).toThrow(
-        'expected a non-null object',
-      );
-    });
-
-    it('should throw on entry missing activeGroup', () => {
-      expect(() => serializeParameterEntry({ groups: {} } as unknown as FileParameterEntry)).toThrow(
-        'missing or invalid activeGroup',
-      );
-    });
-
-    it('should throw on entry missing groups', () => {
-      expect(() => serializeParameterEntry({ activeGroup: 'default' } as unknown as FileParameterEntry)).toThrow(
-        'missing or invalid groups object',
-      );
+      expect(() => serializeParameterEntry(invalidEntry)).toThrow(ZodError);
     });
 
     it('should preserve values after update and serialize round-trip', () => {
@@ -340,16 +288,6 @@ describe('parameter-config.utils', () => {
 
       expect(parsed.groups['default']?.values).toEqual({});
       expect(parsed.groups['small']?.values).toEqual({ width: 5, height: 10 });
-    });
-  });
-
-  describe('parameterEntryPath', () => {
-    it('should return the per-geometry-unit parameter file path', () => {
-      expect(parameterEntryPath('main.ts')).toBe(`${parametersDirectory}/main.ts.json`);
-    });
-
-    it('should handle nested entry paths', () => {
-      expect(parameterEntryPath('src/box.ts')).toBe(`${parametersDirectory}/src/box.ts.json`);
     });
   });
 });

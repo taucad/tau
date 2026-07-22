@@ -3,7 +3,6 @@ import { stringToColor } from '#utils/color.utils.js';
 
 export function Format3D(properties: React.SVGProps<SVGSVGElement> & { extension: string }): React.JSX.Element {
   const color = stringToColor(properties.extension);
-  const fontSize = properties.extension.length <= 3 ? 11 : 9.5;
 
   return (
     <svg
@@ -16,13 +15,24 @@ export function Format3D(properties: React.SVGProps<SVGSVGElement> & { extension
       {...properties}
     >
       {/* Background rectangle */}
-      <rect x='0' y='0' width='24' height='24' rx='2' fill={color} />
+      <rect x='0' y='0' width='24' height='24' rx='5.25' fill={color} />
 
       {/* Extension text */}
       <text
-        x='23'
-        y='23.5'
-        fontSize={fontSize}
+        ref={(element) => {
+          if (!element) {
+            return;
+          }
+
+          element.setAttribute('font-size', '11');
+          const width = element.getComputedTextLength();
+          if (width > 20) {
+            element.setAttribute('font-size', String((11 * 20) / width));
+          }
+        }}
+        x='22'
+        y='20'
+        fontSize='11'
         textAnchor='end'
         fill='white'
         fontWeight='900'

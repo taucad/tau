@@ -78,12 +78,11 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
       expectHasToolCall(message, 'create_file');
       expectToolCallSucceeded(message, 'create_file');
 
-      // The model may write to 'main.ts' or '/main.ts' - check both
-      const fileExists = (await testApp.memFs.exists('main.ts')) || (await testApp.memFs.exists('/main.ts'));
-      expect(fileExists, 'Expected main.ts to exist in the in-memory filesystem').toBe(true);
+      expect(await testApp.memFs.exists('/main.ts'), 'Expected /main.ts to exist in the in-memory filesystem').toBe(
+        true,
+      );
 
-      const path = (await testApp.memFs.exists('main.ts')) ? 'main.ts' : '/main.ts';
-      const mainTs = await testApp.memFs.readFile(path, 'utf8');
+      const mainTs = await testApp.memFs.readFile('/main.ts', 'utf8');
       expect(mainTs).toBeTruthy();
     });
 

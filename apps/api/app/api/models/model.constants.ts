@@ -526,11 +526,75 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         thinkingLevel: 'HIGH',
       },
     },
+    'gemini-3.6-flash': {
+      id: 'google-gemini-3.6-flash',
+      name: 'Gemini 3.6 Flash',
+      slug: 'gemini-3.6-flash',
+      recommended: true,
+      description: 'Efficient multimodal coding model for complex agentic CAD iterations and spatial reasoning.',
+      provider: {
+        id: 'vertexai',
+        name: 'Google',
+      },
+      model: 'gemini-3.6-flash',
+      support: {
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'gemini',
+        families: ['gemini'],
+        contextWindow: 200_000,
+        maxTokens: 65_536,
+        knowledgeCutoff: '2025-01',
+        cost: {
+          inputTokens: 1.5,
+          outputTokens: 7.5,
+          cacheReadTokens: 0.15,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        thinkingLevel: 'MEDIUM',
+      },
+    },
+    'gemini-3.5-flash-lite': {
+      id: 'google-gemini-3.5-flash-lite',
+      name: 'Gemini 3.5 Flash-Lite',
+      slug: 'gemini-3.5-flash-lite',
+      recommended: true,
+      description: 'Fast, low-cost multimodal model for lightweight CAD edits and high-throughput iterations.',
+      provider: {
+        id: 'vertexai',
+        name: 'Google',
+      },
+      model: 'gemini-3.5-flash-lite',
+      support: {
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'gemini',
+        families: ['gemini'],
+        contextWindow: 200_000,
+        maxTokens: 65_536,
+        knowledgeCutoff: '2025-01',
+        cost: {
+          inputTokens: 0.3,
+          outputTokens: 2.5,
+          cacheReadTokens: 0.03,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        thinkingLevel: 'MEDIUM',
+      },
+    },
     'gemini-3.5-flash': {
       id: 'google-gemini-3.5-flash',
       name: 'Gemini 3.5 Flash',
       slug: 'gemini-3.5-flash',
-      recommended: true,
+      recommended: false,
       description:
         'Frontier intelligence at Flash speed with sharpened agentic coding, ideal for rapid design iterations and small changes.',
       provider: {

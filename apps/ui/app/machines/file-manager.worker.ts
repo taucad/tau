@@ -23,7 +23,7 @@ import {
 } from '@taucad/filesystem';
 import { SharedPool } from '@taucad/memory';
 import { authoringTypeMaps } from '@taucad/api-extractor/authoring-types';
-import { kernelTypeMaps } from '@taucad/api-extractor/kernel-types';
+import { kernelTypePackageMaps } from '@taucad/api-extractor/kernel-types';
 import type { SyncFsWorkspaceAdapter } from '@taucad/lsp-fs/sync';
 import { attachSyncFsServer } from '@taucad/lsp-fs/sync';
 import { metaConfig } from '#constants/meta.constants.js';
@@ -127,30 +127,17 @@ async function createNodeModulesMount(): Promise<void> {
   }
 }
 
-function buildBundledTypesPayload(): readonly BundledTypesMountEntry[] {
-  const kernelTypes = kernelTypeMaps.flatMap((typesMap) =>
-    Object.entries(typesMap).map(
-      (entry): BundledTypesMountEntry => ({
-        packageName: entry[0],
-        content: entry[1],
-        prewrapped: true,
-      }),
-    ),
-  );
-  const authoringTypes = authoringTypeMaps.flatMap((typesMap) =>
+const buildBundledTypesPayload = (): readonly BundledTypesMountEntry[] =>
+  [...kernelTypePackageMaps, ...authoringTypeMaps].flatMap((typesMap) =>
     Object.entries(typesMap).map(
       ([packageName, entry]): BundledTypesMountEntry => ({
         packageName,
         content: entry.content,
         files: entry.files,
         packageJson: entry.packageJson,
-        prewrapped: true,
       }),
     ),
   );
-
-  return [...kernelTypes, ...authoringTypes];
-}
 
 const fileService = new WorkspaceFileService({
   providerRegistry,

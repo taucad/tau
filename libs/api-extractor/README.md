@@ -47,16 +47,23 @@ pnpm nx run api-extractor:extract-opencascade
 pnpm nx run api-extractor:extract-kcl
 ```
 
-These outputs are used by `kernel-types` and mounted separately from GeoSpec authoring declarations.
+`kernel-types` exposes two views of the same generated declarations:
+
+- individual raw module maps for prompt and extraction consumers;
+- `kernelTypePackageMaps` for filesystem materialization, with one root package and import subpaths stored as relative declaration files.
+
+The raw generated JSON format stays module-specifier-shaped. The package projection is derived at import time so extractors and generated artifacts have one source of truth.
 
 ## Runtime Integration
 
-`apps/ui/app/machines/file-manager.worker.ts` imports `kernelTypeMaps` and `authoringTypeMaps`, then calls `populateBundledTypesMount(...)` so the editor sees package declarations before TypeScript acquisition falls back to network or package installation. GeoSpec must stay in `authoring-types` rather than `kernel-types`, because it is a test-authoring package used across kernels.
+`apps/ui/app/machines/file-manager.worker.ts` imports `kernelTypePackageMaps` and `authoringTypeMaps`, then calls `populateBundledTypesMount(...)`. Every package name is a true npm package root; import subpaths are written beneath it through the bundle's `files` map. Monaco recursively reads that mounted tree and registers each declaration with both TypeScript and JavaScript defaults before network acquisition is needed.
+
+GeoSpec stays in `authoring-types` rather than `kernel-types` because it is a test-authoring package used across kernels.
 
 ## Maintenance Rules
 
 - Keep generated JSON in source control; the browser editor depends on it at build time.
-- Add a public subpath to both the package extractor and its regression tests.
+- Add a public subpath to the raw extractor map and its projection regression tests.
 - Prefer package-shaped declarations for authoring APIs so `package.json#exports` matches real Node/package resolution.
 - Do not hand-write app-local GeoSpec declarations. Generate them from `packages/geospec/src`.
 - Do not add runtime assets to the root `@taucad/api-extractor` entrypoint.

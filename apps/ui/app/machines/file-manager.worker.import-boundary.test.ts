@@ -6,8 +6,10 @@ import { describe, expect, it } from 'vitest';
 const workerSource = readFileSync(fileURLToPath(new URL('file-manager.worker.ts', import.meta.url)), 'utf8');
 
 describe('file-manager.worker api-extractor import boundary', () => {
-  it('imports kernel types from the dedicated subpath, not the mixed root entry', () => {
+  it('should import package-shaped kernel types from the dedicated subpath', () => {
     expect(workerSource).toContain('@taucad/api-extractor/kernel-types');
+    expect(workerSource).toContain('kernelTypePackageMaps');
+    expect(workerSource).not.toMatch(/\bkernelTypeMaps\b/);
     expect(workerSource).not.toMatch(/from ["']@taucad\/api-extractor["']/);
   });
 

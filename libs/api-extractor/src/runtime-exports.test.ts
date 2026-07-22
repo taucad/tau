@@ -3,39 +3,75 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { authoringTypeMaps, geospecTypes } from '#authoring-types.js';
-import { jscadModelingTypes, kernelTypeMaps, manifoldTypes, opencascadeTypes, replicadTypes } from '#kernel-types.js';
+import type { BundledTypesPackage } from '#bundled-types.types.js';
+import {
+  jscadModelingTypes,
+  kernelTypePackageMaps,
+  manifoldTypes,
+  opencascadeTypes,
+  replicadTypes,
+} from '#kernel-types.js';
 import { kclStdlibReference } from '#kcl-reference.js';
 
 describe('@taucad/api-extractor runtime subpaths', () => {
-  it('kernel-types exposes parsed JSON type maps for all kernels', () => {
-    expect(kernelTypeMaps).toHaveLength(4);
+  it('should expose raw declaration maps and package-shaped projections for all kernels', () => {
     expect(Object.keys(opencascadeTypes).length).toBeGreaterThan(0);
     expect(Object.keys(replicadTypes).length).toBeGreaterThan(0);
     expect(Object.keys(jscadModelingTypes).length).toBeGreaterThan(0);
     expect(Object.keys(manifoldTypes).length).toBeGreaterThan(0);
-    expect(typeof Object.values(replicadTypes)[0]).toBe('string');
+    expect(typeof replicadTypes['replicad']).toBe('string');
+    expect(typeof jscadModelingTypes['@jscad/modeling/colors']).toBe('string');
+
+    const packages: Record<string, BundledTypesPackage> = {};
+    for (const packageMap of kernelTypePackageMaps) {
+      for (const [packageName, packageTypes] of Object.entries(packageMap)) {
+        packages[packageName] = packageTypes;
+      }
+    }
+    expect(Object.keys(packages).sort()).toEqual(
+      ['opencascade.js', 'replicad', '@jscad/modeling', 'manifold-3d'].sort(),
+    );
+
+    const jscadPackage = packages['@jscad/modeling'];
+    const manifoldPackage = packages['manifold-3d'];
+    const opencascadePackage = packages['opencascade.js'];
+    const replicadPackage = packages['replicad'];
+    expect(jscadPackage?.content).toBe(jscadModelingTypes['@jscad/modeling']);
+    expect(Object.keys(jscadPackage?.files ?? {}).sort()).toEqual(
+      Object.keys(jscadModelingTypes)
+        .filter((specifier) => specifier !== '@jscad/modeling')
+        .map((specifier) => `${specifier.slice('@jscad/modeling/'.length)}/index.d.ts`)
+        .sort(),
+    );
+    expect(jscadPackage?.files?.['colors/index.d.ts']).toBe(jscadModelingTypes['@jscad/modeling/colors']);
+    expect(manifoldPackage?.content).toBe(manifoldTypes['manifold-3d']);
+    expect(manifoldPackage?.files?.['manifoldCAD/index.d.ts']).toBe(manifoldTypes['manifold-3d/manifoldCAD']);
+    expect(opencascadePackage?.content).toBe(opencascadeTypes['opencascade.js']);
+    expect(Object.keys(opencascadePackage?.files ?? {})).toEqual([]);
+    expect(replicadPackage?.content).toBe(replicadTypes['replicad']);
+    expect(Object.keys(replicadPackage?.files ?? {})).toEqual([]);
   });
 
-  it('kcl-reference exposes bundled markdown text', () => {
+  it('should expose bundled KCL markdown text', () => {
     expect(typeof kclStdlibReference).toBe('string');
     expect(kclStdlibReference.length).toBeGreaterThan(100);
   });
 
-  it('kernel-types module does not pull in KCL markdown assets', () => {
+  it('should keep KCL markdown assets out of the kernel-types module', () => {
     const kernelTypesSource = readFileSync(fileURLToPath(new URL('kernel-types.ts', import.meta.url)), 'utf8');
     expect(kernelTypesSource).not.toContain('kcl-stdlib-compact.md');
     expect(kernelTypesSource).not.toContain('kcl-reference');
   });
 
-  it('root entry stays type-only and does not bundle runtime assets', () => {
+  it('should keep the root entry type-only and free of runtime assets', () => {
     const indexSource = readFileSync(fileURLToPath(new URL('index.ts', import.meta.url)), 'utf8');
     expect(indexSource).not.toMatch(/\?raw/);
-    expect(indexSource).not.toContain('kernelTypeMaps');
+    expect(indexSource).not.toContain('kernelTypePackageMaps');
     expect(indexSource).not.toContain('kclStdlibReference');
     expect(indexSource).not.toContain('authoringTypeMaps');
   });
 
-  it('authoring-types exposes generated GeoSpec package declarations for all public subpaths', () => {
+  it('should expose generated GeoSpec package declarations for all public subpaths', () => {
     expect(authoringTypeMaps).toContain(geospecTypes);
     const { geospec } = geospecTypes;
     if (!geospec) {
@@ -81,7 +117,7 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     }
   });
 
-  it('generated GeoSpec declarations preserve model-loader and matcher JSDoc', () => {
+  it('should preserve model-loader and matcher JSDoc in generated GeoSpec declarations', () => {
     const { geospec } = geospecTypes;
     if (!geospec) {
       throw new Error('Generated GeoSpec authoring types are missing.');
@@ -137,7 +173,7 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     expect(stepLoaderTypes).toContain('Load STEP/XDE/BRep evidence');
   });
 
-  it('generated GeoSpec mesh declarations expose native component-overlap analysis', () => {
+  it('should expose native component-overlap analysis in generated GeoSpec mesh declarations', () => {
     const { geospec } = geospecTypes;
     if (!geospec) {
       throw new Error('Generated GeoSpec authoring types are missing.');

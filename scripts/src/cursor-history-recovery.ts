@@ -2235,10 +2235,10 @@ const validateCompleteRecoveryArchive = (options: { root: string; diagnostics: O
     const plans = Array.isArray(planManifest['plans']) ? planManifest['plans'].filter(isRecord) : [];
     if (
       planManifest['schema_version'] !== 3 ||
-      planManifest['physical_sources'] !== 2013 ||
-      planManifest['distinct_contents'] !== 1646 ||
+      planManifest['physical_sources'] !== 2012 ||
+      planManifest['distinct_contents'] !== 1645 ||
       planManifest['deduplicated_copies'] !== 367 ||
-      plans.length !== 1646
+      plans.length !== 1645
     ) {
       diagnostics.push({
         path: '../cursor-plans/manifest.json',

@@ -29,6 +29,7 @@ test('renders and updates a Replicad cylinder through Electron utility process',
 
   try {
     const window = await app.firstWindow();
+    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())).toBe(false);
     window.on('console', (message) => {
       diagnostics.push(`[renderer:${message.type()}] ${message.text()}`);
     });

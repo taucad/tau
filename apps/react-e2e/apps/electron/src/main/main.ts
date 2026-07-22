@@ -22,7 +22,6 @@ const createMainWindow = async (): Promise<BrowserWindow> => {
     ? window.loadURL(process.env['ELECTRON_RENDERER_URL']!)
     : window.loadFile(join(import.meta.dirname, '../renderer/index.html')));
 
-  window.show();
   return window;
 };
 

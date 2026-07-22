@@ -11,15 +11,69 @@ import {
   type Sketch,
 } from 'replicad';
 import { defaultParams } from './params.js';
-import triangleSvg from './assets/logo.svg' with { type: 'text' };
+import logoSvg from './assets/logo.svg' with { type: 'text' };
 
 export { defaultParams };
 
 type P2 = [number, number];
 
-function parseSvgPath(d: string): P2[][] {
+type SvgSegment =
+  | { type: 'line'; end: P2 }
+  | { type: 'arc'; end: P2; midpoint: P2 };
+
+type SvgSubpath = {
+  start: P2;
+  segments: SvgSegment[];
+};
+
+type CircularArcInput = {
+  start: P2;
+  end: P2;
+  radius: number;
+  largeArc: boolean;
+  sweep: boolean;
+};
+
+function circularArcMidpoint({
+  start,
+  end,
+  radius,
+  largeArc,
+  sweep,
+}: CircularArcInput): P2 {
+  const delta: P2 = [end[0] - start[0], end[1] - start[1]];
+  const chord = Math.hypot(...delta);
+  if (chord === 0 || radius < chord / 2) {
+    throw new Error('Unsupported SVG: invalid circular arc geometry.');
+  }
+
+  const chordMidpoint: P2 = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
+  const centerDistance = Math.sqrt(Math.max(0, radius ** 2 - (chord / 2) ** 2));
+  const centerSign = largeArc === sweep ? -1 : 1;
+  const center: P2 = [
+    chordMidpoint[0] - (delta[1] / chord) * centerDistance * centerSign,
+    chordMidpoint[1] + (delta[0] / chord) * centerDistance * centerSign,
+  ];
+  const startAngle = Math.atan2(start[1] - center[1], start[0] - center[0]);
+  const endAngle = Math.atan2(end[1] - center[1], end[0] - center[0]);
+  let sweepAngle = endAngle - startAngle;
+
+  if (sweep && sweepAngle < 0) {
+    sweepAngle += Math.PI * 2;
+  } else if (!sweep && sweepAngle > 0) {
+    sweepAngle -= Math.PI * 2;
+  }
+
+  const midpointAngle = startAngle + sweepAngle / 2;
+  return [
+    center[0] + radius * Math.cos(midpointAngle),
+    center[1] + radius * Math.sin(midpointAngle),
+  ];
+}
+
+function parseSvgPath(d: string): SvgSubpath[] {
   const tokens: Array<string | number> = [];
-  const re = /([HLMVZhlmvz])|(-?\d*\.?\d+(?:e[+-]?\d+)?)/g;
+  const re = /([A-Za-z])|(-?\d*\.?\d+(?:e[+-]?\d+)?)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(d)) !== null) {
     if (m[1]) {
@@ -29,124 +83,91 @@ function parseSvgPath(d: string): P2[][] {
     }
   }
 
-  const subpaths: P2[][] = [];
-  let cur: P2 = [0, 0];
-  let start: P2 = [0, 0];
-  let path: P2[] = [];
+  const subpaths: SvgSubpath[] = [];
+  let current: P2 = [0, 0];
+  let path: SvgSubpath | undefined;
   let lastCmd = '';
-  let i = 0;
+  let index = 0;
 
-  while (i < tokens.length) {
+  while (index < tokens.length) {
     let cmd: string;
-    if (typeof tokens[i] === 'string') {
-      cmd = tokens[i++] as string;
+    if (typeof tokens[index] === 'string') {
+      cmd = tokens[index++] as string;
     } else {
-      cmd = lastCmd === 'M' ? 'L' : lastCmd === 'm' ? 'l' : lastCmd;
+      cmd = lastCmd === 'M' ? 'L' : lastCmd;
     }
 
     switch (cmd) {
       case 'M': {
-        const x = tokens[i++] as number;
-        const y = tokens[i++] as number;
-        if (path.length > 0) {
+        const x = tokens[index++] as number;
+        const y = tokens[index++] as number;
+        if (path) {
           subpaths.push(path);
         }
-        path = [];
-        cur = [x, y];
-        start = [x, y];
-        path.push(cur);
-        break;
-      }
-      case 'm': {
-        const dx = tokens[i++] as number;
-        const dy = tokens[i++] as number;
-        if (path.length > 0) {
-          subpaths.push(path);
-        }
-        path = [];
-        cur = [cur[0] + dx, cur[1] + dy];
-        start = cur;
-        path.push(cur);
+        current = [x, y];
+        path = { start: current, segments: [] };
         break;
       }
       case 'L': {
-        cur = [tokens[i++] as number, tokens[i++] as number];
-        path.push(cur);
+        current = [tokens[index++] as number, tokens[index++] as number];
+        path?.segments.push({ type: 'line', end: current });
         break;
       }
-      case 'l': {
-        cur = [
-          cur[0] + (tokens[i++] as number),
-          cur[1] + (tokens[i++] as number),
-        ];
-        path.push(cur);
-        break;
-      }
-      case 'H': {
-        cur = [tokens[i++] as number, cur[1]];
-        path.push(cur);
-        break;
-      }
-      case 'h': {
-        cur = [cur[0] + (tokens[i++] as number), cur[1]];
-        path.push(cur);
-        break;
-      }
-      case 'V': {
-        cur = [cur[0], tokens[i++] as number];
-        path.push(cur);
-        break;
-      }
-      case 'v': {
-        cur = [cur[0], cur[1] + (tokens[i++] as number)];
-        path.push(cur);
-        break;
-      }
-      case 'Z':
-      case 'z': {
-        cur = start;
-        if (path.length > 0) {
-          subpaths.push(path);
+      case 'A': {
+        const radiusX = tokens[index++] as number;
+        const radiusY = tokens[index++] as number;
+        const rotation = tokens[index++] as number;
+        const largeArcFlag = tokens[index++] as number;
+        const sweepFlag = tokens[index++] as number;
+        const end: P2 = [tokens[index++] as number, tokens[index++] as number];
+        if (radiusX !== radiusY || rotation !== 0) {
+          throw new Error(
+            'Unsupported SVG: logo arcs must be unrotated circles.',
+          );
         }
-        path = [];
+
+        path?.segments.push({
+          type: 'arc',
+          end,
+          midpoint: circularArcMidpoint({
+            start: current,
+            end,
+            radius: radiusX,
+            largeArc: largeArcFlag === 1,
+            sweep: sweepFlag === 1,
+          }),
+        });
+        current = end;
         break;
+      }
+      case 'Z': {
+        if (path) {
+          subpaths.push(path);
+          current = path.start;
+        }
+        path = undefined;
+        break;
+      }
+      default: {
+        throw new Error(`Unsupported SVG path command: ${cmd}`);
       }
     }
     lastCmd = cmd;
   }
-  if (path.length > 0) {
+  if (path) {
     subpaths.push(path);
   }
   return subpaths;
 }
 
-function dedupe(points: P2[]): P2[] {
-  const out: P2[] = [];
-  for (const pt of points) {
-    const prev = out.at(-1);
-    if (!prev || pt[0] !== prev[0] || pt[1] !== prev[1]) {
-      out.push(pt);
+function drawingFromPath(path: SvgSubpath): Drawing {
+  const pen = draw(path.start);
+  for (const segment of path.segments) {
+    if (segment.type === 'arc') {
+      pen.threePointsArcTo(segment.end, segment.midpoint);
+    } else {
+      pen.lineTo(segment.end);
     }
-  }
-  if (out.length > 1) {
-    const first = out.at(0)!;
-    const last = out.at(-1)!;
-    if (first[0] === last[0] && first[1] === last[1]) {
-      out.pop();
-    }
-  }
-  return out;
-}
-
-function drawingFromPoints(points: P2[]): Drawing {
-  const first = points[0];
-  if (!first) {
-    throw new Error('Expected at least one point to build a drawing.');
-  }
-
-  const pen = draw(first);
-  for (const p of points.slice(1)) {
-    pen.lineTo(p);
   }
   return pen.close();
 }
@@ -219,64 +240,28 @@ function createBackText(p = defaultParams): Shape3D {
 }
 
 export default function main(p = defaultParams): ShapeConfig[] {
-  const pathMatch = /<path[^>]*\sd=(?:"([^"]+)"|'([^']+)')/.exec(triangleSvg);
-  const polyMatch = /<polygon[^>]*\spoints=(?:"([^"]+)"|'([^']+)')/.exec(
-    triangleSvg,
+  const pathData = /<path[^>]*\sd=(?:"([^"]+)"|'([^']+)')/
+    .exec(logoSvg)
+    ?.slice(1)
+    .find(Boolean);
+  if (!pathData) {
+    throw new Error('Unsupported SVG: expected a path with d data.');
+  }
+  const subpaths = parseSvgPath(pathData).filter(
+    (path) => path.segments.length >= 2,
   );
 
-  let subpaths: P2[][];
-  if (pathMatch) {
-    const pathData = pathMatch[1] ?? pathMatch[2];
-    if (!pathData) {
-      throw new Error('Unsupported SVG: path is missing d data.');
-    }
-
-    subpaths = parseSvgPath(pathData)
-      .map((pts) => dedupe(pts))
-      .filter((pts) => pts.length >= 3);
-  } else if (polyMatch) {
-    const rawPoints = polyMatch[1] ?? polyMatch[2];
-    if (!rawPoints) {
-      throw new Error('Unsupported SVG: polygon is missing points data.');
-    }
-
-    const pts = rawPoints
-      .trim()
-      .split(/\s+/)
-      .map((pair: string): P2 => {
-        const [x, y] = pair.split(',').map(Number);
-        if (x === undefined || y === undefined) {
-          throw new Error(`Unsupported SVG: invalid polygon point "${pair}".`);
-        }
-
-        return [x, y];
-      });
-    subpaths = [dedupe(pts)];
-  } else {
-    throw new Error(
-      'Unsupported SVG: expected <path d="..."/> or <polygon points="..."/>.',
-    );
-  }
-
-  let minX = Infinity,
-    maxX = -Infinity,
-    minY = Infinity,
-    maxY = -Infinity;
-  for (const pts of subpaths) {
-    for (const [x, y] of pts) {
-      if (x < minX) {
-        minX = x;
-      }
-      if (x > maxX) {
-        maxX = x;
-      }
-      if (y < minY) {
-        minY = y;
-      }
-      if (y > maxY) {
-        maxY = y;
-      }
-    }
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const subpath of subpaths) {
+    const [[pathMinX, pathMinY], [pathMaxX, pathMaxY]] =
+      drawingFromPath(subpath).boundingBox.bounds;
+    minX = Math.min(minX, pathMinX);
+    maxX = Math.max(maxX, pathMaxX);
+    minY = Math.min(minY, pathMinY);
+    maxY = Math.max(maxY, pathMaxY);
   }
   const cX = (minX + maxX) / 2;
   const cY = (minY + maxY) / 2;
@@ -284,10 +269,25 @@ export default function main(p = defaultParams): ShapeConfig[] {
   const bbH = maxY - minY;
   const scale = p.logoSize / Math.max(bbW, bbH);
 
-  const logoSubpaths = subpaths.map((pts) =>
-    pts.map(
-      ([x, y]) => [(x - cX) * scale, p.logoCenterY - (y - cY) * scale] as P2,
-    ),
+  const transformPoint = ([x, y]: P2): P2 => [
+    (x - cX) * scale,
+    p.logoCenterY - (y - cY) * scale,
+  ];
+  const logoSubpaths = subpaths.map(
+    (subpath): SvgSubpath => ({
+      start: transformPoint(subpath.start),
+      segments: subpath.segments.map((segment): SvgSegment => {
+        if (segment.type === 'arc') {
+          return {
+            type: 'arc',
+            end: transformPoint(segment.end),
+            midpoint: transformPoint(segment.midpoint),
+          };
+        }
+
+        return { type: 'line', end: transformPoint(segment.end) };
+      }),
+    }),
   );
 
   const firstLogoSubpath = logoSubpaths[0];
@@ -297,7 +297,7 @@ export default function main(p = defaultParams): ShapeConfig[] {
 
   const logoSolids = [firstLogoSubpath, ...logoSubpaths.slice(1)].map(
     (subpath) =>
-      drawingFromPoints(subpath)
+      drawingFromPath(subpath)
         .sketchOnPlane('XY', p.tabletHeight)
         .extrude(p.logoHeight),
   );
@@ -305,7 +305,9 @@ export default function main(p = defaultParams): ShapeConfig[] {
   const logoTopZ = p.tabletHeight + p.logoHeight;
   const logo =
     p.logoChamferSize > 0
-      ? logoBase.chamfer(p.logoChamferSize, (e) => e.inPlane('XY', logoTopZ))
+      ? logoBase.chamfer(p.logoChamferSize, (edge) =>
+          edge.inPlane('XY', logoTopZ),
+        )
       : logoBase;
 
   const tabletOuterSketch = drawRoundedRectangle(
@@ -322,8 +324,8 @@ export default function main(p = defaultParams): ShapeConfig[] {
   ]).extrude(p.tabletHeight);
 
   if (p.edgeFilletRadius > 0) {
-    tablet = tablet.fillet(p.edgeFilletRadius, (e) =>
-      e
+    tablet = tablet.fillet(p.edgeFilletRadius, (edge) =>
+      edge
         .either([
           (finder) => finder.inPlane('XY', 0),
           (finder) => finder.inPlane('XY', p.tabletHeight),
@@ -337,8 +339,8 @@ export default function main(p = defaultParams): ShapeConfig[] {
   }
 
   if (p.holeFilletRadius > 0) {
-    tablet = tablet.fillet(p.holeFilletRadius, (e) =>
-      e
+    tablet = tablet.fillet(p.holeFilletRadius, (edge) =>
+      edge
         .either([
           (finder) => finder.inPlane('XY', 0),
           (finder) => finder.inPlane('XY', p.tabletHeight),

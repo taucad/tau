@@ -10,7 +10,7 @@ export const defaultParams = {
   logoSize: 16,
   logoCenterY: 0,
   logoHeight: 0.8,
-  logoChamferSize: 0.3,
+  logoChamferSize: 0.1,
   tabletColor: '#000000',
   logoColor: '#008f7b',
   backText: 'tau.new',

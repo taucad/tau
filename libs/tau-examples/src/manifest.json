@@ -181,6 +181,12 @@
   },
   {
     "kernel": "replicad",
+    "name": "logo",
+    "mainFile": "main.ts",
+    "files": ["README.md", "generate-logo.ts", "logo.svg", "main.ts"]
+  },
+  {
+    "kernel": "replicad",
     "name": "logo-keychain",
     "mainFile": "main.ts",
     "files": ["assets/logo.svg", "logo-keychain.geospec.ts", "main.ts", "params.ts"]
@@ -232,6 +238,12 @@
     "name": "table",
     "mainFile": "main.ts",
     "files": ["main.ts"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "tau-wordmark",
+    "mainFile": "main.ts",
+    "files": ["README.md", "generate-wordmark.ts", "main.ts", "wordmark.svg"]
   },
   {
     "kernel": "replicad",

@@ -1,6 +1,7 @@
 import { createElement, Fragment } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { Body, Button, Container, Head, Heading, Hr, Html, Link, Preview, Section, Text } from 'react-email';
+import { tauEmailLogoPathData } from '#email/templates/tau-logo-path.generated.js';
 
 const colors = {
   background: '#fcffff',
@@ -112,7 +113,7 @@ const tauLogo = (): React.ReactElement =>
       xmlns: 'http://www.w3.org/2000/svg',
     },
     createElement('path', {
-      d: 'M256 37.873 392.533 2.622l102.4 26.441L256 90.754 17.067 29.063l102.4-26.441L256 37.873ZM0 59.906l238.933 61.692v387.78l-51.2-13.218V161.261L0 112.792V59.906Zm512 0-238.933 61.692v387.78l51.2-13.218V161.261L512 112.787V59.906Z',
+      d: tauEmailLogoPathData,
       fill: '#008f7b',
     }),
   );

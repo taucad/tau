@@ -9,12 +9,12 @@ const expectedEnvelope = {
   size: {
     x: Number('20.65913780233915'),
     y: Number('20.65913780233915'),
-    z: Number('2.8000002000005235'),
+    z: Number('2.8000002000003144'),
   },
   center: {
     x: 0,
     y: 0,
-    z: Number('1.400000000000262'),
+    z: Number('1.4000000000001573'),
   },
 } as const;
 
@@ -23,7 +23,7 @@ const expectedHoleCenter = {
   y: -6,
 } as const;
 
-const expectedDefaultVolumeMm3 = Number('765.0113397934321');
+const expectedDefaultVolumeMm3 = Number('802.7033492996919');
 
 const loadDefaultStep = async () =>
   loadModel({ file: 'main.ts', format: 'step' });

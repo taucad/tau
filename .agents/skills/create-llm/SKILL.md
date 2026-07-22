@@ -22,6 +22,7 @@ Use this skill when adding, updating, enabling, or evaluating an LLM in Tau's AP
 
 - Prefer an existing dedicated provider when it serves the model with the right billing, telemetry identity, adapter, and provider controls.
 - Do not route non-OpenAI providers through `openai` just because their API is OpenAI-compatible.
+- If the selected model family lacks a UI brand icon, follow [add-logo](../add-logo/SKILL.md) with the established brand identity instead of sourcing or generating one here.
 - Keep model descriptions CAD-task focused: say when a Tau user should pick the model.
 - Cap catalog context windows at Tau's effective `200_000` policy unless that policy changes.
 - Keep text-only or uncertain models hidden until Tau can route image inputs safely.

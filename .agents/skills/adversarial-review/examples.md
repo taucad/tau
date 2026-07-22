@@ -1,128 +1,87 @@
-# Adversarial Review Examples
+# Adversarial Review Example
 
-These synthetic examples calibrate report shape. They are not evaluation fixtures and use a notification-delivery domain distinct from the held-out corpus.
+This single synthetic notification-delivery example calibrates scope, materiality, Ponytail selection, correctness, and explicit apply.
 
-## Broad read-only review
-
-### Input
+## Input
 
 ```text
-/adversarial-review @docs/research/synthetic-notification-blueprint.md R1-R5
+/adversarial-review @docs/research/synthetic-notification-blueprint.md R1-R3
 ```
 
-### Condensed output
+The synthetic blueprint proposes:
+
+- R1: add a `DeliveryCoordinator` beside the existing delivery-attempt record;
+- R2: let both the API and worker mark delivery terminal after provider acceptance;
+- R3: add per-provider retry queues and configuration before any provider needs distinct behavior.
+
+Current-source evidence shows:
+
+- the delivery-attempt record already owns intent, retry state, and terminal status;
+- the API and worker can race terminal writes after an ambiguous provider timeout;
+- every current provider uses the same retry policy;
+- the selected recommendations do not change regions, dashboards, retention policy, or deployment topology.
+
+## Review output
 
 ```text
-Not ready for Superplan. The event-log direction survives, but delivery ownership needs correction, provider replay needs evidence, and one retention policy needs human confirmation.
-NOT READY FOR R1-R5
+Not ready for Superplan. The proposed design duplicates the existing delivery authority, splits terminal ownership, and adds a retry layer with no current consumer.
+NOT READY FOR R1-R3
 
-## Review synthesis
+## Material findings
 
-Two related blockers have a clear architectural correction, one requires empirical evidence, one is a product-policy choice, and two attempted attacks were falsified. Keep the append-only event log and short fenced leases; neither requires action.
+### AR1: The proposed coordinator duplicates delivery authority and leaves two terminal-state owners
 
-## Audit appendix
+Evidence: the delivery-attempt record already owns coordination, while R1 adds a second coordinator and R2 lets both the API and worker update terminal state after provider acceptance. A timeout can let one retry while the other records success.
 
-Ledger ARL-7d21c0b1, generation 1. The complete appendix contains document/source manifests, the claim ledger, AR1-AR6 fourteen-field records including two falsified attacks, R1-R5 coverage, stable Q1 mapping, revision map, and readiness checklist.
+Smallest correct revision: drop R1 and keep the delivery-attempt record as the sole state machine. The API appends intent; only the worker calls providers and writes terminal state. Amend R2 and delete the second-owner path.
 
-## Action required from you
+### AR2: Provider-specific retry infrastructure has no consumer
 
-One clear-cut correction, one evidence task, and one human choice remain.
+Evidence: every current provider uses the same retry policy and no selected requirement needs provider-specific behavior.
 
-P0 = critical premise/security/data loss · P1 = architecture/production/release blocker · P2 = material quality/operability/handoff defect · P3 = non-blocking improvement
+Smallest correct revision: drop R3 and keep the existing shared retry path. Revisit only when a real provider requires different semantics.
 
-### Clear-cut resolutions to sense-check
+## Preserved direction
 
-| Ref | Question and context | Architecturally correct resolution and basis |
-| --- | --- | --- |
-| AR1-P1, AR2-P1 | **Which component owns notification delivery state?** The blueprint lets both the API and worker mark delivery complete, so a timeout after provider acceptance can duplicate delivery or leave conflicting state. | Make the delivery-attempt record the sole state machine. The API appends intent; the worker alone owns provider calls and terminal transitions. Current retry call sites prove that split ownership is unsafe. |
+- Keep the existing retry default. Naming and tuning remain reversible and do not block planning.
 
-### Evidence required, not human input
+Skipped: multi-region replication, dashboards, retention, and deployment rollback do not enter the selected recommendations or current failure. Revisit only if a later recommendation changes those boundaries.
 
-| Ref | Question and context | Evidence to gather | Decision rule |
-| --- | --- | --- | --- |
-| AR3-P1 | **Can the provider idempotency key safely cover disaster-recovery replay?** The blueprint assumes 30-day retention, but the checked-in adapter and cited contract do not establish it. | Verify the authoritative retention contract and replay a key older than the documented retry window. | Reuse the provider key only if retention exceeds the maximum replay window; otherwise require an internal durable delivery receipt. |
+## Next action
 
-### Human input questions
+/adversarial-review apply @docs/research/synthetic-notification-blueprint.md AR1,AR2
 
-Reply with `Q1 A`.
-
-| Ref | Context and question | Options | Recommendation |
-| --- | --- | --- | --- |
-| Q1 · AR4-P2 | Delivery receipts must remain long enough for support and audit, but longer retention increases storage and privacy exposure. Architecture requires an explicit window but cannot determine the product promise. **Which default retention should the blueprint specify?** | **A. 90 days with export before expiry.** B. One year for every workspace. C. Retain indefinitely. | **A** — covers ordinary support investigations while bounding privacy and storage cost. |
-
-### Next action
-
-Reply `Q1 A` to resolve the remaining product choice. This response records the choice only; it does not change files. I will then return the exact eligible apply command.
-
-No files were changed. No implementation or /superplan action was performed.
+No files were changed.
 ```
 
-## Choice response
+## Why this is the target behavior
 
-### Input
+- The real correctness defect blocks readiness.
+- Ponytail deletes two speculative abstractions instead of designing them more completely.
+- One shared owner groups the race symptoms under one amendment.
+- Unrelated production dimensions fail the scope and materiality gates.
+- A reversible preference takes the existing default without a question.
+- The output contains no ledger, hashes, failed-attack catalogue, N/A table, or audit appendix.
+
+## Apply input
 
 ```text
-Q1 A
+/adversarial-review apply @docs/research/synthetic-notification-blueprint.md AR1,AR2
 ```
 
-### Condensed output
+## Apply output
 
 ```text
-Recorded Q1 = A: delivery receipts default to 90 days with export before expiry. No files were changed.
+Updated the notification blueprint so the delivery-attempt record is the sole state machine and the worker is the sole provider/terminal-state owner. Removed the proposed coordinator, provider-specific retry layer, and contradictory API terminal-write path.
 
-Apply the clear-cut ownership correction and resolved retention choice with the complete write set:
+Validation: pnpm docs:validate passed. R2 and the shared delivery-ownership invariant were rereviewed; no unrelated production audit was repeated.
 
-/adversarial-review apply ARL-7d21c0b1 @docs/research/synthetic-notification-blueprint.md AR1,AR2,AR4
+READY FOR R1-R3
 
-AR3 remains mutation-ineligible until the provider replay evidence exists.
+Next action:
+/superplan @docs/research/synthetic-notification-blueprint.md R1-R3
+
+No product implementation or Superplan action was performed.
 ```
 
-## Apply result
-
-### Input
-
-```text
-/adversarial-review apply ARL-7d21c0b1 @docs/research/synthetic-notification-blueprint.md AR1,AR2,AR4
-```
-
-### Condensed output
-
-```text
-The delivery-ownership and retention corrections are applied coherently, but the blueprint is still not ready for Superplan until provider idempotency retention is verified.
-NOT READY FOR R1-R5
-
-## Changes made
-
-- Made the delivery-attempt record the sole delivery state machine across architecture, R1/R2, migration, and fault tests.
-- Set the selected 90-day receipt-retention policy consistently across lifecycle, privacy, and acceptance sections.
-- Removed the stale API-owned sent flag and contradictory indefinite-retention text.
-
-## Validation and rereview
-
-- pnpm docs:validate — passed.
-- R1-R5 rereview — AR1, AR2, and AR4 verified; AR3 remains open.
-
-## Audit appendix
-
-Changed path: docs/research/synthetic-notification-blueprint.md. Ledger ARL-7d21c0b1 generation 2 preserves every ID, Q1 = A, exact fingerprints, revision coverage, and the full readiness checklist.
-
-## Action required from you
-
-No human judgment is required. One empirical blocker remains.
-
-P0 = critical premise/security/data loss · P1 = architecture/production/release blocker · P2 = material quality/operability/handoff defect · P3 = non-blocking improvement
-
-### Evidence required, not human input
-
-| Ref | Question and context | Evidence to gather | Decision rule |
-| --- | --- | --- | --- |
-| AR3-P1 | **Can the provider idempotency key safely cover disaster-recovery replay?** The architecture now depends only on the provider's actual retention guarantee. | Run the recorded provider replay experiment. | If retention exceeds the replay window, amend R3 with the proof; otherwise specify an internal durable receipt. |
-
-### Next action
-
-Run the provider replay experiment recorded under R3, then invoke:
-
-/adversarial-review continuation ARL-7d21c0b1 @<current-transcript>.jsonl @docs/research/synthetic-notification-blueprint.md
-
-No product implementation or /superplan action was performed.
-```
+Apply changes only the named research document and the coherent revisions selected by `AR1` and `AR2`. If source or document drift changes either revision, it writes nothing and returns a fresh concise review instead.

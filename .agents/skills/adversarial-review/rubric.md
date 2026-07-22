@@ -1,141 +1,103 @@
 # Adversarial Review Rubric
 
-Apply every mandatory lens. Apply each conditional module when triggered; otherwise record `NOT APPLICABLE` and why. A review is incomplete when a lens or triggered module is silently omitted.
+Use the core gates for every selected recommendation. Use a triggered check only when its trigger is present in the selected recommendation, current caller graph, governing policy, or demonstrated failure.
 
-## Mandatory lenses
+## Core gates
 
-| ID  | Lens                                       | Required attacks                                                                                                                                           |
-| --- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| L1  | Purpose, authority, and eigenquestion      | Re-derive outcome, invariant, and owner; challenge inherited framing; identify policy or current-intent conflicts.                                         |
-| L2  | Evidence and currency                      | Verify material current-state claims; locate stale/tentative claims; require source, experiment, upstream evidence, or a concrete validation step.         |
-| L3  | Architecture and source of truth           | Trace ownership, boundaries, data flow, lifecycle, public API, persistence, and duplicated authority.                                                      |
-| L4  | Counterexamples and failure states         | Probe concurrency, cancellation, retries, idempotency, partial failure, recovery, stale data, abuse, trust boundaries, and resource exhaustion.            |
-| L5  | Completeness and traceability              | Inventory sibling surfaces and consumers; map findings to recommendations, files/symbols, dependencies, tests, cleanup, migrations, and acceptance.        |
-| L6  | Reuse, simplification, scope, and deletion | Check native facilities, standards, generators, and existing patterns; reject reinvention and correctness-reducing shortcuts; preserve explicit deferrals. |
-| L7  | Testing and verification                   | Demand semantic, negative, fault, parity, round-trip, runtime, visual, and measured evidence where applicable; reject proxies and self-fulfilling tests.   |
-| L8  | Production readiness                       | Evaluate observability, rollout/rollback, compatibility, platforms, performance, memory, storage/cost, security/privacy, and operational lifecycle.        |
-| L9  | Consumer and Superplan determinism         | Model user/API/LLM ergonomics; ensure a weaker implementer can execute every in-scope recommendation without reconstructing decisions.                     |
+### 1. Outcome, invariant, and owner
 
-## Human synthesis quality
+- Restate the user outcome and explicit non-goals.
+- Re-derive the invariant and the current layer that should own it.
+- Reject inherited framing when one shared owner can remove multiple symptoms.
 
-The final action endcap is part of correctness, not optional formatting. Require all of the following:
+### 2. Current evidence
 
-- group atomic findings by the smallest root cause while retaining every independent ledger record;
-- classify each row exactly once as `CLEAR_CUT`, `EVIDENCE_REQUIRED`, `HUMAN_CHOICE`, or `NO_ACTION`;
-- reserve `HUMAN_CHOICE` for product, commercial, policy, or value judgments that evidence cannot decide;
-- render every atomic reference with its authoritative priority as `AR#-P#`; list every member of mixed-priority rows;
-- pair every clear-cut reference with the question, concrete defect and consequence, correction, and strongest basis so the human can sense-check it;
-- pair every evidence reference with the uncertainty, exact evidence task, and decision rule; never delegate an empirical answer to the user;
-- give each human choice a stable `Q#`, every related `AR#-P#`, self-contained context, two or three mutually exclusive options, and a recommended default with rationale;
-- include all independent human questions in one response without a count limit, batching, queue, or omission;
-- order prerequisites before dependent work, then severity, confidence, and stable ID;
-- preserve validated directions as explicit `NO_ACTION` results and retain their `FALSIFIED` records in the appendix;
-- give an exact copyable next response or invocation with eligible IDs and the complete write set;
-- place the complete audit appendix before the final action endcap so the human finishes on an executable interface.
+- Verify load-bearing claims against current source, runtime evidence, active policy, or authoritative upstream behavior.
+- Read current callers of the owner and siblings sharing the demonstrated failure mode.
+- Treat research and tests as evidence, not automatic authority; either can be stale or encode a defect.
 
-A short report that omits a blocker or question is incorrect. A complete report that exposes IDs without semantic context or asks the human to join audit tables before acting is also incorrect.
+### 3. Ponytail selection
 
-## Conditional modules
+Apply the active Ponytail ladder after understanding the flow:
 
-| Module                       | Trigger                                     | Additional attacks                                                                                                                |
-| ---------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| UI/UX/accessibility          | User-visible or editor behavior             | Interaction states, keyboard/screen-reader behavior, responsive layout, flicker/stable identity, visual and runtime verification. |
-| CAD/numerical                | Geometry, kernels, conversion, grading      | Tolerances, exactness, provider parity, geometry-only evidence, round trips, scale, degeneracy.                                   |
-| AI/agent/context             | Prompts, tools, memory, model routing       | Tool ambiguity, canonical schemas, context cost, compaction, trust, provider parity, weaker-model handoff.                        |
-| Dependency/build/release     | Upstream source, WASM, packages, deployment | Licensing, generated artifacts, ABI/API compatibility, platform builds, versioning, rollback.                                     |
-| Billing/security/legal/abuse | Money, auth, sharing, private assets        | Authorization, replay/idempotency, privacy, fraud/abuse, regional/legal constraints, reconciliation.                              |
-| Commercial/strategy          | Market, moat, pricing, data, partnerships   | Falsifiable demand, defensibility, adoption friction, monetization, dependency power, strategic forks.                            |
+1. Does the recommendation need to exist?
+2. Does current code, a standard, the platform, or an installed dependency already satisfy it?
+3. What can be deleted or narrowed?
+4. What is the minimum candidate that preserves the invariant?
 
-## Finding taxonomy
+### 4. Correctness floor
 
-### Severity
+Reject any candidate that weakens trust-boundary validation, authorization, security/privacy, accessibility, explicit user requirements, data-loss prevention, or the minimum semantic proof.
 
-| Value | Meaning                                                              |
-| ----- | -------------------------------------------------------------------- |
-| P0    | Critical premise, security, data-loss, or destructive-scope failure. |
-| P1    | Architecture, production, or release blocker.                        |
-| P2    | Material quality, operability, evidence, or handoff defect.          |
-| P3    | Non-blocking improvement.                                            |
+### 5. Scope and materiality
 
-### Evidence disposition
+A candidate finding enters the review only when all are true:
 
-| Value          | Meaning                                                                 |
-| -------------- | ----------------------------------------------------------------------- |
-| CONFIRMED      | Available evidence directly supports the attack.                        |
-| NEEDS_EVIDENCE | Material attack remains unresolved and has an explicit resolution path. |
-| FALSIFIED      | Evidence defeated the attack; retain it to prevent resurrection.        |
+1. direct evidence or an exact unresolved experiment supports it;
+2. it lies inside the selected recommendation's scope cone or correctness floor;
+3. it changes the plan or prevents concrete harm;
+4. Superplan cannot resolve it through ordinary implementation exploration without making a new design decision.
 
-### User disposition
+Group all qualifying counterexamples with the same owner and correction into one finding.
 
-`PENDING`, `ACCEPTED`, or `DECLINED` records user authority separately from factual evidence.
+### 6. Stop
 
-### Resolution
+Stop when the minimum correct direction survives every triggered check and remaining plausible attacks cannot change the plan. Omit failed attacks and irrelevant dimensions.
 
-`OPEN`, `APPLIED`, `VERIFIED`, or `TOMBSTONED` records lifecycle separately from evidence and user choice.
+## Scope cone
 
-### Confidence
+Review may expand only to:
 
-Use `High`, `Medium`, or `Low` based on directness, reproducibility, authority, and currency of evidence. Confidence never substitutes for an evidence disposition.
+- current callers of the changed owner;
+- sibling callers sharing the same evidenced failure mode;
+- active policies directly governing the selected behavior;
+- companion research with a load-bearing contradiction;
+- external evidence needed to choose the minimum architecture.
 
-### Human action class
+Repository size, generic production readiness, or the existence of another platform is not itself a trigger.
 
-| Value             | Meaning                                                                                   |
-| ----------------- | ----------------------------------------------------------------------------------------- |
-| CLEAR_CUT         | Evidence determines the coherent blueprint correction; explicit apply still gates writes. |
-| EVIDENCE_REQUIRED | An unresolved measurement or experiment has an exact decision rule.                       |
-| HUMAN_CHOICE      | An irreducible product, commercial, policy, or value preference remains.                  |
-| NO_ACTION         | The attacked direction survived or otherwise requires no human action.                    |
+## Triggered checks
 
-This is a derived presentation class. It never replaces severity, evidence disposition, user disposition, resolution, or confidence in the atomic ledger.
+| Trigger                                                        | Check only these consequences                                                                                                                           |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stateful, concurrent, durable, or retrying behavior            | Cancellation, interleaving, idempotency, partial commit, recovery, stale state, resource lifetime, and data loss that can affect the selected invariant |
+| Trust, auth, private data, billing, or destructive action      | Authorization, confinement, replay, privacy, abuse, auditability, and failure-safe defaults                                                             |
+| User-visible UI or editor behavior                             | Keyboard/screen-reader access, stable identity, interaction states, responsive layout, and visual/runtime verification affected by the recommendation   |
+| CAD, numerical, conversion, or grading behavior                | Exactness/tolerance, degenerate inputs, provider parity, geometry-only evidence, and required round trips                                               |
+| External dependency, package, build, WASM, or release boundary | Authoritative upstream capability, licensing, ABI/API compatibility, generated artifacts, supported platforms, and rollback only when changed           |
+| Agent, prompt, tool, memory, or context behavior               | Canonical schema, tool ambiguity, context cost, compaction, trust, provider parity, and weaker-model handoff only when architecture-changing            |
+| Measured hot path or explicit performance/cost claim           | A direct measurement and threshold capable of selecting a different design                                                                              |
+| Durable data or current consumer migration                     | Compatibility and migration steps necessary to avoid corrupting or stranding current data/consumers                                                     |
 
-## Required attack patterns
+Do not list untriggered rows as `NOT APPLICABLE`.
 
-For each in-scope surface, challenge both overengineering and underengineering:
+## Evidence order
 
-- wrong eigenquestion or ownership layer;
-- duplicated source of truth or lifecycle authority;
-- wrapper/proxy/sidecar that masks a source defect;
-- speculative abstraction or compatibility path without a real consumer;
-- unproved claim that a native facility cannot meet the invariant;
-- unproved reuse that merely moves the defect;
-- missing sibling call sites, states, layers, platforms, documents, migrations, or cleanup;
-- convenient proxy evidence standing in for the semantic contract;
-- correctness without performance, security, cost, platform, or operational proof;
-- ambiguous public paths or tool choices that force user/agent rediscovery;
-- deferred in-scope production work disguised as a follow-up;
-- scope expansion that violates explicit non-goals.
+Prefer the strongest evidence appropriate to the claim:
 
-## Rationalization inoculation
-
-These claims require evidence, not acceptance at face value:
-
-- “The repository is too large, so sample only high-risk files.”
-- “The current test passes, therefore the contract is correct.”
-- “This proxy is easier for the model to assert.”
-- “A compatibility path is safer than deleting superseded behavior.”
-- “This wrapper avoids touching the architecture.”
-- “The blueprint says it exists, so current source need not be checked.”
-- “Correct output means performance can be deferred.”
-- “Production hardening can be a later follow-up.”
-- “The native capability probably cannot support this.”
-- “The user should decide” when source, measurement, or standards can decide.
-
-Each may be true in a specific case only after supporting evidence is recorded.
-
-## Evidence quality
-
-Prefer, in order appropriate to the claim:
-
-1. reproducible runtime behavior or measurement;
-2. current implementation and complete call-site/source-of-truth trace;
-3. semantic tests that distinguish tempting false positives;
+1. reproducible behavior or measurement;
+2. current implementation and its real callers;
+3. semantic tests that distinguish the dangerous false positive;
 4. authoritative upstream source or standard;
-5. official documentation;
-6. active research and policy;
-7. explicit, labeled assumption with a resolution step.
+5. active policy and research;
+6. an explicit assumption with a decision-changing resolution step.
 
-Do not treat stale comments, old assistant prose, passing proxy tests, or blueprint assertions as current-state proof.
+Gather safe in-scope evidence during review. Do not ask the user to guess an empirical answer.
 
-## Failed attacks
+## Evidence and test sufficiency
 
-A failed attack is a valid result when it names the attempted falsification, the evidence that defeated it, and the recommendation/lens it protects. Retain it as `FALSIFIED` so continuation and later reviews do not present it as a new defect.
+Require the smallest semantic check that fails when the selected invariant breaks. Add negative, fault, parity, round-trip, runtime, visual, or measured evidence only when the triggered boundary needs it. Proxies and self-fulfilling assertions are not evidence.
+
+## Finding shape
+
+One material finding contains:
+
+- review-local `AR#` when apply selection is needed;
+- the shared root cause and owner;
+- direct evidence;
+- concrete consequence;
+- the smallest coherent blueprint revision.
+
+Architecture-changing uncertainty contains the exact evidence step and outcome-to-decision rule. A human choice is allowed only when evidence cannot decide an irreversible architecture-changing preference.
+
+Everything else is omitted. A failed attack is worth one optional `Skipped` line only when it protects a tempting rejected direction and names a concrete revisit trigger.

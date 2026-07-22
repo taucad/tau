@@ -40,6 +40,19 @@
       "options": {
         "command": "node scripts/src/pdf-to-md.ts"
       }
+    },
+    "cursor-history-recovery": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/src/cursor-history-recovery.ts"
+      }
+    },
+    "validate-cursor-history": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/src/cursor-history-recovery.ts verify --output-root docs/research/cursor-history"
+      }
     }
   }
 }

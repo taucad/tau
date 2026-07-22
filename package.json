@@ -43,7 +43,7 @@
     "repos:sync": "node scripts/dist/repos.js sync --all",
     "repos:status": "node scripts/dist/repos.js status --all",
     "knip": "NX_DAEMON=false knip --max-issues 227",
-    "docs:validate": "nx run scripts:validate-frontmatter",
+    "docs:validate": "nx run scripts:validate-frontmatter && nx run scripts:validate-cursor-history",
     "projects:validate": "nx run scripts:validate-project-names",
     "tsgo-refs:validate": "nx run scripts:validate-tsgo-runtime-references",
     "size:build": "node tools/size-build.mjs",

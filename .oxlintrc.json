@@ -5,8 +5,12 @@
   },
   "ignorePatterns": [
     "repos/**",
+    "**/.claude/skills/**",
+    "**/.next/**",
+    "**/.next-*/**",
     "**/assets/**",
     "**/dist/**",
+    "**/dist-*/**",
     "**/generated/**",
     "**/native/opencascade/geospec_opencascade_single.*",
     "**/wasm/**",
@@ -1297,6 +1301,22 @@
       }
     },
     {
+      // Agent skill folders are self-contained units (SKILL.md + scripts +
+      // references travel together into agent harnesses), so sibling relative
+      // imports are their contract — same reasoning as examples/**. The
+      // `.claude/skills` symlink twin is ignored outright (ignorePatterns)
+      // to avoid double-linting the same files.
+      "files": ["**/.agents/skills/**/*.{ts,mts}"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": ["error", "domain", "freelist", "smalloc", "punycode", "sys", "querystring", "colors"]
+          }
+        ]
+      }
+    },
+    {
       /*
        * Standalone examples (e.g. `examples/electron-tau`) model what a downstream
        * consumer wires up, not what an internal Tau library writes:
@@ -1321,6 +1341,24 @@
           }
         ],
         "@typescript-eslint/explicit-module-boundary-types": "warn"
+      }
+    },
+    {
+      /*
+       * Cross-framework E2E fixtures are standalone consumer applications
+       * compiled independently by Next.js, Vite, and Electron Vite. Their
+       * portable local imports follow each host bundler rather than Tau's
+       * production-app `#alias` and emitted `.js` conventions.
+       */
+      "files": ["apps/react-e2e/**/*.{ts,tsx}"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": ["error", "domain", "freelist", "smalloc", "punycode", "sys", "querystring", "colors"]
+          }
+        ],
+        "import/extensions": "off"
       }
     },
     {

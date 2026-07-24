@@ -9,7 +9,7 @@ import * as mdxParser from '@taucad/oxlint/mdx-parser';
 
 /**
  * Workspace root plus every workspace member directory that has a `package.json`
- * (`packages/*`, `kernels/*`, `libs/*`, `apps/*`, `examples/*`), so
+ * (`packages/*`, `kernels/*`, `libs/*`, `apps/*`, `examples/*`, `scripts`), so
  * `import-x/no-extraneous-dependencies` resolves deps from the owning manifest.
  */
 const workspacePackageDirectories = () => {
@@ -41,6 +41,9 @@ const workspacePackageDirectories = () => {
   absorbChildren(path.join(root, 'libs'));
   absorbChildren(path.join(root, 'apps'));
   absorbChildren(path.join(root, 'examples'));
+  if (fs.existsSync(path.join(root, 'scripts/package.json'))) {
+    directories.add(path.join(root, 'scripts'));
+  }
 
   return [...directories];
 };
@@ -200,9 +203,12 @@ const config = [
       '.nx/cache',
       '.nx/workspace-data',
       '**/dist',
+      '**/dist-*',
       '**/coverage/',
       '**/.cache',
       '**/build',
+      '**/.next/**',
+      '**/.next-*/**',
       '**/public/build',
       '**/public/*.js',
       '**/.env',
@@ -225,6 +231,12 @@ const config = [
       'packages/render/spike/**',
       '**/wasm/**',
       'repos/**',
+      // Symlink twin of libs/tau-examples/.agents/skills — linting it would
+      // double-lint the same files.
+      '**/.claude/skills/**',
+      // Generated kernel-API reference (greppable .d.ts) — carries its own
+      // oxlint/eslint disable banner and lives in no tsconfig project.
+      '**/.agents/skills/*/references/*.d.ts',
       '**/reports/**',
       // GeoSpec fixture generation scripts are verbatim-normative model-code
       // inputs run through the runtime VM (see fixtures/README.md), not
@@ -430,6 +442,20 @@ const config = [
     rules: {
       'import-x/extensions': 'off',
       '@typescript-eslint/naming-convention': 'warn',
+    },
+  },
+
+  {
+    /*
+     * Cross-framework E2E fixtures are standalone consumer applications
+     * compiled independently by Next.js, Vite, and Electron Vite. Their
+     * portable local imports follow each host bundler rather than Tau's
+     * production-app `#alias` and emitted `.js` conventions.
+     */
+    files: ['apps/react-e2e/**/*.{ts,tsx}'],
+    rules: {
+      '@nx/enforce-module-boundaries': 'off',
+      'import-x/extensions': 'off',
     },
   },
 

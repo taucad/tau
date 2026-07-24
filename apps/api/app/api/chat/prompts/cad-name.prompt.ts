@@ -8,7 +8,6 @@ requested object.
 
 The title should be 1-3 words, should use Title Case, and should not include any special characters.
 Do NOT include redundant words like "Design" or "Model".
-Do NOT return generic names such as "Image Project", "Untitled", or "New Project".
 
 You are not answering the prompt, you are generating the title for the conversation.
 You should ONLY respond with the title, and nothing else.

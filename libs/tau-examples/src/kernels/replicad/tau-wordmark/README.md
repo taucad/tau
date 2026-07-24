@@ -23,7 +23,7 @@ The five regions are fused into one disconnected 2D drawing. There are no BRep p
 | A/U stroke width        | `160`                                      |
 | Base-logo radius family | `r0 / r24 / r60`                           |
 | Wordmark radius family  | `0 / 56.25 / 140.625`                      |
-| Fill                    | `#008f7b`                                  |
+| Fill                    | `#00987c`                                  |
 
 The A and U points come from the SVG exported from the PDF-compatible Illustrator master. Their 400-unit runs rise by 103.24 units, the Illustrator-rounded form of the same `1 / sqrt(15)` axis used by the T. Every glyph uses the canonical symbol's three-radius profile, scaled by `1200 / 512`, with true circular Replicad arcs.
 
@@ -62,5 +62,7 @@ The sharp Replicad reconstruction was rasterized against the Illustrator SVG at 
 ## Render Packet
 
 - `wordmark.svg` - canonical generated vector render.
+- `apps/ui/public/wordmark.svg` - public vector asset.
+- `apps/ui/public/wordmark.png` - public raster asset at 512 pixels high.
 - `thumbnail.webp` - runtime-rendered 768 by 576 preview.
 - `apps/ui/app/components/icons/tau-wordmark.tsx` - generated UI consumer using `currentColor`.

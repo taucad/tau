@@ -1,6 +1,5 @@
 import { draw, type Drawing, type Point2D } from 'replicad';
-
-const logoColor = '#008f7b';
+import { tauBrandColor } from '../tau-brand.js';
 
 const topPoints: readonly Point2D[] = [
   [256, -37.873],
@@ -141,7 +140,7 @@ export const createTauLogo = (): Drawing =>
 
 const main = () => ({
   shape: createTauLogo(),
-  color: logoColor,
+  color: tauBrandColor,
   name: 'Tau logo',
 });
 

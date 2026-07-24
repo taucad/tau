@@ -5,6 +5,7 @@
  * Usage:
  *   pnpm nx generate-thumbnails tau-examples
  *   pnpm nx check-thumbnails tau-examples
+ *   pnpm exec tsx libs/tau-examples/scripts/generate-thumbnails.mts --only=replicad/logo,replicad/tau-wordmark
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -35,6 +36,14 @@ const kernelsDirectory = join(sourceDirectory, 'kernels');
 const manifestPath = join(sourceDirectory, 'manifest.json');
 const assetMapPath = join(sourceDirectory, 'thumbnail.assets.ts');
 const check = process.argv.includes('--check');
+const only = new Set(
+  process.argv
+    .find((argument) => argument.startsWith('--only='))
+    ?.slice('--only='.length)
+    .split(',')
+    .filter(Boolean) ?? [],
+);
+const thumbnailOptions = { width: 768, height: 576, margin: 0.1 } as const;
 
 const preset = presets.all();
 const runtime = defineRuntime({
@@ -129,11 +138,36 @@ const imagesEquivalent = async (
   return changedPixels <= left.width * left.height * 0.001;
 };
 
+const renderSvgThumbnail = async (svg: string): Promise<Uint8Array<ArrayBuffer>> => {
+  const { width, height, margin } = thumbnailOptions;
+  const foreground = await sharp(Buffer.from(svg))
+    .resize({
+      width: Math.round(width * (1 - 2 * margin)),
+      height: Math.round(height * (1 - 2 * margin)),
+      fit: 'contain',
+    })
+    .png()
+    .toBuffer();
+  const thumbnail = await sharp({
+    create: { width, height, channels: 4, background: '#000' },
+  })
+    .composite([{ input: foreground, gravity: 'center' }])
+    .webp()
+    .toBuffer();
+  return new Uint8Array(thumbnail);
+};
+
 const entries = JSON.parse(readFileSync(manifestPath, 'utf8')) as ManifestEntry[];
-const renderable = entries.filter(
+const allRenderable = entries.filter(
   (entry): entry is ManifestEntry & { readonly mainFile: string } =>
     entry.mainFile !== undefined && supportedKernels.has(entry.kernel),
 );
+const renderable =
+  only.size === 0 ? allRenderable : allRenderable.filter((entry) => only.has(`${entry.kernel}/${entry.name}`));
+const missing = [...only].filter((key) => !renderable.some((entry) => `${entry.kernel}/${entry.name}` === key));
+if (missing.length > 0) {
+  throw new Error(`Unknown or unsupported examples: ${missing.join(', ')}`);
+}
 const skipped = entries.filter((entry) => entry.mainFile === undefined || !supportedKernels.has(entry.kernel));
 for (const entry of skipped) {
   const reason = entry.mainFile ? `kernel ${entry.kernel} is not composed` : 'no supported main entrypoint';
@@ -152,10 +186,28 @@ try {
     const sourcePath = `${entry.kernel}/${entry.name}/${entry.mainFile}`;
     console.log(`Rendering ${entry.kernel}/${entry.name}`);
     // oxlint-disable-next-line eslint/no-await-in-loop -- One shared runtime/GPU queue renders fixtures serially.
-    const result = await client.export('webp', {
+    const outcome = await client.render({
       source: { path: sourcePath },
       content: { includeEdges: true },
-      exportOptions: { width: 768, height: 576, margin: 0.1 },
+    });
+    if (outcome.superseded) {
+      throw new Error(`Thumbnail render failed for ${entry.kernel}/${entry.name}: render was superseded`);
+    }
+    if (outcome.geometry.success && outcome.geometry.data.format === 'svg') {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Preserve manifest order and the shared render queue.
+      const bytes = await renderSvgThumbnail(outcome.geometry.data.content);
+      thumbnails.push({
+        entry,
+        bytes,
+        path: join(kernelsDirectory, entry.kernel, entry.name, 'thumbnail.webp'),
+      });
+      continue;
+    }
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Re-export the settled 3D render through the image transcoder.
+    const result = await client.export('webp', {
+      ...(!outcome.geometry.success && { source: { path: sourcePath } }),
+      content: { includeEdges: true },
+      exportOptions: thumbnailOptions,
     });
     if (!result.success) {
       throw new Error(
@@ -184,7 +236,7 @@ try {
   client.terminate();
 }
 
-const assetMap = generateAssetMap(thumbnails);
+const assetMap = only.size === 0 ? generateAssetMap(thumbnails) : undefined;
 if (check) {
   const drift: string[] = [];
   for (const thumbnail of thumbnails) {
@@ -198,7 +250,7 @@ if (check) {
       drift.push(`${thumbnail.entry.kernel}/${thumbnail.entry.name}: thumbnail pixels differ`);
     }
   }
-  if (!existsSync(assetMapPath) || readFileSync(assetMapPath, 'utf8') !== assetMap) {
+  if (assetMap !== undefined && (!existsSync(assetMapPath) || readFileSync(assetMapPath, 'utf8') !== assetMap)) {
     drift.push('thumbnail.assets.ts differs');
   }
   if (drift.length > 0) {
@@ -209,6 +261,8 @@ if (check) {
   for (const thumbnail of thumbnails) {
     writeFileSync(thumbnail.path, thumbnail.bytes);
   }
-  writeFileSync(assetMapPath, assetMap);
-  console.log(`Generated ${thumbnails.length} thumbnails and thumbnail.assets.ts`);
+  if (assetMap !== undefined) {
+    writeFileSync(assetMapPath, assetMap);
+  }
+  console.log(`Generated ${thumbnails.length} thumbnails${assetMap ? ' and thumbnail.assets.ts' : ''}`);
 }

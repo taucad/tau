@@ -1,6 +1,6 @@
 import { draw, type Drawing, type Point2D } from 'replicad';
+import { tauBrandColor } from '../tau-brand.js';
 
-const logoColor = '#008f7b';
 const symbolScale = 1200 / 512;
 const symbolVerticalOffset = 2.622 * symbolScale;
 const r24 = 24 * symbolScale;
@@ -196,7 +196,7 @@ export const createTauWordmark = (): Drawing =>
 
 const main = () => ({
   shape: createTauWordmark(),
-  color: logoColor,
+  color: tauBrandColor,
   name: 'Tau wordmark',
 });
 

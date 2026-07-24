@@ -1,6 +1,6 @@
 # Tau Logo
 
-Parametric 2D reconstruction of the Tau brandmark. The default model returns one Replicad `Drawing`; `generate-logo.ts` exports that drawing to `logo.svg`, the logo-keychain asset, the UI favicon and React icon, and the email logo path module.
+Parametric 2D reconstruction of the Tau brandmark. The default model returns one Replicad `Drawing`; `generate-logo.ts` exports that drawing to `logo.svg`, the logo-keychain asset, the UI SVG/PNG/ICO favicon family and React icon, and the email logo path module.
 
 ## Part Census
 
@@ -19,7 +19,7 @@ The three regions are fused into one disconnected 2D drawing. There are no BRep 
 | Brand coordinate system | `512 × 512` SVG view box          |
 | Symmetry axis           | `x = 256`                         |
 | Sloped-axis angle       | `atan(1 / sqrt(15)) = 14.477512°` |
-| Fill                    | `#008f7b`                         |
+| Fill                    | `#00987c`                         |
 
 ## Verification
 

@@ -1,7 +1,7 @@
 import { createElement, Fragment } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { Body, Button, Container, Head, Heading, Hr, Html, Link, Preview, Section, Text } from 'react-email';
-import { tauEmailLogoPathData } from '#email/templates/tau-logo-path.generated.js';
+import { tauEmailLogoColor, tauEmailLogoPathData } from '#email/templates/tau-logo-path.generated.js';
 
 const colors = {
   background: '#fcffff',
@@ -10,7 +10,7 @@ const colors = {
   mutedSurface: '#ecf4f1',
   muted: '#4b5953',
   border: '#d8e0dd',
-  accent: '#00987c',
+  accent: tauEmailLogoColor,
   accentText: '#f9fffe',
 } as const;
 
@@ -114,7 +114,7 @@ const tauLogo = (): React.ReactElement =>
     },
     createElement('path', {
       d: tauEmailLogoPathData,
-      fill: '#008f7b',
+      fill: tauEmailLogoColor,
     }),
   );
 

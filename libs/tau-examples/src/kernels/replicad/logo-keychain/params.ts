@@ -12,7 +12,7 @@ export const defaultParams = {
   logoHeight: 0.8,
   logoChamferSize: 0.1,
   tabletColor: '#000000',
-  logoColor: '#008f7b',
+  logoColor: '#00987c',
   backText: 'tau.new',
   backTextFontSize: 7,
   backTextLineGap: -1,

@@ -3,7 +3,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import openCascade from 'replicad-opencascadejs';
 import { setOC } from 'replicad';
-import { createTauWordmark } from '#kernels/replicad/tau-wordmark/main.js';
+import sharp from 'sharp';
+import { tauBrandColor } from '../tau-brand.js';
+import { createTauWordmark } from './main.js';
 
 setOC(await openCascade());
 
@@ -17,7 +19,11 @@ const paths = createTauWordmark()
   .flat()
   .map((path) => formatPath(path));
 const pathData = paths.join(' ');
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3160 1187.71"><path fill="#008f7b" fill-rule="evenodd" d="${pathData}"/></svg>\n`;
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3160 1187.71"><path fill="${tauBrandColor}" fill-rule="evenodd" d="${pathData}"/></svg>\n`;
+const png = await sharp(Buffer.from(svg))
+  .resize({ height: 512 })
+  .png()
+  .toBuffer();
 const component = `export function TauWordmark(properties: React.SVGProps<SVGSVGElement>): React.JSX.Element {
   return (
     <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3160 1187.71' {...properties}>
@@ -35,6 +41,8 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = join(directory, '../../../../../..');
 const outputs = [
   [join(directory, 'wordmark.svg'), svg],
+  [join(workspaceRoot, 'apps/ui/public/wordmark.svg'), svg],
+  [join(workspaceRoot, 'apps/ui/public/wordmark.png'), png],
   [
     join(workspaceRoot, 'apps/ui/app/components/icons/tau-wordmark.tsx'),
     component,
@@ -43,7 +51,9 @@ const outputs = [
 
 if (process.argv.includes('--check')) {
   for (const [output, expected] of outputs) {
-    if (readFileSync(output, 'utf8') !== expected) {
+    const expectedBytes =
+      typeof expected === 'string' ? Buffer.from(expected) : expected;
+    if (!readFileSync(output).equals(expectedBytes)) {
       throw new Error(`Generated wordmark differs: ${output}`);
     }
   }

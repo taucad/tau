@@ -1,117 +1,74 @@
-import { mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { buildMarkdown, runBatch, sha256File, staleReason } from '#pdf-to-md.js';
+import { convertPdfArtifact, validatePdfArtifact } from '#pdf-to-md.js';
 
-const entry = {
-  title: 'A Paper',
-  authors: ['Ada Lovelace'],
-  year: 2026,
-  venue: 'Journal',
-  source_url: 'https://example.com/paper', // eslint-disable-line @typescript-eslint/naming-convention -- YAML field
-  pdf_url: 'https://example.com/paper.pdf', // eslint-disable-line @typescript-eslint/naming-convention -- YAML field
-  pdf: 'docs/reference/pdf/a-paper.pdf',
-  markdown: 'docs/reference/a-paper.md',
-  citation: { format: 'bibtex', key: 'lovelace2026', bibtex: '@article{lovelace2026, title={A Paper}}' },
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+const buildPdf = (text: string): Uint8Array<ArrayBuffer> => {
+  const stream = text === '' ? '' : `BT /F1 12 Tf 72 720 Td (${text}) Tj ET`;
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let body = '%PDF-1.4\n';
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(body));
+    body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(body);
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  body += offsets
+    .slice(1)
+    .map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`)
+    .join('');
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Uint8Array.from(Buffer.from(body));
 };
 
-const markdownFor = (pdfSha256: string): string =>
-  buildMarkdown({ id: 'a-paper', entry, pageCount: 3, pdfSha256, text: 'body' });
-
-const writeTemporaryPdf = (contents: string): string => {
-  const path = join(mkdtempSync(join(tmpdir(), 'pdf-to-md-')), 'a-paper.pdf');
+const temporaryPdf = (contents: Uint8Array<ArrayBuffer>): string => {
+  const directory = mkdtempSync(join(tmpdir(), 'tau-pdf-test-'));
+  temporaryDirectories.push(directory);
+  const path = join(directory, 'paper.pdf');
   writeFileSync(path, contents);
   return path;
 };
 
-describe('staleReason', () => {
-  const pdfSha256 = 'a'.repeat(64);
-  const manifestHash = (): string => {
-    const hash = /^> Manifest hash: `(?<hash>[a-f0-9]+)`$/mu.exec(markdownFor(pdfSha256))?.groups?.['hash'];
-    if (hash === undefined) {
-      throw new Error('generated markdown is missing its manifest hash');
-    }
-    return hash;
-  };
-
-  it('should report generated markdown as fresh when both recorded hashes match', () => {
-    expect(staleReason({ markdown: markdownFor(pdfSha256), manifestHash: manifestHash(), pdfSha256 })).toBeUndefined();
-  });
-
-  it('should report stale markdown when the cached PDF content no longer matches', () => {
-    expect(
-      staleReason({ markdown: markdownFor(pdfSha256), manifestHash: manifestHash(), pdfSha256: 'b'.repeat(64) }),
-    ).toBe('pdf changed');
-  });
-
-  it('should report stale markdown when the manifest entry changed', () => {
-    expect(staleReason({ markdown: markdownFor(pdfSha256), manifestHash: 'deadbeef', pdfSha256 })).toBe(
-      'manifest changed',
+describe('validatePdfArtifact', () => {
+  it('should accept PDF magic and reject other cached bytes', async () => {
+    await expect(validatePdfArtifact(temporaryPdf(buildPdf('Hello')))).resolves.toBeUndefined();
+    await expect(validatePdfArtifact(temporaryPdf(Buffer.from('not a pdf')))).rejects.toThrow(
+      'cached artifact is not a PDF',
     );
   });
 
-  it('should report stale markdown when it predates recorded PDF hashes', () => {
-    expect(staleReason({ markdown: '> Manifest hash: `deadbeef`\n', manifestHash: 'deadbeef', pdfSha256 })).toBe(
-      'pdf changed',
-    );
-  });
-
-  it('should skip the PDF comparison when the cached PDF is missing', () => {
-    expect(
-      staleReason({ markdown: markdownFor(pdfSha256), manifestHash: manifestHash(), pdfSha256: undefined }),
-    ).toBeUndefined();
+  it('should reject an oversized PDF before parsing it', async () => {
+    const path = temporaryPdf(Buffer.from('%PDF-'));
+    truncateSync(path, 100 * 1024 * 1024 + 1);
+    await expect(validatePdfArtifact(path)).rejects.toThrow('PDF exceeds');
   });
 });
 
-describe('runBatch', () => {
-  it('should keep going after a failure so one bad reference cannot skip the rest', async () => {
-    const attempted: string[] = [];
-    const run = runBatch(['a', 'bad', 'c'], async (id) => {
-      attempted.push(id);
-      if (id === 'bad') {
-        throw new Error(`${id}: cached PDF missing`);
-      }
-    });
-
-    await expect(run).rejects.toThrow('1 of 3 references failed');
-    expect(attempted).toEqual(['a', 'bad', 'c']);
+describe('convertPdfArtifact', () => {
+  it('should isolate the parser and return extracted text', async () => {
+    const result = await convertPdfArtifact(temporaryPdf(buildPdf('Hello Tau')));
+    expect(result.markdown).toContain('Hello Tau');
+    expect(result.detail).toContain('PDF text extraction');
   });
 
-  it('should report every failure rather than only the first', async () => {
-    const run = runBatch(['x', 'y'], async (id) => {
-      throw new Error(`${id}: cached PDF missing`);
-    });
-
-    await expect(run).rejects.toThrow(
-      '2 of 2 references failed:\n  - x: cached PDF missing\n  - y: cached PDF missing',
-    );
-  });
-
-  it('should resolve without throwing when every reference succeeds', async () => {
-    await expect(runBatch(['a', 'b'], async () => undefined)).resolves.toBeUndefined();
-  });
-});
-
-describe('sha256File', () => {
-  it('should ignore mtime changes so `git lfs checkout` does not fake staleness', () => {
-    const path = writeTemporaryPdf('%PDF-1.7 bytes');
-    const before = sha256File(path);
-
-    utimesSync(path, new Date(), new Date(Date.now() + 86_400_000));
-
-    expect(sha256File(path)).toBe(before);
-    expect(staleReason({ markdown: markdownFor(before), manifestHash: 'x', pdfSha256: before })).not.toBe(
-      'pdf changed',
-    );
-  });
-
-  it('should change when the PDF bytes change', () => {
-    const path = writeTemporaryPdf('%PDF-1.7 bytes');
-    const before = sha256File(path);
-    writeFileSync(path, '%PDF-1.7 other bytes');
-
-    expect(sha256File(path)).not.toBe(before);
+  it('should preserve the visible OCR failure for PDFs without text', async () => {
+    await expect(convertPdfArtifact(temporaryPdf(buildPdf('')))).rejects.toThrow(/no extractable text|usable text/i);
   });
 });

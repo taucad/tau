@@ -41,6 +41,12 @@
         "command": "node scripts/src/pdf-to-md.ts"
       }
     },
+    "text-to-md": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/src/text-to-md.ts"
+      }
+    },
     "cursor-history-recovery": {
       "executor": "nx:run-commands",
       "cache": false,

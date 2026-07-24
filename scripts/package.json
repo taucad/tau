@@ -14,9 +14,14 @@
   "dependencies": {
     "@inkjs/ui": "catalog:",
     "ink": "catalog:",
+    "ipaddr.js": "catalog:",
     "js-yaml": "catalog:",
     "pdf-parse": "catalog:",
-    "react": "catalog:"
+    "react": "catalog:",
+    "remark-gfm": "catalog:",
+    "remark-parse": "catalog:",
+    "remark-stringify": "catalog:",
+    "unified": "catalog:"
   },
   "devDependencies": {
     "@types/js-yaml": "catalog:",

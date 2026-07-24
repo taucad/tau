@@ -414,12 +414,15 @@ catalogs:
     ioredis-mock:
       specifier: ^8.13.1
       version: 8.13.1
+    ipaddr.js:
+      specifier: 2.4.0
+      version: 2.4.0
     isbot:
       specifier: ^5.1.43
       version: 5.1.43
     js-yaml:
-      specifier: ^4.2.0
-      version: 4.2.0
+      specifier: 4.3.0
+      version: 4.3.0
     json-schema-default:
       specifier: ^1.0.2
       version: 1.0.2
@@ -472,7 +475,7 @@ catalogs:
       specifier: ^0.16.0
       version: 0.16.0
     pdf-parse:
-      specifier: ^2.4.5
+      specifier: 2.4.5
       version: 2.4.5
     polygon-clipping:
       specifier: ^0.15.7
@@ -504,6 +507,9 @@ catalogs:
     rehype-stringify:
       specifier: ^10.0.1
       version: 10.0.1
+    remark-gfm:
+      specifier: 4.0.1
+      version: 4.0.1
     remark-math:
       specifier: ^6.0.0
       version: 6.0.0
@@ -513,6 +519,9 @@ catalogs:
     remark-rehype:
       specifier: ^11.1.2
       version: 11.1.2
+    remark-stringify:
+      specifier: 11.0.0
+      version: 11.0.0
     resend:
       specifier: ^6.14.0
       version: 6.14.0
@@ -1048,7 +1057,7 @@ importers:
         version: 5.1.43
       js-yaml:
         specifier: 'catalog:'
-        version: 4.2.0
+        version: 4.3.0
       json-rpc-2.0:
         specifier: ^1.7.1
         version: 1.7.1
@@ -2555,15 +2564,30 @@ importers:
       ink:
         specifier: 'catalog:'
         version: 6.8.0(@types/react@19.0.12)(react@19.2.7)
+      ipaddr.js:
+        specifier: 'catalog:'
+        version: 2.4.0
       js-yaml:
         specifier: 'catalog:'
-        version: 4.2.0
+        version: 4.3.0
       pdf-parse:
         specifier: 'catalog:'
         version: 2.4.5
       react:
         specifier: 'catalog:'
         version: 19.2.7
+      remark-gfm:
+        specifier: 'catalog:'
+        version: 4.0.1
+      remark-parse:
+        specifier: 'catalog:'
+        version: 11.0.0
+      remark-stringify:
+        specifier: 'catalog:'
+        version: 11.0.0
+      unified:
+        specifier: 'catalog:'
+        version: 11.0.5
     devDependencies:
       '@types/js-yaml':
         specifier: 'catalog:'

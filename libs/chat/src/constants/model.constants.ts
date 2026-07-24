@@ -12,6 +12,7 @@ export const modelProviders = [
   'together',
   'morph',
   'xai',
+  'moonshot',
 ] as const;
 
 /**
@@ -29,4 +30,5 @@ export const modelFamilies = [
   'llama',
   'minimax',
   'grok',
+  'kimi',
 ] as const;

@@ -42,6 +42,7 @@ const environmentSchemaBase = z.object({
   CEREBRAS_API_KEY: z.string().optional(),
   TOGETHER_API_KEY: z.string().optional(),
   XAI_API_KEY: z.string().optional(),
+  MOONSHOT_API_KEY: z.string().optional(),
   LANGSMITH_TRACING: z.string().optional(),
   LANGSMITH_ENDPOINT: z.string().optional(),
   LANGSMITH_PROJECT: z.string().optional(),

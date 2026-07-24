@@ -18,6 +18,8 @@ import type { ProviderDiagnosticsContext } from '#api/chat/utils/provider-diagno
 import { createGoogleProviderDiagnosticsFetch } from '#api/chat/utils/provider-diagnostics.js';
 import { TauChatXaiResponses } from '#api/providers/xai-responses.adapter.js';
 import type { TauChatXaiResponsesInput } from '#api/providers/xai-responses.adapter.js';
+import { TauChatMoonshotCompletions } from '#api/providers/moonshot-completions.adapter.js';
+import type { TauChatMoonshotCompletionsInput } from '#api/providers/moonshot-completions.adapter.js';
 
 // Type for mapping provider IDs to their option types
 type ProviderOptionsMap = {
@@ -37,6 +39,7 @@ type ProviderOptionsMap = {
     };
   };
   xai: TauChatXaiResponsesInput;
+  moonshot: TauChatMoonshotCompletionsInput & { configuration?: Provider['configuration'] };
 };
 
 type ProviderRuntimeOptions = {
@@ -218,6 +221,26 @@ export class ProviderService {
             baseURL: 'https://api.x.ai/v1',
             conversationId: runtimeOptions?.diagnosticsContext?.chatId,
             ...options,
+          }),
+      },
+      moonshot: {
+        provider: 'moonshot',
+        otelProviderName: 'moonshot',
+        configuration: {
+          apiKey: configService.get('MOONSHOT_API_KEY', { infer: true }),
+          baseURL: 'https://api.moonshot.ai/v1',
+        },
+        inputTokensIncludesCacheReadTokens: true,
+        inputTokensIncludesCacheWriteTokens: false,
+        createClass: (options, runtimeOptions) =>
+          new TauChatMoonshotCompletions({
+            ...options,
+            configuration: {
+              apiKey: configService.get('MOONSHOT_API_KEY', { infer: true }),
+              baseURL: 'https://api.moonshot.ai/v1',
+            },
+            promptCacheKey: runtimeOptions?.diagnosticsContext?.chatId,
+            outputVersion: 'v1',
           }),
       },
     };

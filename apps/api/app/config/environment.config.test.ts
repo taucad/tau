@@ -20,6 +20,20 @@ describe('environmentSchema', () => {
     expect(merged.success).toBe(true);
   });
 
+  it('should accept Moonshot credentials while keeping them optional', () => {
+    const withoutMoonshot = Object.fromEntries(
+      Object.entries(withRequiredCookieSecret(process.env)).filter(([key]) => key !== 'MOONSHOT_API_KEY'),
+    );
+    const optionalResult = environmentSchema.safeParse(withoutMoonshot);
+    const configuredResult = environmentSchema.safeParse({ ...withoutMoonshot, MOONSHOT_API_KEY: 'sk-test-moonshot' });
+
+    expect(optionalResult.success).toBe(true);
+    expect(configuredResult.success).toBe(true);
+    if (configuredResult.success) {
+      expect(configuredResult.data.MOONSHOT_API_KEY).toBe('sk-test-moonshot');
+    }
+  });
+
   it('should reject localhost TAU_S3_ENDPOINT while in production mode', () => {
     const result = environmentSchema.safeParse({
       ...withRequiredCookieSecret(process.env),

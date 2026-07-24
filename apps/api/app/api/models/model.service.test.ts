@@ -4,7 +4,7 @@ import { toolName } from '@taucad/chat/constants';
 import type { ConfigService } from '@nestjs/config';
 import { modelList } from '#api/models/model.constants.js';
 import { ModelService } from '#api/models/model.service.js';
-import type { ProviderService } from '#api/providers/provider.service.js';
+import { ProviderService } from '#api/providers/provider.service.js';
 import type { Environment } from '#config/environment.config.ts';
 
 const maxEffectiveContextWindow = 200_000;
@@ -30,6 +30,7 @@ const cappedModelIds = [
   'morph-qwen-3.5-397b',
   'morph-deepseek-v4-flash',
   'xai-grok-4.5',
+  'moonshot-kimi-k3',
 ] as const;
 
 const getCloudCatalogEntries = () => Object.values(modelList).flatMap((modelsBySlug) => Object.values(modelsBySlug));
@@ -120,6 +121,59 @@ describe('ModelService', () => {
       tools: true,
       toolChoice: false,
       modalities: { input: ['text', 'image'], output: ['text'] },
+    });
+  });
+
+  it('lists Kimi K3 as a recommended image-capable tool model with its complete catalog contract', async () => {
+    const service = createModelService();
+    const listedModels = await service.getModels();
+    const kimi = listedModels.find((model) => model.id === 'moonshot-kimi-k3');
+
+    expect(kimi).toMatchObject({
+      recommended: true,
+      model: 'kimi-k3',
+      provider: { id: 'moonshot', name: 'Moonshot AI' },
+      support: {
+        tools: true,
+        toolChoice: false,
+        modalities: { input: ['text', 'image'], output: ['text'] },
+      },
+      details: {
+        family: 'kimi',
+        contextWindow: maxEffectiveContextWindow,
+        maxTokens: 1_048_576,
+        cost: { inputTokens: 3, outputTokens: 15, cacheReadTokens: 0.3, cacheWriteTokens: 0 },
+      },
+      configuration: { streaming: true, reasoning: { effort: 'high' } },
+    });
+    expect(kimi?.configuration).not.toHaveProperty('maxTokens');
+    expect(kimi?.configuration).not.toHaveProperty('maxOutputTokens');
+  });
+
+  it('subtracts Moonshot cache hits from inclusive prompt tokens exactly once', async () => {
+    const configService = {
+      get: vi.fn((key: string) => (key === 'MOONSHOT_API_KEY' ? 'sk-test-moonshot' : false)),
+    } satisfies Pick<ConfigService<Environment>, 'get'>;
+    const service = new ModelService(
+      new ProviderService(configService as unknown as ConfigService<Environment, true>),
+      configService as unknown as ConfigService<Environment>,
+    );
+    await service.getModels();
+
+    expect(
+      service.normalizeUsageTokens('moonshot-kimi-k3', {
+        inputTokens: 100,
+        outputTokens: 20,
+        reasoningTokens: 10,
+        cacheReadTokens: 60,
+        cacheWriteTokens: 0,
+      }),
+    ).toEqual({
+      inputTokens: 40,
+      outputTokens: 20,
+      reasoningTokens: 10,
+      cacheReadTokens: 60,
+      cacheWriteTokens: 0,
     });
   });
 

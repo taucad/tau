@@ -113,6 +113,9 @@ export const providerEnvForModelId = (modelId: string): string | undefined => {
     case 'xai': {
       return 'XAI_API_KEY';
     }
+    case 'moonshot': {
+      return 'MOONSHOT_API_KEY';
+    }
     default: {
       return undefined;
     }

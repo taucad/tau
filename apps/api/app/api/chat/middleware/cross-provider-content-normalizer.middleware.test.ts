@@ -613,6 +613,30 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
       });
     });
 
+    it('heals Moonshot tool args without applying Responses-only content rewrites', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('moonshot');
+      const aiMessage = new AIMessage({
+        content: [
+          { type: 'reasoning', reasoning: 'Read the file first.' },
+          { type: 'text', text: 'Reading.' },
+          { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: '' },
+        ],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        response_metadata: { output_version: 'v1', model_provider: 'moonshot' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: [{ id: 'call_read_1', name: 'read_file', args: { targetFile: 'main.ts' }, type: 'tool_call' }],
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      expect((request.messages[0] as AIMessage).content).toEqual([
+        { type: 'reasoning', reasoning: 'Read the file first.' },
+        { type: 'text', text: 'Reading.' },
+        { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: { targetFile: 'main.ts' } },
+      ]);
+    });
+
     it('rewrites V1 assistant text blocks to output_text items and keeps output_version for openai target', async () => {
       const middleware = createCrossProviderContentNormalizerMiddleware('openai');
       const aiMessage = new AIMessage({

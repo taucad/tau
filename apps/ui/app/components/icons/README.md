@@ -48,3 +48,9 @@ pnpm nx run ui:generate-svg-sprite
 - For raster brand assets (e.g. `manifold.png`), `<SvgIcon>` already supports a
   PNG fallback via the `pngIcons` map — use it when an asset cannot be expressed
   cleanly as path data.
+
+## Attribution
+
+- `kimi.svg` is sourced from Lobe Icons' `kimi-color.svg` at commit
+  `fbd2d56e3f734e889f1373e71c8368cc4e60e0d7`, licensed under MIT (Copyright 2023 LobeHub),
+  with a Tau-specific rounded black background.

@@ -732,12 +732,13 @@ function normalizeAiMessage(message: AIMessage, targetProvider: ProviderId): Bas
     result = canonicalizeLegacyToolMetadataForGoogle(result);
   }
 
-  // Anthropic, Responses API providers, and OpenRouter (OpenAI-compatible chat completions) format
+  // Anthropic, Responses API providers, and OpenAI-compatible chat-completions providers format
   // assistant tool calls from the content block — recover empty args from tool_calls.
   if (
     targetProvider === 'anthropic' ||
     targetProvider === 'openai' ||
     targetProvider === 'morph' ||
+    targetProvider === 'moonshot' ||
     targetProvider === 'xai'
   ) {
     result = healEmptyToolCallArgs(result);
@@ -769,6 +770,8 @@ function normalizeAiMessage(message: AIMessage, targetProvider: ProviderId): Bas
  *   then rewrites V1 assistant `text` blocks into native Responses `output_text`
  *   message items so the API accepts them for the assistant role — while preserving
  *   `output_version: 'v1'`.
+ * - **morph/moonshot**: heals empty `tool_call` args for Chat Completions replay
+ *   without applying Responses-only content rewrites.
  *
  * For Responses API targets, also rewrites `ToolMessage` content blocks from the generic
  * LangChain V1 shape (`text` / `image_url`) into the OpenAI Responses API native

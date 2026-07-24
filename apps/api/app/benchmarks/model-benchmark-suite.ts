@@ -50,6 +50,7 @@ const providerKeyMap: Record<string, string> = {
   cerebras: 'CEREBRAS_API_KEY',
   morph: 'MORPH_API_KEY',
   xai: 'XAI_API_KEY',
+  moonshot: 'MOONSHOT_API_KEY',
 };
 
 function hasApiKey(providerId: string): boolean {

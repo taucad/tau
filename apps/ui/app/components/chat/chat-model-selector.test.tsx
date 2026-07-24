@@ -79,6 +79,13 @@ const modelCatalogue: Model[] = [
     provider: { id: 'xai', name: 'xAI' },
     details: { family: 'grok' },
   } as unknown as Model,
+  {
+    id: 'moonshot-kimi-k3',
+    name: 'Kimi K3',
+    description: '',
+    provider: { id: 'moonshot', name: 'Moonshot AI' },
+    details: { family: 'kimi' },
+  } as unknown as Model,
 ];
 
 // The selector must NOT read selectedModel/setSelectedModelId from
@@ -217,5 +224,23 @@ describe('ChatModelSelector — chat-scoped read + dual-write', () => {
     render(label);
 
     expect(screen.getAllByTestId('svg-icon').map((icon) => icon.textContent)).toContain('grok');
+  });
+
+  it('renders the Kimi family icon for Moonshot models', () => {
+    renderSelector();
+    const kimi = capturedComboBox.groupedItems
+      ?.flatMap((group) => group.items)
+      .find((model) => model.id === 'moonshot-kimi-k3');
+
+    if (!kimi) {
+      throw new Error('Expected Kimi model in selector items');
+    }
+    const label = capturedComboBox.renderLabel?.(kimi, undefined);
+    if (!label) {
+      throw new Error('Expected Kimi model label renderer output');
+    }
+    render(label);
+
+    expect(screen.getAllByTestId('svg-icon').map((icon) => icon.textContent)).toContain('kimi');
   });
 });

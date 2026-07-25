@@ -75,7 +75,6 @@ Project skills in `.agents/skills/` provide guided workflows. Read the relevant 
 | `pr-review-coordinator` | Fixing PR review comments from GitHub                                                      |
 | `typescript-overloads`  | Resolving TS2322 overloaded function type errors                                           |
 | `langgraph`             | Questions about LangGraph and agentic AI                                                   |
-| `occt-wasm-build`       | Building OpenCASCADE WASM binaries                                                         |
 | `rebuild-kcl-wasm-lib`  | Rebuilding/republishing `@taucad/kcl-wasm-lib` from `taucad/modeling-app`                  |
 
 ## Conventions

@@ -67,11 +67,55 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         },
       },
     },
+    'claude-opus-5': {
+      id: 'anthropic-claude-opus-5',
+      name: 'Opus 5',
+      slug: 'claude-opus-5',
+      recommended: true,
+      description:
+        'Strong Opus model for long-horizon agentic CAD design, complex multi-part assemblies, and multi-file work.',
+      provider: {
+        id: 'anthropic',
+        name: 'Anthropic',
+      },
+      model: 'claude-opus-5',
+      support: {
+        toolChoice: false,
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'claude',
+        families: ['claude'],
+        contextWindow: 200_000, // Provider supports 1M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-05',
+        cost: {
+          inputTokens: 5,
+          outputTokens: 25,
+          cacheReadTokens: 0.5,
+          cacheWriteTokens: 6.25,
+        },
+      },
+      configuration: {
+        streaming: true,
+        maxTokens: 120_000,
+        // @ts-expect-error: FIXME - some models use camelCase
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
+        max_tokens: 120_000,
+        thinking: {
+          type: 'adaptive',
+          display: 'summarized',
+        },
+        outputConfig: {
+          effort: 'high',
+        },
+      },
+    },
     'claude-4.8-opus': {
       id: 'anthropic-claude-opus-4.8',
       name: 'Opus 4.8',
       slug: 'claude-opus-4.8',
-      recommended: true,
+      recommended: false,
       description:
         "Anthropic's most powerful long-context capable model with adaptive reasoning, great for designing complex multi-part assemblies.",
       provider: {

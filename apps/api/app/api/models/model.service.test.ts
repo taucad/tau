@@ -11,6 +11,7 @@ const maxEffectiveContextWindow = 200_000;
 
 const cappedModelIds = [
   'anthropic-claude-fable-5',
+  'anthropic-claude-opus-5',
   'anthropic-claude-opus-4.8',
   'anthropic-claude-sonnet-5',
   'openai-gpt-5.6-sol',
@@ -70,6 +71,37 @@ describe('ModelService', () => {
     for (const modelId of cappedModelIds) {
       expect(service.getContextWindow(modelId), modelId).toBe(maxEffectiveContextWindow);
     }
+  });
+
+  it('recommends Opus 5 instead of Opus 4.8', async () => {
+    const service = createModelService();
+    const listedModels = await service.getModels();
+    const opus5 = listedModels.find((model) => model.id === 'anthropic-claude-opus-5');
+
+    expect(opus5).toMatchObject({
+      recommended: true,
+      model: 'claude-opus-5',
+      provider: { id: 'anthropic', name: 'Anthropic' },
+      support: {
+        toolChoice: false,
+        modalities: { input: ['text', 'image'], output: ['text'] },
+      },
+      details: {
+        family: 'claude',
+        contextWindow: maxEffectiveContextWindow,
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-05',
+        cost: { inputTokens: 5, outputTokens: 25, cacheReadTokens: 0.5, cacheWriteTokens: 6.25 },
+      },
+      configuration: {
+        streaming: true,
+        maxTokens: 120_000,
+        thinking: { type: 'adaptive', display: 'summarized' },
+        outputConfig: { effort: 'high' },
+      },
+    });
+    expect(opus5?.configuration).toHaveProperty('max_tokens', 120_000);
+    expect(modelList.anthropic['claude-4.8-opus'].recommended).toBe(false);
   });
 
   it('lists every GPT-5.6 tier and keeps GPT-5.5 non-recommended', async () => {

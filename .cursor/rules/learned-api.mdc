@@ -17,6 +17,7 @@ cleanup; they may exceed the 200-char cap.
 - Reminder/instruction injections defer until ~70% context-window utilization to preserve provider prompt-cache hits (R1 of `docs/research/gemini-prompt-cache-busting.md`).
 - `gitStatus` is omitted entirely from prompt context until git is wired into projects — placeholder/empty `gitStatus` values still bust prompt caches across providers.
 - Don't introduce env vars for single-consumer time/threshold knobs with a sane default — hard-code inline (e.g. `dedupEntryTtlSeconds = 3600`); promote to config only when a 2nd consumer needs it.
+- Preserve Kimi reasoning replay for multi-turn task performance; generic ChatOpenAI text/tool streaming alone is not full Kimi parity.
 - `/health/ready` must assert every external capability (Postgres, Redis, S3/R2 via root probe `__health/probe.txt` decoupled from prefix) so capability go-live is verified without manual probes.
 - All API Zod schemas remain pure (no refines/superRefines/checks) so they convert cleanly to JSON Schema for OpenAPI; cross-field/conditional rules live outside the schema (controller/service guards or DTO normalisation), never inline on the schema.
 - `model.constants.ts` entries match peer providers: concise labels that describe practical use case — no verbose marketing copy (Morph/OpenRouter included).

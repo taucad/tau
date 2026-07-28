@@ -52,5 +52,4 @@ pnpm nx run ui:generate-svg-sprite
 ## Attribution
 
 - `kimi.svg` is sourced from Lobe Icons' `kimi-color.svg` at commit
-  `fbd2d56e3f734e889f1373e71c8368cc4e60e0d7`, licensed under MIT (Copyright 2023 LobeHub),
-  with a Tau-specific rounded black background.
+  `fbd2d56e3f734e889f1373e71c8368cc4e60e0d7`, licensed under MIT (Copyright 2023 LobeHub).

@@ -80,10 +80,10 @@ const modelCatalogue: Model[] = [
     details: { family: 'grok' },
   } as unknown as Model,
   {
-    id: 'moonshot-kimi-k3',
+    id: 'together-kimi-k3',
     name: 'Kimi K3',
     description: '',
-    provider: { id: 'moonshot', name: 'Moonshot AI' },
+    provider: { id: 'together', name: 'Together AI' },
     details: { family: 'kimi' },
   } as unknown as Model,
 ];
@@ -226,11 +226,11 @@ describe('ChatModelSelector — chat-scoped read + dual-write', () => {
     expect(screen.getAllByTestId('svg-icon').map((icon) => icon.textContent)).toContain('grok');
   });
 
-  it('renders the Kimi family icon for Moonshot models', () => {
+  it('renders the Kimi family icon for Together models', () => {
     renderSelector();
     const kimi = capturedComboBox.groupedItems
       ?.flatMap((group) => group.items)
-      .find((model) => model.id === 'moonshot-kimi-k3');
+      .find((model) => model.id === 'together-kimi-k3');
 
     if (!kimi) {
       throw new Error('Expected Kimi model in selector items');

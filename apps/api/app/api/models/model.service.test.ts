@@ -26,6 +26,7 @@ const cappedModelIds = [
   'google-gemini-3.5-flash',
   'together-glm-5.1',
   'together-glm-5.2',
+  'together-kimi-k3',
   'together-qwen-3.5-397b',
   'together-llama-4-maverick',
   'morph-qwen-3.5-397b',
@@ -156,15 +157,17 @@ describe('ModelService', () => {
     });
   });
 
-  it('lists Kimi K3 as a recommended image-capable tool model with its complete catalog contract', async () => {
+  it('lists Together Kimi K3 while retaining Moonshot as a hidden fallback', async () => {
     const service = createModelService();
     const listedModels = await service.getModels();
-    const kimi = listedModels.find((model) => model.id === 'moonshot-kimi-k3');
+    const kimi = service.models.find((model) => model.id === 'together-kimi-k3');
+    const moonshotKimi = service.models.find((model) => model.id === 'moonshot-kimi-k3');
+    const listedModelIds = listedModels.map((model) => model.id);
 
     expect(kimi).toMatchObject({
       recommended: true,
-      model: 'kimi-k3',
-      provider: { id: 'moonshot', name: 'Moonshot AI' },
+      model: 'moonshotai/Kimi-K3',
+      provider: { id: 'together', name: 'Together AI' },
       support: {
         tools: true,
         toolChoice: false,
@@ -173,18 +176,29 @@ describe('ModelService', () => {
       details: {
         family: 'kimi',
         contextWindow: maxEffectiveContextWindow,
-        maxTokens: 1_048_576,
+        maxTokens: 200_000,
         cost: { inputTokens: 3, outputTokens: 15, cacheReadTokens: 0.3, cacheWriteTokens: 0 },
       },
-      configuration: { streaming: true, reasoning: { effort: 'high' } },
+      configuration: { streaming: true },
     });
     expect(kimi?.configuration).not.toHaveProperty('maxTokens');
     expect(kimi?.configuration).not.toHaveProperty('maxOutputTokens');
+    expect(kimi?.configuration).not.toHaveProperty('reasoning');
+    expect(listedModelIds).toContain('together-kimi-k3');
+    expect(moonshotKimi).toMatchObject({
+      recommended: false,
+      model: 'kimi-k3',
+      provider: { id: 'moonshot' },
+      details: { contextWindow: maxEffectiveContextWindow },
+    });
+    expect(listedModelIds).not.toContain('moonshot-kimi-k3');
+    expect(service.getContextWindow('together-kimi-k3')).toBe(maxEffectiveContextWindow);
+    expect(service.getContextWindow('moonshot-kimi-k3')).toBe(maxEffectiveContextWindow);
   });
 
-  it('subtracts Moonshot cache hits from inclusive prompt tokens exactly once', async () => {
+  it('subtracts Together cache hits from inclusive prompt tokens exactly once', async () => {
     const configService = {
-      get: vi.fn((key: string) => (key === 'MOONSHOT_API_KEY' ? 'sk-test-moonshot' : false)),
+      get: vi.fn((key: string) => (key === 'TOGETHER_API_KEY' ? 'sk-test-together' : false)),
     } satisfies Pick<ConfigService<Environment>, 'get'>;
     const service = new ModelService(
       new ProviderService(configService as unknown as ConfigService<Environment, true>),
@@ -193,7 +207,7 @@ describe('ModelService', () => {
     await service.getModels();
 
     expect(
-      service.normalizeUsageTokens('moonshot-kimi-k3', {
+      service.normalizeUsageTokens('together-kimi-k3', {
         inputTokens: 100,
         outputTokens: 20,
         reasoningTokens: 10,

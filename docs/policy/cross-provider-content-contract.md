@@ -3,7 +3,7 @@ title: 'Cross-Provider Content Contract Policy'
 description: 'Persistence and API rules for LangChain V1 standard assistant content blocks and provider replay metadata across model providers'
 status: active
 created: '2026-05-02'
-updated: '2026-07-22'
+updated: '2026-07-28'
 related:
   - docs/policy/interrupted-tool-call-contract.md
   - docs/research/cross-provider-thinking-block-portability.md
@@ -43,7 +43,7 @@ Inbound `wrapModelCall` MUST normalize persisted foreign shapes before provider 
 - **Target `anthropic`**: heal empty `tool_call` / `tool_use` block args from the matching `message.tool_calls` entry (streaming merge can leave `args: ''` while `tool_calls` holds the parsed object).
 - **Target `openai`**: (a) heal empty `tool_call` block args from `message.tool_calls` — the Responses v1 converter formats tool calls from the content block (`convertFunctionCall` reads `tool_call.args`), so empty args would emit an invalid `arguments: ""`; (b) drop `reasoning` blocks that lack a valid id (see Rule 8); (c) rewrite each V1 assistant `text` block into a `non_standard` block whose value is the native Responses item `{ type: "message", role: "assistant", content: [{ type: "output_text", text, annotations: [] }] }`, and set `response_metadata.model_provider = "openai"`. Tool-call content blocks are **kept** (the Responses v1 converter builds `function_call` items from them, never from `message.tool_calls`).
   - The OpenAI Responses v1 converter (`convertStandardContentMessageToResponsesInput`) always emits `input_text` for `text` blocks regardless of role, which the API rejects for the assistant role. Its only verbatim passthrough is the `non_standard` branch, gated by `isResponsesMessage` (`model_provider === "openai"`). This rewrite keeps the load-bearing `output_version: "v1"` flag intact (no clearing) and routes the assistant text through that sanctioned passthrough. `model_provider` normalization to the active target is the documented gate enabling native-item passthrough; its only effect in the send path is to enable the `non_standard` branch. Because flipping it also un-gates foreign `non_standard` wrappers (Anthropic `redacted_thinking` / `compaction`, which are not valid Responses items), those are dropped here — matching the prior effective behaviour where the gate already discarded them for OpenAI targets.
-- **Target `moonshot`**: heal empty `tool_call` block args from `message.tool_calls`, preserve opaque `additional_kwargs.reasoning_content`, and leave V1 `reasoning`/`text` blocks in Chat Completions form. Never apply the OpenAI/xAI Responses item rewrites or tool-message conversion to Moonshot.
+- **Target `moonshot` or `together`**: heal empty `tool_call` block args from `message.tool_calls`, preserve opaque Kimi reasoning metadata, and leave V1 `reasoning`/`text` blocks in Chat Completions form. Never apply the OpenAI/xAI Responses item rewrites or tool-message conversion to either Kimi route.
 
 **Why**: Checkpoints written before Rule 1 shipped, or emitted by providers still on v0 shapes, must not wedge a thread. Tool-call blocks are both cross-provider hazards (Anthropic `tool_use` replayed to Google) and intra-provider V1 round-trip hazards (empty args on Anthropic and OpenAI, `input_text` on OpenAI). The OpenAI rewrite is a deliberate, no-fork middleware band-aid: the upstream `input_text`-for-assistant bug is unfixed in the latest released `@langchain/openai` and on `main` (the roll-forward to a fixed version was blocked — see the research doc), so we repair at the one centralized site rather than forking the package or clearing `output_version`.
 
@@ -72,7 +72,7 @@ When Tau replays provider-native assistant/tool turns, every `AIMessage` clone i
 
 Middleware that changes `AIMessage.content` or trims tool-call arguments MUST use the shared clone helper rather than constructing a partial `new AIMessage(...)`. A clone that drops unknown `additional_kwargs` is a provider-boundary bug, even when the current provider does not use those fields.
 
-For Moonshot Kimi tool loops, `additional_kwargs.reasoning_content` and V1 `reasoning` blocks are equivalent opaque replay carriers at Tau's boundary. The Moonshot adapter MUST serialize the available carrier back to the assistant message's `reasoning_content` field together with the complete prior tool call; middleware MUST preserve both forms and MUST NOT expose reasoning as assistant prose.
+For Kimi tool loops, `additional_kwargs.reasoning_content`, `additional_kwargs.reasoning`, and V1 `reasoning` blocks are equivalent opaque replay carriers at Tau's boundary. The shared Kimi adapter MUST serialize the available carrier together with the complete prior tool call, using Moonshot's `reasoning_content` field for direct requests and Together's documented `reasoning` field for Together-hosted requests. Middleware MUST preserve these forms and MUST NOT expose reasoning as assistant prose.
 
 **Why**: Provider adapters store opaque replay state outside visible text. Dropping it creates synthetic history that may look valid to Tau but fail or degrade at the model API boundary.
 
@@ -108,7 +108,7 @@ The one place this leaks is `reasoning`: `convertResponsesMessageToAIMessage` pe
 
 - Unit: `apps/api/app/api/chat/middleware/cross-provider-content-normalizer.middleware.test.ts`
 - Unit: `apps/api/app/api/chat/utils/provider-diagnostics.test.ts`
-- Unit: `apps/api/app/api/providers/moonshot-completions.adapter.test.ts`
+- Unit: `apps/api/app/api/providers/kimi-completions.adapter.test.ts`
 - API middleware replay: `apps/api/app/testing/middleware-integration.test.ts`
 - Hermetic replay: `apps/api/app/api/chat/cross-provider-tool-call-replay.test.ts` (opus-style `tool_use` history → `vertexai`; Anthropic empty-args heal; OpenAI same- and cross-provider replay asserted against the real `convertMessagesToResponsesInput` payload — assistant `output_text` not `input_text`, `output_version` preserved, healed `function_call.arguments`, and **no emitted item carries an empty `id`/`call_id`** for a reasoning + text + tool_calls turn)
 - Optional real-LLM: `apps/api/app/testing/cross-provider-thinking.integration.test.ts` (`describe.skip` in CI)

@@ -739,6 +739,7 @@ function normalizeAiMessage(message: AIMessage, targetProvider: ProviderId): Bas
     targetProvider === 'openai' ||
     targetProvider === 'morph' ||
     targetProvider === 'moonshot' ||
+    targetProvider === 'together' ||
     targetProvider === 'xai'
   ) {
     result = healEmptyToolCallArgs(result);
@@ -770,7 +771,7 @@ function normalizeAiMessage(message: AIMessage, targetProvider: ProviderId): Bas
  *   then rewrites V1 assistant `text` blocks into native Responses `output_text`
  *   message items so the API accepts them for the assistant role — while preserving
  *   `output_version: 'v1'`.
- * - **morph/moonshot**: heals empty `tool_call` args for Chat Completions replay
+ * - **morph/moonshot/together**: heals empty `tool_call` args for Chat Completions replay
  *   without applying Responses-only content rewrites.
  *
  * For Responses API targets, also rewrites `ToolMessage` content blocks from the generic

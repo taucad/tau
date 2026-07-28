@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/naming-convention -- Moonshot/OpenAI and LangChain wire contracts use snake_case. */
+/* eslint-disable @typescript-eslint/naming-convention -- Kimi/OpenAI and LangChain wire contracts use snake_case. */
 import {
   ChatOpenAICompletions,
   convertCompletionsDeltaToBaseMessageChunk,
@@ -14,25 +14,31 @@ import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager
 import { ChatGenerationChunk } from '@langchain/core/outputs';
 import type { ChatGeneration, ChatResult } from '@langchain/core/outputs';
 
-export type TauChatMoonshotCompletionsInput = BaseChatOpenAIFields;
+export type KimiModelProvider = 'moonshot' | 'together';
 
-type MoonshotUsage = OpenAIClient.Completions.CompletionUsage & {
+export type TauChatKimiCompletionsInput = BaseChatOpenAIFields & {
+  readonly modelProvider: KimiModelProvider;
+};
+
+type KimiUsage = OpenAIClient.Completions.CompletionUsage & {
   readonly cached_tokens?: number;
 };
 
-type MoonshotCompletion = Omit<OpenAIClient.Chat.Completions.ChatCompletion, 'usage'> & {
-  readonly usage?: MoonshotUsage;
+type KimiCompletion = Omit<OpenAIClient.Chat.Completions.ChatCompletion, 'usage'> & {
+  readonly usage?: KimiUsage;
 };
 
-type MoonshotCompletionChunk = Omit<OpenAIClient.Chat.Completions.ChatCompletionChunk, 'usage'> & {
-  readonly usage?: MoonshotUsage;
+type KimiCompletionChunk = Omit<OpenAIClient.Chat.Completions.ChatCompletionChunk, 'usage'> & {
+  readonly usage?: KimiUsage;
 };
 
-type MoonshotAssistantMessage = OpenAIClient.Chat.Completions.ChatCompletionAssistantMessageParam & {
+type KimiAssistantMessage = OpenAIClient.Chat.Completions.ChatCompletionAssistantMessageParam & {
+  readonly reasoning?: string;
   readonly reasoning_content?: string;
 };
 
-type MoonshotResponseMessage = OpenAIClient.Chat.Completions.ChatCompletionMessage & {
+type KimiResponseMessage = OpenAIClient.Chat.Completions.ChatCompletionMessage & {
+  readonly reasoning?: string;
   readonly reasoning_content?: string;
 };
 
@@ -41,11 +47,11 @@ const validateTokenCount = (name: string, value: number | undefined): void => {
     return;
   }
   if (!Number.isSafeInteger(value) || value < 0) {
-    throw new TypeError(`Moonshot usage ${name} must be a non-negative safe integer`);
+    throw new TypeError(`Kimi usage ${name} must be a non-negative safe integer`);
   }
 };
 
-const normalizeMoonshotUsage = (usage: MoonshotUsage | undefined): MoonshotUsage | undefined => {
+const normalizeKimiUsage = (usage: KimiUsage | undefined): KimiUsage | undefined => {
   if (!usage) {
     return undefined;
   }
@@ -68,7 +74,7 @@ const normalizeMoonshotUsage = (usage: MoonshotUsage | undefined): MoonshotUsage
   };
 };
 
-const usageMetadataFromMoonshot = (usage: MoonshotUsage | undefined): UsageMetadata | undefined => {
+const usageMetadataFromKimi = (usage: KimiUsage | undefined): UsageMetadata | undefined => {
   if (!usage) {
     return undefined;
   }
@@ -100,44 +106,58 @@ const reasoningFromMessage = (message: BaseMessage): string | undefined => {
     }
   }
 
-  const legacyReasoning = message.additional_kwargs['reasoning_content'];
+  const legacyReasoning = message.additional_kwargs['reasoning'] ?? message.additional_kwargs['reasoning_content'];
   return typeof legacyReasoning === 'string' && legacyReasoning.length > 0 ? legacyReasoning : undefined;
 };
 
-const serializeMoonshotMessages = (
+const serializeKimiMessages = (
   messages: BaseMessage[],
   model: string,
+  modelProvider: KimiModelProvider,
 ): OpenAIClient.Chat.Completions.ChatCompletionMessageParam[] =>
   messages.flatMap((message) => {
     const converted = convertMessagesToCompletionsMessageParams({ messages: [message], model });
-    const reasoningContent = reasoningFromMessage(message);
-    if (reasoningContent === undefined) {
+    const reasoning = reasoningFromMessage(message);
+    if (reasoning === undefined) {
       return converted;
     }
 
     return converted.map((parameter) =>
       parameter.role === 'assistant'
-        ? ({ ...parameter, reasoning_content: reasoningContent } satisfies MoonshotAssistantMessage)
+        ? ({
+            ...parameter,
+            ...(modelProvider === 'together' ? { reasoning } : { reasoning_content: reasoning }),
+          } satisfies KimiAssistantMessage)
         : parameter,
     );
   });
 
-const convertMoonshotMessage = (
-  message: MoonshotResponseMessage,
-  rawResponse: MoonshotCompletion,
-  usage: MoonshotUsage | undefined,
+const responseReasoning = (message: KimiResponseMessage | Record<string, unknown>): string | undefined => {
+  const reasoning = message.reasoning ?? message.reasoning_content;
+  return typeof reasoning === 'string' && reasoning.length > 0 ? reasoning : undefined;
+};
+
+const convertKimiMessage = (
+  message: KimiResponseMessage,
+  rawResponse: KimiCompletion,
+  options: {
+    readonly usage: KimiUsage | undefined;
+    readonly modelProvider: KimiModelProvider;
+  },
 ): AIMessage => {
+  const { usage, modelProvider } = options;
   const converted = convertCompletionsMessageToBaseMessage({
     message,
     rawResponse: rawResponse as OpenAIClient.Chat.Completions.ChatCompletion,
   });
   if (!AIMessage.isInstance(converted)) {
-    throw new TypeError(`Moonshot returned unsupported message role: ${message.role}`);
+    throw new TypeError(`Kimi returned unsupported message role: ${message.role}`);
   }
 
   const content: Array<{ type: 'reasoning'; reasoning: string } | { type: 'text'; text: string }> = [];
-  if (message.reasoning_content) {
-    content.push({ type: 'reasoning', reasoning: message.reasoning_content });
+  const reasoning = responseReasoning(message);
+  if (reasoning) {
+    content.push({ type: 'reasoning', reasoning });
   }
   if (typeof message.content === 'string' && message.content.length > 0) {
     content.push({ type: 'text', text: message.content });
@@ -149,10 +169,10 @@ const convertMoonshotMessage = (
     tool_calls: converted.tool_calls,
     invalid_tool_calls: converted.invalid_tool_calls,
     additional_kwargs: converted.additional_kwargs,
-    usage_metadata: usageMetadataFromMoonshot(usage),
+    usage_metadata: usageMetadataFromKimi(usage),
     response_metadata: {
       ...converted.response_metadata,
-      model_provider: 'moonshot',
+      model_provider: modelProvider,
       model_name: rawResponse.model,
       output_version: 'v1',
       ...(rawResponse.usage === undefined ? {} : { usage: rawResponse.usage }),
@@ -160,11 +180,15 @@ const convertMoonshotMessage = (
   });
 };
 
-const convertMoonshotDelta = (
+const convertKimiDelta = (
   delta: Record<string, unknown>,
-  rawResponse: MoonshotCompletionChunk,
-  defaultRole?: OpenAIClient.Chat.ChatCompletionRole,
+  rawResponse: KimiCompletionChunk,
+  options: {
+    readonly modelProvider: KimiModelProvider;
+    readonly defaultRole?: OpenAIClient.Chat.ChatCompletionRole;
+  },
 ): AIMessageChunk => {
+  const { modelProvider, defaultRole } = options;
   const converted = convertCompletionsDeltaToBaseMessageChunk({
     delta,
     rawResponse: rawResponse as OpenAIClient.Chat.Completions.ChatCompletionChunk,
@@ -172,13 +196,14 @@ const convertMoonshotDelta = (
   });
   if (!AIMessageChunk.isInstance(converted)) {
     const role = typeof delta['role'] === 'string' ? delta['role'] : (defaultRole ?? 'unknown');
-    throw new TypeError(`Moonshot returned unsupported stream role: ${role}`);
+    throw new TypeError(`Kimi returned unsupported stream role: ${role}`);
   }
 
   const content: Array<{ type: 'reasoning'; reasoning: string; index: 0 } | { type: 'text'; text: string; index: 1 }> =
     [];
-  if (typeof delta['reasoning_content'] === 'string' && delta['reasoning_content'].length > 0) {
-    content.push({ type: 'reasoning', reasoning: delta['reasoning_content'], index: 0 });
+  const reasoning = responseReasoning(delta);
+  if (reasoning) {
+    content.push({ type: 'reasoning', reasoning, index: 0 });
   }
   if (typeof delta['content'] === 'string' && delta['content'].length > 0) {
     content.push({ type: 'text', text: delta['content'], index: 1 });
@@ -191,16 +216,20 @@ const convertMoonshotDelta = (
     additional_kwargs: converted.additional_kwargs,
     response_metadata: {
       ...converted.response_metadata,
-      model_provider: 'moonshot',
+      model_provider: modelProvider,
       output_version: 'v1',
     },
   });
 };
 
-/** OpenAI-compatible Kimi transport with Moonshot's reasoning replay and usage deltas. */
-export class TauChatMoonshotCompletions extends ChatOpenAICompletions {
-  public constructor(fields?: TauChatMoonshotCompletionsInput) {
-    super(fields);
+/** OpenAI-compatible Kimi transport with preserved reasoning replay and usage deltas. */
+export class TauChatKimiCompletions extends ChatOpenAICompletions {
+  public readonly modelProvider: KimiModelProvider;
+
+  public constructor(fields: TauChatKimiCompletionsInput) {
+    const { modelProvider, ...openAIFields } = fields;
+    super(openAIFields);
+    this.modelProvider = modelProvider;
   }
 
   public override invocationParams(
@@ -208,6 +237,11 @@ export class TauChatMoonshotCompletions extends ChatOpenAICompletions {
     extra?: { streaming?: boolean },
   ): ReturnType<ChatOpenAICompletions['invocationParams']> {
     const parameters = super.invocationParams(options, extra);
+    if (this.modelProvider === 'together') {
+      Reflect.deleteProperty(parameters, 'reasoning_effort');
+      return parameters;
+    }
+
     for (const name of [
       'temperature',
       'top_p',
@@ -250,14 +284,17 @@ export class TauChatMoonshotCompletions extends ChatOpenAICompletions {
     const response = (await this.completionWithRetry(
       {
         ...parameters,
-        messages: serializeMoonshotMessages(messages, this.model),
+        messages: serializeKimiMessages(messages, this.model, this.modelProvider),
         stream: false,
       },
       { signal: options.signal, ...options.options },
-    )) as MoonshotCompletion;
-    const usage = normalizeMoonshotUsage(response.usage);
+    )) as KimiCompletion;
+    const usage = normalizeKimiUsage(response.usage);
     const generations: ChatGeneration[] = response.choices.map((choice) => {
-      const message = convertMoonshotMessage(choice.message as MoonshotResponseMessage, response, usage);
+      const message = convertKimiMessage(choice.message as KimiResponseMessage, response, {
+        usage,
+        modelProvider: this.modelProvider,
+      });
       return {
         text: typeof choice.message.content === 'string' ? choice.message.content : '',
         message,
@@ -270,7 +307,7 @@ export class TauChatMoonshotCompletions extends ChatOpenAICompletions {
     return {
       generations,
       llmOutput: {
-        tokenUsage: usageMetadataFromMoonshot(usage),
+        tokenUsage: usageMetadataFromKimi(usage),
       },
     };
   }
@@ -283,13 +320,13 @@ export class TauChatMoonshotCompletions extends ChatOpenAICompletions {
     const stream = (await this.completionWithRetry(
       {
         ...this.invocationParams(options, { streaming: true }),
-        messages: serializeMoonshotMessages(messages, this.model),
+        messages: serializeKimiMessages(messages, this.model, this.modelProvider),
         stream: true,
       },
       options,
-    )) as AsyncIterable<MoonshotCompletionChunk>;
+    )) as AsyncIterable<KimiCompletionChunk>;
     let defaultRole: OpenAIClient.Chat.ChatCompletionRole | undefined;
-    let rawUsage: MoonshotUsage | undefined;
+    let rawUsage: KimiUsage | undefined;
 
     for await (const data of stream) {
       if (options.signal?.aborted) {
@@ -303,7 +340,10 @@ export class TauChatMoonshotCompletions extends ChatOpenAICompletions {
         continue;
       }
 
-      const chunk = convertMoonshotDelta(choice.delta as unknown as Record<string, unknown>, data, defaultRole);
+      const chunk = convertKimiDelta(choice.delta as unknown as Record<string, unknown>, data, {
+        modelProvider: this.modelProvider,
+        defaultRole,
+      });
       defaultRole = choice.delta.role ?? defaultRole;
       const indices = { prompt: options.promptIndex ?? 0, completion: choice.index };
       const generation = new ChatGenerationChunk({
@@ -320,14 +360,14 @@ export class TauChatMoonshotCompletions extends ChatOpenAICompletions {
       });
     }
 
-    const usage = normalizeMoonshotUsage(rawUsage);
+    const usage = normalizeKimiUsage(rawUsage);
     if (usage && rawUsage) {
       const generation = new ChatGenerationChunk({
         message: new AIMessageChunk({
           content: [],
-          usage_metadata: usageMetadataFromMoonshot(usage),
+          usage_metadata: usageMetadataFromKimi(usage),
           response_metadata: {
-            model_provider: 'moonshot',
+            model_provider: this.modelProvider,
             output_version: 'v1',
             usage: rawUsage,
           },
@@ -352,26 +392,26 @@ export class TauChatMoonshotCompletions extends ChatOpenAICompletions {
     const stream = (await this.completionWithRetry(
       {
         ...this.invocationParams(options, { streaming: true }),
-        messages: serializeMoonshotMessages(messages, this.model),
+        messages: serializeKimiMessages(messages, this.model, this.modelProvider),
         stream: true,
       },
       options,
-    )) as AsyncIterable<MoonshotCompletionChunk>;
+    )) as AsyncIterable<KimiCompletionChunk>;
 
-    const abortable = async function* (): AsyncGenerator<MoonshotCompletionChunk> {
+    const abortable = async function* (): AsyncGenerator<KimiCompletionChunk> {
       for await (const chunk of stream) {
         if (options.signal?.aborted) {
           return;
         }
-        const usage = normalizeMoonshotUsage(chunk.usage);
+        const usage = normalizeKimiUsage(chunk.usage);
         yield usage === undefined ? chunk : { ...chunk, usage };
       }
     };
 
     yield* convertOpenAICompletionsStream(abortable(), {
-      provider: 'moonshot',
+      provider: this.modelProvider,
       streamUsage: this.streamUsage,
     });
   }
 }
-/* eslint-enable @typescript-eslint/naming-convention -- end Moonshot/OpenAI and LangChain wire contracts. */
+/* eslint-enable @typescript-eslint/naming-convention -- end Kimi/OpenAI and LangChain wire contracts. */

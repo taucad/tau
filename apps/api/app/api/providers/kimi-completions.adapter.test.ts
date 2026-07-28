@@ -1,16 +1,17 @@
-/* eslint-disable @typescript-eslint/naming-convention -- fixtures mirror Moonshot/OpenAI wire keys. */
+/* eslint-disable @typescript-eslint/naming-convention -- fixtures mirror Kimi/OpenAI wire keys. */
 import { describe, expect, it } from 'vitest';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { OpenAIClient } from '@langchain/openai';
-import { TauChatMoonshotCompletions } from '#api/providers/moonshot-completions.adapter.js';
+import { TauChatKimiCompletions } from '#api/providers/kimi-completions.adapter.js';
+import type { KimiModelProvider, TauChatKimiCompletionsInput } from '#api/providers/kimi-completions.adapter.js';
 
-type MoonshotUsage = OpenAIClient.Completions.CompletionUsage & { cached_tokens?: number };
-type MoonshotCompletion = Omit<OpenAIClient.Chat.Completions.ChatCompletion, 'usage'> & { usage?: MoonshotUsage };
-type MoonshotChunk = Omit<OpenAIClient.Chat.Completions.ChatCompletionChunk, 'usage'> & {
-  usage?: MoonshotUsage;
+type KimiUsage = OpenAIClient.Completions.CompletionUsage & { cached_tokens?: number };
+type KimiCompletion = Omit<OpenAIClient.Chat.Completions.ChatCompletion, 'usage'> & { usage?: KimiUsage };
+type KimiChunk = Omit<OpenAIClient.Chat.Completions.ChatCompletionChunk, 'usage'> & {
+  usage?: KimiUsage;
 };
-type MoonshotRequest = OpenAIClient.Chat.Completions.ChatCompletionCreateParams;
+type KimiRequest = OpenAIClient.Chat.Completions.ChatCompletionCreateParams;
 
 const baseCompletion = {
   id: 'chatcmpl_moonshot_1',
@@ -36,7 +37,34 @@ const baseCompletion = {
     total_tokens: 120,
     cached_tokens: 60,
   },
-} satisfies MoonshotCompletion;
+} satisfies KimiCompletion;
+
+const togetherCompletion = {
+  id: 'chatcmpl_together_1',
+  object: 'chat.completion',
+  created: 1,
+  model: 'moonshotai/Kimi-K3',
+  choices: [
+    {
+      index: 0,
+      finish_reason: 'stop',
+      logprobs: null,
+      message: {
+        role: 'assistant',
+        reasoning: 'Use the documented Together reasoning field.',
+        content: 'Ack.',
+        refusal: null,
+      },
+    },
+  ],
+  usage: {
+    prompt_tokens: 100,
+    completion_tokens: 20,
+    total_tokens: 120,
+    prompt_tokens_details: { cached_tokens: 60 },
+    completion_tokens_details: { reasoning_tokens: 12 },
+  },
+} satisfies KimiCompletion;
 
 const streamChunks = [
   {
@@ -98,13 +126,24 @@ const streamChunks = [
       cached_tokens: 50,
     },
   },
-] satisfies MoonshotChunk[];
+] satisfies KimiChunk[];
 
-class FakeMoonshot extends TauChatMoonshotCompletions {
-  public readonly requests: MoonshotRequest[] = [];
+class FakeKimi extends TauChatKimiCompletions {
+  public readonly requests: KimiRequest[] = [];
 
-  public constructor(private readonly result: MoonshotCompletion | MoonshotChunk[]) {
-    super({ apiKey: 'test-moonshot-key', model: 'kimi-k3', streaming: Array.isArray(result), outputVersion: 'v1' });
+  public constructor(
+    modelProvider: KimiModelProvider,
+    private readonly result: KimiCompletion | KimiChunk[],
+    fields: Partial<Omit<TauChatKimiCompletionsInput, 'modelProvider'>> = {},
+  ) {
+    super({
+      apiKey: `test-${modelProvider}-key`,
+      model: modelProvider === 'together' ? 'moonshotai/Kimi-K3' : 'kimi-k3',
+      streaming: Array.isArray(result),
+      outputVersion: 'v1',
+      modelProvider,
+      ...fields,
+    });
   }
 
   public override async completionWithRetry(
@@ -120,7 +159,7 @@ class FakeMoonshot extends TauChatMoonshotCompletions {
   > {
     this.requests.push(request);
     if (request.stream) {
-      const chunks = this.result as MoonshotChunk[];
+      const chunks = this.result as KimiChunk[];
       return (async function* stream() {
         yield* chunks as OpenAIClient.Chat.Completions.ChatCompletionChunk[];
       })();
@@ -129,9 +168,9 @@ class FakeMoonshot extends TauChatMoonshotCompletions {
   }
 }
 
-describe('TauChatMoonshotCompletions', () => {
+describe('TauChatKimiCompletions', () => {
   it('should replay V1 reasoning and the complete assistant tool turn', async () => {
-    const model = new FakeMoonshot(baseCompletion);
+    const model = new FakeKimi('moonshot', baseCompletion);
     const messages: BaseMessage[] = [
       new AIMessage({
         content: [
@@ -159,8 +198,37 @@ describe('TauChatMoonshotCompletions', () => {
     ]);
   });
 
+  it('should replay Together reasoning with the documented field and a complete tool turn', async () => {
+    const model = new FakeKimi('together', togetherCompletion);
+    const messages: BaseMessage[] = [
+      new AIMessage({
+        content: [
+          { type: 'reasoning', reasoning: 'Inspect the current file.' },
+          { type: 'tool_call', id: 'call_1', name: 'read_file', args: { targetFile: 'main.ts' } },
+        ],
+        tool_calls: [{ id: 'call_1', name: 'read_file', args: { targetFile: 'main.ts' } }],
+        response_metadata: { output_version: 'v1', model_provider: 'together' },
+      }),
+      new ToolMessage({ content: 'file contents', tool_call_id: 'call_1' }),
+    ];
+
+    await model.invoke(messages);
+
+    expect(model.requests[0]?.messages).toEqual([
+      {
+        role: 'assistant',
+        content: [],
+        reasoning: 'Inspect the current file.',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"targetFile":"main.ts"}' } },
+        ],
+      },
+      { role: 'tool', content: 'file contents', tool_call_id: 'call_1' },
+    ]);
+  });
+
   it('should replay legacy reasoning without inventing it for foreign messages', async () => {
-    const model = new FakeMoonshot(baseCompletion);
+    const model = new FakeKimi('moonshot', baseCompletion);
     await model.invoke([
       new AIMessage({ content: 'legacy', additional_kwargs: { reasoning_content: 'legacy thought' } }),
       new AIMessage({ content: 'foreign', response_metadata: { model_provider: 'anthropic' } }),
@@ -173,7 +241,7 @@ describe('TauChatMoonshotCompletions', () => {
   });
 
   it('should preserve base64 image input and omit fixed K3 parameters', async () => {
-    const model = new FakeMoonshot(baseCompletion);
+    const model = new FakeKimi('moonshot', baseCompletion);
     await model.invoke(
       [
         new HumanMessage({
@@ -210,8 +278,26 @@ describe('TauChatMoonshotCompletions', () => {
     expect(model.requests[0]).not.toHaveProperty('max_completion_tokens');
   });
 
+  it('should preserve standard Together parameters without sending Moonshot reasoning effort', async () => {
+    const model = new FakeKimi('together', togetherCompletion, {
+      temperature: 0.2,
+      topP: 0.9,
+      maxTokens: 512,
+    });
+
+    await model.invoke([new HumanMessage('Reply Ack.')], { reasoning: { effort: 'high' } });
+
+    expect(model.requests[0]).toMatchObject({
+      model: 'moonshotai/Kimi-K3',
+      temperature: 0.2,
+      top_p: 0.9,
+      max_tokens: 512,
+    });
+    expect(model.requests[0]).not.toHaveProperty('reasoning_effort');
+  });
+
   it('should emit Moonshot V1 reasoning, text, and cache usage for non-streaming responses', async () => {
-    const message = await new FakeMoonshot(baseCompletion).invoke([new HumanMessage('Reply Ack.')]);
+    const message = await new FakeKimi('moonshot', baseCompletion).invoke([new HumanMessage('Reply Ack.')]);
 
     expect(message.content).toEqual([
       { type: 'reasoning', reasoning: 'Check the exact result.' },
@@ -254,9 +340,9 @@ describe('TauChatMoonshotCompletions', () => {
           },
         },
       ],
-    } satisfies MoonshotCompletion;
+    } satisfies KimiCompletion;
 
-    const message = await new FakeMoonshot(toolCompletion).invoke([new HumanMessage('Read main.ts')]);
+    const message = await new FakeKimi('moonshot', toolCompletion).invoke([new HumanMessage('Read main.ts')]);
 
     expect(message.content).toEqual([
       { type: 'reasoning', reasoning: 'Inspect the requested file.' },
@@ -267,9 +353,30 @@ describe('TauChatMoonshotCompletions', () => {
     ]);
   });
 
+  it('should materialize documented Together reasoning and nested usage as V1 content', async () => {
+    const message = await new FakeKimi('together', togetherCompletion).invoke([new HumanMessage('Reply Ack.')]);
+
+    expect(message.content).toEqual([
+      { type: 'reasoning', reasoning: 'Use the documented Together reasoning field.' },
+      { type: 'text', text: 'Ack.' },
+    ]);
+    expect(message.response_metadata).toMatchObject({
+      model_provider: 'together',
+      model_name: 'moonshotai/Kimi-K3',
+      output_version: 'v1',
+    });
+    expect(message.usage_metadata).toEqual({
+      input_tokens: 100,
+      output_tokens: 20,
+      total_tokens: 120,
+      input_token_details: { cache_read: 60 },
+      output_token_details: { reasoning: 12 },
+    });
+  });
+
   it('should stream reasoning, incremental tool arguments, and final cache usage', async () => {
     const chunks = [];
-    for await (const chunk of await new FakeMoonshot(streamChunks).stream([new HumanMessage('Read main.ts')])) {
+    for await (const chunk of await new FakeKimi('moonshot', streamChunks).stream([new HumanMessage('Read main.ts')])) {
       chunks.push(chunk);
     }
 
@@ -294,7 +401,7 @@ describe('TauChatMoonshotCompletions', () => {
 
   it('should emit native Moonshot reasoning and normalized usage events', async () => {
     const events = [];
-    const model = new FakeMoonshot(streamChunks);
+    const model = new FakeKimi('moonshot', streamChunks);
     for await (const event of model._streamChatModelEvents([new HumanMessage('Read main.ts')], {})) {
       events.push(event);
     }
@@ -321,16 +428,31 @@ describe('TauChatMoonshotCompletions', () => {
     });
   });
 
+  it('should label observed Together reasoning-content streams as Together', async () => {
+    const chunks = [];
+    for await (const chunk of await new FakeKimi('together', streamChunks).stream([new HumanMessage('Read main.ts')])) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.flatMap((chunk) => (Array.isArray(chunk.content) ? chunk.content : []))).toContainEqual({
+      type: 'reasoning',
+      reasoning: 'Plan.',
+      index: 0,
+    });
+    expect(chunks.every((chunk) => chunk.response_metadata.model_provider === 'together')).toBe(true);
+  });
+
   it('should reject negative provider usage', async () => {
     const invalid = {
       ...baseCompletion,
       usage: { ...baseCompletion.usage, cached_tokens: -1 },
-    } satisfies MoonshotCompletion;
+    } satisfies KimiCompletion;
 
-    await expect(new FakeMoonshot(invalid).invoke([new HumanMessage('hello')])).rejects.toThrow(TypeError);
-    await expect(new FakeMoonshot(invalid).invoke([new HumanMessage('hello')])).rejects.toThrow(
-      'Moonshot usage cached_tokens must be a non-negative safe integer',
+    const invocation = new FakeKimi('moonshot', invalid).invoke([new HumanMessage('hello')]);
+
+    await expect(invocation).rejects.toThrow(
+      new TypeError('Kimi usage cached_tokens must be a non-negative safe integer'),
     );
   });
 });
-/* eslint-enable @typescript-eslint/naming-convention -- end Moonshot/OpenAI fixtures. */
+/* eslint-enable @typescript-eslint/naming-convention -- end Kimi/OpenAI fixtures. */

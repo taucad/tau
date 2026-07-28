@@ -670,6 +670,39 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
   },
 
   together: {
+    'kimi-k3': {
+      enabled: true,
+      id: 'together-kimi-k3',
+      name: 'Kimi K3',
+      slug: 'kimi-k3',
+      recommended: true,
+      description: 'Long-context multimodal reasoning model for complex agentic CAD design and multi-file work.',
+      provider: {
+        id: 'together',
+        name: 'Together AI',
+      },
+      model: 'moonshotai/Kimi-K3',
+      support: {
+        tools: true,
+        toolChoice: false,
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'kimi',
+        families: ['kimi'],
+        contextWindow: 200_000, // Provider supports 1M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 200_000,
+        cost: {
+          inputTokens: 3,
+          outputTokens: 15,
+          cacheReadTokens: 0.3,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+      },
+    },
     'deepseek-v3.1': {
       enabled: false,
       id: 'together-deepseek-v3.1',
@@ -1011,11 +1044,11 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
 
   moonshot: {
     'kimi-k3': {
-      enabled: true,
+      enabled: false,
       id: 'moonshot-kimi-k3',
       name: 'Kimi K3',
       slug: 'kimi-k3',
-      recommended: true,
+      recommended: false,
       description: 'Long-context multimodal reasoning model for complex agentic CAD design and multi-file work.',
       provider: {
         id: 'moonshot',

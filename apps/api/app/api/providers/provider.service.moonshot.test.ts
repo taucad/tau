@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import { ProviderService } from '#api/providers/provider.service.js';
-import { TauChatMoonshotCompletions } from '#api/providers/moonshot-completions.adapter.js';
+import { TauChatKimiCompletions } from '#api/providers/kimi-completions.adapter.js';
 import { createProviderDiagnosticsContext } from '#api/chat/utils/provider-diagnostics.js';
 
 describe('ProviderService moonshot', () => {
@@ -24,7 +24,8 @@ describe('ProviderService moonshot', () => {
       { diagnosticsContext },
     );
 
-    expect(model).toBeInstanceOf(TauChatMoonshotCompletions);
+    expect(model).toBeInstanceOf(TauChatKimiCompletions);
+    expect((model as TauChatKimiCompletions).modelProvider).toBe('moonshot');
     expect(model.model).toBe('kimi-k3');
     expect(model.reasoning).toEqual({ effort: 'high' });
     expect(model.promptCacheKey).toBe('chat_kimi_1');

@@ -18,8 +18,8 @@ import type { ProviderDiagnosticsContext } from '#api/chat/utils/provider-diagno
 import { createGoogleProviderDiagnosticsFetch } from '#api/chat/utils/provider-diagnostics.js';
 import { TauChatXaiResponses } from '#api/providers/xai-responses.adapter.js';
 import type { TauChatXaiResponsesInput } from '#api/providers/xai-responses.adapter.js';
-import { TauChatMoonshotCompletions } from '#api/providers/moonshot-completions.adapter.js';
-import type { TauChatMoonshotCompletionsInput } from '#api/providers/moonshot-completions.adapter.js';
+import { TauChatKimiCompletions } from '#api/providers/kimi-completions.adapter.js';
+import type { TauChatKimiCompletionsInput } from '#api/providers/kimi-completions.adapter.js';
 
 // Type for mapping provider IDs to their option types
 type ProviderOptionsMap = {
@@ -39,7 +39,7 @@ type ProviderOptionsMap = {
     };
   };
   xai: TauChatXaiResponsesInput;
-  moonshot: TauChatMoonshotCompletionsInput & { configuration?: Provider['configuration'] };
+  moonshot: Omit<TauChatKimiCompletionsInput, 'modelProvider'> & { configuration?: Provider['configuration'] };
 };
 
 type ProviderRuntimeOptions = {
@@ -183,13 +183,22 @@ export class ProviderService {
           apiKey: configService.get('TOGETHER_API_KEY', { infer: true }),
           baseURL: 'https://api.together.xyz/v1',
         },
-        inputTokensIncludesCacheReadTokens: false,
+        inputTokensIncludesCacheReadTokens: true,
         inputTokensIncludesCacheWriteTokens: false,
-        createClass: (options) =>
-          new ChatOpenAI({
+        createClass: (options) => {
+          if (options.model === 'moonshotai/Kimi-K3') {
+            return new TauChatKimiCompletions({
+              ...options,
+              modelProvider: 'together',
+              outputVersion: 'v1',
+            });
+          }
+
+          return new ChatOpenAI({
             outputVersion: 'v1',
             ...options,
-          }),
+          });
+        },
       },
       morph: {
         provider: 'morph',
@@ -233,8 +242,9 @@ export class ProviderService {
         inputTokensIncludesCacheReadTokens: true,
         inputTokensIncludesCacheWriteTokens: false,
         createClass: (options, runtimeOptions) =>
-          new TauChatMoonshotCompletions({
+          new TauChatKimiCompletions({
             ...options,
+            modelProvider: 'moonshot',
             configuration: {
               apiKey: configService.get('MOONSHOT_API_KEY', { infer: true }),
               baseURL: 'https://api.moonshot.ai/v1',

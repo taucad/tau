@@ -637,6 +637,43 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
       ]);
     });
 
+    it('heals Together Kimi tool args without applying Responses-only content rewrites', async () => {
+      const middleware = createCrossProviderContentNormalizerMiddleware('together');
+      const aiMessage = new AIMessage({
+        content: [
+          { type: 'reasoning', reasoning: 'Read the file first.' },
+          { type: 'text', text: 'Reading.' },
+          { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: '' },
+        ],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        response_metadata: { output_version: 'v1', model_provider: 'together' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        additional_kwargs: { reasoning_content: 'opaque Together reasoning' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: [{ id: 'call_read_1', name: 'read_file', args: { targetFile: 'main.ts' }, type: 'tool_call' }],
+      });
+
+      await invokeWrapModelCall(middleware, { messages: [aiMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const output = request.messages[0] as AIMessage;
+      expect(output.content).toEqual([
+        { type: 'reasoning', reasoning: 'Read the file first.' },
+        { type: 'text', text: 'Reading.' },
+        { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: { targetFile: 'main.ts' } },
+      ]);
+      expect(output.additional_kwargs).toEqual({
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        reasoning_content: 'opaque Together reasoning',
+      });
+      expect(output.response_metadata).toEqual({
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        output_version: 'v1',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        model_provider: 'together',
+      });
+    });
+
     it('rewrites V1 assistant text blocks to output_text items and keeps output_version for openai target', async () => {
       const middleware = createCrossProviderContentNormalizerMiddleware('openai');
       const aiMessage = new AIMessage({

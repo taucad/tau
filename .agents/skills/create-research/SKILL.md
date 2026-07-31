@@ -122,7 +122,7 @@ Detailed data tables, file inventories, or raw experiment results.
 
 ## Frontmatter Pitfalls
 
-Two errors that repeatedly break `pnpm docs:validate`:
+Three errors that repeatedly break `pnpm docs:validate`:
 
 1. **Unquoted dates** — YAML auto-parses bare `YYYY-MM-DD` as `Date` objects. The validator expects strings. Always single-quote dates.
 
@@ -167,6 +167,20 @@ description: 'One-line description'
 status: draft
 related:
   - docs/policy/some-policy.md
+```
+
+3. **Overlong description** — the validator (`scripts/src/validate-frontmatter.ts`) caps `description` at 300 characters and fails with `description: Too big: expected string to have <=300 characters`. Survey-style docs tempt a paragraph-length abstract; keep `description` to one sentence and put the abstract in the Executive Summary.
+
+CORRECT:
+
+```yaml
+description: 'Survey of GPU surface-extraction techniques for sparse voxel grids, with recommendations.'
+```
+
+INCORRECT:
+
+```yaml
+description: 'Comprehensive survey of GPU surface extraction covering marching cubes, dual contouring, surface nets, flying edges, and transvoxel, with per-technique memory and dispatch analysis, benchmark methodology, hardware caveats, integration constraints, and detailed recommendations…' # >300 chars
 ```
 
 ## Section Guide
@@ -283,7 +297,7 @@ Use descriptive slugs that identify the subject: `filesystem-architecture`, `occ
 Before finalizing a research document:
 
 - [ ] Filename matches `docs/research/{slug}.md`
-- [ ] YAML frontmatter with title, description, status, created, updated, category — dates single-quoted
+- [ ] YAML frontmatter with title, description, status, created, updated, category — dates single-quoted, description ≤300 characters
 - [ ] Frontmatter `title` matches H1 heading
 - [ ] Frontmatter `related` lists cross-referenced docs
 - [ ] Opens with one-line scope statement

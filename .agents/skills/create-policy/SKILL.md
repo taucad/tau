@@ -68,7 +68,7 @@ Explicit "do not" rules when the wrong approach is common or tempting.
 
 ## Frontmatter Pitfalls
 
-Two errors that repeatedly break `pnpm docs:validate`:
+Three errors that repeatedly break `pnpm docs:validate`:
 
 1. **Unquoted dates** — YAML auto-parses bare `YYYY-MM-DD` as `Date` objects. The validator expects strings. Always single-quote dates.
 
@@ -112,6 +112,20 @@ description: 'One-line description'
 status: active
 related:
   - docs/research/some-research.md
+```
+
+3. **Overlong description** — the validator (`scripts/src/validate-frontmatter.ts`) caps `description` at 300 characters and fails with `description: Too big: expected string to have <=300 characters`. Keep `description` to one sentence; the Rationale section holds the longer explanation.
+
+CORRECT:
+
+```yaml
+description: 'Rules for authoring and registering custom tau-lint oxlint rules.'
+```
+
+INCORRECT:
+
+```yaml
+description: 'Comprehensive policy covering the authoring, testing, registration, configuration, severity selection, autofix requirements, and maintenance lifecycle of custom tau-lint oxlint rules, including AST visitor patterns, RuleTester conventions, and the mapping between policies and their enforcing rules…' # >300 chars
 ```
 
 ## Section Guide
@@ -265,7 +279,7 @@ This creates a bidirectional link: the policy explains _why_, the lint rule enfo
 Before finalizing a policy:
 
 - [ ] Filename matches `docs/policy/{name}-policy.md`
-- [ ] YAML frontmatter with title, description, status, created, updated — dates single-quoted
+- [ ] YAML frontmatter with title, description, status, created, updated — dates single-quoted, description ≤300 characters, status one of draft | active | deprecated | superseded
 - [ ] Frontmatter `title` matches H1 heading
 - [ ] Frontmatter `related` lists cross-referenced docs
 - [ ] Opens with one-line scope statement

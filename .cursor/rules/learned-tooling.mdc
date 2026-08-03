@@ -22,6 +22,7 @@ cleanup; they may exceed the 200-char cap.
 
 - Light tasks (docs, preview, dev-mode renders) must NEVER declare `dependsOn` for heavy build targets (multi-min WASM rebuilds) in `project.json` — opening docs should serve whatever artefact is available, not silently trigger a fresh bindgen/WASM build.
 - GitHub Actions release-notes / PR @-mentions must resolve to the GitHub login (parse it from the `<id>+<login>@users.noreply.github.com` form in commit author emails), never the real name from `git log %an` — real-name forms like `@richard fontein` silently break the `@username` autolink in PR bodies and release notes.
+- HTML references cache a visual PDF plus inert semantic snapshot; Markdown comes from the snapshot and is accepted only after raw/rendered legibility review.
 
 ## Learned Workspace Facts
 

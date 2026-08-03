@@ -4,6 +4,7 @@ import { delimiter, join } from 'node:path';
 import process from 'node:process';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { convertWithReferencePandoc } from '#reference-pandoc.js';
 import { convertLatexArtifact, readLatexArtifact, validateLatexArtifact } from '#text-to-md.js';
 
 const originalPath = process.env['PATH'];
@@ -39,8 +40,9 @@ const args = process.argv.slice(2);
 if (args.length === 1 && args[0] === '--version') {
   process.stdout.write('pandoc ${version}\\n');
 } else {
-  const expected = ['+RTS', '-M512M', '-RTS', '--sandbox', '--fail-if-warnings', '--from=latex', '--to=gfm-raw_html', '--wrap=none'];
-  if (JSON.stringify(args) !== JSON.stringify(expected)) process.exit(9);
+  const expectedLatex = ['+RTS', '-M512M', '-RTS', '--sandbox', '--fail-if-warnings', '--from=latex', '--to=gfm-raw_html', '--wrap=none'];
+  const expectedHtml = ['+RTS', '-M512M', '-RTS', '--sandbox', '--fail-if-warnings', '--from=html', '--to=gfm-raw_html', '--wrap=none'];
+  if (JSON.stringify(args) !== JSON.stringify(expectedLatex) && JSON.stringify(args) !== JSON.stringify(expectedHtml)) process.exit(9);
   let input = '';
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (chunk) => { input += chunk; });
@@ -77,6 +79,17 @@ describe('convertLatexArtifact', () => {
   it('should reject Pandoc versions older than the security baseline', async () => {
     installFakePandoc('3.1.3');
     await expect(convertLatexArtifact(temporaryFile('Evidence'))).rejects.toThrow('3.1.4 or newer');
+  });
+
+  it('should invoke the same constrained boundary with the fixed HTML reader', async () => {
+    installFakePandoc();
+    const result = await convertWithReferencePandoc({
+      profile: 'html-to-gfm',
+      input: '<main><h1>Rendered</h1><p>Evidence</p></main>',
+    });
+    expect(result.markdown).toContain('Rendered');
+    expect(result.markdown).toContain('Evidence');
+    expect(result.version).toBe('3.10.0');
   });
 
   const smoke = process.env['PANDOC_SMOKE'] === '1' ? it : it.skip;

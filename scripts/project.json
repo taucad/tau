@@ -47,6 +47,12 @@
         "command": "node scripts/src/text-to-md.ts"
       }
     },
+    "html-to-md": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/src/html-to-md.ts"
+      }
+    },
     "cursor-history-recovery": {
       "executor": "nx:run-commands",
       "cache": false,

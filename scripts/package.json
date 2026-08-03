@@ -13,8 +13,10 @@
   },
   "dependencies": {
     "@inkjs/ui": "catalog:",
+    "@playwright/test": "catalog:",
     "ink": "catalog:",
     "ipaddr.js": "catalog:",
+    "jsdom": "catalog:",
     "js-yaml": "catalog:",
     "pdf-parse": "catalog:",
     "react": "catalog:",
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "@types/js-yaml": "catalog:",
+    "@types/jsdom": "catalog:",
     "netlify-cli": "catalog:"
   }
 }

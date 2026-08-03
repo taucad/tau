@@ -33,7 +33,7 @@ export const validatePdfArtifact = async (path: string): Promise<void> => {
 };
 
 const requirePermissionFlags = (): void => {
-  for (const flag of ['--permission', '--allow-addons', '--allow-fs-read', '--allow-net']) {
+  for (const flag of ['--permission', '--allow-addons', '--allow-fs-read']) {
     if (!process.allowedNodeEnvironmentFlags.has(flag)) {
       throw new Error(`Node.js runtime does not support required containment flag ${flag}`);
     }
@@ -78,8 +78,8 @@ const main = async (): Promise<void> => {
   await runReferenceCli({
     format: 'pdf',
     target: 'pdf-to-md',
-    validateArtifact: validatePdfArtifact,
-    convertArtifact: convertPdfArtifact,
+    validateArtifacts: async (paths) => validatePdfArtifact(paths.artifact),
+    convertArtifacts: async (paths) => convertPdfArtifact(paths.artifact),
   });
 };
 

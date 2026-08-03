@@ -9,6 +9,7 @@ import { dump as yamlDump } from 'js-yaml';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { assertPublicAddresses, downloadArtifact, validateArtifactUrl } from '#reference-download.js';
+import { buildHtmlSnapshot } from '#reference-html.js';
 import { isPublicUrl, sanitizeReferenceMarkdown } from '#reference-markdown.js';
 import {
   buildReferenceMarkdown,
@@ -20,7 +21,13 @@ import {
   staleReason,
   validateReferenceManifest,
 } from '#reference-to-md.js';
-import type { ReferenceEntry, ReferenceManifest } from '#reference-to-md.js';
+import type {
+  HtmlCaptureReport,
+  ReferenceEntry,
+  ReferenceFormat,
+  ReferenceManifest,
+  ReferenceRunner,
+} from '#reference-to-md.js';
 
 type HttpsRequest = typeof httpsRequest;
 
@@ -33,7 +40,7 @@ afterEach(() => {
   }
 });
 
-const entry = (format: 'pdf' | 'latex' = 'pdf'): ReferenceEntry => ({
+const entry = (format: ReferenceFormat = 'pdf'): ReferenceEntry => ({
   title: 'A Paper',
   authors: ['Ada Lovelace'],
   year: 2026,
@@ -41,19 +48,24 @@ const entry = (format: 'pdf' | 'latex' = 'pdf'): ReferenceEntry => ({
   source_url: 'https://example.com/paper', // eslint-disable-line @typescript-eslint/naming-convention -- manifest field
   artifact: {
     format,
-    url: format === 'pdf' ? 'https://arxiv.org/pdf/2601.00000' : undefined,
+    url:
+      format === 'pdf'
+        ? 'https://arxiv.org/pdf/2601.00000'
+        : format === 'html'
+          ? 'https://example.com/paper'
+          : undefined,
     rights: { status: 'unreviewed' },
   },
   citation: { format: 'bibtex', key: 'lovelace2026', bibtex: '@article{lovelace2026, title={A Paper}}' },
 });
 
-const manifest = (format: 'pdf' | 'latex' = 'pdf'): ReferenceManifest => ({
+const manifest = (format: ReferenceFormat = 'pdf'): ReferenceManifest => ({
   version: 2,
   groups: { research: { references: ['a-paper'] } },
   references: { 'a-paper': entry(format) },
 });
 
-const temporaryRepo = (format: 'pdf' | 'latex' = 'pdf'): string => {
+const temporaryRepo = (format: ReferenceFormat = 'pdf'): string => {
   const root = mkdtempSync(join(tmpdir(), 'tau-reference-test-'));
   temporaryDirectories.push(root);
   const reference = join(root, 'repos/tau-brain/reference');
@@ -74,11 +86,25 @@ describe('reference manifest v2', () => {
     });
   });
 
-  it('should reject version 1 fields and invalid permitted rights', () => {
+  it('should derive both fixed HTML cache paths without accepting manifest paths', () => {
+    const root = temporaryRepo('html');
+    expect(readReferenceManifest(root)).toEqual(manifest('html'));
+    expect(referencePaths(root, 'a-paper', 'html')).toMatchObject({
+      artifactDisplay: 'docs/reference/pdf/a-paper.pdf',
+      snapshotDisplay: 'docs/reference/source/a-paper.snapshot.html',
+      markdownDisplay: 'docs/reference/a-paper.md',
+    });
+  });
+
+  it('should allow explicit permission and validate optional rights provenance', () => {
     const root = temporaryRepo();
     const candidate = manifest() as unknown as Record<string, unknown>;
     candidate['pdf_dir'] = 'docs/reference/pdf';
     expect(() => validateReferenceManifest(candidate, root)).toThrow('pdf_dir is a removed version 1 field');
+
+    const explicitlyPermitted = manifest();
+    explicitlyPermitted.references['a-paper']!.artifact.rights = { status: 'permitted' };
+    expect(validateReferenceManifest(explicitlyPermitted, root)).toEqual(explicitlyPermitted);
 
     const invalid = manifest();
     invalid.references['a-paper']!.artifact.rights = {
@@ -88,13 +114,49 @@ describe('reference manifest v2', () => {
     };
     expect(() => validateReferenceManifest(invalid, root)).toThrow('approved redistribution license');
 
-    const unofficial = manifest();
-    unofficial.references['a-paper']!.artifact.rights = {
+    // 2026-07-26 operator decision: any credential-free HTTPS surface is valid evidence.
+    const nonArxiv = manifest();
+    nonArxiv.references['a-paper']!.artifact.rights = {
+      status: 'permitted',
+      license: 'CC-BY-4.0',
+      evidence_url: 'https://diglib.eg.org/some/paper?rights=cc-by', // eslint-disable-line @typescript-eslint/naming-convention -- manifest field
+    };
+    expect(validateReferenceManifest(nonArxiv, root)).toEqual(nonArxiv);
+
+    const insecure = manifest();
+    insecure.references['a-paper']!.artifact.rights = {
+      status: 'permitted',
+      license: 'CC-BY-4.0',
+      evidence_url: 'http://example.com/license', // eslint-disable-line @typescript-eslint/naming-convention -- manifest field
+    };
+    expect(() => validateReferenceManifest(insecure, root)).toThrow('credential-free HTTPS URL');
+
+    const credentialed = manifest();
+    credentialed.references['a-paper']!.artifact.rights = {
+      status: 'permitted',
+      license: 'CC-BY-4.0',
+      evidence_url: 'https://user:pass@example.com/license', // eslint-disable-line @typescript-eslint/naming-convention -- manifest field
+    };
+    expect(() => validateReferenceManifest(credentialed, root)).toThrow('must be a public HTTP(S) URL');
+  });
+
+  it('should require page-scoped same-origin rights evidence for HTML', () => {
+    const root = temporaryRepo('html');
+    const explicitlyPermitted = manifest('html');
+    explicitlyPermitted.references['a-paper']!.artifact.rights = { status: 'permitted' };
+    expect(validateReferenceManifest(explicitlyPermitted, root)).toEqual(explicitlyPermitted);
+
+    const allowed = manifest('html');
+    allowed.references['a-paper']!.artifact.rights = {
       status: 'permitted',
       license: 'CC-BY-4.0',
       evidence_url: 'https://example.com/license', // eslint-disable-line @typescript-eslint/naming-convention -- manifest field
     };
-    expect(() => validateReferenceManifest(unofficial, root)).toThrow('official credential-free arXiv HTTPS URL');
+    expect(validateReferenceManifest(allowed, root)).toEqual(allowed);
+
+    const crossOrigin = structuredClone(allowed);
+    crossOrigin.references['a-paper']!.artifact.rights.evidence_url = 'https://publisher.example/license';
+    expect(() => validateReferenceManifest(crossOrigin, root)).toThrow('HTML publisher origin');
   });
 
   it('should trust only the canonical Tau Brain boundary symlink', () => {
@@ -120,6 +182,7 @@ describe('reference Markdown', () => {
     expect(sanitized).not.toContain('file:///');
     expect(sanitized).toContain(String.raw`\\{danger\\}`);
     expect(sanitized).toContain(String.raw`\import secrets`);
+    expect(sanitizeReferenceMarkdown(sanitized)).toBe(sanitized);
   });
 
   it('should accept public URLs and reject local or credential-bearing URLs', () => {
@@ -155,6 +218,60 @@ describe('reference Markdown', () => {
       }),
     ).toBe('artifact changed');
   });
+
+  it('should require both HTML hashes and report exact pair staleness', () => {
+    const root = temporaryRepo('html');
+    const paths = referencePaths(root, 'a-paper', 'html');
+    const currentEntry = entry('html');
+    const capture: HtmlCaptureReport = {
+      profile: 'html-v1',
+      chromiumVersion: '149.0.0.0',
+      finalUrl: 'https://example.com/paper',
+      semanticRoot: 'main',
+      completeness: 'standards-complete',
+      discovered: 2,
+      visited: 2,
+      empty: 0,
+      failed: 0,
+      skipped: 0,
+    };
+    const markdown = buildReferenceMarkdown({
+      id: 'a-paper',
+      entry: currentEntry,
+      paths,
+      artifactSha256: 'a'.repeat(64),
+      snapshotSha256: 'b'.repeat(64),
+      capture,
+      detail: 'HTML conversion',
+      body: 'Evidence',
+    });
+    expect(
+      staleReason({
+        markdown,
+        manifestHash: referenceManifestHash('a-paper', currentEntry),
+        artifactSha256: 'a'.repeat(64),
+        snapshotSha256: 'b'.repeat(64),
+        requiresSnapshot: true,
+      }),
+    ).toBeUndefined();
+    expect(
+      staleReason({
+        markdown,
+        manifestHash: referenceManifestHash('a-paper', currentEntry),
+        artifactSha256: 'a'.repeat(64),
+        snapshotSha256: 'c'.repeat(64),
+        requiresSnapshot: true,
+      }),
+    ).toBe('snapshot changed');
+    expect(
+      staleReason({
+        markdown,
+        manifestHash: referenceManifestHash('a-paper', currentEntry),
+        artifactSha256: 'a'.repeat(64),
+        requiresSnapshot: true,
+      }),
+    ).toBe('snapshot missing');
+  });
 });
 
 describe('reference downloader', () => {
@@ -166,8 +283,14 @@ describe('reference downloader', () => {
       assertPublicAddresses([{ address: '::ffff:127.0.0.1', family: 6 }]);
     }).toThrow('non-public');
     expect(() => {
-      validateArtifactUrl('https://example.com/paper.pdf', 'pdf');
-    }).toThrow('not allowed');
+      assertPublicAddresses([
+        { address: '93.184.216.34', family: 4 },
+        { address: '::1', family: 6 },
+      ]);
+    }).toThrow('non-public');
+    // 2026-07-26 operator decision: any host may serve a PDF artifact once the
+    // manifest rights gate holds; transport constraints below are unchanged.
+    expect(validateArtifactUrl('https://example.com/paper.pdf', 'pdf').hostname).toBe('example.com');
     expect(() => {
       validateArtifactUrl('https://arxiv.org/source.tex', 'latex');
     }).toThrow('remote LaTeX downloads are not enabled');
@@ -242,8 +365,8 @@ describe('reference runner', () => {
         format: 'pdf',
         target: 'pdf-to-md',
         repoRoot: root,
-        validateArtifact: async () => undefined,
-        convertArtifact: async () => ({ markdown: '<b>bad</b>\n\nEvidence', detail: 'test extraction' }),
+        validateArtifacts: async () => undefined,
+        convertArtifacts: async () => ({ markdown: '<b>bad</b>\n\nEvidence', detail: 'test extraction' }),
       },
       ['convert', 'a-paper'],
     );
@@ -275,11 +398,78 @@ describe('reference runner', () => {
           format: 'pdf',
           target: 'pdf-to-md',
           repoRoot: root,
-          validateArtifact: async () => undefined,
-          convertArtifact: async () => ({ markdown: 'unused', detail: 'unused' }),
+          validateArtifacts: async () => undefined,
+          convertArtifacts: async () => ({ markdown: 'unused', detail: 'unused' }),
         },
         ['validate'],
       ),
     ).rejects.toThrow('artifact missing: docs/reference/pdf/a-paper.pdf');
+  });
+
+  it('should acquire an incomplete HTML pair once and reconvert without recapture', async () => {
+    const root = temporaryRepo('html');
+    const permittedManifest = manifest('html');
+    permittedManifest.references['a-paper']!.artifact.rights = {
+      status: 'permitted',
+      license: 'CC-BY-4.0',
+      evidence_url: 'https://example.com/license', // eslint-disable-line @typescript-eslint/naming-convention -- manifest field
+    };
+    writeFileSync(join(root, 'repos/tau-brain/reference/_index.yaml'), yamlDump(permittedManifest, { lineWidth: -1 }));
+    const paths = referencePaths(root, 'a-paper', 'html');
+    if (paths.format !== 'html') {
+      throw new Error('expected HTML reference paths');
+    }
+    mkdirSync(dirname(paths.artifact), { recursive: true });
+    mkdirSync(dirname(paths.snapshot), { recursive: true });
+    const acquire = vi.fn(async () => {
+      writeFileSync(paths.artifact, '%PDF-fixture');
+      writeFileSync(
+        paths.snapshot,
+        buildHtmlSnapshot({
+          report: {
+            profile: 'html-v1',
+            chromiumVersion: '149.0.0.0',
+            finalUrl: 'https://example.com/paper',
+            semanticRoot: 'main',
+            completeness: 'standards-complete',
+            discovered: 0,
+            visited: 0,
+            empty: 0,
+            failed: 0,
+            skipped: 0,
+          },
+          nodes: [{ kind: 'element', tag: 'p', children: [{ kind: 'text', value: 'Evidence' }] }],
+        }),
+      );
+    });
+    const runner: ReferenceRunner = {
+      format: 'html',
+      target: 'html-to-md',
+      repoRoot: root,
+      acquireArtifacts: acquire,
+      validateArtifacts: async () => undefined,
+      convertArtifacts: async () => ({
+        markdown: 'Evidence',
+        detail: 'test HTML conversion',
+        capture: {
+          profile: 'html-v1',
+          chromiumVersion: '149.0.0.0',
+          finalUrl: 'https://example.com/paper',
+          semanticRoot: 'main',
+          completeness: 'standards-complete',
+          discovered: 0,
+          visited: 0,
+          empty: 0,
+          failed: 0,
+          skipped: 0,
+        },
+      }),
+    };
+
+    await runReferenceCli(runner, ['sync', 'a-paper']);
+    expect(acquire).toHaveBeenCalledOnce();
+    await runReferenceCli(runner, ['sync', '--force', 'a-paper']);
+    expect(acquire).toHaveBeenCalledOnce();
+    expect(readFileSync(paths.markdown, 'utf8')).toContain('Snapshot SHA-256');
   });
 });

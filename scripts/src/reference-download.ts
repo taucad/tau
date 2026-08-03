@@ -13,35 +13,51 @@ import {
   unlinkSync,
   writeSync,
 } from 'node:fs';
-import type { IncomingMessage } from 'node:http';
+import type { IncomingMessage, OutgoingHttpHeaders } from 'node:http';
+import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import type { LookupFunction } from 'node:net';
 import { basename, dirname, join } from 'node:path';
 
 import ipaddr from 'ipaddr.js';
 
-import type { ReferenceFormat } from '#reference-to-md.js';
+type DownloadFormat = 'pdf' | 'latex';
 
 const maximumRedirects = 3;
 const totalTimeoutMilliseconds = 30_000;
 const idleTimeoutMilliseconds = 10_000;
-const maximumBytes: Record<ReferenceFormat, number> = {
+const maximumBytes: Record<DownloadFormat, number> = {
   pdf: 100 * 1024 * 1024,
   latex: 5 * 1024 * 1024,
 };
-const artifactHosts: Record<ReferenceFormat, ReadonlySet<string>> = {
-  pdf: new Set(['arxiv.org', 'export.arxiv.org']),
-  latex: new Set(),
-};
+// 2026-07-26 operator decision: PDF artifacts may be fetched from any host once the
+// manifest's rights gate is satisfied (approved license + recorded evidence_url). The
+// transport protections below are host-independent and unchanged: credential-free
+// HTTPS:443 canonical URLs, pinned public-unicast DNS, bounded size and redirects.
+// Remote LaTeX stays disabled (unchanged feature gate, not a rights control).
 
-type DownloadDependencies = {
+export type DownloadDependencies = {
   request: typeof httpsRequest;
   lookup(hostname: string, options: { all: true; verbatim: true }): Promise<LookupAddress[]>;
 };
 
+export type PublicRequestDependencies = {
+  requestHttp: typeof httpRequest;
+  requestHttps: typeof httpsRequest;
+  lookup(hostname: string, options: { all: true; verbatim: true }): Promise<LookupAddress[]>;
+};
+
+export type PublicRequestOptions = {
+  url: URL;
+  method: 'GET' | 'HEAD';
+  headers: OutgoingHttpHeaders;
+  deadline: number;
+  idleTimeoutMilliseconds: number;
+};
+
 export type DownloadArtifactOptions = {
   id: string;
-  format: ReferenceFormat;
+  format: DownloadFormat;
   url: string;
   destination: string;
   force: boolean;
@@ -52,6 +68,12 @@ const defaultDependencies: DownloadDependencies = {
   request: httpsRequest,
 };
 
+const defaultPublicRequestDependencies: PublicRequestDependencies = {
+  lookup: async (hostname, options) => dnsLookup(hostname, options),
+  requestHttp: httpRequest,
+  requestHttps: httpsRequest,
+};
+
 const headerValue = (value: string | string[] | undefined): string | undefined =>
   Array.isArray(value) ? value[0] : value;
 
@@ -59,19 +81,18 @@ const printableUrl = (url: URL): string => `${url.origin}${url.pathname}`;
 
 export const assertPublicAddresses = (addresses: readonly LookupAddress[]): void => {
   if (addresses.length === 0) {
-    throw new Error('artifact host did not resolve to an address');
+    throw new Error('request host did not resolve to an address');
   }
 
   for (const { address } of addresses) {
     if (!ipaddr.isValid(address) || ipaddr.process(address).range() !== 'unicast') {
-      throw new Error(`artifact host resolved to a non-public address (${address})`);
+      throw new Error(`request host resolved to a non-public address (${address})`);
     }
   }
 };
 
-export const validateArtifactUrl = (value: string, format: ReferenceFormat): URL => {
+export const validateArtifactUrl = (value: string, format: DownloadFormat): URL => {
   const url = new URL(value);
-  const hostname = url.hostname.toLowerCase();
   if (
     url.protocol !== 'https:' ||
     url.username !== '' ||
@@ -82,31 +103,32 @@ export const validateArtifactUrl = (value: string, format: ReferenceFormat): URL
   ) {
     throw new Error('artifact downloads require credential-free HTTPS on port 443 without a query or fragment');
   }
-  if (!artifactHosts[format].has(hostname)) {
-    const detail =
-      format === 'latex' ? 'remote LaTeX downloads are not enabled' : `artifact host is not allowed (${hostname})`;
-    throw new Error(detail);
+  if (format === 'latex') {
+    throw new Error('remote LaTeX downloads are not enabled');
   }
   return url;
 };
 
-const requestOnce = async (
-  url: URL,
-  deadline: number,
-  dependencies: DownloadDependencies,
+export const requestPublicUrl = async (
+  options: PublicRequestOptions,
+  dependencies: PublicRequestDependencies = defaultPublicRequestDependencies,
 ): Promise<IncomingMessage> => {
+  const { url } = options;
+  if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.username !== '' || url.password !== '') {
+    throw new Error('public requests require credential-free HTTP(S)');
+  }
   const addresses = await dependencies.lookup(url.hostname, { all: true, verbatim: true });
   assertPublicAddresses(addresses);
   const pinned = [...addresses].sort((left, right) =>
     `${left.family}:${left.address}`.localeCompare(`${right.family}:${right.address}`),
   )[0];
   if (!pinned) {
-    throw new Error('artifact host did not resolve to an address');
+    throw new Error('request host did not resolve to an address');
   }
 
-  const remaining = deadline - Date.now();
+  const remaining = options.deadline - Date.now();
   if (remaining <= 0) {
-    throw new Error('artifact download exceeded the 30 second total timeout');
+    throw new Error('public request exceeded its total timeout');
   }
 
   return new Promise<IncomingMessage>((resolve, reject) => {
@@ -118,20 +140,20 @@ const requestOnce = async (
     ): void => {
       // Node >=21 invokes lookup with { all: true } and expects an address array; the
       // legacy (address, family) form then reads `addresses[0].address` as undefined.
-      if (typeof options === 'object' && options !== null && (options as { all?: boolean }).all) {
+      if (typeof options === 'object' && options !== null && Reflect.get(options, 'all') === true) {
         callback(null, [{ address: pinned.address, family: pinned.family }]);
         return;
       }
       callback(null, pinned.address, pinned.family);
     }) as LookupFunction;
 
-    const request = dependencies.request(
+    const request = (url.protocol === 'https:' ? dependencies.requestHttps : dependencies.requestHttp)(
       url,
       {
-        headers: { accept: '*/*', 'accept-encoding': 'identity', 'user-agent': 'TauReferenceBot/1.0' },
+        headers: options.headers,
         lookup: pinnedLookup,
-        method: 'GET',
-        servername: url.hostname,
+        method: options.method,
+        ...(url.protocol === 'https:' ? { servername: url.hostname } : {}),
       },
       (response) => {
         const clear = (): void => {
@@ -143,10 +165,10 @@ const requestOnce = async (
       },
     );
     const totalTimer = setTimeout(() => {
-      request.destroy(new Error('artifact download exceeded the 30 second total timeout'));
+      request.destroy(new Error('public request exceeded its total timeout'));
     }, remaining);
-    request.setTimeout(idleTimeoutMilliseconds, () => {
-      request.destroy(new Error('artifact download exceeded the 10 second idle timeout'));
+    request.setTimeout(options.idleTimeoutMilliseconds, () => {
+      request.destroy(new Error('public request exceeded its idle timeout'));
     });
     request.once('error', (error) => {
       clearTimeout(totalTimer);
@@ -156,7 +178,23 @@ const requestOnce = async (
   });
 };
 
-const validateDownloadedArtifact = (path: string, format: ReferenceFormat): void => {
+const requestOnce = async (url: URL, deadline: number, dependencies: DownloadDependencies): Promise<IncomingMessage> =>
+  requestPublicUrl(
+    {
+      url,
+      deadline,
+      method: 'GET',
+      idleTimeoutMilliseconds,
+      headers: { accept: '*/*', 'accept-encoding': 'identity', 'user-agent': 'TauReferenceBot/1.0' },
+    },
+    {
+      lookup: dependencies.lookup,
+      requestHttp: httpRequest,
+      requestHttps: dependencies.request,
+    },
+  );
+
+const validateDownloadedArtifact = (path: string, format: DownloadFormat): void => {
   const descriptor = openSync(path, constants.O_RDONLY);
   try {
     const header = Buffer.alloc(8);

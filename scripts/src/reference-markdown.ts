@@ -64,8 +64,8 @@ export const isPublicUrl = (value: string): boolean => {
 const sanitizeText = (value: string): string =>
   value
     .replaceAll(moduleLikeLine, '\\')
-    .replaceAll('{', String.raw`\{`)
-    .replaceAll('}', String.raw`\}`);
+    .replaceAll(/(?<!\\)\{/gu, String.raw`\{`)
+    .replaceAll(/(?<!\\)\}/gu, String.raw`\}`);
 
 const sanitizeChildren = (children: MarkdownNode[], depth: number, state: { nodes: number }): MarkdownNode[] => {
   if (depth > maximumDepth) {

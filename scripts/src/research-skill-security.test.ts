@@ -14,11 +14,13 @@ describe('research workflow ownership', () => {
     expect(createReference).toContain('sole owner of reference-manifest');
     expect(createReference).toContain('scripts:pdf-to-md');
     expect(createReference).toContain('scripts:text-to-md');
+    expect(createReference).toContain('scripts:html-to-md');
     expect(createReference).toContain('docs/reference/_index.yaml');
     expect(createResearch).toContain('references-ready');
     expect(createResearch).toContain('../create-reference/SKILL.md');
     expect(createResearch).not.toContain('scripts:pdf-to-md');
     expect(createResearch).not.toContain('scripts:text-to-md');
+    expect(createResearch).not.toContain('scripts:html-to-md');
     expect(createResearch).not.toContain('_index.yaml');
   });
 });

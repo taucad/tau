@@ -24,7 +24,7 @@ import { isPublicUrl, sanitizeReferenceMarkdown } from '#reference-markdown.js';
 import { parseReferenceArgs, referenceUsage } from '#reference-to-md.args.js';
 import type { ReferenceCliOptions } from '#reference-to-md.args.js';
 
-export type ReferenceFormat = 'pdf' | 'latex';
+export type ReferenceFormat = 'pdf' | 'latex' | 'html';
 export type RightsStatus = 'permitted' | 'user-provided' | 'unreviewed' | 'restricted';
 
 export type Citation = {
@@ -67,36 +67,92 @@ export type ReferenceManifest = {
   references: Record<string, ReferenceEntry>;
 };
 
-export type ReferencePaths = {
+type ReferenceCommonPaths = {
+  format: ReferenceFormat;
   artifact: string;
   artifactDisplay: string;
   markdown: string;
   markdownDisplay: string;
 };
 
+export type ReferencePaths =
+  | (ReferenceCommonPaths & {
+      format: 'pdf' | 'latex';
+      snapshot?: never;
+      snapshotDisplay?: never;
+    })
+  | (ReferenceCommonPaths & {
+      format: 'html';
+      snapshot: string;
+      snapshotDisplay: string;
+    });
+
+export type HtmlCaptureCompleteness = 'standards-complete' | 'partial' | 'legacy-pdf-only';
+
+export type HtmlCaptureReport = {
+  profile: string;
+  chromiumVersion: string;
+  finalUrl: string;
+  semanticRoot: 'main' | 'article' | 'body' | 'legacy-markdown';
+  completeness: HtmlCaptureCompleteness;
+  discovered: number;
+  visited: number;
+  empty: number;
+  failed: number;
+  skipped: number;
+};
+
 type ReferenceState = ReferencePaths & {
   id: string;
   artifactExists: boolean;
+  snapshotExists: boolean;
+  artifactsComplete: boolean;
   markdownExists: boolean;
   markdownStale: boolean;
   reason: string;
 };
 
-type ReferenceRunner = {
+export type ReferenceRunner = {
   format: ReferenceFormat;
-  target: 'pdf-to-md' | 'text-to-md';
+  target: 'pdf-to-md' | 'text-to-md' | 'html-to-md';
   repoRoot?: string;
-  validateArtifact(path: string): Promise<void>;
-  convertArtifact(path: string): Promise<{ markdown: string; detail: string }>;
+  acquireArtifacts?(options: {
+    id: string;
+    entry: ReferenceEntry;
+    paths: ReferencePaths;
+    url: string;
+    force: boolean;
+  }): Promise<void>;
+  validateArtifacts(paths: ReferencePaths): Promise<void>;
+  convertArtifacts(paths: ReferencePaths): Promise<{
+    markdown: string;
+    detail: string;
+    capture?: HtmlCaptureReport;
+  }>;
 };
 
 const approvedLicenses = new Set(['CC0-1.0', 'CC-BY-4.0', 'CC-BY-SA-4.0']);
-const approvedRightsEvidenceHosts = new Set(['arxiv.org', 'export.arxiv.org']);
+// 2026-07-26 operator decision: rights evidence is accepted from any credential-free
+// HTTPS surface (publisher DL, institutional repository, Crossref deposit) and recorded
+// verbatim in evidence_url. The license allowlist above is unchanged — the gate still
+// requires an approved redistribution license; only the evidence-host allowlist was
+// removed (it previously admitted arXiv alone and blocked verifiably CC-BY sources).
 const legacyEntryFields = ['pdf_url', 'pdf', 'markdown'] as const;
 const idPattern = /^[a-z0-9][a-z0-9-]*$/u;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const urlOrigin = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  try {
+    return new URL(value).origin;
+  } catch {
+    return undefined;
+  }
+};
 
 const assertSingleLine = (value: unknown, path: string, errors: string[]): value is string => {
   // oxlint-disable-next-line eslint/no-control-regex -- Manifest metadata must not inject control characters.
@@ -141,7 +197,13 @@ const assertUsedByPath = (options: { repoRoot: string; path: string; id: string;
   }
 };
 
-const validateRights = (value: unknown, path: string, errors: string[]): ReferenceRights | undefined => {
+const validateRights = (options: {
+  value: unknown;
+  path: string;
+  errors: string[];
+  context: { format: ReferenceFormat; sourceUrl: unknown; artifactUrl: unknown };
+}): ReferenceRights | undefined => {
+  const { value, path, errors, context } = options;
   if (!isRecord(value)) {
     errors.push(`${path} must be an object`);
     return undefined;
@@ -154,22 +216,28 @@ const validateRights = (value: unknown, path: string, errors: string[]): Referen
 
   const rights = value as ReferenceRights;
   if (status === 'permitted') {
-    if (typeof rights.license !== 'string' || !approvedLicenses.has(rights.license)) {
+    if (rights.license !== undefined && !approvedLicenses.has(rights.license)) {
       errors.push(`${path}.license must be an approved redistribution license`);
     }
-    if (typeof rights.evidence_url !== 'string' || !isPublicUrl(rights.evidence_url)) {
+    if (rights.evidence_url !== undefined && !isPublicUrl(rights.evidence_url)) {
       errors.push(`${path}.evidence_url must be a public HTTP(S) URL`);
-    } else {
+    } else if (rights.evidence_url !== undefined) {
       const evidenceUrl = new URL(rights.evidence_url);
-      if (
-        evidenceUrl.protocol !== 'https:' ||
-        !approvedRightsEvidenceHosts.has(evidenceUrl.hostname.toLowerCase()) ||
-        evidenceUrl.username !== '' ||
-        evidenceUrl.password !== '' ||
-        evidenceUrl.search !== '' ||
-        evidenceUrl.hash !== ''
-      ) {
-        errors.push(`${path}.evidence_url must be an official credential-free arXiv HTTPS URL`);
+      if (context.format === 'html') {
+        const permittedOrigins = [urlOrigin(context.sourceUrl), urlOrigin(context.artifactUrl)].filter(
+          (origin): origin is string => origin !== undefined,
+        );
+        if (
+          evidenceUrl.protocol !== 'https:' ||
+          evidenceUrl.username !== '' ||
+          evidenceUrl.password !== '' ||
+          (evidenceUrl.port !== '' && evidenceUrl.port !== '443') ||
+          !permittedOrigins.includes(evidenceUrl.origin)
+        ) {
+          errors.push(`${path}.evidence_url must be credential-free HTTPS on the HTML publisher origin`);
+        }
+      } else if (evidenceUrl.protocol !== 'https:' || evidenceUrl.username !== '' || evidenceUrl.password !== '') {
+        errors.push(`${path}.evidence_url must be a credential-free HTTPS URL recording the license evidence`);
       }
     }
   }
@@ -255,8 +323,11 @@ export const validateReferenceManifest = (value: unknown, repoRoot: string): Ref
     }
 
     const { artifact } = rawEntry;
-    if (!isRecord(artifact) || (artifact['format'] !== 'pdf' && artifact['format'] !== 'latex')) {
-      errors.push(`${path}.artifact.format must be pdf or latex`);
+    if (
+      !isRecord(artifact) ||
+      (artifact['format'] !== 'pdf' && artifact['format'] !== 'latex' && artifact['format'] !== 'html')
+    ) {
+      errors.push(`${path}.artifact.format must be pdf, latex, or html`);
     } else {
       if (artifact['url'] !== undefined) {
         if (!assertSingleLine(artifact['url'], `${path}.artifact.url`, errors)) {
@@ -265,7 +336,16 @@ export const validateReferenceManifest = (value: unknown, repoRoot: string): Ref
           errors.push(`${path}.artifact.url must be a public HTTP(S) URL`);
         }
       }
-      validateRights(artifact['rights'], `${path}.artifact.rights`, errors);
+      validateRights({
+        value: artifact['rights'],
+        path: `${path}.artifact.rights`,
+        errors,
+        context: {
+          format: artifact['format'],
+          sourceUrl,
+          artifactUrl: artifact['url'],
+        },
+      });
       if (
         isRecord(artifact['rights']) &&
         artifact['rights']['status'] === 'permitted' &&
@@ -336,13 +416,24 @@ export const referencePaths = (repoRoot: string, id: string, format: ReferenceFo
     throw new Error(`invalid reference id "${id}"`);
   }
   const root = referenceRoot(repoRoot);
-  const artifactDisplay = format === 'pdf' ? `docs/reference/pdf/${id}.pdf` : `docs/reference/source/${id}.tex`;
+  const artifactDisplay =
+    format === 'pdf' || format === 'html' ? `docs/reference/pdf/${id}.pdf` : `docs/reference/source/${id}.tex`;
   const markdownDisplay = `docs/reference/${id}.md`;
-  const artifact = join(root, format === 'pdf' ? 'pdf' : 'source', `${id}.${format === 'pdf' ? 'pdf' : 'tex'}`);
+  const artifact = join(
+    root,
+    format === 'pdf' || format === 'html' ? 'pdf' : 'source',
+    `${id}.${format === 'pdf' || format === 'html' ? 'pdf' : 'tex'}`,
+  );
   const markdown = join(root, `${id}.md`);
   assertSafeReferencePath(root, artifact);
   assertSafeReferencePath(root, markdown);
-  return { artifact, artifactDisplay, markdown, markdownDisplay };
+  if (format !== 'html') {
+    return { format, artifact, artifactDisplay, markdown, markdownDisplay };
+  }
+  const snapshot = join(root, 'source', `${id}.snapshot.html`);
+  const snapshotDisplay = `docs/reference/source/${id}.snapshot.html`;
+  assertSafeReferencePath(root, snapshot);
+  return { format, artifact, artifactDisplay, snapshot, snapshotDisplay, markdown, markdownDisplay };
 };
 
 export const readReferenceManifest = (repoRoot: string): ReferenceManifest => {
@@ -382,15 +473,25 @@ export const staleReason = (options: {
   markdown: string;
   manifestHash: string;
   artifactSha256?: string;
+  snapshotSha256?: string;
+  requiresSnapshot?: boolean;
 }): string | undefined => {
   if (extractHeaderHash(options.markdown, 'Manifest hash') !== options.manifestHash) {
     return 'manifest changed';
   }
-  if (
-    options.artifactSha256 !== undefined &&
-    extractHeaderHash(options.markdown, 'Artifact SHA-256') !== options.artifactSha256
-  ) {
+  if (options.artifactSha256 === undefined) {
+    return 'artifact missing';
+  }
+  if (extractHeaderHash(options.markdown, 'Artifact SHA-256') !== options.artifactSha256) {
     return 'artifact changed';
+  }
+  if (options.requiresSnapshot) {
+    if (options.snapshotSha256 === undefined) {
+      return 'snapshot missing';
+    }
+    if (extractHeaderHash(options.markdown, 'Snapshot SHA-256') !== options.snapshotSha256) {
+      return 'snapshot changed';
+    }
   }
   return undefined;
 };
@@ -406,12 +507,33 @@ export const buildReferenceMarkdown = (options: {
   entry: ReferenceEntry;
   paths: ReferencePaths;
   artifactSha256: string;
+  snapshotSha256?: string;
   detail: string;
   body: string;
+  capture?: HtmlCaptureReport;
 }): string => {
   const artifactUrl = options.entry.artifact.url
     ? `> Artifact URL: ${options.entry.artifact.url}`
     : '> Artifact URL: local user-provided artifact';
+  const artifactLines = [
+    `> Cached artifact: \`${options.paths.artifactDisplay}\``,
+    `> Artifact SHA-256: \`${options.artifactSha256}\``,
+  ];
+  if (options.paths.format === 'html') {
+    if (!options.snapshotSha256 || !options.capture) {
+      throw new Error('HTML Markdown requires snapshot hash and capture report');
+    }
+    artifactLines.push(
+      `> Cached snapshot: \`${options.paths.snapshotDisplay}\``,
+      `> Snapshot SHA-256: \`${options.snapshotSha256}\``,
+      `> Capture profile: \`${options.capture.profile}\``,
+      `> Chromium version: \`${options.capture.chromiumVersion}\``,
+      `> Final URL: ${options.capture.finalUrl}`,
+      `> Semantic root: \`${options.capture.semanticRoot}\``,
+      `> Capture completeness: \`${options.capture.completeness}\``,
+      `> Interaction states: discovered=${options.capture.discovered} visited=${options.capture.visited} empty=${options.capture.empty} failed=${options.capture.failed} skipped=${options.capture.skipped}`,
+    );
+  }
   return [
     `# ${escapedHeading(options.entry.title)}`,
     '',
@@ -421,8 +543,7 @@ export const buildReferenceMarkdown = (options: {
     `> Reference ID: \`${options.id}\``,
     `> Source URL: ${options.entry.source_url}`,
     artifactUrl,
-    `> Cached artifact: \`${options.paths.artifactDisplay}\``,
-    `> Artifact SHA-256: \`${options.artifactSha256}\``,
+    ...artifactLines,
     `> Citation: \`${options.entry.citation.key}\` (${options.entry.citation.format})`,
     `> Manifest hash: \`${referenceManifestHash(options.id, options.entry)}\``,
     '',
@@ -463,19 +584,34 @@ const atomicWriteText = (path: string, text: string): void => {
 const getState = (repoRoot: string, id: string, entry: ReferenceEntry): ReferenceState => {
   const paths = referencePaths(repoRoot, id, entry.artifact.format);
   const artifactExists = existsSync(paths.artifact);
+  const snapshotExists = paths.format !== 'html' || existsSync(paths.snapshot);
+  const artifactsComplete = artifactExists && snapshotExists;
   const markdownExists = existsSync(paths.markdown);
   if (!markdownExists) {
-    return { ...paths, id, artifactExists, markdownExists, markdownStale: true, reason: 'markdown missing' };
+    return {
+      ...paths,
+      id,
+      artifactExists,
+      snapshotExists,
+      artifactsComplete,
+      markdownExists,
+      markdownStale: true,
+      reason: 'markdown missing',
+    };
   }
   const reason = staleReason({
     markdown: readFileSync(paths.markdown, 'utf8'),
     manifestHash: referenceManifestHash(id, entry),
     artifactSha256: artifactExists ? sha256File(paths.artifact) : undefined,
+    snapshotSha256: paths.format === 'html' && snapshotExists ? sha256File(paths.snapshot) : undefined,
+    requiresSnapshot: paths.format === 'html',
   });
   return {
     ...paths,
     id,
     artifactExists,
+    snapshotExists,
+    artifactsComplete,
     markdownExists,
     markdownStale: reason !== undefined,
     reason: reason ?? 'fresh',
@@ -551,20 +687,37 @@ const assertDownloadAllowed = (id: string, entry: ReferenceEntry): string => {
 };
 
 const downloadReference = async (options: {
+  runner: ReferenceRunner;
   repoRoot: string;
   id: string;
   entry: ReferenceEntry;
   force: boolean;
 }): Promise<void> => {
   const paths = referencePaths(options.repoRoot, options.id, options.entry.artifact.format);
-  if (existsSync(paths.artifact) && !options.force) {
-    console.log(`${options.id}: cached artifact exists (${paths.artifactDisplay})`);
+  const cached = existsSync(paths.artifact) && (paths.format !== 'html' || existsSync(paths.snapshot));
+  if (cached && !options.force) {
+    console.log(
+      `${options.id}: cached artifact${paths.format === 'html' ? ' pair' : ''} exists (${paths.artifactDisplay})`,
+    );
     return;
   }
   const url = assertDownloadAllowed(options.id, options.entry);
+  if (options.runner.acquireArtifacts) {
+    await options.runner.acquireArtifacts({
+      id: options.id,
+      entry: options.entry,
+      paths,
+      url,
+      force: options.force,
+    });
+    return;
+  }
+  if (paths.format === 'html') {
+    throw new Error(`${options.id}: HTML runner is missing its paired acquisition hook`);
+  }
   await downloadArtifact({
     id: options.id,
-    format: options.entry.artifact.format,
+    format: paths.format,
     url,
     destination: paths.artifact,
     force: options.force,
@@ -579,9 +732,18 @@ const convertReference = async (options: {
   force: boolean;
 }): Promise<void> => {
   const state = getState(options.repoRoot, options.id, options.entry);
-  if (!state.artifactExists) {
+  if (!state.artifactsComplete) {
+    const missing =
+      state.format === 'html'
+        ? [
+            state.artifactExists ? undefined : state.artifactDisplay,
+            state.snapshotExists ? undefined : state.snapshotDisplay,
+          ]
+            .filter((path): path is string => path !== undefined)
+            .join(', ')
+        : state.artifactDisplay;
     throw new Error(
-      `${options.id}: cached artifact missing; run "pnpm nx run scripts:${options.runner.target} -- download ${options.id}"`,
+      `${options.id}: cached artifact missing (${missing}); run "pnpm nx run scripts:${options.runner.target} -- download ${options.id}"`,
     );
   }
   if (options.entry.artifact.rights.status === 'restricted') {
@@ -592,8 +754,8 @@ const convertReference = async (options: {
     return;
   }
 
-  await options.runner.validateArtifact(state.artifact);
-  const converted = await options.runner.convertArtifact(state.artifact);
+  await options.runner.validateArtifacts(state);
+  const converted = await options.runner.convertArtifacts(state);
   const body = sanitizeReferenceMarkdown(converted.markdown);
   if (body === '') {
     throw new Error(`${options.id}: converted artifact did not contain usable text`);
@@ -605,8 +767,10 @@ const convertReference = async (options: {
       entry: options.entry,
       paths: state,
       artifactSha256: sha256File(state.artifact),
+      snapshotSha256: state.format === 'html' ? sha256File(state.snapshot) : undefined,
       detail: converted.detail,
       body,
+      capture: converted.capture,
     }),
   );
   console.log(`${options.id}: converted ${state.markdownDisplay}`);
@@ -620,15 +784,19 @@ const validateOutputs = async (
   const errors: string[] = [];
   for (const [id, entry] of references) {
     const state = getState(repoRoot, id, entry);
-    if (state.artifactExists) {
+    if (!state.artifactExists) {
+      errors.push(`${id}: artifact missing: ${state.artifactDisplay}`);
+    }
+    if (state.format === 'html' && !state.snapshotExists) {
+      errors.push(`${id}: snapshot missing: ${state.snapshotDisplay}`);
+    }
+    if (state.artifactsComplete) {
       try {
         // oxlint-disable-next-line eslint/no-await-in-loop -- Validation stays sequential and bounded.
-        await runner.validateArtifact(state.artifact);
+        await runner.validateArtifacts(state);
       } catch (error) {
         errors.push(`${id}: ${error instanceof Error ? error.message : String(error)}`);
       }
-    } else {
-      errors.push(`${id}: artifact missing: ${state.artifactDisplay}`);
     }
     if (!state.markdownExists) {
       errors.push(`${id}: markdown missing: ${state.markdownDisplay}`);
@@ -662,7 +830,10 @@ export const runReferenceCli = async (runner: ReferenceRunner, argv = process.ar
     case 'status': {
       for (const [id, entry] of references) {
         const state = getState(repoRoot, id, entry);
-        const artifact = state.artifactExists ? 'artifact:cached' : 'artifact:missing';
+        const artifact =
+          state.format === 'html'
+            ? `pdf:${state.artifactExists ? 'cached' : 'missing'} snapshot:${state.snapshotExists ? 'cached' : 'missing'}`
+            : `artifact:${state.artifactExists ? 'cached' : 'missing'}`;
         const markdown = state.markdownExists
           ? state.markdownStale
             ? `md:stale(${state.reason})`
@@ -674,7 +845,7 @@ export const runReferenceCli = async (runner: ReferenceRunner, argv = process.ar
     }
     case 'download': {
       await runBatch(references, async ([id, entry]) =>
-        downloadReference({ repoRoot, id, entry, force: parsed.options.force }),
+        downloadReference({ runner, repoRoot, id, entry, force: parsed.options.force }),
       );
       break;
     }
@@ -686,8 +857,8 @@ export const runReferenceCli = async (runner: ReferenceRunner, argv = process.ar
     }
     case 'sync': {
       await runBatch(references, async ([id, entry]) => {
-        if (!getState(repoRoot, id, entry).artifactExists) {
-          await downloadReference({ repoRoot, id, entry, force: false });
+        if (!getState(repoRoot, id, entry).artifactsComplete) {
+          await downloadReference({ runner, repoRoot, id, entry, force: false });
         }
         await convertReference({ runner, repoRoot, id, entry, force: parsed.options.force });
       });

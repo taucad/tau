@@ -22,7 +22,8 @@
   "author": "Richard Fontein",
   "license": "MIT",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./sync": "./src/sync/index.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -31,6 +32,11 @@
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
+      },
+      "./sync": {
+        "types": "./dist/sync/index.d.ts",
+        "import": "./dist/sync/index.js",
+        "default": "./dist/sync/index.js"
       }
     }
   },

@@ -28,4 +28,9 @@ export type BridgeWatchEvent = unknown;
  */
 export type BridgeCallOptions = {
   prepareCallArgs?: (method: string, args: unknown[]) => unknown[];
+  /**
+   * Milliseconds. Resolve one call's client deadline. `undefined` keeps the
+   * default and `'none'` installs no wall-clock timer.
+   */
+  resolveCallTimeout?: (method: string) => number | 'none' | undefined;
 };

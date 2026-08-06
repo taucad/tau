@@ -52,6 +52,25 @@ describe('@taucad/rpc/bridge', () => {
     client.dispose();
   });
 
+  it('should acknowledge a watch only after the server installs it', async () => {
+    const channel = new MessageChannel();
+    const unsubscribe = vi.fn();
+    const watch = vi.fn(() => unsubscribe);
+    createBridgeServer({ watch }, wrapBridgePort(channel.port1));
+    const client = createBridgeCall(wrapBridgePort(channel.port2));
+
+    const handle = client.watchReady({ paths: ['/main.ts'] }, vi.fn());
+    expect(watch).not.toHaveBeenCalled();
+    await handle.ready;
+    expect(watch).toHaveBeenCalledWith({ paths: ['/main.ts'] }, expect.any(Function));
+
+    handle.unsubscribe();
+    await vi.waitFor(() => {
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+    client.dispose();
+  });
+
   it('should serialize thrown errors across the bridge', async () => {
     const channel = new MessageChannel();
     createBridgeServer(
@@ -94,11 +113,94 @@ describe('@taucad/rpc/bridge', () => {
     }
   });
 
+  it('should publish an optional hello payload from createBridgePort', async () => {
+    const bridge = createBridgePort({}, { hello: { capability: 'rooted' } });
+    const client = createBridgeCall(wrapBridgePort(bridge.port));
+
+    await client.ready;
+    expect(client.hello.payload).toEqual({ capability: 'rooted' });
+
+    client.dispose();
+    bridge.dispose();
+  });
+
   it('should collect unique transferable ArrayBuffers', () => {
     const buffer = new ArrayBuffer(8);
     const viewA = new Uint8Array(buffer, 0, 4);
     const viewB = new Uint8Array(buffer, 4, 4);
 
     expect(extractTransferables({ viewA, nested: [viewB] })).toEqual([buffer]);
+  });
+
+  it('applies method-specific deadlines without weakening ordinary calls', async () => {
+    vi.useFakeTimers();
+    let resolveCommit!: (value: string) => void;
+    const commitResult = new Promise<string>((resolve) => {
+      resolveCommit = resolve;
+    });
+    const channel = new MessageChannel();
+    createBridgeServer(
+      {
+        ordinary: async () =>
+          new Promise<never>(() => {
+            void 0;
+          }),
+        commitPendingProjectDirectory: async () => commitResult,
+      },
+      wrapBridgePort(channel.port1),
+    );
+    const client = createBridgeCall(wrapBridgePort(channel.port2), {
+      resolveCallTimeout: (method) => (method === 'commitPendingProjectDirectory' ? 'none' : 10),
+    });
+
+    try {
+      const ordinary = expect(client.call('ordinary', [])).rejects.toThrow("Bridge call 'ordinary' timed out");
+      const commit = client.call('commitPendingProjectDirectory', []);
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      await ordinary;
+      resolveCommit('committed');
+      await expect(commit).resolves.toBe('committed');
+    } finally {
+      client.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects a deadline-free call when the proxy is disposed', async () => {
+    const channel = new MessageChannel();
+    createBridgeServer(
+      {
+        commitPendingProjectDirectory: async () =>
+          new Promise<never>(() => {
+            void 0;
+          }),
+      },
+      wrapBridgePort(channel.port1),
+    );
+    const client = createBridgeCall(wrapBridgePort(channel.port2), {
+      resolveCallTimeout: () => 'none',
+    });
+    const pending = client.call('commitPendingProjectDirectory', []);
+
+    client.dispose();
+
+    await expect(pending).rejects.toThrow('Bridge proxy closed');
+  });
+
+  it('rejects invalid resolved deadlines before dispatch', async () => {
+    const channel = new MessageChannel();
+    const handler = vi.fn();
+    createBridgeServer({ handler }, wrapBridgePort(channel.port1));
+    const client = createBridgeCall(wrapBridgePort(channel.port2), {
+      resolveCallTimeout: () => Number.POSITIVE_INFINITY,
+    });
+
+    try {
+      await expect(client.call('handler', [])).rejects.toThrow(RangeError);
+      expect(handler).not.toHaveBeenCalled();
+    } finally {
+      client.dispose();
+    }
   });
 });

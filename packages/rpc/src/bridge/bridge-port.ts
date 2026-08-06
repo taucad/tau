@@ -18,16 +18,17 @@ export type BridgePort = {
  * Create a MessagePort that bridges to an object implementation.
  *
  * @param handlers - Object whose methods are served over the bridge.
+ * @param options - Optional channel hello payload.
  * @returns Handle with port and dispose function.
  * @public
  */
-export function createBridgePort<T extends StringKeyedObject>(handlers: T): BridgePort {
+export function createBridgePort<T extends StringKeyedObject>(handlers: T, options?: { hello?: unknown }): BridgePort {
   const channel = new MessageChannel();
   const serverWrapped = wrapMessagePort<unknown>(channel.port1, { label: 'bridge-port-server' });
   if (serverWrapped.start) {
     serverWrapped.start();
   }
-  createBridgeServer(handlers, serverWrapped);
+  createBridgeServer(handlers, serverWrapped, { hello: options?.hello });
   return {
     port: channel.port2,
     dispose() {

@@ -1,7 +1,13 @@
 import { createChannelServer } from '#channel.js';
 import type { WithTransferables } from '#channel.js';
 import type { Port } from '#port.js';
-import { broadcastEvent, serializeBridgeError, watchEvent, wrapAsTransferables } from '#bridge/bridge-internal.js';
+import {
+  bridgeWatchReadyMarker,
+  broadcastEvent,
+  serializeBridgeError,
+  watchEvent,
+  wrapAsTransferables,
+} from '#bridge/bridge-internal.js';
 import type { BroadcastFrame } from '#bridge/bridge-internal.js';
 import type { BridgeWatchEvent, BridgeWatchRequest, StringKeyedObject } from '#bridge/bridge-protocol.js';
 import { createPushQueue } from '#bridge/push-queue.js';
@@ -14,6 +20,7 @@ import type { PushQueue } from '#bridge/push-queue.js';
  */
 export type BridgeServerHandle = {
   emit: (event: string, data: unknown) => void;
+  dispose(): void;
 };
 
 /**
@@ -38,6 +45,7 @@ export function createBridgeServer<
     onDisconnect?: () => void;
     onWatch?: (watchId: string, request: WatchRequestPayload) => void;
     onUnwatch?: (watchId: string) => void;
+    hello?: unknown;
   },
 ): BridgeServerHandle {
   const broadcastQueues = new Set<PushQueue<BroadcastFrame>>();
@@ -59,6 +67,7 @@ export function createBridgeServer<
   const channelServer = createChannelServer({
     port,
     sessionKey: 'bridge',
+    hello: options?.hello,
     impl: {
       call: async (_context, name, args) => {
         try {
@@ -114,7 +123,7 @@ export function createBridgeServer<
   async function* subscribeWatch(
     listenArgs: unknown,
     signal?: AbortSignal,
-  ): AsyncGenerator<WatchEventPayload | WithTransferables<WatchEventPayload>> {
+  ): AsyncGenerator<WatchEventPayload | WithTransferables<WatchEventPayload> | { __tauBridgeWatchReady: true }> {
     const request = (listenArgs as { request?: WatchRequestPayload } | undefined)?.request;
     if (!request) {
       return;
@@ -133,6 +142,7 @@ export function createBridgeServer<
       queue.push(event);
     });
     watchUnsubs.set(watchId, unsubscribe);
+    yield { [bridgeWatchReadyMarker]: true };
 
     const cleanup = (): void => {
       const u = watchUnsubs.get(watchId);
@@ -192,5 +202,10 @@ export function createBridgeServer<
     }
   }
 
-  return { emit };
+  return {
+    emit,
+    dispose() {
+      channelServer.dispose('hard-close');
+    },
+  };
 }

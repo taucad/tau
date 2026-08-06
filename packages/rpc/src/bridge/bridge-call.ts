@@ -3,6 +3,7 @@ import { createChannelClient } from '#channel.js';
 import type { Port } from '#port.js';
 import {
   broadcastEvent,
+  isBridgeWatchReadyFrame,
   isBridgeErrorWire,
   messagePortCallTimeout,
   reconstructError,
@@ -27,14 +28,34 @@ export function createBridgeCall<WatchRequestPayload = BridgeWatchRequest, Watch
   call: (method: string, args: unknown[]) => Promise<unknown>;
   listen: (event: string, handler: (data: unknown) => void) => () => void;
   watch: (request: WatchRequestPayload, handler: (event: WatchEventPayload) => void) => () => void;
+  watchReady: (
+    request: WatchRequestPayload,
+    handler: (event: WatchEventPayload) => void,
+  ) => { unsubscribe: () => void; ready: Promise<void> };
+  ready: Promise<void>;
+  hello: { readonly payload: unknown };
   dispose: () => void;
 } {
   const channelClient = createChannelClient({ port, sessionKey: 'bridge' });
 
   const eventListeners = new Map<string, Set<(data: unknown) => void>>();
   const pendingCalls = new Set<{ reject: (error: Error) => void; ac: AbortController }>();
+  const backgroundTasks = new Set<Promise<void>>();
   let disposed = false;
   let broadcastAbort: AbortController | undefined;
+
+  const observeBackgroundTask = async (task: Promise<void>): Promise<void> => {
+    try {
+      await task;
+    } finally {
+      backgroundTasks.delete(task);
+    }
+  };
+
+  const trackBackgroundTask = (task: Promise<void>): void => {
+    backgroundTasks.add(task);
+    void observeBackgroundTask(task);
+  };
 
   const dispatchBroadcastFrame = (eventName: string, eventData: unknown): void => {
     const handlers = eventListeners.get(eventName);
@@ -50,23 +71,24 @@ export function createBridgeCall<WatchRequestPayload = BridgeWatchRequest, Watch
     }
   };
 
+  const consumeBroadcastEvents = async (abort: AbortController): Promise<void> => {
+    try {
+      for await (const raw of channelClient.listen(broadcastEvent, undefined, abort.signal)) {
+        const frame = raw as BroadcastFrame;
+        dispatchBroadcastFrame(frame.event, frame.data);
+      }
+    } catch {
+      // Aborted on dispose: nothing to do.
+    }
+  };
+
   const ensureBroadcastSubscription = (): void => {
     if (broadcastAbort !== undefined || disposed) {
       return;
     }
     const abort = new AbortController();
     broadcastAbort = abort;
-    // async-iife: bootstrap
-    void (async (): Promise<void> => {
-      try {
-        for await (const raw of channelClient.listen(broadcastEvent, undefined, abort.signal)) {
-          const frame = raw as BroadcastFrame;
-          dispatchBroadcastFrame(frame.event, frame.data);
-        }
-      } catch {
-        // Aborted on dispose: nothing to do.
-      }
-    })();
+    trackBackgroundTask(consumeBroadcastEvents(abort));
   };
 
   const dispose = (): void => {
@@ -93,6 +115,13 @@ export function createBridgeCall<WatchRequestPayload = BridgeWatchRequest, Watch
 
     const preparedArgs = options?.prepareCallArgs ? options.prepareCallArgs(method, args) : args;
     const callArgs = wrapAsTransferables(preparedArgs);
+    const resolvedTimeout = options?.resolveCallTimeout?.(method);
+    const callTimeout = resolvedTimeout ?? messagePortCallTimeout;
+    if (callTimeout !== 'none' && (!Number.isFinite(callTimeout) || callTimeout < 0)) {
+      throw new RangeError(
+        `Bridge call timeout must be a finite non-negative number or 'none': ${String(callTimeout)}`,
+      );
+    }
     const ac = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let entry: { reject: (error: Error) => void; ac: AbortController } | undefined;
@@ -100,15 +129,17 @@ export function createBridgeCall<WatchRequestPayload = BridgeWatchRequest, Watch
       return await new Promise<unknown>((resolve, reject) => {
         entry = { reject, ac };
         pendingCalls.add(entry);
-        timer = setTimeout(() => {
-          if (pendingCalls.delete(entry!)) {
-            ac.abort();
-            reject(new Error(`Bridge call '${method}' timed out`));
-          }
-        }, messagePortCallTimeout);
-        channelClient
-          .call(method, callArgs, ac.signal)
-          .then((result) => {
+        if (callTimeout !== 'none') {
+          timer = setTimeout(() => {
+            if (pendingCalls.delete(entry!)) {
+              ac.abort();
+              reject(new Error(`Bridge call '${method}' timed out`));
+            }
+          }, callTimeout);
+        }
+        const settleCall = async (): Promise<void> => {
+          try {
+            const result = await channelClient.call(method, callArgs, ac.signal);
             if (!pendingCalls.delete(entry!)) {
               return;
             }
@@ -117,19 +148,64 @@ export function createBridgeCall<WatchRequestPayload = BridgeWatchRequest, Watch
               return;
             }
             resolve(result);
-          })
-          .catch((error: unknown) => {
+          } catch (error) {
             if (!pendingCalls.delete(entry!)) {
               return;
             }
             reject(error instanceof Error ? error : new Error(String(error)));
-          });
+          }
+        };
+        trackBackgroundTask(settleCall());
       });
     } finally {
       if (timer !== undefined) {
         clearTimeout(timer);
       }
     }
+  };
+
+  const startWatch = (
+    request: WatchRequestPayload,
+    handler: (event: WatchEventPayload) => void,
+  ): { unsubscribe: () => void; ready: Promise<void> } => {
+    const ac = new AbortController();
+    let resolveReady!: () => void;
+    let rejectReady!: (error: Error) => void;
+    let settled = false;
+    const ready = new Promise<void>((resolve, reject) => {
+      resolveReady = resolve;
+      rejectReady = reject;
+    });
+    const consumeWatchEvents = async (): Promise<void> => {
+      try {
+        for await (const raw of channelClient.listen(watchEvent, { request }, ac.signal)) {
+          if (isBridgeWatchReadyFrame(raw)) {
+            if (!settled) {
+              settled = true;
+              resolveReady();
+            }
+            continue;
+          }
+          handler(raw as WatchEventPayload);
+        }
+        if (!settled) {
+          settled = true;
+          rejectReady(new Error('Bridge watch closed before registration'));
+        }
+      } catch (error) {
+        if (!settled) {
+          settled = true;
+          rejectReady(error instanceof Error ? error : new Error(String(error)));
+        }
+      }
+    };
+    trackBackgroundTask(consumeWatchEvents());
+    return {
+      unsubscribe() {
+        ac.abort();
+      },
+      ready,
+    };
   };
 
   return {
@@ -150,21 +226,20 @@ export function createBridgeCall<WatchRequestPayload = BridgeWatchRequest, Watch
       };
     },
     watch(request, handler) {
-      const ac = new AbortController();
-      // async-iife: bootstrap
-      void (async (): Promise<void> => {
+      const handle = startWatch(request, handler);
+      const ignoreReadyFailure = async (): Promise<void> => {
         try {
-          for await (const raw of channelClient.listen(watchEvent, { request }, ac.signal)) {
-            handler(raw as WatchEventPayload);
-          }
+          await handle.ready;
         } catch {
-          // Aborted via the returned unsubscribe; nothing to surface.
+          // Legacy watch callers cannot observe registration failure.
         }
-      })();
-      return () => {
-        ac.abort();
       };
+      trackBackgroundTask(ignoreReadyFailure());
+      return handle.unsubscribe;
     },
+    watchReady: startWatch,
+    ready: channelClient.ready,
+    hello: channelClient.hello,
     dispose,
   };
 }

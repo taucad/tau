@@ -7,6 +7,13 @@ export const messagePortCallTimeout = 30_000;
 
 export const broadcastEvent = 'broadcast';
 export const watchEvent = 'watch';
+export const bridgeWatchReadyMarker = '__tauBridgeWatchReady';
+
+export type BridgeWatchReadyFrame = { readonly [bridgeWatchReadyMarker]: true };
+
+/** Return whether a bridge stream frame acknowledges watch registration. */
+export const isBridgeWatchReadyFrame = (value: unknown): value is BridgeWatchReadyFrame =>
+  value !== null && typeof value === 'object' && (value as Record<string, unknown>)[bridgeWatchReadyMarker] === true;
 
 /** Wire frame carrying a broadcast event name and its payload. */
 export type BroadcastFrame = { event: string; data: unknown };

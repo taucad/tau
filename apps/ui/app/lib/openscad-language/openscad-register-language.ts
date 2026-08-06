@@ -75,7 +75,6 @@ export const openscadContribution: LanguageContribution = {
     const bridgeDisposable = serveLanguageFileSystemRequests(pair.clientSide.server, {
       fileManager: context.fileManager,
       treeService: context.treeService,
-      proxy,
       paths,
       filePoolBuffer: snap.context.filePoolBuffer,
     });

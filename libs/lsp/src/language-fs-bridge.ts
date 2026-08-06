@@ -1,7 +1,6 @@
 import { createJSONRPCErrorResponse } from 'json-rpc-2.0';
 import type { JSONRPCRequest, JSONRPCResponse, JSONRPCServer } from 'json-rpc-2.0';
 import type { FileStat as TauFileStat } from '@taucad/types';
-import type { FileSystemClient } from '@taucad/fs-client/file-system-client';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { SharedPool } from '@taucad/memory';
@@ -32,7 +31,6 @@ export type LanguageFsBridgeFileManager = Readonly<{
 export type ServeLanguageFileSystemOptions = Readonly<{
   fileManager: LanguageFsBridgeFileManager;
   treeService: FileTreeService;
-  proxy: Pick<FileSystemClient, 'searchFiles'>;
   paths: WorkspacePathResolver;
   filePoolBuffer?: SharedArrayBuffer;
 }>;
@@ -162,7 +160,7 @@ export function serveLanguageFileSystemRequests(
     }
 
     try {
-      const hits = options.proxy.searchFiles(options.paths.root, parsed.params.pattern, {
+      const hits = await options.treeService.searchFiles(parsed.params.pattern, {
         maxResults: parsed.params.max,
         includeDirectories: false,
       });

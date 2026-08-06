@@ -19,8 +19,11 @@ function createTestFs(overrides?: { readonly readFile?: (path: string) => Promis
   const paths = new WorkspacePathResolver('/w');
   return {
     fileManager: { readFile },
-    treeService: { stat: vi.fn(), listDirectory: vi.fn() } as unknown as FileTreeService,
-    proxy: { searchFiles: vi.fn().mockReturnValue([]) },
+    treeService: {
+      stat: vi.fn(),
+      listDirectory: vi.fn(),
+      searchFiles: vi.fn().mockResolvedValue([]),
+    } as unknown as FileTreeService,
     paths,
   };
 }

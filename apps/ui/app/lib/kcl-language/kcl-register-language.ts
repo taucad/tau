@@ -195,7 +195,6 @@ async function initializeLsp(monaco: typeof Monaco): Promise<void> {
     fs: {
       fileManager: context.fileManager,
       treeService: context.treeService,
-      proxy,
       paths,
       filePoolBuffer: snap.context.filePoolBuffer,
     },

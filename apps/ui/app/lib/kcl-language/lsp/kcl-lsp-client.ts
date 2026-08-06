@@ -11,7 +11,6 @@
 import type * as LSP from 'vscode-languageserver-protocol';
 import { JSONRPCClient, JSONRPCServer, JSONRPCServerAndClient } from 'json-rpc-2.0';
 import type { JSONRPCRequest } from 'json-rpc-2.0';
-import type { FileSystemClient } from '@taucad/fs-client/file-system-client';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { IntoServer } from '#lib/kcl-language/lsp/codec/into-server.js';
@@ -83,7 +82,6 @@ export type NotificationHandler = (notification: LSP.NotificationMessage) => voi
 export type KclLspFsBridgeOptions = Readonly<{
   fileManager: Pick<FileManagerApi, 'readFile'>;
   treeService: FileTreeService;
-  proxy: Pick<FileSystemClient, 'searchFiles'>;
   paths: WorkspacePathResolver;
   filePoolBuffer?: SharedArrayBuffer;
 }>;
@@ -298,7 +296,6 @@ export class KclLspClient {
     this.languageFsDisposable = serveLanguageFileSystemRequests(this.languageFsServer, {
       fileManager: this.options.fs.fileManager,
       treeService: this.options.fs.treeService,
-      proxy: this.options.fs.proxy,
       paths: this.options.fs.paths,
       filePoolBuffer: this.options.fs.filePoolBuffer,
     });

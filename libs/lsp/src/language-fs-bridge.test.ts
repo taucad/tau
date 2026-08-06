@@ -13,8 +13,7 @@ describe('serveLanguageFileSystemRequests', () => {
     const paths = new WorkspacePathResolver('/w');
     const disposable = serveLanguageFileSystemRequests(server, {
       fileManager: { readFile },
-      treeService: { stat: vi.fn(), listDirectory: vi.fn() } as unknown as FileTreeService,
-      proxy: { searchFiles: vi.fn().mockReturnValue([]) },
+      treeService: { stat: vi.fn(), listDirectory: vi.fn(), searchFiles: vi.fn() } as unknown as FileTreeService,
       paths,
     });
 
@@ -38,8 +37,7 @@ describe('serveLanguageFileSystemRequests', () => {
     const paths = new WorkspacePathResolver('/root');
     const disposable = serveLanguageFileSystemRequests(server, {
       fileManager: { readFile: vi.fn() },
-      treeService: { stat, listDirectory: vi.fn() } as unknown as FileTreeService,
-      proxy: { searchFiles: vi.fn().mockReturnValue([]) },
+      treeService: { stat, listDirectory: vi.fn(), searchFiles: vi.fn() } as unknown as FileTreeService,
       paths,
     });
 
@@ -64,8 +62,7 @@ describe('serveLanguageFileSystemRequests', () => {
     const paths = new WorkspacePathResolver('/root');
     const disposable = serveLanguageFileSystemRequests(server, {
       fileManager: { readFile: vi.fn() },
-      treeService: { stat: vi.fn(), listDirectory } as unknown as FileTreeService,
-      proxy: { searchFiles: vi.fn().mockReturnValue([]) },
+      treeService: { stat: vi.fn(), listDirectory, searchFiles: vi.fn() } as unknown as FileTreeService,
       paths,
     });
 
@@ -85,13 +82,12 @@ describe('serveLanguageFileSystemRequests', () => {
   });
 
   it('fs/findFiles passes max to searchFiles', async () => {
-    const searchFiles = vi.fn().mockReturnValue([{ path: 'out.txt' }]);
+    const searchFiles = vi.fn().mockResolvedValue([{ path: 'out.txt' }]);
     const server = new JSONRPCServer();
     const paths = new WorkspacePathResolver('/root');
     const disposable = serveLanguageFileSystemRequests(server, {
       fileManager: { readFile: vi.fn() },
-      treeService: { stat: vi.fn(), listDirectory: vi.fn() } as unknown as FileTreeService,
-      proxy: { searchFiles },
+      treeService: { stat: vi.fn(), listDirectory: vi.fn(), searchFiles } as unknown as FileTreeService,
       paths,
     });
 
@@ -102,7 +98,7 @@ describe('serveLanguageFileSystemRequests', () => {
       params: { pattern: '*.scad', max: 12 },
     });
 
-    expect(searchFiles).toHaveBeenCalledWith('/root', '*.scad', { maxResults: 12, includeDirectories: false });
+    expect(searchFiles).toHaveBeenCalledWith('*.scad', { maxResults: 12, includeDirectories: false });
     expect(response && 'result' in response && response.result).toEqual(['out.txt']);
     disposable.dispose();
   });
@@ -112,8 +108,7 @@ describe('serveLanguageFileSystemRequests', () => {
     const paths = new WorkspacePathResolver('/root');
     const disposable = serveLanguageFileSystemRequests(server, {
       fileManager: { readFile: vi.fn() },
-      treeService: { stat: vi.fn(), listDirectory: vi.fn() } as unknown as FileTreeService,
-      proxy: { searchFiles: vi.fn().mockReturnValue([]) },
+      treeService: { stat: vi.fn(), listDirectory: vi.fn(), searchFiles: vi.fn() } as unknown as FileTreeService,
       paths,
     });
 

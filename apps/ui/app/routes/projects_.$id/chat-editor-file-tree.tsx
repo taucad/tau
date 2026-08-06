@@ -380,10 +380,9 @@ export const ChatEditorFileTree = memo(function ({
   const lastSyncedActiveFilePathRef = useRef<string | undefined>(undefined);
 
   /**
-   * Overwrite-confirm dialog state. We surface the dialog from
-   * `onDrop` / `onRename` when the worker reports `NAME_EXISTS` via
-   * the `canMove` / `canRename` preflight; the resolver re-issues the
-   * mutation with `{ overwrite: true }` when the user picks "Replace".
+   * Overwrite-confirm dialog state for create and upload flows. Moves and
+   * renames reject collisions because their storage operation has no truthful
+   * replacement contract.
    *
    * `sessionRememberRef.current` is the "Do not ask again for this
    * session" affordance — once the user opts in for a multi-drag we
@@ -644,32 +643,16 @@ export const ChatEditorFileTree = memo(function ({
       const newPath = parts.join('/');
       const wasExpanded = item.isFolder() && item.isExpanded();
 
-      // R6 preflight: `canRename` validates `newName` + collision against the
-      // worker's authoritative view before mutating. On `NAME_EXISTS` we route
-      // through the R8 overwrite-confirm dialog; every other typed error is
-      // surfaced as a copy-registry toast and the rename aborts.
+      // Validate the basename and destination against the worker's authoritative
+      // view. Every collision remains non-destructive and aborts the rename.
       const preflight = await canRename(oldPath, newName);
-      let overwriteApproved = false;
       if (preflight !== true) {
-        if (isWorkspaceMutationErrorLike(preflight) && preflight.code === 'NAME_EXISTS') {
-          const decision = await requestOverwriteConfirm([newPath]);
-          if (decision.choice !== 'overwrite') {
-            return;
-          }
-          overwriteApproved = true;
-        } else {
-          surfacePreflightError(preflight as WorkspaceMutationErrorLike);
-          return;
-        }
+        surfacePreflightError(preflight as WorkspaceMutationErrorLike);
+        return;
       }
 
       try {
-        if (overwriteApproved) {
-          const { contentService: cs } = await fileManager.whenServicesReady();
-          await cs.move(oldPath, newPath, { overwrite: true });
-        } else {
-          await renameFile(oldPath, newPath);
-        }
+        await renameFile(oldPath, newPath);
         if (wasExpanded) {
           setExpandedItems((previous) => {
             const withoutOld = previous.filter((p) => p !== oldPath);
@@ -680,7 +663,7 @@ export const ChatEditorFileTree = memo(function ({
         toast.error(`Rename failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     },
-    [canRename, fileManager, renameFile, requestOverwriteConfirm, surfacePreflightError],
+    [canRename, renameFile, surfacePreflightError],
   );
 
   // Initialize headless-tree
@@ -706,13 +689,10 @@ export const ChatEditorFileTree = memo(function ({
     indent: 16,
     async onDrop(draggedItems, target) {
       // Handle drag-and-drop by moving items into the target folder.
-      // R6 preflight + R7 bulkMove + R8 overwrite dialog in one path:
+      // Preflight and then execute truthful sequential moves:
       //   1. Compute the (source → target) edit set, skipping bundled-types and no-ops.
-      //   2. Preflight every edit via `canMove`. Any non-`NAME_EXISTS` error aborts the
-      //      whole batch with a toast (consistent with VS Code's drag-validation pattern).
-      //   3. Collect every `NAME_EXISTS` collision and raise a single overwrite-confirm
-      //      dialog naming all targets so the user only acts once for a multi-drag.
-      //   4. Issue one atomic `bulkMove` with `{ overwrite }` set per the dialog result.
+      //   2. Abort on any typed preflight error, including collisions.
+      //   3. Issue `bulkMove`; completed and failed edits are reported exactly.
       //      The resulting `directoryRenamed` / `fileRenamed` ContentChangeEvents flow
       //      through `file-operation-participants.ts` and update every consumer machine.
       const targetPath = target.item.getId();
@@ -734,34 +714,17 @@ export const ChatEditorFileTree = memo(function ({
         return;
       }
 
-      const collisions: string[] = [];
       const preflightResults = await Promise.all(edits.map(async (edit) => canMove(edit.source, edit.target)));
-      for (const [index, result] of preflightResults.entries()) {
+      for (const result of preflightResults) {
         if (result === true) {
-          continue;
-        }
-        if (isWorkspaceMutationErrorLike(result) && result.code === 'NAME_EXISTS') {
-          const edit = edits[index];
-          if (edit !== undefined) {
-            collisions.push(edit.target);
-          }
           continue;
         }
         surfacePreflightError(result as WorkspaceMutationErrorLike);
         return;
       }
 
-      let overwriteApproved = false;
-      if (collisions.length > 0) {
-        const decision = await requestOverwriteConfirm(collisions);
-        if (decision.choice !== 'overwrite') {
-          return;
-        }
-        overwriteApproved = true;
-      }
-
       try {
-        const result = await bulkMove(edits, overwriteApproved ? { overwrite: true } : undefined);
+        const result = await bulkMove(edits);
         if (result.failed.length > 0) {
           const first = result.failed[0];
           if (first !== undefined && isWorkspaceMutationErrorLike(first.error)) {

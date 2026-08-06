@@ -18,8 +18,9 @@
  * @internal
  */
 
-import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
+import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.types.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
+import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 
 /**
  * Internal discriminated filesystem handle. The transport plane reads this
@@ -47,8 +48,7 @@ export type RuntimeFileSystemHandle =
   | { readonly kind: 'inline'; readonly create: () => RuntimeFileSystemBase }
   | {
       readonly kind: 'channel';
-      readonly port: MessagePort;
-      readonly dispose?: () => void;
+      readonly create: () => FileSystemBridgeConnection;
     };
 
 /* Module-private symbol — not exported, so external callers cannot

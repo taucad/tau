@@ -37,10 +37,7 @@ import type { GeometryTransport, RuntimeInitializeResult, RuntimeProtocol } from
 import { allocatePools } from '#transport/_internal/sab-pools.js';
 import { triggerAbort } from '#transport/_internal/abort-channel.js';
 import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
-import {
-  RuntimeFileSystemBridgeConsumedError,
-  buildFileSystemBridge,
-} from '#transport/_internal/file-system-bridge.js';
+import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 import { nodeWorkerId } from '#transport/_internal/node-worker-id.js';
 import type { NodeWorkerId } from '#transport/_internal/node-worker-id.js';
 
@@ -186,7 +183,6 @@ export const nodeWorkerClient = (
   };
 
   let bridge: ReturnType<typeof buildFileSystemBridge>;
-  let bridgeConsumedByFailedInitialize = false;
   let openPromise: Promise<TransportClientReady> | undefined;
   let worker: NodeWorkerLike | undefined;
   let port: Port<unknown> | undefined;
@@ -236,9 +232,6 @@ export const nodeWorkerClient = (
       if (!channel) {
         throw new Error('nodeWorkerTransport: channel unavailable after open()');
       }
-      if (bridgeConsumedByFailedInitialize && bridge?.kind === 'channel') {
-        throw new RuntimeFileSystemBridgeConsumedError('nodeWorkerTransport');
-      }
       bridge ??= buildFileSystemBridge(options.fileSystem);
       const pooled = ensurePools();
       const memoryHandle: RuntimeInitializeMemoryHandle = {
@@ -254,18 +247,14 @@ export const nodeWorkerClient = (
           'initialize',
           transferables.length > 0 ? { value: args, transferables } : args,
         );
-        bridgeConsumedByFailedInitialize = false;
         return result;
       } catch (error) {
-        if (bridge?.kind === 'inline') {
+        if (bridge) {
           try {
             bridge.dispose();
           } finally {
             bridge = undefined;
-            bridgeConsumedByFailedInitialize = false;
           }
-        } else if (bridge?.kind === 'channel') {
-          bridgeConsumedByFailedInitialize = true;
         }
         throw error;
       }

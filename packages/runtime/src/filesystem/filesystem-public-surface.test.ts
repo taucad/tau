@@ -28,6 +28,7 @@ const forbiddenNames = [
   'filesystemBridgeConnectMessageType',
   'waitForWorkerReady',
   'workerReadyMessageType',
+  'createRuntimeFileSystem',
 ] as const;
 
 describe('@taucad/runtime/filesystem public surface (R16)', () => {

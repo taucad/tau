@@ -4,7 +4,7 @@
  *
  * - `kind: 'inline'`  → wrap in a fresh `BridgePort` so the worker can
  *                       consume it via the same proxy plumbing.
- * - `kind: 'channel'` → forward the supplied port verbatim.
+ * - `kind: 'channel'` → open a fresh remote connection for this binding.
  *
  * Returns `undefined` when no filesystem was supplied (`fileSystem ===
  * undefined`); transports degrade to whatever default FS the worker
@@ -28,30 +28,6 @@ export type ResolvedFileSystemBridge = {
   readonly dispose: () => void;
 };
 
-/**
- * Error raised when retrying initialize with a channel-backed filesystem whose
- * transferable port was already consumed by a failed initialize call.
- *
- * @internal
- */
-export class RuntimeFileSystemBridgeConsumedError extends Error {
-  /**
-   * Stable diagnostic code for retry attempts that reuse a consumed bridge port.
-   *
-   * @returns Stable runtime diagnostic code.
-   */
-  public get code(): 'RUNTIME_FILESYSTEM_BRIDGE_CONSUMED' {
-    return 'RUNTIME_FILESYSTEM_BRIDGE_CONSUMED';
-  }
-
-  public constructor(transportName: string) {
-    super(
-      `${transportName}: filesystem bridge port was consumed by a failed initialize call. Recreate the RuntimeClient before retrying this transport.`,
-    );
-    this.name = 'RuntimeFileSystemBridgeConsumedError';
-  }
-}
-
 export const buildFileSystemBridge = (fs: RuntimeFileSystem | undefined): ResolvedFileSystemBridge | undefined => {
   if (!fs) {
     return undefined;
@@ -63,7 +39,13 @@ export const buildFileSystemBridge = (fs: RuntimeFileSystem | undefined): Resolv
      * calls this once, so each `RuntimeClient` owns an isolated inline
      * filesystem instance — no shared mutable state across clients
      * built from the same `inProcessTransport({ runtime, fileSystem })` plugin. */
-    const bridge = createBridgePort(handle.create());
+    const fileSystem = handle.create();
+    const bridge = createBridgePort(fileSystem, {
+      hello: {
+        capabilities: fileSystem.capabilities,
+        watchable: typeof fileSystem.watch === 'function',
+      },
+    });
     return {
       port: bridge.port,
       kind: 'inline',
@@ -72,11 +54,12 @@ export const buildFileSystemBridge = (fs: RuntimeFileSystem | undefined): Resolv
       },
     };
   }
+  const connection = handle.create();
   return {
-    port: handle.port,
+    port: connection.port,
     kind: 'channel',
     dispose: () => {
-      handle.dispose?.();
+      connection.dispose();
     },
   };
 };

@@ -623,12 +623,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
      *    cross-process topologies).
      * 3. Neither: filesystem stays undefined; kernel runs without FS. */
     if (input.transferables.inlineFileSystem) {
+      input.transferables.fileSystemPort?.close();
       this.fileSystem = adaptInlineFileSystem(input.transferables.inlineFileSystem);
       this._filesystem = this.createFileSystem();
     } else if (input.transferables.fileSystemPort) {
-      this.fileSystem = await createWorkerFileSystemProxy(input.transferables.fileSystemPort, {
-        filePool: this._filePool,
-      });
+      this.fileSystem = await createWorkerFileSystemProxy(input.transferables.fileSystemPort);
       this._filesystem = this.createFileSystem();
     }
 

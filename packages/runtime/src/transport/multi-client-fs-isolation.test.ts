@@ -93,7 +93,7 @@ describe('multi-client filesystem isolation (spec/instance harmonisation)', () =
     const fakeBaseFactory = vi.fn((): RuntimeFileSystemBase => {
       const base: RuntimeFileSystemBase = {
         id: 'runtime:test-counted',
-        capabilities: { persistent: false, writable: true, quotaBased: false, caseSensitive: true },
+        capabilities: { persistent: false, writable: true, quotaBased: false },
         dispose() {
           /* Stub dispose — `create()`-count assertion does not exercise lifecycle. */
         },

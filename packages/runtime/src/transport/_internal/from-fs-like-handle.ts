@@ -21,6 +21,7 @@ import type { NativeStats } from '@taucad/types';
 import { toFileStat } from '@taucad/types/constants';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import type { RuntimeFileSystemHandle } from '#transport/_internal/runtime-filesystem-handle.js';
+import { resolveVirtualPath } from '@taucad/utils/path';
 
 /**
  * Minimal interface for any fs-compatible object with a `promises` namespace.
@@ -31,6 +32,7 @@ import type { RuntimeFileSystemHandle } from '#transport/_internal/runtime-files
  * @public
  */
 export type FsLike = {
+  /** Filesystem methods that receive paths within this already-confined filesystem. Runtime `/` is its root. */
   promises: {
     readFile(path: string, encoding: 'utf8'): Promise<string>;
     readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
@@ -47,34 +49,27 @@ export type FsLike = {
 
 /**
  * Internal: produce the discriminated `inline`-arm handle backing the
- * public `fromFsLike` factory. Captures `fsLike` and `rootPath` in the
+ * public `fromFsLike` factory. Captures the already-rooted `fsLike` in the
  * spec closure; each `create()` invocation builds a fresh
  * `RuntimeFileSystemBase` adapter targeting the same backing object.
  *
  * @internal
  * @param fsLike - An fs-compatible object with a `promises` namespace.
- * @param rootPath - Optional root path prefix for all operations.
  */
-export function _fromFsLikeHandle(fsLike: FsLike, rootPath = '/'): RuntimeFileSystemHandle {
+export function _fromFsLikeHandle(fsLike: FsLike): RuntimeFileSystemHandle {
   return {
     kind: 'inline',
-    create: () => buildFsLikeBase(fsLike, rootPath),
+    create: () => buildFsLikeBase(fsLike),
   };
 }
 
 /**
  * Build a fresh `RuntimeFileSystemBase` adapter wrapping the supplied
- * `fsLike` rooted at `rootPath`. Per-binding adapter; underlying
+ * already-rooted `fsLike`. Per-binding adapter; underlying
  * `fsLike` is shared by reference (the user owns its lifecycle).
  */
-function buildFsLikeBase(fsLike: FsLike, rootPath: string): RuntimeFileSystemBase {
-  const resolve = (p: string): string => {
-    if (rootPath === '/') {
-      return p;
-    }
-
-    return p.startsWith('/') ? `${rootPath}${p}` : `${rootPath}/${p}`;
-  };
+function buildFsLikeBase(fsLike: FsLike): RuntimeFileSystemBase {
+  const resolve = (path: string): string => resolveVirtualPath(path);
 
   function readFile(path: string, encoding: 'utf8'): Promise<string>;
   function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
@@ -89,7 +84,7 @@ function buildFsLikeBase(fsLike: FsLike, rootPath: string): RuntimeFileSystemBas
 
   return {
     id: 'runtime:fs-like',
-    capabilities: { persistent: true, writable: true, quotaBased: false, caseSensitive: true },
+    capabilities: { persistent: true, writable: true, quotaBased: false },
     dispose() {
       /* The host FsLike owns the filesystem lifecycle; nothing for us to do here. */
     },
@@ -114,18 +109,25 @@ function buildFsLikeBase(fsLike: FsLike, rootPath: string): RuntimeFileSystemBas
       await fsLike.promises.rmdir(resolve(directoryPath));
     },
     async rename(oldPath: string, newPath: string): Promise<void> {
-      await fsLike.promises.rename(resolve(oldPath), resolve(newPath));
+      const resolvedOldPath = resolve(oldPath);
+      const resolvedNewPath = resolve(newPath);
+      await fsLike.promises.rename(resolvedOldPath, resolvedNewPath);
     },
     async lstat(filePath: string) {
       const stats = await fsLike.promises.lstat(resolve(filePath));
       return toFileStat(stats);
     },
     async exists(filePath: string): Promise<boolean> {
+      const resolvedPath = resolve(filePath);
       try {
-        await fsLike.promises.stat(resolve(filePath));
+        await fsLike.promises.stat(resolvedPath);
         return true;
-      } catch {
-        return false;
+      } catch (error) {
+        const { code } = error as NodeJS.ErrnoException;
+        if (code === 'ENOENT' || code === 'ENOTDIR') {
+          return false;
+        }
+        throw error;
       }
     },
   };

@@ -24,10 +24,12 @@ describe('extractInlineFileSystem (R2)', () => {
     const pair = new MessageChannel();
     const channelFs = wrapAsRuntimeFileSystem({
       kind: 'channel',
-      port: pair.port2,
-      dispose(): void {
-        pair.port2.close();
-      },
+      create: () => ({
+        port: pair.port2,
+        dispose(): void {
+          pair.port2.close();
+        },
+      }),
     });
 
     expect(() => extractInlineFileSystem(channelFs)).toThrow(TypeError);

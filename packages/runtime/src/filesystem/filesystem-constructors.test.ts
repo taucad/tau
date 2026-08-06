@@ -19,6 +19,12 @@ function makeFs(): RuntimeFileSystemBase {
 
 describe('filesystem constructors', () => {
   describe('fromMemoryFS', () => {
+    it('should not fabricate watch support', () => {
+      const fileSystem = makeFs();
+
+      expect(fileSystem.watch).toBeUndefined();
+    });
+
     it('should mkdir and create all parent directories', async () => {
       const fileSystem = makeFs();
 

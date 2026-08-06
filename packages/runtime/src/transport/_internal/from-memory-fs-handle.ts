@@ -22,6 +22,7 @@
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import type { RuntimeFileSystemHandle } from '#transport/_internal/runtime-filesystem-handle.js';
 import { fileStatFromBytes } from '@taucad/filesystem';
+import { resolveVirtualPath } from '@taucad/utils/path';
 
 function enoent(message: string): Error {
   const error = new Error(message);
@@ -62,8 +63,9 @@ function buildMemoryFsBase(seedFiles: Record<string, string> | undefined): Runti
 
   if (seedFiles) {
     for (const [filePath, content] of Object.entries(seedFiles)) {
-      store.set(filePath, content);
-      const parts = filePath.split('/');
+      const canonicalPath = resolveVirtualPath(filePath);
+      store.set(canonicalPath, content);
+      const parts = canonicalPath.split('/');
       for (let i = 1; i < parts.length; i++) {
         directories.add(parts.slice(0, i).join('/'));
       }
@@ -78,9 +80,10 @@ function buildMemoryFsBase(seedFiles: Record<string, string> | undefined): Runti
   function readFile(path: string, encoding: 'utf8'): Promise<string>;
   function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   async function readFile(filePath: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
-    const content = store.get(filePath);
+    const canonicalPath = resolveVirtualPath(filePath);
+    const content = store.get(canonicalPath);
     if (content === undefined) {
-      throw enoent(`ENOENT: no such file: ${filePath}`);
+      throw enoent(`ENOENT: no such file: ${canonicalPath}`);
     }
 
     if (encoding === 'utf8') {
@@ -95,28 +98,31 @@ function buildMemoryFsBase(seedFiles: Record<string, string> | undefined): Runti
 
   return {
     id: 'runtime:memory',
-    capabilities: { persistent: false, writable: true, quotaBased: false, caseSensitive: true },
+    capabilities: { persistent: false, writable: true, quotaBased: false },
     dispose() {
       store.clear();
       directories.clear();
     },
     readFile,
     async writeFile(filePath, data) {
-      store.set(filePath, data);
-      const parts = filePath.split('/');
+      const canonicalPath = resolveVirtualPath(filePath);
+      store.set(canonicalPath, data);
+      const parts = canonicalPath.split('/');
       for (let i = 1; i < parts.length; i++) {
         directories.add(parts.slice(0, i).join('/'));
       }
     },
     async mkdir(directoryPath) {
-      directories.add(directoryPath);
-      const parts = directoryPath.split('/');
+      const canonicalPath = resolveVirtualPath(directoryPath);
+      directories.add(canonicalPath);
+      const parts = canonicalPath.split('/');
       for (let i = 1; i < parts.length; i++) {
         directories.add(parts.slice(0, i).join('/'));
       }
     },
     async readdir(directoryPath) {
-      const prefix = directoryPath.endsWith('/') ? directoryPath : `${directoryPath}/`;
+      const canonicalPath = resolveVirtualPath(directoryPath);
+      const prefix = canonicalPath === '/' ? '/' : `${canonicalPath}/`;
       const entries = new Set<string>();
       for (const key of store.keys()) {
         if (key.startsWith(prefix)) {
@@ -137,51 +143,56 @@ function buildMemoryFsBase(seedFiles: Record<string, string> | undefined): Runti
       return [...entries].filter(Boolean);
     },
     async unlink(filePath) {
-      store.delete(filePath);
+      store.delete(resolveVirtualPath(filePath));
     },
     async stat(filePath) {
-      if (store.has(filePath)) {
-        const content = store.get(filePath)!;
+      const canonicalPath = resolveVirtualPath(filePath);
+      if (store.has(canonicalPath)) {
+        const content = store.get(canonicalPath)!;
         const bytes = typeof content === 'string' ? encoder.encode(content) : content;
         return fileStatFromBytes(bytes, Date.now());
       }
 
-      if (directories.has(filePath)) {
+      if (directories.has(canonicalPath)) {
         return { type: 'dir', size: 0, mtimeMs: Date.now() };
       }
 
-      throw new Error(`ENOENT: no such file or directory: ${filePath}`);
+      throw enoent(`ENOENT: no such file or directory: ${canonicalPath}`);
     },
     async rmdir(directoryPath) {
-      directories.delete(directoryPath);
+      directories.delete(resolveVirtualPath(directoryPath));
     },
     async rename(oldPath, newPath) {
-      const content = store.get(oldPath);
+      const canonicalOldPath = resolveVirtualPath(oldPath);
+      const canonicalNewPath = resolveVirtualPath(newPath);
+      const content = store.get(canonicalOldPath);
       if (content !== undefined) {
-        store.set(newPath, content);
-        store.delete(oldPath);
-      } else if (directories.has(oldPath)) {
-        directories.delete(oldPath);
-        directories.add(newPath);
+        store.set(canonicalNewPath, content);
+        store.delete(canonicalOldPath);
+      } else if (directories.has(canonicalOldPath)) {
+        directories.delete(canonicalOldPath);
+        directories.add(canonicalNewPath);
       } else {
-        throw enoent(`ENOENT: no such file or directory: ${oldPath}`);
+        throw enoent(`ENOENT: no such file or directory: ${canonicalOldPath}`);
       }
     },
     async lstat(filePath) {
-      if (store.has(filePath)) {
-        const content = store.get(filePath)!;
+      const canonicalPath = resolveVirtualPath(filePath);
+      if (store.has(canonicalPath)) {
+        const content = store.get(canonicalPath)!;
         const bytes = typeof content === 'string' ? encoder.encode(content) : content;
         return fileStatFromBytes(bytes, Date.now());
       }
 
-      if (directories.has(filePath)) {
+      if (directories.has(canonicalPath)) {
         return { type: 'dir', size: 0, mtimeMs: Date.now() };
       }
 
-      throw enoent(`ENOENT: no such file or directory: ${filePath}`);
+      throw enoent(`ENOENT: no such file or directory: ${canonicalPath}`);
     },
     async exists(filePath) {
-      return store.has(filePath) || directories.has(filePath);
+      const canonicalPath = resolveVirtualPath(filePath);
+      return store.has(canonicalPath) || directories.has(canonicalPath);
     },
   };
 }

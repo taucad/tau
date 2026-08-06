@@ -13,8 +13,4 @@ export { fromMemoryFs, fromFsLike, fromFileSystemBridge, isRuntimeFileSystem } f
 export type { FsLike, RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 export { fromBrowserFs } from '#filesystem/from-browser-fs.js';
 
-// Enhanced filesystem wrapper — used by kernel authors composing their own
-// `RuntimeFileSystemBase` implementations.
-export { createRuntimeFileSystem } from '#filesystem/create-runtime-filesystem.js';
-
 export { runtimeFileSystemSchema } from '#filesystem/runtime-filesystem.schemas.js';

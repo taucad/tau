@@ -26,7 +26,8 @@ import type {
 } from '#transport/runtime-transport.types.js';
 import { runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
-import { extractInlineFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
+import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
+import { resolveRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
 import { allocatePools } from '#transport/_internal/sab-pools.js';
 import type { AllocatedPools } from '#transport/_internal/sab-pools.js';
@@ -91,8 +92,10 @@ export const inProcessClient = (
   if (fileSystem !== undefined && !isRuntimeFileSystem(fileSystem)) {
     throw new TypeError('inProcessTransport: `fileSystem` must be produced by a `fromX` factory');
   }
-  const inlineFileSystem = extractInlineFileSystem(fileSystem);
+  const fileSystemHandle = fileSystem === undefined ? undefined : resolveRuntimeFileSystem(fileSystem);
+  const inlineFileSystem = fileSystemHandle?.kind === 'inline' ? fileSystemHandle.create() : undefined;
 
+  let bridge: ReturnType<typeof buildFileSystemBridge>;
   let pooled: AllocatedPools | undefined;
   let channelPair: MessageChannel | undefined;
   let wrappedClientPort: ReturnType<typeof wrapMessagePort<unknown>> | undefined;
@@ -228,12 +231,28 @@ export const inProcessClient = (
       if (!channel || !pooled) {
         throw new Error('inProcessTransport: channel unavailable after open()');
       }
+      if (fileSystemHandle?.kind === 'channel') {
+        bridge ??= buildFileSystemBridge(fileSystem);
+      }
       const memoryHandle: RuntimeInitializeMemoryHandle = {
         ...(pooled.signalBuffer ? { signalBuffer: pooled.signalBuffer } : {}),
         ...(pooled.geometryPoolBuffer ? { geometryPoolBuffer: pooled.geometryPoolBuffer } : {}),
         ...(pooled.filePoolBuffer ? { filePoolBuffer: pooled.filePoolBuffer } : {}),
+        ...(bridge ? { fileSystemPort: bridge.port } : {}),
       };
-      return channel.call('initialize', { ...input, memoryHandle });
+      const args = { ...input, memoryHandle };
+      try {
+        return await channel.call('initialize', bridge ? { value: args, transferables: [bridge.port] } : args);
+      } catch (error) {
+        if (bridge) {
+          try {
+            bridge.dispose();
+          } finally {
+            bridge = undefined;
+          }
+        }
+        throw error;
+      }
     },
     abort(reason): void {
       if (!channel || !pooled) {
@@ -261,6 +280,11 @@ export const inProcessClient = (
       }
       try {
         wrappedHostPort?.close();
+      } catch {
+        /* Best-effort */
+      }
+      try {
+        bridge?.dispose();
       } catch {
         /* Best-effort */
       }

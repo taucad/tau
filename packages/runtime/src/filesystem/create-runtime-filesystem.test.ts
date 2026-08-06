@@ -131,67 +131,25 @@ describe('createRuntimeFileSystem', () => {
       const exists = await fs.exists('/a/b/c');
       expect(exists).toBe(true);
     });
-  });
 
-  describe('override support', () => {
-    it('should use supplied readFiles override instead of default', async () => {
-      const customReadFiles = vi.fn().mockResolvedValue({ '/x': new Uint8Array([99]) });
-      const base = makeFs({ '/x': 'original' });
-      const fs = createRuntimeFileSystem({
-        ...base,
-        readFiles: customReadFiles,
-      });
+    it('propagates non-absence errors without attempting mkdir', async () => {
+      const base = makeFs();
+      const denied = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+      vi.spyOn(base, 'stat').mockRejectedValueOnce(denied);
+      const mkdirSpy = vi.spyOn(base, 'mkdir');
+      const fs = createRuntimeFileSystem(base);
 
-      const result = await fs.readFiles(['/x']);
-      expect(customReadFiles).toHaveBeenCalledWith(['/x']);
-      expect(result).toEqual({ '/x': new Uint8Array([99]) });
+      await expect(fs.ensureDir('/denied')).rejects.toBe(denied);
+      expect(mkdirSpy).not.toHaveBeenCalled();
     });
 
-    it('should use supplied ensureDir override instead of default', async () => {
-      const customEnsureDirectory = vi.fn().mockResolvedValue(undefined);
-      const base = makeFs();
-      const fs = createRuntimeFileSystem({
-        ...base,
-        ensureDir: customEnsureDirectory,
-      });
+    it('rejects a file-kind conflict without attempting mkdir', async () => {
+      const base = makeFs({ '/occupied': 'file' });
+      const mkdirSpy = vi.spyOn(base, 'mkdir');
+      const fs = createRuntimeFileSystem(base);
 
-      await fs.ensureDir('/custom/path');
-      expect(customEnsureDirectory).toHaveBeenCalledWith('/custom/path');
-    });
-
-    it('should use supplied readdirContents override instead of default', async () => {
-      const customReaddirContents = vi.fn().mockResolvedValue({ 'file.txt': new Uint8Array([1]) });
-      const base = makeFs();
-      const fs = createRuntimeFileSystem({
-        ...base,
-        readdirContents: customReaddirContents,
-      });
-
-      const result = await fs.readdirContents('/dir');
-      expect(customReaddirContents).toHaveBeenCalledWith('/dir');
-      expect(result).toEqual({ 'file.txt': new Uint8Array([1]) });
-    });
-
-    it('should use supplied readdirStat override instead of default', async () => {
-      const mockEntries = [
-        {
-          path: '/d/f',
-          name: 'f',
-          type: 'file',
-          size: 5,
-          mtimeMs: 123,
-        },
-      ];
-      const customReaddirStat = vi.fn().mockResolvedValue(mockEntries);
-      const base = makeFs();
-      const fs = createRuntimeFileSystem({
-        ...base,
-        readdirStat: customReaddirStat,
-      });
-
-      const result = await fs.readdirStat('/d');
-      expect(customReaddirStat).toHaveBeenCalledWith('/d');
-      expect(result).toEqual(mockEntries);
+      await expect(fs.ensureDir('/occupied')).rejects.toMatchObject({ code: 'EEXIST' });
+      expect(mkdirSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -212,18 +170,18 @@ describe('createRuntimeFileSystem', () => {
     });
   });
 
-  describe('delegation to FileSystemService', () => {
-    it('routes provider primitives through the canonical Layer 2 service', async () => {
+  describe('canonical primitive decoration', () => {
+    it('canonicalizes paths before delegating to the base provider', async () => {
       const base = makeFs({ '/seed.txt': 'seeded' });
       const readSpy = vi.spyOn(base, 'readFile');
       const writeSpy = vi.spyOn(base, 'writeFile');
       const fs = createRuntimeFileSystem(base);
 
-      await fs.writeFile('/created.txt', 'value');
+      await fs.writeFile('/nested/../created.txt', 'value');
       expect(writeSpy).toHaveBeenCalledWith('/created.txt', 'value');
 
-      expect(await fs.readFile('/seed.txt', 'utf8')).toBe('seeded');
-      expect(readSpy).toHaveBeenCalledWith('/seed.txt');
+      expect(await fs.readFile('/nested/../seed.txt', 'utf8')).toBe('seeded');
+      expect(readSpy).toHaveBeenCalledWith('/seed.txt', 'utf8');
     });
 
     it('preserves the base provider identity and capabilities on the facade', () => {
@@ -234,20 +192,13 @@ describe('createRuntimeFileSystem', () => {
       expect(fs.capabilities).toEqual(base.capabilities);
     });
 
-    it('forwards base.watch when present', () => {
+    it('keeps provider watch on the transport boundary', () => {
       const base = makeFs();
       const watch = vi.fn(() => () => undefined);
       const fs = createRuntimeFileSystem({ ...base, watch });
 
-      const handler = vi.fn();
-      fs.watch?.({ paths: ['/'] }, handler);
-      expect(watch).toHaveBeenCalledWith({ paths: ['/'] }, handler);
-    });
-
-    it('omits watch when the base provider does not implement it', () => {
-      const base = makeFs();
-      const fs = createRuntimeFileSystem(base);
-      expect(fs.watch).toBeUndefined();
+      expect('watch' in fs).toBe(false);
+      expect(watch).not.toHaveBeenCalled();
     });
   });
 });

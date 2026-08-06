@@ -5,6 +5,8 @@ import { nodeWorkerClient } from '#transport/node-worker-client.js';
 import type { RuntimeInitializePayload } from '#transport/runtime-transport.types.js';
 import { webWorkerClient } from '#transport/web-worker-client.js';
 import { wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
+import { inProcessClient } from '#transport/in-process-client.js';
+import { defineRuntime } from '#worker/runtime-definition.js';
 
 const mocks = vi.hoisted(() => {
   const channel = {
@@ -74,15 +76,21 @@ const createNodeWorkerCtor = () => {
 };
 
 const createChannelBackedFileSystem = () => {
-  const channel = new MessageChannel();
-  return wrapAsRuntimeFileSystem({
-    kind: 'channel',
-    port: channel.port1,
-    dispose() {
-      channel.port1.close();
-      channel.port2.close();
-    },
+  const openConnection = vi.fn(() => {
+    const channel = new MessageChannel();
+    return {
+      port: channel.port1,
+      dispose() {
+        channel.port1.close();
+        channel.port2.close();
+      },
+    };
   });
+  const fileSystem = wrapAsRuntimeFileSystem({
+    kind: 'channel',
+    create: openConnection,
+  });
+  return { fileSystem, openConnection };
 };
 
 const initializePayload = {
@@ -119,31 +127,31 @@ describe('worker transport initialize filesystem bridge retries', () => {
     await client.close();
   });
 
-  it('should report a terminal web-worker diagnostic for consumed channel filesystem bridges', async () => {
+  it('should open a fresh channel filesystem bridge after failed web-worker initialize', async () => {
+    const { fileSystem, openConnection } = createChannelBackedFileSystem();
     const client = webWorkerClient({
       createWorker: createWebWorker,
-      fileSystem: createChannelBackedFileSystem(),
+      fileSystem,
     });
-    mocks.channel.call.mockRejectedValueOnce(new Error('Invalid runtime config'));
+    mocks.channel.call.mockRejectedValueOnce(new Error('Invalid runtime config')).mockResolvedValueOnce({});
 
     await expect(client.initialize(initializePayload)).rejects.toThrow('Invalid runtime config');
-    try {
-      await client.initialize(initializePayload);
-      expect.fail('should reject consumed channel filesystem bridge retry');
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).name).toBe('RuntimeFileSystemBridgeConsumedError');
-      expect((error as Error).message).toContain('webWorkerTransport');
-      expect((error as Error).message).toContain('Recreate the RuntimeClient');
-      expect((error as { code?: string }).code).toBe('RUNTIME_FILESYSTEM_BRIDGE_CONSUMED');
-    }
-    expect(mocks.channel.call).toHaveBeenCalledTimes(1);
+    await expect(client.initialize(initializePayload)).resolves.toEqual({});
+
+    expect(mocks.channel.call).toHaveBeenCalledTimes(2);
+    expect(openConnection).toHaveBeenCalledTimes(2);
+    const firstPayload = mocks.channel.call.mock.calls[0]?.[1] as InitializeCallPayload;
+    const secondPayload = mocks.channel.call.mock.calls[1]?.[1] as InitializeCallPayload;
+    expect(secondPayload.value?.memoryHandle?.fileSystemPort).not.toBe(
+      firstPayload.value?.memoryHandle?.fileSystemPort,
+    );
     await client.close();
   });
 
   it('should rebuild inline node-worker filesystem bridges after failed initialize', async () => {
     const { workerCtor } = createNodeWorkerCtor();
     const client = nodeWorkerClient({
+      url: new URL('about:blank'),
       workerCtor,
       fileSystem: fromMemoryFs({ [mainFilePath]: 'export default 1;' }),
     });
@@ -163,26 +171,40 @@ describe('worker transport initialize filesystem bridge retries', () => {
     await client.close();
   });
 
-  it('should report a terminal node-worker diagnostic for consumed channel filesystem bridges', async () => {
+  it('should open a fresh channel filesystem bridge after failed node-worker initialize', async () => {
     const { workerCtor } = createNodeWorkerCtor();
+    const { fileSystem, openConnection } = createChannelBackedFileSystem();
     const client = nodeWorkerClient({
+      url: new URL('about:blank'),
       workerCtor,
-      fileSystem: createChannelBackedFileSystem(),
+      fileSystem,
     });
-    mocks.channel.call.mockRejectedValueOnce(new Error('Invalid runtime config'));
+    mocks.channel.call.mockRejectedValueOnce(new Error('Invalid runtime config')).mockResolvedValueOnce({});
 
     await expect(client.initialize(initializePayload)).rejects.toThrow('Invalid runtime config');
-    try {
-      await client.initialize(initializePayload);
-      expect.fail('should reject consumed channel filesystem bridge retry');
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).name).toBe('RuntimeFileSystemBridgeConsumedError');
-      expect((error as Error).message).toContain('nodeWorkerTransport');
-      expect((error as Error).message).toContain('Recreate the RuntimeClient');
-      expect((error as { code?: string }).code).toBe('RUNTIME_FILESYSTEM_BRIDGE_CONSUMED');
-    }
-    expect(mocks.channel.call).toHaveBeenCalledTimes(1);
+    await expect(client.initialize(initializePayload)).resolves.toEqual({});
+
+    expect(mocks.channel.call).toHaveBeenCalledTimes(2);
+    expect(openConnection).toHaveBeenCalledTimes(2);
+    const firstPayload = mocks.channel.call.mock.calls[0]?.[1] as InitializeCallPayload;
+    const secondPayload = mocks.channel.call.mock.calls[1]?.[1] as InitializeCallPayload;
+    expect(secondPayload.value?.memoryHandle?.fileSystemPort).not.toBe(
+      firstPayload.value?.memoryHandle?.fileSystemPort,
+    );
     await client.close();
+  });
+
+  it('should open one fresh channel connection for each in-process runtime binding', async () => {
+    const { fileSystem, openConnection } = createChannelBackedFileSystem();
+    const runtime = defineRuntime({});
+    const firstClient = inProcessClient({ runtime, fileSystem });
+    const secondClient = inProcessClient({ runtime, fileSystem });
+
+    await firstClient.initialize(initializePayload);
+    await secondClient.initialize(initializePayload);
+
+    expect(openConnection).toHaveBeenCalledTimes(2);
+    await firstClient.close();
+    await secondClient.close();
   });
 });

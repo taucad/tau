@@ -45,7 +45,7 @@ describe('RuntimeFileSystem opacity (C9)', () => {
       }),
     );
     assertType<RuntimeFileSystem>(
-      fromFileSystemBridge({ port: undefined as unknown as MessagePort, dispose: () => undefined }),
+      fromFileSystemBridge(() => ({ port: undefined as unknown as MessagePort, dispose: () => undefined })),
     );
     assertType<RuntimeFileSystem>(fromBrowserFs(undefined as unknown as FileSystemDirectoryHandle));
     assertType<RuntimeFileSystem>(fromNodeFs('/tmp'));

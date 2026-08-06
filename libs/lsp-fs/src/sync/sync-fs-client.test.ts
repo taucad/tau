@@ -52,7 +52,7 @@ describe('createSyncFsClient', () => {
     expect(client.fileExists(`file:///${relativePath}`)).toBe(true);
   });
 
-  it('round-trips readFile, readdir, and statMtimeVersion via Tier 2 (worker + Atomics.wait)', async () => {
+  it('round-trips readFile, listDirectories, and statMtimeVersion via Tier 2 (worker + Atomics.wait)', async () => {
     const root = '/root';
     const nestedDeepAbs = joinPath(root, 'nested/deep.ts');
 
@@ -74,7 +74,7 @@ describe('createSyncFsClient', () => {
         }
         throw Object.assign(new Error('missing'), { code: 'ENOENT' });
       },
-      readdir: async (path: string) => {
+      listDirectories: async (path: string) => {
         expect(path).toBe(joinPath(root, 'nested'));
         return ['deep.ts', 'other.ts'];
       },
@@ -137,7 +137,7 @@ describe('createSyncFsClient', () => {
         }
         throw Object.assign(new Error('missing'), { code: 'ENOENT' });
       },
-      readdir: async (path: string) => {
+      listDirectories: async (path: string) => {
         expect(path).toBe(directoryAbs);
         return ['a.ts'];
       },
@@ -175,7 +175,7 @@ describe('createSyncFsClient', () => {
     expect(slotProbes.every((p) => p.outcome !== 'exception')).toBe(true);
     expect(slotProbes.some((p) => p.op === 'readFile' && p.outcome === 'ok')).toBe(true);
     expect(slotProbes.some((p) => p.op === 'statMtimeVersion' && p.outcome === 'ok')).toBe(true);
-    expect(slotProbes.some((p) => p.op === 'readdir' && p.outcome === 'ok')).toBe(true);
+    expect(slotProbes.some((p) => p.op === 'listDirectories' && p.outcome === 'ok')).toBe(true);
   });
 
   it('emits onProbe with raw -> relative -> absolute path translation for pool hits', () => {

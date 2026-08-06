@@ -4,49 +4,42 @@
  */
 
 import { z } from 'zod';
+import {
+  defaultSyncArenaBytes,
+  syncChannelError,
+  syncSlotIndex,
+  syncSlotInt32Length,
+  syncSlotState,
+} from '@taucad/fs-bridge/sync';
 
-/** Int32 indices for the request state vector (single in-flight sync op).
- *
- * @public
- */
-export const slotIndex = { state: 0, requestId: 1, errorCode: 2, payloadLength: 3 } as const;
+/** Int32 indices for the request state vector. @public */
+// oxlint-disable-next-line unicorn-js/prefer-export-from -- LSP keeps stable compatibility names.
+export const slotIndex = syncSlotIndex;
 
-/** Length of the Int32 sync slot (`Int32Array(slotInt32Length)`).
- *
- * @public
- */
-export const slotInt32Length = 4;
+/** Number of Int32 values in the shared request slot. @public */
+// oxlint-disable-next-line unicorn-js/prefer-export-from -- LSP keeps stable compatibility names.
+export const slotInt32Length = syncSlotInt32Length;
 
-/** Slot state values (written with {@link Atomics.store} on index {@link slotIndex.state}).
- *
- * @public
- */
-export const syncState = { idle: 0, pending: 1, ready: 2 } as const;
+/** Shared request slot states. @public */
+// oxlint-disable-next-line unicorn-js/prefer-export-from -- LSP keeps stable compatibility names.
+export const syncState = syncSlotState;
 
-/** Result error class (written to {@link slotIndex.errorCode}).
- *
- * @public
- */
-export const syncError = {
-  ok: 0,
-  notFound: 1,
-  isDirectory: 2,
-  tooLarge: 3,
-  ioError: 4,
-  aborted: 5,
-  invalidRequest: 6,
-  /** Path missing or wrong node kind for `fileExists` / `directoryExists` probes (vs. empty read payload). */
-  absent: 7,
-} as const;
+/** Shared request result error codes. @public */
+// oxlint-disable-next-line unicorn-js/prefer-export-from -- LSP keeps stable compatibility names.
+export const syncError = syncChannelError;
 
-/** Default bounded copy arena for a single cold read (4 MiB).
- *
- * @public
- */
-export const defaultArenaBytes = 4 * 1024 * 1024;
+/** Default LSP bounded-copy arena size. @public */
+// oxlint-disable-next-line unicorn-js/prefer-export-from -- LSP keeps stable compatibility names.
+export const defaultArenaBytes = defaultSyncArenaBytes;
 
 /** @public */
-export const syncFsOpSchema = z.enum(['readFile', 'fileExists', 'directoryExists', 'readdir', 'statMtimeVersion']);
+export const syncFsOpSchema = z.enum([
+  'readFile',
+  'fileExists',
+  'directoryExists',
+  'listDirectories',
+  'statMtimeVersion',
+]);
 
 /** Operations the FM sync server must implement.
  *

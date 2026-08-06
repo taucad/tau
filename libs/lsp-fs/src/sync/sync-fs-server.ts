@@ -1,12 +1,7 @@
 import { getErrno } from '@taucad/utils/error';
+import { completeSyncResponse } from '@taucad/fs-bridge/sync';
 import type { TauSyncFsWireMessage } from '#sync/sync-fs-protocol.js';
-import {
-  slotIndex,
-  slotInt32Length,
-  syncError,
-  syncState,
-  tauSyncFsWireMessageSchema,
-} from '#sync/sync-fs-protocol.js';
+import { slotIndex, slotInt32Length, syncError, tauSyncFsWireMessageSchema } from '#sync/sync-fs-protocol.js';
 
 const textEncoder = new TextEncoder();
 
@@ -18,40 +13,31 @@ const textEncoder = new TextEncoder();
 export type SyncFsWorkspaceAdapter = Readonly<{
   readFileBytes(path: string): Promise<Uint8Array<ArrayBuffer>>;
   stat(path: string): Promise<{ mtimeMs: number; isDirectory: boolean }>;
-  readdir(path: string): Promise<string[]>;
+  listDirectories(path: string): Promise<string[]>;
 }>;
-
-function finish(int32: Int32Array, errorCode: number, payloadLength: number): void {
-  Atomics.store(int32, slotIndex.errorCode, errorCode);
-  Atomics.store(int32, slotIndex.payloadLength, payloadLength);
-  Atomics.store(int32, slotIndex.state, syncState.ready);
-  Atomics.notify(int32, slotIndex.state, 1);
-}
 
 type FinishPathPresenceContext = Readonly<{
   workspace: SyncFsWorkspaceAdapter;
   path: string;
-  int32: Int32Array;
-  arena: Uint8Array<ArrayBuffer>;
   mode: 'file' | 'directory';
+  finish(errorCode: number, payload?: Uint8Array<ArrayBuffer>): void;
 }>;
 
 async function finishPathPresenceFromStat(context: FinishPathPresenceContext): Promise<void> {
-  const { workspace, path, int32, arena, mode } = context;
+  const { workspace, path, mode, finish } = context;
   try {
     const stat = await workspace.stat(path);
     const positive = mode === 'file' ? !stat.isDirectory : stat.isDirectory;
     if (!positive) {
-      finish(int32, syncError.absent, 0);
+      finish(syncError.absent);
       return;
     }
-    arena.set(textEncoder.encode('1'), 0);
-    finish(int32, syncError.ok, 1);
+    finish(syncError.ok, textEncoder.encode('1'));
   } catch (error) {
     if (getErrno(error) === 'ENOENT') {
-      finish(int32, syncError.absent, 0);
+      finish(syncError.absent);
     } else {
-      finish(int32, syncError.ioError, 0);
+      finish(syncError.ioError);
     }
   }
 }
@@ -70,9 +56,11 @@ export function createSyncFsServerHandler(params: {
 
   return async (message: TauSyncFsWireMessage): Promise<void> => {
     const { op, requestId, path } = message;
+    const finish = (errorCode: number, payload?: Uint8Array<ArrayBuffer>): void => {
+      completeSyncResponse({ slot: int32, arena, requestId, errorCode, payload });
+    };
 
     if (Atomics.load(int32, slotIndex.requestId) !== requestId) {
-      finish(int32, syncError.invalidRequest, 0);
       return;
     }
 
@@ -80,63 +68,52 @@ export function createSyncFsServerHandler(params: {
       switch (op) {
         case 'readFile': {
           const data = await workspace.readFileBytes(path);
-          if (data.byteLength > arena.byteLength) {
-            finish(int32, syncError.tooLarge, 0);
-            return;
-          }
-          arena.set(data);
-          finish(int32, syncError.ok, data.byteLength);
+          finish(syncError.ok, data);
           return;
         }
         case 'fileExists': {
-          await finishPathPresenceFromStat({ workspace, path, int32, arena, mode: 'file' });
+          await finishPathPresenceFromStat({ workspace, path, mode: 'file', finish });
           return;
         }
         case 'directoryExists': {
-          await finishPathPresenceFromStat({ workspace, path, int32, arena, mode: 'directory' });
+          await finishPathPresenceFromStat({ workspace, path, mode: 'directory', finish });
           return;
         }
-        case 'readdir': {
-          const names = await workspace.readdir(path);
+        case 'listDirectories': {
+          const names = await workspace.listDirectories(path);
           const encoded = textEncoder.encode(JSON.stringify(names));
-          if (encoded.byteLength > arena.byteLength) {
-            finish(int32, syncError.tooLarge, 0);
-            return;
-          }
-          arena.set(encoded);
-          finish(int32, syncError.ok, encoded.byteLength);
+          finish(syncError.ok, encoded);
           return;
         }
         case 'statMtimeVersion': {
           try {
             const stat = await workspace.stat(path);
             if (stat.isDirectory) {
-              finish(int32, syncError.isDirectory, 0);
+              finish(syncError.isDirectory);
               return;
             }
             const version = String(stat.mtimeMs);
             const encoded = textEncoder.encode(version);
-            arena.set(encoded);
-            finish(int32, syncError.ok, encoded.byteLength);
+            finish(syncError.ok, encoded);
           } catch (error) {
             if (getErrno(error) === 'ENOENT') {
-              finish(int32, syncError.notFound, 0);
+              finish(syncError.notFound);
             } else {
-              finish(int32, syncError.ioError, 0);
+              finish(syncError.ioError);
             }
           }
           return;
         }
         default: {
-          finish(int32, syncError.invalidRequest, 0);
+          finish(syncError.invalidRequest);
         }
       }
     } catch (error) {
       if (getErrno(error) === 'ENOENT') {
-        finish(int32, syncError.notFound, 0);
+        finish(syncError.notFound);
         return;
       }
-      finish(int32, syncError.ioError, 0);
+      finish(syncError.ioError);
     }
   };
 }

@@ -1,8 +1,9 @@
 import { SharedPool } from '@taucad/memory';
 import { joinPath } from '@taucad/utils/path';
+import { createSyncRequestClient } from '@taucad/fs-bridge/sync';
 
 import type { SyncFsOp, TauSyncFsWireMessage } from '#sync/sync-fs-protocol.js';
-import { slotIndex, slotInt32Length, syncError, syncState } from '#sync/sync-fs-protocol.js';
+import { slotIndex, slotInt32Length, syncError } from '#sync/sync-fs-protocol.js';
 import { monacoFileUriToWorkspaceRelative } from '#uri.js';
 
 /**
@@ -73,7 +74,7 @@ export type CreateSyncFsClientOptions = Readonly<{
   arenaSab: SharedArrayBuffer;
   filePoolBuffer?: SharedArrayBuffer;
   workspaceRootAbsolute: string;
-  /** Optional cap for a single `readFile` / `readdir` payload; default full arena. */
+  /** Optional cap for a single `readFile` / `listDirectories` payload; default full arena. */
   arenaBytes?: number;
   textDecoder?: TextDecoder;
   /** Optional diagnostic sink invoked once per operation. Bound and bounded by the consumer. */
@@ -102,8 +103,10 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
 
   /** Browser `TextDecoder` rejects SAB-backed views; copying into a fresh `Uint8Array` yields a non-shared buffer (VS Code sync-api-common idiom). */
   const decodeArena = (length: number): string => decoder.decode(new Uint8Array(arena.subarray(0, length)));
-  let requestId = 0;
-  let disposed = false;
+  const syncClient = createSyncRequestClient({
+    port: options.port,
+    slotSab: options.slotSab,
+  });
 
   const resolveTarget = (fileName: string): ResolvedTarget => {
     try {
@@ -116,25 +119,10 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
   };
 
   const perform = (op: SyncFsOp, absolutePath: string): void => {
-    if (disposed) {
-      throw new Error('sync-fs: client disposed');
-    }
-    const myRequest = ++requestId;
-    Atomics.store(int32, slotIndex.state, syncState.pending);
-    Atomics.store(int32, slotIndex.requestId, myRequest);
-    Atomics.store(int32, slotIndex.errorCode, syncError.ok);
-    Atomics.store(int32, slotIndex.payloadLength, 0);
-
-    const message: TauSyncFsWireMessage = { tau: 'sync-fs', op, requestId: myRequest, path: absolutePath };
-    options.port.postMessage(message);
-
-    while (Atomics.load(int32, slotIndex.state) === syncState.pending) {
-      Atomics.wait(int32, slotIndex.state, syncState.pending);
-    }
-
-    if (Atomics.load(int32, slotIndex.requestId) !== myRequest) {
-      throw new Error('sync-fs: stale request completion');
-    }
+    syncClient.perform((requestId) => {
+      const message: TauSyncFsWireMessage = { tau: 'sync-fs', op, requestId, path: absolutePath };
+      return message;
+    });
   };
 
   const emitTranslationFailure = (op: SyncFsOp, fileName: string, detail: string): void => {
@@ -221,8 +209,6 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
           detail,
         });
         return undefined;
-      } finally {
-        Atomics.store(int32, slotIndex.state, syncState.idle);
       }
     },
 
@@ -280,8 +266,6 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
           detail,
         });
         return false;
-      } finally {
-        Atomics.store(int32, slotIndex.state, syncState.idle);
       }
     },
 
@@ -327,25 +311,23 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
           detail,
         });
         return false;
-      } finally {
-        Atomics.store(int32, slotIndex.state, syncState.idle);
       }
     },
 
     getDirectories(directoryName: string): string[] {
       const target = resolveTarget(directoryName);
       if (target.absolutePath === undefined) {
-        emitTranslationFailure('readdir', directoryName, target.translationError ?? 'translation failed');
+        emitTranslationFailure('listDirectories', directoryName, target.translationError ?? 'translation failed');
         return [];
       }
 
       try {
-        perform('readdir', target.absolutePath);
+        perform('listDirectories', target.absolutePath);
         const errorCode = Atomics.load(int32, slotIndex.errorCode);
         const payloadByteLength = Atomics.load(int32, slotIndex.payloadLength);
         if (errorCode !== syncError.ok) {
           onProbe?.({
-            op: 'readdir',
+            op: 'listDirectories',
             fileName: directoryName,
             relativePath: target.relativePath,
             absolutePath: target.absolutePath,
@@ -358,7 +340,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
         }
         if (payloadByteLength <= 0) {
           onProbe?.({
-            op: 'readdir',
+            op: 'listDirectories',
             fileName: directoryName,
             relativePath: target.relativePath,
             absolutePath: target.absolutePath,
@@ -373,7 +355,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
         const parsed: unknown = JSON.parse(text);
         if (!Array.isArray(parsed) || !parsed.every((x): x is string => typeof x === 'string')) {
           onProbe?.({
-            op: 'readdir',
+            op: 'listDirectories',
             fileName: directoryName,
             relativePath: target.relativePath,
             absolutePath: target.absolutePath,
@@ -381,12 +363,12 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
             outcome: 'error',
             errorCode,
             payloadBytes: payloadByteLength,
-            detail: 'invalid readdir payload',
+            detail: 'invalid listDirectories payload',
           });
           return [];
         }
         onProbe?.({
-          op: 'readdir',
+          op: 'listDirectories',
           fileName: directoryName,
           relativePath: target.relativePath,
           absolutePath: target.absolutePath,
@@ -400,7 +382,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         onProbe?.({
-          op: 'readdir',
+          op: 'listDirectories',
           fileName: directoryName,
           relativePath: target.relativePath,
           absolutePath: target.absolutePath,
@@ -409,8 +391,6 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
           detail,
         });
         return [];
-      } finally {
-        Atomics.store(int32, slotIndex.state, syncState.idle);
       }
     },
 
@@ -476,13 +456,11 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
           detail,
         });
         return undefined;
-      } finally {
-        Atomics.store(int32, slotIndex.state, syncState.idle);
       }
     },
 
     dispose(): void {
-      disposed = true;
+      syncClient.dispose();
     },
   };
 }

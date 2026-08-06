@@ -2126,6 +2126,9 @@ importers:
 
   libs/lsp-fs:
     dependencies:
+      '@taucad/fs-bridge':
+        specifier: workspace:*
+        version: link:../../packages/fs-bridge
       '@taucad/memory':
         specifier: workspace:*
         version: link:../../packages/memory

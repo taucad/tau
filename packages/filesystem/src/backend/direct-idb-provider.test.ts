@@ -1,6 +1,6 @@
 // oxlint-disable-next-line import/no-unassigned-import -- Side-effect import to polyfill IndexedDB for tests
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
 
 const encoder = new TextEncoder();
@@ -9,7 +9,7 @@ describe('DirectIdbProvider', () => {
   let provider: DirectIdbProvider;
 
   beforeEach(async () => {
-    provider = new DirectIdbProvider(`test-${Date.now()}`);
+    provider = new DirectIdbProvider(`test-${crypto.randomUUID()}`);
     await provider.initialize();
   });
 
@@ -53,6 +53,20 @@ describe('DirectIdbProvider', () => {
       expect(result).toEqual(data);
     });
 
+    it('should own queued input and returned byte snapshots', async () => {
+      const input = new Uint8Array([1, 2, 3]);
+      const pending = provider.writeFile('/owned.bin', input);
+      input.fill(9);
+      await pending;
+
+      const first = await provider.readFile('/owned.bin');
+      first.fill(8);
+      const second = await provider.readFile('/owned.bin');
+
+      expect(second).toEqual(new Uint8Array([1, 2, 3]));
+      expect(second).not.toBe(first);
+    });
+
     it('should write a Uint8Array and read as utf8', async () => {
       const bytes = encoder.encode('encoded');
       await provider.writeFile('/encoded.txt', bytes);
@@ -85,6 +99,32 @@ describe('DirectIdbProvider', () => {
       expect(result).toBe('nested');
       const parentStat = await provider.stat('/a/b');
       expect(parentStat.type).toBe('dir');
+    });
+
+    it('should keep draining later writes after one flush generation fails', async () => {
+      type FlushBatch = (batch: ReadonlyArray<{ path: string; data: Uint8Array<ArrayBuffer> }>) => Promise<void>;
+      const internals = provider as unknown as { _flushBatch: FlushBatch };
+      const originalFlushBatch = internals._flushBatch.bind(provider);
+      const releaseFailure = Promise.withResolvers<void>();
+      let generation = 0;
+      internals._flushBatch = async (batch) => {
+        generation++;
+        if (generation === 1) {
+          await releaseFailure.promise;
+          throw new Error('flush failed');
+        }
+        await originalFlushBatch(batch);
+      };
+
+      const failed = provider.writeFile('/failed.txt', 'failed');
+      const second = provider.writeFile('/second.txt', 'second');
+      const third = provider.writeFile('/third.txt', 'third');
+      releaseFailure.resolve();
+
+      await expect(failed).rejects.toThrow(new Error('flush failed'));
+      await expect(Promise.all([second, third])).resolves.toEqual([undefined, undefined]);
+      await expect(provider.readFile('/second.txt', 'utf8')).resolves.toBe('second');
+      await expect(provider.readFile('/third.txt', 'utf8')).resolves.toBe('third');
     });
   });
 
@@ -157,11 +197,10 @@ describe('DirectIdbProvider', () => {
       expect(stats.type).toBe('dir');
     });
 
-    it('should return a numeric mtimeMs', async () => {
+    it('should use the stable unknown mtime for newly written files', async () => {
       await provider.writeFile('/timed.txt', 'data');
       const stats = await provider.stat('/timed.txt');
-      expect(typeof stats.mtimeMs).toBe('number');
-      expect(stats.mtimeMs).toBeGreaterThan(0);
+      expect(stats.mtimeMs).toBe(0);
     });
 
     it('should throw for non-existent path', async () => {
@@ -212,6 +251,26 @@ describe('DirectIdbProvider', () => {
     it('should throw for non-existent file', async () => {
       await expect(provider.unlink('/not-here.txt')).rejects.toThrow('ENOENT');
     });
+
+    it('should preserve the indexed entry when the delete transaction aborts', async () => {
+      await provider.writeFile('/preserved.txt', 'keep');
+      const database = (provider as unknown as { _db: IDBDatabase })._db;
+      const transaction = new EventTarget() as IDBTransaction;
+      Object.defineProperties(transaction, {
+        error: { value: new DOMException('delete aborted', 'AbortError') },
+        objectStore: {
+          value: () => ({
+            delete: () => {
+              queueMicrotask(() => transaction.dispatchEvent(new Event('abort')));
+            },
+          }),
+        },
+      });
+      vi.spyOn(database, 'transaction').mockReturnValueOnce(transaction);
+
+      await expect(provider.unlink('/preserved.txt')).rejects.toThrow('delete aborted');
+      await expect(provider.readFile('/preserved.txt', 'utf8')).resolves.toBe('keep');
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -227,6 +286,13 @@ describe('DirectIdbProvider', () => {
 
     it('should throw for non-existent directory', async () => {
       await expect(provider.rmdir('/ghost')).rejects.toThrow('ENOENT');
+    });
+
+    it('should preserve a non-empty directory', async () => {
+      await provider.writeFile('/occupied/file.txt', 'keep');
+
+      await expect(provider.rmdir('/occupied')).rejects.toThrow('ENOTEMPTY');
+      await expect(provider.readFile('/occupied/file.txt', 'utf8')).resolves.toBe('keep');
     });
   });
 
@@ -264,6 +330,33 @@ describe('DirectIdbProvider', () => {
       await provider.rename('/scratch', '/temp');
       expect(await provider.exists('/scratch')).toBe(false);
       expect(await provider.exists('/temp')).toBe(true);
+    });
+
+    it('should reject a directory rename on transaction abort without mutating its projection', async () => {
+      await provider.mkdir('/preserved');
+      const database = (provider as unknown as { _db: IDBDatabase })._db;
+      const transaction = new EventTarget() as IDBTransaction;
+      let abortQueued = false;
+      const queueAbort = () => {
+        if (!abortQueued) {
+          abortQueued = true;
+          queueMicrotask(() => transaction.dispatchEvent(new Event('abort')));
+        }
+      };
+      Object.defineProperties(transaction, {
+        error: { value: new DOMException('rename aborted', 'AbortError') },
+        objectStore: {
+          value: () => ({
+            delete: queueAbort,
+            put: queueAbort,
+          }),
+        },
+      });
+      vi.spyOn(database, 'transaction').mockReturnValueOnce(transaction);
+
+      await expect(provider.rename('/preserved', '/lost')).rejects.toThrow('rename aborted');
+      await expect(provider.exists('/preserved')).resolves.toBe(true);
+      await expect(provider.exists('/lost')).resolves.toBe(false);
     });
 
     it('should throw when source does not exist', async () => {
@@ -339,45 +432,9 @@ describe('DirectIdbProvider', () => {
 
       provider2.dispose();
     });
-  });
 
-  // ---------------------------------------------------------------------------
-  // bulkImport
-  // ---------------------------------------------------------------------------
-
-  describe('bulkImport', () => {
-    it('should make all imported files readable after completion', async () => {
-      const files = new Map<string, Uint8Array<ArrayBuffer>>([
-        ['/a.txt', encoder.encode('a')],
-        ['/b/c.txt', encoder.encode('bc')],
-      ]);
-      await provider.bulkImport(files);
-      expect(await provider.readFile('/a.txt', 'utf8')).toBe('a');
-      expect(await provider.readFile('/b/c.txt', 'utf8')).toBe('bc');
-    });
-
-    it('should create intermediate directories for imported files', async () => {
-      const files = new Map<string, Uint8Array<ArrayBuffer>>([['/x/y/z/file.txt', encoder.encode('deep')]]);
-      await provider.bulkImport(files);
-      expect(await provider.exists('/x')).toBe(true);
-      expect(await provider.exists('/x/y')).toBe(true);
-      expect(await provider.exists('/x/y/z')).toBe(true);
-      const stats = await provider.stat('/x/y');
-      expect(stats.type).toBe('dir');
-    });
-
-    it('should handle empty import map without error', async () => {
-      const entriesBefore = await provider.readdir('/');
-      await provider.bulkImport(new Map());
-      const entriesAfter = await provider.readdir('/');
-      const countBefore = entriesBefore.length;
-      const countAfter = entriesAfter.length;
-      expect(countAfter).toBe(countBefore);
-    });
-
-    it('should support reading imported files after dispose and re-init', async () => {
-      const files = new Map<string, Uint8Array<ArrayBuffer>>([['/imported.txt', encoder.encode('persisted')]]);
-      await provider.bulkImport(files);
+    it('should preserve an explicitly created empty directory across reopen', async () => {
+      await provider.mkdir('/empty');
 
       const dbName = (provider as unknown as { _dbName: string })._dbName;
       provider.dispose();
@@ -386,8 +443,73 @@ describe('DirectIdbProvider', () => {
       (provider2 as unknown as { _dbName: string })._dbName = dbName;
       await provider2.initialize();
 
-      expect(await provider2.readFile('/imported.txt', 'utf8')).toBe('persisted');
+      await expect(provider2.stat('/empty')).resolves.toMatchObject({ type: 'dir' });
+      await expect(provider2.readdir('/empty')).resolves.toEqual([]);
       provider2.dispose();
+    });
+
+    it('reads current durable metadata after reopening the same provider', async () => {
+      await provider.writeFile('/metadata.txt', 'before');
+      const dbName = (provider as unknown as { _dbName: string })._dbName;
+      const peer = new DirectIdbProvider('unused');
+      (peer as unknown as { _dbName: string })._dbName = dbName;
+      await peer.initialize();
+      await peer.writeFile('/metadata.txt', 'x');
+      peer.dispose();
+
+      provider.dispose();
+      await provider.initialize();
+
+      await expect(provider.stat('/metadata.txt')).resolves.toMatchObject({ type: 'file', size: 1 });
+    });
+
+    it('should reject a persisted file/directory collision without retaining an open provider', async () => {
+      const dbName = (provider as unknown as { _dbName: string })._dbName;
+      const database = (provider as unknown as { _db: IDBDatabase })._db;
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction('files', 'readwrite');
+        transaction.objectStore('files').put(encoder.encode('file'), '/entry');
+        transaction.objectStore('files').put(encoder.encode('child'), '/entry/child.txt');
+        transaction.addEventListener('complete', () => {
+          resolve();
+        });
+        transaction.addEventListener('error', () => {
+          reject(transaction.error ?? new Error('IndexedDB collision seed failed.'));
+        });
+        transaction.addEventListener('abort', () => {
+          reject(transaction.error ?? new Error('IndexedDB collision seed aborted.'));
+        });
+      });
+      provider.dispose();
+
+      const provider2 = new DirectIdbProvider('unused');
+      (provider2 as unknown as { _dbName: string })._dbName = dbName;
+
+      await expect(provider2.initialize()).rejects.toMatchObject({ code: 'EIO' });
+      expect((provider2 as unknown as { _db?: IDBDatabase })._db).toBeUndefined();
+      await expect(provider2.stat('/entry')).rejects.toThrow(/not initialized|disposed/);
+    });
+
+    it('keeps the prior metadata projection readable until refresh swaps a complete snapshot', async () => {
+      await provider.writeFile('/visible.txt', 'visible');
+      const database = (provider as unknown as { _db: IDBDatabase })._db;
+      const request = new EventTarget() as IDBRequest<IDBValidKey[]>;
+      Object.defineProperties(request, {
+        result: { value: ['/visible.txt'] },
+        error: { value: null },
+      });
+      const transaction = {
+        objectStore: () => ({ getAllKeys: () => request }),
+      } as unknown as IDBTransaction;
+      vi.spyOn(database, 'transaction').mockReturnValueOnce(transaction);
+
+      const refresh = provider.refresh();
+      await Promise.resolve();
+      await expect(provider.readdir('/')).resolves.toContain('visible.txt');
+
+      request.dispatchEvent(new Event('success'));
+      await refresh;
+      await expect(provider.readdir('/')).resolves.toContain('visible.txt');
     });
   });
 
@@ -401,6 +523,40 @@ describe('DirectIdbProvider', () => {
       provider.dispose();
       await expect(provider.readFile('/before-dispose.txt')).rejects.toThrow();
     });
+
+    const operations: ReadonlyArray<{
+      name: string;
+      run: (candidate: DirectIdbProvider) => Promise<unknown>;
+    }> = [
+      { name: 'writeFile', run: async (candidate) => candidate.writeFile('/file', 'x') },
+      { name: 'readFile', run: async (candidate) => candidate.readFile('/file') },
+      { name: 'readdir', run: async (candidate) => candidate.readdir('/') },
+      { name: 'readdirWithStats', run: async (candidate) => candidate.readdirWithStats('/') },
+      { name: 'stat', run: async (candidate) => candidate.stat('/') },
+      { name: 'lstat', run: async (candidate) => candidate.lstat('/') },
+      { name: 'exists', run: async (candidate) => candidate.exists('/') },
+      { name: 'mkdir', run: async (candidate) => candidate.mkdir('/directory') },
+      { name: 'unlink', run: async (candidate) => candidate.unlink('/file') },
+      { name: 'rmdir', run: async (candidate) => candidate.rmdir('/directory') },
+      { name: 'rename', run: async (candidate) => candidate.rename('/source', '/target') },
+    ];
+
+    it.each(['before initialization', 'after disposal'] as const)(
+      'should reject every public operation %s',
+      async (phase) => {
+        for (const operation of operations) {
+          const candidate = new DirectIdbProvider(`lifecycle-${phase}-${operation.name}-${crypto.randomUUID()}`);
+          if (phase === 'after disposal') {
+            // oxlint-disable-next-line no-await-in-loop -- Each operation needs its own closed provider fixture.
+            await candidate.initialize();
+            candidate.dispose();
+          }
+          // oxlint-disable-next-line no-await-in-loop -- Table assertions intentionally run one lifecycle operation at a time.
+          await expect(operation.run(candidate), operation.name).rejects.toThrow(/not initialized|disposed/);
+          candidate.dispose();
+        }
+      },
+    );
   });
 
   describe('readdirWithStats', () => {
@@ -423,7 +579,7 @@ describe('DirectIdbProvider', () => {
       expect(directory!.type).toBe('dir');
     });
 
-    it('should use cached sizes from writeFile without extra IDB reads', async () => {
+    it('should report the durable size after writeFile', async () => {
       await provider.writeFile('/cached.txt', 'hello');
       const entries = await provider.readdirWithStats('/');
       const entry = entries.find((entryItem) => entryItem.name === 'cached.txt');
@@ -438,7 +594,6 @@ describe('DirectIdbProvider', () => {
       const provider2 = new DirectIdbProvider('unused');
       (provider2 as unknown as { _dbName: string })._dbName = dbName;
       await provider2.initialize();
-      // Prime the size/metadata caches (readFile does not populate _mtimes).
       await provider2.readFile('/hydrated.txt');
 
       const first = await provider2.readdirWithStats('/');
@@ -450,6 +605,45 @@ describe('DirectIdbProvider', () => {
       expect(secondEntry!.mtimeMs).toBe(0);
 
       provider2.dispose();
+    });
+
+    it('purges projected files whose durable rows were removed by a peer', async () => {
+      await provider.writeFile('/stat-ghost.txt', 'stat');
+      await provider.writeFile('/read-ghost.txt', 'read');
+      await provider.writeFile('/list-ghost.txt', 'list');
+      const dbName = (provider as unknown as { _dbName: string })._dbName;
+      const peer = new DirectIdbProvider('unused');
+      (peer as unknown as { _dbName: string })._dbName = dbName;
+      await peer.initialize();
+      await peer.unlink('/stat-ghost.txt');
+      await peer.unlink('/read-ghost.txt');
+      await peer.unlink('/list-ghost.txt');
+
+      await expect(provider.stat('/stat-ghost.txt')).rejects.toThrow('ENOENT');
+      await expect(provider.readFile('/read-ghost.txt')).rejects.toThrow('ENOENT');
+      await expect(provider.readdirWithStats('/')).resolves.not.toContainEqual(
+        expect.objectContaining({ name: 'list-ghost.txt' }),
+      );
+      await expect(provider.exists('/stat-ghost.txt')).resolves.toBe(false);
+      await expect(provider.exists('/read-ghost.txt')).resolves.toBe(false);
+      await expect(provider.exists('/list-ghost.txt')).resolves.toBe(false);
+      peer.dispose();
+    });
+
+    it('does not recreate a peer-deleted child during a stale directory rename', async () => {
+      await provider.writeFile('/source/live.txt', 'live');
+      await provider.writeFile('/source/deleted.txt', 'deleted');
+      const dbName = (provider as unknown as { _dbName: string })._dbName;
+      const peer = new DirectIdbProvider('unused');
+      (peer as unknown as { _dbName: string })._dbName = dbName;
+      await peer.initialize();
+      await peer.unlink('/source/deleted.txt');
+
+      await provider.rename('/source', '/target');
+
+      await expect(provider.readFile('/target/live.txt', 'utf8')).resolves.toBe('live');
+      await expect(provider.exists('/target/deleted.txt')).resolves.toBe(false);
+      peer.dispose();
     });
   });
 });

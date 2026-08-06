@@ -1,12 +1,13 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
 import { createMockRootHandle } from '#testing/mock-handle-factory.js';
 
 describe('FileSystemAccessProvider', () => {
   let provider: FileSystemAccessProvider;
+  let rootHandle: ReturnType<typeof createMockRootHandle>;
 
   beforeEach(() => {
-    const rootHandle = createMockRootHandle();
+    rootHandle = createMockRootHandle();
     provider = new FileSystemAccessProvider(rootHandle as unknown as FileSystemDirectoryHandle);
   });
 
@@ -109,6 +110,23 @@ describe('FileSystemAccessProvider', () => {
     it('should throw for non-existent directory', async () => {
       await expect(provider.readdir('/nonexistent')).rejects.toThrow('ENOENT');
     });
+
+    it('should exclude Chromium swap entries without hiding near-miss user files', async () => {
+      await provider.writeFile('/main.ts.crswap', 'swap');
+      await provider.writeFile('/main.ts.1.crswap', 'swap collision');
+      await provider.writeFile('/notes.crswap.txt', 'user content');
+      await provider.writeFile('/.DS_Store', 'real host metadata');
+      await provider.writeFile('/main.ts', 'source');
+
+      await expect(provider.readdir('/')).resolves.toEqual(['notes.crswap.txt', '.DS_Store', 'main.ts']);
+      await expect(provider.readdirWithStats('/')).resolves.toEqual([
+        expect.objectContaining({ name: 'notes.crswap.txt', type: 'file' }),
+        expect.objectContaining({ name: '.DS_Store', type: 'file' }),
+        expect.objectContaining({ name: 'main.ts', type: 'file' }),
+      ]);
+      await expect(provider.readFile('/main.ts.crswap', 'utf8')).resolves.toBe('swap');
+      await expect(provider.readFile('/.DS_Store', 'utf8')).resolves.toBe('real host metadata');
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -197,6 +215,76 @@ describe('FileSystemAccessProvider', () => {
     it('should throw when source does not exist', async () => {
       await expect(provider.rename('/missing.txt', '/target.txt')).rejects.toThrow('ENOENT');
     });
+
+    it('should remove a failed new file and only the parent directories it created', async () => {
+      const originalGetDirectoryHandle = rootHandle.getDirectoryHandle.bind(rootHandle);
+      const writeError = new Error('write failed');
+      const writable = {
+        write: vi.fn().mockRejectedValue(writeError),
+        close: vi.fn().mockResolvedValue(undefined),
+        abort: vi.fn().mockResolvedValue(undefined),
+      };
+      vi.spyOn(rootHandle, 'getDirectoryHandle').mockImplementation(async (name, options) => {
+        const directory = await originalGetDirectoryHandle(name, options);
+        if (name === 'created' && options?.create) {
+          const originalGetFileHandle = directory.getFileHandle.bind(directory);
+          vi.spyOn(directory, 'getFileHandle').mockImplementation(async (fileName, fileOptions) => {
+            const handle = await originalGetFileHandle(fileName, fileOptions);
+            if (fileName === 'failed.txt' && fileOptions?.create) {
+              vi.spyOn(handle, 'createWritable').mockResolvedValue(
+                writable as unknown as Awaited<ReturnType<typeof handle.createWritable>>,
+              );
+            }
+            return handle;
+          });
+        }
+        return directory;
+      });
+
+      await expect(provider.writeFile('/created/failed.txt', 'new')).rejects.toThrow(writeError);
+
+      expect(writable.abort).toHaveBeenCalledWith(writeError);
+      await expect(provider.exists('/created/failed.txt')).resolves.toBe(false);
+      await expect(provider.exists('/created')).resolves.toBe(false);
+    });
+
+    it('should preserve a pre-existing parent when a new file write fails', async () => {
+      await provider.mkdir('/existing');
+      const existing = await rootHandle.getDirectoryHandle('existing');
+      const originalGetFileHandle = existing.getFileHandle.bind(existing);
+      vi.spyOn(existing, 'getFileHandle').mockImplementation(async (name, options) => {
+        const handle = await originalGetFileHandle(name, options);
+        if (name === 'failed.txt' && options?.create) {
+          vi.spyOn(handle, 'createWritable').mockRejectedValue(new Error('create writable failed'));
+        }
+        return handle;
+      });
+
+      await expect(provider.writeFile('/existing/failed.txt', 'new')).rejects.toThrow('create writable failed');
+
+      await expect(provider.exists('/existing/failed.txt')).resolves.toBe(false);
+      await expect(provider.stat('/existing')).resolves.toMatchObject({ type: 'dir' });
+    });
+
+    it('should remove a partial directory-copy destination and preserve the source', async () => {
+      await provider.mkdir('/source');
+      await provider.writeFile('/source/a.ts', 'a');
+      await provider.writeFile('/source/b.ts', 'b');
+      const writeError = new Error('copy write failed');
+      const originalWriteFile = provider.writeFile.bind(provider);
+      vi.spyOn(provider, 'writeFile').mockImplementation(async (path, data) => {
+        if (path === '/new-parent/destination/b.ts') {
+          throw writeError;
+        }
+        await originalWriteFile(path, data);
+      });
+
+      await expect(provider.rename('/source', '/new-parent/destination')).rejects.toThrow(writeError);
+      await expect(provider.readFile('/source/a.ts', 'utf8')).resolves.toBe('a');
+      await expect(provider.readFile('/source/b.ts', 'utf8')).resolves.toBe('b');
+      await expect(provider.exists('/new-parent/destination')).resolves.toBe(false);
+      await expect(provider.exists('/new-parent')).resolves.toBe(false);
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -216,6 +304,13 @@ describe('FileSystemAccessProvider', () => {
 
     it('should return false for non-existent path', async () => {
       expect(await provider.exists('/nothing')).toBe(false);
+    });
+
+    it('should propagate permission failures instead of reporting absence', async () => {
+      vi.spyOn(rootHandle, 'getFileHandle').mockRejectedValueOnce(
+        new DOMException('Permission denied', 'NotAllowedError'),
+      );
+      await expect(provider.exists('/denied')).rejects.toMatchObject({ name: 'NotAllowedError' });
     });
   });
 
@@ -263,6 +358,114 @@ describe('FileSystemAccessProvider', () => {
       await provider.rename('/old-file.txt', '/new-file.txt');
       const read2 = await provider.readFile('/new-file.txt', 'utf8');
       expect(read2).toBe('data');
+    });
+
+    it('should clear sibling-stale directory handles on refresh', async () => {
+      await provider.mkdir('/cached');
+      await expect(provider.readdir('/cached')).resolves.toEqual([]);
+
+      await rootHandle.removeEntry('cached', { recursive: true });
+      const replacement = await rootHandle.getDirectoryHandle('cached', { create: true });
+      const replacementFile = await replacement.getFileHandle('new.txt', { create: true });
+      const writable = await replacementFile.createWritable();
+      await writable.write(new TextEncoder().encode('new'));
+      await writable.close();
+
+      await expect(provider.readdir('/cached')).resolves.toEqual([]);
+      await provider.refresh();
+      await expect(provider.readdir('/cached')).resolves.toEqual(['new.txt']);
+    });
+  });
+
+  describe('readFileStream', () => {
+    it('rejects invalid ranges before resolving a file handle', () => {
+      const resolveHandle = vi.spyOn(rootHandle, 'getFileHandle');
+
+      expect(() => provider.readFileStream('/stream.bin', { length: Number.POSITIVE_INFINITY })).toThrow(RangeError);
+      expect(resolveHandle).not.toHaveBeenCalled();
+    });
+
+    it('should read one native chunk at a time and cancel the native reader', async () => {
+      await provider.writeFile('/stream.bin', 'seed');
+      const handle = await rootHandle.getFileHandle('stream.bin');
+      let index = 0;
+      const read = vi.fn(async (): Promise<ReadableStreamReadResult<Uint8Array<ArrayBuffer>>> => {
+        const chunks = [new Uint8Array([1]), new Uint8Array([2])];
+        const value = chunks[index++];
+        return value === undefined ? { done: true, value: undefined } : { done: false, value };
+      });
+      const cancel = vi.fn().mockResolvedValue(undefined);
+      vi.spyOn(handle, 'getFile').mockResolvedValue({
+        size: 2,
+        stream: () => ({ getReader: () => ({ read, cancel }) }),
+      } as unknown as File);
+      vi.spyOn(rootHandle, 'getFileHandle').mockResolvedValue(handle);
+
+      const stream = provider.readFileStream('/stream.bin');
+      await vi.waitFor(() => {
+        expect(read).toHaveBeenCalledTimes(1);
+      });
+
+      const consumer = stream.getReader();
+      await expect(consumer.read()).resolves.toEqual({ done: false, value: new Uint8Array([1]) });
+      await vi.waitFor(() => {
+        expect(read).toHaveBeenCalledTimes(2);
+      });
+      await consumer.cancel('stopped');
+
+      expect(cancel).toHaveBeenCalledWith('stopped');
+    });
+
+    it('should cancel a pending native read when aborted after the first chunk', async () => {
+      await provider.writeFile('/abort.bin', 'seed');
+      const handle = await rootHandle.getFileHandle('abort.bin');
+      const pendingRead = Promise.withResolvers<ReadableStreamReadResult<Uint8Array<ArrayBuffer>>>();
+      const read = vi
+        .fn<() => Promise<ReadableStreamReadResult<Uint8Array<ArrayBuffer>>>>()
+        .mockResolvedValueOnce({ done: false, value: new Uint8Array([1]) })
+        .mockReturnValueOnce(pendingRead.promise);
+      const cancel = vi.fn().mockResolvedValue(undefined);
+      vi.spyOn(handle, 'getFile').mockResolvedValue({
+        size: 2,
+        stream: () => ({ getReader: () => ({ read, cancel }) }),
+      } as unknown as File);
+      vi.spyOn(rootHandle, 'getFileHandle').mockResolvedValue(handle);
+      const abort = new AbortController();
+
+      const consumer = provider.readFileStream('/abort.bin', { signal: abort.signal }).getReader();
+      await expect(consumer.read()).resolves.toEqual({ done: false, value: new Uint8Array([1]) });
+      await vi.waitFor(() => {
+        expect(read).toHaveBeenCalledTimes(2);
+      });
+      const next = consumer.read();
+      abort.abort();
+
+      await expect(next).rejects.toMatchObject({ name: 'AbortError' });
+      expect(cancel).toHaveBeenCalledOnce();
+      pendingRead.resolve({ done: true, value: undefined });
+    });
+
+    it('should cancel the native reader when aborted during stream initialization', async () => {
+      await provider.writeFile('/initializing.bin', 'seed');
+      const handle = await rootHandle.getFileHandle('initializing.bin');
+      const pendingFile = Promise.withResolvers<File>();
+      const cancel = vi.fn().mockResolvedValue(undefined);
+      vi.spyOn(handle, 'getFile').mockReturnValue(pendingFile.promise);
+      vi.spyOn(rootHandle, 'getFileHandle').mockResolvedValue(handle);
+      const abort = new AbortController();
+
+      const consumer = provider.readFileStream('/initializing.bin', { signal: abort.signal }).getReader();
+      const read = consumer.read();
+      abort.abort();
+
+      await expect(read).rejects.toMatchObject({ name: 'AbortError' });
+      pendingFile.resolve({
+        size: 1,
+        stream: () => ({ getReader: () => ({ read: vi.fn(), cancel }) }),
+      } as unknown as File);
+      await vi.waitFor(() => {
+        expect(cancel).toHaveBeenCalledOnce();
+      });
     });
   });
 

@@ -1,4 +1,3 @@
-import type { FileSystemBackend } from '@taucad/types';
 import type { FileSystemProvider } from '#types.js';
 import { MemoryProvider } from '#backend/memory-provider.js';
 import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
@@ -24,17 +23,13 @@ export type ProviderRegistryOptions = {
  * ambient handle; multiple concurrent webaccess scopes coexist
  * without cross-contamination.
  *
- * Mount providers (created via {@link createMountProvider}) are
- * uncached — the caller owns their lifecycle. Standalone providers
- * (created via {@link getStandaloneProvider}) are cached for the
- * cross-backend `/files` browse use-case and keyed by
- * `(backend, workspaceId)` so two workspaces with the same folder
- * name never collide.
+ * The registry is the sole provider owner. Mounts and scoped reads resolve
+ * through the same cache, keyed by physical storage-root identity.
  *
  * @public
  */
 export class ProviderRegistry {
-  private readonly _standaloneProviders = new Map<string, FileSystemProvider>();
+  private readonly _providers = new Map<string, Promise<FileSystemProvider>>();
   private readonly _databasePrefix: string;
 
   /**
@@ -60,17 +55,36 @@ export class ProviderRegistry {
    * @param scope - Workspace scope (carries `directoryHandle` + `workspaceId` for webaccess).
    * @returns Standalone provider instance.
    */
-  public async getStandaloneProvider(scope: WorkspaceScope): Promise<FileSystemProvider> {
-    const cacheKey = scope.backend === 'webaccess' ? `webaccess:${scope.workspaceId}` : scope.backend;
-
-    const cached = this._standaloneProviders.get(cacheKey);
-    if (cached) {
-      return cached;
+  public async getProvider(scope: WorkspaceScope): Promise<FileSystemProvider> {
+    const cacheKey = this.resolveStorageRootKey(scope);
+    let pending = this._providers.get(cacheKey);
+    if (!pending) {
+      pending = this._createProvider(scope);
+      this._providers.set(cacheKey, pending);
     }
 
-    const provider = await this._createProvider(scope);
-    this._standaloneProviders.set(cacheKey, provider);
-    return provider;
+    try {
+      const provider = await pending;
+      if (this._providers.get(cacheKey) !== pending) {
+        throw new Error(`Provider root was revoked during initialization: ${cacheKey}`);
+      }
+      return provider;
+    } catch (error) {
+      if (this._providers.get(cacheKey) === pending) {
+        this._providers.delete(cacheKey);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Return an already-owned provider without constructing or reviving a root.
+   *
+   * @param storageRootKey - Canonical physical storage-root identity.
+   * @returns The existing provider promise, or `undefined` when the root is not owned.
+   */
+  public getOwnedProvider(storageRootKey: string): Promise<FileSystemProvider> | undefined {
+    return this._providers.get(storageRootKey);
   }
 
   /**
@@ -79,48 +93,71 @@ export class ProviderRegistry {
    * cached entry is dropped; otherwise every entry for the backend is
    * cleared (used by `disposeAll` and bulk recovery flows).
    *
-   * @param backend - Backend whose standalone providers to invalidate.
-   * @param workspaceId - Optional webaccess workspace id; when set, only that workspace's entry is dropped.
+   * @param storageRootKey - Stable physical storage-root identity to dispose.
    */
-  public invalidateStandaloneProvider(backend: FileSystemBackend, workspaceId?: string): void {
-    const keysToRemove: string[] = [];
-    if (backend === 'webaccess' && workspaceId !== undefined) {
-      const targetKey = `webaccess:${workspaceId}`;
-      if (this._standaloneProviders.has(targetKey)) {
-        keysToRemove.push(targetKey);
-      }
-    } else {
-      for (const key of this._standaloneProviders.keys()) {
-        if (key === backend || key.startsWith(`${backend}:`)) {
-          keysToRemove.push(key);
+  public disposeRoot(storageRootKey: string): void {
+    const pending = this._providers.get(storageRootKey);
+    this._providers.delete(storageRootKey);
+    if (pending) {
+      // async-iife: bootstrap -- revocation is synchronous; a provider still initializing is disposed on settlement.
+      void (async () => {
+        try {
+          const provider = await pending;
+          provider.dispose();
+        } catch {
+          // Failed initialization has no provider resource to dispose.
         }
-      }
+      })();
     }
+  }
 
-    for (const key of keysToRemove) {
-      this._standaloneProviders.get(key)?.dispose();
-      this._standaloneProviders.delete(key);
+  /** Dispose every registry-owned provider. */
+  public disposeAll(): void {
+    const pending = [...this._providers.values()];
+    this._providers.clear();
+    for (const provider of pending) {
+      // async-iife: bootstrap -- registry teardown cannot await providers that are still initializing.
+      void (async () => {
+        try {
+          const resolved = await provider;
+          resolved.dispose();
+        } catch {
+          // Failed initialization has no provider resource to dispose.
+        }
+      })();
     }
   }
 
   /**
-   * Create a fresh provider instance for use as a mount target.
-   * Does not cache the instance. The caller owns the provider's lifecycle
-   * and must dispose it.
+   * Resolve the canonical physical storage-root identity used for provider
+   * caching, authority locks, and cross-tab invalidation.
    *
-   * @param scope - Workspace scope (carries `directoryHandle` + `workspaceId` for webaccess).
-   * @returns A new, uncached provider instance.
+   * @param scope - Explicit workspace/provider scope.
+   * @returns Canonical storage-root key.
    */
-  public async createMountProvider(scope: WorkspaceScope): Promise<FileSystemProvider> {
-    return this._createProvider(scope);
-  }
-
-  /** Dispose all cached standalone providers. */
-  public disposeAll(): void {
-    for (const provider of this._standaloneProviders.values()) {
-      provider.dispose();
+  public resolveStorageRootKey(scope: WorkspaceScope): string {
+    switch (scope.backend) {
+      case 'indexeddb': {
+        return `indexeddb:${this._databasePrefix}`;
+      }
+      case 'opfs': {
+        return 'opfs:origin';
+      }
+      case 'webaccess': {
+        return `webaccess:${scope.workspaceId}`;
+      }
+      case 'memory': {
+        const { storageRootKey } = scope;
+        if (
+          typeof storageRootKey !== 'string' ||
+          !storageRootKey.startsWith('memory:') ||
+          storageRootKey.slice('memory:'.length).trim().length === 0
+        ) {
+          throw new TypeError('Memory storage root must use memory:<scope>.');
+        }
+        return storageRootKey;
+      }
     }
-    this._standaloneProviders.clear();
   }
 
   private async _createProvider(scope: WorkspaceScope): Promise<FileSystemProvider> {

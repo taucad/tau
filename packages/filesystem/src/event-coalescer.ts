@@ -4,9 +4,8 @@
  * Buffers ChangeEvents within a configurable time window and applies
  * coalescing rules before delivery:
  *
- * - `added → deleted` within the same window cancels out (no event)
- * - `deleted → added` within the same window collapses to `updated`
- * - Parent directory delete suppresses child delete spam
+ * - Repeated facts for one path collapse to the final observable fact
+ * - A final delete is preserved because `fileWritten` does not prove creation
  * - Rename emits both old and new path invalidation
  *
  * Originating bridge port ids are stored on events via {@link tagEventOrigin} /
@@ -16,13 +15,8 @@
  * @see docs/policy/filesystem-policy.md
  */
 
-import { clearEventOrigin, getEventOrigin, tagEventOrigin } from '#event-origin-registry.js';
+import { copyEventAuthorities, getEventOrigin, tagEventOrigin } from '#event-origin-registry.js';
 import type { ChangeEvent } from '#types.js';
-
-type PendingEvent = {
-  event: ChangeEvent;
-  timestamp: number;
-};
 
 /**
  * Configuration for {@link EventCoalescer}.
@@ -33,8 +27,8 @@ export type CoalescerOptions = {
   coalescingWindow?: number;
   /** Maximum queue depth before emitting overflow. Default: 10,000. */
   maxQueueDepth?: number;
-  /** Called when queue depth is exceeded. */
-  onOverflow?: () => void;
+  /** Called with every event discarded when queue depth is exceeded. */
+  onOverflow?: (events: readonly ChangeEvent[]) => void;
 };
 
 /** Milliseconds. */
@@ -75,34 +69,14 @@ function collapsePathHistory(history: ChangeEvent[]): ChangeEvent | undefined {
     return history[0];
   }
 
-  const first = history[0]!;
   const last = history.at(-1)!;
-
-  const firstType = first.type;
-  const lastType = last.type;
-
   const origin = mergeOrigins(history);
-
-  if (firstType === 'fileWritten' && lastType === 'fileDeleted') {
-    return undefined;
+  const survivor: ChangeEvent = { ...last };
+  copyEventAuthorities(last, survivor);
+  if (origin !== undefined) {
+    tagEventOrigin(survivor, origin);
   }
-
-  if (firstType === 'fileDeleted' && lastType === 'fileWritten') {
-    applyCollapsedOrigin(last, origin);
-    return last;
-  }
-
-  applyCollapsedOrigin(last, origin);
-  return last;
-}
-
-function applyCollapsedOrigin(survivor: ChangeEvent, origin: string | undefined): void {
-  if (origin === undefined) {
-    clearEventOrigin(survivor);
-    return;
-  }
-
-  tagEventOrigin(survivor, origin);
+  return survivor;
 }
 
 /**
@@ -114,9 +88,9 @@ export class EventCoalescer {
   /** Milliseconds. */
   private readonly _coalescingWindow: number;
   private readonly _maxQueueDepth: number;
-  private readonly _onOverflow?: () => void;
+  private readonly _onOverflow?: (events: readonly ChangeEvent[]) => void;
   private readonly _deliverCallback: (events: ChangeEvent[]) => void;
-  private _pending: PendingEvent[] = [];
+  private _pending: ChangeEvent[] = [];
   private _timer: ReturnType<typeof setTimeout> | undefined;
 
   /**
@@ -139,19 +113,20 @@ export class EventCoalescer {
    */
   public push(event: ChangeEvent): void {
     if (this._pending.length >= this._maxQueueDepth) {
+      const discarded = [...this._pending, event];
       this._pending = [];
       if (this._timer !== undefined) {
         clearTimeout(this._timer);
         this._timer = undefined;
       }
-      this._onOverflow?.();
+      this._onOverflow?.(discarded);
       return;
     }
 
-    this._pending.push({ event, timestamp: Date.now() });
+    this._pending.push(event);
 
     if (this._timer !== undefined) {
-      clearTimeout(this._timer);
+      return;
     }
     this._timer = setTimeout(() => {
       this._flush();
@@ -183,7 +158,7 @@ export class EventCoalescer {
       return;
     }
 
-    const events = this._pending.map((p) => p.event);
+    const events = this._pending;
     this._pending = [];
 
     const coalesced = coalesceChangeEvents(events);
@@ -198,8 +173,8 @@ export class EventCoalescer {
  *
  * Same originator across a merged path sequence preserves the tag via
  * {@link tagEventOrigin}; mixed originators (including untagged mixed with
- * tagged) clear it via {@link clearEventOrigin} on the survivor so every
- * bridge port receives the batch when appropriate.
+ * tagged) leave the cloned survivor untagged so every bridge port receives
+ * the batch when appropriate.
  *
  * @param events - Raw change events to coalesce.
  * @returns Coalesced event array.
@@ -210,20 +185,23 @@ export function coalesceChangeEvents(events: ChangeEvent[]): ChangeEvent[] {
     return events;
   }
 
-  const renameEvents: ChangeEvent[] = [];
+  const indexedEvents: Array<{ index: number; event: ChangeEvent }> = [];
   const renamedFromPaths = new Set<string>();
-  const pathHistory = new Map<string, ChangeEvent[]>();
-  const nonPathEvents: ChangeEvent[] = [];
+  const pathHistory = new Map<string, Array<{ index: number; event: ChangeEvent }>>();
 
-  for (const event of events) {
-    if (event.type === 'fileRenamed') {
-      renameEvents.push(event);
+  for (const [index, event] of events.entries()) {
+    if (event.type === 'directoryChanged') {
+      indexedEvents.push({ index, event });
+      continue;
+    }
+    if (event.type === 'fileRenamed' || event.type === 'directoryRenamed') {
+      indexedEvents.push({ index, event });
       renamedFromPaths.add(event.oldPath);
       continue;
     }
     const path = getEventPath(event);
     if (!path) {
-      nonPathEvents.push(event);
+      indexedEvents.push({ index, event });
       continue;
     }
     let history = pathHistory.get(path);
@@ -231,18 +209,11 @@ export function coalesceChangeEvents(events: ChangeEvent[]): ChangeEvent[] {
       history = [];
       pathHistory.set(path, history);
     }
-    history.push(event);
-  }
-
-  const result: ChangeEvent[] = [];
-  const deletedDirectories = new Set<string>();
-
-  for (const event of nonPathEvents) {
-    result.push(event);
+    history.push({ index, event });
   }
 
   for (const [path, history] of pathHistory) {
-    const collapsed = collapsePathHistory(history);
+    const collapsed = collapsePathHistory(history.map(({ event }) => event));
     if (!collapsed) {
       continue;
     }
@@ -251,40 +222,10 @@ export function coalesceChangeEvents(events: ChangeEvent[]): ChangeEvent[] {
       continue;
     }
 
-    if (collapsed.type === 'fileDeleted') {
-      deletedDirectories.add(path);
-    }
-    result.push(collapsed);
+    indexedEvents.push({ index: history.at(-1)!.index, event: collapsed });
   }
 
-  for (const event of renameEvents) {
-    result.push(event);
-  }
-
-  return result.filter((event) => {
-    if (event.type !== 'fileDeleted') {
-      return true;
-    }
-    const { path } = event;
-    for (const directory of deletedDirectories) {
-      if (directory !== path && path.startsWith(`${directory}/`)) {
-        return false;
-      }
-    }
-    return true;
-  });
-}
-
-/**
- * Alias for {@link coalesceChangeEvents}; kept as the historical public entry
- * name for untagged batches used by tests and tooling.
- *
- * @param events - Raw change events to coalesce.
- * @returns Coalesced event array.
- * @public
- */
-export function coalesceEvents(events: ChangeEvent[]): ChangeEvent[] {
-  return coalesceChangeEvents(events);
+  return indexedEvents.toSorted((left, right) => left.index - right.index).map(({ event }) => event);
 }
 
 function getEventPath(event: ChangeEvent): string | undefined {

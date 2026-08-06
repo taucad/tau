@@ -11,8 +11,9 @@
  */
 
 import { describe, expectTypeOf, it } from 'vitest';
-import type { WorkspaceFileService } from '#workspace-file-service.js';
+import type { RootedFileSystem, WorkspaceFileService } from '#workspace-file-service.js';
 import type { WorkspaceScope } from '#mount-table.js';
+import type { FileStatEntry } from '@taucad/types';
 
 describe('WorkspaceFileService explicit-workspace contract', () => {
   it('mount accepts a discriminated MountConfig requiring directoryHandle + workspaceId for webaccess', () => {
@@ -33,19 +34,16 @@ describe('WorkspaceFileService explicit-workspace contract', () => {
     expectTypeOf<undefined>().toExtend<OptionsArgument>();
   });
 
-  it('mount-routed methods accept an optional scope inside their options bag', () => {
+  it('keeps scoped reads while mutations remain mount-routed', () => {
     type ReadFileOptions = Parameters<WorkspaceFileService['readFile']>[1];
-    type UnlinkOptions = Parameters<WorkspaceFileService['unlink']>[1];
     type RmdirOptions = Parameters<WorkspaceFileService['rmdir']>[1];
     type GetZippedDirectoryOptions = Parameters<WorkspaceFileService['getZippedDirectory']>[1];
 
     expectTypeOf<{ scope: WorkspaceScope }>().toExtend<NonNullable<ReadFileOptions>>();
-    expectTypeOf<{ scope: WorkspaceScope }>().toExtend<NonNullable<UnlinkOptions>>();
-    expectTypeOf<{ scope: WorkspaceScope; recursive: true }>().toExtend<NonNullable<RmdirOptions>>();
+    expectTypeOf<RmdirOptions>().toEqualTypeOf<{ recursive?: boolean } | undefined>();
     expectTypeOf<{ scope: WorkspaceScope }>().toExtend<NonNullable<GetZippedDirectoryOptions>>();
 
     expectTypeOf<undefined>().toExtend<ReadFileOptions>();
-    expectTypeOf<undefined>().toExtend<UnlinkOptions>();
     expectTypeOf<undefined>().toExtend<RmdirOptions>();
     expectTypeOf<undefined>().toExtend<GetZippedDirectoryOptions>();
   });
@@ -61,9 +59,34 @@ describe('WorkspaceFileService explicit-workspace contract', () => {
     expectTypeOf<WorkspaceFileService>().not.toHaveProperty('setDirectoryHandle');
   });
 
-  it('exposes a workspaceId-scoped invalidator', () => {
-    expectTypeOf<WorkspaceFileService['invalidateStandaloneProvider']>().parameters.toExtend<
-      [backend: 'webaccess' | 'indexeddb' | 'opfs' | 'memory', workspaceId?: string]
+  it('exposes root-keyed teardown', () => {
+    expectTypeOf<WorkspaceFileService['disposeStorageRoot']>().parameters.toExtend<[storageRootKey: string]>();
+  });
+
+  it('requires an explicit search root and returns results asynchronously', () => {
+    type Search = WorkspaceFileService['searchFiles'];
+    expectTypeOf<Search>().parameters.toExtend<
+      [root: string, query: string, options?: { maxResults?: number; includeDirectories?: boolean }]
     >();
+    expectTypeOf<ReturnType<Search>>().toEqualTypeOf<Promise<FileStatEntry[]>>();
+  });
+
+  it('exposes the exact identity-safe permanent-delete result union', () => {
+    type InputScope = Parameters<WorkspaceFileService['permanentlyDeleteProjectDirectory']>[0]['scope'];
+    type Result = Awaited<ReturnType<WorkspaceFileService['permanentlyDeleteProjectDirectory']>>;
+
+    expectTypeOf<Extract<InputScope, { backend: 'memory' }>>().toEqualTypeOf<never>();
+    expectTypeOf<Result>().toEqualTypeOf<
+      | { readonly status: 'deleted' | 'absent' }
+      | { readonly status: 'identity-mismatch'; readonly actualProjectId: string }
+      | { readonly status: 'unidentifiable' }
+    >();
+  });
+
+  it('keeps rooted filesystems to transported provider primitives plus watch', () => {
+    expectTypeOf<RootedFileSystem>().not.toHaveProperty('readFiles');
+    expectTypeOf<RootedFileSystem>().not.toHaveProperty('readdirContents');
+    expectTypeOf<RootedFileSystem>().not.toHaveProperty('readdirStat');
+    expectTypeOf<RootedFileSystem>().not.toHaveProperty('ensureDir');
   });
 });

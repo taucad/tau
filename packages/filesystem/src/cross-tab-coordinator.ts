@@ -1,73 +1,95 @@
 /**
  * Cross-tab write coordinator using `navigator.locks` and `BroadcastChannel`.
  *
- * Provides exclusive per-file write locks to prevent concurrent write conflicts
+ * Provides exclusive resource locks to prevent concurrent write conflicts
  * across browser tabs. Notifies other tabs of mutations via `BroadcastChannel`.
  *
  * Progressive enhancement: no-op when `navigator.locks` is unavailable.
  */
 
-import { generatePrefixedId } from '@taucad/utils/id';
-
 const lockPrefix = 'tau-fs-write:';
 const channelName = 'tau-fs-changes';
 
-type ChangeNotification = {
-  type: 'write' | 'delete' | 'rename';
-  path: string;
-  newPath?: string;
-  tabId: string;
+/** Cloneable canonical physical authority identity. @public */
+export type PhysicalAuthority = {
+  readonly storageRootKey: string;
+  readonly providerBasePath: string;
 };
 
-/**
- * Whether `navigator.locks` is available in the current environment.
- *
- * @returns `true` when the Web Locks API is wired into `navigator`, `false` otherwise.
- * @public
- */
-export function isNavigatorLocksSupported(): boolean {
-  return typeof navigator !== 'undefined' && 'locks' in navigator;
-}
+/** Cross-authority invalidation published to sibling tabs. @public */
+export type ChangeNotification =
+  | {
+      readonly type: 'write' | 'mkdir' | 'delete' | 'rmdir' | 'directory-change';
+      readonly path: string;
+      readonly authority: PhysicalAuthority;
+    }
+  | {
+      readonly type: 'project-unavailable';
+      readonly path: string;
+      readonly authority: PhysicalAuthority;
+    };
 
 /**
  * Coordinates filesystem writes across browser tabs.
  *
- * - Uses `navigator.locks` for per-file exclusive write serialization
+ * - Uses `navigator.locks` for supplied logical/physical resource serialization
  * - Uses `BroadcastChannel` to notify other tabs of mutations
  * - Progressive enhancement: executes operations directly when locks unavailable
  *
  * @public
  */
 export class CrossTabCoordinator {
-  private readonly _tabId: string;
   private _channel: BroadcastChannel | undefined;
   private _changeHandler: ((notification: ChangeNotification) => void) | undefined;
 
   public constructor() {
-    this._tabId = generatePrefixedId('tab');
     if (typeof BroadcastChannel !== 'undefined') {
       this._channel = new BroadcastChannel(channelName);
     }
   }
 
   /**
-   * Execute a write operation under an exclusive per-file lock.
-   * Other tabs attempting to write to the same path will queue until this completes.
+   * Run a mutation under sorted exclusive locks and publish only after success.
    *
-   * @param path - File path to acquire the lock for.
-   * @param operation - Async operation to execute while holding the lock.
-   * @returns The result of `operation`.
+   * @param paths - Logical and physical lock tokens.
+   * @param notification - Invalidation published after the operation succeeds.
+   * @param operation - Mutation body.
+   * @returns The mutation result.
    */
-  public async withWriteLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
-    if (!isNavigatorLocksSupported()) {
+  public async withMutationLocks<T>(
+    paths: readonly string[],
+    notification: ChangeNotification,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const run = async (): Promise<T> => {
+      const result = await operation();
+      this.notifyMutation(notification);
+      return result;
+    };
+    return this.withLocks(paths, run);
+  }
+
+  /**
+   * Execute an authority operation under supplied locks without implying mutation.
+   *
+   * @param paths - Lock tokens to acquire in deterministic order.
+   * @param operation - Operation body.
+   * @returns The operation result.
+   */
+  public async withLocks<T>(paths: readonly string[], operation: () => Promise<T>): Promise<T> {
+    if (typeof navigator === 'undefined' || !('locks' in navigator)) {
       return operation();
     }
 
-    return navigator.locks.request(`${lockPrefix}${path}`, { mode: 'exclusive' }, async () => {
-      const result = await operation();
-      this._postChangeNotification({ type: 'write', path, tabId: this._tabId });
-      return result;
-    });
+    const sortedPaths = [...new Set(paths)].sort();
+    const acquire = async (index: number): Promise<T> => {
+      const path = sortedPaths[index];
+      if (path === undefined) {
+        return operation();
+      }
+      return navigator.locks.request(`${lockPrefix}${path}`, { mode: 'exclusive' }, async () => acquire(index + 1));
+    };
+    return acquire(0);
   }
 
   /**
@@ -80,11 +102,41 @@ export class CrossTabCoordinator {
 
     if (this._channel) {
       this._channel.addEventListener('message', (event: MessageEvent<ChangeNotification>) => {
-        if (event.data.tabId !== this._tabId) {
-          this._changeHandler?.(event.data);
-        }
+        this._changeHandler?.(event.data);
       });
     }
+  }
+
+  /** Publish one already-committed mutation to sibling tabs. */
+  public notifyMutation(notification: ChangeNotification): void {
+    this._postChangeNotification(notification);
+  }
+
+  /**
+   * Notify sibling tabs before a project route becomes unavailable.
+   *
+   * @param projectId - Logical project identity being revoked.
+   */
+  public notifyProjectUnavailable(projectId: string, authority: PhysicalAuthority): void {
+    this._postChangeNotification({
+      type: 'project-unavailable',
+      path: `/projects/${projectId}`,
+      authority,
+    });
+  }
+
+  /**
+   * Invalidate one directory and all descendants in sibling tabs.
+   *
+   * @param path - Logical directory path.
+   * @param authority - Canonical physical provider and base-path identity.
+   */
+  public notifyDirectoryChange(path: string, authority: PhysicalAuthority): void {
+    this._postChangeNotification({
+      type: 'directory-change',
+      path,
+      authority,
+    });
   }
 
   /** Release resources. */

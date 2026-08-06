@@ -76,6 +76,14 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
         if ((error as { code?: string }).code !== 'EEXIST') {
           throw error;
         }
+        // `EEXIST` is success only when the existing entry is the directory
+        // this recursive walk needs. A file at the same path must remain an
+        // error instead of becoming a file/directory collision.
+        // oxlint-disable-next-line no-await-in-loop -- The kind check belongs to the sequential ancestor walk.
+        const existing = await this.stat(current);
+        if (existing.type !== 'dir') {
+          throw this._eexist(current);
+        }
       }
     }
   }
@@ -84,14 +92,19 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
    * Test whether `path` resolves to any filesystem entry.
    *
    * @param path - Absolute path to probe.
-   * @returns `true` when {@link stat} succeeds for `path`, `false` otherwise.
+   * @returns `true` when {@link stat} succeeds for `path`, `false` for a
+   * recognized absence or non-directory ancestor.
    */
   public async exists(path: string): Promise<boolean> {
     try {
       await this.stat(path);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null ? (error as NodeJS.ErrnoException).code : undefined;
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        return false;
+      }
+      throw error;
     }
   }
 
@@ -118,6 +131,44 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
   public abstract unlink(path: string): Promise<void>;
   public abstract rmdir(path: string): Promise<void>;
   public abstract rename(from: string, to: string): Promise<void>;
+
+  /**
+   * Construct a provider-neutral errno-style error.
+   *
+   * @param code - Stable errno code.
+   * @param description - Human-readable failure description.
+   * @param path - Path associated with the failure.
+   * @returns Error carrying the errno code.
+   */
+  protected _errno(code: string, description: string, path: string): Error {
+    const error = new Error(`${code}: ${description} '${path}'`);
+    (error as NodeJS.ErrnoException).code = code;
+    return error;
+  }
+
+  protected _enoent(path: string): Error {
+    return this._errno('ENOENT', 'no such file or directory', path);
+  }
+
+  protected _eexist(path: string): Error {
+    return this._errno('EEXIST', 'file or directory already exists', path);
+  }
+
+  protected _eisdir(path: string): Error {
+    return this._errno('EISDIR', 'is a directory', path);
+  }
+
+  protected _enotdir(path: string): Error {
+    return this._errno('ENOTDIR', 'not a directory', path);
+  }
+
+  protected _enotempty(path: string): Error {
+    return this._errno('ENOTEMPTY', 'directory not empty', path);
+  }
+
+  protected _einval(path: string): Error {
+    return this._errno('EINVAL', 'invalid argument', path);
+  }
 
   // -- Protected abstract methods (internal primitives) -----------------------
 

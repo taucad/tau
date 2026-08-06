@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { clearEventOrigin, getEventOrigin, tagEventOrigin } from '#event-origin-registry.js';
+import {
+  copyEventAuthorities,
+  getEventAuthorities,
+  getEventOrigin,
+  isEventGloballyVisible,
+  tagEventAuthorities,
+  tagEventOrigin,
+} from '#event-origin-registry.js';
 import type { ChangeEvent } from '#types.js';
 
 const mockBackend = 'memory';
@@ -25,13 +32,6 @@ describe('event-origin-registry', () => {
     tagEventOrigin(event, 'first');
     tagEventOrigin(event, 'second');
     expect(getEventOrigin(event)).toBe('second');
-  });
-
-  it('should clear a tag via clearEventOrigin', () => {
-    const event = fileWrittenEvent('/clear.txt');
-    tagEventOrigin(event, 'port');
-    clearEventOrigin(event);
-    expect(getEventOrigin(event)).toBeUndefined();
   });
 
   it('should not leak tag to a different object', () => {
@@ -60,5 +60,19 @@ describe('event-origin-registry', () => {
 
     const fresh = fileWrittenEvent('/gc.txt');
     expect(getEventOrigin(fresh)).toBeUndefined();
+  });
+
+  it('copies captured authority visibility without copying origin', () => {
+    const source = fileWrittenEvent('/captured.txt');
+    const target = { ...source };
+    const authority = {};
+    tagEventOrigin(source, 'port');
+    tagEventAuthorities(source, [authority], false);
+
+    copyEventAuthorities(source, target);
+
+    expect(getEventAuthorities(target)).toEqual([authority]);
+    expect(isEventGloballyVisible(target)).toBe(false);
+    expect(getEventOrigin(target)).toBeUndefined();
   });
 });

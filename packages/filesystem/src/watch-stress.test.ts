@@ -57,7 +57,7 @@ describe('Watch edit storm (100+ rapid events)', () => {
     expect(paths.size).toBe(pathCount);
   });
 
-  it('should coalesce rapid write+delete pairs into zero events (cancel)', () => {
+  it('should preserve the final delete from rapid write+delete pairs', () => {
     const received: WatchEvent[] = [];
     registry.watch({ paths: ['/src'], recursive: true }, (event) => {
       received.push(event);
@@ -70,7 +70,10 @@ describe('Watch edit storm (100+ rapid events)', () => {
 
     vi.advanceTimersByTime(100);
 
-    expect(received.length).toBe(0);
+    expect(received).toHaveLength(50);
+    expect(received).toEqual(
+      Array.from({ length: 50 }, (_, index) => ({ type: 'delete', path: `/src/tmp-${index}.ts` })),
+    );
   });
 
   it('should handle mixed event types across 100+ files correctly', () => {
@@ -117,7 +120,7 @@ describe('Watch subscribe/unsubscribe lifecycle', () => {
   it('should handle 50 watch/unwatch cycles with no leaked subscriptions', () => {
     for (let i = 0; i < 50; i++) {
       const handler = vi.fn();
-      const unsub = registry.watch({ paths: [`/project-${i}`], recursive: true }, handler, `owner-${i}`);
+      const unsub = registry.watch({ paths: [`/project-${i}`], recursive: true }, handler);
       unsub();
     }
 
@@ -125,19 +128,7 @@ describe('Watch subscribe/unsubscribe lifecycle', () => {
     expect(registry.handlerCount).toBe(0);
   });
 
-  it('should handle 50 owner-based cleanup cycles with no leaks', () => {
-    for (let i = 0; i < 50; i++) {
-      const ownerId = `port-${i}`;
-      registry.watch({ paths: ['/src'], recursive: true }, vi.fn(), ownerId);
-      registry.watch({ paths: ['/lib'], recursive: true }, vi.fn(), ownerId);
-      registry.cleanupOwner(ownerId);
-    }
-
-    expect(registry.subscriptionCount).toBe(0);
-    expect(registry.handlerCount).toBe(0);
-  });
-
-  it('should maintain correct ref counts for concurrent owners with shared requests', () => {
+  it('should maintain correct ref counts for concurrent subscribers with shared requests', () => {
     const request = { paths: ['/src'], recursive: true };
     const handlers: Array<ReturnType<typeof vi.fn>> = [];
     const unsubs: Array<() => void> = [];
@@ -145,7 +136,7 @@ describe('Watch subscribe/unsubscribe lifecycle', () => {
     for (let i = 0; i < 20; i++) {
       const handler = vi.fn();
       handlers.push(handler);
-      unsubs.push(registry.watch(request, handler, `port-${i}`));
+      unsubs.push(registry.watch(request, handler));
     }
 
     expect(registry.subscriptionCount).toBe(1);

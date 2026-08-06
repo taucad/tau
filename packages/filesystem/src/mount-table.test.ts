@@ -142,7 +142,7 @@ describe('MountTable', () => {
     it('should return backend for a project-mounted path', () => {
       mountTable.mount('/', rootProvider, { backend: 'memory' });
       mountTable.mount('/projects/proj_A', nodeModulesProvider, { backend: 'opfs' });
-      const backend = mountTable.resolveBackend('/projects/proj_A/main.ts');
+      const { backend } = mountTable.resolve('/projects/proj_A/main.ts');
       expect(backend).toBe('opfs');
     });
 
@@ -157,10 +157,10 @@ describe('MountTable', () => {
       mountTable.mount('/', rootProvider, { backend: 'memory' });
       mountTable.mount('/projects/A', projectProvider, { backend: 'opfs' });
 
-      expect(mountTable.resolveBackend('/projects/A/file.ts')).toBe('opfs');
+      expect(mountTable.resolve('/projects/A/file.ts').backend).toBe('opfs');
 
       mountTable.unmount('/projects/A');
-      expect(mountTable.resolveBackend('/projects/A/file.ts')).toBe('memory');
+      expect(mountTable.resolve('/projects/A/file.ts').backend).toBe('memory');
     });
 
     it('should pass backend through resolve as well', () => {
@@ -172,26 +172,32 @@ describe('MountTable', () => {
     });
   });
 
-  describe('preservePath mounts', () => {
-    it('should preserve the full path when preservePath is true', () => {
+  describe('provider base paths', () => {
+    it('should map a virtual prefix to an explicit provider directory', () => {
       mountTable.mount('/', rootProvider, { backend: 'memory' });
-      mountTable.mount('/projects/proj_A', nodeModulesProvider, { backend: 'opfs', preservePath: true });
+      mountTable.mount('/projects/proj_A', nodeModulesProvider, {
+        backend: 'opfs',
+        providerBasePath: '/workspace/projects/proj_A',
+      });
 
       const result = mountTable.resolve('/projects/proj_A/main.ts');
       expect(result.provider).toBe(nodeModulesProvider);
-      expect(result.path).toBe('/projects/proj_A/main.ts');
+      expect(result.path).toBe('/workspace/projects/proj_A/main.ts');
     });
 
     it('should preserve the full path for exact prefix match', () => {
       mountTable.mount('/', rootProvider, { backend: 'memory' });
-      mountTable.mount('/projects/proj_A', nodeModulesProvider, { backend: 'memory', preservePath: true });
+      mountTable.mount('/projects/proj_A', nodeModulesProvider, {
+        backend: 'memory',
+        providerBasePath: '/workspace/projects/proj_A',
+      });
 
       const result = mountTable.resolve('/projects/proj_A');
       expect(result.provider).toBe(nodeModulesProvider);
-      expect(result.path).toBe('/projects/proj_A');
+      expect(result.path).toBe('/workspace/projects/proj_A');
     });
 
-    it('should still strip prefix when preservePath is false', () => {
+    it('should route relative to provider root by default', () => {
       mountTable.mount('/', rootProvider, { backend: 'memory' });
       mountTable.mount('/node_modules', nodeModulesProvider, { backend: 'memory' });
 
@@ -200,9 +206,12 @@ describe('MountTable', () => {
       expect(result.path).toBe('/lodash/index.js');
     });
 
-    it('should carry backend metadata with preservePath mounts', () => {
+    it('should carry backend metadata with base-path mounts', () => {
       mountTable.mount('/', rootProvider, { backend: 'memory' });
-      mountTable.mount('/projects/proj_B', nodeModulesProvider, { backend: 'indexeddb', preservePath: true });
+      mountTable.mount('/projects/proj_B', nodeModulesProvider, {
+        backend: 'indexeddb',
+        providerBasePath: '/projects/proj_B',
+      });
 
       const result = mountTable.resolve('/projects/proj_B/src/app.ts');
       expect(result.backend).toBe('indexeddb');
@@ -211,14 +220,14 @@ describe('MountTable', () => {
   });
 
   describe('provider disposal', () => {
-    it('should dispose replaced provider when mounting same prefix', () => {
+    it('should not dispose a registry-owned provider when replacing a route', () => {
       const disposeSpy = vi.spyOn(rootProvider, 'dispose');
       mountTable.mount('/', rootProvider, { backend: 'memory' });
 
       const newProvider = { ...rootProvider, dispose: vi.fn() } as unknown as FileSystemProvider;
       mountTable.mount('/', newProvider, { backend: 'indexeddb' });
 
-      expect(disposeSpy).toHaveBeenCalledOnce();
+      expect(disposeSpy).not.toHaveBeenCalled();
       const result = mountTable.resolve('/file.ts');
       expect(result.provider).toBe(newProvider);
       expect(result.backend).toBe('indexeddb');
@@ -238,30 +247,6 @@ describe('MountTable', () => {
       mountTable.mount('/node_modules', nodeModulesProvider, { backend: 'memory' });
       mountTable.dispose();
       expect(() => mountTable.resolve('/file.ts')).toThrow();
-    });
-  });
-
-  describe('webaccess MountConfig discriminator', () => {
-    it('should carry workspaceId through to MountEntry for webaccess mounts', async () => {
-      const wspProvider = await createMemoryProvider();
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- intentional bare-stub `FileSystemDirectoryHandle`; production callers always supply a real handle resolved by the FM machine
-      const stubHandle = {} as FileSystemDirectoryHandle;
-      mountTable.mount('/projects/proj_A', wspProvider, {
-        backend: 'webaccess',
-        directoryHandle: stubHandle,
-        workspaceId: 'wsp_alpha',
-        preservePath: true,
-      });
-
-      const list = mountTable.listMounts();
-      const entry = list.find((m) => m.prefix === '/projects/proj_A');
-      expect(entry?.workspaceId).toBe('wsp_alpha');
-    });
-
-    it('should not assign workspaceId for non-webaccess mounts', () => {
-      mountTable.mount('/', rootProvider, { backend: 'memory' });
-      const entry = mountTable.listMounts().find((m) => m.prefix === '/');
-      expect(entry?.workspaceId).toBeUndefined();
     });
   });
 });

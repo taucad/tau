@@ -69,6 +69,23 @@ export class ResourceQueue {
   }
 
   /**
+   * Queue one operation behind every supplied resource in deterministic order.
+   * Duplicate keys are acquired once; an empty list executes immediately.
+   *
+   * @param paths - Resource keys participating in the operation.
+   * @param operation - Async operation to execute while every key is held.
+   * @returns The operation's return value.
+   */
+  public async queueForMany<T>(paths: readonly string[], operation: () => Promise<T>): Promise<T> {
+    const sortedPaths = [...new Set(paths)].sort();
+    const acquire = async (index: number): Promise<T> => {
+      const path = sortedPaths[index];
+      return path === undefined ? operation() : this.queueFor(path, async () => acquire(index + 1));
+    };
+    return acquire(0);
+  }
+
+  /**
    * Total number of operations queued or in-flight across all paths.
    * @returns The aggregate queue depth.
    */

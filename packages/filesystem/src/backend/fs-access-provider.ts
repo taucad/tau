@@ -10,8 +10,8 @@
 
 import type { FileReadStreamOptions, FileStat, ProviderCapabilities } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
-import { streamChunkSize } from '#backend/stream-utils.js';
 import { fileStatFromBytes } from '#content-metadata.js';
+import { validateFileReadStreamOptions } from '#backend/stream-utils.js';
 
 const handleCacheMaxEntries = 10_000;
 
@@ -20,10 +20,27 @@ type IterableFileSystemDirectoryHandle = FileSystemDirectoryHandle & {
   entries(): AsyncIterableIterator<[string, FileSystemDirectoryEntryHandle]>;
 };
 
-const directoryEntries = (
+/**
+ * Test whether a basename is Chromium's private File System Access swap artifact.
+ *
+ * @param name - Entry basename.
+ * @returns `true` for Chromium-owned `.crswap` entries.
+ * @public
+ */
+export const isChromiumSwapArtifactName = (name: string): boolean => name.endsWith('.crswap');
+
+const directoryEntries = async function* (
   handle: FileSystemDirectoryHandle,
-): AsyncIterableIterator<[string, FileSystemDirectoryEntryHandle]> =>
-  (handle as IterableFileSystemDirectoryHandle).entries();
+): AsyncGenerator<[string, FileSystemDirectoryEntryHandle]> {
+  for await (const entry of (handle as IterableFileSystemDirectoryHandle).entries()) {
+    if (!isChromiumSwapArtifactName(entry[0])) {
+      yield entry;
+    }
+  }
+};
+
+const hasDomName = (error: unknown, name: string): boolean =>
+  typeof error === 'object' && error !== null && 'name' in error && error.name === name;
 
 /**
  * Filesystem provider backed by the File System Access API.
@@ -65,13 +82,22 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * @param data - Bytes or UTF-8 string to store.
    */
   public async writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {
-    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
-    const fileHandle = await this._resolveFileHandle(path, { create: true });
-    const writable = await fileHandle.createWritable();
+    this._assertReady();
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
+    const created = await this._createFileHandle(path);
+    let writable: FileSystemWritableFileStream | undefined;
     try {
+      writable = await created.fileHandle.createWritable();
       await writable.write(bytes);
-    } finally {
       await writable.close();
+    } catch (error) {
+      try {
+        await writable?.abort(error);
+      } catch {
+        // Preserve the write/close failure that caused the abort.
+      }
+      await this._cleanupFailedFileCreation(path, created);
+      throw error;
     }
   }
 
@@ -82,6 +108,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * @returns The names of files and subdirectories directly inside `path`.
    */
   public async readdir(path: string): Promise<string[]> {
+    this._assertReady();
     const directoryHandle = await this._resolveDirectoryHandle(path);
     const entries: string[] = [];
     for await (const [name] of directoryEntries(directoryHandle)) {
@@ -97,6 +124,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * @returns Each entry's name paired with its stat metadata.
    */
   public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
+    this._assertReady();
     const directoryHandle = await this._resolveDirectoryHandle(path);
     const result: Array<{ name: string } & FileStat> = [];
     for await (const [name, handle] of directoryEntries(directoryHandle)) {
@@ -120,6 +148,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * @returns Type/size/mtime for the entry at `path`.
    */
   public async stat(path: string): Promise<FileStat> {
+    this._assertReady();
     const segments = this._splitPath(path);
 
     if (segments.length === 0) {
@@ -129,17 +158,25 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     const parentHandle = await this._resolveDirectoryHandle('/' + segments.slice(0, -1).join('/'));
     const name = segments.at(-1)!;
 
+    let fileError: unknown;
     try {
       const fileHandle = await parentHandle.getFileHandle(name);
       const file = await fileHandle.getFile();
       return fileStatFromBytes(new Uint8Array(await file.arrayBuffer()), file.lastModified);
-    } catch {
-      try {
-        await parentHandle.getDirectoryHandle(name);
-        return { type: 'dir', size: 0, mtimeMs: 0 };
-      } catch {
+    } catch (error) {
+      fileError = error;
+    }
+    if (!hasDomName(fileError, 'NotFoundError') && !hasDomName(fileError, 'TypeMismatchError')) {
+      throw fileError;
+    }
+    try {
+      await parentHandle.getDirectoryHandle(name);
+      return { type: 'dir', size: 0, mtimeMs: 0 };
+    } catch (error) {
+      if (hasDomName(error, 'NotFoundError') || hasDomName(error, 'TypeMismatchError')) {
         throw this._enoent(path);
       }
+      throw error;
     }
   }
 
@@ -149,13 +186,18 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * @param path - Absolute file path to remove.
    */
   public async unlink(path: string): Promise<void> {
+    this._assertReady();
     const segments = this._splitPath(path);
     if (segments.length === 0) {
-      throw this._enoent(path);
+      throw this._eisdir(path);
     }
 
     const parentHandle = await this._resolveDirectoryHandle('/' + segments.slice(0, -1).join('/'));
     const name = segments.at(-1)!;
+    const entry = await this.stat(path);
+    if (entry.type === 'dir') {
+      throw this._eisdir(path);
+    }
     await parentHandle.removeEntry(name);
   }
 
@@ -165,6 +207,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * @param path - Absolute directory path to remove.
    */
   public async rmdir(path: string): Promise<void> {
+    this._assertReady();
     const segments = this._splitPath(path);
     if (segments.length === 0) {
       throw this._enoent(path);
@@ -172,7 +215,18 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
 
     const parentHandle = await this._resolveDirectoryHandle('/' + segments.slice(0, -1).join('/'));
     const name = segments.at(-1)!;
-    await parentHandle.removeEntry(name, { recursive: false });
+    const entry = await this.stat(path);
+    if (entry.type !== 'dir') {
+      throw this._enotdir(path);
+    }
+    try {
+      await parentHandle.removeEntry(name, { recursive: false });
+    } catch (error) {
+      if (hasDomName(error, 'InvalidModificationError')) {
+        throw this._enotempty(path);
+      }
+      throw error;
+    }
     this._invalidateHandleCachePrefix(path);
   }
 
@@ -185,7 +239,26 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * @param to - Destination absolute path.
    */
   public async rename(from: string, to: string): Promise<void> {
+    this._assertReady();
+    if (from === to) {
+      await this.stat(from);
+      return;
+    }
+    if (from === '/') {
+      throw this._einval(from);
+    }
     const sourceStat = await this.stat(from);
+    if (sourceStat.type === 'dir' && to.startsWith(`${from}/`)) {
+      throw this._einval(to);
+    }
+    try {
+      await this.stat(to);
+      throw this._eexist(to);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
     if (sourceStat.type === 'dir') {
       await this._renameDirectory(from, to);
       return;
@@ -196,6 +269,12 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     this._invalidateHandleCachePrefix(from);
   }
 
+  /** Drop cached directory handles before applying sibling-authority facts. */
+  public async refresh(): Promise<void> {
+    this._assertReady();
+    this._handleCache.clear();
+  }
+
   /**
    * Stream the contents of `path` with optional positional/length slicing and abort support.
    *
@@ -204,63 +283,110 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * @returns A `ReadableStream` of byte chunks.
    */
   public readFileStream(path: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>> {
-    const resolveHandle = async () => this._resolveFileHandle(path);
+    this._assertReady();
+    validateFileReadStreamOptions(options);
     let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
+    let initialize: Promise<void>;
+    let settled = false;
+    let abortHandler: (() => void) | undefined;
+    let cancelReason: unknown;
+    let readerCancelled = false;
+
+    const cancelReader = async (reason: unknown): Promise<void> => {
+      if (reader === undefined || readerCancelled) {
+        return;
+      }
+      readerCancelled = true;
+      try {
+        await reader.cancel(reason);
+      } catch {
+        // Cancellation cannot replace the stream's existing result.
+      }
+    };
+
+    const cleanup = (): void => {
+      if (abortHandler !== undefined) {
+        options?.signal?.removeEventListener('abort', abortHandler);
+        abortHandler = undefined;
+      }
+    };
 
     return new ReadableStream({
-      start: async (controller) => {
-        try {
-          const fileHandle = await resolveHandle();
-          const file = await fileHandle.getFile();
-
-          let blob: Blob = file;
-          if (options?.position !== undefined || options?.length !== undefined) {
-            const start = options.position ?? 0;
-            const end = options.length === undefined ? file.size : start + options.length;
-            blob = file.slice(start, end);
-          }
-
-          const nativeStream = blob.stream();
-          reader = nativeStream.getReader();
-
-          let buffer = new Uint8Array(0);
-
-          // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- reader loop
-          while (true) {
-            if (options?.signal?.aborted) {
-              controller.error(new DOMException('The operation was aborted.', 'AbortError'));
-              return;
+      start: (controller) => {
+        initialize = (async () => {
+          try {
+            const fileHandle = await this._resolveFileHandle(path);
+            const file = await fileHandle.getFile();
+            let blob: Blob = file;
+            if (options?.position !== undefined || options?.length !== undefined) {
+              const start = options.position ?? 0;
+              const end = options.length === undefined ? file.size : start + options.length;
+              blob = file.slice(start, end);
             }
-
-            // oxlint-disable-next-line no-await-in-loop -- Sequential stream reads
-            const { done, value } = await reader.read();
-            if (done) {
-              if (buffer.byteLength > 0) {
-                controller.enqueue(buffer);
-              }
-              controller.close();
-              return;
+            reader = blob.stream().getReader();
+            if (settled) {
+              await cancelReader(cancelReason);
             }
-
-            const merged = new Uint8Array(buffer.byteLength + value.byteLength);
-            merged.set(buffer);
-            merged.set(value, buffer.byteLength);
-            buffer = merged;
-
-            while (buffer.byteLength >= streamChunkSize) {
-              controller.enqueue(buffer.slice(0, streamChunkSize));
-              buffer = buffer.slice(streamChunkSize);
+          } catch (error) {
+            if (!settled) {
+              throw error;
             }
           }
-        } catch (error) {
+        })();
+
+        abortHandler = () => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          const error = new DOMException('The operation was aborted.', 'AbortError');
+          cancelReason = error;
+          cleanup();
+          void cancelReader(error);
           controller.error(error);
+        };
+        if (options?.signal?.aborted) {
+          abortHandler();
+        } else {
+          options?.signal?.addEventListener('abort', abortHandler, { once: true });
         }
       },
-      cancel: async () => {
+      pull: async (controller) => {
         try {
-          await reader?.cancel();
+          await initialize;
+          // oxlint-disable-next-line typescript/no-unnecessary-condition -- An abort event can settle the stream while initialization is suspended.
+          if (settled) {
+            return;
+          }
+          const chunk = await reader!.read();
+          // oxlint-disable-next-line typescript/no-unnecessary-condition -- An abort event can settle the stream while the reader is suspended.
+          if (settled) {
+            return;
+          }
+          if (chunk.done) {
+            settled = true;
+            cleanup();
+            controller.close();
+            return;
+          }
+          controller.enqueue(new Uint8Array(chunk.value));
+        } catch (error) {
+          if (!settled) {
+            settled = true;
+            cleanup();
+            controller.error(error);
+          }
+        }
+      },
+      cancel: async (reason) => {
+        settled = true;
+        cancelReason = reason;
+        cleanup();
+        try {
+          await initialize;
+          await cancelReader(reason);
         } catch {
-          // Reader may already be closed; safe to ignore
+          // Initialization or native cancellation has already ended the stream.
         }
       },
     });
@@ -271,16 +397,18 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   // ---------------------------------------------------------------------------
 
   protected async readFileRaw(path: string): Promise<Uint8Array<ArrayBuffer>> {
+    this._assertReady();
     const fileHandle = await this._resolveFileHandle(path);
     const file = await fileHandle.getFile();
     return new Uint8Array(await file.arrayBuffer());
   }
 
   protected async mkdirSingle(path: string): Promise<void> {
+    this._assertReady();
     this._invalidateHandleCachePrefix(path);
     const segments = this._splitPath(path);
     if (segments.length === 0) {
-      return;
+      throw this._eexist(path);
     }
 
     const parentHandle = await this._resolveDirectoryHandle('/' + segments.slice(0, -1).join('/'));
@@ -288,11 +416,15 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
 
     try {
       await parentHandle.getDirectoryHandle(name);
-      const error = new Error(`EEXIST: directory already exists '${path}'`);
-      (error as NodeJS.ErrnoException).code = 'EEXIST';
-      throw error;
+      throw this._eexist(path);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw error;
+      }
+      if (hasDomName(error, 'TypeMismatchError')) {
+        throw this._eexist(path);
+      }
+      if (!hasDomName(error, 'NotFoundError')) {
         throw error;
       }
     }
@@ -301,6 +433,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   }
 
   protected async _resolveDirectoryHandle(path: string): Promise<FileSystemDirectoryHandle> {
+    this._assertReady();
     const cached = this._handleCache.get(path);
     if (cached) {
       this._touchHandleCache(path);
@@ -322,8 +455,14 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       try {
         // oxlint-disable-next-line no-await-in-loop -- Sequential directory traversal required
         handle = await handle.getDirectoryHandle(segment);
-      } catch {
-        throw this._enoent(path);
+      } catch (error) {
+        if (hasDomName(error, 'TypeMismatchError')) {
+          throw this._enotdir(resolvedPath);
+        }
+        if (hasDomName(error, 'NotFoundError')) {
+          throw this._enoent(path);
+        }
+        throw error;
       }
       this._setHandleCache(resolvedPath, handle);
     }
@@ -331,29 +470,27 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     return handle;
   }
 
-  protected async _resolveFileHandle(path: string, options?: { create: boolean }): Promise<FileSystemFileHandle> {
+  protected async _resolveFileHandle(path: string): Promise<FileSystemFileHandle> {
+    this._assertReady();
     const segments = this._splitPath(path);
     if (segments.length === 0) {
-      throw this._enoent(path);
+      throw this._eisdir(path);
     }
 
     const fileName = segments.pop()!;
 
-    if (options?.create && segments.length > 0) {
-      let directoryHandle = this._rootHandle;
-      for (const segment of segments) {
-        // oxlint-disable-next-line no-await-in-loop -- Sequential directory creation required
-        directoryHandle = await directoryHandle.getDirectoryHandle(segment, { create: true });
-      }
-      return directoryHandle.getFileHandle(fileName, { create: true });
-    }
-
     const parentHandle = await this._resolveDirectoryHandle('/' + segments.join('/'));
 
     try {
-      return await parentHandle.getFileHandle(fileName, { create: options?.create });
-    } catch {
-      throw this._enoent(path);
+      return await parentHandle.getFileHandle(fileName);
+    } catch (error) {
+      if (hasDomName(error, 'TypeMismatchError')) {
+        throw this._eisdir(path);
+      }
+      if (hasDomName(error, 'NotFoundError')) {
+        throw this._enoent(path);
+      }
+      throw error;
     }
   }
 
@@ -361,9 +498,131 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     return path.split('/').filter(Boolean);
   }
 
+  /** Lifecycle readiness hook. Handle-backed user roots are ready at construction. */
+  // oxlint-disable-next-line no-empty-function -- OPFS overrides this hook; ordinary File System Access roots are ready at construction.
+  protected _assertReady(): void {}
+
   // ---------------------------------------------------------------------------
   // Private instance methods
   // ---------------------------------------------------------------------------
+
+  private async _createFileHandle(path: string): Promise<{
+    fileHandle: FileSystemFileHandle;
+    createdFile: boolean;
+    createdDirectories: string[];
+  }> {
+    const segments = this._splitPath(path);
+    if (segments.length === 0) {
+      throw this._eisdir(path);
+    }
+    const fileName = segments.pop()!;
+    const createdDirectories: string[] = [];
+    let directoryHandle = this._rootHandle;
+    let directoryPath = '';
+
+    try {
+      for (const segment of segments) {
+        directoryPath += `/${segment}`;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- Sequential directory traversal is required by the handle API.
+          directoryHandle = await directoryHandle.getDirectoryHandle(segment);
+        } catch (error) {
+          if (hasDomName(error, 'TypeMismatchError')) {
+            throw this._enotdir(directoryPath);
+          }
+          if (!hasDomName(error, 'NotFoundError')) {
+            throw error;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- Missing ancestors are created in path order.
+          directoryHandle = await directoryHandle.getDirectoryHandle(segment, { create: true });
+          createdDirectories.push(directoryPath);
+        }
+      }
+
+      try {
+        return {
+          fileHandle: await directoryHandle.getFileHandle(fileName),
+          createdFile: false,
+          createdDirectories,
+        };
+      } catch (error) {
+        if (hasDomName(error, 'TypeMismatchError')) {
+          throw this._eisdir(path);
+        }
+        if (!hasDomName(error, 'NotFoundError')) {
+          throw error;
+        }
+        return {
+          fileHandle: await directoryHandle.getFileHandle(fileName, { create: true }),
+          createdFile: true,
+          createdDirectories,
+        };
+      }
+    } catch (error) {
+      await this._cleanupCreatedDirectories(createdDirectories);
+      throw error;
+    }
+  }
+
+  private async _cleanupFailedFileCreation(
+    path: string,
+    created: { createdFile: boolean; createdDirectories: readonly string[] },
+  ): Promise<void> {
+    if (created.createdFile) {
+      try {
+        await this._removeEntry(path, false);
+      } catch {
+        return;
+      }
+    }
+    await this._cleanupCreatedDirectories(created.createdDirectories);
+  }
+
+  private async _cleanupCreatedDirectories(paths: readonly string[]): Promise<void> {
+    for (const path of paths.toReversed()) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- Cleanup must proceed from deepest child to parent.
+        await this._removeEntry(path, false);
+      } catch {
+        break;
+      }
+    }
+  }
+
+  private async _removeEntry(path: string, recursive: boolean): Promise<void> {
+    const segments = this._splitPath(path);
+    if (segments.length === 0) {
+      return;
+    }
+    const name = segments.pop()!;
+    const parent = await this._resolveDirectoryHandle(`/${segments.join('/')}`);
+    await parent.removeEntry(name, { recursive });
+    this._invalidateHandleCachePrefix(path);
+  }
+
+  private async _missingDirectoryPaths(path: string): Promise<string[]> {
+    const missing: string[] = [];
+    let current = '';
+    let ancestorMissing = false;
+    for (const segment of this._splitPath(path)) {
+      current += `/${segment}`;
+      if (ancestorMissing) {
+        missing.push(current);
+        continue;
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- Determine exactly which destination ancestors the rename will create.
+        await this._resolveDirectoryHandle(current);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw error;
+        }
+        ancestorMissing = true;
+        missing.push(current);
+      }
+    }
+    return missing;
+  }
 
   private _setHandleCache(key: string, handle: FileSystemDirectoryHandle): void {
     if (this._handleCache.size >= this._handleCacheMax) {
@@ -406,16 +665,29 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * @param to   - Destination absolute directory path.
    */
   private async _renameDirectory(from: string, to: string): Promise<void> {
-    await this._copyDirectoryContents(from, to);
+    const createdDirectories = await this._missingDirectoryPaths(to);
+    try {
+      await this._copyDirectoryContents(from, to);
 
-    const segments = this._splitPath(from);
-    if (segments.length === 0) {
-      throw new Error(`Cannot rename the filesystem root`);
+      const segments = this._splitPath(from);
+      if (segments.length === 0) {
+        throw new Error(`Cannot rename the filesystem root`);
+      }
+      const parentHandle = await this._resolveDirectoryHandle('/' + segments.slice(0, -1).join('/'));
+      const name = segments.at(-1)!;
+      await parentHandle.removeEntry(name, { recursive: true });
+      this._invalidateHandleCachePrefix(from);
+    } catch (error) {
+      if (createdDirectories.includes(to)) {
+        try {
+          await this._removeEntry(to, true);
+        } catch {
+          // Preserve the rename failure; remaining residue stays visible for recovery.
+        }
+      }
+      await this._cleanupCreatedDirectories(createdDirectories.filter((path) => path !== to));
+      throw error;
     }
-    const parentHandle = await this._resolveDirectoryHandle('/' + segments.slice(0, -1).join('/'));
-    const name = segments.at(-1)!;
-    await parentHandle.removeEntry(name, { recursive: true });
-    this._invalidateHandleCachePrefix(from);
   }
 
   /**
@@ -427,13 +699,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    */
   private async _copyDirectoryContents(source: string, destination: string): Promise<void> {
     const sourceHandle = await this._resolveDirectoryHandle(source);
-
-    const destinationSegments = this._splitPath(destination);
-    let destinationHandle = this._rootHandle;
-    for (const segment of destinationSegments) {
-      // oxlint-disable-next-line no-await-in-loop -- Sequential directory creation required
-      destinationHandle = await destinationHandle.getDirectoryHandle(segment, { create: true });
-    }
+    await this.mkdir(destination, { recursive: true });
 
     for await (const [entryName, entryHandle] of directoryEntries(sourceHandle)) {
       if (entryHandle.kind === 'directory') {
@@ -441,20 +707,8 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       } else {
         const file = await entryHandle.getFile();
         const bytes = new Uint8Array(await file.arrayBuffer());
-        const destinationFile = await destinationHandle.getFileHandle(entryName, { create: true });
-        const writable = await destinationFile.createWritable();
-        try {
-          await writable.write(bytes);
-        } finally {
-          await writable.close();
-        }
+        await this.writeFile(`${destination}/${entryName}`, bytes);
       }
     }
-  }
-
-  private _enoent(path: string): Error {
-    const error = new Error(`ENOENT: no such file or directory '${path}'`);
-    (error as NodeJS.ErrnoException).code = 'ENOENT';
-    return error;
   }
 }

@@ -6,20 +6,34 @@ import { WorkspaceFileService } from '#workspace-file-service.js';
 import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { ChangeEventBus } from '#change-event-bus.js';
-import { createMemoryProvider } from '#backend/memory-provider.js';
 import { getEventOrigin } from '#event-origin-registry.js';
 import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 import type { ChangeEvent, FileSystemProvider } from '#types.js';
 
 async function createMountedWorkspaceFileService() {
-  const rootProvider = await createMemoryProvider();
-  const nodeModulesProvider = await createMemoryProvider();
+  const providerRegistry = new ProviderRegistry();
+  const rootProvider = await providerRegistry.getProvider({
+    backend: 'memory',
+    storageRootKey: 'memory:mount-integration-root',
+  });
+  const nodeModulesProvider = await providerRegistry.getProvider({
+    backend: 'memory',
+    storageRootKey: 'memory:mount-integration-node-modules',
+  });
 
   const mountTable = new MountTable();
-  mountTable.mount('/', rootProvider, { backend: 'memory' });
-  mountTable.mount('/node_modules', nodeModulesProvider, { backend: 'memory' });
-
-  const providerRegistry = new ProviderRegistry();
+  mountTable.mount('/', rootProvider, {
+    backend: 'memory',
+    storageRootKey: 'memory:mount-integration-root',
+  });
+  mountTable.mount('/node_modules', nodeModulesProvider, {
+    backend: 'memory',
+    storageRootKey: 'memory:mount-integration-node-modules',
+  });
+  mountTable.mount('/previews/deps', nodeModulesProvider, {
+    backend: 'memory',
+    storageRootKey: 'memory:mount-integration-node-modules',
+  });
 
   const resourceQueue = new ResourceQueue();
   const eventBus = new ChangeEventBus();
@@ -31,7 +45,7 @@ async function createMountedWorkspaceFileService() {
     mountTable,
   });
 
-  return { service, rootProvider, nodeModulesProvider, eventBus, mountTable };
+  return { service, rootProvider, nodeModulesProvider, eventBus, mountTable, providerRegistry };
 }
 
 describe('MountTable integration', () => {
@@ -53,6 +67,42 @@ describe('MountTable integration', () => {
   // -------------------------------------------------------------------------
 
   describe('multi-mount routing', () => {
+    it('keeps the committed project-route projection when staging a replacement fails', async () => {
+      const context = await createMountedWorkspaceFileService();
+      const committedId = 'proj_ccccccccccccccccccccc';
+      const replacementId = 'proj_rrrrrrrrrrrrrrrrrrrrr';
+      await context.service.configureProjectRoots({
+        projects: [
+          {
+            projectId: committedId,
+            backend: 'memory',
+            storageRootKey: 'memory:committed',
+            providerBasePath: '/projects/committed-physical',
+          },
+        ],
+        roots: [],
+      });
+      await context.service.writeFile(`/projects/${committedId}/main.ts`, 'committed');
+      vi.spyOn(context.providerRegistry, 'getProvider').mockRejectedValueOnce(new Error('provider unavailable'));
+
+      await expect(
+        context.service.configureProjectRoots({
+          projects: [
+            {
+              projectId: replacementId,
+              backend: 'memory',
+              storageRootKey: 'memory:replacement',
+              providerBasePath: '/projects/replacement-physical',
+            },
+          ],
+          roots: [],
+        }),
+      ).rejects.toThrow('provider unavailable');
+
+      expect(await context.service.readFile(`/projects/${committedId}/main.ts`, 'utf8')).toBe('committed');
+      context.service.dispose();
+    });
+
     it('should route readFile to root mount for project files', async () => {
       await rootProvider.writeFile('/src/main.ts', 'hello');
       const content = await service.readFile('/src/main.ts', 'utf8');
@@ -67,7 +117,7 @@ describe('MountTable integration', () => {
 
     it('should route writeFile to correct provider based on path', async () => {
       await service.writeFile('/src/app.ts', 'app code');
-      await service.writeFile('/node_modules/react/index.js', 'react');
+      await service.writeFile('/previews/deps/react/index.js', 'react');
 
       expect(await rootProvider.readFile('/src/app.ts', 'utf8')).toBe('app code');
       expect(await nodeModulesProvider.readFile('/react/index.js', 'utf8')).toBe('react');
@@ -124,17 +174,17 @@ describe('MountTable integration', () => {
   // -------------------------------------------------------------------------
 
   describe('cross-mount operations', () => {
-    it('should perform cross-mount rename as copy+delete', async () => {
+    it('should perform a cross-mount move as copy and delete', async () => {
       await rootProvider.writeFile('/temp.js', 'temp content');
-      await service.rename('/temp.js', '/node_modules/temp.js');
+      await service.move('/temp.js', '/previews/deps/temp.js');
 
       expect(await rootProvider.exists('/temp.js')).toBe(false);
       expect(await nodeModulesProvider.readFile('/temp.js', 'utf8')).toBe('temp content');
     });
 
-    it('should handle same-mount rename normally', async () => {
+    it('should handle a same-mount move', async () => {
       await rootProvider.writeFile('/old.ts', 'code');
-      await service.rename('/old.ts', '/new.ts');
+      await service.move('/old.ts', '/new.ts');
 
       expect(await rootProvider.exists('/old.ts')).toBe(false);
       expect(await rootProvider.readFile('/new.ts', 'utf8')).toBe('code');
@@ -142,7 +192,7 @@ describe('MountTable integration', () => {
 
     it('should duplicate files across mount boundaries', async () => {
       await rootProvider.writeFile('/src/util.ts', 'util code');
-      await service.duplicateFile('/src/util.ts', '/node_modules/util.ts');
+      await service.duplicateFile('/src/util.ts', '/previews/deps/util.ts');
 
       expect(await rootProvider.readFile('/src/util.ts', 'utf8')).toBe('util code');
       expect(await nodeModulesProvider.readFile('/util.ts', 'utf8')).toBe('util code');
@@ -167,15 +217,15 @@ describe('MountTable integration', () => {
       expect(writeEvent).toBeDefined();
     });
 
-    it('should emit fileWritten with virtual absolute path for node_modules writes', async () => {
+    it('should emit fileWritten with the virtual absolute path for nested-mount writes', async () => {
       const events: ChangeEvent[] = [];
       eventBus.subscribe((event) => {
         events.push(event);
       });
 
-      await service.writeFile('/node_modules/lodash/index.js', 'x');
+      await service.writeFile('/previews/deps/lodash/index.js', 'x');
       const writeEvent = events.find(
-        (event) => event.type === 'fileWritten' && 'path' in event && event.path === '/node_modules/lodash/index.js',
+        (event) => event.type === 'fileWritten' && 'path' in event && event.path === '/previews/deps/lodash/index.js',
       );
       expect(writeEvent).toBeDefined();
     });
@@ -217,9 +267,9 @@ describe('MountTable integration', () => {
   describe('single mount', () => {
     it('should work with only a root mount', async () => {
       const providerRegistry = new ProviderRegistry();
-      const provider = await providerRegistry.createMountProvider({ backend: 'memory' });
+      const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:test-root' });
       const mt = new MountTable();
-      mt.mount('/', provider, { backend: 'memory' });
+      mt.mount('/', provider, { backend: 'memory', storageRootKey: 'memory:test-root' });
 
       const svc = new WorkspaceFileService({
         providerRegistry,
@@ -234,134 +284,7 @@ describe('MountTable integration', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Dynamic mount routing (domain-agnostic mount / unmount)
-  // -------------------------------------------------------------------------
-
-  describe('dynamic mount routing', () => {
-    it('should mount a path prefix on the specified backend', async () => {
-      await service.mount('/projects/proj_A', { backend: 'memory', preservePath: true });
-      const exists = await service.exists('/projects/proj_A');
-      expect(exists).toBeDefined();
-    });
-
-    it('should route reads/writes to the mounted provider for mounted paths', async () => {
-      await service.mount('/projects/proj_A', { backend: 'memory', preservePath: true });
-      await service.writeFile('/projects/proj_A/main.ts', 'project A code');
-      const content = await service.readFile('/projects/proj_A/main.ts', 'utf8');
-      expect(content).toBe('project A code');
-
-      // Verify the file is NOT on the root provider
-      expect(await rootProvider.exists('/projects/proj_A/main.ts')).toBe(false);
-    });
-
-    it('should route non-mounted paths to the root provider', async () => {
-      await service.mount('/projects/proj_A', { backend: 'memory', preservePath: true });
-      await service.writeFile('/config.json', '{}');
-      expect(await rootProvider.readFile('/config.json', 'utf8')).toBe('{}');
-    });
-
-    it('should unmount a prefix and fall through to root', async () => {
-      await service.mount('/projects/proj_B', { backend: 'memory', preservePath: true });
-      await service.writeFile('/projects/proj_B/app.ts', 'app code');
-
-      service.unmount('/projects/proj_B');
-
-      expect(await service.exists('/projects/proj_B/app.ts')).toBe(false);
-    });
-
-    it('should handle multiple simultaneous mounts on different prefixes', async () => {
-      await service.mount('/projects/proj_X', { backend: 'memory', preservePath: true });
-      await service.mount('/projects/proj_Y', { backend: 'memory', preservePath: true });
-
-      await service.writeFile('/projects/proj_X/x.ts', 'X');
-      await service.writeFile('/projects/proj_Y/y.ts', 'Y');
-
-      expect(await service.readFile('/projects/proj_X/x.ts', 'utf8')).toBe('X');
-      expect(await service.readFile('/projects/proj_Y/y.ts', 'utf8')).toBe('Y');
-
-      // Cross-isolation: project X file not visible under project Y
-      expect(await service.exists('/projects/proj_Y/x.ts')).toBe(false);
-    });
-
-    it('should emit correct backend in events for mounted paths', async () => {
-      const events: ChangeEvent[] = [];
-      eventBus.subscribe((event) => {
-        events.push(event);
-      });
-
-      await service.mount('/projects/proj_C', { backend: 'memory', preservePath: true });
-      await service.writeFile('/projects/proj_C/main.ts', 'code');
-
-      const writeEvent = events.find(
-        (event) => event.type === 'fileWritten' && 'path' in event && event.path === '/projects/proj_C/main.ts',
-      );
-      expect(writeEvent).toBeDefined();
-      expect(writeEvent!.backend).toBe('memory');
-    });
-
-    it('should emit correct backend in events for root paths', async () => {
-      const events: ChangeEvent[] = [];
-      eventBus.subscribe((event) => {
-        events.push(event);
-      });
-
-      await service.mount('/projects/proj_D', { backend: 'memory', preservePath: true });
-      await service.writeFile('/root-file.txt', 'root content');
-
-      const writeEvent = events.find(
-        (event) => event.type === 'fileWritten' && 'path' in event && event.path === '/root-file.txt',
-      );
-      expect(writeEvent).toBeDefined();
-      expect(writeEvent!.backend).toBe('memory');
-    });
-
-    it('should isolate project mount from root mount', async () => {
-      const providerRegistry = new ProviderRegistry();
-      const rootProvider = await providerRegistry.createMountProvider({ backend: 'memory' });
-
-      const projectMountTable = new MountTable();
-      projectMountTable.mount('/', rootProvider, { backend: 'memory' });
-      const projectEventBus = new ChangeEventBus();
-
-      const projectService = new WorkspaceFileService({
-        providerRegistry,
-        resourceQueue: new ResourceQueue(),
-        eventBus: projectEventBus,
-        mountTable: projectMountTable,
-      });
-
-      await projectService.mount('/projects/proj_E', { backend: 'memory', preservePath: true });
-
-      await projectService.writeFile('/projects/proj_E/test.ts', 'hello');
-      expect(await projectService.readFile('/projects/proj_E/test.ts', 'utf8')).toBe('hello');
-
-      expect(await projectService.exists('/test.ts')).toBe(false);
-    });
-
-    it('should dispose the mount provider on unmount', async () => {
-      await service.mount('/projects/proj_F', { backend: 'memory', preservePath: true });
-      await service.writeFile('/projects/proj_F/test.ts', 'test');
-
-      expect(await service.exists('/projects/proj_F/test.ts')).toBe(true);
-
-      service.unmount('/projects/proj_F');
-
-      expect(await service.exists('/projects/proj_F/test.ts')).toBe(false);
-    });
-
-    it('should pass full path to provider when mount uses preservePath', async () => {
-      await service.mount('/projects/proj_G', { backend: 'memory', preservePath: true });
-
-      await service.writeFile('/projects/proj_G/main.ts', 'code');
-
-      const content = await service.readFile('/projects/proj_G/main.ts', 'utf8');
-      expect(content).toBe('code');
-
-      const entries = await service.readdir('/projects/proj_G');
-      expect(entries).toContain('main.ts');
-    });
-
+  describe('boot topology routing', () => {
     // Project bootstrap contract pin: the cross-workspace `client.writeFiles`
     // path used by `createProject` (apps/ui/app/hooks/use-project-manager.tsx)
     // dispatches a bulk write keyed by absolute paths under sibling mount
@@ -372,18 +295,23 @@ describe('MountTable integration', () => {
     // to `client.writeFiles` is correct only if this routing contract holds.
     it('should route bulk writeFiles across sibling mount prefixes to the correct providers', async () => {
       const providerRegistry = new ProviderRegistry();
-      const rootProvider = await providerRegistry.createMountProvider({ backend: 'memory' });
-      const firstProjectProvider = await providerRegistry.createMountProvider({ backend: 'indexeddb' });
-      const secondProjectProvider = await providerRegistry.createMountProvider({ backend: 'memory' });
+      const rootProvider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:root' });
+      const firstProjectProvider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const secondProjectProvider = await providerRegistry.getProvider({
+        backend: 'memory',
+        storageRootKey: 'memory:second-project',
+      });
       const siblingMountTable = new MountTable();
-      siblingMountTable.mount('/', rootProvider, { backend: 'memory' });
+      siblingMountTable.mount('/', rootProvider, { backend: 'memory', storageRootKey: 'memory:root' });
       siblingMountTable.mount('/projects/proj_A', firstProjectProvider, {
         backend: 'indexeddb',
-        preservePath: true,
+        storageRootKey: providerRegistry.resolveStorageRootKey({ backend: 'indexeddb' }),
+        providerBasePath: '/projects/proj_A',
       });
       siblingMountTable.mount('/projects/proj_B', secondProjectProvider, {
         backend: 'memory',
-        preservePath: true,
+        storageRootKey: 'memory:second-project',
+        providerBasePath: '/projects/proj_B',
       });
       const siblingEventBus = new ChangeEventBus();
       const crossTabCoordinator = new CrossTabCoordinator();

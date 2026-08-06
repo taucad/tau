@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { EventCoalescer, coalesceEvents, coalesceChangeEvents } from '#event-coalescer.js';
+import { EventCoalescer, coalesceChangeEvents } from '#event-coalescer.js';
 import { getEventOrigin, tagEventOrigin } from '#event-origin-registry.js';
 import type { ChangeEvent } from '#types.js';
 
@@ -14,49 +14,49 @@ const renamed = (oldPath: string, newPath: string): ChangeEvent => ({
   backend: testBackend,
 });
 
-describe('coalesceEvents (pure)', () => {
+describe('coalesceChangeEvents (pure)', () => {
   it('should pass through single events unchanged', () => {
     const events = [written('/a.txt')];
-    expect(coalesceEvents(events)).toEqual(events);
+    expect(coalesceChangeEvents(events)).toEqual(events);
   });
 
-  it('should cancel written → deleted for the same path', () => {
+  it('should preserve the final delete after a write to an existing path', () => {
     const events = [written('/a.txt'), deleted('/a.txt')];
-    expect(coalesceEvents(events)).toEqual([]);
+    expect(coalesceChangeEvents(events)).toEqual([deleted('/a.txt')]);
   });
 
   it('should collapse deleted → written to a single written (update)', () => {
     const events = [deleted('/a.txt'), written('/a.txt')];
-    expect(coalesceEvents(events)).toEqual([written('/a.txt')]);
+    expect(coalesceChangeEvents(events)).toEqual([written('/a.txt')]);
   });
 
-  it('should suppress child deletes when parent is deleted', () => {
+  it('should not guess that an untyped file delete is a parent-directory summary', () => {
     const events = [deleted('/dir'), deleted('/dir/a.txt'), deleted('/dir/b.txt')];
-    const result = coalesceEvents(events);
-    expect(result).toEqual([deleted('/dir')]);
+    const result = coalesceChangeEvents(events);
+    expect(result).toEqual(events);
   });
 
   it('should not suppress child events for unrelated parents', () => {
     const events = [deleted('/other'), deleted('/dir/a.txt')];
-    const result = coalesceEvents(events);
+    const result = coalesceChangeEvents(events);
     expect(result).toHaveLength(2);
   });
 
   it('should keep rename events', () => {
     const events = [renamed('/old.txt', '/new.txt')];
-    expect(coalesceEvents(events)).toEqual(events);
+    expect(coalesceChangeEvents(events)).toEqual(events);
   });
 
   it('should preserve rename event alongside other events in multi-event batch', () => {
     const events = [written('/a.txt'), renamed('/old.txt', '/new.txt')];
-    const result = coalesceEvents(events);
+    const result = coalesceChangeEvents(events);
     expect(result).toHaveLength(2);
     expect(result).toEqual([written('/a.txt'), renamed('/old.txt', '/new.txt')]);
   });
 
   it('should preserve rename event when fileRenamed is followed by fileDeleted on oldPath', () => {
     const events = [renamed('/a', '/b'), deleted('/a')];
-    const result = coalesceEvents(events);
+    const result = coalesceChangeEvents(events);
     const allPaths = result.flatMap((event) => {
       const paths: string[] = [];
       if ('path' in event) {
@@ -72,7 +72,7 @@ describe('coalesceEvents (pure)', () => {
 
   it('should not cancel rename when fileWritten + fileRenamed + fileDeleted occur on same path', () => {
     const events = [written('/a'), renamed('/a', '/b'), deleted('/a')];
-    const result = coalesceEvents(events);
+    const result = coalesceChangeEvents(events);
     const allPaths = result.flatMap((event) => {
       const paths: string[] = [];
       if ('path' in event) {
@@ -88,21 +88,43 @@ describe('coalesceEvents (pure)', () => {
 
   it('should deduplicate repeated writes to the same path', () => {
     const events = [written('/a.txt'), written('/a.txt'), written('/a.txt')];
-    const result = coalesceEvents(events);
+    const result = coalesceChangeEvents(events);
     expect(result).toEqual([written('/a.txt')]);
   });
 
   it('should preserve mixed events for different paths', () => {
     const events = [written('/a.txt'), deleted('/b.txt'), written('/c.txt')];
-    const result = coalesceEvents(events);
+    const result = coalesceChangeEvents(events);
     expect(result).toHaveLength(3);
   });
 
   it('should pass through backendChanged events', () => {
     const backendEvent: ChangeEvent = { type: 'backendChanged', backend: testBackend };
-    const result = coalesceEvents([backendEvent, written('/a.txt')]);
+    const result = coalesceChangeEvents([backendEvent, written('/a.txt')]);
     expect(result).toHaveLength(2);
     expect(result[0]).toEqual(backendEvent);
+  });
+
+  it('places a collapsed path fact at its final causal position', () => {
+    const backendEvent: ChangeEvent = { type: 'backendChanged', backend: testBackend };
+
+    expect(coalesceChangeEvents([written('/a.txt'), backendEvent, deleted('/a.txt')])).toEqual([
+      backendEvent,
+      deleted('/a.txt'),
+    ]);
+  });
+
+  it('never collapses away a directory summary reset', () => {
+    const summary: ChangeEvent = { type: 'directoryChanged', path: '/src', backend: testBackend };
+
+    expect(coalesceChangeEvents([written('/src'), summary, written('/src')])).toEqual([summary, written('/src')]);
+  });
+
+  it('keeps interleaved rename and path histories in causal order', () => {
+    expect(coalesceChangeEvents([written('/a'), renamed('/old', '/new'), written('/a')])).toEqual([
+      renamed('/old', '/new'),
+      written('/a'),
+    ]);
   });
 });
 
@@ -125,6 +147,8 @@ describe('coalesceChangeEvents (origin merge)', () => {
     const result = coalesceChangeEvents([firstWritten, secondWritten]);
     expect(result).toHaveLength(1);
     expect(getEventOrigin(result[0]!)).toBeUndefined();
+    expect(result[0]).not.toBe(secondWritten);
+    expect(getEventOrigin(secondWritten)).toBe('p2');
   });
 
   it('should clear origin when defined origin mixes with external observer (undefined)', () => {
@@ -143,7 +167,7 @@ describe('coalesceChangeEvents (origin merge)', () => {
     tagEventOrigin(w, 'k');
     const result = coalesceChangeEvents([d, w]);
     expect(result).toHaveLength(1);
-    expect(result[0]).toBe(w);
+    expect(result[0]).not.toBe(w);
     expect(getEventOrigin(result[0]!)).toBe('k');
   });
 
@@ -154,8 +178,9 @@ describe('coalesceChangeEvents (origin merge)', () => {
     tagEventOrigin(w, 'u');
     const result = coalesceChangeEvents([d, w]);
     expect(result).toHaveLength(1);
-    expect(result[0]).toBe(w);
+    expect(result[0]).not.toBe(w);
     expect(getEventOrigin(result[0]!)).toBeUndefined();
+    expect(getEventOrigin(w)).toBe('u');
   });
 
   it('should not merge origins across different paths', () => {
@@ -224,7 +249,7 @@ describe('EventCoalescer (timed)', () => {
     coalescer.dispose();
   });
 
-  it('should cancel written+deleted within same window', () => {
+  it('should deliver the final delete for written+deleted within one window', () => {
     const deliver = vi.fn();
     const coalescer = new EventCoalescer(deliver, { coalescingWindow: 50 });
 
@@ -232,7 +257,7 @@ describe('EventCoalescer (timed)', () => {
     coalescer.push(deleted('/a.txt'));
 
     vi.advanceTimersByTime(50);
-    expect(deliver).not.toHaveBeenCalled();
+    expect(deliver).toHaveBeenCalledWith([deleted('/a.txt')]);
 
     coalescer.dispose();
   });
@@ -261,6 +286,12 @@ describe('EventCoalescer (timed)', () => {
 
     coalescer.push(written('/4.txt'));
     expect(onOverflow).toHaveBeenCalledTimes(1);
+    expect(onOverflow).toHaveBeenCalledWith([
+      written('/1.txt'),
+      written('/2.txt'),
+      written('/3.txt'),
+      written('/4.txt'),
+    ]);
     expect(deliver).not.toHaveBeenCalled();
 
     vi.advanceTimersByTime(1000);
@@ -312,7 +343,7 @@ describe('EventCoalescer (timed)', () => {
     coalescer.dispose();
   });
 
-  it('should reset timer on each push (sliding window)', () => {
+  it('should deliver continuous traffic by the first event deadline', () => {
     const deliver = vi.fn();
     const coalescer = new EventCoalescer(deliver, { coalescingWindow: 75 });
 
@@ -321,12 +352,14 @@ describe('EventCoalescer (timed)', () => {
     expect(deliver).not.toHaveBeenCalled();
 
     coalescer.push(written('/b.txt'));
-    vi.advanceTimersByTime(50);
-    expect(deliver).not.toHaveBeenCalled();
-
     vi.advanceTimersByTime(25);
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver).toHaveBeenCalledWith([written('/a.txt'), written('/b.txt')]);
+
+    coalescer.push(written('/c.txt'));
+    vi.advanceTimersByTime(75);
+    expect(deliver).toHaveBeenCalledTimes(2);
+    expect(deliver).toHaveBeenLastCalledWith([written('/c.txt')]);
 
     coalescer.dispose();
   });

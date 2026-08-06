@@ -23,6 +23,20 @@ describe('createMemoryProvider', () => {
     expect(content).toBe('hello memory');
   });
 
+  it('should own input and output byte snapshots', async () => {
+    const provider = await createMemoryProvider();
+    const input = new Uint8Array([1, 2, 3]);
+    await provider.writeFile('/owned.bin', input);
+    input.fill(9);
+
+    const first = await provider.readFile('/owned.bin');
+    first.fill(8);
+    const second = await provider.readFile('/owned.bin');
+
+    expect(second).toEqual(new Uint8Array([1, 2, 3]));
+    expect(second).not.toBe(first);
+  });
+
   it('should create an independent provider per factory call', async () => {
     const a = await createMemoryProvider();
     const b = await createMemoryProvider();
@@ -53,6 +67,8 @@ describe('createMemoryProvider', () => {
     await provider.writeFile('/src/index.ts', 'export {}');
     await provider.writeFile('/src/utils/helpers.ts', 'export {}');
     await provider.writeFile('/src/utils/strings.ts', 'export {}');
+    const nestedDirectoryStat = await provider.stat('/src/utils');
+    const nestedDirectoryMtime = nestedDirectoryStat.mtimeMs;
 
     await provider.rename('/src', '/lib');
 
@@ -62,6 +78,8 @@ describe('createMemoryProvider', () => {
     expect(await provider.exists('/lib/index.ts')).toBe(true);
     expect(await provider.exists('/lib/utils/helpers.ts')).toBe(true);
     expect(await provider.exists('/lib/utils/strings.ts')).toBe(true);
+    const renamedDirectoryStat = await provider.stat('/lib/utils');
+    expect(renamedDirectoryStat.mtimeMs).toBe(nestedDirectoryMtime);
   });
 
   it('should return entries with stats from readdirWithStats', async () => {

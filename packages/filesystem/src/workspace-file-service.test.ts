@@ -7,13 +7,18 @@ import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { MountTable } from '#mount-table.js';
+import type { CommitPendingProjectDirectoryResult, StorageRootConfig } from '#mount-table.js';
 import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
+import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
 import { SharedPool } from '@taucad/memory';
 import type { ChangeEvent, FileSystemProvider, WatchEvent } from '#types.js';
 import { getEventOrigin } from '#event-origin-registry.js';
+import { parseProjectManifestBytes, projectToManifest, serializeProjectManifest } from '@taucad/types';
+import type { ProjectManifest } from '@taucad/types';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+let databaseSequence = 0;
 
 /**
  * Poll a predicate until it becomes true. Used to await asynchronous
@@ -37,11 +42,11 @@ async function waitFor(predicate: () => boolean, waitTimeout = 2000, pollInterva
 }
 
 async function createWorkspaceFileService(options?: { crossTabCoordinator?: CrossTabCoordinator }) {
-  const providerRegistry = new ProviderRegistry();
-  const provider = await providerRegistry.createMountProvider({ backend: 'memory' });
+  const providerRegistry = new ProviderRegistry({ databasePrefix: `tau-workspace-test-${databaseSequence++}` });
+  const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:0' });
 
   const mountTable = new MountTable();
-  mountTable.mount('/', provider, { backend: 'memory' });
+  mountTable.mount('/', provider, { backend: 'memory', storageRootKey: 'memory:0' });
 
   const resourceQueue = new ResourceQueue();
   const eventBus = new ChangeEventBus();
@@ -71,28 +76,771 @@ describe('WorkspaceFileService', () => {
     rootProvider = context.provider;
   });
 
-  describe('Layer 2 composition', () => {
-    it('exposes a FileSystemService via fileSystem', () => {
-      expect(service.fileSystem).toBeDefined();
-      expect(typeof service.fileSystem.readFile).toBe('function');
-      expect(typeof service.fileSystem.asProvider).toBe('function');
-      expect(typeof service.fileSystem.asRuntimeFileSystem).toBe('function');
+  describe('project discovery', () => {
+    const manifestProject = (id: string, name = id): ProjectManifest =>
+      projectToManifest({
+        id,
+        name,
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: 'main.ts' } },
+      });
+
+    const writeManifest = async (
+      provider: FileSystemProvider,
+      directory: string,
+      project: ProjectManifest,
+    ): Promise<void> => {
+      if (!(await provider.exists('/projects'))) {
+        await provider.mkdir('/projects');
+      }
+      await provider.mkdir(`/projects/${directory}`);
+      await provider.writeFile(`/projects/${directory}/tau.json`, serializeProjectManifest(projectToManifest(project)));
+    };
+
+    it('discovers valid manifests and applies deterministic duplicate-id ordering', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const duplicateId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
+      await writeManifest(provider, 'b-copy', manifestProject(duplicateId, 'copy'));
+      await writeManifest(provider, 'a-original', manifestProject(duplicateId, 'original'));
+      await service.configureProjectRoots({
+        projects: [],
+        roots: [{ backend: 'indexeddb' }],
+      });
+
+      const result = await service.listProjectManifests();
+      expect(result.entries.map((entry) => [entry.locator.relativeDirectory, entry.status])).toEqual([
+        ['/projects/a-original', 'duplicate-id'],
+        ['/projects/b-copy', 'duplicate-id'],
+      ]);
+      expect(result.roots).toEqual([{ status: 'complete', root: { backend: 'indexeddb' } }]);
     });
 
-    it('Layer 2 service shares the workspace mount table for path routing', async () => {
-      await service.writeFile('/layer2.txt', 'hello');
-      const bytes = await service.fileSystem.readFile('/layer2.txt');
-      expect(decoder.decode(bytes)).toBe('hello');
+    it('surfaces a malformed id as adoption-required without mutating the file', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const source = projectToManifest(manifestProject('proj_bbbbbbbbbbbbbbbbbbbbb', 'Dropped')) as Record<
+        string,
+        unknown
+      >;
+      source['id'] = 'copied-folder';
+      await provider.mkdir('/projects');
+      await provider.mkdir('/projects/dropped');
+      const bytes = encoder.encode(JSON.stringify(source));
+      await provider.writeFile('/projects/dropped/tau.json', bytes);
+      await service.configureProjectRoots({
+        projects: [],
+        roots: [{ backend: 'indexeddb' }],
+      });
+
+      expect(await service.listProjectManifests()).toMatchObject({
+        entries: [
+          {
+            status: 'adoption-required',
+            locator: { relativeDirectory: '/projects/dropped' },
+            manifest: { name: 'Dropped' },
+          },
+        ],
+      });
+      expect(await provider.readFile('/projects/dropped/tau.json')).toEqual(bytes);
     });
 
-    it('Layer 2 writes are visible to the workspace eventBus', async () => {
+    it('strictly quarantines unsafe structural and presentation data', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const unsafe = {
+        ...projectToManifest(manifestProject('proj_ccccccccccccccccccccc')),
+        assets: { main: { entryPath: '../escape.ts' } },
+      };
+      await provider.mkdir('/projects');
+      await provider.mkdir('/projects/unsafe');
+      await provider.writeFile('/projects/unsafe/tau.json', encoder.encode(JSON.stringify(unsafe)));
+      const salvaged = {
+        ...projectToManifest(manifestProject('proj_ddddddddddddddddddddd')),
+        name: 42,
+      };
+      await provider.mkdir('/projects/salvaged');
+      await provider.writeFile('/projects/salvaged/tau.json', encoder.encode(JSON.stringify(salvaged)));
+      await service.configureProjectRoots({
+        projects: [],
+        roots: [{ backend: 'indexeddb' }],
+      });
+
+      const { entries } = await service.listProjectManifests();
+      expect(entries.find((entry) => entry.locator.relativeDirectory === '/projects/unsafe')).toMatchObject({
+        status: 'invalid',
+      });
+      expect(entries.find((entry) => entry.locator.relativeDirectory === '/projects/salvaged')).toMatchObject({
+        status: 'invalid',
+      });
+    });
+
+    it('marks a root inaccessible when a child read fails for a reason other than absence', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      await writeManifest(provider, 'b-readable', manifestProject('proj_rrrrrrrrrrrrrrrrrrrrr'));
+      await provider.mkdir('/projects/a-unreadable');
+      vi.spyOn(provider, 'readFile').mockRejectedValueOnce(new Error('storage unavailable'));
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+
+      await expect(service.listProjectManifests()).resolves.toEqual({
+        entries: [],
+        roots: [{ status: 'inaccessible', root: { backend: 'indexeddb' }, reason: 'storage unavailable' }],
+      });
+    });
+
+    it('refreshes an owned provider before discovering out-of-band project creation', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      const dbName = (provider as unknown as { _dbName: string })._dbName;
+      const peer = new DirectIdbProvider('unused');
+      (peer as unknown as { _dbName: string })._dbName = dbName;
+      await peer.initialize();
+      const project = manifestProject('proj_ooooooooooooooooooooo', 'Out of band');
+      await writeManifest(peer, 'out-of-band', project);
+
+      try {
+        await expect(service.listProjectManifests()).resolves.toMatchObject({
+          entries: [
+            {
+              status: 'valid',
+              manifest: { id: project.id },
+              locator: { relativeDirectory: '/projects/out-of-band' },
+            },
+          ],
+        });
+      } finally {
+        peer.dispose();
+      }
+    });
+  });
+
+  describe('permanentlyDeleteProjectDirectory', () => {
+    const projectId = 'proj_eeeeeeeeeeeeeeeeeeeee';
+    const directory = `/projects/readable-project--${projectId}`;
+    const scope: StorageRootConfig = { backend: 'indexeddb' };
+
+    beforeEach(async () => {
+      rootProvider = await providerRegistry.getProvider(scope);
+    });
+
+    const writePhysicalProject = async (id = projectId): Promise<void> => {
+      await rootProvider.mkdir(directory, { recursive: true });
+      await rootProvider.writeFile(
+        `${directory}/tau.json`,
+        serializeProjectManifest(
+          projectToManifest({
+            id,
+            name: 'Readable Project',
+            description: '',
+            tags: [],
+            assets: { main: { entryPath: 'main.ts' } },
+          }),
+        ),
+      );
+      await rootProvider.writeFile(`${directory}/main.ts`, encoder.encode('export default {};'));
+    };
+
+    it('rejects an untyped memory scope before provider or storage-key lookup', async () => {
+      const resolveStorageRootKey = vi.spyOn(providerRegistry, 'resolveStorageRootKey');
+      const getProvider = vi.spyOn(providerRegistry, 'getProvider');
+
+      await expect(
+        service.permanentlyDeleteProjectDirectory({
+          projectId,
+          providerBasePath: directory,
+          scope: { backend: 'memory', storageRootKey: 'memory:forbidden' },
+        } as unknown as Parameters<WorkspaceFileService['permanentlyDeleteProjectDirectory']>[0]),
+      ).rejects.toThrow('durable storage');
+      expect(resolveStorageRootKey).not.toHaveBeenCalled();
+      expect(getProvider).not.toHaveBeenCalled();
+    });
+
+    it('deletes only the exact directory after re-establishing manifest identity', async () => {
+      await writePhysicalProject();
+
+      await expect(
+        service.permanentlyDeleteProjectDirectory({
+          projectId,
+          providerBasePath: directory,
+          scope,
+        }),
+      ).resolves.toEqual({ status: 'deleted' });
+
+      expect(await rootProvider.exists(directory)).toBe(false);
+    });
+
+    it('is idempotent when the exact directory is already absent', async () => {
+      await expect(
+        service.permanentlyDeleteProjectDirectory({
+          projectId,
+          providerBasePath: directory,
+          scope,
+        }),
+      ).resolves.toEqual({ status: 'absent' });
+    });
+
+    it('preserves every byte when the manifest belongs to another project', async () => {
+      const actualProjectId = 'proj_fffffffffffffffffffff';
+      await writePhysicalProject(actualProjectId);
+
+      await expect(
+        service.permanentlyDeleteProjectDirectory({
+          projectId,
+          providerBasePath: directory,
+          scope,
+        }),
+      ).resolves.toEqual({ status: 'identity-mismatch', actualProjectId });
+
+      expect(await rootProvider.exists(`${directory}/main.ts`)).toBe(true);
+    });
+
+    it('preserves a non-empty directory that has no identifiable manifest', async () => {
+      await rootProvider.mkdir(directory, { recursive: true });
+      await rootProvider.writeFile(`${directory}/user-file.txt`, encoder.encode('keep me'));
+
+      await expect(
+        service.permanentlyDeleteProjectDirectory({
+          projectId,
+          providerBasePath: directory,
+          scope,
+        }),
+      ).resolves.toEqual({ status: 'unidentifiable' });
+
+      expect(decoder.decode(await rootProvider.readFile(`${directory}/user-file.txt`))).toBe('keep me');
+    });
+
+    it('preserves an empty manifest-less directory', async () => {
+      await rootProvider.mkdir(directory, { recursive: true });
+
+      await expect(
+        service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
+      ).resolves.toEqual({ status: 'unidentifiable' });
+
+      expect(await rootProvider.exists(directory)).toBe(true);
+    });
+
+    it.each([
+      { name: 'an invalid project id', projectId: '../invalid', providerBasePath: directory },
+      { name: 'a non-canonical path', projectId, providerBasePath: `/projects/../projects/readable--${projectId}` },
+      { name: 'a nested project path', projectId, providerBasePath: `${directory}/nested` },
+      { name: 'a path outside /projects', projectId, providerBasePath: `/trash/readable--${projectId}` },
+    ])('rejects $name before provider access', async ({ projectId: inputProjectId, providerBasePath }) => {
+      const getProvider = vi.spyOn(providerRegistry, 'getProvider');
+
+      await expect(
+        service.permanentlyDeleteProjectDirectory({
+          projectId: inputProjectId,
+          providerBasePath,
+          scope,
+        }),
+      ).rejects.toThrow();
+
+      expect(getProvider).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { name: 'an absent directory', fixture: 'absent', expected: { status: 'absent' } },
+      {
+        name: 'a foreign manifest',
+        fixture: 'foreign',
+        expected: { status: 'identity-mismatch', actualProjectId: 'proj_fffffffffffffffffffff' },
+      },
+      { name: 'a manifest-less directory', fixture: 'unidentifiable', expected: { status: 'unidentifiable' } },
+    ])('keeps $name silent', async ({ fixture, expected }) => {
+      const coordinator = new CrossTabCoordinator();
+      const notifyProjectUnavailable = vi.spyOn(coordinator, 'notifyProjectUnavailable');
+      const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+      const deleteProvider = await context.providerRegistry.getProvider(scope);
       const events: ChangeEvent[] = [];
-      const off = eventBus.subscribe((event) => events.push(event));
+      context.eventBus.subscribe((event) => events.push(event));
+      if (fixture !== 'absent') {
+        await deleteProvider.mkdir(directory, { recursive: true });
+      }
+      if (fixture === 'foreign') {
+        await deleteProvider.writeFile(
+          `${directory}/tau.json`,
+          serializeProjectManifest(
+            projectToManifest({
+              id: 'proj_fffffffffffffffffffff',
+              name: 'Foreign',
+              description: '',
+              tags: [],
+              assets: { main: { entryPath: 'main.ts' } },
+            }),
+          ),
+        );
+      }
 
-      service.fileSystem.publishChangeEvent({ type: 'fileWritten', path: '/probe.txt', backend: 'memory' });
+      try {
+        await expect(
+          context.service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
+        ).resolves.toEqual(expected);
+        expect(events).toEqual([]);
+        expect(notifyProjectUnavailable).not.toHaveBeenCalled();
+      } finally {
+        context.service.dispose();
+      }
+    });
 
-      expect(events.some((event) => event.type === 'fileWritten' && event.path === '/probe.txt')).toBe(true);
-      off();
+    it('keeps the manifest as replay evidence when deletion fails, then safely retries', async () => {
+      await writePhysicalProject();
+      const manifestPath = `${directory}/tau.json`;
+      const originalUnlink = rootProvider.unlink.bind(rootProvider);
+      let rejectManifest = true;
+      vi.spyOn(rootProvider, 'unlink').mockImplementation(async (path) => {
+        if (path === manifestPath && rejectManifest) {
+          rejectManifest = false;
+          throw new Error('manifest delete failed');
+        }
+        await originalUnlink(path);
+      });
+
+      await expect(
+        service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
+      ).rejects.toThrow('manifest delete failed');
+      expect(await rootProvider.exists(manifestPath)).toBe(true);
+
+      await expect(
+        service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
+      ).resolves.toEqual({ status: 'deleted' });
+      expect(await rootProvider.exists(directory)).toBe(false);
+    });
+
+    it('restores the exact manifest bytes when final directory removal fails', async () => {
+      await writePhysicalProject();
+      const manifestPath = `${directory}/tau.json`;
+      const manifest = await rootProvider.readFile(manifestPath);
+      const originalRmdir = rootProvider.rmdir.bind(rootProvider);
+      let rejectFinalDirectory = true;
+      vi.spyOn(rootProvider, 'rmdir').mockImplementation(async (path) => {
+        if (path === directory && rejectFinalDirectory) {
+          rejectFinalDirectory = false;
+          throw new Error('final directory removal failed');
+        }
+        await originalRmdir(path);
+      });
+
+      await expect(
+        service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
+      ).rejects.toThrow('final directory removal failed');
+      expect(await rootProvider.readFile(manifestPath)).toEqual(manifest);
+
+      await expect(
+        service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
+      ).resolves.toEqual({ status: 'deleted' });
+    });
+
+    it('holds both the logical project lock and exact physical-directory lock', async () => {
+      const coordinator = new CrossTabCoordinator();
+      const withLocks = vi.spyOn(coordinator, 'withLocks');
+      const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+      const queueForMany = vi.spyOn(context.resourceQueue, 'queueForMany');
+      const physicalLock = `${context.providerRegistry.resolveStorageRootKey(scope)}:${directory}`;
+
+      try {
+        await context.service.permanentlyDeleteProjectDirectory({
+          projectId,
+          providerBasePath: directory,
+          scope,
+        });
+
+        expect(withLocks).toHaveBeenCalledWith([`project:${projectId}`, physicalLock], expect.any(Function));
+        expect(queueForMany).toHaveBeenCalledWith([`project:${projectId}`, physicalLock], expect.any(Function));
+      } finally {
+        context.service.dispose();
+        coordinator.dispose();
+      }
+    });
+  });
+
+  describe('commitPendingProjectDirectory', () => {
+    const projectId = 'proj_ppppppppppppppppppppp';
+    const directory = `/projects/pending-project--${projectId}`;
+    const scope: StorageRootConfig = { backend: 'indexeddb' };
+    let commitProvider: FileSystemProvider;
+    const mainFile = 'main.ts';
+    const escapeFile = '../escape.ts';
+    const nestedManifest = 'nested/tau.json';
+    const absoluteMainFile = '/main.ts';
+    const nonCanonicalMainFile = 'src/./main.ts';
+    const canonicalMainFile = 'src/main.ts';
+    const manifestDescendant = 'tau.json/child';
+    const punctuationSibling = 'src!/sibling.ts';
+    const punctuationManifestSibling = 'tau.json!/sibling';
+    const manifest = serializeProjectManifest(
+      projectToManifest({
+        id: projectId,
+        name: 'Pending Project',
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: mainFile } },
+      }),
+    );
+    const defaultFiles = {
+      [mainFile]: { content: encoder.encode('export default {};') },
+    };
+    const commit = async (
+      files: Record<string, { content: Uint8Array<ArrayBuffer> }> = defaultFiles,
+    ): Promise<CommitPendingProjectDirectoryResult> => {
+      const result = await service.commitPendingProjectDirectory({
+        providerBasePath: directory,
+        scope,
+        files,
+        manifest,
+      });
+      return result;
+    };
+
+    beforeEach(async () => {
+      commitProvider = await providerRegistry.getProvider(scope);
+    });
+
+    it('rejects a memory scope before storage-key resolution or provider access', async () => {
+      const resolveStorageRootKey = vi.spyOn(providerRegistry, 'resolveStorageRootKey');
+      const getProvider = vi.spyOn(providerRegistry, 'getProvider');
+
+      await expect(
+        service.commitPendingProjectDirectory({
+          providerBasePath: directory,
+          scope: { backend: 'memory', storageRootKey: 'memory:forbidden' },
+          files: defaultFiles,
+          manifest,
+        } as unknown as Parameters<WorkspaceFileService['commitPendingProjectDirectory']>[0]),
+      ).rejects.toThrow('durable storage');
+
+      expect(resolveStorageRootKey).not.toHaveBeenCalled();
+      expect(getProvider).not.toHaveBeenCalled();
+    });
+
+    it('replaces manifest-less residue and writes the manifest last', async () => {
+      await commitProvider.mkdir(directory, { recursive: true });
+      await commitProvider.writeFile(`${directory}/stale.bin`, encoder.encode('stale'));
+      const writes: string[] = [];
+      const originalWriteFile = commitProvider.writeFile.bind(commitProvider);
+      vi.spyOn(commitProvider, 'writeFile').mockImplementation(async (path, data) => {
+        writes.push(path);
+        return originalWriteFile(path, data);
+      });
+
+      await expect(commit()).resolves.toEqual({ status: 'committed' });
+
+      expect(await commitProvider.exists(`${directory}/stale.bin`)).toBe(false);
+      expect(decoder.decode(await commitProvider.readFile(`${directory}/main.ts`))).toBe('export default {};');
+      expect(writes.at(-1)).toBe(`${directory}/tau.json`);
+    });
+
+    it('is idempotent for an existing same-project manifest', async () => {
+      await expect(commit()).resolves.toEqual({ status: 'committed' });
+      await expect(commit({ [mainFile]: { content: encoder.encode('different') } })).resolves.toEqual({
+        status: 'already-committed',
+      });
+
+      expect(decoder.decode(await commitProvider.readFile(`${directory}/main.ts`))).toBe('export default {};');
+    });
+
+    it('preserves an existing foreign or unidentifiable manifest', async () => {
+      const foreignId = 'proj_qqqqqqqqqqqqqqqqqqqqq';
+      await commitProvider.mkdir(directory, { recursive: true });
+      await commitProvider.writeFile(
+        `${directory}/tau.json`,
+        serializeProjectManifest(
+          projectToManifest({
+            id: foreignId,
+            name: 'Foreign',
+            description: '',
+            tags: [],
+            assets: { main: { entryPath: 'main.ts' } },
+          }),
+        ),
+      );
+      await commitProvider.writeFile(`${directory}/keep.txt`, encoder.encode('keep'));
+
+      await expect(commit()).resolves.toEqual({ status: 'identity-mismatch', actualProjectId: foreignId });
+      expect(decoder.decode(await commitProvider.readFile(`${directory}/keep.txt`))).toBe('keep');
+
+      await commitProvider.writeFile(`${directory}/tau.json`, encoder.encode('{invalid'));
+      await expect(commit()).resolves.toEqual({ status: 'unidentifiable-manifest' });
+      expect(decoder.decode(await commitProvider.readFile(`${directory}/keep.txt`))).toBe('keep');
+    });
+
+    it('validates every path before mutating residue', async () => {
+      await commitProvider.mkdir(directory, { recursive: true });
+      await commitProvider.writeFile(`${directory}/keep.txt`, encoder.encode('keep'));
+
+      await expect(
+        commit({
+          [escapeFile]: { content: encoder.encode('escape') },
+          [nestedManifest]: { content: manifest },
+        }),
+      ).rejects.toThrow('unsafe');
+
+      expect(decoder.decode(await commitProvider.readFile(`${directory}/keep.txt`))).toBe('keep');
+    });
+
+    it.each([
+      {
+        name: 'an invalid manifest',
+        input: { manifest: encoder.encode('{invalid') },
+      },
+      {
+        name: 'a manifest whose project identity differs',
+        input: {
+          manifest: serializeProjectManifest(
+            projectToManifest({
+              id: 'proj_qqqqqqqqqqqqqqqqqqqqq',
+              name: 'Different Project',
+              description: '',
+              tags: [],
+              assets: { main: { entryPath: 'main.ts' } },
+            }),
+          ),
+        },
+      },
+      {
+        name: 'an unallocated target',
+        input: { providerBasePath: '/projects/pending-project' },
+      },
+      {
+        name: 'an absolute journal path',
+        input: { files: { [absoluteMainFile]: { content: encoder.encode('unsafe') } } },
+      },
+      {
+        name: 'a non-canonical colliding journal path',
+        input: {
+          files: {
+            [nonCanonicalMainFile]: { content: encoder.encode('first') },
+            [canonicalMainFile]: { content: encoder.encode('second') },
+          },
+        },
+      },
+      {
+        name: 'a nested manifest',
+        input: { files: { [nestedManifest]: { content: manifest } } },
+      },
+      {
+        name: 'a file whose descendant is also a file',
+        input: {
+          files: {
+            src: { content: encoder.encode('file') },
+            [canonicalMainFile]: { content: encoder.encode('descendant') },
+          },
+        },
+      },
+      {
+        name: 'a punctuation-interposed file ancestor collision',
+        input: {
+          files: {
+            src: { content: encoder.encode('file') },
+            [punctuationSibling]: { content: encoder.encode('punctuation') },
+            [canonicalMainFile]: { content: encoder.encode('descendant') },
+          },
+        },
+      },
+      {
+        name: 'a file below the reserved manifest path',
+        input: { files: { [manifestDescendant]: { content: encoder.encode('unsafe') } } },
+      },
+      {
+        name: 'a punctuation-interposed file below the reserved manifest path',
+        input: {
+          files: {
+            [punctuationManifestSibling]: { content: encoder.encode('punctuation') },
+            [manifestDescendant]: { content: encoder.encode('unsafe') },
+          },
+        },
+      },
+      {
+        name: 'a non-binary payload',
+        input: { files: { [mainFile]: { content: 'not-bytes' } } },
+      },
+    ])('rejects $name before mutating residue', async ({ input }) => {
+      await commitProvider.mkdir(directory, { recursive: true });
+      await commitProvider.writeFile(`${directory}/keep.txt`, encoder.encode('keep'));
+
+      await expect(
+        service.commitPendingProjectDirectory({
+          providerBasePath: directory,
+          scope,
+          files: { [mainFile]: { content: encoder.encode('export default {};') } },
+          manifest,
+          ...input,
+        } as Parameters<WorkspaceFileService['commitPendingProjectDirectory']>[0]),
+      ).rejects.toThrow();
+
+      expect(decoder.decode(await commitProvider.readFile(`${directory}/keep.txt`))).toBe('keep');
+    });
+
+    it('leaves no commit marker after a failed manifest write and retries exactly', async () => {
+      const originalWriteFile = commitProvider.writeFile.bind(commitProvider);
+      vi.spyOn(commitProvider, 'writeFile')
+        .mockImplementationOnce(async (path, data) => {
+          await originalWriteFile(path, data);
+        })
+        .mockRejectedValueOnce(new Error('manifest write failed'))
+        .mockImplementation(async (path, data) => {
+          await originalWriteFile(path, data);
+        });
+
+      await expect(commit()).rejects.toThrow('manifest write failed');
+      expect(await commitProvider.exists(`${directory}/tau.json`)).toBe(false);
+
+      await expect(commit()).resolves.toEqual({ status: 'committed' });
+      expect(decoder.decode(await commitProvider.readFile(`${directory}/main.ts`))).toBe('export default {};');
+    });
+
+    it('invalidates sibling projections after a partially mutating failure', async () => {
+      const coordinator = new CrossTabCoordinator();
+      const notifyDirectoryChange = vi.spyOn(coordinator, 'notifyDirectoryChange');
+      const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+      const provider = await context.providerRegistry.getProvider(scope);
+      const originalWriteFile = provider.writeFile.bind(provider);
+      vi.spyOn(provider, 'writeFile')
+        .mockImplementationOnce(async (path, data) => {
+          await originalWriteFile(path, data);
+        })
+        .mockRejectedValueOnce(new Error('manifest write failed'));
+
+      try {
+        await expect(
+          context.service.commitPendingProjectDirectory({
+            providerBasePath: directory,
+            scope,
+            files: { [mainFile]: { content: encoder.encode('export default {};') } },
+            manifest,
+          }),
+        ).rejects.toThrow('manifest write failed');
+
+        expect(await provider.exists(`${directory}/main.ts`)).toBe(true);
+        expect(await provider.exists(`${directory}/tau.json`)).toBe(false);
+        expect(notifyDirectoryChange).toHaveBeenCalledOnce();
+        expect(notifyDirectoryChange).toHaveBeenCalledWith(`/projects/${projectId}`, {
+          storageRootKey: context.providerRegistry.resolveStorageRootKey(scope),
+          providerBasePath: directory,
+        });
+      } finally {
+        context.service.dispose();
+        coordinator.dispose();
+      }
+    });
+
+    it('holds logical and physical locks and publishes one directory invalidation', async () => {
+      const coordinator = new CrossTabCoordinator();
+      const withLocks = vi.spyOn(coordinator, 'withLocks');
+      const notifyDirectoryChange = vi.spyOn(coordinator, 'notifyDirectoryChange');
+      const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+      const queueForMany = vi.spyOn(context.resourceQueue, 'queueForMany');
+
+      try {
+        await context.service.commitPendingProjectDirectory({
+          providerBasePath: directory,
+          scope,
+          files: { [mainFile]: { content: encoder.encode('export default {};') } },
+          manifest,
+        });
+
+        expect(withLocks).toHaveBeenCalledWith(
+          [`project:${projectId}`, `${context.providerRegistry.resolveStorageRootKey(scope)}:${directory}`],
+          expect.any(Function),
+        );
+        expect(queueForMany).toHaveBeenCalledWith(
+          [`project:${projectId}`, `${context.providerRegistry.resolveStorageRootKey(scope)}:${directory}`],
+          expect.any(Function),
+        );
+        expect(notifyDirectoryChange).toHaveBeenCalledOnce();
+        expect(notifyDirectoryChange).toHaveBeenCalledWith(`/projects/${projectId}`, {
+          storageRootKey: context.providerRegistry.resolveStorageRootKey(scope),
+          providerBasePath: directory,
+        });
+      } finally {
+        context.service.dispose();
+        coordinator.dispose();
+      }
+    });
+
+    it('serializes concurrent commits into one write and one idempotent replay', async () => {
+      const results = await Promise.all([commit(), commit()]);
+
+      expect(results.map((result) => result.status).sort()).toEqual(['already-committed', 'committed']);
+      expect(decoder.decode(await commitProvider.readFile(`${directory}/main.ts`))).toBe('export default {};');
+      expect(parseProjectManifestBytes(await commitProvider.readFile(`${directory}/tau.json`))).toMatchObject({
+        success: true,
+        data: { id: projectId },
+      });
+    });
+
+    it('owns manifest and file bytes before awaiting provider acquisition', async () => {
+      const releaseProvider = Promise.withResolvers<void>();
+      const providerRequested = Promise.withResolvers<void>();
+      const originalGetProvider = providerRegistry.getProvider.bind(providerRegistry);
+      vi.spyOn(providerRegistry, 'getProvider').mockImplementation(async (requestedScope) => {
+        providerRequested.resolve();
+        await releaseProvider.promise;
+        return originalGetProvider(requestedScope);
+      });
+      const mutableManifest = new Uint8Array(manifest);
+      const mutableContent = encoder.encode('owned content');
+      const pending = service.commitPendingProjectDirectory({
+        providerBasePath: directory,
+        scope,
+        files: { [mainFile]: { content: mutableContent } },
+        manifest: mutableManifest,
+      });
+      await providerRequested.promise;
+      mutableManifest.fill(0);
+      mutableContent.fill(0);
+      releaseProvider.resolve();
+
+      await expect(pending).resolves.toEqual({ status: 'committed' });
+      await expect(commitProvider.readFile(`${directory}/main.ts`, 'utf8')).resolves.toBe('owned content');
+      expect(parseProjectManifestBytes(await commitProvider.readFile(`${directory}/tau.json`))).toMatchObject({
+        success: true,
+        data: { id: projectId },
+      });
+    });
+
+    it('refreshes stale IndexedDB authority state before replaying a committed project', async () => {
+      const databasePrefix = `tau-two-authority-${databaseSequence++}`;
+      const createAuthority = async () => {
+        const registry = new ProviderRegistry({ databasePrefix });
+        const provider = await registry.getProvider({ backend: 'memory', storageRootKey: 'memory:test-root' });
+        const mountTable = new MountTable();
+        mountTable.mount('/', provider, { backend: 'memory', storageRootKey: 'memory:test-root' });
+        return {
+          registry,
+          service: new WorkspaceFileService({
+            providerRegistry: registry,
+            resourceQueue: new ResourceQueue(),
+            eventBus: new ChangeEventBus(),
+            mountTable,
+          }),
+        };
+      };
+      const first = await createAuthority();
+      const second = await createAuthority();
+      const indexedDbScope = { backend: 'indexeddb' } as const;
+      const firstProvider = await first.registry.getProvider(indexedDbScope);
+
+      try {
+        await expect(
+          second.service.commitPendingProjectDirectory({
+            providerBasePath: directory,
+            scope: indexedDbScope,
+            files: { [mainFile]: { content: encoder.encode('authoritative') } },
+            manifest,
+          }),
+        ).resolves.toEqual({ status: 'committed' });
+
+        await expect(
+          first.service.commitPendingProjectDirectory({
+            providerBasePath: directory,
+            scope: indexedDbScope,
+            files: { [mainFile]: { content: encoder.encode('stale overwrite') } },
+            manifest,
+          }),
+        ).resolves.toEqual({ status: 'already-committed' });
+        await expect(firstProvider.readFile(`${directory}/main.ts`, 'utf8')).resolves.toBe('authoritative');
+      } finally {
+        first.service.dispose();
+        second.service.dispose();
+      }
     });
   });
 
@@ -145,6 +893,35 @@ describe('WorkspaceFileService', () => {
       const result = await service.readFile('/empty.txt', 'utf8');
       expect(result).toBe('');
     });
+
+    it('refreshes provider admission state only after entering the existing lock', async () => {
+      const coordinator = new CrossTabCoordinator();
+      const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+      const originalWithLocks = coordinator.withLocks.bind(coordinator);
+      let insideLock = false;
+      vi.spyOn(coordinator, 'withLocks').mockImplementation(async (paths, operation) =>
+        originalWithLocks(paths, async () => {
+          insideLock = true;
+          try {
+            return await operation();
+          } finally {
+            insideLock = false;
+          }
+        }),
+      );
+      const refresh = vi.fn(async () => {
+        expect(insideLock).toBe(true);
+      });
+      context.provider.refresh = refresh;
+
+      try {
+        await context.service.writeFile('/locked.txt', 'data');
+        expect(refresh).toHaveBeenCalledOnce();
+      } finally {
+        context.service.dispose();
+        coordinator.dispose();
+      }
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -179,13 +956,6 @@ describe('WorkspaceFileService', () => {
       const controller = new AbortController();
       controller.abort();
       await expect(service.readDirectory('/canceldir', { signal: controller.signal })).rejects.toThrow('aborted');
-    });
-
-    it('should throw AbortError for readFiles with pre-aborted signal', async () => {
-      await service.writeFile('/f1.txt', 'a');
-      const controller = new AbortController();
-      controller.abort();
-      await expect(service.readFiles(['/f1.txt'], { signal: controller.signal })).rejects.toThrow('aborted');
     });
   });
 
@@ -241,24 +1011,15 @@ describe('WorkspaceFileService', () => {
       const end = await reader.read();
       expect(end.done).toBe(true);
     });
-  });
 
-  // ---------------------------------------------------------------------------
-  // readFiles
-  // ---------------------------------------------------------------------------
+    it('rejects invalid ranges before any provider I/O', async () => {
+      const nativeRead = vi.fn(() => new ReadableStream<Uint8Array<ArrayBuffer>>());
+      rootProvider.readFileStream = nativeRead;
+      const bufferedRead = vi.spyOn(rootProvider, 'readFile');
 
-  describe('readFiles', () => {
-    it('should read multiple files in parallel', async () => {
-      await service.writeFile('/a.txt', 'alpha');
-      await service.writeFile('/b.txt', 'bravo');
-      const results = await service.readFiles(['/a.txt', '/b.txt']);
-      expect(decoder.decode(results['/a.txt'])).toBe('alpha');
-      expect(decoder.decode(results['/b.txt'])).toBe('bravo');
-    });
-
-    it('should return an empty record for an empty input', async () => {
-      const results = await service.readFiles([]);
-      expect(results).toEqual({});
+      await expect(service.readFileStream('/stream.txt', { position: Number.NaN })).rejects.toThrow(RangeError);
+      expect(nativeRead).not.toHaveBeenCalled();
+      expect(bufferedRead).not.toHaveBeenCalled();
     });
   });
 
@@ -327,7 +1088,7 @@ describe('WorkspaceFileService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // exists / batchExists
+  // exists
   // ---------------------------------------------------------------------------
 
   describe('exists', () => {
@@ -343,20 +1104,6 @@ describe('WorkspaceFileService', () => {
     it('should return true for an existing directory', async () => {
       await service.mkdir('/dir');
       expect(await service.exists('/dir')).toBe(true);
-    });
-  });
-
-  describe('batchExists', () => {
-    it('should return existence map for multiple paths', async () => {
-      await service.writeFile('/yes.txt', 'y');
-      const result = await service.batchExists(['/yes.txt', '/no.txt']);
-      expect(result['/yes.txt']).toBe(true);
-      expect(result['/no.txt']).toBe(false);
-    });
-
-    it('should return an empty record for empty input', async () => {
-      const result = await service.batchExists([]);
-      expect(result).toEqual({});
     });
   });
 
@@ -379,8 +1126,57 @@ describe('WorkspaceFileService', () => {
       expect(await service.exists('/a/b/c')).toBe(true);
     });
 
+    it('keeps recursive mkdir of an existing directory silent', async () => {
+      const coordinator = new CrossTabCoordinator();
+      const notifyMutation = vi.spyOn(coordinator, 'notifyMutation');
+      const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+      const events: ChangeEvent[] = [];
+      context.eventBus.subscribe((event) => events.push(event));
+
+      try {
+        await context.service.mkdir('/existing', { recursive: true });
+        notifyMutation.mockClear();
+        events.length = 0;
+
+        await expect(context.service.mkdir('/existing', { recursive: true })).resolves.toBeUndefined();
+        expect(events).toEqual([]);
+        expect(notifyMutation).not.toHaveBeenCalled();
+      } finally {
+        context.service.dispose();
+        coordinator.dispose();
+      }
+    });
+
     it('should throw when creating nested directory without recursive', async () => {
       await expect(service.mkdir('/x/y/z')).rejects.toThrow();
+    });
+
+    it('broadly invalidates local and peer projections after a partial recursive mkdir failure', async () => {
+      const coordinator = new CrossTabCoordinator();
+      const notifyDirectoryChange = vi.spyOn(coordinator, 'notifyDirectoryChange');
+      const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+      const events: ChangeEvent[] = [];
+      context.eventBus.subscribe((event) => events.push(event));
+      const originalMkdir = context.provider.mkdir.bind(context.provider);
+      vi.spyOn(context.provider, 'mkdir').mockImplementationOnce(async () => {
+        await originalMkdir('/partial');
+        throw new Error('injected recursive mkdir failure');
+      });
+
+      try {
+        await expect(context.service.mkdir('/partial/nested', { recursive: true })).rejects.toThrow(
+          'injected recursive mkdir failure',
+        );
+        await expect(context.provider.exists('/partial')).resolves.toBe(true);
+        expect(events).toContainEqual({ type: 'backendChanged', backend: 'memory' });
+        expect(notifyDirectoryChange).toHaveBeenCalledWith('/', {
+          storageRootKey: 'memory:0',
+          providerBasePath: '/',
+        });
+      } finally {
+        context.service.dispose();
+        coordinator.dispose();
+      }
     });
 
     it('should list new subdirectories in readDirectory after recursive mkdir', async () => {
@@ -415,30 +1211,6 @@ describe('WorkspaceFileService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // rename
-  // ---------------------------------------------------------------------------
-
-  describe('rename', () => {
-    it('should rename a file', async () => {
-      await service.writeFile('/old.txt', 'data');
-      await service.rename('/old.txt', '/new.txt');
-      expect(await service.exists('/old.txt')).toBe(false);
-      const content = await service.readFile('/new.txt', 'utf8');
-      expect(content).toBe('data');
-    });
-
-    it('should rename a directory', async () => {
-      await service.mkdir('/olddir');
-      await service.writeFile('/olddir/file.txt', 'inside');
-      await service.rename('/olddir', '/newdir');
-      expect(await service.exists('/olddir')).toBe(false);
-      expect(await service.exists('/newdir')).toBe(true);
-      const content = await service.readFile('/newdir/file.txt', 'utf8');
-      expect(content).toBe('inside');
-    });
-  });
-
-  // ---------------------------------------------------------------------------
   // move
   // ---------------------------------------------------------------------------
 
@@ -460,30 +1232,12 @@ describe('WorkspaceFileService', () => {
       expect(await service.exists('/lib/utils/helpers.ts')).toBe(true);
     });
 
-    it('should refuse to overwrite an existing target without overwrite: true', async () => {
+    it('should refuse to overwrite an existing target', async () => {
       await service.writeFile('/keep.txt', 'untouched');
       await service.writeFile('/source.txt', 'replace');
       await expect(service.move('/source.txt', '/keep.txt')).rejects.toThrow('EEXIST');
       const content = await service.readFile('/keep.txt', 'utf8');
       expect(content).toBe('untouched');
-    });
-
-    it('should overwrite an existing file target when overwrite: true', async () => {
-      await service.writeFile('/keep.txt', 'untouched');
-      await service.writeFile('/source.txt', 'replace');
-      await service.move('/source.txt', '/keep.txt', { overwrite: true });
-      const content = await service.readFile('/keep.txt', 'utf8');
-      expect(content).toBe('replace');
-      expect(await service.exists('/source.txt')).toBe(false);
-    });
-
-    it('should overwrite an existing directory target when overwrite: true', async () => {
-      await service.writeFile('/old/a.txt', 'old-a');
-      await service.writeFile('/old/b.txt', 'old-b');
-      await service.writeFile('/new/c.txt', 'new-c');
-      await service.move('/new', '/old', { overwrite: true });
-      expect(await service.exists('/old/a.txt')).toBe(false);
-      expect(await service.exists('/old/c.txt')).toBe(true);
     });
 
     it('should emit directoryRenamed for directory sources', async () => {
@@ -505,6 +1259,45 @@ describe('WorkspaceFileService', () => {
         expect.objectContaining({ type: 'fileRenamed', oldPath: '/a.txt', newPath: '/b.txt' }),
       );
     });
+  });
+
+  it('rejects every generic mutation path into the authority-global bundled types mount', async () => {
+    await service.writeFile('/source.txt', 'source');
+    await service.writeFile('/source-dir/file.txt', 'source');
+    const cases: ReadonlyArray<{ name: string; run: () => Promise<unknown> }> = [
+      { name: 'writeFile', run: async () => service.writeFile('/node_modules/file.ts', 'x') },
+      {
+        name: 'writeFiles',
+        run: async () => service.writeFiles(Object.fromEntries([['/node_modules/file.ts', { content: 'x' }]])),
+      },
+      { name: 'mkdir', run: async () => service.mkdir('/node_modules/package') },
+      { name: 'move source', run: async () => service.move('/node_modules/file.ts', '/target.ts') },
+      { name: 'move target', run: async () => service.move('/source.txt', '/node_modules/file.ts') },
+      { name: 'duplicateFile', run: async () => service.duplicateFile('/source.txt', '/node_modules/file.ts') },
+      {
+        name: 'copyDirectory',
+        run: async () => service.copyDirectory('/source-dir', '/node_modules/package'),
+      },
+      { name: 'unlink', run: async () => service.unlink('/node_modules/file.ts') },
+      { name: 'rmdir', run: async () => service.rmdir('/node_modules/package', { recursive: true }) },
+      {
+        name: 'canonical alias',
+        run: async () => service.writeFile('/safe/../node_modules/alias.ts', 'x'),
+      },
+    ];
+
+    for (const { name, run } of cases) {
+      // oxlint-disable-next-line no-await-in-loop -- Each public endpoint is an independent trust-boundary assertion.
+      await expect(run(), name).rejects.toMatchObject({ code: 'BUNDLED_TYPES_WORKSPACE' });
+    }
+    await expect(service.bulkMove([{ source: '/source.txt', target: '/node_modules/bulk.ts' }])).resolves.toMatchObject(
+      {
+        moved: [],
+        failed: [{ error: { code: 'BUNDLED_TYPES_WORKSPACE' } }],
+      },
+    );
+    await expect(service.readFile('/source.txt', 'utf8')).resolves.toBe('source');
+    await expect(service.readFile('/source-dir/file.txt', 'utf8')).resolves.toBe('source');
   });
 
   // ---------------------------------------------------------------------------
@@ -540,16 +1333,9 @@ describe('WorkspaceFileService', () => {
       expect(result.target).toBe('/keep.txt');
     });
 
-    it('returns true when target exists but overwrite is requested', async () => {
+    it('returns INVALID_NAME for paths that traverse above virtual root', async () => {
       await service.writeFile('/source.txt', 'src');
-      await service.writeFile('/keep.txt', 'keep');
-      const result = await service.canMove('/source.txt', '/keep.txt', { overwrite: true });
-      expect(result).toBe(true);
-    });
-
-    it('returns INVALID_NAME for non-normalised paths', async () => {
-      await service.writeFile('/source.txt', 'src');
-      const result = await service.canMove('/source.txt', '/foo/../bar.txt');
+      const result = await service.canMove('/source.txt', '/../bar.txt');
       expect(result).not.toBe(true);
       if (result === true) {
         return;
@@ -622,6 +1408,15 @@ describe('WorkspaceFileService', () => {
       expect(result.code).toBe('BUNDLED_TYPES_WORKSPACE');
     });
 
+    it('rejects non-canonical aliases before interpreting their target', async () => {
+      const result = await service.canCreate('/safe/../node_modules/new.ts', 'file');
+      expect(result).not.toBe(true);
+      if (result === true) {
+        return;
+      }
+      expect(result.code).toBe('INVALID_NAME');
+    });
+
     it('rejects relative paths with INVALID_NAME', async () => {
       const result = await service.canCreate('relative.txt', 'file');
       expect(result).not.toBe(true);
@@ -659,7 +1454,7 @@ describe('WorkspaceFileService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // R7: bulkMove transaction with rollback
+  // Sequential bulkMove with truthful partial results
   // ---------------------------------------------------------------------------
 
   describe('bulkMove', () => {
@@ -679,7 +1474,7 @@ describe('WorkspaceFileService', () => {
       expect(await service.exists('/dst/c.txt')).toBe(true);
     });
 
-    it('rolls back every prior move when a middle edit fails', async () => {
+    it('reports a failed middle edit without rolling back completed moves', async () => {
       await service.writeFile('/a.txt', 'a');
       await service.writeFile('/b.txt', 'b');
       await service.writeFile('/c.txt', 'c');
@@ -691,16 +1486,58 @@ describe('WorkspaceFileService', () => {
         { source: '/c.txt', target: '/dst/c.txt' },
       ]);
 
-      expect(result.moved.length).toBe(0);
+      expect(result.moved.map(({ edit }) => edit.source)).toEqual(['/a.txt', '/c.txt']);
       expect(result.failed.length).toBe(1);
       expect(result.failed[0]?.edit.source).toBe('/b.txt');
       expect(result.failed[0]?.error.code).toBe('NAME_EXISTS');
 
-      expect(await service.exists('/a.txt')).toBe(true);
+      expect(await service.exists('/a.txt')).toBe(false);
       expect(await service.exists('/b.txt')).toBe(true);
-      expect(await service.exists('/c.txt')).toBe(true);
-      expect(await service.exists('/dst/a.txt')).toBe(false);
-      expect(await service.exists('/dst/c.txt')).toBe(false);
+      expect(await service.exists('/c.txt')).toBe(false);
+      expect(await service.exists('/dst/a.txt')).toBe(true);
+      expect(await service.exists('/dst/c.txt')).toBe(true);
+      expect(await service.readFile('/dst/b.txt', 'utf8')).toBe('collision');
+    });
+
+    it('does not misreport an unknown provider failure as a missing source', async () => {
+      await service.writeFile('/source.txt', 'data');
+      const denied = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+      vi.spyOn(rootProvider, 'rename').mockRejectedValueOnce(denied);
+
+      const result = await service.bulkMove([{ source: '/source.txt', target: '/target.txt' }]);
+
+      expect(result.moved).toEqual([]);
+      expect(result.failed[0]?.error).toMatchObject({
+        code: 'OPERATION_FAILED',
+        path: '/source.txt',
+        target: '/target.txt',
+      });
+      expect(await service.readFile('/source.txt', 'utf8')).toBe('data');
+    });
+
+    it('never rolls a completed move back over a peer write after a later edit fails', async () => {
+      await service.writeFile('/a.txt', 'original');
+      await service.writeFile('/b.txt', 'blocked');
+      await service.writeFile('/dst/b.txt', 'collision');
+      const originalMove = service.move.bind(service);
+      let moveCount = 0;
+      vi.spyOn(service, 'move').mockImplementation(async (source, target, context) => {
+        const stat = await originalMove(source, target, context);
+        moveCount += 1;
+        if (moveCount === 1) {
+          await service.writeFile(target, 'peer update');
+        }
+        return stat;
+      });
+
+      const result = await service.bulkMove([
+        { source: '/a.txt', target: '/dst/a.txt' },
+        { source: '/b.txt', target: '/dst/b.txt' },
+      ]);
+
+      expect(result.moved.map(({ edit }) => edit.source)).toEqual(['/a.txt']);
+      expect(result.failed.map(({ edit }) => edit.source)).toEqual(['/b.txt']);
+      expect(await service.readFile('/dst/a.txt', 'utf8')).toBe('peer update');
       expect(await service.readFile('/dst/b.txt', 'utf8')).toBe('collision');
     });
 
@@ -741,24 +1578,41 @@ describe('WorkspaceFileService', () => {
     it('should throw when removing a non-existent directory', async () => {
       await expect(service.rmdir('/nope')).rejects.toThrow();
     });
-  });
 
-  // ---------------------------------------------------------------------------
-  // ensureDirectoryExists
-  // ---------------------------------------------------------------------------
+    it('broadly invalidates local and peer projections after a partial recursive removal failure', async () => {
+      const coordinator = new CrossTabCoordinator();
+      const notifyDirectoryChange = vi.spyOn(coordinator, 'notifyDirectoryChange');
+      const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+      await context.service.writeFile('/partial/a.txt', 'a');
+      await context.service.writeFile('/partial/b.txt', 'b');
+      const events: ChangeEvent[] = [];
+      context.eventBus.subscribe((event) => events.push(event));
+      const originalUnlink = context.provider.unlink.bind(context.provider);
+      let unlinkCount = 0;
+      vi.spyOn(context.provider, 'unlink').mockImplementation(async (path) => {
+        unlinkCount++;
+        if (unlinkCount === 2) {
+          throw new Error('injected recursive removal failure');
+        }
+        await originalUnlink(path);
+      });
 
-  describe('ensureDirectoryExists', () => {
-    it('should create the full directory chain', async () => {
-      await service.ensureDirectoryExists('/x/y/z');
-      expect(await service.exists('/x')).toBe(true);
-      expect(await service.exists('/x/y')).toBe(true);
-      expect(await service.exists('/x/y/z')).toBe(true);
-    });
-
-    it('should be a no-op when directories already exist', async () => {
-      await service.mkdir('/existing', { recursive: true });
-      await service.ensureDirectoryExists('/existing');
-      expect(await service.exists('/existing')).toBe(true);
+      try {
+        await expect(context.service.rmdir('/partial', { recursive: true })).rejects.toThrow(
+          'injected recursive removal failure',
+        );
+        expect(await context.provider.exists('/partial/a.txt')).not.toBe(
+          await context.provider.exists('/partial/b.txt'),
+        );
+        expect(events).toContainEqual({ type: 'backendChanged', backend: 'memory' });
+        expect(notifyDirectoryChange).toHaveBeenCalledWith('/', {
+          storageRootKey: 'memory:0',
+          providerBasePath: '/',
+        });
+      } finally {
+        context.service.dispose();
+        coordinator.dispose();
+      }
     });
   });
 
@@ -795,6 +1649,17 @@ describe('WorkspaceFileService', () => {
       expect(await service.readFile('/dest/a.txt', 'utf8')).toBe('aaa');
       expect(await service.readFile('/dest/sub/b.txt', 'utf8')).toBe('bbb');
     });
+
+    it('should preserve empty directories, including an entirely empty source', async () => {
+      await service.mkdir('/source/empty/nested', { recursive: true });
+      await service.copyDirectory('/source', '/dest');
+      await service.mkdir('/entirely-empty');
+      await service.copyDirectory('/entirely-empty', '/empty-copy');
+
+      await expect(service.stat('/dest/empty')).resolves.toMatchObject({ type: 'dir' });
+      await expect(service.stat('/dest/empty/nested')).resolves.toMatchObject({ type: 'dir' });
+      await expect(service.stat('/empty-copy')).resolves.toMatchObject({ type: 'dir' });
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -810,9 +1675,16 @@ describe('WorkspaceFileService', () => {
       expect(decoder.decode(contents['src/main.ts'])).toBe('code');
     });
 
-    it('should return an empty record for a non-existent directory', async () => {
-      const contents = await service.getDirectoryContents('/nonexistent');
-      expect(contents).toEqual({});
+    it('should propagate a missing-directory error', async () => {
+      await expect(service.getDirectoryContents('/nonexistent')).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('distinguishes an empty directory from a file path', async () => {
+      await service.mkdir('/empty');
+      await service.writeFile('/file.txt', 'file');
+
+      await expect(service.getDirectoryContents('/empty')).resolves.toEqual({});
+      await expect(service.getDirectoryContents('/file.txt')).rejects.toMatchObject({ code: 'ENOTDIR' });
     });
   });
 
@@ -855,16 +1727,16 @@ describe('WorkspaceFileService', () => {
         await service.writeFiles({ [path]: { content: 'plain-cube' } });
         await vi.advanceTimersByTimeAsync(75);
 
-        expect(received).toEqual([{ type: 'change', path, correlationId: undefined }]);
+        expect(received).toEqual([{ type: 'change', path }]);
       } finally {
         unsubscribe();
         vi.useRealTimers();
       }
     });
 
-    it('should use the cross-tab write lock for every batch path', async () => {
+    it('should use the cross-tab mutation lock for every batch path', async () => {
       const coordinator = new CrossTabCoordinator();
-      const withWriteLock = vi.spyOn(coordinator, 'withWriteLock');
+      const withMutationLocks = vi.spyOn(coordinator, 'withMutationLocks');
       const { service: svc } = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
       const pathA = '/batch/a.txt';
       const pathB = '/batch/b.txt';
@@ -875,18 +1747,89 @@ describe('WorkspaceFileService', () => {
           [pathB]: { content: 'b' },
         });
 
-        expect(withWriteLock).toHaveBeenCalledTimes(2);
-        expect(withWriteLock).toHaveBeenCalledWith(pathA, expect.any(Function));
-        expect(withWriteLock).toHaveBeenCalledWith(pathB, expect.any(Function));
+        expect(withMutationLocks).toHaveBeenCalledTimes(2);
+        expect(withMutationLocks).toHaveBeenCalledWith(
+          [pathA, '/batch', `memory:0:${pathA}`, 'memory:0:/batch'],
+          { type: 'write', path: pathA, authority: { storageRootKey: 'memory:0', providerBasePath: '/' } },
+          expect.any(Function),
+        );
+        expect(withMutationLocks).toHaveBeenCalledWith(
+          [pathB, '/batch', `memory:0:${pathB}`, 'memory:0:/batch'],
+          { type: 'write', path: pathB, authority: { storageRootKey: 'memory:0', providerBasePath: '/' } },
+          expect.any(Function),
+        );
       } finally {
         svc.dispose();
         coordinator.dispose();
       }
     });
 
+    it('waits for every admitted write and invalidates local and peer projections after a partial failure', async () => {
+      const coordinator = new CrossTabCoordinator();
+      const notifyDirectoryChange = vi.spyOn(coordinator, 'notifyDirectoryChange');
+      const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+      const originalWriteFile = context.provider.writeFile.bind(context.provider);
+      const failedPath = '/batch/failed.txt';
+      const delayedPath = '/batch/delayed.txt';
+      let releaseDelayedWrite: (() => void) | undefined;
+      const delayedWrite = new Promise<void>((resolve) => {
+        releaseDelayedWrite = resolve;
+      });
+      let delayedWriteStarted = false;
+      vi.spyOn(context.provider, 'writeFile').mockImplementation(async (path, data) => {
+        if (path === failedPath) {
+          throw new Error('injected write failure');
+        }
+        if (path === delayedPath) {
+          delayedWriteStarted = true;
+          await delayedWrite;
+        }
+        return originalWriteFile(path, data);
+      });
+      const events: ChangeEvent[] = [];
+      const unsubscribe = context.eventBus.subscribe((event) => events.push(event));
+
+      try {
+        const result = context.service.writeFiles({
+          [failedPath]: { content: 'failed' },
+          [delayedPath]: { content: 'completed' },
+        });
+        let settled = false;
+        const observeSettlement = async (): Promise<void> => {
+          try {
+            await result;
+          } catch {
+            settled = true;
+            return;
+          }
+          settled = true;
+        };
+        const settlementObservation = observeSettlement();
+
+        await waitFor(() => delayedWriteStarted);
+        await Promise.resolve();
+        expect(settled).toBe(false);
+
+        releaseDelayedWrite?.();
+        await expect(result).rejects.toThrow('injected write failure');
+        await settlementObservation;
+
+        expect(await context.provider.readFile(delayedPath)).toEqual(encoder.encode('completed'));
+        expect(events).toContainEqual({ type: 'backendChanged', backend: 'memory' });
+        expect(notifyDirectoryChange).toHaveBeenCalledWith('/batch', {
+          storageRootKey: 'memory:0',
+          providerBasePath: '/',
+        });
+      } finally {
+        unsubscribe();
+        context.service.dispose();
+        coordinator.dispose();
+      }
+    });
+
     it('should perform no provider, lock, or event work for an empty batch', async () => {
       const coordinator = new CrossTabCoordinator();
-      const withWriteLock = vi.spyOn(coordinator, 'withWriteLock');
+      const withMutationLocks = vi.spyOn(coordinator, 'withMutationLocks');
       const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
       const providerWrite = vi.spyOn(context.provider, 'writeFile');
       const events: ChangeEvent[] = [];
@@ -898,7 +1841,7 @@ describe('WorkspaceFileService', () => {
         await context.service.writeFiles({});
 
         expect(providerWrite).not.toHaveBeenCalled();
-        expect(withWriteLock).not.toHaveBeenCalled();
+        expect(withMutationLocks).not.toHaveBeenCalled();
         expect(events).toEqual([]);
       } finally {
         unsubscribe();
@@ -1070,7 +2013,9 @@ describe('WorkspaceFileService', () => {
 
   describe('readShallowDirectory', () => {
     it('should return empty array for memory scope', async () => {
-      const nodes = await service.readShallowDirectory('/', { scope: { backend: 'memory' } });
+      const nodes = await service.readShallowDirectory('/', {
+        scope: { backend: 'memory', storageRootKey: 'memory:shallow-directory' },
+      });
       expect(nodes).toEqual([]);
     });
 
@@ -1086,7 +2031,7 @@ describe('WorkspaceFileService', () => {
         }),
         readdirWithStats: undefined,
       });
-      vi.spyOn(providerRegistry, 'getStandaloneProvider').mockResolvedValue(mockProvider);
+      vi.spyOn(providerRegistry, 'getProvider').mockResolvedValue(mockProvider);
 
       const nodes = await service.readShallowDirectory('/', { scope: { backend: 'indexeddb' } });
 
@@ -1098,11 +2043,11 @@ describe('WorkspaceFileService', () => {
       ]);
     });
 
-    it('should propagate errors when getStandaloneProvider throws', async () => {
+    it('should propagate errors when getProvider throws', async () => {
       // Audit R7: structured error propagation replaces the previous
       // swallow-to-`[]` fallback so the /files route can surface
       // recovery UI for revoked permissions / missing handles.
-      vi.spyOn(providerRegistry, 'getStandaloneProvider').mockRejectedValue(new Error('no provider'));
+      vi.spyOn(providerRegistry, 'getProvider').mockRejectedValue(new Error('no provider'));
 
       await expect(service.readShallowDirectory('/', { scope: { backend: 'indexeddb' } })).rejects.toThrow(
         'no provider',
@@ -1114,7 +2059,7 @@ describe('WorkspaceFileService', () => {
         readdir: vi.fn().mockRejectedValue(new Error('ENOENT')),
         readdirWithStats: undefined,
       });
-      vi.spyOn(providerRegistry, 'getStandaloneProvider').mockResolvedValue(mockProvider);
+      vi.spyOn(providerRegistry, 'getProvider').mockResolvedValue(mockProvider);
 
       await expect(service.readShallowDirectory('/', { scope: { backend: 'indexeddb' } })).rejects.toThrow('ENOENT');
     });
@@ -1130,7 +2075,7 @@ describe('WorkspaceFileService', () => {
         }),
         readdirWithStats: undefined,
       });
-      vi.spyOn(providerRegistry, 'getStandaloneProvider').mockResolvedValue(mockProvider);
+      vi.spyOn(providerRegistry, 'getProvider').mockResolvedValue(mockProvider);
 
       const nodes = await service.readShallowDirectory('/', { scope: { backend: 'indexeddb' } });
       expect(nodes).toEqual([
@@ -1144,7 +2089,7 @@ describe('WorkspaceFileService', () => {
         stat: vi.fn().mockResolvedValue({ type: 'file', size: 1, mtimeMs: 1, contentKind: 'text', lineCount: 1 }),
         readdirWithStats: undefined,
       });
-      vi.spyOn(providerRegistry, 'getStandaloneProvider').mockResolvedValue(mockProvider);
+      vi.spyOn(providerRegistry, 'getProvider').mockResolvedValue(mockProvider);
 
       const nodes = await service.readShallowDirectory('/', { scope: { backend: 'indexeddb' } });
       expect(nodes[0]!.id).toBe('/file.txt');
@@ -1157,7 +2102,7 @@ describe('WorkspaceFileService', () => {
         stat: vi.fn().mockResolvedValue({ type: 'file', size: 1, mtimeMs: 1, contentKind: 'text', lineCount: 1 }),
         readdirWithStats: undefined,
       });
-      vi.spyOn(providerRegistry, 'getStandaloneProvider').mockResolvedValue(mockProvider);
+      vi.spyOn(providerRegistry, 'getProvider').mockResolvedValue(mockProvider);
 
       const nodes = await service.readShallowDirectory('/parent/sub', { scope: { backend: 'indexeddb' } });
       expect(nodes[0]!.id).toBe('/parent/sub/child.txt');
@@ -1215,9 +2160,9 @@ describe('WorkspaceFileService', () => {
       await service.writeFiles({ '/mut-batch/x.txt': { content: 'b' } }, context);
       await service.mkdir('/mut-mkdir', { recursive: true }, context);
       await service.writeFile('/mut-r1.txt', 'c');
-      await service.rename('/mut-r1.txt', '/mut-r2.txt', context);
+      await service.move('/mut-r1.txt', '/mut-r2.txt', context);
       await service.writeFile('/mut-u.txt', 'd');
-      await service.unlink('/mut-u.txt', undefined, context);
+      await service.unlink('/mut-u.txt', context);
       await service.mkdir('/mut-rmdir', { recursive: true });
       await service.rmdir('/mut-rmdir', undefined, context);
       await service.writeFile('/mut-dup-s.txt', 'e');
@@ -1280,12 +2225,12 @@ describe('WorkspaceFileService', () => {
       expect(directoryEvents[0]).toMatchObject({ type: 'directoryCreated', path: '/evdir' });
     });
 
-    it('should emit fileRenamed on rename', async () => {
+    it('should emit fileRenamed on a file move', async () => {
       await service.writeFile('/ren.txt', 'data');
       const events: ChangeEvent[] = [];
       eventBus.subscribe((event) => events.push(event));
 
-      await service.rename('/ren.txt', '/renamed.txt');
+      await service.move('/ren.txt', '/renamed.txt');
 
       const renameEvents = events.filter((event) => event.type === 'fileRenamed');
       expect(renameEvents).toHaveLength(1);
@@ -1318,20 +2263,16 @@ describe('WorkspaceFileService', () => {
       expect(directoryEvents[0]).toMatchObject({ type: 'directoryDeleted', path: '/rmd' });
     });
 
-    it('should emit fileCopied on duplicateFile', async () => {
+    it('should emit fileWritten for the duplicated destination', async () => {
       await service.writeFile('/dup-src.txt', 'copy');
       const events: ChangeEvent[] = [];
       eventBus.subscribe((event) => events.push(event));
 
       await service.duplicateFile('/dup-src.txt', '/dup-dst.txt');
 
-      const copyEvents = events.filter((event) => event.type === 'fileCopied');
-      expect(copyEvents).toHaveLength(1);
-      expect(copyEvents[0]).toMatchObject({
-        type: 'fileCopied',
-        sourcePath: '/dup-src.txt',
-        targetPath: '/dup-dst.txt',
-      });
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'fileWritten', path: '/dup-dst.txt', backend: 'memory' }),
+      );
     });
 
     it('should include backend in emitted events', async () => {
@@ -1369,11 +2310,11 @@ describe('WorkspaceFileService', () => {
       expect(after).toHaveLength(0);
     });
 
-    it('should return fresh listing after rename', async () => {
+    it('should return a fresh listing after a move', async () => {
       await service.writeFile('/ren-cache/old.txt', 'data');
       await service.readDirectory('/ren-cache');
 
-      await service.rename('/ren-cache/old.txt', '/ren-cache/new.txt');
+      await service.move('/ren-cache/old.txt', '/ren-cache/new.txt');
       const nodes = await service.readDirectory('/ren-cache');
       const names = nodes.map((n) => n.name);
       expect(names).toContain('new.txt');
@@ -1393,6 +2334,23 @@ describe('WorkspaceFileService', () => {
       eventBus.emit({ type: 'fileWritten', path: '/x', backend: 'memory' });
       expect(handler).not.toHaveBeenCalled();
     });
+
+    it('clears search, pool, route, and discovery derivatives without reviving providers', async () => {
+      const pool = new SharedPool(new SharedArrayBuffer(128 * 1024), { maxEntries: 8 });
+      service.setFilePool(pool);
+      await service.writeFile('/cached.txt', 'cached');
+      await service.readFile('/cached.txt');
+      await service.searchFiles('/', 'cached');
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      const getProvider = vi.spyOn(providerRegistry, 'getProvider');
+
+      service.dispose();
+
+      expect(pool.has('/cached.txt')).toBe(false);
+      await expect(service.listProjectManifests()).resolves.toEqual({ entries: [], roots: [] });
+      await expect(service.searchFiles('/', 'cached')).rejects.toThrow();
+      expect(getProvider).not.toHaveBeenCalled();
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -1408,14 +2366,9 @@ describe('WorkspaceFileService', () => {
       unsub();
     });
 
-    it('should expose watchRegistry', () => {
-      expect(service.watchRegistry).toBeDefined();
-      expect(service.watchRegistry.subscriptionCount).toBe(0);
-    });
-
     it('should coalesce watch events within 75ms kernel window', async () => {
       const received: WatchEvent[] = [];
-      service.watch({ paths: ['/src'], correlationId: 'c', recursive: true }, (event) => {
+      service.watch({ paths: ['/src'], recursive: true }, (event) => {
         received.push(event);
       });
 
@@ -1466,35 +2419,12 @@ describe('WorkspaceFileService', () => {
     });
   });
 
-  describe('cleanupWatches', () => {
-    it('should delegate to watchRegistry.cleanupOwner', async () => {
-      const handler = vi.fn();
-      service.watch({ paths: ['/'], correlationId: 'c', recursive: true }, handler, 'owner-1');
-      expect(service.watchRegistry.handlerCount).toBe(1);
-
-      service.cleanupWatches('owner-1');
-      expect(service.watchRegistry.handlerCount).toBe(0);
-    });
-  });
-
-  describe('eventBus getter', () => {
-    it('should return the event bus instance', () => {
-      expect(service.eventBus).toBe(eventBus);
-    });
-  });
-
-  describe('_ensurePath error propagation', () => {
-    it('should propagate non-EEXIST errors during nested writes', async () => {
-      const origMkdir = rootProvider.mkdir.bind(rootProvider);
-      let callCount = 0;
-      rootProvider.mkdir = async (path: string) => {
-        callCount++;
-        if (callCount === 2) {
-          const error = new Error('disk full') as NodeJS.ErrnoException;
-          error.code = 'EIO';
-          throw error;
-        }
-        return origMkdir(path);
+  describe('provider write error propagation', () => {
+    it('should propagate provider errors during nested writes', async () => {
+      rootProvider.writeFile = async () => {
+        const error = new Error('disk full') as NodeJS.ErrnoException;
+        error.code = 'EIO';
+        throw error;
       };
 
       await expect(service.writeFile('/a/b/c.txt', 'data')).rejects.toThrow('disk full');
@@ -1541,11 +2471,11 @@ describe('WorkspaceFileService', () => {
       expect(stats[0]!.path).toBe('b.txt');
     });
 
-    it('should reflect rename in subsequent getDirectoryStat', async () => {
+    it('should reflect a move in subsequent getDirectoryStat', async () => {
       await service.writeFile('/root/old.txt', 'data');
       await service.getDirectoryStat('/root');
 
-      await service.rename('/root/old.txt', '/root/new.txt');
+      await service.move('/root/old.txt', '/root/new.txt');
 
       const stats = await service.getDirectoryStat('/root');
       const paths = stats.map((s) => s.path);
@@ -1587,17 +2517,6 @@ describe('WorkspaceFileService', () => {
       const paths = stats.map((s) => s.path).sort();
       expect(paths).toEqual(['a.txt', 'sub/b.txt']);
     });
-
-    it('should reflect ensureDirectoryExists in subsequent getDirectoryStat', async () => {
-      await service.writeFile('/root/a.txt', 'a');
-      await service.getDirectoryStat('/root');
-
-      await service.ensureDirectoryExists('/root/new-dir');
-
-      const stats = await service.getDirectoryStat('/root');
-      const hasEntry = stats.some((s) => s.path === 'a.txt');
-      expect(hasEntry).toBe(true);
-    });
   });
 
   // ---------------------------------------------------------------------------
@@ -1621,15 +2540,20 @@ describe('WorkspaceFileService', () => {
 
 describe('WorkspaceFileService integration [DirectIDB]', () => {
   let service: WorkspaceFileService;
+  let rootProvider: FileSystemProvider;
 
   beforeEach(async () => {
     const providerRegistry = new ProviderRegistry({
-      databasePrefix: `test-integration-${Date.now()}`,
+      databasePrefix: `test-integration-${crypto.randomUUID()}`,
     });
-    const provider = await providerRegistry.createMountProvider({ backend: 'indexeddb' });
+    const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+    rootProvider = provider;
 
     const mountTable = new MountTable();
-    mountTable.mount('/', provider, { backend: 'indexeddb' });
+    mountTable.mount('/', provider, {
+      backend: 'indexeddb',
+      storageRootKey: providerRegistry.resolveStorageRootKey({ backend: 'indexeddb' }),
+    });
 
     const resourceQueue = new ResourceQueue();
     const eventBus = new ChangeEventBus();
@@ -1671,11 +2595,14 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
     const eventBus = new ChangeEventBus();
 
     const providerRegistry = new ProviderRegistry({
-      databasePrefix: `test-events-${Date.now()}`,
+      databasePrefix: `test-events-${crypto.randomUUID()}`,
     });
-    const provider = await providerRegistry.createMountProvider({ backend: 'indexeddb' });
+    const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
     const mountTable = new MountTable();
-    mountTable.mount('/', provider, { backend: 'indexeddb' });
+    mountTable.mount('/', provider, {
+      backend: 'indexeddb',
+      storageRootKey: providerRegistry.resolveStorageRootKey({ backend: 'indexeddb' }),
+    });
 
     const eventService = new WorkspaceFileService({
       providerRegistry,
@@ -1704,13 +2631,13 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       await service.writeFile('/README.md', '# Hello');
       await service.getDirectoryStat('/');
 
-      const results = service.searchFiles('/', 'helper');
+      const results = await service.searchFiles('/', 'helper');
       expect(results).toHaveLength(1);
       expect(results[0]!.path).toBe('src/utils/helper.ts');
     });
 
-    it('should return empty array when tree is not built', () => {
-      const results = service.searchFiles('/', 'anything');
+    it('should build the requested root when the tree is cold', async () => {
+      const results = await service.searchFiles('/', 'anything');
       expect(results).toEqual([]);
     });
 
@@ -1720,7 +2647,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       await service.writeFile('/c.ts', 'c');
       await service.getDirectoryStat('/');
 
-      const results = service.searchFiles('/', '.ts', { maxResults: 2 });
+      const results = await service.searchFiles('/', '.ts', { maxResults: 2 });
       expect(results).toHaveLength(2);
     });
 
@@ -1728,9 +2655,42 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       await service.writeFile('/src/main.ts', 'a');
       await service.getDirectoryStat('/');
 
-      const results = service.searchFiles('/', 'src', { includeDirectories: true });
+      const results = await service.searchFiles('/', 'src', { includeDirectories: true });
       const types = results.map((r) => r.type);
       expect(types).toContain('dir');
+    });
+
+    it('rebuilds the sole cache for sequential A to B to A searches', async () => {
+      await service.writeFile('/a/a-only.ts', 'a');
+      await service.writeFile('/b/b-only.ts', 'b');
+
+      await expect(service.searchFiles('/a', 'only')).resolves.toMatchObject([{ path: 'a-only.ts' }]);
+      await expect(service.searchFiles('/b', 'only')).resolves.toMatchObject([{ path: 'b-only.ts' }]);
+      await expect(service.searchFiles('/a', 'only')).resolves.toMatchObject([{ path: 'a-only.ts' }]);
+    });
+
+    it('returns concurrent root scans from their local trees independent of completion order', async () => {
+      await service.writeFile('/a/a-only.ts', 'a');
+      await service.writeFile('/b/b-only.ts', 'b');
+      const originalReaddir = rootProvider.readdir.bind(rootProvider);
+      const aGate = Promise.withResolvers<void>();
+      const bGate = Promise.withResolvers<void>();
+      vi.spyOn(rootProvider, 'readdir').mockImplementation(async (path) => {
+        if (path === '/a') {
+          await aGate.promise;
+        }
+        if (path === '/b') {
+          await bGate.promise;
+        }
+        return originalReaddir(path);
+      });
+
+      const a = service.searchFiles('/a', 'only');
+      const b = service.searchFiles('/b', 'only');
+      bGate.resolve();
+      await expect(b).resolves.toMatchObject([{ path: 'b-only.ts' }]);
+      aGate.resolve();
+      await expect(a).resolves.toMatchObject([{ path: 'a-only.ts' }]);
     });
   });
 
@@ -1744,9 +2704,9 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       const pool = new SharedPool(buffer, { maxEntries: 128 });
 
       const providerRegistry = new ProviderRegistry();
-      const provider = await providerRegistry.createMountProvider({ backend: 'memory' });
+      const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:test-root' });
       const mountTable = new MountTable();
-      mountTable.mount('/', provider, { backend: 'memory' });
+      mountTable.mount('/', provider, { backend: 'memory', storageRootKey: 'memory:test-root' });
 
       const resourceQueue = new ResourceQueue();
       const eventBus = new ChangeEventBus();
@@ -1771,6 +2731,16 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       const cached = pool.resolveCopy('/cached.txt');
       expect(cached).toBeDefined();
       expect(decoder.decode(cached)).toBe('pooled content');
+    });
+
+    it('stores aliased reads under only their canonical shared-pool key', async () => {
+      const { service: svc, pool } = await createWorkspaceFileServiceWithPool();
+      await svc.writeFile('/directory/cached.txt', 'pooled content');
+
+      await svc.readFile('/directory/./cached.txt');
+
+      expect(pool.has('/directory/cached.txt')).toBe(true);
+      expect(pool.has('/directory/./cached.txt')).toBe(false);
     });
 
     it('should invalidate pool entry on writeFile', async () => {
@@ -1802,7 +2772,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       await svc.readFile('/old.txt');
       expect(pool.has('/old.txt')).toBe(true);
 
-      await svc.rename('/old.txt', '/new.txt');
+      await svc.move('/old.txt', '/new.txt');
       expect(pool.has('/old.txt')).toBe(false);
       expect(pool.has('/new.txt')).toBe(false);
     });
@@ -1899,85 +2869,72 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       expect(blob).toBeInstanceOf(Blob);
       expect(blob.size).toBeGreaterThan(0);
     });
+
+    it('rejects missing and file paths instead of returning plausible empty archives', async () => {
+      await service.writeFile('/file.txt', 'file');
+
+      await expect(service.getZippedDirectory('/missing')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(service.getZippedDirectory('/file.txt')).rejects.toMatchObject({ code: 'ENOTDIR' });
+    });
   });
 
-  // ---------------------------------------------------------------------------
-  // mount / unmount (dynamic mount routing)
-  // ---------------------------------------------------------------------------
-
-  describe('mount / unmount', () => {
+  describe('protected dynamic mounts', () => {
     let mountedService: WorkspaceFileService;
-    let mountedEventBus: ChangeEventBus;
     let mountedRegistry: ProviderRegistry;
 
     beforeEach(async () => {
       mountedRegistry = new ProviderRegistry();
-      const rootProvider = await mountedRegistry.createMountProvider({ backend: 'memory' });
+      const rootProvider = await mountedRegistry.getProvider({
+        backend: 'memory',
+        storageRootKey: 'memory:dynamic-test-root',
+      });
 
       const mountTable = new MountTable();
-      mountTable.mount('/', rootProvider, { backend: 'memory' });
-      mountedEventBus = new ChangeEventBus();
+      mountTable.mount('/', rootProvider, { backend: 'memory', storageRootKey: 'memory:dynamic-test-root' });
 
       mountedService = new WorkspaceFileService({
         providerRegistry: mountedRegistry,
         resourceQueue: new ResourceQueue(),
-        eventBus: mountedEventBus,
+        eventBus: new ChangeEventBus(),
         mountTable,
       });
     });
 
-    it('should mount a path prefix on the specified backend', async () => {
-      await mountedService.mount('/data', { backend: 'memory' });
-      await mountedService.writeFile('/data/test.txt', 'hello');
-      const content = await mountedService.readFile('/data/test.txt', 'utf8');
-      expect(content).toBe('hello');
+    it('mounts and unmounts one isolated preview root', async () => {
+      await mountedService.mount('/previews/card-a', {
+        backend: 'memory',
+        storageRootKey: 'memory:preview:card-a',
+      });
+      await mountedService.writeFile('/previews/card-a/main.ts', 'preview');
+      await expect(mountedService.readFile('/previews/card-a/main.ts', 'utf8')).resolves.toBe('preview');
+
+      mountedService.unmount('/previews/card-a');
+      await expect(mountedService.exists('/previews/card-a/main.ts')).resolves.toBe(false);
     });
 
-    it('should unmount a path prefix and dispose the provider', async () => {
-      await mountedService.mount('/ephemeral', { backend: 'memory', preservePath: true });
-      await mountedService.writeFile('/ephemeral/file.txt', 'temp');
-      expect(await mountedService.exists('/ephemeral/file.txt')).toBe(true);
+    it.each(['/data', '/projects/proj_a', '/previews/a/nested', '/previews/../projects/proj_a'])(
+      'rejects dynamic prefix %s before provider lookup',
+      async (prefix) => {
+        const getProvider = vi.spyOn(mountedRegistry, 'getProvider');
+        await expect(
+          mountedService.mount(prefix, {
+            backend: 'memory',
+            storageRootKey: 'memory:preview:a',
+          }),
+        ).rejects.toThrow(/not admitted|canonical/);
+        expect(getProvider).not.toHaveBeenCalled();
+      },
+    );
 
-      mountedService.unmount('/ephemeral');
-
-      expect(await mountedService.exists('/ephemeral/file.txt')).toBe(false);
-    });
-
-    it('should route writes to the mounted provider and not the root', async () => {
-      await mountedService.mount('/isolated', { backend: 'memory' });
-      await mountedService.writeFile('/isolated/secret.txt', 'data');
-
-      const rootEntries = await mountedService.readdir('/');
-      expect(rootEntries).not.toContain('secret.txt');
-    });
-
-    it('should handle unmount of non-existent prefix gracefully', () => {
-      expect(() => {
-        mountedService.unmount('/nonexistent');
-      }).not.toThrow();
-    });
-
-    it('should support multiple simultaneous mounts', async () => {
-      await mountedService.mount('/a', { backend: 'memory' });
-      await mountedService.mount('/b', { backend: 'memory' });
-
-      await mountedService.writeFile('/a/x.txt', 'A');
-      await mountedService.writeFile('/b/y.txt', 'B');
-
-      expect(await mountedService.readFile('/a/x.txt', 'utf8')).toBe('A');
-      expect(await mountedService.readFile('/b/y.txt', 'utf8')).toBe('B');
-      expect(await mountedService.exists('/b/x.txt')).toBe(false);
-    });
-
-    it('should pass preservePath option through to mount table', async () => {
-      await mountedService.mount('/projects/abc', { backend: 'memory', preservePath: true });
-      await mountedService.writeFile('/projects/abc/main.ts', 'code');
-
-      const content = await mountedService.readFile('/projects/abc/main.ts', 'utf8');
-      expect(content).toBe('code');
-
-      const entries = await mountedService.readdir('/projects/abc');
-      expect(entries).toContain('main.ts');
+    it('rejects a preview identity that does not match its prefix before provider lookup', async () => {
+      const getProvider = vi.spyOn(mountedRegistry, 'getProvider');
+      await expect(
+        mountedService.mount('/previews/card-a', {
+          backend: 'memory',
+          storageRootKey: 'memory:preview:card-b',
+        }),
+      ).rejects.toThrow('protected prefix');
+      expect(getProvider).not.toHaveBeenCalled();
     });
   });
 });

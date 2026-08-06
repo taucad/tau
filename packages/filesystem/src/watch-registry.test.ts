@@ -2,7 +2,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { WatchRegistry } from '#watch-registry.js';
 import { ChangeEventBus } from '#change-event-bus.js';
-import type { ChangeEvent, WatchRequest } from '#types.js';
+import type { ChangeEvent, WatchEvent, WatchRequest } from '#types.js';
+import { tagEventAuthorities } from '#event-origin-registry.js';
 
 const testBackend = 'memory';
 
@@ -15,6 +16,13 @@ const renamedEvent = (oldPath: string, newPath: string): ChangeEvent => ({
   backend: testBackend,
 });
 const directoryChanged = (path: string): ChangeEvent => ({ type: 'directoryChanged', path, backend: testBackend });
+const directoryDeleted = (path: string): ChangeEvent => ({ type: 'directoryDeleted', path, backend: testBackend });
+const directoryRenamed = (oldPath: string, newPath: string): ChangeEvent => ({
+  type: 'directoryRenamed',
+  oldPath,
+  newPath,
+  backend: testBackend,
+});
 
 describe('WatchRegistry', () => {
   let bus: ChangeEventBus;
@@ -56,6 +64,22 @@ describe('WatchRegistry', () => {
 
       emitAndFlush(written('/other/file.txt'));
       expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('delivers captured facts only to the matching authority subscription', () => {
+      const firstAuthority = {};
+      const secondAuthority = {};
+      const first = vi.fn();
+      const second = vi.fn();
+      registry.watch({ paths: ['/src'] }, first, { authority: firstAuthority });
+      registry.watch({ paths: ['/src'] }, second, { authority: secondAuthority });
+      const event = written('/src/file.txt');
+      tagEventAuthorities(event, [firstAuthority], false);
+
+      emitAndFlush(event);
+
+      expect(first).toHaveBeenCalledOnce();
+      expect(second).not.toHaveBeenCalled();
     });
   });
 
@@ -111,42 +135,6 @@ describe('WatchRegistry', () => {
     });
   });
 
-  // --- Event type filter ---
-
-  describe('event type filter', () => {
-    it('should filter by event type when filter is set', () => {
-      const handler = vi.fn();
-      registry.watch({ paths: ['/src'], recursive: true, filter: { deleted: false } }, handler);
-
-      emitAndFlush(deletedEvent('/src/file.txt'));
-      expect(handler).not.toHaveBeenCalled();
-
-      emitAndFlush(written('/src/file.txt'));
-      expect(handler).toHaveBeenCalledTimes(1);
-    });
-
-    it('should deliver all event types when filter is not set', () => {
-      const handler = vi.fn();
-      registry.watch({ paths: ['/src'], recursive: true }, handler);
-
-      emitAndFlush(written('/src/a.txt'));
-      emitAndFlush(deletedEvent('/src/b.txt'));
-      expect(handler).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  // --- Correlation ID ---
-
-  describe('correlationId', () => {
-    it('should echo correlationId in outgoing events', () => {
-      const handler = vi.fn();
-      registry.watch({ paths: ['/src'], recursive: true, correlationId: 'test-123' }, handler);
-
-      emitAndFlush(written('/src/file.txt'));
-      expect(handler).toHaveBeenCalledWith(expect.objectContaining({ correlationId: 'test-123' }));
-    });
-  });
-
   // --- Rename events ---
 
   describe('rename events', () => {
@@ -161,12 +149,24 @@ describe('WatchRegistry', () => {
       );
     });
 
-    it('should exclude renames where new path matches excludes', () => {
+    it('should deliver a rename when either endpoint remains observable', () => {
       const handler = vi.fn();
       registry.watch({ paths: ['/src'], recursive: true, excludes: ['/src/tmp/*'] }, handler);
 
       emitAndFlush(renamedEvent('/src/file.txt', '/src/tmp/file.txt'));
-      expect(handler).not.toHaveBeenCalled();
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'rename', oldPath: '/src/file.txt', newPath: '/src/tmp/file.txt' }),
+      );
+    });
+
+    it('should deliver a rename into an exact watched path', () => {
+      const handler = vi.fn();
+      registry.watch({ paths: ['/src/created.txt'] }, handler);
+
+      emitAndFlush(renamedEvent('/tmp/created.txt', '/src/created.txt'));
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'rename', oldPath: '/tmp/created.txt', newPath: '/src/created.txt' }),
+      );
     });
   });
 
@@ -218,6 +218,46 @@ describe('WatchRegistry', () => {
       expect(registry.subscriptionCount).toBe(2);
     });
 
+    it('does not alias delimiter-containing paths with a multi-path request', () => {
+      const commaPath = vi.fn();
+      const separatePaths = vi.fn();
+
+      registry.watch({ paths: ['/a,b'] }, commaPath);
+      registry.watch({ paths: ['/a', '/b'] }, separatePaths);
+
+      expect(registry.subscriptionCount).toBe(2);
+      emitAndFlush(written('/b'));
+      expect(commaPath).not.toHaveBeenCalled();
+      expect(separatePaths).toHaveBeenCalledOnce();
+    });
+
+    it('owns a normalized request snapshot instead of retaining caller mutation', () => {
+      const handler = vi.fn();
+      const request: WatchRequest = { paths: ['/src'] };
+      registry.watch(request, handler);
+      request.paths[0] = '/other';
+
+      emitAndFlush(written('/src/file.ts'));
+      expect(handler).toHaveBeenCalledOnce();
+      emitAndFlush(written('/other/file.ts'));
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it('lets duplicate registrations of the same handler own independent disposers', () => {
+      const handler = vi.fn();
+      const first = registry.watch({ paths: ['/src'] }, handler);
+      const second = registry.watch({ paths: ['/src'] }, handler);
+
+      first();
+      expect(registry.handlerCount).toBe(1);
+      emitAndFlush(written('/src/file.ts'));
+      expect(handler).toHaveBeenCalledOnce();
+
+      second();
+      expect(registry.handlerCount).toBe(0);
+      expect(registry.subscriptionCount).toBe(0);
+    });
+
     it('should tolerate double unsubscribe without error', () => {
       const handler = vi.fn();
       const unsub = registry.watch({ paths: ['/src'] }, handler);
@@ -229,69 +269,6 @@ describe('WatchRegistry', () => {
     });
   });
 
-  // --- Owner cleanup ---
-
-  describe('owner cleanup', () => {
-    it('should remove all watches for an owner on cleanupOwner', () => {
-      const h1 = vi.fn();
-      const h2 = vi.fn();
-
-      registry.watch({ paths: ['/src'], recursive: true }, h1, 'port-1');
-      registry.watch({ paths: ['/lib'], recursive: true }, h2, 'port-1');
-
-      expect(registry.subscriptionCount).toBe(2);
-
-      registry.cleanupOwner('port-1');
-      expect(registry.subscriptionCount).toBe(0);
-
-      emitAndFlush(written('/src/file.txt'));
-      expect(h1).not.toHaveBeenCalled();
-      expect(h2).not.toHaveBeenCalled();
-    });
-
-    it('should not affect other owners', () => {
-      const h1 = vi.fn();
-      const h2 = vi.fn();
-
-      registry.watch({ paths: ['/src'] }, h1, 'port-1');
-      registry.watch({ paths: ['/lib'] }, h2, 'port-2');
-
-      registry.cleanupOwner('port-1');
-
-      expect(registry.subscriptionCount).toBe(1);
-      emitAndFlush(written('/lib/file.txt'));
-      expect(h2).toHaveBeenCalledTimes(1);
-    });
-
-    it('should only remove the disconnecting owner handlers when multiple owners share a subscription', () => {
-      const h1 = vi.fn();
-      const h2 = vi.fn();
-      const request: WatchRequest = { paths: ['/src'], recursive: true };
-
-      registry.watch(request, h1, 'port-1');
-      registry.watch(request, h2, 'port-2');
-
-      expect(registry.subscriptionCount).toBe(1);
-      expect(registry.handlerCount).toBe(2);
-
-      registry.cleanupOwner('port-1');
-
-      // Subscription should survive because port-2 still has a handler
-      expect(registry.subscriptionCount).toBe(1);
-      expect(registry.handlerCount).toBe(1);
-
-      emitAndFlush(written('/src/file.txt'));
-      expect(h1).not.toHaveBeenCalled();
-      expect(h2).toHaveBeenCalledTimes(1);
-    });
-
-    it('should tolerate cleanup of nonexistent owner', () => {
-      expect(() => {
-        registry.cleanupOwner('nonexistent');
-      }).not.toThrow();
-    });
-  });
-
   // --- Reset ---
 
   describe('reset / reconfigure', () => {
@@ -299,28 +276,68 @@ describe('WatchRegistry', () => {
       const h1 = vi.fn();
       const h2 = vi.fn();
 
-      registry.watch({ paths: ['/src'], correlationId: 'c1' }, h1);
-      registry.watch({ paths: ['/lib'], correlationId: 'c2' }, h2);
+      registry.watch({ paths: ['/src'] }, h1);
+      registry.watch({ paths: ['/lib'] }, h2);
 
       registry.emitResetAll();
 
-      expect(h1).toHaveBeenCalledWith(expect.objectContaining({ type: 'reset', correlationId: 'c1' }));
-      expect(h2).toHaveBeenCalledWith(expect.objectContaining({ type: 'reset', correlationId: 'c2' }));
+      expect(h1).toHaveBeenCalledWith({ type: 'reset' });
+      expect(h2).toHaveBeenCalledWith({ type: 'reset' });
     });
+
+    it('flushes older exact facts before a topology reset and never delivers them afterward', () => {
+      const events: WatchEvent[] = [];
+      registry.watch({ paths: ['/src'], recursive: true }, (event) => events.push(event));
+      bus.emit(written('/src/pending.ts'));
+
+      registry.emitResetAll();
+      expect(events).toEqual([{ type: 'change', path: '/src/pending.ts' }, { type: 'reset' }]);
+
+      vi.advanceTimersByTime(100);
+      expect(events).toEqual([{ type: 'change', path: '/src/pending.ts' }, { type: 'reset' }]);
+    });
+
+    it.each([directoryDeleted('/src'), directoryRenamed('/src', '/renamed')])(
+      'resets an exact descendant watch for typed ancestor directory fact $type',
+      (event) => {
+        const handler = vi.fn();
+        registry.watch({ paths: ['/src/main.ts'] }, handler);
+
+        bus.emit(event);
+
+        expect(handler).toHaveBeenCalledExactlyOnceWith({ type: 'reset' });
+      },
+    );
 
     it('should trigger reset per subscription when backendChanged event occurs', () => {
       const handler = vi.fn();
-      registry.watch({ paths: ['/src'], correlationId: 'abc' }, handler);
+      registry.watch({ paths: ['/src'] }, handler);
 
       bus.emit({ type: 'backendChanged', backend: testBackend });
-      expect(handler).toHaveBeenCalledWith(expect.objectContaining({ type: 'reset', correlationId: 'abc' }));
+      expect(handler).toHaveBeenCalledWith({ type: 'reset' });
+    });
+
+    it('should flush concrete events then reset only subscriptions affected by a directory summary', () => {
+      const recursiveEvents: WatchEvent[] = [];
+      const descendantHandler = vi.fn();
+      const siblingHandler = vi.fn();
+      registry.watch({ paths: ['/src'], recursive: true }, (event) => recursiveEvents.push(event));
+      registry.watch({ paths: ['/src/subdir/model.ts'] }, descendantHandler);
+      registry.watch({ paths: ['/other'], recursive: true }, siblingHandler);
+
+      bus.emit(written('/src/exact.ts'));
+      bus.emit(directoryChanged('/src/subdir'));
+
+      expect(recursiveEvents).toEqual([{ type: 'change', path: '/src/exact.ts' }, { type: 'reset' }]);
+      expect(descendantHandler).toHaveBeenCalledWith({ type: 'reset' });
+      expect(siblingHandler).not.toHaveBeenCalled();
     });
   });
 
-  // --- Case sensitivity ---
+  // --- Exact spelling ---
 
-  describe('case sensitivity', () => {
-    it('should treat paths as-is in case-sensitive mode', () => {
+  describe('exact spelling', () => {
+    it('should match exact spelling without synthesizing aliases', () => {
       const handler = vi.fn();
       registry.watch({ paths: ['/Src'], recursive: true }, handler);
 
@@ -328,16 +345,6 @@ describe('WatchRegistry', () => {
       expect(handler).not.toHaveBeenCalled();
 
       emitAndFlush(written('/Src/file.txt'));
-      expect(handler).toHaveBeenCalledTimes(1);
-    });
-
-    it('should match regardless of case in case-insensitive mode', () => {
-      registry.setCaseSensitive(false);
-
-      const handler = vi.fn();
-      registry.watch({ paths: ['/Src'], recursive: true }, handler);
-
-      emitAndFlush(written('/src/file.txt'));
       expect(handler).toHaveBeenCalledTimes(1);
     });
   });
@@ -374,14 +381,6 @@ describe('WatchRegistry', () => {
 
       emitAndFlush(deletedEvent('/src/a.txt'));
       expect(handler).toHaveBeenCalledWith(expect.objectContaining({ type: 'delete' }));
-    });
-
-    it('should map directoryChanged to change', () => {
-      const handler = vi.fn();
-      registry.watch({ paths: ['/src'], recursive: true }, handler);
-
-      emitAndFlush(directoryChanged('/src/subdir'));
-      expect(handler).toHaveBeenCalledWith(expect.objectContaining({ type: 'change' }));
     });
 
     it('should map fileRenamed to rename', () => {
@@ -422,8 +421,8 @@ describe('WatchRegistry', () => {
       });
       const passing = vi.fn();
 
-      registry.watch({ paths: ['/src'], correlationId: 'c1' }, failing);
-      registry.watch({ paths: ['/src'], correlationId: 'c1' }, passing);
+      registry.watch({ paths: ['/src'] }, failing);
+      registry.watch({ paths: ['/src'] }, passing);
 
       registry.emitResetAll();
 
@@ -442,7 +441,7 @@ describe('WatchRegistry', () => {
       });
       const passing = vi.fn();
 
-      const request: WatchRequest = { paths: ['/src'], correlationId: 'bc1' };
+      const request: WatchRequest = { paths: ['/src'] };
       registry.watch(request, failing);
       registry.watch(request, passing);
 
@@ -457,14 +456,14 @@ describe('WatchRegistry', () => {
     });
   });
 
-  // --- Overflow ---
+  // --- Queue saturation ---
 
-  describe('overflow', () => {
-    it('should emit overflow event to all handlers when coalescer queue is exceeded', () => {
+  describe('queue saturation', () => {
+    it('should emit reset to all handlers when the coalescer queue is exceeded', () => {
       const overflowRegistry = new WatchRegistry(bus, { maxQueueDepth: 3 });
 
       const handler = vi.fn();
-      overflowRegistry.watch({ paths: ['/src'], recursive: true, correlationId: 'ov1' }, handler);
+      overflowRegistry.watch({ paths: ['/src'], recursive: true }, handler);
 
       bus.emit(written('/src/1.txt'));
       bus.emit(written('/src/2.txt'));
@@ -472,12 +471,12 @@ describe('WatchRegistry', () => {
       expect(handler).not.toHaveBeenCalled();
 
       bus.emit(written('/src/4.txt'));
-      expect(handler).toHaveBeenCalledWith(expect.objectContaining({ type: 'overflow', correlationId: 'ov1' }));
+      expect(handler).toHaveBeenCalledWith({ type: 'reset' });
 
       overflowRegistry.dispose();
     });
 
-    it('should log error and continue when handler throws during overflow', () => {
+    it('should log an error and continue when a handler throws during saturation reset', () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
       const overflowRegistry = new WatchRegistry(bus, { maxQueueDepth: 3 });
 
@@ -485,7 +484,7 @@ describe('WatchRegistry', () => {
         throw new Error('overflow-boom');
       });
       const passing = vi.fn();
-      const request: WatchRequest = { paths: ['/src'], recursive: true, correlationId: 'ov2' };
+      const request: WatchRequest = { paths: ['/src'], recursive: true };
       overflowRegistry.watch(request, failing);
       overflowRegistry.watch(request, passing);
 
@@ -496,7 +495,7 @@ describe('WatchRegistry', () => {
 
       expect(failing).toHaveBeenCalledTimes(1);
       expect(passing).toHaveBeenCalledTimes(1);
-      expect(passing).toHaveBeenCalledWith(expect.objectContaining({ type: 'overflow' }));
+      expect(passing).toHaveBeenCalledWith({ type: 'reset' });
       expect(consoleErrorSpy).toHaveBeenCalledWith('[WatchRegistry] Handler error:', expect.any(Error));
 
       consoleErrorSpy.mockRestore();

@@ -63,6 +63,10 @@ class MockFileHandle {
       this._entry.lastModified = Date.now();
     });
   }
+
+  public async isSameEntry(other: FileSystemHandle): Promise<boolean> {
+    return other instanceof MockFileHandle && other._entry === this._entry;
+  }
 }
 
 class MockDirectoryHandle {
@@ -72,10 +76,13 @@ class MockDirectoryHandle {
 
   // oxlint-disable-next-line @typescript-eslint/parameter-properties -- erasableSyntaxOnly forbids parameter properties
   public readonly name: string;
-  private readonly _children = new Map<string, Entry>();
+  private readonly _children: Map<string, Entry>;
+  private readonly _identity: Record<string, never>;
 
-  public constructor(name: string) {
+  public constructor(name: string, identity: Record<string, never> = {}, children = new Map<string, Entry>()) {
     this.name = name;
+    this._identity = identity;
+    this._children = children;
   }
 
   public async getFileHandle(name: string, options?: { create?: boolean }): Promise<MockFileHandle> {
@@ -110,9 +117,13 @@ class MockDirectoryHandle {
     throw new DOMException(`Directory not found: ${name}`, 'NotFoundError');
   }
 
-  public async removeEntry(name: string, _options?: { recursive?: boolean }): Promise<void> {
-    if (!this._children.has(name)) {
+  public async removeEntry(name: string, options?: { recursive?: boolean }): Promise<void> {
+    const entry = this._children.get(name);
+    if (!entry) {
       throw new DOMException(`Entry not found: ${name}`, 'NotFoundError');
+    }
+    if (entry.kind === 'directory' && !options?.recursive && entry.handle._children.size > 0) {
+      throw new DOMException(`Directory not empty: ${name}`, 'InvalidModificationError');
     }
     this._children.delete(name);
   }
@@ -121,6 +132,19 @@ class MockDirectoryHandle {
     for (const [name, entry] of this._children) {
       yield entry.kind === 'file' ? [name, new MockFileHandle(name, entry)] : [name, entry.handle];
     }
+  }
+
+  public async isSameEntry(other: FileSystemHandle): Promise<boolean> {
+    return other instanceof MockDirectoryHandle && other._identity === this._identity;
+  }
+
+  /**
+   * Create another JS wrapper for the same in-memory directory entry.
+   *
+   * @returns A handle wrapper sharing this directory's identity and children.
+   */
+  public clone(): MockDirectoryHandle {
+    return new MockDirectoryHandle(this.name, this._identity, this._children);
   }
 }
 

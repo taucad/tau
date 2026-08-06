@@ -5,6 +5,8 @@
  * @see repos/vscode/src/vs/platform/files/common/fileService.ts
  */
 
+import type { FileReadStreamOptions } from '#types.js';
+
 /**
  * Default chunk size for streaming reads (256 KiB).
  * Balanced between memory overhead and IPC/context-switch cost.
@@ -13,17 +15,21 @@
 export const streamChunkSize: number = 256 * 1024;
 
 /**
- * Options for streaming file reads.
+ * Reject invalid byte ranges before they reach buffered or native slicing.
+ *
+ * @param options - Optional byte range to validate.
  * @public
  */
-export type FileReadStreamOptions = {
-  /** Byte offset to start reading from. */
-  position?: number;
-  /** Maximum number of bytes to read. */
-  length?: number;
-  /** Abort signal for cancellation. */
-  signal?: AbortSignal;
-};
+export function validateFileReadStreamOptions(options?: FileReadStreamOptions): void {
+  for (const [name, value] of [
+    ['position', options?.position],
+    ['length', options?.length],
+  ] as const) {
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
+      throw new RangeError(`${name} must be a non-negative safe integer.`);
+    }
+  }
+}
 
 /**
  * Wrap a complete `Uint8Array` into a `ReadableStream<Uint8Array>` with chunking.
@@ -38,6 +44,7 @@ export function bufferToStream(
   buffer: Uint8Array<ArrayBuffer>,
   options?: FileReadStreamOptions,
 ): ReadableStream<Uint8Array<ArrayBuffer>> {
+  validateFileReadStreamOptions(options);
   let offset = options?.position ?? 0;
   const end = options?.length === undefined ? buffer.byteLength : Math.min(offset + options.length, buffer.byteLength);
 

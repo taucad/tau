@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import type { FileStat, ProviderCapabilities } from '#types.js';
 import { fileStatFromBytes } from '#content-metadata.js';
@@ -138,6 +138,13 @@ describe('AbstractFileSystemProvider', () => {
     it('should return true for an existing directory', async () => {
       await provider.mkdir('/dir');
       expect(await provider.exists('/dir')).toBe(true);
+    });
+
+    it('should propagate permission and I/O errors instead of reporting absence', async () => {
+      vi.spyOn(provider, 'stat').mockRejectedValueOnce(
+        Object.assign(new Error('permission denied'), { code: 'EACCES' }),
+      );
+      await expect(provider.exists('/uncertain')).rejects.toMatchObject({ code: 'EACCES' });
     });
   });
 

@@ -1,24 +1,19 @@
 /**
  * Origin Private File System (OPFS) filesystem provider.
  *
- * OPFS is the browser's built-in private filesystem accessed via
- * `navigator.storage.getDirectory()`. It uses the same `FileSystemDirectoryHandle`
- * API as the File System Access API, so this provider extends
- * {@link FileSystemAccessProvider} and only overrides initialization and identity.
+ * OPFS exposes the same directory-handle API as File System Access, so this
+ * provider only supplies initialization, identity, and initialization guards.
  */
 
 import type { ProviderCapabilities } from '#types.js';
 import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
 
-/**
- * Filesystem provider backed by the Origin Private File System.
- *
- * @public
- */
+/** Filesystem provider backed by the origin-private filesystem. @public */
 export class OPFSProvider extends FileSystemAccessProvider {
   /**
-   * Backend identifier; always `'opfs'`.
-   * @returns The literal string `'opfs'`.
+   * OPFS backend identifier.
+   *
+   * @returns The OPFS backend identifier.
    */
   public override get id(): string {
     return 'opfs';
@@ -32,62 +27,27 @@ export class OPFSProvider extends FileSystemAccessProvider {
 
   private _initialized = false;
 
-  /**
-   * Create an uninitialized provider. Call {@link initialize} before use.
-   * A temporary empty handle is passed to super; replaced by the real OPFS
-   * root in `initialize()`.
-   */
-  // oxlint-disable-next-line typescript/no-unsafe-argument -- Placeholder handle replaced in initialize()
+  /** Create an uninitialized provider. Call {@link initialize} before use. */
+  // oxlint-disable-next-line typescript/no-unsafe-argument -- Placeholder handle is replaced in initialize().
   public constructor() {
     super(undefined as unknown as FileSystemDirectoryHandle);
   }
 
-  /**
-   * Obtain the OPFS root directory handle from the browser.
-   */
+  /** Obtain the OPFS root directory handle. */
   public async initialize(): Promise<void> {
-    const root = await navigator.storage.getDirectory();
-    this._rootHandle = root;
+    this._initialized = false;
+    this._rootHandle = await navigator.storage.getDirectory();
     this._initialized = true;
+    await super.refresh();
   }
 
-  /**
-   * Persist `data` at `path`, after asserting that the OPFS root has been initialized.
-   *
-   * @param path - Absolute file path to write.
-   * @param data - Bytes or UTF-8 string to store.
-   * @returns Resolves once the inherited write is complete.
-   */
-  public override async writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {
-    this._ensureInitialized();
-    return super.writeFile(path, data);
+  /** Revoke the acquired OPFS root until the next successful initialize. */
+  public override dispose(): void {
+    this._initialized = false;
+    super.dispose();
   }
 
-  /**
-   * List immediate child names under `path`, after asserting that the OPFS root has been initialized.
-   *
-   * @param path - Absolute directory path to enumerate.
-   * @returns The names of files and subdirectories directly inside `path`.
-   */
-  public override async readdir(path: string): Promise<string[]> {
-    this._ensureInitialized();
-    return super.readdir(path);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Protected instance methods
-  // ---------------------------------------------------------------------------
-
-  protected override async readFileRaw(path: string): Promise<Uint8Array<ArrayBuffer>> {
-    this._ensureInitialized();
-    return super.readFileRaw(path);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Private instance methods
-  // ---------------------------------------------------------------------------
-
-  private _ensureInitialized(): void {
+  protected override _assertReady(): void {
     if (!this._initialized) {
       throw new Error('OPFSProvider is not initialized. Call initialize() first.');
     }

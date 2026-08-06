@@ -2,7 +2,7 @@ import { defineConfig } from 'tsdown';
 import type { Options } from 'tsdown';
 
 const baseConfig: Options = {
-  entry: ['src/index.ts', 'src/backend/index.ts', 'src/bundled-types-mount.ts', 'src/providers/index.ts'],
+  entry: ['src/index.ts', 'src/backend/index.ts', 'src/bundled-types-mount.ts'],
   sourcemap: false,
   clean: ['dist'],
   dts: true,

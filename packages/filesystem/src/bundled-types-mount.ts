@@ -1,15 +1,17 @@
 import type { WorkspaceFileService } from '#workspace-file-service.js';
+import { getNodeModulesPath } from '@taucad/utils/import';
+import { isSafeRelativePath, resolveVirtualPath } from '@taucad/utils/path';
 
 /**
- * One kernel typings entry mirrored under `/node_modules/<packageName>/` in the worker.
+ * One package-shaped declaration bundle mirrored under `/node_modules/<packageName>/`.
  *
  * @public
  */
 export type BundledTypesMountEntry = Readonly<{
+  /** Root npm package name. Import subpaths belong in `files`. */
   packageName: string;
-  content?: string;
-  /** When true, `content` is emitted verbatim (already `declare module` or ambient). */
-  prewrapped?: boolean;
+  /** Root declaration content, emitted verbatim as `index.d.ts`. */
+  content: string;
   /** Additional files to write relative to `/node_modules/<packageName>/`. */
   files?: Readonly<Record<string, string>>;
   /** Package metadata to write instead of the minimal default package.json. */
@@ -17,94 +19,73 @@ export type BundledTypesMountEntry = Readonly<{
 }>;
 
 /**
- * Payload posted from the main thread after the FM worker mounts `/node_modules`.
+ * Declaration bundles populated after the file-manager worker mounts `/node_modules`.
  *
  * @public
  */
 export type BundledTypesPayload = readonly BundledTypesMountEntry[];
 
-function declarationSource(entry: BundledTypesMountEntry): string {
-  const content = entry.content ?? '';
-  return entry.prewrapped ? content : `declare module '${entry.packageName}' {\n${content}\n}`;
-}
-
-function bytesEqual(a: Uint8Array<ArrayBuffer>, b: Uint8Array<ArrayBuffer>): boolean {
-  if (a.byteLength !== b.byteLength) {
-    return false;
-  }
-
-  for (let i = 0; i < a.byteLength; i++) {
-    if (a[i] !== b[i]) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-async function readFileBytes(
-  service: WorkspaceFileService,
-  path: string,
-): Promise<Uint8Array<ArrayBuffer> | undefined> {
-  try {
-    const data = await service.readFile(path);
-    if (typeof data === 'string') {
-      return new TextEncoder().encode(data);
-    }
-
-    return data;
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * Writes bundled `.d.ts` + minimal `package.json` under `/node_modules/<pkg>/`.
- * Skips writes when existing bytes match (idempotent across reloads).
  *
- * @param fileService - Workspace file service used for idempotent writes.
- * @param payload - Kernel typings entries to mirror under `/node_modules`.
+ * @param fileService - Workspace file service used to replace package roots.
+ * @param payload - Package-shaped declaration bundles to mirror under `/node_modules`.
  * @public
  */
 export async function populateBundledTypesMount(
   fileService: WorkspaceFileService,
   payload: BundledTypesPayload,
 ): Promise<void> {
-  await Promise.all(
-    payload.map(async (entry) => {
-      const declarationTypesPath = `/node_modules/${entry.packageName}/index.d.ts`;
-      const packageJsonPath = `/node_modules/${entry.packageName}/package.json`;
-      const source = declarationSource(entry);
-      const expectedDeclarationBytes = new TextEncoder().encode(source);
-      const packageJsonText = JSON.stringify(
-        entry.packageJson ?? { name: entry.packageName, types: 'index.d.ts' },
-        null,
-        2,
-      );
-      const expectedPackageJsonBytes = new TextEncoder().encode(packageJsonText);
-
-      if (entry.content !== undefined) {
-        const existingDeclaration = await readFileBytes(fileService, declarationTypesPath);
-        if (existingDeclaration === undefined || !bytesEqual(existingDeclaration, expectedDeclarationBytes)) {
-          await fileService.writeFile(declarationTypesPath, source);
-        }
+  const targets = new Set<string>();
+  const reserve = (path: string): void => {
+    if (targets.has(path)) {
+      throw new TypeError(`Duplicate bundled type target: ${JSON.stringify(path)}`);
+    }
+    let parent = path.slice(0, path.lastIndexOf('/')) || '/';
+    while (parent !== '/') {
+      if (targets.has(parent)) {
+        throw new TypeError(`Bundled type target collides with ancestor: ${JSON.stringify(path)}`);
       }
-
-      await Promise.all(
-        Object.entries(entry.files ?? {}).map(async ([relativePath, content]) => {
-          const filePath = `/node_modules/${entry.packageName}/${relativePath}`;
-          const expectedFileBytes = new TextEncoder().encode(content);
-          const existingFile = await readFileBytes(fileService, filePath);
-          if (existingFile === undefined || !bytesEqual(existingFile, expectedFileBytes)) {
-            await fileService.writeFile(filePath, content);
-          }
-        }),
-      );
-
-      const existingPackageJson = await readFileBytes(fileService, packageJsonPath);
-      if (existingPackageJson === undefined || !bytesEqual(existingPackageJson, expectedPackageJsonBytes)) {
-        await fileService.writeFile(packageJsonPath, packageJsonText);
+      parent = parent.slice(0, parent.lastIndexOf('/')) || '/';
+    }
+    for (const target of targets) {
+      if (target.startsWith(`${path}/`)) {
+        throw new TypeError(`Bundled type target collides with ancestor: ${JSON.stringify(path)}`);
       }
-    }),
-  );
+    }
+    targets.add(path);
+  };
+  const validatedPayload = payload.map((entry) => {
+    const packageDirectory = getNodeModulesPath(entry.packageName);
+    const declarationTypesPath = `${packageDirectory}/index.d.ts`;
+    const packageJsonPath = `${packageDirectory}/package.json`;
+    reserve(packageJsonPath);
+    reserve(declarationTypesPath);
+    const files = Object.entries(entry.files ?? {}).map(([relativePath, content]) => {
+      if (!isSafeRelativePath(relativePath)) {
+        throw new TypeError(`Invalid bundled type path: ${JSON.stringify(relativePath)}`);
+      }
+      const path = resolveVirtualPath(`${packageDirectory}/${relativePath}`);
+      reserve(path);
+      return { path, content };
+    });
+    const packageJsonText = JSON.stringify(
+      entry.packageJson ?? { name: entry.packageName, types: 'index.d.ts' },
+      null,
+      2,
+    );
+    if (typeof packageJsonText !== 'string') {
+      throw new TypeError(`Bundled package metadata is not serializable: ${JSON.stringify(entry.packageName)}`);
+    }
+    return {
+      packageDirectory,
+      files: [
+        { path: declarationTypesPath, content: entry.content },
+        ...files,
+        { path: packageJsonPath, content: packageJsonText },
+      ],
+    };
+  });
+
+  await fileService.replaceBundledTypePackages(validatedPayload);
 }

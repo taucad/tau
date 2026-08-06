@@ -76,6 +76,29 @@ describe('ResourceQueue', () => {
     expect(log.indexOf('2-start')).toBeLessThan(log.indexOf('1-end'));
   });
 
+  it('serializes overlapping multi-resource operations without depending on caller order', async () => {
+    const queue = new ResourceQueue();
+    const releaseFirst = Promise.withResolvers<void>();
+    const firstStarted = Promise.withResolvers<void>();
+    const order: string[] = [];
+    const first = queue.queueForMany(['/target', '/source'], async () => {
+      order.push('first-start');
+      firstStarted.resolve();
+      await releaseFirst.promise;
+      order.push('first-end');
+    });
+    await firstStarted.promise;
+    const second = queue.queueForMany(['/source', '/other'], async () => {
+      order.push('second');
+    });
+
+    await Promise.resolve();
+    expect(order).toEqual(['first-start']);
+    releaseFirst.resolve();
+    await Promise.all([first, second]);
+    expect(order).toEqual(['first-start', 'first-end', 'second']);
+  });
+
   it('should auto-cleanup empty queues', async () => {
     const queue = new ResourceQueue();
 

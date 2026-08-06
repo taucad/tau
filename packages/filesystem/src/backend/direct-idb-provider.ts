@@ -7,13 +7,17 @@
  * path set on init (~26ms for 10k entries vs ~12s ZenFS full scan).
  */
 
-import type { FileContentMetadata } from '@taucad/types';
 import type { FileStat, ProviderCapabilities } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import { getFileContentMetadata } from '#content-metadata.js';
 
 const storeName = 'files';
 const dbVersion = 1;
+const directoryKeyPrefix = '\0directory:';
+
+const directoryStorageKey = (path: string): string => `${directoryKeyPrefix}${path}`;
+const directoryPathFromKey = (key: string): string | undefined =>
+  key.startsWith(directoryKeyPrefix) ? key.slice(directoryKeyPrefix.length) : undefined;
 
 function parentDirectory(path: string): string {
   const lastSlash = path.lastIndexOf('/');
@@ -36,40 +40,34 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     return 'indexeddb';
   }
 
-  public readonly capabilities: ProviderCapabilities = {
-    persistent: true,
-    writable: true,
-    quotaBased: true,
-  };
+  public readonly capabilities: ProviderCapabilities;
 
   private _db: IDBDatabase | undefined;
   private readonly _dbName: string;
 
   /** In-memory path index: tracks all file paths for O(1) existence/readdir. */
-  private readonly _paths = new Set<string>();
+  private _paths = new Set<string>();
   /** In-memory directory set: derived from file paths. */
-  private readonly _dirs = new Set<string>(['/']);
-  /** Timestamps per path for stat(). */
-  private readonly _mtimes = new Map<string, number>();
-  /** Cached file sizes populated on write/read to avoid loading full content for stat. */
-  private readonly _fileSizes = new Map<string, number>();
-  /** Cached file content metadata populated on write/read to avoid repeated classification. */
-  private readonly _fileMetadata = new Map<string, FileContentMetadata>();
-
+  private _dirs = new Set<string>(['/']);
   /** Pending writes accumulated for the next batched IDB transaction. */
-  private readonly _writeBatch: Array<{ path: string; data: Uint8Array<ArrayBuffer> }> = [];
+  private readonly _writeBatch: Array<{
+    path: string;
+    data: Uint8Array<ArrayBuffer>;
+    resolve: () => void;
+    reject: (reason: unknown) => void;
+  }> = [];
+  /** Admitted writes that have not settled, used to reject concurrent tree collisions. */
+  private readonly _pendingWritePaths = new Map<string, number>();
   /** Promise for the currently in-flight flush, or undefined when idle. */
   private _flushActive: Promise<void> | undefined;
-  /** Promise for the queued follow-up flush, or undefined when none is queued. */
-  private _flushQueued: Promise<void> | undefined;
-  /** Resolver for the queued follow-up flush. */
-  private _flushQueuedResolve: (() => void) | undefined;
-  /** Rejector for the queued follow-up flush. */
-  private _flushQueuedReject: ((reason: unknown) => void) | undefined;
-
   public constructor(databasePrefix: string) {
     super();
     this._dbName = `${databasePrefix}-fs-direct`;
+    this.capabilities = {
+      persistent: true,
+      writable: true,
+      quotaBased: true,
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -81,8 +79,27 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    * path index via `getAllKeys()`.
    */
   public async initialize(): Promise<void> {
-    this._db = await this._openDb();
-    await this._hydratePathIndex();
+    const database = await this._openDb();
+    this._db = database;
+    try {
+      const snapshot = await this._readPathIndexSnapshot();
+      this._paths = snapshot.paths;
+      this._dirs = snapshot.directories;
+    } catch (error) {
+      database.close();
+      if (this._db === database) {
+        this._db = undefined;
+      }
+      throw error;
+    }
+  }
+
+  /** Refresh the provider's metadata indexes from the backing database. */
+  public async refresh(): Promise<void> {
+    this._ensureOpen();
+    const snapshot = await this._readPathIndexSnapshot();
+    this._paths = snapshot.paths;
+    this._dirs = snapshot.directories;
   }
 
   /**
@@ -91,18 +108,24 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    *
    * @param path - Absolute file path to write.
    * @param data - Bytes or UTF-8 string to store.
+   * @returns A promise that settles when the queued generation commits or fails.
    */
   public async writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {
     this._ensureOpen();
-    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
-    this._ensureParentDirs(path);
-    this._paths.add(path);
-    this._mtimes.set(path, Date.now());
-    this._fileSizes.set(path, bytes.byteLength);
-    this._fileMetadata.set(path, getFileContentMetadata(bytes));
-
-    this._writeBatch.push({ path, data: bytes });
-    await this._throttledFlush();
+    this._assertWritablePath(path);
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
+    const deferred = Promise.withResolvers<void>();
+    this._pendingWritePaths.set(path, (this._pendingWritePaths.get(path) ?? 0) + 1);
+    this._writeBatch.push({ path, data: bytes, resolve: deferred.resolve, reject: deferred.reject });
+    this._flushActive ??= this._drainFlushes();
+    return deferred.promise.finally(() => {
+      const remaining = (this._pendingWritePaths.get(path) ?? 1) - 1;
+      if (remaining === 0) {
+        this._pendingWritePaths.delete(path);
+      } else {
+        this._pendingWritePaths.set(path, remaining);
+      }
+    });
   }
 
   /**
@@ -112,7 +135,11 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    * @returns The names of files and subdirectories directly inside `path`.
    */
   public async readdir(path: string): Promise<string[]> {
+    this._ensureOpen();
     const normalizedPath = path === '/' ? '/' : path;
+    if (this._paths.has(normalizedPath)) {
+      throw this._enotdir(path);
+    }
     if (!this._dirs.has(normalizedPath)) {
       throw this._enoent(path);
     }
@@ -153,7 +180,8 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     const names = await this.readdir(path);
     const prefix = path === '/' ? '/' : `${path}/`;
     const result: Array<{ name: string } & FileStat> = [];
-    const uncachedMetadataPaths: Array<{ index: number; fullPath: string }> = [];
+    const fileMetadataPaths: Array<{ index: number; fullPath: string }> = [];
+    const missingIndexes = new Set<number>();
 
     for (const name of names) {
       const fullPath = `${prefix}${name}`;
@@ -162,54 +190,43 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
           name,
           type: 'dir',
           size: 0,
-          mtimeMs: this._mtimes.get(fullPath) ?? 0,
+          mtimeMs: 0,
         });
       } else {
-        const cachedSize = this._fileSizes.get(fullPath);
-        const cachedMetadata = this._fileMetadata.get(fullPath);
-        if (cachedSize !== undefined && cachedMetadata !== undefined) {
-          result.push({
-            name,
-            type: 'file',
-            size: cachedSize,
-            mtimeMs: this._mtimes.get(fullPath) ?? 0,
-            ...cachedMetadata,
-          });
-        } else {
-          uncachedMetadataPaths.push({ index: result.length, fullPath });
-          result.push({
-            name,
-            type: 'file',
-            size: 0,
-            mtimeMs: this._mtimes.get(fullPath) ?? Date.now(),
-            contentKind: 'text',
-            lineCount: 1,
-          });
-        }
+        fileMetadataPaths.push({ index: result.length, fullPath });
+        result.push({
+          name,
+          type: 'file',
+          size: 0,
+          mtimeMs: 0,
+          contentKind: 'text',
+          lineCount: 1,
+        });
       }
     }
 
-    if (uncachedMetadataPaths.length > 0 && this._db) {
+    if (fileMetadataPaths.length > 0 && this._db) {
       await new Promise<void>((resolve, reject) => {
         const tx = this._db!.transaction(storeName, 'readonly');
-        let remaining = uncachedMetadataPaths.length;
+        let remaining = fileMetadataPaths.length;
 
         const store = tx.objectStore(storeName);
         const bindRequest = (request: IDBRequest, entryFullPath: string, entryIndex: number) => {
           request.addEventListener('success', () => {
             const data = request.result as Uint8Array<ArrayBuffer> | undefined;
-            const bytes = data ?? new Uint8Array();
-            const metadata = getFileContentMetadata(bytes);
-            const mtimeMs = this._mtimes.get(entryFullPath) ?? Date.now();
-            this._fileSizes.set(entryFullPath, bytes.byteLength);
-            this._fileMetadata.set(entryFullPath, metadata);
-            result[entryIndex] = {
-              name: result[entryIndex]!.name,
-              type: 'file',
-              size: bytes.byteLength,
-              mtimeMs,
-              ...metadata,
-            };
+            if (data === undefined) {
+              this._purgeFileProjection(entryFullPath);
+              missingIndexes.add(entryIndex);
+            } else {
+              const metadata = getFileContentMetadata(data);
+              result[entryIndex] = {
+                name: result[entryIndex]!.name,
+                type: 'file',
+                size: data.byteLength,
+                mtimeMs: 0,
+                ...metadata,
+              };
+            }
             remaining--;
             if (remaining === 0) {
               resolve();
@@ -219,37 +236,41 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
             reject(request.error ?? new Error(`IDB get failed for '${entryFullPath}'`));
           });
         };
-        for (const { index, fullPath } of uncachedMetadataPaths) {
+        for (const { index, fullPath } of fileMetadataPaths) {
           bindRequest(store.get(fullPath), fullPath, index);
         }
       });
     }
 
-    return result;
+    return result.filter((_, index) => !missingIndexes.has(index));
   }
 
   /**
-   * Resolve metadata for `path`. File sizes are cached after first read to avoid IDB round-trips.
+   * Resolve authoritative metadata for `path` from the durable row.
    *
    * @param path - Absolute path to stat.
    * @returns Type/size/mtime for the entry at `path`.
    */
   public async stat(path: string): Promise<FileStat> {
+    this._ensureOpen();
     if (this._dirs.has(path)) {
-      return { type: 'dir', size: 0, mtimeMs: this._mtimes.get(path) ?? 0 };
+      return { type: 'dir', size: 0, mtimeMs: 0 };
     }
     if (this._paths.has(path)) {
-      const cachedSize = this._fileSizes.get(path);
-      const cachedMetadata = this._fileMetadata.get(path);
-      if (cachedSize !== undefined && cachedMetadata !== undefined) {
-        return { type: 'file', size: cachedSize, mtimeMs: this._mtimes.get(path) ?? Date.now(), ...cachedMetadata };
-      }
       const data = await this._idbGet(path);
-      const bytes = data ?? new Uint8Array();
-      const metadata = getFileContentMetadata(bytes);
-      this._fileSizes.set(path, bytes.byteLength);
-      this._fileMetadata.set(path, metadata);
-      return { type: 'file', size: bytes.byteLength, mtimeMs: this._mtimes.get(path) ?? Date.now(), ...metadata };
+      if (data === undefined) {
+        this._purgeFileProjection(path);
+        throw this._enoent(path);
+      }
+      const metadata = getFileContentMetadata(data);
+      return { type: 'file', size: data.byteLength, mtimeMs: 0, ...metadata };
+    }
+    const repaired = await this._idbGet(path);
+    if (repaired !== undefined) {
+      const metadata = getFileContentMetadata(repaired);
+      this._paths.add(path);
+      this._ensureParentDirs(path);
+      return { type: 'file', size: repaired.byteLength, mtimeMs: 0, ...metadata };
     }
     throw this._enoent(path);
   }
@@ -261,14 +282,14 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    */
   public async unlink(path: string): Promise<void> {
     this._ensureOpen();
+    if (this._dirs.has(path)) {
+      throw this._eisdir(path);
+    }
     if (!this._paths.has(path)) {
       throw this._enoent(path);
     }
     await this._idbDelete(path);
     this._paths.delete(path);
-    this._mtimes.delete(path);
-    this._fileSizes.delete(path);
-    this._fileMetadata.delete(path);
   }
 
   /**
@@ -277,11 +298,19 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    * @param path - Absolute directory path to remove.
    */
   public async rmdir(path: string): Promise<void> {
+    this._ensureOpen();
+    if (this._paths.has(path)) {
+      throw this._enotdir(path);
+    }
     if (!this._dirs.has(path) || path === '/') {
       throw this._enoent(path);
     }
+    const prefix = `${path}/`;
+    if ([...this._paths, ...this._dirs].some((entry) => entry.startsWith(prefix))) {
+      throw this._enotempty(path);
+    }
+    await this._idbDelete(directoryStorageKey(path));
     this._dirs.delete(path);
-    this._mtimes.delete(path);
   }
 
   /**
@@ -295,8 +324,21 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    */
   public async rename(from: string, to: string): Promise<void> {
     this._ensureOpen();
+    if (from === to) {
+      if (!this._dirs.has(from) && !this._paths.has(from)) {
+        throw this._enoent(from);
+      }
+      return;
+    }
 
     if (this._dirs.has(from) && !this._paths.has(from)) {
+      if (from === '/' || to.startsWith(`${from}/`)) {
+        throw this._einval(to);
+      }
+      if (this._dirs.has(to) || this._paths.has(to)) {
+        throw this._eexist(to);
+      }
+      this._assertNoFileAncestor(to);
       await this._renameDirectory(from, to);
       return;
     }
@@ -304,28 +346,34 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     if (!this._paths.has(from)) {
       throw this._enoent(from);
     }
+    if (this._dirs.has(to) || this._paths.has(to)) {
+      throw this._eexist(to);
+    }
+    this._assertNoFileAncestor(to);
     const data = await this._idbGet(from);
     if (data === undefined) {
+      this._purgeFileProjection(from);
       throw this._enoent(from);
     }
+    await new Promise<void>((resolve, reject) => {
+      const tx = this._db!.transaction(storeName, 'readwrite');
+      const store = tx.objectStore(storeName);
+      store.put(data, to);
+      store.delete(from);
+      this._putParentDirectoryRows(store, to);
+      tx.addEventListener('complete', () => {
+        resolve();
+      });
+      tx.addEventListener('error', () => {
+        reject(tx.error ?? new Error('File rename transaction failed'));
+      });
+      tx.addEventListener('abort', () => {
+        reject(tx.error ?? new Error('File rename transaction aborted'));
+      });
+    });
     this._ensureParentDirs(to);
-    await this._idbPut(to, data);
-    await this._idbDelete(from);
     this._paths.delete(from);
     this._paths.add(to);
-    const mtime = this._mtimes.get(from) ?? Date.now();
-    this._mtimes.delete(from);
-    this._mtimes.set(to, mtime);
-    const size = this._fileSizes.get(from);
-    const metadata = this._fileMetadata.get(from);
-    this._fileSizes.delete(from);
-    this._fileMetadata.delete(from);
-    if (size !== undefined) {
-      this._fileSizes.set(to, size);
-    }
-    if (metadata !== undefined) {
-      this._fileMetadata.set(to, metadata);
-    }
   }
 
   private async _renameDirectory(from: string, to: string): Promise<void> {
@@ -346,19 +394,6 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       }
     }
 
-    if (filePaths.length === 0) {
-      this._ensureParentDirs(to);
-      for (const directory of directoriesToMove) {
-        const newDirectory = to + directory.slice(from.length);
-        this._dirs.add(newDirectory);
-        this._dirs.delete(directory);
-        const mtime = this._mtimes.get(directory) ?? Date.now();
-        this._mtimes.delete(directory);
-        this._mtimes.set(newDirectory, mtime);
-      }
-      return;
-    }
-
     const fileData = new Map<string, Uint8Array<ArrayBuffer>>();
     for (const path of filePaths) {
       // oxlint-disable-next-line no-await-in-loop -- Sequential reads required to assemble the directory subtree before the rewrite transaction
@@ -369,83 +404,43 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     }
 
     await new Promise<void>((resolve, reject) => {
-      const tx = this._db!.transaction(storeName, 'readwrite', { durability: 'relaxed' });
+      const tx = this._db!.transaction(storeName, 'readwrite');
       const store = tx.objectStore(storeName);
       for (const [oldPath, data] of fileData) {
         const newPath = to + oldPath.slice(from.length);
         store.delete(oldPath);
         store.put(data, newPath);
       }
+      for (const directory of directoriesToMove) {
+        const newDirectory = to + directory.slice(from.length);
+        store.delete(directoryStorageKey(directory));
+        store.put(true, directoryStorageKey(newDirectory));
+      }
+      this._putParentDirectoryRows(store, to);
       tx.addEventListener('complete', () => {
         resolve();
       });
       tx.addEventListener('error', () => {
         reject(tx.error ?? new Error('Directory rename transaction failed'));
       });
+      tx.addEventListener('abort', () => {
+        reject(tx.error ?? new Error('Directory rename transaction aborted'));
+      });
     });
 
     this._ensureParentDirs(to);
     for (const oldPath of filePaths) {
+      this._purgeFileProjection(oldPath);
+    }
+    for (const oldPath of fileData.keys()) {
       const newPath = to + oldPath.slice(from.length);
-      this._paths.delete(oldPath);
       this._paths.add(newPath);
-      const mtime = this._mtimes.get(oldPath) ?? Date.now();
-      this._mtimes.delete(oldPath);
-      this._mtimes.set(newPath, mtime);
-      const size = this._fileSizes.get(oldPath);
-      const metadata = this._fileMetadata.get(oldPath);
-      this._fileSizes.delete(oldPath);
-      this._fileMetadata.delete(oldPath);
-      if (size !== undefined) {
-        this._fileSizes.set(newPath, size);
-      }
-      if (metadata !== undefined) {
-        this._fileMetadata.set(newPath, metadata);
-      }
     }
     for (const directory of directoriesToMove) {
       const newDirectory = to + directory.slice(from.length);
       this._dirs.add(newDirectory);
       this._dirs.delete(directory);
-      const mtime = this._mtimes.get(directory) ?? Date.now();
-      this._mtimes.delete(directory);
-      this._mtimes.set(newDirectory, mtime);
     }
-  }
-
-  /**
-   * Import many files in a single IndexedDB transaction.
-   * Replaces `BulkImportableStoreFS` for high-volume writes.
-   *
-   * @param files - Map of path to file content for bulk insertion.
-   */
-  public async bulkImport(files: Map<string, Uint8Array<ArrayBuffer>>): Promise<void> {
-    this._ensureOpen();
-    if (files.size === 0) {
-      return;
-    }
-
-    const now = Date.now();
-    await new Promise<void>((resolve, reject) => {
-      const tx = this._db!.transaction(storeName, 'readwrite', { durability: 'relaxed' });
-      const store = tx.objectStore(storeName);
-
-      for (const [path, content] of files) {
-        store.put(content, path);
-        this._ensureParentDirs(path);
-        this._paths.add(path);
-        this._mtimes.set(path, now);
-        this._fileSizes.set(path, content.byteLength);
-        this._fileMetadata.set(path, getFileContentMetadata(content));
-      }
-
-      tx.addEventListener('complete', () => {
-        resolve();
-      });
-      tx.addEventListener('error', () => {
-        reject(tx.error ?? new Error('bulkImport transaction failed'));
-      });
-    });
   }
 
   /** Close the underlying IDB connection. Subsequent operations throw until {@link initialize} is called again. */
@@ -460,98 +455,87 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
 
   protected async readFileRaw(path: string): Promise<Uint8Array<ArrayBuffer>> {
     this._ensureOpen();
-    if (!this._paths.has(path)) {
-      throw this._enoent(path);
+    if (this._dirs.has(path)) {
+      throw this._eisdir(path);
     }
     const data = await this._idbGet(path);
     if (data === undefined) {
+      this._purgeFileProjection(path);
       throw this._enoent(path);
     }
-    this._fileSizes.set(path, data.byteLength);
-    this._fileMetadata.set(path, getFileContentMetadata(data));
-    return data;
+    this._paths.add(path);
+    this._ensureParentDirs(path);
+    return new Uint8Array(data);
   }
 
   protected async mkdirSingle(path: string): Promise<void> {
-    if (this._dirs.has(path)) {
-      const error = new Error(`EEXIST: directory already exists '${path}'`);
-      (error as NodeJS.ErrnoException).code = 'EEXIST';
-      throw error;
+    this._ensureOpen();
+    if (this._dirs.has(path) || this._paths.has(path) || this._pendingWritePaths.has(path)) {
+      throw this._eexist(path);
     }
     const parent = parentDirectory(path);
+    if (this._paths.has(parent) || this._pendingWritePaths.has(parent)) {
+      throw this._enotdir(parent);
+    }
     if (parent !== '/' && !this._dirs.has(parent)) {
       throw this._enoent(parent);
     }
+    await new Promise<void>((resolve, reject) => {
+      const tx = this._db!.transaction(storeName, 'readwrite');
+      tx.objectStore(storeName).put(true, directoryStorageKey(path));
+      tx.addEventListener('complete', () => {
+        resolve();
+      });
+      tx.addEventListener('error', () => {
+        reject(tx.error ?? new Error(`Directory create failed for '${path}'`));
+      });
+      tx.addEventListener('abort', () => {
+        reject(tx.error ?? new Error(`Directory create aborted for '${path}'`));
+      });
+    });
     this._dirs.add(path);
-    this._mtimes.set(path, Date.now());
   }
 
   // ---------------------------------------------------------------------------
   // Write batching (VS Code Throttler pattern)
   // ---------------------------------------------------------------------------
 
-  /**
-   * Throttled flush: at most one active flush + one queued. Multiple writes
-   * arriving while a flush is active accumulate in `_writeBatch` and are
-   * flushed together in the next `_flushBatch` call.
-   *
-   * @returns Resolves once the caller's write has been durably committed (either
-   *   by the active flush or by the next queued flush).
-   */
-  private async _throttledFlush(): Promise<void> {
-    if (this._flushActive) {
-      if (!this._flushQueued) {
-        const { promise, resolve, reject } = Promise.withResolvers<void>();
-        this._flushQueued = promise;
-        this._flushQueuedResolve = resolve;
-        this._flushQueuedReject = reject;
-      }
-      return this._flushQueued;
-    }
-
-    this._flushActive = this._flushBatch();
+  /** Drain every queued generation; a failed generation does not strand later writes. */
+  private async _drainFlushes(): Promise<void> {
     try {
-      await this._flushActive;
+      while (this._writeBatch.length > 0) {
+        const generation = this._writeBatch.splice(0);
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- Generations must commit in arrival order.
+          await this._flushBatch(generation);
+          for (const entry of generation) {
+            entry.resolve();
+          }
+        } catch (error) {
+          for (const entry of generation) {
+            entry.reject(error);
+          }
+        }
+      }
     } finally {
       this._flushActive = undefined;
-    }
-
-    if (this._flushQueuedResolve) {
-      const resolve = this._flushQueuedResolve;
-      const reject = this._flushQueuedReject!;
-      this._flushQueued = undefined;
-      this._flushQueuedResolve = undefined;
-      this._flushQueuedReject = undefined;
-
-      this._flushActive = this._flushBatch();
-      // async-iife: bootstrap — settlement is observed via the queued resolver/rejecter,
-      // not via this fire-and-forget chain; awaiting here would block the caller's flush.
-      // oxlint-disable-next-line eslint-plugin-promise/prefer-await-to-then -- Intentional: resolve/reject the queued promise without awaiting (fires the follow-up flush)
-      void this._flushActive
-        // oxlint-disable-next-line eslint-plugin-promise/prefer-await-to-then -- Intentional chaining for throttle handoff
-        .then(() => {
-          this._flushActive = undefined;
-          resolve();
-        })
-        // oxlint-disable-next-line eslint-plugin-promise/prefer-await-to-then -- Intentional chaining for throttle handoff
-        .catch((error: unknown) => {
-          this._flushActive = undefined;
-          reject(error);
-        });
+      if (this._writeBatch.length > 0) {
+        this._flushActive = this._drainFlushes();
+      }
     }
   }
 
-  /** Drain the current batch into a single IDB transaction. */
-  private async _flushBatch(): Promise<void> {
-    const batch = this._writeBatch.splice(0, this._writeBatch.length);
-    if (batch.length === 0) {
-      return;
-    }
-
+  /**
+   * Commit one queued generation in a single IndexedDB transaction.
+   *
+   * @param batch - Owned writes in the generation.
+   */
+  private async _flushBatch(batch: ReadonlyArray<{ path: string; data: Uint8Array<ArrayBuffer> }>): Promise<void> {
     await new Promise<void>((resolve, reject) => {
-      const tx = this._db!.transaction(storeName, 'readwrite', { durability: 'relaxed' });
+      const tx = this._db!.transaction(storeName, 'readwrite');
       const store = tx.objectStore(storeName);
       for (const { path, data } of batch) {
+        this._putParentDirectoryRows(store, path);
         store.put(data, path);
       }
       tx.addEventListener('complete', () => {
@@ -560,7 +544,15 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       tx.addEventListener('error', () => {
         reject(tx.error ?? new Error('Batch write transaction failed'));
       });
+      tx.addEventListener('abort', () => {
+        reject(tx.error ?? new Error('Batch write transaction aborted'));
+      });
     });
+
+    for (const { path } of batch) {
+      this._ensureParentDirs(path);
+      this._paths.add(path);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -588,8 +580,12 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     });
   }
 
-  /** Hydrate the in-memory path index from all stored keys. */
-  private async _hydratePathIndex(): Promise<void> {
+  /**
+   * Read a complete metadata snapshot without exposing partial hydration.
+   *
+   * @returns Complete file and directory path indexes.
+   */
+  private async _readPathIndexSnapshot(): Promise<{ paths: Set<string>; directories: Set<string> }> {
     const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
       const tx = this._db!.transaction(storeName, 'readonly');
       const store = tx.objectStore(storeName);
@@ -603,22 +599,38 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       });
     });
 
+    const paths = new Set<string>();
+    const directories = new Set<string>(['/']);
+
     for (const key of keys) {
       const path = typeof key === 'string' ? key : JSON.stringify(key);
-      this._paths.add(path);
-      this._addParentDirs(path);
+      const directoryPath = directoryPathFromKey(path);
+      if (directoryPath !== undefined) {
+        directories.add(directoryPath);
+        this._addParentDirs(directoryPath, directories);
+        continue;
+      }
+      paths.add(path);
+      this._addParentDirs(path, directories);
     }
+    for (const path of paths) {
+      if (directories.has(path)) {
+        throw this._errno('EIO', 'persisted path is both a file and directory', path);
+      }
+    }
+    return { paths, directories };
   }
 
   /**
    * Register all parent directories of a path in the dirs set.
    *
    * @param path - File path whose ancestor directories should be indexed.
+   * @param directories - Directory index to update.
    */
-  private _addParentDirs(path: string): void {
+  private _addParentDirs(path: string, directories = this._dirs): void {
     let directory = parentDirectory(path);
-    while (directory !== '/' && !this._dirs.has(directory)) {
-      this._dirs.add(directory);
+    while (directory !== '/' && !directories.has(directory)) {
+      directories.add(directory);
       directory = parentDirectory(directory);
     }
   }
@@ -632,16 +644,39 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     this._addParentDirs(path);
   }
 
+  private _assertWritablePath(path: string): void {
+    if (this._dirs.has(path) || [...this._pendingWritePaths.keys()].some((pending) => pending.startsWith(`${path}/`))) {
+      throw this._eisdir(path);
+    }
+    this._assertNoFileAncestor(path);
+  }
+
+  private _purgeFileProjection(path: string): void {
+    this._paths.delete(path);
+  }
+
+  private _assertNoFileAncestor(path: string): void {
+    let parent = parentDirectory(path);
+    while (parent !== '/') {
+      if (this._paths.has(parent) || this._pendingWritePaths.has(parent)) {
+        throw this._enotdir(parent);
+      }
+      parent = parentDirectory(parent);
+    }
+  }
+
+  private _putParentDirectoryRows(store: IDBObjectStore, path: string): void {
+    let parent = parentDirectory(path);
+    while (parent !== '/') {
+      store.put(true, directoryStorageKey(parent));
+      parent = parentDirectory(parent);
+    }
+  }
+
   private _ensureOpen(): void {
     if (!this._db) {
       throw new Error('DirectIdbProvider is not initialized or has been disposed');
     }
-  }
-
-  private _enoent(path: string): Error {
-    const error = new Error(`ENOENT: no such file or directory '${path}'`);
-    (error as NodeJS.ErrnoException).code = 'ENOENT';
-    return error;
   }
 
   private async _idbGet(key: string): Promise<Uint8Array<ArrayBuffer> | undefined> {
@@ -659,32 +694,20 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     });
   }
 
-  private async _idbPut(key: string, value: Uint8Array<ArrayBuffer>): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const tx = this._db!.transaction(storeName, 'readwrite', { durability: 'relaxed' });
-      const store = tx.objectStore(storeName);
-      const request = store.put(value, key);
-
-      request.addEventListener('success', () => {
-        resolve();
-      });
-      request.addEventListener('error', () => {
-        reject(request.error ?? new Error(`IDB put failed for '${key}'`));
-      });
-    });
-  }
-
   private async _idbDelete(key: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const tx = this._db!.transaction(storeName, 'readwrite', { durability: 'relaxed' });
+      const tx = this._db!.transaction(storeName, 'readwrite');
       const store = tx.objectStore(storeName);
-      const request = store.delete(key);
+      store.delete(key);
 
-      request.addEventListener('success', () => {
+      tx.addEventListener('complete', () => {
         resolve();
       });
-      request.addEventListener('error', () => {
-        reject(request.error ?? new Error(`IDB delete failed for '${key}'`));
+      tx.addEventListener('error', () => {
+        reject(tx.error ?? new Error(`IDB delete failed for '${key}'`));
+      });
+      tx.addEventListener('abort', () => {
+        reject(tx.error ?? new Error(`IDB delete aborted for '${key}'`));
       });
     });
   }

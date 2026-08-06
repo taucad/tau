@@ -8,8 +8,14 @@
  * @public
  */
 
-import type { FileSystemBackend } from '@taucad/types';
+import type {
+  AdoptableProjectManifest,
+  FileSystemBackend,
+  ProjectManifest,
+  ProjectManifestParseIssue,
+} from '@taucad/types';
 import type { FileSystemProvider } from '#types.js';
+import { resolveVirtualPath } from '@taucad/utils/path';
 
 /**
  * Common option fields shared by every {@link MountConfig} variant.
@@ -17,12 +23,10 @@ import type { FileSystemProvider } from '#types.js';
  */
 export type MountConfigCommon = {
   /**
-   * When true, the full absolute path is passed to the provider unchanged
-   * instead of stripping the mount prefix. Use for mounts where the provider
-   * shares storage with the root and stores data at full paths (e.g. project
-   * mounts on the same IndexedDB database).
+   * Absolute provider-relative directory represented by the mount prefix.
+   * Defaults to `/` for a provider rooted at the mount itself.
    */
-  readonly preservePath?: boolean;
+  readonly providerBasePath?: string;
 };
 
 /**
@@ -43,13 +47,129 @@ export type MountConfig =
       readonly workspaceId: string;
     })
   | (MountConfigCommon & {
-      readonly backend: 'indexeddb' | 'opfs' | 'memory';
+      readonly backend: 'indexeddb' | 'opfs';
+    })
+  | (MountConfigCommon & {
+      readonly backend: 'memory';
+      readonly storageRootKey: string;
     });
 
 /**
- * Workspace scope passed to standalone-provider operations via the
- * `{ scope }` options bag on `readFile`, `unlink`, `rmdir`,
- * `getZippedDirectory`, and `readShallowDirectory`. Mirrors
+ * Cloneable persisted route from a virtual project id to a physical root directory.
+ * @public
+ */
+export type ProjectRootConfig = MountConfig & {
+  readonly projectId: string;
+  readonly providerBasePath: string;
+};
+
+/**
+ * Physical root scanned for project manifests, independent of existing project routes.
+ * @public
+ */
+export type StorageRootConfig =
+  | {
+      readonly backend: 'webaccess';
+      readonly directoryHandle: FileSystemDirectoryHandle;
+      readonly workspaceId: string;
+    }
+  | {
+      readonly backend: 'indexeddb' | 'opfs';
+    };
+
+/** Complete persisted project-route and discovery-root configuration. @public */
+export type ProjectRootConfiguration = {
+  readonly projects: readonly ProjectRootConfig[];
+  readonly roots: readonly StorageRootConfig[];
+};
+
+/** Stable locator for a discovered project directory. @public */
+export type ProjectLocator =
+  | {
+      readonly backend: 'indexeddb' | 'opfs';
+      readonly storageRootKey: string;
+      readonly relativeDirectory: string;
+    }
+  | {
+      readonly backend: 'webaccess';
+      readonly storageRootKey: string;
+      readonly relativeDirectory: string;
+      readonly workspaceId: string;
+    };
+
+/** Validated or quarantined result from project discovery. @public */
+export type ProjectDiscoveryEntry =
+  | {
+      readonly status: 'valid';
+      readonly manifest: ProjectManifest;
+      readonly locator: ProjectLocator;
+    }
+  | {
+      readonly status: 'duplicate-id';
+      readonly manifest: ProjectManifest;
+      readonly locator: ProjectLocator;
+    }
+  | {
+      readonly status: 'adoption-required';
+      readonly manifest: AdoptableProjectManifest;
+      readonly locator: ProjectLocator;
+      readonly issue: ProjectManifestParseIssue;
+    }
+  | {
+      readonly status: 'invalid';
+      readonly locator: ProjectLocator;
+      readonly issue: ProjectManifestParseIssue;
+    };
+
+/** Completeness of one configured physical-root scan. @public */
+export type ProjectRootDiscoveryStatus =
+  | {
+      readonly status: 'complete';
+      readonly root: StorageRootConfig;
+    }
+  | {
+      readonly status: 'inaccessible';
+      readonly root: StorageRootConfig;
+      readonly reason: string;
+    };
+
+/** Complete project-discovery result. Entries never imply an unreported root was empty. @public */
+export type ProjectDiscoveryResult = {
+  readonly entries: readonly ProjectDiscoveryEntry[];
+  readonly roots: readonly ProjectRootDiscoveryStatus[];
+};
+
+/** Exact scoped request for permanently removing one project directory. @public */
+export type PermanentDeleteProjectDirectoryInput = {
+  readonly projectId: string;
+  readonly providerBasePath: string;
+  readonly scope: StorageRootConfig;
+};
+
+/** Identity-safe outcome of permanent project-directory deletion. @public */
+export type PermanentDeleteProjectDirectoryResult =
+  | { readonly status: 'deleted' | 'absent' }
+  | { readonly status: 'identity-mismatch'; readonly actualProjectId: string }
+  | { readonly status: 'unidentifiable' };
+
+/** Exact scoped request for committing one journal-backed project directory. @public */
+export type CommitPendingProjectDirectoryInput = {
+  readonly providerBasePath: string;
+  readonly scope: StorageRootConfig;
+  readonly files: Readonly<Record<string, { readonly content: Uint8Array<ArrayBuffer> }>>;
+  readonly manifest: Uint8Array<ArrayBuffer>;
+};
+
+/** Identity-safe outcome of committing one journal-backed project directory. @public */
+export type CommitPendingProjectDirectoryResult =
+  | { readonly status: 'committed' | 'already-committed' }
+  | { readonly status: 'identity-mismatch'; readonly actualProjectId: string }
+  | { readonly status: 'unidentifiable-manifest' };
+
+/**
+ * Workspace scope passed to standalone-provider read operations via the
+ * `{ scope }` options bag on `readFile`, `getZippedDirectory`, and
+ * `readShallowDirectory`. Mirrors
  * {@link MountConfig} but without mount-only options.
  *
  * @public
@@ -61,8 +181,19 @@ export type WorkspaceScope =
       readonly workspaceId: string;
     }
   | {
-      readonly backend: 'indexeddb' | 'opfs' | 'memory';
+      readonly backend: 'indexeddb' | 'opfs';
+    }
+  | {
+      readonly backend: 'memory';
+      readonly storageRootKey: string;
     };
+
+/** Authority-resolved metadata installed in the low-level mount table. @public */
+export type MountMetadata = {
+  readonly backend: FileSystemBackend;
+  readonly storageRootKey?: string;
+  readonly providerBasePath?: string;
+};
 
 /**
  * A single mount entry mapping a path prefix to a provider.
@@ -72,14 +203,8 @@ export type MountEntry = {
   readonly prefix: string;
   readonly provider: FileSystemProvider;
   readonly backend: FileSystemBackend;
-  readonly preservePath?: boolean;
-  /**
-   * Workspace identity for `webaccess` mounts only. Stable id minted from
-   * `generatePrefixedId(idPrefix.workspace)`; identifies the workspace
-   * row whose handle backs this mount. `undefined` for IDB / OPFS /
-   * memory mounts.
-   */
-  readonly workspaceId?: string;
+  readonly storageRootKey?: string;
+  readonly providerBasePath: string;
 };
 
 /**
@@ -92,6 +217,8 @@ export type MountResolution = {
   readonly path: string;
   /** Backend type of the matching mount. */
   readonly backend: FileSystemBackend;
+  /** Exact mount entry that admitted the operation. Undefined only for named physical operations. */
+  readonly entry?: MountEntry;
 };
 
 /**
@@ -119,37 +246,35 @@ export class MountTable {
 
   /**
    * Add a mount point. Re-sorts the table by prefix length (longest first).
-   * If a mount already exists at the same prefix, the old provider is disposed
-   * before replacement.
+   * If a mount already exists at the same prefix, it is replaced. Providers
+   * are registry-owned and mounts never dispose them.
    *
    * @param prefix - Absolute path prefix (e.g. `/`, `/node_modules`).
    * @param provider - Provider to handle paths under this prefix.
    * @param config - Backend identifier and additional mount options.
    */
-  public mount(prefix: string, provider: FileSystemProvider, config: MountConfig): void {
+  public mount(prefix: string, provider: FileSystemProvider, config: MountMetadata): void {
     const normalized = this._normalizePrefix(prefix);
 
     const existingIndex = this._mounts.findIndex((m) => m.prefix === normalized);
     if (existingIndex !== -1) {
-      const existing = this._mounts[existingIndex]!;
-      existing.provider.dispose();
       this._mounts.splice(existingIndex, 1);
     }
 
-    const workspaceId = config.backend === 'webaccess' ? config.workspaceId : undefined;
+    const providerBasePath = this._normalizePrefix(config.providerBasePath ?? '/');
     this._mounts.push({
       prefix: normalized,
       provider,
       backend: config.backend,
-      preservePath: config.preservePath,
-      workspaceId,
+      storageRootKey: config.storageRootKey,
+      providerBasePath,
     });
     this._mounts.sort((a, b) => b.prefix.length - a.prefix.length);
   }
 
   /**
    * Remove a mount point. Does not dispose the provider —
-   * `WorkspaceFileService.unmount` owns disposal. Subsequent reads under
+   * `ProviderRegistry` is its sole owner. Subsequent reads under
    * the prefix fall through to whichever broader mount covers the path
    * (typically the root mount), matching POSIX-like `umount` semantics.
    *
@@ -168,42 +293,35 @@ export class MountTable {
    * @throws When no mount matches the path.
    */
   public resolve(absolutePath: string): MountResolution {
-    const normalized = absolutePath.endsWith('/') && absolutePath.length > 1 ? absolutePath.slice(0, -1) : absolutePath;
+    const normalized = resolveVirtualPath(absolutePath);
 
     for (const entry of this._mounts) {
       if (entry.prefix === '/') {
-        return { provider: entry.provider, path: normalized, backend: entry.backend };
+        return {
+          provider: entry.provider,
+          path: this._resolveProviderPath(entry.providerBasePath, normalized),
+          backend: entry.backend,
+          entry,
+        };
       }
 
       if (normalized === entry.prefix) {
         return {
           provider: entry.provider,
-          path: entry.preservePath ? normalized : '/',
+          path: entry.providerBasePath,
           backend: entry.backend,
+          entry,
         };
       }
 
       if (normalized.startsWith(entry.prefix + '/')) {
-        const resolvedPath = entry.preservePath ? normalized : normalized.slice(entry.prefix.length) || '/';
-        return { provider: entry.provider, path: resolvedPath, backend: entry.backend };
+        const suffix = normalized.slice(entry.prefix.length);
+        const resolvedPath = this._resolveProviderPath(entry.providerBasePath, suffix);
+        return { provider: entry.provider, path: resolvedPath, backend: entry.backend, entry };
       }
     }
 
     throw new Error(`[MountTable] No mount matches path: ${absolutePath}`);
-  }
-
-  /**
-   * Resolve the backend identifier for the mount that handles a given path.
-   *
-   * @param absolutePath - Absolute virtual path.
-   * @returns Backend identifier, or `undefined` if no mount matches.
-   */
-  public resolveBackend(absolutePath: string): FileSystemBackend | undefined {
-    try {
-      return this.resolve(absolutePath).backend;
-    } catch {
-      return undefined;
-    }
   }
 
   /**
@@ -214,6 +332,17 @@ export class MountTable {
    */
   public listMounts(): readonly MountEntry[] {
     return this._mounts;
+  }
+
+  /**
+   * Return the exact installed mount entry at `prefix`, if present.
+   *
+   * @param prefix - Absolute virtual mount prefix.
+   * @returns The exact entry or `undefined` when no exact mount exists.
+   */
+  public getExactMount(prefix: string): MountEntry | undefined {
+    const normalized = this._normalizePrefix(prefix);
+    return this._mounts.find((mount) => mount.prefix === normalized);
   }
 
   /**
@@ -247,10 +376,17 @@ export class MountTable {
     this._mounts = [];
   }
 
-  private _normalizePrefix(prefix: string): string {
-    if (prefix === '/') {
-      return '/';
+  private _resolveProviderPath(basePath: string, suffix: string): string {
+    if (basePath === '/') {
+      return suffix || '/';
     }
-    return prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+    if (!suffix || suffix === '/') {
+      return basePath;
+    }
+    return resolveVirtualPath(`${basePath}${suffix}`);
+  }
+
+  private _normalizePrefix(prefix: string): string {
+    return resolveVirtualPath(prefix);
   }
 }

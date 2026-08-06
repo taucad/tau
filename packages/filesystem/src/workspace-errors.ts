@@ -53,14 +53,32 @@ export function isMissingWorkspaceHandleError(error: unknown): error is MissingW
 }
 
 /**
+ * Error raised when a rooted filesystem view cannot be used.
+ * @public
+ */
+export class RootedFileSystemError extends Error {
+  public readonly code: 'ROOT_UNAVAILABLE' | 'ESTALE';
+
+  public constructor(code: 'ROOT_UNAVAILABLE' | 'ESTALE') {
+    super(
+      code === 'ROOT_UNAVAILABLE'
+        ? 'The requested filesystem root is unavailable.'
+        : 'The rooted filesystem is stale and must be reopened.',
+    );
+    this.name = 'RootedFileSystemError';
+    this.code = code;
+  }
+}
+
+/**
  * Discriminated typed-error code returned by the preflight
  * `canMove` / `canRename` / `canCreate` / `canDelete` family on
  * {@link WorkspaceFileService}. The UI surfaces these via a copy
  * registry rather than parsing message strings — see
  * `apps/ui/app/filesystem/workspace-errors.ts:workspaceErrorCopy`.
  *
- * - `NAME_EXISTS` — destination path already occupied; the caller
- *   should ask the user to confirm overwrite (R8 dialog flow) or
+ * - `NAME_EXISTS` — destination path already occupied. Create/upload
+ *   flows may confirm a content overwrite; move/rename callers must
  *   choose a different name.
  * - `INVALID_NAME` — path is syntactically invalid (empty segment,
  *   reserved characters, contains `..`, etc.).
@@ -74,6 +92,8 @@ export function isMissingWorkspaceHandleError(error: unknown): error is MissingW
  *   {@link MissingWorkspaceHandleError}.
  * - `NOT_FOUND` — source path does not exist (a `canMove` /
  *   `canDelete` against a path the user just lost in a race).
+ * - `OPERATION_FAILED` — the provider rejected an admitted mutation for a
+ *   reason that is not one of the narrower preflight codes.
  *
  * @public
  */
@@ -83,7 +103,8 @@ export type WorkspaceMutationErrorCode =
   | 'READ_ONLY_MOUNT'
   | 'BUNDLED_TYPES_WORKSPACE'
   | 'MISSING_WORKSPACE_HANDLE'
-  | 'NOT_FOUND';
+  | 'NOT_FOUND'
+  | 'OPERATION_FAILED';
 
 /**
  * Structured error returned by the `can*` preflight family. Pairs the
@@ -144,6 +165,9 @@ function messageForCode(code: WorkspaceMutationErrorCode, path: string, target: 
     case 'NOT_FOUND': {
       return `'${path}' does not exist.`;
     }
+    case 'OPERATION_FAILED': {
+      return `The filesystem operation for '${path}' failed.`;
+    }
   }
 }
 
@@ -153,6 +177,8 @@ function messageForCode(code: WorkspaceMutationErrorCode, path: string, target: 
  * have crossed the worker boundary (matched on the
  * `__workspaceMutationError__` marker + `code` shape).
  *
+ * @param error - Unknown value to inspect.
+ * @returns Whether the value carries the workspace-mutation error contract.
  * @public
  */
 export function isWorkspaceMutationError(error: unknown): error is WorkspaceMutationError {

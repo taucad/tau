@@ -44,7 +44,10 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    * @param data - Bytes or UTF-8 string to store.
    */
   public async writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {
-    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+    if (this._dirs.has(path)) {
+      throw this._eisdir(path);
+    }
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
     this._ensureParentDirs(path);
     this._files.set(path, bytes);
     this._mtimes.set(path, Date.now());
@@ -58,7 +61,10 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    */
   public async readdir(path: string): Promise<string[]> {
     const normalizedPath = path === '/' ? '/' : path;
-    if (!this._dirs.has(normalizedPath) && !this._files.has(normalizedPath)) {
+    if (this._files.has(normalizedPath)) {
+      throw this._enotdir(path);
+    }
+    if (!this._dirs.has(normalizedPath)) {
       throw this._enoent(path);
     }
 
@@ -138,6 +144,9 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    * @param path - Absolute file path to remove.
    */
   public async unlink(path: string): Promise<void> {
+    if (this._dirs.has(path)) {
+      throw this._eisdir(path);
+    }
     if (!this._files.has(path)) {
       throw this._enoent(path);
     }
@@ -151,16 +160,15 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    * @param path - Absolute directory path to remove.
    */
   public async rmdir(path: string): Promise<void> {
+    if (this._files.has(path)) {
+      throw this._enotdir(path);
+    }
     if (!this._dirs.has(path) || path === '/') {
       throw this._enoent(path);
     }
     const prefix = `${path}/`;
-    for (const filePath of this._files.keys()) {
-      if (filePath.startsWith(prefix)) {
-        const error = new Error(`ENOTEMPTY: directory not empty '${path}'`);
-        (error as NodeJS.ErrnoException).code = 'ENOTEMPTY';
-        throw error;
-      }
+    if ([...this._files.keys(), ...this._dirs].some((entryPath) => entryPath.startsWith(prefix))) {
+      throw this._enotempty(path);
     }
     this._dirs.delete(path);
     this._mtimes.delete(path);
@@ -173,10 +181,25 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    * @param to - Destination absolute path.
    */
   public async rename(from: string, to: string): Promise<void> {
+    if (from === to) {
+      if (!this._dirs.has(from) && !this._files.has(from)) {
+        throw this._enoent(from);
+      }
+      return;
+    }
+
+    if (from === '/') {
+      throw this._einval(from);
+    }
+
     if (this._dirs.has(from)) {
+      if (to.startsWith(`${from}/`)) {
+        throw this._einval(to);
+      }
+      if (this._dirs.has(to) || this._files.has(to)) {
+        throw this._eexist(to);
+      }
       this._ensureParentDirs(to);
-      this._dirs.add(to);
-      this._dirs.delete(from);
 
       const prefix = `${from}/`;
       const entriesToMove: Array<[string, Uint8Array<ArrayBuffer>]> = [];
@@ -193,6 +216,9 @@ export class MemoryProvider extends AbstractFileSystemProvider {
         }
       }
 
+      this._dirs.add(to);
+      this._dirs.delete(from);
+
       for (const [oldPath, data] of entriesToMove) {
         const newPath = to + oldPath.slice(from.length);
         this._files.set(newPath, data);
@@ -206,6 +232,11 @@ export class MemoryProvider extends AbstractFileSystemProvider {
         const newDirectory = to + oldDirectory.slice(from.length);
         this._dirs.add(newDirectory);
         this._dirs.delete(oldDirectory);
+        const mtime = this._mtimes.get(oldDirectory);
+        this._mtimes.delete(oldDirectory);
+        if (mtime !== undefined) {
+          this._mtimes.set(newDirectory, mtime);
+        }
       }
 
       const mtime = this._mtimes.get(from) ?? Date.now();
@@ -217,6 +248,9 @@ export class MemoryProvider extends AbstractFileSystemProvider {
     const data = this._files.get(from);
     if (!data) {
       throw this._enoent(from);
+    }
+    if (this._dirs.has(to) || this._files.has(to)) {
+      throw this._eexist(to);
     }
     this._ensureParentDirs(to);
     this._files.set(to, data);
@@ -231,20 +265,24 @@ export class MemoryProvider extends AbstractFileSystemProvider {
   // ---------------------------------------------------------------------------
 
   protected async readFileRaw(path: string): Promise<Uint8Array<ArrayBuffer>> {
+    if (this._dirs.has(path)) {
+      throw this._eisdir(path);
+    }
     const data = this._files.get(path);
     if (!data) {
       throw this._enoent(path);
     }
-    return data;
+    return new Uint8Array(data);
   }
 
   protected async mkdirSingle(path: string): Promise<void> {
-    if (this._dirs.has(path)) {
-      const error = new Error(`EEXIST: directory already exists '${path}'`);
-      (error as NodeJS.ErrnoException).code = 'EEXIST';
-      throw error;
+    if (this._dirs.has(path) || this._files.has(path)) {
+      throw this._eexist(path);
     }
     const parent = path.slice(0, path.lastIndexOf('/')) || '/';
+    if (this._files.has(parent)) {
+      throw this._enotdir(parent);
+    }
     if (parent !== '/' && !this._dirs.has(parent)) {
       throw this._enoent(parent);
     }
@@ -258,16 +296,19 @@ export class MemoryProvider extends AbstractFileSystemProvider {
 
   private _ensureParentDirs(path: string): void {
     let directory = path.slice(0, path.lastIndexOf('/')) || '/';
-    while (directory !== '/' && !this._dirs.has(directory)) {
-      this._dirs.add(directory);
+    const missing: string[] = [];
+    while (directory !== '/') {
+      if (this._files.has(directory)) {
+        throw this._enotdir(directory);
+      }
+      if (!this._dirs.has(directory)) {
+        missing.push(directory);
+      }
       directory = directory.slice(0, directory.lastIndexOf('/')) || '/';
     }
-  }
-
-  private _enoent(path: string): Error {
-    const error = new Error(`ENOENT: no such file or directory '${path}'`);
-    (error as NodeJS.ErrnoException).code = 'ENOENT';
-    return error;
+    for (const missingDirectory of missing) {
+      this._dirs.add(missingDirectory);
+    }
   }
 }
 

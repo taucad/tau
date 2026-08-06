@@ -27,6 +27,7 @@ import { kernelTypePackageMaps } from '@taucad/api-extractor/kernel-types';
 import type { SyncFsWorkspaceAdapter } from '@taucad/lsp-fs/sync';
 import { attachSyncFsServer } from '@taucad/lsp-fs/sync';
 import { metaConfig } from '#constants/meta.constants.js';
+import { listWorkspaceDirectories } from '#machines/file-manager-sync-fs-adapter.js';
 
 const providerRegistry = new ProviderRegistry({ databasePrefix: metaConfig.databasePrefix });
 const resourceQueue = new ResourceQueue();
@@ -224,7 +225,7 @@ self.addEventListener(
           const stat = await fileService.stat(path);
           return { mtimeMs: stat.mtimeMs, isDirectory: stat.type === 'dir' };
         },
-        readdir: async (path) => fileService.readdir(path),
+        listDirectories: async (path) => listWorkspaceDirectories(fileService, path),
       };
       languageFsSyncDispose = attachSyncFsServer({
         port: data.port,

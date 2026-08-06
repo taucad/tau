@@ -1,6 +1,13 @@
 import { draw, type Drawing, type Point2D } from 'replicad';
 import { tauBrandColor } from '../tau-brand.js';
 
+export const defaultParams = {
+  avatar: false,
+  avatarScale: 0.64,
+};
+
+const avatarCenter: Point2D = [256, -256];
+
 const topPoints: readonly Point2D[] = [
   [256, -37.873],
   [392.533, -2.622],
@@ -133,15 +140,22 @@ const roundedPolygon = (
   return pen.close();
 };
 
-export const createTauLogo = (): Drawing =>
-  roundedPolygon(topPoints, cornerRadii.top)
+export const createTauLogo = (p = defaultParams): Drawing => {
+  const logo = roundedPolygon(topPoints, cornerRadii.top)
     .fuse(roundedPolygon(leftPoints, cornerRadii.side))
     .fuse(roundedPolygon(rightPoints, cornerRadii.side));
 
-const main = () => ({
-  shape: createTauLogo(),
+  if (!p.avatar) {
+    return logo;
+  }
+
+  return logo.scale(p.avatarScale, avatarCenter);
+};
+
+const main = (p = defaultParams) => ({
+  shape: createTauLogo(p),
   color: tauBrandColor,
-  name: 'Tau logo',
+  name: p.avatar ? 'Tau avatar' : 'Tau logo',
 });
 
 export default main;

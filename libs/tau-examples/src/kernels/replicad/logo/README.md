@@ -1,6 +1,6 @@
 # Tau Logo
 
-Parametric 2D reconstruction of the Tau brandmark. The default model returns one Replicad `Drawing`; `generate-logo.ts` exports that drawing to `logo.svg`, the logo-keychain asset, the UI SVG/PNG/ICO favicon family and React icon, and the email logo path module.
+Parametric 2D reconstruction of the Tau brandmark. Set `avatar` to inset the mark within a transparent safe area and use `avatarScale` to target the crop shape. `generate-logo.ts` exports the canonical logo assets plus explicit circle-safe and square-optimized avatar files.
 
 ## Part Census
 
@@ -20,6 +20,8 @@ The three regions are fused into one disconnected 2D drawing. There are no BRep 
 | Symmetry axis           | `x = 256`                         |
 | Sloped-axis angle       | `atan(1 / sqrt(15)) = 14.477512°` |
 | Fill                    | `#00987c`                         |
+| Circle avatar scale     | `0.64` about `(256, 256)`         |
+| Square avatar scale     | `0.8` about `(256, 256)`          |
 
 ## Verification
 
@@ -40,5 +42,9 @@ GeoSpec currently accepts mesh and BRep evidence, not 2D SVG drawings; the gener
 ## Render Packet
 
 - `logo.svg` - canonical generated vector render.
+- `apps/ui/public/avatar-circle.svg` - circle-safe avatar vector.
+- `apps/ui/public/avatar-circle.png` - circle-safe transparent 512 by 512 avatar raster.
+- `apps/ui/public/avatar-square.svg` - square-optimized avatar vector.
+- `apps/ui/public/avatar-square.png` - square-optimized transparent 512 by 512 avatar raster.
 - `thumbnail.webp` - 768 by 576 preview rasterized from the runtime's 2D SVG artifact and verified by the thumbnail drift gate.
 - `docs/research/tau-logo-reconstruction.md` - source provenance and raster-comparison evidence.

@@ -111,6 +111,12 @@ import { isNotFoundError } from '#filesystem/filesystem-errors.js';
 
 type FileSystemProxy = WorkerFileSystemProxy;
 
+type ObservedFileRevision = {
+  readonly hash: string;
+  readonly content?: Uint8Array<ArrayBuffer>;
+  readonly expectedPrior?: Readonly<{ hash: string | undefined }>;
+};
+
 type TranscoderPluginEntry = TranscoderPlugin<Record<string, unknown>> &
   RuntimePluginDefinitionCarrier<TranscoderDefinition>;
 
@@ -449,7 +455,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Progress callback set during render, used by entry methods to emit phase transitions */
   private onProgress?: (phase: RenderPhase) => void;
 
-  /** Bundle result cache keyed by entry path. Selectively invalidated when dependencies change; fully cleared on reset/overflow events. */
+  /** Bundle result cache keyed by entry path. Selectively invalidated when dependencies change; fully cleared on reset. */
   private readonly bundleResultCache = new Map<string, BundleResult>();
 
   /** Paths which may schedule the current autonomous preview. */
@@ -477,6 +483,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** One serialized lane for kernel/cache/watch/native state. */
   private operationTail: Promise<void> = Promise.resolve();
+  /** Serializes authoritative watch rereads before they enter the operation lane. */
+  private watchReconciliationTail: Promise<void> = Promise.resolve();
   private operationAdmissionOpen = true;
   private cleanupPromise: Promise<void> | undefined;
   private pendingWirePreviewGeneration: number | undefined;
@@ -960,12 +968,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.operationAdmissionOpen = false;
     clearTimeout(this.paramDebounceTimer);
     this.paramDebounceTimer = undefined;
-    this.cleanupPromise = this.drainAndCleanup(this.operationTail);
+    this.cleanupPromise = this.drainAndCleanup();
     return this.cleanupPromise;
   }
 
-  private async drainAndCleanup(pendingOperations: Promise<void>): Promise<void> {
-    await pendingOperations;
+  private async drainAndCleanup(): Promise<void> {
+    await this.watchReconciliationTail;
+    await this.operationTail;
     await this.performCleanup();
   }
 
@@ -1537,7 +1546,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const addedSet = new Set(addedPaths);
     let dirty = false;
     const handler = (event: WatchEvent): void => {
-      if (event.type === 'reset' || event.type === 'overflow') {
+      if (event.type === 'reset') {
         dirty = true;
       } else if (this.exactWatchEventPaths(event).some((path) => addedSet.has(path))) {
         dirty = true;
@@ -2698,6 +2707,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       throw new TypeError('Staged runtime paths must be unique after canonicalization');
     }
     const changedPaths: string[] = [];
+    const revisions = new Map<string, ObservedFileRevision>();
     const createdDirectories = new Set<string>();
     for (const [absolutePath, bytes] of entries) {
       const directory = parentDirectory(absolutePath);
@@ -2709,12 +2719,16 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       // oxlint-disable-next-line no-await-in-loop -- staging must complete before dependency resolution
       await this.filesystem.writeFile(absolutePath, bytes);
       changedPaths.push(absolutePath);
+      if (this.fileHashCache.has(absolutePath) || this.watchedPaths.has(absolutePath)) {
+        // oxlint-disable-next-line no-await-in-loop -- staging order and cache publication stay deterministic
+        revisions.set(absolutePath, { hash: await this.hashContent(bytes), content: bytes });
+      }
     }
     if (changedPaths.length > 0) {
       const generation =
         previewGeneration ??
         (this.shouldScheduleExactPreview(changedPaths) ? this.reserveWorkerPreviewGeneration() : undefined);
-      await this.routeExactChangedPaths(changedPaths, generation);
+      await this.routeExactChangedPaths(changedPaths, generation, revisions);
     }
   }
 
@@ -3541,8 +3555,37 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     for (const path of changedPaths) {
       this.fileHashCache.delete(path);
       this.fileContentCache.delete(path);
-      this.fileContentCache.delete(`utf8:${path}`);
     }
+    this._invalidateBundleCachesForPaths(changedPaths);
+  }
+
+  private _applyObservedRevisions(
+    changedPaths: readonly string[],
+    revisions: ReadonlyMap<string, ObservedFileRevision | undefined>,
+  ): void {
+    for (const path of changedPaths) {
+      const revision = revisions.get(path);
+      if (revision === undefined) {
+        this.fileHashCache.delete(path);
+        this.fileContentCache.delete(path);
+        continue;
+      }
+      if (revision.expectedPrior !== undefined && this.fileHashCache.get(path) !== revision.expectedPrior.hash) {
+        this.fileHashCache.delete(path);
+        this.fileContentCache.delete(path);
+        continue;
+      }
+      this.fileHashCache.set(path, revision.hash);
+      if (revision.content === undefined) {
+        this.fileContentCache.delete(path);
+      } else {
+        this.fileContentCache.set(path, revision.content);
+      }
+    }
+    this._invalidateBundleCachesForPaths(changedPaths);
+  }
+
+  private _invalidateBundleCachesForPaths(changedPaths: readonly string[]): void {
     for (const [entryPath, result] of this.bundleResultCache) {
       if (
         changedPaths.includes(entryPath) ||
@@ -3555,7 +3598,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
   }
 
-  private exactWatchEventPaths(event: Exclude<WatchEvent, { type: 'reset' | 'overflow' }>): string[] {
+  private exactWatchEventPaths(event: Exclude<WatchEvent, { type: 'reset' }>): string[] {
     const paths: string[] = [];
     if ('path' in event) {
       paths.push(resolveVirtualPath(event.path));
@@ -3570,29 +3613,75 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (!this.operationAdmissionOpen) {
       return;
     }
-    if (event.type === 'reset' || event.type === 'overflow') {
-      const generation = this.currentFile ? this.reserveWorkerPreviewGeneration() : undefined;
-      try {
-        await this.enqueueOperation(async () => this.routeReset(generation));
-      } catch (error) {
-        this.reportWatchRoutingError(error, generation);
-      }
-      return;
-    }
-    const paths = this.exactWatchEventPaths(event);
-    const generation = this.shouldScheduleExactPreview(paths) ? this.reserveWorkerPreviewGeneration() : undefined;
+    let generation: number | undefined;
     try {
-      await this.enqueueOperation(async () => this.routeExactChangedPaths(paths, generation));
+      await this.enqueueWatchReconciliation(async () => {
+        const paths = event.type === 'reset' ? [...this.watchedPaths] : this.exactWatchEventPaths(event);
+        const revisions = await this.readChangedObservedRevisions(paths);
+        if (revisions.size === 0 || !this.operationAdmissionOpen) {
+          return;
+        }
+        const changedPaths = [...revisions.keys()];
+        generation = this.shouldScheduleExactPreview(changedPaths) ? this.reserveWorkerPreviewGeneration() : undefined;
+        await this.enqueueOperation(async () => this.routeExactChangedPaths(changedPaths, generation, revisions));
+      });
     } catch (error) {
       this.reportWatchRoutingError(error, generation);
     }
+  }
+
+  private async enqueueWatchReconciliation(operation: () => Promise<void>): Promise<void> {
+    const previous = this.watchReconciliationTail;
+    const next = Promise.withResolvers<void>();
+    this.watchReconciliationTail = next.promise;
+    await previous;
+    try {
+      await operation();
+    } finally {
+      next.resolve();
+    }
+  }
+
+  private async readChangedObservedRevisions(
+    paths: readonly string[],
+  ): Promise<Map<string, ObservedFileRevision | undefined>> {
+    const changed = new Map<string, ObservedFileRevision | undefined>();
+    const { fileSystem } = this;
+    if (!fileSystem) {
+      return changed;
+    }
+    for (const path of paths) {
+      const expectedPrior = { hash: this.fileHashCache.get(path) };
+      let revision: ObservedFileRevision | undefined;
+      let readFailed = false;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- serialized reads preserve the observer's revision order
+        const content = await fileSystem.readFile(path);
+        // oxlint-disable-next-line no-await-in-loop -- serialized hashes preserve the observer's revision order
+        revision = { hash: await this.hashContent(content), content, expectedPrior };
+      } catch (error) {
+        if (isNotFoundError(error)) {
+          revision = { hash: 'missing', expectedPrior };
+        } else {
+          readFailed = true;
+        }
+      }
+      if (readFailed || revision?.hash !== this.fileHashCache.get(path)) {
+        changed.set(path, revision);
+      }
+    }
+    return changed;
   }
 
   private reportWatchRoutingError(error: unknown, generation: number | undefined): void {
     if (!this.operationAdmissionOpen) {
       return;
     }
-    this.onError?.(this.errorToRuntimeIssues(error), generation ?? this.renderGeneration);
+    this.onError?.(
+      this.errorToRuntimeIssues(error),
+      generation,
+      generation === undefined ? undefined : this.renderRecordForGeneration(generation)?.renderId,
+    );
   }
 
   private shouldScheduleExactPreview(paths: readonly string[]): boolean {
@@ -3602,8 +3691,16 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return Boolean(this.currentFile && paths.some((path) => previewPaths.has(path)));
   }
 
-  private async routeExactChangedPaths(paths: readonly string[], generation?: number): Promise<void> {
-    this._invalidateCachesForPaths(paths);
+  private async routeExactChangedPaths(
+    paths: readonly string[],
+    generation?: number,
+    revisions?: ReadonlyMap<string, ObservedFileRevision | undefined>,
+  ): Promise<void> {
+    if (revisions) {
+      this._applyObservedRevisions(paths, revisions);
+    } else {
+      this._invalidateCachesForPaths(paths);
+    }
     this.onFileChanged(paths);
     if (generation === undefined || generation !== this.renderGeneration || !this.currentFile) {
       return;
@@ -3614,21 +3711,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       renderDebounce = Math.min(renderDebounce, this.currentPreviewWatchPaths.get(path) ?? fileChangeDebounce);
     }
     this.scheduleRender(renderDebounce, generation);
-  }
-
-  private async routeReset(generation?: number): Promise<void> {
-    this.clearVolatileFileCaches();
-    this.invalidatePublishedArtifactState();
-    this.currentPreviewWatchPaths.clear();
-    this.currentPreviewMiddlewarePaths.clear();
-    if (this.currentFile) {
-      const entryPath = resolveVirtualPath(joinPath(this.currentFile.path, this.currentFile.filename));
-      this.currentPreviewWatchPaths.set(entryPath, fileChangeDebounce);
-    }
-    if (generation === undefined || generation !== this.renderGeneration || !this.currentFile) {
-      return;
-    }
-    this.scheduleRender(fileChangeDebounce, generation);
   }
 
   /**

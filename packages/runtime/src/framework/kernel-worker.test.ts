@@ -399,54 +399,307 @@ describe('KernelWorker lifecycle', () => {
       }
     });
 
-    it.each(['reset', 'overflow'] as const)(
-      'should clear volatile state and schedule one recovery for %s',
-      async (type) => {
-        const filesystem = createMockFileSystem();
-        filesystem.mocks.readFiles.mockResolvedValue({
-          '/main.ts': new Uint8Array([1, 2, 3]),
+    it('should invalidate changed dependencies and schedule one recovery for reset', async () => {
+      const filesystem = createMockFileSystem();
+      filesystem.mocks.readFiles.mockResolvedValue({
+        '/main.ts': new Uint8Array([1, 2, 3]),
+      });
+      let watchHandler: ((event: WatchEvent) => void) | undefined;
+      Object.assign(filesystem, {
+        watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          watchHandler = handler;
+          return () => {
+            watchHandler = undefined;
+          };
+        }),
+      });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      // @ts-expect-error - install the watch-capable proxy seam exercised by production initialization
+      worker.fileSystem = filesystem;
+
+      try {
+        await openAndWaitForRender(worker, createGeometryFile('main.ts'));
+        await vi.waitFor(() => {
+          expect(watchHandler).toBeDefined();
         });
-        let watchHandler: ((event: WatchEvent) => void) | undefined;
-        Object.assign(filesystem, {
-          watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
-            watchHandler = handler;
-            return () => {
-              watchHandler = undefined;
-            };
-          }),
+        // @ts-expect-error - seed volatile state to verify conservative loss recovery
+        worker.bundleResultCache.set('/cached.ts', {
+          code: '',
+          dependencies: ['/main.ts'],
+          unresolvedPaths: [],
+          issues: [],
+          success: true,
         });
-        const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
-        // @ts-expect-error - install the watch-capable proxy seam exercised by production initialization
-        worker.fileSystem = filesystem;
+        const states: string[] = [];
+        worker.onStateChanged = (state) => states.push(state);
 
-        try {
-          await openAndWaitForRender(worker, createGeometryFile('main.ts'));
-          await vi.waitFor(() => {
-            expect(watchHandler).toBeDefined();
-          });
-          // @ts-expect-error - seed volatile state to verify conservative loss recovery
-          worker.bundleResultCache.set('/cached.ts', {
-            code: '',
-            dependencies: [],
-            unresolvedPaths: [],
-            issues: [],
-            success: true,
-          });
-          const states: string[] = [];
-          worker.onStateChanged = (state) => states.push(state);
+        watchHandler!({ type: 'reset' });
+        await vi.waitFor(() => {
+          expect(states).toEqual(['buffering']);
+        });
 
-          watchHandler!({ type });
-          await vi.waitFor(() => {
-            expect(states).toEqual(['buffering']);
-          });
+        // @ts-expect-error - changed dependencies are invalidated without clearing unrelated caches
+        expect(worker.bundleResultCache.size).toBe(0);
+      } finally {
+        await worker.cleanup();
+      }
+    });
 
-          // @ts-expect-error - verify the existing broad reset contract remains intact
-          expect(worker.bundleResultCache.size).toBe(0);
-        } finally {
-          await worker.cleanup();
+    it('should ignore an exact event and reset when watched bytes are unchanged', async () => {
+      const bytes = new Uint8Array([1, 2, 3]);
+      const filesystem = createMockFileSystem({ readFileResult: bytes });
+      filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': bytes });
+      let watchHandler: ((event: WatchEvent) => void) | undefined;
+      Object.assign(filesystem, {
+        watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          watchHandler = handler;
+          return vi.fn();
+        }),
+      });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      // @ts-expect-error - install the watch-capable proxy seam exercised by production initialization
+      worker.fileSystem = filesystem;
+
+      try {
+        await openAndWaitForRender(worker, createGeometryFile('main.ts'));
+        const states: string[] = [];
+        worker.onStateChanged = (state) => states.push(state);
+        watchHandler!({ type: 'change', path: '/main.ts' });
+        watchHandler!({ type: 'reset' });
+        await vi.waitFor(() => {
+          expect(filesystem.mocks.readFile).toHaveBeenCalledTimes(2);
+        });
+        expect(states).toEqual([]);
+        expect(worker.createGeometryCalls).toBe(1);
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
+    it('should collapse duplicate watch records for one changed revision', async () => {
+      const initial = new Uint8Array([1]);
+      const changed = new Uint8Array([2]);
+      const filesystem = createMockFileSystem({ readFileResult: changed });
+      filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': initial });
+      let watchHandler: ((event: WatchEvent) => void) | undefined;
+      Object.assign(filesystem, {
+        watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          watchHandler = handler;
+          return vi.fn();
+        }),
+      });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      // @ts-expect-error - install the watch-capable proxy seam exercised by production initialization
+      worker.fileSystem = filesystem;
+
+      try {
+        await openAndWaitForRender(worker, createGeometryFile('main.ts'));
+        watchHandler!({ type: 'change', path: '/main.ts' });
+        watchHandler!({ type: 'change', path: '/main.ts' });
+        await vi.waitFor(() => {
+          expect(worker.createGeometryCalls).toBe(2);
+        });
+        expect(filesystem.mocks.readFile).toHaveBeenCalledTimes(2);
+        await new Promise((resolve) => {
+          setTimeout(resolve, 75);
+        });
+        expect(worker.createGeometryCalls).toBe(2);
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
+    it('should conservatively render after an observer read failure', async () => {
+      const filesystem = createMockFileSystem();
+      filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1]) });
+      filesystem.mocks.readFile.mockRejectedValue(new Error('read failed'));
+      let watchHandler: ((event: WatchEvent) => void) | undefined;
+      Object.assign(filesystem, {
+        watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          watchHandler = handler;
+          return vi.fn();
+        }),
+      });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      // @ts-expect-error - install the watch-capable proxy seam exercised by production initialization
+      worker.fileSystem = filesystem;
+
+      try {
+        await openAndWaitForRender(worker, createGeometryFile('main.ts'));
+        watchHandler!({ type: 'change', path: '/main.ts' });
+        await vi.waitFor(() => {
+          expect(worker.createGeometryCalls).toBe(2);
+        });
+        expect(worker.createGeometryCalls).toBe(2);
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
+    it('should render both present-to-missing and missing-to-present revisions', async () => {
+      const filesystem = createMockFileSystem();
+      filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1]) });
+      let missing = false;
+      let bytes = new Uint8Array([1]);
+      filesystem.mocks.readFile.mockImplementation(async () => {
+        if (missing) {
+          throw Object.assign(new Error('missing'), { code: 'ENOENT' });
         }
-      },
-    );
+        return bytes;
+      });
+      let watchHandler: ((event: WatchEvent) => void) | undefined;
+      Object.assign(filesystem, {
+        watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          watchHandler = handler;
+          return vi.fn();
+        }),
+      });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      // @ts-expect-error - install the watch-capable proxy seam exercised by production initialization
+      worker.fileSystem = filesystem;
+
+      try {
+        await openAndWaitForRender(worker, createGeometryFile('main.ts'));
+        missing = true;
+        watchHandler!({ type: 'delete', path: '/main.ts' });
+        await vi.waitFor(() => {
+          expect(worker.createGeometryCalls).toBe(2);
+        });
+
+        missing = false;
+        bytes = new Uint8Array([2]);
+        watchHandler!({ type: 'change', path: '/main.ts' });
+        await vi.waitFor(() => {
+          expect(worker.createGeometryCalls).toBe(3);
+        });
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
+    it('should render the latest authoritative revision once across local, external, and echo records', async () => {
+      const initial = new Uint8Array([1]);
+      const local = new Uint8Array([2]);
+      const external = new Uint8Array([3]);
+      const filesystem = createMockFileSystem();
+      filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': initial });
+      filesystem.mocks.readFile
+        .mockResolvedValueOnce(local)
+        .mockResolvedValueOnce(external)
+        .mockResolvedValueOnce(external);
+      let watchHandler: ((event: WatchEvent) => void) | undefined;
+      Object.assign(filesystem, {
+        watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          watchHandler = handler;
+          return vi.fn();
+        }),
+      });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      // @ts-expect-error - install the watch-capable proxy seam exercised by production initialization
+      worker.fileSystem = filesystem;
+
+      try {
+        await openAndWaitForRender(worker, createGeometryFile('main.ts'));
+        watchHandler!({ type: 'change', path: '/main.ts' });
+        watchHandler!({ type: 'change', path: '/main.ts' });
+        watchHandler!({ type: 'change', path: '/main.ts' });
+
+        await vi.waitFor(() => {
+          expect(worker.createGeometryCalls).toBe(2);
+        });
+        await new Promise((resolve) => {
+          setTimeout(resolve, 75);
+        });
+        expect(worker.createGeometryCalls).toBe(2);
+        // @ts-expect-error - verify the existing runtime revision cache owns the final authoritative bytes
+        expect(worker.fileHashCache.get('/main.ts')).toBe(await worker.hashContent(external));
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
+    it('should reject a stale watch reread after a newer staged write owns the same path', async () => {
+      const initial = new Uint8Array([1]);
+      const latest = new Uint8Array([2]);
+      let diskBytes = initial;
+      const renderReads: number[][] = [];
+      const staleRead = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+      const watchReadStarted = Promise.withResolvers<void>();
+      let parkNextRead = false;
+      const filesystem = createMockFileSystem();
+      filesystem.mocks.readFiles.mockImplementation(async () => {
+        const snapshot = new Uint8Array(diskBytes);
+        renderReads.push([...snapshot]);
+        return { '/main.ts': snapshot };
+      });
+      filesystem.mocks.readFile.mockImplementation(async () => {
+        if (parkNextRead) {
+          parkNextRead = false;
+          watchReadStarted.resolve();
+          return staleRead.promise;
+        }
+        return new Uint8Array(diskBytes);
+      });
+      filesystem.mocks.writeFile.mockImplementation(async (_path, data) => {
+        diskBytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
+      });
+      let watchHandler: ((event: WatchEvent) => void) | undefined;
+      Object.assign(filesystem, {
+        watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          watchHandler = handler;
+          return vi.fn();
+        }),
+      });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      // @ts-expect-error - install the watch-capable proxy seam exercised by production initialization
+      worker.fileSystem = filesystem;
+
+      try {
+        await openAndWaitForRender(worker, createGeometryFile('main.ts'));
+        parkNextRead = true;
+        watchHandler!({ type: 'change', path: '/main.ts' });
+        await watchReadStarted.promise;
+
+        // @ts-expect-error - drive the production staged-write path during the parked observer reread
+        await worker.writeFilesAndInvalidate({ '/main.ts': latest });
+        // @ts-expect-error - verify the staged revision owns the cache before the stale read settles
+        expect(worker.fileHashCache.get('/main.ts')).toBe(await worker.hashContent(latest));
+
+        staleRead.resolve(initial);
+        // @ts-expect-error - wait for the production routeWatchEvent reconciliation lane to settle
+        await worker.watchReconciliationTail;
+        // @ts-expect-error - the stale observer revision must never be installed
+        expect(worker.fileHashCache.get('/main.ts')).not.toBe(await worker.hashContent(initial));
+
+        await vi.waitFor(() => {
+          expect(worker.createGeometryCalls).toBeGreaterThan(1);
+          expect(renderReads.at(-1)).toEqual([2]);
+        });
+        // @ts-expect-error - the recovery render restores the current staged revision
+        expect(worker.fileHashCache.get('/main.ts')).toBe(await worker.hashContent(latest));
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
+    it('should discard a stale observed revision when a newer same-path revision already owns the cache', () => {
+      const worker = createConfiguredWorker();
+      // @ts-expect-error - pin the private revision-commit guard at its single install site
+      worker.fileHashCache.set('/main.ts', 'newer');
+      // @ts-expect-error - pin the paired content cache behavior at the same private seam
+      worker.fileContentCache.set('/main.ts', new Uint8Array([2]));
+
+      // @ts-expect-error - exercise the private compare-and-set commit used by observer reconciliation
+      worker._applyObservedRevisions(
+        ['/main.ts'],
+        new Map([['/main.ts', { hash: 'stale', content: new Uint8Array([1]), expectedPrior: { hash: 'older' } }]]),
+      );
+
+      // @ts-expect-error - verify stale observer data was conservatively evicted, not installed
+      expect(worker.fileHashCache.has('/main.ts')).toBe(false);
+      // @ts-expect-error - verify the paired stale content was also evicted
+      expect(worker.fileContentCache.has('/main.ts')).toBe(false);
+    });
   });
 
   // ---------------------------------------------------------------------------

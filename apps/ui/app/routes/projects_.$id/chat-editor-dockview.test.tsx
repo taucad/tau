@@ -4,15 +4,22 @@ import userEvent from '@testing-library/user-event';
 import type { IDockviewPanelProps } from 'dockview-react';
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 
+const { mockToastError } = vi.hoisted(() => ({ mockToastError: vi.fn() }));
+
+vi.mock('sonner', () => ({ toast: { error: mockToastError } }));
+
 const mockResolve = vi.fn();
 const mockWriteFile = vi.fn();
+const mockContentSaveEditor = vi.fn(async () => undefined);
 const mockAcquireModel = vi.fn(async () => undefined);
 const mockReleaseModel = vi.fn();
 const mockIsApplyingFilesystemContent = vi.fn(() => false);
+const mockSaveEditor = vi.fn<(path: string, data: Uint8Array<ArrayBuffer>) => Promise<void>>(async () => undefined);
 const mockModelService = {
   acquireModel: mockAcquireModel,
   releaseModel: mockReleaseModel,
   isApplyingFilesystemContent: mockIsApplyingFilesystemContent,
+  saveEditor: mockSaveEditor,
 };
 
 const mockUseFileContent = vi.fn<(path: string | undefined) => FileContentResult>();
@@ -23,7 +30,7 @@ vi.mock('#hooks/use-file-content.js', () => ({
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
-    contentService: { resolve: mockResolve },
+    contentService: { resolve: mockResolve, saveEditor: mockContentSaveEditor },
     writeFile: mockWriteFile,
   }),
 }));
@@ -49,8 +56,10 @@ vi.mock('#hooks/use-project.js', () => ({
   }),
 }));
 
+const mockUseMonacoServices = vi.fn(() => ({ modelService: mockModelService as typeof mockModelService | undefined }));
+
 vi.mock('#hooks/use-monaco-model-service.js', () => ({
-  useMonacoServices: () => ({ modelService: mockModelService, markerService: undefined }),
+  useMonacoServices: () => ({ ...mockUseMonacoServices(), markerService: undefined }),
 }));
 
 vi.mock('#hooks/use-kernel-diagnostics.js', () => ({
@@ -94,6 +103,9 @@ describe('FileEditor routing', () => {
     vi.clearAllMocks();
     editorMachineSnapshot.context.openFiles = [];
     mockIsApplyingFilesystemContent.mockReturnValue(false);
+    mockSaveEditor.mockResolvedValue(undefined);
+    mockContentSaveEditor.mockResolvedValue(undefined);
+    mockUseMonacoServices.mockReturnValue({ modelService: mockModelService });
     mockResolveViewer.mockReturnValue(defaultViewer);
   });
 
@@ -256,6 +268,7 @@ describe('FileEditor routing', () => {
       await userEvent.click(screen.getByTestId('trigger-change'));
 
       expect(mockIsApplyingFilesystemContent).toHaveBeenCalledWith('src/main.ts');
+      expect(mockSaveEditor).not.toHaveBeenCalled();
       expect(mockWriteFile).not.toHaveBeenCalled();
     });
 
@@ -265,7 +278,7 @@ describe('FileEditor routing', () => {
       // (preserving the same paneId).
       editorMachineSnapshot.context.openFiles = [{ paneId: 'pane-1', path: 'src/renamed.ts' }];
       const captured: string[] = [];
-      mockWriteFile.mockImplementation(async (p: string) => {
+      mockSaveEditor.mockImplementation(async (p: string) => {
         captured.push(p);
       });
       mockUseFileContent.mockReturnValue({
@@ -295,9 +308,94 @@ describe('FileEditor routing', () => {
       await userEvent.click(screen.getByTestId('trigger-change'));
       expect(captured).toEqual(['src/renamed.ts']);
       expect(mockIsApplyingFilesystemContent).toHaveBeenCalledWith('src/renamed.ts');
-      expect(mockWriteFile).toHaveBeenCalledWith('src/renamed.ts', new TextEncoder().encode('new content'), {
-        source: 'editor',
+      expect(mockSaveEditor).toHaveBeenCalledWith('src/renamed.ts', new TextEncoder().encode('new content'));
+      expect(mockWriteFile).not.toHaveBeenCalled();
+    });
+
+    it('should retain bounded saves while Monaco services are initializing', async () => {
+      editorMachineSnapshot.context.openFiles = [{ paneId: 'pane-1', path: 'src/main.ts' }];
+      mockUseMonacoServices.mockReturnValue({ modelService: undefined });
+      mockUseFileContent.mockReturnValue({
+        kind: 'text',
+        content: new TextEncoder().encode('hello'),
       });
+      mockResolveViewer.mockReturnValueOnce(({ onChange }: { readonly onChange: (value: string) => void }) => (
+        <button
+          type='button'
+          data-testid='trigger-change'
+          onClick={() => {
+            onChange('new content');
+          }}
+        >
+          change
+        </button>
+      ));
+
+      render(<FileEditor paneId='pane-1' filePath='src/main.ts' panelApi={mockPanelApi} />);
+      await userEvent.click(screen.getByTestId('trigger-change'));
+
+      expect(mockContentSaveEditor).toHaveBeenCalledWith('src/main.ts', new TextEncoder().encode('new content'));
+      expect(mockWriteFile).not.toHaveBeenCalled();
+    });
+
+    it('should surface a rejected editor save without retrying it', async () => {
+      editorMachineSnapshot.context.openFiles = [{ paneId: 'pane-1', path: 'src/main.ts' }];
+      mockSaveEditor.mockRejectedValueOnce(new Error('disk full'));
+      mockUseFileContent.mockReturnValue({
+        kind: 'text',
+        content: new TextEncoder().encode('hello'),
+      });
+      mockResolveViewer.mockReturnValueOnce(({ onChange }: { readonly onChange: (value: string) => void }) => (
+        <button
+          type='button'
+          data-testid='trigger-change'
+          onClick={() => {
+            onChange('new content');
+          }}
+        >
+          change
+        </button>
+      ));
+
+      render(<FileEditor paneId='pane-1' filePath='src/main.ts' panelApi={mockPanelApi} />);
+      await userEvent.click(screen.getByTestId('trigger-change'));
+
+      await vi.waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith("Couldn't save 'main.ts'");
+      });
+      expect(mockSaveEditor).toHaveBeenCalledOnce();
+    });
+
+    it('should surface fallback copy for an unmapped structured save error', async () => {
+      editorMachineSnapshot.context.openFiles = [{ paneId: 'pane-1', path: 'src/main.ts' }];
+      mockSaveEditor.mockRejectedValueOnce({
+        __workspaceMutationError__: true,
+        code: 'FUTURE_CODE',
+        path: 'src/main.ts',
+      });
+      mockUseFileContent.mockReturnValue({
+        kind: 'text',
+        content: new TextEncoder().encode('hello'),
+      });
+      mockResolveViewer.mockReturnValueOnce(({ onChange }: { readonly onChange: (value: string) => void }) => (
+        <button
+          type='button'
+          data-testid='trigger-change'
+          onClick={() => {
+            onChange('new content');
+          }}
+        >
+          change
+        </button>
+      ));
+
+      render(<FileEditor paneId='pane-1' filePath='src/main.ts' panelApi={mockPanelApi} />);
+      await userEvent.click(screen.getByTestId('trigger-change'));
+
+      await vi.waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith("Couldn't save 'main.ts'");
+      });
+      expect(mockSaveEditor).toHaveBeenCalledOnce();
     });
 
     it('should suppress writes when the tab is no longer in openFiles', async () => {
@@ -321,6 +419,7 @@ describe('FileEditor routing', () => {
 
       render(<FileEditor paneId='pane-orphan' filePath='src/ghost.ts' panelApi={mockPanelApi} />);
       await userEvent.click(screen.getByTestId('trigger-change'));
+      expect(mockSaveEditor).not.toHaveBeenCalled();
       expect(mockWriteFile).not.toHaveBeenCalled();
     });
 
@@ -346,6 +445,7 @@ describe('FileEditor routing', () => {
       await userEvent.click(screen.getByTestId('trigger-change'));
 
       expect(mockIsApplyingFilesystemContent).not.toHaveBeenCalled();
+      expect(mockSaveEditor).not.toHaveBeenCalled();
       expect(mockWriteFile).not.toHaveBeenCalled();
     });
   });

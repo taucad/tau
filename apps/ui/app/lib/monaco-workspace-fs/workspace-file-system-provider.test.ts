@@ -2,7 +2,11 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as monaco from 'monaco-editor';
 import type { FileStatEntry } from '@taucad/types';
 import type { FileContentResult, FileContentService } from '@taucad/fs-client/file-content-service';
-import { createWorkspaceFileSystemProvider } from '#lib/monaco-workspace-fs/workspace-file-system-provider.js';
+import {
+  createWorkspaceFileSystemProvider,
+  subscribeWorkspaceContentDispatch,
+} from '#lib/monaco-workspace-fs/workspace-file-system-provider.js';
+import { createMonacoWorkspaceFs } from '#lib/monaco-workspace-fs/monaco-workspace-fs.js';
 import { MonacoWorkspaceFileNotFoundError } from '#lib/monaco-workspace-fs/file-not-found-error.js';
 import { drainMonacoPostTestWork } from '#lib/testing/monaco-async-drain.js';
 
@@ -67,13 +71,30 @@ describe('createWorkspaceFileSystemProvider', () => {
     expect(peeked).toBe('hello');
   });
 
+  it('peekModel returns undefined instead of throwing for a malformed file URI', () => {
+    const contentService = {
+      resolve: vi.fn(),
+      peekOutcome: vi.fn(() => ({ kind: 'loading' })),
+    } as unknown as FileContentService;
+    const workspaceFs = createMonacoWorkspaceFs(monaco);
+    workspaceFs.registerFileSystemProvider(createWorkspaceFileSystemProvider({ monaco, contentService }));
+    const uri = monaco.Uri.from({ scheme: 'file', path: '/../outside.ts' });
+
+    expect(uri.path).toBe('/../outside.ts');
+    expect(workspaceFs.peekModel(uri)).toBeUndefined();
+    expect(contentService.peekOutcome).toHaveBeenCalledWith('../outside.ts');
+    workspaceFs.dispose();
+  });
+
   it('isReadOnly is true for node_modules paths', () => {
     const contentService = {
       resolve: vi.fn(),
       peekOutcome: vi.fn(),
     } as unknown as FileContentService;
     const provider = createWorkspaceFileSystemProvider({ monaco, contentService });
+    expect(provider.isReadOnly?.(monaco.Uri.file('/node_modules'))).toBe(true);
     expect(provider.isReadOnly?.(monaco.Uri.file('/node_modules/foo/index.js'))).toBe(true);
+    expect(provider.isReadOnly?.(monaco.Uri.file('/src/node_modules/foo/index.js'))).toBe(false);
     expect(provider.isReadOnly?.(monaco.Uri.file('/src/main.ts'))).toBe(false);
   });
 
@@ -145,5 +166,24 @@ describe('createWorkspaceFileSystemProvider', () => {
     const uris = await provider.findFiles?.('replicad', { maxResults: 10 });
     expect(searchFiles).toHaveBeenCalledWith('replicad', { maxResults: 10, includeDirectories: false });
     expect(uris?.map((u) => u.path)).toEqual(['/node_modules/replicad/index.d.ts']);
+  });
+
+  it('subscribes and disposes both structural and outcome dispatch', () => {
+    const unsubscribeContent = vi.fn();
+    const unsubscribeOutcome = vi.fn();
+    const contentService = {
+      onDidContentChange: vi.fn(() => unsubscribeContent),
+      onDidChangeOutcome: vi.fn(() => unsubscribeOutcome),
+    } as unknown as FileContentService;
+    const dispatch = vi.fn();
+    const dispatchOutcome = vi.fn();
+
+    const subscription = subscribeWorkspaceContentDispatch(contentService, dispatch, dispatchOutcome);
+    expect(contentService.onDidContentChange).toHaveBeenCalledWith(dispatch);
+    expect(contentService.onDidChangeOutcome).toHaveBeenCalledWith(dispatchOutcome);
+
+    subscription.dispose();
+    expect(unsubscribeContent).toHaveBeenCalledOnce();
+    expect(unsubscribeOutcome).toHaveBeenCalledOnce();
   });
 });

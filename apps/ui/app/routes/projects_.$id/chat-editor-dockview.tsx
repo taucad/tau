@@ -12,6 +12,7 @@ import type {
   IDockviewPanelProps,
   IWatermarkPanelProps,
 } from 'dockview-react';
+import { toast } from 'sonner';
 import {
   languageFromExtension,
   tauFileDragMime,
@@ -45,6 +46,7 @@ import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
 import { useFeature } from '#flags/use-feature.js';
 import { resolveViewer } from '#routes/projects_.$id/chat-editor-viewer-registry.js';
 import { Button } from '#components/ui/button.js';
+import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '#filesystem/workspace-errors.js';
 
 /**
  * Create a root-level Monaco URI for a file path.
@@ -52,6 +54,20 @@ import { Button } from '#components/ui/button.js';
 function createMonacoUri(monaco: typeof Monaco, relativePath: string): Monaco.Uri {
   return monaco.Uri.file(`/${relativePath}`);
 }
+
+const reportEditorSaveFailure = async (completion: Promise<void>, path: string): Promise<void> => {
+  try {
+    await completion;
+  } catch (error) {
+    const fallback = `Couldn't save '${path.split('/').pop() ?? path}'`;
+    let message = fallback;
+    if (isWorkspaceMutationErrorLike(error)) {
+      const copy = workspaceMutationErrorCopy[error.code];
+      message = typeof copy === 'function' ? copy({ path: error.path, target: error.target }) : fallback;
+    }
+    toast.error(message);
+  }
+};
 
 /**
  * Params passed to each editor panel via Dockview.
@@ -117,6 +133,7 @@ export const FileEditor = memo(function ({
   const { contentService } = fileManager;
   const { modelService, markerService } = useMonacoServices();
   const planModeEnabled = useFeature('planMode');
+  const handledSaveCompletion = useRef<Promise<void> | undefined>(undefined);
   const openFiles = useSelector(editorRef, (state) => state.context.openFiles);
   // Resolve the live path via the stable paneId. The path param the
   // panel was created with is a starting hint only — once the panel is
@@ -187,11 +204,16 @@ export const FileEditor = memo(function ({
         return;
       }
       const encoded = encodeTextFile(value ?? '');
-      void fileManager.writeFile(liveEntry.path, encoded, {
-        source: 'editor',
-      });
+      const completion = modelService
+        ? modelService.saveEditor(liveEntry.path, encoded)
+        : contentService?.saveEditor(liveEntry.path, encoded);
+      if (completion === undefined || handledSaveCompletion.current === completion) {
+        return;
+      }
+      handledSaveCompletion.current = completion;
+      void reportEditorSaveFailure(completion, liveEntry.path);
     },
-    [readOnly, fileManager, paneId, editorRef, modelService],
+    [readOnly, contentService, paneId, editorRef, modelService],
   );
 
   // Acquire/release ref-counted editor model hold

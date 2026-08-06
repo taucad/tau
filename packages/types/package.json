@@ -47,6 +47,7 @@
   },
   "dependencies": {
     "@taucad/json-schema": "workspace:*",
-    "@taucad/units": "workspace:*"
+    "@taucad/units": "workspace:*",
+    "zod": "catalog:"
   }
 }

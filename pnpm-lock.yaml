@@ -2532,6 +2532,9 @@ importers:
       '@taucad/units':
         specifier: workspace:*
         version: link:../units
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
 
   packages/units: {}
 

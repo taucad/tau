@@ -16,7 +16,24 @@ export type * from '#types/mime-types.types.js';
 export type * from '#types/project.types.js';
 export type * from '#types/publication.types.js';
 export type * from '#types/schema.types.js';
-export { projectRelativePathSchema } from '#schemas/project-manifest.schema.js';
+export {
+  parseAdoptableProjectManifestBytes,
+  parseProjectManifestBytes,
+  projectIdSchema,
+  projectManifestMaxBytes,
+  projectManifestSchema,
+  projectManifestSchemaUrl,
+  projectRelativePathSchema,
+  projectToManifest,
+  serializeProjectManifest,
+} from '#schemas/project-manifest.schema.js';
+export type {
+  AdoptableProjectManifest,
+  AdoptableProjectManifestParseResult,
+  ProjectManifest,
+  ProjectManifestParseIssue,
+  ProjectManifestParseResult,
+} from '#schemas/project-manifest.schema.js';
 export {
   fileParameterEntrySchema,
   getActiveGroupValues,

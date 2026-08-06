@@ -1,5 +1,42 @@
 import type { FileItem } from '#types/editor.types.js';
 
+const editorHiddenExact = new Set([
+  '.DS_Store',
+  '.localized',
+  '.AppleDouble',
+  '.LSOverride',
+  '__MACOSX',
+  '.DocumentRevisions-V100',
+  '.fseventsd',
+  '.Spotlight-V100',
+  '.TemporaryItems',
+  '.Trashes',
+  '.VolumeIcon.icns',
+  '.directory',
+]);
+const editorHiddenWindows = new Set([
+  'thumbs.db',
+  'thumbs.db:encryptable',
+  'ehthumbs.db',
+  'ehthumbs_vista.db',
+  'desktop.ini',
+  '$recycle.bin',
+]);
+
+/** Whether any path segment is host metadata hidden only from Tau's editor tree. */
+export const isEditorSystemArtifactPath = (path: string): boolean =>
+  path
+    .split('/')
+    .some(
+      (segment) =>
+        editorHiddenExact.has(segment) ||
+        editorHiddenWindows.has(segment.toLowerCase()) ||
+        segment.startsWith('._') ||
+        segment.startsWith('.com.apple.timemachine.') ||
+        segment.startsWith('.Trash-') ||
+        segment.endsWith('.crswap'),
+    );
+
 /**
  * Tree item data returned by the headless-tree data loader.
  * @public

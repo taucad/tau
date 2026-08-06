@@ -91,7 +91,11 @@ import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { parentDirectory } from '@taucad/utils/path';
 
 import type { TreeItemData } from '#routes/projects_.$id/chat-editor-file-tree.utils.js';
-import { getItemData, isPathFolder } from '#routes/projects_.$id/chat-editor-file-tree.utils.js';
+import {
+  getItemData,
+  isEditorSystemArtifactPath,
+  isPathFolder,
+} from '#routes/projects_.$id/chat-editor-file-tree.utils.js';
 import { isBundledTypesWorkspacePath } from '#lib/bundled-types-tree.constants.js';
 import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '#filesystem/workspace-errors.js';
 import type { WorkspaceMutationErrorLike } from '#filesystem/workspace-errors.js';
@@ -323,14 +327,16 @@ export const ChatEditorFileTree = memo(function ({
       return [];
     }
 
-    return [...fileTreeMap.values()].map((entry) => ({
-      id: entry.path,
-      name: entry.name,
-      path: entry.path,
-      content: new Uint8Array(),
-      language: getIconIdFromExtension(getFileExtension(entry.path)),
-      isDirectory: entry.type === 'dir',
-    }));
+    return [...fileTreeMap.values()]
+      .filter((entry) => !isEditorSystemArtifactPath(entry.path))
+      .map((entry) => ({
+        id: entry.path,
+        name: entry.name,
+        path: entry.path,
+        content: new Uint8Array(),
+        language: getIconIdFromExtension(getFileExtension(entry.path)),
+        isDirectory: entry.type === 'dir',
+      }));
   }, [fileTreeMap]);
 
   // Tree state management

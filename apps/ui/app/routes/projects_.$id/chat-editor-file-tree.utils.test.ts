@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { FileItem } from '#types/editor.types.js';
 import {
   getItemData,
+  isEditorSystemArtifactPath,
   isPathFolder,
   sortChildrenFoldersFirst,
 } from '#routes/projects_.$id/chat-editor-file-tree.utils.js';
@@ -22,6 +23,54 @@ function createFileItem(path: string, options?: { isDirectory?: boolean }): File
 }
 
 const rootId = '';
+
+describe('isEditorSystemArtifactPath', () => {
+  it.each([
+    '.DS_Store',
+    '.localized',
+    '.AppleDouble',
+    '.LSOverride',
+    '._main.ts',
+    '__MACOSX',
+    '.DocumentRevisions-V100',
+    '.fseventsd',
+    '.Spotlight-V100',
+    '.TemporaryItems',
+    '.Trashes',
+    '.VolumeIcon.icns',
+    '.com.apple.timemachine.snapshot',
+    'Thumbs.db',
+    'THUMBS.DB:ENCRYPTABLE',
+    'ehthumbs.db',
+    'ehthumbs_vista.db',
+    'DESKTOP.INI',
+    '$Recycle.Bin',
+    '.directory',
+    '.Trash-1000',
+    '.main.ts.crswap',
+    '.main.ts.1.crswap',
+  ])('hides approved host artifact %s', (path) => {
+    expect(isEditorSystemArtifactPath(path)).toBe(true);
+    expect(isEditorSystemArtifactPath(`src/${path}/descendant.ts`)).toBe(true);
+  });
+
+  it.each([
+    '.git',
+    '.env',
+    '.gitignore',
+    'main.ts~',
+    '.main.ts.swp',
+    '.nfs123',
+    '.fuse_hidden123',
+    'nohup.out',
+    'lost+found',
+    'notes.crswap.txt',
+    'desktop.ini.txt',
+    '.trash-1000',
+  ])('keeps user-significant or near-miss path %s', (path) => {
+    expect(isEditorSystemArtifactPath(path)).toBe(false);
+  });
+});
 
 // ===================================================================
 // getItemData

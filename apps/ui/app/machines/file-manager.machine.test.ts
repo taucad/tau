@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createActor } from 'xstate';
-import { SharedPool } from '@taucad/memory';
 import type * as FsBridge from '@taucad/fs-bridge';
+import type { ProjectRootConfiguration } from '@taucad/filesystem';
+import { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 
 const workerTestState = vi.hoisted(() => {
@@ -43,6 +44,7 @@ vi.mock('#machines/file-manager.worker.js?worker', () => ({
 
 const mockMount = vi.fn<(prefix: string, backend: string, options?: unknown) => Promise<void>>();
 const mockUnmount = vi.fn<(prefix: string) => void>();
+const mockConfigureProjectRoots = vi.fn<(configuration: ProjectRootConfiguration) => Promise<void>>();
 const mockWaitForWorkerReady = vi.fn<() => Promise<void>>();
 const mockCreateFileSystemBridge = vi.fn(() => ({
   port: {
@@ -52,16 +54,17 @@ const mockCreateFileSystemBridge = vi.fn(() => ({
   },
   dispose: vi.fn(),
 }));
-const mockOpenFileSystemBridge = vi.fn(() => ({
+const mockOpenFileSystemBridge = vi.fn((_worker: Worker, _options?: { root?: string }) => ({
   port: new MessageChannel().port1,
   dispose: vi.fn(),
 }));
 
 vi.mock('@taucad/fs-bridge', () => ({
   createFileSystemBridge: () => mockCreateFileSystemBridge(),
-  openFileSystemBridge: () => mockOpenFileSystemBridge(),
+  openFileSystemBridge: (worker: Worker, options?: { root?: string }) => mockOpenFileSystemBridge(worker, options),
   waitForWorkerReady: async () => mockWaitForWorkerReady(),
   createFileSystemBridgeProxy: vi.fn(() => ({
+    configureProjectRoots: mockConfigureProjectRoots,
     mount: mockMount,
     unmount: mockUnmount,
     getDirectoryStat: vi.fn(async () => []),
@@ -90,9 +93,11 @@ const mockGetWorkspace =
 const mockCheckHandlePermission = vi.fn<() => Promise<string>>();
 const mockSetProjectFileSystemConfig =
   vi.fn<(config: { projectId: string; backend: 'webaccess'; workspaceId: string }) => Promise<void>>();
+const mockGetProjectRootConfigs = vi.fn<() => Promise<ProjectRootConfiguration>>();
 
 vi.mock('#filesystem/handle-store.js', () => ({
   getDefaultWorkspace: vi.fn(async () => undefined),
+  getProjectRootConfigs: async () => mockGetProjectRootConfigs(),
   getWorkspace: async (...args: unknown[]) => mockGetWorkspace(...(args as [string])),
   getProjectFileSystemConfig: async () => mockGetProjectFileSystemConfig(),
   checkHandlePermission: async () => mockCheckHandlePermission(),
@@ -111,6 +116,8 @@ describe('fileManagerMachine', () => {
     mockGetWorkspace.mockResolvedValue(undefined);
     mockCheckHandlePermission.mockResolvedValue('granted');
     mockSetProjectFileSystemConfig.mockResolvedValue(undefined);
+    mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+    mockConfigureProjectRoots.mockResolvedValue(undefined);
   });
 
   it('should start in initializing state when shouldInitializeOnStart is false', () => {
@@ -241,6 +248,123 @@ describe('fileManagerMachine', () => {
     expect(snapshot.context.contentService).toBeDefined();
     expect(snapshot.context.treeService).toBeDefined();
 
+    actor.stop();
+  });
+
+  it('should poll granted webaccess roots from an indexeddb root file manager', async () => {
+    const startPolling = vi.spyOn(FileTreeService.prototype, 'startPolling').mockImplementation(() => undefined);
+    const directoryHandle = { kind: 'directory', name: 'External' } as unknown as FileSystemDirectoryHandle;
+    mockGetProjectRootConfigs.mockResolvedValue({
+      projects: [],
+      roots: [
+        {
+          backend: 'webaccess',
+          workspaceId: 'wsp_external',
+          directoryHandle,
+        },
+      ],
+    });
+    const actor = createActor(fileManagerMachine, {
+      input: {
+        rootDirectory: '/test',
+        shouldInitializeOnStart: true,
+      },
+    });
+
+    actor.start();
+    try {
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+        expect(startPolling).toHaveBeenCalledOnce();
+      });
+      expect(actor.getSnapshot().context.backendType).toBe('indexeddb');
+    } finally {
+      actor.stop();
+      startPolling.mockRestore();
+    }
+  });
+
+  it('should not poll from an indexeddb root file manager without a granted webaccess root', async () => {
+    const startPolling = vi.spyOn(FileTreeService.prototype, 'startPolling').mockImplementation(() => undefined);
+    mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+    const actor = createActor(fileManagerMachine, {
+      input: {
+        rootDirectory: '/test',
+        shouldInitializeOnStart: true,
+      },
+    });
+
+    actor.start();
+    try {
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+        expect(mockGetProjectRootConfigs.mock.calls.length).toBeGreaterThanOrEqual(2);
+      });
+      expect(actor.getSnapshot().context.backendType).toBe('indexeddb');
+      expect(startPolling).not.toHaveBeenCalled();
+    } finally {
+      actor.stop();
+      startPolling.mockRestore();
+    }
+  });
+
+  it('should dispose the replaced service trio once while retaining the worker and bridge authority', async () => {
+    const actor = createActor(fileManagerMachine, {
+      input: {
+        rootDirectory: '/projects/project-a',
+        shouldInitializeOnStart: true,
+      },
+    });
+    actor.start();
+
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().value).toBe('ready');
+    });
+
+    const first = actor.getSnapshot().context;
+    const firstContentService = first.contentService!;
+    const firstTreeService = first.treeService!;
+    const firstChangeChannel = first.workerChangeChannel!;
+    const disposeContent = vi.spyOn(firstContentService, 'dispose');
+    const disposeTree = vi.spyOn(firstTreeService, 'dispose');
+    const disposeChannel = vi.spyOn(firstChangeChannel, 'dispose');
+
+    actor.send({ type: 'reloadWorkspace' });
+
+    await vi.waitFor(() => {
+      const next = actor.getSnapshot();
+      expect(next.value).toBe('ready');
+      expect(next.context.contentService).not.toBe(firstContentService);
+    });
+
+    const next = actor.getSnapshot().context;
+    expect(disposeContent).toHaveBeenCalledOnce();
+    expect(disposeTree).toHaveBeenCalledOnce();
+    expect(disposeChannel).toHaveBeenCalledOnce();
+    expect(next.worker).toBe(first.worker);
+    expect(next.proxy).toBe(first.proxy);
+    expect(next.openFileSystemBridge).toBe(first.openFileSystemBridge);
+    expect(workerTestState.instances[0]?.terminate).not.toHaveBeenCalled();
+
+    actor.stop();
+  });
+
+  it('should open runtime bridges with the selected authority root', async () => {
+    const actor = createActor(fileManagerMachine, {
+      input: {
+        rootDirectory: '/projects/project-a',
+        shouldInitializeOnStart: true,
+      },
+    });
+    actor.start();
+
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().value).toBe('ready');
+    });
+
+    actor.getSnapshot().context.openFileSystemBridge?.('/projects/project-a');
+
+    expect(mockOpenFileSystemBridge).toHaveBeenCalledWith(expect.anything(), { root: '/projects/project-a' });
     actor.stop();
   });
 
@@ -377,7 +501,37 @@ describe('fileManagerMachine', () => {
   // ── projectId-based backend resolution ────────────────────────────────────
 
   describe('projectId backend resolution', () => {
-    it('should call mount with opfs when project config stores opfs', async () => {
+    it('should configure the complete persisted route set before services initialize', async () => {
+      const configuration: ProjectRootConfiguration = {
+        projects: [
+          {
+            projectId: 'test-id',
+            backend: 'indexeddb',
+            providerBasePath: '/projects/test-id',
+          },
+        ],
+        roots: [{ backend: 'indexeddb' }],
+      };
+      mockGetProjectRootConfigs.mockResolvedValue(configuration);
+
+      const actor = createActor(fileManagerMachine, {
+        input: {
+          rootDirectory: '/projects/test-id',
+          shouldInitializeOnStart: true,
+          projectId: 'test-id',
+        },
+      });
+      actor.start();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+
+      expect(mockConfigureProjectRoots).toHaveBeenCalledWith(configuration);
+      actor.stop();
+    });
+
+    it('should resolve opfs from persisted project config without navigation-time mounting', async () => {
       mockGetProjectFileSystemConfig.mockResolvedValue({ projectId: 'test-id', backend: 'opfs' });
 
       const actor = createActor(fileManagerMachine, {
@@ -394,11 +548,12 @@ describe('fileManagerMachine', () => {
       });
 
       expect(mockGetProjectFileSystemConfig).toHaveBeenCalled();
-      expect(mockMount).toHaveBeenCalledWith('/projects/test-id', { backend: 'opfs', preservePath: true });
+      expect(actor.getSnapshot().context.backendType).toBe('opfs');
+      expect(mockMount).not.toHaveBeenCalled();
       actor.stop();
     });
 
-    it('should call mount with indexeddb when project config returns undefined', async () => {
+    it('should resolve indexeddb by default without navigation-time mounting', async () => {
       mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
 
       const actor = createActor(fileManagerMachine, {
@@ -415,7 +570,8 @@ describe('fileManagerMachine', () => {
       });
 
       expect(mockGetProjectFileSystemConfig).toHaveBeenCalled();
-      expect(mockMount).toHaveBeenCalledWith('/projects/test-id', { backend: 'indexeddb', preservePath: true });
+      expect(actor.getSnapshot().context.backendType).toBe('indexeddb');
+      expect(mockMount).not.toHaveBeenCalled();
       actor.stop();
     });
 
@@ -436,7 +592,7 @@ describe('fileManagerMachine', () => {
       actor.stop();
     });
 
-    it('should call mount with memory when project config stores memory', async () => {
+    it('should resolve memory from persisted project config without navigation-time mounting', async () => {
       mockGetProjectFileSystemConfig.mockResolvedValue({ projectId: 'mem-id', backend: 'memory' });
 
       const actor = createActor(fileManagerMachine, {
@@ -452,7 +608,8 @@ describe('fileManagerMachine', () => {
         expect(actor.getSnapshot().value).toBe('ready');
       });
 
-      expect(mockMount).toHaveBeenCalledWith('/projects/mem-id', { backend: 'memory', preservePath: true });
+      expect(actor.getSnapshot().context.backendType).toBe('memory');
+      expect(mockMount).not.toHaveBeenCalled();
       actor.stop();
     });
 
@@ -480,7 +637,7 @@ describe('fileManagerMachine', () => {
   describe('webaccess workspace resolution', () => {
     const makeHandle = (name: string) => ({ kind: 'directory', name }) as unknown as FileSystemDirectoryHandle;
 
-    it('resolves bound workspaceId from project config and mounts webaccess', async () => {
+    it('resolves a bound webaccess workspace without navigation-time mounting', async () => {
       mockGetProjectFileSystemConfig.mockResolvedValue({
         projectId: 'proj-1',
         backend: 'webaccess',
@@ -506,17 +663,7 @@ describe('fileManagerMachine', () => {
       });
 
       expect(mockGetWorkspace).toHaveBeenCalledWith('wsp_bound');
-      // Audit R2: webaccess mount carries the resolved handle + workspaceId
-      // atomically through a single discriminated MountConfig — no
-      // ambient `setDirectoryHandle` round-trip.
-      // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Vitest's `expect.objectContaining` returns `any`; the matcher is typed correctly at runtime.
-      const handleMatcher = expect.objectContaining({ name: 'Bound' }) as FileSystemDirectoryHandle;
-      expect(mockMount).toHaveBeenCalledWith('/projects/proj-1', {
-        backend: 'webaccess',
-        directoryHandle: handleMatcher,
-        workspaceId: 'wsp_bound',
-        preservePath: true,
-      });
+      expect(mockMount).not.toHaveBeenCalled();
       const snapshot = actor.getSnapshot();
       expect(snapshot.context.activeWorkspaceId).toBe('wsp_bound');
       expect(snapshot.context.activeWorkspaceName).toBe('Bound Workspace');
@@ -697,14 +844,7 @@ describe('fileManagerMachine', () => {
       expect(snapshot.context.activeWorkspaceName).toBe('Recovered Workspace');
       expect(snapshot.context.unavailableReason).toBeUndefined();
       expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
-      // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Vitest's `expect.objectContaining` returns `any`; the matcher is typed correctly at runtime.
-      const recoveredHandleMatcher = expect.objectContaining({ name: 'Recovered' }) as FileSystemDirectoryHandle;
-      expect(mockMount).toHaveBeenCalledWith('/projects/proj-recover', {
-        backend: 'webaccess',
-        directoryHandle: recoveredHandleMatcher,
-        workspaceId: 'wsp_recovered',
-        preservePath: true,
-      });
+      expect(mockMount).not.toHaveBeenCalled();
       actor.stop();
     });
 
@@ -962,10 +1102,10 @@ describe('fileManagerMachine', () => {
     });
   });
 
-  // ── project mount lifecycle cleanup ────────────────────────────────────
+  // ── persistent project-route lifetime ──────────────────────────────────
 
-  describe('project mount lifecycle', () => {
-    it('should unmount project prefix on root change when projectId is set', async () => {
+  describe('persistent project-route lifetime', () => {
+    it('should not unmount a persistent project route on root change', async () => {
       mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
 
       const actor = createActor(fileManagerMachine, {
@@ -983,7 +1123,7 @@ describe('fileManagerMachine', () => {
 
       actor.send({ type: 'setRoot', path: '/projects/proj-2', projectId: 'proj-2' });
 
-      expect(mockUnmount).toHaveBeenCalledWith('/projects/proj-1');
+      expect(mockUnmount).not.toHaveBeenCalled();
       actor.stop();
     });
 
@@ -1116,7 +1256,7 @@ describe('fileManagerMachine', () => {
         postMessage: vi.fn(),
       } as unknown as Worker;
 
-      // Match the production filePoolBytes size (50 MiB) so SharedPool init succeeds.
+      // Match the production filePoolBytes size (50 MiB) so pool initialization succeeds.
       const parentBuffer = new SharedArrayBuffer(50 * 1024 * 1024);
 
       const actor = createActor(fileManagerMachine, {
@@ -1172,85 +1312,6 @@ describe('fileManagerMachine', () => {
       expect((filePoolCalls[0]![0] as { buffer: SharedArrayBuffer }).buffer).toBe(filePoolBuffer);
 
       actor.stop();
-    });
-
-    // ── SAB-sharing end-to-end topology ────────────────────────────────────
-    // Locks down the producer/consumer invariant the SAB-sharing change
-    // depends on:
-    //   root FM allocates SAB
-    //     → posts to FM worker (writer)
-    //     → seeds nested FM context (reader-side FileContentService)
-    //     → flows into every cad.machine kernel runtime worker (reader)
-    //
-    // Each cad.machine spins up its own kernel runtime worker, which in turn
-    // constructs `new SharedPool(filePoolBuffer)` (kernel-worker.ts:495). This
-    // test simulates that fan-out by manually constructing reader pools over
-    // the SAB extracted from the root machine's `postMessage`. A bug that
-    // re-allocates the SAB anywhere along the chain would break either the
-    // identity assertion or the cross-instance read assertion.
-    it('should propagate one SAB end-to-end so writer stores are visible to nested FM and every kernel runtime reader', async () => {
-      const rootActor = createActor(fileManagerMachine, {
-        input: {
-          rootDirectory: '/test',
-          shouldInitializeOnStart: true,
-        },
-      });
-      rootActor.start();
-
-      await vi.waitFor(() => {
-        expect(rootActor.getSnapshot().value).toBe('ready');
-      });
-
-      const { worker: rootWorker, filePoolBuffer: rootBuffer } = rootActor.getSnapshot().context;
-      expect(rootBuffer).toBeInstanceOf(SharedArrayBuffer);
-
-      const filePoolMessage = vi
-        .mocked(rootWorker!.postMessage)
-        .mock.calls.find(([message]) => (message as { type?: string }).type === 'filePool');
-      expect(filePoolMessage).toBeDefined();
-      const postedBuffer = (filePoolMessage![0] as { buffer: SharedArrayBuffer }).buffer;
-      expect(postedBuffer).toBe(rootBuffer);
-
-      const writerPool = new SharedPool(postedBuffer);
-
-      const nestedActor = createActor(fileManagerMachine, {
-        input: {
-          rootDirectory: '/projects/nested',
-          shouldInitializeOnStart: true,
-          projectId: 'nested',
-          sharedWorker: rootWorker,
-          sharedFilePoolBuffer: rootBuffer,
-        },
-      });
-      nestedActor.start();
-
-      await vi.waitFor(() => {
-        expect(nestedActor.getSnapshot().value).toBe('ready');
-      });
-
-      expect(nestedActor.getSnapshot().context.filePoolBuffer).toBe(rootBuffer);
-
-      const cadKernelReaderA = new SharedPool(nestedActor.getSnapshot().context.filePoolBuffer!);
-      const cadKernelReaderB = new SharedPool(nestedActor.getSnapshot().context.filePoolBuffer!);
-
-      const encoder = new TextEncoder();
-      const decoder = new TextDecoder();
-      writerPool.store('/projects/nested/main.scad', encoder.encode('cube([1,2,3]);'));
-      writerPool.store('/projects/nested/util.scad', encoder.encode('module noop() {}'));
-
-      expect(decoder.decode(cadKernelReaderA.resolveCopy('/projects/nested/main.scad'))).toBe('cube([1,2,3]);');
-      expect(decoder.decode(cadKernelReaderB.resolveCopy('/projects/nested/main.scad'))).toBe('cube([1,2,3]);');
-      expect(decoder.decode(cadKernelReaderA.resolveCopy('/projects/nested/util.scad'))).toBe('module noop() {}');
-      expect(decoder.decode(cadKernelReaderB.resolveCopy('/projects/nested/util.scad'))).toBe('module noop() {}');
-
-      writerPool.invalidate('/projects/nested/main.scad');
-
-      expect(cadKernelReaderA.resolve('/projects/nested/main.scad')).toBeUndefined();
-      expect(cadKernelReaderB.resolve('/projects/nested/main.scad')).toBeUndefined();
-      expect(decoder.decode(cadKernelReaderA.resolveCopy('/projects/nested/util.scad'))).toBe('module noop() {}');
-
-      nestedActor.stop();
-      rootActor.stop();
     });
   });
 

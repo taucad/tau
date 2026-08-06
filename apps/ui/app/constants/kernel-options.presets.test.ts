@@ -51,7 +51,6 @@ describe('kernel option presets', () => {
     const buildOptions = await defaultKernelOptions();
     const deps: Parameters<typeof buildOptions>[0] = {
       fileSystem: fromMemoryFs(),
-      filePoolBuffer: new SharedArrayBuffer(32),
     };
     const options = buildOptions(deps);
 

@@ -3,12 +3,18 @@ import type { FileEntry, FileSystemBackend } from '@taucad/types';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import { safeDispose } from '@taucad/utils/dispose';
 import FileManagerWorker from '#machines/file-manager.worker.js?worker';
-import { getProjectFileSystemConfig, getWorkspace, checkHandlePermission } from '#filesystem/handle-store.js';
+import {
+  getProjectFileSystemConfig,
+  getWorkspace,
+  checkHandlePermission,
+  getProjectRootConfigs,
+} from '#filesystem/handle-store.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { normalizePath } from '@taucad/utils/path';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import { SharedPool } from '@taucad/memory';
 import { FileTreeService } from '@taucad/fs-client/file-tree-service';
+import type { ExternalPollTelemetry } from '@taucad/fs-client/file-tree-service';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
@@ -46,7 +52,7 @@ type FileManagerContext = {
   worker: Worker | undefined;
   proxy: (FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void }) | undefined;
   bridgeDispose?: () => void;
-  openFileSystemBridge?: () => FileSystemBridgeConnection;
+  openFileSystemBridge?: (root: string) => FileSystemBridgeConnection;
   filePoolBuffer: SharedArrayBuffer | undefined;
   contentService: FileContentService | undefined;
   treeService: FileTreeService | undefined;
@@ -83,6 +89,7 @@ type FileManagerContext = {
   activeWorkspaceName: string | undefined;
   projectId: string | undefined;
   sharedWorker: Worker | undefined;
+  onExternalPollTelemetry: ((aggregate: ExternalPollTelemetry) => void) | undefined;
 };
 
 // ============ Lifecycle Actors ============
@@ -92,7 +99,7 @@ type WorkerConnectedEvent = {
   worker: Worker;
   proxy: FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void };
   bridgeDispose: () => void;
-  openFileSystemBridge: () => FileSystemBridgeConnection;
+  openFileSystemBridge: (root: string) => FileSystemBridgeConnection;
   filePoolBuffer: SharedArrayBuffer | undefined;
 };
 
@@ -127,8 +134,6 @@ type WebAccessUnavailableEvent = {
 const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileManagerContext }>(
   async ({ input, signal }) => {
     const { context } = input;
-    const initT0 = performance.now();
-    console.debug(`[FileManager] connectWorkerActor: start +${initT0.toFixed(0)}ms`);
 
     safeDispose(() => context.proxy?.dispose());
     safeDispose(context.bridgeDispose);
@@ -144,7 +149,6 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     }
 
     const worker = context.sharedWorker ?? new FileManagerWorker({ name: `fm-root` });
-    console.debug(`[FileManager] worker created +${(performance.now() - initT0).toFixed(1)}ms`);
 
     // Crash-aware error/messageerror/envelope listeners. Listeners are
     // installed before any await so a synchronous load failure (404 served as
@@ -198,7 +202,6 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     if (!context.sharedWorker) {
       try {
         await Promise.race([waitForWorkerReady(worker, signal), crashSignal]);
-        console.debug(`[FileManager] worker ready +${(performance.now() - initT0).toFixed(1)}ms`);
       } catch (error) {
         worker.removeEventListener('error', onWorkerError);
         worker.removeEventListener('messageerror', onWorkerMessageError);
@@ -222,24 +225,20 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     // 50 MiB pool isn't duplicated per project route.
     const { filePoolBuffer: inheritedPoolBuffer } = context;
     let filePoolBuffer: SharedArrayBuffer | undefined = inheritedPoolBuffer;
-    if (inheritedPoolBuffer) {
-      console.debug(`[FileManager] filePool SAB inherited from parent +${(performance.now() - initT0).toFixed(1)}ms`);
-    } else {
+    if (!inheritedPoolBuffer) {
       try {
         filePoolBuffer = new SharedArrayBuffer(filePoolBytes);
         worker.postMessage({ type: 'filePool', buffer: filePoolBuffer });
-        console.debug(`[FileManager] filePool SAB allocated +${(performance.now() - initT0).toFixed(1)}ms`);
       } catch {
-        console.debug('[FileManager] SharedArrayBuffer unavailable, skipping file pool');
+        filePoolBuffer = undefined;
       }
     }
 
     const bridge = createFileSystemBridge(worker);
     const { dispose: bridgeDispose } = bridge;
-    console.debug(`[FileManager] bridge created, port transferred +${(performance.now() - initT0).toFixed(1)}ms`);
     const proxy = createFileSystemBridgeProxy<FileManagerProtocol>(bridge);
-    console.debug(`[FileManager] proxy created +${(performance.now() - initT0).toFixed(1)}ms`);
-    const openBridge = (): FileSystemBridgeConnection => openFileSystemBridge(worker);
+    await proxy.configureProjectRoots(await getProjectRootConfigs());
+    const openBridge = (root: string): FileSystemBridgeConnection => openFileSystemBridge(worker, { root });
 
     return { type: 'workerConnected', worker, proxy, bridgeDispose, openFileSystemBridge: openBridge, filePoolBuffer };
   },
@@ -253,8 +252,6 @@ const initializeServicesActor = fromSafeAsync<
 >(async ({ input, signal }) => {
   const { context } = input;
   const proxy = context.proxy!;
-  const initT0 = performance.now();
-  console.debug(`[FileManager] initializeServicesActor: start +${initT0.toFixed(0)}ms`);
 
   let backend = context.backendType;
   let projectConfig: ProjectConfigLookup;
@@ -299,28 +296,15 @@ const initializeServicesActor = fromSafeAsync<
         activeWorkspaceName,
       };
     }
-
-    if (context.projectId) {
-      const projectPrefix = `/projects/${context.projectId}`;
-      // Single discriminated mount call — the directory handle and stable
-      // workspace id are passed atomically (Audit R2). The worker never
-      // observes an "active handle" between two RPCs.
-      await proxy.mount(projectPrefix, {
-        backend: 'webaccess',
-        directoryHandle: entry.handle,
-        workspaceId: entry.workspace.workspaceId,
-        preservePath: true,
-      });
-    }
-  } else if (context.projectId) {
-    const projectPrefix = `/projects/${context.projectId}`;
-    await proxy.mount(projectPrefix, { backend, preservePath: true });
   }
 
   let initialEntries: FileEntry[] = [];
   try {
     const rootPath = context.rootDirectory;
     const absolutePath = normalizePath(rootPath);
+    if (backend === 'webaccess') {
+      await proxy.pollExternalChanges(absolutePath);
+    }
     const rootNodes = await proxy.readDirectory(absolutePath);
     for (const node of rootNodes) {
       if (node.children !== undefined) {
@@ -356,8 +340,7 @@ const initializeServicesActor = fromSafeAsync<
         });
       }
     }
-  } catch (error) {
-    console.debug('[FileManager] Initial tree hydration failed (empty filesystem?):', error);
+  } catch {
     initialEntries = [];
   }
 
@@ -390,6 +373,7 @@ const initializeServicesActor = fromSafeAsync<
     channel: workerChangeChannel,
     visibility: visibilityProvider,
     initialEntries,
+    onExternalPollTelemetry: context.onExternalPollTelemetry,
   });
 
   treeService.connectToContentService(contentService);
@@ -408,11 +392,9 @@ const initializeServicesActor = fromSafeAsync<
           treeService.listDirectory(`${bundledTypesWorkspaceRootSegment}/${entry.name}`, { signal }),
         ),
     );
-  } catch (error) {
-    console.debug('[FileManager] eager node_modules listing failed:', error);
+  } catch {
+    // Bundled types remain lazily loadable through the regular tree path.
   }
-
-  console.debug('[FileManager] initializeServicesActor: success');
   return {
     type: 'workerInitialized',
     configuredBackend: backend,
@@ -467,6 +449,7 @@ type FileManagerInput = {
    * nested machine skips its own allocation/post.
    */
   sharedFilePoolBuffer?: SharedArrayBuffer;
+  onExternalPollTelemetry?: (aggregate: ExternalPollTelemetry) => void;
 };
 
 export const fileManagerMachine = setup({
@@ -492,12 +475,16 @@ export const fileManagerMachine = setup({
 
     clearError: assign({ error: undefined }),
 
-    destroyWorkerAndServices: assign(({ context }) => {
-      if (context.projectId && context.proxy) {
-        const projectPrefix = `/projects/${context.projectId}`;
-        context.proxy.unmount(projectPrefix);
-      }
+    disposeServicesForReload({ context }) {
+      // Keep the successful service identity published until its replacement
+      // succeeds, but release the old service graph before constructing the
+      // next one. The worker, proxy, bridge opener, and authority stay alive.
+      context.contentService?.dispose();
+      context.treeService?.dispose();
+      context.workerChangeChannel?.dispose();
+    },
 
+    destroyWorkerAndServices: assign(({ context }) => {
       context.contentService?.dispose();
       context.treeService?.dispose();
       context.workerChangeChannel?.dispose();
@@ -551,7 +538,7 @@ export const fileManagerMachine = setup({
         assertEvent(event, 'workerConnected');
         return event.bridgeDispose;
       },
-      openFileSystemBridge({ event }) {
+      openFileSystemBridge({ event }: { event: FileManagerEvent }) {
         assertEvent(event, 'workerConnected');
         return event.openFileSystemBridge;
       },
@@ -612,24 +599,36 @@ export const fileManagerMachine = setup({
       },
     }),
 
-    startPolling({ context }) {
+    startPolling({ context, self }) {
+      const { treeService } = context;
       if (context.backendType === 'webaccess') {
-        context.treeService?.startPolling();
+        treeService?.startPolling();
+        return;
       }
+      if (treeService === undefined) {
+        return;
+      }
+      // async-iife: bootstrap — the root file manager also observes granted webaccess
+      // workspaces even when its own mounted backend is IndexedDB.
+      void (async () => {
+        try {
+          const configuration = await getProjectRootConfigs();
+          const snapshot = self.getSnapshot();
+          if (
+            snapshot.matches('ready') &&
+            snapshot.context.treeService === treeService &&
+            configuration.roots.some(({ backend }) => backend === 'webaccess')
+          ) {
+            treeService.startPolling();
+          }
+        } catch {
+          // Worker initialization remains usable if the handle registry cannot be enumerated.
+        }
+      })();
     },
 
     stopPolling({ context }) {
-      context.treeService?.stopChangeDetection();
-    },
-
-    unmountProjectMount({ context }) {
-      if (context.projectId && context.proxy) {
-        const projectPrefix = `/projects/${context.projectId}`;
-        // Fire-and-forget: the worker side is synchronous-ish (mount table
-        // ops) and `reloadWorkspace` is followed immediately by a fresh
-        // `initializeServicesActor` run that will re-mount.
-        context.proxy.unmount(projectPrefix);
-      }
+      context.treeService?.stopPolling();
     },
   },
   guards: {
@@ -667,6 +666,7 @@ export const fileManagerMachine = setup({
     activeWorkspaceName: undefined,
     projectId: input.projectId,
     sharedWorker: input.sharedWorker,
+    onExternalPollTelemetry: input.onExternalPollTelemetry,
   }),
   initial: 'initializing',
   exit: ['stopPolling', 'destroyWorkerAndServices'],
@@ -752,11 +752,7 @@ export const fileManagerMachine = setup({
 
         reloadWorkspace: {
           target: 'initializingServices',
-          // Unmount the existing project mount before re-initializing so the
-          // worker doesn't briefly hold both the old and new webaccess
-          // providers (R11 / Finding 9). Falls through cleanly when the
-          // mount didn't exist (e.g. recovery branch).
-          actions: ['stopPolling', 'unmountProjectMount', 'clearError'],
+          actions: ['stopPolling', 'disposeServicesForReload', 'clearError'],
         },
       },
     },
@@ -779,7 +775,7 @@ export const fileManagerMachine = setup({
         },
         reloadWorkspace: {
           target: 'initializingServices',
-          actions: ['unmountProjectMount', 'clearError'],
+          actions: ['clearError'],
         },
       },
     },

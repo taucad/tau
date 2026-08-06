@@ -69,6 +69,28 @@ describe('buildWorkspaceTelemetry', () => {
     });
   });
 
+  it('emits a content-free workspace.external_poll aggregate', () => {
+    const { analytics, capture } = makeAnalyticsStub();
+    buildWorkspaceTelemetry(analytics).workspaceExternalPoll({
+      count: 30,
+      successes: 29,
+      failures: 1,
+      visible: 24,
+      hidden: 6,
+      p50: 4,
+      p95: 9,
+    });
+    expect(capture).toHaveBeenCalledWith(workspaceEventName.externalPoll, {
+      count: 30,
+      successes: 29,
+      failures: 1,
+      visible: 24,
+      hidden: 6,
+      p50: 4,
+      p95: 9,
+    });
+  });
+
   // Audit Finding 10: explicit `unmount` is a fire-and-forget operation —
   // when it rejects (e.g. the worker crashed mid-call) the failure must still
   // surface as telemetry so we can track silent unmount loss in production.
@@ -93,6 +115,15 @@ describe('buildWorkspaceTelemetry', () => {
     expect(() => {
       telemetry.workspaceCreated({ workspaceId: 'wsp_x', isDefault: false });
       telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'unsupported' });
+      telemetry.workspaceExternalPoll({
+        count: 1,
+        successes: 1,
+        failures: 0,
+        visible: 1,
+        hidden: 0,
+        p50: 2,
+        p95: 2,
+      });
     }).not.toThrow();
   });
 });

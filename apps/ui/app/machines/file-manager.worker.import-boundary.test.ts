@@ -17,4 +17,11 @@ describe('file-manager.worker api-extractor import boundary', () => {
     expect(workerSource).not.toContain('kcl-stdlib-compact.md');
     expect(workerSource).not.toContain('@taucad/api-extractor/kcl-reference');
   });
+
+  it('mounts root and OPFS only through registry-owned providers', () => {
+    expect(workerSource).not.toContain('FileSystemAccessProvider');
+    expect(workerSource).not.toContain('navigator.storage.getDirectory');
+    expect(workerSource).toContain('providerRegistry.getProvider(rootScope)');
+    expect(workerSource).toContain("fileService.mount('/node_modules', { backend: 'opfs'");
+  });
 });

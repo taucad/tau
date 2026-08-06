@@ -26,9 +26,8 @@ export type AppRuntimeExportFormat = Parameters<AppRuntimeClient['export']>[0];
 /**
  * Deferred-construction shape for typed runtime client options.
  *
- * The web-worker transport requires the file-system bridge handle and
- * the file-content `SharedArrayBuffer` to be supplied at construction
- * time, but both are owned by the file-manager machine and only
+ * The web-worker transport requires the opaque project filesystem to be
+ * supplied at construction time, but it is owned by the file-manager machine and only
  * become available after it reaches `ready`. UI surfaces accept this
  * factory and invoke it inside the cad-machine's `connectKernelActor`
  * once the snapshot is in scope, keeping the runtime invariant that
@@ -36,7 +35,6 @@ export type AppRuntimeExportFormat = Parameters<AppRuntimeClient['export']>[0];
  */
 export type KernelOptionsFactory = (deps: {
   readonly fileSystem: RuntimeFileSystem;
-  readonly filePoolBuffer?: SharedArrayBuffer;
   readonly runtimeConfig: UiRuntimeConfigInput;
 }) => RuntimeClientOptionsWithTransport<typeof runtime>;
 

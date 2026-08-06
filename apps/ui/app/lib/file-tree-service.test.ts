@@ -63,7 +63,6 @@ function createMockProxy(overrides?: Partial<FileManagerProxy>): FileManagerProx
     readFile: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
     writeFile: vi.fn().mockResolvedValue(undefined),
     writeFiles: vi.fn().mockResolvedValue(undefined),
-    rename: vi.fn().mockResolvedValue(undefined),
     move: vi.fn().mockResolvedValue(textFileStat(0, 0)),
     unlink: vi.fn().mockResolvedValue(undefined),
     copyDirectory: vi.fn().mockResolvedValue(undefined),
@@ -259,8 +258,8 @@ describe('FileTreeService', () => {
     const contentService = createContentServiceForTree(contentProxy);
     service.connectToContentService(contentService);
 
-    vi.mocked(contentProxy.rename).mockResolvedValue(undefined);
-    await contentService.rename('main.ts', 'app.ts');
+    vi.mocked(contentProxy.move).mockResolvedValue(textFileStat(0, 0));
+    await contentService.move('main.ts', 'app.ts');
 
     expect(service.getTreeSnapshot().has('main.ts')).toBe(false);
     expect(service.getTreeSnapshot().has('app.ts')).toBe(true);
@@ -704,7 +703,7 @@ describe('FileTreeService', () => {
   });
 
   describe('searchFiles', () => {
-    it('should delegate to proxy.searchFiles with correct root path', async () => {
+    it('should delegate to proxy.searchFiles with the captured root', async () => {
       const mockResults: FileStatEntry[] = [textFileStatEntry('src/main.ts', 100, 1000)];
       const searchProxy = createMockProxy({
         searchFiles: vi.fn().mockReturnValue(mockResults) as unknown as FileSystemClient['searchFiles'],
@@ -747,39 +746,22 @@ describe('FileTreeService', () => {
       searchService.dispose();
     });
 
-    it('should warm the worker search index via getDirectoryStat on first call', async () => {
-      const warmProxy = createMockProxy({
+    it('should use the current root after reset without a client-side warm RPC', async () => {
+      const rootedProxy = createMockProxy({
         getDirectoryStat: vi.fn().mockResolvedValue([]),
         searchFiles: vi.fn().mockReturnValue([]) as unknown as FileSystemClient['searchFiles'],
       });
-      const warmService = createTreeHarness({ proxy: warmProxy }).service;
+      const rootedService = createTreeHarness({ proxy: rootedProxy }).service;
 
-      await warmService.searchFiles('main');
-      expect(warmProxy.getDirectoryStat).toHaveBeenCalledWith('/project');
+      await rootedService.searchFiles('main');
+      rootedService.reset('/new-project');
+      await rootedService.searchFiles('utils');
 
-      await warmService.searchFiles('utils');
-      expect(warmProxy.getDirectoryStat).toHaveBeenCalledOnce();
+      expect(rootedProxy.searchFiles).toHaveBeenNthCalledWith(1, '/project', 'main', undefined);
+      expect(rootedProxy.searchFiles).toHaveBeenNthCalledWith(2, '/new-project', 'utils', undefined);
+      expect(rootedProxy.getDirectoryStat).not.toHaveBeenCalled();
 
-      warmService.dispose();
-    });
-
-    it('should re-warm the search index after reset()', async () => {
-      const resetProxy = createMockProxy({
-        getDirectoryStat: vi.fn().mockResolvedValue([]),
-        searchFiles: vi.fn().mockReturnValue([]) as unknown as FileSystemClient['searchFiles'],
-      });
-      const resetService = createTreeHarness({ proxy: resetProxy }).service;
-
-      await resetService.searchFiles('main');
-      expect(resetProxy.getDirectoryStat).toHaveBeenCalledOnce();
-
-      resetService.reset('/new-project');
-
-      await resetService.searchFiles('main');
-      expect(resetProxy.getDirectoryStat).toHaveBeenCalledTimes(2);
-      expect(resetProxy.getDirectoryStat).toHaveBeenLastCalledWith('/new-project');
-
-      resetService.dispose();
+      rootedService.dispose();
     });
   });
 

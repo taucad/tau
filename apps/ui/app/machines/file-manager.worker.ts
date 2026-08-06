@@ -3,22 +3,20 @@
  *
  * Single entry point for all filesystem access. Every connection (main thread,
  * kernel workers, git) receives a MessagePort that is served by the same
- * WorkspaceFileService instance. Writes to the same file are serialized via a per-file
- * ResourceQueue (VS Code pattern); writes to different files run in parallel.
+ * WorkspaceFileService instance. Mutations serialize on their logical and physical
+ * conflict paths; independent authority subtrees can still run in parallel.
  */
 
 import { exposeFileSystem, workerReadyMessageType } from '@taucad/fs-bridge';
 
 import { populateBundledTypesMount } from '@taucad/filesystem/bundled-types-mount';
 import type { BundledTypesMountEntry } from '@taucad/filesystem/bundled-types-mount';
-import { FileSystemAccessProvider } from '@taucad/filesystem/backend';
 import {
   ChangeEventBus,
   EventCoalescer,
   MountTable,
   ProviderRegistry,
   ResourceQueue,
-  ThrottledWorker,
   WorkspaceFileService,
 } from '@taucad/filesystem';
 import { SharedPool } from '@taucad/memory';
@@ -109,19 +107,8 @@ self.addEventListener('unhandledrejection', (event) => {
 });
 
 async function createNodeModulesMount(): Promise<void> {
-  if (!('storage' in navigator) || !('getDirectory' in navigator.storage)) {
-    console.debug('[FM-Worker] OPFS not available, /node_modules falls through to root mount');
-    return;
-  }
   try {
-    const opfsRoot = await navigator.storage.getDirectory();
-    const nodeModulesHandle = await opfsRoot.getDirectoryHandle('tau-node-modules', { create: true });
-    const nodeModulesProvider = new FileSystemAccessProvider(nodeModulesHandle);
-    // Worker-internal OPFS-backed mount — no workspaceId because the
-    // backing storage isn't user-pickable. The discriminated
-    // `MountConfig` accepts `backend: 'opfs'` without the webaccess
-    // identity fields.
-    mountTable.mount('/node_modules', nodeModulesProvider, { backend: 'opfs' });
+    await fileService.mount('/node_modules', { backend: 'opfs', providerBasePath: '/tau-node-modules' });
     console.debug('[FM-Worker] /node_modules mounted on OPFS');
   } catch (error) {
     console.warn('[FM-Worker] Failed to mount OPFS /node_modules, falling through to root', error);
@@ -151,9 +138,14 @@ const t0 = performance.now();
 console.debug(`[FM-Worker] module evaluated in ${t0.toFixed(1)}ms`);
 
 try {
-  await fileService.mount('/', { backend: 'indexeddb' });
+  const rootScope = { backend: 'indexeddb' } as const;
+  const rootProvider = await providerRegistry.getProvider(rootScope);
+  mountTable.mount('/', rootProvider, {
+    backend: 'indexeddb',
+    storageRootKey: providerRegistry.resolveStorageRootKey(rootScope),
+  });
 } catch (error) {
-  postWorkerInitError("mount('/', 'indexeddb')", error);
+  postWorkerInitError('mount root IndexedDB provider', error);
   throw error;
 }
 
@@ -173,17 +165,10 @@ try {
 }
 
 exposeFileSystem(fileService, {
-  watchHandler: {
-    watch(request, handler, ownerId) {
-      return fileService.watch(request, handler, ownerId);
-    },
-    cleanupWatches(ownerId) {
-      fileService.cleanupWatches(ownerId);
-    },
-  },
+  handlerForRoot: (root, context) => fileService.createRootedFileSystem(root, context),
   changeEventBus: eventBus,
-  createCoalescer: (deliver, coalescingWindow) => new EventCoalescer(deliver, { coalescingWindow }),
-  createThrottledWorker: (handler) => new ThrottledWorker(handler),
+  createCoalescer: (deliver, coalescingWindow, onOverflow) =>
+    new EventCoalescer(deliver, { coalescingWindow, onOverflow }),
 });
 
 let languageFsSyncDispose: { dispose(): void } | undefined;

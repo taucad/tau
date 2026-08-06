@@ -11,7 +11,7 @@
  *   - `client` is a typed proxy facade; `workspace` carries lifecycle.
  *   - The legacy `setDirectoryHandle` ambient-state hook is gone.
  *   - The deleted `*Scoped` suffix surface and top-level admin
- *     callbacks (`mount`, `unmount`, `invalidateStandaloneProvider`)
+ *     callbacks (`mount`, `unmount`, `disposeStorageRoot`)
  *     are no longer reachable on the context value.
  */
 
@@ -76,20 +76,22 @@ describe('useFileManager surface', () => {
     expectTypeOf<Client>().toHaveProperty('rmdir');
     expectTypeOf<Client>().toHaveProperty('getZippedDirectory');
     expectTypeOf<Client>().toHaveProperty('readShallowDirectory');
+    expectTypeOf<Client>().toHaveProperty('commitPendingProjectDirectory');
 
-    // Each migrated method accepts an options-bag with optional `scope`.
-    expectTypeOf<{ scope: WorkspaceScope }>().toExtend<NonNullable<Parameters<Client['unlink']>[1]>>();
+    expectTypeOf<Parameters<Client['unlink']>>().toEqualTypeOf<[path: string]>();
     expectTypeOf<{ scope: WorkspaceScope; recursive: true }>().toExtend<NonNullable<Parameters<Client['rmdir']>[1]>>();
     expectTypeOf<{ scope: WorkspaceScope }>().toExtend<NonNullable<Parameters<Client['getZippedDirectory']>[1]>>();
     expectTypeOf<{ scope: WorkspaceScope }>().toExtend<NonNullable<Parameters<Client['readShallowDirectory']>[1]>>();
   });
 
-  it('exposes a workspace admin facade with mount/unmount/invalidateStandaloneProvider', () => {
+  it('exposes a workspace admin facade with mount/unmount/root teardown', () => {
     expectTypeOf<Context>().toHaveProperty('workspace');
     type Workspace = Context['workspace'];
     expectTypeOf<Workspace>().toHaveProperty('mount');
     expectTypeOf<Workspace>().toHaveProperty('unmount');
-    expectTypeOf<Workspace>().toHaveProperty('invalidateStandaloneProvider');
+    expectTypeOf<Workspace>().toHaveProperty('disposeStorageRoot');
+    expectTypeOf<Workspace>().toHaveProperty('replaceWorkspaceHandle');
+    expectTypeOf<Workspace>().toHaveProperty('forgetWorkspace');
 
     type MountConfigArgument = Parameters<Workspace['mount']>[1];
     type WebaccessMount = Extract<MountConfigArgument, { backend: 'webaccess' }>;

@@ -28,15 +28,13 @@ import type { GeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { ENV } from '#environment.config.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
-import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
+import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
 
 type RpcHandlerDepsBase = Omit<RpcHandlerDependencies, 'chatId'>;
 
 type GeoSpecClientCache = {
-  openFileSystemBridge: () => FileSystemBridgeConnection;
-  projectRootPath: string;
+  fileSystem: RuntimeFileSystem;
   runtimeConfig: UiRuntimeConfigInput;
-  filePoolBuffer: SharedArrayBuffer | undefined;
   client: GeoSpecWorkerRpcClient;
 };
 
@@ -45,9 +43,7 @@ const isSameGeoSpecClientCache = (
   input: Omit<GeoSpecClientCache, 'client'>,
 ): boolean =>
   cache !== undefined &&
-  cache.openFileSystemBridge === input.openFileSystemBridge &&
-  cache.projectRootPath === input.projectRootPath &&
-  cache.filePoolBuffer === input.filePoolBuffer &&
+  cache.fileSystem === input.fileSystem &&
   cache.runtimeConfig.tauApiUrl === input.runtimeConfig.tauApiUrl &&
   cache.runtimeConfig.tauWebSocketUrl === input.runtimeConfig.tauWebSocketUrl;
 
@@ -182,9 +178,7 @@ export function useChatRpcConnection(options: UseChatRpcConnectionOptions): UseC
 
       const runtimeConfig = createUiRuntimeConfig(ENV);
       const cacheInput = {
-        openFileSystemBridge: fileManager.openFileSystemBridge,
-        projectRootPath: snapshot.context.rootDirectory,
-        filePoolBuffer: snapshot.context.filePoolBuffer,
+        fileSystem: fileManager.runtimeFileSystem,
         runtimeConfig,
       };
       const cachedGeoSpecClient = geoSpecClientRef.current;
@@ -193,10 +187,9 @@ export function useChatRpcConnection(options: UseChatRpcConnectionOptions): UseC
       }
 
       void cachedGeoSpecClient?.client.close();
+      const { openFileSystemBridge, rootDirectory } = snapshot.context;
       const client = createGeoSpecWorkerRpcClient({
-        openFileSystemBridge: cacheInput.openFileSystemBridge,
-        projectRootPath: snapshot.context.rootDirectory,
-        filePoolBuffer: snapshot.context.filePoolBuffer,
+        openFileSystemBridge: () => openFileSystemBridge(rootDirectory),
         runtimeConfig,
       });
       geoSpecClientRef.current = { ...cacheInput, client };

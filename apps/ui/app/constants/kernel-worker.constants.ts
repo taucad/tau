@@ -18,7 +18,7 @@ const createDebugRuntimeWorker = (): Worker =>
 /**
  * Build the editor's default {@link RuntimeClientOptions} with a
  * web-worker transport configured for the supplied filesystem and
- * file-content pool.
+ * project-rooted filesystem.
  *
  * Wire topology — `webWorkerTransport`: the kernel runs in a dedicated
  * `Worker` spawned from the UI app's worker-owned runtime entry.
@@ -27,18 +27,16 @@ const createDebugRuntimeWorker = (): Worker =>
  * delivery (declared via `sharedMemory.geometry`); the filesystem
  * bridges through a `MessagePort` to the FM worker.
  *
- * The filesystem handle and the file-pool `SharedArrayBuffer` are
- * owned by the file-manager machine and only available after it
+ * The filesystem handle is owned by the file-manager machine and only available after it
  * reaches `ready`. They are passed in here so the transport client
  * is constructed with everything it needs up-front, preserving the
  * runtime invariant that `client.connect()` takes no arguments.
  */
-export const createDefaultKernelOptions: KernelOptionsFactory = ({ fileSystem, filePoolBuffer, runtimeConfig }) => ({
+export const createDefaultKernelOptions: KernelOptionsFactory = ({ fileSystem, runtimeConfig }) => ({
   config: runtimeConfig,
   transport: webWorkerTransport({
     createWorker: createDefaultRuntimeWorker,
     fileSystem,
-    filePoolBuffer,
     sharedMemory: {
       geometry: { bytes: 100 * 1024 * 1024 },
     },
@@ -59,7 +57,6 @@ export const createDebugKernelOptions: KernelOptionsFactory = (deps) => ({
   transport: webWorkerTransport({
     createWorker: createDebugRuntimeWorker,
     fileSystem: deps.fileSystem,
-    filePoolBuffer: deps.filePoolBuffer,
     sharedMemory: {
       geometry: { bytes: 100 * 1024 * 1024 },
     },

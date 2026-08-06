@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useEffect, useMemo, useCallback, useRef } from 'react';
+import { createContext, useContext, useEffect, useMemo, useCallback, useId, useRef } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -74,17 +74,6 @@ function deriveStatus(cadState: string): CadPreviewStatus {
 }
 
 /**
- * Whether `prepareFiles` should (re)mount the preview-owned ephemeral prefix.
- *
- * A retry after a post-mount failure (e.g. `client.writeFiles` rejected) re-runs
- * `prepareFiles` with the same prefix already mounted. Re-mounting the same
- * prefix would register a second, duplicate mount on the worker; skip it when the
- * prefix is already the one this provider registered.
- */
-export const shouldMountPreviewPrefix = (mountedPrefix: string | undefined, previewPrefix: string): boolean =>
-  mountedPrefix !== previewPrefix;
-
-/**
  * Combines CAD machine phase and initialization errors into the preview status
  * exposed by {@link useCadPreview}.
  */
@@ -107,38 +96,12 @@ export const deriveCadPreviewStatus = (args: {
  * Uses cadPreviewMachine to orchestrate file preparation and kernel initialization,
  * following the same invoke+fromPromise pattern as projectMachine.
  *
- * ## Two-mode filesystem contract (when `files` is provided)
+ * When `files` is supplied, each provider instance owns a distinct ephemeral
+ * `/previews/<instance>` memory root. Preview setup and teardown therefore
+ * cannot replace a persistent `/projects/<projectId>` route. When `files` is
+ * omitted, the CAD machine reads the existing persistent project route.
  *
- * Preview files always land under `/projects/<projectId>/...`, but who owns
- * the worker-side mount depends on the surrounding `FileManagerProvider`:
- *
- * 1. **Case A — surrounding FM is project-scoped to the same `projectId`**
- *    (e.g. `projects_.$id_.preview/route.tsx` and `v.$id/route.tsx`, both of
- *    which wrap the preview in a `FileManagerProvider rootDirectory={/projects/<id>}`).
- *    The FM machine has already mounted that prefix on the worker
- *    (file-manager.machine.ts, gated on `context.projectId !== undefined`).
- *    The provider writes via `FileContentService.writeFiles` so the FM's
- *    cache + tree refresh stay coherent. Absolute keys resolve to
- *    workspace-relative paths inside the resolver — no escape, no extra
- *    mount lifecycle.
- *
- * 2. **Case B — surrounding FM does NOT match the preview's `projectId`**
- *    (e.g. `import-viewer.tsx` with `projectId='import-preview-<owner>-<repo>'`
- *    under the app shell's root FM at `/`, or `project-grid.tsx`
- *    thumbnails). No mount exists for the preview prefix; writing through
- *    the surrounding `FileContentService` would trip
- *    `WorkspaceScopeViolationError` (keys escape its `rootDirectory`).
- *    The provider mounts its own ephemeral `{ backend: 'memory',
- *    preservePath: true }` at `/projects/<projectId>`, writes via
- *    `client.writeFiles` (the worker-namespace escape hatch — see
- *    `use-file-manager.tsx` `FileSystemClientFacade` JSDoc), and unmounts
- *    on React teardown. Ephemerality keeps the user's persistent IDB clean.
- *
- * Detection is purely a function of `snapshot.context.projectId` on the
- * `fileManagerRef`. No mount-table query / `isMounted` API is required —
- * the FM machine is the only producer of `/projects/<id>` mounts.
- *
- * @example <caption>Simple thumbnail (Case B — root FM, ephemeral mount)</caption>
+ * @example <caption>Simple thumbnail (isolated ephemeral mount)</caption>
  * ```tsx
  * <CadPreviewProvider projectId="my-project" mainFile="main.ts" files={files}>
  *   <CadPreviewViewer className="size-full" />
@@ -162,13 +125,11 @@ export function CadPreviewProvider({
   children,
 }: CadPreviewProviderProps): React.JSX.Element {
   const { fileManagerRef, client, workspace } = useFileManager();
+  const previewInstance = useId().replaceAll(':', '');
+  const previewPrefix = joinPath('/previews', previewInstance);
+  const fileSystemRoot = files === undefined ? joinPath('/projects', projectId) : previewPrefix;
 
-  // Tracks the mount prefix this provider instance registered on the worker.
-  // Set by the `prepareFiles` actor when the preview owns the mount lifecycle
-  // (root-FM / cross-scope case); left `undefined` when the surrounding
-  // project-scoped FM already owns the mount. The unmount-on-cleanup effect
-  // reads this ref so a sibling provider with the same `projectId` cannot
-  // unmount someone else's mount.
+  // Set only after this provider instance successfully installs its isolated mount.
   const mountedPrefixRef = useRef<string | undefined>(undefined);
   // Capture `workspace.unmount` so the cleanup effect uses a stable reference
   // even if the gated facade re-renders.
@@ -180,6 +141,7 @@ export function CadPreviewProvider({
       shouldInitializeKernelOnStart: false,
       fileManagerRef,
       kernelOptionsFactory,
+      fileSystemRoot,
     },
   });
 
@@ -218,54 +180,22 @@ export function CadPreviewProvider({
 
             signal.throwIfAborted();
 
-            const { contentService, projectId: fmProjectId } = snapshot.context;
-            if (!contentService) {
-              throw new Error('File manager services not available after initialization');
-            }
-
-            signal.throwIfAborted();
-
-            // Always write the full snapshot to the filesystem. A previous optimization skipped writes when
-            // `exists(firstKey)` was true; first key order follows Map insertion (arbitrary), so a
-            // stale match could skip the entire write while the kernel still read from disk — ENOENT,
-            // empty geometry, and broken tree refresh. Preview imports are not hot enough to require skipping.
+            // Always write the full snapshot. Preview imports are not hot enough
+            // to justify stale-file detection, and every instance has its own root.
             const projectFiles: Record<string, { content: Uint8Array<ArrayBuffer> }> = {};
             for (const [path, file] of Object.entries(input.files)) {
-              projectFiles[joinPath('/projects', input.projectId, path)] = {
+              projectFiles[joinPath(previewPrefix, path)] = {
                 content: new Uint8Array(file.content),
               };
             }
 
-            // Two-mode dispatch (see CadPreviewProvider JSDoc):
-            //   - Case A (FM owns mount): surrounding FM machine has already
-            //     mounted the project's backend at `/projects/<projectId>` (it
-            //     does this iff `context.projectId !== undefined`, see
-            //     file-manager.machine.ts ~lines 295-309). Write through the
-            //     FM's `FileContentService` so its cache + tree refresh stay
-            //     coherent for the editor / publication view.
-            //   - Case B (preview owns mount): surrounding FM doesn't match
-            //     this preview's `projectId` (root-FM thumbnail / import-
-            //     preview / cross-scope). Mount an ephemeral `memory` backend
-            //     at the preview prefix and write via `client.writeFiles`,
-            //     the documented worker-namespace escape hatch. Going through
-            //     `contentService.writeFiles` would trip
-            //     `WorkspaceScopeViolationError` because the absolute keys
-            //     escape the FM's `rootDirectory` (the bug this fix closes).
-            const previewOwnsMount = fmProjectId !== input.projectId;
-            if (previewOwnsMount) {
-              const previewPrefix = joinPath('/projects', input.projectId);
-              // Only mount when this prefix isn't already registered. A retry
-              // after a post-mount write failure re-runs prepareFiles with the
-              // prefix still mounted — remounting would duplicate the mount.
-              if (shouldMountPreviewPrefix(mountedPrefixRef.current, previewPrefix)) {
-                await workspace.mount(previewPrefix, { backend: 'memory', preservePath: true });
-                mountedPrefixRef.current = previewPrefix;
-              }
-              signal.throwIfAborted();
-              await client.writeFiles(projectFiles);
-            } else {
-              await contentService.writeFiles(projectFiles, 'machine');
-            }
+            await workspace.mount(previewPrefix, {
+              backend: 'memory',
+              storageRootKey: `memory:preview:${previewInstance}`,
+            });
+            mountedPrefixRef.current = previewPrefix;
+            signal.throwIfAborted();
+            await client.writeFiles(projectFiles);
           }
         }),
       },
@@ -289,9 +219,6 @@ export function CadPreviewProvider({
   }, [isEnabled, previewRef]);
 
   // Unmount the preview-owned ephemeral prefix on React teardown.
-  // Mount-on-write registration happens inside `prepareFiles` (above) and
-  // sets `mountedPrefixRef.current` only when the preview owns the mount.
-  // Cleanup is a no-op when the surrounding FM already owned the mount.
   // The effect intentionally has an empty dependency array — it should run
   // exactly once at unmount (or `projectId` change, which remounts the
   // provider via the `key={projectId-mainFile}` callers use). React invokes

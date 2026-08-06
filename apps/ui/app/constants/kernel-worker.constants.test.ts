@@ -62,8 +62,7 @@ describe('kernel-worker constants', () => {
 
   it('createDefaultKernelOptions builds client options with boot config and a wired TransportPlugin', () => {
     const fileSystem = fromMemoryFs();
-    const filePoolBuffer = new SharedArrayBuffer(1024);
-    const options = createDefaultKernelOptions({ fileSystem, filePoolBuffer, runtimeConfig: expectedConfig });
+    const options = createDefaultKernelOptions({ fileSystem, runtimeConfig: expectedConfig });
 
     expect(options.config).toEqual(expectedConfig);
     expect(options.transport).toBeDefined();
@@ -81,8 +80,7 @@ describe('kernel-worker constants', () => {
 
   it('createDebugKernelOptions inherits transport composition from default', () => {
     const fileSystem = fromMemoryFs();
-    const filePoolBuffer = new SharedArrayBuffer(1024);
-    const debugOptions = createDebugKernelOptions({ fileSystem, filePoolBuffer, runtimeConfig: expectedConfig });
+    const debugOptions = createDebugKernelOptions({ fileSystem, runtimeConfig: expectedConfig });
 
     expect(debugOptions.transport).toBeDefined();
     expect(debugOptions.config).toEqual(expectedConfig);
@@ -95,7 +93,6 @@ describe('kernel-worker constants', () => {
   it('createDefaultKernelOptions does not expose a top-level tessellation field', () => {
     const options = createDefaultKernelOptions({
       fileSystem: fromMemoryFs(),
-      filePoolBuffer: new SharedArrayBuffer(1024),
       runtimeConfig: expectedConfig,
     });
     expect(options).not.toHaveProperty('tessellation');

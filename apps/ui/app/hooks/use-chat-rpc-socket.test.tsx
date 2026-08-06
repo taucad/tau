@@ -10,11 +10,13 @@ import { ChatRpcSocketService } from '#services/chat-rpc-socket.service.js';
 
 const hookMocks = vi.hoisted(() => {
   const worker = { postMessage: vi.fn(), terminate: vi.fn() };
+  const firstRuntimeFileSystem = {};
+  const secondRuntimeFileSystem = {};
   const fileManager = {
     fileManagerRef: {
       getSnapshot: vi.fn(),
     },
-    openFileSystemBridge: vi.fn(),
+    runtimeFileSystem: firstRuntimeFileSystem,
     readFile: vi.fn(),
     writeFile: vi.fn(),
     deleteFile: vi.fn(),
@@ -25,6 +27,8 @@ const hookMocks = vi.hoisted(() => {
   return {
     worker,
     fileManager,
+    firstRuntimeFileSystem,
+    secondRuntimeFileSystem,
     createGeoSpecWorkerRpcClient,
   };
 });
@@ -112,12 +116,12 @@ const getRegisteredRpcHandler = (): RpcRequestHandler => {
 describe('ChatRpcSocketProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hookMocks.fileManager.runtimeFileSystem = hookMocks.firstRuntimeFileSystem;
     hookMocks.fileManager.fileManagerRef.getSnapshot.mockReturnValue({
       context: {
         worker: hookMocks.worker,
-        openFileSystemBridge: hookMocks.fileManager.openFileSystemBridge,
+        openFileSystemBridge: vi.fn(),
         rootDirectory: '/projects/proj-a',
-        filePoolBuffer: new SharedArrayBuffer(8),
       },
     });
   });
@@ -196,12 +200,12 @@ describe('ChatRpcSocketProvider', () => {
     const handler = getRegisteredRpcHandler();
 
     await handler(createGeoSpecRpcRequest('request-1'));
+    hookMocks.fileManager.runtimeFileSystem = hookMocks.secondRuntimeFileSystem;
     hookMocks.fileManager.fileManagerRef.getSnapshot.mockReturnValueOnce({
       context: {
         worker: hookMocks.worker,
-        openFileSystemBridge: hookMocks.fileManager.openFileSystemBridge,
+        openFileSystemBridge: vi.fn(),
         rootDirectory: '/projects/proj-b',
-        filePoolBuffer: new SharedArrayBuffer(8),
       },
     });
     await handler(createGeoSpecRpcRequest('request-2'));

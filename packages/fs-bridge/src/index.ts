@@ -12,16 +12,13 @@ export {
 
 export type {
   BridgeChangeEventBus,
-  BridgeWatchHandler,
   ChangeEventCoalescer,
   CoalescerFactory,
   ExposeFileSystemHandle,
   FileSystemBridge,
   FileSystemBridgeConnection,
-  FileSystemBridgeFilePool,
   FileSystemBridgeOptions,
   MutationMethodNameInternal,
   MutationOverrideMapInternal,
-  ThrottledEventWorker,
-  ThrottledWorkerFactory,
+  RootedFileSystemHandlerFactory,
 } from '#filesystem-bridge.js';

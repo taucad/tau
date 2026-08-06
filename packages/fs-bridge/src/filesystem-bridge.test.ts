@@ -1,9 +1,11 @@
+/* eslint-disable @typescript-eslint/naming-convention -- test data uses virtual paths as object keys */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { Port } from '@taucad/rpc';
 import {
   ChangeEventBus,
   CrossTabCoordinator,
+  EventCoalescer,
   MountTable,
   ProviderRegistry,
   ResourceQueue,
@@ -11,7 +13,8 @@ import {
   WorkspaceFileService,
   WorkspaceMutationError,
 } from '@taucad/filesystem';
-import type { WatchEvent } from '@taucad/filesystem';
+import { MemoryProvider } from '@taucad/filesystem/backend';
+import type { RootedFileSystem, WatchEvent, WorkspaceScope } from '@taucad/filesystem';
 import type { ChangeEvent } from '@taucad/types';
 import {
   bindMutationContextForPort,
@@ -56,7 +59,6 @@ function makeMutatingFakeHandlers() {
     writeFile: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     writeFiles: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     mkdir: vi.fn<AnyAsync>().mockResolvedValue(undefined),
-    rename: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     move: vi.fn<AnyAsync>().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
     bulkMove: vi.fn<AnyAsync>().mockResolvedValue({ moved: [], failed: [] }),
     canMove: vi.fn<AnyAsync>().mockResolvedValue(true),
@@ -67,6 +69,7 @@ function makeMutatingFakeHandlers() {
     rmdir: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     duplicateFile: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     copyDirectory: vi.fn<AnyAsync>().mockResolvedValue(undefined),
+    commitPendingProjectDirectory: vi.fn<AnyAsync>().mockResolvedValue({ status: 'committed' }),
     readFile: vi.fn<AnyAsync>().mockResolvedValue(new Uint8Array()),
     readdir: vi.fn<AnyAsync>().mockResolvedValue([]),
     stat: vi.fn<AnyAsync>().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
@@ -77,7 +80,6 @@ function makeMutatingFakeHandlers() {
 
 describe('bindMutationContextForPort', () => {
   const mutationContext = { originClientId: 'port_test_abc' };
-  const memoryScope: { backend: 'memory' } = { backend: 'memory' };
 
   describe('mutating-method context injection', () => {
     it('writeFile(path, data) lands as service.writeFile(path, data, context)', async () => {
@@ -116,18 +118,11 @@ describe('bindMutationContextForPort', () => {
       expect(handlers.mkdir.mock.calls[0]).toEqual(['/d', { recursive: true }, mutationContext]);
     });
 
-    it('rename(from, to) lands as service.rename(from, to, context)', async () => {
+    it('move(source, target) lands as service.move(source, target, context)', async () => {
       const handlers = makeMutatingFakeHandlers();
       const wrapper = bindMutationContextForPort(handlers, mutationContext);
-      await wrapper.rename('/a', '/b');
-      expect(handlers.rename.mock.calls[0]).toEqual(['/a', '/b', mutationContext]);
-    });
-
-    it('move(source, target) lands as service.move(source, target, options, context)', async () => {
-      const handlers = makeMutatingFakeHandlers();
-      const wrapper = bindMutationContextForPort(handlers, mutationContext);
-      await wrapper.move('/a', '/b', { overwrite: true });
-      expect(handlers.move.mock.calls[0]).toEqual(['/a', '/b', { overwrite: true }, mutationContext]);
+      await wrapper.move('/a', '/b');
+      expect(handlers.move.mock.calls[0]).toEqual(['/a', '/b', mutationContext]);
     });
 
     it('bulkMove serializes failed WorkspaceMutationError instances before they cross the bridge', async () => {
@@ -142,7 +137,7 @@ describe('bindMutationContextForPort', () => {
       const result = await wrapper.bulkMove([{ source: '/a', target: '/b' }]);
       const firstError = firstFailedBulkMoveError(result);
 
-      expect(handlers.bulkMove.mock.calls[0]).toEqual([[{ source: '/a', target: '/b' }], undefined, mutationContext]);
+      expect(handlers.bulkMove.mock.calls[0]).toEqual([[{ source: '/a', target: '/b' }], mutationContext]);
       expect(firstError).toEqual({
         [workspaceMutationErrorMarker]: true,
         name: 'WorkspaceMutationError',
@@ -154,18 +149,11 @@ describe('bindMutationContextForPort', () => {
       expect(firstError).not.toBeInstanceOf(WorkspaceMutationError);
     });
 
-    it('unlink(path) lands as service.unlink(path, undefined, context)', async () => {
+    it('unlink(path) lands as service.unlink(path, context)', async () => {
       const handlers = makeMutatingFakeHandlers();
       const wrapper = bindMutationContextForPort(handlers, mutationContext);
       await wrapper.unlink('/x.txt');
-      expect(handlers.unlink.mock.calls[0]).toEqual(['/x.txt', undefined, mutationContext]);
-    });
-
-    it('unlink(path, { scope }) preserves the options bag and appends context', async () => {
-      const handlers = makeMutatingFakeHandlers();
-      const wrapper = bindMutationContextForPort(handlers, mutationContext);
-      await wrapper.unlink('/x.txt', { scope: memoryScope });
-      expect(handlers.unlink.mock.calls[0]).toEqual(['/x.txt', { scope: memoryScope }, mutationContext]);
+      expect(handlers.unlink.mock.calls[0]).toEqual(['/x.txt', mutationContext]);
     });
 
     it('rmdir(path) lands as service.rmdir(path, undefined, context)', async () => {
@@ -175,10 +163,10 @@ describe('bindMutationContextForPort', () => {
       expect(handlers.rmdir.mock.calls[0]).toEqual(['/d', undefined, mutationContext]);
     });
 
-    it('rmdir(path, { scope, recursive: true }) preserves the options bag and appends context', async () => {
+    it('rmdir(path, { recursive: true }) preserves the options bag and appends context', async () => {
       const handlers = makeMutatingFakeHandlers();
       const wrapper = bindMutationContextForPort(handlers, mutationContext);
-      const options = { scope: memoryScope, recursive: true };
+      const options = { recursive: true };
       await wrapper.rmdir('/d', options);
       expect(handlers.rmdir.mock.calls[0]).toEqual(['/d', options, mutationContext]);
     });
@@ -195,6 +183,22 @@ describe('bindMutationContextForPort', () => {
       const wrapper = bindMutationContextForPort(handlers, mutationContext);
       await wrapper.copyDirectory('/d1', '/d2');
       expect(handlers.copyDirectory.mock.calls[0]).toEqual(['/d1', '/d2', mutationContext]);
+    });
+
+    it('commitPendingProjectDirectory(input) appends the mutation context', async () => {
+      const handlers = makeMutatingFakeHandlers();
+      const wrapper = bindMutationContextForPort(handlers, mutationContext);
+      const input: Parameters<typeof wrapper.commitPendingProjectDirectory>[0] = {
+        projectId: 'proj_ppppppppppppppppppppp',
+        providerBasePath: '/projects/pending--proj_ppppppppppppppppppppp',
+        scope: { backend: 'memory', storageRootKey: 'memory:0' },
+        files: { 'main.ts': { content: new Uint8Array([1]) } },
+        manifest: new Uint8Array([2]),
+      };
+
+      await wrapper.commitPendingProjectDirectory(input);
+
+      expect(handlers.commitPendingProjectDirectory.mock.calls[0]).toEqual([input, mutationContext]);
     });
   });
 
@@ -262,7 +266,7 @@ describe('bindMutationContextForPort', () => {
         path: '/gone',
       });
 
-      expect(handlers.canMove.mock.calls[0]).toEqual(['/a', '/b', undefined]);
+      expect(handlers.canMove.mock.calls[0]).toEqual(['/a', '/b']);
       expect(handlers.canRename.mock.calls[0]).toEqual(['/a', 'bad/name']);
       expect(handlers.canCreate.mock.calls[0]).toEqual(['/node_modules/x', 'file']);
       expect(handlers.canDelete.mock.calls[0]).toEqual(['/gone']);
@@ -330,15 +334,16 @@ describe('bindMutationContextForPort', () => {
       const wrapperB = bindMutationContextForPort(handlers, { originClientId: 'port_B' });
       await wrapperA.unlink('/a');
       await wrapperB.unlink('/b');
-      expect(handlers.unlink.mock.calls[0]).toEqual(['/a', undefined, { originClientId: 'port_A' }]);
-      expect(handlers.unlink.mock.calls[1]).toEqual(['/b', undefined, { originClientId: 'port_B' }]);
+      expect(handlers.unlink.mock.calls[0]).toEqual(['/a', { originClientId: 'port_A' }]);
+      expect(handlers.unlink.mock.calls[1]).toEqual(['/b', { originClientId: 'port_B' }]);
     });
   });
 });
 
 describe('createFileSystemBridge', () => {
-  it('should send disconnect message before closing port on dispose', () => {
+  it('should close its port on dispose without sending a non-protocol frame', () => {
     const postSpy = vi.spyOn(MessagePort.prototype, 'postMessage');
+    const closeSpy = vi.spyOn(MessagePort.prototype, 'close');
     try {
       const worker = {
         postMessage: vi.fn(),
@@ -347,57 +352,90 @@ describe('createFileSystemBridge', () => {
       const handle = createFileSystemBridge(worker);
       handle.dispose();
 
-      expect(postSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'disconnect' }));
+      expect(postSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'disconnect' }));
+      expect(closeSpy).toHaveBeenCalled();
     } finally {
       postSpy.mockRestore();
+      closeSpy.mockRestore();
     }
+  });
+
+  it('sends the requested root only in the trusted connection envelope', () => {
+    const postMessage = vi.fn<(message: unknown, transfer: Transferable[]) => void>();
+    const worker = { postMessage } as unknown as Worker;
+
+    const handle = createFileSystemBridge(worker, { root: '/projects/alpha' });
+
+    expect(postMessage).toHaveBeenCalledOnce();
+    const [envelope, transfer] = postMessage.mock.calls[0]!;
+    expect(envelope).toMatchObject({ type: filesystemBridgeConnectMessageType, root: '/projects/alpha' });
+    const { port } = envelope as { readonly port: unknown };
+    expect(port).toBeInstanceOf(MessagePort);
+    expect(transfer).toEqual([port]);
+    handle.dispose();
   });
 });
 
 describe('createFileSystemBridgeProxy', () => {
-  it('should use the file pool for cached readFile calls and invalidate it on fileChanged events', async () => {
+  it('clones pending-commit bytes before transfer and exempts only that method from the bridge deadline', async () => {
+    vi.useFakeTimers();
     const channel = new MessageChannel();
-    const server = createBridgeServer(
-      {
-        async readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
-          return encoding === 'utf8' ? `remote:${path}` : new TextEncoder().encode(`remote:${path}`);
-        },
-      },
-      fsBridgePort(channel.port1, 'fs-bridge-file-pool-server'),
-    );
-    const filePool = {
-      resolveCopy: vi.fn((path: string) =>
-        path === '/cached.ts' ? new TextEncoder().encode('cached-content') : undefined,
-      ),
-      invalidate: vi.fn(),
-    };
-    const proxy = createFileSystemBridgeProxy<{
-      readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>>;
-    }>(
-      {
-        port: fsBridgePort(channel.port2, 'fs-bridge-file-pool-client'),
-        dispose() {
-          channel.port2.close();
-        },
-      },
-      { filePool },
-    );
-
-    await expect(proxy.readFile('/cached.ts', 'utf8')).resolves.toBe('cached-content');
-    server.emit('fileChanged', { path: '/cached.ts' });
-    await vi.waitFor(() => {
-      expect(filePool.invalidate).toHaveBeenCalledWith('/cached.ts');
+    let resolveCommit!: () => void;
+    const commitGate = new Promise<void>((resolve) => {
+      resolveCommit = resolve;
     });
-    await expect(proxy.readFile('/remote.ts', 'utf8')).resolves.toBe('remote:/remote.ts');
+    const received = vi.fn();
+    createBridgeServer(
+      {
+        async commitPendingProjectDirectory(input: unknown): Promise<{ status: 'committed' }> {
+          received(input);
+          await commitGate;
+          return { status: 'committed' };
+        },
+      },
+      fsBridgePort(channel.port1, 'fs-bridge-pending-commit-server'),
+    );
+    const proxy = createFileSystemBridgeProxy<{
+      commitPendingProjectDirectory(input: {
+        projectId: string;
+        providerBasePath: string;
+        scope: { backend: 'memory'; storageRootKey: string };
+        files: Record<string, { content: Uint8Array<ArrayBuffer> }>;
+        manifest: Uint8Array<ArrayBuffer>;
+      }): Promise<{ status: 'committed' }>;
+    }>({
+      port: fsBridgePort(channel.port2, 'fs-bridge-pending-commit-client'),
+      dispose() {
+        channel.port2.close();
+      },
+    });
+    const content = new Uint8Array([1, 2, 3]);
+    const manifest = new Uint8Array([4, 5, 6]);
 
-    expect(filePool.resolveCopy).toHaveBeenCalledWith('/cached.ts');
-    expect(filePool.resolveCopy).toHaveBeenCalledWith('/remote.ts');
-    proxy.dispose();
-    channel.port1.close();
+    try {
+      const pending = proxy.commitPendingProjectDirectory({
+        projectId: 'proj_ppppppppppppppppppppp',
+        providerBasePath: '/projects/pending--proj_ppppppppppppppppppppp',
+        scope: { backend: 'memory', storageRootKey: 'memory:0' },
+        files: { 'main.ts': { content } },
+        manifest,
+      });
+
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(content).toEqual(new Uint8Array([1, 2, 3]));
+      expect(manifest).toEqual(new Uint8Array([4, 5, 6]));
+      resolveCommit();
+      await expect(pending).resolves.toEqual({ status: 'committed' });
+      expect(received).toHaveBeenCalledOnce();
+    } finally {
+      proxy.dispose();
+      channel.port1.close();
+      vi.useRealTimers();
+    }
   });
 });
 
-describe('exposeFileSystem throttled delivery', () => {
+describe('exposeFileSystem coalesced delivery', () => {
   let messageHandlers: Array<(event: MessageEvent) => void>;
 
   beforeEach(() => {
@@ -412,144 +450,90 @@ describe('exposeFileSystem throttled delivery', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
-  it('should create ThrottledWorker when createThrottledWorker is provided', () => {
-    let factoryCalled = false;
-
+  it('should replace every discarded backend with one backendChanged loss signal', () => {
+    const bus = new ChangeEventBus();
     const handle = exposeFileSystem(
       {},
       {
-        changeEventBus: { subscribe: vi.fn(() => vi.fn()) },
-        createCoalescer: () => ({ push: vi.fn(), flush: vi.fn(), dispose: vi.fn() }),
-        createThrottledWorker: () => {
-          factoryCalled = true;
-          return { push: vi.fn(), flush: vi.fn(), dispose: vi.fn() };
-        },
+        changeEventBus: bus,
+        createCoalescer: (deliver, coalescingWindow, onOverflow) =>
+          new EventCoalescer(deliver, { coalescingWindow, maxQueueDepth: 2, onOverflow }),
       },
     );
-
-    expect(factoryCalled).toBe(true);
-
-    handle.cleanup();
-  });
-
-  it('should pass coalesced events to throttled worker push', () => {
-    const pushFunction = vi.fn();
-    let coalescerDeliver: ((events: ChangeEvent[]) => void) | undefined;
-
-    const handle = exposeFileSystem(
-      {},
-      {
-        changeEventBus: { subscribe: vi.fn(() => vi.fn()) },
-        createCoalescer: (deliver) => {
-          coalescerDeliver = deliver;
-          return { push: vi.fn(), flush: vi.fn(), dispose: vi.fn() };
-        },
-        createThrottledWorker: () => ({
-          push: pushFunction,
-          flush: vi.fn(),
-          dispose: vi.fn(),
-        }),
-      },
-    );
-
-    expect(coalescerDeliver).toBeDefined();
-    const a = written('/a.txt');
-    const b = written('/b.txt');
-    const batch = [a, b];
-    coalescerDeliver!(batch);
-
-    expect(pushFunction).toHaveBeenCalledTimes(1);
-    expect(pushFunction).toHaveBeenCalledWith(batch);
-
-    handle.cleanup();
-  });
-
-  it('should dispose ThrottledWorker on bridge cleanup', () => {
-    const disposeFunction = vi.fn();
-
-    const handle = exposeFileSystem(
-      {},
-      {
-        changeEventBus: { subscribe: vi.fn(() => vi.fn()) },
-        createCoalescer: () => ({ push: vi.fn(), flush: vi.fn(), dispose: vi.fn() }),
-        createThrottledWorker: () => ({
-          push: vi.fn(),
-          flush: vi.fn(),
-          dispose: disposeFunction,
-        }),
-      },
-    );
-
-    handle.cleanup();
-
-    expect(disposeFunction).toHaveBeenCalledTimes(1);
-  });
-
-  it('should deliver directly to handles when no throttled worker is provided', () => {
-    let coalescerDeliver: ((events: ChangeEvent[]) => void) | undefined;
-
-    const handle = exposeFileSystem(
-      {},
-      {
-        changeEventBus: { subscribe: vi.fn(() => vi.fn()) },
-        createCoalescer: (deliver) => {
-          coalescerDeliver = deliver;
-          return { push: vi.fn(), flush: vi.fn(), dispose: vi.fn() };
-        },
-      },
-    );
-
-    expect(coalescerDeliver).toBeDefined();
-    const writtenEvent = written('/a.txt');
-    coalescerDeliver!([writtenEvent]);
-
-    handle.cleanup();
-  });
-
-  it('should route throttled worker output through deliverToHandles', () => {
-    let throttledHandler: ((chunk: ChangeEvent[]) => void) | undefined;
-    let coalescerDeliver: ((events: ChangeEvent[]) => void) | undefined;
-
-    const handle = exposeFileSystem(
-      {},
-      {
-        changeEventBus: { subscribe: vi.fn(() => vi.fn()) },
-        createCoalescer: (deliver) => {
-          coalescerDeliver = deliver;
-          return { push: vi.fn(), flush: vi.fn(), dispose: vi.fn() };
-        },
-        createThrottledWorker: (handler) => {
-          throttledHandler = handler;
-          return {
-            push: (items: ChangeEvent[]) => {
-              handler(items);
-            },
-            flush: vi.fn(),
-            dispose: vi.fn(),
-          };
-        },
-      },
-    );
-
     const channel = new MessageChannel();
     for (const h of messageHandlers) {
       h(new MessageEvent('message', { data: { type: filesystemBridgeConnectMessageType, port: channel.port1 } }));
     }
-
-    expect(handle.serverHandles.size).toBe(1);
-    expect(throttledHandler).toBeDefined();
-
     const serverHandle = [...handle.serverHandles.values()][0]!;
     const emitSpy = vi.spyOn(serverHandle, 'emit');
 
-    const first = written('/a.txt');
-    const second = written('/b.txt');
-    coalescerDeliver!([first, second]);
+    bus.emit(written('/a.txt'));
+    bus.emit(written('/b.txt'));
+    bus.emit({ type: 'fileWritten', path: '/c.txt', backend: 'opfs' });
 
-    expect(emitSpy).toHaveBeenCalledWith('fileChanged', first);
-    expect(emitSpy).toHaveBeenCalledWith('fileChanged', second);
+    expect(emitSpy).toHaveBeenCalledTimes(2);
+    expect(emitSpy).toHaveBeenNthCalledWith(1, 'fileChanged', { type: 'backendChanged', backend: 'memory' });
+    expect(emitSpy).toHaveBeenNthCalledWith(2, 'fileChanged', { type: 'backendChanged', backend: 'opfs' });
+
+    handle.cleanup();
+    channel.port2.close();
+  });
+
+  it('releases server connection state when the remote port closes without a protocol frame', async () => {
+    const unsubscribe = vi.fn();
+    const handle = exposeFileSystem({ watch: vi.fn(() => unsubscribe) });
+    const channel = new MessageChannel();
+    for (const handler of messageHandlers) {
+      handler(new MessageEvent('message', { data: { type: filesystemBridgeConnectMessageType, port: channel.port1 } }));
+    }
+    const client = createFileSystemBridgeProxy<{ watch: unknown }>({
+      port: channel.port2,
+      dispose() {
+        channel.port2.close();
+      },
+    });
+    const watch = client.watchReady({ paths: ['/main.ts'] }, vi.fn());
+    await watch.ready;
+    expect(handle.activePorts.size).toBe(1);
+
+    channel.port2.close();
+
+    await vi.waitFor(() => {
+      expect(handle.activePorts.size).toBe(0);
+      expect(handle.serverHandles.size).toBe(0);
+      expect(unsubscribe).toHaveBeenCalledOnce();
+    });
+    handle.cleanup();
+  });
+
+  it('should deliver continuous UI traffic by the first 500 ms deadline', () => {
+    vi.useFakeTimers();
+    const bus = new ChangeEventBus();
+    const handle = exposeFileSystem(
+      {},
+      {
+        changeEventBus: bus,
+        createCoalescer: (deliver, coalescingWindow, onOverflow) =>
+          new EventCoalescer(deliver, { coalescingWindow, onOverflow }),
+      },
+    );
+    const channel = new MessageChannel();
+    for (const handler of messageHandlers) {
+      handler(new MessageEvent('message', { data: { type: filesystemBridgeConnectMessageType, port: channel.port1 } }));
+    }
+    const emitSpy = vi.spyOn([...handle.serverHandles.values()][0]!, 'emit');
+
+    bus.emit(written('/a.txt'));
+    vi.advanceTimersByTime(400);
+    bus.emit(written('/b.txt'));
+    vi.advanceTimersByTime(100);
+
+    expect(emitSpy).toHaveBeenCalledTimes(2);
+    expect(emitSpy).toHaveBeenNthCalledWith(1, 'fileChanged', written('/a.txt'));
+    expect(emitSpy).toHaveBeenNthCalledWith(2, 'fileChanged', written('/b.txt'));
 
     handle.cleanup();
     channel.port2.close();
@@ -642,9 +626,9 @@ describe('exposeFileSystem skip-originator dispatch', () => {
 
   it('should deliver a batch write to a peer exact watcher while suppressing the author echo', async () => {
     const providerRegistry = new ProviderRegistry();
-    const provider = await providerRegistry.createMountProvider({ backend: 'memory' });
+    const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:bridge-test' });
     const mountTable = new MountTable();
-    mountTable.mount('/', provider, { backend: 'memory' });
+    mountTable.mount('/', provider, { backend: 'memory', storageRootKey: 'memory:bridge-test' });
     const bus = new ChangeEventBus();
     const crossTabCoordinator = new CrossTabCoordinator();
     const service = new WorkspaceFileService({
@@ -654,7 +638,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       crossTabCoordinator,
       mountTable,
     });
-    const handle = exposeFileSystem(service, { changeEventBus: bus, watchHandler: service });
+    const handle = exposeFileSystem(service, { changeEventBus: bus });
     const fireConnect = (port: MessagePort): void => {
       const messageHandler = messageHandlers[0];
       expect(messageHandler).toBeDefined();
@@ -687,23 +671,21 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     const stopPeerEvents = clientB.listen('fileChanged', (event) => {
       peerEvents.push(event);
     });
-    const stopPeerWatch = clientB.watch({ paths: [path], correlationId: 'runtime-main' }, (event) => {
+    const peerWatch = clientB.watchReady({ paths: [path] }, (event) => {
       peerWatchEvents.push(event);
     });
 
     try {
-      await vi.waitFor(() => {
-        expect(service.watchRegistry.subscriptionCount).toBe(1);
-      });
+      await peerWatch.ready;
       await clientA.writeFiles({ [path]: { content: 'cube([10, 10, 10]);' } });
       await vi.waitFor(() => {
-        expect(peerWatchEvents).toEqual([{ type: 'change', path, correlationId: 'runtime-main' }]);
+        expect(peerWatchEvents).toEqual([{ type: 'change', path }]);
         expect(peerEvents).toEqual([{ type: 'fileWritten', path, backend: 'memory' }]);
       });
 
       expect(authorEvents).toEqual([]);
     } finally {
-      stopPeerWatch();
+      peerWatch.unsubscribe();
       stopAuthorEvents();
       stopPeerEvents();
       clientA.dispose();
@@ -764,16 +746,6 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       name: 'mkdir',
       args: ['/d'],
       handler: buildEmitter(() => ({ type: 'directoryChanged', path: '/', backend: 'memory' })),
-    },
-    {
-      name: 'rename',
-      args: ['/a', '/b'],
-      handler: buildEmitter((a) => ({
-        type: 'fileRenamed',
-        oldPath: a[0] as string,
-        newPath: a[1] as string,
-        backend: 'memory',
-      })),
     },
     {
       name: 'unlink',
@@ -852,6 +824,30 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     chB.port2.close();
   });
 
+  it('transfers provider-owned reads without detaching authoritative bytes', async () => {
+    const provider = new MemoryProvider();
+    await provider.writeFile('/data.bin', new Uint8Array([1, 2, 3]));
+    const handle = exposeFileSystem({ readFile: provider.readFile.bind(provider) });
+    const channel = new MessageChannel();
+    messageHandlers[0]!(
+      new MessageEvent('message', {
+        data: { type: filesystemBridgeConnectMessageType, port: channel.port1 },
+      }),
+    );
+    const client = createBridgeCall(fsBridgePort(channel.port2, 'fs-bridge-owned-read-client'));
+
+    try {
+      await expect(client.call('readFile', ['/data.bin'])).resolves.toEqual(new Uint8Array([1, 2, 3]));
+      await expect(client.call('readFile', ['/data.bin'])).resolves.toEqual(new Uint8Array([1, 2, 3]));
+      await expect(provider.readFile('/data.bin')).resolves.toEqual(new Uint8Array([1, 2, 3]));
+    } finally {
+      client.dispose();
+      handle.cleanup();
+      channel.port1.close();
+      channel.port2.close();
+    }
+  });
+
   it('should deliver observer-sourced bus events to every connected port', async () => {
     const bus = new ChangeEventBus();
 
@@ -898,5 +894,210 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     handle.cleanup();
     chA.port2.close();
     chB.port2.close();
+  });
+
+  it('does not broadcast an in-flight write after its project route is replaced', async () => {
+    const projectId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
+    const oldScope = { backend: 'memory', storageRootKey: 'memory:bridge-stale-old' } satisfies WorkspaceScope;
+    const providerRegistry = new ProviderRegistry();
+    const rootProvider = await providerRegistry.getProvider({
+      backend: 'memory',
+      storageRootKey: 'memory:bridge-stale-root',
+    });
+    const mountTable = new MountTable();
+    mountTable.mount('/', rootProvider, { backend: 'memory', storageRootKey: 'memory:bridge-stale-root' });
+    const bus = new ChangeEventBus();
+    const service = new WorkspaceFileService({
+      providerRegistry,
+      resourceQueue: new ResourceQueue(),
+      eventBus: bus,
+      mountTable,
+    });
+    await service.configureProjectRoots({
+      projects: [
+        {
+          projectId,
+          ...oldScope,
+          providerBasePath: `/projects/${projectId}`,
+        },
+      ],
+      roots: [],
+    });
+    const oldProvider = await providerRegistry.getProvider(oldScope);
+    const originalWrite = oldProvider.writeFile.bind(oldProvider);
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    vi.spyOn(oldProvider, 'writeFile').mockImplementation(async (path, data) => {
+      started.resolve();
+      await release.promise;
+      await originalWrite(path, data);
+    });
+    const rooted = service.createRootedFileSystem(`/projects/${projectId}`);
+    const queuedWrite = rooted.writeFile('/queued.txt', 'old provider');
+    await started.promise;
+    await service.configureProjectRoots({
+      projects: [
+        {
+          projectId,
+          backend: 'memory',
+          storageRootKey: 'memory:bridge-stale-new',
+          providerBasePath: `/projects/${projectId}`,
+        },
+      ],
+      roots: [],
+    });
+
+    const handle = exposeFileSystem(service, { changeEventBus: bus });
+    const channel = new MessageChannel();
+    messageHandlers[0]!(
+      new MessageEvent('message', {
+        data: { type: filesystemBridgeConnectMessageType, port: channel.port1 },
+      }),
+    );
+    const client = createBridgeCall(fsBridgePort(channel.port2, 'fs-bridge-stale-route-client'));
+    const received: unknown[] = [];
+    const stopListening = client.listen('fileChanged', (event) => received.push(event));
+
+    try {
+      release.resolve();
+      await queuedWrite;
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 30);
+      });
+
+      expect(received).toEqual([]);
+      await expect(oldProvider.readFile(`/projects/${projectId}/queued.txt`, 'utf8')).resolves.toBe('old provider');
+      await expect(service.exists(`/projects/${projectId}/queued.txt`)).resolves.toBe(false);
+    } finally {
+      release.resolve();
+      stopListening();
+      client.dispose();
+      handle.cleanup();
+      service.dispose();
+      channel.port1.close();
+      channel.port2.close();
+    }
+  });
+
+  it('captures one rooted handler per scoped port and excludes scoped ports from global broadcasts', async () => {
+    const alphaProjectId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
+    const betaProjectId = 'proj_bbbbbbbbbbbbbbbbbbbbb';
+    const providerRegistry = new ProviderRegistry();
+    const rootProvider = await providerRegistry.getProvider({
+      backend: 'memory',
+      storageRootKey: 'memory:bridge-root',
+    });
+    const mountTable = new MountTable();
+    mountTable.mount('/', rootProvider, { backend: 'memory' });
+    const bus = new ChangeEventBus();
+    const service = new WorkspaceFileService({
+      providerRegistry,
+      resourceQueue: new ResourceQueue(),
+      eventBus: bus,
+      mountTable,
+    });
+    await service.configureProjectRoots({
+      projects: [
+        {
+          projectId: alphaProjectId,
+          backend: 'memory',
+          storageRootKey: 'memory:bridge-alpha',
+          providerBasePath: `/projects/${alphaProjectId}`,
+        },
+        {
+          projectId: betaProjectId,
+          backend: 'memory',
+          storageRootKey: 'memory:bridge-beta',
+          providerBasePath: `/projects/${betaProjectId}`,
+        },
+      ],
+      roots: [],
+    });
+    const handlerForRoot = vi.fn((root: string, context: { originClientId?: string }) =>
+      service.createRootedFileSystem(root, context),
+    );
+    const handle = exposeFileSystem(service, { changeEventBus: bus, handlerForRoot });
+    const connect = (port: MessagePort, root: string): void => {
+      messageHandlers[0]!(
+        new MessageEvent('message', {
+          data: { type: filesystemBridgeConnectMessageType, port, root },
+        }),
+      );
+    };
+    const alphaChannel = new MessageChannel();
+    const betaChannel = new MessageChannel();
+    connect(alphaChannel.port1, `/projects/${alphaProjectId}`);
+    connect(betaChannel.port1, `/projects/${betaProjectId}`);
+    const alpha = createFileSystemBridgeProxy<RootedFileSystem>({
+      port: alphaChannel.port2,
+      dispose: () => {
+        alphaChannel.port2.close();
+      },
+    });
+    const beta = createFileSystemBridgeProxy<RootedFileSystem>({
+      port: betaChannel.port2,
+      dispose: () => {
+        betaChannel.port2.close();
+      },
+    });
+    const globalEvents: unknown[] = [];
+    const stopBroadcast = alpha.listen('fileChanged', (event) => globalEvents.push(event));
+    const watchEvents: WatchEvent[] = [];
+    const stopWatch = alpha.watch({ paths: ['/'], recursive: true }, (event) => watchEvents.push(event));
+
+    try {
+      await alpha.writeFile('/same.ts', 'alpha');
+      await beta.writeFile('/same.ts', 'beta');
+      await service.writeFile(`/projects/${alphaProjectId}/external.ts`, 'external');
+
+      await expect(alpha.readFile('/same.ts', 'utf8')).resolves.toBe('alpha');
+      await expect(beta.readFile('/same.ts', 'utf8')).resolves.toBe('beta');
+      await vi.waitFor(() => {
+        expect(watchEvents).toContainEqual({ type: 'change', path: '/external.ts' });
+      });
+      expect(watchEvents).not.toContainEqual({ type: 'change', path: '/same.ts' });
+      expect(globalEvents).toEqual([]);
+      expect(handlerForRoot).toHaveBeenCalledTimes(2);
+      expect(handlerForRoot.mock.calls[0]?.[0]).toBe(`/projects/${alphaProjectId}`);
+      expect(handlerForRoot.mock.calls[0]?.[1].originClientId).toMatch(/^port_/u);
+      expect(handlerForRoot.mock.calls[1]?.[0]).toBe(`/projects/${betaProjectId}`);
+      expect(handlerForRoot.mock.calls[1]?.[1].originClientId).toMatch(/^port_/u);
+    } finally {
+      stopWatch();
+      stopBroadcast();
+      alpha.dispose();
+      beta.dispose();
+      handle.cleanup();
+      service.dispose();
+      alphaChannel.port1.close();
+      betaChannel.port1.close();
+    }
+  });
+
+  it('returns a typed root error over RPC instead of exposing the authority namespace', async () => {
+    const handle = exposeFileSystem({}, { handlerForRoot: () => undefined });
+    const channel = new MessageChannel();
+    messageHandlers[0]!(
+      new MessageEvent('message', {
+        data: { type: filesystemBridgeConnectMessageType, port: channel.port1, root: '/projects/missing' },
+      }),
+    );
+    const proxy = createFileSystemBridgeProxy<{ readFile(path: string): Promise<Uint8Array<ArrayBuffer>> }>({
+      port: channel.port2,
+      dispose: () => {
+        channel.port2.close();
+      },
+    });
+
+    try {
+      await expect(proxy.readFile('/main.ts')).rejects.toMatchObject({
+        code: 'ROOT_UNAVAILABLE',
+        message: 'The requested filesystem root is unavailable.',
+      });
+    } finally {
+      proxy.dispose();
+      handle.cleanup();
+      channel.port1.close();
+    }
   });
 });

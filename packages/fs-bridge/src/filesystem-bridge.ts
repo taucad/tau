@@ -2,7 +2,12 @@
  * Filesystem bridge: worker-side ({@link exposeFileSystem}) and client-side ({@link createFileSystemBridge}).
  */
 
-import { getEventOrigin, isWorkspaceMutationError } from '@taucad/filesystem';
+import {
+  getEventOrigin,
+  isEventGloballyVisible,
+  isWorkspaceMutationError,
+  RootedFileSystemError,
+} from '@taucad/filesystem';
 import { safeDispose } from '@taucad/utils/dispose';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { ChangeEvent } from '@taucad/types';
@@ -15,7 +20,6 @@ import type {
   WorkspaceMutationContext,
   WorkspaceMutationError,
   WorkspaceMutationErrorCode,
-  WorkspaceScope,
 } from '@taucad/filesystem';
 import type { BridgeServerHandle, Port, StringKeyedObject } from '@taucad/rpc/bridge';
 import { catchMessages, createBridgeCall, createBridgeServer } from '@taucad/rpc/bridge';
@@ -58,22 +62,15 @@ export type FileSystemBridgeConnection = {
  */
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- proxy target types may be class/interface services without string index signatures.
 export type FileSystemBridgeProxy<T extends object> = T & {
+  readonly ready: Promise<void>;
+  readonly hello: { readonly payload: unknown };
   dispose(): void;
   listen(event: string, handler: (data: unknown) => void): () => void;
   watch(request: WatchRequest, handler: (event: WatchEvent) => void): () => void;
-};
-
-/**
- * Optional shared file pool used by filesystem bridge clients for zero-IPC
- * reads and fileChanged-driven invalidation.
- *
- * Structurally compatible with `SharedPool` from `@taucad/memory`.
- *
- * @public
- */
-export type FileSystemBridgeFilePool = {
-  resolveCopy(path: string): Uint8Array<ArrayBuffer> | undefined;
-  invalidate?(path: string): void;
+  watchReady(
+    request: WatchRequest,
+    handler: (event: WatchEvent) => void,
+  ): { unsubscribe: () => void; ready: Promise<void> };
 };
 
 const isFileSystemBridgeConnection = (
@@ -102,33 +99,53 @@ const cloneWritePayloadForTransfer = (value: unknown): unknown => {
   return value;
 };
 
+const cloneFileMapForTransfer = (value: unknown): Record<string, unknown> => {
+  if (value === null || typeof value !== 'object') {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([path, descriptor]) => {
+      if (descriptor === null || typeof descriptor !== 'object' || !('content' in descriptor)) {
+        return [path, descriptor];
+      }
+      const entry = descriptor as Record<string, unknown>;
+      return [path, { ...entry, content: cloneWritePayloadForTransfer(entry['content']) }];
+    }),
+  );
+};
+
 const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] => {
   if (method === 'writeFile' && args.length >= 2) {
     return [args[0], cloneWritePayloadForTransfer(args[1]), ...args.slice(2)];
+  }
+
+  if (
+    method === 'commitPendingProjectDirectory' &&
+    args.length > 0 &&
+    args[0] !== null &&
+    typeof args[0] === 'object'
+  ) {
+    const input = args[0] as Record<string, unknown>;
+    return [
+      {
+        ...input,
+        files: cloneFileMapForTransfer(input['files']),
+        manifest: cloneWritePayloadForTransfer(input['manifest']),
+      },
+      ...args.slice(1),
+    ];
   }
 
   if (method !== 'writeFiles' || args.length === 0 || args[0] === null || typeof args[0] !== 'object') {
     return args;
   }
 
-  const files: Record<string, unknown> = {};
-  for (const [path, descriptor] of Object.entries(args[0] as Record<string, unknown>)) {
-    if (descriptor !== null && typeof descriptor === 'object' && 'content' in descriptor) {
-      const entry = descriptor as Record<string, unknown>;
-      files[path] = {
-        ...entry,
-        content: cloneWritePayloadForTransfer(entry['content']),
-      };
-      continue;
-    }
-    files[path] = descriptor;
-  }
-
-  return [files, ...args.slice(1)];
+  return [cloneFileMapForTransfer(args[0]), ...args.slice(1)];
 };
 
 /**
- * The eight worker-side filesystem methods that receive a
+ * Worker-side filesystem methods that receive a
  * {@link WorkspaceMutationContext} for change-bus echo suppression.
  *
  * Hand-written union; see {@link MutationOverrideMap} below for the
@@ -140,13 +157,13 @@ type MutationMethodName =
   | 'writeFile'
   | 'writeFiles'
   | 'mkdir'
-  | 'rename'
   | 'move'
   | 'bulkMove'
   | 'unlink'
   | 'rmdir'
   | 'duplicateFile'
-  | 'copyDirectory';
+  | 'copyDirectory'
+  | 'commitPendingProjectDirectory';
 
 /**
  * Mutating-method projection of {@link WorkspaceFileService}. Derived via
@@ -169,10 +186,9 @@ type MutationOverrideMap = {
 
 type WriteFileParameters = Parameters<MutatingMethods['writeFile']>;
 type WriteFilesParameters = Parameters<MutatingMethods['writeFiles']>;
-type RenameParameters = Parameters<MutatingMethods['rename']>;
 type DuplicateFileParameters = Parameters<MutatingMethods['duplicateFile']>;
 type CopyDirectoryParameters = Parameters<MutatingMethods['copyDirectory']>;
-type MoveOptions = { overwrite?: boolean };
+type CommitPendingProjectDirectoryParameters = Parameters<MutatingMethods['commitPendingProjectDirectory']>;
 type BulkMoveEdit = Readonly<{ source: string; target: string }>;
 type BulkMoveResult = {
   moved: ReadonlyArray<{ edit: { source: string; target: string }; stat: FileStat }>;
@@ -261,15 +277,11 @@ export function bindMutationContextForPort<T extends StringKeyedObject>(
       mutatingService.writeFile(path, data, context),
     writeFiles: async (files: WriteFilesParameters[0]): Promise<void> => mutatingService.writeFiles(files, context),
     mkdir: async (path: string, options?: MkdirOptions): Promise<void> => mutatingService.mkdir(path, options, context),
-    rename: async (from: RenameParameters[0], to: RenameParameters[1]): Promise<void> =>
-      mutatingService.rename(from, to, context),
-    move: async (source: string, target: string, options?: MoveOptions): Promise<FileStat> =>
-      mutatingService.move(source, target, options, context),
-    bulkMove: async (edits: readonly BulkMoveEdit[], options?: MoveOptions): Promise<BulkMoveResult> =>
-      serializeBulkMoveResult(await mutatingService.bulkMove(edits, options, context)),
-    unlink: async (path: string, options?: { scope?: WorkspaceScope }): Promise<void> =>
-      mutatingService.unlink(path, options, context),
-    rmdir: async (path: string, options?: { scope?: WorkspaceScope; recursive?: boolean }): Promise<void> =>
+    move: async (source: string, target: string): Promise<FileStat> => mutatingService.move(source, target, context),
+    bulkMove: async (edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult> =>
+      serializeBulkMoveResult(await mutatingService.bulkMove(edits, context)),
+    unlink: async (path: string): Promise<void> => mutatingService.unlink(path, context),
+    rmdir: async (path: string, options?: { recursive?: boolean }): Promise<void> =>
       mutatingService.rmdir(path, options, context),
     duplicateFile: async (
       sourcePath: DuplicateFileParameters[0],
@@ -279,10 +291,12 @@ export function bindMutationContextForPort<T extends StringKeyedObject>(
       sourcePath: CopyDirectoryParameters[0],
       destinationPath: CopyDirectoryParameters[1],
     ): Promise<void> => mutatingService.copyDirectory(sourcePath, destinationPath, context),
+    commitPendingProjectDirectory: async (input: CommitPendingProjectDirectoryParameters[0]) =>
+      mutatingService.commitPendingProjectDirectory(input, context),
   };
   const preflightOverrides: PreflightOverrideMap = {
-    canMove: async (source: string, target: string, options?: MoveOptions): Promise<true | WorkspaceMutationError> =>
-      serializeMutationResult(await preflightService.canMove(source, target, options)),
+    canMove: async (source: string, target: string): Promise<true | WorkspaceMutationError> =>
+      serializeMutationResult(await preflightService.canMove(source, target)),
     canRename: async (source: string, newName: string): Promise<true | WorkspaceMutationError> =>
       serializeMutationResult(await preflightService.canRename(source, newName)),
     canCreate: async (path: string, kind: 'file' | 'directory'): Promise<true | WorkspaceMutationError> =>
@@ -333,13 +347,12 @@ export type MutationMethodNameInternal = MutationMethodName;
 
 /**
  * Minimal interface for an event coalescer that batches ChangeEvents
- * before delivering them. Matches the push/flush/dispose API surface
- * of `EventCoalescer` from `@taucad/filesystem`.
+ * before delivering them. The bridge needs only enqueue and disposal;
+ * reset ordering remains internal to the filesystem watch registry.
  * @public
  */
 export type ChangeEventCoalescer = {
   push(event: ChangeEvent): void;
-  flush(): void;
   dispose(): void;
 };
 
@@ -354,29 +367,9 @@ export type CoalescerFactory = (
   deliver: (events: ChangeEvent[]) => void,
   /** Coalescing window. Milliseconds. */
   coalescingWindow: number,
+  /** Report discarded events so the bridge can replace them with loss signals. */
+  onOverflow: (events: readonly ChangeEvent[]) => void,
 ) => ChangeEventCoalescer;
-
-/**
- * Minimal interface for a throttled worker that delivers events in chunks.
- * Matches the push/flush/dispose API surface of `ThrottledWorker` from
- * `@taucad/filesystem`.
- * @public
- */
-export type ThrottledEventWorker = {
-  push(items: ChangeEvent[]): void;
-  flush(): void;
-  dispose(): void;
-};
-
-/**
- * Factory that creates a {@link ThrottledEventWorker}.
- *
- * Called by {@link exposeFileSystem} with a handler that delivers chunks
- * to all connected bridge ports. The factory receives the handler and
- * should return a throttled worker wrapping it.
- * @public
- */
-export type ThrottledWorkerFactory = (handler: (chunk: ChangeEvent[]) => void) => ThrottledEventWorker;
 
 /**
  * Options for configuring the filesystem bridge message type.
@@ -384,6 +377,12 @@ export type ThrottledWorkerFactory = (handler: (chunk: ChangeEvent[]) => void) =
  */
 export type FileSystemBridgeOptions = {
   messageType?: string;
+  /**
+   * Project mount to expose as `/` for this connection. The root is consumed
+   * by the filesystem server when the connection is accepted; it is never
+   * forwarded to runtime calls.
+   */
+  root?: string;
   /** Coalescing window for UI-bound fileChanged events (default: 500). Milliseconds. */
   uiCoalescingWindow?: number;
   /**
@@ -392,22 +391,6 @@ export type FileSystemBridgeOptions = {
    * When omitted, events pass through without batching.
    */
   createCoalescer?: CoalescerFactory;
-  /**
-   * Factory for creating a throttled event worker. When provided alongside
-   * `createCoalescer`, coalesced batches flow through the throttled worker
-   * for chunked delivery to bridge clients.
-   */
-  createThrottledWorker?: ThrottledWorkerFactory;
-};
-
-/**
- * Optional watch handler for bridge servers.
- * When provided, enables watch/unwatch control messages over the bridge.
- * @public
- */
-export type BridgeWatchHandler = {
-  watch(request: WatchRequest, handler: (event: WatchEvent) => void, ownerId?: string): () => void;
-  cleanupWatches(ownerId: string): void;
 };
 
 /**
@@ -430,6 +413,43 @@ export type ExposeFileSystemHandle = {
 };
 
 /**
+ * Creates the filesystem handler captured by one rooted bridge connection.
+ * @public
+ */
+export type RootedFileSystemHandlerFactory = (
+  root: string,
+  context: WorkspaceMutationContext,
+) => StringKeyedObject | undefined;
+
+type FileSystemBridgeConnectEnvelope = {
+  readonly type: unknown;
+  readonly port: MessagePort;
+  readonly root?: unknown;
+};
+
+const isFileSystemBridgeConnectEnvelope = (value: unknown): value is FileSystemBridgeConnectEnvelope =>
+  typeof value === 'object' &&
+  value !== null &&
+  'type' in value &&
+  'port' in value &&
+  value.port instanceof MessagePort;
+
+const createUnavailableHandlers = (error: unknown): StringKeyedObject =>
+  new Proxy(
+    {},
+    {
+      get(_target, property) {
+        if (typeof property === 'symbol') {
+          return undefined;
+        }
+        return (): never => {
+          throw error;
+        };
+      },
+    },
+  );
+
+/**
  * Expose a filesystem to incoming bridge connections.
  *
  * Listens on the worker's global scope for messages with the specified type
@@ -443,24 +463,30 @@ export type ExposeFileSystemHandle = {
  * - `serverHandles`: map from port to BridgeServerHandle (with emit())
  *
  * @param handlers - Filesystem handler methods to expose
- * @param options - Optional message type and watch handler
+ * @param options - Optional message type, rooted-handler factory, and change bus
  * @returns Handle with cleanup, activePorts, and serverHandles
  * @public
  */
 export function exposeFileSystem<T extends StringKeyedObject>(
   handlers: T,
-  options?: FileSystemBridgeOptions & { watchHandler?: BridgeWatchHandler; changeEventBus?: BridgeChangeEventBus },
+  options?: FileSystemBridgeOptions & {
+    handlerForRoot?: RootedFileSystemHandlerFactory;
+    changeEventBus?: BridgeChangeEventBus;
+  },
 ): ExposeFileSystemHandle {
   const messageType = options?.messageType ?? filesystemBridgeConnectMessageType;
   const activePorts = new Set<MessagePort>();
   const serverHandles = new Map<MessagePort, BridgeServerHandle>();
   const portIds = new Map<MessagePort, string>();
-  const portWatches = new Map<MessagePort, Map<string, () => void>>();
+  const scopedPorts = new Set<MessagePort>();
 
   const deliverToHandles = (events: ChangeEvent[]): void => {
     for (const event of events) {
       const originClientId = getEventOrigin(event);
       for (const [recipientPort, handle] of serverHandles) {
+        if (scopedPorts.has(recipientPort)) {
+          continue;
+        }
         const recipientPortId = portIds.get(recipientPort);
         if (originClientId !== undefined && recipientPortId !== undefined && originClientId === recipientPortId) {
           continue;
@@ -470,77 +496,91 @@ export function exposeFileSystem<T extends StringKeyedObject>(
     }
   };
 
-  const throttledWorker = options?.createThrottledWorker?.(deliverToHandles);
-
-  const deliverFromCoalescer = throttledWorker
-    ? (events: ChangeEvent[]): void => {
-        throttledWorker.push(events);
-      }
-    : deliverToHandles;
-
   let coalescer: ChangeEventCoalescer | undefined;
   if (options?.createCoalescer) {
-    coalescer = options.createCoalescer(deliverFromCoalescer, options.uiCoalescingWindow ?? defaultUiCoalescingWindow);
+    coalescer = options.createCoalescer(
+      deliverToHandles,
+      options.uiCoalescingWindow ?? defaultUiCoalescingWindow,
+      (discarded) => {
+        const affectedBackends = new Set(discarded.map((event) => event.backend));
+        deliverToHandles(
+          [...affectedBackends].map((backend) => ({
+            type: 'backendChanged',
+            backend,
+          })),
+        );
+      },
+    );
   }
 
   const unsubscribeEventBus = options?.changeEventBus?.subscribe((event) => {
+    const changeEvent = event as ChangeEvent;
+    if (!isEventGloballyVisible(changeEvent)) {
+      return;
+    }
     if (coalescer) {
-      coalescer.push(event as ChangeEvent);
+      coalescer.push(changeEvent);
     } else {
-      deliverToHandles([event as ChangeEvent]);
+      deliverToHandles([changeEvent]);
     }
   });
 
-  const handler = (event: MessageEvent): void => {
-    if (event.data?.type === messageType && event.data.port instanceof MessagePort) {
-      const port = event.data.port as MessagePort;
+  const handler = (event: MessageEvent<unknown>): void => {
+    if (isFileSystemBridgeConnectEnvelope(event.data) && event.data.type === messageType) {
+      const { port } = event.data;
       const stopAndReplayMessages = catchMessages(port);
       const portId = `port_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
       activePorts.add(port);
       portIds.set(port, portId);
-      portWatches.set(port, new Map());
+
+      let disconnected = false;
+      const disconnectPort = (): void => {
+        if (disconnected) {
+          return;
+        }
+        disconnected = true;
+        const handle = serverHandles.get(port);
+        port.removeEventListener('close', disconnectPort);
+        activePorts.delete(port);
+        portIds.delete(port);
+        scopedPorts.delete(port);
+        serverHandles.delete(port);
+        safeDispose(() => handle?.dispose());
+        safeDispose(() => {
+          port.close();
+        });
+      };
+      port.addEventListener('close', disconnectPort);
 
       const wrappedPort = wrapFileSystemBridgePort(port, 'expose-fs-bridge');
+      const requestedRoot = typeof event.data.root === 'string' ? event.data.root : undefined;
+      const mutationContext = { originClientId: portId };
+      let portHandlers: StringKeyedObject;
+      let handlersAvailable = true;
+      if (requestedRoot === undefined) {
+        portHandlers = bindMutationContextForPort(handlers, mutationContext);
+      } else {
+        scopedPorts.add(port);
+        try {
+          const rootedHandlers = options?.handlerForRoot?.(requestedRoot, mutationContext);
+          handlersAvailable = rootedHandlers !== undefined;
+          portHandlers = rootedHandlers ?? createUnavailableHandlers(new RootedFileSystemError('ROOT_UNAVAILABLE'));
+        } catch (error) {
+          handlersAvailable = false;
+          portHandlers = createUnavailableHandlers(error);
+        }
+      }
 
-      const portBoundHandlers = bindMutationContextForPort(handlers, { originClientId: portId });
-      const serverHandle = createBridgeServer<T, WatchRequest, WatchEvent>(portBoundHandlers, wrappedPort, {
+      const handlerRecord = portHandlers as { capabilities?: unknown; watch?: unknown };
+
+      const serverHandle = createBridgeServer<StringKeyedObject, WatchRequest, WatchEvent>(portHandlers, wrappedPort, {
+        hello: {
+          capabilities: handlersAvailable ? handlerRecord.capabilities : undefined,
+          watchable: handlersAvailable && typeof handlerRecord.watch === 'function',
+        },
         onDisconnect() {
-          const watches = portWatches.get(port);
-          if (watches) {
-            for (const unsubscribe of watches.values()) {
-              unsubscribe();
-            }
-            portWatches.delete(port);
-          }
-          options?.watchHandler?.cleanupWatches(portId);
-          activePorts.delete(port);
-          portIds.delete(port);
-          serverHandles.delete(port);
-          safeDispose(() => {
-            port.close();
-          });
-        },
-        onWatch(watchId: string, request: WatchRequest) {
-          if (!options?.watchHandler) {
-            return;
-          }
-          const unsubscribe = options.watchHandler.watch(
-            request,
-            (watchEvent: WatchEvent) => {
-              serverHandle.emit(`watch:${watchId}`, watchEvent);
-            },
-            portId,
-          );
-          portWatches.get(port)?.set(watchId, unsubscribe);
-        },
-        onUnwatch(watchId: string) {
-          const watches = portWatches.get(port);
-          const unsubscribe = watches?.get(watchId);
-          if (unsubscribe) {
-            unsubscribe();
-            watches?.delete(watchId);
-          }
+          disconnectPort();
         },
       });
       serverHandles.set(port, serverHandle);
@@ -559,7 +599,6 @@ export function exposeFileSystem<T extends StringKeyedObject>(
   return {
     cleanup() {
       coalescer?.dispose();
-      throttledWorker?.dispose();
       unsubscribeEventBus?.();
       self.removeEventListener('message', handler);
       for (const port of activePorts) {
@@ -567,7 +606,12 @@ export function exposeFileSystem<T extends StringKeyedObject>(
           port.close();
         });
       }
+      for (const handle of serverHandles.values()) {
+        safeDispose(() => handle.dispose());
+      }
       activePorts.clear();
+      portIds.clear();
+      scopedPorts.clear();
       serverHandles.clear();
     },
     activePorts,
@@ -634,14 +678,15 @@ export async function waitForWorkerReady(worker: Worker | EventTarget, signal?: 
 export function openFileSystemBridge(worker: Worker, options?: FileSystemBridgeOptions): FileSystemBridgeConnection {
   const messageType = options?.messageType ?? filesystemBridgeConnectMessageType;
   const channel = new MessageChannel();
-  worker.postMessage({ type: messageType, port: channel.port1 }, [channel.port1]);
+  const envelope =
+    options?.root === undefined
+      ? { type: messageType, port: channel.port1 }
+      : { type: messageType, port: channel.port1, root: options.root };
+  worker.postMessage(envelope, [channel.port1]);
   const rawPort = channel.port2;
   return {
     port: rawPort,
     dispose() {
-      safeDispose(() => {
-        rawPort.postMessage({ type: 'disconnect' });
-      });
       safeDispose(() => {
         rawPort.close();
       });
@@ -676,19 +721,13 @@ export function createFileSystemBridge(worker: Worker, options?: FileSystemBridg
  * Create a typed proxy over a filesystem bridge.
  *
  * @param bridge - Bridge returned from {@link createFileSystemBridge} or raw connection from {@link openFileSystemBridge}.
- * @param options - Optional filesystem-specific client behavior such as shared file-pool reads.
  * @returns Typed proxy for bridge method calls.
  * @public
  */
 export function createFileSystemBridgeProxy<
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- proxy target types may be class/interface services without string index signatures.
   T extends object,
->(
-  bridge: FileSystemBridge | FileSystemBridgeConnection,
-  options?: {
-    filePool?: FileSystemBridgeFilePool;
-  },
-): FileSystemBridgeProxy<T> {
+>(bridge: FileSystemBridge | FileSystemBridgeConnection): FileSystemBridgeProxy<T> {
   const resolvedBridge: FileSystemBridge = isFileSystemBridgeConnection(bridge)
     ? {
         port: wrapFileSystemBridgePort(bridge.port, 'fs-bridge-proxy'),
@@ -699,42 +738,23 @@ export function createFileSystemBridgeProxy<
     resolvedBridge.port.start();
   }
 
-  const { call, listen, watch, dispose } = createBridgeCall<WatchRequest, WatchEvent>(resolvedBridge.port, {
-    prepareCallArgs: cloneWriteArgsForTransfer,
-  });
-  const filePoolUnsubscribe = options?.filePool?.invalidate
-    ? listen('fileChanged', (event) => {
-        const payload = event as { path?: string };
-        if (typeof payload.path === 'string') {
-          options.filePool?.invalidate?.(payload.path);
-        }
-      })
-    : undefined;
+  const { call, listen, watch, watchReady, ready, hello, dispose } = createBridgeCall<WatchRequest, WatchEvent>(
+    resolvedBridge.port,
+    {
+      prepareCallArgs: cloneWriteArgsForTransfer,
+      resolveCallTimeout: (method) => (method === 'commitPendingProjectDirectory' ? 'none' : undefined),
+    },
+  );
   let isDisposed = false;
 
-  const invoke = async (method: string, args: unknown[]): Promise<unknown> => {
-    if (method === 'readFile' && options?.filePool) {
-      const filePath = args[0] as string;
-      const encoding = args[1] as string | undefined;
-      const cached = options.filePool.resolveCopy(filePath);
-      if (cached) {
-        return encoding === 'utf8' ? new TextDecoder().decode(cached) : new Uint8Array(cached);
-      }
-    }
-    return call(method, args);
-  };
-
   return new Proxy({} as FileSystemBridgeProxy<T>, {
-    get(_target, property) {
+    get(_target, property): unknown {
       if (property === 'dispose') {
         return (): void => {
           if (isDisposed) {
             return;
           }
           isDisposed = true;
-          safeDispose(() => {
-            filePoolUnsubscribe?.();
-          });
           safeDispose(() => {
             dispose();
           });
@@ -749,13 +769,22 @@ export function createFileSystemBridgeProxy<
       if (property === 'watch') {
         return watch;
       }
+      if (property === 'watchReady') {
+        return watchReady;
+      }
+      if (property === 'ready') {
+        return ready;
+      }
+      if (property === 'hello') {
+        return hello;
+      }
       if (property === 'then' || property === 'toJSON' || typeof property === 'symbol') {
         return undefined;
       }
       if (isDisposed) {
         throw new Error(`Filesystem bridge proxy has been disposed — cannot call '${property}'`);
       }
-      return async (...args: unknown[]) => invoke(property, args);
+      return (...args: unknown[]) => call(property, args);
     },
   });
 }

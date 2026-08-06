@@ -5,10 +5,11 @@ import type { ContentChangeEvent, FileContentResult, OutcomeChangeEvent } from '
 import { BinaryFileError, FileNotFoundError, FileTooLargeError } from '#file-content-errors.js';
 import type { FileSystemClient } from '#file-system-client.js';
 import { SharedPool } from '@taucad/memory';
-import type { ChangeEvent } from '@taucad/types';
+import type { ChangeEvent, FileStat } from '@taucad/types';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
 import { WorkspacePathResolver, WorkspaceScopeViolationError } from '#workspace-path-resolver.js';
 import { RefreshGenerationGuard } from '#refresh-generation-guard.js';
+import { WorkspaceMutationError } from '@taucad/filesystem';
 
 function createMockProxy(overrides?: Partial<FileSystemClient>): FileSystemClient {
   const proxy = mock<FileSystemClient>({
@@ -17,7 +18,7 @@ function createMockProxy(overrides?: Partial<FileSystemClient>): FileSystemClien
     writeFiles: vi.fn().mockResolvedValue(undefined),
     mkdir: vi.fn().mockResolvedValue(undefined),
     rmdir: vi.fn().mockResolvedValue(undefined),
-    rename: vi.fn().mockResolvedValue(undefined),
+    move: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
     unlink: vi.fn().mockResolvedValue(undefined),
     copyDirectory: vi.fn().mockResolvedValue(undefined),
     getZippedDirectory: vi.fn().mockResolvedValue(new Blob()),
@@ -133,17 +134,6 @@ describe('FileContentService', () => {
     harness.disposeChannel();
   });
 
-  it('populateText sets text outcome and cache without worker read', async () => {
-    vi.mocked(proxy.readFile).mockClear();
-    const data = new TextEncoder().encode('manual');
-    service.populateText('typed.ts', data);
-
-    expect(service.peekOutcome('typed.ts').kind).toBe('text');
-    const result = await service.resolve('typed.ts');
-    expect(proxy.readFile).not.toHaveBeenCalled();
-    expectTextContent(result, data);
-  });
-
   it('should resolve text content from worker on cache miss', async () => {
     const data = new Uint8Array([10, 20, 30]);
     vi.mocked(proxy.readFile).mockResolvedValue(data);
@@ -214,7 +204,8 @@ describe('FileContentService', () => {
   it('should preserve A→C→A write intent while the committed cache still contains A', async () => {
     const initial = new TextEncoder().encode('A');
     const intermediate = new TextEncoder().encode('C');
-    service.populateText('main.ts', initial);
+    vi.mocked(proxy.readFile).mockResolvedValue(initial);
+    await service.resolve('main.ts');
 
     const intermediateWrite = Promise.withResolvers<void>();
     const finalWrite = Promise.withResolvers<void>();
@@ -246,16 +237,197 @@ describe('FileContentService', () => {
     );
   });
 
+  describe('editor save backpressure', () => {
+    it('should persist only the active and latest pending model values', async () => {
+      const first = Promise.withResolvers<void>();
+      vi.mocked(proxy.writeFile).mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+
+      const active = service.saveEditor('main.ts', new Uint8Array([1]));
+      const replaced = service.saveEditor('main.ts', new Uint8Array([2]));
+      const latest = service.saveEditor('main.ts', new Uint8Array([3]));
+      expect(proxy.writeFile).toHaveBeenCalledOnce();
+
+      first.resolve();
+      await Promise.all([active, replaced, latest]);
+
+      expect(vi.mocked(proxy.writeFile).mock.calls.map(([path, data]) => [path, data])).toEqual([
+        ['/project/main.ts', new Uint8Array([1])],
+        ['/project/main.ts', new Uint8Array([3])],
+      ]);
+    });
+
+    it('should retain only one latest value while the follow-up save is active', async () => {
+      const first = Promise.withResolvers<void>();
+      const second = Promise.withResolvers<void>();
+      vi.mocked(proxy.writeFile)
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise)
+        .mockResolvedValue(undefined);
+
+      const completion = service.saveEditor('main.ts', new Uint8Array([1]));
+      void service.saveEditor('main.ts', new Uint8Array([2]));
+      first.resolve();
+      await vi.waitFor(() => {
+        expect(proxy.writeFile).toHaveBeenCalledTimes(2);
+      });
+
+      void service.saveEditor('main.ts', new Uint8Array([3]));
+      void service.saveEditor('main.ts', new Uint8Array([4]));
+      second.resolve();
+      await completion;
+
+      expect(vi.mocked(proxy.writeFile).mock.calls.map(([, data]) => data)).toEqual([
+        new Uint8Array([1]),
+        new Uint8Array([2]),
+        new Uint8Array([4]),
+      ]);
+    });
+
+    it('should continue to the latest pending value after an active write rejects', async () => {
+      const first = Promise.withResolvers<void>();
+      vi.mocked(proxy.writeFile).mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+
+      const completion = service.saveEditor('main.ts', new Uint8Array([1]));
+      void service.saveEditor('main.ts', new Uint8Array([2]));
+      first.reject(new Error('first failed'));
+      await completion;
+
+      expect(proxy.writeFile).toHaveBeenCalledTimes(2);
+      expect(service.peek('main.ts')).toEqual(new Uint8Array([2]));
+    });
+
+    it('should save different paths independently', async () => {
+      const first = Promise.withResolvers<void>();
+      const second = Promise.withResolvers<void>();
+      vi.mocked(proxy.writeFile).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+
+      const a = service.saveEditor('a.ts', new Uint8Array([1]));
+      const b = service.saveEditor('b.ts', new Uint8Array([2]));
+      expect(proxy.writeFile).toHaveBeenCalledTimes(2);
+      first.resolve();
+      second.resolve();
+      await Promise.all([a, b]);
+    });
+
+    it('should drain accepted saves before moving and route edits during the move to the destination', async () => {
+      const firstWrite = Promise.withResolvers<void>();
+      const move = Promise.withResolvers<FileStat>();
+      vi.mocked(proxy.writeFile).mockReturnValueOnce(firstWrite.promise).mockResolvedValue(undefined);
+      vi.mocked(proxy.move).mockReturnValueOnce(move.promise);
+
+      const active = service.saveEditor('main.ts', new Uint8Array([1]));
+      void service.saveEditor('main.ts', new Uint8Array([2]));
+      const moving = service.move('main.ts', 'renamed.ts');
+      firstWrite.resolve();
+      await vi.waitFor(() => {
+        expect(proxy.move).toHaveBeenCalledOnce();
+      });
+      expect(proxy.writeFile).toHaveBeenCalledTimes(2);
+
+      const duringMove = service.saveEditor('main.ts', new Uint8Array([3]));
+      expect(proxy.writeFile).toHaveBeenCalledTimes(2);
+      move.resolve({ type: 'file', size: 1, mtimeMs: 0, contentKind: 'binary' });
+      await Promise.all([active, moving, duringMove]);
+
+      expect(vi.mocked(proxy.writeFile).mock.calls[2]).toEqual(['/project/renamed.ts', new Uint8Array([3])]);
+    });
+
+    it('should discard pending and in-delete edits after a successful delete', async () => {
+      const activeWrite = Promise.withResolvers<void>();
+      const unlink = Promise.withResolvers<void>();
+      vi.mocked(proxy.writeFile).mockReturnValueOnce(activeWrite.promise).mockResolvedValue(undefined);
+      vi.mocked(proxy.unlink).mockReturnValueOnce(unlink.promise);
+
+      const active = service.saveEditor('main.ts', new Uint8Array([1]));
+      void service.saveEditor('main.ts', new Uint8Array([2]));
+      const deleting = service.delete('main.ts', 'user');
+      activeWrite.resolve();
+      await vi.waitFor(() => {
+        expect(proxy.unlink).toHaveBeenCalledOnce();
+      });
+      const duringDelete = service.saveEditor('main.ts', new Uint8Array([3]));
+      unlink.resolve();
+      await Promise.all([active, deleting, duringDelete]);
+
+      expect(proxy.writeFile).toHaveBeenCalledOnce();
+      expect(service.peekOutcome('main.ts')).toEqual({ kind: 'orphaned' });
+    });
+
+    it('should replay only the latest deferred edit when deletion fails', async () => {
+      const activeWrite = Promise.withResolvers<void>();
+      const unlink = Promise.withResolvers<void>();
+      vi.mocked(proxy.writeFile).mockReturnValueOnce(activeWrite.promise).mockResolvedValue(undefined);
+      vi.mocked(proxy.unlink).mockReturnValueOnce(unlink.promise);
+
+      void service.saveEditor('main.ts', new Uint8Array([1]));
+      void service.saveEditor('main.ts', new Uint8Array([2]));
+      const deleting = service.delete('main.ts', 'user');
+      activeWrite.resolve();
+      await vi.waitFor(() => {
+        expect(proxy.unlink).toHaveBeenCalledOnce();
+      });
+      const duringDelete = service.saveEditor('main.ts', new Uint8Array([3]));
+      unlink.reject(new Error('delete failed'));
+      await expect(deleting).rejects.toThrow('delete failed');
+      await duringDelete;
+
+      expect(vi.mocked(proxy.writeFile).mock.calls).toHaveLength(2);
+      expect(vi.mocked(proxy.writeFile).mock.calls[1]).toEqual(['/project/main.ts', new Uint8Array([3])]);
+    });
+  });
+
   it('should update cache on rename', async () => {
     const data = new Uint8Array([1, 2, 3]);
     vi.mocked(proxy.readFile).mockResolvedValue(data);
 
     await service.resolve('old.ts');
-    await service.rename('old.ts', 'new.ts');
+    await service.move('old.ts', 'new.ts');
 
     expect(service.has('old.ts')).toBe(false);
     expect(service.has('new.ts')).toBe(true);
     expect(service.peek('new.ts')).toEqual(data);
+  });
+
+  it('should apply every completed bulk move even when another edit fails', async () => {
+    const sourceBytes = new Map([
+      ['/project/a.ts', new Uint8Array([1])],
+      ['/project/b.ts', new Uint8Array([2])],
+      ['/project/c.ts', new Uint8Array([3])],
+    ]);
+    vi.mocked(proxy.readFile).mockImplementation(async (path) => sourceBytes.get(path)!);
+    await Promise.all(['a.ts', 'b.ts', 'c.ts'].map(async (path) => service.resolve(path)));
+    vi.mocked(proxy.bulkMove).mockResolvedValue({
+      moved: [
+        {
+          edit: { source: '/project/a.ts', target: '/project/dst/a.ts' },
+          stat: { type: 'file', size: 1, mtimeMs: 0, contentKind: 'binary' },
+        },
+        {
+          edit: { source: '/project/c.ts', target: '/project/dst/c.ts' },
+          stat: { type: 'file', size: 1, mtimeMs: 0, contentKind: 'binary' },
+        },
+      ],
+      failed: [
+        {
+          edit: { source: '/project/b.ts', target: '/project/dst/b.ts' },
+          error: new WorkspaceMutationError('NAME_EXISTS', '/project/dst/b.ts'),
+        },
+      ],
+    });
+
+    const result = await service.bulkMove([
+      { source: 'a.ts', target: 'dst/a.ts' },
+      { source: 'b.ts', target: 'dst/b.ts' },
+      { source: 'c.ts', target: 'dst/c.ts' },
+    ]);
+
+    expect(result.moved).toHaveLength(2);
+    expect(service.peek('a.ts')).toBeUndefined();
+    expect(service.peek('dst/a.ts')).toEqual(new Uint8Array([1]));
+    expect(service.peek('b.ts')).toEqual(new Uint8Array([2]));
+    expect(service.peek('dst/b.ts')).toBeUndefined();
+    expect(service.peek('c.ts')).toBeUndefined();
+    expect(service.peek('dst/c.ts')).toEqual(new Uint8Array([3]));
   });
 
   it('should fire content change on delete', async () => {
@@ -349,7 +521,8 @@ describe('FileContentService', () => {
       events.push(event);
     });
     const source = new Uint8Array([9, 8, 7]);
-    service.populateText('src/main.ts', source);
+    vi.mocked(proxy.readFile).mockResolvedValue(source);
+    await service.resolve('src/main.ts');
 
     await service.duplicate('src/main.ts', 'src/main-copy.ts');
 
@@ -533,6 +706,7 @@ describe('FileContentService', () => {
       service: FileContentService;
       pool: SharedPool;
       proxy: FileSystemClient;
+      emitFileChanged: (event: ChangeEvent) => void;
     } {
       const buffer = new SharedArrayBuffer(16 * 1024 * 1024);
       const pool = new SharedPool(buffer, { maxEntries: 128 });
@@ -549,7 +723,14 @@ describe('FileContentService', () => {
         filePool: pool,
         openSizeBytes: options?.openSizeBytes ?? 50 * 1024 * 1024,
       });
-      return { service: svc, pool, proxy: mockProxy };
+      return {
+        service: svc,
+        pool,
+        proxy: mockProxy,
+        emitFileChanged: (event) => {
+          (listen.mock.calls[0]![1] as (data: unknown) => void)(event);
+        },
+      };
     }
 
     it('should resolve text from shared pool on cache miss', async () => {
@@ -609,6 +790,24 @@ describe('FileContentService', () => {
       expectTextContent(result, workerData);
     });
 
+    it('should bypass stale pooled bytes when a worker invalidation requests an authoritative reread', async () => {
+      const { service: svc, pool, proxy: mockProxy, emitFileChanged: emit } = createPoolService();
+      pool.store('/project/main.ts', encoder.encode('stale'));
+      await svc.resolve('main.ts');
+      vi.mocked(mockProxy.readFile).mockResolvedValue(encoder.encode('fresh'));
+
+      emit({ type: 'directoryChanged', path: '/project', backend: 'webaccess' });
+
+      await vi.waitFor(() => {
+        const outcome = svc.peekOutcome('main.ts');
+        expect(outcome.kind).toBe('text');
+        if (outcome.kind === 'text') {
+          expect(new TextDecoder().decode(outcome.content)).toBe('fresh');
+        }
+      });
+      expect(mockProxy.readFile).toHaveBeenCalledWith('/project/main.ts');
+    });
+
     it('should preserve existing cache hit behaviour after pool fast path', async () => {
       const { service: svc, proxy: mockProxy } = createPoolService();
 
@@ -651,6 +850,36 @@ describe('FileContentService', () => {
       handler.mockClear();
 
       await service.resolve('main.ts');
+
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('should treat separately allocated equal text bytes as the same outcome', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([65, 66]));
+      await service.resolve('main.ts');
+      const handler = vi.fn<(event: OutcomeChangeEvent) => void>();
+      service.onDidChangeOutcome(handler);
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([65, 66]));
+
+      emitFileChanged(fileWritten('main.ts'));
+      await vi.waitFor(() => {
+        expect(proxy.readFile).toHaveBeenCalledTimes(2);
+      });
+
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('should treat separately allocated equal binary heads as the same outcome', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([0, 1, 2]));
+      await service.resolve('asset.bin');
+      const handler = vi.fn<(event: OutcomeChangeEvent) => void>();
+      service.onDidChangeOutcome(handler);
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([0, 1, 2]));
+
+      emitFileChanged(fileWritten('asset.bin'));
+      await vi.waitFor(() => {
+        expect(proxy.readFile).toHaveBeenCalledTimes(2);
+      });
 
       expect(handler).not.toHaveBeenCalled();
     });
@@ -1023,6 +1252,24 @@ describe('FileContentService', () => {
   });
 
   describe('refresh generation guard', () => {
+    it('should return classified bytes when an unsubscribed first resolve becomes stale', async () => {
+      const firstRead = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+      vi.mocked(proxy.readFile)
+        .mockReturnValueOnce(firstRead.promise)
+        .mockResolvedValueOnce(new Uint8Array([2]));
+
+      const resolving = service.resolveBytes('main.ts');
+      await vi.waitFor(() => {
+        expect(proxy.readFile).toHaveBeenCalledOnce();
+      });
+      emitFileChanged(fileWritten('main.ts'));
+      firstRead.resolve(new Uint8Array([1]));
+
+      await expect(resolving).resolves.toEqual(new Uint8Array([1]));
+      expect(service.peekOutcome('main.ts')).toEqual({ kind: 'loading' });
+      await expect(service.resolveBytes('main.ts')).resolves.toEqual(new Uint8Array([2]));
+    });
+
     it('should discard a stale refresh result when a newer refresh started before the slow read settled', async () => {
       vi.useFakeTimers();
       try {
@@ -1075,6 +1322,48 @@ describe('FileContentService', () => {
         expectTextContent(service.peekOutcome('main.ts'), new Uint8Array([51]));
       });
     });
+
+    it('should not let a slow external reread replace a newer successful local write', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([65]));
+      await service.resolve('main.ts');
+      const slowRead = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+      vi.mocked(proxy.readFile).mockImplementationOnce(async () => slowRead.promise);
+      emitFileChanged(fileWritten('main.ts'));
+      await vi.waitFor(() => {
+        expect(proxy.readFile).toHaveBeenCalledTimes(2);
+      });
+
+      await service.write('main.ts', new Uint8Array([66]), 'editor');
+      slowRead.resolve(new Uint8Array([65]));
+      await slowRead.promise;
+      await Promise.resolve();
+      await vi.waitFor(() => {
+        expectTextContent(service.peekOutcome('main.ts'), new Uint8Array([66]));
+      });
+    });
+
+    it.each([Object.assign(new Error('missing'), { code: 'ENOENT' }), new Error('read failed')])(
+      'should suppress a stale refresh failure after a successful local write',
+      async (failure) => {
+        vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([65]));
+        await service.resolve('main.ts');
+        const slowRead = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+        vi.mocked(proxy.readFile).mockImplementationOnce(async () => slowRead.promise);
+        emitFileChanged(fileWritten('main.ts'));
+        await vi.waitFor(() => {
+          expect(proxy.readFile).toHaveBeenCalledTimes(2);
+        });
+
+        await service.write('main.ts', new Uint8Array([66]), 'editor');
+        slowRead.reject(failure);
+        await slowRead.promise.catch(() => undefined);
+        await Promise.resolve();
+        await vi.waitFor(() => {
+          expectTextContent(service.peekOutcome('main.ts'), new Uint8Array([66]));
+        });
+        expect(service.isOrphaned('main.ts')).toBe(false);
+      },
+    );
   });
 
   describe('handleWorkerFileChanged', () => {
@@ -1313,13 +1602,13 @@ describe('FileContentService', () => {
       harness.disposeChannel();
     });
 
-    it('rename rejects foreign-absolute keys with WorkspaceScopeViolationError before touching the proxy', async () => {
+    it('move rejects foreign-absolute keys with WorkspaceScopeViolationError before touching the proxy', async () => {
       const harness = createHarness({ workspaceRoot: '/projects/abc' });
 
-      await expect(harness.service.rename('main.ts', '/projects/other/main.ts')).rejects.toBeInstanceOf(
+      await expect(harness.service.move('main.ts', '/projects/other/main.ts')).rejects.toBeInstanceOf(
         WorkspaceScopeViolationError,
       );
-      expect(harness.proxy.rename).not.toHaveBeenCalled();
+      expect(harness.proxy.move).not.toHaveBeenCalled();
       harness.disposeChannel();
     });
 
@@ -1445,7 +1734,7 @@ describe('FileContentService', () => {
         events.push(event);
       });
 
-      await harness.service.rename('/projects/abc/old.ts', '/projects/abc/new.ts');
+      await harness.service.move('/projects/abc/old.ts', '/projects/abc/new.ts');
 
       const renamed = events.find((event) => event.type === 'renamed');
       expect(renamed).toBeDefined();

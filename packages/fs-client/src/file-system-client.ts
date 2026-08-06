@@ -7,6 +7,12 @@ import type {
   WatchRequest,
   WorkspaceMutationError,
   WorkspaceScope,
+  ProjectRootConfiguration,
+  ProjectDiscoveryResult,
+  CommitPendingProjectDirectoryInput,
+  CommitPendingProjectDirectoryResult,
+  PermanentDeleteProjectDirectoryInput,
+  PermanentDeleteProjectDirectoryResult,
 } from '@taucad/filesystem';
 
 /**
@@ -21,9 +27,8 @@ export type BulkMoveEdit = Readonly<{
 
 /**
  * Result of a {@link FileSystemClient.bulkMove}. Successful moves are
- * surfaced via `moved` with their post-move {@link FileStat}; on
- * mid-flight failure every prior move is rolled back, `moved` is
- * empty, and `failed` carries the offending edit + structured error.
+ * surfaced via `moved` with their post-move {@link FileStat}; failures
+ * are reported independently and never erase completed edits.
  *
  * @public
  */
@@ -54,14 +59,12 @@ export type BulkMoveResult = Readonly<{
 export type FileSystemClient = {
   readFile(filepath: string, options: 'utf8' | { encoding: 'utf8'; scope?: WorkspaceScope }): Promise<string>;
   readFile(filepath: string, options?: { scope?: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
-  readFiles(paths: string[]): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
   writeFile(filepath: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
   writeFiles(files: Record<string, { content: Uint8Array<ArrayBuffer> }>): Promise<void>;
   mkdir(path: string, options?: MkdirOptions): Promise<void>;
   readdir(path: string): Promise<string[]>;
   stat(path: string): Promise<FileStat>;
   lstat(path: string): Promise<FileStat>;
-  rename(oldPath: string, newPath: string): Promise<void>;
   /**
    * Move a file or directory. Directory-aware: same-mount moves delegate to
    * the provider's directory-aware rename and cross-mount moves recursively
@@ -69,19 +72,18 @@ export type FileSystemClient = {
    *
    * @param source - Current absolute path.
    * @param target - New absolute path.
-   * @param options - Optional `{ overwrite }` for collision resolution.
    * @returns Stat of the resulting entry at `target`.
    */
-  move(source: string, target: string, options?: { overwrite?: boolean }): Promise<FileStat>;
+  move(source: string, target: string): Promise<FileStat>;
   /**
    * Preflight {@link move}. Returns `true` when the move is safe to
    * issue; otherwise returns a structured {@link WorkspaceMutationError}
    * with a machine-readable `code` (`NAME_EXISTS`, `INVALID_NAME`,
    * `BUNDLED_TYPES_WORKSPACE`, `READ_ONLY_MOUNT`, `NOT_FOUND`,
-   * `MISSING_WORKSPACE_HANDLE`) so the UI can route to a copy registry
+   * `MISSING_WORKSPACE_HANDLE`, `OPERATION_FAILED`) so the UI can route to a copy registry
    * without parsing message strings.
    */
-  canMove(source: string, target: string, options?: { overwrite?: boolean }): Promise<true | WorkspaceMutationError>;
+  canMove(source: string, target: string): Promise<true | WorkspaceMutationError>;
   /**
    * Preflight rename within a single parent directory. See {@link canMove}.
    */
@@ -96,27 +98,17 @@ export type FileSystemClient = {
    */
   canDelete(path: string): Promise<true | WorkspaceMutationError>;
   /**
-   * Move many paths atomically. On mid-flight failure every prior
-   * move in the batch is reversed so the workspace returns to its
-   * pre-batch state. See {@link BulkMoveResult}.
+   * Move many paths sequentially and report each completed or failed edit.
    */
-  bulkMove(edits: readonly BulkMoveEdit[], options?: { overwrite?: boolean }): Promise<BulkMoveResult>;
+  bulkMove(edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult>;
+  /** Delete a single mount-routed file. */
+  unlink(path: string): Promise<void>;
   /**
-   * Delete a single file. Pass `{ scope }` to target the standalone
-   * provider for an explicit workspace scope instead of the active
-   * mount table.
+   * Remove a mount-routed directory. Pass `{ recursive: true }` for a
+   * recursive walk; crossing a nested mount point is rejected.
    */
-  unlink(path: string, options?: { scope?: WorkspaceScope }): Promise<void>;
-  /**
-   * Remove a directory. Pass `{ scope }` to target the standalone
-   * provider; pass `{ recursive: true }` for a recursive walk. Mount-
-   * routed recursive removal is rejected if the subtree would cross into
-   * a nested mount point.
-   */
-  rmdir(path: string, options?: { scope?: WorkspaceScope; recursive?: boolean }): Promise<void>;
+  rmdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   exists(path: string): Promise<boolean>;
-  batchExists(paths: string[]): Promise<Record<string, boolean>>;
-  ensureDirectoryExists(path: string): Promise<void>;
   getDirectoryStat(path: string): Promise<FileStatEntry[]>;
   getDirectoryContents(path: string): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
   duplicateFile(sourcePath: string, destinationPath: string): Promise<void>;
@@ -136,6 +128,18 @@ export type FileSystemClient = {
    */
   mount(prefix: string, config: MountConfig): Promise<void>;
   unmount(prefix: string): void;
+  /** Replace the worker's persistent project routes from the main-thread locator store. */
+  configureProjectRoots(configuration: ProjectRootConfiguration): Promise<void>;
+  /** Discover content-addressed projects by scanning configured physical roots. */
+  listProjectManifests(): Promise<ProjectDiscoveryResult>;
+  /** Commit one durable journal snapshot as an identity-safe manifest-last project directory. */
+  commitPendingProjectDirectory(
+    input: CommitPendingProjectDirectoryInput,
+  ): Promise<CommitPendingProjectDirectoryResult>;
+  /** Permanently remove one exact physical project after verifying its manifest identity. */
+  permanentlyDeleteProjectDirectory(
+    input: PermanentDeleteProjectDirectoryInput,
+  ): Promise<PermanentDeleteProjectDirectoryResult>;
 
   /**
    * Read a single directory level. Pass `{ scope }` to read via the
@@ -155,15 +159,19 @@ export type FileSystemClient = {
    * Folder" and the recovery `bindProjectToWorkspace` flow so the next
    * standalone read picks up the fresh handle.
    */
-  invalidateStandaloneProvider(backend: 'webaccess' | 'indexeddb' | 'opfs' | 'memory', workspaceId?: string): void;
+  /** Dispose a registry-owned physical storage root after an explicit rebind/teardown. */
+  disposeStorageRoot(storageRootKey: string): void;
 
   readDirectory(path: string): Promise<FileTreeNode[]>;
 
   searchFiles(
-    basePath: string,
+    root: string,
     query: string,
     options?: { maxResults?: number; includeDirectories?: boolean },
-  ): FileStatEntry[];
+  ): Promise<FileStatEntry[]>;
+
+  /** Reconcile out-of-band changes under one routed root, or every configured webaccess root when omitted. */
+  pollExternalChanges(root?: string): Promise<void>;
 
   watch(request: WatchRequest, handler: (event: WatchEvent) => void): () => void;
 };

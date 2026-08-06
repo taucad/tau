@@ -6,6 +6,7 @@
  */
 export class RefreshGenerationGuard {
   private readonly generations = new Map<string, number>();
+  private nextGeneration = 0;
 
   /**
    * Allocate the next monotonic generation for `path`.
@@ -13,7 +14,7 @@ export class RefreshGenerationGuard {
    * @returns Opaque generation number for {@link isCurrent} comparisons.
    */
   public begin(path: string): number {
-    const next = (this.generations.get(path) ?? 0) + 1;
+    const next = ++this.nextGeneration;
     this.generations.set(path, next);
     return next;
   }
@@ -29,7 +30,8 @@ export class RefreshGenerationGuard {
   }
 
   /**
-   * Clear generation bookkeeping for one path or the entire map.
+   * Clear generation bookkeeping for one path or the entire map. Tokens are
+   * never reused, so an older in-flight operation cannot ABA-match after reset.
    * @param path - Optional path key; omit to clear all tracked paths.
    */
   public reset(path?: string): void {

@@ -2,7 +2,7 @@
 
 Client-side filesystem facades for Tau: `FileContentService`, `FileTreeService`, `WorkerChangeChannel`, path resolution, and related helpers.
 
-Depends on `@taucad/filesystem` for the core types and primitives (`BoundedFileCache`, `FileSystemObserverBridge`, `FileTreeNode`, etc.).
+Depends on `@taucad/filesystem` for core types and primitives such as `BoundedFileCache` and `FileTreeNode`. Change detection uses authority events plus the file-tree polling fallback; there is no separate native-observer branch.
 
 ## Entry points
 

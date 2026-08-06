@@ -1,4 +1,4 @@
-import { joinPath, normalizePath } from '@taucad/utils/path';
+import { resolveVirtualPath, VirtualPathError } from '@taucad/utils/path';
 
 /**
  * Thrown when an agent-supplied path would resolve outside the workspace root
@@ -75,30 +75,21 @@ function isAbsoluteGlobalNodeModules(absoluteNorm: string): boolean {
   );
 }
 
-function resolvePathSegmentsUnderRoot(rootNorm: string, relativeSegments: string[], originalInput: string): string {
-  const rootSegments = rootNorm.split('/').filter((segment) => segment.length > 0);
-  const stack = [...rootSegments];
-
-  for (const segment of relativeSegments) {
-    if (segment === '' || segment === '.') {
-      continue;
+function resolveUnderWorkspaceRoot(rootNorm: string, relativePath: string, originalInput: string): string {
+  try {
+    const resolved = resolveVirtualPath(`${rootNorm === '/' ? '' : rootNorm}/${relativePath}`);
+    if (rootNorm === '/' || resolved === rootNorm || resolved.startsWith(`${rootNorm}/`)) {
+      return resolved;
     }
-
-    if (segment === '..') {
-      if (stack.length <= rootSegments.length) {
-        throw new WorkspacePathEscapeError(
-          `Path escapes workspace: segment ".." in "${originalInput}" resolves above root "${rootNorm}"`,
-          { input: originalInput, root: rootNorm },
-        );
-      }
-
-      stack.pop();
-    } else {
-      stack.push(segment);
+  } catch (error) {
+    if (!(error instanceof VirtualPathError)) {
+      throw error;
     }
   }
-
-  return `/${stack.join('/')}`;
+  throw new WorkspacePathEscapeError(`Path escapes workspace: "${originalInput}" resolves outside root "${rootNorm}"`, {
+    input: originalInput,
+    root: rootNorm,
+  });
 }
 
 /**
@@ -120,7 +111,7 @@ export class WorkspacePathResolver {
   private rootDirectory: string;
 
   public constructor(rootDirectory: string) {
-    this.rootDirectory = rootDirectory;
+    this.rootDirectory = resolveVirtualPath(rootDirectory);
   }
 
   /**
@@ -146,8 +137,8 @@ export class WorkspacePathResolver {
    * @returns Project-relative path segments, `''` at workspace root, or `undefined` if outside the root.
    */
   public toRelativePath(absolutePath: string): string | undefined {
-    const rootNorm = normalizePath(this.rootDirectory);
-    const absNorm = normalizePath(absolutePath);
+    const rootNorm = this.rootDirectory;
+    const absNorm = resolveVirtualPath(absolutePath);
     if (isAbsoluteGlobalNodeModules(absNorm)) {
       return absNorm === `/${bundledTypesWorkspaceRootSegment}` ? bundledTypesWorkspaceRootSegment : absNorm.slice(1);
     }
@@ -168,9 +159,9 @@ export class WorkspacePathResolver {
    */
   public toAbsolutePath(relativePath: string): string {
     if (isWorkspaceRelativeGlobalNodeModules(relativePath)) {
-      return normalizePath(`/${relativePath}`);
+      return resolveVirtualPath(`/${relativePath}`);
     }
-    return joinPath(this.rootDirectory, relativePath);
+    return resolveUnderWorkspaceRoot(this.rootDirectory, relativePath, relativePath);
   }
 
   /**
@@ -186,7 +177,7 @@ export class WorkspacePathResolver {
    * @public
    */
   public toAbsoluteWorkspacePath(input: string): string {
-    const rootNorm = normalizePath(this.rootDirectory);
+    const rootNorm = this.rootDirectory;
     const trimmed = input.trim();
 
     if (trimmed === '' || trimmed === '.' || trimmed === '/' || trimmed === './') {
@@ -207,14 +198,13 @@ export class WorkspacePathResolver {
       }
 
       if (isWorkspaceRelativeGlobalNodeModules(trimmedRelative)) {
-        return normalizePath(`/${trimmedRelative}`);
+        return resolveVirtualPath(`/${trimmedRelative}`);
       }
 
-      const segments = trimmedRelative.split('/').filter((s) => s.length > 0 && s !== '.');
-      return resolvePathSegmentsUnderRoot(rootNorm, segments, input);
+      return resolveUnderWorkspaceRoot(rootNorm, trimmedRelative, input);
     }
 
-    const absNormalized = normalizePath(trimmed);
+    const absNormalized = resolveVirtualPath(trimmed);
     if (isAbsoluteGlobalNodeModules(absNormalized)) {
       return absNormalized;
     }
@@ -237,7 +227,7 @@ export class WorkspacePathResolver {
         return rootNorm;
       }
 
-      return resolvePathSegmentsUnderRoot(rootNorm, topLevelSegments, input);
+      return resolveUnderWorkspaceRoot(rootNorm, topLevelSegments.join('/'), input);
     }
 
     let trimmedRelative = trimmed;
@@ -249,8 +239,7 @@ export class WorkspacePathResolver {
       return rootNorm;
     }
 
-    const segments = trimmedRelative.split('/').filter((s) => s.length > 0 && s !== '.');
-    return resolvePathSegmentsUnderRoot(rootNorm, segments, input);
+    return resolveUnderWorkspaceRoot(rootNorm, trimmedRelative, input);
   }
 
   /**
@@ -271,7 +260,7 @@ export class WorkspacePathResolver {
    * @param rootDirectory - New absolute root path for subsequent resolution.
    */
   public reset(rootDirectory: string): void {
-    this.rootDirectory = rootDirectory;
+    this.rootDirectory = resolveVirtualPath(rootDirectory);
   }
 
   /**
@@ -301,7 +290,7 @@ export class WorkspacePathResolver {
   public toWorkspaceRelativeKey(method: string, input: string): string {
     try {
       const absolute = this.toAbsoluteWorkspacePath(input);
-      const rootNorm = normalizePath(this.rootDirectory);
+      const rootNorm = this.rootDirectory;
       if (absolute === rootNorm) {
         return '';
       }

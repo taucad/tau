@@ -1,6 +1,6 @@
 import type { FileContentMetadata, FileEntry, FileStatEntry, FileStat } from '@taucad/types';
 import type { FileTreeNode } from '@taucad/filesystem';
-import { FileSystemObserverBridge, getFileContentMetadata } from '@taucad/filesystem';
+import { getFileContentMetadata } from '@taucad/filesystem';
 import { Topic } from '@taucad/events';
 import type { FileContentService, ContentChangeEvent } from '#file-content-service.js';
 import type { FileSystemClient } from '#file-system-client.js';
@@ -27,9 +27,42 @@ const defaultRefreshDebounce = 100;
 const watchIntervalFocused = 2000;
 /** Milliseconds. */
 const watchIntervalBlurred = 10_000;
+/** Milliseconds. */
+const pollingTelemetryWindow = 60_000;
+// oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
+// ponytail: 5-tick global reconcile (10 s visible / 50 s hidden); tune from poll telemetry.
+const globalReconcileTickInterval = 5;
 
 type FileTreeFileNode = Extract<FileTreeNode, { contentKind: FileContentMetadata['contentKind'] }>;
 type CachedFileEntry = Extract<FileEntry, { type: 'file' }>;
+
+/**
+ * Content-free aggregate for the existing external-filesystem polling loop.
+ *
+ * @public
+ */
+export type ExternalPollTelemetry = {
+  readonly count: number;
+  readonly successes: number;
+  readonly failures: number;
+  readonly visible: number;
+  readonly hidden: number;
+  /** Milliseconds. */
+  readonly p50: number;
+  /** Milliseconds. */
+  readonly p95: number;
+};
+
+type PollingTelemetryState = {
+  startedAt: number;
+  durations: number[];
+  successes: number;
+  failures: number;
+  visible: number;
+  hidden: number;
+  inFlight: boolean;
+  stopped: boolean;
+};
 
 const isFileTreeFileNode = (entry: FileTreeNode): entry is FileTreeFileNode => entry.children === undefined;
 
@@ -54,6 +87,7 @@ type FileTreeServiceInit = {
   initialEntries?: FileEntry[];
   /** Debounce window between subsequent tree-refresh fires. Milliseconds. */
   refreshDebounce?: number;
+  onExternalPollTelemetry?: (aggregate: ExternalPollTelemetry) => void;
 };
 
 /**
@@ -91,17 +125,20 @@ export class FileTreeService {
   private readonly paths: WorkspacePathResolver;
   private readonly visibility: VisibilityProvider;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
-  private pendingRefreshPath = '';
+  private pendingRefreshPath: string | undefined;
   private pollingTimer: ReturnType<typeof setTimeout> | undefined;
   private visibilityUnsub: (() => void) | undefined;
+  private pollingEpoch = 0;
+  private pollingTelemetry: PollingTelemetryState | undefined;
   private contentUnsubscribe: (() => void) | undefined;
   /** Milliseconds. */
   private readonly refreshDebounce: number;
-  private _observerBridge: FileSystemObserverBridge | undefined;
+  private readonly onExternalPollTelemetry: ((aggregate: ExternalPollTelemetry) => void) | undefined;
   private _refreshAbortController: AbortController | undefined;
+  private _backendResync: Promise<void> | undefined;
+  private _epoch = 0;
   private _cachedCompleteTree: FileItem[] | undefined;
   private _completeTreeVersion = 0;
-  private _searchIndexWarmed = false;
   private readonly _listingPathSubscribers = new PathSubscriberRegistry<void>();
   private readonly _listingGuard = new RefreshGenerationGuard();
   private readonly _inFlightDirectoryList = new Map<string, Promise<void>>();
@@ -114,6 +151,7 @@ export class FileTreeService {
     this.paths = init.paths;
     this.visibility = init.visibility;
     this.refreshDebounce = init.refreshDebounce ?? defaultRefreshDebounce;
+    this.onExternalPollTelemetry = init.onExternalPollTelemetry;
     this._tree = new Map();
     if (init.initialEntries) {
       for (const entry of init.initialEntries) {
@@ -171,7 +209,15 @@ export class FileTreeService {
         },
       }),
       init.channel.onBackendChanged(() => {
-        this.scheduleRefresh('');
+        const resync = this.resyncResolvedDirectories();
+        this._backendResync = resync;
+        // async-iife: bootstrap — worker callbacks cannot await the full resolved-directory walk.
+        // oxlint-disable-next-line promise/prefer-await-to-then -- Identity-guarded cleanup tracks this exact resync promise.
+        void resync.finally(() => {
+          if (this._backendResync === resync) {
+            this._backendResync = undefined;
+          }
+        });
       }),
     ];
   }
@@ -375,10 +421,6 @@ export class FileTreeService {
     options?: { maxResults?: number; includeDirectories?: boolean },
   ): Promise<FileStatEntry[]> {
     const absolutePath = this.paths.toAbsoluteWorkspacePath('');
-    if (!this._searchIndexWarmed) {
-      await this.proxy.getDirectoryStat(absolutePath);
-      this._searchIndexWarmed = true;
-    }
     return this.proxy.searchFiles(absolutePath, query, options);
   }
 
@@ -398,8 +440,10 @@ export class FileTreeService {
    * @param path - Path hint whose refresh should be merged with pending work.
    */
   public scheduleRefresh(path: string): void {
-    if (this.pendingRefreshPath === '' || path === '') {
+    if (this.pendingRefreshPath === undefined) {
       this.pendingRefreshPath = path;
+    } else if (this.pendingRefreshPath === '' || path === '') {
+      this.pendingRefreshPath = '';
     } else {
       const currentParts = this.pendingRefreshPath.split('/');
       const newParts = path.split('/');
@@ -420,102 +464,79 @@ export class FileTreeService {
 
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = undefined;
-      void this.executeRefresh(this.pendingRefreshPath);
-      this.pendingRefreshPath = '';
+      const pendingPath = this.pendingRefreshPath;
+      this.pendingRefreshPath = undefined;
+      if (pendingPath !== undefined) {
+        void this.executeRefresh(pendingPath);
+      }
     }, this.refreshDebounce);
   }
 
-  // === Change Detection (Observer preferred, polling fallback) ===
-
   /**
-   * Whether the observer is actively monitoring changes.
-   * @returns `true` when a native {@link FileSystemObserverBridge} session is active.
-   */
-  public get isObserving(): boolean {
-    return this._observerBridge?.isObserving ?? false;
-  }
-
-  /**
-   * Start observing via FileSystemObserver (Chrome 133+).
-   * Returns `true` if the observer was started, `false` if unavailable.
-   * When observer is active, polling is stopped to eliminate double work.
-   * @param handle - Native directory handle supplied by the host picker.
-   * @returns `true` when observation started successfully.
-   */
-  public async startObserving(handle: FileSystemDirectoryHandle): Promise<boolean> {
-    this.stopPolling();
-
-    this._observerBridge = new FileSystemObserverBridge((event) => {
-      const path = 'path' in event ? event.path : '';
-      this.scheduleRefresh(path);
-    });
-
-    const started = await this._observerBridge.observe(handle);
-    if (!started) {
-      this._observerBridge = undefined;
-      return false;
-    }
-    return true;
-  }
-
-  /**
-   * Stop observing. Allows polling to be started again.
-   * @returns `void` after tearing down the observer bridge, if any.
-   */
-  public stopObserving(): void {
-    if (this._observerBridge) {
-      this._observerBridge.disconnect();
-      this._observerBridge = undefined;
-    }
-  }
-
-  /**
-   * Unified entry point for external change detection.
-   * Tries FileSystemObserver first; falls back to polling.
-   * @param handle - Optional host handle enabling native observation.
-   */
-  public async startChangeDetection(handle?: FileSystemDirectoryHandle): Promise<void> {
-    if (handle) {
-      const observerStarted = await this.startObserving(handle);
-      if (observerStarted) {
-        return;
-      }
-    }
-    this.startPolling();
-  }
-
-  /**
-   * Stop all change detection (observer + polling).
-   * @returns `void` once timers/observer subscriptions are cleared.
-   */
-  public stopChangeDetection(): void {
-    this.stopObserving();
-    this.stopPolling();
-  }
-
-  /**
-   * Begin polling the worker on a visibility-aware interval when observers are unavailable.
+   * Begin polling the worker on a visibility-aware interval.
    */
   public startPolling(): void {
-    if (this.isObserving) {
-      return;
-    }
-
     this.stopPolling();
+    const epoch = ++this.pollingEpoch;
+    const telemetry: PollingTelemetryState = {
+      startedAt: performance.now(),
+      durations: [],
+      successes: 0,
+      failures: 0,
+      visible: 0,
+      hidden: 0,
+      inFlight: false,
+      stopped: false,
+    };
+    this.pollingTelemetry = telemetry;
+    let completedTicks = 0;
 
     const poll = (): void => {
+      if (epoch !== this.pollingEpoch) {
+        return;
+      }
       const pollInterval = this.visibility.isVisible() ? watchIntervalFocused : watchIntervalBlurred;
-      this.pollingTimer = setTimeout(() => {
-        this.scheduleRefresh('');
-        poll();
+      this.pollingTimer = setTimeout(async () => {
+        this.pollingTimer = undefined;
+        const visible = this.visibility.isVisible();
+        const startedAt = performance.now();
+        let success = false;
+        telemetry.inFlight = true;
+        try {
+          await this.proxy.pollExternalChanges(this.paths.toAbsoluteWorkspacePath(''));
+          completedTicks++;
+          if (completedTicks % globalReconcileTickInterval === 0) {
+            await this.proxy.pollExternalChanges();
+          }
+          success = true;
+        } catch (error) {
+          console.error('[FileTreeService] external filesystem poll failed:', error);
+        } finally {
+          const completedAt = performance.now();
+          telemetry.inFlight = false;
+          telemetry.durations.push(completedAt - startedAt);
+          telemetry.successes += success ? 1 : 0;
+          telemetry.failures += success ? 0 : 1;
+          telemetry.visible += visible ? 1 : 0;
+          telemetry.hidden += visible ? 0 : 1;
+          if (telemetry.stopped || completedAt - telemetry.startedAt >= pollingTelemetryWindow) {
+            this.flushPollingTelemetry(telemetry, completedAt);
+          }
+          if (!telemetry.stopped) {
+            poll();
+          }
+        }
       }, pollInterval);
     };
 
     poll();
 
     this.visibilityUnsub = this.visibility.onVisibilityChange(() => {
-      this.stopPolling();
-      poll();
+      if (this.pollingTimer !== undefined) {
+        clearTimeout(this.pollingTimer);
+        this.pollingTimer = undefined;
+        poll();
+      }
     });
   }
 
@@ -523,6 +544,7 @@ export class FileTreeService {
    * Tear down polling timers and visibility subscriptions.
    */
   public stopPolling(): void {
+    this.pollingEpoch++;
     if (this.pollingTimer !== undefined) {
       clearTimeout(this.pollingTimer);
       this.pollingTimer = undefined;
@@ -530,6 +552,13 @@ export class FileTreeService {
     if (this.visibilityUnsub !== undefined) {
       this.visibilityUnsub();
       this.visibilityUnsub = undefined;
+    }
+    const telemetry = this.pollingTelemetry;
+    if (telemetry) {
+      telemetry.stopped = true;
+      if (!telemetry.inFlight) {
+        this.flushPollingTelemetry(telemetry, performance.now());
+      }
     }
   }
 
@@ -568,6 +597,7 @@ export class FileTreeService {
    * @param initialEntries - Optional seed entries for eagerly known files.
    */
   public reset(rootDirectory: string, initialEntries?: FileEntry[]): void {
+    this._epoch++;
     this.paths.reset(rootDirectory);
     this._refreshAbortController?.abort();
     this._refreshAbortController = undefined;
@@ -575,8 +605,7 @@ export class FileTreeService {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = undefined;
     }
-    this.pendingRefreshPath = '';
-    this._searchIndexWarmed = false;
+    this.pendingRefreshPath = undefined;
 
     const newTree = new Map<string, FileEntry>();
     if (initialEntries) {
@@ -613,10 +642,11 @@ export class FileTreeService {
    * Dispose worker subscriptions, timers, and in-flight refresh controllers.
    */
   public dispose(): void {
+    this._epoch++;
     for (const unsubscribe of this.unsubscribeChannel) {
       unsubscribe();
     }
-    this.stopChangeDetection();
+    this.stopPolling();
     this._refreshAbortController?.abort();
     this._refreshAbortController = undefined;
     this.contentUnsubscribe?.();
@@ -627,6 +657,39 @@ export class FileTreeService {
     }
     this.#treeTopic.dispose();
     this._listingPathSubscribers.clear();
+  }
+
+  private flushPollingTelemetry(telemetry: PollingTelemetryState, completedAt: number): void {
+    if (telemetry.durations.length === 0) {
+      if (telemetry.stopped && this.pollingTelemetry === telemetry) {
+        this.pollingTelemetry = undefined;
+      }
+      return;
+    }
+    const sorted = [...telemetry.durations].sort((left, right) => left - right);
+    const percentile = (value: number): number => sorted[Math.ceil(sorted.length * value) - 1]!;
+    try {
+      this.onExternalPollTelemetry?.({
+        count: sorted.length,
+        successes: telemetry.successes,
+        failures: telemetry.failures,
+        visible: telemetry.visible,
+        hidden: telemetry.hidden,
+        p50: percentile(0.5),
+        p95: percentile(0.95),
+      });
+    } catch {
+      // Telemetry must never alter polling continuity.
+    }
+    telemetry.startedAt = completedAt;
+    telemetry.durations = [];
+    telemetry.successes = 0;
+    telemetry.failures = 0;
+    telemetry.visible = 0;
+    telemetry.hidden = 0;
+    if (telemetry.stopped && this.pollingTelemetry === telemetry) {
+      this.pollingTelemetry = undefined;
+    }
   }
 
   private relativeKeyFromUserPath(path: string): string {
@@ -907,6 +970,14 @@ export class FileTreeService {
   }
 
   private async executeRefresh(path: string): Promise<void> {
+    const epoch = this._epoch;
+    while (this._backendResync !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- A replacement resync may be installed while the prior generation settles.
+      await this._backendResync;
+    }
+    if (this._epoch !== epoch) {
+      return;
+    }
     this._refreshAbortController?.abort();
     const controller = new AbortController();
     this._refreshAbortController = controller;
@@ -938,6 +1009,43 @@ export class FileTreeService {
         return;
       }
       console.error('[FileTreeService] refresh failed:', error);
+    }
+  }
+
+  private async resyncResolvedDirectories(): Promise<void> {
+    this._refreshAbortController?.abort();
+    const controller = new AbortController();
+    this._refreshAbortController = controller;
+    const resolvedDirectories = [...this._tree.keys()]
+      .filter((path) => this.isDirectoryResolvedKey(path))
+      .toSorted((left, right) => {
+        const leftDepth = left === '' ? 0 : left.split('/').length;
+        const rightDepth = right === '' ? 0 : right.split('/').length;
+        return leftDepth - rightDepth;
+      });
+
+    try {
+      for (const path of resolvedDirectories) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        if (!this.isDirectoryResolvedKey(path)) {
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- Parent directories must merge before their still-present resolved descendants.
+        const entries = await this.proxy.readDirectory(this.paths.toAbsoluteWorkspacePath(path));
+        if (controller !== this._refreshAbortController) {
+          return;
+        }
+        if (this.isDirectoryResolvedKey(path)) {
+          this.mergeChildren(path, entries);
+        }
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
+      console.error('[FileTreeService] backend resync failed:', error);
     }
   }
 
@@ -1076,6 +1184,12 @@ export class FileTreeService {
       const name = prefix === '' ? key : key.slice(prefix.length);
       if (!diskNames.has(name)) {
         newTree.delete(key);
+        const subtreePrefix = `${key}/`;
+        for (const descendant of newTree.keys()) {
+          if (descendant.startsWith(subtreePrefix)) {
+            newTree.delete(descendant);
+          }
+        }
       }
     }
 

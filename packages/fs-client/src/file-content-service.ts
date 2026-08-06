@@ -102,6 +102,18 @@ const loadingOutcome: FileContentResult = { kind: 'loading' };
  */
 export type OrphanChangeEvent = { path: string; orphaned: boolean };
 
+type EditorSaveState = {
+  pending: Uint8Array<ArrayBuffer> | undefined;
+  completion: Promise<void>;
+};
+
+type EditorMutationBarrier = {
+  readonly source: string;
+  readonly target: string | undefined;
+  readonly deferred: Map<string, Uint8Array<ArrayBuffer>>;
+  readonly settled: PromiseWithResolvers<void>;
+};
+
 /**
  * Single content authority on the main thread.
  * All content operations (read, write, rename, delete, duplicate)
@@ -150,6 +162,8 @@ export class FileContentService {
   private readonly pathNotifyRegistry = new PathSubscriberRegistry();
   private readonly contentChangeRegistry = new PathSubscriberRegistry<ContentChangeEvent>();
   private readonly orphanedPaths = new Set<string>();
+  private readonly editorSaves = new Map<string, EditorSaveState>();
+  private readonly editorMutationBarriers: EditorMutationBarrier[] = [];
   // eslint-disable-next-line tau-lint/no-handrolled-fanout -- Holds worker-channel unsubscribe callbacks; event fan-out uses Topic/PathSubscriberRegistry.
   private readonly unsubscribeChannel: Array<() => void>;
   readonly #orphanTopic = new Topic<OrphanChangeEvent>({ name: 'FileContentService.orphan' });
@@ -259,7 +273,8 @@ export class FileContentService {
       return pending;
     }
 
-    const promise = this.computeOutcome(path, options);
+    const generation = this.refreshGuard.begin(path);
+    const promise = this.computeOutcome(path, generation, options);
     this.pendingResolves.set(path, promise);
 
     try {
@@ -302,8 +317,6 @@ export class FileContentService {
         throw result.cause instanceof Error ? result.cause : new Error(String(result.cause));
       }
       case 'loading': {
-        // ComputeOutcome never resolves to 'loading'; this branch is unreachable
-        // but keeps the discriminator exhaustive for future kinds.
         throw new Error(`Unexpected 'loading' outcome for '${path}'`);
       }
     }
@@ -318,42 +331,6 @@ export class FileContentService {
    */
   public peekOutcome(path: string): FileContentResult {
     return this.outcomes.get(path) ?? loadingOutcome;
-  }
-
-  /**
-   * Sync-backfill main-thread cache + `text` outcome after a successful read
-   * from the worker outside the usual resolve path (e.g. Monaco workspace FS
-   * proxy fall-through). Skips async worker round-trip on subsequent resolves.
-   *
-   * @param path - Workspace-relative path.
-   * @param data - File bytes already validated as openable text-sized UTF-8.
-   * @public
-   */
-  public populateText(path: string, data: Uint8Array<ArrayBuffer>): void {
-    this.pendingResolves.delete(path);
-    const limit = this.openSizeBytes;
-    if (seemsBinary(data)) {
-      const head = data.slice(0, headSniffByteLength);
-      const outcome: FileContentResult = { kind: 'binary', size: data.byteLength, head };
-      this.cache.delete(path);
-      this.publishOutcome(path, outcome);
-      return;
-    }
-
-    if (data.byteLength > limit) {
-      const outcome: FileContentResult = { kind: 'too-large', size: data.byteLength, limit };
-      this.cache.delete(path);
-      this.publishOutcome(path, outcome);
-      return;
-    }
-
-    const copy = new Uint8Array(data.byteLength);
-    copy.set(data);
-    this.cache.set(path, copy);
-    const outcome: FileContentResult = { kind: 'text', content: copy };
-    this.publishOutcome(path, outcome);
-    this.setOrphaned(path, false);
-    this.notifyGlobalSubscribers({ type: 'read', path, data: copy });
   }
 
   /**
@@ -375,10 +352,41 @@ export class FileContentService {
     const wireCopy = new Uint8Array(data);
     const absolutePath = this.paths.toAbsolutePath(key);
     await this.proxy.writeFile(absolutePath, wireCopy);
+    this.refreshGuard.begin(key);
     this.cache.set(key, localCopy);
     this.setOrphaned(key, false);
     this.publishOutcome(key, { kind: 'text', content: localCopy });
     this.notifyGlobalSubscribers({ type: 'written', path: key, data: localCopy, source });
+  }
+
+  /**
+   * Persist Monaco working-copy changes with one active write and one
+   * replaceable latest value per workspace path.
+   *
+   * @param path - Workspace-relative model path.
+   * @param data - Latest model bytes.
+   * @returns Promise settled after the latest accepted value is durable.
+   */
+  // oxlint-disable-next-line @typescript-eslint/promise-function-async -- Concurrent callers must receive the shared queue promise by identity.
+  public saveEditor(path: string, data: Uint8Array<ArrayBuffer>): Promise<void> {
+    const key = this.paths.toWorkspaceRelativeKey('saveEditor', path);
+    const copy = new Uint8Array(data);
+    const barrier = this._editorMutationBarrierFor(key);
+    if (barrier !== undefined) {
+      barrier.deferred.set(key, copy);
+      return barrier.settled.promise;
+    }
+
+    const existing = this.editorSaves.get(key);
+    if (existing !== undefined) {
+      existing.pending = copy;
+      return existing.completion;
+    }
+
+    const state: EditorSaveState = { pending: copy, completion: Promise.resolve() };
+    this.editorSaves.set(key, state);
+    state.completion = this._drainEditorSave(key, state);
+    return state.completion;
   }
 
   /**
@@ -413,30 +421,12 @@ export class FileContentService {
     await this.proxy.writeFiles(absoluteFiles);
 
     for (const [key, localCopy] of clones) {
+      this.refreshGuard.begin(key);
       this.cache.set(key, localCopy);
       this.publishOutcome(key, { kind: 'text', content: localCopy });
     }
 
     this.notifyGlobalSubscribers({ type: 'batchWritten', paths, source });
-  }
-
-  /**
-   * Rename a file. Updates cache and notifies subscribers for both old and new paths.
-   *
-   * Both arguments **MUST** be workspace-relative; absolute keys that escape
-   * the workspace root throw {@link WorkspaceScopeViolationError}
-   * synchronously.
-   *
-   * Preserved for backward compatibility with callers that only deal with
-   * single-file renames. New callers should use {@link move}, which handles
-   * both files and directories and returns the resulting stat.
-   *
-   * @param oldPath - Previous workspace-relative path.
-   * @param newPath - Target workspace-relative path.
-   * @throws {WorkspaceScopeViolationError} When either key escapes the workspace root.
-   */
-  public async rename(oldPath: string, newPath: string): Promise<void> {
-    await this.move(oldPath, newPath);
   }
 
   /**
@@ -449,47 +439,22 @@ export class FileContentService {
    *
    * @param oldPath - Source workspace-relative path.
    * @param newPath - Target workspace-relative path.
-   * @param options - Optional `{ overwrite }` for collision resolution.
    * @throws {WorkspaceScopeViolationError} When either key escapes the workspace root.
    */
-  public async move(oldPath: string, newPath: string, options?: { overwrite?: boolean }): Promise<void> {
+  public async move(oldPath: string, newPath: string): Promise<void> {
     const oldKey = this.paths.toWorkspaceRelativeKey('move', oldPath);
     const newKey = this.paths.toWorkspaceRelativeKey('move', newPath);
     const absoluteOldPath = this.paths.toAbsolutePath(oldKey);
     const absoluteNewPath = this.paths.toAbsolutePath(newKey);
-    await this.proxy.move(absoluteOldPath, absoluteNewPath, options);
-
-    const subtreeKeys: string[] = [];
-    const oldPrefix = oldKey === '' ? '' : `${oldKey}/`;
-    for (const path of this.outcomes.keys()) {
-      if (path === oldKey || path.startsWith(oldPrefix)) {
-        subtreeKeys.push(path);
-      }
-    }
-    for (const [path] of this.cache.entries()) {
-      if ((path === oldKey || path.startsWith(oldPrefix)) && !subtreeKeys.includes(path)) {
-        subtreeKeys.push(path);
-      }
-    }
-
-    if (subtreeKeys.length === 0) {
-      this.cache.rename(oldKey, newKey);
-      this.pathNotifyRegistry.notifyPath(oldKey, undefined);
-      this.notifyGlobalSubscribers({ type: 'renamed', oldPath: oldKey, newPath: newKey });
-      return;
-    }
-
-    const newPrefix = newKey === '' ? '' : `${newKey}/`;
-    for (const path of subtreeKeys) {
-      const remapped = path === oldKey ? newKey : `${newPrefix}${path.slice(oldPrefix.length)}`;
-      this.cache.rename(path, remapped);
-      const oldOutcome = this.outcomes.get(path);
-      if (oldOutcome) {
-        this.outcomes.delete(path);
-        this.publishOutcome(remapped, oldOutcome);
-      }
-      this.pathNotifyRegistry.notifyPath(path, undefined);
-      this.notifyGlobalSubscribers({ type: 'renamed', oldPath: path, newPath: remapped });
+    const barrier = this._beginEditorMutation(oldKey, newKey);
+    await this._drainEditorSavesUnder(oldKey, barrier, false);
+    try {
+      await this.proxy.move(absoluteOldPath, absoluteNewPath);
+      this.recordMove(oldKey, newKey);
+      await this._finishEditorMutation(barrier, true);
+    } catch (error) {
+      await this._finishEditorMutation(barrier, false);
+      throw error;
     }
   }
 
@@ -500,16 +465,12 @@ export class FileContentService {
    *
    * @param oldPath - Workspace-relative source path.
    * @param newPath - Workspace-relative target path.
-   * @param options - Optional `{ overwrite }` for collision resolution.
+   * @returns `true` when the move is valid, otherwise its structured error.
    */
-  public async canMove(
-    oldPath: string,
-    newPath: string,
-    options?: { overwrite?: boolean },
-  ): Promise<true | WorkspaceMutationError> {
+  public async canMove(oldPath: string, newPath: string): Promise<true | WorkspaceMutationError> {
     const oldKey = this.paths.toWorkspaceRelativeKey('canMove', oldPath);
     const newKey = this.paths.toWorkspaceRelativeKey('canMove', newPath);
-    return this.proxy.canMove(this.paths.toAbsolutePath(oldKey), this.paths.toAbsolutePath(newKey), options);
+    return this.proxy.canMove(this.paths.toAbsolutePath(oldKey), this.paths.toAbsolutePath(newKey));
   }
 
   /**
@@ -517,6 +478,7 @@ export class FileContentService {
    *
    * @param oldPath - Workspace-relative current path.
    * @param newName - New basename (no slashes).
+   * @returns `true` when the rename is valid, otherwise its structured error.
    */
   public async canRename(oldPath: string, newName: string): Promise<true | WorkspaceMutationError> {
     const oldKey = this.paths.toWorkspaceRelativeKey('canRename', oldPath);
@@ -528,6 +490,7 @@ export class FileContentService {
    *
    * @param path - Workspace-relative path.
    * @param kind - `'file'` or `'directory'`.
+   * @returns `true` when creation is valid, otherwise its structured error.
    */
   public async canCreate(path: string, kind: 'file' | 'directory'): Promise<true | WorkspaceMutationError> {
     const key = this.paths.toWorkspaceRelativeKey('canCreate', path);
@@ -538,6 +501,7 @@ export class FileContentService {
    * Preflight delete. Workspace-relative wrapper for `canDelete`.
    *
    * @param path - Workspace-relative path.
+   * @returns `true` when deletion is valid, otherwise its structured error.
    */
   public async canDelete(path: string): Promise<true | WorkspaceMutationError> {
     const key = this.paths.toWorkspaceRelativeKey('canDelete', path);
@@ -545,20 +509,16 @@ export class FileContentService {
   }
 
   /**
-   * Move many paths atomically. Workspace-relative wrapper that
+   * Move many paths sequentially. This workspace-relative wrapper
    * translates each edit's source/target into absolute paths, calls
-   * the worker {@link FileSystemClient.bulkMove}, and (on success)
-   * migrates the local cache + outcome map for every moved entry via
+   * the worker {@link FileSystemClient.bulkMove}, and migrates the local
+   * cache + outcome map for every completed entry via
    * the same logic as {@link move}.
    *
-   * On worker-side mid-flight failure the worker already rolled back
-   * the moves; this wrapper makes no local cache changes in that
-   * branch and surfaces the structured error verbatim.
-   *
    * @param edits - Workspace-relative source/target pairs.
-   * @param options - Optional `{ overwrite }` propagated to every move.
+   * @returns Per-edit move successes and failures.
    */
-  public async bulkMove(edits: readonly BulkMoveEdit[], options?: { overwrite?: boolean }): Promise<BulkMoveResult> {
+  public async bulkMove(edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult> {
     if (edits.length === 0) {
       return { moved: [], failed: [] };
     }
@@ -574,17 +534,31 @@ export class FileContentService {
       };
     });
 
-    const result = await this.proxy.bulkMove(
-      normalized.map(({ source, target }) => ({ source, target })),
-      options,
+    const barriers = normalized.map(({ oldKey, newKey }) => this._beginEditorMutation(oldKey, newKey));
+    await Promise.all(
+      barriers.map(async (barrier) => {
+        await this._drainEditorSavesUnder(barrier.source, barrier, false);
+      }),
     );
 
-    if (result.failed.length > 0) {
-      return result;
+    let result: BulkMoveResult;
+    try {
+      result = await this.proxy.bulkMove(normalized.map(({ source, target }) => ({ source, target })));
+    } catch (error) {
+      await Promise.all(barriers.map(async (barrier) => this._finishEditorMutation(barrier, false)));
+      throw error;
     }
 
-    for (const entry of normalized) {
+    for (const moved of result.moved) {
+      const entry = normalized.find(
+        ({ source, target }) => source === moved.edit.source && target === moved.edit.target,
+      );
+      if (entry === undefined) {
+        continue;
+      }
       const { oldKey, newKey } = entry;
+      this.refreshGuard.begin(oldKey);
+      this.refreshGuard.begin(newKey);
       const subtreeKeys: string[] = [];
       const oldPrefix = oldKey === '' ? '' : `${oldKey}/`;
       for (const path of this.outcomes.keys()) {
@@ -608,6 +582,8 @@ export class FileContentService {
       const newPrefix = newKey === '' ? '' : `${newKey}/`;
       for (const path of subtreeKeys) {
         const remapped = path === oldKey ? newKey : `${newPrefix}${path.slice(oldPrefix.length)}`;
+        this.refreshGuard.begin(path);
+        this.refreshGuard.begin(remapped);
         this.cache.rename(path, remapped);
         const oldOutcome = this.outcomes.get(path);
         if (oldOutcome) {
@@ -618,6 +594,13 @@ export class FileContentService {
         this.notifyGlobalSubscribers({ type: 'renamed', oldPath: path, newPath: remapped });
       }
     }
+
+    const movedSources = new Set(result.moved.map(({ edit }) => edit.source));
+    await Promise.all(
+      barriers.map(async (barrier, index) =>
+        this._finishEditorMutation(barrier, movedSources.has(normalized[index]!.source)),
+      ),
+    );
 
     return result;
   }
@@ -635,11 +618,20 @@ export class FileContentService {
   public async delete(path: string, source: FileWriteSource): Promise<void> {
     const key = this.paths.toWorkspaceRelativeKey('delete', path);
     const absolutePath = this.paths.toAbsolutePath(key);
-    await this.proxy.unlink(absolutePath);
-    this.cache.delete(key);
-    this.setOrphaned(key, true);
-    this.publishOutcome(key, { kind: 'orphaned' });
-    this.notifyGlobalSubscribers({ type: 'deleted', path: key, source });
+    const barrier = this._beginEditorMutation(key);
+    await this._drainEditorSavesUnder(key, barrier, true);
+    try {
+      await this.proxy.unlink(absolutePath);
+      this.refreshGuard.begin(key);
+      this.cache.delete(key);
+      this.setOrphaned(key, true);
+      this.publishOutcome(key, { kind: 'orphaned' });
+      this.notifyGlobalSubscribers({ type: 'deleted', path: key, source });
+      await this._finishEditorMutation(barrier, true);
+    } catch (error) {
+      await this._finishEditorMutation(barrier, false);
+      throw error;
+    }
   }
 
   /**
@@ -670,9 +662,17 @@ export class FileContentService {
    */
   public async deleteDirectory(path: string, options?: { recursive?: boolean }): Promise<void> {
     const key = this.paths.toWorkspaceRelativeKey('deleteDirectory', path);
-    await this.proxy.rmdir(this.paths.toAbsolutePath(key), options);
-    this.orphanSubtree(key);
-    this.notifyGlobalSubscribers({ type: 'directoryDeleted', path: key });
+    const barrier = this._beginEditorMutation(key);
+    await this._drainEditorSavesUnder(key, barrier, true);
+    try {
+      await this.proxy.rmdir(this.paths.toAbsolutePath(key), options);
+      this.orphanSubtree(key);
+      this.notifyGlobalSubscribers({ type: 'directoryDeleted', path: key });
+      await this._finishEditorMutation(barrier, true);
+    } catch (error) {
+      await this._finishEditorMutation(barrier, false);
+      throw error;
+    }
   }
 
   /**
@@ -694,6 +694,7 @@ export class FileContentService {
     const localCopy = new Uint8Array(data);
     const wireCopy = new Uint8Array(data);
     await this.proxy.writeFile(this.paths.toAbsolutePath(destinationKey), wireCopy);
+    this.refreshGuard.begin(destinationKey);
     this.cache.set(destinationKey, localCopy);
     this.setOrphaned(destinationKey, false);
     this.publishOutcome(destinationKey, { kind: 'text', content: localCopy });
@@ -806,6 +807,7 @@ export class FileContentService {
    * @param rootDirectory - New absolute project root used by {@link WorkspacePathResolver}.
    */
   public reset(rootDirectory: string): void {
+    this._cancelEditorPendingWork();
     this.paths.reset(rootDirectory);
     this.cache.clear();
     this.pendingResolves.clear();
@@ -818,6 +820,7 @@ export class FileContentService {
    * Release workers, caches, and subscriptions owned by this service.
    */
   public dispose(): void {
+    this._cancelEditorPendingWork();
     for (const unsubscribe of this.unsubscribeChannel) {
       unsubscribe();
     }
@@ -832,11 +835,152 @@ export class FileContentService {
     this.refreshGuard.reset();
   }
 
+  private async _drainEditorSave(path: string, state: EditorSaveState): Promise<void> {
+    let finalError: unknown;
+    try {
+      while (state.pending !== undefined) {
+        const data = state.pending;
+        state.pending = undefined;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- Saves for one path are intentionally serialized.
+          await this.write(path, data, 'editor');
+          finalError = undefined;
+        } catch (error) {
+          finalError = error;
+        }
+      }
+      if (finalError !== undefined) {
+        // oxlint-disable-next-line @typescript-eslint/only-throw-error -- Preserve the exact rejection from the filesystem client.
+        throw finalError;
+      }
+    } finally {
+      if (this.editorSaves.get(path) === state) {
+        this.editorSaves.delete(path);
+      }
+    }
+  }
+
+  private _beginEditorMutation(source: string, target?: string): EditorMutationBarrier {
+    const barrier: EditorMutationBarrier = {
+      source,
+      target,
+      deferred: new Map(),
+      settled: Promise.withResolvers<void>(),
+    };
+    this.editorMutationBarriers.push(barrier);
+    return barrier;
+  }
+
+  private async _drainEditorSavesUnder(
+    prefix: string,
+    barrier: EditorMutationBarrier,
+    cancelPending: boolean,
+  ): Promise<void> {
+    const completions: Array<Promise<void>> = [];
+    for (const [path, state] of this.editorSaves) {
+      if (!this._pathIsWithin(path, prefix)) {
+        continue;
+      }
+      if (cancelPending && state.pending !== undefined) {
+        barrier.deferred.set(path, state.pending);
+        state.pending = undefined;
+      }
+      completions.push(state.completion);
+    }
+    await Promise.allSettled(completions);
+  }
+
+  private async _finishEditorMutation(barrier: EditorMutationBarrier, succeeded: boolean): Promise<void> {
+    const index = this.editorMutationBarriers.indexOf(barrier);
+    if (index !== -1) {
+      this.editorMutationBarriers.splice(index, 1);
+    }
+    if (succeeded && barrier.target === undefined) {
+      barrier.settled.resolve();
+      return;
+    }
+
+    const saves: Array<Promise<void>> = [];
+    for (const [path, data] of barrier.deferred) {
+      const destination =
+        succeeded && barrier.target !== undefined
+          ? path === barrier.source
+            ? barrier.target
+            : `${barrier.target}${path.slice(barrier.source.length)}`
+          : path;
+      saves.push(this.saveEditor(destination, data));
+    }
+    try {
+      await Promise.all(saves);
+      barrier.settled.resolve();
+    } catch (error) {
+      barrier.settled.reject(error);
+    }
+  }
+
+  private _editorMutationBarrierFor(path: string): EditorMutationBarrier | undefined {
+    return this.editorMutationBarriers.findLast(({ source }) => this._pathIsWithin(path, source));
+  }
+
+  private _pathIsWithin(path: string, prefix: string): boolean {
+    return path === prefix || prefix === '' || path.startsWith(`${prefix}/`);
+  }
+
+  private _cancelEditorPendingWork(): void {
+    for (const state of this.editorSaves.values()) {
+      state.pending = undefined;
+    }
+    for (const barrier of this.editorMutationBarriers.splice(0)) {
+      barrier.deferred.clear();
+      barrier.settled.resolve();
+    }
+  }
+
+  private recordMove(oldKey: string, newKey: string): void {
+    this.refreshGuard.begin(oldKey);
+    this.refreshGuard.begin(newKey);
+    const subtreeKeys: string[] = [];
+    const oldPrefix = oldKey === '' ? '' : `${oldKey}/`;
+    for (const path of this.outcomes.keys()) {
+      if (path === oldKey || path.startsWith(oldPrefix)) {
+        subtreeKeys.push(path);
+      }
+    }
+    for (const [path] of this.cache.entries()) {
+      if ((path === oldKey || path.startsWith(oldPrefix)) && !subtreeKeys.includes(path)) {
+        subtreeKeys.push(path);
+      }
+    }
+
+    if (subtreeKeys.length === 0) {
+      this.cache.rename(oldKey, newKey);
+      this.pathNotifyRegistry.notifyPath(oldKey, undefined);
+      this.notifyGlobalSubscribers({ type: 'renamed', oldPath: oldKey, newPath: newKey });
+      return;
+    }
+
+    const newPrefix = newKey === '' ? '' : `${newKey}/`;
+    for (const path of subtreeKeys) {
+      const remapped = path === oldKey ? newKey : `${newPrefix}${path.slice(oldPrefix.length)}`;
+      this.refreshGuard.begin(path);
+      this.refreshGuard.begin(remapped);
+      this.cache.rename(path, remapped);
+      const oldOutcome = this.outcomes.get(path);
+      if (oldOutcome) {
+        this.outcomes.delete(path);
+        this.publishOutcome(remapped, oldOutcome);
+      }
+      this.pathNotifyRegistry.notifyPath(path, undefined);
+      this.notifyGlobalSubscribers({ type: 'renamed', oldPath: path, newPath: remapped });
+    }
+  }
+
   private shouldRecompute(options?: ResolveOptions): boolean {
     return Boolean(options?.forceText) || options?.sizeLimit !== undefined;
   }
 
   private onWorkerFileWritten(relativePath: string): void {
+    this.refreshGuard.begin(relativePath);
     this.setOrphaned(relativePath, false);
     if (this.shouldRefreshWorkerPath(relativePath)) {
       // async-iife: bootstrap
@@ -848,6 +992,7 @@ export class FileContentService {
   }
 
   private onWorkerFileDeleted(relativePath: string): void {
+    this.refreshGuard.begin(relativePath);
     this.cache.delete(relativePath);
     this.setOrphaned(relativePath, true);
     this.publishOutcome(relativePath, { kind: 'orphaned' });
@@ -857,11 +1002,12 @@ export class FileContentService {
     const { oldPath, newPath } = event;
     if (oldPath !== undefined) {
       this.cache.delete(oldPath);
-      this.refreshGuard.reset(oldPath);
+      this.refreshGuard.begin(oldPath);
       this.setOrphaned(oldPath, true);
       this.publishOutcome(oldPath, { kind: 'orphaned' });
     }
     if (newPath !== undefined) {
+      this.refreshGuard.begin(newPath);
       this.cache.delete(newPath);
       this.setOrphaned(newPath, false);
       if (this.shouldRefreshWorkerPath(newPath)) {
@@ -891,7 +1037,7 @@ export class FileContentService {
     }
     for (const path of affected) {
       this.cache.delete(path);
-      this.refreshGuard.reset(path);
+      this.refreshGuard.begin(path);
       this.setOrphaned(path, true);
       this.publishOutcome(path, { kind: 'orphaned' });
     }
@@ -916,7 +1062,7 @@ export class FileContentService {
     }
     for (const path of affected) {
       this.cache.delete(path);
-      this.refreshGuard.reset(path);
+      this.refreshGuard.begin(path);
       this.setOrphaned(path, true);
       this.publishOutcome(path, { kind: 'orphaned' });
       const remapped =
@@ -926,6 +1072,7 @@ export class FileContentService {
             ? newDirectory
             : `${newPrefix}${path.slice(oldPrefix.length)}`;
       if (remapped !== undefined) {
+        this.refreshGuard.begin(remapped);
         this.notifyGlobalSubscribers({ type: 'renamed', oldPath: path, newPath: remapped });
         if (this.shouldRefreshWorkerPath(remapped)) {
           // async-iife: bootstrap
@@ -994,7 +1141,7 @@ export class FileContentService {
    */
   private async refreshOutcomeInPlace(path: string): Promise<void> {
     const generation = this.refreshGuard.begin(path);
-    const data = await this.readBytes(path);
+    const data = await this.readBytes(path, generation, true);
     if (!this.refreshGuard.isCurrent(path, generation)) {
       return;
     }
@@ -1034,11 +1181,10 @@ export class FileContentService {
     this.notifyGlobalSubscribers({ type: 'read', path, data });
   }
 
-  private async computeOutcome(path: string, options?: ResolveOptions): Promise<FileContentResult> {
-    const data = await this.readBytes(path);
+  private async computeOutcome(path: string, generation: number, options?: ResolveOptions): Promise<FileContentResult> {
+    const data = await this.readBytes(path, generation);
     if (data === undefined) {
-      // ReadBytes already published the orphaned/error outcome.
-      return this.outcomes.get(path) ?? { kind: 'orphaned' };
+      return this.outcomes.get(path) ?? loadingOutcome;
     }
 
     const limit = options?.sizeLimit ?? this.openSizeBytes;
@@ -1047,16 +1193,23 @@ export class FileContentService {
     if (!forceText && seemsBinary(data)) {
       const head = data.slice(0, headSniffByteLength);
       const outcome: FileContentResult = { kind: 'binary', size: data.byteLength, head };
-      this.publishOutcome(path, outcome);
+      if (this.refreshGuard.isCurrent(path, generation)) {
+        this.publishOutcome(path, outcome);
+      }
       return outcome;
     }
 
     if (data.byteLength > limit) {
       const outcome: FileContentResult = { kind: 'too-large', size: data.byteLength, limit };
-      this.publishOutcome(path, outcome);
+      if (this.refreshGuard.isCurrent(path, generation)) {
+        this.publishOutcome(path, outcome);
+      }
       return outcome;
     }
 
+    if (!this.refreshGuard.isCurrent(path, generation)) {
+      return { kind: 'text', content: data };
+    }
     this.cache.set(path, data);
     const outcome: FileContentResult = { kind: 'text', content: data };
     this.publishOutcome(path, outcome);
@@ -1064,12 +1217,18 @@ export class FileContentService {
     return outcome;
   }
 
-  private async readBytes(path: string): Promise<Uint8Array<ArrayBuffer> | undefined> {
-    if (this.filePool) {
+  private async readBytes(
+    path: string,
+    generation: number,
+    bypassSharedPool = false,
+  ): Promise<Uint8Array<ArrayBuffer> | undefined> {
+    if (!bypassSharedPool && this.filePool) {
       const absolutePath = this.paths.toAbsolutePath(path);
       const poolData = this.filePool.resolveCopy(absolutePath);
       if (poolData) {
-        this.setOrphaned(path, false);
+        if (this.refreshGuard.isCurrent(path, generation)) {
+          this.setOrphaned(path, false);
+        }
         return poolData;
       }
     }
@@ -1077,9 +1236,14 @@ export class FileContentService {
     const absolutePath = this.paths.toAbsolutePath(path);
     try {
       const data = await this.proxy.readFile(absolutePath);
-      this.setOrphaned(path, false);
+      if (this.refreshGuard.isCurrent(path, generation)) {
+        this.setOrphaned(path, false);
+      }
       return data;
     } catch (error) {
+      if (!this.refreshGuard.isCurrent(path, generation)) {
+        return undefined;
+      }
       if (error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
         this.setOrphaned(path, true);
         this.publishOutcome(path, { kind: 'orphaned' });
@@ -1133,11 +1297,11 @@ function outcomesEqual(a: FileContentResult, b: FileContentResult): boolean {
     }
     case 'text': {
       const other = b as Extract<FileContentResult, { kind: 'text' }>;
-      return a.content === other.content;
+      return bytesEqual(a.content, other.content);
     }
     case 'binary': {
       const other = b as Extract<FileContentResult, { kind: 'binary' }>;
-      return a.size === other.size && a.head === other.head;
+      return a.size === other.size && bytesEqual(a.head, other.head);
     }
     case 'too-large': {
       const other = b as Extract<FileContentResult, { kind: 'too-large' }>;
@@ -1149,3 +1313,6 @@ function outcomesEqual(a: FileContentResult, b: FileContentResult): boolean {
     }
   }
 }
+
+const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
+  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);

@@ -1,6 +1,6 @@
 import { describe, it, expectTypeOf } from 'vitest';
-import type { FileSystemClient } from '#file-system-client.js';
-import type { WorkspaceScope } from '@taucad/filesystem';
+import type { BulkMoveEdit, FileSystemClient } from '#file-system-client.js';
+import type { StorageRootConfig, WorkspaceScope } from '@taucad/filesystem';
 
 type AssertKeys<Expected extends keyof FileSystemClient> = Expected;
 
@@ -15,6 +15,8 @@ export type FileSystemClientCoreRpcKeys = AssertKeys<
   | 'stat'
   | 'readDirectory'
   | 'getDirectoryStat'
+  | 'searchFiles'
+  | 'pollExternalChanges'
   | 'exists'
   | 'watch'
   | 'mount'
@@ -23,6 +25,7 @@ export type FileSystemClientCoreRpcKeys = AssertKeys<
   | 'unlink'
   | 'rmdir'
   | 'getZippedDirectory'
+  | 'commitPendingProjectDirectory'
 >;
 
 describe('FileSystemClient explicit-workspace contract', () => {
@@ -57,20 +60,41 @@ describe('FileSystemClient explicit-workspace contract', () => {
     expectTypeOf<undefined>().toExtend<OptionsArgument>();
   });
 
-  it('mount-routed methods accept an optional scope inside their options bag', () => {
+  it('keeps scoped reads while mutations remain mount-routed', () => {
     type ReadFileOptions = Parameters<FileSystemClient['readFile']>[1];
-    type UnlinkOptions = Parameters<FileSystemClient['unlink']>[1];
     type RmdirOptions = Parameters<FileSystemClient['rmdir']>[1];
     type GetZippedDirectoryOptions = Parameters<FileSystemClient['getZippedDirectory']>[1];
 
     expectTypeOf<{ scope: WorkspaceScope }>().toExtend<NonNullable<ReadFileOptions>>();
-    expectTypeOf<{ scope: WorkspaceScope }>().toExtend<NonNullable<UnlinkOptions>>();
-    expectTypeOf<{ scope: WorkspaceScope; recursive: true }>().toExtend<NonNullable<RmdirOptions>>();
+    expectTypeOf<RmdirOptions>().toEqualTypeOf<{ recursive?: boolean } | undefined>();
     expectTypeOf<{ scope: WorkspaceScope }>().toExtend<NonNullable<GetZippedDirectoryOptions>>();
 
     expectTypeOf<undefined>().toExtend<ReadFileOptions>();
-    expectTypeOf<undefined>().toExtend<UnlinkOptions>();
     expectTypeOf<undefined>().toExtend<RmdirOptions>();
     expectTypeOf<undefined>().toExtend<GetZippedDirectoryOptions>();
+  });
+
+  it('exposes the journal-backed project-directory commit as one typed authority command', () => {
+    type Input = Parameters<FileSystemClient['commitPendingProjectDirectory']>[0];
+    expectTypeOf<Input>().toExtend<{
+      providerBasePath: string;
+      scope: StorageRootConfig;
+      files: Readonly<Record<string, { readonly content: Uint8Array<ArrayBuffer> }>>;
+      manifest: Uint8Array<ArrayBuffer>;
+    }>();
+    expectTypeOf<Input>().not.toHaveProperty('projectId');
+  });
+
+  it('does not expose move overwrite or bulk rollback options', () => {
+    expectTypeOf<Parameters<FileSystemClient['move']>>().toEqualTypeOf<[source: string, target: string]>();
+    expectTypeOf<Parameters<FileSystemClient['canMove']>>().toEqualTypeOf<[source: string, target: string]>();
+    expectTypeOf<Parameters<FileSystemClient['bulkMove']>>().toEqualTypeOf<[edits: readonly BulkMoveEdit[]]>();
+  });
+
+  it('keeps search rooted and allows external polling to select one routed root', () => {
+    expectTypeOf<Parameters<FileSystemClient['searchFiles']>>().toExtend<
+      [root: string, query: string, options?: { maxResults?: number; includeDirectories?: boolean }]
+    >();
+    expectTypeOf<Parameters<FileSystemClient['pollExternalChanges']>>().toEqualTypeOf<[root?: string]>();
   });
 });

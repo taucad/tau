@@ -9,8 +9,8 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "kernels/<%= name %>"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "files": ["dist", "README.md"],
   "keywords": ["cad", "kernel", "<%= name %>"],
   "author": "Richard Fontein",
@@ -23,14 +23,14 @@
     "access": "public",
     "exports": {
       ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.js",
-        "default": "./dist/index.js"
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
       },
       "./kernel": {
-        "types": "./dist/<%= name %>.kernel.d.ts",
-        "import": "./dist/<%= name %>.kernel.js",
-        "default": "./dist/<%= name %>.kernel.js"
+        "types": "./dist/<%= name %>.kernel.d.mts",
+        "import": "./dist/<%= name %>.kernel.mjs",
+        "default": "./dist/<%= name %>.kernel.mjs"
       }
     }
   },

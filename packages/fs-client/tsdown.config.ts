@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsdown';
-import type { Options } from 'tsdown';
+import type { UserConfig } from 'tsdown';
 
-const baseConfig: Options = {
+const baseConfig: UserConfig = {
   entry: [
     'src/workspace-path-resolver.ts',
     'src/path-subscriber-registry.ts',
@@ -25,7 +25,7 @@ const baseConfig: Options = {
   unbundle: true,
 };
 
-const packageConfig: Options = {
+const packageConfig: UserConfig = {
   ...baseConfig,
   format: 'esm',
   outDir: 'dist',

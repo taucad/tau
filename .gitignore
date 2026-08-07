@@ -54,7 +54,7 @@ next-env.d.ts
 # Repos CLI bundle (checked in); TUI bundle requires build
 !scripts/dist/
 scripts/dist/*
-!scripts/dist/repos.js
+!scripts/dist/repos.mjs
 
 # Repos - for integration context
 repos/**/*

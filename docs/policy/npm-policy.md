@@ -150,7 +150,7 @@ export default defineConfig(packageConfig);
 Required fields:
 
 - `unbundle: true` — emit source files mirroring `src/` structure. Required for any package whose consumers use `new URL(literal, import.meta.url)` for asset/plugin discovery (see `docs/research/runtime-zero-config-bundling.md`). Default-on workspace-wide for consistency.
-- `dts: true` — emit `.d.ts` declarations beside ESM JavaScript.
+- `dts: true` — emit `.d.mts` declarations beside ESM JavaScript.
 - `minify: true` — non-negotiable for published artefacts.
 - `tsconfig: 'tsconfig.build.json'` — separate from `tsconfig.json` (dev) and `tsconfig.spec.json` (tests).
 
@@ -204,9 +204,9 @@ Every runtime subpath in `package.json#publishConfig.exports` must follow this c
 ```json
 {
   "./foo": {
-    "types": "./dist/foo.d.ts",
-    "import": "./dist/foo.js",
-    "default": "./dist/foo.js"
+    "types": "./dist/foo.d.mts",
+    "import": "./dist/foo.mjs",
+    "default": "./dist/foo.mjs"
   }
 }
 ```
@@ -218,7 +218,7 @@ For type-only entries (no runtime code), expose only `types`:
 ```json
 {
   "./types": {
-    "types": "./dist/types/index.d.ts"
+    "types": "./dist/types/index.d.mts"
   }
 }
 ```
@@ -248,8 +248,8 @@ Every publishable package must declare these fields. Missing fields fail `publin
 | `engines`                | `{ "node": ">=22" }` (matches Node 22 LTS WebSocket global and stable ESM resolver)                |
 | `sideEffects`            | `false` unless the package has top-level side effects (rare)                                       |
 | `files`                  | `["dist", "README.md", "CHANGELOG.md"]` — never include source, tests, or configs                  |
-| `main`                   | `./dist/index.js` for packages with a root runtime export                                          |
-| `types`                  | `./dist/index.d.ts` for packages with a root export                                                |
+| `main`                   | `./dist/index.mjs` for packages with a root runtime export                                         |
+| `types`                  | `./dist/index.d.mts` for packages with a root export                                               |
 | `exports`                | Map every public subpath to its source `.ts` (workspace dev)                                       |
 | `publishConfig.exports`  | Map every public subpath to its ESM output (publish-time override)                                 |
 | `publishConfig.access`   | `"public"` for scoped packages                                                                     |
@@ -261,7 +261,7 @@ INCORRECT (missing `engines`, `sideEffects`, `bugs`, `homepage`, `prepublishOnly
 {
   "name": "@taucad/runtime",
   "version": "0.1.0",
-  "main": "./dist/index.js"
+  "main": "./dist/index.mjs"
 }
 ```
 
@@ -325,8 +325,8 @@ See `docs/research/runtime-npm-release-bundling.md#readme-audit` for the canonic
 
 Every publishable Tau package ships ESM-only output.
 
-- `dist/*.js` is the JavaScript output tree.
-- `dist/*.d.ts` is the declaration output tree.
+- `dist/*.mjs` is the JavaScript output tree.
+- `dist/*.d.mts` is the declaration output tree.
 - `publishConfig.exports` must not declare `require` conditions.
 - `attw` runs with `profile: 'esm-only'`.
 

@@ -36,9 +36,9 @@ describe('kernel generator', () => {
     expect(packageJson.license).toBe('MIT');
     expect(packageJson.exports?.['./kernel']).toBe('./src/example.kernel.ts');
     expect(packageJson.publishConfig?.exports?.['./kernel']).toEqual({
-      types: './dist/example.kernel.d.ts',
-      import: './dist/example.kernel.js',
-      default: './dist/example.kernel.js',
+      types: './dist/example.kernel.d.mts',
+      import: './dist/example.kernel.mjs',
+      default: './dist/example.kernel.mjs',
     });
     expect(packageJson.dependencies?.['@taucad/runtime']).toBe('workspace:*');
     expect(packageJson.dependencies?.['zod']).toBe('catalog:');

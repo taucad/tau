@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsdown';
-import type { Options } from 'tsdown';
+import type { UserConfig } from 'tsdown';
 
-const baseConfig: Options = {
+const baseConfig: UserConfig = {
   entry: [
     'src/index.ts',
     'src/client/index.ts',
@@ -12,7 +12,6 @@ const baseConfig: Options = {
     'src/plugins/middleware-entry.ts',
     'src/plugins/bundler-entry.ts',
     'src/plugins/transcoder-entry.ts',
-    'src/runner/index.ts',
     'src/transport/index.ts',
     'src/transport/in-process.ts',
     'src/transport/web.ts',
@@ -66,30 +65,30 @@ const baseConfig: Options = {
   copy: (options) => [
     {
       from: 'src/kernels/replicad/fonts',
-      to: `${options.outDir}/kernels/replicad/fonts`,
+      to: `${options.outDir}/kernels/replicad`,
     },
     {
       from: 'src/kernels/replicad/wasm',
-      to: `${options.outDir}/kernels/replicad/wasm`,
+      to: `${options.outDir}/kernels/replicad`,
     },
     {
       from: 'src/kernels/zoo/wasm',
-      to: `${options.outDir}/kernels/zoo/wasm`,
+      to: `${options.outDir}/kernels/zoo`,
     },
     {
       from: 'src/kernels/manifold/wasm',
-      to: `${options.outDir}/kernels/manifold/wasm`,
+      to: `${options.outDir}/kernels/manifold`,
     },
     {
       from: 'src/kernels/opencascade/wasm',
-      to: `${options.outDir}/kernels/opencascade/wasm`,
+      to: `${options.outDir}/kernels/opencascade`,
     },
   ],
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
 };
 
-const packageConfig: Options = {
+const packageConfig: UserConfig = {
   ...baseConfig,
   format: 'esm',
   outDir: 'dist',

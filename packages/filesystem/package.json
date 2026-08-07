@@ -9,8 +9,8 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/filesystem"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "files": [
     "dist",
     "README.md"
@@ -32,19 +32,19 @@
     "access": "public",
     "exports": {
       ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.js",
-        "default": "./dist/index.js"
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
       },
       "./backend": {
-        "types": "./dist/backend/index.d.ts",
-        "import": "./dist/backend/index.js",
-        "default": "./dist/backend/index.js"
+        "types": "./dist/backend/index.d.mts",
+        "import": "./dist/backend/index.mjs",
+        "default": "./dist/backend/index.mjs"
       },
       "./bundled-types-mount": {
-        "types": "./dist/bundled-types-mount.d.ts",
-        "import": "./dist/bundled-types-mount.js",
-        "default": "./dist/bundled-types-mount.js"
+        "types": "./dist/bundled-types-mount.d.mts",
+        "import": "./dist/bundled-types-mount.mjs",
+        "default": "./dist/bundled-types-mount.mjs"
       }
     }
   },

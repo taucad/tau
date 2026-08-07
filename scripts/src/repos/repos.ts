@@ -11,7 +11,7 @@ const [command] = process.argv.slice(2);
 if (command) {
   run(process.argv.slice(2));
 } else {
-  const tuiPath = join(dirname(fileURLToPath(import.meta.url)), 'repos-tui.js');
+  const tuiPath = join(dirname(fileURLToPath(import.meta.url)), 'repos-tui.mjs');
 
   if (!existsSync(tuiPath)) {
     console.error('TUI not available. Build first: pnpm nx build scripts');

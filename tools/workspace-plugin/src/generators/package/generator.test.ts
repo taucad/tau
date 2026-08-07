@@ -41,13 +41,13 @@ describe('package generator', () => {
       imports?: Record<string, string>;
     }>(tree, 'packages/example/package.json');
 
-    expect(packageJson.main).toBe('./dist/index.js');
-    expect(packageJson.types).toBe('./dist/index.d.ts');
+    expect(packageJson.main).toBe('./dist/index.mjs');
+    expect(packageJson.types).toBe('./dist/index.d.mts');
     expect(packageJson.module).toBeUndefined();
     expect(packageJson.publishConfig?.exports?.['.']).toEqual({
-      types: './dist/index.d.ts',
-      import: './dist/index.js',
-      default: './dist/index.js',
+      types: './dist/index.d.mts',
+      import: './dist/index.mjs',
+      default: './dist/index.mjs',
     });
     expect(packageJson.imports?.['#*.js']).toBe('./src/*.ts');
     expect(packageJson.imports?.['#*']).toBe('./src/*');

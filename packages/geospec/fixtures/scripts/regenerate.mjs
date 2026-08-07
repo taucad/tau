@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 const fixturesRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const repoRoot = resolve(fixturesRoot, '../../..');
-const cli = join(repoRoot, 'packages/cli/dist/bin/taucad.js');
+const cli = join(repoRoot, 'packages/cli/dist/bin/taucad.mjs');
 const families = ['contact', 'clearance', 'mate', 'containment', 'selector'];
 const only = new Set(process.argv.slice(2));
 

@@ -10,10 +10,10 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/geospec"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "bin": {
-    "geospec": "./dist/cli.js"
+    "geospec": "./dist/cli.mjs"
   },
   "files": [
     "dist",
@@ -48,78 +48,78 @@
   "publishConfig": {
     "access": "public",
     "bin": {
-      "geospec": "./dist/cli.js"
+      "geospec": "./dist/cli.mjs"
     },
     "exports": {
       ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.js",
-        "default": "./dist/index.js"
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
       },
       "./brep": {
-        "types": "./dist/brep/index.d.ts",
-        "import": "./dist/brep/index.js",
-        "default": "./dist/brep/index.js"
+        "types": "./dist/brep/index.d.mts",
+        "import": "./dist/brep/index.mjs",
+        "default": "./dist/brep/index.mjs"
       },
       "./config": {
-        "types": "./dist/config/index.d.ts",
-        "import": "./dist/config/index.js",
-        "default": "./dist/config/index.js"
+        "types": "./dist/config/index.d.mts",
+        "import": "./dist/config/index.mjs",
+        "default": "./dist/config/index.mjs"
       },
       "./inspection": {
-        "types": "./dist/inspection/index.d.ts",
-        "import": "./dist/inspection/index.js",
-        "default": "./dist/inspection/index.js"
+        "types": "./dist/inspection/index.d.mts",
+        "import": "./dist/inspection/index.mjs",
+        "default": "./dist/inspection/index.mjs"
       },
       "./mesh": {
-        "types": "./dist/mesh/index.d.ts",
-        "import": "./dist/mesh/index.js",
-        "default": "./dist/mesh/index.js"
+        "types": "./dist/mesh/index.d.mts",
+        "import": "./dist/mesh/index.mjs",
+        "default": "./dist/mesh/index.mjs"
       },
       "./model": {
-        "types": "./dist/model/index.d.ts",
-        "import": "./dist/model/index.js",
-        "default": "./dist/model/index.js"
+        "types": "./dist/model/index.d.mts",
+        "import": "./dist/model/index.mjs",
+        "default": "./dist/model/index.mjs"
       },
       "./proofs": {
-        "types": "./dist/proofs/index.d.ts",
-        "import": "./dist/proofs/index.js",
-        "default": "./dist/proofs/index.js"
+        "types": "./dist/proofs/index.d.mts",
+        "import": "./dist/proofs/index.mjs",
+        "default": "./dist/proofs/index.mjs"
       },
       "./runner": {
-        "types": "./dist/runner/index.d.ts",
-        "import": "./dist/runner/index.js",
-        "default": "./dist/runner/index.js"
+        "types": "./dist/runner/index.d.mts",
+        "import": "./dist/runner/index.mjs",
+        "default": "./dist/runner/index.mjs"
       },
       "./runner/node": {
-        "types": "./dist/runner/node/index.d.ts",
-        "import": "./dist/runner/node/index.js",
-        "default": "./dist/runner/node/index.js"
+        "types": "./dist/runner/node/index.d.mts",
+        "import": "./dist/runner/node/index.mjs",
+        "default": "./dist/runner/node/index.mjs"
       },
       "./runner/web": {
-        "types": "./dist/runner/web/index.d.ts",
-        "import": "./dist/runner/web/index.js",
-        "default": "./dist/runner/web/index.js"
+        "types": "./dist/runner/web/index.d.mts",
+        "import": "./dist/runner/web/index.mjs",
+        "default": "./dist/runner/web/index.mjs"
       },
       "./runner/worker": {
-        "types": "./dist/runner/worker/index.d.ts",
-        "import": "./dist/runner/worker/index.js",
-        "default": "./dist/runner/worker/index.js"
+        "types": "./dist/runner/worker/index.d.mts",
+        "import": "./dist/runner/worker/index.mjs",
+        "default": "./dist/runner/worker/index.mjs"
       },
       "./selector": {
-        "types": "./dist/selector/index.d.ts",
-        "import": "./dist/selector/index.js",
-        "default": "./dist/selector/index.js"
+        "types": "./dist/selector/index.d.mts",
+        "import": "./dist/selector/index.mjs",
+        "default": "./dist/selector/index.mjs"
       },
       "./step": {
-        "types": "./dist/step/index.d.ts",
-        "import": "./dist/step/index.js",
-        "default": "./dist/step/index.js"
+        "types": "./dist/step/index.d.mts",
+        "import": "./dist/step/index.mjs",
+        "default": "./dist/step/index.mjs"
       },
       "./native/opencascade/single": {
         "types": "./dist/native/opencascade/geospec_opencascade_single.d.ts",
-        "import": "./dist/native/opencascade/geospec_opencascade_single.js",
-        "default": "./dist/native/opencascade/geospec_opencascade_single.js"
+        "import": "./dist/native/opencascade/geospec_opencascade_single.mjs",
+        "default": "./dist/native/opencascade/geospec_opencascade_single.mjs"
       }
     }
   },

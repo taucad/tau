@@ -1,5 +1,5 @@
 import { defineConfig } from 'tsdown';
-import type { Options } from 'tsdown';
+import type { UserConfig } from 'tsdown';
 
 const nativeOpenCascadeArtifacts = [
   'geospec_opencascade_single.d.ts',
@@ -8,13 +8,13 @@ const nativeOpenCascadeArtifacts = [
   'geospec_opencascade_single.provenance.json',
 ] as const;
 
-const nativeOpenCascadeCopyEntries = (outDirectory: string): NonNullable<Options['copy']> =>
+const nativeOpenCascadeCopyEntries = (outDirectory: string): NonNullable<UserConfig['copy']> =>
   nativeOpenCascadeArtifacts.map((artifact) => ({
     from: `native/opencascade/${artifact}`,
-    to: `${outDirectory}/native/opencascade/${artifact}`,
+    to: `${outDirectory}/native/opencascade`,
   }));
 
-const baseConfig: Options = {
+const baseConfig: UserConfig = {
   entry: [
     'src/index.ts',
     'src/brep/index.ts',
@@ -38,7 +38,7 @@ const baseConfig: Options = {
   unbundle: true,
 };
 
-const packageConfig: Options = {
+const packageConfig: UserConfig = {
   ...baseConfig,
   entry: [
     'src/index.ts',

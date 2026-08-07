@@ -125,7 +125,7 @@ Run `pnpm repos` with no arguments to launch the interactive terminal UI:
 
 ## Build
 
-The repos CLI is a bundled single-file script at `scripts/dist/repos.js` (checked into git). CLI commands work immediately with no build step.
+The repos CLI is a bundled single-file script at `scripts/dist/repos.mjs` (checked into git). CLI commands work immediately with no build step.
 
 The interactive TUI (`pnpm repos` with no args) requires a separate bundle with React/ink that is gitignored:
 
@@ -135,8 +135,8 @@ pnpm nx build scripts   # Build both CLI + TUI bundles
 
 Source files live in `scripts/src/repos/`. The tsdown config at `scripts/tsdown.config.ts` produces two bundles:
 
-- `dist/repos.js` — CLI bundle (~98 KB, checked in)
-- `dist/repos-tui.js` — TUI bundle (~1.7 MB, gitignored, needs build)
+- `dist/repos.mjs` — CLI bundle (~98 KB, checked in)
+- `dist/repos-tui.mjs` — TUI bundle (~1.7 MB, gitignored, needs build)
 
 ## For Agents
 

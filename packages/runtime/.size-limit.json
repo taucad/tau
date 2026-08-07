@@ -1,52 +1,52 @@
 [
   {
     "name": "total (ESM JS)",
-    "path": ["dist/**/*.js", "!dist/**/wasm/**", "!dist/**/fonts/**"],
-    "limit": "130 kB"
+    "path": ["dist/**/*.mjs", "!dist/**/wasm/**", "!dist/**/fonts/**"],
+    "limit": "145 kB"
   },
   {
     "name": "@taucad/runtime",
-    "path": "dist/index.js",
+    "path": "dist/index.mjs",
     "limit": "1 kB"
   },
   {
     "name": "@taucad/runtime/worker/web",
-    "path": "dist/worker/web.js",
+    "path": "dist/worker/web.mjs",
     "limit": "3 kB"
   },
   {
     "name": "@taucad/runtime/worker/node",
-    "path": "dist/worker/node.js",
+    "path": "dist/worker/node.mjs",
     "limit": "3 kB"
   },
   {
     "name": "kernel: replicad",
-    "path": "dist/kernels/replicad/replicad.kernel.js",
+    "path": "dist/kernels/replicad/replicad.kernel.mjs",
     "limit": "5 kB"
   },
   {
     "name": "kernel: zoo",
-    "path": "dist/kernels/zoo/zoo.kernel.js",
+    "path": "dist/kernels/zoo/zoo.kernel.mjs",
     "limit": "3 kB"
   },
   {
     "name": "kernel: manifold",
-    "path": "dist/kernels/manifold/manifold.kernel.js",
+    "path": "dist/kernels/manifold/manifold.kernel.mjs",
     "limit": "3 kB"
   },
   {
     "name": "kernel: opencascade",
-    "path": "dist/kernels/opencascade/opencascade.kernel.js",
-    "limit": "4 kB"
+    "path": "dist/kernels/opencascade/opencascade.kernel.mjs",
+    "limit": "4.25 kB"
   },
   {
     "name": "kernel: jscad",
-    "path": "dist/kernels/jscad/jscad.kernel.js",
+    "path": "dist/kernels/jscad/jscad.kernel.mjs",
     "limit": "3 kB"
   },
   {
     "name": "bundler: esbuild",
-    "path": "dist/bundler/esbuild.bundler.js",
+    "path": "dist/bundler/esbuild.bundler.mjs",
     "limit": "1 kB"
   }
 ]

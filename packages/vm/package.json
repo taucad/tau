@@ -9,8 +9,8 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/vm"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "files": [
     "dist",
     "README.md"
@@ -32,19 +32,19 @@
     "access": "public",
     "exports": {
       ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.js",
-        "default": "./dist/index.js"
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
       },
       "./internal": {
-        "types": "./dist/internal.d.ts",
-        "import": "./dist/internal.js",
-        "default": "./dist/internal.js"
+        "types": "./dist/internal.d.mts",
+        "import": "./dist/internal.mjs",
+        "default": "./dist/internal.mjs"
       },
       "./constants": {
-        "types": "./dist/constants.d.ts",
-        "import": "./dist/constants.js",
-        "default": "./dist/constants.js"
+        "types": "./dist/constants.d.mts",
+        "import": "./dist/constants.mjs",
+        "default": "./dist/constants.mjs"
       }
     }
   },

@@ -1,8 +1,8 @@
 import { resolve } from 'node:path';
 import { defineConfig } from 'tsdown';
-import type { Options } from 'tsdown';
+import type { UserConfig } from 'tsdown';
 
-const cliConfig: Options = {
+const cliConfig: UserConfig = {
   entry: { repos: 'src/repos/repos.ts' },
   format: 'esm',
   outDir: 'dist',
@@ -12,14 +12,14 @@ const cliConfig: Options = {
   minify: false,
   sourcemap: false,
   tsconfig: 'tsconfig.build.json',
-  noExternal: [/.*/],
+  deps: { alwaysBundle: [/.*/] },
   banner: { js: '#!/usr/bin/env node' },
   outputOptions: {
     inlineDynamicImports: true,
   },
 };
 
-const tuiConfig: Options = {
+const tuiConfig: UserConfig = {
   entry: { 'repos-tui': 'src/repos/repos-tui.ts' },
   format: 'esm',
   outDir: 'dist',
@@ -29,7 +29,7 @@ const tuiConfig: Options = {
   minify: false,
   sourcemap: false,
   tsconfig: 'tsconfig.build.json',
-  noExternal: [/.*/],
+  deps: { alwaysBundle: [/.*/] },
   alias: {
     'react-devtools-core': resolve(import.meta.dirname, 'src/repos/stubs/react-devtools-core.ts'),
   },

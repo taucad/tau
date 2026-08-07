@@ -9,8 +9,8 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/units"
   },
-  "main": "./dist/types/index.js",
-  "types": "./dist/types/index.d.ts",
+  "main": "./dist/types/index.mjs",
+  "types": "./dist/types/index.d.mts",
   "files": [
     "dist",
     "README.md"
@@ -32,24 +32,24 @@
     "access": "public",
     "exports": {
       ".": {
-        "types": "./dist/types/index.d.ts",
-        "import": "./dist/types/index.js",
-        "default": "./dist/types/index.js"
+        "types": "./dist/types/index.d.mts",
+        "import": "./dist/types/index.mjs",
+        "default": "./dist/types/index.mjs"
       },
       "./constants": {
-        "types": "./dist/constants/index.d.ts",
-        "import": "./dist/constants/index.js",
-        "default": "./dist/constants/index.js"
+        "types": "./dist/constants/index.d.mts",
+        "import": "./dist/constants/index.mjs",
+        "default": "./dist/constants/index.mjs"
       },
       "./converter": {
-        "types": "./dist/converter/index.d.ts",
-        "import": "./dist/converter/index.js",
-        "default": "./dist/converter/index.js"
+        "types": "./dist/converter/index.d.mts",
+        "import": "./dist/converter/index.mjs",
+        "default": "./dist/converter/index.mjs"
       },
       "./parser": {
-        "types": "./dist/parser/index.d.ts",
-        "import": "./dist/parser/index.js",
-        "default": "./dist/parser/index.js"
+        "types": "./dist/parser/index.d.mts",
+        "import": "./dist/parser/index.mjs",
+        "default": "./dist/parser/index.mjs"
       }
     }
   },

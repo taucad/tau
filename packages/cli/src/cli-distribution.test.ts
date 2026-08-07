@@ -10,7 +10,7 @@ const execFileAsync = promisify(execFile);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../../..');
-const cliBinPath = resolve(repoRoot, 'packages/cli/dist/bin/taucad.js');
+const cliBinPath = resolve(repoRoot, 'packages/cli/dist/bin/taucad.mjs');
 const birdhouse = resolve(repoRoot, 'libs/tau-examples/src/kernels/replicad/birdhouse/main.ts');
 
 const gltfMagicBytes = 0x46_54_6c_67;
@@ -54,7 +54,7 @@ describe('taucad CLI dist (real binary)', () => {
     }
   });
 
-  it('should ship a hashbang executable at dist/bin/taucad.js', async () => {
+  it('should ship a hashbang executable at dist/bin/taucad.mjs', async () => {
     const head = await readFile(cliBinPath, 'utf8');
 
     expect(head.startsWith('#!/usr/bin/env node')).toBe(true);

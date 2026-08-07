@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsdown';
-import type { Options } from 'tsdown';
+import type { UserConfig } from 'tsdown';
 
-const baseConfig: Options = {
+const baseConfig: UserConfig = {
   entry: ['src/index.ts', 'src/internal.ts', 'src/constants.ts'],
   sourcemap: false,
   clean: ['dist'],
@@ -10,14 +10,14 @@ const baseConfig: Options = {
   copy: (options) => [
     {
       from: 'src/wasm',
-      to: `${options.outDir}/wasm`,
+      to: options.outDir,
     },
   ],
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
 };
 
-const packageConfig: Options = {
+const packageConfig: UserConfig = {
   ...baseConfig,
   format: 'esm',
   outDir: 'dist',

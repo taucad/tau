@@ -9,8 +9,8 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "kernels/openscad"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "files": [
     "dist",
     "README.md",
@@ -33,14 +33,14 @@
     "access": "public",
     "exports": {
       ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.js",
-        "default": "./dist/index.js"
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
       },
       "./kernel": {
-        "types": "./dist/openscad.kernel.d.ts",
-        "import": "./dist/openscad.kernel.js",
-        "default": "./dist/openscad.kernel.js"
+        "types": "./dist/openscad.kernel.d.mts",
+        "import": "./dist/openscad.kernel.mjs",
+        "default": "./dist/openscad.kernel.mjs"
       }
     }
   },

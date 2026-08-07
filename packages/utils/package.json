@@ -34,49 +34,49 @@
     "access": "public",
     "exports": {
       "./id": {
-        "types": "./dist/id.utils.d.ts",
-        "import": "./dist/id.utils.js",
-        "default": "./dist/id.utils.js"
+        "types": "./dist/id.utils.d.mts",
+        "import": "./dist/id.utils.mjs",
+        "default": "./dist/id.utils.mjs"
       },
       "./path": {
-        "types": "./dist/path.utils.d.ts",
-        "import": "./dist/path.utils.js",
-        "default": "./dist/path.utils.js"
+        "types": "./dist/path.utils.d.mts",
+        "import": "./dist/path.utils.mjs",
+        "default": "./dist/path.utils.mjs"
       },
       "./file": {
-        "types": "./dist/file.utils.d.ts",
-        "import": "./dist/file.utils.js",
-        "default": "./dist/file.utils.js"
+        "types": "./dist/file.utils.d.mts",
+        "import": "./dist/file.utils.mjs",
+        "default": "./dist/file.utils.mjs"
       },
       "./import": {
-        "types": "./dist/import.utils.d.ts",
-        "import": "./dist/import.utils.js",
-        "default": "./dist/import.utils.js"
+        "types": "./dist/import.utils.d.mts",
+        "import": "./dist/import.utils.mjs",
+        "default": "./dist/import.utils.mjs"
       },
       "./schema": {
-        "types": "./dist/schema.utils.d.ts",
-        "import": "./dist/schema.utils.js",
-        "default": "./dist/schema.utils.js"
+        "types": "./dist/schema.utils.d.mts",
+        "import": "./dist/schema.utils.mjs",
+        "default": "./dist/schema.utils.mjs"
       },
       "./dispose": {
-        "types": "./dist/dispose.utils.d.ts",
-        "import": "./dist/dispose.utils.js",
-        "default": "./dist/dispose.utils.js"
+        "types": "./dist/dispose.utils.d.mts",
+        "import": "./dist/dispose.utils.mjs",
+        "default": "./dist/dispose.utils.mjs"
       },
       "./error": {
-        "types": "./dist/error.utils.d.ts",
-        "import": "./dist/error.utils.js",
-        "default": "./dist/error.utils.js"
+        "types": "./dist/error.utils.d.mts",
+        "import": "./dist/error.utils.mjs",
+        "default": "./dist/error.utils.mjs"
       },
       "./cache": {
-        "types": "./dist/cache.utils.d.ts",
-        "import": "./dist/cache.utils.js",
-        "default": "./dist/cache.utils.js"
+        "types": "./dist/cache.utils.d.mts",
+        "import": "./dist/cache.utils.mjs",
+        "default": "./dist/cache.utils.mjs"
       },
       "./hash": {
-        "types": "./dist/hash.utils.d.ts",
-        "import": "./dist/hash.utils.js",
-        "default": "./dist/hash.utils.js"
+        "types": "./dist/hash.utils.d.mts",
+        "import": "./dist/hash.utils.mjs",
+        "default": "./dist/hash.utils.mjs"
       }
     }
   },

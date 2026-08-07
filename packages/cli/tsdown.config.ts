@@ -1,5 +1,5 @@
 import { defineConfig } from 'tsdown';
-import type { Options } from 'tsdown';
+import type { UserConfig } from 'tsdown';
 
 /*
  * Packages that must remain external from the CLI bin bundle. Bundling them
@@ -22,7 +22,7 @@ const cliExternals: Array<RegExp | string> = [
   'jszip',
 ];
 
-const baseConfig: Options = {
+const baseConfig: UserConfig = {
   entry: ['src/index.ts'],
   sourcemap: false,
   clean: ['dist'],
@@ -32,13 +32,13 @@ const baseConfig: Options = {
   unbundle: true,
 };
 
-const packageConfig: Options = {
+const packageConfig: UserConfig = {
   ...baseConfig,
   format: 'esm',
   outDir: 'dist',
 };
 
-const cliConfig: Options = {
+const cliConfig: UserConfig = {
   entry: { taucad: 'src/bin.ts' },
   format: 'esm',
   outDir: 'dist/bin',
@@ -49,7 +49,7 @@ const cliConfig: Options = {
   minify: false,
   sourcemap: false,
   tsconfig: 'tsconfig.build.json',
-  external: cliExternals,
+  deps: { neverBundle: cliExternals },
   banner: { js: '#!/usr/bin/env node' },
 };
 

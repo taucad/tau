@@ -85,9 +85,9 @@ Changelogs are generated automatically from version plan descriptions and conven
 
 All packages are built with [tsdown](https://tsdown.dev/) (Rolldown-based bundler) via a custom Nx plugin (`tools/tsdown.plugin.ts`). The build produces:
 
-| Output | Directory | Description                  |
-| ------ | --------- | ---------------------------- |
-| ESM    | `dist/`   | ES modules (`.js` + `.d.ts`) |
+| Output | Directory | Description                    |
+| ------ | --------- | ------------------------------ |
+| ESM    | `dist/`   | ES modules (`.mjs` + `.d.mts`) |
 
 ### Build Order
 

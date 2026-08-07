@@ -5,30 +5,17 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 
-//#region ../node_modules/.pnpm/js-yaml@4.2.0/node_modules/js-yaml/dist/js-yaml.mjs
-/*! js-yaml 4.2.0 https://github.com/nodeca/js-yaml @license MIT */
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
-var __copyProps = (to, from, except, desc) => {
-	if (from && typeof from === "object" || typeof from === "function") for (var keys = __getOwnPropNames(from), i = 0, n = keys.length, key; i < n; i++) {
-		key = keys[i];
-		if (!__hasOwnProp.call(to, key) && key !== except) __defProp(to, key, {
-			get: ((k) => from[k]).bind(null, key),
-			enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable
-		});
-	}
-	return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", {
-	value: mod,
-	enumerable: true
-}) : target, mod));
-var require_common = /* @__PURE__ */ __commonJSMin(((exports, module) => {
+//#region ../node_modules/.pnpm/js-yaml@4.3.0/node_modules/js-yaml/dist/js-yaml.mjs
+function getDefaultExportFromCjs(x) {
+	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, "default") ? x["default"] : x;
+}
+var jsYaml = {};
+var loader = {};
+var common = {};
+var hasRequiredCommon;
+function requireCommon() {
+	if (hasRequiredCommon) return common;
+	hasRequiredCommon = 1;
 	function isNothing(subject) {
 		return typeof subject === "undefined" || subject === null;
 	}
@@ -58,24 +45,29 @@ var require_common = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	function isNegativeZero(number) {
 		return number === 0 && Number.NEGATIVE_INFINITY === 1 / number;
 	}
-	module.exports.isNothing = isNothing;
-	module.exports.isObject = isObject;
-	module.exports.toArray = toArray;
-	module.exports.repeat = repeat;
-	module.exports.isNegativeZero = isNegativeZero;
-	module.exports.extend = extend;
-}));
-var require_exception = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	function formatError(exception, compact) {
+	common.isNothing = isNothing;
+	common.isObject = isObject;
+	common.toArray = toArray;
+	common.repeat = repeat;
+	common.isNegativeZero = isNegativeZero;
+	common.extend = extend;
+	return common;
+}
+var exception;
+var hasRequiredException;
+function requireException() {
+	if (hasRequiredException) return exception;
+	hasRequiredException = 1;
+	function formatError(exception2, compact) {
 		let where = "";
-		const message = exception.reason || "(unknown reason)";
-		if (!exception.mark) return message;
-		if (exception.mark.name) where += "in \"" + exception.mark.name + "\" ";
-		where += "(" + (exception.mark.line + 1) + ":" + (exception.mark.column + 1) + ")";
-		if (!compact && exception.mark.snippet) where += "\n\n" + exception.mark.snippet;
+		const message = exception2.reason || "(unknown reason)";
+		if (!exception2.mark) return message;
+		if (exception2.mark.name) where += "in \"" + exception2.mark.name + "\" ";
+		where += "(" + (exception2.mark.line + 1) + ":" + (exception2.mark.column + 1) + ")";
+		if (!compact && exception2.mark.snippet) where += "\n\n" + exception2.mark.snippet;
 		return message + " " + where;
 	}
-	function YAMLException$1(reason, mark) {
+	function YAMLException2(reason, mark) {
 		Error.call(this);
 		this.name = "YAMLException";
 		this.reason = reason;
@@ -84,15 +76,20 @@ var require_exception = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		if (Error.captureStackTrace) Error.captureStackTrace(this, this.constructor);
 		else this.stack = (/* @__PURE__ */ new Error()).stack || "";
 	}
-	YAMLException$1.prototype = Object.create(Error.prototype);
-	YAMLException$1.prototype.constructor = YAMLException$1;
-	YAMLException$1.prototype.toString = function toString(compact) {
+	YAMLException2.prototype = Object.create(Error.prototype);
+	YAMLException2.prototype.constructor = YAMLException2;
+	YAMLException2.prototype.toString = function toString(compact) {
 		return this.name + ": " + formatError(this, compact);
 	};
-	module.exports = YAMLException$1;
-}));
-var require_snippet = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var common = require_common();
+	exception = YAMLException2;
+	return exception;
+}
+var snippet;
+var hasRequiredSnippet;
+function requireSnippet() {
+	if (hasRequiredSnippet) return snippet;
+	hasRequiredSnippet = 1;
+	const common2 = requireCommon();
 	function getLine(buffer, lineStart, lineEnd, position, maxLineLength) {
 		let head = "";
 		let tail = "";
@@ -111,7 +108,7 @@ var require_snippet = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		};
 	}
 	function padStart(string, max) {
-		return common.repeat(" ", max - string.length) + string;
+		return common2.repeat(" ", max - string.length) + string;
 	}
 	function makeSnippet(mark, options) {
 		options = Object.create(options || null);
@@ -136,24 +133,29 @@ var require_snippet = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		const maxLineLength = options.maxLength - (options.indent + lineNoLength + 3);
 		for (let i = 1; i <= options.linesBefore; i++) {
 			if (foundLineNo - i < 0) break;
-			const line$1 = getLine(mark.buffer, lineStarts[foundLineNo - i], lineEnds[foundLineNo - i], mark.position - (lineStarts[foundLineNo] - lineStarts[foundLineNo - i]), maxLineLength);
-			result = common.repeat(" ", options.indent) + padStart((mark.line - i + 1).toString(), lineNoLength) + " | " + line$1.str + "\n" + result;
+			const line2 = getLine(mark.buffer, lineStarts[foundLineNo - i], lineEnds[foundLineNo - i], mark.position - (lineStarts[foundLineNo] - lineStarts[foundLineNo - i]), maxLineLength);
+			result = common2.repeat(" ", options.indent) + padStart((mark.line - i + 1).toString(), lineNoLength) + " | " + line2.str + "\n" + result;
 		}
 		const line = getLine(mark.buffer, lineStarts[foundLineNo], lineEnds[foundLineNo], mark.position, maxLineLength);
-		result += common.repeat(" ", options.indent) + padStart((mark.line + 1).toString(), lineNoLength) + " | " + line.str + "\n";
-		result += common.repeat("-", options.indent + lineNoLength + 3 + line.pos) + "^\n";
+		result += common2.repeat(" ", options.indent) + padStart((mark.line + 1).toString(), lineNoLength) + " | " + line.str + "\n";
+		result += common2.repeat("-", options.indent + lineNoLength + 3 + line.pos) + "^\n";
 		for (let i = 1; i <= options.linesAfter; i++) {
 			if (foundLineNo + i >= lineEnds.length) break;
-			const line$1 = getLine(mark.buffer, lineStarts[foundLineNo + i], lineEnds[foundLineNo + i], mark.position - (lineStarts[foundLineNo] - lineStarts[foundLineNo + i]), maxLineLength);
-			result += common.repeat(" ", options.indent) + padStart((mark.line + i + 1).toString(), lineNoLength) + " | " + line$1.str + "\n";
+			const line2 = getLine(mark.buffer, lineStarts[foundLineNo + i], lineEnds[foundLineNo + i], mark.position - (lineStarts[foundLineNo] - lineStarts[foundLineNo + i]), maxLineLength);
+			result += common2.repeat(" ", options.indent) + padStart((mark.line + i + 1).toString(), lineNoLength) + " | " + line2.str + "\n";
 		}
 		return result.replace(/\n$/, "");
 	}
-	module.exports = makeSnippet;
-}));
-var require_type = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var YAMLException$1 = require_exception();
-	var TYPE_CONSTRUCTOR_OPTIONS = [
+	snippet = makeSnippet;
+	return snippet;
+}
+var type;
+var hasRequiredType;
+function requireType() {
+	if (hasRequiredType) return type;
+	hasRequiredType = 1;
+	const YAMLException2 = requireException();
+	const TYPE_CONSTRUCTOR_OPTIONS = [
 		"kind",
 		"multi",
 		"resolve",
@@ -165,24 +167,24 @@ var require_type = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		"defaultStyle",
 		"styleAliases"
 	];
-	var YAML_NODE_KINDS = [
+	const YAML_NODE_KINDS = [
 		"scalar",
 		"sequence",
 		"mapping"
 	];
-	function compileStyleAliases(map) {
+	function compileStyleAliases(map2) {
 		const result = {};
-		if (map !== null) Object.keys(map).forEach(function(style) {
-			map[style].forEach(function(alias) {
+		if (map2 !== null) Object.keys(map2).forEach(function(style) {
+			map2[style].forEach(function(alias) {
 				result[String(alias)] = style;
 			});
 		});
 		return result;
 	}
-	function Type$1(tag, options) {
+	function Type2(tag, options) {
 		options = options || {};
 		Object.keys(options).forEach(function(name) {
-			if (TYPE_CONSTRUCTOR_OPTIONS.indexOf(name) === -1) throw new YAMLException$1("Unknown option \"" + name + "\" is met in definition of \"" + tag + "\" YAML type.");
+			if (TYPE_CONSTRUCTOR_OPTIONS.indexOf(name) === -1) throw new YAMLException2("Unknown option \"" + name + "\" is met in definition of \"" + tag + "\" YAML type.");
 		});
 		this.options = options;
 		this.tag = tag;
@@ -200,16 +202,21 @@ var require_type = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		this.defaultStyle = options["defaultStyle"] || null;
 		this.multi = options["multi"] || false;
 		this.styleAliases = compileStyleAliases(options["styleAliases"] || null);
-		if (YAML_NODE_KINDS.indexOf(this.kind) === -1) throw new YAMLException$1("Unknown kind \"" + this.kind + "\" is specified for \"" + tag + "\" YAML type.");
+		if (YAML_NODE_KINDS.indexOf(this.kind) === -1) throw new YAMLException2("Unknown kind \"" + this.kind + "\" is specified for \"" + tag + "\" YAML type.");
 	}
-	module.exports = Type$1;
-}));
-var require_schema = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var YAMLException$1 = require_exception();
-	var Type$1 = require_type();
-	function compileList(schema, name) {
+	type = Type2;
+	return type;
+}
+var schema;
+var hasRequiredSchema;
+function requireSchema() {
+	if (hasRequiredSchema) return schema;
+	hasRequiredSchema = 1;
+	const YAMLException2 = requireException();
+	const Type2 = requireType();
+	function compileList(schema2, name) {
 		const result = [];
-		schema[name].forEach(function(currentType) {
+		schema2[name].forEach(function(currentType) {
 			let newIndex = result.length;
 			result.forEach(function(previousType, previousIndex) {
 				if (previousType.tag === currentType.tag && previousType.kind === currentType.kind && previousType.multi === currentType.multi) newIndex = previousIndex;
@@ -231,36 +238,36 @@ var require_schema = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 				fallback: []
 			}
 		};
-		function collectType(type) {
-			if (type.multi) {
-				result.multi[type.kind].push(type);
-				result.multi["fallback"].push(type);
-			} else result[type.kind][type.tag] = result["fallback"][type.tag] = type;
+		function collectType(type2) {
+			if (type2.multi) {
+				result.multi[type2.kind].push(type2);
+				result.multi["fallback"].push(type2);
+			} else result[type2.kind][type2.tag] = result["fallback"][type2.tag] = type2;
 		}
 		for (let index = 0, length = arguments.length; index < length; index += 1) arguments[index].forEach(collectType);
 		return result;
 	}
-	function Schema$1(definition) {
+	function Schema2(definition) {
 		return this.extend(definition);
 	}
-	Schema$1.prototype.extend = function extend(definition) {
+	Schema2.prototype.extend = function extend(definition) {
 		let implicit = [];
 		let explicit = [];
-		if (definition instanceof Type$1) explicit.push(definition);
+		if (definition instanceof Type2) explicit.push(definition);
 		else if (Array.isArray(definition)) explicit = explicit.concat(definition);
 		else if (definition && (Array.isArray(definition.implicit) || Array.isArray(definition.explicit))) {
 			if (definition.implicit) implicit = implicit.concat(definition.implicit);
 			if (definition.explicit) explicit = explicit.concat(definition.explicit);
-		} else throw new YAMLException$1("Schema.extend argument should be a Type, [ Type ], or a schema definition ({ implicit: [...], explicit: [...] })");
-		implicit.forEach(function(type) {
-			if (!(type instanceof Type$1)) throw new YAMLException$1("Specified list of YAML types (or a single Type object) contains a non-Type object.");
-			if (type.loadKind && type.loadKind !== "scalar") throw new YAMLException$1("There is a non-scalar type in the implicit list of a schema. Implicit resolving of such types is not supported.");
-			if (type.multi) throw new YAMLException$1("There is a multi type in the implicit list of a schema. Multi tags can only be listed as explicit.");
+		} else throw new YAMLException2("Schema.extend argument should be a Type, [ Type ], or a schema definition ({ implicit: [...], explicit: [...] })");
+		implicit.forEach(function(type2) {
+			if (!(type2 instanceof Type2)) throw new YAMLException2("Specified list of YAML types (or a single Type object) contains a non-Type object.");
+			if (type2.loadKind && type2.loadKind !== "scalar") throw new YAMLException2("There is a non-scalar type in the implicit list of a schema. Implicit resolving of such types is not supported.");
+			if (type2.multi) throw new YAMLException2("There is a multi type in the implicit list of a schema. Multi tags can only be listed as explicit.");
 		});
-		explicit.forEach(function(type) {
-			if (!(type instanceof Type$1)) throw new YAMLException$1("Specified list of YAML types (or a single Type object) contains a non-Type object.");
+		explicit.forEach(function(type2) {
+			if (!(type2 instanceof Type2)) throw new YAMLException2("Specified list of YAML types (or a single Type object) contains a non-Type object.");
 		});
-		const result = Object.create(Schema$1.prototype);
+		const result = Object.create(Schema2.prototype);
 		result.implicit = (this.implicit || []).concat(implicit);
 		result.explicit = (this.explicit || []).concat(explicit);
 		result.compiledImplicit = compileList(result, "implicit");
@@ -268,41 +275,66 @@ var require_schema = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		result.compiledTypeMap = compileMap(result.compiledImplicit, result.compiledExplicit);
 		return result;
 	};
-	module.exports = Schema$1;
-}));
-var require_str = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	module.exports = new (require_type())("tag:yaml.org,2002:str", {
+	schema = Schema2;
+	return schema;
+}
+var str;
+var hasRequiredStr;
+function requireStr() {
+	if (hasRequiredStr) return str;
+	hasRequiredStr = 1;
+	str = new (requireType())("tag:yaml.org,2002:str", {
 		kind: "scalar",
 		construct: function(data) {
 			return data !== null ? data : "";
 		}
 	});
-}));
-var require_seq = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	module.exports = new (require_type())("tag:yaml.org,2002:seq", {
+	return str;
+}
+var seq;
+var hasRequiredSeq;
+function requireSeq() {
+	if (hasRequiredSeq) return seq;
+	hasRequiredSeq = 1;
+	seq = new (requireType())("tag:yaml.org,2002:seq", {
 		kind: "sequence",
 		construct: function(data) {
 			return data !== null ? data : [];
 		}
 	});
-}));
-var require_map = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	module.exports = new (require_type())("tag:yaml.org,2002:map", {
+	return seq;
+}
+var map;
+var hasRequiredMap;
+function requireMap() {
+	if (hasRequiredMap) return map;
+	hasRequiredMap = 1;
+	map = new (requireType())("tag:yaml.org,2002:map", {
 		kind: "mapping",
 		construct: function(data) {
 			return data !== null ? data : {};
 		}
 	});
-}));
-var require_failsafe = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	module.exports = new (require_schema())({ explicit: [
-		require_str(),
-		require_seq(),
-		require_map()
+	return map;
+}
+var failsafe;
+var hasRequiredFailsafe;
+function requireFailsafe() {
+	if (hasRequiredFailsafe) return failsafe;
+	hasRequiredFailsafe = 1;
+	failsafe = new (requireSchema())({ explicit: [
+		requireStr(),
+		requireSeq(),
+		requireMap()
 	] });
-}));
-var require_null = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var Type$1 = require_type();
+	return failsafe;
+}
+var _null;
+var hasRequired_null;
+function require_null() {
+	if (hasRequired_null) return _null;
+	hasRequired_null = 1;
+	const Type2 = requireType();
 	function resolveYamlNull(data) {
 		if (data === null) return true;
 		const max = data.length;
@@ -314,7 +346,7 @@ var require_null = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	function isNull(object) {
 		return object === null;
 	}
-	module.exports = new Type$1("tag:yaml.org,2002:null", {
+	_null = new Type2("tag:yaml.org,2002:null", {
 		kind: "scalar",
 		resolve: resolveYamlNull,
 		construct: constructYamlNull,
@@ -338,9 +370,14 @@ var require_null = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		},
 		defaultStyle: "lowercase"
 	});
-}));
-var require_bool = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var Type$1 = require_type();
+	return _null;
+}
+var bool;
+var hasRequiredBool;
+function requireBool() {
+	if (hasRequiredBool) return bool;
+	hasRequiredBool = 1;
+	const Type2 = requireType();
 	function resolveYamlBoolean(data) {
 		if (data === null) return false;
 		const max = data.length;
@@ -352,7 +389,7 @@ var require_bool = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	function isBoolean(object) {
 		return Object.prototype.toString.call(object) === "[object Boolean]";
 	}
-	module.exports = new Type$1("tag:yaml.org,2002:bool", {
+	bool = new Type2("tag:yaml.org,2002:bool", {
 		kind: "scalar",
 		resolve: resolveYamlBoolean,
 		construct: constructYamlBoolean,
@@ -370,10 +407,15 @@ var require_bool = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		},
 		defaultStyle: "lowercase"
 	});
-}));
-var require_int = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var common = require_common();
-	var Type$1 = require_type();
+	return bool;
+}
+var int;
+var hasRequiredInt;
+function requireInt() {
+	if (hasRequiredInt) return int;
+	hasRequiredInt = 1;
+	const common2 = requireCommon();
+	const Type2 = requireType();
 	function isHexCode(c) {
 		return c >= 48 && c <= 57 || c >= 65 && c <= 70 || c >= 97 && c <= 102;
 	}
@@ -401,7 +443,7 @@ var require_int = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 					if (ch !== "0" && ch !== "1") return false;
 					hasDigits = true;
 				}
-				return hasDigits && Number.isFinite(parseYamlInteger(data));
+				return hasDigits && isFinite(parseYamlInteger(data));
 			}
 			if (ch === "x") {
 				index++;
@@ -409,7 +451,7 @@ var require_int = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 					if (!isHexCode(data.charCodeAt(index))) return false;
 					hasDigits = true;
 				}
-				return hasDigits && Number.isFinite(parseYamlInteger(data));
+				return hasDigits && isFinite(parseYamlInteger(data));
 			}
 			if (ch === "o") {
 				index++;
@@ -417,7 +459,7 @@ var require_int = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 					if (!isOctCode(data.charCodeAt(index))) return false;
 					hasDigits = true;
 				}
-				return hasDigits && Number.isFinite(parseYamlInteger(data));
+				return hasDigits && isFinite(parseYamlInteger(data));
 			}
 		}
 		for (; index < max; index++) {
@@ -425,7 +467,7 @@ var require_int = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 			hasDigits = true;
 		}
 		if (!hasDigits) return false;
-		return Number.isFinite(parseYamlInteger(data));
+		return isFinite(parseYamlInteger(data));
 	}
 	function parseYamlInteger(data) {
 		let value = data;
@@ -448,9 +490,9 @@ var require_int = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		return parseYamlInteger(data);
 	}
 	function isInteger(object) {
-		return Object.prototype.toString.call(object) === "[object Number]" && object % 1 === 0 && !common.isNegativeZero(object);
+		return Object.prototype.toString.call(object) === "[object Number]" && object % 1 === 0 && !common2.isNegativeZero(object);
 	}
-	module.exports = new Type$1("tag:yaml.org,2002:int", {
+	int = new Type2("tag:yaml.org,2002:int", {
 		kind: "scalar",
 		resolve: resolveYamlInteger,
 		construct: constructYamlInteger,
@@ -477,16 +519,21 @@ var require_int = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 			hexadecimal: [16, "hex"]
 		}
 	});
-}));
-var require_float = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var common = require_common();
-	var Type$1 = require_type();
-	var YAML_FLOAT_PATTERN = /* @__PURE__ */ new RegExp("^(?:[-+]?(?:[0-9]+)(?:\\.[0-9]*)?(?:[eE][-+]?[0-9]+)?|\\.[0-9]+(?:[eE][-+]?[0-9]+)?|[-+]?\\.(?:inf|Inf|INF)|\\.(?:nan|NaN|NAN))$");
-	var YAML_FLOAT_SPECIAL_PATTERN = /* @__PURE__ */ new RegExp("^(?:[-+]?\\.(?:inf|Inf|INF)|\\.(?:nan|NaN|NAN))$");
+	return int;
+}
+var float;
+var hasRequiredFloat;
+function requireFloat() {
+	if (hasRequiredFloat) return float;
+	hasRequiredFloat = 1;
+	const common2 = requireCommon();
+	const Type2 = requireType();
+	const YAML_FLOAT_PATTERN = /* @__PURE__ */ new RegExp("^(?:[-+]?(?:[0-9]+)(?:\\.[0-9]*)?(?:[eE][-+]?[0-9]+)?|\\.[0-9]+(?:[eE][-+]?[0-9]+)?|[-+]?\\.(?:inf|Inf|INF)|\\.(?:nan|NaN|NAN))$");
+	const YAML_FLOAT_SPECIAL_PATTERN = /* @__PURE__ */ new RegExp("^(?:[-+]?\\.(?:inf|Inf|INF)|\\.(?:nan|NaN|NAN))$");
 	function resolveYamlFloat(data) {
 		if (data === null) return false;
 		if (!YAML_FLOAT_PATTERN.test(data)) return false;
-		if (Number.isFinite(parseFloat(data, 10))) return true;
+		if (isFinite(parseFloat(data, 10))) return true;
 		return YAML_FLOAT_SPECIAL_PATTERN.test(data);
 	}
 	function constructYamlFloat(data) {
@@ -497,7 +544,7 @@ var require_float = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		else if (value === ".nan") return NaN;
 		return sign * parseFloat(value, 10);
 	}
-	var SCIENTIFIC_WITHOUT_DOT = /^[-+]?[0-9]+e/;
+	const SCIENTIFIC_WITHOUT_DOT = /^[-+]?[0-9]+e/;
 	function representYamlFloat(object, style) {
 		if (isNaN(object)) switch (style) {
 			case "lowercase": return ".nan";
@@ -514,14 +561,14 @@ var require_float = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 			case "uppercase": return "-.INF";
 			case "camelcase": return "-.Inf";
 		}
-		else if (common.isNegativeZero(object)) return "-0.0";
+		else if (common2.isNegativeZero(object)) return "-0.0";
 		const res = object.toString(10);
 		return SCIENTIFIC_WITHOUT_DOT.test(res) ? res.replace("e", ".e") : res;
 	}
 	function isFloat(object) {
-		return Object.prototype.toString.call(object) === "[object Number]" && (object % 1 !== 0 || common.isNegativeZero(object));
+		return Object.prototype.toString.call(object) === "[object Number]" && (object % 1 !== 0 || common2.isNegativeZero(object));
 	}
-	module.exports = new Type$1("tag:yaml.org,2002:float", {
+	float = new Type2("tag:yaml.org,2002:float", {
 		kind: "scalar",
 		resolve: resolveYamlFloat,
 		construct: constructYamlFloat,
@@ -529,22 +576,37 @@ var require_float = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		represent: representYamlFloat,
 		defaultStyle: "lowercase"
 	});
-}));
-var require_json = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	module.exports = require_failsafe().extend({ implicit: [
+	return float;
+}
+var json;
+var hasRequiredJson;
+function requireJson() {
+	if (hasRequiredJson) return json;
+	hasRequiredJson = 1;
+	json = requireFailsafe().extend({ implicit: [
 		require_null(),
-		require_bool(),
-		require_int(),
-		require_float()
+		requireBool(),
+		requireInt(),
+		requireFloat()
 	] });
-}));
-var require_core = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	module.exports = require_json();
-}));
-var require_timestamp = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var Type$1 = require_type();
-	var YAML_DATE_REGEXP = /* @__PURE__ */ new RegExp("^([0-9][0-9][0-9][0-9])-([0-9][0-9])-([0-9][0-9])$");
-	var YAML_TIMESTAMP_REGEXP = /* @__PURE__ */ new RegExp("^([0-9][0-9][0-9][0-9])-([0-9][0-9]?)-([0-9][0-9]?)(?:[Tt]|[ \\t]+)([0-9][0-9]?):([0-9][0-9]):([0-9][0-9])(?:\\.([0-9]*))?(?:[ \\t]*(Z|([-+])([0-9][0-9]?)(?::([0-9][0-9]))?))?$");
+	return json;
+}
+var core;
+var hasRequiredCore;
+function requireCore() {
+	if (hasRequiredCore) return core;
+	hasRequiredCore = 1;
+	core = requireJson();
+	return core;
+}
+var timestamp;
+var hasRequiredTimestamp;
+function requireTimestamp() {
+	if (hasRequiredTimestamp) return timestamp;
+	hasRequiredTimestamp = 1;
+	const Type2 = requireType();
+	const YAML_DATE_REGEXP = /* @__PURE__ */ new RegExp("^([0-9][0-9][0-9][0-9])-([0-9][0-9])-([0-9][0-9])$");
+	const YAML_TIMESTAMP_REGEXP = /* @__PURE__ */ new RegExp("^([0-9][0-9][0-9][0-9])-([0-9][0-9]?)-([0-9][0-9]?)(?:[Tt]|[ \\t]+)([0-9][0-9]?):([0-9][0-9]):([0-9][0-9])(?:\\.([0-9]*))?(?:[ \\t]*(Z|([-+])([0-9][0-9]?)(?::([0-9][0-9]))?))?$");
 	function resolveYamlTimestamp(data) {
 		if (data === null) return false;
 		if (YAML_DATE_REGEXP.exec(data) !== null) return true;
@@ -582,34 +644,44 @@ var require_timestamp = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	function representYamlTimestamp(object) {
 		return object.toISOString();
 	}
-	module.exports = new Type$1("tag:yaml.org,2002:timestamp", {
+	timestamp = new Type2("tag:yaml.org,2002:timestamp", {
 		kind: "scalar",
 		resolve: resolveYamlTimestamp,
 		construct: constructYamlTimestamp,
 		instanceOf: Date,
 		represent: representYamlTimestamp
 	});
-}));
-var require_merge = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var Type$1 = require_type();
+	return timestamp;
+}
+var merge;
+var hasRequiredMerge;
+function requireMerge() {
+	if (hasRequiredMerge) return merge;
+	hasRequiredMerge = 1;
+	const Type2 = requireType();
 	function resolveYamlMerge(data) {
 		return data === "<<" || data === null;
 	}
-	module.exports = new Type$1("tag:yaml.org,2002:merge", {
+	merge = new Type2("tag:yaml.org,2002:merge", {
 		kind: "scalar",
 		resolve: resolveYamlMerge
 	});
-}));
-var require_binary = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var Type$1 = require_type();
-	var BASE64_MAP = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\n\r";
+	return merge;
+}
+var binary;
+var hasRequiredBinary;
+function requireBinary() {
+	if (hasRequiredBinary) return binary;
+	hasRequiredBinary = 1;
+	const Type2 = requireType();
+	const BASE64_MAP = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\n\r";
 	function resolveYamlBinary(data) {
 		if (data === null) return false;
 		let bitlen = 0;
 		const max = data.length;
-		const map = BASE64_MAP;
+		const map2 = BASE64_MAP;
 		for (let idx = 0; idx < max; idx++) {
-			const code = map.indexOf(data.charAt(idx));
+			const code = map2.indexOf(data.charAt(idx));
 			if (code > 64) continue;
 			if (code < 0) return false;
 			bitlen += 6;
@@ -619,7 +691,7 @@ var require_binary = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	function constructYamlBinary(data) {
 		const input = data.replace(/[\r\n=]/g, "");
 		const max = input.length;
-		const map = BASE64_MAP;
+		const map2 = BASE64_MAP;
 		let bits = 0;
 		const result = [];
 		for (let idx = 0; idx < max; idx++) {
@@ -628,7 +700,7 @@ var require_binary = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 				result.push(bits >> 8 & 255);
 				result.push(bits & 255);
 			}
-			bits = bits << 6 | map.indexOf(input.charAt(idx));
+			bits = bits << 6 | map2.indexOf(input.charAt(idx));
 		}
 		const tailbits = max % 4 * 6;
 		if (tailbits === 0) {
@@ -645,50 +717,55 @@ var require_binary = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		let result = "";
 		let bits = 0;
 		const max = object.length;
-		const map = BASE64_MAP;
+		const map2 = BASE64_MAP;
 		for (let idx = 0; idx < max; idx++) {
 			if (idx % 3 === 0 && idx) {
-				result += map[bits >> 18 & 63];
-				result += map[bits >> 12 & 63];
-				result += map[bits >> 6 & 63];
-				result += map[bits & 63];
+				result += map2[bits >> 18 & 63];
+				result += map2[bits >> 12 & 63];
+				result += map2[bits >> 6 & 63];
+				result += map2[bits & 63];
 			}
 			bits = (bits << 8) + object[idx];
 		}
 		const tail = max % 3;
 		if (tail === 0) {
-			result += map[bits >> 18 & 63];
-			result += map[bits >> 12 & 63];
-			result += map[bits >> 6 & 63];
-			result += map[bits & 63];
+			result += map2[bits >> 18 & 63];
+			result += map2[bits >> 12 & 63];
+			result += map2[bits >> 6 & 63];
+			result += map2[bits & 63];
 		} else if (tail === 2) {
-			result += map[bits >> 10 & 63];
-			result += map[bits >> 4 & 63];
-			result += map[bits << 2 & 63];
-			result += map[64];
+			result += map2[bits >> 10 & 63];
+			result += map2[bits >> 4 & 63];
+			result += map2[bits << 2 & 63];
+			result += map2[64];
 		} else if (tail === 1) {
-			result += map[bits >> 2 & 63];
-			result += map[bits << 4 & 63];
-			result += map[64];
-			result += map[64];
+			result += map2[bits >> 2 & 63];
+			result += map2[bits << 4 & 63];
+			result += map2[64];
+			result += map2[64];
 		}
 		return result;
 	}
 	function isBinary(obj) {
 		return Object.prototype.toString.call(obj) === "[object Uint8Array]";
 	}
-	module.exports = new Type$1("tag:yaml.org,2002:binary", {
+	binary = new Type2("tag:yaml.org,2002:binary", {
 		kind: "scalar",
 		resolve: resolveYamlBinary,
 		construct: constructYamlBinary,
 		predicate: isBinary,
 		represent: representYamlBinary
 	});
-}));
-var require_omap = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var Type$1 = require_type();
-	var _hasOwnProperty = Object.prototype.hasOwnProperty;
-	var _toString = Object.prototype.toString;
+	return binary;
+}
+var omap;
+var hasRequiredOmap;
+function requireOmap() {
+	if (hasRequiredOmap) return omap;
+	hasRequiredOmap = 1;
+	const Type2 = requireType();
+	const _hasOwnProperty = Object.prototype.hasOwnProperty;
+	const _toString = Object.prototype.toString;
 	function resolveYamlOmap(data) {
 		if (data === null) return true;
 		const objectKeys = [];
@@ -709,15 +786,20 @@ var require_omap = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	function constructYamlOmap(data) {
 		return data !== null ? data : [];
 	}
-	module.exports = new Type$1("tag:yaml.org,2002:omap", {
+	omap = new Type2("tag:yaml.org,2002:omap", {
 		kind: "sequence",
 		resolve: resolveYamlOmap,
 		construct: constructYamlOmap
 	});
-}));
-var require_pairs = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var Type$1 = require_type();
-	var _toString = Object.prototype.toString;
+	return omap;
+}
+var pairs;
+var hasRequiredPairs;
+function requirePairs() {
+	if (hasRequiredPairs) return pairs;
+	hasRequiredPairs = 1;
+	const Type2 = requireType();
+	const _toString = Object.prototype.toString;
 	function resolveYamlPairs(data) {
 		if (data === null) return true;
 		const object = data;
@@ -742,15 +824,20 @@ var require_pairs = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		}
 		return result;
 	}
-	module.exports = new Type$1("tag:yaml.org,2002:pairs", {
+	pairs = new Type2("tag:yaml.org,2002:pairs", {
 		kind: "sequence",
 		resolve: resolveYamlPairs,
 		construct: constructYamlPairs
 	});
-}));
-var require_set = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var Type$1 = require_type();
-	var _hasOwnProperty = Object.prototype.hasOwnProperty;
+	return pairs;
+}
+var set;
+var hasRequiredSet;
+function requireSet() {
+	if (hasRequiredSet) return set;
+	hasRequiredSet = 1;
+	const Type2 = requireType();
+	const _hasOwnProperty = Object.prototype.hasOwnProperty;
 	function resolveYamlSet(data) {
 		if (data === null) return true;
 		const object = data;
@@ -762,41 +849,50 @@ var require_set = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	function constructYamlSet(data) {
 		return data !== null ? data : {};
 	}
-	module.exports = new Type$1("tag:yaml.org,2002:set", {
+	set = new Type2("tag:yaml.org,2002:set", {
 		kind: "mapping",
 		resolve: resolveYamlSet,
 		construct: constructYamlSet
 	});
-}));
-var require_default = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	module.exports = require_core().extend({
-		implicit: [require_timestamp(), require_merge()],
+	return set;
+}
+var _default;
+var hasRequired_default;
+function require_default() {
+	if (hasRequired_default) return _default;
+	hasRequired_default = 1;
+	_default = requireCore().extend({
+		implicit: [requireTimestamp(), requireMerge()],
 		explicit: [
-			require_binary(),
-			require_omap(),
-			require_pairs(),
-			require_set()
+			requireBinary(),
+			requireOmap(),
+			requirePairs(),
+			requireSet()
 		]
 	});
-}));
-var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var common = require_common();
-	var YAMLException$1 = require_exception();
-	var makeSnippet = require_snippet();
-	var DEFAULT_SCHEMA$1 = require_default();
-	var _hasOwnProperty = Object.prototype.hasOwnProperty;
-	var CONTEXT_FLOW_IN = 1;
-	var CONTEXT_FLOW_OUT = 2;
-	var CONTEXT_BLOCK_IN = 3;
-	var CONTEXT_BLOCK_OUT = 4;
-	var CHOMPING_CLIP = 1;
-	var CHOMPING_STRIP = 2;
-	var CHOMPING_KEEP = 3;
-	var PATTERN_NON_PRINTABLE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x84\x86-\x9F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:[^\uD800-\uDBFF]|^)[\uDC00-\uDFFF]/;
-	var PATTERN_NON_ASCII_LINE_BREAKS = /[\x85\u2028\u2029]/;
-	var PATTERN_FLOW_INDICATORS = /[,\[\]{}]/;
-	var PATTERN_TAG_HANDLE = /^(?:!|!!|![0-9A-Za-z-]+!)$/;
-	var PATTERN_TAG_URI = /^(?:!|[^,\[\]{}])(?:%[0-9a-f]{2}|[0-9a-z\-#;/?:@&=+$,_.!~*'()\[\]])*$/i;
+	return _default;
+}
+var hasRequiredLoader;
+function requireLoader() {
+	if (hasRequiredLoader) return loader;
+	hasRequiredLoader = 1;
+	const common2 = requireCommon();
+	const YAMLException2 = requireException();
+	const makeSnippet = requireSnippet();
+	const DEFAULT_SCHEMA2 = require_default();
+	const _hasOwnProperty = Object.prototype.hasOwnProperty;
+	const CONTEXT_FLOW_IN = 1;
+	const CONTEXT_FLOW_OUT = 2;
+	const CONTEXT_BLOCK_IN = 3;
+	const CONTEXT_BLOCK_OUT = 4;
+	const CHOMPING_CLIP = 1;
+	const CHOMPING_STRIP = 2;
+	const CHOMPING_KEEP = 3;
+	const PATTERN_NON_PRINTABLE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x84\x86-\x9F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:[^\uD800-\uDBFF]|^)[\uDC00-\uDFFF]/;
+	const PATTERN_NON_ASCII_LINE_BREAKS = /[\x85\u2028\u2029]/;
+	const PATTERN_FLOW_INDICATORS = /[,\[\]{}]/;
+	const PATTERN_TAG_HANDLE = /^(?:!|!!|![0-9A-Za-z-]+!)$/;
+	const PATTERN_TAG_URI = /^(?:!|[^,\[\]{}])(?:%[0-9a-f]{2}|[0-9a-z\-#;/?:@&=+$,_.!~*'()\[\]])*$/i;
 	function _class(obj) {
 		return Object.prototype.toString.call(obj);
 	}
@@ -864,8 +960,8 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		});
 		else object[key] = value;
 	}
-	var simpleEscapeCheck = new Array(256);
-	var simpleEscapeMap = new Array(256);
+	const simpleEscapeCheck = new Array(256);
+	const simpleEscapeMap = new Array(256);
 	for (let i = 0; i < 256; i++) {
 		simpleEscapeCheck[i] = simpleEscapeSequence(i) ? 1 : 0;
 		simpleEscapeMap[i] = simpleEscapeSequence(i);
@@ -873,13 +969,13 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	function State(input, options) {
 		this.input = input;
 		this.filename = options["filename"] || null;
-		this.schema = options["schema"] || DEFAULT_SCHEMA$1;
+		this.schema = options["schema"] || DEFAULT_SCHEMA2;
 		this.onWarning = options["onWarning"] || null;
 		this.legacy = options["legacy"] || false;
 		this.json = options["json"] || false;
 		this.listener = options["listener"] || null;
 		this.maxDepth = typeof options["maxDepth"] === "number" ? options["maxDepth"] : 100;
-		this.maxMergeSeqLength = typeof options["maxMergeSeqLength"] === "number" ? options["maxMergeSeqLength"] : 20;
+		this.maxTotalMergeKeys = typeof options["maxTotalMergeKeys"] === "number" ? options["maxTotalMergeKeys"] : 1e4;
 		this.implicitTypes = this.schema.compiledImplicit;
 		this.typeMap = this.schema.compiledTypeMap;
 		this.length = input.length;
@@ -888,6 +984,7 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		this.lineStart = 0;
 		this.lineIndent = 0;
 		this.depth = 0;
+		this.totalMergeKeys = 0;
 		this.firstTabInLine = -1;
 		this.documents = [];
 		this.anchorMapTransactions = [];
@@ -901,7 +998,7 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 			column: state.position - state.lineStart
 		};
 		mark.snippet = makeSnippet(mark);
-		return new YAMLException$1(message, mark);
+		return new YAMLException2(message, mark);
 	}
 	function throwError(state, message) {
 		throw generateError(state, message);
@@ -921,7 +1018,7 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		state.anchorMap[name] = value;
 	}
 	function beginAnchorTransaction(state) {
-		state.anchorMapTransactions.push(Object.create(null));
+		state.anchorMapTransactions.push(/* @__PURE__ */ Object.create(null));
 	}
 	function commitAnchorTransaction(state) {
 		const transaction = state.anchorMapTransactions.pop();
@@ -967,7 +1064,7 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		state.kind = snapshot.kind;
 		state.result = snapshot.result;
 	}
-	var directiveHandlers = {
+	const directiveHandlers = {
 		YAML: function handleYamlDirective(state, name, args) {
 			if (state.version !== null) throwError(state, "duplication of %YAML directive");
 			if (args.length !== 1) throwError(state, "YAML directive accepts exactly one argument");
@@ -1008,10 +1105,11 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		}
 	}
 	function mergeMappings(state, destination, source, overridableKeys) {
-		if (!common.isObject(source)) throwError(state, "cannot merge mappings; the provided source object is unacceptable");
+		if (!common2.isObject(source)) throwError(state, "cannot merge mappings; the provided source object is unacceptable");
 		const sourceKeys = Object.keys(source);
 		for (let index = 0, quantity = sourceKeys.length; index < quantity; index += 1) {
 			const key = sourceKeys[index];
+			if (state.maxTotalMergeKeys !== -1 && ++state.totalMergeKeys > state.maxTotalMergeKeys) throwError(state, "merge keys exceeded maxTotalMergeKeys (" + state.maxTotalMergeKeys + ")");
 			if (!_hasOwnProperty.call(destination, key)) {
 				setProperty(destination, key, source[key]);
 				overridableKeys[key] = true;
@@ -1029,16 +1127,8 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		if (typeof keyNode === "object" && _class(keyNode) === "[object Object]") keyNode = "[object Object]";
 		keyNode = String(keyNode);
 		if (_result === null) _result = {};
-		if (keyTag === "tag:yaml.org,2002:merge") if (Array.isArray(valueNode)) {
-			if (valueNode.length > state.maxMergeSeqLength) throwError(state, "merge sequence length exceeded maxMergeSeqLength (" + state.maxMergeSeqLength + ")");
-			const seen = /* @__PURE__ */ new Set();
-			for (let index = 0, quantity = valueNode.length; index < quantity; index += 1) {
-				const src = valueNode[index];
-				if (seen.has(src)) continue;
-				seen.add(src);
-				mergeMappings(state, _result, src, overridableKeys);
-			}
-		} else mergeMappings(state, _result, valueNode, overridableKeys);
+		if (keyTag === "tag:yaml.org,2002:merge") if (Array.isArray(valueNode)) for (let index = 0, quantity = valueNode.length; index < quantity; index += 1) mergeMappings(state, _result, valueNode[index], overridableKeys);
+		else mergeMappings(state, _result, valueNode, overridableKeys);
 		else {
 			if (!state.json && !_hasOwnProperty.call(overridableKeys, keyNode) && _hasOwnProperty.call(_result, keyNode)) {
 				state.line = startLine || state.line;
@@ -1099,7 +1189,7 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	}
 	function writeFoldedLines(state, count) {
 		if (count === 1) state.result += " ";
-		else if (count > 1) state.result += common.repeat("\n", count - 1);
+		else if (count > 1) state.result += common2.repeat("\n", count - 1);
 	}
 	function readPlainScalar(state, nodeIndent, withinFlowCollection) {
 		let captureStart;
@@ -1243,7 +1333,7 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		let isPair;
 		let isExplicitPair;
 		let isMapping;
-		const overridableKeys = Object.create(null);
+		const overridableKeys = /* @__PURE__ */ Object.create(null);
 		let keyNode;
 		let keyTag;
 		let valueNode;
@@ -1356,7 +1446,7 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 			}
 			if (!detectedIndent && textIndent === 0) throwError(state, "missing indentation for block scalar");
 			if (state.lineIndent < textIndent) {
-				if (chomping === CHOMPING_KEEP) state.result += common.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
+				if (chomping === CHOMPING_KEEP) state.result += common2.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
 				else if (chomping === CHOMPING_CLIP) {
 					if (didReadContent) state.result += "\n";
 				}
@@ -1364,14 +1454,14 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 			}
 			if (folding) if (isWhiteSpace(ch)) {
 				atMoreIndented = true;
-				state.result += common.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
+				state.result += common2.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
 			} else if (atMoreIndented) {
 				atMoreIndented = false;
-				state.result += common.repeat("\n", emptyLines + 1);
+				state.result += common2.repeat("\n", emptyLines + 1);
 			} else if (emptyLines === 0) {
 				if (didReadContent) state.result += " ";
-			} else state.result += common.repeat("\n", emptyLines);
-			else state.result += common.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
+			} else state.result += common2.repeat("\n", emptyLines);
+			else state.result += common2.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
 			didReadContent = true;
 			detectedIndent = true;
 			emptyLines = 0;
@@ -1430,7 +1520,7 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		const _tag = state.tag;
 		const _anchor = state.anchor;
 		const _result = {};
-		const overridableKeys = Object.create(null);
+		const overridableKeys = /* @__PURE__ */ Object.create(null);
 		let keyTag = null;
 		let keyNode = null;
 		let valueNode = null;
@@ -1620,7 +1710,7 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		let atNewLine = false;
 		let hasContent = false;
 		let propertyStart = null;
-		let type;
+		let type2;
 		let flowIndent;
 		let blockIndent;
 		if (state.depth >= state.maxDepth) throwError(state, "nesting exceeded maxDepth (" + state.maxDepth + ")");
@@ -1679,29 +1769,29 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		} else if (state.tag === "?") {
 			if (state.result !== null && state.kind !== "scalar") throwError(state, "unacceptable node kind for !<?> tag; it should be \"scalar\", not \"" + state.kind + "\"");
 			for (let typeIndex = 0, typeQuantity = state.implicitTypes.length; typeIndex < typeQuantity; typeIndex += 1) {
-				type = state.implicitTypes[typeIndex];
-				if (type.resolve(state.result)) {
-					state.result = type.construct(state.result);
-					state.tag = type.tag;
+				type2 = state.implicitTypes[typeIndex];
+				if (type2.resolve(state.result)) {
+					state.result = type2.construct(state.result);
+					state.tag = type2.tag;
 					if (state.anchor !== null) storeAnchor(state, state.anchor, state.result);
 					break;
 				}
 			}
 		} else if (state.tag !== "!") {
-			if (_hasOwnProperty.call(state.typeMap[state.kind || "fallback"], state.tag)) type = state.typeMap[state.kind || "fallback"][state.tag];
+			if (_hasOwnProperty.call(state.typeMap[state.kind || "fallback"], state.tag)) type2 = state.typeMap[state.kind || "fallback"][state.tag];
 			else {
-				type = null;
+				type2 = null;
 				const typeList = state.typeMap.multi[state.kind || "fallback"];
 				for (let typeIndex = 0, typeQuantity = typeList.length; typeIndex < typeQuantity; typeIndex += 1) if (state.tag.slice(0, typeList[typeIndex].tag.length) === typeList[typeIndex].tag) {
-					type = typeList[typeIndex];
+					type2 = typeList[typeIndex];
 					break;
 				}
 			}
-			if (!type) throwError(state, "unknown tag !<" + state.tag + ">");
-			if (state.result !== null && type.kind !== state.kind) throwError(state, "unacceptable node kind for !<" + state.tag + "> tag; it should be \"" + type.kind + "\", not \"" + state.kind + "\"");
-			if (!type.resolve(state.result, state.tag)) throwError(state, "cannot resolve a node with !<" + state.tag + "> explicit tag");
+			if (!type2) throwError(state, "unknown tag !<" + state.tag + ">");
+			if (state.result !== null && type2.kind !== state.kind) throwError(state, "unacceptable node kind for !<" + state.tag + "> tag; it should be \"" + type2.kind + "\", not \"" + state.kind + "\"");
+			if (!type2.resolve(state.result, state.tag)) throwError(state, "cannot resolve a node with !<" + state.tag + "> explicit tag");
 			else {
-				state.result = type.construct(state.result, state.tag);
+				state.result = type2.construct(state.result, state.tag);
 				if (state.anchor !== null) storeAnchor(state, state.anchor, state.result);
 			}
 		}
@@ -1715,8 +1805,8 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		let ch;
 		state.version = null;
 		state.checkLineBreaks = state.legacy;
-		state.tagMap = Object.create(null);
-		state.anchorMap = Object.create(null);
+		state.tagMap = /* @__PURE__ */ Object.create(null);
+		state.anchorMap = /* @__PURE__ */ Object.create(null);
 		while ((ch = state.input.charCodeAt(state.position)) !== 0) {
 			skipSeparationSpace(state, true, -1);
 			ch = state.input.charCodeAt(state.position);
@@ -1784,7 +1874,7 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		while (state.position < state.length - 1) readDocument(state);
 		return state.documents;
 	}
-	function loadAll$1(input, iterator, options) {
+	function loadAll2(input, iterator, options) {
 		if (iterator !== null && typeof iterator === "object" && typeof options === "undefined") {
 			options = iterator;
 			iterator = null;
@@ -1793,47 +1883,52 @@ var require_loader = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		if (typeof iterator !== "function") return documents;
 		for (let index = 0, length = documents.length; index < length; index += 1) iterator(documents[index]);
 	}
-	function load$1(input, options) {
+	function load2(input, options) {
 		const documents = loadDocuments(input, options);
 		if (documents.length === 0) return;
 		else if (documents.length === 1) return documents[0];
-		throw new YAMLException$1("expected a single document in the stream, but found more");
+		throw new YAMLException2("expected a single document in the stream, but found more");
 	}
-	module.exports.loadAll = loadAll$1;
-	module.exports.load = load$1;
-}));
-var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var common = require_common();
-	var YAMLException$1 = require_exception();
-	var DEFAULT_SCHEMA$1 = require_default();
-	var _toString = Object.prototype.toString;
-	var _hasOwnProperty = Object.prototype.hasOwnProperty;
-	var CHAR_BOM = 65279;
-	var CHAR_TAB = 9;
-	var CHAR_LINE_FEED = 10;
-	var CHAR_CARRIAGE_RETURN = 13;
-	var CHAR_SPACE = 32;
-	var CHAR_EXCLAMATION = 33;
-	var CHAR_DOUBLE_QUOTE = 34;
-	var CHAR_SHARP = 35;
-	var CHAR_PERCENT = 37;
-	var CHAR_AMPERSAND = 38;
-	var CHAR_SINGLE_QUOTE = 39;
-	var CHAR_ASTERISK = 42;
-	var CHAR_COMMA = 44;
-	var CHAR_MINUS = 45;
-	var CHAR_COLON = 58;
-	var CHAR_EQUALS = 61;
-	var CHAR_GREATER_THAN = 62;
-	var CHAR_QUESTION = 63;
-	var CHAR_COMMERCIAL_AT = 64;
-	var CHAR_LEFT_SQUARE_BRACKET = 91;
-	var CHAR_RIGHT_SQUARE_BRACKET = 93;
-	var CHAR_GRAVE_ACCENT = 96;
-	var CHAR_LEFT_CURLY_BRACKET = 123;
-	var CHAR_VERTICAL_LINE = 124;
-	var CHAR_RIGHT_CURLY_BRACKET = 125;
-	var ESCAPE_SEQUENCES = {};
+	loader.loadAll = loadAll2;
+	loader.load = load2;
+	return loader;
+}
+var dumper = {};
+var hasRequiredDumper;
+function requireDumper() {
+	if (hasRequiredDumper) return dumper;
+	hasRequiredDumper = 1;
+	const common2 = requireCommon();
+	const YAMLException2 = requireException();
+	const DEFAULT_SCHEMA2 = require_default();
+	const _toString = Object.prototype.toString;
+	const _hasOwnProperty = Object.prototype.hasOwnProperty;
+	const CHAR_BOM = 65279;
+	const CHAR_TAB = 9;
+	const CHAR_LINE_FEED = 10;
+	const CHAR_CARRIAGE_RETURN = 13;
+	const CHAR_SPACE = 32;
+	const CHAR_EXCLAMATION = 33;
+	const CHAR_DOUBLE_QUOTE = 34;
+	const CHAR_SHARP = 35;
+	const CHAR_PERCENT = 37;
+	const CHAR_AMPERSAND = 38;
+	const CHAR_SINGLE_QUOTE = 39;
+	const CHAR_ASTERISK = 42;
+	const CHAR_COMMA = 44;
+	const CHAR_MINUS = 45;
+	const CHAR_COLON = 58;
+	const CHAR_EQUALS = 61;
+	const CHAR_GREATER_THAN = 62;
+	const CHAR_QUESTION = 63;
+	const CHAR_COMMERCIAL_AT = 64;
+	const CHAR_LEFT_SQUARE_BRACKET = 91;
+	const CHAR_RIGHT_SQUARE_BRACKET = 93;
+	const CHAR_GRAVE_ACCENT = 96;
+	const CHAR_LEFT_CURLY_BRACKET = 123;
+	const CHAR_VERTICAL_LINE = 124;
+	const CHAR_RIGHT_CURLY_BRACKET = 125;
+	const ESCAPE_SEQUENCES = {};
 	ESCAPE_SEQUENCES[0] = "\\0";
 	ESCAPE_SEQUENCES[7] = "\\a";
 	ESCAPE_SEQUENCES[8] = "\\b";
@@ -1849,7 +1944,7 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	ESCAPE_SEQUENCES[160] = "\\_";
 	ESCAPE_SEQUENCES[8232] = "\\L";
 	ESCAPE_SEQUENCES[8233] = "\\P";
-	var DEPRECATED_BOOLEANS_SYNTAX = [
+	const DEPRECATED_BOOLEANS_SYNTAX = [
 		"y",
 		"Y",
 		"yes",
@@ -1867,17 +1962,17 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		"Off",
 		"OFF"
 	];
-	var DEPRECATED_BASE60_SYNTAX = /^[-+]?[0-9_]+(?::[0-9_]+)+(?:\.[0-9_]*)?$/;
-	function compileStyleMap(schema, map) {
-		if (map === null) return {};
+	const DEPRECATED_BASE60_SYNTAX = /^[-+]?[0-9_]+(?::[0-9_]+)+(?:\.[0-9_]*)?$/;
+	function compileStyleMap(schema2, map2) {
+		if (map2 === null) return {};
 		const result = {};
-		const keys = Object.keys(map);
+		const keys = Object.keys(map2);
 		for (let index = 0, length = keys.length; index < length; index += 1) {
 			let tag = keys[index];
-			let style = String(map[tag]);
+			let style = String(map2[tag]);
 			if (tag.slice(0, 2) === "!!") tag = "tag:yaml.org,2002:" + tag.slice(2);
-			const type = schema.compiledTypeMap["fallback"][tag];
-			if (type && _hasOwnProperty.call(type.styleAliases, style)) style = type.styleAliases[style];
+			const type2 = schema2.compiledTypeMap["fallback"][tag];
+			if (type2 && _hasOwnProperty.call(type2.styleAliases, style)) style = type2.styleAliases[style];
 			result[tag] = style;
 		}
 		return result;
@@ -1895,17 +1990,17 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		} else if (character <= 4294967295) {
 			handle = "U";
 			length = 8;
-		} else throw new YAMLException$1("code point within a string may not be greater than 0xFFFFFFFF");
-		return "\\" + handle + common.repeat("0", length - string.length) + string;
+		} else throw new YAMLException2("code point within a string may not be greater than 0xFFFFFFFF");
+		return "\\" + handle + common2.repeat("0", length - string.length) + string;
 	}
-	var QUOTING_TYPE_SINGLE = 1;
-	var QUOTING_TYPE_DOUBLE = 2;
+	const QUOTING_TYPE_SINGLE = 1;
+	const QUOTING_TYPE_DOUBLE = 2;
 	function State(options) {
-		this.schema = options["schema"] || DEFAULT_SCHEMA$1;
+		this.schema = options["schema"] || DEFAULT_SCHEMA2;
 		this.indent = Math.max(1, options["indent"] || 2);
 		this.noArrayIndent = options["noArrayIndent"] || false;
 		this.skipInvalid = options["skipInvalid"] || false;
-		this.flowLevel = common.isNothing(options["flowLevel"]) ? -1 : options["flowLevel"];
+		this.flowLevel = common2.isNothing(options["flowLevel"]) ? -1 : options["flowLevel"];
 		this.styleMap = compileStyleMap(this.schema, options["styles"] || null);
 		this.sortKeys = options["sortKeys"] || false;
 		this.lineWidth = options["lineWidth"] || 80;
@@ -1923,7 +2018,7 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		this.usedDuplicates = null;
 	}
 	function indentString(string, spaces) {
-		const ind = common.repeat(" ", spaces);
+		const ind = common2.repeat(" ", spaces);
 		let position = 0;
 		let result = "";
 		const length = string.length;
@@ -1943,10 +2038,10 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		return result;
 	}
 	function generateNextLine(state, level) {
-		return "\n" + common.repeat(" ", state.indent * level);
+		return "\n" + common2.repeat(" ", state.indent * level);
 	}
-	function testImplicitResolving(state, str) {
-		for (let index = 0, length = state.implicitTypes.length; index < length; index += 1) if (state.implicitTypes[index].resolve(str)) return true;
+	function testImplicitResolving(state, str2) {
+		for (let index = 0, length = state.implicitTypes.length; index < length; index += 1) if (state.implicitTypes[index].resolve(str2)) return true;
 		return false;
 	}
 	function isWhitespace(c) {
@@ -1981,11 +2076,11 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	function needIndentIndicator(string) {
 		return /^\n* /.test(string);
 	}
-	var STYLE_PLAIN = 1;
-	var STYLE_SINGLE = 2;
-	var STYLE_LITERAL = 3;
-	var STYLE_FOLDED = 4;
-	var STYLE_DOUBLE = 5;
+	const STYLE_PLAIN = 1;
+	const STYLE_SINGLE = 2;
+	const STYLE_LITERAL = 3;
+	const STYLE_FOLDED = 4;
+	const STYLE_DOUBLE = 5;
 	function chooseScalarStyle(string, singleLineOnly, indentPerLevel, lineWidth, testAmbiguousType, quotingType, forceQuotes, inblock) {
 		let i;
 		let char = 0;
@@ -2025,7 +2120,7 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		return quotingType === QUOTING_TYPE_DOUBLE ? STYLE_DOUBLE : STYLE_SINGLE;
 	}
 	function writeScalar(state, string, level, iskey, inblock) {
-		state.dump = function() {
+		state.dump = (function() {
 			if (string.length === 0) return state.quotingType === QUOTING_TYPE_DOUBLE ? "\"\"" : "''";
 			if (!state.noCompatMode) {
 				if (DEPRECATED_BOOLEANS_SYNTAX.indexOf(string) !== -1 || DEPRECATED_BASE60_SYNTAX.test(string)) return state.quotingType === QUOTING_TYPE_DOUBLE ? "\"" + string + "\"" : "'" + string + "'";
@@ -2033,18 +2128,18 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 			const indent = state.indent * Math.max(1, level);
 			const lineWidth = state.lineWidth === -1 ? -1 : Math.max(Math.min(state.lineWidth, 40), state.lineWidth - indent);
 			const singleLineOnly = iskey || state.flowLevel > -1 && level >= state.flowLevel;
-			function testAmbiguity(string$1) {
-				return testImplicitResolving(state, string$1);
+			function testAmbiguity(string2) {
+				return testImplicitResolving(state, string2);
 			}
 			switch (chooseScalarStyle(string, singleLineOnly, state.indent, lineWidth, testAmbiguity, state.quotingType, state.forceQuotes && !iskey, inblock)) {
 				case STYLE_PLAIN: return string;
 				case STYLE_SINGLE: return "'" + string.replace(/'/g, "''") + "'";
 				case STYLE_LITERAL: return "|" + blockHeader(string, state.indent) + dropEndingNewline(indentString(string, indent));
 				case STYLE_FOLDED: return ">" + blockHeader(string, state.indent) + dropEndingNewline(indentString(foldString(string, lineWidth), indent));
-				case STYLE_DOUBLE: return "\"" + escapeString(string, lineWidth) + "\"";
-				default: throw new YAMLException$1("impossible error: invalid scalar style");
+				case STYLE_DOUBLE: return "\"" + escapeString(string) + "\"";
+				default: throw new YAMLException2("impossible error: invalid scalar style");
 			}
-		}();
+		})();
 	}
 	function blockHeader(string, indentPerLevel) {
 		const indentIndicator = needIndentIndicator(string) ? String(indentPerLevel) : "";
@@ -2056,12 +2151,12 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	}
 	function foldString(string, width) {
 		const lineRe = /(\n+)([^\n]*)/g;
-		let result = function() {
+		let result = (function() {
 			let nextLF = string.indexOf("\n");
 			nextLF = nextLF !== -1 ? nextLF : string.length;
 			lineRe.lastIndex = nextLF;
 			return foldLine(string.slice(0, nextLF), width);
-		}();
+		})();
 		let prevMoreIndented = string[0] === "\n" || string[0] === " ";
 		let moreIndented;
 		let match;
@@ -2167,7 +2262,7 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		const objectKeyList = Object.keys(object);
 		if (state.sortKeys === true) objectKeyList.sort();
 		else if (typeof state.sortKeys === "function") objectKeyList.sort(state.sortKeys);
-		else if (state.sortKeys) throw new YAMLException$1("sortKeys must be a boolean or a function");
+		else if (state.sortKeys) throw new YAMLException2("sortKeys must be a boolean or a function");
 		for (let index = 0, length = objectKeyList.length; index < length; index += 1) {
 			let pairBuffer = "";
 			if (!compact || _result !== "") pairBuffer += generateNextLine(state, level);
@@ -2192,17 +2287,17 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	function detectType(state, object, explicit) {
 		const typeList = explicit ? state.explicitTypes : state.implicitTypes;
 		for (let index = 0, length = typeList.length; index < length; index += 1) {
-			const type = typeList[index];
-			if ((type.instanceOf || type.predicate) && (!type.instanceOf || typeof object === "object" && object instanceof type.instanceOf) && (!type.predicate || type.predicate(object))) {
-				if (explicit) if (type.multi && type.representName) state.tag = type.representName(object);
-				else state.tag = type.tag;
+			const type2 = typeList[index];
+			if ((type2.instanceOf || type2.predicate) && (!type2.instanceOf || typeof object === "object" && object instanceof type2.instanceOf) && (!type2.predicate || type2.predicate(object))) {
+				if (explicit) if (type2.multi && type2.representName) state.tag = type2.representName(object);
+				else state.tag = type2.tag;
 				else state.tag = "?";
-				if (type.represent) {
-					const style = state.styleMap[type.tag] || type.defaultStyle;
+				if (type2.represent) {
+					const style = state.styleMap[type2.tag] || type2.defaultStyle;
 					let _result;
-					if (_toString.call(type.represent) === "[object Function]") _result = type.represent(object, style);
-					else if (_hasOwnProperty.call(type.represent, style)) _result = type.represent[style](object, style);
-					else throw new YAMLException$1("!<" + type.tag + "> tag resolver accepts not \"" + style + "\" style");
+					if (_toString.call(type2.represent) === "[object Function]") _result = type2.represent(object, style);
+					else if (_hasOwnProperty.call(type2.represent, style)) _result = type2.represent[style](object, style);
+					else throw new YAMLException2("!<" + type2.tag + "> tag resolver accepts not \"" + style + "\" style");
 					state.dump = _result;
 				}
 				return true;
@@ -2214,10 +2309,10 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		state.tag = null;
 		state.dump = object;
 		if (!detectType(state, object, false)) detectType(state, object, true);
-		const type = _toString.call(state.dump);
+		const type2 = _toString.call(state.dump);
 		const inblock = block;
 		if (block) block = state.flowLevel < 0 || state.flowLevel > level;
-		const objectOrArray = type === "[object Object]" || type === "[object Array]";
+		const objectOrArray = type2 === "[object Object]" || type2 === "[object Array]";
 		let duplicateIndex;
 		let duplicate;
 		if (objectOrArray) {
@@ -2228,14 +2323,14 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		if (duplicate && state.usedDuplicates[duplicateIndex]) state.dump = "*ref_" + duplicateIndex;
 		else {
 			if (objectOrArray && duplicate && !state.usedDuplicates[duplicateIndex]) state.usedDuplicates[duplicateIndex] = true;
-			if (type === "[object Object]") if (block && Object.keys(state.dump).length !== 0) {
+			if (type2 === "[object Object]") if (block && Object.keys(state.dump).length !== 0) {
 				writeBlockMapping(state, level, state.dump, compact);
 				if (duplicate) state.dump = "&ref_" + duplicateIndex + state.dump;
 			} else {
 				writeFlowMapping(state, level, state.dump);
 				if (duplicate) state.dump = "&ref_" + duplicateIndex + " " + state.dump;
 			}
-			else if (type === "[object Array]") if (block && state.dump.length !== 0) {
+			else if (type2 === "[object Array]") if (block && state.dump.length !== 0) {
 				if (state.noArrayIndent && !isblockseq && level > 0) writeBlockSequence(state, level - 1, state.dump, compact);
 				else writeBlockSequence(state, level, state.dump, compact);
 				if (duplicate) state.dump = "&ref_" + duplicateIndex + state.dump;
@@ -2243,12 +2338,12 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 				writeFlowSequence(state, level, state.dump);
 				if (duplicate) state.dump = "&ref_" + duplicateIndex + " " + state.dump;
 			}
-			else if (type === "[object String]") {
+			else if (type2 === "[object String]") {
 				if (state.tag !== "?") writeScalar(state, state.dump, level, iskey, inblock);
-			} else if (type === "[object Undefined]") return false;
+			} else if (type2 === "[object Undefined]") return false;
 			else {
 				if (state.skipInvalid) return false;
-				throw new YAMLException$1("unacceptable kind of an object to dump " + type);
+				throw new YAMLException2("unacceptable kind of an object to dump " + type2);
 			}
 			if (state.tag !== null && state.tag !== "?") {
 				let tagStr = encodeURI(state.tag[0] === "!" ? state.tag.slice(1) : state.tag).replace(/!/g, "%21");
@@ -2283,7 +2378,7 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 			}
 		}
 	}
-	function dump$1(input, options) {
+	function dump2(input, options) {
 		options = options || {};
 		const state = new State(options);
 		if (!state.noRefs) getDuplicateReferences(input, state);
@@ -2292,47 +2387,52 @@ var require_dumper = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		if (writeNode(state, 0, value, true, true)) return state.dump + "\n";
 		return "";
 	}
-	module.exports.dump = dump$1;
-}));
-var import_js_yaml = /* @__PURE__ */ __toESM((/* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var loader = require_loader();
-	var dumper = require_dumper();
+	dumper.dump = dump2;
+	return dumper;
+}
+var hasRequiredJsYaml;
+function requireJsYaml() {
+	if (hasRequiredJsYaml) return jsYaml;
+	hasRequiredJsYaml = 1;
+	const loader2 = requireLoader();
+	const dumper2 = requireDumper();
 	function renamed(from, to) {
 		return function() {
 			throw new Error("Function yaml." + from + " is removed in js-yaml 4. Use yaml." + to + " instead, which is now safe by default.");
 		};
 	}
-	module.exports.Type = require_type();
-	module.exports.Schema = require_schema();
-	module.exports.FAILSAFE_SCHEMA = require_failsafe();
-	module.exports.JSON_SCHEMA = require_json();
-	module.exports.CORE_SCHEMA = require_core();
-	module.exports.DEFAULT_SCHEMA = require_default();
-	module.exports.load = loader.load;
-	module.exports.loadAll = loader.loadAll;
-	module.exports.dump = dumper.dump;
-	module.exports.YAMLException = require_exception();
-	module.exports.types = {
-		binary: require_binary(),
-		float: require_float(),
-		map: require_map(),
+	jsYaml.Type = requireType();
+	jsYaml.Schema = requireSchema();
+	jsYaml.FAILSAFE_SCHEMA = requireFailsafe();
+	jsYaml.JSON_SCHEMA = requireJson();
+	jsYaml.CORE_SCHEMA = requireCore();
+	jsYaml.DEFAULT_SCHEMA = require_default();
+	jsYaml.load = loader2.load;
+	jsYaml.loadAll = loader2.loadAll;
+	jsYaml.dump = dumper2.dump;
+	jsYaml.YAMLException = requireException();
+	jsYaml.types = {
+		binary: requireBinary(),
+		float: requireFloat(),
+		map: requireMap(),
 		null: require_null(),
-		pairs: require_pairs(),
-		set: require_set(),
-		timestamp: require_timestamp(),
-		bool: require_bool(),
-		int: require_int(),
-		merge: require_merge(),
-		omap: require_omap(),
-		seq: require_seq(),
-		str: require_str()
+		pairs: requirePairs(),
+		set: requireSet(),
+		timestamp: requireTimestamp(),
+		bool: requireBool(),
+		int: requireInt(),
+		merge: requireMerge(),
+		omap: requireOmap(),
+		seq: requireSeq(),
+		str: requireStr()
 	};
-	module.exports.safeLoad = renamed("safeLoad", "load");
-	module.exports.safeLoadAll = renamed("safeLoadAll", "loadAll");
-	module.exports.safeDump = renamed("safeDump", "dump");
-})))(), 1);
-var { Type, Schema, FAILSAFE_SCHEMA, JSON_SCHEMA, CORE_SCHEMA, DEFAULT_SCHEMA, load, loadAll, dump, YAMLException, types, safeLoad, safeLoadAll, safeDump } = import_js_yaml.default;
-var index_vite_proxy_tmp_default = import_js_yaml.default;
+	jsYaml.safeLoad = renamed("safeLoad", "load");
+	jsYaml.safeLoadAll = renamed("safeLoadAll", "loadAll");
+	jsYaml.safeDump = renamed("safeDump", "dump");
+	return jsYaml;
+}
+const yaml = /* @__PURE__ */ getDefaultExportFromCjs(requireJsYaml());
+const { Type, Schema, FAILSAFE_SCHEMA, JSON_SCHEMA, CORE_SCHEMA, DEFAULT_SCHEMA, load, loadAll, dump, YAMLException, types, safeLoad, safeLoadAll, safeDump } = yaml;
 
 //#endregion
 //#region src/repos/lib.ts
@@ -2350,18 +2450,23 @@ function findRoot() {
 }
 function readManifest(root) {
 	const resolvedRoot = root ?? findRoot();
+	const filePath = join(resolvedRoot, "repos.yaml");
+	const content = readFileSync(filePath, "utf8");
 	return {
-		manifest: load(readFileSync(join(resolvedRoot, "repos.yaml"), "utf8")),
+		manifest: load(content),
 		root: resolvedRoot
 	};
 }
 function writeManifest(manifest, root) {
-	writeFileSync(join(root ?? findRoot(), "repos.yaml"), dump(manifest, {
+	const resolvedRoot = root ?? findRoot();
+	const filePath = join(resolvedRoot, "repos.yaml");
+	const content = dump(manifest, {
 		lineWidth: -1,
 		noRefs: true,
 		quotingType: "'",
 		forceQuotes: false
-	}), "utf8");
+	});
+	writeFileSync(filePath, content, "utf8");
 }
 function repoUrl(ownerRepo) {
 	return `https://github.com/${ownerRepo}.git`;
@@ -2396,7 +2501,8 @@ function resolveRepos(manifest, filter) {
 	return Object.entries(manifest.repos);
 }
 function isCloned(context) {
-	return existsSync(join(repoPath(context), ".git"));
+	const directory = repoPath(context);
+	return existsSync(join(directory, ".git"));
 }
 function gitExec(context, args) {
 	const directory = repoPath(context);
@@ -2524,12 +2630,13 @@ function cloneRepo(context) {
 			writeManifest(manifest, root);
 		}
 	}
-	execSync(buildCloneArgs({
+	const args = buildCloneArgs({
 		cloneUrl: repo.fork ? repoUrl(repo.fork) : repoUrl(repo.upstream),
 		directory,
 		branch: repo.branch,
 		shallow: repo.shallow && !repo.commit
-	}).join(" "), { stdio: "inherit" });
+	});
+	execSync(args.join(" "), { stdio: "inherit" });
 	if (repo.fork) execSync(`git -C ${directory} remote add upstream ${repoUrl(repo.upstream)}`, { stdio: "inherit" });
 	if (repo.commit) execSync(`git -C ${directory} checkout ${repo.commit}`, { stdio: "inherit" });
 	return {
@@ -2660,7 +2767,7 @@ const shortFlagMap = {
 	p: "path"
 };
 function parseArgs(argv) {
-	const command$1 = argv[0] ?? "";
+	const command = argv[0] ?? "";
 	const positional = [];
 	const flags = {};
 	let i = 1;
@@ -2697,7 +2804,7 @@ function parseArgs(argv) {
 		}
 	}
 	return {
-		command: command$1,
+		command,
 		positional,
 		flags
 	};
@@ -2710,7 +2817,8 @@ function getFilter(positional, flags) {
 }
 function cmdClone(positional, flags) {
 	const { manifest, root } = readManifest();
-	const repos = resolveRepos(manifest, getFilter(positional, flags));
+	const filter = getFilter(positional, flags);
+	const repos = resolveRepos(manifest, filter);
 	const results = [];
 	for (const [name, repo] of repos) {
 		const result = cloneRepo({
@@ -2729,7 +2837,8 @@ function cmdClone(positional, flags) {
 }
 function cmdSync(positional, flags) {
 	const { manifest, root } = readManifest();
-	const repos = resolveRepos(manifest, getFilter(positional, flags));
+	const filter = getFilter(positional, flags);
+	const repos = resolveRepos(manifest, filter);
 	const results = [];
 	for (const [name, repo] of repos) {
 		if (!isCloned({
@@ -2754,7 +2863,8 @@ function cmdSync(positional, flags) {
 }
 function cmdStatus(positional, flags) {
 	const { manifest, root } = readManifest();
-	const repos = resolveRepos(manifest, getFilter(positional, flags));
+	const filter = getFilter(positional, flags);
+	const repos = resolveRepos(manifest, filter);
 	const statuses = [];
 	for (const [name, repo] of repos) statuses.push(getRepoStatus({
 		name,
@@ -2846,7 +2956,8 @@ function cmdList(flags) {
 }
 function cmdExec(positional, flags) {
 	const { manifest, root } = readManifest();
-	const repos = resolveRepos(manifest, getFilter([], flags));
+	const filter = getFilter([], flags);
+	const repos = resolveRepos(manifest, filter);
 	const cmd = positional.join(" ");
 	if (!cmd) throw new Error("Usage: repos exec [--group G] [--all] -- <command>");
 	for (const [name, repo] of repos) {
@@ -2941,7 +3052,7 @@ function cmdRemove(positional) {
 	if (!name) throw new Error("Usage: repos remove <name>");
 	const { manifest, root } = readManifest();
 	if (!manifest.repos[name]) throw new Error(`Repo "${name}" not found in manifest.`);
-	const { [name]: _,...remainingRepos } = manifest.repos;
+	const { [name]: _, ...remainingRepos } = manifest.repos;
 	manifest.repos = remainingRepos;
 	for (const group of Object.values(manifest.groups)) {
 		const index = group.repos.indexOf(name);
@@ -2969,8 +3080,8 @@ Short flags: -g (group) -b (branch) -c (commit) -d (description) -p (path)
 Run without arguments for interactive TUI.
 `.trim();
 function run(argv) {
-	const { command: command$1, positional, flags } = parseArgs(argv);
-	switch (command$1) {
+	const { command, positional, flags } = parseArgs(argv);
+	switch (command) {
 		case "add":
 			cmdAdd(positional, flags);
 			break;
@@ -3005,9 +3116,9 @@ function run(argv) {
 			console.log(helpText);
 			break;
 		default:
-			console.error(`Unknown command: ${command$1}\n`);
+			console.error(`Unknown command: ${command}\n`);
 			console.log(helpText);
-			throw new Error(`Unknown command: ${command$1}`);
+			throw new Error(`Unknown command: ${command}`);
 	}
 }
 
@@ -3016,7 +3127,7 @@ function run(argv) {
 const [command] = process.argv.slice(2);
 if (command) run(process.argv.slice(2));
 else {
-	const tuiPath = join(dirname(fileURLToPath(import.meta.url)), "repos-tui.js");
+	const tuiPath = join(dirname(fileURLToPath(import.meta.url)), "repos-tui.mjs");
 	if (!existsSync(tuiPath)) {
 		console.error("TUI not available. Build first: pnpm nx build scripts");
 		console.error("Or use CLI mode: pnpm repos help");

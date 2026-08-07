@@ -48,6 +48,14 @@ describe('rpcClientErrorCode', () => {
   });
 });
 
+describe('list_directory RPC schema', () => {
+  const listDirectory = rpcSchemasRegistry[rpcName.listDirectory];
+
+  it('should accept an omitted path so the handler can use the project root', () => {
+    expect(listDirectory.inputSchema.safeParse({}).success).toBe(true);
+  });
+});
+
 describe('grep RPC schema — additive envelope fields', () => {
   const grep = rpcSchemasRegistry[rpcName.grep];
 

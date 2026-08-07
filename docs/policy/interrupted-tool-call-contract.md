@@ -38,7 +38,7 @@ Use the static tool schema according to the AI SDK lifecycle contract:
 - `input-available`, `approval-requested`, `approval-responded`, `output-available`, and `output-denied` require complete typed input;
 - `output-error` accepts complete typed input or `undefined`.
 
-Dynamic tools remain unknown and must not use the static registry. Invalid static interrupted input is demoted to `rawInput` and `input` is cleared before strict validation.
+Dynamic tools remain unknown and must not use the static registry. Invalid static interrupted input is demoted to `rawInput` and `input` is cleared before strict validation — but only for the states the AI SDK lets carry an absent input (`output-error`, and historical in-progress parts canonicalized to it). The approval states have no demotion path: the AI SDK's own `ToolUIPart` types their `input` as required, so clearing it would emit a part that is not assignable to `MyUIMessage[]` (Rule 8). An approval part whose input no longer satisfies its tool schema must fail validation rather than lose its approval semantics.
 
 ### 3. `rawInput` Is the Lossless Forensic Channel
 
@@ -116,7 +116,7 @@ When the AI SDK changes a lifecycle field or state, compare both its exported UI
 - [ ] Historical assistant `input-streaming` / `input-available` tool parts followed by a user message canonicalize to interrupted `output-error`.
 - [ ] Active current-tail static `input-streaming` parts use typed partial input; dynamic parts remain unknown.
 - [ ] Static available, approval, success, and denied states validate complete input.
-- [ ] Invalid static interrupted input moves to `rawInput`.
+- [ ] Invalid static interrupted input moves to `rawInput` wherever `input` may be absent; approval states reject instead.
 - [ ] Dynamic tools are included in lifecycle normalization and UI finalization.
 - [ ] `rawInput`, `title`, provider metadata, and approval metadata are preserved where valid.
 - [ ] Approval histories fail explicitly before provider replay until adapter support exists.

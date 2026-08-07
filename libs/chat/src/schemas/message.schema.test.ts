@@ -290,6 +290,40 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
       expect(part).not.toHaveProperty('rawInput');
     });
 
+    // The AI SDK types `input` as required on every approval state (only
+    // `output-error` allows it to be absent), so there is no demotion path here:
+    // clearing `input` would produce a part that is not assignable to
+    // `ToolUIPart`. Rejecting is correct — do not "heal" these into rawInput.
+    it.each(['approval-requested', 'approval-responded', 'output-denied'] as const)(
+      'should reject a static %s part whose input does not satisfy the tool schema',
+      (state) => {
+        const approval =
+          state === 'approval-requested'
+            ? { id: 'appr_1' }
+            : { id: 'appr_1', approved: state === 'approval-responded' };
+
+        const result = uiMessagesSchema.safeParse([
+          userMessage,
+          {
+            id: 'm1',
+            role: 'assistant',
+            parts: [
+              {
+                type: 'tool-read_file',
+                toolCallId: 'call_approval',
+                state,
+                // Partial: `targetFile` is required by the read_file input schema.
+                input: { limit: 15 },
+                approval,
+              },
+            ],
+          },
+        ]);
+
+        expect(result.success).toBe(false);
+      },
+    );
+
     it('should accept active input-streaming tool parts with typed partial input', () => {
       const result = uiMessagesSchema.safeParse([
         userMessage,

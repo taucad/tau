@@ -33,19 +33,20 @@ import thumbnail26 from './kernels/replicad/ibeam/thumbnail.webp?url';
 import thumbnail27 from './kernels/replicad/lego/thumbnail.webp?url';
 import thumbnail28 from './kernels/replicad/logo/thumbnail.webp?url';
 import thumbnail29 from './kernels/replicad/logo-keychain/thumbnail.webp?url';
-import thumbnail30 from './kernels/replicad/pot-plant/thumbnail.webp?url';
-import thumbnail31 from './kernels/replicad/projection-test/thumbnail.webp?url';
-import thumbnail32 from './kernels/replicad/rao-nozzle/thumbnail.webp?url';
-import thumbnail33 from './kernels/replicad/simple-tray/thumbnail.webp?url';
-import thumbnail34 from './kernels/replicad/staircase/thumbnail.webp?url';
-import thumbnail35 from './kernels/replicad/stress-test/thumbnail.webp?url';
-import thumbnail36 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
-import thumbnail37 from './kernels/replicad/table/thumbnail.webp?url';
-import thumbnail38 from './kernels/replicad/tau-wordmark/thumbnail.webp?url';
-import thumbnail39 from './kernels/replicad/tray/thumbnail.webp?url';
-import thumbnail40 from './kernels/replicad/vase/thumbnail.webp?url';
-import thumbnail41 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
-import thumbnail42 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
+import thumbnail30 from './kernels/replicad/picovoxel-logo/thumbnail.webp?url';
+import thumbnail31 from './kernels/replicad/pot-plant/thumbnail.webp?url';
+import thumbnail32 from './kernels/replicad/projection-test/thumbnail.webp?url';
+import thumbnail33 from './kernels/replicad/rao-nozzle/thumbnail.webp?url';
+import thumbnail34 from './kernels/replicad/simple-tray/thumbnail.webp?url';
+import thumbnail35 from './kernels/replicad/staircase/thumbnail.webp?url';
+import thumbnail36 from './kernels/replicad/stress-test/thumbnail.webp?url';
+import thumbnail37 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
+import thumbnail38 from './kernels/replicad/table/thumbnail.webp?url';
+import thumbnail39 from './kernels/replicad/tau-wordmark/thumbnail.webp?url';
+import thumbnail40 from './kernels/replicad/tray/thumbnail.webp?url';
+import thumbnail41 from './kernels/replicad/vase/thumbnail.webp?url';
+import thumbnail42 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
+import thumbnail43 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
 
 /** Static thumbnail URLs keyed by `<kernel>/<example>`. @public */
 export const thumbnailAssets = {
@@ -79,19 +80,20 @@ export const thumbnailAssets = {
   'replicad/lego': thumbnail27,
   'replicad/logo': thumbnail28,
   'replicad/logo-keychain': thumbnail29,
-  'replicad/pot-plant': thumbnail30,
-  'replicad/projection-test': thumbnail31,
-  'replicad/rao-nozzle': thumbnail32,
-  'replicad/simple-tray': thumbnail33,
-  'replicad/staircase': thumbnail34,
-  'replicad/stress-test': thumbnail35,
-  'replicad/t-slot-rail': thumbnail36,
-  'replicad/table': thumbnail37,
-  'replicad/tau-wordmark': thumbnail38,
-  'replicad/tray': thumbnail39,
-  'replicad/vase': thumbnail40,
-  'replicad/wavy-vase': thumbnail41,
-  'replicad/wedge-door-stopper': thumbnail42,
+  'replicad/picovoxel-logo': thumbnail30,
+  'replicad/pot-plant': thumbnail31,
+  'replicad/projection-test': thumbnail32,
+  'replicad/rao-nozzle': thumbnail33,
+  'replicad/simple-tray': thumbnail34,
+  'replicad/staircase': thumbnail35,
+  'replicad/stress-test': thumbnail36,
+  'replicad/t-slot-rail': thumbnail37,
+  'replicad/table': thumbnail38,
+  'replicad/tau-wordmark': thumbnail39,
+  'replicad/tray': thumbnail40,
+  'replicad/vase': thumbnail41,
+  'replicad/wavy-vase': thumbnail42,
+  'replicad/wedge-door-stopper': thumbnail43,
 } as const;
 
 /** Key of a generated example thumbnail asset. @public */

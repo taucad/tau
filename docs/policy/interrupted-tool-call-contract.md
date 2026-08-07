@@ -3,10 +3,11 @@ title: 'Interrupted Tool-Call Contract Policy'
 description: 'Schema and provider-adapter rules for interrupted, stale, and partial AI SDK tool lifecycle parts'
 status: active
 created: '2026-04-23'
-updated: '2026-06-19'
+updated: '2026-07-22'
 related:
   - docs/research/interrupted-tool-call-validation-failure.md
   - docs/research/google-cancel-followup-stale-tool-part-validation.md
+  - docs/research/ui-message-schema-type-safety.md
   - docs/policy/testing-policy.md
   - docs/policy/cross-provider-content-contract.md
 ---
@@ -27,21 +28,21 @@ The API owns this wire contract. The UI finalizer still cleans up the local tail
 
 A static or dynamic tool part in `input-streaming` or `input-available` becomes stale when it belongs to an assistant message followed by a later user message. `uiMessagesSchema` must canonicalize those historical in-progress parts to `output-error` with structured `USER_INTERRUPTED` metadata before strict per-tool validation runs.
 
-Active current-tail assistant messages are different: if no later user message exists, `input-streaming` can remain live and tolerant.
+Active current-tail assistant messages are different: if no later user message exists, `input-streaming` can remain live with typed partial static input or unknown dynamic input.
 
-### 2. Strict Static Tool Schemas Apply Only Where Semantically Meaningful
+### 2. Static Tool Inputs Must Match Their Lifecycle State
 
-Static tool input schemas remain authoritative for completed static tool inputs:
+Use the static tool schema according to the AI SDK lifecycle contract:
 
-- `input-available`
-- `output-available`
-- valid `output-error.input` when present
+- `input-streaming` accepts typed partial input or `undefined`;
+- `input-available`, `approval-requested`, `approval-responded`, `output-available`, and `output-denied` require complete typed input;
+- `output-error` accepts complete typed input or `undefined`.
 
-They do not apply to active streaming fragments, approval lifecycle states, denied outputs, or dynamic tools. Invalid static interrupted input is demoted to `rawInput` and `input` is cleared.
+Dynamic tools remain unknown and must not use the static registry. Invalid static interrupted input is demoted to `rawInput` and `input` is cleared before strict validation.
 
 ### 3. `rawInput` Is the Lossless Forensic Channel
 
-`rawInput: z.unknown().optional()` belongs on tool lifecycle states that may carry partial or provider-native argument data. The normalizer must preserve partial arguments rather than dropping them merely because Tau cannot validate them as completed static tool input.
+`rawInput: z.unknown().optional()` is the lossless channel for partial, malformed, or provider-native argument data. Keep canonical static `input` compatible with its lifecycle type instead of widening it to `unknown`.
 
 Provider conversion uses the existing `input ?? rawInput` behavior, so interrupted attempts still produce coherent model history.
 
@@ -68,7 +69,7 @@ Shared tool helpers should use `isAnyToolPart` / `getToolPartName` when behavior
 
 ### 6. Approval Lifecycle State Must Not Be Rewritten as Interruption
 
-Approval lifecycle states (`approval-requested`, `approval-responded`, `output-denied`) are valid AI SDK UI message states. Tau parses them and preserves approval metadata, but provider replay through the current LangChain adapter is not fully supported.
+Approval lifecycle states (`approval-requested`, `approval-responded`, `output-denied`) are valid AI SDK UI message states. Tau requires complete input for static approval states, keeps dynamic input unknown, and preserves approval metadata, but provider replay through the current LangChain adapter is not fully supported.
 
 Until approval replay is implemented end-to-end, the API must fail explicitly before provider calls via `assertSupportedApprovalReplay`, returning `UNSUPPORTED_TOOL_APPROVAL_REPLAY`. The sanitizer must never silently relabel an approval response as `USER_INTERRUPTED`.
 
@@ -82,9 +83,9 @@ Once a stale tool part is canonicalized to interrupted `output-error`, the exist
 
 Synthetic interrupted tool results must include matching `tool_call_id`, `name`, `status: 'error'`, and JSON content with `{ errorCode, toolName, toolCallId, message }`.
 
-### 8. Append, Never Narrow, on AI SDK Schema Evolution
+### 8. Separate Wire Recovery From Canonical Output
 
-When the AI SDK adds a tool lifecycle field or state, Tau should add an optional field or new branch and a regression test. Do not narrow previously parseable persisted chat messages without a normalizer.
+When the AI SDK changes a lifecycle field or state, compare both its exported UI-message types and its runtime validator. Recover legacy wire shapes through preprocessing, defaults, or `rawInput`; every successful `uiMessagesSchema` output must remain assignable to `MyUIMessage[]` without an assertion. Do not copy a permissive intermediate `unknown` field into canonical output merely because the upstream validator later casts its result.
 
 ## Decision Table
 
@@ -103,6 +104,7 @@ When the AI SDK adds a tool lifecycle field or state, Tau should add an optional
 
 - Special-casing `edit_file`, `read_file`, or any individual tool for stale-state repair.
 - Treating every malformed tool input as acceptable forever; completed static success states still use strict schemas.
+- Copying permissive `validateUIMessages` branches without checking the exported AI SDK output types.
 - Requiring the web UI to heal every payload before the API can accept it.
 - Running lifecycle repair after strict Zod validation.
 - Consulting `tool-input.registry.ts` for `dynamic-tool`.
@@ -112,8 +114,8 @@ When the AI SDK adds a tool lifecycle field or state, Tau should add an optional
 ## Summary Checklist
 
 - [ ] Historical assistant `input-streaming` / `input-available` tool parts followed by a user message canonicalize to interrupted `output-error`.
-- [ ] Active current-tail `input-streaming` tool parts remain live and tolerant.
-- [ ] Static completed states still validate against strict tool schemas.
+- [ ] Active current-tail static `input-streaming` parts use typed partial input; dynamic parts remain unknown.
+- [ ] Static available, approval, success, and denied states validate complete input.
 - [ ] Invalid static interrupted input moves to `rawInput`.
 - [ ] Dynamic tools are included in lifecycle normalization and UI finalization.
 - [ ] `rawInput`, `title`, provider metadata, and approval metadata are preserved where valid.
@@ -125,5 +127,7 @@ When the AI SDK adds a tool lifecycle field or state, Tau should add an optional
 
 - `docs/research/google-cancel-followup-stale-tool-part-validation.md`
 - `docs/research/interrupted-tool-call-validation-failure.md`
+- `docs/research/ui-message-schema-type-safety.md`
 - `docs/policy/testing-policy.md`
-- `node_modules/ai/src/ui/validate-ui-messages.ts`
+- `repos/ai/packages/ai/src/ui/ui-messages.ts`
+- `repos/ai/packages/ai/src/ui/validate-ui-messages.ts`

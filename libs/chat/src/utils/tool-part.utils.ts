@@ -1,4 +1,6 @@
+import type { ToolUIPart } from 'ai';
 import type { MyMessagePart, MyToolPart } from '#types/message.types.js';
+import type { MyTools } from '#types/tool.types.js';
 
 /** @public */
 export type MyDynamicToolPart = Extract<MyMessagePart, { type: 'dynamic-tool' }>;
@@ -34,6 +36,10 @@ export function isAnyToolPart(part: MyMessagePart): part is MyAnyToolPart {
  * Returns the provider/model-facing tool name for static and dynamic tool parts.
  * @public
  */
-export function getToolPartName(part: MyAnyToolPart): string {
-  return isDynamicToolPart(part) ? part.toolName : part.type.slice('tool-'.length);
+export function getToolPartName<Name extends keyof MyTools>(part: ToolUIPart<Pick<MyTools, Name>>): Name;
+/** @public */
+export function getToolPartName(part: MyAnyToolPart): string;
+/** @public */
+export function getToolPartName(part: { readonly type: string; readonly toolName?: string }): string {
+  return part.type === 'dynamic-tool' && part.toolName !== undefined ? part.toolName : part.type.slice('tool-'.length);
 }

@@ -37,7 +37,7 @@ import { testModelInputSchema } from '#schemas/tools/test-model.tool.schema.js';
 // @see https://github.com/BenLorantfy/nestjs-zod/issues/145
 //
 // Modifications:
-// - static completed tool states keep Tau's strict per-tool input/output schemas
+// - static tool states emit AI SDK-compatible typed inputs; opaque recovery data stays in rawInput
 // - interrupted/historical tool lifecycle states are normalized in preprocess
 
 const approvalRequestedSchema = z.object({
@@ -68,15 +68,25 @@ const approvalDeniedSchema = z.object({
 
 // Helper function to create tool schemas for a specific tool
 // Uses proper generic constraints to preserve exact schema types
-const createToolSchemas = <
-  Name extends ToolName,
-  Input extends z.ZodObject<z.ZodRawShape>,
+const createToolSchemasFromStreaming = <
+  Name extends string,
+  Input extends z.ZodType,
   Output extends z.ZodObject<z.ZodRawShape> | z.ZodArray<z.ZodType> | z.ZodString,
->(
-  toolName: Name,
-  inputSchema: Input,
-  outputSchema: Output,
-) => {
+  StreamingInput extends z.ZodType,
+  CompletedInput extends z.ZodType,
+>({
+  toolName,
+  inputSchema,
+  outputSchema,
+  streamingInputSchema,
+  completedInputSchema,
+}: {
+  toolName: Name;
+  inputSchema: Input;
+  outputSchema: Output;
+  streamingInputSchema: StreamingInput;
+  completedInputSchema: CompletedInput;
+}) => {
   const toolType = `tool-${toolName}` as const;
   return [
     // Input-streaming state
@@ -87,7 +97,7 @@ const createToolSchemas = <
       state: z.literal('input-streaming'),
       providerExecuted: z.boolean().optional(),
       callProviderMetadata: providerMetadataSchema.optional(),
-      input: z.unknown().optional(),
+      input: z.union([streamingInputSchema, z.undefined()]),
       rawInput: z.unknown().optional(),
       output: z.never().optional(),
       errorText: z.never().optional(),
@@ -114,7 +124,7 @@ const createToolSchemas = <
       title: z.string().optional(),
       state: z.literal('output-available'),
       providerExecuted: z.boolean().optional(),
-      input: inputSchema,
+      input: completedInputSchema,
       rawInput: z.unknown().optional(),
       output: outputSchema,
       errorText: z.never().optional(),
@@ -139,16 +149,15 @@ const createToolSchemas = <
       callProviderMetadata: providerMetadataSchema.optional(),
       approval: approvalApprovedSchema,
     }),
-    // Approval-lifecycle states — backfilled from the upstream AI SDK
-    // `validateUIMessages` schema (`node_modules/ai/src/ui/validate-ui-messages.ts`).
-    // See docs/research/interrupted-tool-call-validation-failure.md R7.
+    // Static approval-lifecycle states require complete typed tool input,
+    // matching the AI SDK ToolUIPart output contract.
     z.object({
       type: z.literal(toolType),
       toolCallId: z.string(),
       title: z.string().optional(),
       state: z.literal('approval-requested'),
       providerExecuted: z.boolean().optional(),
-      input: z.unknown(),
+      input: inputSchema,
       rawInput: z.unknown().optional(),
       output: z.never().optional(),
       errorText: z.never().optional(),
@@ -161,7 +170,7 @@ const createToolSchemas = <
       title: z.string().optional(),
       state: z.literal('approval-responded'),
       providerExecuted: z.boolean().optional(),
-      input: z.unknown(),
+      input: inputSchema,
       rawInput: z.unknown().optional(),
       output: z.never().optional(),
       errorText: z.never().optional(),
@@ -174,7 +183,7 @@ const createToolSchemas = <
       title: z.string().optional(),
       state: z.literal('output-denied'),
       providerExecuted: z.boolean().optional(),
-      input: z.unknown(),
+      input: inputSchema,
       rawInput: z.unknown().optional(),
       output: z.never().optional(),
       errorText: z.never().optional(),
@@ -183,6 +192,23 @@ const createToolSchemas = <
     }),
   ] as const;
 };
+
+const createToolSchemas = <
+  Name extends string,
+  Input extends z.ZodType,
+  Output extends z.ZodObject<z.ZodRawShape> | z.ZodArray<z.ZodType> | z.ZodString,
+>(
+  toolName: Name,
+  inputSchema: Input,
+  outputSchema: Output,
+) =>
+  createToolSchemasFromStreaming({
+    toolName,
+    inputSchema,
+    outputSchema,
+    streamingInputSchema: inputSchema instanceof z.ZodObject ? inputSchema.partial() : inputSchema,
+    completedInputSchema: inputSchema,
+  });
 
 // Specialized helper for tools with empty input schemas
 // Uses z.record(z.never()) for input which correctly types to Record<string, never>
@@ -202,7 +228,7 @@ const createEmptyInputToolSchemas = <Name extends ToolName, Output extends z.Zod
       state: z.literal('input-streaming'),
       providerExecuted: z.boolean().optional(),
       callProviderMetadata: providerMetadataSchema.optional(),
-      input: z.unknown().optional(),
+      input: z.union([emptyInput, z.undefined()]),
       rawInput: z.unknown().optional(),
       output: z.never().optional(),
       errorText: z.never().optional(),
@@ -251,15 +277,14 @@ const createEmptyInputToolSchemas = <Name extends ToolName, Output extends z.Zod
       callProviderMetadata: providerMetadataSchema.optional(),
       approval: approvalApprovedSchema,
     }),
-    // Approval-lifecycle states — see createToolSchemas notes; backfilled
-    // to match upstream `validateUIMessages`.
+    // Approval-lifecycle states use the same complete empty-input contract.
     z.object({
       type: z.literal(toolType),
       toolCallId: z.string(),
       title: z.string().optional(),
       state: z.literal('approval-requested'),
       providerExecuted: z.boolean().optional(),
-      input: z.unknown(),
+      input: emptyInput,
       rawInput: z.unknown().optional(),
       output: z.never().optional(),
       errorText: z.never().optional(),
@@ -272,7 +297,7 @@ const createEmptyInputToolSchemas = <Name extends ToolName, Output extends z.Zod
       title: z.string().optional(),
       state: z.literal('approval-responded'),
       providerExecuted: z.boolean().optional(),
-      input: z.unknown(),
+      input: emptyInput,
       rawInput: z.unknown().optional(),
       output: z.never().optional(),
       errorText: z.never().optional(),
@@ -285,7 +310,7 @@ const createEmptyInputToolSchemas = <Name extends ToolName, Output extends z.Zod
       title: z.string().optional(),
       state: z.literal('output-denied'),
       providerExecuted: z.boolean().optional(),
-      input: z.unknown(),
+      input: emptyInput,
       rawInput: z.unknown().optional(),
       output: z.never().optional(),
       errorText: z.never().optional(),
@@ -436,7 +461,10 @@ const rawUiMessagesSchema = z
               toolCallId: z.string(),
               title: z.string().optional(),
               state: z.literal('output-error'),
-              input: z.unknown().optional(),
+              input: z
+                .unknown()
+                .optional()
+                .transform((value): unknown => value),
               rawInput: z.unknown().optional(),
               providerExecuted: z.boolean().optional(),
               output: z.never().optional(),
@@ -589,7 +617,7 @@ const normalizeMessageParts = (message: RawMessageWithParts, historical: boolean
 
   let nextParts: unknown[] | undefined;
   for (let index = 0; index < message.parts.length; index += 1) {
-    const part = message.parts[index];
+    const part: unknown = message.parts[index];
     if (!isRecord(part)) {
       continue;
     }
@@ -599,7 +627,7 @@ const normalizeMessageParts = (message: RawMessageWithParts, historical: boolean
       continue;
     }
 
-    nextParts ??= [...message.parts];
+    nextParts ??= message.parts.map((part: unknown) => part);
     nextParts[index] = normalizedPart;
   }
 
@@ -626,7 +654,7 @@ const normalizeToolLifecycleParts = (input: unknown): unknown => {
   let nextMessages: unknown[] | undefined;
   let seenLaterUser = false;
   for (let index = input.length - 1; index >= 0; index -= 1) {
-    const message = input[index];
+    const message: unknown = input[index];
     if (!isRecord(message)) {
       continue;
     }
@@ -634,7 +662,7 @@ const normalizeToolLifecycleParts = (input: unknown): unknown => {
     const historical = message['role'] === 'assistant' && seenLaterUser;
     const normalizedMessage = normalizeMessageParts(message, historical);
     if (normalizedMessage !== message) {
-      nextMessages ??= [...input];
+      nextMessages ??= input.map((message: unknown) => message);
       nextMessages[index] = normalizedMessage;
     }
 

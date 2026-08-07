@@ -175,25 +175,25 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
   });
 
   describe('interrupted tool parts (output-error with partial input)', () => {
-    const interruptedReadFilePart = (overrides: Partial<MyMessagePart> = {}): MyMessagePart => {
-      const literal = {
-        type: 'tool-read_file',
+    const interruptedReadFilePart = (overrides: Record<string, unknown> = {}) => ({
+      type: 'tool-read_file',
+      toolCallId: 'call_test',
+      state: 'output-error',
+      input: { limit: 15 },
+      errorText: JSON.stringify({
+        errorCode: 'USER_INTERRUPTED',
+        message: 'Interrupted by user.',
+        toolName: 'read_file',
         toolCallId: 'call_test',
-        state: 'output-error',
-        input: { limit: 15 },
-        errorText: JSON.stringify({
-          errorCode: 'USER_INTERRUPTED',
-          message: 'Interrupted by user.',
-          toolName: 'read_file',
-          toolCallId: 'call_test',
-        }),
-        ...overrides,
-      };
-      return literal as unknown as MyMessagePart;
-    };
+      }),
+      ...overrides,
+    });
 
     it('should accept tool-read_file in output-error with partial input lacking required fields', () => {
-      const result = uiMessagesSchema.safeParse([userMessage, baseMessage([interruptedReadFilePart()])]);
+      const result = uiMessagesSchema.safeParse([
+        userMessage,
+        { id: 'm1', role: 'assistant', parts: [interruptedReadFilePart()] },
+      ]);
 
       expect(result.success).toBe(true);
     });
@@ -201,12 +201,11 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
     it('should accept tool-read_file in output-error with rawInput populated and input cleared', () => {
       const result = uiMessagesSchema.safeParse([
         userMessage,
-        baseMessage([
-          interruptedReadFilePart({
-            input: undefined,
-            rawInput: { limit: 15 },
-          } as unknown as Partial<MyMessagePart>),
-        ]),
+        {
+          id: 'm1',
+          role: 'assistant',
+          parts: [interruptedReadFilePart({ input: undefined, rawInput: { limit: 15 } })],
+        },
       ]);
 
       expect(result.success).toBe(true);
@@ -219,34 +218,41 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
         return;
       }
       expect(part.input).toBeUndefined();
-      expect((part as { rawInput?: unknown }).rawInput).toEqual({ limit: 15 });
+      expect(part).toMatchObject({ rawInput: { limit: 15 } });
     });
 
     it('should accept tool-test_model in output-error with rawInput populated', () => {
       const result = uiMessagesSchema.safeParse([
         userMessage,
-        baseMessage([
-          {
-            type: `tool-${toolName.testModel}`,
-            toolCallId: 'call_test_model',
-            state: 'output-error',
-            input: undefined,
-            rawInput: { stray: 'ignored partial' },
-            errorText: JSON.stringify({
-              errorCode: 'USER_INTERRUPTED',
-              message: 'Interrupted by user.',
-              toolName: 'test_model',
+        {
+          id: 'm1',
+          role: 'assistant',
+          parts: [
+            {
+              type: `tool-${toolName.testModel}`,
               toolCallId: 'call_test_model',
-            }),
-          } as unknown as MyMessagePart,
-        ]),
+              state: 'output-error',
+              input: undefined,
+              rawInput: { stray: 'ignored partial' },
+              errorText: JSON.stringify({
+                errorCode: 'USER_INTERRUPTED',
+                message: 'Interrupted by user.',
+                toolName: 'test_model',
+                toolCallId: 'call_test_model',
+              }),
+            },
+          ],
+        },
       ]);
 
       expect(result.success).toBe(true);
     });
 
     it('should heal a legacy persisted output-error part by moving invalid input to rawInput', () => {
-      const result = uiMessagesSchema.safeParse([userMessage, baseMessage([interruptedReadFilePart()])]);
+      const result = uiMessagesSchema.safeParse([
+        userMessage,
+        { id: 'm1', role: 'assistant', parts: [interruptedReadFilePart()] },
+      ]);
 
       expect(result.success).toBe(true);
       if (!result.success) {
@@ -258,17 +264,17 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
         return;
       }
       expect(part.input).toBeUndefined();
-      expect((part as { rawInput?: unknown }).rawInput).toEqual({ limit: 15 });
+      expect(part).toMatchObject({ rawInput: { limit: 15 } });
     });
 
     it('should preserve a strictly valid output-error input untouched', () => {
       const result = uiMessagesSchema.safeParse([
         userMessage,
-        baseMessage([
-          interruptedReadFilePart({
-            input: { targetFile: 'main.ts', limit: 15 },
-          } as unknown as Partial<MyMessagePart>),
-        ]),
+        {
+          id: 'm1',
+          role: 'assistant',
+          parts: [interruptedReadFilePart({ input: { targetFile: 'main.ts', limit: 15 } })],
+        },
       ]);
 
       expect(result.success).toBe(true);
@@ -281,10 +287,10 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
         return;
       }
       expect(part.input).toEqual({ targetFile: 'main.ts', limit: 15 });
-      expect((part as { rawInput?: unknown }).rawInput).toBeUndefined();
+      expect(part).not.toHaveProperty('rawInput');
     });
 
-    it('should accept active input-streaming tool parts with unknown partial input', () => {
+    it('should accept active input-streaming tool parts with typed partial input', () => {
       const result = uiMessagesSchema.safeParse([
         userMessage,
         baseMessage([
@@ -292,8 +298,7 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
             type: 'tool-read_file',
             toolCallId: 'call_streaming',
             state: 'input-streaming',
-            input: 'partial-json-fragment',
-            rawInput: ['partial'],
+            input: { limit: 15 },
           },
         ]),
       ]);
@@ -307,21 +312,24 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
       if (part.state !== 'input-streaming') {
         return;
       }
-      expect(part.input).toBe('partial-json-fragment');
-      expect((part as { rawInput?: unknown }).rawInput).toEqual(['partial']);
+      expect(part.input).toEqual({ limit: 15 });
     });
 
     it('should terminalize stale historical input-available static tool parts followed by a user message', () => {
       const result = uiMessagesSchema.safeParse([
         userMessage,
-        baseMessage([
-          {
-            type: 'tool-read_file',
-            toolCallId: 'call_stale_read',
-            state: 'input-available',
-            input: { limit: 40 },
-          },
-        ]),
+        {
+          id: 'm1',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-read_file',
+              toolCallId: 'call_stale_read',
+              state: 'input-available',
+              input: { limit: 40 },
+            },
+          ],
+        },
         { id: 'm2', role: 'user', parts: [{ type: 'text', text: 'continue' }] },
       ]);
 
@@ -335,7 +343,7 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
         return;
       }
       expect(part.input).toBeUndefined();
-      expect((part as { rawInput?: unknown }).rawInput).toEqual({ limit: 40 });
+      expect(part).toMatchObject({ rawInput: { limit: 40 } });
       expect(JSON.parse(part.errorText) as Record<string, unknown>).toMatchObject({
         errorCode: 'USER_INTERRUPTED',
         toolName: 'read_file',
@@ -367,7 +375,7 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
         return;
       }
       expect(part.input).toEqual({ targetFile: 'main.ts', limit: 40 });
-      expect((part as { rawInput?: unknown }).rawInput).toBeUndefined();
+      expect(part).not.toHaveProperty('rawInput');
     });
 
     it('should terminalize stale historical dynamic tool parts without requiring input', () => {
@@ -400,31 +408,28 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
     it('should accept dynamic-tool in output-error with rawInput populated', () => {
       const result = uiMessagesSchema.safeParse([
         userMessage,
-        baseMessage([
-          {
-            type: 'dynamic-tool',
-            toolName: 'experimental_tool',
-            toolCallId: 'call_dynamic',
-            state: 'output-error',
-            input: undefined,
-            rawInput: { partial: true },
-            errorText: 'interrupted',
-          } as unknown as MyMessagePart,
-        ]),
+        {
+          id: 'm1',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'dynamic-tool',
+              toolName: 'experimental_tool',
+              toolCallId: 'call_dynamic',
+              state: 'output-error',
+              input: undefined,
+              rawInput: { partial: true },
+              errorText: 'interrupted',
+            },
+          ],
+        },
       ]);
 
       expect(result.success).toBe(true);
     });
   });
 
-  /**
-   * Backfill of the AI SDK approval lifecycle. The upstream
-   * `validateUIMessages` schema accepts `approval-requested`,
-   * `approval-responded`, and `output-denied` for both static and dynamic tool
-   * parts. Mirroring those keeps `uiMessagesSchema` forward-compatible the
-   * moment any tool starts emitting approval UI, without a follow-up schema
-   * change blocking the UX work.
-   */
+  /** AI SDK approval states with typed static input and unknown dynamic input. */
   describe('AI SDK approval-lifecycle tool-part states', () => {
     it('should accept a static tool-read_file part in approval-requested state', () => {
       const result = uiMessagesSchema.safeParse([
@@ -436,40 +441,11 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
             state: 'approval-requested',
             input: { targetFile: 'main.ts' },
             approval: { id: 'approval_1' },
-          } as unknown as MyMessagePart,
-        ]),
-      ]);
-
-      expect(result.success).toBe(true);
-    });
-
-    it('should accept and preserve partial static approval-requested input without strict tool validation', () => {
-      const result = uiMessagesSchema.safeParse([
-        userMessage,
-        baseMessage([
-          {
-            type: 'tool-read_file',
-            toolCallId: 'call_approval_partial',
-            state: 'approval-requested',
-            input: { limit: 40 },
-            rawInput: { streamed: true },
-            approval: { id: 'approval_partial' },
           },
         ]),
       ]);
 
       expect(result.success).toBe(true);
-      if (!result.success) {
-        return;
-      }
-      const part = findToolPart(result.data[1]?.parts ?? [], 'tool-read_file');
-      expect(part.state).toBe('approval-requested');
-      if (part.state !== 'approval-requested') {
-        return;
-      }
-      expect(part.input).toEqual({ limit: 40 });
-      expect((part as { rawInput?: unknown }).rawInput).toEqual({ streamed: true });
-      expect(part.approval).toEqual({ id: 'approval_partial' });
     });
 
     it('should accept a static tool-read_file part in approval-responded state', () => {
@@ -482,38 +458,11 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
             state: 'approval-responded',
             input: { targetFile: 'main.ts' },
             approval: { id: 'approval_1', approved: true, reason: 'looks safe' },
-          } as unknown as MyMessagePart,
-        ]),
-      ]);
-
-      expect(result.success).toBe(true);
-    });
-
-    it('should accept and preserve partial static approval-responded input without strict tool validation', () => {
-      const result = uiMessagesSchema.safeParse([
-        userMessage,
-        baseMessage([
-          {
-            type: 'tool-read_file',
-            toolCallId: 'call_approval_response_partial',
-            state: 'approval-responded',
-            input: { limit: 40 },
-            approval: { id: 'approval_1', approved: true, reason: 'ok' },
           },
         ]),
       ]);
 
       expect(result.success).toBe(true);
-      if (!result.success) {
-        return;
-      }
-      const part = findToolPart(result.data[1]?.parts ?? [], 'tool-read_file');
-      expect(part.state).toBe('approval-responded');
-      if (part.state !== 'approval-responded') {
-        return;
-      }
-      expect(part.input).toEqual({ limit: 40 });
-      expect(part.approval).toEqual({ id: 'approval_1', approved: true, reason: 'ok' });
     });
 
     it('should accept a static tool-read_file part in output-denied state', () => {
@@ -526,38 +475,11 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
             state: 'output-denied',
             input: { targetFile: 'main.ts' },
             approval: { id: 'approval_1', approved: false, reason: 'forbidden path' },
-          } as unknown as MyMessagePart,
-        ]),
-      ]);
-
-      expect(result.success).toBe(true);
-    });
-
-    it('should accept and preserve partial static output-denied input without strict tool validation', () => {
-      const result = uiMessagesSchema.safeParse([
-        userMessage,
-        baseMessage([
-          {
-            type: 'tool-read_file',
-            toolCallId: 'call_denied_partial',
-            state: 'output-denied',
-            input: { limit: 40 },
-            approval: { id: 'approval_denied', approved: false, reason: 'not this path' },
           },
         ]),
       ]);
 
       expect(result.success).toBe(true);
-      if (!result.success) {
-        return;
-      }
-      const part = findToolPart(result.data[1]?.parts ?? [], 'tool-read_file');
-      expect(part.state).toBe('output-denied');
-      if (part.state !== 'output-denied') {
-        return;
-      }
-      expect(part.input).toEqual({ limit: 40 });
-      expect(part.approval).toEqual({ id: 'approval_denied', approved: false, reason: 'not this path' });
     });
 
     it('should preserve approval metadata on static output-available parts', () => {
@@ -584,7 +506,7 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
       if (part.state !== 'output-available') {
         return;
       }
-      expect((part as { approval?: unknown }).approval).toEqual({
+      expect(part.approval).toEqual({
         id: 'approval_output',
         approved: true,
         reason: 'safe',
@@ -615,7 +537,7 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
       if (part.state !== 'output-error') {
         return;
       }
-      expect((part as { approval?: unknown }).approval).toEqual({ id: 'approval_error', approved: true });
+      expect(part.approval).toEqual({ id: 'approval_error', approved: true });
     });
 
     it('should accept a filtered tool-test_model part in approval-requested state', () => {
@@ -628,7 +550,7 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
             state: 'approval-requested',
             input: { files: ['main.geospec.ts'], testNamePattern: 'watertight' },
             approval: { id: 'approval_test_model' },
-          } as unknown as MyMessagePart,
+          },
         ]),
       ]);
 
@@ -646,7 +568,7 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
             state: 'approval-requested',
             input: { foo: 'bar' },
             approval: { id: 'approval_dynamic' },
-          } as unknown as MyMessagePart,
+          },
         ]),
       ]);
 
@@ -664,7 +586,7 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
             state: 'approval-responded',
             input: { foo: 'bar' },
             approval: { id: 'approval_dynamic', approved: true },
-          } as unknown as MyMessagePart,
+          },
         ]),
       ]);
 
@@ -682,7 +604,7 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
             state: 'output-denied',
             input: { foo: 'bar' },
             approval: { id: 'approval_dynamic', approved: false, reason: 'no' },
-          } as unknown as MyMessagePart,
+          },
         ]),
       ]);
 
@@ -692,15 +614,19 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
     it('should accept dynamic-tool output-error without an input property', () => {
       const result = uiMessagesSchema.safeParse([
         userMessage,
-        baseMessage([
-          {
-            type: 'dynamic-tool',
-            toolName: 'experimental_tool',
-            toolCallId: 'call_dynamic_no_input',
-            state: 'output-error',
-            errorText: 'interrupted',
-          },
-        ]),
+        {
+          id: 'm1',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'dynamic-tool',
+              toolName: 'experimental_tool',
+              toolCallId: 'call_dynamic_no_input',
+              state: 'output-error',
+              errorText: 'interrupted',
+            },
+          ],
+        },
       ]);
 
       expect(result.success).toBe(true);
@@ -744,14 +670,11 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
       if (!result.success) {
         return;
       }
-      expect((result.data[1]?.parts[0] as { approval?: unknown } | undefined)?.approval).toEqual({
-        id: 'approval_dynamic_output',
-        approved: true,
+      expect(result.data[1]?.parts[0]).toMatchObject({
+        approval: { id: 'approval_dynamic_output', approved: true },
       });
-      expect((result.data[1]?.parts[1] as { approval?: unknown } | undefined)?.approval).toEqual({
-        id: 'approval_dynamic_error',
-        approved: true,
-        reason: 'still allowed',
+      expect(result.data[1]?.parts[1]).toMatchObject({
+        approval: { id: 'approval_dynamic_error', approved: true, reason: 'still allowed' },
       });
     });
   });

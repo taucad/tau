@@ -1,8 +1,8 @@
+import type { ToolUIPart } from 'ai';
 import type {
   MessageRole,
   MyMetadata,
   MyMessagePart,
-  MyToolPart,
   MyUIMessage,
   ToolInvocation,
   MyTools,
@@ -99,12 +99,9 @@ type ToolSerializer<T extends keyof MyTools> = {
   readonly output: (output: ToolOutputOf<T>) => string;
 };
 
-type ErasedToolSerializer = {
-  readonly input: (input: unknown) => string;
-  readonly output: (output: unknown) => string;
-};
+type ToolPartFor<Name extends keyof MyTools> = ToolUIPart<Pick<MyTools, Name>>;
 
-const toolSerializers = {
+const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
   [toolName.webSearch]: {
     input: (input) => `query: ${input.query}`,
     output: (output) =>
@@ -263,11 +260,11 @@ const toolSerializers = {
     input: (input) => `mode: ${input.mode}`,
     output: (output) => `Captured ${output.images.length} image(s)`,
   },
-} satisfies { [K in keyof MyTools]: ToolSerializer<K> };
+};
 
-const serializeToolPart = (part: MyToolPart): string => {
+const serializeToolPart = <Name extends keyof MyTools>(part: ToolPartFor<Name>): string => {
   const name = getToolPartName(part);
-  const serializer = toolSerializers[name] as ErasedToolSerializer;
+  const serializer = toolSerializers[name];
   const inputString = part.state !== 'input-streaming' && part.input !== undefined ? serializer.input(part.input) : '';
   const resultString =
     serializeToolState(part) ?? (part.state === 'output-available' ? serializer.output(part.output) : '');

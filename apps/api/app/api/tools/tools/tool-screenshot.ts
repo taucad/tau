@@ -13,8 +13,15 @@ export const screenshotToolDefinition = {
 You MUST pass \`targetFile\` (the source file path of the geometry unit to screenshot, e.g. "main.ts" or "lib/bracket.scad"). There is no implicit fallback — if no viewer panel currently displays \`targetFile\`, the call fails with UNKNOWN_GEOMETRY_UNIT.
 
 Modes:
-- single: Captures the current camera perspective of the targetFile's viewer (1 image)
-- multi_angle: Captures a labeled composite of all 6 orthographic views (front, back, right, left, top, bottom) of the targetFile as a single image`,
+- single: Captures one deterministic perspective isometric image
+- multi_angle: Captures 6 separate orthographic images (front, back, right, left, top, bottom)
+
+Every image includes:
+- an in-image view label; canonical axis-aligned labels name the camera position as View From ±axis
+- a camera-aligned red-X, green-Y, blue-Z orientation indicator with dot/cross depth notation
+- a physical scale bar; orthographic scale is depth-invariant, while perspective scale is measured at the subject-center plane and marked @ center
+
+Use these annotations when reasoning about orientation, handedness, opposite faces, and size.`,
   schema: screenshotInputSchema,
 } as const;
 
@@ -23,34 +30,11 @@ export const screenshotTool = tool(async (args, runtime: ToolRuntime): Promise<S
   const { toolCallId } = runtime;
   const { targetFile } = args;
 
-  if (args.mode === 'multi_angle') {
-    const result = await chatRpcService.sendRpcRequest({
-      chatId,
-      toolCallId,
-      rpcName: rpcName.captureObservations,
-      args: { targetFile },
-    });
-
-    assertRpcSuccess(result, {
-      toolName: toolName.screenshot,
-      toolCallId,
-      clientErrorMessage: `Failed to capture multi-angle screenshots for ${targetFile}`,
-    });
-
-    return {
-      images: result.observations.map((obs) => ({
-        view: obs.side,
-        dataUrl: obs.src,
-      })),
-    };
-  }
-
-  // Single screenshot mode
   const result = await chatRpcService.sendRpcRequest({
     chatId,
     toolCallId,
-    rpcName: rpcName.captureScreenshot,
-    args: { targetFile },
+    rpcName: rpcName.captureImages,
+    args: { mode: args.mode, targetFile },
   });
 
   assertRpcSuccess(result, {

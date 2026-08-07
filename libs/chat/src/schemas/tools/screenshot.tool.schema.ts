@@ -8,7 +8,7 @@ export const screenshotInputSchema = z
   .object({
     mode: z
       .enum(['single', 'multi_angle'])
-      .describe('single: current camera perspective. multi_angle: all 6 orthographic views'),
+      .describe('single: deterministic perspective isometric view. multi_angle: all 6 orthographic views'),
     targetFile: z
       .string()
       .describe('Source file path of the geometry unit to screenshot (e.g. "main.ts", "lib/bracket.scad").'),
@@ -31,7 +31,7 @@ export const screenshotImageSchema = z.object({
  * @public
  */
 export const screenshotOutputSchema = z.object({
-  images: z.array(screenshotImageSchema).describe('Array of captured screenshot images'),
+  images: z.array(screenshotImageSchema).min(1).describe('Array of captured screenshot images'),
 });
 /** @public */
 export type ScreenshotOutput = z.infer<typeof screenshotOutputSchema>;

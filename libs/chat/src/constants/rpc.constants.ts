@@ -19,11 +19,10 @@ export const rpcName = {
   grep: 'grep',
   globSearch: 'glob_search',
   getKernelResult: 'get_kernel_result',
-  captureObservations: 'capture_observations',
+  captureImages: 'capture_images',
   runGeoSpecTests: 'run_geospec_tests',
   fetchGeometry: 'fetch_geometry',
   exportGeometry: 'export_geometry',
-  captureScreenshot: 'capture_screenshot',
   appendFile: 'append_file',
   editFile: 'edit_file',
   resolveSkill: 'resolve_skill',
@@ -44,7 +43,7 @@ export const rpcNames = Object.values(rpcName) as [(typeof rpcName)[keyof typeof
  * the matching `tool-output-available` chunk arrives.
  *
  * Read-only RPCs (`readFile`, `grep`, `globSearch`, `listDirectory`,
- * `getKernelResult`, `captureScreenshot`, etc.) intentionally bypass the
+ * `getKernelResult`, `captureImages`, etc.) intentionally bypass the
  * ledger — re-issuing them after an interrupt is harmless.
  *
  * Adding a new mutating RPC requires adding it here; the partition invariant
@@ -72,11 +71,10 @@ export const readOnlyRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
   rpcName.grep,
   rpcName.globSearch,
   rpcName.getKernelResult,
-  rpcName.captureObservations,
+  rpcName.captureImages,
   rpcName.runGeoSpecTests,
   rpcName.fetchGeometry,
   rpcName.exportGeometry,
-  rpcName.captureScreenshot,
   rpcName.resolveSkill,
 ]);
 

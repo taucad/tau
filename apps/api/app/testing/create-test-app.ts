@@ -11,7 +11,7 @@ import { createRuntimeFileSystem, fromMemoryFs } from '@taucad/runtime/filesyste
 import { extractInlineFileSystem } from '@taucad/runtime/transport-internals';
 import type { RuntimeFileSystemBase } from '@taucad/runtime';
 import { createRpcDispatcher } from '@taucad/chat/rpc';
-import type { RpcGeoSpecClient, RpcGraphicsClient } from '@taucad/chat/rpc';
+import type { RpcGeoSpecClient, RpcGraphicsClient, RpcImageClient } from '@taucad/chat/rpc';
 import { getEnvironment } from '#config/environment.config.js';
 import { ChatController } from '#api/chat/chat.controller.js';
 import { ChatService } from '#api/chat/chat.service.js';
@@ -134,7 +134,8 @@ export type TestApp = {
 /**
  * Optional overrides for {@link createTestApp}.
  *
- * - `graphicsStub`: replace the default (omitted) graphics client.
+ * - `graphicsStub`: replace the default (omitted) geometry client.
+ * - `imagesStub`: replace the default (omitted) headless image client.
  * - `geospecStub`: replace the default (omitted) GeoSpec client. Used by
  *   agent-loop safeguards tests to inject deterministic `test_model` failures.
  * - `storeService`: replace the default in-memory store service. Used by
@@ -142,6 +143,7 @@ export type TestApp = {
  */
 export type CreateTestAppOptions = {
   graphicsStub?: RpcGraphicsClient;
+  imagesStub?: RpcImageClient;
   geospecStub?: RpcGeoSpecClient;
   storeService?: Pick<StoreService, 'getStore' | 'getReadDedupClearer'>;
   modelService?: Pick<
@@ -219,6 +221,7 @@ export async function createTestApp(options: CreateTestAppOptions = {}): Promise
     fileSystem: createHeadlessRpcFileSystem(createRuntimeFileSystem(memFs)),
     kernelClient: createHeadlessRuntimeClient({ createGeometry: async () => ({ success: true, issues: [] }) }),
     ...(options.graphicsStub ? { graphics: options.graphicsStub } : {}),
+    ...(options.imagesStub ? { images: options.imagesStub } : {}),
     ...(options.geospecStub ? { geospec: options.geospecStub } : {}),
   });
   headlessRpc.setDispatcher(dispatcher);

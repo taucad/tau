@@ -13,7 +13,7 @@ import { z as zod } from 'zod';
 import { rpcName } from '#constants/rpc.constants.js';
 import { diffStatsWithContentSchema } from '#schemas/tools/diff.schema.js';
 import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
-import { geoSpecRunFilterInputSchema, observationSchema } from '#schemas/tools/test-model.tool.schema.js';
+import { geoSpecRunFilterInputSchema } from '#schemas/tools/test-model.tool.schema.js';
 import { exportGeometryFormatSchema } from '#schemas/tools/export-geometry.tool.schema.js';
 import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
 import { testModelOutputSchema } from '@taucad/testing';
@@ -249,17 +249,6 @@ const getKernelResultRpc = defineRpc({
   }),
 });
 
-const captureObservationsRpc = defineRpc({
-  input: zod
-    .object({
-      targetFile: zod.string(),
-    })
-    .strict(),
-  success: zod.object({
-    observations: zod.array(observationSchema),
-  }),
-});
-
 const runGeoSpecTestsRpc = defineRpc({
   input: geoSpecRunFilterInputSchema,
   success: testModelOutputSchema,
@@ -298,19 +287,23 @@ const fetchGeometryRpc = defineRpc({
   }),
 });
 
-const captureScreenshotRpc = defineRpc({
+const captureImagesRpc = defineRpc({
   input: zod
     .object({
+      mode: zod.enum(['single', 'multi_angle']),
       targetFile: zod.string(),
+      includeEdges: zod.boolean().optional(),
     })
     .strict(),
   success: zod.object({
-    images: zod.array(
-      zod.object({
-        view: zod.string(),
-        dataUrl: zod.string(),
-      }),
-    ),
+    images: zod
+      .array(
+        zod.object({
+          view: zod.string(),
+          dataUrl: zod.string(),
+        }),
+      )
+      .min(1),
   }),
 });
 
@@ -391,11 +384,10 @@ export type RpcSchemasRegistry = {
   [rpcName.grep]: RpcSchemaEntry<GrepRpcInput, GrepRpcResult>;
   [rpcName.globSearch]: RpcSchemaEntry<GlobSearchRpcInput, GlobSearchRpcResult>;
   [rpcName.getKernelResult]: RpcSchemaEntry<GetKernelResultRpcInput, GetKernelResultRpcResult>;
-  [rpcName.captureObservations]: RpcSchemaEntry<CaptureObservationsRpcInput, CaptureObservationsRpcResult>;
+  [rpcName.captureImages]: RpcSchemaEntry<CaptureImagesRpcInput, CaptureImagesRpcResult>;
   [rpcName.runGeoSpecTests]: RpcSchemaEntry<RunGeoSpecTestsRpcInput, RunGeoSpecTestsRpcResult>;
   [rpcName.fetchGeometry]: RpcSchemaEntry<FetchGeometryRpcInput, FetchGeometryRpcResult>;
   [rpcName.exportGeometry]: RpcSchemaEntry<ExportGeometryRpcInput, ExportGeometryRpcResult>;
-  [rpcName.captureScreenshot]: RpcSchemaEntry<CaptureScreenshotRpcInput, CaptureScreenshotRpcResult>;
   [rpcName.appendFile]: RpcSchemaEntry<AppendFileRpcInput, AppendFileRpcResult>;
   [rpcName.editFile]: RpcSchemaEntry<EditFileRpcInput, EditFileRpcResult>;
   [rpcName.resolveSkill]: RpcSchemaEntry<ResolveSkillRpcInput, ResolveSkillRpcResult>;
@@ -435,9 +427,9 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
     inputSchema: getKernelResultRpc.inputSchema,
     resultSchema: getKernelResultRpc.resultSchema,
   },
-  [rpcName.captureObservations]: {
-    inputSchema: captureObservationsRpc.inputSchema,
-    resultSchema: captureObservationsRpc.resultSchema,
+  [rpcName.captureImages]: {
+    inputSchema: captureImagesRpc.inputSchema,
+    resultSchema: captureImagesRpc.resultSchema,
   },
   [rpcName.runGeoSpecTests]: {
     inputSchema: runGeoSpecTestsRpc.inputSchema,
@@ -450,10 +442,6 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
   [rpcName.exportGeometry]: {
     inputSchema: exportGeometryRpc.inputSchema,
     resultSchema: exportGeometryRpc.resultSchema,
-  },
-  [rpcName.captureScreenshot]: {
-    inputSchema: captureScreenshotRpc.inputSchema,
-    resultSchema: captureScreenshotRpc.resultSchema,
   },
   [rpcName.appendFile]: {
     inputSchema: appendFileRpc.inputSchema,
@@ -590,11 +578,11 @@ export type GetKernelResultRpcSuccess = z.infer<typeof getKernelResultRpc.succes
 export type GetKernelResultRpcResult = z.infer<typeof getKernelResultRpc.resultSchema>;
 
 /** @public */
-export type CaptureObservationsRpcInput = z.infer<typeof captureObservationsRpc.inputSchema>;
+export type CaptureImagesRpcInput = z.infer<typeof captureImagesRpc.inputSchema>;
 /** @public */
-export type CaptureObservationsRpcSuccess = z.infer<typeof captureObservationsRpc.successSchema>;
+export type CaptureImagesRpcSuccess = z.infer<typeof captureImagesRpc.successSchema>;
 /** @public */
-export type CaptureObservationsRpcResult = z.infer<typeof captureObservationsRpc.resultSchema>;
+export type CaptureImagesRpcResult = z.infer<typeof captureImagesRpc.resultSchema>;
 
 /** @public */
 export type RunGeoSpecTestsRpcInput = z.infer<typeof runGeoSpecTestsRpc.inputSchema>;
@@ -618,12 +606,6 @@ export type FetchGeometryRpcSuccess = z.infer<typeof fetchGeometryRpc.successSch
 export type FetchGeometryRpcResult = z.infer<typeof fetchGeometryRpc.resultSchema>;
 
 /** @public */
-export type CaptureScreenshotRpcInput = z.infer<typeof captureScreenshotRpc.inputSchema>;
-/** @public */
-export type CaptureScreenshotRpcSuccess = z.infer<typeof captureScreenshotRpc.successSchema>;
-/** @public */
-export type CaptureScreenshotRpcResult = z.infer<typeof captureScreenshotRpc.resultSchema>;
-
 /** @public */
 export type AppendFileRpcInput = z.infer<typeof appendFileRpc.inputSchema>;
 /** @public */

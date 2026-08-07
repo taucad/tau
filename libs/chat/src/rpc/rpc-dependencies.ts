@@ -8,10 +8,8 @@
  * - Workers or other JS runtimes
  */
 import type {
-  CaptureObservationsRpcResult,
-  CaptureScreenshotRpcResult,
-  CaptureScreenshotRpcInput,
-  CaptureObservationsRpcInput,
+  CaptureImagesRpcResult,
+  CaptureImagesRpcInput,
   ExportGeometryRpcInput,
   FetchGeometryRpcInput,
   FetchGeometryRpcResult,
@@ -22,8 +20,12 @@ import type {
   ResolveSkillRpcResult,
 } from '#schemas/rpc.schema.js';
 import type { ExportFile, FileContentMetadata } from '@taucad/types';
-
-/** @public */
+/**
+ * One direct child returned by {@link RpcFileSystem.readdir}.
+ * `name` is a basename, never a path.
+ *
+ * @public
+ */
 export type RpcDirectoryEntry =
   | {
       name: string;
@@ -41,6 +43,12 @@ export type RpcDirectoryEntry =
 /**
  * Abstract filesystem for RPC handlers.
  * Implementations can wrap browser fileManager, `fromMemoryFS()` / `fromNodeFS()` (which yield a `RuntimeFileSystemHandle`), etc.
+ *
+ * Paths use one canonical project-relative namespace: root is `''`, and
+ * descendants are normalized POSIX keys such as `src/main.ts` with no leading
+ * slash. Raw agent aliases never reach this interface. Implementations must
+ * translate these keys to their backing filesystem namespace.
+ *
  * @public
  */
 export type RpcFileSystem = {
@@ -125,10 +133,13 @@ export type RpcGraphicsExportGeometryResult =
  * @public
  */
 export type RpcGraphicsClient = {
-  captureObservations(args: Pick<CaptureObservationsRpcInput, 'targetFile'>): Promise<CaptureObservationsRpcResult>;
   fetchGeometry(args: Pick<FetchGeometryRpcInput, 'targetFile' | 'parameters'>): Promise<FetchGeometryRpcResult>;
   exportGeometry(args: Pick<ExportGeometryRpcInput, 'targetFile' | 'format'>): Promise<RpcGraphicsExportGeometryResult>;
-  captureScreenshot(args: Pick<CaptureScreenshotRpcInput, 'targetFile'>): Promise<CaptureScreenshotRpcResult>;
+};
+
+/** Browser/headless image capture client independent of a mounted viewport. @public */
+export type RpcImageClient = {
+  captureImages(args: CaptureImagesRpcInput): Promise<CaptureImagesRpcResult>;
 };
 
 /**
@@ -166,6 +177,7 @@ export type RpcDependencies = {
   fileSystem: RpcFileSystem;
   kernelClient: RpcRuntimeClient;
   graphics?: RpcGraphicsClient;
+  images?: RpcImageClient;
   geospec?: RpcGeoSpecClient;
   skillResolver?: RpcSkillResolver;
 };

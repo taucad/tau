@@ -5,6 +5,7 @@ export type {
   RpcFileStat,
   RpcRuntimeClient,
   RpcGraphicsClient,
+  RpcImageClient,
   RpcGeoSpecClient,
   RpcGraphicsExportGeometryResult,
   RpcSkillResolver,
@@ -21,6 +22,6 @@ export { handleListDirectory } from '#rpc/handlers/handle-list-directory.js';
 export { handleGrep } from '#rpc/handlers/handle-grep.js';
 export { handleGlobSearch } from '#rpc/handlers/handle-glob-search.js';
 export { handleGetKernelResult } from '#rpc/handlers/handle-get-kernel-result.js';
-export { handleCaptureObservations } from '#rpc/handlers/handle-capture-observations.js';
+export { handleCaptureImages } from '#rpc/handlers/handle-capture-images.js';
 export { handleRunGeoSpecTests } from '#rpc/handlers/handle-run-geospec-tests.js';
 export { handleResolveSkill } from '#rpc/handlers/handle-resolve-skill.js';

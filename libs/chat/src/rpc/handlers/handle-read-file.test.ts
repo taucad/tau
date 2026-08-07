@@ -14,6 +14,30 @@ const textStat = (size: number, lineCount: number): RpcFileStat => ({
 });
 
 describe('handleReadFile', () => {
+  it.each(['/src/a.ts', './src/a.ts'])(
+    'should normalize agent path %j before every filesystem call',
+    async (targetFile) => {
+      const fileSystem = mock<RpcFileSystem>();
+      fileSystem.stat.mockResolvedValue(textStat(1, 1));
+      fileSystem.readFile.mockResolvedValue('x');
+
+      await handleReadFile({ targetFile }, fileSystem);
+
+      expect(fileSystem.stat).toHaveBeenCalledWith('src/a.ts');
+      expect(fileSystem.readFile).toHaveBeenCalledWith('src/a.ts');
+    },
+  );
+
+  it('should reject paths outside the project before filesystem access', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+
+    const result = await handleReadFile({ targetFile: '../secret' }, fileSystem);
+
+    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.validationError });
+    expect(fileSystem.stat).not.toHaveBeenCalled();
+    expect(fileSystem.readFile).not.toHaveBeenCalled();
+  });
+
   it('should return raw file content with line metadata', async () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.readFile.mockResolvedValue('line1\nline2\nline3');
@@ -111,7 +135,7 @@ describe('handleReadFile', () => {
   //
   // The transcript Downloads/involute_gear_profiles_2026-05-12T07-18.md shows
   // three back-to-back read_file calls (lines 1039, 1291, 2225) each pulling
-  // 200–500 lines from `node_modules/opencascade.js/index.d.ts` (the dense
+  // 200–500 lines from `node_modules/libcascade/index.d.ts` (the dense
   // 226 592-line OCJS bindings .d.ts). Combined output: ~34 KB / ~12 K tokens.
   // The schema currently caps neither the explicit `limit` parameter nor the
   // implicit `limit ?? lines.length` fallback, so the model can request

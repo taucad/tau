@@ -1,6 +1,7 @@
 import type { CreateFileRpcInput, CreateFileRpcResult } from '#schemas/rpc.schema.js';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
+import { resolveRpcProjectPath } from '#rpc/rpc-project-path.js';
 
 /** @public */
 export async function handleCreateFile(
@@ -8,17 +9,14 @@ export async function handleCreateFile(
   fileSystem: RpcFileSystem,
 ): Promise<CreateFileRpcResult> {
   try {
-    // Capture prior content when overwriting an existing file so the overwrite
-    // is invertible for restore (R7). A genuine new file reverts to absent, so
-    // its originalContent stays '' and linesRemoved 0.
-    const existed = await fileSystem.exists(input.targetFile);
-    const originalContent = existed ? await fileSystem.readFile(input.targetFile) : '';
+    const targetFile = resolveRpcProjectPath(input.targetFile);
+    const existed = await fileSystem.exists(targetFile);
+    const originalContent = existed ? await fileSystem.readFile(targetFile) : '';
 
-    await fileSystem.writeFile(input.targetFile, input.content);
-
+    await fileSystem.writeFile(targetFile, input.content);
     return {
       success: true,
-      message: `File created: ${input.targetFile}`,
+      message: `File created: ${targetFile}`,
       diffStats: {
         linesAdded: input.content.split('\n').length,
         linesRemoved: existed ? originalContent.split('\n').length : 0,

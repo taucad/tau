@@ -1,9 +1,33 @@
 import { describe, it, expect } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
+import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 import { handleCreateFile } from '#rpc/handlers/handle-create-file.js';
 
 describe('handleCreateFile', () => {
+  it.each(['/src/a.ts', './src/a.ts'])(
+    'should normalize agent path %j before every filesystem call',
+    async (targetFile) => {
+      const fileSystem = mock<RpcFileSystem>();
+      fileSystem.exists.mockResolvedValue(false);
+      fileSystem.writeFile.mockResolvedValue();
+
+      await handleCreateFile({ targetFile, content: 'x' }, fileSystem);
+
+      expect(fileSystem.writeFile).toHaveBeenCalledWith('src/a.ts', 'x');
+    },
+  );
+
+  it('should reject host paths before filesystem access', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+
+    const result = await handleCreateFile({ targetFile: 'C:/secret', content: 'x' }, fileSystem);
+
+    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.validationError });
+    expect(fileSystem.exists).not.toHaveBeenCalled();
+    expect(fileSystem.writeFile).not.toHaveBeenCalled();
+  });
+
   it('should capture prior content as originalContent and linesRemoved when overwriting an existing file', async () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.exists.mockResolvedValue(true);

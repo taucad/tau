@@ -45,6 +45,62 @@ describe('handleGrep', () => {
     expect(result.success && result.matches[0]?.content).toContain('hello');
   });
 
+  it.each(['', '.', './', '/'] as const)(
+    'should resolve root alias %j before recursively reading project-relative paths',
+    async (rootAlias) => {
+      const fileSystem = mock<RpcFileSystem>();
+      fileSystem.stat.mockResolvedValue({
+        size: 0,
+        isDirectory: true,
+        createdAt: '2026-05-12T00:00:00.000Z',
+        modifiedAt: '2026-05-12T00:00:00.000Z',
+      });
+      fileSystem.readdir.mockImplementation(async (path) => {
+        if (path === '') {
+          return [{ name: 'checks', type: 'dir', size: 0 }];
+        }
+        if (path === 'checks') {
+          return [textEntry('existing.geospec.ts', 24, 1)];
+        }
+        throw new Error(`Unexpected non-canonical project path: ${path}`);
+      });
+      fileSystem.readFile.mockImplementation(async (path) => {
+        if (path === 'checks/existing.geospec.ts') {
+          return "it('should retain this check')";
+        }
+        throw new Error(`Unexpected non-canonical project path: ${path}`);
+      });
+
+      const result = await handleGrep({ pattern: 'retain', path: rootAlias }, fileSystem);
+
+      expect(result).toEqual({
+        success: true,
+        matches: [
+          {
+            file: 'checks/existing.geospec.ts',
+            line: 1,
+            content: "it('should retain this check')",
+          },
+        ],
+        totalMatches: 1,
+        truncated: false,
+        appliedHeadLimit: 50,
+        appliedOffset: 0,
+      });
+    },
+  );
+
+  it('should reject paths outside the project before filesystem access', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+
+    const result = await handleGrep({ pattern: 'x', path: '../secret' }, fileSystem);
+
+    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.validationError });
+    expect(fileSystem.stat).not.toHaveBeenCalled();
+    expect(fileSystem.readdir).not.toHaveBeenCalled();
+    expect(fileSystem.readFile).not.toHaveBeenCalled();
+  });
+
   it('should return FILE_NOT_FOUND when the path stat fails with ENOENT', async () => {
     const fileSystem = mock<RpcFileSystem>();
     const error = new Error('ENOENT: no such file');
@@ -61,7 +117,7 @@ describe('handleGrep', () => {
   //
   // The transcript at Downloads/involute_gear_profiles_2026-05-12T07-18.md (lines
   // 1015, 1030, 1405) shows three back-to-back `grep` calls with `path` set to a
-  // FILE (`node_modules/opencascade.js/index.d.ts`). Each crashed with
+  // FILE (`node_modules/libcascade/index.d.ts`). Each crashed with
   // `[Error: Grep search failed]` because `collectFilePaths` calls `readdir` on
   // what is actually a regular file. The model recovered with three large
   // `read_file` calls instead, leaking ~34 KB of OCCT type bindings into the

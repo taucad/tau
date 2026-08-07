@@ -5,6 +5,26 @@ import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 import { handleAppendFile } from '#rpc/handlers/handle-append-file.js';
 
 describe('handleAppendFile', () => {
+  it.each(['/src/a.ts', './src/a.ts'])(
+    'should normalize agent path %j before filesystem access',
+    async (targetFile) => {
+      const fileSystem = mock<RpcFileSystem>();
+
+      await handleAppendFile({ targetFile, content: 'x' }, fileSystem);
+
+      expect(fileSystem.appendFile).toHaveBeenCalledWith('src/a.ts', 'x');
+    },
+  );
+
+  it('should reject host paths before filesystem access', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+
+    const result = await handleAppendFile({ targetFile: 'file:///secret', content: 'x' }, fileSystem);
+
+    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.validationError });
+    expect(fileSystem.appendFile).not.toHaveBeenCalled();
+  });
+
   it('should append content and return bytes written', async () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.appendFile.mockResolvedValue(undefined);

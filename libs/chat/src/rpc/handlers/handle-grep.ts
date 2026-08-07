@@ -1,7 +1,9 @@
 import type { GrepRpcInput, GrepRpcResult } from '#schemas/rpc.schema.js';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
+import { resolveRpcProjectPath } from '#rpc/rpc-project-path.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
+import { joinRelativePath } from '@taucad/utils/path';
 
 /**
  * Default `headLimit` when the caller omits one. Mirrors claude-code's
@@ -22,7 +24,7 @@ async function collectFilePaths(fileSystem: RpcFileSystem, basePath: string): Pr
   const entries = await fileSystem.readdir(basePath);
 
   for (const entry of entries) {
-    const fullPath = basePath ? `${basePath}/${entry.name}` : entry.name;
+    const fullPath = joinRelativePath(basePath, entry.name);
     if (entry.type === 'file') {
       paths.push(fullPath);
     } else {
@@ -59,7 +61,7 @@ export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem)
 
   try {
     const regex = new RegExp(input.pattern, input.caseSensitive === false ? 'gi' : 'g');
-    const basePath = input.path ?? '';
+    const basePath = resolveRpcProjectPath(input.path ?? '');
 
     let filesToSearch: string[];
     try {

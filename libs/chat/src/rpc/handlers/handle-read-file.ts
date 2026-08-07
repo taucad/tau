@@ -1,6 +1,7 @@
 import type { ReadFileRpcInput, ReadFileRpcResult } from '#schemas/rpc.schema.js';
 import type { RpcFileMetadata, RpcFileStat, RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
+import { resolveRpcProjectPath } from '#rpc/rpc-project-path.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 
 /**
@@ -29,9 +30,10 @@ export async function handleReadFile(input: ReadFileRpcInput, fileSystem: RpcFil
   const limit = Math.min(requestedLimit, maxReadLines);
 
   try {
+    const targetFile = resolveRpcProjectPath(input.targetFile);
     let fileStat: RpcFileStat | undefined;
     try {
-      fileStat = await fileSystem.stat(input.targetFile);
+      fileStat = await fileSystem.stat(targetFile);
     } catch {
       // `stat` may not be available in all environments — fall through to
       // unbounded `readFile`. Without a stat we cannot enforce the 256 KB
@@ -65,7 +67,7 @@ export async function handleReadFile(input: ReadFileRpcInput, fileSystem: RpcFil
       };
     }
 
-    const text = await fileSystem.readFile(input.targetFile);
+    const text = await fileSystem.readFile(targetFile);
     const lines = text.split('\n');
     const totalLines = lines.length;
 

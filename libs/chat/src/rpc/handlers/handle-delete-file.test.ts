@@ -2,10 +2,33 @@ import { describe, it, expect } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { rpcName } from '#constants/rpc.constants.js';
-import { rpcSchemasRegistry } from '#schemas/rpc.schema.js';
+import { rpcClientErrorCode, rpcSchemasRegistry } from '#schemas/rpc.schema.js';
 import { handleDeleteFile } from '#rpc/handlers/handle-delete-file.js';
 
 describe('handleDeleteFile', () => {
+  it.each(['/src/a.ts', './src/a.ts'])(
+    'should normalize agent path %j before every filesystem call',
+    async (targetFile) => {
+      const fileSystem = mock<RpcFileSystem>();
+      fileSystem.readFile.mockResolvedValue('x');
+
+      await handleDeleteFile({ targetFile }, fileSystem);
+
+      expect(fileSystem.readFile).toHaveBeenCalledWith('src/a.ts');
+      expect(fileSystem.deleteFile).toHaveBeenCalledWith('src/a.ts');
+    },
+  );
+
+  it('should reject paths outside the project before filesystem access', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+
+    const result = await handleDeleteFile({ targetFile: '../secret' }, fileSystem);
+
+    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.validationError });
+    expect(fileSystem.readFile).not.toHaveBeenCalled();
+    expect(fileSystem.deleteFile).not.toHaveBeenCalled();
+  });
+
   it('should capture pre-deletion content as diffStats reading and deleting the same file exactly once (single round-trip)', async () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.readFile.mockResolvedValue('line1\nline2\nline3');
@@ -62,7 +85,7 @@ describe('handleDeleteFile', () => {
         diffStats: { linesAdded: 0, linesRemoved: 2, originalContent: 'a\nb', modifiedContent: '' },
       }).success,
     ).toBe(true);
-    // diffStats is optional — a legacy/missing delete result is still valid.
+    // DiffStats is optional — a legacy/missing delete result is still valid.
     expect(resultSchema.safeParse({ success: true, message: 'File deleted: a.ts' }).success).toBe(true);
   });
 });

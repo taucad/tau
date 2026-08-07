@@ -3,7 +3,7 @@ import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '
 
 /** @public */
 export const listDirectoryInputSchema = z.object({
-  path: z.string().describe('The path of the directory to list, relative to the project root.'),
+  path: z.string().optional().describe('The directory to list. Defaults to the project root.'),
 });
 
 const baseDirectoryEntrySchema = z.object({

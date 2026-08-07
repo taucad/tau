@@ -181,7 +181,9 @@ const toolSerializers = {
     },
   },
   [toolName.listDirectory]: {
-    input: (input) => `path: ${input.path}`,
+    // Path is optional (omitted = project root); match the glob/grep formatters
+    // and drop the line rather than rendering `path: undefined`.
+    input: (input) => (input.path ? `path: ${input.path}` : ''),
     output(output) {
       const header = output.path ? `Path: ${output.path}\n` : '';
       const list = output.entries

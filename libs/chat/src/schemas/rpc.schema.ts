@@ -173,7 +173,7 @@ const directoryEntrySchema = zod.union([
 
 const listDirectoryRpc = defineRpc({
   input: zod.object({
-    path: zod.string(),
+    path: zod.string().optional(),
   }),
   success: zod.object({
     entries: zod.array(directoryEntrySchema),

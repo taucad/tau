@@ -57,6 +57,52 @@ describe('handleListDirectory', () => {
     });
   });
 
+  it.each(['', '.', './', '/'] as const)('should resolve root alias %j to the project root', async (rootAlias) => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockImplementation(async (path) => {
+      if (path === '') {
+        return [{ name: 'checks', type: 'dir', size: 0 }];
+      }
+      throw new Error(`Unexpected non-canonical project path: ${path}`);
+    });
+
+    const result = await handleListDirectory({ path: rootAlias }, fileSystem);
+
+    expect(result).toEqual({
+      success: true,
+      path: '/',
+      entries: [{ name: 'checks', type: 'dir', size: 0 }],
+    });
+  });
+
+  it('should list the project root when path is omitted', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockImplementation(async (path) => {
+      if (path === '') {
+        return [{ name: 'checks', type: 'dir', size: 0 }];
+      }
+      throw new Error(`Unexpected non-canonical project path: ${path}`);
+    });
+
+    const result = await handleListDirectory({}, fileSystem);
+
+    expect(fileSystem.readdir).toHaveBeenCalledWith('');
+    expect(result).toEqual({
+      success: true,
+      path: '/',
+      entries: [{ name: 'checks', type: 'dir', size: 0 }],
+    });
+  });
+
+  it('should reject paths outside the project before filesystem access', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+
+    const result = await handleListDirectory({ path: '../secret' }, fileSystem);
+
+    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.validationError });
+    expect(fileSystem.readdir).not.toHaveBeenCalled();
+  });
+
   it('should return FILE_NOT_FOUND when readdir fails with ENOENT', async () => {
     const fileSystem = mock<RpcFileSystem>();
     const error = new Error('ENOENT: no such file');

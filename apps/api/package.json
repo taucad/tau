@@ -11,6 +11,7 @@
     "@pyroscope/nodejs": "catalog:",
     "@taucad/api-extractor": "workspace:*",
     "@taucad/chat": "workspace:*",
+    "@taucad/filesystem": "workspace:*",
     "@taucad/openscad": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/tau-examples": "workspace:*",

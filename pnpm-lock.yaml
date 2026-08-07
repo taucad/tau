@@ -1617,6 +1617,9 @@ importers:
       '@taucad/chat':
         specifier: workspace:*
         version: link:../../libs/chat
+      '@taucad/filesystem':
+        specifier: workspace:*
+        version: link:../../packages/filesystem
       '@taucad/openscad':
         specifier: workspace:*
         version: link:../../kernels/openscad

@@ -1,12 +1,13 @@
 // @vitest-environment node
 /* oxlint-disable max-lines -- RPC adapter coverage shares one typed actor/service fixture matrix. */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { RpcDependencies, RpcFileSystem } from '@taucad/chat/rpc';
+import type { handleGlobSearch, RpcDependencies, RpcFileSystem } from '@taucad/chat/rpc';
 import { rpcClientErrorCodeSchema } from '@taucad/chat';
 import { createEmptyGlb } from '@taucad/runtime/kernel';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import type { FileEntry, FileExtension, FileStat } from '@taucad/types';
 import type { ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
+import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import { rpcName } from '@taucad/chat/constants';
 import type { RpcHandlerDependencies, RpcCallInput } from '#hooks/rpc-handlers.js';
 
@@ -57,6 +58,7 @@ vi.mock('xstate', async () => {
 });
 
 const { createRpcHandlers } = await import('#hooks/rpc-handlers.js');
+const actualChatRpc = await vi.importActual<{ handleGlobSearch: typeof handleGlobSearch }>('@taucad/chat/rpc');
 
 // ===================================================================
 // Factories
@@ -458,14 +460,51 @@ describe('rpc-handlers', () => {
         await expect(pending).resolves.toEqual([expect.objectContaining({ name: 'a.txt' })]);
       });
 
-      it.each(['.', '/', './', ''] as const)(
-        'should pass root alias %j through to listDirectory unchanged',
-        async (pathArgument) => {
-          vi.mocked(lastTreeService!.listDirectory).mockResolvedValueOnce([]);
-          await fileSystem.readdir(pathArgument);
-          expect(lastTreeService!.listDirectory).toHaveBeenCalledWith(pathArgument);
-        },
-      );
+      it('should pass the canonical project root to listDirectory', async () => {
+        vi.mocked(lastTreeService!.listDirectory).mockResolvedValueOnce([]);
+        await fileSystem.readdir('');
+        expect(lastTreeService!.listDirectory).toHaveBeenCalledWith('');
+      });
+
+      it('should traverse a root glob using only canonical project-relative paths', async () => {
+        const treeService = createMockTreeService();
+        treeService.listDirectory.mockImplementation(async (path) => {
+          if (path === '') {
+            return [{ name: 'checks', path: 'checks', isFolder: true, size: 0, mtimeMs: 0 }];
+          }
+          if (path === 'checks') {
+            return [
+              textDirectoryEntry('existing.geospec.ts', 'checks/existing.geospec.ts', {
+                size: 120,
+                mtimeMs: 0,
+                lineCount: 4,
+              }),
+            ];
+          }
+          throw new Error(`Unexpected non-canonical project path: ${path}`);
+        });
+        const browserFileSystem = buildDeps({ fileManager: mockFm, treeService }).fileSystem;
+
+        const result = await actualChatRpc.handleGlobSearch(
+          { pattern: '**/*.geospec.ts', path: '/' },
+          browserFileSystem,
+        );
+
+        expect(result).toEqual({
+          success: true,
+          files: ['checks/existing.geospec.ts'],
+          entries: [
+            {
+              path: 'checks/existing.geospec.ts',
+              isDirectory: false,
+              size: 120,
+              contentKind: 'text',
+              lineCount: 4,
+            },
+          ],
+          totalFiles: 1,
+        });
+      });
 
       it('should reject when whenServicesReady rejects', async () => {
         mockFm.whenServicesReady.mockRejectedValue(new Error('File manager initialization failed'));
@@ -489,6 +528,27 @@ describe('rpc-handlers', () => {
       it('should reject when whenServicesReady rejects', async () => {
         mockFm.whenServicesReady.mockRejectedValue(new Error('File manager initialization failed'));
         await expect(fileSystem.exists('any')).rejects.toThrow('File manager initialization failed');
+      });
+    });
+
+    describe('appendFile', () => {
+      it('should create a missing file after FileNotFoundError', async () => {
+        mockFm.readFile.mockRejectedValue(new FileNotFoundError('missing', { path: 'events.jsonl' }));
+
+        await fileSystem.appendFile('events.jsonl', '{"event":"test"}\n');
+
+        const [path, data, options] = getWriteCall(mockFm);
+        expect(path).toBe('events.jsonl');
+        expect(new TextDecoder().decode(data)).toBe('{"event":"test"}\n');
+        expect(options).toEqual({ source: 'machine' });
+      });
+
+      it('should propagate non-ENOENT read failures without writing', async () => {
+        const readError = Object.assign(new Error('storage offline'), { code: 'EIO' });
+        mockFm.readFile.mockRejectedValue(readError);
+
+        await expect(fileSystem.appendFile('events.jsonl', 'ignored')).rejects.toBe(readError);
+        expect(mockFm.writeFile).not.toHaveBeenCalled();
       });
     });
   });
@@ -1396,6 +1456,7 @@ describe('rpc-handlers', () => {
   describe('executeRpcCall ledger recording', () => {
     it('records successful side-effect RPC in the ledger', async () => {
       const out = {
+        success: true,
         message: 'ok',
         diffStats: {
           linesAdded: 1,

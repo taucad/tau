@@ -36,7 +36,9 @@ import type {
 } from '@taucad/chat/rpc';
 import type { ExportFile, FileExtension, FileStat } from '@taucad/types';
 import { DirectoryListingFailedError, DirectoryListingErrorCode } from '@taucad/fs-client/directory-listing';
+import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
+import { getErrno } from '@taucad/utils/error';
 import { recordRpcOutcome } from '#services/rpc-ledger.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
@@ -173,8 +175,10 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
       try {
         const data = await fileManager.readFile(path);
         existing = decodeTextFile(data);
-      } catch {
-        // File doesn't exist yet — will be created
+      } catch (error) {
+        if (!(error instanceof FileNotFoundError) && getErrno(error) !== 'ENOENT') {
+          throw error;
+        }
       }
 
       await fileManager.writeFile(path, encodeTextFile(existing + content), {

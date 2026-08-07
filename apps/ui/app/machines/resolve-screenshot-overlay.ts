@@ -9,11 +9,8 @@ type CadActorRef = ActorRefFrom<typeof cadMachine>;
 /**
  * Build a {@link ScreenshotOverlay} from a per-view CAD actor ref.
  *
- * Reads `file.filename` (the project-relative entry path, e.g. `lib/part.ts`)
- * — NOT `file.path`, which on `CadContext` is the project mount root
- * `/projects/{projectId}` and would render a useless chip like
- * `/projects/proj_OUJEN…`. Resolves the matching sprite icon via the same
- * priority chain the file tree / editor tabs use
+ * Reads the project-relative `entryPath` (for example `lib/part.ts`) and
+ * resolves the matching sprite icon via the same priority chain the file tree / editor tabs use
  * ({@link getIconIdFromExtension}). Returns `undefined` when the CAD machine
  * has no file loaded so the screenshot pipeline simply skips stamping rather
  * than rendering a partial chip.
@@ -26,11 +23,11 @@ export function resolveScreenshotOverlay(cadRef: CadActorRef | undefined): Scree
   if (!cadRef) {
     return undefined;
   }
-  const { file } = cadRef.getSnapshot().context;
-  if (!file?.filename) {
+  const { entryPath } = cadRef.getSnapshot().context;
+  if (!entryPath) {
     return undefined;
   }
-  return buildScreenshotOverlayForPath(file.filename);
+  return buildScreenshotOverlayForPath(entryPath);
 }
 
 /**

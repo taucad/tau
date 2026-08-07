@@ -7,10 +7,10 @@ type CadActorRef = ActorRefFrom<typeof cadMachine>;
 
 /**
  * Hand-rolled stub: `resolveScreenshotOverlay` only ever calls
- * `cadRef.getSnapshot().context.file`, so we don't need a real XState actor.
+ * `cadRef.getSnapshot().context.entryPath`, so we don't need a real XState actor.
  */
-function stubCadRef(file: { path?: string; filename?: string } | undefined): CadActorRef {
-  return { getSnapshot: () => ({ context: { file } }) } as unknown as CadActorRef;
+function stubCadRef(entryPath: string | undefined): CadActorRef {
+  return { getSnapshot: () => ({ context: { entryPath } }) } as unknown as CadActorRef;
 }
 
 describe('resolveScreenshotOverlay', () => {
@@ -18,20 +18,12 @@ describe('resolveScreenshotOverlay', () => {
     expect(resolveScreenshotOverlay(undefined)).toBeUndefined();
   });
 
-  it('returns undefined when the snapshot has no file', () => {
+  it('returns undefined when the snapshot has no entry path', () => {
     expect(resolveScreenshotOverlay(stubCadRef(undefined))).toBeUndefined();
   });
 
-  it('returns undefined when file.filename is missing even if file.path is set', () => {
-    // Locks in the bug fix: we must NOT fall back to `file.path` (the project
-    // mount root). If `filename` is absent, the chip should be skipped.
-    expect(resolveScreenshotOverlay(stubCadRef({ path: '/projects/proj_X' }))).toBeUndefined();
-  });
-
-  it('uses file.filename (project-relative) and ignores file.path (project mount root)', () => {
-    // The smoking-gun regression: previously this returned
-    // { filePath: '/projects/proj_X', … } because the resolver read `file.path`.
-    const overlay = resolveScreenshotOverlay(stubCadRef({ path: '/projects/proj_X', filename: 'lib/part.ts' }));
+  it('uses the project-relative entry path', () => {
+    const overlay = resolveScreenshotOverlay(stubCadRef('lib/part.ts'));
 
     expect(overlay).toEqual({
       filePath: 'lib/part.ts',

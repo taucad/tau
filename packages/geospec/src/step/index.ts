@@ -4,21 +4,25 @@
  * @module
  */
 
-export { createStepLoader, loadStep } from '#step/load-step.js';
+export { createStepLoader, loadStep, parseXdeReadResultJson } from '#step/load-step.js';
+export type { GeoSpecStepLoader } from '#step/load-step.js';
+export { createBrepEvidenceLedger, getBrepFacetDiagnostic } from '#step/evidence-ledger.js';
+export type { BrepFacetName, CreateBrepEvidenceLedgerOptions } from '#step/evidence-ledger.js';
 export type {
   CreateStepLoaderOptions,
   GeoSpecNativeStepBackend,
   GeoSpecNativeStepBackendFactory,
-  GeoSpecNativeStepReadResult,
   GeoSpecNativeXdeReadResult,
   GeoSpecOpenCascadeStepModule,
-  GeoSpecStepLoader,
   LoadStepOptions,
   StepLoadProgressEvent,
   StepSource,
   StepStreamingMode,
   XdeDatumPlacement,
+  XdeDatumSystem,
   XdeOccurrence,
   XdeReadResult,
+  XdeSemanticDatum,
   XdeSubshapeName,
+  XdeSupplementalPlane,
 } from '#step/types.js';

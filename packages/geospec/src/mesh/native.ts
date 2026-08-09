@@ -1,4 +1,5 @@
-import type { MeshDistanceStats } from '#mesh/distance.js';
+import type { MeshDistanceStats } from '#mesh/types.js';
+import { ensureOpenCascadeModule } from '#native/opencascade-module.js';
 
 /**
  * Flat triangle-soup input accepted by native mesh analyzers.
@@ -148,9 +149,7 @@ export const createOpenCascadeMeshBackend = (module: GeoSpecOpenCascadeMeshModul
  */
 export const resolveDefaultGeoSpecMeshBackend = async (): Promise<GeoSpecMeshBackend | undefined> => {
   try {
-    const module_ = await import('geospec/native/opencascade/single');
-    const factory = module_.default as (options?: unknown) => Promise<unknown>;
-    return createOpenCascadeMeshBackend((await factory()) as GeoSpecOpenCascadeMeshModule);
+    return createOpenCascadeMeshBackend((await ensureOpenCascadeModule()) as GeoSpecOpenCascadeMeshModule);
   } catch {
     return undefined;
   }

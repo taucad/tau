@@ -160,14 +160,6 @@ const getPlaqueRender = (): PlaqueRender => {
   return plaqueRender;
 };
 
-const readNativeOffHandle = (worker: unknown): string | undefined => {
-  if (typeof worker !== 'object' || worker === null || !('nativeHandle' in worker)) {
-    return undefined;
-  }
-  const { nativeHandle } = worker as { nativeHandle?: unknown };
-  return typeof nativeHandle === 'string' ? nativeHandle : undefined;
-};
-
 const expectWatertightPlaque = async (glb: Uint8Array<ArrayBuffer>): Promise<void> => {
   const stats = await analyzeGlb(glb);
   const watertight = stats.analyseWatertight();
@@ -227,11 +219,10 @@ describe('OpenSCAD plaque watertightness regression evidence', () => {
       throw new Error('OpenSCAD plaque fixture did not produce geometry.');
     }
     const glb = extractGltfFromResult(result);
-    const off = readNativeOffHandle(worker);
+    const off = result.serializedNativeHandle;
 
     expect(glb).toBeInstanceOf(Uint8Array);
     expect(off).toEqual(expect.any(String));
-    expect(result.serializedNativeHandle).toEqual(off);
 
     if (!(glb instanceof Uint8Array) || typeof off !== 'string') {
       throw new Error('OpenSCAD plaque fixture did not produce GLB and OFF evidence.');

@@ -18,8 +18,15 @@ const cubeGap = 20;
 describe('native relationship proofs (SB1 two-cube fixture)', () => {
   let subject: GeometrySubject;
   let context: RelationshipProofContext;
+  let previousExtremaGate: string | undefined;
 
   beforeAll(async () => {
+    // This suite certifies the exact native proof path (measured extrema
+    // distances, boolean common volumes, audit diagnostics). The CR4 mesh
+    // gate would resolve these mm-scale rows first and has its own
+    // differential, so pin it off for every path including the matcher.
+    previousExtremaGate = process.env['GEOSPEC_EXTREMA_GATE'];
+    process.env['GEOSPEC_EXTREMA_GATE'] = '0';
     subject = await loadStep({ source: fixturePath, name: 'two-cube-assembly.step' });
     const built = getSubjectProofContext(subject);
     if (!built) {
@@ -29,6 +36,11 @@ describe('native relationship proofs (SB1 two-cube fixture)', () => {
   }, 120_000);
 
   afterAll(() => {
+    if (previousExtremaGate === undefined) {
+      delete process.env['GEOSPEC_EXTREMA_GATE'];
+    } else {
+      process.env['GEOSPEC_EXTREMA_GATE'] = previousExtremaGate;
+    }
     subject.nativeXde?.delete?.();
   });
 

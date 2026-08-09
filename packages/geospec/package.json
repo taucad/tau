@@ -43,7 +43,10 @@
     "./runner/worker": "./src/runner/worker/index.ts",
     "./selector": "./src/selector/index.ts",
     "./step": "./src/step/index.ts",
-    "./native/opencascade/single": "./native/opencascade/geospec_opencascade_single.js"
+    "./native/opencascade/single": {
+      "types": "./native/opencascade/dist/init.d.ts",
+      "default": "./native/opencascade/dist/init.js"
+    }
   },
   "publishConfig": {
     "access": "public",
@@ -117,9 +120,9 @@
         "default": "./dist/step/index.mjs"
       },
       "./native/opencascade/single": {
-        "types": "./dist/native/opencascade/geospec_opencascade_single.d.ts",
-        "import": "./dist/native/opencascade/geospec_opencascade_single.mjs",
-        "default": "./dist/native/opencascade/geospec_opencascade_single.mjs"
+        "types": "./dist/native/opencascade/init.d.ts",
+        "import": "./dist/native/opencascade/init.js",
+        "default": "./dist/native/opencascade/init.js"
       }
     }
   },
@@ -136,6 +139,7 @@
     "manifold-3d": "catalog:"
   },
   "devDependencies": {
+    "@libcascade/toolchain": "3.0.0-canary.bce9b10b",
     "@taucad/openscad": "workspace:*"
   }
 }

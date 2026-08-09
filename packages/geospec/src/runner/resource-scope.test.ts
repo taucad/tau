@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { GeometrySubject } from '#mesh/types.js';
+import { createGeoSpecResourceScopeProfile } from '#runner/profile.js';
 import { createGeoSpecResourceScope } from '#runner/resource-scope.js';
 
 describe('GeoSpec resource scope disposal', () => {
@@ -30,5 +32,43 @@ describe('GeoSpec resource scope disposal', () => {
     calls.length = 0;
     await expect(scope.dispose()).resolves.toBeUndefined();
     expect(calls).toEqual([]);
+  });
+});
+
+describe('GeoSpec resource scope native reader disposal', () => {
+  it("should dispose a tracked subject's native XDE reader exactly once across scopes", async () => {
+    const deleteSpy = vi.fn();
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- minimal internal-runner stub; only the fields resource-scope reads.
+    const subject = { kind: 'geometry-subject', nativeXde: { delete: deleteSpy } } as unknown as GeometrySubject;
+
+    const first = createGeoSpecResourceScope();
+    first.trackSubject(subject);
+    // Cache hits re-fire onLoadResolved with the same subject; re-tracking
+    // must not register a second disposal.
+    first.trackSubject(subject);
+    expect(deleteSpy).not.toHaveBeenCalled();
+
+    await first.dispose();
+    expect(deleteSpy).toHaveBeenCalledTimes(1);
+
+    // Deleting an Emscripten handle twice aborts the wasm: a second scope that
+    // tracked the same subject must find the delete already performed.
+    const second = createGeoSpecResourceScope();
+    second.trackSubject(subject);
+    await second.dispose();
+    expect(deleteSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should not register a disposal when the subject has no native reader', async () => {
+    const profile = createGeoSpecResourceScopeProfile();
+    const scope = createGeoSpecResourceScope({ profile });
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- minimal internal-runner stub; only the fields resource-scope reads.
+    const subject = { kind: 'geometry-subject' } as unknown as GeometrySubject;
+
+    scope.trackSubject(subject);
+
+    expect(profile.trackedSubjects).toBe(1);
+    expect(profile.registeredDisposables).toBe(0);
+    await expect(scope.dispose()).resolves.toBeUndefined();
   });
 });

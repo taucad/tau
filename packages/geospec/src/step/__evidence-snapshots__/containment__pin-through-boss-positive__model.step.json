@@ -1,0 +1,767 @@
+{
+  "brep": {
+    "boundingBox": {
+      "center": [
+        0,
+        0,
+        0
+      ],
+      "max": [
+        32.00493677191296,
+        15.004936771912961,
+        15.004936771912961
+      ],
+      "min": [
+        -32.00493677191296,
+        -15.004936771912961,
+        -15.004936771912961
+      ],
+      "size": [
+        64.00987354382592,
+        30.009873543825922,
+        30.009873543825922
+      ]
+    },
+    "chamferFeatures": [],
+    "circularHolePatterns": [],
+    "circularHoles": [
+      {
+        "axis": "x",
+        "axisRange": {
+          "max": -13.995063228087039,
+          "min": -30.00493677191296
+        },
+        "center": [
+          -22,
+          -2.4917481981628532e-17,
+          7.247535904753022e-13
+        ],
+        "diameter": 22.06,
+        "through": false
+      },
+      {
+        "axis": "x",
+        "axisRange": {
+          "max": 30.00493677191296,
+          "min": 13.995063228087039
+        },
+        "center": [
+          22,
+          -2.4917481981628532e-17,
+          7.247535904753022e-13
+        ],
+        "diameter": 22.06,
+        "through": false
+      },
+      {
+        "axis": "x",
+        "axisRange": {
+          "max": 8.004934534074378,
+          "min": -8.004934534074378
+        },
+        "center": [
+          -2.436101343322866e-16,
+          -2.545841370268877e-16,
+          7.247535904753022e-13
+        ],
+        "diameter": 22.05,
+        "through": false
+      }
+    ],
+    "cylindricalFaces": [
+      {
+        "axis": "x",
+        "axisRange": {
+          "max": -13.995063228087039,
+          "min": -30.00493677191296
+        },
+        "center": [
+          -22,
+          -2.4917481981628532e-17,
+          7.247535904753022e-13
+        ],
+        "radius": 11.03
+      },
+      {
+        "axis": "x",
+        "axisRange": {
+          "max": 30.00493677191296,
+          "min": 13.995063228087039
+        },
+        "center": [
+          22,
+          -2.4917481981628532e-17,
+          7.247535904753022e-13
+        ],
+        "radius": 11.03
+      },
+      {
+        "axis": "x",
+        "axisRange": {
+          "max": 8.004934534074378,
+          "min": -8.004934534074378
+        },
+        "center": [
+          -2.436101343322866e-16,
+          -2.545841370268877e-16,
+          7.247535904753022e-13
+        ],
+        "radius": 11.025
+      },
+      {
+        "axis": "x",
+        "axisRange": {
+          "max": 32.00492334488147,
+          "min": -32.00492334488147
+        },
+        "center": [
+          -8.481479150568819e-16,
+          -8.603831462866581e-16,
+          7.212008767965017e-13
+        ],
+        "radius": 11
+      }
+    ],
+    "filletFeatures": [
+      {
+        "radius": 11
+      }
+    ],
+    "massProperties": {
+      "centerOfMass": [
+        -9.92085735241351e-16,
+        3.9738298512745553e-16,
+        4.028281454136235e-14
+      ],
+      "surfaceArea": 16345.13379287727,
+      "volume": 44004.005031359666
+    },
+    "minimumWallThickness": {
+      "algorithm": "occt-brep-extrema-material-interval",
+      "location": [
+        -8,
+        11.5125,
+        -1.9008082417450926e-15
+      ],
+      "pointA": [
+        -8,
+        12,
+        -1.7763568394002505e-15
+      ],
+      "pointB": [
+        -8,
+        11.025,
+        -2.025259644089935e-15
+      ],
+      "solidIndex": 2,
+      "supportA": {
+        "faceIndex": 0,
+        "supportType": "edge",
+        "surfaceType": "plane"
+      },
+      "supportB": {
+        "faceIndex": 6,
+        "supportType": "edge",
+        "surfaceType": "cylinder"
+      },
+      "tieCount": 11,
+      "tolerance": 0.000001,
+      "value": 0.9749999999999996
+    },
+    "planarFaces": [
+      {
+        "area": 480,
+        "center": [
+          -22,
+          15,
+          1.1102230246251565e-16
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "offset": 15
+      },
+      {
+        "area": 517.7910103308776,
+        "center": [
+          -30,
+          3.139683743129367e-16,
+          -2.6645352591003757e-15
+        ],
+        "normal": [
+          -1,
+          0,
+          0
+        ],
+        "offset": 30
+      },
+      {
+        "area": 517.7910103308776,
+        "center": [
+          -14,
+          1.5411290836522316e-16,
+          -2.6645352591003757e-15
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "offset": -14
+      },
+      {
+        "area": 480,
+        "center": [
+          -22,
+          -3.3306690738754696e-16,
+          -15
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "offset": 15
+      },
+      {
+        "area": 480,
+        "center": [
+          -22,
+          -3.3306690738754696e-16,
+          15
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "offset": 15
+      },
+      {
+        "area": 480,
+        "center": [
+          -22,
+          -15,
+          1.1102230246251565e-16
+        ],
+        "normal": [
+          0,
+          -1,
+          0
+        ],
+        "offset": 15
+      },
+      {
+        "area": 480,
+        "center": [
+          22,
+          15,
+          1.1102230246251565e-16
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "offset": 15
+      },
+      {
+        "area": 517.7910103308776,
+        "center": [
+          14,
+          3.139683743129367e-16,
+          -2.6645352591003757e-15
+        ],
+        "normal": [
+          -1,
+          0,
+          0
+        ],
+        "offset": -14
+      },
+      {
+        "area": 517.7910103308776,
+        "center": [
+          30,
+          1.5411290836522316e-16,
+          -2.6645352591003757e-15
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "offset": 30
+      },
+      {
+        "area": 480,
+        "center": [
+          22,
+          -3.3306690738754696e-16,
+          -15
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "offset": 15
+      },
+      {
+        "area": 480,
+        "center": [
+          22,
+          -3.3306690738754696e-16,
+          15
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "offset": 15
+      },
+      {
+        "area": 480,
+        "center": [
+          22,
+          -15,
+          1.1102230246251565e-16
+        ],
+        "normal": [
+          0,
+          -1,
+          0
+        ],
+        "offset": 15
+      },
+      {
+        "area": 384,
+        "center": [
+          1.942890293094024e-16,
+          12,
+          2.220446049250313e-16
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "offset": 12
+      },
+      {
+        "area": 194.13744946075212,
+        "center": [
+          -8,
+          3.3528627130072002e-15,
+          -3.1086244689504383e-15
+        ],
+        "normal": [
+          -1,
+          0,
+          0
+        ],
+        "offset": 8
+      },
+      {
+        "area": 194.13744946075212,
+        "center": [
+          8,
+          -1.2957194931123404e-15,
+          -3.1086244689504383e-15
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "offset": 8
+      },
+      {
+        "area": 384,
+        "center": [
+          -1.2836953722228372e-16,
+          0,
+          -12
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "offset": 12
+      },
+      {
+        "area": 384,
+        "center": [
+          -1.2836953722228372e-16,
+          0,
+          12
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "offset": 12
+      },
+      {
+        "area": 384,
+        "center": [
+          -1.942890293094024e-16,
+          -12,
+          2.220446049250313e-16
+        ],
+        "normal": [
+          0,
+          -1,
+          0
+        ],
+        "offset": 12
+      },
+      {
+        "area": 380.132711084365,
+        "center": [
+          32,
+          6.20583259237344e-16,
+          0
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "offset": 32
+      },
+      {
+        "area": 380.132711084365,
+        "center": [
+          -32,
+          6.20583259237344e-16,
+          0
+        ],
+        "normal": [
+          -1,
+          0,
+          0
+        ],
+        "offset": 32
+      }
+    ],
+    "topologyCounts": {
+      "compounds": 1,
+      "edges": 96,
+      "faces": 24,
+      "shells": 4,
+      "solids": 4,
+      "vertices": 192,
+      "wires": 30
+    },
+    "validity": {
+      "closedSolids": true,
+      "invalidSolidCount": 0,
+      "openEdgeCount": 0,
+      "solidCount": 4,
+      "valid": true
+    }
+  },
+  "capabilities": [
+    {
+      "feature": "bounding-box",
+      "kind": "brep"
+    },
+    {
+      "feature": "bounding-box",
+      "kind": "mesh"
+    },
+    {
+      "feature": "center-of-mass",
+      "kind": "mesh"
+    },
+    {
+      "feature": "chamfer-features",
+      "kind": "brep"
+    },
+    {
+      "feature": "circular-hole-patterns",
+      "kind": "brep"
+    },
+    {
+      "feature": "circular-holes",
+      "kind": "brep"
+    },
+    {
+      "feature": "component-overlap",
+      "kind": "mesh"
+    },
+    {
+      "feature": "connected-components",
+      "kind": "mesh"
+    },
+    {
+      "feature": "cylindrical-faces",
+      "kind": "brep"
+    },
+    {
+      "feature": "distance",
+      "kind": "mesh"
+    },
+    {
+      "feature": "fillet-features",
+      "kind": "brep"
+    },
+    {
+      "feature": "mass-properties",
+      "kind": "brep"
+    },
+    {
+      "feature": "planar-faces",
+      "kind": "brep"
+    },
+    {
+      "feature": "product-structure",
+      "kind": "step"
+    },
+    {
+      "feature": "reader-provenance",
+      "kind": "step"
+    },
+    {
+      "feature": "schema",
+      "kind": "step"
+    },
+    {
+      "feature": "surface-area",
+      "kind": "mesh"
+    },
+    {
+      "feature": "topology-counts",
+      "kind": "brep"
+    },
+    {
+      "feature": "triangles",
+      "kind": "mesh"
+    },
+    {
+      "feature": "units",
+      "kind": "step"
+    },
+    {
+      "feature": "validity",
+      "kind": "brep"
+    },
+    {
+      "feature": "volume",
+      "kind": "mesh"
+    },
+    {
+      "feature": "wall-thickness",
+      "kind": "brep"
+    },
+    {
+      "feature": "watertightness",
+      "kind": "mesh"
+    }
+  ],
+  "diagnostics": [],
+  "mesh": {
+    "format": "mesh-buffer",
+    "meshCount": 1,
+    "signedVolume": 44000.43243997398,
+    "surfaceArea": 16344.89199027477,
+    "triangleCount": 1724,
+    "triangleDigest": "sha256:133ba9a967f1b241a4cb622513dd16903d7ac6e2899102a713c7b54b46b454d5",
+    "vertexCount": 5172,
+    "watertight": true
+  },
+  "provenance": {
+    "contentHash": "sha256:c6d923164cc472210e67abb8edc1b4e872bcd00b093db8b3cd4bfb15eccb80d8",
+    "loader": "opencascade-step",
+    "unit": "mm"
+  },
+  "step": {
+    "capabilities": [
+      {
+        "feature": "product-structure",
+        "supported": true
+      },
+      {
+        "feature": "color",
+        "supported": false
+      },
+      {
+        "feature": "material",
+        "supported": false
+      },
+      {
+        "feature": "geometric-tolerance",
+        "reason": "GeoSpec P0 reports unsupported AP242 PMI/GD&T evidence explicitly.",
+        "supported": false
+      }
+    ],
+    "productStructure": [
+      {
+        "name": "assembly",
+        "path": "product[0]"
+      },
+      {
+        "name": "bossA",
+        "path": "product[1]"
+      },
+      {
+        "name": "bossB",
+        "path": "product[2]"
+      },
+      {
+        "name": "rodSmallEnd",
+        "path": "product[3]"
+      },
+      {
+        "name": "wristPin",
+        "path": "product[4]"
+      }
+    ],
+    "readStrategy": {
+      "bytesRead": 71444,
+      "copiedToEmscriptenFs": false,
+      "inputKind": "path",
+      "nativeReadStream": true,
+      "strategy": "native-stream"
+    },
+    "schema": "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF {1 0 10303 442 1 1 4 }",
+    "unit": "mm",
+    "xde": {
+      "datumPlacements": [],
+      "datumSystems": [],
+      "freeShapeCount": 0,
+      "occurrences": [
+        {
+          "instanceName": "bossA",
+          "path": "bossA",
+          "productName": "bossA",
+          "shapeIndex": 0,
+          "transform": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "instanceName": "bossB",
+          "path": "bossB",
+          "productName": "bossB",
+          "shapeIndex": 1,
+          "transform": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "instanceName": "rodSmallEnd",
+          "path": "rodSmallEnd",
+          "productName": "rodSmallEnd",
+          "shapeIndex": 2,
+          "transform": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "instanceName": "wristPin",
+          "path": "wristPin",
+          "productName": "wristPin",
+          "shapeIndex": 3,
+          "transform": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      ],
+      "semanticDatums": [],
+      "subshapeNames": [
+        {
+          "faceIndex": 6,
+          "name": "bore",
+          "occurrencePath": "bossA",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 6,
+          "name": "bore",
+          "occurrencePath": "bossB",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 6,
+          "name": "bore",
+          "occurrencePath": "rodSmallEnd",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 0,
+          "name": "body",
+          "occurrencePath": "wristPin",
+          "shapeType": "face"
+        }
+      ],
+      "supplementalPlanes": []
+    }
+  }
+}

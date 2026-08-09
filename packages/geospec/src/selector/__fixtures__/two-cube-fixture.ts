@@ -53,6 +53,16 @@ export const createFixtureXde = (): XdeReadResult => ({
       zAxis: [0, 0, 1],
     },
   ],
+  semanticDatums: [
+    // Plane-feature datum on cubeA's top face; frame derives from face facts.
+    { occurrencePath: 'cubeA', label: 'A', faceIndexes: [0] },
+    // Cylinder-feature datum on cubeA's bore.
+    { occurrencePath: 'cubeA', label: 'B', faceIndexes: [2] },
+    // Point-target datum with no face attachment — no frame derivable.
+    { occurrencePath: 'cubeA', label: 'C', faceIndexes: [] },
+  ],
+  datumSystems: [{ occurrencePath: 'cubeA', name: 'Datum System.1', references: [['A'], ['B', 'C']] }],
+  supplementalPlanes: [],
   freeShapeCount: 0,
 });
 

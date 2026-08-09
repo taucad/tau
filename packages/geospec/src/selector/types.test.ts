@@ -42,6 +42,7 @@ describe('selector serialization', () => {
     const plain = { pattern: 'x', flags: 'g' };
     const selector = { kind: 'face', of: /cube/u, query: { metadata: plain } } as unknown as GeometrySelector;
 
+    // oxlint-disable-next-line unicorn/prefer-structured-clone -- exercises the JSON wire round-trip, not cloning.
     const roundTripped = deserializeSelector(JSON.parse(JSON.stringify(serializeSelector(selector))));
 
     const { query, of } = roundTripped as FaceSelector & { query: { metadata: unknown } };

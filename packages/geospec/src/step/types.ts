@@ -1,4 +1,4 @@
-import type { GeoSpecUnit, GeometrySubject } from '#mesh/types.js';
+import type { GeoSpecUnit } from '#config/define-geospec-config.js';
 
 /**
  * STEP source forms accepted by {@link import('./load-step.js').loadStep}.
@@ -33,29 +33,12 @@ export type StepLoadProgressEvent = {
 };
 
 /**
- * Minimal native STEP reader result shape returned by GeoSpec OCCT builds.
- *
- * @public
- */
-export type GeoSpecNativeStepReadResult = {
-  success: boolean;
-  evidenceJson(): string;
-  meshTrianglePointer?(): number;
-  meshTriangleCount?(): number;
-  delete?(): void;
-};
-
-/**
  * Minimal OpenCascade.js module shape consumed by {@link loadStep}.
  *
  * @public
  */
 export type GeoSpecOpenCascadeStepModule = {
   HEAPF64?: Float64Array<ArrayBuffer>;
-  GeoSpecStepStreamReader?: {
-    readText(data: string, optionsJson: string): GeoSpecNativeStepReadResult;
-    readFile?(path: string, optionsJson: string): GeoSpecNativeStepReadResult;
-  };
   FS?: {
     writeFile(path: string, data: Uint8Array<ArrayBuffer>): void;
     unlink(path: string): void;
@@ -96,8 +79,13 @@ export type XdeSubshapeName = {
 };
 
 /**
- * One native AP242 datum placement row, expanded per occurrence like subshape
- * names and expressed in subject-frame coordinates.
+ * One native AP242 datum placement row (a coordinate *frame* from the
+ * supplemental-geometry channel), expanded per occurrence like subshape names
+ * and expressed in subject-frame coordinates.
+ *
+ * Distinct from {@link XdeSemanticDatum}: this is supplemental geometry
+ * (`AXIS2_PLACEMENT_3D` items in a CONSTRUCTIVE_GEOMETRY_REPRESENTATION), not
+ * the GD&T `DATUM` family.
  *
  * @public
  */
@@ -110,6 +98,50 @@ export type XdeDatumPlacement = {
 };
 
 /**
+ * One semantic GD&T datum (`DATUM` + `DATUM_FEATURE` family) recovered from an
+ * AP242 file, attached to product faces via GEOMETRIC_ITEM_SPECIFIC_USAGE and
+ * expanded per occurrence of the owning product.
+ *
+ * @public
+ */
+export type XdeSemanticDatum = {
+  occurrencePath: string;
+  /** The GD&T datum identification letter(s): 'A', 'B', … */
+  label: string;
+  /** DATUM_FEATURE name when the file authored one. */
+  featureName?: string;
+  /** Attached faces in the owning product's deterministic face traversal order. */
+  faceIndexes: number[];
+};
+
+/**
+ * One GD&T datum reference frame (`DATUM_SYSTEM`) with its precedence
+ * compartments, expanded per occurrence of the owning product.
+ *
+ * @public
+ */
+export type XdeDatumSystem = {
+  occurrencePath: string;
+  name: string;
+  /** Compartments in precedence order; each holds one or more datum labels (common datums). */
+  references: string[][];
+};
+
+/**
+ * One supplemental-geometry `PLANE` item (e.g. `'Datum Plane 1'`), expanded per
+ * occurrence and expressed in subject-frame millimetres (per-context units
+ * resolved by the reader).
+ *
+ * @public
+ */
+export type XdeSupplementalPlane = {
+  occurrencePath: string;
+  name: string;
+  origin: [number, number, number];
+  normal: [number, number, number];
+};
+
+/**
  * Structured AP242 read result produced by the GeoSpec verification kernel's
  * XDE reader (SB1). One STEP-XDE read yields structure and geometry together.
  *
@@ -119,15 +151,22 @@ export type XdeReadResult = {
   occurrences: XdeOccurrence[];
   subshapeNames: XdeSubshapeName[];
   datumPlacements: XdeDatumPlacement[];
+  /** Semantic GD&T datums (the `DATUM` family) — empty for graphical-only files. */
+  semanticDatums: XdeSemanticDatum[];
+  /** GD&T datum reference frames (`DATUM_SYSTEM`). */
+  datumSystems: XdeDatumSystem[];
+  /** Supplemental-geometry `PLANE` items. */
+  supplementalPlanes: XdeSupplementalPlane[];
   /** Free (non-assembly) top-level shapes — the flat-export degenerate case. */
   freeShapeCount: number;
 };
 
 /**
  * Native handle over a parsed AP242 document that retains shapes so exact
- * BRep proof queries (extrema, classification, boolean common) can run
- * against resolved entities without a second parse. Face indices follow the
- * same deterministic traversal order as {@link XdeSubshapeName.faceIndex};
+ * BRep proof queries (extrema, classification, boolean common) and every
+ * lazy analysis facet (lazy-evidence blueprint R3) run against resolved
+ * entities without a second parse. Face indices follow the same
+ * deterministic traversal order as {@link XdeSubshapeName.faceIndex};
  * pass `-1` to address the whole occurrence shape.
  *
  * @public
@@ -144,6 +183,46 @@ export type GeoSpecNativeXdeReadResult = {
   commonVolume(occurrenceA: number, occurrenceB: number): string;
   /** JSON: per-face analytic facts for the occurrence's product shape. */
   faceFacts(occurrence: number): string;
+  /** Facet: `{ topologyCounts, boundingBox }` over the retained root shape. */
+  analysisSummaryJson(): string;
+  /** Facet: `{ massProperties: { surfaceArea, volume, centerOfMass } }`. */
+  analysisMassPropertiesJson(): string;
+  /** Facet: `{ validity }` — one BRepCheck analysis, per-solid queries (R5). */
+  analysisValidityJson(optionsJson: string): string;
+  /** Facet: planar/cylindrical faces, holes, patterns, chamfers, fillets. */
+  analysisFaceFeaturesJson(): string;
+  /**
+   * Facet: `{ minimumWallThickness }`, `{}` when unsupported, or
+   * `{ budgetExceeded: { workUnits, limit } }` when the R13 work-unit budget
+   * (optionsJson `workUnitBudget`) is exhausted.
+   */
+  analysisWallThicknessJson(optionsJson: string): string;
+  /** Facet: tessellates the root shape; `{ triangleCount }`. */
+  meshTriangles(optionsJson: string): string;
+  /**
+   * Facet: tessellates ONE placed occurrence shape (subject frame) into the
+   * retained triangle buffer; `{ triangleCount, deflection }` where
+   * `deflection` is the achieved mesh deviation floored at the requested
+   * linear tolerance. Clobbers the root `meshTriangles` buffer by design —
+   * callers copy out immediately via the pointer accessors. Optional: absent
+   * on pre-hybrid wasm builds and fake natives; consumers fall back to exact
+   * classification.
+   */
+  occurrenceMeshTriangles?(occurrence: number, optionsJson: string): string;
+  /**
+   * Tessellate ONE face of a placed occurrence (`face` = the 0-based face
+   * ordinal `faceFacts`/`extrema` use) into the retained soup — the exact
+   * trimmed per-face footprint for the topological contact-patch engine (R1).
+   * Same clobber/pointer transfer contract as `occurrenceMeshTriangles`.
+   * Optional: absent on pre-facet wasm builds and fake natives; consumers fall
+   * back to the winding/classify lattice.
+   */
+  occurrenceFaceMeshTriangles?(occurrence: number, face: number, optionsJson: string): string;
+  /** Byte pointer into HEAPF64 for the retained triangle soup. */
+  meshTrianglePointer(): number;
+  meshTriangleCount(): number;
+  /** Embind handle-liveness probe (ledger disposal guard, blueprint A12). */
+  isDeleted?(): boolean;
   delete?(): void;
 };
 
@@ -157,9 +236,17 @@ export type GeoSpecNativeXdeReadResult = {
  */
 export type GeoSpecNativeStepBackend = GeoSpecOpenCascadeStepModule & {
   GeoSpecXdeReader?: {
-    readText(data: string): GeoSpecNativeXdeReadResult;
-    readFile?(path: string): GeoSpecNativeXdeReadResult;
+    readText(data: string, optionsJson: string): GeoSpecNativeXdeReadResult;
+    readFile?(path: string, optionsJson: string): GeoSpecNativeXdeReadResult;
   };
+  /**
+   * Embind class behind {@link GeoSpecNativeXdeReadResult}. Its prototype IS the
+   * backend's method table, so the optional-facet probe (R8) reads it instead of
+   * a handle: which facets a build exposes is a property of the wasm binary, not
+   * of any one subject, so a warm subject answers it without parsing. Absent on
+   * test fakes and hand-built backends, which are probed by materializing.
+   */
+  GeoSpecXdeReadResult?: { prototype?: Partial<GeoSpecNativeXdeReadResult> };
 };
 
 /**
@@ -197,10 +284,3 @@ export type LoadStepOptions = {
  * @public
  */
 export type CreateStepLoaderOptions = Omit<LoadStepOptions, 'source'>;
-
-/**
- * Function shape returned by {@link import('./load-step.js').createStepLoader}.
- *
- * @public
- */
-export type GeoSpecStepLoader = (options: LoadStepOptions) => Promise<GeometrySubject>;

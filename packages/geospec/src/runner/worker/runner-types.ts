@@ -12,6 +12,12 @@ export type GeoSpecRunnerFileResult = {
   file: string;
   /** Low-level module execution result for this file. */
   result: GeoSpecRunResult;
+  /** Wall-clock cost of executing this file, in milliseconds (R1). */
+  durationMs?: number;
+  /** First deterministic model-load cache key observed in this file (R9 affinity telemetry). */
+  primaryLoadKey?: string;
+  /** Executing worker's isolate-resident memory at file completion, in bytes (R15 memory-class telemetry). */
+  workerMemoryBytes?: number;
 };
 
 /**
@@ -32,6 +38,8 @@ export type GeoSpecRunnerResult = {
   files: GeoSpecRunnerFileResult[];
   /** Run-level issues such as aborts or empty filter selections. */
   issues?: VmIssue[];
+  /** Wall-clock cost of the whole run, in milliseconds (R1). */
+  durationMs?: number;
 };
 
 /**
@@ -42,7 +50,14 @@ export type GeoSpecRunnerResult = {
 export type GeoSpecRunnerEvent =
   | { type: 'run-start'; files: readonly string[] }
   | { type: 'file-start'; file: string }
-  | { type: 'file-complete'; file: string; result: GeoSpecRunResult }
+  | {
+      type: 'file-complete';
+      file: string;
+      result: GeoSpecRunResult;
+      durationMs?: number;
+      primaryLoadKey?: string;
+      workerMemoryBytes?: number;
+    }
   | { type: 'run-complete'; result: GeoSpecRunnerResult }
   | { type: 'abort'; reason?: string }
   | { type: 'close' };
@@ -59,6 +74,11 @@ export type GeoSpecRunnerRunOptions = {
   testNamePattern?: string | RegExp;
   /** Timeout for each async test callback, in milliseconds. */
   testTimeout?: number;
+  /**
+   * Stop after the first failing file (R1). Interactive fail-fast only —
+   * never the default for reward runs, which want the complete red set.
+   */
+  bail?: boolean;
 };
 
 /**

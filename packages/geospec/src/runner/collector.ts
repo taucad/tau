@@ -13,7 +13,8 @@ import type { SelectorIndex } from '#selector/index-builder.js';
 import { matchesGeoSpecTestName } from '#runner/filter.js';
 import type { GeoSpecTestNamePattern } from '#runner/filter.js';
 import { withMatcherBudget } from '#runner/matcher-budget.js';
-import { forensicSync } from '#runner/forensic.js';
+import { getBrepFacetDiagnostic } from '#step/evidence-ledger.js';
+import { forensicAsync, forensicSync } from '#runner/forensic.js';
 import type {
   GeoSpecAssertion,
   GeoSpecAssemblyOccurrencesExpectation,
@@ -164,6 +165,14 @@ const unsupportedEvidenceDiagnostic = (matcher: string, evidence: string): Geome
   suggestion:
     'Load a STEP/BRep-capable subject with loadModel({ format: "step" }) or use a mesh measurement matcher that supports approximate mesh evidence.',
 });
+
+// R12: mesh matchers fail closed on subjects loaded without mesh evidence
+// (`mesh: false` STEP loads withhold every `{kind:'mesh'}` capability) —
+// reading the empty record's degenerate stats would silently decide a verdict.
+const requireMeshEvidence = (matcher: string, subject: GeometrySubject): GeometryDiagnostic[] | undefined =>
+  subject.capabilities.some((capability) => capability.kind === 'mesh')
+    ? undefined
+    : [unsupportedEvidenceDiagnostic(matcher, 'mesh')];
 
 const invalidExpectationDiagnostic = (options: {
   matcher: string;
@@ -570,11 +579,23 @@ const recordValidatedAssertion = (
   assertion: GeoSpecAssertion,
   validationDiagnostics: GeometryDiagnostic[],
   evaluate: () => GeometryDiagnostic[],
-): GeoSpecAssertion =>
-  recordAssertion(
-    assertion,
-    validationDiagnostics.length > 0 ? validationDiagnostics : withMatcherBudget(assertion.kind, evaluate),
-  );
+): GeoSpecAssertion => {
+  if (validationDiagnostics.length > 0) {
+    return recordAssertion(assertion, validationDiagnostics);
+  }
+  // R1/R2: every budgeted matcher gets a duration and a forensic `assert.<kind>`
+  // span at this single choke point (covers the previously blind heavy matchers,
+  // e.g. voidContinuity). Duration is stamped even when the assertion throws.
+  const startedAt = performance.now();
+  try {
+    return recordAssertion(
+      assertion,
+      forensicSync(`assert.${assertion.kind}`, () => withMatcherBudget(assertion.kind, evaluate)),
+    );
+  } finally {
+    assertion.durationMs = performance.now() - startedAt;
+  }
+};
 
 const isVec3 = (value: unknown): value is Vec3 =>
   Array.isArray(value) && value.length === 3 && value.every((entry) => typeof entry === 'number');
@@ -786,6 +807,10 @@ const evaluateConnectedComponents = (
   if (!isGeometrySubject(subject)) {
     return [unsupportedSubjectDiagnostic('toHaveConnectedComponents')];
   }
+  const missingMesh = requireMeshEvidence('toHaveConnectedComponents', subject);
+  if (missingMesh) {
+    return missingMesh;
+  }
 
   const toleranceMm = expected.toleranceMm ?? expected.tolerance ?? defaultConnectedToleranceMm;
   const analysis = subject.mesh.stats.analyseConnectedComponents(toleranceMm);
@@ -810,6 +835,10 @@ const evaluateConnectedComponents = (
 const evaluateWatertight = (subject: unknown): GeometryDiagnostic[] => {
   if (!isGeometrySubject(subject)) {
     return [unsupportedSubjectDiagnostic('toBeWatertight')];
+  }
+  const missingMesh = requireMeshEvidence('toBeWatertight', subject);
+  if (missingMesh) {
+    return missingMesh;
   }
 
   const watertight = subject.mesh.stats.analyseWatertight();
@@ -1038,6 +1067,10 @@ const evaluateComponentInterference = async (
   if (!isGeometrySubject(subject)) {
     return [unsupportedSubjectDiagnostic('toHaveNoComponentInterference')];
   }
+  const missingMesh = requireMeshEvidence('toHaveNoComponentInterference', subject);
+  if (missingMesh) {
+    return missingMesh;
+  }
 
   const analysis = await analyzeMeshOverlap({
     subject,
@@ -1175,6 +1208,10 @@ const validateMeshIntegrityExpectation = (expected: unknown): GeometryDiagnostic
 const evaluateMeshIntegrity = (subject: unknown, expected: GeoSpecMeshIntegrityExpectation): GeometryDiagnostic[] => {
   if (!isGeometrySubject(subject)) {
     return [unsupportedSubjectDiagnostic('toHaveMeshIntegrity')];
+  }
+  const missingMesh = requireMeshEvidence('toHaveMeshIntegrity', subject);
+  if (missingMesh) {
+    return missingMesh;
   }
   const quality = subject.mesh.stats.meshQuality;
   const watertight = subject.mesh.stats.analyseWatertight();
@@ -1681,13 +1718,30 @@ const legacyPlaneSelection = (selector: LegacyPlaneSelector, index: SelectorInde
 };
 
 /**
+ * Stable in-run memo key for a legacy `GeoSpecGeometrySelector` (R5): strings
+ * and RegExp by their content, object forms by JSON.
+ */
+const selectorMemoKey = (selector: GeoSpecGeometrySelector): string => {
+  if (typeof selector === 'string') {
+    return `s:${selector}`;
+  }
+  if (selector instanceof RegExp) {
+    return `r:${selector.source}:${selector.flags}`;
+  }
+  return `o:${JSON.stringify(selector)}`;
+};
+
+/**
  * Resolve one relationship endpoint through the SB3 selector engine.
  * Legacy `GeoSpecGeometrySelector` forms stay supported: strings and RegExp
  * resolve as occurrence/authored-path shorthands, named legacy axis/plane
  * forms become engine queries, and explicit analytic axis/plane forms become
  * `stability: 'explicit'` fixture selections.
  */
-const resolveRelationshipSelector = (selector: GeoSpecGeometrySelector, index: SelectorIndex): GeometrySelection => {
+const resolveRelationshipSelectorUncached = (
+  selector: GeoSpecGeometrySelector,
+  index: SelectorIndex,
+): GeometrySelection => {
   if (selector instanceof RegExp) {
     return resolveGeometrySelector({ kind: 'occurrence', name: selector }, index);
   }
@@ -1703,14 +1757,40 @@ const resolveRelationshipSelector = (selector: GeoSpecGeometrySelector, index: S
   return resolveGeometrySelector(selector, index);
 };
 
+/**
+ * Resolve a relationship endpoint, memoized per subject (R5). `resolve` is pure
+ * over `(selector, index)` (D1), so an identical selector — a shared datum or
+ * mount referenced by many relationships — resolves once instead of 2× per
+ * relationship. This attacks the dominant selector-resolution wall independent
+ * of the contact lattice; the memo is verdict-identical.
+ */
+const resolveRelationshipSelector = (
+  selector: GeoSpecGeometrySelector,
+  index: SelectorIndex,
+  memo?: Map<string, GeometrySelection>,
+): GeometrySelection => {
+  if (!memo) {
+    return resolveRelationshipSelectorUncached(selector, index);
+  }
+  const key = selectorMemoKey(selector);
+  const cached = memo.get(key);
+  if (cached) {
+    return cached;
+  }
+  const resolved = resolveRelationshipSelectorUncached(selector, index);
+  memo.set(key, resolved);
+  return resolved;
+};
+
 const evaluateOneSpatialRelationship = (options: {
   context: RelationshipProofContext;
   relationship: GeoSpecSpatialRelationshipExpectation;
   index: number;
+  resolutionMemo?: Map<string, GeometrySelection>;
 }): GeometryDiagnostic[] => {
-  const { context, relationship, index } = options;
-  const subjectSelection = resolveRelationshipSelector(relationship.subject, context.index);
-  const targetSelection = resolveRelationshipSelector(relationship.target, context.index);
+  const { context, relationship, index, resolutionMemo } = options;
+  const subjectSelection = resolveRelationshipSelector(relationship.subject, context.index, resolutionMemo);
+  const targetSelection = resolveRelationshipSelector(relationship.target, context.index, resolutionMemo);
   const resolutionDiagnostics = [subjectSelection, targetSelection]
     .filter((selection) => selection.status !== 'resolved')
     .flatMap((selection) => selection.diagnostics);
@@ -1737,9 +1817,12 @@ const evaluateSpatialRelationships = async (
   if (!context) {
     return [brepRelationshipPreconditionDiagnostic(subject)];
   }
+  // R5: memoize interface/selector resolution per subject — shared datum/mount
+  // selectors resolve once instead of 2× per relationship.
+  const resolutionMemo = new Map<string, GeometrySelection>();
   return expected.relationships.flatMap((relationship, index) =>
     forensicSync(`assert.relationship[${index}].${relationship.kind}`, () =>
-      evaluateOneSpatialRelationship({ context, relationship, index }),
+      evaluateOneSpatialRelationship({ context, relationship, index, resolutionMemo }),
     ),
   );
 };
@@ -1871,6 +1954,11 @@ const evaluateSurfaceArea = (subject: unknown, expected: GeoSpecSurfaceAreaExpec
   if (missingBrep) {
     return missingBrep;
   }
+  const usesMesh = required === 'mesh' || brepValue === undefined;
+  const missingMesh = usesMesh ? requireMeshEvidence('toHaveSurfaceArea', subject) : undefined;
+  if (missingMesh) {
+    return missingMesh;
+  }
   const actual =
     required === 'mesh'
       ? subject.mesh.stats.meshQuality.surfaceArea
@@ -1912,6 +2000,11 @@ const evaluateVolume = (subject: unknown, expected: GeoSpecVolumeExpectation): G
   const missingBrep = required === 'brep' ? requireBrepMeasurement('toHaveVolume', brepValue) : undefined;
   if (missingBrep) {
     return missingBrep;
+  }
+  const usesMesh = required === 'mesh' || brepValue === undefined;
+  const missingMesh = usesMesh ? requireMeshEvidence('toHaveVolume', subject) : undefined;
+  if (missingMesh) {
+    return missingMesh;
   }
   const actual = required === 'mesh' ? meshVolume(subject) : (brepValue ?? meshVolume(subject));
   const failures = evaluateNumeric({
@@ -2035,6 +2128,12 @@ const evaluateChamferDistance = async (
   if (!isGeometrySubject(reference)) {
     return [unsupportedSubjectDiagnostic('toHaveChamferDistanceTo reference')];
   }
+  const missingMesh =
+    requireMeshEvidence('toHaveChamferDistanceTo', subject) ??
+    requireMeshEvidence('toHaveChamferDistanceTo reference', reference);
+  if (missingMesh) {
+    return missingMesh;
+  }
 
   const result = await analyzeChamferDistance({
     actual: subject.mesh.stats.meshQuality.triangles,
@@ -2099,6 +2198,10 @@ const evaluateDistanceSummary = async (options: {
   }
   if (!isGeometrySubject(reference)) {
     return [unsupportedSubjectDiagnostic(`${matcher} reference`)];
+  }
+  const missingMesh = requireMeshEvidence(matcher, subject) ?? requireMeshEvidence(`${matcher} reference`, reference);
+  if (missingMesh) {
+    return missingMesh;
   }
   const result = await analyzeChamferDistance({
     actual: subject.mesh.stats.meshQuality.triangles,
@@ -2327,6 +2430,12 @@ const evaluateMinimumWallThickness = (
   }
   const thickness = subject.brep?.minimumWallThickness;
   if (!thickness) {
+    // R13: an exhausted wall-thickness work-unit budget fails on the bounded
+    // MATCHER_TIMEOUT contract instead of a generic unsupported diagnostic.
+    const facetDiagnostic = subject.brep ? getBrepFacetDiagnostic(subject.brep, 'wallThickness') : undefined;
+    if (facetDiagnostic?.code === 'MATCHER_TIMEOUT') {
+      return [facetDiagnostic];
+    }
     return [unsupportedEvidenceDiagnostic('toHaveMinimumWallThickness', 'BRep wall-thickness')];
   }
 
@@ -2756,7 +2865,15 @@ export const createCollector = (): GeoSpecCollector => {
     evaluate: () => Promise<GeometryDiagnostic[]>,
   ): GeoSpecAssertion => {
     const pending = (async () => {
-      const diagnostics = await evaluate();
+      // R1/R2: async matchers (componentInterference, sampled distances) get the
+      // same duration + `assert.<kind>` forensic span as the sync choke point.
+      const startedAt = performance.now();
+      let diagnostics: GeometryDiagnostic[];
+      try {
+        diagnostics = await forensicAsync(`assert.${assertion.kind}`, evaluate);
+      } finally {
+        assertion.durationMs = performance.now() - startedAt;
+      }
       assertion.passed = diagnostics.length === 0;
       assertion.diagnostics = diagnostics;
       if (diagnostics.length > 0) {
@@ -3580,6 +3697,7 @@ export const createCollector = (): GeoSpecCollector => {
 
         const previousTest = activeTest;
         activeTest = scheduledTest.test;
+        const startedAt = performance.now();
         try {
           // oxlint-disable-next-line no-await-in-loop -- GeoSpec CAD tests run serially so model-loader state and native resources cannot cross-wire.
           await withTimeout(Promise.resolve(scheduledTest.function_()), testTimeout);
@@ -3590,6 +3708,7 @@ export const createCollector = (): GeoSpecCollector => {
           scheduledTest.test.diagnostics.push(...createErrorDiagnostics(error));
         } finally {
           activeTest = previousTest;
+          scheduledTest.test.durationMs = performance.now() - startedAt;
         }
       }
     },

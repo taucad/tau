@@ -546,4 +546,48 @@ describe('BRep minimum wall thickness topology repros', () => {
 
     expect(subject.brep?.minimumWallThickness?.value).toBeCloseTo(10, 6);
   });
+
+  it(
+    'H28 should fail on the bounded MATCHER_TIMEOUT contract when the wall work-unit budget is exhausted',
+    { timeout: 60_000 },
+    async () => {
+      // R13: one work unit (one exact extrema or one material-interval proof)
+      // cannot complete any wall analysis, so the facet reports a
+      // deterministic budget exhaustion and never a partial minimum.
+      const previousBudget = process.env['GEOSPEC_WALL_WORK_UNIT_BUDGET'];
+      process.env['GEOSPEC_WALL_WORK_UNIT_BUDGET'] = '1';
+      try {
+        const subject = await loadStepSource({ source: importedAssemblyStepPath, name: 'two-cube-assembly.step' });
+        expect(subject.brep?.minimumWallThickness).toBeUndefined();
+
+        const collector = createCollector();
+        installCollector(collector);
+        try {
+          collector.it('should reject a budget-exhausted wall claim', () => {
+            collector.expectGeo(subject).toHaveMinimumWallThickness({
+              value: { greaterThanOrEqual: 1 },
+              tolerance,
+            });
+          });
+          await collector.waitForCompletion(10_000);
+
+          const diagnostic = collector.tests[0]?.assertions[0]?.diagnostics?.[0];
+          expect(collector.tests[0]?.status).toBe('failed');
+          expect(diagnostic).toMatchObject({
+            code: 'MATCHER_TIMEOUT',
+            severity: 'error',
+            details: { facet: 'wallThickness', limit: 1 },
+          });
+        } finally {
+          clearCollectorGlobals();
+        }
+      } finally {
+        if (previousBudget === undefined) {
+          delete process.env['GEOSPEC_WALL_WORK_UNIT_BUDGET'];
+        } else {
+          process.env['GEOSPEC_WALL_WORK_UNIT_BUDGET'] = previousBudget;
+        }
+      }
+    },
+  );
 });

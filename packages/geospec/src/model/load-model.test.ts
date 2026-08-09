@@ -489,15 +489,17 @@ describe('loadModel', () => {
         sourceFormat: 'glb',
         targetFormat: 'glb',
         fidelity: 'mesh',
-        schema: {
-          properties: {
-            coordinateSystem: {},
-            unit: {},
+        exportOptions: {
+          schema: {
+            properties: {
+              coordinateSystem: {},
+              unit: {},
+            },
           },
-        },
-        defaults: {
-          coordinateSystem: 'z-up',
-          unit: { length: 'meter' },
+          defaults: {
+            coordinateSystem: 'z-up',
+            unit: { length: 'meter' },
+          },
         },
       })),
     });
@@ -673,7 +675,10 @@ describe('loadModel', () => {
         sourceFormat: 'glb',
         targetFormat: 'glb',
         fidelity: 'mesh',
-        schema: { properties: { coordinateSystem: {} } },
+        exportOptions: {
+          schema: { properties: { coordinateSystem: {} } },
+          defaults: {},
+        },
       })),
     });
 
@@ -716,8 +721,7 @@ describe('loadModel', () => {
         targetFormat: 'step',
         transcoderId: 'converter',
         fidelity: 'mesh',
-        schema: { properties: {} },
-        defaults: {},
+        exportOptions: { schema: { properties: {} }, defaults: {} },
       })),
     });
 
@@ -1008,29 +1012,35 @@ describe('loadModel', () => {
       data: [{ bytes: stepBytes, name: 'assembly.step', mimeType: 'model/step' }],
       issues: [],
     }));
-    let parsedOptions: unknown;
+    const meshTriangles = vi.fn(() => JSON.stringify({ triangleCount: 0 }));
     const reader = {
-      readText: vi.fn((_data: string, optionsJson: string) => {
-        parsedOptions = JSON.parse(optionsJson);
-        return {
-          success: true,
-          evidenceJson: () =>
-            JSON.stringify({
-              brep: { validity: { valid: true } },
-              diagnostics: [],
-            }),
-          delete: vi.fn(),
-        };
-      }),
+      readText: vi.fn(() => ({
+        isSuccess: () => true,
+        resultJson: () =>
+          JSON.stringify({ occurrences: [], subshapeNames: [], datumPlacements: [], freeShapeCount: 0 }),
+        extrema: () => '{}',
+        classifyPoints: () => '{"states":[]}',
+        commonVolume: () => '{"volume":0}',
+        faceFacts: () => '{"faces":[]}',
+        analysisSummaryJson: () => '{}',
+        analysisMassPropertiesJson: () => '{}',
+        analysisValidityJson: () => JSON.stringify({ validity: { valid: true } }),
+        analysisFaceFeaturesJson: () => '{}',
+        analysisWallThicknessJson: () => '{}',
+        meshTriangles,
+        meshTrianglePointer: () => 0,
+        meshTriangleCount: () => 0,
+        delete: vi.fn(),
+      })),
     };
-    const stepStreamReaderKey = 'GeoSpecStepStreamReader';
+    const xdeReaderKey = 'GeoSpecXdeReader';
 
     const subject = await loadModel({
       file: mainFile,
       format: 'step',
       mesh: false,
       runtime: runtimeMock({ export: exportMock }),
-      nativeStepBackend: { [stepStreamReaderKey]: reader },
+      nativeStepBackend: { [xdeReaderKey]: reader },
     });
 
     expect(exportMock).toHaveBeenCalledOnce();
@@ -1039,7 +1049,9 @@ describe('loadModel', () => {
       parameters: undefined,
       exportOptions: {},
     });
-    expect(parsedOptions).toMatchObject({ mesh: false });
+    // Mesh-disabled loads skip the tessellation facet outright (lazy-evidence R3).
+    expect(meshTriangles).not.toHaveBeenCalled();
+    expect(subject.brep?.validity).toMatchObject({ valid: true });
     expect(subject.mesh.stats.triangleCount).toBe(0);
     expect(subject.capabilities).not.toContainEqual({ kind: 'mesh', feature: 'component-overlap' });
   });

@@ -11,7 +11,7 @@
  * @module
  */
 
-import type { GeometryDiagnostic } from '#mesh/types.js';
+import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
 import type { GeometrySelection } from '#selector/types.js';
 
 /**
@@ -28,6 +28,12 @@ export type RelationshipWitness = {
   kind: 'point' | 'axis' | 'plane';
   value: number[];
   topologyRef?: string;
+  /**
+   * Where the witness points came from: absent = the exact BRep evaluator;
+   * `'mesh'` = a realizable tessellation pair backing a certified-bound proof
+   * (CR4) — honest reporting, never a verdict input.
+   */
+  provenance?: 'mesh';
 };
 
 /**
@@ -48,7 +54,7 @@ export type RelationshipBroadPhase = {
  * @public
  */
 export type RelationshipFinalEvidence = {
-  method: 'extrema' | 'analytic' | 'classification' | 'boolean-intersection';
+  method: 'extrema' | 'analytic' | 'classification' | 'boolean-intersection' | 'mesh-distance-bound';
   /** Measured values in millimetres/degrees (shared unit contract). */
   measured: Record<string, number>;
   /** Expected values in millimetres/degrees (shared unit contract). */
@@ -78,4 +84,47 @@ export type RelationshipEvidence = {
 export type RelationshipEndpointReport = {
   role: 'subject' | 'target';
   selection: GeometrySelection;
+};
+
+/**
+ * A native shape address: the occurrence index plus the 0-based face ordinal.
+ *
+ * @public
+ */
+export type NativeShapeRef = { occurrence: number; face: number };
+
+/**
+ * One subject face's contact-patch estimate against the target solid.
+ *
+ * @public
+ */
+export type ContactPatch = {
+  /** True face area (mm²) from the resolved face facts. */
+  faceArea: number;
+  /** Sampled estimate (mm²): contacting fraction × faceArea. */
+  patchArea: number;
+  /** Quantization band (mm²). */
+  band: number;
+  /** Sampled footprint size. */
+  footprint: number;
+  /** Footprint samples within the contact tolerance. */
+  contacting: number;
+  /** Footprint samples inside the target solid. */
+  penetrating: number;
+  /** A contacting witness point, when any sample seats. */
+  witness?: Vec3;
+};
+
+/**
+ * Engine-agnostic resolution of a void-continuity claim.
+ *
+ * @public
+ */
+export type ResolvedVoidClaim = {
+  waypoints: Vec3[];
+  materialPaths: string[];
+  region: { min: Vec3; max: Vec3 };
+  resolution: number;
+  isolatedFrom: Vec3[];
+  minCrossSection?: number;
 };

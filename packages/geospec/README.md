@@ -21,9 +21,9 @@ describe('bracket', () => {
       format: 'glb',
     });
 
-    expectGeo(model).toHaveBoundingBox({ size: { x: 0.04, y: 0.008, z: 0.02 }, tolerance: 0.001 });
-    expectGeo(model).toHaveSurfaceArea({ value: 0.002_56, tolerance: 0.000_1 });
-    expectGeo(model).toHaveVolume({ value: 0.000_006_4, tolerance: 0.000_001 });
+    expectGeo(model).toHaveBoundingBox({ size: { x: 40, y: 20, z: 8 }, tolerance: 0.1 });
+    expectGeo(model).toHaveSurfaceArea({ value: 2560, tolerance: 10 });
+    expectGeo(model).toHaveVolume({ value: 6400, tolerance: 10 });
   });
 });
 ```
@@ -181,8 +181,8 @@ const oc = await initOpenCascade();
 const backend = createOpenCascadeMeshBackend(oc);
 ```
 
-The custom C++ wrapper and Docker build config live in
-`native/opencascade/`. GeoSpec does not run a production JavaScript
+The custom C++ wrappers and the `@libcascade/toolchain` build config
+(`libcascade.config.ts`) live in `native/opencascade/`. GeoSpec does not run a production JavaScript
 triangle-distance fallback; native backend failures are returned as structured
 diagnostics.
 

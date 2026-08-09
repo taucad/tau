@@ -32,7 +32,10 @@ const expectTripletCloseTo = (actual: readonly number[] | undefined, expected: r
 
 const exportStepText = async (coordinateSystem: 'z-up' | 'y-up' = 'z-up'): Promise<string> => {
   const worker = await createTestWorker(replicadKernel, { [translatedDatumModelFile]: translatedDatumModelSource });
-  const createResult = await worker.createGeometry({ file: createGeometryFile(translatedDatumModelFile), parameters: {} });
+  const createResult = await worker.createGeometry({
+    file: createGeometryFile(translatedDatumModelFile),
+    parameters: {},
+  });
   assertSuccess(createResult, 'createGeometry for runtime STEP datum readback');
 
   const exportResult = await worker.exportGeometry('step', { coordinateSystem });
@@ -54,7 +57,7 @@ describe('Replicad runtime STEP export read through GeoSpec XDE', () => {
   }, 120_000);
 
   const readXde = (stepText: string): XdeReadResult => {
-    const native = backend.GeoSpecXdeReader!.readText(stepText);
+    const native = backend.GeoSpecXdeReader!.readText(stepText, '{}');
     try {
       if (!native.isSuccess()) {
         throw new Error(native.resultJson());

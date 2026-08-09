@@ -7,14 +7,20 @@
  * cross-section must meet `minCrossSection`.
  *
  * Method — a deterministic 6-connectivity flood-fill over a uniform voxel grid
- * bounding the declared region. A cell is "open void" iff exact point-in-solid
- * classification (`classifyPoints`, exact per point) reports `out` of EVERY
- * material occurrence at the cell centre. Each occurrence is classified only
- * over the voxels inside its own inflated AABB — a voxel outside a solid's
- * bounding box is trivially `out` of that solid — so the verdict is identical
- * to classifying every voxel against every solid, at a fraction of the native
- * calls. The scan is chunked and checks the matcher budget between chunks, so a
- * heavy claim fails bounded rather than stalling the run.
+ * bounding the declared region. A cell is "open void" iff it is `out` of EVERY
+ * material occurrence at the cell centre, with per-cell occupancy decided
+ * exact-equivalently by one of two engines (R6 move 3, hybrid-wasm-matcher
+ * architecture): large ranges on hybrid-capable subjects use mesh-boolean
+ * occupancy (Manifold planar slices of the AP242-read BRep's tessellation)
+ * for every cell provably farther from the surface than the tessellation
+ * deviation, with exact point-in-solid classification (`classifyPoints`)
+ * reserved for the boundary band — small ranges and every hybrid failure mode
+ * classify each cell exactly. Each occurrence is decided only over the voxels
+ * inside its own inflated AABB — a voxel outside a solid's bounding box is
+ * trivially `out` of that solid — so the verdict is identical to classifying
+ * every voxel against every solid, at a fraction of the native calls. Both
+ * engines charge the matcher budget as they go, so a heavy claim fails
+ * bounded rather than stalling the run.
  *
  * Guarantees (stated honestly, not "never approximated"):
  * - Connectivity uses 6-connectivity, which is *conservative*: a path proven
@@ -38,7 +44,17 @@ import { selectorDiagnosticCodes } from '#selector/diagnostics.js';
 import type { SelectorIndex } from '#selector/index-builder.js';
 import { dot, normalize, subtract } from '#selector/vector-math.js';
 import type { RelationshipProofContext } from '#proofs/relationship-proofs.js';
-import { checkBudget } from '#runner/matcher-budget.js';
+import {
+  computeVoidMeshOccupancy,
+  mergeAscendingCells,
+  voidMeshAngularToleranceDegrees,
+  voidMeshDeflection,
+} from '#proofs/void-occupancy.js';
+import { proveVoidTopology } from '#proofs/void-topology.js';
+import { getGeoSpecEvidenceCache, uint32ArrayCodec } from '#cache/evidence-cache.js';
+import { chargeBudget } from '#runner/matcher-budget.js';
+import { forensicCount, forensicSync } from '#runner/forensic.js';
+import type { ResolvedVoidClaim } from '#proofs/types.js';
 
 /**
  * Voxel budget ceiling. At the 2 mm default resolution this covers roughly a
@@ -63,6 +79,44 @@ const defaultResolution = 2;
  * latency measurably matters.
  */
 const classifyChunk = 16_384;
+
+/**
+ * Hybrid-engine gate (R6 move 3): ranges below this cell count stay on the
+ * pure exact scan — tessellating a whole part (the hybrid's fixed cost) can
+ * exceed the classification it would save on a genuinely small lane. Above it
+ * mesh occupancy wins by orders. Sized low because the fixed cost is only a
+ * ~1–2 s tessellation while the exact cost it replaces is `cells × per-point`
+ * where per-point is up to ~17 ms on a B-spline casting — so even a few-k-cell
+ * lane on a heavy part pays. A pure function of the claim's grid ∩ occurrence
+ * AABB (deterministic, §16), overridable per-machine via
+ * `GEOSPEC_VOID_HYBRID_MIN_CELLS`.
+ */
+const defaultHybridMinRangeCells = 4000;
+
+const hybridMinRangeCells = (): number => {
+  if (typeof process !== 'undefined' && typeof process.env === 'object') {
+    const raw = Number(process.env['GEOSPEC_VOID_HYBRID_MIN_CELLS']);
+    if (Number.isFinite(raw) && raw >= 0) {
+      return raw;
+    }
+  }
+  return defaultHybridMinRangeCells;
+};
+
+/** `GEOSPEC_VOID_ENGINE=exact` forces the pure exact scan (parity harness + ops escape hatch). */
+const voidEngineForcedExact = (): boolean =>
+  typeof process !== 'undefined' && typeof process.env === 'object' && process.env['GEOSPEC_VOID_ENGINE'] === 'exact';
+
+/**
+ * `GEOSPEC_VOID_ENGINE=topological` selects the mesh-topology spike engine
+ * (research V2: Boolean void + `Decompose`, O(surface) not O(volume)). A
+ * verdict-model migration gated by the differential corpus — never the default;
+ * the voxel engine ships until parity is proven. See {@link proveVoidTopology}.
+ */
+const voidEngineForcedTopological = (): boolean =>
+  typeof process !== 'undefined' &&
+  typeof process.env === 'object' &&
+  process.env['GEOSPEC_VOID_ENGINE'] === 'topological';
 
 type ClassificationPayload = { states: Array<'in' | 'out' | 'on'> };
 
@@ -239,14 +293,69 @@ const occupancyCache = new WeakMap<RelationshipProofContext['native'], Map<strin
 const gridKey = (grid: Grid): string =>
   `${grid.origin[0]},${grid.origin[1]},${grid.origin[2]}|${grid.resolution}|${grid.dims[0]},${grid.dims[1]},${grid.dims[2]}`;
 
+/** Cell (ix,iy,iz) from a `linearIndex`-space index. */
+const cellFromLinear = (grid: Grid, cell: number): Cell => {
+  const [nx, ny] = grid.dims;
+  const iz = Math.floor(cell / (nx * ny));
+  const rest = cell - iz * nx * ny;
+  const iy = Math.floor(rest / nx);
+  return [rest - iy * nx, iy, iz];
+};
+
+/**
+ * Exact chunked classification of an explicit ascending cell list (the hybrid
+ * engine's boundary band). Same chunk size, budget pricing (one unit per
+ * point), and closed rule (`in`/`on` closes) as the full scan, so the closed
+ * subset is bit-identical to what a full scan would emit for these cells.
+ */
+const classifyCellsExact = (options: {
+  context: RelationshipProofContext;
+  grid: Grid;
+  occurrence: number;
+  cells: readonly number[];
+}): { closed: number[] } | { error: string } => {
+  const { context, grid, occurrence, cells } = options;
+  const closed: number[] = [];
+  for (let start = 0; start < cells.length; start += classifyChunk) {
+    const chunk = cells.slice(start, start + classifyChunk);
+    chargeBudget(chunk.length);
+    const payload = parse<ClassificationPayload>(
+      context.native.classifyPoints(
+        occurrence,
+        JSON.stringify(chunk.map((cell) => cellCenter(grid, cellFromLinear(grid, cell)))),
+      ),
+    );
+    if ('error' in payload) {
+      return { error: payload.error };
+    }
+    for (const [position, cell] of chunk.entries()) {
+      if (payload.states[position] !== 'out') {
+        closed.push(cell);
+      }
+    }
+  }
+  return { closed };
+};
+
 /**
  * Cells that `occurrence` closes over `grid`: those inside its inflated AABB
  * whose centre classifies `in`/`on`. Classifies only AABB voxels (A1), chunked
  * with a matcher-budget check between chunks (A2) so a heavy claim is
  * preemptible. The returned cell indices are in `linearIndex` space regardless
  * of scan order.
+ *
+ * Hybrid engine (throughput blueprint R6 move 3): for large ranges on
+ * hybrid-capable subjects, mesh-boolean occupancy decides every cell provably
+ * farther from the surface than the tessellation deviation, and ONLY the
+ * boundary band is classified exactly — closed sets stay exact-equivalent by
+ * construction (see void-occupancy.ts), so verdicts, witnesses, and cached
+ * evidence are bit-identical to the pure exact scan. Every hybrid failure
+ * mode falls back to that exact scan.
+ *
+ * Exported for the hybrid-vs-exact equivalence harness (@internal); proof
+ * callers go through {@link proveVoidContinuity}.
  */
-const closedCellsForOccurrence = (options: {
+export const closedCellsForOccurrence = (options: {
   context: RelationshipProofContext;
   grid: Grid;
   occurrence: number;
@@ -260,6 +369,37 @@ const closedCellsForOccurrence = (options: {
   if (!range) {
     return { closed: [] };
   }
+
+  const rangeCells = (range.x1 - range.x0 + 1) * (range.y1 - range.y0 + 1) * (range.z1 - range.z0 + 1);
+  const fetchOccurrenceMesh = context.occurrenceMesh;
+  if (fetchOccurrenceMesh && rangeCells >= hybridMinRangeCells() && !voidEngineForcedExact()) {
+    const occupancy = forensicSync('void.mesh.occupancy', () =>
+      computeVoidMeshOccupancy({
+        grid,
+        range,
+        fetchMesh: () =>
+          fetchOccurrenceMesh(occurrence, {
+            linearDeflection: voidMeshDeflection(grid.resolution),
+            angularDeflectionDegrees: voidMeshAngularToleranceDegrees,
+          }),
+      }),
+    );
+    if ('fallback' in occupancy) {
+      // Deterministic per (subject, claim): the exact scan below decides.
+      forensicCount('void.hybrid.fallback', 1);
+    } else {
+      forensicCount('void.hybrid.bandCells', occupancy.bandCells.length);
+      forensicCount('void.hybrid.meshClosed', occupancy.meshClosed.length);
+      const bandClosed = forensicSync('void.classify.band', () =>
+        classifyCellsExact({ context, grid, occurrence, cells: occupancy.bandCells }),
+      );
+      if ('error' in bandClosed) {
+        return bandClosed;
+      }
+      return { closed: mergeAscendingCells(occupancy.meshClosed, bandClosed.closed) };
+    }
+  }
+
   const closed: number[] = [];
   let batch: Vec3[] = [];
   let batchCells: number[] = [];
@@ -267,6 +407,10 @@ const closedCellsForOccurrence = (options: {
     if (batch.length === 0) {
       return undefined;
     }
+    // R13: charge deterministic work units (one per classified point) BEFORE
+    // the native call, so an oversized claim fails bounded at the chunk
+    // boundary regardless of machine load or pool contention.
+    chargeBudget(batch.length);
     const payload = parse<ClassificationPayload>(context.native.classifyPoints(occurrence, JSON.stringify(batch)));
     if ('error' in payload) {
       return payload.error;
@@ -292,7 +436,6 @@ const closedCellsForOccurrence = (options: {
           if (error !== undefined) {
             return { error };
           }
-          checkBudget();
         }
       }
     }
@@ -332,6 +475,7 @@ const computeOpenCells = (options: {
   }
   const key = gridKey(grid);
 
+  const evidenceCache = getGeoSpecEvidenceCache();
   for (const path of materialPaths) {
     const occurrence = context.occurrenceIndexByPath.get(path);
     if (occurrence === undefined) {
@@ -340,11 +484,41 @@ const computeOpenCells = (options: {
     const cacheKey = `${key}|${occurrence}`;
     let closed = cache.get(cacheKey);
     if (!closed) {
-      const result = closedCellsForOccurrence({ context, grid, occurrence, bounds: boundsByPath.get(path) });
-      if ('error' in result) {
-        return { error: `classifyPoints failed for '${path}': ${result.error}` };
+      // R5/R6: persist per-occurrence closed cells subject-scoped — the flood
+      // engine's entire native cost replays across runs, processes, and pool
+      // workers when the artifact and grid are unchanged. The verdict is a
+      // pure function of the closed sets, so replay is verdict-identical.
+      // Version 2: hybrid mesh-occupancy engine (R6 move 3). Values are
+      // exact-equivalent to v1 by construction; the bump conservatively
+      // recomputes rather than mixing engine provenance in one family.
+      let classificationError: string | undefined;
+      const computeClosed = (): number[] | undefined => {
+        const result = closedCellsForOccurrence({ context, grid, occurrence, bounds: boundsByPath.get(path) });
+        if ('error' in result) {
+          classificationError = `classifyPoints failed for '${path}': ${result.error}`;
+          return undefined;
+        }
+        return result.closed;
+      };
+      closed =
+        evidenceCache && context.subjectContentHash !== undefined
+          ? evidenceCache.getOrCompute({
+              family: 'void-closed-cells',
+              // CR8: v3 — the hybrid fill's intercepts now come from the
+              // one-pass triangle sweep, not per-layer Manifold slices;
+              // payload provenance changed, so the version rotates.
+              version: 3,
+              key: { subjectHash: context.subjectContentHash, occurrence, path, grid: cacheKey },
+              compute: computeClosed,
+              codec: uint32ArrayCodec,
+            })
+          : computeClosed();
+      if (classificationError !== undefined) {
+        return { error: classificationError };
       }
-      closed = result.closed;
+      if (!closed) {
+        return { error: `classifyPoints produced no classification for '${path}'.` };
+      }
       cache.set(cacheKey, closed);
     }
     for (const cell of closed) {
@@ -374,19 +548,17 @@ const floodComponents = (grid: Grid, open: boolean[]): { components: Int32Array;
       const iz = Math.floor(cell / (nx * ny));
       const iy = Math.floor((cell - iz * nx * ny) / nx);
       const ix = cell - iz * nx * ny - iy * nx;
-      const neighbours: Array<[number, number, number]> = [
-        [ix - 1, iy, iz],
-        [ix + 1, iy, iz],
-        [ix, iy - 1, iz],
-        [ix, iy + 1, iz],
-        [ix, iy, iz - 1],
-        [ix, iy, iz + 1],
-      ];
-      for (const [jx, jy, jz] of neighbours) {
+      // R18/13d: fixed ±1 offsets with direct index arithmetic — the previous
+      // per-pop neighbour tuple array was ≤4M cells × 7 allocations of pure
+      // GC churn. Same cells visited in the same order.
+      for (let face = 0; face < 6; face += 1) {
+        const jx = face === 0 ? ix - 1 : face === 1 ? ix + 1 : ix;
+        const jy = face === 2 ? iy - 1 : face === 3 ? iy + 1 : iy;
+        const jz = face === 4 ? iz - 1 : face === 5 ? iz + 1 : iz;
         if (jx < 0 || jy < 0 || jz < 0 || jx >= nx || jy >= ny || jz >= nz) {
           continue;
         }
-        const neighbour = linearIndex(grid, [jx, jy, jz]);
+        const neighbour = jx + jy * nx + jz * nx * ny;
         if (open[neighbour] && components[neighbour] === -1) {
           components[neighbour] = component;
           stack.push(neighbour);
@@ -509,26 +681,26 @@ const slabLumenCells = (options: {
   }
   const [nx, ny, nz] = grid.dims;
   const seen = new Set<number>();
-  const stack: Array<[number, number, number]> = [[sx, sy, sz]];
+  // R18/13d: flat index stack + fixed ±1 offsets, no per-pop tuple arrays —
+  // the same hoist as the main flood. Same cells visited in the same order.
+  const stack: number[] = [(sz * ny + sy) * nx + sx];
   seen.add(linearIndex(grid, [sx, sy, sz]));
   while (stack.length > 0) {
-    const [ix, iy, iz] = stack.pop()!;
-    const neighbours: Array<[number, number, number]> = [
-      [ix - 1, iy, iz],
-      [ix + 1, iy, iz],
-      [ix, iy - 1, iz],
-      [ix, iy + 1, iz],
-      [ix, iy, iz - 1],
-      [ix, iy, iz + 1],
-    ];
-    for (const [jx, jy, jz] of neighbours) {
+    const cell = stack.pop()!;
+    const iz = Math.floor(cell / (nx * ny));
+    const iy = Math.floor((cell - iz * nx * ny) / nx);
+    const ix = cell - iz * nx * ny - iy * nx;
+    for (let face = 0; face < 6; face += 1) {
+      const jx = face === 0 ? ix - 1 : face === 1 ? ix + 1 : ix;
+      const jy = face === 2 ? iy - 1 : face === 3 ? iy + 1 : iy;
+      const jz = face === 4 ? iz - 1 : face === 5 ? iz + 1 : iz;
       if (jx < 0 || jy < 0 || jz < 0 || jx >= nx || jy >= ny || jz >= nz) {
         continue;
       }
-      const key = linearIndex(grid, [jx, jy, jz]);
+      const key = jx + jy * nx + jz * nx * ny;
       if (!seen.has(key) && inSlab(jx, jy, jz)) {
         seen.add(key);
-        stack.push([jx, jy, jz]);
+        stack.push(key);
       }
     }
   }
@@ -618,10 +790,119 @@ const regionJoinsComponent = (options: {
 };
 
 /**
+ * Resolve a void-continuity expectation to its engine-agnostic claim, or the
+ * early diagnostics that reject it (bad path/resolution, unresolved waypoint,
+ * missing material set, un-derivable region). Refuses the degenerate "classify
+ * every occurrence over an unbounded region" default (Finding 2): it is
+ * O(all-occurrences × V) and no tract needs every solid as material — require a
+ * declared material set, or derive a narrow neighbourhood from declared bounds.
+ *
+ * @param expectation - The declared void-continuity expectation.
+ * @param context - Per-subject proof context (occurrence index + bounds).
+ * @returns The resolved claim, or `{ diagnostics }` rejecting it.
+ * @public
+ */
+export const resolveVoidClaim = (
+  expectation: GeoSpecVoidContinuityExpectation,
+  context: RelationshipProofContext,
+): ResolvedVoidClaim | { diagnostics: GeometryDiagnostic[] } => {
+  if (!Array.isArray(expectation.path) || expectation.path.length === 0) {
+    return {
+      diagnostics: [
+        unsupported(
+          'void-continuity needs at least one path waypoint.',
+          'Declare an ordered path of >= 1 waypoints known to lie in the void.',
+        ),
+      ],
+    };
+  }
+  const resolution = expectation.resolution ?? defaultResolution;
+  if (!(resolution > 0)) {
+    return {
+      diagnostics: [
+        unsupported(
+          `void-continuity resolution must be positive, got ${resolution}.`,
+          'Declare a positive voxel edge (mm), or omit resolution for the 2 mm default.',
+        ),
+      ],
+    };
+  }
+
+  // Resolve waypoints.
+  const waypoints: Vec3[] = [];
+  for (const waypoint of expectation.path) {
+    const resolved = resolveWaypoint(waypoint, context.index);
+    if ('error' in resolved) {
+      return {
+        diagnostics: [
+          unsupported(
+            `void-continuity waypoint could not be resolved: ${resolved.error}`,
+            'Use explicit [x, y, z] points, or occurrence names that exist in the subject with bounds.',
+          ),
+        ],
+      };
+    }
+    waypoints.push(resolved.point);
+  }
+
+  // Material set + region.
+  const declaredBounds = expectation.bounds;
+  let materialPaths: string[];
+  if (expectation.material) {
+    materialPaths = expectation.material;
+  } else if (declaredBounds) {
+    materialPaths = occurrencesIntersecting(declaredBounds, context.index, resolution);
+  } else {
+    return {
+      diagnostics: [
+        unsupported(
+          'void-continuity needs a material set or explicit bounds to bound the void; refusing to classify every occurrence over an unbounded region.',
+          'Declare `material` occurrence names, or `bounds` { min, max } so the neighbourhood material set can be derived.',
+        ),
+      ],
+    };
+  }
+  if (materialPaths.length === 0) {
+    return {
+      diagnostics: [
+        unsupported(
+          'void-continuity found no material occurrences to bound the void.',
+          'Declare material occurrence names, or select bounds that overlap occurrences carrying face bounds.',
+        ),
+      ],
+    };
+  }
+  const region = declaredBounds ?? materialBounds(materialPaths, context.index, resolution);
+  if (!region) {
+    return {
+      diagnostics: [
+        unsupported(
+          'void-continuity could not derive a region: the material occurrences carry no bounds.',
+          'Declare explicit bounds { min, max }, or select material occurrences that carry face bounds.',
+        ),
+      ],
+    };
+  }
+  return {
+    waypoints,
+    materialPaths,
+    region,
+    resolution,
+    isolatedFrom: expectation.isolatedFrom ?? [],
+    ...(expectation.minCrossSection === undefined ? {} : { minCrossSection: expectation.minCrossSection }),
+  };
+};
+
+/**
  * Prove a void-continuity claim. Emits `GEOSPEC_VOID_CONTINUITY_MISMATCH`
  * (connectivity/isolation/cross-section fail), a `_UNSUPPORTED_EVIDENCE`
  * diagnostic (a sub-claim that cannot be honestly decided at the declared
  * resolution), or an empty array on pass.
+ *
+ * Default engine: the deterministic voxel flood (exact + hybrid mesh-occupancy,
+ * bit-identical verdicts). `GEOSPEC_VOID_ENGINE=topological` dispatches the
+ * mesh-topology spike ({@link proveVoidTopology}) once the claim resolves — a
+ * verdict-model migration, never the default.
  *
  * @param expectation - The declared void-continuity expectation.
  * @param context - Per-subject proof context (native handle + occurrence index).
@@ -632,74 +913,17 @@ export const proveVoidContinuity = (
   expectation: GeoSpecVoidContinuityExpectation,
   context: RelationshipProofContext,
 ): GeometryDiagnostic[] => {
-  if (!Array.isArray(expectation.path) || expectation.path.length === 0) {
-    return [
-      unsupported(
-        'void-continuity needs at least one path waypoint.',
-        'Declare an ordered path of >= 1 waypoints known to lie in the void.',
-      ),
-    ];
+  const resolved = resolveVoidClaim(expectation, context);
+  if ('diagnostics' in resolved) {
+    return resolved.diagnostics;
   }
-  const resolution = expectation.resolution ?? defaultResolution;
-  if (!(resolution > 0)) {
-    return [
-      unsupported(
-        `void-continuity resolution must be positive, got ${resolution}.`,
-        'Declare a positive voxel edge (mm), or omit resolution for the 2 mm default.',
-      ),
-    ];
+  // Engine dispatch AFTER resolution so both engines share one claim setup —
+  // the topological spike is measured against the voxel verdict, not against a
+  // different region.
+  if (voidEngineForcedTopological()) {
+    return proveVoidTopology(resolved, context);
   }
-
-  // Resolve waypoints.
-  const waypoints: Vec3[] = [];
-  for (const waypoint of expectation.path) {
-    const resolved = resolveWaypoint(waypoint, context.index);
-    if ('error' in resolved) {
-      return [
-        unsupported(
-          `void-continuity waypoint could not be resolved: ${resolved.error}`,
-          'Use explicit [x, y, z] points, or occurrence names that exist in the subject with bounds.',
-        ),
-      ];
-    }
-    waypoints.push(resolved.point);
-  }
-
-  // Material set + region. Refuse the degenerate "classify every occurrence
-  // over an unbounded region" default (Finding 2): it is O(all-occurrences x V)
-  // and no tract needs every solid as material. Require a declared material
-  // set, or derive a narrow neighbourhood from declared bounds.
-  const declaredBounds = expectation.bounds;
-  let materialPaths: string[];
-  if (expectation.material) {
-    materialPaths = expectation.material;
-  } else if (declaredBounds) {
-    materialPaths = occurrencesIntersecting(declaredBounds, context.index, resolution);
-  } else {
-    return [
-      unsupported(
-        'void-continuity needs a material set or explicit bounds to bound the void; refusing to classify every occurrence over an unbounded region.',
-        'Declare `material` occurrence names, or `bounds` { min, max } so the neighbourhood material set can be derived.',
-      ),
-    ];
-  }
-  if (materialPaths.length === 0) {
-    return [
-      unsupported(
-        'void-continuity found no material occurrences to bound the void.',
-        'Declare material occurrence names, or select bounds that overlap occurrences carrying face bounds.',
-      ),
-    ];
-  }
-  const region = declaredBounds ?? materialBounds(materialPaths, context.index, resolution);
-  if (!region) {
-    return [
-      unsupported(
-        'void-continuity could not derive a region: the material occurrences carry no bounds.',
-        'Declare explicit bounds { min, max }, or select material occurrences that carry face bounds.',
-      ),
-    ];
-  }
+  const { waypoints, materialPaths, region, resolution } = resolved;
 
   const dims: [number, number, number] = [
     Math.max(1, Math.ceil((region.max[0] - region.min[0]) / resolution)),
@@ -718,7 +942,10 @@ export const proveVoidContinuity = (
   }
 
   const grid: Grid = { origin: region.min, resolution, dims };
-  const open = computeOpenCells({ context, grid, materialPaths });
+  // R2: the flood phases were the suite's largest invisible sink (~880 s in
+  // flow-paths) — span classification, flood, and cross-section separately.
+  forensicCount('void.grid.cells', totalVoxels);
+  const open = forensicSync('void.classify', () => computeOpenCells({ context, grid, materialPaths }));
   if ('error' in open) {
     return [
       unsupported(
@@ -746,7 +973,7 @@ export const proveVoidContinuity = (
     ];
   }
 
-  const { components } = floodComponents(grid, open);
+  const { components } = forensicSync('void.flood', () => floodComponents(grid, open));
   const firstCell = waypointCells[0];
   if (!firstCell) {
     return [
@@ -814,7 +1041,9 @@ export const proveVoidContinuity = (
         ),
       ];
     }
-    const bottleneck = bottleneckCrossSection({ grid, components, component: pathComponent, waypoints });
+    const bottleneck = forensicSync('void.crossSection', () =>
+      bottleneckCrossSection({ grid, components, component: pathComponent, waypoints }),
+    );
     if (!bottleneck) {
       return [
         unsupported(

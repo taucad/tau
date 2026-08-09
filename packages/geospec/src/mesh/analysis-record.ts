@@ -1,5 +1,14 @@
 import type { Document, Mesh } from '@gltf-transform/core';
+import type { GeoSpecEvidenceCodec } from '#cache/evidence-cache.js';
+import {
+  decodeSectionedPayload,
+  encodeSectionedPayload,
+  sectionToFloat64,
+  sectionToUint32,
+  typedArrayBytes,
+} from '#cache/section-codec.js';
 import { weldPositions } from '#mesh/_internal/spatial-welding.js';
+import { forensicSync } from '#runner/forensic.js';
 import type {
   AabbMeters,
   BoundingBoxStats,
@@ -707,6 +716,31 @@ const buildConnectedPieces = (record: MeshAnalysisRecord): MeshAnalysisSubPiece[
   return pieces;
 };
 
+/**
+ * Max-variance sweep axis over AABB centres (R18/13e): a pure function of the
+ * boxes with tie order x ≥ y ≥ z, shared by every sweep-and-prune site so
+ * colinear stacks on any one axis cannot degrade the prune to O(n²).
+ *
+ * @internal
+ */
+export const sweepAxisByCentreVariance = (aabbs: readonly AabbMeters[]): 0 | 1 | 2 => {
+  const sums = [0, 0, 0];
+  const squares = [0, 0, 0];
+  for (const aabb of aabbs) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      const centre = (aabb.min[axis]! + aabb.max[axis]!) / 2;
+      sums[axis]! += centre;
+      squares[axis]! += centre * centre;
+    }
+  }
+  const count = aabbs.length || 1;
+  const variance = (axis: number): number => squares[axis]! / count - (sums[axis]! / count) ** 2;
+  const x = variance(0);
+  const y = variance(1);
+  const z = variance(2);
+  return x >= y && x >= z ? 0 : y >= z ? 1 : 2;
+};
+
 const aabbsOverlapWithin = (left: AabbMeters, right: AabbMeters, tolerance: number): boolean => {
   for (let axis = 0; axis < 3; axis++) {
     if (left.max[axis]! + tolerance < right.min[axis]!) {
@@ -770,6 +804,14 @@ const minimumSeparationAcrossPieces = (
   let bestTo = rightPieces[0]?.name ?? '';
   for (const left of leftPieces) {
     for (const right of rightPieces) {
+      // R18/13c: the x-axis gap alone lower-bounds the L∞ gap, so a pair whose
+      // x gap already meets the running best can never strictly improve it —
+      // skip before the full separation. Enumeration order is unchanged, so
+      // the reported argmin pair is byte-identical to the unpruned scan.
+      const xGap = Math.max(0, Math.max(right.aabb.min[0] - left.aabb.max[0], left.aabb.min[0] - right.aabb.max[0]));
+      if (xGap >= bestGapM) {
+        continue;
+      }
       const { axis, gapM } = linfSeparation(left.aabb, right.aabb);
       if (gapM < bestGapM) {
         bestGapM = gapM;
@@ -805,12 +847,17 @@ const createConnectedComponents = (record: MeshAnalysisRecord, toleranceMm: numb
     }
   };
 
-  const sorted = [...pieces].sort((left, right) => left.aabb.min[0] - right.aabb.min[0]);
+  // R18/13e: sweep along the max-variance axis (pure function of the pieces;
+  // tie order x ≥ y ≥ z) so colinear stacks keep the prune effective. The
+  // union-find PARTITION is axis-independent (membership uses the 3-axis
+  // test), and cluster ordering is canonicalized after bucketing.
+  const axis = sweepAxisByCentreVariance(pieces.map((piece) => piece.aabb));
+  const sorted = [...pieces].sort((left, right) => left.aabb.min[axis] - right.aabb.min[axis]);
   for (let leftIndex = 0; leftIndex < sorted.length; leftIndex++) {
     const left = sorted[leftIndex]!;
     for (let rightIndex = leftIndex + 1; rightIndex < sorted.length; rightIndex++) {
       const right = sorted[rightIndex]!;
-      if (right.aabb.min[0] > left.aabb.max[0] + tolerance) {
+      if (right.aabb.min[axis] > left.aabb.max[axis] + tolerance) {
         break;
       }
       if (aabbsOverlapWithin(left.aabb, right.aabb, tolerance)) {
@@ -945,19 +992,33 @@ const createRecord = (options: {
   let connectedPiecesCache: MeshAnalysisSubPiece[] | undefined;
   let watertightCache: WatertightResult | undefined;
   let partitionCache: MeshComponentPartition | undefined;
+  let topologySummaryCache: MeshTopologySummary | undefined;
   const connectedComponentsCache = new Map<number, ConnectedComponentsResult>();
   const getWeldedPositions = (): MeshAnalysisWeldedPositions => {
-    weldedPositionsCache ??= buildWeldedPositions(options.positions);
+    // R4: welded topology is computed once per record and shared by every
+    // consumer (topology summary, sub-pieces, watertight breakdowns).
+    weldedPositionsCache ??= forensicSync('mesh.record.weld', () => buildWeldedPositions(options.positions));
     return weldedPositionsCache;
   };
-  const topologySummary = topologyFromTriangles({
-    positions: options.positions,
-    triangleIndices: options.triangleIndices,
-    weldedPositions: getWeldedPositions(),
-    trianglePrimitiveIndices: options.trianglePrimitiveIndices,
-    primitives: options.primitives,
-    includeIrregularEdgeClusters: true,
-  });
+  // R4 (lazy mesh facades): the topology summary — welding every vertex plus a
+  // full edge map over every triangle — was the dominant eager cost of the
+  // assembly GLB load path (~58 s/file at 0.1 mm, Finding 5). It is now a lazy
+  // facet: consumers that never ask a watertight/topology question never pay
+  // for it, and the values are identical because the same inputs compute the
+  // same summary on first access.
+  const getTopologySummary = (): MeshTopologySummary => {
+    topologySummaryCache ??= forensicSync('mesh.record.topology', () =>
+      topologyFromTriangles({
+        positions: options.positions,
+        triangleIndices: options.triangleIndices,
+        weldedPositions: getWeldedPositions(),
+        trianglePrimitiveIndices: options.trianglePrimitiveIndices,
+        primitives: options.primitives,
+        includeIrregularEdgeClusters: true,
+      }),
+    );
+    return topologySummaryCache;
+  };
   const record: MeshAnalysisRecord = {
     vertexCount: options.vertexCount,
     meshCount: options.meshCount,
@@ -968,7 +1029,9 @@ const createRecord = (options: {
     primitives: options.primitives,
     quality: options.quality,
     boundingBox: options.boundingBox,
-    topologySummary,
+    get topologySummary(): MeshTopologySummary {
+      return getTopologySummary();
+    },
     getWeldedPositions,
     getTriangles: () => {
       trianglesCache ??= buildMeshTriangles(record);
@@ -999,7 +1062,103 @@ const createRecord = (options: {
   return record;
 };
 
-export const buildMeshAnalysisRecord = (document: Document): MeshAnalysisRecord => {
+/**
+ * The eager inputs of a mesh analysis record — everything the document
+ * traversal produces before any lazy facet. Pure function of the source
+ * bytes, so it persists as the `mesh-record` evidence family (R3) and
+ * rehydrates without re-parsing the GLB.
+ *
+ * @internal
+ */
+export type MeshAnalysisRecordSnapshot = {
+  vertexCount: number;
+  meshCount: number;
+  positions: Float64Array<ArrayBuffer>;
+  triangleIndices: Uint32Array<ArrayBuffer>;
+  trianglePrimitiveIndices: Uint32Array<ArrayBuffer>;
+  primitives: MeshAnalysisPrimitiveRecord[];
+  quality: MeshQualityBase;
+  boundingBox?: Omit<BoundingBoxStats, 'primitives'>;
+};
+
+/**
+ * Capture a record's eager inputs for the `mesh-record` family (R3).
+ *
+ * @internal
+ */
+export const snapshotMeshAnalysisRecord = (record: MeshAnalysisRecord): MeshAnalysisRecordSnapshot => ({
+  vertexCount: record.vertexCount,
+  meshCount: record.meshCount,
+  positions: record.positions,
+  triangleIndices: record.triangleIndices,
+  trianglePrimitiveIndices: record.trianglePrimitiveIndices,
+  primitives: record.primitives,
+  quality: record.quality,
+  ...(record.boundingBox ? { boundingBox: record.boundingBox } : {}),
+});
+
+/**
+ * Rebuild a full record (lazy facets included) from persisted inputs (R3).
+ *
+ * @internal
+ */
+export const rehydrateMeshAnalysisRecord = (snapshot: MeshAnalysisRecordSnapshot): MeshAnalysisRecord =>
+  createRecord(snapshot);
+
+/**
+ * Evidence codec for `mesh-record` snapshots: JSON header (scalars, primitive
+ * table, quality) plus three binary sections (positions, triangle indices,
+ * triangle→primitive map), so assembly-class geometry never round-trips
+ * through JSON number parsing (R3).
+ *
+ * @internal
+ */
+export const meshRecordSnapshotCodec: GeoSpecEvidenceCodec<MeshAnalysisRecordSnapshot> = {
+  encode: (snapshot) =>
+    encodeSectionedPayload(
+      {
+        vertexCount: snapshot.vertexCount,
+        meshCount: snapshot.meshCount,
+        primitives: snapshot.primitives,
+        quality: snapshot.quality,
+        ...(snapshot.boundingBox ? { boundingBox: snapshot.boundingBox } : {}),
+      },
+      [
+        typedArrayBytes(snapshot.positions),
+        typedArrayBytes(snapshot.triangleIndices),
+        typedArrayBytes(snapshot.trianglePrimitiveIndices),
+      ],
+    ),
+  decode: (bytes) => {
+    const { header, sections } = decodeSectionedPayload(bytes);
+    if (sections.length !== 3) {
+      throw new Error('mesh-record payload must carry exactly 3 sections.');
+    }
+    const meta = header as {
+      vertexCount: number;
+      meshCount: number;
+      primitives: MeshAnalysisPrimitiveRecord[];
+      quality: MeshQualityBase;
+      boundingBox?: Omit<BoundingBoxStats, 'primitives'>;
+    };
+    return {
+      vertexCount: meta.vertexCount,
+      meshCount: meta.meshCount,
+      positions: sectionToFloat64(sections[0]!),
+      triangleIndices: sectionToUint32(sections[1]!),
+      trianglePrimitiveIndices: sectionToUint32(sections[2]!),
+      primitives: meta.primitives,
+      quality: meta.quality,
+      ...(meta.boundingBox ? { boundingBox: meta.boundingBox } : {}),
+    };
+  },
+};
+
+export const buildMeshAnalysisRecord = (document: Document): MeshAnalysisRecord =>
+  // R2: the GLB mesh path had zero instrumentation (Finding 5).
+  forensicSync('mesh.record.build', () => buildMeshAnalysisRecordEager(document));
+
+const buildMeshAnalysisRecordEager = (document: Document): MeshAnalysisRecord => {
   const meshNodeNames = buildMeshNodeNameMap(document);
   const positions: number[] = [];
   const triangleIndices: number[] = [];
@@ -1192,10 +1351,18 @@ export const createGeometryStatsFromRecord = (record: MeshAnalysisRecord): Geome
     meshQuality: createMeshQualityStats(record),
     connectedComponents: (toleranceMm) => record.getConnectedComponents(toleranceMm).count,
     analyseConnectedComponents: (toleranceMm) => record.getConnectedComponents(toleranceMm),
-    watertight: record.topologySummary.watertight,
+    // R4: placeholder immediately shadowed by the lazy getter below.
+    watertight: false,
     analyseWatertight: () => record.getWatertightResult(),
     boundingBox: createBoundingBoxStats(record),
   };
+  // R4: reading `watertight` forces the (lazy) topology summary — building the
+  // stats facade no longer does.
+  Object.defineProperty(stats, 'watertight', {
+    configurable: false,
+    enumerable: true,
+    get: () => record.topologySummary.watertight,
+  });
   attachMeshAnalysisRecord(stats, record);
   return stats;
 };

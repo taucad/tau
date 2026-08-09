@@ -1,3 +1,4 @@
+import { withGeoSpecBuildLock } from '#cache/build-lock.js';
 import { GeoSpecModelLoadError, loadModel } from '#model/index.js';
 import {
   createDefaultNodeRuntimeClient,
@@ -5,6 +6,7 @@ import {
   runtimeKeyForModelLoad,
   sourceAdapterForModelLoad,
 } from '#model/runtime.js';
+import { createModelLoadCacheKey, readThreadedModelLoadCacheKey } from '#runner/model-load-cache.js';
 import type { GeoSpecRuntimeKey, ModelRuntimeClientResult } from '#model/runtime.js';
 import type {
   GeoSpecModelLoader,
@@ -13,6 +15,7 @@ import type {
   LoadModelOptions,
 } from '#model/types.js';
 import type { GeometrySubject } from '#mesh/types.js';
+import { forensicAsync } from '#runner/forensic.js';
 
 type RuntimeFactoryOptions = {
   key: GeoSpecRuntimeKey;
@@ -187,12 +190,15 @@ export const createGeoSpecNodeInvocationContext = (
       stats.runtimeCreations[key] = (stats.runtimeCreations[key] ?? 0) + 1;
     }
     const promise = (async () => {
-      const result = await factory({
-        key,
-        projectPath,
-        file,
-        sourceAdapters,
-      });
+      // R2: runtime client creation was an unspanned part of the boot floor.
+      const result = await forensicAsync(`load.runtime.create.${key}`, async () =>
+        factory({
+          key,
+          projectPath,
+          file,
+          sourceAdapters,
+        }),
+      );
       if (!result.success) {
         throw new GeoSpecModelLoadError(result.diagnostics);
       }
@@ -278,16 +284,27 @@ export const createGeoSpecNodeInvocationContext = (
       } as LoadModelOptions);
     }
     const key = runtimeKeyForModelLoad({ file: input.file, sourceAdapters: resolvedSourceAdapters });
-    return loadWithBudget(
-      key,
-      input.file,
-      loadModel({
-        projectPath,
-        ...input,
-        ...(resolvedSourceAdapters ? { sourceAdapters: resolvedSourceAdapters } : {}),
-        runtime: async () => runtimeForKey(key, input.file),
-      } as LoadModelOptions),
-    );
+    const budgetedLoad = async (): Promise<GeometrySubject> =>
+      loadWithBudget(
+        key,
+        input.file,
+        loadModel({
+          projectPath,
+          ...input,
+          ...(resolvedSourceAdapters ? { sourceAdapters: resolvedSourceAdapters } : {}),
+          runtime: async () => runtimeForKey(key, input.file),
+        } as LoadModelOptions),
+      );
+    // R14: serialize same-key builds across processes and pool workers so a
+    // cold start pays one kernel build, not N. Lock-wait happens BEFORE the
+    // budgeted load starts, so waiting can never trip MODEL_LOAD_TIMEOUT;
+    // waiters then complete against the winner's warm geometry cache.
+    // R10: the cached wrapper already canonicalized this load's key — reuse it
+    // instead of re-serializing the include set.
+    const buildLockKey = readThreadedModelLoadCacheKey(input) ?? createModelLoadCacheKey(input);
+    return buildLockKey === undefined
+      ? budgetedLoad()
+      : withGeoSpecBuildLock({ projectPath, key: buildLockKey, run: budgetedLoad });
   };
 
   return {

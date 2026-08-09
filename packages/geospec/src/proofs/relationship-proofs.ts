@@ -11,7 +11,7 @@
  * @module
  */
 
-import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
+import type { GeometryDiagnostic, OccurrenceFaceMeshFetcher, OccurrenceMeshFetcher, Vec3 } from '#mesh/types.js';
 import type { GeoSpecSpatialRelationshipExpectation } from '#runner/types.js';
 import type { GeoSpecNativeXdeReadResult } from '#step/types.js';
 import { selectorDiagnosticCodes } from '#selector/diagnostics.js';
@@ -20,8 +20,16 @@ import type { SelectorTolerances } from '#selector/tolerances.js';
 import { serializeSelector } from '#selector/types.js';
 import type { GeometryFacts, GeometrySelection, ResolvedEntity } from '#selector/types.js';
 import { axisAngleBetweenDegrees, distance, dot, normalize, scale, subtract } from '#selector/vector-math.js';
-import { checkBudget } from '#runner/matcher-budget.js';
+import { getGeoSpecEvidenceCache } from '#cache/evidence-cache.js';
+import { chargeBudget } from '#runner/matcher-budget.js';
+import { classifySeating, occtContactClassifier, windingContactClassifier } from '#proofs/contact-classifier.js';
+import { buildMeshDistanceData, meshWithinDistance, meshesFartherThan } from '#proofs/mesh-distance-predicates.js';
+import type { MeshWitnessPair } from '#proofs/mesh-distance-predicates.js';
+import type { ClassificationState, ContactClassifier } from '#proofs/contact-classifier.js';
+import { estimateContactPatchTopological } from '#proofs/contact-topology.js';
 import type {
+  ContactPatch,
+  NativeShapeRef,
   RelationshipBroadPhase,
   RelationshipEvidence,
   RelationshipFinalEvidence,
@@ -50,6 +58,45 @@ export type RelationshipProofContext = {
   index: SelectorIndex;
   occurrenceIndexByPath: ReadonlyMap<string, number>;
   tolerances: SelectorTolerances;
+  /**
+   * SHA-256 of the subject artifact bytes (R5 subject-scope cache identity).
+   * Absent for subjects without content provenance — those never persist.
+   */
+  subjectContentHash?: string;
+  /**
+   * Per-occurrence on-demand tessellation (subject frame) for the hybrid
+   * void-occupancy engine. Absent on pre-hybrid native builds and fake
+   * natives — void claims then run the pure exact scan.
+   */
+  occurrenceMesh?: OccurrenceMeshFetcher;
+  /**
+   * Per-occurrence-face on-demand tessellation (subject frame) for the
+   * topological contact-patch engine (R1: exact trimmed per-face footprint).
+   * Absent on pre-facet native builds and fake natives — contact claims then
+   * fall back to the winding/classify sampling lattice.
+   */
+  occurrenceFaceMesh?: OccurrenceFaceMeshFetcher;
+  /**
+   * Programmatic override of the `GEOSPEC_CONTACT_ENGINE` env selection. The
+   * differential corpus injects the engine per proof through the context so it
+   * never mutates global `process.env` (which would race concurrent suites).
+   * Production leaves this unset and reads the env.
+   */
+  contactEngine?: ContactEngine;
+  /**
+   * Programmatic override of `GEOSPEC_CONTACT_ANALYTIC_SEATING` (CO-R6,
+   * default ON): exact analytic seating distance for plane/cylinder target
+   * faces. Same context-injection contract as {@link contactEngine}.
+   */
+  contactAnalyticSeating?: boolean;
+  /**
+   * Programmatic override of `GEOSPEC_EXTREMA_GATE` (CR4, default ON since
+   * the 0-flip promotion run): certified mesh-distance threshold predicates
+   * resolve contact/clearance claims whose tolerance sits strictly clear of
+   * the mesh interval; straddles compute the exact OCCT extrema unchanged.
+   * Same context-injection contract as {@link contactEngine}.
+   */
+  extremaGate?: boolean;
 };
 
 /**
@@ -227,8 +274,6 @@ const explicitEndpointRejection = (input: RelationshipProofInput): RelationshipE
   return undefined;
 };
 
-type NativeShapeRef = { occurrence: number; face: number };
-
 const shapeRef = (entity: ResolvedEntity, context: RelationshipProofContext): NativeShapeRef | undefined => {
   if (entity.occurrencePath === undefined) {
     return undefined;
@@ -350,6 +395,59 @@ type ExtremaMeasurement = {
   target: ResolvedEntity;
 };
 
+// --- R1: persisted exact-BRep proof payloads (relationship-verdict family) -------
+
+/**
+ * Wrap one exact-BRep native crossing in the persisted `relationship-verdict`
+ * family (suite audit R1 — the dominant hot cost): the payload is a pure
+ * function of (engine digest, subject content hash, shape references, call
+ * arguments), so warm runs replay it instead of re-crossing into OCCT. Error
+ * payloads are never stored (failures re-evaluate every run), and the
+ * work-unit charge lives inside the compute so replays charge nothing — the
+ * cache-hit precedent the overlap sweep set.
+ */
+const isNativeErrorPayload = (value: unknown): value is { error: string } =>
+  typeof value === 'object' &&
+  value !== null &&
+  'error' in value &&
+  typeof (value as { error?: unknown }).error === 'string';
+
+const cachedNativePayload = <T extends Record<string, unknown>>(options: {
+  input: RelationshipProofInput;
+  kind: string;
+  key: Record<string, unknown>;
+  /** Work units the native crossing charges; 0 keeps historically-unmetered calls unmetered. */
+  charge: number;
+  call: () => string;
+}): T | { error: string } => {
+  const compute = (): T | { error: string } => {
+    if (options.charge > 0) {
+      chargeBudget(options.charge);
+    }
+    return parseNativeJson<T>(options.call());
+  };
+  const cache = getGeoSpecEvidenceCache();
+  const subjectHash = options.input.context.subjectContentHash;
+  if (!cache || subjectHash === undefined) {
+    return compute();
+  }
+  let uncachedOutcome: { error: string } | undefined;
+  const stored = cache.getOrCompute<T>({
+    family: 'relationship-verdict',
+    version: 1,
+    key: { subjectHash, kind: options.kind, ...options.key },
+    compute: () => {
+      const computed = compute();
+      if (isNativeErrorPayload(computed)) {
+        uncachedOutcome = computed;
+        return undefined;
+      }
+      return computed;
+    },
+  });
+  return stored ?? uncachedOutcome ?? compute();
+};
+
 const measureExtrema = (input: RelationshipProofInput): ExtremaMeasurement | RelationshipEvidence => {
   const endpoints = proofEndpoints(input);
   if (isEvidence(endpoints)) {
@@ -363,13 +461,22 @@ const measureExtrema = (input: RelationshipProofInput): ExtremaMeasurement | Rel
   if (isEvidence(references)) {
     return references;
   }
-  const raw = input.context.native.extrema(
-    references.subject.occurrence,
-    references.subject.face,
-    references.target.occurrence,
-    references.target.face,
-  );
-  const payload = parseNativeJson<ExtremaPayload>(raw);
+  const payload = cachedNativePayload<ExtremaPayload>({
+    input,
+    kind: 'extrema',
+    key: {
+      subject: `${references.subject.occurrence}/${references.subject.face}`,
+      target: `${references.target.occurrence}/${references.target.face}`,
+    },
+    charge: 1,
+    call: () =>
+      input.context.native.extrema(
+        references.subject.occurrence,
+        references.subject.face,
+        references.target.occurrence,
+        references.target.face,
+      ),
+  });
   if ('error' in payload) {
     return nativeError(input, 'extrema', payload.error);
   }
@@ -396,6 +503,451 @@ const measureExtrema = (input: RelationshipProofInput): ExtremaMeasurement | Rel
  * flange fixtures (patch 258.9–262.0 vs analytic 260.2; 1600.0 vs 1600).
  */
 const contactPatchGrid = 40;
+
+/**
+ * Contact-patch engine (spatial-relationship blueprint R1/R2), read once per
+ * proof from `GEOSPEC_CONTACT_ENGINE` (mirrors `GEOSPEC_VOID_ENGINE`).
+ * `winding` swaps the target membership oracle to the fast winding number over
+ * the target tessellation (sampling lattice retained); `topological` also
+ * replaces the grid with the exact per-face triangulation. Default `classify`
+ * is the OCCT sampling lattice.
+ *
+ * @public
+ */
+export type ContactEngine = 'classify' | 'winding' | 'topological';
+
+const contactEngine = (): ContactEngine => {
+  if (typeof process === 'undefined' || typeof process.env !== 'object') {
+    return 'classify';
+  }
+  const value = process.env['GEOSPEC_CONTACT_ENGINE'];
+  return value === 'winding' || value === 'topological' ? value : 'classify';
+};
+
+/**
+ * CO-R6 (contact-oracle blueprint): replace the soup `on`-band test with the
+ * exact analytic distance for plane/cylinder target faces, removing the
+ * target side's deflection slack from the seating band. Promoted to default
+ * after a 0-flip contact differential; `GEOSPEC_CONTACT_ANALYTIC_SEATING=0`
+ * restores the soup band. Cone needs witness-slope recovery and
+ * sphere/torus/bspline stay on the soup path regardless.
+ */
+const contactAnalyticSeating = (): boolean => {
+  if (typeof process === 'undefined' || typeof process.env !== 'object') {
+    return true;
+  }
+  return process.env['GEOSPEC_CONTACT_ANALYTIC_SEATING'] !== '0';
+};
+
+/** Exact signed distance to an analytic target face (CO-R6). */
+const analyticSeatingDistance = (facts: GeometryFacts): ((point: Vec3) => number) | undefined => {
+  if (facts.surfaceType === 'plane' && facts.normal && facts.offset !== undefined) {
+    const [nx, ny, nz] = facts.normal;
+    const { offset } = facts;
+    return (point) => point[0] * nx + point[1] * ny + point[2] * nz - offset;
+  }
+  if (facts.surfaceType === 'cylinder' && facts.axisOrigin && facts.axisDirection && facts.radius !== undefined) {
+    const [ox, oy, oz] = facts.axisOrigin;
+    const length = Math.hypot(facts.axisDirection[0], facts.axisDirection[1], facts.axisDirection[2]);
+    if (!(length > 0)) {
+      return undefined;
+    }
+    const dx = facts.axisDirection[0] / length;
+    const dy = facts.axisDirection[1] / length;
+    const dz = facts.axisDirection[2] / length;
+    const { radius } = facts;
+    return (point) => {
+      const px = point[0] - ox;
+      const py = point[1] - oy;
+      const pz = point[2] - oz;
+      const along = px * dx + py * dy + pz * dz;
+      return Math.hypot(px - along * dx, py - along * dy, pz - along * dz) - radius;
+    };
+  }
+  return undefined;
+};
+
+/**
+ * Tessellation deflection for the target winding oracle: finer than the contact
+ * tolerance so the ±tolerance probes fall cleanly on either side of the
+ * tessellated surface (crisp winding number), clamped to the void engine's sane
+ * band.
+ */
+const contactMeshDeflection = (tolerance: number): number => Math.min(0.1, Math.max(0.005, tolerance / 2));
+
+/** Angular tessellation tolerance for the target winding oracle (loader default). */
+const contactMeshAngularToleranceDegrees = 15;
+
+// --- CR4: certified mesh-distance gate for extrema claims -----------------------
+
+/**
+ * F4 (Finding 4): the certified interval slack is `k · (δ_subject + δ_target)`
+ * with the achieved tessellation deflections. k = 2 was measured by the
+ * deviation gate (zero containment violations across the fixture corpus at
+ * every deflection tried, unbounded margin).
+ */
+const extremaDeviationSafetyFactor = 2;
+
+/**
+ * Default ON since the CO-R6-precedent promotion run: 0 verdict flips across
+ * the v8 corpus gate-on vs gate-off (110 tests, cold + hot), differential
+ * green, hot byte-identity preserved by the peek-first contract. Benefit is
+ * claim-scale-dependent: µm-band fits straddle to the exact path because the
+ * certified slack (≥ 0.02 mm at the deflection floor) exceeds the band;
+ * mm-scale claims resolve. `GEOSPEC_EXTREMA_GATE=0` is the escape hatch.
+ */
+const extremaGateEnabled = (): boolean => {
+  if (typeof process === 'undefined' || typeof process.env !== 'object') {
+    return false;
+  }
+  return process.env['GEOSPEC_EXTREMA_GATE'] !== '0';
+};
+
+type MeshGate = {
+  subject: ReturnType<typeof buildMeshDistanceData>;
+  target: ReturnType<typeof buildMeshDistanceData>;
+  /** Certified mesh↔BRep interval slack (F4): k · (δ_subject + δ_target). */
+  slack: number;
+  subjectEntity: ResolvedEntity;
+  targetEntity: ResolvedEntity;
+  broadPhase?: RelationshipBroadPhase;
+};
+
+/**
+ * Peek one stored exact payload in the `relationship-verdict` family without
+ * computing anything — the gate's peek-first contract: a cached exact payload
+ * always wins so hot runs stay byte-identical.
+ */
+const storedVerdictPayload = <T extends Record<string, unknown>>(
+  input: RelationshipProofInput,
+  kind: string,
+  key: Record<string, unknown>,
+): T | undefined => {
+  const cache = getGeoSpecEvidenceCache();
+  const subjectHash = input.context.subjectContentHash;
+  if (!cache || subjectHash === undefined) {
+    return undefined;
+  }
+  return cache.getOrCompute<T>({
+    family: 'relationship-verdict',
+    version: 1,
+    key: { subjectHash, kind, ...key },
+    compute: () => undefined,
+  });
+};
+
+/**
+ * Prepare the mesh-distance gate for one exact-BRep claim, or `undefined`
+ * whenever the exact path must run instead: gate disabled, face-targeted
+ * endpoints (an occurrence-level interval only bounds a face pair from
+ * below), unresolved endpoints (the exact path surfaces the identical
+ * evidence), no tessellation fetcher, or an already-stored exact payload
+ * (`storedPayloadExists`, the caller's kind-specific peek — hot runs stay
+ * byte-identical).
+ */
+const prepareMeshGate = (
+  input: RelationshipProofInput,
+  storedPayloadExists: (references: { subject: NativeShapeRef; target: NativeShapeRef }) => boolean,
+): MeshGate | undefined => {
+  if (!(input.context.extremaGate ?? extremaGateEnabled())) {
+    return undefined;
+  }
+  const fetchMesh = input.context.occurrenceMesh;
+  if (!fetchMesh) {
+    return undefined;
+  }
+  const endpoints = proofEndpoints(input);
+  if (isEvidence(endpoints)) {
+    return undefined;
+  }
+  const references = requireShapeReferences({
+    input,
+    subject: endpoints.subject.entity,
+    target: endpoints.target.entity,
+  });
+  if (isEvidence(references)) {
+    return undefined;
+  }
+  if (references.subject.face !== -1 || references.target.face !== -1) {
+    return undefined;
+  }
+  if (storedPayloadExists(references)) {
+    return undefined;
+  }
+  const tolerance = input.expectation.tolerance ?? input.context.tolerances.linearMm;
+  const meshOptions = {
+    linearDeflection: contactMeshDeflection(tolerance),
+    angularDeflectionDegrees: contactMeshAngularToleranceDegrees,
+  };
+  const subjectMesh = fetchMesh(references.subject.occurrence, meshOptions);
+  if ('error' in subjectMesh) {
+    return undefined;
+  }
+  const targetMesh = fetchMesh(references.target.occurrence, meshOptions);
+  if ('error' in targetMesh) {
+    return undefined;
+  }
+  const broadPhase = aabbBroadPhase({
+    subject: endpoints.subject.entity,
+    target: endpoints.target.entity,
+    linearMm: input.context.tolerances.linearMm,
+  });
+  return {
+    subject: buildMeshDistanceData(subjectMesh.triangles),
+    target: buildMeshDistanceData(targetMesh.triangles),
+    slack: extremaDeviationSafetyFactor * (subjectMesh.deflection + targetMesh.deflection),
+    subjectEntity: endpoints.subject.entity,
+    targetEntity: endpoints.target.entity,
+    ...(broadPhase ? { broadPhase } : {}),
+  };
+};
+
+/** Realizable mesh pair as provenance-labelled point witnesses. */
+const meshPairWitnesses = (pair: MeshWitnessPair, gate: MeshGate): RelationshipWitness[] => [
+  { ...pointWitness(pair.subjectPoint, gate.subjectEntity.topologyRef), provenance: 'mesh' },
+  { ...pointWitness(pair.targetPoint, gate.targetEntity.topologyRef), provenance: 'mesh' },
+];
+
+/**
+ * Resolve a plain-distance contact claim from certified mesh bounds, or
+ * `undefined` on a straddle (→ exact extrema, unchanged). Pass: a realizable
+ * pair bounds the exact distance at or below the tolerance. Fail: the
+ * separation certificate bounds every pair strictly above it.
+ */
+const peekExtremaPayload = (
+  input: RelationshipProofInput,
+): ((references: { subject: NativeShapeRef; target: NativeShapeRef }) => boolean) => {
+  return (references) =>
+    storedVerdictPayload<ExtremaPayload>(input, 'extrema', {
+      subject: `${references.subject.occurrence}/${references.subject.face}`,
+      target: `${references.target.occurrence}/${references.target.face}`,
+    }) !== undefined;
+};
+
+const resolveContactByMeshGate = (input: RelationshipProofInput): RelationshipEvidence | undefined => {
+  const gate = prepareMeshGate(input, peekExtremaPayload(input));
+  if (!gate) {
+    return undefined;
+  }
+  const tolerance = input.expectation.tolerance ?? input.context.tolerances.linearMm;
+  const passThreshold = tolerance - gate.slack;
+  if (passThreshold > 0) {
+    chargeBudget(1);
+    const witness = meshWithinDistance(gate.subject, gate.target, passThreshold);
+    if (witness) {
+      return passEvidence({
+        final: {
+          method: 'mesh-distance-bound',
+          measured: { distanceUpperBound: witness.distance + gate.slack },
+          expected: { distance: 0, tolerance },
+          witnesses: meshPairWitnesses(witness, gate),
+        },
+        ...(gate.broadPhase ? { broadPhase: gate.broadPhase } : {}),
+      });
+    }
+  }
+  chargeBudget(1);
+  if (meshesFartherThan(gate.subject, gate.target, tolerance + gate.slack)) {
+    return failEvidence({
+      input,
+      message: `expected contact within ${tolerance}mm, but the certified mesh bound puts every exact point pair beyond it.`,
+      suggestion: 'Translate the subject toward the target, or correct the declared interface.',
+      final: {
+        method: 'mesh-distance-bound',
+        measured: { distanceLowerBound: tolerance },
+        expected: { distance: 0, tolerance },
+        witnesses: [],
+      },
+      ...(gate.broadPhase ? { broadPhase: gate.broadPhase } : {}),
+    });
+  }
+  return undefined;
+};
+
+/**
+ * Resolve a clearance-band claim from certified mesh bounds, or `undefined`
+ * on any straddle. The exact comparator is `d + tol ≥ min && d − tol ≤ max`;
+ * each side resolves only when certified strictly clear of its boundary, and
+ * boundary equality always falls through to the exact evaluator.
+ */
+const resolveClearanceByMeshGate = (input: RelationshipProofInput): RelationshipEvidence | undefined => {
+  const gate = prepareMeshGate(input, peekExtremaPayload(input));
+  if (!gate) {
+    return undefined;
+  }
+  const tolerance = input.expectation.tolerance ?? input.context.tolerances.linearMm;
+  const min = input.expectation.min ?? 0;
+  const max = input.expectation.max ?? Number.POSITIVE_INFINITY;
+  const expected = {
+    ...(input.expectation.min === undefined ? {} : { min }),
+    ...(input.expectation.max === undefined ? {} : { max }),
+    tolerance,
+  };
+  const lowBoundary = min - tolerance;
+  let lowCertified = lowBoundary <= 0;
+  if (!lowCertified) {
+    chargeBudget(1);
+    lowCertified = meshesFartherThan(gate.subject, gate.target, lowBoundary + gate.slack);
+  }
+  let upperWitness: MeshWitnessPair | undefined;
+  let highCertified = max === Number.POSITIVE_INFINITY;
+  if (!highCertified) {
+    const threshold = max + tolerance - gate.slack;
+    if (threshold > 0) {
+      chargeBudget(1);
+      upperWitness = meshWithinDistance(gate.subject, gate.target, threshold);
+      highCertified = upperWitness !== undefined;
+    }
+  }
+  if (lowCertified && highCertified) {
+    return passEvidence({
+      final: {
+        method: 'mesh-distance-bound',
+        measured: {
+          ...(lowBoundary <= 0 ? {} : { distanceLowerBound: lowBoundary }),
+          ...(upperWitness ? { distanceUpperBound: upperWitness.distance + gate.slack } : {}),
+        },
+        expected,
+        witnesses: upperWitness ? meshPairWitnesses(upperWitness, gate) : [],
+      },
+      ...(gate.broadPhase ? { broadPhase: gate.broadPhase } : {}),
+    });
+  }
+  if (lowBoundary > 0) {
+    const tightThreshold = lowBoundary - gate.slack;
+    if (tightThreshold > 0) {
+      chargeBudget(1);
+      const witness = meshWithinDistance(gate.subject, gate.target, tightThreshold);
+      if (witness && witness.distance + gate.slack < lowBoundary) {
+        return failEvidence({
+          input,
+          message: `expected clearance in [${min}, ${max === Number.POSITIVE_INFINITY ? '∞' : max}]mm, but a realizable pair bounds the exact distance below ${lowBoundary}mm (too tight).`,
+          suggestion: 'Increase the gap at the witness pair, or relax the declared minimum.',
+          final: {
+            method: 'mesh-distance-bound',
+            measured: { distanceUpperBound: witness.distance + gate.slack },
+            expected,
+            witnesses: meshPairWitnesses(witness, gate),
+          },
+          ...(gate.broadPhase ? { broadPhase: gate.broadPhase } : {}),
+        });
+      }
+    }
+  }
+  if (max !== Number.POSITIVE_INFINITY) {
+    chargeBudget(1);
+    if (meshesFartherThan(gate.subject, gate.target, max + tolerance + gate.slack)) {
+      return failEvidence({
+        input,
+        message: `expected clearance in [${min}, ${max}]mm, but the certified mesh bound puts every exact point pair beyond ${max + tolerance}mm (too loose).`,
+        suggestion: 'Reduce the gap, or relax the declared maximum.',
+        final: {
+          method: 'mesh-distance-bound',
+          measured: { distanceLowerBound: max + tolerance },
+          expected,
+          witnesses: [],
+        },
+        ...(gate.broadPhase ? { broadPhase: gate.broadPhase } : {}),
+      });
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Build the target membership oracle for one contact claim: the fast winding
+ * number over the target occurrence tessellation for the `winding`/`topological`
+ * engines, falling back to the exact OCCT classifier when the occurrence mesh is
+ * unavailable (deterministic per subject, §16 — never timing/load). Built once
+ * per claim and shared across every subject face: this is the amortization that
+ * makes FWN win (one `O(n log n)` build, then many `O(log n)` queries).
+ */
+/**
+ * Per-subject cache of the winding target oracle: the Barnes-Hut tree build over
+ * the target tessellation is heavy (hundreds of thousands of triangles for a
+ * casting), so it is built once per `(target occurrence, tolerance)` and reused
+ * across every contact claim of the subject run — the amortization that makes
+ * the winding oracle a net win over per-claim OCCT classification. Keyed on the
+ * Weakly-held proof context, so it releases with the subject.
+ */
+const targetClassifierCache = new WeakMap<RelationshipProofContext, Map<string, ContactClassifier>>();
+
+// R2/CO-R2 (suite audit): a winding classifier is a pure function of (subject
+// content, target occurrence, tolerance) — engine digest invariance rides the
+// occurrence-mesh evidence family it is built from. The per-context WeakMap
+// dies with each requirement's fresh subject object, so this small
+// content-keyed LRU carries built trees across requirements within one
+// worker. ponytail: capacity 8 — entries retain their soup + tree, so raise
+// only with a measured need.
+const windingClassifierLru = new Map<string, ContactClassifier>();
+const windingClassifierLruCapacity = 8;
+
+const buildTargetClassifier = (options: {
+  input: RelationshipProofInput;
+  target: NativeShapeRef;
+  engine: ContactEngine;
+  tolerance: number;
+  /** CO-R6: exact analytic seating distance for the claim's target face. */
+  analyticOnDistance?: (point: Vec3) => number;
+}): ContactClassifier => {
+  const { input, target, engine, tolerance } = options;
+  if (engine === 'classify' || !input.context.occurrenceMesh) {
+    return occtContactClassifier(input.context.native, target.occurrence);
+  }
+  let perContext = targetClassifierCache.get(input.context);
+  if (!perContext) {
+    perContext = new Map();
+    targetClassifierCache.set(input.context, perContext);
+  }
+  // CO-R6 classifiers seat against one specific face, so they never share an
+  // entry with the plain band classifier for the same occurrence.
+  const mode = options.analyticOnDistance ? `analytic-${target.face}` : 'band';
+  const key = `${target.occurrence}:${tolerance}:${mode}`;
+  const cached = perContext.get(key);
+  if (cached) {
+    return cached;
+  }
+  const contentKey =
+    input.context.subjectContentHash === undefined
+      ? undefined
+      : `${input.context.subjectContentHash}:${target.occurrence}:${tolerance}:${mode}`;
+  if (contentKey) {
+    const shared = windingClassifierLru.get(contentKey);
+    if (shared) {
+      // Refresh LRU recency.
+      windingClassifierLru.delete(contentKey);
+      windingClassifierLru.set(contentKey, shared);
+      perContext.set(key, shared);
+      return shared;
+    }
+  }
+  const mesh = input.context.occurrenceMesh(target.occurrence, {
+    linearDeflection: contactMeshDeflection(tolerance),
+    angularDeflectionDegrees: contactMeshAngularToleranceDegrees,
+  });
+  const classifier = windingContactClassifier(mesh, {
+    toleranceBand: tolerance,
+    ...(options.analyticOnDistance ? { analyticOnDistance: options.analyticOnDistance } : {}),
+  });
+  // Winding-mesh unavailable → fall back to OCCT (cached too, so the failed
+  // fetch is not retried); the fallback ladder stays a pure function of the
+  // subject (§16).
+  const resolved: ContactClassifier =
+    'error' in classifier ? occtContactClassifier(input.context.native, target.occurrence) : classifier;
+  perContext.set(key, resolved);
+  // Only content-pure winding classifiers are shareable; the OCCT fallback is
+  // bound to this context's native handle.
+  if (contentKey && !('error' in classifier)) {
+    windingClassifierLru.set(contentKey, resolved);
+    if (windingClassifierLru.size > windingClassifierLruCapacity) {
+      const oldest = windingClassifierLru.keys().next().value;
+      if (oldest !== undefined) {
+        windingClassifierLru.delete(oldest);
+      }
+    }
+  }
+  return resolved;
+};
 
 /**
  * Meridian of a conical subject face, fully fixed from exact evidence. The
@@ -506,6 +1058,7 @@ const coneMeridianFromBisection = (options: {
     stationBase[2] + probe[2] * radius,
   ];
   const classify = (points: Vec3[]): Array<'in' | 'out' | 'on'> | undefined => {
+    chargeBudget(points.length);
     const payload = parseNativeJson<ClassificationPayload>(native.classifyPoints(occurrence, JSON.stringify(points)));
     return 'error' in payload ? undefined : payload.states;
   };
@@ -593,23 +1146,6 @@ const faceGridPoints = (facts: GeometryFacts, cone?: ConeMeridian): Vec3[] | und
   return points;
 };
 
-type ContactPatch = {
-  /** True face area (mm²) from the resolved SB1 face facts (exact). */
-  faceArea: number;
-  /** Sampled estimate (mm²): contacting fraction × faceArea. */
-  patchArea: number;
-  /** Quantization band (mm²): one grid-row of the sampled footprint perimeter. */
-  band: number;
-  /** Lattice points that landed on the subject face (the sampled footprint). */
-  footprint: number;
-  /** Footprint points within the contact tolerance of the target boundary. */
-  contacting: number;
-  /** Footprint points `in` the target solid — penetration, not clean seating. */
-  penetrating: number;
-  /** A contacting witness point, when any sample seats. */
-  witness?: Vec3;
-};
-
 /**
  * Surface direction at a projected sample — the bracketing direction for the
  * tolerance probes. The sign is irrelevant (the bracket is symmetric);
@@ -654,14 +1190,14 @@ const surfaceNormalAt = (facts: GeometryFacts, point: Vec3, cone?: ConeMeridian)
  */
 const countContactSamples = (options: {
   input: RelationshipProofInput;
-  target: NativeShapeRef;
   points: Vec3[];
   subjectStates: readonly string[];
-  targetStates: readonly string[];
+  targetStates: readonly ClassificationState[];
   facts: GeometryFacts;
   cone?: ConeMeridian;
+  targetClassifier: ContactClassifier;
 }): Pick<ContactPatch, 'footprint' | 'contacting' | 'penetrating' | 'witness'> | { error: string } => {
-  const { input, target, points, subjectStates, targetStates, facts, cone } = options;
+  const { input, points, subjectStates, targetStates, facts, cone, targetClassifier } = options;
   const tolerance = input.expectation.tolerance ?? input.context.tolerances.linearMm;
   const footprintIndices: number[] = [];
   const probePlus: Vec3[] = [];
@@ -687,41 +1223,36 @@ const countContactSamples = (options: {
       ]);
     }
   }
-  let plusStates: readonly string[] = [];
-  let minusStates: readonly string[] = [];
+  let plusStates: readonly ClassificationState[] = [];
+  let minusStates: readonly ClassificationState[] = [];
   if (probePlus.length > 0) {
-    const plusPayload = parseNativeJson<ClassificationPayload>(
-      input.context.native.classifyPoints(target.occurrence, JSON.stringify(probePlus)),
-    );
-    if ('error' in plusPayload) {
-      return { error: plusPayload.error };
+    chargeBudget(probePlus.length + probeMinus.length);
+    const plus = targetClassifier.classify(probePlus);
+    if (!Array.isArray(plus)) {
+      return plus;
     }
-    const minusPayload = parseNativeJson<ClassificationPayload>(
-      input.context.native.classifyPoints(target.occurrence, JSON.stringify(probeMinus)),
-    );
-    if ('error' in minusPayload) {
-      return { error: minusPayload.error };
+    const minus = targetClassifier.classify(probeMinus);
+    if (!Array.isArray(minus)) {
+      return minus;
     }
-    plusStates = plusPayload.states;
-    minusStates = minusPayload.states;
+    plusStates = plus;
+    minusStates = minus;
   }
   let contacting = 0;
   let penetrating = 0;
   let witness: Vec3 | undefined;
   for (const sample of footprintIndices) {
-    const state = targetStates[sample];
-    if (state === 'in') {
+    const position = probePosition.get(sample);
+    const outcome = classifySeating(
+      targetStates[sample],
+      position === undefined ? undefined : plusStates[position],
+      position === undefined ? undefined : minusStates[position],
+    );
+    if (outcome === 'penetrate') {
       penetrating += 1;
       continue;
     }
-    let seats = state === 'on';
-    const position = probePosition.get(sample);
-    if (!seats && position !== undefined) {
-      const plus = plusStates[position];
-      const minus = minusStates[position];
-      seats = plus === 'on' || minus === 'on' || (plus !== minus && plus !== undefined && minus !== undefined);
-    }
-    if (seats) {
+    if (outcome === 'seat') {
       contacting += 1;
       witness ??= points[sample];
     }
@@ -751,6 +1282,10 @@ const estimateContactPatch = (options: {
   subject: NativeShapeRef;
   target: NativeShapeRef;
   facts: GeometryFacts;
+  /** R2/CO-R1: the target oracle, built only when target work actually runs. */
+  getTargetClassifier: () => ContactClassifier;
+  /** R3 broad-phase: face beyond contact tolerance of the target — skip target work. */
+  assumeNoContact?: boolean;
 }): ContactPatch | { error: string } | undefined => {
   const { input, subject, target, facts } = options;
   if (facts.area === undefined || facts.area <= 0) {
@@ -758,9 +1293,16 @@ const estimateContactPatch = (options: {
   }
   let cone: ConeMeridian | undefined;
   if (facts.surfaceType === 'cone') {
-    const witnessPayload = parseNativeJson<ExtremaPayload>(
-      input.context.native.extrema(subject.occurrence, subject.face, target.occurrence, target.face),
-    );
+    const witnessPayload = cachedNativePayload<ExtremaPayload>({
+      input,
+      kind: 'extrema',
+      key: {
+        subject: `${subject.occurrence}/${subject.face}`,
+        target: `${target.occurrence}/${target.face}`,
+      },
+      charge: 1,
+      call: () => input.context.native.extrema(subject.occurrence, subject.face, target.occurrence, target.face),
+    });
     if ('error' in witnessPayload) {
       return { error: witnessPayload.error };
     }
@@ -776,29 +1318,53 @@ const estimateContactPatch = (options: {
     return undefined;
   }
   const pointsJson = JSON.stringify(points);
-  const subjectStates = parseNativeJson<ClassificationPayload>(
-    input.context.native.classifyPoints(subject.occurrence, pointsJson),
-  );
+  // R13: one unit per exact subject classification (the footprint sweep).
+  const subjectStates = cachedNativePayload<ClassificationPayload>({
+    input,
+    kind: 'classify-points',
+    key: { occurrence: subject.occurrence, points: pointsJson },
+    charge: points.length,
+    call: () => input.context.native.classifyPoints(subject.occurrence, pointsJson),
+  });
   if ('error' in subjectStates) {
     return { error: subjectStates.error };
   }
-  const targetStates = parseNativeJson<ClassificationPayload>(
-    input.context.native.classifyPoints(target.occurrence, pointsJson),
-  );
-  if ('error' in targetStates) {
-    return { error: targetStates.error };
-  }
-  const counts = countContactSamples({
-    input,
-    target,
-    points,
-    subjectStates: subjectStates.states,
-    targetStates: targetStates.states,
-    facts,
-    cone,
-  });
-  if ('error' in counts) {
-    return counts;
+  let counts: Pick<ContactPatch, 'footprint' | 'contacting' | 'penetrating' | 'witness'>;
+  if (options.assumeNoContact) {
+    // R3 broad-phase: the subject face lies beyond the contact tolerance of the
+    // target AABB, so no footprint point can seat or penetrate. Skip the
+    // dominant target classification + probes; the footprint (and thus the
+    // band) stay identical to the full computation, so the verdict cannot
+    // change — broad phase is never a verdict source.
+    counts = {
+      footprint: subjectStates.states.filter((state) => state === 'on').length,
+      contacting: 0,
+      penetrating: 0,
+    };
+  } else {
+    // R2/CO-R1: the oracle materializes here, on the first face that actually
+    // classifies against the target — never for cached or pruned faces.
+    const targetClassifier = options.getTargetClassifier();
+    // R13: one unit per exact target classification — the contact-patch lattice
+    // is the dominant relationship cost (40×40 per face endpoint).
+    chargeBudget(points.length);
+    const targetStates = targetClassifier.classify(points);
+    if (!Array.isArray(targetStates)) {
+      return targetStates;
+    }
+    const result = countContactSamples({
+      input,
+      points,
+      subjectStates: subjectStates.states,
+      targetStates,
+      facts,
+      cone,
+      targetClassifier,
+    });
+    if ('error' in result) {
+      return result;
+    }
+    counts = result;
   }
   const { footprint, contacting, penetrating, witness } = counts;
   if (footprint === 0) {
@@ -865,21 +1431,111 @@ const proveContactArea = (input: RelationshipProofInput, minContactArea: number)
   if (!target) {
     return unsupportedEvidence(bindingDraft);
   }
+  // R1/R2: pick the contact engine once; the target membership oracle is
+  // shared by the whole face group so the winding-tree build amortises across
+  // every face's queries. R2/CO-R1 (suite audit): the oracle is a memoized
+  // THUNK invoked only inside a contact-patch cache miss — a fully-cached run
+  // triangulates and trees nothing, and a face group entirely beyond the
+  // contact tolerance (CO-R5's occurrence-level case) never builds it either.
+  const engine = input.context.contactEngine ?? contactEngine();
+  const tolerance = input.expectation.tolerance ?? input.context.tolerances.linearMm;
+  // CO-R6 (flag-gated): analytic seating applies only when the target face
+  // exposes full analytic params — plane and cylinder; every other surface
+  // keeps the soup band. The choice is a pure function of the subject (§16).
+  const analyticOnDistance =
+    (input.context.contactAnalyticSeating ?? contactAnalyticSeating())
+      ? analyticSeatingDistance(targetEntity.facts)
+      : undefined;
+  let builtTargetClassifier: ContactClassifier | undefined;
+  const getTargetClassifier = (): ContactClassifier => {
+    builtTargetClassifier ??= buildTargetClassifier({
+      input,
+      target,
+      engine,
+      tolerance,
+      ...(analyticOnDistance ? { analyticOnDistance } : {}),
+    });
+    return builtTargetClassifier;
+  };
   // Sum per-face patches in resolution order (deterministic): faces that do
   // not seat on the target contribute zero, so per-deck claims over a
   // both-sides face group count only the deck-side faces.
   const totals = { patchArea: 0, band: 0, faceArea: 0, footprint: 0, contacting: 0, penetrating: 0 };
   let witness: { point: Vec3; topologyRef?: string } | undefined;
+  const evidenceCache = getGeoSpecEvidenceCache();
   for (const entity of subjectEntities) {
     // A face-group patch sums one fixed-lattice classification per face, so the
-    // cost scales with the group size — check the matcher budget between faces
-    // so a large group fails bounded rather than stalling the run (WS-C/C3).
-    checkBudget();
+    // cost scales with the group size — the per-face lattice classifications
+    // charge the work-unit budget (R13), so a large group fails bounded
+    // rather than stalling the run.
     const subject = shapeRef(entity, input.context);
     if (!subject) {
       return unsupportedEvidence(bindingDraft);
     }
-    const patch = estimateContactPatch({ input, subject, target, facts: entity.facts });
+    // R5/R7: contact patches are pure functions of (artifact, endpoints,
+    // tolerance, lattice) — persist per face so unchanged geometry replays its
+    // 1,600-classification lattice from the authenticated cache. Failures and
+    // unsupported outcomes are never stored (they re-evaluate every run).
+    // R3 broad-phase: a subject face whose AABB is beyond the contact tolerance
+    // of the target cannot seat or penetrate — skip the dominant target work
+    // while keeping footprint/band identical (never a verdict source).
+    const assumeNoContact =
+      entity.facts.bounds !== undefined &&
+      targetEntity.facts.bounds !== undefined &&
+      aabbGap(entity.facts.bounds, targetEntity.facts.bounds) > tolerance;
+    const computePatch = (): ContactPatch | { error: string } | undefined => {
+      if (engine === 'topological') {
+        const topological = estimateContactPatchTopological({
+          input,
+          subject,
+          target,
+          facts: entity.facts,
+          getTargetClassifier,
+          assumeNoContact,
+        });
+        // A `{ fallback }` (per-face mesh unavailable/degenerate) drops to the
+        // winding lattice below; a real patch / error / undefined is final.
+        if (topological === undefined || !('fallback' in topological)) {
+          return topological;
+        }
+      }
+      return estimateContactPatch({
+        input,
+        subject,
+        target,
+        facts: entity.facts,
+        getTargetClassifier,
+        assumeNoContact,
+      });
+    };
+    let uncachedOutcome: ContactPatch | { error: string } | undefined;
+    const patch =
+      evidenceCache && input.context.subjectContentHash !== undefined
+        ? (evidenceCache.getOrCompute({
+            family: 'contact-patch',
+            version: 1,
+            key: {
+              engine,
+              // CO-R6: the seating mode changes computed patch payloads, so it
+              // is a key dimension — a band-mode run must never replay an
+              // analytic-mode patch, and vice versa.
+              seating: analyticOnDistance ? 'analytic' : 'band',
+              subjectHash: input.context.subjectContentHash,
+              subject: `${subject.occurrence}/${subject.face}`,
+              target: `${target.occurrence}/${target.face}`,
+              tolerance,
+              grid: contactPatchGrid,
+            },
+            compute: () => {
+              const computed = computePatch();
+              if (computed === undefined || 'error' in computed) {
+                uncachedOutcome = computed;
+                return undefined;
+              }
+              return computed;
+            },
+          }) ?? uncachedOutcome)
+        : computePatch();
     if (patch === undefined) {
       return unsupportedEvidence({
         input,
@@ -952,6 +1608,12 @@ export const proveContact = (input: RelationshipProofInput): RelationshipEvidenc
   if (input.expectation.minContactArea !== undefined) {
     return proveContactArea(input, input.expectation.minContactArea);
   }
+  // CR4: certified mesh bounds resolve claims strictly clear of the tolerance
+  // boundary; straddles (undefined) compute the exact extrema unchanged.
+  const gated = resolveContactByMeshGate(input);
+  if (gated) {
+    return gated;
+  }
   const measurement = measureExtrema(input);
   if (isEvidence(measurement)) {
     return measurement;
@@ -987,6 +1649,12 @@ export const proveContact = (input: RelationshipProofInput): RelationshipEvidenc
  * @public
  */
 export const proveClearance = (input: RelationshipProofInput): RelationshipEvidence => {
+  // CR4: certified mesh bounds resolve claims strictly clear of both band
+  // boundaries; straddles (undefined) compute the exact extrema unchanged.
+  const gated = resolveClearanceByMeshGate(input);
+  if (gated) {
+    return gated;
+  }
   const measurement = measureExtrema(input);
   if (isEvidence(measurement)) {
     return measurement;
@@ -1425,15 +2093,23 @@ const measureEngagedSpan = (options: {
     frame.origin[2] + parameter * frame.direction[2],
   ]);
   const stationsJson = JSON.stringify(stations);
-  const subjectStates = parseNativeJson<ClassificationPayload>(
-    input.context.native.classifyPoints(references.subject.occurrence, stationsJson),
-  );
+  const subjectStates = cachedNativePayload<ClassificationPayload>({
+    input,
+    kind: 'classify-points',
+    key: { occurrence: references.subject.occurrence, points: stationsJson },
+    charge: stations.length,
+    call: () => input.context.native.classifyPoints(references.subject.occurrence, stationsJson),
+  });
   if ('error' in subjectStates) {
     return nativeError(input, 'classifyPoints', subjectStates.error);
   }
-  const targetStates = parseNativeJson<ClassificationPayload>(
-    input.context.native.classifyPoints(references.target.occurrence, stationsJson),
-  );
+  const targetStates = cachedNativePayload<ClassificationPayload>({
+    input,
+    kind: 'classify-points',
+    key: { occurrence: references.target.occurrence, points: stationsJson },
+    charge: stations.length,
+    call: () => input.context.native.classifyPoints(references.target.occurrence, stationsJson),
+  });
   if ('error' in targetStates) {
     return nativeError(input, 'classifyPoints', targetStates.error);
   }
@@ -1473,14 +2149,22 @@ const proveBoreContainment = (options: {
   }
   const tolerance = input.expectation.tolerance ?? input.context.tolerances.linearMm;
   const radialClearance = bore.radius - subjectRadius;
-  const extremaPayload = parseNativeJson<ExtremaPayload>(
-    input.context.native.extrema(
-      references.subject.occurrence,
-      references.subject.face,
-      references.target.occurrence,
-      references.target.face,
-    ),
-  );
+  const extremaPayload = cachedNativePayload<ExtremaPayload>({
+    input,
+    kind: 'extrema',
+    key: {
+      subject: `${references.subject.occurrence}/${references.subject.face}`,
+      target: `${references.target.occurrence}/${references.target.face}`,
+    },
+    charge: 0,
+    call: () =>
+      input.context.native.extrema(
+        references.subject.occurrence,
+        references.subject.face,
+        references.target.occurrence,
+        references.target.face,
+      ),
+  });
   if ('error' in extremaPayload) {
     return nativeError(input, 'extrema', extremaPayload.error);
   }
@@ -1611,8 +2295,14 @@ export const proveContainment = (input: RelationshipProofInput): RelationshipEvi
   if (points.length === 0) {
     return analyticUnsupported(input, 'subject', 'boundary face (centroid + bounds)');
   }
-  const raw = input.context.native.classifyPoints(references.target.occurrence, JSON.stringify(points));
-  const payload = parseNativeJson<ClassificationPayload>(raw);
+  const containmentPointsJson = JSON.stringify(points);
+  const payload = cachedNativePayload<ClassificationPayload>({
+    input,
+    kind: 'classify-points',
+    key: { occurrence: references.target.occurrence, points: containmentPointsJson },
+    charge: points.length,
+    call: () => input.context.native.classifyPoints(references.target.occurrence, containmentPointsJson),
+  });
   if ('error' in payload) {
     return nativeError(input, 'classifyPoints', payload.error);
   }
@@ -1694,14 +2384,22 @@ export const proveInsertion = (input: RelationshipProofInput): RelationshipEvide
     return measured;
   }
   const { depth, step } = measured;
-  const extremaPayload = parseNativeJson<ExtremaPayload>(
-    input.context.native.extrema(
-      references.subject.occurrence,
-      references.subject.face,
-      references.target.occurrence,
-      references.target.face,
-    ),
-  );
+  const extremaPayload = cachedNativePayload<ExtremaPayload>({
+    input,
+    kind: 'extrema',
+    key: {
+      subject: `${references.subject.occurrence}/${references.subject.face}`,
+      target: `${references.target.occurrence}/${references.target.face}`,
+    },
+    charge: 0,
+    call: () =>
+      input.context.native.extrema(
+        references.subject.occurrence,
+        references.subject.face,
+        references.target.occurrence,
+        references.target.face,
+      ),
+  });
   const witnesses: RelationshipWitness[] =
     'error' in extremaPayload
       ? []
@@ -1745,6 +2443,54 @@ export const proveInsertion = (input: RelationshipProofInput): RelationshipEvide
 type CommonVolumePayload = { volume: number; centroid: Vec3 };
 
 /**
+ * CR5: resolve an interference claim from the certified-zero leg, or
+ * `undefined` when the exact boolean must run. When the occurrence meshes are
+ * provably separated beyond the F4 slack, the exact BRep solids are disjoint
+ * and their common volume is 0 EXACTLY — no volume-error bound is involved,
+ * so the comparator evaluates against the true volume. Touching, crossing,
+ * and nested pairs all fall through unchanged (the containment-volume leg was
+ * deliberately not built: it would need its own empirical ε_V gate, and the
+ * corpus's positive-volume claims are crossing pairs the boolean must decide).
+ */
+const resolveInterferenceByMeshGate = (input: RelationshipProofInput): RelationshipEvidence | undefined => {
+  const gate = prepareMeshGate(
+    input,
+    (references) =>
+      storedVerdictPayload<CommonVolumePayload>(input, 'common-volume', {
+        subject: references.subject.occurrence,
+        target: references.target.occurrence,
+      }) !== undefined,
+  );
+  if (!gate) {
+    return undefined;
+  }
+  chargeBudget(1);
+  if (!meshesFartherThan(gate.subject, gate.target, gate.slack)) {
+    return undefined;
+  }
+  const { linearMm } = input.context.tolerances;
+  const volumeTolerance = linearMm ** 3;
+  const min = input.expectation.minVolume ?? 0;
+  const max = input.expectation.maxVolume ?? 0;
+  const final: RelationshipFinalEvidence = {
+    method: 'mesh-distance-bound',
+    measured: { volume: 0 },
+    expected: { minVolume: min, maxVolume: max },
+    witnesses: [],
+  };
+  if (min - volumeTolerance <= 0 && max + volumeTolerance >= 0) {
+    return passEvidence({ final, ...(gate.broadPhase ? { broadPhase: gate.broadPhase } : {}) });
+  }
+  return failEvidence({
+    input,
+    message: `expected exact intersection volume in [${min}, ${max}]mm³, but the certified mesh separation proves the solids are disjoint (volume 0).`,
+    suggestion: 'Restore the declared intentional interference, or relax the declared minVolume.',
+    final,
+    ...(gate.broadPhase ? { broadPhase: gate.broadPhase } : {}),
+  });
+};
+
+/**
  * Exact interference proof: `BRepAlgoAPI_Common`-class boolean volume of the
  * resolved solid pair. Positive common volume outside the declared allowance
  * band fails with the measured volume and the intersection centroid witness.
@@ -1754,6 +2500,12 @@ type CommonVolumePayload = { volume: number; centroid: Vec3 };
  * @public
  */
 export const proveInterference = (input: RelationshipProofInput): RelationshipEvidence => {
+  // CR5: the certified-zero leg resolves provably-disjoint pairs without the
+  // OCCT boolean; anything else computes exactly as before.
+  const gated = resolveInterferenceByMeshGate(input);
+  if (gated) {
+    return gated;
+  }
   const endpoints = proofEndpoints(input);
   if (isEvidence(endpoints)) {
     return endpoints;
@@ -1766,9 +2518,16 @@ export const proveInterference = (input: RelationshipProofInput): RelationshipEv
   if (isEvidence(references)) {
     return references;
   }
-  const payload = parseNativeJson<CommonVolumePayload>(
-    input.context.native.commonVolume(references.subject.occurrence, references.target.occurrence),
-  );
+  const payload = cachedNativePayload<CommonVolumePayload>({
+    input,
+    kind: 'common-volume',
+    key: {
+      subject: references.subject.occurrence,
+      target: references.target.occurrence,
+    },
+    charge: 1,
+    call: () => input.context.native.commonVolume(references.subject.occurrence, references.target.occurrence),
+  });
   if ('error' in payload) {
     return nativeError(input, 'commonVolume', payload.error);
   }

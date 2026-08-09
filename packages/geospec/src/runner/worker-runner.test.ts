@@ -370,9 +370,12 @@ describe('GeoSpec worker-style runners', () => {
       bypasses: 0,
       failures: 0,
     });
+    // R10: the runner's run-lifetime cached loader is branded, so the
+    // per-module layer is skipped entirely — both loads hit the aggregate
+    // cache directly and the module counters never move.
     expect(profile.moduleModelLoadCache).toEqual({
       hits: 0,
-      misses: 2,
+      misses: 0,
       bypasses: 0,
       failures: 0,
     });

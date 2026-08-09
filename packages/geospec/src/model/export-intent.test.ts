@@ -19,7 +19,10 @@ describe('resolveRuntimeExportIntent', () => {
         sourceFormat: 'glb',
         targetFormat: 'glb',
         fidelity: 'mesh',
-        schema: { properties: { coordinateSystem: {}, unit: {} } },
+        exportOptions: {
+          schema: { properties: { coordinateSystem: {}, unit: {} } },
+          defaults: {},
+        },
       })),
     });
 
@@ -121,7 +124,10 @@ describe('resolveRuntimeExportIntent', () => {
         sourceFormat: 'glb',
         targetFormat: 'glb',
         fidelity: 'mesh',
-        schema: { properties: { coordinateSystem: {} } },
+        exportOptions: {
+          schema: { properties: { coordinateSystem: {} } },
+          defaults: {},
+        },
       })),
     });
 
@@ -150,7 +156,7 @@ describe('resolveRuntimeExportIntent', () => {
         targetFormat: 'step',
         transcoderId: 'converter',
         fidelity: 'mesh',
-        schema: { properties: {} },
+        exportOptions: { schema: { properties: {} }, defaults: {} },
       })),
     });
 
@@ -176,7 +182,10 @@ describe('resolveRuntimeExportIntent', () => {
         sourceFormat: 'step',
         targetFormat: 'step',
         fidelity: 'brep',
-        schema: { properties: { coordinateSystem: {} } },
+        exportOptions: {
+          schema: { properties: { coordinateSystem: {} } },
+          defaults: {},
+        },
       })),
     });
 

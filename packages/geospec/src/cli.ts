@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFile, mkdir, stat, writeFile, readdir } from 'node:fs/promises';
+import { availableParallelism } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GeometryDiagnostic } from '#mesh/types.js';
@@ -9,11 +10,16 @@ import {
   createGeoSpecNodeInvocationContext,
   createGeoSpecNodeInvocationContextStats,
 } from '#runner/node/invocation-context.js';
-import { createGeoSpecNodeRunner } from '#runner/node/index.js';
+import { createGeoSpecNodePoolRunner, createGeoSpecNodeRunner } from '#runner/node/index.js';
+import { createNodeVmFileSystem } from '#runner/node/node-vm-filesystem.js';
 import { createGeoSpecRunProfile } from '#runner/profile.js';
+import type { GeoSpecRunner, GeoSpecRunnerEvent } from '#runner/worker/index.js';
 import type { GeoSpecTestCase } from '#runner/types.js';
+import { flushGeoSpecEvidenceStore } from '#cache/evidence-cache.js';
+import { installNodeEvidenceCache } from '#cache/node-evidence-store.js';
+import { processPeakRssBytes, writeGeoSpecTimings } from '#cache/timings.js';
+import type { GeoSpecFileTiming } from '#cache/timings.js';
 import { loadStep } from '#step/index.js';
-import type { VmFileSystem } from '@taucad/vm';
 
 /**
  * Options accepted by the GeoSpec Node CLI runner.
@@ -41,41 +47,12 @@ export type GeoSpecCliRunOptions = {
   /** Milliseconds. */
   testTimeout?: number;
   json: boolean;
-};
-
-const createNodeVmFileSystem = (root: string): VmFileSystem => {
-  async function readNodeVmFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
-  async function readNodeVmFile(path: string, encoding: 'utf8'): Promise<string>;
-  async function readNodeVmFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
-    const content = await readFile(resolveNodeVmPath({ root, path }));
-    if (encoding === 'utf8') {
-      return content.toString('utf8');
-    }
-    const copy = new Uint8Array(content.byteLength);
-    copy.set(content);
-    return copy;
-  }
-
-  return {
-    async exists(path: string): Promise<boolean> {
-      try {
-        await stat(resolveNodeVmPath({ root, path }));
-        return true;
-      } catch {
-        return false;
-      }
-    },
-
-    readFile: readNodeVmFile,
-
-    async writeFile(path: string, content: string): Promise<void> {
-      await writeFile(resolveNodeVmPath({ root, path }), content, 'utf8');
-    },
-
-    async ensureDir(path: string): Promise<void> {
-      await mkdir(resolveNodeVmPath({ root, path }), { recursive: true });
-    },
-  };
+  /** Streaming machine-readable reporter: one JSON object per runner event (R1). */
+  reporter?: 'jsonl';
+  /** Stop after the first failing file (R1). Never the default: reward runs want the complete red set. */
+  bail: boolean;
+  /** Worker-pool size (R3): 1 = serial engine; omit for container-correct auto-sizing (R15). */
+  workers?: number;
 };
 
 const resolveNodeVmPath = (options: { root: string; path: string }): string =>
@@ -104,6 +81,9 @@ Options:
   -t <regexp>                   Alias for --testNamePattern
   --test-timeout <ms>           Async test timeout in milliseconds
   --json                        Print machine-readable JSON
+  --reporter jsonl              Stream one JSON line per runner event to stdout
+  --bail                        Stop after the first failing file
+  --workers <n>                 Worker-pool size; 1 = serial, default = auto (cpus/memory aware)
   -h, --help                    Show this help
 `;
 
@@ -124,6 +104,8 @@ const flagNamesWithValues = new Set([
   '-t',
   '--test-timeout',
   '--pattern',
+  '--reporter',
+  '--workers',
 ]);
 
 const parseIntegerFlag = (options: {
@@ -152,6 +134,7 @@ const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
     include: [],
     exclude: [],
     json: false,
+    bail: false,
   };
   let index = 0;
   let projectDirectory = '.';
@@ -159,6 +142,10 @@ const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
 
   if (argv.includes('--help') || argv.includes('-h')) {
     return { help: true, errors };
+  }
+
+  if (argv.includes('--json') && argv.includes('--reporter')) {
+    errors.push('--json and --reporter jsonl are mutually exclusive; choose one machine-readable output.');
   }
 
   if (argv[index] === 'run') {
@@ -169,6 +156,11 @@ const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
     const token = argv[index]!;
     if (token === '--json') {
       run.json = true;
+      index += 1;
+      continue;
+    }
+    if (token === '--bail') {
+      run.bail = true;
       index += 1;
       continue;
     }
@@ -200,10 +192,22 @@ const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
           run.testTimeout = parseIntegerFlag({ flag: token, value, errors });
           break;
         }
+        case '--workers': {
+          run.workers = parseIntegerFlag({ flag: token, value, errors });
+          break;
+        }
         case '--testNamePattern':
         case '--test-name-pattern':
         case '-t': {
           run.testNamePattern = value;
+          break;
+        }
+        case '--reporter': {
+          if (value === 'jsonl') {
+            run.reporter = value;
+          } else {
+            errors.push(`--reporter supports only 'jsonl', got '${value}'.`);
+          }
           break;
         }
       }
@@ -239,14 +243,22 @@ type GeoSpecCliDiagnostic = {
 type GeoSpecCliFileResult = {
   file: string;
   success: boolean;
+  durationMs?: number;
   issues?: GeoSpecCliIssue[];
-  tests?: Array<{ name: string; suite: string[]; status: string; diagnostics?: GeoSpecCliDiagnostic[] }>;
+  tests?: Array<{
+    name: string;
+    suite: string[];
+    status: string;
+    durationMs?: number;
+    diagnostics?: GeoSpecCliDiagnostic[];
+  }>;
 };
 
 type GeoSpecCliJsonResult = {
   success: boolean;
   passed: number;
   failed: number;
+  durationMs?: number;
   issues?: GeoSpecCliIssue[];
   files: GeoSpecCliFileResult[];
 };
@@ -266,6 +278,35 @@ const diagnosticsForTest = (test: GeoSpecTestCase): readonly GeometryDiagnostic[
 };
 
 const profilePathEnvironmentKey = 'GEOSPEC_PROFILE_JSON_PATH';
+
+const formatSeconds = (ms: number): string => `${(ms / 1000).toFixed(1)}s`;
+
+/**
+ * Aggregate per-matcher duration totals from collected assertions (R1:
+ * "per-matcher totals to the profile JSON").
+ */
+const aggregateMatcherTotals = (
+  files: ReadonlyArray<{ result: { success: boolean; tests?: GeoSpecTestCase[] } }>,
+): Record<string, { count: number; totalMs: number; maxMs: number }> => {
+  const totals: Record<string, { count: number; totalMs: number; maxMs: number }> = {};
+  for (const { result } of files) {
+    if (!result.success || !result.tests) {
+      continue;
+    }
+    for (const test of result.tests) {
+      for (const assertion of test.assertions) {
+        if (assertion.durationMs === undefined) {
+          continue;
+        }
+        const entry = (totals[assertion.kind] ??= { count: 0, totalMs: 0, maxMs: 0 });
+        entry.count += 1;
+        entry.totalMs += assertion.durationMs;
+        entry.maxMs = Math.max(entry.maxMs, assertion.durationMs);
+      }
+    }
+  }
+  return totals;
+};
 
 /**
  * Run the GeoSpec command-line interface.
@@ -290,6 +331,8 @@ export const runGeoSpecCli = async (options: GeoSpecCliOptions = {}): Promise<nu
   }
 
   const projectPath = resolve(options.cwd ?? process.cwd(), parsed.projectDirectory);
+  // R5: authenticated out-of-tree evidence cache (GEOSPEC_EVIDENCE_CACHE=0 disables).
+  installNodeEvidenceCache(projectPath);
   const filesystem = createNodeVmFileSystem(projectPath);
   const discovery = await discoverGeoSpecFiles({
     filesystem: createNodeDiscoveryFileSystem(projectPath),
@@ -308,28 +351,152 @@ export const runGeoSpecCli = async (options: GeoSpecCliOptions = {}): Promise<nu
   const profilePath = process.env[profilePathEnvironmentKey];
   const invocationStats = profilePath ? createGeoSpecNodeInvocationContextStats() : undefined;
   const runProfile = profilePath ? createGeoSpecRunProfile() : undefined;
-  const invocationContext = createGeoSpecNodeInvocationContext({
-    projectPath,
-    ...(invocationStats ? { stats: invocationStats } : {}),
-  });
-  const runner = createGeoSpecNodeRunner({
-    filesystem,
-    projectPath,
-    modelLoader: invocationContext.modelLoader,
-    stepLoader: async (input) => loadStep(input),
-    ...(runProfile ? { internalProfile: runProfile } : {}),
-  });
+
+  // R3 routing: the worker pool is the default for multi-file runs; the serial
+  // engine remains `--workers 1`, single-file runs, and profiled runs (whose
+  // in-process counters a pool cannot observe).
+  const environmentWorkers = Number(process.env['GEOSPEC_WORKERS']);
+  const requestedWorkers =
+    parsed.run.workers ??
+    (Number.isFinite(environmentWorkers) && environmentWorkers >= 1 ? Math.floor(environmentWorkers) : undefined);
+  const usePool = files.length > 1 && requestedWorkers !== 1 && !profilePath;
+
+  const invocationContext = usePool
+    ? undefined
+    : createGeoSpecNodeInvocationContext({
+        projectPath,
+        ...(invocationStats ? { stats: invocationStats } : {}),
+      });
+
+  // R1: stream lifecycle events to stderr by default; a heartbeat covers the
+  // long silent stretch inside a heavy file (exit criterion: no >10 s silence).
+  const fileLabel = (file: string): string => (isAbsolute(file) ? relative(projectPath, file) : file);
+  const jsonl = parsed.run.reporter === 'jsonl';
+  const emitJsonl = (record: Record<string, unknown>): void => {
+    if (jsonl) {
+      stdout(JSON.stringify(record));
+    }
+  };
+  const running = new Map<string, number>();
+  const fileTelemetry: Record<string, GeoSpecFileTiming> = {};
+  const heartbeat = setInterval(() => {
+    for (const [label, startedAt] of running) {
+      stderr(`[geospec] … ${label} running ${formatSeconds(performance.now() - startedAt)}`);
+    }
+  }, 10_000);
+  heartbeat.unref();
+
+  const onEvent = (event: GeoSpecRunnerEvent): void => {
+    switch (event.type) {
+      case 'run-start': {
+        stderr(`[geospec] run ${event.files.length} file(s)`);
+        emitJsonl({ event: 'run-start', files: event.files.map(fileLabel) });
+        break;
+      }
+      case 'file-start': {
+        const label = fileLabel(event.file);
+        running.set(label, performance.now());
+        stderr(`[geospec] ▶ ${label}`);
+        emitJsonl({ event: 'file-start', file: label });
+        break;
+      }
+      case 'file-complete': {
+        const label = fileLabel(event.file);
+        running.delete(label);
+        const durationMs = event.durationMs ?? 0;
+        fileTelemetry[label] = {
+          durationMs,
+          processPeakRssBytes: processPeakRssBytes(),
+          ...(event.primaryLoadKey === undefined ? {} : { primaryLoadKey: event.primaryLoadKey }),
+          ...(event.workerMemoryBytes === undefined ? {} : { workerMemoryBytes: event.workerMemoryBytes }),
+          updatedAt: new Date().toISOString(),
+        };
+        if (event.result.success) {
+          const failedTests = event.result.tests.filter((test) => test.status === 'failed').length;
+          const outcome = failedTests === 0 ? 'pass' : `fail (${failedTests})`;
+          stderr(`[geospec] ${failedTests === 0 ? '✓' : '✗'} ${label} ${outcome} ${formatSeconds(durationMs)}`);
+          emitJsonl({
+            event: 'file-complete',
+            file: label,
+            success: failedTests === 0,
+            durationMs,
+            tests: event.result.tests.map((test) => ({
+              name: test.name,
+              suite: test.suite,
+              status: test.status,
+              ...(test.durationMs === undefined ? {} : { durationMs: test.durationMs }),
+            })),
+          });
+        } else {
+          stderr(`[geospec] ✗ ${label} module failure ${formatSeconds(durationMs)}`);
+          emitJsonl({
+            event: 'file-complete',
+            file: label,
+            success: false,
+            durationMs,
+            issues: event.result.issues.map((issue) => issue.code),
+          });
+        }
+        break;
+      }
+      case 'run-complete': {
+        emitJsonl({
+          event: 'run-complete',
+          success: event.result.success,
+          passed: event.result.passed,
+          failed: event.result.failed,
+          ...(event.result.durationMs === undefined ? {} : { durationMs: event.result.durationMs }),
+        });
+        break;
+      }
+      case 'abort': {
+        stderr(`[geospec] aborted${event.reason ? `: ${event.reason}` : ''}`);
+        emitJsonl({ event: 'abort', ...(event.reason ? { reason: event.reason } : {}) });
+        break;
+      }
+      case 'close': {
+        break;
+      }
+    }
+  };
+
+  let runner: GeoSpecRunner;
+  if (usePool) {
+    // R15: all pool workers share this process's libuv threadpool — size it
+    // before the first worker spawns so multi-MB artifact reads never
+    // serialize on the default 4 threads.
+    process.env['UV_THREADPOOL_SIZE'] ??= String(availableParallelism() + 2);
+    runner = createGeoSpecNodePoolRunner({
+      projectPath,
+      ...(requestedWorkers === undefined ? {} : { workers: requestedWorkers }),
+      onEvent,
+    });
+  } else {
+    runner = createGeoSpecNodeRunner({
+      filesystem,
+      projectPath,
+      modelLoader: invocationContext!.modelLoader,
+      stepLoader: async (input) => loadStep(input),
+      onEvent,
+      ...(runProfile ? { internalProfile: runProfile } : {}),
+    });
+  }
   const aggregate = await runner
     .run({
       files: files.sort(),
       testNamePattern: parsed.run.testNamePattern,
       testTimeout: parsed.run.testTimeout,
+      bail: parsed.run.bail,
     })
     .finally(async () => {
+      clearInterval(heartbeat);
+      // R9: land any write-behind evidence entries before the process winds down.
+      await flushGeoSpecEvidenceStore();
+      await writeGeoSpecTimings(projectPath, fileTelemetry);
       try {
         await runner.close();
       } finally {
-        await invocationContext.dispose();
+        await invocationContext?.dispose();
         if (profilePath && invocationStats && runProfile) {
           await mkdir(dirname(profilePath), { recursive: true });
           await writeFile(
@@ -349,14 +516,27 @@ export const runGeoSpecCli = async (options: GeoSpecCliOptions = {}): Promise<nu
       }
     });
 
+  // R1: per-matcher totals appended to the profile JSON after results exist.
+  if (profilePath) {
+    try {
+      const raw = await readFile(profilePath, 'utf8');
+      const profileJson: Record<string, unknown> = JSON.parse(raw) as Record<string, unknown>;
+      profileJson['matchers'] = aggregateMatcherTotals(aggregate.files);
+      await writeFile(profilePath, JSON.stringify(profileJson, null, 2), 'utf8');
+    } catch {
+      // Profile augmentation must never fail the run.
+    }
+  }
+
   const fileResults: GeoSpecCliFileResult[] = [];
 
-  for (const { file, result } of aggregate.files) {
+  for (const { file, result, durationMs } of aggregate.files) {
     const label = isAbsolute(file) ? relative(projectPath, file) : file;
     if (!result.success) {
       fileResults.push({
         file: label,
         success: false,
+        ...(durationMs === undefined ? {} : { durationMs }),
         issues: result.issues.map((issue) => ({
           code: issue.code,
           message: issue.message,
@@ -385,12 +565,14 @@ export const runGeoSpecCli = async (options: GeoSpecCliOptions = {}): Promise<nu
     fileResults.push({
       file: label,
       success: result.tests.every((test) => test.status !== 'failed'),
+      ...(durationMs === undefined ? {} : { durationMs }),
       tests: result.tests.map((test) => {
         const diagnostics = diagnosticsForTest(test);
         return {
           name: test.name,
           suite: test.suite,
           status: test.status,
+          ...(test.durationMs === undefined ? {} : { durationMs: test.durationMs }),
           ...(diagnostics.length === 0 ? {} : { diagnostics: cliDiagnostics(diagnostics) }),
         };
       }),
@@ -412,12 +594,14 @@ export const runGeoSpecCli = async (options: GeoSpecCliOptions = {}): Promise<nu
       success: aggregate.success,
       passed: aggregate.passed,
       failed: aggregate.failed,
+      ...(aggregate.durationMs === undefined ? {} : { durationMs: aggregate.durationMs }),
       ...(runIssues.length > 0 ? { issues: runIssues } : {}),
       files: fileResults,
     };
     stdout(JSON.stringify(jsonResult, null, 2));
-  } else {
-    stdout(`${aggregate.passed} passed, ${aggregate.failed} failed`);
+  } else if (!jsonl) {
+    const duration = aggregate.durationMs === undefined ? '' : ` in ${formatSeconds(aggregate.durationMs)}`;
+    stdout(`${aggregate.passed} passed, ${aggregate.failed} failed${duration}`);
   }
   return aggregate.failed === 0 ? 0 : 1;
 };

@@ -301,9 +301,63 @@ const buildInterfaceRows = (options: {
   return rows;
 };
 
+/**
+ * Deterministic frame completion: the world axis least parallel to z, orthogonalized.
+ *
+ * @param zAxis - Unit frame z axis.
+ * @returns Unit x axis perpendicular to z.
+ */
+const completeFrameAxisX = (zAxis: Vec3): Vec3 => {
+  const candidates: Vec3[] = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ];
+  let best = candidates[0]!;
+  let bestAlignment = Number.POSITIVE_INFINITY;
+  for (const candidate of candidates) {
+    const alignment = Math.abs(candidate[0] * zAxis[0] + candidate[1] * zAxis[1] + candidate[2] * zAxis[2]);
+    if (alignment < bestAlignment - 1e-12) {
+      bestAlignment = alignment;
+      best = candidate;
+    }
+  }
+  const dot = best[0] * zAxis[0] + best[1] * zAxis[1] + best[2] * zAxis[2];
+  const projected: Vec3 = [best[0] - dot * zAxis[0], best[1] - dot * zAxis[1], best[2] - dot * zAxis[2]];
+  const length = Math.hypot(projected[0], projected[1], projected[2]);
+  return length > 1e-12 ? [projected[0] / length, projected[1] / length, projected[2] / length] : [1, 0, 0];
+};
+
+/**
+ * Frame for a semantic GD&T datum derived from its attached face's analytic facts.
+ *
+ * @param face - Attached face row, when resolved.
+ * @returns Derived orthonormal frame, or undefined for non-analytic attachments.
+ */
+const semanticDatumFrame = (
+  face: SelectorFaceRow | undefined,
+): { origin: Vec3; xAxis: Vec3; zAxis: Vec3 } | undefined => {
+  if (!face) {
+    return undefined;
+  }
+  const { facts } = face;
+  if (facts.surfaceType === 'plane' && facts.normal) {
+    return { origin: facts.centroid, xAxis: completeFrameAxisX(facts.normal), zAxis: facts.normal };
+  }
+  if ((facts.surfaceType === 'cylinder' || facts.surfaceType === 'cone') && facts.axisOrigin && facts.axisDirection) {
+    return {
+      origin: facts.axisOrigin,
+      xAxis: completeFrameAxisX(facts.axisDirection),
+      zAxis: facts.axisDirection,
+    };
+  }
+  return undefined;
+};
+
 const buildDatumRows = (options: {
   xde: XdeReadResult;
   occurrences: SelectorOccurrenceRow[];
+  faces: SelectorFaceRow[];
   diagnostics: GeometryDiagnostic[];
 }): SelectorDatumRow[] => {
   const occurrenceByPath = new Map(options.occurrences.map((occurrence) => [occurrence.path, occurrence]));
@@ -329,6 +383,39 @@ const buildDatumRows = (options: {
       origin: placement.origin,
       xAxis: placement.xAxis,
       zAxis: placement.zAxis,
+    });
+  }
+
+  // Semantic GD&T datums resolve by identification letter (`datum('A')`).
+  // Their frame derives from the first attached face's analytic surface —
+  // plane: centroid + normal; cylinder/cone: axis. Unattached or
+  // non-analytic datums carry no frame and stay diagnostic-visible.
+  const faceByKey = new Map(options.faces.map((face) => [`${face.occurrencePath}#${face.faceIndex}`, face]));
+  for (const datum of options.xde.semanticDatums) {
+    const fullName = composeFullName(datum.occurrencePath, datum.label);
+    const firstFaceIndex = datum.faceIndexes[0];
+    const frame = semanticDatumFrame(
+      firstFaceIndex === undefined ? undefined : faceByKey.get(`${datum.occurrencePath}#${firstFaceIndex}`),
+    );
+    if (!frame) {
+      options.diagnostics.push({
+        code: 'GEOSPEC_SELECTOR_UNSUPPORTED_EVIDENCE',
+        severity: 'info',
+        message: `Semantic datum '${fullName}' has no analytic face attachment to derive a frame from.`,
+        suggestion:
+          'Point/line datum targets and non-analytic datum features carry no frame; match on face or interface evidence instead.',
+        details: { datumName: fullName, occurrencePath: datum.occurrencePath, faceIndexes: datum.faceIndexes },
+      });
+      continue;
+    }
+    rows.push({
+      id: `semantic-datum:${fullName}`,
+      fullName,
+      occurrencePath: datum.occurrencePath,
+      name: datum.label,
+      origin: frame.origin,
+      xAxis: frame.xAxis,
+      zAxis: frame.zAxis,
     });
   }
   return rows;
@@ -398,7 +485,7 @@ export const buildSelectorIndex = (options: BuildSelectorIndexOptions): Selector
     }
   }
   const interfaces = buildInterfaceRows({ xde: options.xde, faces, diagnostics });
-  const datums = buildDatumRows({ xde: options.xde, occurrences, diagnostics });
+  const datums = buildDatumRows({ xde: options.xde, occurrences, faces, diagnostics });
   return {
     occurrences,
     faces,

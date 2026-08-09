@@ -1,4 +1,4 @@
-// GeoSpec native mesh metrics for opencascade.js custom builds.
+// GeoSpec native mesh metrics for libcascade custom builds.
 //
 // The wrapper accepts triangle soups copied into the Emscripten heap as
 // Float64 triples (`ax ay az bx by bz cx cy cz` per triangle). It keeps the

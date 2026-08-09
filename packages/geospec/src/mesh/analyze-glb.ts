@@ -1,6 +1,15 @@
 import type { Document } from '@gltf-transform/core';
 import { WebIO } from '@gltf-transform/core';
-import { buildMeshAnalysisRecord, createGeometryStatsFromRecord } from '#mesh/analysis-record.js';
+import { getGeoSpecEvidenceCache } from '#cache/evidence-cache.js';
+import {
+  buildMeshAnalysisRecord,
+  createGeometryStatsFromRecord,
+  meshRecordSnapshotCodec,
+  rehydrateMeshAnalysisRecord,
+  snapshotMeshAnalysisRecord,
+} from '#mesh/analysis-record.js';
+import type { MeshAnalysisRecordSnapshot } from '#mesh/analysis-record.js';
+import { forensicAsync } from '#runner/forensic.js';
 import type { GeometryStats } from '#mesh/types.js';
 
 /**
@@ -23,8 +32,37 @@ export const analyzeGlb = async (glb: Uint8Array<ArrayBuffer>): Promise<Geometry
   // which requires 4-byte alignment. Copying into a fresh Uint8Array
   // guarantees byteOffset === 0.
   const aligned = glb.byteOffset % 4 === 0 ? glb : new Uint8Array(glb);
-  const document = await io.readBinary(aligned);
-  return analyzeGltfDocument(document);
+  // R3: the record's eager inputs are a pure function of the GLB bytes.
+  // Peek the persisted `mesh-record` family before paying the parse, and
+  // store the snapshot after a miss — the async parse cannot run inside the
+  // sync compute, so this is the overlap peek/store-after discipline.
+  const cache = getGeoSpecEvidenceCache();
+  const recordKey = cache ? { subjectHash: cache.hashBytes(aligned) } : undefined;
+  if (cache && recordKey) {
+    const snapshot = cache.getOrCompute<MeshAnalysisRecordSnapshot>({
+      family: 'mesh-record',
+      version: 1,
+      key: recordKey,
+      codec: meshRecordSnapshotCodec,
+      compute: () => undefined,
+    });
+    if (snapshot) {
+      return createGeometryStatsFromRecord(rehydrateMeshAnalysisRecord(snapshot));
+    }
+  }
+  // R2: GLB parse was part of the uninstrumented mesh path (Finding 5).
+  const document = await forensicAsync('mesh.glb.parse', async () => io.readBinary(aligned));
+  const record = buildMeshAnalysisRecord(document);
+  if (cache && recordKey) {
+    cache.getOrCompute({
+      family: 'mesh-record',
+      version: 1,
+      key: recordKey,
+      codec: meshRecordSnapshotCodec,
+      compute: () => snapshotMeshAnalysisRecord(record),
+    });
+  }
+  return createGeometryStatsFromRecord(record);
 };
 
 /**

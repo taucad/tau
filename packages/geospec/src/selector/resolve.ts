@@ -11,11 +11,7 @@
  */
 
 import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
-import {
-  ambiguousDiagnostic,
-  unmatchedDiagnostic,
-  unsupportedEvidenceDiagnostic,
-} from '#selector/diagnostics.js';
+import { ambiguousDiagnostic, unmatchedDiagnostic, unsupportedEvidenceDiagnostic } from '#selector/diagnostics.js';
 import { parseSelectorPath } from '#selector/grammar.js';
 import type {
   SelectorBodyRow,
@@ -740,8 +736,7 @@ const resolveInterfaceRows = (options: {
     return failedSelection('unsupported', {
       ...draft,
       message: `Authored interface '${firstDangling.fullName}' references missing faceIndex ${firstDangling.faceIndex}.`,
-      suggestion:
-        'Re-export from Tau runtime so authored names resolve against the live shape before STEP writing.',
+      suggestion: 'Re-export from Tau runtime so authored names resolve against the live shape before STEP writing.',
       candidates: rankCandidates(rows.map((row) => interfaceEntity(row))),
       details: {
         interfaceName: firstDangling.fullName,

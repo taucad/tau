@@ -14,6 +14,8 @@ fixtures/
   containment/             # containment.* family
   selector/                # selector-behavior fixtures (ambiguity, unnamed, drift,
                            # second-producer transformed-instance)
+  interop/nist-pmi/        # pristine third-party AP242 GD&T files (NIST PMI corpus) —
+                           # never regenerate; provenance + license in PROVENANCE.md
   scripts/                 # generation scripts (replicad model code run through the runtime CLI)
     regenerate.mjs         # corpus regeneration driver
     <family>/<name>/main.ts

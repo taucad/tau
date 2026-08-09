@@ -9,6 +9,7 @@ import { buildMeshAnalysisRecord, createGeometryStatsFromRecord } from '#mesh/an
 import type { GeometrySubject } from '#mesh/types.js';
 import type { GeoSpecModelLoadCacheStats } from '#runner/model-load-cache.js';
 import type { GeoSpecNodeInvocationContextStats } from '#runner/node/invocation-context.js';
+import { createGeoSpecResourceScopeProfile } from '#runner/profile.js';
 import type { GeoSpecResourceScopeProfile } from '#runner/profile.js';
 import { runGeoSpecModule } from '#runner/run-geospec-module.js';
 import { summarizeLoadPathSamples } from '#experiments/load-path/summary.js';
@@ -169,22 +170,7 @@ const emptyModelLoadCacheStats = (): GeoSpecModelLoadCacheStats => ({
   failures: 0,
 });
 
-const emptyResourceScopeProfile = (): GeoSpecResourceScopeProfile => ({
-  trackedSubjects: 0,
-  registeredDisposables: 0,
-  disposedScopes: 0,
-  disposedResources: 0,
-  overlap: {
-    cacheCreations: 0,
-    cacheDisposals: 0,
-    preparedComponentHits: 0,
-    preparedComponentMisses: 0,
-    pairVolumeHits: 0,
-    pairVolumeMisses: 0,
-    invalidDiagnosticHits: 0,
-    invalidDiagnosticMisses: 0,
-  },
-});
+const emptyResourceScopeProfile = createGeoSpecResourceScopeProfile;
 
 const addModelLoadCacheStats = (
   total: GeoSpecModelLoadCacheStats,
@@ -216,6 +202,14 @@ const addResourceScopeProfile = (
   total.overlap.preparedComponentMisses += next.overlap.preparedComponentMisses;
   total.overlap.pairVolumeHits += next.overlap.pairVolumeHits;
   total.overlap.pairVolumeMisses += next.overlap.pairVolumeMisses;
+  total.overlap.prefilterProven += next.overlap.prefilterProven;
+  total.overlap.prefilterFallthrough += next.overlap.prefilterFallthrough;
+  total.overlap.outcomeSeparated += next.overlap.outcomeSeparated;
+  total.overlap.outcomeTouching += next.overlap.outcomeTouching;
+  total.overlap.outcomeContainment += next.overlap.outcomeContainment;
+  total.overlap.outcomeTransversal += next.overlap.outcomeTransversal;
+  total.overlap.arrangementResolved += next.overlap.arrangementResolved;
+  total.overlap.arrangementFallback += next.overlap.arrangementFallback;
   total.overlap.invalidDiagnosticHits += next.overlap.invalidDiagnosticHits;
   total.overlap.invalidDiagnosticMisses += next.overlap.invalidDiagnosticMisses;
 };

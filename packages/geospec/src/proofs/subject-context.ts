@@ -11,6 +11,7 @@
  * @module
  */
 
+import { getGeoSpecEvidenceCache } from '#cache/evidence-cache.js';
 import type { GeometrySubject } from '#mesh/types.js';
 import { buildSelectorIndex } from '#selector/index-builder.js';
 import type { SelectorFaceFactsTable } from '#selector/index-builder.js';
@@ -43,17 +44,39 @@ export const getSubjectProofContext = (subject: GeometrySubject): RelationshipPr
     contextCache.set(subject, undefined);
     return undefined;
   }
+  const evidenceCache = getGeoSpecEvidenceCache();
+  const subjectHash = subject.provenance.contentHash;
   const faceFactsByOccurrence: SelectorFaceFactsTable = {};
   const occurrenceIndexByPath = new Map<string, number>();
   for (const [position, occurrence] of xde.occurrences.entries()) {
     occurrenceIndexByPath.set(occurrence.path, position);
-    faceFactsByOccurrence[occurrence.path] = parseFaceFacts(native.faceFacts(position));
+    // R5: persist per-occurrence face facts subject-scoped — the eager
+    // proof-context sweep over all occurrences replays warm.
+    const computeFacts = (): { faces: SelectorFaceFacts[] } => parseFaceFacts(native.faceFacts(position));
+    faceFactsByOccurrence[occurrence.path] =
+      evidenceCache && subjectHash !== undefined
+        ? (evidenceCache.getOrCompute({
+            family: 'face-facts',
+            version: 1,
+            key: { subjectHash, occurrence: position },
+            compute: computeFacts,
+          }) ?? computeFacts())
+        : computeFacts();
   }
   const context: RelationshipProofContext = {
     native,
     index: buildSelectorIndex({ xde, faceFactsByOccurrence }),
     occurrenceIndexByPath,
     tolerances: resolveTolerances(),
+    // R5 subject-scope identity: sound wholesale invalidation when the
+    // artifact changes.
+    ...(subject.provenance.contentHash === undefined ? {} : { subjectContentHash: subject.provenance.contentHash }),
+    // Hybrid void-occupancy engine seam (R6 move 3): present only for
+    // native-BRep subjects loaded through a hybrid-capable backend.
+    ...(subject.occurrenceMesh === undefined ? {} : { occurrenceMesh: subject.occurrenceMesh }),
+    // Topological contact-patch engine seam (R1): present only for native-BRep
+    // subjects whose backend exposes the per-face tessellation facet.
+    ...(subject.occurrenceFaceMesh === undefined ? {} : { occurrenceFaceMesh: subject.occurrenceFaceMesh }),
   };
   contextCache.set(subject, context);
   return context;

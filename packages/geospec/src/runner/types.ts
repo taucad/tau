@@ -365,7 +365,13 @@ export type GeoSpecMinimumDistanceExpectation = {
  */
 export type GeoSpecGeometrySelector =
   | GeoSpecComponentSelector
-  | { kind: 'occurrence'; name: GeoSpecComponentSelector }
+  | {
+      kind: 'occurrence';
+      /** Product or instance name to match (also matches the PRODUCT name shared by instanced parts). */
+      name?: GeoSpecComponentSelector;
+      /** Exact occurrence path — the per-instance identity when instances share one product. */
+      path?: GeoSpecComponentSelector;
+    }
   | {
       kind: 'axis';
       name?: GeoSpecComponentSelector;
@@ -660,6 +666,8 @@ export type GeoSpecAssertion = {
   passed?: boolean;
   /** Structured diagnostics from matcher evaluation. */
   diagnostics?: GeometryDiagnostic[];
+  /** Wall-clock cost of matcher evaluation in milliseconds (R1: budgeted matchers only). */
+  durationMs?: number;
 };
 
 /**
@@ -685,6 +693,8 @@ export type GeoSpecTestCase = {
   status: GeoSpecTestStatus;
   /** Structured diagnostics emitted by test execution. */
   diagnostics: GeometryDiagnostic[];
+  /** Wall-clock cost of the test body plus its pending assertions, in milliseconds (R1). */
+  durationMs?: number;
 };
 
 /**
@@ -713,6 +723,13 @@ export type RunGeoSpecModuleOptions = {
   resourceScope?: GeoSpecResourceScope;
   /** Internal profile counters used by opt-in benchmark tooling. */
   internalProfile?: GeoSpecRunProfile;
+  /**
+   * List-only collection pass (R3 shard splitting): execute the module to
+   * REGISTER tests, skip every body, and return all registered tests as
+   * `skipped` in registration order. Used by the pool to split heavy files
+   * into per-test shards.
+   */
+  collectOnly?: boolean;
 };
 
 /**

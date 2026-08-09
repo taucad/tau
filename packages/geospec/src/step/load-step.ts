@@ -1,24 +1,39 @@
+import { getGeoSpecEvidenceCache } from '#cache/evidence-cache.js';
+import type { GeoSpecEvidenceCodec } from '#cache/evidence-cache.js';
+import {
+  decodeSectionedPayload,
+  encodeSectionedPayload,
+  sectionToFloat64,
+  typedArrayBytes,
+} from '#cache/section-codec.js';
 import { loadMesh } from '#mesh/load-mesh.js';
-import { forensicAsync, forensicSync } from '#runner/forensic.js';
+import { ensureManifoldModule } from '#mesh/manifold-module.js';
+import { ensureOpenCascadeModule } from '#native/opencascade-module.js';
+import { forensicAsync, forensicEnabled, forensicSync } from '#runner/forensic.js';
+import { createBrepEvidenceLedger } from '#step/evidence-ledger.js';
 import type {
-  BrepEvidence,
   GeometryCapability,
-  GeometryDiagnostic,
   GeometrySource,
   GeometrySubject,
+  OccurrenceFaceMeshFetcher,
+  OccurrenceMeshFetcher,
   StepEvidence,
 } from '#mesh/types.js';
 import type {
   CreateStepLoaderOptions,
   GeoSpecNativeStepBackend,
-  GeoSpecNativeStepReadResult,
   GeoSpecNativeXdeReadResult,
   GeoSpecOpenCascadeStepModule,
-  GeoSpecStepLoader,
   LoadStepOptions,
   XdeReadResult,
 } from '#step/types.js';
-import type { SelectorFaceFacts } from '#selector/types.js';
+
+/**
+ * Function shape returned by {@link createStepLoader}.
+ *
+ * @public
+ */
+export type GeoSpecStepLoader = (options: LoadStepOptions) => Promise<GeometrySubject>;
 
 type StepBytes = {
   bytes: Uint8Array<ArrayBuffer>;
@@ -26,16 +41,20 @@ type StepBytes = {
   source: GeometrySource;
 };
 
-type NativeEvidencePayload = {
-  brep?: BrepEvidence;
-  step?: StepEvidence;
-  triangles?: number[];
-  diagnostics?: GeometryDiagnostic[];
-};
-
 const defaultMeshLinearTolerance = 0.01;
 const defaultMeshAngularToleranceDegrees = 15;
 const defaultMaxBytes = 256 * 1024 * 1024;
+
+// R13: default work-unit budget for the wall-thickness facet (one unit = one
+// exact extrema or one material-interval proof). Generous — today's largest
+// corpus subject (the 666-solid assembly) consumes ~43k units under the eager
+// algorithm — so a healthy subject never false-fails; the runner can lower it.
+const defaultWallThicknessWorkUnitBudget = 250_000;
+
+const resolveWallThicknessWorkUnitBudget = (): number => {
+  const raw = Number(process.env['GEOSPEC_WALL_WORK_UNIT_BUDGET']);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : defaultWallThicknessWorkUnitBudget;
+};
 
 const isBlobLike = (value: unknown): value is Blob =>
   typeof value === 'object' &&
@@ -254,89 +273,89 @@ const copyHeapFloat64 = (options: { heap: Float64Array<ArrayBuffer>; start: numb
   return values;
 };
 
-const readNativeStep = async (options: {
-  bytes: StepBytes;
-  loadOptions: LoadStepOptions;
-  module: GeoSpecOpenCascadeStepModule;
-}): Promise<{ payload: NativeEvidencePayload; strategy: StepEvidence['readStrategy'] } | undefined> => {
-  const reader = options.module.GeoSpecStepStreamReader;
-  if (!reader) {
-    return undefined;
-  }
-  let result: GeoSpecNativeStepReadResult | undefined;
-  try {
-    const optionsJson = JSON.stringify({
-      mesh: options.loadOptions.mesh ?? true,
-      meshLinearTolerance: options.loadOptions.meshLinearTolerance ?? defaultMeshLinearTolerance,
-      meshAngularToleranceDegrees:
-        options.loadOptions.meshAngularToleranceDegrees ?? defaultMeshAngularToleranceDegrees,
-    });
-    let strategy: StepEvidence['readStrategy'];
-    if (options.loadOptions.streaming !== 'filesystem') {
-      result = reader.readText(options.bytes.text, optionsJson);
-      strategy = {
-        strategy: 'native-stream',
-        inputKind: options.bytes.source.kind,
-        bytesRead: options.bytes.bytes.byteLength,
-        nativeReadStream: true,
-        copiedToEmscriptenFs: false,
-      };
-    } else if (typeof reader.readFile === 'function' && options.module.FS) {
-      const path = `/geospec-step-${Date.now()}-${Math.random().toString(16).slice(2)}.step`;
-      options.module.FS.writeFile(path, options.bytes.bytes);
-      try {
-        result = reader.readFile(path, optionsJson);
-      } finally {
-        options.module.FS.unlink(path);
-      }
-      strategy = {
-        strategy: 'filesystem',
-        inputKind: options.bytes.source.kind,
-        bytesRead: options.bytes.bytes.byteLength,
-        nativeReadStream: false,
-        copiedToEmscriptenFs: true,
-      };
-    } else {
-      return undefined;
-    }
-    const payload = JSON.parse(result.evidenceJson()) as NativeEvidencePayload;
-    if (!result.success) {
-      const message =
-        payload.diagnostics?.map((diagnostic) => diagnostic.message).join('\n') ?? 'GeoSpec native STEP reader failed.';
-      throw new Error(message);
-    }
-    if (result.meshTrianglePointer && result.meshTriangleCount && options.module.HEAPF64) {
-      const pointer = result.meshTrianglePointer();
-      const count = result.meshTriangleCount();
-      if (pointer > 0 && count > 0) {
-        const start = pointer / Float64Array.BYTES_PER_ELEMENT;
-        payload.triangles = copyHeapFloat64({ heap: options.module.HEAPF64, start, length: count * 9 });
-      }
-    }
-    return {
-      payload,
-      strategy,
-    };
-  } finally {
-    result?.delete?.();
-  }
+/**
+ * Parse a native XDE `resultJson()` payload into a complete {@link XdeReadResult},
+ * defaulting evidence arrays a pre-GDT wasm build does not emit.
+ *
+ * @param json - Raw `resultJson()` payload from the native reader.
+ * @returns Structured read result with every evidence array present.
+ * @public
+ */
+export const parseXdeReadResultJson = (json: string): XdeReadResult => {
+  const raw = JSON.parse(json) as Partial<XdeReadResult>;
+  return {
+    occurrences: raw.occurrences ?? [],
+    subshapeNames: raw.subshapeNames ?? [],
+    datumPlacements: raw.datumPlacements ?? [],
+    semanticDatums: raw.semanticDatums ?? [],
+    datumSystems: raw.datumSystems ?? [],
+    supplementalPlanes: raw.supplementalPlanes ?? [],
+    freeShapeCount: raw.freeShapeCount ?? 0,
+  };
 };
 
 type NativeXdeRead = {
-  xde?: XdeReadResult;
-  nativeXde?: GeoSpecNativeXdeReadResult;
-  diagnostic?: GeometryDiagnostic;
+  xde: XdeReadResult;
+  nativeXde: GeoSpecNativeXdeReadResult;
+  strategy: StepEvidence['readStrategy'];
 };
 
-// One STEP-XDE read yields structure, names, and datum placements together; the
-// native result also retains placed shapes for exact BRep proof calls, so it
-// is handed to the subject instead of being deleted here.
-const readNativeXde = (options: { text: string; module: GeoSpecNativeStepBackend }): NativeXdeRead => {
+// R8: which read path a subject takes is a pure function of the load options
+// and the backend — never of the artifact — so it resolves without reading.
+// That keeps `readStrategy` provenance identical on a warm subject that never
+// parses. `undefined` means this backend cannot read at all (load-fatal).
+const resolveReadStrategy = (options: {
+  bytes: StepBytes;
+  loadOptions: LoadStepOptions;
+  module: GeoSpecNativeStepBackend;
+}): StepEvidence['readStrategy'] | undefined => {
   const reader = options.module.GeoSpecXdeReader;
   if (!reader) {
-    return {};
+    return undefined;
   }
-  const result = reader.readText(options.text);
+  const shared = { inputKind: options.bytes.source.kind, bytesRead: options.bytes.bytes.byteLength };
+  if (options.loadOptions.streaming !== 'filesystem') {
+    return { strategy: 'native-stream', ...shared, nativeReadStream: true, copiedToEmscriptenFs: false };
+  }
+  if (typeof reader.readFile === 'function' && options.module.FS) {
+    return { strategy: 'filesystem', ...shared, nativeReadStream: false, copiedToEmscriptenFs: true };
+  }
+  return undefined;
+};
+
+// The single AP242 read per load (lazy-evidence blueprint R3, Finding 3): one
+// STEP-XDE read yields structure, names, and datum placements together, and
+// retains the placed shapes plus the analysis root so every BRep evidence
+// facet and exact proof call runs without a second parse. Parse/transfer
+// failures stay load-fatal (blueprint A12) — analysis failures surface later
+// as memoized facet diagnostics.
+// GEOSPEC_FORENSIC=1 turns on native per-phase [FORENSIC] stderr timing. This
+// is an argument to the read, so it is part of the persisted structure's key.
+const nativeReaderOptionsJson = (): string => JSON.stringify({ forensic: forensicEnabled() });
+
+const readNativeXde = (options: {
+  bytes: StepBytes;
+  loadOptions: LoadStepOptions;
+  module: GeoSpecNativeStepBackend;
+  strategy: StepEvidence['readStrategy'];
+}): GeoSpecNativeXdeReadResult => {
+  const reader = options.module.GeoSpecXdeReader;
+  if (!reader) {
+    throw new Error('GeoSpec native XDE reader disappeared between strategy resolution and the read.');
+  }
+  const readerOptionsJson = nativeReaderOptionsJson();
+  let result: GeoSpecNativeXdeReadResult;
+  if (options.strategy.strategy === 'native-stream') {
+    result = reader.readText(options.bytes.text, readerOptionsJson);
+  } else {
+    const path = `/geospec-step-${Date.now()}-${Math.random().toString(16).slice(2)}.step`;
+    options.module.FS?.writeFile(path, options.bytes.bytes);
+    try {
+      result = reader.readFile!(path, readerOptionsJson);
+    } finally {
+      options.module.FS?.unlink(path);
+    }
+  }
   if (!result.isSuccess()) {
     let message = 'GeoSpec native XDE reader failed.';
     try {
@@ -346,9 +365,149 @@ const readNativeXde = (options: { text: string; module: GeoSpecNativeStepBackend
       // Keep the generic message when the native error payload is unreadable.
     }
     result.delete?.();
-    return { diagnostic: { code: 'GEOSPEC_XDE_READ_FAILED', severity: 'warning', message } };
+    throw new Error(message);
   }
-  return { xde: JSON.parse(result.resultJson()) as XdeReadResult, nativeXde: result };
+  return result;
+};
+
+/** Optional facets a backend build exposes; drives the engine seams below. */
+type NativeXdeCapabilities = { occurrenceMesh: boolean; occurrenceFaceMesh: boolean };
+
+type NativeXdeMaterializer = {
+  /** Parse (once) and return the live handle; throws exactly as an eager load did. */
+  force: () => GeoSpecNativeXdeReadResult;
+  isDeleted: () => boolean;
+  delete: () => void;
+};
+
+// R8: the parse itself, deferred behind one closure and memoized. Everything a
+// warm run needs (the XDE structure, the facet values, the proof payloads) is
+// persisted evidence, so on a fully-cached subject `force` is never called and
+// the 13 MB OCCT reader never runs. `isDeleted`/`delete` answer WITHOUT forcing:
+// the ledger probes liveness before every facet read (evidence-ledger.ts), and
+// a liveness probe that parsed would defeat the whole recommendation.
+const createNativeXdeMaterializer = (options: {
+  bytes: StepBytes;
+  loadOptions: LoadStepOptions;
+  module: GeoSpecNativeStepBackend;
+  strategy: StepEvidence['readStrategy'];
+}): NativeXdeMaterializer => {
+  let handle: GeoSpecNativeXdeReadResult | undefined;
+  let deleted = false;
+  return {
+    force: (): GeoSpecNativeXdeReadResult => {
+      if (deleted) {
+        throw new Error('the native XDE handle was disposed before this facet was demanded');
+      }
+      handle ??= forensicSync('load.native.xdeReader', () => readNativeXde(options));
+      return handle;
+    },
+    isDeleted: (): boolean => deleted || (handle?.isDeleted?.() ?? false),
+    // Idempotent by ownership: deleting an Emscripten handle twice aborts the
+    // wasm, and a subject can be disposed by more than one path (the resource
+    // scope, plus a caller unwinding a failed load). The handle guards itself
+    // rather than making every caller track whether it already fired.
+    delete: (): void => {
+      if (deleted) {
+        return;
+      }
+      deleted = true;
+      handle?.delete?.();
+    },
+  };
+};
+
+// R8: read the optional-facet table off the embind result PROTOTYPE, so a warm
+// subject decides its engine seams (hybrid void, contact patches) with zero
+// parse. The answer is identical either way — the prototype is the very object
+// a handle would delegate to. Backends without the class (test fakes, hand-built
+// modules) are probed by materializing, which for a fake costs nothing.
+const probeNativeXdeCapabilities = (options: {
+  module: GeoSpecNativeStepBackend;
+  force: () => GeoSpecNativeXdeReadResult;
+}): NativeXdeCapabilities => {
+  const table: Partial<GeoSpecNativeXdeReadResult> = options.module.GeoSpecXdeReadResult?.prototype ?? options.force();
+  return {
+    occurrenceMesh: typeof table.occurrenceMeshTriangles === 'function',
+    occurrenceFaceMesh: typeof table.occurrenceFaceMeshTriangles === 'function',
+  };
+};
+
+// R8: the subject's native surface, materializing on first real call. Optional
+// facets are installed per the probed capabilities so `subject.occurrenceMesh`
+// stays present-or-absent exactly as an eager load left it — consumers read
+// presence as a capability signal and fall back to other engines on absence.
+const createLazyNativeXde = (options: {
+  materializer: NativeXdeMaterializer;
+  capabilities: NativeXdeCapabilities;
+}): GeoSpecNativeXdeReadResult => {
+  const { force } = options.materializer;
+  return {
+    isSuccess: () => force().isSuccess(),
+    resultJson: () => force().resultJson(),
+    extrema: (...extremaArguments: Parameters<GeoSpecNativeXdeReadResult['extrema']>) =>
+      force().extrema(...extremaArguments),
+    classifyPoints: (occurrence, pointsJson) => force().classifyPoints(occurrence, pointsJson),
+    commonVolume: (occurrenceA, occurrenceB) => force().commonVolume(occurrenceA, occurrenceB),
+    faceFacts: (occurrence) => force().faceFacts(occurrence),
+    analysisSummaryJson: () => force().analysisSummaryJson(),
+    analysisMassPropertiesJson: () => force().analysisMassPropertiesJson(),
+    analysisValidityJson: (optionsJson) => force().analysisValidityJson(optionsJson),
+    analysisFaceFeaturesJson: () => force().analysisFaceFeaturesJson(),
+    analysisWallThicknessJson: (optionsJson) => force().analysisWallThicknessJson(optionsJson),
+    meshTriangles: (optionsJson) => force().meshTriangles(optionsJson),
+    meshTrianglePointer: () => force().meshTrianglePointer(),
+    meshTriangleCount: () => force().meshTriangleCount(),
+    ...(options.capabilities.occurrenceMesh
+      ? {
+          occurrenceMeshTriangles: (occurrence: number, optionsJson: string): string =>
+            force().occurrenceMeshTriangles!(occurrence, optionsJson),
+        }
+      : {}),
+    ...(options.capabilities.occurrenceFaceMesh
+      ? {
+          occurrenceFaceMeshTriangles: (occurrence: number, face: number, optionsJson: string): string =>
+            force().occurrenceFaceMeshTriangles!(occurrence, face, optionsJson),
+        }
+      : {}),
+    isDeleted: options.materializer.isDeleted,
+    delete: options.materializer.delete,
+  };
+};
+
+// R8: the XDE structure every selector index reads is a pure function of the
+// artifact bytes and of how we asked the reader to read them, so it persists
+// subject-scoped. Resolved EAGERLY at load, which is what keeps parse/transfer
+// failures load-fatal (blueprint A12): a cold subject parses right here and
+// throws from `loadStep` exactly as before, while a warm subject replays a
+// structure that a successful parse already produced — so skipping the re-parse
+// can never hide a failure.
+//
+// The key carries both read arguments (the reader options JSON and the read
+// strategy) alongside the content hash, mirroring the `brep-facet` precedent: a
+// key has to distinguish any two reads that could return different structures,
+// and neither argument is worth assuming inert. The cost is one re-parse when a
+// diagnostic flag flips, never a stale structure.
+const readXdeStructure = (options: {
+  contentHash: string;
+  readerOptionsJson: string;
+  strategy: StepEvidence['readStrategy'];
+  force: () => GeoSpecNativeXdeReadResult;
+}): XdeReadResult => {
+  const compute = (): XdeReadResult => parseXdeReadResultJson(options.force().resultJson());
+  const cache = getGeoSpecEvidenceCache();
+  return cache
+    ? (cache.getOrCompute({
+        family: 'xde-read',
+        version: 1,
+        key: {
+          subjectHash: options.contentHash,
+          options: options.readerOptionsJson,
+          strategy: options.strategy.strategy,
+        },
+        compute,
+      }) ?? compute())
+    : compute();
 };
 
 const resolveNativeStepBackend = async (options: {
@@ -363,9 +522,7 @@ const resolveNativeStepBackend = async (options: {
     return backend;
   }
   try {
-    const module_ = await import('geospec/native/opencascade/single');
-    const factory = module_.default as (options?: unknown) => Promise<GeoSpecOpenCascadeStepModule>;
-    return await factory();
+    return (await ensureOpenCascadeModule()) as GeoSpecOpenCascadeStepModule;
   } catch {
     return undefined;
   }
@@ -401,353 +558,222 @@ const brepCapabilities: GeometryCapability[] = [
   { kind: 'brep', feature: 'circular-hole-patterns' },
   { kind: 'brep', feature: 'chamfer-features' },
   { kind: 'brep', feature: 'fillet-features' },
+  // Finding 8 fix: capabilities describe what the loader can compute for the
+  // subject, not which facets happen to be materialized. Wall thickness is
+  // always offered on a successful native read; an invalid or open subject
+  // reports its unsupported-evidence diagnostic at proof time instead (§5).
+  { kind: 'brep', feature: 'wall-thickness' },
 ];
 
-const stepCapabilities = (options: { brep: BrepEvidence | undefined; hasMesh: boolean }): GeometryCapability[] => [
+const stepCapabilities = (options: { hasBrep: boolean; hasMesh: boolean }): GeometryCapability[] => [
   ...(options.hasMesh ? meshCapabilities : []),
   ...stepEvidenceCapabilities,
-  ...(options.brep
-    ? [
-        ...brepCapabilities,
-        ...(options.brep.minimumWallThickness ? ([{ kind: 'brep', feature: 'wall-thickness' }] as const) : []),
-      ]
-    : []),
+  ...(options.hasBrep ? brepCapabilities : []),
 ];
 
-const axisIndices = { x: 0, y: 1, z: 2 } as const;
-
-const axisValue = (value: readonly [number, number, number], axis: 'x' | 'y' | 'z'): number => value[axisIndices[axis]];
-
-const perpendicularAxes = (axis: 'x' | 'y' | 'z'): Array<'x' | 'y' | 'z'> =>
-  axis === 'x' ? ['y', 'z'] : axis === 'y' ? ['x', 'z'] : ['x', 'y'];
-
-const coordinatesMatch = (options: {
-  left: readonly [number, number, number] | undefined;
-  right: readonly [number, number, number] | undefined;
-  axes: ReadonlyArray<'x' | 'y' | 'z'>;
-  tolerance: number;
-}): boolean => {
-  const { left, right } = options;
-  if (!left || !right) {
-    return false;
-  }
-  return options.axes.every((axis) => Math.abs(axisValue(left, axis) - axisValue(right, axis)) <= options.tolerance);
-};
-
-const isAxisNormal = (normal: readonly [number, number, number], axis: 'x' | 'y' | 'z'): boolean => {
-  const axisMagnitude = Math.abs(axisValue(normal, axis));
-  const offAxisMagnitude = perpendicularAxes(axis).reduce(
-    (sum, perpendicularAxis) => sum + Math.abs(axisValue(normal, perpendicularAxis)),
-    0,
-  );
-  return axisMagnitude > 0.95 && offAxisMagnitude < 0.05;
-};
-
-const touchesBoundingExtent = (options: { value: number; min: number; max: number; tolerance: number }): boolean =>
-  Math.abs(options.value - options.min) <= options.tolerance ||
-  Math.abs(options.value - options.max) <= options.tolerance;
-
-const hasInternalCircularCap = (options: {
-  brep: BrepEvidence;
-  diameter: number;
-  axis: 'x' | 'y' | 'z';
-  center?: readonly [number, number, number];
-}): boolean => {
-  const { brep, axis, center, diameter } = options;
-  if (!brep.boundingBox || !brep.planarFaces || !center) {
-    return false;
-  }
-
-  const radius = diameter / 2;
-  const expectedCapArea = Math.PI * radius * radius;
-  const areaTolerance = Math.max(1, expectedCapArea * 0.05);
-  const positionTolerance = 0.1;
-  const boundaryTolerance = 0.1;
-  const min = axisValue(brep.boundingBox.min, axis);
-  const max = axisValue(brep.boundingBox.max, axis);
-
-  return brep.planarFaces.some((face) => {
-    if (!face.center || face.area === undefined || !isAxisNormal(face.normal, axis)) {
-      return false;
-    }
-    if (
-      !coordinatesMatch({
-        left: face.center,
-        right: center,
-        axes: perpendicularAxes(axis),
-        tolerance: positionTolerance,
-      })
-    ) {
-      return false;
-    }
-    if (Math.abs(face.area - expectedCapArea) > areaTolerance) {
-      return false;
-    }
-
-    return !touchesBoundingExtent({
-      value: axisValue(face.center, axis),
-      min,
-      max,
-      tolerance: boundaryTolerance,
-    });
-  });
-};
-
-const holeThroughFromAxisRange = (options: {
-  brep: BrepEvidence;
-  axis: 'x' | 'y' | 'z';
-  axisRange?: { min: number; max: number };
-}): boolean | undefined => {
-  const { axisRange, brep, axis } = options;
-  if (!axisRange || !brep.boundingBox) {
-    return undefined;
-  }
-  const tolerance = 0.1;
-  return (
-    axisRange.min <= axisValue(brep.boundingBox.min, axis) + tolerance &&
-    axisRange.max >= axisValue(brep.boundingBox.max, axis) - tolerance
-  );
-};
-
-type CircularHole = NonNullable<BrepEvidence['circularHoles']>[number];
-type CircularHolePattern = NonNullable<BrepEvidence['circularHolePatterns']>[number];
-type ChamferFeature = NonNullable<BrepEvidence['chamferFeatures']>[number];
-
-const axisOf = (direction: readonly [number, number, number] | undefined): 'x' | 'y' | 'z' | undefined => {
-  if (!direction) {
-    return undefined;
-  }
-  const abs = direction.map((component) => Math.abs(component));
-  const dominant = Math.max(...abs);
-  // Axis-aligned means one component dominates and the others are near zero.
-  if (dominant <= 0.999 || abs.filter((value) => value > 0.05).length !== 1) {
-    return undefined;
-  }
-  return abs[0] === dominant ? 'x' : abs[1] === dominant ? 'y' : 'z';
-};
-
-const axialSpan = (facts: SelectorFaceFacts, axis: 'x' | 'y' | 'z'): number => {
-  const index = axisIndices[axis];
-  return facts.bounds.max[index] - facts.bounds.min[index];
-};
-
-// Re-derive revolved (conical) chamfer features the native planar-only
-// recognizer misses (WS-E / Finding 7). A shaft-end or bore-entry chamfer is a
-// `cone` face that is axis-aligned, small, and topologically flanked by a
-// coaxial `cylinder` face and a coaxial planar end face (normal along the axis).
-// Its 45 deg leg length equals its axial span, which is what toHaveChamferFeature
-// checks as `distance`.
-// C1: emitted only when the cone is small, axis-aligned, and flanked by both a
-// coaxial cylinder and a coaxial end plane - the shaft-end / bore chamfer
-// signature - so a deep taper or a stray cone is never reported as a chamfer.
-// Deterministic: candidates are traversal-ordered and distances rounded to a
-// stable key before de-duplication.
-const deriveChamferFeaturesFromFaceFacts = (faces: readonly SelectorFaceFacts[]): ChamferFeature[] => {
-  const cones = faces.filter((face) => face.surfaceType === 'cone');
-  const cylinders = faces.filter((face) => face.surfaceType === 'cylinder');
-  const planes = faces.filter((face) => face.surfaceType === 'plane');
-  const maxChamferDistance = 10;
-
-  const distances = new Set<number>();
-  const derived: ChamferFeature[] = [];
-  for (const cone of cones) {
-    const axis = axisOf(cone.axisDirection);
-    if (!axis) {
-      continue;
-    }
-    const distance = axialSpan(cone, axis);
-    if (distance <= 1e-6 || distance > maxChamferDistance) {
-      continue;
-    }
-    // A chamfer bridges a coaxial cylinder wall and a coaxial end face; require
-    // both so a stand-alone taper is never surfaced as a chamfer (C1).
-    const coaxialCylinder = cylinders.some((cylinder) => axisOf(cylinder.axisDirection) === axis);
-    const coaxialEndPlane = planes.some((plane) => axisOf(plane.normal) === axis);
-    if (!coaxialCylinder || !coaxialEndPlane) {
-      continue;
-    }
-    // Round to a micrometer-stable key so identical chamfers around a revolve collapse.
-    const key = Math.round(distance * 1000) / 1000;
-    if (distances.has(key)) {
-      continue;
-    }
-    distances.add(key);
-    derived.push({ distance: key, selection: `revolved chamfer (axis ${axis})` });
-  }
-  return derived;
-};
-
-// Axial gap (mm) beyond which two blind holes belong to different pads.
-const padSeparationGap = 20;
-
-const holePatternFrom = (group: readonly CircularHole[]): CircularHolePattern => {
-  const { axis } = group[0]!;
-  const centre: [number, number, number] = [0, 0, 0];
-  for (const hole of group) {
-    centre[0] += hole.center![0];
-    centre[1] += hole.center![1];
-    centre[2] += hole.center![2];
-  }
-  centre[0] /= group.length;
-  centre[1] /= group.length;
-  centre[2] /= group.length;
-  const [px, py] = perpendicularAxes(axis).map((perpendicularAxis) => axisIndices[perpendicularAxis]);
-  let radialSum = 0;
-  for (const hole of group) {
-    radialSum += Math.hypot(hole.center![px!] - centre[px!], hole.center![py!] - centre[py!]);
-  }
-  return {
-    count: group.length,
-    holeDiameter: group[0]!.diameter,
-    boltCircleDiameter: (2 * radialSum) / group.length,
-    axis,
-    center: centre,
-  };
-};
-
-// Split a blind-hole family into per-pad clusters by their entry-face plane:
-// sort by axial centre and start a new pad wherever the gap exceeds
-// padSeparationGap. Sorting on a scalar coordinate keeps the split deterministic
-// (C2).
-const splitBlindHolesByPad = (holes: readonly CircularHole[]): CircularHole[][] => {
-  const axialIndex = axisIndices[holes[0]!.axis];
-  const sorted = [...holes].sort((a, b) => a.center![axialIndex] - b.center![axialIndex]);
-  const pads: CircularHole[][] = [];
-  let current: CircularHole[] = [];
-  let previous: number | undefined;
-  for (const hole of sorted) {
-    const axial = hole.center![axialIndex];
-    if (previous !== undefined && axial - previous > padSeparationGap) {
-      pads.push(current);
-      current = [];
-    }
-    current.push(hole);
-    previous = axial;
-  }
-  pads.push(current);
-  return pads;
-};
-
-// Re-group circular holes into per-pattern families (WS-E / Finding 7). The
-// native recognizer keys only by (axis, diameter), so two mirror-symmetric
-// blind-tap pads on opposite faces merge into one over-counted pattern. Rule:
-//   - Base family = (axis, diameter).
-//   - THROUGH holes stay in one family per base key (a through pattern spans the
-//     part and legitimately spreads along/around the axis, for example a bolt
-//     circle or a row of breathing windows).
-//   - BLIND holes (taps) enter from a single face, so a family is split into
-//     pads by entry-plane clustering: a large axial gap starts a new pad.
-// So two positive/negative-y pads of 3 taps report count 3 each (not a merged
-// 6), while a single-face bolt circle of 6 blind taps stays count 6. Shallow
-// taps are kept (no depth/aspect floor) so short blind bores still pattern.
-// Deterministic: holes are consumed in native traversal order, clusters seeded
-// by that order.
-const deriveHolePatterns = (holes: readonly CircularHole[]): CircularHolePattern[] => {
-  const families = new Map<string, CircularHole[]>();
-  for (const hole of holes) {
-    if (!hole.center) {
-      continue;
-    }
-    const diameterKey = Math.round(hole.diameter * 1000) / 1000;
-    // Through patterns are one family per (axis, diameter); blind taps are split
-    // into pads below, keyed apart so a through row and a blind pad never merge.
-    const kindKey = hole.through ? 'through' : 'blind';
-    const key = `${hole.axis}:${diameterKey}:${kindKey}`;
-    families.set(key, [...(families.get(key) ?? []), hole]);
-  }
-
-  const patterns: CircularHolePattern[] = [];
-  for (const [key, family] of families) {
-    const groups = key.endsWith(':blind') ? splitBlindHolesByPad(family) : [family];
-    for (const group of groups) {
-      if (group.length >= 2) {
-        patterns.push(holePatternFrom(group));
-      }
-    }
-  }
-  return patterns;
-};
-
-const normalizeBrepEvidence = (
-  brep: BrepEvidence | undefined,
-  faceFacts: readonly SelectorFaceFacts[] = [],
-): BrepEvidence | undefined => {
-  if (!brep) {
-    return brep;
-  }
-
-  const circularHoles = brep.circularHoles?.map((hole) => {
-    const rangeThrough = holeThroughFromAxisRange({ brep, axis: hole.axis, axisRange: hole.axisRange });
-    const cappedBlindHole = hasInternalCircularCap({
-      brep,
-      diameter: hole.diameter,
-      axis: hole.axis,
-      center: hole.center,
-    });
-    return {
-      ...hole,
-      through: rangeThrough ?? (hole.through && !cappedBlindHole),
-    };
-  });
-
-  // Re-derive pattern grouping from the corrected through-state so mirror-
-  // symmetric pads and single-face bolt circles are grouped per the rule above.
-  const circularHolePatterns = circularHoles ? deriveHolePatterns(circularHoles) : brep.circularHolePatterns;
-
-  // Union the native (planar-bevel) chamfers with revolved cone chamfers the
-  // native recognizer cannot see.
-  const derivedChamfers = deriveChamferFeaturesFromFaceFacts(faceFacts);
-  const chamferFeatures =
-    derivedChamfers.length > 0 ? [...(brep.chamferFeatures ?? []), ...derivedChamfers] : brep.chamferFeatures;
-
-  return {
-    ...brep,
-    ...(circularHoles ? { circularHoles } : {}),
-    ...(circularHolePatterns ? { circularHolePatterns } : {}),
-    ...(chamferFeatures ? { chamferFeatures } : {}),
-  };
-};
-
-// Chamfer/hole re-derivation is a per-part feature check; the native
-// analyzeShape brep it augments is only meaningful for a single-solid part, and
-// the rev2 chamfer/pattern REQs load individual parts (loadPartStep). Cap
-// face-fact collection to part-scale occurrence counts so a 650-occurrence
-// assembly load never pays a native faceFacts() call per occurrence.
-const maxPartOccurrences = 8;
-
-// Gather per-face analytic facts across every occurrence so TS-side feature
-// re-derivation (revolved chamfers) can read cone/cylinder/plane geometry the
-// native analyzeShape payload omits. Returns [] when the native XDE handle is
-// absent (mesh-only or failed read) or the subject is assembly-scale.
-const collectFaceFacts = (xdeRead?: NativeXdeRead): SelectorFaceFacts[] => {
-  const native = xdeRead?.nativeXde;
-  const occurrences = xdeRead?.xde?.occurrences;
-  if (!native || !occurrences || occurrences.length > maxPartOccurrences) {
+// Triangle soup for mesh evidence rides the meshTriangles facet: the facet
+// tessellates the retained root shape and the triangles are copied out of the
+// wasm heap in one pass. `mesh: false` loads skip tessellation entirely.
+const readMeshTriangles = (options: {
+  loadOptions: LoadStepOptions;
+  native: GeoSpecNativeXdeReadResult;
+  module: GeoSpecNativeStepBackend;
+}): number[] => {
+  if (options.loadOptions.mesh === false) {
     return [];
   }
-  const facts: SelectorFaceFacts[] = [];
-  for (let position = 0; position < occurrences.length; position++) {
-    try {
-      const parsed = JSON.parse(native.faceFacts(position)) as { faces?: SelectorFaceFacts[] };
-      if (Array.isArray(parsed.faces)) {
-        facts.push(...parsed.faces);
-      }
-    } catch {
-      // A single occurrence's fact read failing must not drop the load.
-    }
+  const meshOptionsJson = JSON.stringify({
+    mesh: true,
+    meshLinearTolerance: options.loadOptions.meshLinearTolerance ?? defaultMeshLinearTolerance,
+    meshAngularToleranceDegrees: options.loadOptions.meshAngularToleranceDegrees ?? defaultMeshAngularToleranceDegrees,
+  });
+  const summary = JSON.parse(options.native.meshTriangles(meshOptionsJson)) as {
+    triangleCount?: number;
+    error?: string;
+  };
+  if (summary.error !== undefined) {
+    throw new Error(summary.error);
   }
-  return facts;
+  const count = summary.triangleCount ?? 0;
+  if (count <= 0 || !options.module.HEAPF64) {
+    return [];
+  }
+  const pointer = options.native.meshTrianglePointer();
+  if (pointer <= 0) {
+    return [];
+  }
+  const start = pointer / Float64Array.BYTES_PER_ELEMENT;
+  return copyHeapFloat64({ heap: options.module.HEAPF64, start, length: count * 9 });
+};
+
+// R4: one tessellation payload per (subject, occurrence, deflection) — JSON
+// header for the achieved deflection, one binary section for the soup.
+const occurrenceMeshCodec: GeoSpecEvidenceCodec<{ triangles: Float64Array<ArrayBuffer>; deflection: number }> = {
+  encode: (value) => encodeSectionedPayload({ deflection: value.deflection }, [typedArrayBytes(value.triangles)]),
+  decode: (bytes) => {
+    const { header, sections } = decodeSectionedPayload(bytes);
+    if (sections.length !== 1) {
+      throw new Error('occurrence-mesh payload must carry exactly 1 section.');
+    }
+    return { triangles: sectionToFloat64(sections[0]!), deflection: (header as { deflection: number }).deflection };
+  },
+};
+
+/**
+ * Per-occurrence on-demand tessellation for the hybrid void-occupancy engine
+ * (throughput blueprint R6 move 3). Each call re-meshes the placed occurrence
+ * at the requested density and copies the soup out of the wasm heap
+ * immediately (the retained buffer is shared with the root facet). Works for
+ * `mesh: false` loads — void claims tessellate on demand, never at load.
+ *
+ * R4 (suite audit): the soup is a pure function of (subject content,
+ * occurrence, deflection), so successful fetches are memoized on the subject
+ * AND persisted as the shared `occurrence-mesh` family — the contact
+ * classifier, void occupancy, and overlap all read through this one seam
+ * instead of re-tessellating per consumer, per run.
+ */
+const createOccurrenceMeshFetcher = (options: {
+  occurrenceMeshTriangles: (occurrence: number, optionsJson: string) => string;
+  native: GeoSpecNativeXdeReadResult;
+  module: GeoSpecNativeStepBackend;
+  contentHash: string;
+}): OccurrenceMeshFetcher => {
+  const memo = new Map<string, { triangles: Float64Array<ArrayBuffer>; deflection: number }>();
+  const fetchDirect: OccurrenceMeshFetcher = (occurrence, meshOptions) => {
+    const summary = JSON.parse(
+      options.occurrenceMeshTriangles(
+        occurrence,
+        JSON.stringify({
+          mesh: true,
+          meshLinearTolerance: meshOptions.linearDeflection,
+          meshAngularToleranceDegrees: meshOptions.angularDeflectionDegrees,
+        }),
+      ),
+    ) as { triangleCount?: number; deflection?: number; error?: string };
+    if (summary.error !== undefined) {
+      return { error: summary.error };
+    }
+    const deflection = summary.deflection ?? meshOptions.linearDeflection;
+    const count = summary.triangleCount ?? 0;
+    if (count <= 0 || !options.module.HEAPF64) {
+      return { triangles: new Float64Array(0), deflection };
+    }
+    const pointer = options.native.meshTrianglePointer();
+    if (pointer <= 0) {
+      return { triangles: new Float64Array(0), deflection };
+    }
+    const start = pointer / Float64Array.BYTES_PER_ELEMENT;
+    return { triangles: options.module.HEAPF64.slice(start, start + count * 9), deflection };
+  };
+  return (occurrence, meshOptions) => {
+    const memoKey = `${occurrence}:${meshOptions.linearDeflection}:${meshOptions.angularDeflectionDegrees}`;
+    const memoized = memo.get(memoKey);
+    if (memoized) {
+      return memoized;
+    }
+    const cache = getGeoSpecEvidenceCache();
+    let uncachedError: { error: string } | undefined;
+    const result = cache
+      ? (cache.getOrCompute({
+          family: 'occurrence-mesh',
+          version: 1,
+          key: {
+            subjectHash: options.contentHash,
+            occurrence,
+            linearDeflection: meshOptions.linearDeflection,
+            angularDeflectionDegrees: meshOptions.angularDeflectionDegrees,
+          },
+          codec: occurrenceMeshCodec,
+          compute: () => {
+            const computed = fetchDirect(occurrence, meshOptions);
+            if ('error' in computed) {
+              uncachedError = computed;
+              return undefined;
+            }
+            return computed;
+          },
+        }) ??
+        uncachedError ??
+        fetchDirect(occurrence, meshOptions))
+      : fetchDirect(occurrence, meshOptions);
+    if (!('error' in result)) {
+      memo.set(memoKey, result);
+    }
+    return result;
+  };
+};
+
+/**
+ * Per-occurrence-face on-demand tessellation for the topological contact-patch
+ * engine (spatial-relationship blueprint R1). Mirrors
+ * {@link createOccurrenceMeshFetcher} but tessellates one face by index; the
+ * retained buffer is shared with the root facet, so the soup is copied out of
+ * the wasm heap immediately. Successful fetches are memoized on the subject
+ * (R4) — per-face results stay in-process only, since the contact-patch
+ * family already persists their derived patches.
+ */
+const createOccurrenceFaceMeshFetcher = (options: {
+  occurrenceFaceMeshTriangles: (occurrence: number, face: number, optionsJson: string) => string;
+  native: GeoSpecNativeXdeReadResult;
+  module: GeoSpecNativeStepBackend;
+}): OccurrenceFaceMeshFetcher => {
+  const memo = new Map<string, { triangles: Float64Array<ArrayBuffer>; deflection: number }>();
+  return (occurrence, face, meshOptions) => {
+    const memoKey = `${occurrence}:${face}:${meshOptions.linearDeflection}:${meshOptions.angularDeflectionDegrees}`;
+    const memoized = memo.get(memoKey);
+    if (memoized) {
+      return memoized;
+    }
+    const summary = JSON.parse(
+      options.occurrenceFaceMeshTriangles(
+        occurrence,
+        face,
+        JSON.stringify({
+          mesh: true,
+          meshLinearTolerance: meshOptions.linearDeflection,
+          meshAngularToleranceDegrees: meshOptions.angularDeflectionDegrees,
+        }),
+      ),
+    ) as { triangleCount?: number; deflection?: number; error?: string };
+    if (summary.error !== undefined) {
+      return { error: summary.error };
+    }
+    const deflection = summary.deflection ?? meshOptions.linearDeflection;
+    const count = summary.triangleCount ?? 0;
+    if (count <= 0 || !options.module.HEAPF64) {
+      const empty = { triangles: new Float64Array(0), deflection };
+      memo.set(memoKey, empty);
+      return empty;
+    }
+    const pointer = options.native.meshTrianglePointer();
+    if (pointer <= 0) {
+      const empty = { triangles: new Float64Array(0), deflection };
+      memo.set(memoKey, empty);
+      return empty;
+    }
+    const start = pointer / Float64Array.BYTES_PER_ELEMENT;
+    const result = { triangles: options.module.HEAPF64.slice(start, start + count * 9), deflection };
+    memo.set(memoKey, result);
+    return result;
+  };
 };
 
 const buildStepSubject = async (options: {
   bytes: StepBytes;
   loadOptions: LoadStepOptions;
-  payload: NativeEvidencePayload;
-  strategy: StepEvidence['readStrategy'];
-  xdeRead?: NativeXdeRead;
+  xdeRead: NativeXdeRead;
+  module: GeoSpecNativeStepBackend;
+  contentHash: string;
+  capabilities: NativeXdeCapabilities;
 }): Promise<GeometrySubject> => {
   const unit = options.loadOptions.unit ?? 'mm';
-  const triangles = options.payload.triangles ?? [];
+  // `mesh: false` skips tessellation entirely and so never touches the native
+  // handle (R8: the whole v8 corpus loads this way and stays parse-free warm);
+  // a `mesh: true` load genuinely needs the root soup at load time and forces
+  // the parse here, warm or cold.
+  const triangles = forensicSync('load.native.meshTriangles', () =>
+    readMeshTriangles({ loadOptions: options.loadOptions, native: options.xdeRead.nativeXde, module: options.module }),
+  );
   const hasMesh = triangles.length > 0;
   const meshBuffer = trianglesToMeshBuffer(triangles);
   const meshResult = await loadMesh({
@@ -763,34 +789,48 @@ const buildStepSubject = async (options: {
   if (!meshResult.success) {
     throw new Error(meshResult.diagnostics.map((diagnostic) => diagnostic.message).join('\n'));
   }
-  const brep = normalizeBrepEvidence(options.payload.brep, collectFaceFacts(options.xdeRead));
-  const payloadStepCapabilities = options.payload.step?.capabilities ?? [];
+  // R5 subject-scope identity — resolved before the ledger so persisted facets
+  // key on the artifact bytes (R8 computes it earlier still, ahead of any
+  // native work, so a warm subject can key its whole load on it).
+  const { contentHash } = options;
+  // Hybrid void engine (R6 move 3): resolve the Manifold module here, while
+  // still async, so the SYNC proof path's engine choice is deterministic —
+  // ready or permanently failed by proof time, never timing-dependent. A
+  // failed init leaves the sync getter empty and every void claim on the
+  // exact path; it must never fail the load.
+  const occurrenceMeshTriangles = options.xdeRead.nativeXde.occurrenceMeshTriangles?.bind(options.xdeRead.nativeXde);
+  const occurrenceFaceMeshTriangles = options.xdeRead.nativeXde.occurrenceFaceMeshTriangles?.bind(
+    options.xdeRead.nativeXde,
+  );
+  if (options.capabilities.occurrenceMesh) {
+    await ensureManifoldModule().catch(() => undefined);
+  }
+  const brep = createBrepEvidenceLedger({
+    native: options.xdeRead.nativeXde,
+    occurrenceCount: options.xdeRead.xde.occurrences.length,
+    facetOptionsJson: JSON.stringify({ forensic: forensicEnabled() }),
+    wallThicknessOptionsJson: JSON.stringify({
+      forensic: forensicEnabled(),
+      workUnitBudget: resolveWallThicknessWorkUnitBudget(),
+    }),
+    contentHash,
+  });
   const step: StepEvidence = {
     schema: extractStepSchema(options.bytes.text),
     unit,
     productStructure: extractProducts(options.bytes.text),
-    readStrategy: options.strategy,
+    readStrategy: options.xdeRead.strategy,
     capabilities: [
       { feature: 'product-structure', supported: true },
-      {
-        feature: 'color',
-        supported: Boolean(
-          payloadStepCapabilities.some((capability) => capability.feature === 'color' && capability.supported),
-        ),
-      },
-      {
-        feature: 'material',
-        supported: Boolean(
-          payloadStepCapabilities.some((capability) => capability.feature === 'material' && capability.supported),
-        ),
-      },
+      { feature: 'color', supported: false },
+      { feature: 'material', supported: false },
       {
         feature: 'geometric-tolerance',
         supported: false,
         reason: 'GeoSpec P0 reports unsupported AP242 PMI/GD&T evidence explicitly.',
       },
     ],
-    xde: options.xdeRead?.xde,
+    xde: options.xdeRead.xde,
   };
   return {
     ...meshResult.subject,
@@ -800,20 +840,42 @@ const buildStepSubject = async (options: {
       source: options.bytes.source,
       unit,
       loader: 'opencascade-step',
-      contentHash: await hashBytes(options.bytes.bytes),
+      contentHash,
       parameters: options.loadOptions.parameters,
     },
-    capabilities: stepCapabilities({ brep, hasMesh }),
-    diagnostics: [
-      ...(options.payload.diagnostics ?? []),
-      ...(options.xdeRead?.diagnostic ? [options.xdeRead.diagnostic] : []),
-    ],
-    nativeXde: options.xdeRead?.nativeXde,
+    capabilities: stepCapabilities({ hasBrep: true, hasMesh }),
+    diagnostics: [],
+    nativeXde: options.xdeRead.nativeXde,
+    ...(occurrenceMeshTriangles
+      ? {
+          occurrenceMesh: createOccurrenceMeshFetcher({
+            occurrenceMeshTriangles,
+            native: options.xdeRead.nativeXde,
+            module: options.module,
+            contentHash,
+          }),
+        }
+      : {}),
+    ...(occurrenceFaceMeshTriangles
+      ? {
+          occurrenceFaceMesh: createOccurrenceFaceMeshFetcher({
+            occurrenceFaceMeshTriangles,
+            native: options.xdeRead.nativeXde,
+            module: options.module,
+          }),
+        }
+      : {}),
   };
 };
 
 /**
  * Load STEP/XDE/BRep evidence into a GeoSpec geometry subject.
+ *
+ * At most one AP242/XDE read per subject, and none at all when the subject's
+ * evidence is already cached (R8): the read is deferred behind the returned
+ * subject's native surface and fires on the first proof that genuinely needs
+ * live geometry. Every `subject.brep` field materializes lazily on first access
+ * via the evidence facet ledger.
  *
  * @param options - STEP source and loading options.
  * @returns A geometry subject with STEP, BRep, and mesh evidence.
@@ -827,26 +889,42 @@ export const loadStep = async (options: LoadStepOptions): Promise<GeometrySubjec
     nativeStepBackend: options.nativeStepBackend,
     openCascade: options.openCascade,
   });
-  const native = module
-    ? await forensicAsync('load.native.analyzeReader', async () =>
-        readNativeStep({ bytes, loadOptions: options, module }),
-      )
-    : undefined;
-  if (!module || !native) {
+  const strategy = module ? resolveReadStrategy({ bytes, loadOptions: options, module }) : undefined;
+  if (!module || !strategy) {
     throw new Error(
-      'GeoSpec native STEP reader is unavailable. Use geospec/native/opencascade/single or pass a nativeStepBackend module with GeoSpecStepStreamReader.',
+      'GeoSpec native STEP reader is unavailable. Use geospec/native/opencascade/single or pass a nativeStepBackend module with GeoSpecXdeReader.',
     );
   }
-  options.onProgress?.({ phase: 'mesh-brep', bytesRead: bytes.bytes.byteLength });
-  const xdeRead = forensicSync('load.native.xdeReader', () => readNativeXde({ text: bytes.text, module }));
+  // R8: subject identity comes from the artifact bytes, ahead of any native
+  // work — it is the key every persisted family already uses, so resolving it
+  // first is what lets a warm subject skip the parse entirely.
+  const contentHash = await hashBytes(bytes.bytes);
+  const materializer = createNativeXdeMaterializer({ bytes, loadOptions: options, module, strategy });
   try {
+    const xde = readXdeStructure({
+      contentHash,
+      readerOptionsJson: nativeReaderOptionsJson(),
+      strategy,
+      force: materializer.force,
+    });
+    const capabilities = probeNativeXdeCapabilities({ module, force: materializer.force });
+    const nativeXde = createLazyNativeXde({ materializer, capabilities });
+    options.onProgress?.({ phase: 'mesh-brep', bytesRead: bytes.bytes.byteLength });
     return await forensicAsync('load.buildSubject', async () =>
-      buildStepSubject({ bytes, loadOptions: options, payload: native.payload, strategy: native.strategy, xdeRead }),
+      buildStepSubject({
+        bytes,
+        loadOptions: options,
+        xdeRead: { xde, nativeXde, strategy },
+        module,
+        contentHash,
+        capabilities,
+      }),
     );
   } catch (error) {
     // The subject takes ownership of the native XDE handle on success; on a
     // build failure it never receives it, so delete it here to avoid a leak.
-    xdeRead.nativeXde?.delete?.();
+    // No-ops when nothing was ever parsed.
+    materializer.delete();
     throw error;
   }
 };

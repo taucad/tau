@@ -25,6 +25,8 @@ export type GeoSpecModelLoadCacheStats = {
 export type CreateCachedModelLoaderOptions = {
   stats?: GeoSpecModelLoadCacheStats;
   onLoadResolved?: (subject: GeometrySubject) => void;
+  /** Observe the deterministic cache key of every keyed load (R9 affinity telemetry). */
+  onCacheKey?: (key: string) => void;
 };
 
 const toDeterministicJsonValue = (
@@ -110,6 +112,36 @@ export const createModelLoadCacheStats = (): GeoSpecModelLoadCacheStats => ({
   failures: 0,
 });
 
+const cachedModelLoaderBrand = Symbol.for('tau.geospec.cachedModelLoader');
+
+type BrandedModelLoader = GeoSpecModelLoader & { [cachedModelLoaderBrand]?: true };
+
+// Keys already canonicalized by the cached wrapper, readable by downstream
+// layers (the build lock) without re-serializing. Keyed on the options object
+// itself so the options are never copied or mutated.
+const threadedModelLoadCacheKeys = new WeakMap<LoadModelOptions, string>();
+
+/**
+ * Whether a loader already carries a cached-model-loader wrapper (R10): the
+ * pool/serial runners wrap once for the worker/run lifetime, so downstream
+ * layers must not re-wrap (a per-file layer can only ever hit keys the outer
+ * layer already holds, while re-serializing every include-set).
+ *
+ * @internal
+ */
+export const isCachedModelLoader = (loader: GeoSpecModelLoader | undefined): boolean =>
+  typeof loader === 'function' && (loader as BrandedModelLoader)[cachedModelLoaderBrand] === true;
+
+/**
+ * The canonical cache key the cached wrapper already computed for this load,
+ * threaded through the options object so downstream layers (the cross-process
+ * build lock) do not re-canonicalize large include arrays (R10).
+ *
+ * @internal
+ */
+export const readThreadedModelLoadCacheKey = (options: LoadModelOptions): string | undefined =>
+  threadedModelLoadCacheKeys.get(options);
+
 /**
  * Wrap a GeoSpec model loader with deterministic in-flight/resolved/rejected
  * promise caching for one runner lifetime.
@@ -125,9 +157,9 @@ export const createCachedModelLoader = (
   }
 
   const cache = new Map<string, Promise<GeometrySubject>>();
-  const { onLoadResolved, stats } = options;
+  const { onCacheKey, onLoadResolved, stats } = options;
 
-  return (async (loadOptions: LoadModelOptions) => {
+  const cached = (async (loadOptions: LoadModelOptions) => {
     const key = createModelLoadCacheKey(loadOptions);
     if (!key) {
       if (stats) {
@@ -138,12 +170,13 @@ export const createCachedModelLoader = (
       return subject;
     }
 
-    const cached = cache.get(key);
-    if (cached) {
+    onCacheKey?.(key);
+    const existing = cache.get(key);
+    if (existing) {
       if (stats) {
         stats.hits += 1;
       }
-      return cached;
+      return existing;
     }
 
     if (stats) {
@@ -151,6 +184,7 @@ export const createCachedModelLoader = (
     }
     const promise = (async () => {
       try {
+        threadedModelLoadCacheKeys.set(loadOptions, key);
         const subject = await modelLoader(loadOptions);
         onLoadResolved?.(subject);
         return subject;
@@ -165,5 +199,7 @@ export const createCachedModelLoader = (
     })();
     cache.set(key, promise);
     return promise;
-  }) as GeoSpecModelLoader;
+  }) as BrandedModelLoader;
+  cached[cachedModelLoaderBrand] = true;
+  return cached;
 };

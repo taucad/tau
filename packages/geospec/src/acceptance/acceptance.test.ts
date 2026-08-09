@@ -96,7 +96,7 @@ const loadFixture = (entry: FixtureEntry): LoadedFixture => {
     throw new Error('GeoSpecXdeReader is missing from the native backend.');
   }
   const text = readFileSync(join(entry.directory, 'model.step'), 'utf8');
-  const native = reader.readText(text);
+  const native = reader.readText(text, '{}');
   natives.push(native);
   if (!native.isSuccess()) {
     throw new Error(`${entry.manifest.fixture}: ${native.resultJson()}`);

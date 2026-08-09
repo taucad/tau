@@ -90,6 +90,35 @@ describe('buildSelectorIndex', () => {
     expect(datumOfCubeB).toMatchObject({ origin: [20, 0, 0], xAxis: [0, 1, 0], zAxis: [0, 0, 1] });
   });
 
+  it('should materialize semantic GD&T datums with frames derived from their attached faces', () => {
+    const index = buildFixtureIndex();
+
+    // Plane feature: origin = face centroid, z = face normal.
+    const datumA = index.datums.find((row) => row.fullName === 'cubeA.A');
+    expect(datumA).toMatchObject({ name: 'A', origin: [5, 5, 10], zAxis: [0, 0, 1] });
+    expect(datumA?.id).toBe('semantic-datum:cubeA.A');
+
+    // Cylinder feature: origin = axis origin, z = axis direction.
+    const datumB = index.datums.find((row) => row.fullName === 'cubeA.B');
+    expect(datumB).toMatchObject({ name: 'B', origin: [5, 5, 0], zAxis: [0, 0, 1] });
+
+    // The derived x axis completes an orthonormal frame.
+    for (const row of [datumA, datumB]) {
+      const dot = row!.xAxis[0] * row!.zAxis[0] + row!.xAxis[1] * row!.zAxis[1] + row!.xAxis[2] * row!.zAxis[2];
+      expect(Math.abs(dot)).toBeLessThan(1e-9);
+      expect(Math.hypot(...row!.xAxis)).toBeCloseTo(1, 9);
+    }
+
+    // Point-target datum without a face attachment yields no frame row, only
+    // an informational diagnostic.
+    expect(index.datums.some((row) => row.fullName === 'cubeA.C')).toBe(false);
+    expect(
+      index.diagnostics.some(
+        (diagnostic) => diagnostic.severity === 'info' && diagnostic.message.includes("Semantic datum 'cubeA.C'"),
+      ),
+    ).toBe(true);
+  });
+
   it('should reconstruct groups from contiguous prefix[i] member names per occurrence', () => {
     const index = buildFixtureIndex();
 

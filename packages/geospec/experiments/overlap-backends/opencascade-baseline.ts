@@ -1,4 +1,4 @@
-import nativeFactory from '../../native/opencascade/geospec_opencascade_single.js';
+import nativeFactory from '../../native/opencascade/dist/init.js';
 import type { GeometryDiagnostic, GeometrySubject } from '../../src/mesh/types.js';
 import { aabbCandidatePairs, buildComponentRecords, toTriangleSoup } from './component-records.js';
 import type { OverlapBackendCandidate, OverlapExperimentRecordSet, PreparedOverlapExperiment } from './types.js';

@@ -1,4 +1,5 @@
 import type { KernelIssueCode } from '@taucad/runtime/types';
+import type { GeoSpecUnit as ConfigGeoSpecUnit } from '#config/define-geospec-config.js';
 import type { GeoSpecNativeXdeReadResult, XdeReadResult } from '#step/types.js';
 
 /**
@@ -13,7 +14,7 @@ export type Vec3 = readonly [number, number, number];
  *
  * @public
  */
-export type GeoSpecUnit = 'mm' | 'cm' | 'm' | 'in' | 'ft' | (string & {});
+export type GeoSpecUnit = ConfigGeoSpecUnit;
 
 /**
  * Geometry file formats supported by the P0 mesh loader.
@@ -182,6 +183,43 @@ export type MeshTriangle = {
 };
 
 /**
+ * Directional surface-distance distribution.
+ *
+ * @public
+ */
+export type MeshDistanceDistribution = {
+  min: number;
+  mean: number;
+  max: number;
+  p50: number;
+  p95: number;
+  p99: number;
+  rms: number;
+  samples: number;
+};
+
+/**
+ * Result of comparing two mesh subjects using deterministic point-to-surface
+ * samples.
+ *
+ * @public
+ */
+export type MeshDistanceStats = {
+  min: number;
+  mean: number;
+  max: number;
+  p50: number;
+  p95: number;
+  p99: number;
+  rms: number;
+  samples: number;
+  algorithm?: string;
+  seed?: number;
+  directedActualToExpected?: MeshDistanceDistribution;
+  directedExpectedToActual?: MeshDistanceDistribution;
+};
+
+/**
  * Basic exact or topology-derived BRep evidence consumed by early feature
  * matchers. Loaders may provide any subset; matchers report unsupported
  * diagnostics when the required evidence is absent.
@@ -331,7 +369,68 @@ export type GeometrySubject = {
    * @internal
    */
   nativeXde?: GeoSpecNativeXdeReadResult;
+  /**
+   * On-demand tessellation of one placed occurrence shape (subject frame),
+   * for the hybrid void-occupancy engine (§17/§19: Manifold operates on the
+   * AP242-read BRep's tessellation). The closure copies the soup out of the
+   * wasm heap immediately, so callers own the returned buffer. Present only
+   * for native-BRep subjects whose backend exposes `occurrenceMeshTriangles`.
+   *
+   * @internal
+   */
+  occurrenceMesh?: OccurrenceMeshFetcher;
+  /**
+   * On-demand tessellation of ONE face of a placed occurrence (subject frame),
+   * for the topological contact-patch engine (spatial-relationship blueprint
+   * R1: the exact trimmed per-face footprint replaces the sampling lattice).
+   * Same transfer contract as {@link occurrenceMesh}. Present only for
+   * native-BRep subjects whose backend exposes `occurrenceFaceMeshTriangles`.
+   *
+   * @internal
+   */
+  occurrenceFaceMesh?: OccurrenceFaceMeshFetcher;
 };
+
+/**
+ * Fetch the triangle soup of one placed occurrence at a requested tessellation
+ * density. `deflection` in the result is the achieved mesh-vs-BRep deviation
+ * bound, floored at the requested linear deflection (the wall-mesh soundness
+ * lesson) — consumers size exactness bands from it.
+ *
+ * The returned soup is IMMUTABLE by contract: fetches are memoized per
+ * (occurrence, deflection) and persisted across runs (suite audit R4), so
+ * every consumer of the same tessellation shares one buffer.
+ *
+ * @public
+ */
+export type OccurrenceMeshFetcher = (
+  occurrence: number,
+  options: { linearDeflection: number; angularDeflectionDegrees: number },
+) => OccurrenceMeshResult;
+
+/**
+ * Fetch the triangle soup of ONE face of a placed occurrence at a requested
+ * tessellation density — the exact trimmed per-face footprint the topological
+ * contact-patch engine sums (spatial-relationship blueprint R1). `face` is the
+ * same 0-based face ordinal `faceFacts`/`extrema` use. Same 9-doubles/triangle
+ * soup layout and deflection contract as {@link OccurrenceMeshFetcher}.
+ *
+ * @public
+ */
+export type OccurrenceFaceMeshFetcher = (
+  occurrence: number,
+  face: number,
+  options: { linearDeflection: number; angularDeflectionDegrees: number },
+) => OccurrenceMeshResult;
+
+/**
+ * One occurrence tessellation: subject-frame triangle soup (9 doubles per
+ * triangle, 3 vertices x 3 coords) plus the deflection bound, or a native
+ * error.
+ *
+ * @public
+ */
+export type OccurrenceMeshResult = { triangles: Float64Array<ArrayBuffer>; deflection: number } | { error: string };
 
 /**
  * Axis-aligned bounding box in glTF document units (meters).

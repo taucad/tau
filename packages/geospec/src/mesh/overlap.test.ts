@@ -1,8 +1,33 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { analyzeMeshOverlap, getMeshOverlapCacheStats } from '#mesh/overlap.js';
+import { setGeoSpecEvidenceStore } from '#cache/evidence-cache.js';
+import type { GeoSpecEvidenceStore } from '#cache/evidence-cache.js';
 import type { GeometryDiagnostic, GeometrySubject, MeshTriangle, Vec3, WatertightResult } from '#mesh/types.js';
 import { createGeoSpecResourceScopeProfile } from '#runner/profile.js';
 import { createGeoSpecResourceScope } from '#runner/resource-scope.js';
+
+/**
+ * In-memory evidence store for the lazy-prepare gate: a real `engineDigest`
+ * (so the cache is live), content-addressed `hashBytes`/`digestKey`, and a Map
+ * backing get/put — enough to exercise the persistent overlap-pair-volume peek.
+ */
+const createMemoryEvidenceStore = (): GeoSpecEvidenceStore => {
+  const entries = new Map<string, Uint8Array<ArrayBuffer>>();
+  const sha = (input: string | Uint8Array<ArrayBuffer>): string =>
+    createHash('sha256')
+      .update(typeof input === 'string' ? input : Buffer.from(input.buffer, input.byteOffset, input.byteLength))
+      .digest('hex');
+  return {
+    get: (family, keyDigest) => entries.get(`${family}:${keyDigest}`),
+    put: (family, keyDigest, value) => {
+      entries.set(`${family}:${keyDigest}`, value);
+    },
+    engineDigest: () => 'test-engine-v1',
+    hashBytes: (bytes) => sha(bytes),
+    digestKey: (canonicalKey) => sha(canonicalKey),
+  };
+};
 
 const boxPositions = [
   0, 0, 0, 10, 20, 0, 10, 0, 0, 0, 0, 0, 0, 20, 0, 10, 20, 0, 0, 0, 30, 10, 0, 30, 10, 20, 30, 0, 0, 30, 10, 20, 30, 0,
@@ -170,7 +195,7 @@ describe('analyzeMeshOverlap', () => {
         expect(getMeshOverlapCacheStats(subject)).toEqual({
           preparedComponents: 2,
           pairVolumes: 1,
-          invalidDiagnosticSets: 1,
+          invalidDiagnosticSets: 0,
           disposed: false,
         });
 
@@ -179,7 +204,7 @@ describe('analyzeMeshOverlap', () => {
         expect(getMeshOverlapCacheStats(subject)).toEqual({
           preparedComponents: 2,
           pairVolumes: 1,
-          invalidDiagnosticSets: 1,
+          invalidDiagnosticSets: 0,
           disposed: false,
         });
       } finally {
@@ -199,8 +224,8 @@ describe('analyzeMeshOverlap', () => {
           preparedComponentMisses: 2,
           pairVolumeHits: 1,
           pairVolumeMisses: 1,
-          invalidDiagnosticHits: 1,
-          invalidDiagnosticMisses: 1,
+          invalidDiagnosticHits: 0,
+          invalidDiagnosticMisses: 0,
         },
       });
     },
@@ -375,4 +400,159 @@ describe('analyzeMeshOverlap', () => {
       });
     },
   );
+
+  it(
+    'should replay pair volumes from the persistent cache without rebuilding Manifolds (#1 lazy prepare)',
+    { timeout: 10_000 },
+    async () => {
+      setGeoSpecEvidenceStore(createMemoryEvidenceStore());
+      try {
+        // Cold: empty persistent store, so the exact intersection runs and both
+        // participant Manifolds are built.
+        const coldProfile = createGeoSpecResourceScopeProfile();
+        const coldScope = createGeoSpecResourceScope({ profile: coldProfile });
+        const cold = twoBoxSubject(9);
+        coldScope.trackSubject(cold);
+        const coldResult = await analyzeMeshOverlap({ subject: cold, tolerance: 0.001 });
+        await coldScope.dispose();
+        expect(coldResult.success).toBe(true);
+        if (!coldResult.success) {
+          throw new Error(coldResult.diagnostics.map((diagnostic) => diagnostic.message).join('\n'));
+        }
+        expect(coldProfile.overlap.preparedComponentMisses).toBe(2);
+        expect(coldProfile.overlap.pairVolumeMisses).toBe(1);
+
+        // Warm: identical world-frame geometry but a brand-new subject (empty
+        // in-run cache). The pair volume replays from the persistent peek keyed
+        // on the participant content hashes, so NO Manifold is built — the
+        // whole point of #1 (a warm interference sweep pays ~0 s of prepare).
+        const warmProfile = createGeoSpecResourceScopeProfile();
+        const warmScope = createGeoSpecResourceScope({ profile: warmProfile });
+        const warm = twoBoxSubject(9);
+        warmScope.trackSubject(warm);
+        const warmResult = await analyzeMeshOverlap({ subject: warm, tolerance: 0.001 });
+        await warmScope.dispose();
+        expect(warmResult.success).toBe(true);
+        if (!warmResult.success) {
+          throw new Error(warmResult.diagnostics.map((diagnostic) => diagnostic.message).join('\n'));
+        }
+        expect(warmProfile.overlap.preparedComponentMisses).toBe(0);
+        expect(warmProfile.overlap.pairVolumeHits).toBe(1);
+
+        // Verdict parity: the cached (warm) evidence is byte-identical to cold.
+        expect(warmResult.evidence.overlaps).toEqual(coldResult.evidence.overlaps);
+        expect(warmResult.evidence.overlaps[0]?.intersectionVolume).toBe(
+          coldResult.evidence.overlaps[0]?.intersectionVolume,
+        );
+      } finally {
+        setGeoSpecEvidenceStore(undefined);
+      }
+    },
+  );
+});
+
+describe('overlap pair-volume bundle (R6)', () => {
+  it('should serve a repeat sweep from one bundle read with zero per-pair reads', async () => {
+    const store = createMemoryEvidenceStore();
+    let perPairGets = 0;
+    const counting: GeoSpecEvidenceStore = {
+      ...store,
+      get: (family, keyDigest) => {
+        if (family === 'overlap-pair-volume') {
+          perPairGets += 1;
+        }
+        return store.get(family, keyDigest);
+      },
+    };
+    setGeoSpecEvidenceStore(counting);
+    try {
+      // The bundle keys on the subject content hash; the synthetic overlap
+      // subjects carry none, so give both runs the same one.
+      const withHash = (subject: GeometrySubject): GeometrySubject => ({
+        ...subject,
+        provenance: { ...subject.provenance, contentHash: 'sha256:r6-bundle-fixture' },
+      });
+
+      const cold = await analyzeMeshOverlap({ subject: withHash(twoBoxSubject(9)), tolerance: 0.5 });
+      expect(cold.success).toBe(true);
+      const coldPerPairGets = perPairGets;
+      // The cold sweep actually consulted the per-pair entries — otherwise the
+      // warm assertion below would be vacuous.
+      expect(coldPerPairGets).toBeGreaterThan(0);
+
+      // A fresh subject object (new record, new in-memory cache) over the same
+      // content: the sweep must answer every pair from the ONE bundle blob.
+      const warm = await analyzeMeshOverlap({ subject: withHash(twoBoxSubject(9)), tolerance: 0.5 });
+
+      expect(perPairGets).toBe(coldPerPairGets);
+      expect(warm).toEqual(cold);
+      if (cold.success && warm.success) {
+        expect(warm.evidence.overlaps).toHaveLength(1);
+      }
+    } finally {
+      setGeoSpecEvidenceStore(undefined);
+    }
+  });
+});
+
+describe('variance sweep axis and canonical pair order (R18/13e)', () => {
+  it('should find the identical pair set on a colinear stack that defeats an x-only sweep', async () => {
+    // Five boxes sharing one x-interval, stacked along y with only adjacent
+    // neighbours overlapping: an x-only sweep cannot prune here (every box is
+    // an x-candidate of every other), while the variance choice sweeps y.
+    // Candidacy itself is the 3-axis AABB test, so the PAIR SET — and thus the
+    // reported overlaps — must be exactly the adjacent neighbours.
+    const stack = Array.from({ length: 5 }, (_unused, level) =>
+      trianglesFromFlat(
+        `level-${level}#0`,
+        boxPositions.map((value, index) => (index % 3 === 1 ? value + level * 19 : value)),
+        level * 12,
+      ),
+    ).flat();
+    const subject = subjectFromTriangles(stack);
+
+    const result = await analyzeMeshOverlap({ subject, tolerance: 0.5 });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    // 20-tall boxes every 19 units: exactly the 4 adjacent pairs interfere.
+    expect(result.evidence.overlaps.map((overlap) => [overlap.leftComponentId, overlap.rightComponentId])).toEqual([
+      [0, 1],
+      [1, 2],
+      [2, 3],
+      [3, 4],
+    ]);
+  });
+
+  it('should report overlaps in canonical component-id order regardless of geometry order', async () => {
+    // Two overlapping pairs authored so the x-sweep would meet them in
+    // reverse: the reported order must follow component ids, and each pair's
+    // internal left/right must be the lower id.
+    const subject = subjectFromTriangles([
+      ...trianglesFromFlat(
+        'a#0',
+        boxPositions.map((value, index) => (index % 3 === 0 ? value + 100 : value)),
+      ),
+      ...trianglesFromFlat(
+        'b#0',
+        boxPositions.map((value, index) => (index % 3 === 0 ? value + 109 : value)),
+        12,
+      ),
+      ...trianglesFromFlat('c#0', boxPositions, 24),
+      ...trianglesFromFlat('d#0', shiftBox(9), 36),
+    ]);
+
+    const result = await analyzeMeshOverlap({ subject, tolerance: 0.5 });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    expect(result.evidence.overlaps.map((overlap) => [overlap.leftComponentId, overlap.rightComponentId])).toEqual([
+      [0, 1],
+      [2, 3],
+    ]);
+  });
 });

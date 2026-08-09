@@ -9,6 +9,29 @@ type ScopedSubject = GeometrySubject & {
   [geospecResourceScopeSymbol]?: GeoSpecResourceScope;
 };
 
+// R7 singleton prerequisite: with one shared OpenCascade module per process,
+// undisposed XDE readers accumulate in a single monotonic Emscripten heap for
+// the process lifetime (per-load module GC masked this before). The subject
+// owns its reader; the scope that tracks the subject frees it on dispose. The
+// WeakSet makes the delete idempotent — deleting an Emscripten handle twice
+// aborts the wasm — so a subject tracked by more than one scope (cache hits
+// re-fire onLoadResolved) is deleted exactly once.
+const disposedNativeXdeSubjects = new WeakSet<GeometrySubject>();
+
+const registerNativeXdeDisposal = (scope: GeoSpecResourceScope, subject: GeometrySubject): void => {
+  const native = subject.nativeXde;
+  if (!native?.delete) {
+    return;
+  }
+  scope.register(() => {
+    if (disposedNativeXdeSubjects.has(subject)) {
+      return;
+    }
+    disposedNativeXdeSubjects.add(subject);
+    native.delete?.();
+  });
+};
+
 const disposeSequentially = async (disposables: readonly Disposable[], index = 0): Promise<void> => {
   const disposable = disposables[index];
   if (!disposable) {
@@ -94,6 +117,7 @@ export const createGeoSpecResourceScope = (
           profile.trackedSubjects += 1;
         }
         attachGeoSpecResourceScope(subject, this);
+        registerNativeXdeDisposal(this, subject);
       }
       return subject;
     },

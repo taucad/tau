@@ -26,7 +26,15 @@ const createRunnerAbortedIssue = (reason: string | undefined): VmIssue => ({
   type: 'runtime',
 });
 
-const countRunnerTests = (tests: readonly GeoSpecTestCase[]): { passed: number; failed: number } => {
+const createRunnerBailIssue = (file: string): VmIssue => ({
+  code: 'GEOSPEC_RUNNER_BAILED',
+  message: `GeoSpec run stopped after first failure (--bail): ${file}. Remaining files were not executed.`,
+  severity: 'error',
+  type: 'runtime',
+});
+
+/** Count non-skipped pass/fail totals for runner aggregates (shared with the pool runner, R3). */
+export const countRunnerTests = (tests: readonly GeoSpecTestCase[]): { passed: number; failed: number } => {
   let passed = 0;
   let failed = 0;
   for (const test of tests) {
@@ -68,6 +76,7 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
 
       delete state.aborted;
       const files = [...runOptions.files];
+      const runStartedAt = performance.now();
       emit({ type: 'run-start', files });
 
       let passed = 0;
@@ -76,10 +85,18 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
       const fileResults: GeoSpecRunnerResult['files'] = [];
       const issues: VmIssue[] = [];
       const resourceScope = createGeoSpecResourceScope({ profile: options.internalProfile?.resourceScope });
+      // R9 affinity telemetry: the first deterministic load key seen per file.
+      // Read through an accessor so control-flow analysis does not narrow the
+      // closure-written value to `undefined` at the read sites.
+      let currentFileLoadKey: string | undefined;
+      const takeFileLoadKey = (): string | undefined => currentFileLoadKey;
       const modelLoader = createCachedModelLoader(options.modelLoader, {
         stats: options.internalProfile?.aggregateModelLoadCache,
         onLoadResolved: (subject) => {
           resourceScope.trackSubject(subject);
+        },
+        onCacheKey: (key) => {
+          currentFileLoadKey ??= key;
         },
       });
 
@@ -95,7 +112,9 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
           }
 
           emit({ type: 'file-start', file });
-          // oxlint-disable-next-line no-await-in-loop -- CAD tests run serially for deterministic evidence and bounded runtime pressure.
+          currentFileLoadKey = undefined;
+          const fileStartedAt = performance.now();
+          // oxlint-disable-next-line no-await-in-loop -- Within one worker, CAD tests run serially for deterministic evidence and bounded runtime pressure; the pool runner (R3) parallelizes across workers.
           const result = await runGeoSpecModule({
             filesystem: options.filesystem,
             projectPath: options.projectPath,
@@ -108,18 +127,24 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
             resourceScope,
             ...(options.internalProfile ? { internalProfile: options.internalProfile } : {}),
           });
-          emit({ type: 'file-complete', file, result });
-          fileResults.push({ file, result });
+          const durationMs = performance.now() - fileStartedAt;
+          const primaryLoadKey = takeFileLoadKey();
+          emit({ type: 'file-complete', file, result, durationMs, ...(primaryLoadKey ? { primaryLoadKey } : {}) });
+          fileResults.push({ file, result, durationMs, ...(primaryLoadKey ? { primaryLoadKey } : {}) });
 
-          if (!result.success) {
+          if (result.success) {
+            selectedTests += result.tests.length;
+            const counts = countRunnerTests(result.tests);
+            passed += counts.passed;
+            failed += counts.failed;
+          } else {
             failed += 1;
-            continue;
           }
 
-          selectedTests += result.tests.length;
-          const counts = countRunnerTests(result.tests);
-          passed += counts.passed;
-          failed += counts.failed;
+          if (runOptions.bail === true && failed > 0) {
+            issues.push(createRunnerBailIssue(file));
+            break;
+          }
         }
       } finally {
         await resourceScope.dispose();
@@ -137,6 +162,7 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
         selectedTests,
         files: fileResults,
         ...(issues.length > 0 ? { issues } : {}),
+        durationMs: performance.now() - runStartedAt,
       };
       emit({ type: 'run-complete', result: aggregate });
       return aggregate;

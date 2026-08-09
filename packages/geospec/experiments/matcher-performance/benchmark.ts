@@ -2,7 +2,7 @@
 import { Accessor, Document, WebIO } from '@gltf-transform/core';
 import { BufferGeometry, Float32BufferAttribute, Vector3 } from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
-import nativeFactory from '../../native/opencascade/geospec_opencascade_single.js';
+import nativeFactory from '../../native/opencascade/dist/init.js';
 import { analyzeChamferDistance } from '#mesh/distance.js';
 import { analyzeGltfDocument } from '#mesh/analyze-glb.js';
 import { analyseConnectedComponents, collectPrimitiveRecords } from '#mesh/connected-components.js';

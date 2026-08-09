@@ -1,8 +1,14 @@
-import initManifold from 'manifold-3d';
 import type { Manifold as ManifoldSolid, ManifoldToplevel } from 'manifold-3d';
-import { getMeshAnalysisRecord } from '#mesh/analysis-record.js';
+import { ensureManifoldModule } from '#mesh/manifold-module.js';
+import { getMeshAnalysisRecord, sweepAxisByCentreVariance } from '#mesh/analysis-record.js';
 import type { MeshAnalysisRecord, MeshComponentRecord } from '#mesh/analysis-record.js';
+import { arrangementPairVolume } from '#mesh/overlap-arrangement.js';
+import { buildComponentDisjointnessData, provePairDisjoint } from '#mesh/overlap-prefilter.js';
+import type { ComponentDisjointnessData } from '#mesh/overlap-prefilter.js';
 import type { GeometryDiagnostic, GeometrySubject, Vec3, WatertightPrimitiveBreakdown } from '#mesh/types.js';
+import { getGeoSpecEvidenceCache } from '#cache/evidence-cache.js';
+import { forensicCount, forensicEnabled, forensicLog, forensicSync } from '#runner/forensic.js';
+import { chargeBudget } from '#runner/matcher-budget.js';
 import { getGeoSpecResourceScope } from '#runner/resource-scope.js';
 import type { GeoSpecOverlapCacheProfile } from '#runner/profile.js';
 
@@ -96,6 +102,12 @@ type PairSelectionResult =
 
 type PreparedManifoldComponent = {
   component: MeshComponentRecord;
+  /**
+   * Whether {@link ensureComponentManifold} has run. Lazy preparation keeps
+   * this `false` until a pair's volume misses the cache; a warm run whose pairs
+   * all replay from the persistent cache builds no Manifolds at all.
+   */
+  built: boolean;
   merged: boolean;
   manifold?: ManifoldSolid;
   status?: unknown;
@@ -103,6 +115,27 @@ type PreparedManifoldComponent = {
     message: string;
     code?: string;
   };
+  /**
+   * SHA-256 of the component's WORLD-FRAME triangle soup (R5/A2): placement is
+   * part of the value, so pair evidence keys on participant world geometry —
+   * change one part of 650 and the other pairs' keys are unchanged. Computed at
+   * (cheap) record preparation so the pair cache can be peeked before the
+   * (expensive) Manifold build.
+   */
+  contentHash?: string;
+  /**
+   * The world-frame soup gathered for hashing (R18/13b), retained until the
+   * Manifold build consumes it or the sweep ends — so builds and the
+   * disjointness pre-filter never re-gather.
+   */
+  soup?: Float32Array<ArrayBuffer>;
+  /**
+   * R14-lite structures (BVH, islands, winding mesh), built on the first pair
+   * miss the component participates in and released with the sweep.
+   */
+  disjointness?: ComponentDisjointnessData;
+  /** CR1 census: the component's own solid volume, fetched once per sweep. */
+  solidVolume?: number;
 };
 
 type CachedPairVolume = {
@@ -128,21 +161,14 @@ type MeshOverlapCacheStats = {
 };
 
 const defaultOverlapTolerance = 0.1;
-let manifoldModulePromise: Promise<ManifoldToplevel> | undefined;
 const meshOverlapCacheSymbol = Symbol.for('tau.geospec.meshOverlapCache');
 
 type MeshOverlapCachedSubject = GeometrySubject & {
   [meshOverlapCacheSymbol]?: MeshOverlapCache;
 };
 
-const loadManifold = async (): Promise<ManifoldToplevel> => {
-  manifoldModulePromise ??= (async () => {
-    const wasm = await initManifold();
-    wasm.setup();
-    return wasm;
-  })();
-  return manifoldModulePromise;
-};
+// Shared per-process Manifold init (also serves the hybrid void engine).
+const loadManifold = ensureManifoldModule;
 
 const disposeMeshOverlapCache = (cache: MeshOverlapCache): void => {
   if (cache.disposed) {
@@ -230,19 +256,29 @@ const aabbsOverlap = (left: MeshComponentRecord, right: MeshComponentRecord, tol
 
 const aabbCandidatePairs = (components: readonly MeshComponentRecord[], tolerance: number): AabbPair[] => {
   const pairs: AabbPair[] = [];
-  const sorted = [...components].sort((left, right) => left.aabb.min[0] - right.aabb.min[0]);
+  // R18/13e: sweep along the max-variance centre axis (pure function of the
+  // subject; tie order x ≥ y ≥ z) so a colinear-x stack cannot degrade the
+  // prune to O(n²). Candidacy stays the 3-axis aabbsOverlap test, so the
+  // pair SET is axis-independent.
+  const axis = sweepAxisByCentreVariance(components.map((component) => component.aabb));
+  const sorted = [...components].sort((left, right) => left.aabb.min[axis] - right.aabb.min[axis]);
   for (let leftIndex = 0; leftIndex < sorted.length; leftIndex++) {
     const left = sorted[leftIndex]!;
     for (let rightIndex = leftIndex + 1; rightIndex < sorted.length; rightIndex++) {
       const right = sorted[rightIndex]!;
-      if (right.aabb.min[0] > left.aabb.max[0] + tolerance) {
+      if (right.aabb.min[axis] > left.aabb.max[axis] + tolerance) {
         break;
       }
       if (aabbsOverlap(left, right, tolerance)) {
-        pairs.push({ left, right });
+        // Canonical internal order (lower id = left) so observable labels and
+        // witnesses never depend on which sweep axis enumerated the pair.
+        pairs.push(left.id <= right.id ? { left, right } : { left: right, right: left });
       }
     }
   }
+  // Canonical enumeration order for the same reason: the first reported
+  // overlap supplies the failure witness.
+  pairs.sort((first, second) => first.left.id - second.left.id || first.right.id - second.right.id);
   return pairs;
 };
 
@@ -382,47 +418,76 @@ const manifoldUnavailableDiagnostic = (error: unknown): GeometryDiagnostic => ({
   details: error,
 });
 
-const componentTrianglesToManifold = (options: {
-  wasm: ManifoldToplevel;
-  record: MeshAnalysisRecord;
-  component: MeshComponentRecord;
-}): PreparedManifoldComponent => {
-  const vertProperties = new Float32Array(options.component.triangleCount * 9);
+/**
+ * Gather a component's world-frame triangle soup (9 floats/triangle).
+ *
+ * @param record - The subject mesh analysis record (positions + indices).
+ * @param component - The component whose triangles to collect.
+ * @returns The component's flat vertex soup, one triangle per 9 floats.
+ */
+const gatherComponentSoup = (record: MeshAnalysisRecord, component: MeshComponentRecord): Float32Array<ArrayBuffer> => {
+  const vertProperties = new Float32Array(component.triangleCount * 9);
   let offset = 0;
-  for (const triangleIndex of options.component.triangleIndices) {
+  for (const triangleIndex of component.triangleIndices) {
     const triangleOffset = triangleIndex * 3;
     for (let corner = 0; corner < 3; corner++) {
-      const vertexIndex = options.record.triangleIndices[triangleOffset + corner]!;
+      const vertexIndex = record.triangleIndices[triangleOffset + corner]!;
       const positionOffset = vertexIndex * 3;
-      vertProperties[offset++] = options.record.positions[positionOffset]!;
-      vertProperties[offset++] = options.record.positions[positionOffset + 1]!;
-      vertProperties[offset++] = options.record.positions[positionOffset + 2]!;
+      vertProperties[offset++] = record.positions[positionOffset]!;
+      vertProperties[offset++] = record.positions[positionOffset + 1]!;
+      vertProperties[offset++] = record.positions[positionOffset + 2]!;
     }
   }
-  const triVerts = new Uint32Array(vertProperties.length / 3);
-  for (let index = 0; index < triVerts.length; index++) {
-    triVerts[index] = index;
+  return vertProperties;
+};
+
+/**
+ * Build the Manifold solid for one prepared component — the expensive half of
+ * preparation (vertex weld, half-edge construction, 2-manifold validation) that
+ * lazy preparation defers until a pair's volume actually misses the cache.
+ * Mutates `prepared` in place and is idempotent (`built` guards a second call),
+ * so a component shared by many pairs is constructed at most once.
+ *
+ * @param options - The overlap cache, mesh record, and the prepared component
+ *   record to populate with its Manifold (or its construction error).
+ * @returns The same `prepared` record, now with `built` set.
+ */
+const ensureComponentManifold = (options: {
+  cache: MeshOverlapCache;
+  record: MeshAnalysisRecord;
+  prepared: PreparedManifoldComponent;
+}): PreparedManifoldComponent => {
+  const { cache, record, prepared } = options;
+  if (prepared.built) {
+    return prepared;
   }
-  const mesh = new options.wasm.Mesh({ numProp: 3, vertProperties, triVerts });
-  const merged = mesh.merge();
-  try {
-    const manifold = new options.wasm.Manifold(mesh);
-    return {
-      component: options.component,
-      merged,
-      manifold,
-      status: manifold.status(),
-    };
-  } catch (error) {
-    return {
-      component: options.component,
-      merged,
-      error: {
+  prepared.built = true;
+  if (cache.profile) {
+    cache.profile.preparedComponentMisses += 1;
+  }
+  bucketedStep('build', () => {
+    // R18/13b: reuse the soup the cheap half gathered for hashing; re-gather
+    // only when the sweep already released it.
+    const vertProperties = prepared.soup ?? gatherComponentSoup(record, prepared.component);
+    delete prepared.soup;
+    const triVerts = new Uint32Array(vertProperties.length / 3);
+    for (let index = 0; index < triVerts.length; index++) {
+      triVerts[index] = index;
+    }
+    const mesh = new cache.wasm.Mesh({ numProp: 3, vertProperties, triVerts });
+    prepared.merged = mesh.merge();
+    try {
+      const manifold = new cache.wasm.Manifold(mesh);
+      prepared.manifold = manifold;
+      prepared.status = manifold.status();
+    } catch (error) {
+      prepared.error = {
         message: error instanceof Error ? error.message : String(error),
         code: typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : undefined,
-      },
-    };
-  }
+      };
+    }
+  });
+  return prepared;
 };
 
 const baseComponentLabel = (label: string): string => label.split('#')[0] ?? label;
@@ -529,7 +594,7 @@ const disposePrepared = (components: readonly PreparedManifoldComponent[]): void
   }
 };
 
-const prepareManifoldComponent = (options: {
+const prepareComponentRecord = (options: {
   cache: MeshOverlapCache;
   record: MeshAnalysisRecord;
   component: MeshComponentRecord;
@@ -541,14 +606,22 @@ const prepareManifoldComponent = (options: {
     }
     return cached;
   }
-  if (options.cache.profile) {
-    options.cache.profile.preparedComponentMisses += 1;
-  }
-  const prepared = componentTrianglesToManifold({
-    wasm: options.cache.wasm,
-    record: options.record,
+  // Cheap half of preparation: the world-frame content hash keys the pair
+  // cache, so it must exist before any Manifold build — that lets a pair whose
+  // volume is already cached skip the build entirely (ensureComponentManifold).
+  // R18/13b: the soup gathered for hashing is retained until the sweep ends,
+  // so a Manifold build (or the disjointness pre-filter) never re-gathers it.
+  const vertProperties = gatherComponentSoup(options.record, options.component);
+  const contentHash = getGeoSpecEvidenceCache()?.hashBytes(
+    new Uint8Array(vertProperties.buffer, vertProperties.byteOffset, vertProperties.byteLength),
+  );
+  const prepared: PreparedManifoldComponent = {
     component: options.component,
-  });
+    built: false,
+    merged: false,
+    soup: vertProperties,
+    ...(contentHash === undefined ? {} : { contentHash }),
+  };
   options.cache.preparedComponents.set(options.component.id, prepared);
   return prepared;
 };
@@ -583,11 +656,112 @@ const invalidDiagnosticsForComponents = (options: {
   return diagnostics;
 };
 
+// CR1: per-sweep step attribution — accumulate milliseconds per step across
+// the whole sweep and emit ONE aggregate [FORENSIC] line per bucket at the end
+// (per-pair emission would be thousands of stderr lines; the flat one-line
+// span format the drivers grep stays intact). Zero timer reads when disabled.
+const forensicStepBuckets = new Map<string, number>();
+
+const bucketedStep = <T>(step: string, run: () => T): T => {
+  if (!forensicEnabled()) {
+    return run();
+  }
+  const start = performance.now();
+  try {
+    return run();
+  } finally {
+    forensicStepBuckets.set(step, (forensicStepBuckets.get(step) ?? 0) + (performance.now() - start));
+  }
+};
+
+const flushForensicStepBuckets = (): void => {
+  for (const [step, ms] of forensicStepBuckets) {
+    forensicLog(`overlap.step.${step}`, ms);
+  }
+  forensicStepBuckets.clear();
+};
+
+/**
+ * CR1 census: classify what kind of geometry each computed boolean saw, so the
+ * corpus histogram can steer the CR2 rung selection (a touching-dominant
+ * corpus gains nothing from a transversal clipping engine). Profile-gated and
+ * reporting-only — never a verdict input.
+ */
+const classifyPairOutcome = (options: {
+  profile: GeoSpecOverlapCacheProfile;
+  left: PreparedManifoldComponent;
+  right: PreparedManifoldComponent;
+  volume: number;
+  volumeEpsilon: number;
+}): void => {
+  if (options.volume <= 1e-12) {
+    options.profile.outcomeSeparated += 1;
+    return;
+  }
+  // Both manifolds exist on the miss path; memoize each participant's own
+  // volume so 8.7-pair components pay one wasm call, not one per pair.
+  const leftVolume = (options.left.solidVolume ??= options.left.manifold!.volume());
+  const rightVolume = (options.right.solidVolume ??= options.right.manifold!.volume());
+  const smaller = Math.min(leftVolume, rightVolume);
+  // Ponytail: 0.999 nesting heuristic — census histogram only, never evidence.
+  if (options.volume >= smaller * 0.999) {
+    options.profile.outcomeContainment += 1;
+    return;
+  }
+  if (options.volume <= options.volumeEpsilon) {
+    options.profile.outcomeTouching += 1;
+    return;
+  }
+  options.profile.outcomeTransversal += 1;
+};
+
+const persistentPairKey = (leftHash: string, rightHash: string): { pair: [string, string] } => ({
+  pair: leftHash < rightHash ? [leftHash, rightHash] : [rightHash, leftHash],
+});
+
+// R6: sorted-hash map key inside the per-sweep bundle blob.
+const bundlePairKey = (leftHash: string, rightHash: string): string =>
+  leftHash < rightHash ? `${leftHash}|${rightHash}` : `${rightHash}|${leftHash}`;
+
+// R14-lite: the pre-filter is a pure verdict-preserving proof, so it ships ON;
+// `GEOSPEC_INTERFERENCE_PREFILTER=0` forces every miss through the boolean
+// (the differential gate uses it to compare the two paths).
+const interferencePrefilterEnabled = (): boolean =>
+  typeof process === 'undefined' ||
+  typeof process.env !== 'object' ||
+  process.env['GEOSPEC_INTERFERENCE_PREFILTER'] !== '0';
+
+/** CR2: which engine computes pair volumes on a cache miss. */
+type OverlapEngine = 'manifold' | 'arrangement';
+
+// CR2: the arrangement engine resolves containment-class pair volumes in pure
+// TS; Manifold stays the default until the differential gate promotes it.
+const overlapEngine = (): OverlapEngine =>
+  typeof process !== 'undefined' &&
+  typeof process.env === 'object' &&
+  process.env['GEOSPEC_OVERLAP_ENGINE'] === 'arrangement'
+    ? 'arrangement'
+    : 'manifold';
+
+// CR2/F-g: engine-scoped store versions — arrangement payloads differ from
+// Manifold's in FP low bits, and a flag flip must never replay the other
+// engine's bytes, so each engine owns a family version outright.
+const engineVersion = (engine: OverlapEngine): number => (engine === 'arrangement' ? 2 : 1);
+
 const exactPairVolume = (options: {
   cache: MeshOverlapCache;
+  record: MeshAnalysisRecord;
   left: PreparedManifoldComponent;
   right: PreparedManifoldComponent;
   fallback: Vec3;
+  /** R6: this sweep's bundled pair volumes (one authenticated read for all). */
+  bundle?: Map<string, CachedPairVolume>;
+  /** R14-lite: whether the disjointness pre-filter may prove zero volumes. */
+  prefilter: boolean;
+  /** CR2: the engine computing this sweep's cache misses. */
+  engine: OverlapEngine;
+  /** CR1 census: the sweep's reportable-overlap threshold (tolerance³ floor). */
+  volumeEpsilon: number;
 }): CachedPairVolume | undefined => {
   const key = pairKey(options.left.component, options.right.component);
   const cached = options.cache.pairVolumes.get(key);
@@ -597,25 +771,285 @@ const exactPairVolume = (options: {
     }
     return cached;
   }
-  if (options.cache.profile) {
-    options.cache.profile.pairVolumeMisses += 1;
+
+  // R8: pair volumes are pure functions of the two world-frame participant
+  // geometries — persist them keyed on sorted participant hashes so the
+  // 4,077-pair interference sweep replays warm for unchanged parts. Peek the
+  // persistent store BEFORE building either Manifold (lazy prepare): a warm
+  // hit here skips the ~12 s of Manifold construction the sweep would otherwise
+  // pay every run just to look up a cached scalar.
+  const persistent = getGeoSpecEvidenceCache();
+  const leftHash = options.left.contentHash;
+  const rightHash = options.right.contentHash;
+  const canPersist = persistent && leftHash !== undefined && rightHash !== undefined;
+  if (canPersist) {
+    // R6: the bundle replaces one authenticated file read per pair.
+    const bundled = options.bundle?.get(bundlePairKey(leftHash, rightHash));
+    if (bundled) {
+      if (options.cache.profile) {
+        options.cache.profile.pairVolumeHits += 1;
+      }
+      options.cache.pairVolumes.set(key, bundled);
+      return bundled;
+    }
+    const peeked = bucketedStep('peek', () =>
+      persistent.getOrCompute<CachedPairVolume>({
+        family: 'overlap-pair-volume',
+        version: engineVersion(options.engine),
+        key: persistentPairKey(leftHash, rightHash),
+        compute: () => undefined,
+      }),
+    );
+    if (peeked) {
+      if (options.cache.profile) {
+        options.cache.profile.pairVolumeHits += 1;
+      }
+      options.cache.pairVolumes.set(key, peeked);
+      return peeked;
+    }
   }
+
+  // R14-lite: on a miss, try to PROVE the volume is exactly 0 before paying
+  // the boolean. Every exit except a proof falls through unchanged.
+  if (options.prefilter) {
+    // Rung 0: candidates were tolerance-inflated, so a genuine axis gap on the
+    // uninflated boxes is already a separation proof — free.
+    let verdict: 'disjoint' | 'unknown' = aabbsOverlap(options.left.component, options.right.component, 0)
+      ? 'unknown'
+      : 'disjoint';
+    if (verdict === 'unknown') {
+      options.left.disjointness ??= bucketedStep('prefilter.build', () =>
+        buildComponentDisjointnessData(
+          options.left.soup ?? gatherComponentSoup(options.record, options.left.component),
+        ),
+      );
+      options.right.disjointness ??= bucketedStep('prefilter.build', () =>
+        buildComponentDisjointnessData(
+          options.right.soup ?? gatherComponentSoup(options.record, options.right.component),
+        ),
+      );
+      verdict = bucketedStep('prefilter.prove', () =>
+        provePairDisjoint({
+          leftAabb: options.left.component.aabb,
+          rightAabb: options.right.component.aabb,
+          left: options.left.disjointness!,
+          right: options.right.disjointness!,
+        }),
+      );
+    }
+    if (verdict === 'disjoint') {
+      if (options.cache.profile) {
+        options.cache.profile.prefilterProven += 1;
+      }
+      // The boolean on a truly separated pair yields an empty manifold whose
+      // volume is exactly 0 with no witness — the identical stored payload.
+      const proven: CachedPairVolume = { volume: 0 };
+      const stored = canPersist
+        ? (bucketedStep('persist', () =>
+            persistent.getOrCompute({
+              family: 'overlap-pair-volume',
+              version: engineVersion(options.engine),
+              key: persistentPairKey(leftHash, rightHash),
+              compute: () => proven,
+            }),
+          ) ?? proven)
+        : proven;
+      options.cache.pairVolumes.set(key, stored);
+      return stored;
+    }
+    if (options.cache.profile) {
+      options.cache.profile.prefilterFallthrough += 1;
+    }
+  }
+
+  // CR2 rung B: under the arrangement engine, containment-class pairs resolve
+  // in pure TS before any Manifold exists; every other class falls back to
+  // the boolean below, stored under the arrangement version — the fallback is
+  // a pure function of the pair's geometry, never of cache history (F-a/F-g).
+  if (options.engine === 'arrangement') {
+    options.left.disjointness ??= bucketedStep('prefilter.build', () =>
+      buildComponentDisjointnessData(options.left.soup ?? gatherComponentSoup(options.record, options.left.component)),
+    );
+    options.right.disjointness ??= bucketedStep('prefilter.build', () =>
+      buildComponentDisjointnessData(
+        options.right.soup ?? gatherComponentSoup(options.record, options.right.component),
+      ),
+    );
+    const resolved = bucketedStep('arrangement', () =>
+      arrangementPairVolume({
+        leftAabb: options.left.component.aabb,
+        rightAabb: options.right.component.aabb,
+        left: options.left.disjointness!,
+        right: options.right.disjointness!,
+      }),
+    );
+    if (resolved) {
+      // R13: an arrangement resolution replaces one exact boolean.
+      chargeBudget(1);
+      if (options.cache.profile) {
+        options.cache.profile.arrangementResolved += 1;
+      }
+      const stored = canPersist
+        ? (bucketedStep('persist', () =>
+            persistent.getOrCompute({
+              family: 'overlap-pair-volume',
+              version: engineVersion(options.engine),
+              key: persistentPairKey(leftHash, rightHash),
+              compute: () => resolved,
+            }),
+          ) ?? resolved)
+        : resolved;
+      options.cache.pairVolumes.set(key, stored);
+      return stored;
+    }
+    if (options.cache.profile) {
+      options.cache.profile.arrangementFallback += 1;
+    }
+  }
+
+  // Cache miss: now the exact intersection is unavoidable, so build both
+  // participants' Manifolds (idempotent) and compute.
+  ensureComponentManifold({ cache: options.cache, record: options.record, prepared: options.left });
+  ensureComponentManifold({ cache: options.cache, record: options.record, prepared: options.right });
   if (!options.left.manifold || !options.right.manifold) {
     return undefined;
   }
-
-  const intersection = options.cache.wasm.Manifold.intersection(options.left.manifold, options.right.manifold);
-  try {
-    const volume = intersection.volume();
-    const result: CachedPairVolume = {
-      volume,
-      ...(volume > 1e-12 ? { witnessPoint: volumeWitness(intersection, options.fallback) } : {}),
-    };
-    options.cache.pairVolumes.set(key, result);
-    return result;
-  } finally {
-    intersection.delete();
+  if (options.cache.profile) {
+    options.cache.profile.pairVolumeMisses += 1;
   }
+
+  const computeExact = (): CachedPairVolume => {
+    // R13: one work unit per exact pair volume.
+    chargeBudget(1);
+    const intersection = bucketedStep('intersection', () =>
+      options.cache.wasm.Manifold.intersection(options.left.manifold!, options.right.manifold!),
+    );
+    try {
+      const volume = bucketedStep('volume', () => intersection.volume());
+      return {
+        volume,
+        ...(volume > 1e-12
+          ? { witnessPoint: bucketedStep('witness', () => volumeWitness(intersection, options.fallback)) }
+          : {}),
+      };
+    } finally {
+      bucketedStep('delete', () => {
+        intersection.delete();
+      });
+    }
+  };
+
+  // The 'persist' bucket wraps the whole store round-trip; the boolean steps
+  // inside are bucketed separately, so persist − (intersection + volume +
+  // witness + delete) is the store's own key-hash/serialize overhead.
+  const result = canPersist
+    ? (bucketedStep('persist', () =>
+        persistent.getOrCompute({
+          family: 'overlap-pair-volume',
+          version: engineVersion(options.engine),
+          key: persistentPairKey(leftHash, rightHash),
+          compute: computeExact,
+        }),
+      ) ?? computeExact())
+    : computeExact();
+  if (options.cache.profile) {
+    classifyPairOutcome({
+      profile: options.cache.profile,
+      left: options.left,
+      right: options.right,
+      volume: result.volume,
+      volumeEpsilon: options.volumeEpsilon,
+    });
+  }
+  options.cache.pairVolumes.set(key, result);
+  return result;
+};
+
+/**
+ * Sweep every AABB-surviving pair for positive-volume interference, building
+ * participant Manifolds lazily (only when a pair's volume misses the cache).
+ *
+ * @param options - Cache, mesh record, pairs, prepared records, and the volume
+ *   threshold below which an intersection is not a reportable overlap.
+ * @returns The overlaps found and whether any participant failed Manifold
+ *   construction (so the caller can fail closed with an invalid diagnostic).
+ */
+const computePairOverlaps = (options: {
+  cache: MeshOverlapCache;
+  record: MeshAnalysisRecord;
+  pairs: readonly AabbPair[];
+  preparedById: Map<number, PreparedManifoldComponent>;
+  volumeEpsilon: number;
+  bundle?: Map<string, CachedPairVolume>;
+  prefilter: boolean;
+  engine: OverlapEngine;
+}): { overlaps: MeshComponentOverlap[]; sawInvalidComponent: boolean } => {
+  const overlaps: MeshComponentOverlap[] = [];
+  let sawInvalidComponent = false;
+  // CR1: a budget throw can abort a sweep mid-flight; drop that residue so
+  // this sweep's aggregate step lines attribute only its own work.
+  forensicStepBuckets.clear();
+  for (const pair of options.pairs) {
+    // R13: one work unit per exact pair volume (cache hits recharge nothing —
+    // see exactPairVolume). Manifolds are built lazily inside on a cache miss.
+    const volume = exactPairVolume({
+      cache: options.cache,
+      record: options.record,
+      left: options.preparedById.get(pair.left.id)!,
+      right: options.preparedById.get(pair.right.id)!,
+      fallback: intersectionAabbCenter(pair.left, pair.right),
+      ...(options.bundle ? { bundle: options.bundle } : {}),
+      prefilter: options.prefilter,
+      engine: options.engine,
+      volumeEpsilon: options.volumeEpsilon,
+    });
+    if (volume === undefined) {
+      // A participant failed Manifold construction; fail closed above with the
+      // same invalid-component diagnostic the eager path produced.
+      sawInvalidComponent = true;
+      continue;
+    }
+    if (volume.volume > options.volumeEpsilon) {
+      overlaps.push({
+        leftComponentId: pair.left.id,
+        rightComponentId: pair.right.id,
+        leftLabel: pair.left.label,
+        rightLabel: pair.right.label,
+        leftColor: pair.left.color,
+        rightColor: pair.right.color,
+        intersectionVolume: volume.volume,
+        ...(volume.witnessPoint ? { witnessPoint: volume.witnessPoint } : {}),
+        penetration: 'positive-volume',
+      });
+    }
+  }
+  flushForensicStepBuckets();
+  return { overlaps, sawInvalidComponent };
+};
+
+/**
+ * After a lazy sweep saw an unbuildable participant, materialize every
+ * component's Manifold — so a component the sweep simply never needed is not
+ * mistaken for a non-manifold one — and return the eager path's identical
+ * invalid-component diagnostic set (fail closed, no overlaps).
+ *
+ * @param options - Cache, mesh record, prepared component records, and subject.
+ * @returns The invalid-component diagnostics (empty when all build cleanly).
+ */
+const invalidComponentDiagnosticsAfterSweep = (options: {
+  cache: MeshOverlapCache;
+  record: MeshAnalysisRecord;
+  prepared: readonly PreparedManifoldComponent[];
+  subject: GeometrySubject;
+}): GeometryDiagnostic[] => {
+  for (const component of options.prepared) {
+    ensureComponentManifold({ cache: options.cache, record: options.record, prepared: component });
+  }
+  return invalidDiagnosticsForComponents({
+    cache: options.cache,
+    components: options.prepared,
+    subject: options.subject,
+  });
 };
 
 /**
@@ -688,45 +1122,86 @@ export const analyzeMeshOverlap = async (options: AnalyzeMeshOverlapOptions): Pr
     componentsById.set(pair.left.id, pair.left);
     componentsById.set(pair.right.id, pair.right);
   }
-  const prepared = [...componentsById.values()].map((component) =>
-    prepareManifoldComponent({ cache, record, component }),
+  // R2: the interference sweep was counter-only (Finding 6) — span the prepare
+  // and pair phases with their sizes so per-pair cost is attributable.
+  forensicCount('overlap.components', componentsById.size);
+  forensicCount('overlap.pairs', pairs.length);
+  // #1 lazy prepare: the cheap half only — one world-frame content hash per
+  // component. The Manifold itself (the ~12 s of construction) is built on
+  // demand inside exactPairVolume, so a warm run whose pairs all replay from
+  // the persistent cache builds no Manifolds at all.
+  const prepared = forensicSync('overlap.prepare', () =>
+    [...componentsById.values()].map((component) => prepareComponentRecord({ cache, record, component })),
   );
+  const preparedById = new Map(prepared.map((component) => [component.component.id, component]));
+  // R6: this sweep's pair volumes are readable as ONE authenticated blob —
+  // thousands of per-pair reads collapse to a single get. A bundle miss (or a
+  // pair missing from a bundle) falls back to the per-pair entries, whose
+  // participant-hash keys survive partial subject changes.
+  const persistent = getGeoSpecEvidenceCache();
+  const subjectHash = options.subject.provenance.contentHash;
+  const engine = overlapEngine();
+  const bundleKey =
+    persistent && subjectHash !== undefined ? { subjectHash, tolerance, pairs: options.pairs ?? null } : undefined;
+  const storedBundle =
+    persistent && bundleKey
+      ? persistent.getOrCompute<Record<string, CachedPairVolume>>({
+          family: 'overlap-pair-bundle',
+          version: engineVersion(engine),
+          key: bundleKey,
+          compute: () => undefined,
+        })
+      : undefined;
+  const bundle = storedBundle ? new Map(Object.entries(storedBundle)) : undefined;
   try {
-    const invalidDiagnostics = invalidDiagnosticsForComponents({
-      cache,
-      components: prepared,
-      subject: options.subject,
-    });
-    if (invalidDiagnostics.length > 0) {
-      return { success: false, diagnostics: invalidDiagnostics };
+    const volumeEpsilon = Math.max(tolerance * tolerance * tolerance, 1e-12);
+    const { overlaps, sawInvalidComponent } = forensicSync('overlap.pairVolumes', () =>
+      computePairOverlaps({
+        cache,
+        record,
+        pairs,
+        preparedById,
+        volumeEpsilon,
+        ...(bundle ? { bundle } : {}),
+        prefilter: interferencePrefilterEnabled(),
+        engine,
+      }),
+    );
+
+    if (sawInvalidComponent) {
+      const invalidDiagnostics = invalidComponentDiagnosticsAfterSweep({
+        cache,
+        record,
+        prepared,
+        subject: options.subject,
+      });
+      if (invalidDiagnostics.length > 0) {
+        return { success: false, diagnostics: invalidDiagnostics };
+      }
     }
 
-    const preparedById = new Map(prepared.map((component) => [component.component.id, component]));
-    const volumeEpsilon = Math.max(tolerance * tolerance * tolerance, 1e-12);
-    const overlaps: MeshComponentOverlap[] = [];
-    for (const pair of pairs) {
-      const left = preparedById.get(pair.left.id)?.manifold;
-      const right = preparedById.get(pair.right.id)?.manifold;
-      if (!left || !right) {
-        continue;
+    // R6: after a clean sweep, publish the complete bundle (first writer wins;
+    // hits never rewrite). Incomplete sweeps — any unresolved participant —
+    // never bundle, so a bundle always answers every pair of its claim shape.
+    if (persistent && bundleKey && !storedBundle && pairs.length > 0) {
+      const entries: Record<string, CachedPairVolume> = {};
+      let complete = true;
+      for (const pair of pairs) {
+        const left = preparedById.get(pair.left.id);
+        const right = preparedById.get(pair.right.id);
+        const volume = cache.pairVolumes.get(pairKey(pair.left, pair.right));
+        if (!left?.contentHash || !right?.contentHash || !volume) {
+          complete = false;
+          break;
+        }
+        entries[bundlePairKey(left.contentHash, right.contentHash)] = volume;
       }
-      const volume = exactPairVolume({
-        cache,
-        left: preparedById.get(pair.left.id)!,
-        right: preparedById.get(pair.right.id)!,
-        fallback: intersectionAabbCenter(pair.left, pair.right),
-      });
-      if (volume && volume.volume > volumeEpsilon) {
-        overlaps.push({
-          leftComponentId: pair.left.id,
-          rightComponentId: pair.right.id,
-          leftLabel: pair.left.label,
-          rightLabel: pair.right.label,
-          leftColor: pair.left.color,
-          rightColor: pair.right.color,
-          intersectionVolume: volume.volume,
-          ...(volume.witnessPoint ? { witnessPoint: volume.witnessPoint } : {}),
-          penetration: 'positive-volume',
+      if (complete) {
+        persistent.getOrCompute({
+          family: 'overlap-pair-bundle',
+          version: engineVersion(engine),
+          key: bundleKey,
+          compute: () => entries,
         });
       }
     }
@@ -744,6 +1219,12 @@ export const analyzeMeshOverlap = async (options: AnalyzeMeshOverlapOptions): Pr
       diagnostics: [],
     };
   } finally {
+    // R18/13b + R14-lite: soups and disjointness structures were retained
+    // only for this sweep; release them with it.
+    for (const component of prepared) {
+      delete component.soup;
+      delete component.disjointness;
+    }
     if (created && !scope) {
       cache.dispose();
     }

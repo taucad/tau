@@ -1,43 +1,6 @@
-import type { GeometryDiagnostic, MeshTriangle } from '#mesh/types.js';
+import type { GeometryDiagnostic, MeshDistanceStats, MeshTriangle } from '#mesh/types.js';
 import { resolveDefaultGeoSpecMeshBackend } from '#mesh/native.js';
 import type { GeoSpecMeshBackend, GeoSpecNativeTriangleSoup } from '#mesh/native.js';
-
-/**
- * Result of comparing two mesh subjects using deterministic point-to-surface
- * samples.
- *
- * @public
- */
-export type MeshDistanceStats = {
-  min: number;
-  mean: number;
-  max: number;
-  p50: number;
-  p95: number;
-  p99: number;
-  rms: number;
-  samples: number;
-  algorithm?: string;
-  seed?: number;
-  directedActualToExpected?: MeshDistanceDistribution;
-  directedExpectedToActual?: MeshDistanceDistribution;
-};
-
-/**
- * Directional surface-distance distribution.
- *
- * @public
- */
-export type MeshDistanceDistribution = {
-  min: number;
-  mean: number;
-  max: number;
-  p50: number;
-  p95: number;
-  p99: number;
-  rms: number;
-  samples: number;
-};
 
 /**
  * Options for deterministic Chamfer-style mesh distance analysis.

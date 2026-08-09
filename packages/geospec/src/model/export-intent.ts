@@ -11,15 +11,17 @@ export type GeoSpecExportRoute = Partial<ExportRoute> & {
   targetFormat?: string;
   transcoderId?: string;
   fidelity?: string;
-  schema?: {
-    properties?: Record<string, unknown>;
+  exportOptions?: {
+    schema?: {
+      properties?: Record<string, unknown>;
+    };
+    defaults?: Record<string, unknown>;
   };
-  defaults?: Record<string, unknown>;
 };
 
 /** Runtime client shape for route-aware Tau runtimes. */
 export type RuntimeClientWithRoutes = GeoSpecRuntimeClient & {
-  bestRouteFor(format: string, kernelId?: string): GeoSpecExportRoute | undefined;
+  bestRouteFor(format: string, options?: { readonly kernelId?: string }): GeoSpecExportRoute | undefined;
 };
 
 /** Resolved runtime export request and provenance for a GeoSpec model load. */
@@ -50,8 +52,10 @@ const hasAnyRouteMetadata = (runtime: GeoSpecRuntimeClient, format: RuntimeBacke
   return typeof routesFor === 'function' && (routesFor as (format: string) => readonly unknown[])(format).length > 0;
 };
 
-const hasSchemaProperty = (route: GeoSpecExportRoute | undefined, property: string): boolean =>
-  Boolean(route?.schema?.properties && property in route.schema.properties);
+const hasSchemaProperty = (route: GeoSpecExportRoute | undefined, property: string): boolean => {
+  const properties = route?.exportOptions?.schema.properties;
+  return property in (properties ?? {});
+};
 
 const isDirectRoute = (route: GeoSpecExportRoute): boolean => route.transcoderId === undefined;
 

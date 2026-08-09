@@ -10,8 +10,12 @@
       "cache": false,
       "parallelism": false,
       "options": {
-        "cwd": "{projectRoot}/native/opencascade",
-        "command": "docker run --rm -v \"$PWD:/src\" -u \"$(id -u):$(id -g)\" ghcr.io/taucad/opencascade.js:single-threaded link geospec.single.yml"
+        "cwd": "{projectRoot}",
+        "commands": [
+          "libcascade build --config native/opencascade/libcascade.config.ts",
+          "libcascade assemble --config native/opencascade/libcascade.config.ts"
+        ],
+        "parallel": false
       }
     }
   }

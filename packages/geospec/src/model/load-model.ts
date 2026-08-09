@@ -344,7 +344,8 @@ const exportWithRuntime = async (
 
   const runtimeFormat = format satisfies RuntimeBackedModelFormat;
   try {
-    await runtimeResult.runtime.connect();
+    // R2: first connect boots the kernel worker + wasm — previously unspanned.
+    await forensicAsync('load.runtime.connect', async () => runtimeResult.runtime.connect());
   } catch (error) {
     return {
       success: false,

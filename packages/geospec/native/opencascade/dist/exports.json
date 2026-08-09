@@ -1,0 +1,17 @@
+{
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./init": {
+      "types": "./dist/init.d.ts",
+      "default": "./dist/init.js"
+    },
+    "./single": {
+      "types": "./dist/variant.d.ts",
+      "default": "./dist/geospec_opencascade_single.js"
+    },
+    "./single/wasm": "./dist/geospec_opencascade_single.wasm"
+  }
+}

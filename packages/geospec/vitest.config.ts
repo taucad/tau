@@ -16,7 +16,8 @@ export default defineConfig({
       provider: 'v8',
       reportsDirectory: '../../coverage/packages/geospec',
       include: ['src/**/*'],
-      exclude: ['src/**/*.{test,spec,test-d}.ts'],
+      // Byte-locked file snapshots are data assets, not coverage subjects.
+      exclude: ['src/**/*.{test,spec,test-d}.ts', 'src/**/__evidence-snapshots__/**'],
       thresholds: {
         statements: 100,
         branches: 100,

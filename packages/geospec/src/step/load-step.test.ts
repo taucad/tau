@@ -2,56 +2,121 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { loadStep } from '#step/index.js';
-import type { BrepEvidence, GeometryDiagnostic } from '#mesh/types.js';
+import { getBrepFacetDiagnostic } from '#step/evidence-ledger.js';
+import type { BrepEvidence } from '#mesh/types.js';
 import type {
   GeoSpecNativeStepBackend,
-  GeoSpecNativeStepReadResult,
   GeoSpecNativeXdeReadResult,
   GeoSpecOpenCascadeStepModule,
 } from '#step/types.js';
 import type { SelectorFaceFacts } from '#selector/types.js';
 
 const cubeStepPath = join(import.meta.dirname, '../../../runtime/src/kernels/replicad/__fixtures__/cube.step');
-const trianglePayload = {
-  triangles: [0, 0, 0, 1, 0, 0, 0, 1, 0],
-  brep: {
-    validity: { valid: true },
-    topologyCounts: { faces: 1 },
-  },
-  diagnostics: [],
+
+// A fake facet-surface XDE result: each evidence facet serves a slice of the
+// supplied brep object, mirroring the native decomposition (blueprint R3).
+const makeFacetXde = (options: {
+  brep?: BrepEvidence;
+  facts?: SelectorFaceFacts[];
+  occurrenceCount?: number;
+  meshTriangleValues?: number[];
+  overrides?: Partial<GeoSpecNativeXdeReadResult>;
+}): GeoSpecNativeXdeReadResult => {
+  const { brep = {}, facts = [], occurrenceCount = 1 } = options;
+  const meshCount = Math.floor((options.meshTriangleValues?.length ?? 0) / 9);
+  return {
+    isSuccess: () => true,
+    resultJson: () =>
+      JSON.stringify({
+        occurrences: Array.from({ length: occurrenceCount }, (_value, index) => ({
+          path: `part${index}`,
+          productName: `part${index}`,
+        })),
+        subshapeNames: [],
+        datumPlacements: [],
+        freeShapeCount: occurrenceCount,
+      }),
+    extrema: () => '{}',
+    classifyPoints: () => '{"states":[]}',
+    commonVolume: () => '{"volume":0}',
+    faceFacts: () => JSON.stringify({ faces: facts }),
+    analysisSummaryJson: () => JSON.stringify({ topologyCounts: brep.topologyCounts, boundingBox: brep.boundingBox }),
+    analysisMassPropertiesJson: () => JSON.stringify({ massProperties: brep.massProperties }),
+    analysisValidityJson: () => JSON.stringify({ validity: brep.validity }),
+    analysisFaceFeaturesJson: () =>
+      JSON.stringify({
+        planarFaces: brep.planarFaces,
+        cylindricalFaces: brep.cylindricalFaces,
+        circularHoles: brep.circularHoles,
+        circularHolePatterns: brep.circularHolePatterns,
+        chamferFeatures: brep.chamferFeatures,
+        filletFeatures: brep.filletFeatures,
+      }),
+    analysisWallThicknessJson: () =>
+      brep.minimumWallThickness ? JSON.stringify({ minimumWallThickness: brep.minimumWallThickness }) : '{}',
+    meshTriangles: () => JSON.stringify({ triangleCount: meshCount }),
+    meshTrianglePointer: () => (meshCount > 0 ? Float64Array.BYTES_PER_ELEMENT : 0),
+    meshTriangleCount: () => meshCount,
+    delete: vi.fn(),
+    ...options.overrides,
+  };
 };
 
-const createResult = (payload: unknown, success = true): GeoSpecNativeStepReadResult => ({
-  success,
-  evidenceJson: () => JSON.stringify(payload),
-  delete: vi.fn(),
+// Named native reader keys carry PascalCase class identity; use computed keys so
+// the object-literal naming lint stays satisfied.
+const xdeReaderKey = 'GeoSpecXdeReader';
+const heapKey = 'HEAPF64';
+
+const makeBackend = (options: {
+  brep?: BrepEvidence;
+  facts?: SelectorFaceFacts[];
+  occurrenceCount?: number;
+  meshTriangleValues?: number[];
+  heap?: Float64Array<ArrayBuffer>;
+}): GeoSpecNativeStepBackend => ({
+  ...(options.heap ? { [heapKey]: options.heap } : {}),
+  [xdeReaderKey]: {
+    readText: vi.fn(() =>
+      makeFacetXde({
+        ...(options.brep ? { brep: options.brep } : {}),
+        facts: options.facts ?? [],
+        occurrenceCount: options.occurrenceCount ?? 1,
+        ...(options.meshTriangleValues ? { meshTriangleValues: options.meshTriangleValues } : {}),
+      }),
+    ),
+  },
 });
 
-describe('loadStep', () => {
-  it(
-    'should load STEP evidence through the GeoSpec OpenCascade native stream importer',
-    { timeout: 30_000 },
-    async () => {
-      const subject = await loadStep({
-        source: cubeStepPath,
-        name: 'cube.step',
-      });
+// One fake triangle whose values sit one f64 into the fake heap, matching the
+// pointer the fake facet reports (pointer = 8 bytes -> heap index 1).
+const oneTriangleHeap = (): { heap: Float64Array<ArrayBuffer>; values: number[] } => {
+  const values = [0, 0, 0, 1, 0, 0, 0, 1, 0];
+  const heap = new Float64Array(1 + values.length);
+  heap.set(values, 1);
+  return { heap, values };
+};
 
-      expect(subject.kind).toBe('geometry-subject');
-      expect(subject.provenance.loader).toBe('opencascade-step');
-      expect(subject.step?.readStrategy).toEqual(
-        expect.objectContaining({
-          strategy: 'native-stream',
-          nativeReadStream: true,
-          copiedToEmscriptenFs: false,
-        }),
-      );
-      expect(subject.brep?.validity).toMatchObject({ valid: true });
-      expect(subject.brep?.massProperties?.surfaceArea).toBeCloseTo(600, 6);
-      expect(subject.brep?.massProperties?.volume).toBeCloseTo(1000, 6);
-      expect(subject.mesh.stats.triangleCount).toBe(12);
-    },
-  );
+describe('loadStep', () => {
+  it('should load STEP evidence through the GeoSpec OpenCascade native XDE importer', { timeout: 30_000 }, async () => {
+    const subject = await loadStep({
+      source: cubeStepPath,
+      name: 'cube.step',
+    });
+
+    expect(subject.kind).toBe('geometry-subject');
+    expect(subject.provenance.loader).toBe('opencascade-step');
+    expect(subject.step?.readStrategy).toEqual(
+      expect.objectContaining({
+        strategy: 'native-stream',
+        nativeReadStream: true,
+        copiedToEmscriptenFs: false,
+      }),
+    );
+    expect(subject.brep?.validity).toMatchObject({ valid: true });
+    expect(subject.brep?.massProperties?.surfaceArea).toBeCloseTo(600, 6);
+    expect(subject.brep?.massProperties?.volume).toBeCloseTo(1000, 6);
+    expect(subject.mesh.stats.triangleCount).toBe(12);
+  });
 
   it('should fail when no native STEP reader is available', async () => {
     const bytes = await readFile(cubeStepPath);
@@ -64,63 +129,55 @@ describe('loadStep', () => {
     ).rejects.toThrow('GeoSpec native STEP reader is unavailable');
   });
 
-  it('should load STEP evidence through the backend-neutral nativeStepBackend option', async () => {
-    const reader = {
-      readText: vi.fn(() => createResult(trianglePayload)),
-    };
-    const stepStreamReaderKey = 'GeoSpecStepStreamReader';
-    const nativeStepBackend = { [stepStreamReaderKey]: reader } satisfies GeoSpecNativeStepBackend;
+  it('should load facet evidence through the backend-neutral nativeStepBackend option', async () => {
+    const { heap, values } = oneTriangleHeap();
+    const backend = makeBackend({
+      brep: { validity: { valid: true }, topologyCounts: { faces: 1 } },
+      meshTriangleValues: values,
+      heap,
+    });
 
     const subject = await loadStep({
       source: new TextEncoder().encode('ISO-10303-21; HEADER; ENDSEC; END-ISO-10303-21;'),
-      nativeStepBackend,
+      nativeStepBackend: backend,
     });
 
-    expect(reader.readText).toHaveBeenCalledOnce();
+    expect(backend.GeoSpecXdeReader?.readText).toHaveBeenCalledOnce();
     expect(subject.provenance.loader).toBe('opencascade-step');
     expect(subject.brep?.validity).toMatchObject({ valid: true });
+    expect(subject.brep?.topologyCounts).toMatchObject({ faces: 1 });
     expect(subject.mesh.stats.triangleCount).toBe(1);
   });
 
-  it('should report native parse diagnostics without using another importer', async () => {
-    const reader = {
-      readText: vi.fn(() =>
-        createResult(
-          {
-            diagnostics: [
-              {
-                code: 'GEOSPEC_STEP_PARSE_FAILED',
-                severity: 'error',
-                message: 'mock native STEP parser failed',
-              },
-            ],
+  it('should fail the load when the native XDE parse fails', async () => {
+    const readText = vi.fn(
+      (): GeoSpecNativeXdeReadResult =>
+        makeFacetXde({
+          overrides: {
+            isSuccess: () => false,
+            resultJson: () => JSON.stringify({ error: 'mock native STEP parser failed' }),
           },
-          false,
-        ),
-      ),
-    };
-    const openCascade: GeoSpecOpenCascadeStepModule = {};
-    openCascade.GeoSpecStepStreamReader = reader;
+        }),
+    );
+    const backend: GeoSpecNativeStepBackend = { [xdeReaderKey]: { readText } };
 
     await expect(
       loadStep({
         source: new TextEncoder().encode('ISO-10303-21; HEADER; ENDSEC; END-ISO-10303-21;'),
-        openCascade,
+        nativeStepBackend: backend,
       }),
     ).rejects.toThrow('mock native STEP parser failed');
-    expect(reader.readText).toHaveBeenCalledOnce();
+    expect(readText).toHaveBeenCalledOnce();
   });
 
   it('should use GeoSpec filesystem fallback when explicitly requested', async () => {
     const writeFile = vi.fn();
     const unlink = vi.fn();
-    const readFileNative = vi.fn(() => createResult(trianglePayload));
-    const reader = {
-      readText: vi.fn(() => createResult({ diagnostics: [] })),
-      readFile: readFileNative,
-    };
+    const readText = vi.fn(() => makeFacetXde({ brep: { validity: { valid: true } } }));
+    const readFileNative = vi.fn(() => makeFacetXde({ brep: { validity: { valid: true } } }));
     const openCascade: GeoSpecOpenCascadeStepModule = {};
-    openCascade.GeoSpecStepStreamReader = reader;
+    const backend = openCascade as GeoSpecNativeStepBackend;
+    backend.GeoSpecXdeReader = { readText, readFile: readFileNative };
     openCascade.FS = {
       writeFile,
       unlink,
@@ -139,7 +196,7 @@ describe('loadStep', () => {
         copiedToEmscriptenFs: true,
       }),
     );
-    expect(reader.readText).not.toHaveBeenCalled();
+    expect(readText).not.toHaveBeenCalled();
     expect(readFileNative).toHaveBeenCalledOnce();
     expect(writeFile).toHaveBeenCalledOnce();
     expect(unlink).toHaveBeenCalledOnce();
@@ -147,26 +204,19 @@ describe('loadStep', () => {
 
   it('should delete the native XDE handle when subject construction throws', async () => {
     const xdeDelete = vi.fn();
-    const nativeXde: GeoSpecNativeXdeReadResult = {
-      isSuccess: () => true,
-      resultJson: () => JSON.stringify({ occurrences: [], subshapeNames: [], datumPlacements: [], freeShapeCount: 0 }),
-      extrema: () => '{}',
-      classifyPoints: () => '{"states":[]}',
-      commonVolume: () => '{"volume":0}',
-      faceFacts: () => '{"faces":[]}',
-      delete: xdeDelete,
-    };
-    // A non-iterable `diagnostics` makes buildStepSubject throw after the XDE
-    // read has produced a live native handle, exercising the leak path.
-    const stepStreamReaderKey = 'GeoSpecStepStreamReader';
-    const xdeReaderKey = 'GeoSpecXdeReader';
+    // A mesh facet that reports a native error makes buildStepSubject throw
+    // after the XDE read has produced a live handle, exercising the leak path.
     const backend: GeoSpecNativeStepBackend = {
-      [stepStreamReaderKey]: {
+      [xdeReaderKey]: {
         readText: vi.fn(() =>
-          createResult({ brep: { validity: { valid: true } }, diagnostics: 5 as unknown as GeometryDiagnostic[] }),
+          makeFacetXde({
+            overrides: {
+              meshTriangles: () => JSON.stringify({ error: 'mock mesh facet failure' }),
+              delete: xdeDelete,
+            },
+          }),
         ),
       },
-      [xdeReaderKey]: { readText: vi.fn(() => nativeXde) },
     };
 
     await expect(
@@ -174,92 +224,138 @@ describe('loadStep', () => {
         source: new TextEncoder().encode('ISO-10303-21; HEADER; ENDSEC; END-ISO-10303-21;'),
         nativeStepBackend: backend,
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow('mock mesh facet failure');
     expect(xdeDelete).toHaveBeenCalledOnce();
   });
 
-  it('should preserve BRep evidence without advertising mesh capabilities when mesh loading is disabled', async () => {
-    let parsedOptions: unknown;
-    const reader = {
-      readText: vi.fn((_data: string, optionsJson: string) => {
-        parsedOptions = JSON.parse(optionsJson);
-        return createResult({
-          brep: {
-            validity: { valid: true },
-            cylindricalFaces: [{ radius: 5, axis: 'z' }],
-          },
-          step: {
-            schema: 'AP242',
-          },
-          diagnostics: [],
-        });
-      }),
+  it('should skip tessellation and mesh capabilities when mesh loading is disabled', async () => {
+    const meshTriangles = vi.fn(() => JSON.stringify({ triangleCount: 0 }));
+    const backend: GeoSpecNativeStepBackend = {
+      [xdeReaderKey]: {
+        readText: vi.fn(() =>
+          makeFacetXde({
+            brep: { validity: { valid: true }, cylindricalFaces: [{ radius: 5, axis: 'z' }] },
+            overrides: { meshTriangles },
+          }),
+        ),
+      },
     };
-    const openCascade: GeoSpecOpenCascadeStepModule = {};
-    openCascade.GeoSpecStepStreamReader = reader;
 
     const subject = await loadStep({
       source: new TextEncoder().encode('ISO-10303-21; HEADER; ENDSEC; END-ISO-10303-21;'),
-      openCascade,
+      nativeStepBackend: backend,
       mesh: false,
     });
 
-    expect(parsedOptions).toMatchObject({ mesh: false });
+    expect(meshTriangles).not.toHaveBeenCalled();
     expect(subject.mesh.stats.triangleCount).toBe(0);
+    expect(subject.brep?.cylindricalFaces).toEqual([{ radius: 5, axis: 'z' }]);
     expect(subject.capabilities).toContainEqual({ kind: 'brep', feature: 'cylindrical-faces' });
     expect(subject.capabilities).toContainEqual({ kind: 'step', feature: 'schema' });
     expect(subject.capabilities).not.toContainEqual({ kind: 'mesh', feature: 'component-overlap' });
   });
+
+  it('should offer the wall-thickness capability without materializing the facet', async () => {
+    const analysisWallThicknessJson = vi.fn(() => '{}');
+    const backend: GeoSpecNativeStepBackend = {
+      [xdeReaderKey]: {
+        readText: vi.fn(() =>
+          makeFacetXde({ brep: { validity: { valid: true } }, overrides: { analysisWallThicknessJson } }),
+        ),
+      },
+    };
+
+    const subject = await loadStep({
+      source: new TextEncoder().encode('ISO-10303-21; HEADER; ENDSEC; END-ISO-10303-21;'),
+      nativeStepBackend: backend,
+      mesh: false,
+    });
+
+    // Finding 8 fix: the capability reflects what the loader can compute, not
+    // which facets have run — and merely listing capabilities computes nothing.
+    expect(subject.capabilities).toContainEqual({ kind: 'brep', feature: 'wall-thickness' });
+    expect(analysisWallThicknessJson).not.toHaveBeenCalled();
+
+    expect(subject.brep?.minimumWallThickness).toBeUndefined();
+    expect(analysisWallThicknessJson).toHaveBeenCalledOnce();
+    // Memoized: a second read does not re-enter the native facet.
+    expect(subject.brep?.minimumWallThickness).toBeUndefined();
+    expect(analysisWallThicknessJson).toHaveBeenCalledOnce();
+  });
+
+  it('should memoize a MATCHER_TIMEOUT diagnostic when the wall facet exhausts its work-unit budget', async () => {
+    const backend: GeoSpecNativeStepBackend = {
+      [xdeReaderKey]: {
+        readText: vi.fn(() =>
+          makeFacetXde({
+            brep: { validity: { valid: true } },
+            overrides: {
+              analysisWallThicknessJson: () => JSON.stringify({ budgetExceeded: { workUnits: 7, limit: 7 } }),
+            },
+          }),
+        ),
+      },
+    };
+
+    const subject = await loadStep({
+      source: new TextEncoder().encode('ISO-10303-21; HEADER; ENDSEC; END-ISO-10303-21;'),
+      nativeStepBackend: backend,
+      mesh: false,
+    });
+
+    expect(subject.brep?.minimumWallThickness).toBeUndefined();
+    const diagnostic = subject.brep ? getBrepFacetDiagnostic(subject.brep, 'wallThickness') : undefined;
+    expect(diagnostic).toMatchObject({
+      code: 'MATCHER_TIMEOUT',
+      severity: 'error',
+      details: { facet: 'wallThickness', workUnits: 7, limit: 7 },
+    });
+  });
+
+  it('should memoize a facet-failure diagnostic instead of throwing when a facet errors', async () => {
+    const analysisValidityJson = vi.fn(() => JSON.stringify({ error: 'mock validity crash' }));
+    const backend: GeoSpecNativeStepBackend = {
+      [xdeReaderKey]: {
+        readText: vi.fn(() => makeFacetXde({ overrides: { analysisValidityJson } })),
+      },
+    };
+
+    const subject = await loadStep({
+      source: new TextEncoder().encode('ISO-10303-21; HEADER; ENDSEC; END-ISO-10303-21;'),
+      nativeStepBackend: backend,
+      mesh: false,
+    });
+
+    expect(subject.brep?.validity).toBeUndefined();
+    expect(subject.brep?.validity).toBeUndefined();
+    expect(analysisValidityJson).toHaveBeenCalledOnce();
+    const diagnostic = subject.brep ? getBrepFacetDiagnostic(subject.brep, 'validity') : undefined;
+    expect(diagnostic).toMatchObject({ code: 'GEOSPEC_FACET_FAILED', severity: 'error' });
+  });
+
+  it('should serialize only materialized facets through toJSON', async () => {
+    const backend = makeBackend({ brep: { validity: { valid: true }, topologyCounts: { faces: 6 } } });
+    const subject = await loadStep({
+      source: new TextEncoder().encode('ISO-10303-21; HEADER; ENDSEC; END-ISO-10303-21;'),
+      nativeStepBackend: backend,
+      mesh: false,
+    });
+
+    expect(JSON.stringify(subject.brep)).toBe('{}');
+    expect(subject.brep?.validity).toMatchObject({ valid: true });
+    expect(JSON.stringify(subject.brep)).toBe('{"validity":{"valid":true}}');
+  });
 });
 
-// WS-E: TS-side feature re-derivation from faceFacts. A fake native backend
-// supplies (1) the analyzeShape brep payload the step reader returns and (2) the
-// per-occurrence faceFacts the XDE reader exposes, so loadStep runs the full
-// re-derivation without a real STEP file or wasm.
-const makeXdeResult = (facts: SelectorFaceFacts[], occurrenceCount = 1): GeoSpecNativeXdeReadResult => ({
-  isSuccess: () => true,
-  resultJson: () =>
-    JSON.stringify({
-      occurrences: Array.from({ length: occurrenceCount }, (_value, index) => ({
-        path: `part${index}`,
-        productName: `part${index}`,
-      })),
-      subshapeNames: [],
-      datumPlacements: [],
-      freeShapeCount: occurrenceCount,
-    }),
-  extrema: () => '{}',
-  classifyPoints: () => '{"states":[]}',
-  commonVolume: () => '{"volume":0}',
-  faceFacts: () => JSON.stringify({ faces: facts }),
-  delete: vi.fn(),
-});
-
+// WS-E: TS-side feature re-derivation from faceFacts. A fake facet-surface
+// backend supplies the per-facet evidence plus the per-occurrence faceFacts,
+// so loadStep runs the full re-derivation without a real STEP file or wasm.
 type Hole = NonNullable<BrepEvidence['circularHoles']>[number];
-
-// Named native reader keys carry PascalCase class identity; use computed keys so
-// the object-literal naming lint stays satisfied (mirrors the loadStep tests).
-const stepReaderKey = 'GeoSpecStepStreamReader';
-const xdeReaderKey = 'GeoSpecXdeReader';
-
-const makeBackend = (
-  brep: BrepEvidence | undefined,
-  facts: SelectorFaceFacts[],
-  occurrenceCount = 1,
-): GeoSpecNativeStepBackend =>
-  ({
-    [stepReaderKey]: {
-      readText: vi.fn(() => createResult(brep ? { brep, diagnostics: [] } : { diagnostics: [] })),
-    },
-    [xdeReaderKey]: {
-      readText: vi.fn(() => makeXdeResult(facts, occurrenceCount)),
-    },
-  }) satisfies GeoSpecNativeStepBackend;
 
 const loadWithFaceFacts = async (brep: BrepEvidence, facts: SelectorFaceFacts[], occurrenceCount = 1) =>
   loadStep({
     source: new TextEncoder().encode('ISO-10303-21; HEADER; ENDSEC; END-ISO-10303-21;'),
-    nativeStepBackend: makeBackend(brep, facts, occurrenceCount),
+    nativeStepBackend: makeBackend({ brep, facts, occurrenceCount }),
     mesh: false,
   });
 
@@ -317,14 +413,13 @@ describe('WS-E feature re-derivation', () => {
 
   it('tolerates a faceFacts payload that carries no faces array', async () => {
     const backend: GeoSpecNativeStepBackend = {
-      [stepReaderKey]: {
-        readText: vi.fn(() => createResult({ brep: { validity: { valid: true } }, diagnostics: [] })),
-      },
       [xdeReaderKey]: {
-        readText: vi.fn(() => ({
-          ...makeXdeResult([]),
-          faceFacts: () => '{"error":"no faces"}',
-        })),
+        readText: vi.fn(() =>
+          makeFacetXde({
+            brep: { validity: { valid: true } },
+            overrides: { faceFacts: () => '{"error":"no faces"}' },
+          }),
+        ),
       },
     };
     const subject = await loadStep({
@@ -548,12 +643,16 @@ describe('WS-E feature re-derivation', () => {
     expect(patterns[0]).toEqual(expect.objectContaining({ count: 3, holeDiameter: 6, axis: 'z' }));
   });
 
-  it('leaves a subject without brep evidence untouched', async () => {
+  it('exposes lazily-materialized brep evidence for a facet surface with no analysis payloads', async () => {
+    // Every facet serves an empty slice: the ledger is present (the native
+    // read succeeded) and each field materializes to undefined on demand.
     const subject = await loadStep({
       source: new TextEncoder().encode('ISO-10303-21; HEADER; ENDSEC; END-ISO-10303-21;'),
-      nativeStepBackend: makeBackend(undefined, []),
+      nativeStepBackend: makeBackend({}),
       mesh: false,
     });
-    expect(subject.brep).toBeUndefined();
+    expect(subject.brep).toBeDefined();
+    expect(subject.brep?.validity).toBeUndefined();
+    expect(subject.brep?.minimumWallThickness).toBeUndefined();
   });
 });

@@ -2,9 +2,21 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
+import { readGeoSpecTimings } from '#cache/timings.js';
 import { runGeoSpecCli } from '#cli.js';
 
 const temporaryDirectories: string[] = [];
+
+// Pin the serial engine (R3): vitest has no module hooks for worker_threads
+// .ts entries, so multi-file runs must not auto-route to the pool here. The
+// real pool wire is covered by the tsx-spawned CLI in apps/runtime-e2e.
+process.env['GEOSPEC_WORKERS'] = '1';
+// Isolate the out-of-tree cache root (R5 evidence cache + R1 timings) so CLI
+// tests never touch the developer's real cache. Individual tests may override.
+process.env['GEOSPEC_CACHE_DIR'] ??= await mkdtemp(join(tmpdir(), 'geospec-cli-cache-'));
+
+/** Drop R1 streaming progress lines so failure-content assertions stay exact. */
+const withoutProgress = (lines: readonly string[]): string[] => lines.filter((line) => !line.startsWith('[geospec]'));
 
 const createTemporaryProject = async (): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), 'geospec-cli-'));
@@ -88,7 +100,7 @@ describe('runGeoSpecCli', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout).toEqual(['1 passed, 0 failed']);
+    expect(stdout.join('\n')).toMatch(/^1 passed, 0 failed in \d+(\.\d+)?s$/u);
   });
 
   it('should run root and nested GeoSpec files recursively from Node', async () => {
@@ -129,7 +141,7 @@ describe('runGeoSpecCli', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout).toEqual(['2 passed, 0 failed']);
+    expect(stdout.join('\n')).toMatch(/^2 passed, 0 failed in \d+(\.\d+)?s$/u);
   });
 
   it('should run GeoSpec files below a directory root passed through --file', async () => {
@@ -170,7 +182,7 @@ describe('runGeoSpecCli', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout).toEqual(['1 passed, 0 failed']);
+    expect(stdout.join('\n')).toMatch(/^1 passed, 0 failed in \d+(\.\d+)?s$/u);
   });
 
   it('should run an exact nested GeoSpec file passed through --file', async () => {
@@ -201,7 +213,7 @@ describe('runGeoSpecCli', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout).toEqual(['1 passed, 0 failed']);
+    expect(stdout.join('\n')).toMatch(/^1 passed, 0 failed in \d+(\.\d+)?s$/u);
   });
 
   it('should fail when a directory-root filter selects no GeoSpec files', async () => {
@@ -271,11 +283,11 @@ describe('runGeoSpecCli', () => {
     });
 
     expect(exitCode).toBe(1);
-    expect(stderr).toEqual([
+    expect(withoutProgress(stderr)).toEqual([
       'FAIL main.geospec.ts OpenSCAD cube cutout > should test the source file directly',
       '  GeoSpec model loading has no runtime source adapter for .scad files.',
     ]);
-    expect(stdout).toEqual(['0 passed, 1 failed']);
+    expect(stdout.join('\n')).toMatch(/^0 passed, 1 failed in \d+(\.\d+)?s$/u);
   });
 
   it('should run parameterized Replicad connected-component tests from Node', { timeout: 120_000 }, async () => {
@@ -329,7 +341,7 @@ describe('runGeoSpecCli', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout).toEqual(['2 passed, 0 failed']);
+    expect(stdout.join('\n')).toMatch(/^2 passed, 0 failed in \d+(\.\d+)?s$/u);
   });
 
   it(
@@ -393,7 +405,7 @@ describe('runGeoSpecCli', () => {
       });
 
       expect(exitCode).toBe(0);
-      expect(stdout).toEqual(['3 passed, 0 failed']);
+      expect(stdout.join('\n')).toMatch(/^3 passed, 0 failed in \d+(\.\d+)?s$/u);
     },
   );
 
@@ -426,11 +438,11 @@ describe('runGeoSpecCli', () => {
     });
 
     expect(exitCode).toBe(1);
-    expect(stderr).toEqual([
+    expect(withoutProgress(stderr)).toEqual([
       'FAIL box.geospec.ts box > should fail unsupported subjects',
       '  toBeWatertight requires a GeoSpec GeometrySubject loaded from geometry evidence.',
     ]);
-    expect(stdout).toEqual(['0 passed, 1 failed']);
+    expect(stdout.join('\n')).toMatch(/^0 passed, 1 failed in \d+(\.\d+)?s$/u);
   });
 
   it('should include structured failed-test diagnostics in JSON output', async () => {
@@ -524,7 +536,7 @@ describe('runGeoSpecCli', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout).toEqual(['1 passed, 0 failed']);
+    expect(stdout.join('\n')).toMatch(/^1 passed, 0 failed in \d+(\.\d+)?s$/u);
   });
 
   it('should exclude discovered files with repeatable Vitest-style exclude globs', async () => {
@@ -565,7 +577,7 @@ describe('runGeoSpecCli', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout).toEqual(['1 passed, 0 failed']);
+    expect(stdout.join('\n')).toMatch(/^1 passed, 0 failed in \d+(\.\d+)?s$/u);
   });
 
   it('should filter collected tests by test name pattern', async () => {
@@ -595,7 +607,7 @@ describe('runGeoSpecCli', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout).toEqual(['1 passed, 0 failed']);
+    expect(stdout.join('\n')).toMatch(/^1 passed, 0 failed in \d+(\.\d+)?s$/u);
   });
 
   it('should run all tests except a named check with negative-lookahead testNamePattern', async () => {
@@ -627,7 +639,7 @@ describe('runGeoSpecCli', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout).toEqual(['1 passed, 0 failed']);
+    expect(stdout.join('\n')).toMatch(/^1 passed, 0 failed in \d+(\.\d+)?s$/u);
   });
 
   it('should fail clearly when testNamePattern is not a valid regex', async () => {
@@ -656,7 +668,10 @@ describe('runGeoSpecCli', () => {
     });
 
     expect(exitCode).toBe(1);
-    expect(stderr).toEqual(['FAIL box.geospec.ts', '  testNamePattern is not a valid JavaScript regular expression.']);
+    expect(withoutProgress(stderr)).toEqual([
+      'FAIL box.geospec.ts',
+      '  testNamePattern is not a valid JavaScript regular expression.',
+    ]);
   });
 
   it('should fail when filters select no GeoSpec tests', async () => {
@@ -686,8 +701,8 @@ describe('runGeoSpecCli', () => {
     });
 
     expect(exitCode).toBe(1);
-    expect(stderr).toEqual(['No matching GeoSpec tests were selected by the supplied filters.']);
-    expect(stdout).toEqual(['0 passed, 1 failed']);
+    expect(withoutProgress(stderr)).toEqual(['No matching GeoSpec tests were selected by the supplied filters.']);
+    expect(stdout.join('\n')).toMatch(/^0 passed, 1 failed in \d+(\.\d+)?s$/u);
   });
 
   it('should include structured zero-test diagnostics in JSON output', async () => {
@@ -793,7 +808,7 @@ describe('runGeoSpecCli', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout).toEqual(['1 passed, 0 failed']);
+    expect(stdout.join('\n')).toMatch(/^1 passed, 0 failed in \d+(\.\d+)?s$/u);
   });
 
   it('should emit machine-readable JSON for CLI consumers', async () => {
@@ -835,5 +850,201 @@ describe('runGeoSpecCli', () => {
         ],
       }),
     );
+  });
+
+  describe('streaming results and durations (R1)', () => {
+    const writePassingSpec = async (projectPath: string, name: string): Promise<void> => {
+      await writeFile(
+        join(projectPath, name),
+        [
+          "import { describe, it } from 'geospec';",
+          "describe('box', () => {",
+          "  it('should pass', () => {});",
+          '});',
+        ].join('\n'),
+        'utf8',
+      );
+    };
+
+    const writeFailingSpec = async (projectPath: string, name: string): Promise<void> => {
+      await writeFile(
+        join(projectPath, name),
+        [
+          "import { describe, it } from 'geospec';",
+          "describe('box', () => {",
+          "  it('should fail', () => { throw new Error('red'); });",
+          '});',
+        ].join('\n'),
+        'utf8',
+      );
+    };
+
+    it('should stream file progress to stderr by default', async () => {
+      const projectPath = await createTemporaryProject();
+      process.env['GEOSPEC_CACHE_DIR'] = join(projectPath, '.cache');
+      try {
+        await writePassingSpec(projectPath, 'box.geospec.ts');
+        const stderr: string[] = [];
+        const exitCode = await runGeoSpecCli({
+          argv: ['run', '.'],
+          cwd: projectPath,
+          stderr(message) {
+            stderr.push(message);
+          },
+          stdout() {
+            return undefined;
+          },
+        });
+        expect(exitCode).toBe(0);
+        const output = stderr.join('\n');
+        expect(output).toContain('[geospec] run 1 file(s)');
+        expect(output).toContain('[geospec] ▶ box.geospec.ts');
+        expect(output).toMatch(/\[geospec\] ✓ box\.geospec\.ts pass \d+(\.\d+)?s/u);
+      } finally {
+        delete process.env['GEOSPEC_CACHE_DIR'];
+      }
+    });
+
+    it('should emit one JSON object per event with --reporter jsonl, including per-test durations', async () => {
+      const projectPath = await createTemporaryProject();
+      process.env['GEOSPEC_CACHE_DIR'] = join(projectPath, '.cache');
+      try {
+        await writePassingSpec(projectPath, 'box.geospec.ts');
+        const stdout: string[] = [];
+        const exitCode = await runGeoSpecCli({
+          argv: ['run', '.', '--reporter', 'jsonl'],
+          cwd: projectPath,
+          stderr() {
+            return undefined;
+          },
+          stdout(message) {
+            stdout.push(message);
+          },
+        });
+        expect(exitCode).toBe(0);
+        const events = stdout.map((line) => JSON.parse(line) as Record<string, unknown>);
+        expect(events.map((event) => event['event'])).toEqual([
+          'run-start',
+          'file-start',
+          'file-complete',
+          'run-complete',
+        ]);
+        const fileComplete = events[2] as {
+          file: string;
+          success: boolean;
+          durationMs: number;
+          tests: Array<{ name: string; status: string; durationMs?: number }>;
+        };
+        expect(fileComplete.file).toBe('box.geospec.ts');
+        expect(fileComplete.success).toBe(true);
+        expect(fileComplete.durationMs).toBeGreaterThan(0);
+        expect(fileComplete.tests[0]?.durationMs).toBeGreaterThanOrEqual(0);
+        const runComplete = events[3] as { success: boolean; durationMs: number };
+        expect(runComplete.success).toBe(true);
+        expect(runComplete.durationMs).toBeGreaterThan(0);
+      } finally {
+        delete process.env['GEOSPEC_CACHE_DIR'];
+      }
+    });
+
+    it('should include durations in --json output', async () => {
+      const projectPath = await createTemporaryProject();
+      process.env['GEOSPEC_CACHE_DIR'] = join(projectPath, '.cache');
+      try {
+        await writePassingSpec(projectPath, 'box.geospec.ts');
+        const stdout: string[] = [];
+        const exitCode = await runGeoSpecCli({
+          argv: ['run', '.', '--json'],
+          cwd: projectPath,
+          stderr() {
+            return undefined;
+          },
+          stdout(message) {
+            stdout.push(message);
+          },
+        });
+        expect(exitCode).toBe(0);
+        const result = JSON.parse(stdout.join('\n')) as {
+          durationMs: number;
+          files: Array<{ durationMs: number; tests: Array<{ durationMs?: number }> }>;
+        };
+        expect(result.durationMs).toBeGreaterThan(0);
+        expect(result.files[0]?.durationMs).toBeGreaterThan(0);
+        expect(result.files[0]?.tests[0]?.durationMs).toBeGreaterThanOrEqual(0);
+      } finally {
+        delete process.env['GEOSPEC_CACHE_DIR'];
+      }
+    });
+
+    it('should stop after the first failing file with --bail and report the bail issue', async () => {
+      const projectPath = await createTemporaryProject();
+      process.env['GEOSPEC_CACHE_DIR'] = join(projectPath, '.cache');
+      try {
+        // Files run in sorted order: a-fails runs first, z-passes must not run.
+        await writeFailingSpec(projectPath, 'a-fails.geospec.ts');
+        await writePassingSpec(projectPath, 'z-passes.geospec.ts');
+        const stdout: string[] = [];
+        const exitCode = await runGeoSpecCli({
+          argv: ['run', '.', '--json', '--bail'],
+          cwd: projectPath,
+          stderr() {
+            return undefined;
+          },
+          stdout(message) {
+            stdout.push(message);
+          },
+        });
+        expect(exitCode).toBe(1);
+        const result = JSON.parse(stdout.join('\n')) as {
+          files: Array<{ file: string }>;
+          issues?: Array<{ code: string }>;
+        };
+        expect(result.files.map((file) => file.file)).toEqual(['a-fails.geospec.ts']);
+        expect(result.issues?.some((issue) => issue.code === 'GEOSPEC_RUNNER_BAILED')).toBe(true);
+      } finally {
+        delete process.env['GEOSPEC_CACHE_DIR'];
+      }
+    });
+
+    it('should reject --json combined with --reporter jsonl', async () => {
+      const stderr: string[] = [];
+      const exitCode = await runGeoSpecCli({
+        argv: ['run', '.', '--json', '--reporter', 'jsonl'],
+        stderr(message) {
+          stderr.push(message);
+        },
+        stdout() {
+          return undefined;
+        },
+      });
+      expect(exitCode).toBe(1);
+      expect(stderr.join('\n')).toContain('mutually exclusive');
+    });
+
+    it('should persist per-file timings telemetry into the cache root', async () => {
+      const projectPath = await createTemporaryProject();
+      const cacheDirectory = join(projectPath, '.cache');
+      process.env['GEOSPEC_CACHE_DIR'] = cacheDirectory;
+      try {
+        await writePassingSpec(projectPath, 'box.geospec.ts');
+        const exitCode = await runGeoSpecCli({
+          argv: ['run', '.'],
+          cwd: projectPath,
+          stderr() {
+            return undefined;
+          },
+          stdout() {
+            return undefined;
+          },
+        });
+        expect(exitCode).toBe(0);
+        const timings = await readGeoSpecTimings(projectPath);
+        const entry = timings['box.geospec.ts'];
+        expect(entry?.durationMs).toBeGreaterThan(0);
+        expect(entry?.processPeakRssBytes).toBeGreaterThan(0);
+      } finally {
+        delete process.env['GEOSPEC_CACHE_DIR'];
+      }
+    });
   });
 });

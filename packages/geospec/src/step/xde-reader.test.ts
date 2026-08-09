@@ -36,7 +36,7 @@ describe('GeoSpecXdeReader', () => {
       throw new Error('GeoSpecXdeReader is missing from the native backend.');
     }
     xdeReader = backend.GeoSpecXdeReader;
-    native = xdeReader.readText(text);
+    native = xdeReader.readText(text, '{}');
     if (!native.isSuccess()) {
       throw new Error(native.resultJson());
     }
@@ -95,7 +95,7 @@ describe('GeoSpecXdeReader', () => {
 
   it('should treat a flat non-assembly STEP file as a valid single-level subject', async () => {
     const text = await readFile(flatCubeStepPath, 'utf8');
-    const flatNative = xdeReader.readText(text);
+    const flatNative = xdeReader.readText(text, '{}');
     try {
       expect(flatNative.isSuccess()).toBe(true);
       const flat = JSON.parse(flatNative.resultJson()) as XdeReadResult;
@@ -133,7 +133,7 @@ describe('GeoSpecXdeReader', () => {
   });
 
   it('should fail safely on non-STEP input', () => {
-    const broken = xdeReader.readText('not a step file');
+    const broken = xdeReader.readText('not a step file', '{}');
     try {
       expect(broken.isSuccess()).toBe(false);
       expect(JSON.parse(broken.resultJson())).toHaveProperty('error');

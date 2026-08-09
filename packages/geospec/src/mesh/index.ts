@@ -13,7 +13,7 @@ export {
 export { buildMeshNodeNameMap } from '#mesh/analysis-record.js';
 export { analyzeMeshQuality } from '#mesh/mesh-quality.js';
 export { analyzeChamferDistance } from '#mesh/distance.js';
-export type { AnalyzeChamferDistanceOptions, AnalyzeChamferDistanceResult, MeshDistanceStats } from '#mesh/distance.js';
+export type { AnalyzeChamferDistanceOptions, AnalyzeChamferDistanceResult } from '#mesh/distance.js';
 export { analyzeMeshOverlap } from '#mesh/overlap.js';
 export type {
   AnalyzeMeshOverlapOptions,
@@ -60,6 +60,8 @@ export type {
   GeometryStats,
   GeometrySubject,
   MeshEvidence,
+  MeshDistanceDistribution,
+  MeshDistanceStats,
   MeshFileFormat,
   MeshQualityStats,
   MeshTriangle,

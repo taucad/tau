@@ -14,6 +14,22 @@ export type GeoSpecOverlapCacheProfile = {
   preparedComponentMisses: number;
   pairVolumeHits: number;
   pairVolumeMisses: number;
+  /** R14-lite: pairs whose zero volume the disjointness pre-filter proved. */
+  prefilterProven: number;
+  /** R14-lite: pairs the pre-filter could not prove — fell to the boolean. */
+  prefilterFallthrough: number;
+  /** CR1 census: computed booleans whose intersection volume was exactly 0. */
+  outcomeSeparated: number;
+  /** CR1 census: positive intersections at or below the tolerance³ epsilon. */
+  outcomeTouching: number;
+  /** CR1 census: intersections equal to the smaller participant (nesting). */
+  outcomeContainment: number;
+  /** CR1 census: genuine transversal positive-volume crossings. */
+  outcomeTransversal: number;
+  /** CR2: pair volumes the arrangement engine resolved without a boolean. */
+  arrangementResolved: number;
+  /** CR2: arrangement-engine misses that fell back to the Manifold boolean. */
+  arrangementFallback: number;
   invalidDiagnosticHits: number;
   invalidDiagnosticMisses: number;
 };
@@ -55,6 +71,14 @@ export const createGeoSpecOverlapCacheProfile = (): GeoSpecOverlapCacheProfile =
   preparedComponentMisses: 0,
   pairVolumeHits: 0,
   pairVolumeMisses: 0,
+  prefilterProven: 0,
+  prefilterFallthrough: 0,
+  outcomeSeparated: 0,
+  outcomeTouching: 0,
+  outcomeContainment: 0,
+  outcomeTransversal: 0,
+  arrangementResolved: 0,
+  arrangementFallback: 0,
   invalidDiagnosticHits: 0,
   invalidDiagnosticMisses: 0,
 });

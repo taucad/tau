@@ -1,9 +1,10 @@
 import { createEsbuildModuleVm } from '@taucad/vm';
 import { createCollector } from '#runner/collector.js';
 import { compileGeoSpecTestNamePattern, filterGeoSpecTests } from '#runner/filter.js';
-import { createCachedModelLoader } from '#runner/model-load-cache.js';
+import { flushGeoSpecEvidenceStore } from '#cache/evidence-cache.js';
+import { createCachedModelLoader, isCachedModelLoader } from '#runner/model-load-cache.js';
 import { createGeoSpecResourceScope } from '#runner/resource-scope.js';
-import type { GeoSpecRunResult, RunGeoSpecModuleOptions } from '#runner/types.js';
+import type { GeoSpecRunResult, GeoSpecTestCase, RunGeoSpecModuleOptions } from '#runner/types.js';
 
 const defaultTestTimeout = 30_000;
 const geospecRunBindingsGlobalKey = '__GEOSPEC_RUN_BINDINGS__';
@@ -163,12 +164,18 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
   const ownsResourceScope = !options.resourceScope;
   const resourceScope =
     options.resourceScope ?? createGeoSpecResourceScope({ profile: options.internalProfile?.resourceScope });
-  const modelLoader = createCachedModelLoader(options.modelLoader, {
-    stats: options.internalProfile?.moduleModelLoadCache,
-    onLoadResolved: (subject) => {
-      resourceScope.trackSubject(subject);
-    },
-  });
+  // R10: the pool/serial runners supply a worker/run-lifetime cached loader
+  // (branded) whose onLoadResolved already tracks subjects into the shared
+  // scope; a per-file re-wrap could only ever hit keys the outer layer holds
+  // while re-serializing every include-set per file.
+  const modelLoader = isCachedModelLoader(options.modelLoader)
+    ? options.modelLoader
+    : createCachedModelLoader(options.modelLoader, {
+        stats: options.internalProfile?.moduleModelLoadCache,
+        onLoadResolved: (subject) => {
+          resourceScope.trackSubject(subject);
+        },
+      });
   bindings.set(runToken, {
     collector,
     ...(modelLoader ? { modelLoader } : {}),
@@ -205,6 +212,17 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     if (!executed.success) {
       return { success: false, issues: executed.issues, bundle };
     }
+    if (options.collectOnly === true) {
+      // R3 shard splitting: register tests (async describes included) without
+      // running any body — a never-matching pattern skips every scheduled test.
+      await collector.waitForCompletion(options.testTimeout ?? defaultTestTimeout, /(?!)/u);
+      return {
+        success: true,
+        passed: true,
+        tests: collector.tests.map((test): GeoSpecTestCase => ({ ...test, status: 'skipped' })),
+        bundle,
+      };
+    }
     await collector.waitForCompletion(options.testTimeout ?? defaultTestTimeout, compiledTestNamePattern.pattern);
     const tests = filterGeoSpecTests(collector.tests, compiledTestNamePattern.pattern);
 
@@ -223,5 +241,9 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
       await resourceScope.dispose();
     }
     vm.dispose();
+    // R9: land write-behind evidence at every module/shard boundary so
+    // pending entries become durable (and visible to sibling workers) off the
+    // matcher path. No-op when no store is installed.
+    await flushGeoSpecEvidenceStore();
   }
 }

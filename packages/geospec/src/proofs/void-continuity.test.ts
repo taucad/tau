@@ -326,6 +326,12 @@ describe('void-continuity proof (native fixtures)', () => {
       // A4: two identical claims on the same subject + grid classify once. Count
       // native classifyPoints via a proxy; the memo is keyed by the native handle
       // identity, so the second proof adds zero native calls and matches verdicts.
+      // Pinned to the exact engine: this test verifies the classification memo,
+      // and classifyPoints IS that memoized work — the hybrid engine's tiny/empty
+      // band on this small bore would make the count vacuous. The occupancyCache
+      // wraps both engines identically, so exact-path reuse proves the memo.
+      const previousEngine = process.env['GEOSPEC_VOID_ENGINE'];
+      process.env['GEOSPEC_VOID_ENGINE'] = 'exact';
       let classifyCalls = 0;
       const source = guideContext.native;
       const countingContext: RelationshipProofContext = {
@@ -351,12 +357,20 @@ describe('void-continuity proof (native fixtures)', () => {
         resolution: 1,
         bounds: { min: [-13, -13, -3], max: [13, 13, 48] },
       };
-      const first = prove(claim, countingContext);
-      const afterFirst = classifyCalls;
-      const second = prove(claim, countingContext);
-      expect(afterFirst).toBeGreaterThan(0);
-      expect(classifyCalls).toBe(afterFirst);
-      expect(second).toEqual(first);
+      try {
+        const first = prove(claim, countingContext);
+        const afterFirst = classifyCalls;
+        const second = prove(claim, countingContext);
+        expect(afterFirst).toBeGreaterThan(0);
+        expect(classifyCalls).toBe(afterFirst);
+        expect(second).toEqual(first);
+      } finally {
+        if (previousEngine === undefined) {
+          delete process.env['GEOSPEC_VOID_ENGINE'];
+        } else {
+          process.env['GEOSPEC_VOID_ENGINE'] = previousEngine;
+        }
+      }
     }, 15_000);
   });
 
@@ -428,11 +442,13 @@ describe('void-continuity proof (native fixtures)', () => {
       expect(rejected?.assertions[0]?.diagnostics?.[0]?.message).toContain('BRep-kernel subject');
     });
 
-    it('should fail a heavy matcher as a bounded MATCHER_TIMEOUT through the collector (WS-C)', async () => {
-      // WS-C end to end: a low budget + a large grid (multi-chunk classification,
-      // fresh bounds so the A4 memo misses) makes the void-continuity matcher hit
-      // checkBudget between chunks and fail as a bounded timeout, not a stall.
-      process.env['GEOSPEC_MATCHER_TIMEOUT_MS'] = '1';
+    it('should fail a heavy matcher as a bounded MATCHER_TIMEOUT through the collector (R13)', async () => {
+      // R13 end to end: a tiny work-unit budget + a large grid (multi-chunk
+      // classification, fresh bounds so the A4 memo misses) makes the
+      // void-continuity matcher exhaust its deterministic unit budget at a
+      // chunk boundary and fail as a bounded timeout, not a stall — the same
+      // outcome at any machine load or pool size.
+      process.env['GEOSPEC_MATCHER_UNIT_BUDGET'] = '1';
       try {
         const timedOut = await runOneAssertion((collector) => {
           collector.expectGeo(housing).toHaveVoidContinuity({
@@ -448,7 +464,7 @@ describe('void-continuity proof (native fixtures)', () => {
         expect(timedOut?.status).toBe('failed');
         expect(timedOut?.assertions[0]?.diagnostics?.[0]?.code).toBe('MATCHER_TIMEOUT');
       } finally {
-        delete process.env['GEOSPEC_MATCHER_TIMEOUT_MS'];
+        delete process.env['GEOSPEC_MATCHER_UNIT_BUDGET'];
       }
     }, 30_000);
   });

@@ -1,16 +1,6 @@
 import type { MimeType } from '#types/mime-types.types.js';
 
 /**
- * Reference to a geometry asset by virtual path and display filename.
- *
- * @public
- */
-export type GeometryFile = {
-  path: string;
-  filename: string;
-};
-
-/**
  * File content classification used by model-visible filesystem metadata.
  *
  * @public

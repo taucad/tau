@@ -35,6 +35,15 @@ export type {
   ProjectManifestParseResult,
 } from '#schemas/project-manifest.schema.js';
 export {
+  parseWorkspaceMarker,
+  serializeWorkspaceMarker,
+  workspaceIdSchema,
+  workspaceMarkerPath,
+  workspaceMarkerSchema,
+  workspaceMarkerSchemaUrl,
+} from '#schemas/workspace-marker.schema.js';
+export type { WorkspaceMarker } from '#schemas/workspace-marker.schema.js';
+export {
   fileParameterEntrySchema,
   getActiveGroupValues,
   parameterEntryPath,

@@ -48,8 +48,17 @@ export type ProjectManifest = z.infer<typeof projectManifestSchema>;
 /** Manifest fields accepted before assigning an identity during explicit adoption. @public */
 export type AdoptableProjectManifest = Omit<ProjectManifest, 'id'>;
 
-/** Fatal reason a manifest could not be parsed safely. @public */
+/**
+ * Fatal reason a manifest could not be read or parsed safely.
+ *
+ * `manifest-unreadable` is never produced by parsing — it is raised by
+ * discovery when the manifest bytes could not be obtained at all (a provider
+ * failure that is not simple absence).
+ *
+ * @public
+ */
 export type ProjectManifestParseIssue =
+  | { readonly code: 'manifest-unreadable'; readonly message: string }
   | { readonly code: 'manifest-too-large'; readonly maxBytes: number }
   | { readonly code: 'manifest-invalid-json'; readonly message: string }
   | {

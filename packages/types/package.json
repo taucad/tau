@@ -21,7 +21,7 @@
     "typescript"
   ],
   "author": "Richard Fontein",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "exports": {
     ".": "./src/types/index.ts",
     "./constants": "./src/constants/index.ts"

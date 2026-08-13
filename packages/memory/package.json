@@ -23,7 +23,7 @@
     "lru"
   ],
   "author": "Richard Fontein",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts"
   },

@@ -1,5 +1,6 @@
 import type { RunGeoSpecTestsRpcResult } from '@taucad/chat';
 import { rpcClientErrorCode } from '@taucad/chat';
+import { rpcExecutionTimeout } from '@taucad/chat/constants';
 import type { RpcGeoSpecClient } from '@taucad/chat/rpc';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
@@ -9,9 +10,7 @@ type CreateGeoSpecWorker = () => Worker;
 
 export type GeoSpecWorkerRpcClientOptions = {
   openFileSystemBridge: () => FileSystemBridgeConnection;
-  projectRootPath: string;
   runtimeConfig: UiRuntimeConfigInput;
-  filePoolBuffer?: SharedArrayBuffer;
   createWorker?: CreateGeoSpecWorker;
   /** Milliseconds. */
   runnerTimeout?: number;
@@ -31,13 +30,33 @@ type PendingRun = {
   resolve(result: RunGeoSpecTestsRpcResult): void;
 };
 
-/** Milliseconds. */
-const defaultTimeout = 120_000;
-/** Milliseconds. */
+/**
+ * Milliseconds of slack between the client's worst case and the API's RPC
+ * budget, so the client's specific error always wins the race.
+ */
+const rpcTimeoutHeadroom = 5000;
+/** Milliseconds to wait after cooperative abort before hard-resetting. */
 const defaultAbortGrace = 5000;
+/**
+ * Milliseconds. Worker startup is a fetch plus module evaluation — measured in
+ * hundreds of milliseconds — so a startup that has not finished by now is hung,
+ * and waiting longer only buys a less useful error.
+ */
+const defaultInitTimeout = 10_000;
+/** Milliseconds. Whatever is left of the API's budget once startup and the abort grace are paid for. */
+const defaultTimeout = rpcExecutionTimeout - defaultInitTimeout - defaultAbortGrace - rpcTimeoutHeadroom;
+
+/**
+ * The longest a `runTests` call can take before resolving: a full startup
+ * timeout, then a full run timeout, then the abort grace. Pinned by a test
+ * against {@link rpcExecutionTimeout}.
+ *
+ * @public
+ */
+export const geoSpecClientWorstCaseTimeout = defaultInitTimeout + defaultTimeout + defaultAbortGrace;
 
 const createDefaultGeoSpecWorker = (): Worker =>
-  new Worker(new URL('#workers/geospec-runner.worker.js', import.meta.url), {
+  new Worker(new URL('geospec-runner.worker.ts', import.meta.url), {
     type: 'module',
     name: 'tau-geospec-runner-worker',
   });
@@ -68,7 +87,7 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
   const pendingRuns = new Map<string, PendingRun>();
 
   const runnerTimeout = options.runnerTimeout ?? defaultTimeout;
-  const initTimeout = options.initTimeout ?? defaultTimeout;
+  const initTimeout = options.initTimeout ?? defaultInitTimeout;
   const abortGrace = options.abortGrace ?? defaultAbortGrace;
 
   const requireSessionId = (): string => {
@@ -202,8 +221,7 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
     worker.addEventListener('message', onMessage);
     worker.addEventListener('error', onError);
 
-    const vmFileSystemBridge = options.openFileSystemBridge();
-    const runtimeFileSystemBridge = options.openFileSystemBridge();
+    const fileSystemBridge = options.openFileSystemBridge();
     const nextSessionId = createRequestId();
     const requestId = createRequestId();
     initializeRequestId = requestId;
@@ -221,16 +239,12 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
         type: 'initialize',
         requestId,
         sessionId: nextSessionId,
-        projectRootPath: options.projectRootPath,
         runtimeConfig: options.runtimeConfig,
-        vmFileSystemPort: vmFileSystemBridge.port,
-        runtimeFileSystemPort: runtimeFileSystemBridge.port,
-        ...(options.filePoolBuffer ? { filePoolBuffer: options.filePoolBuffer } : {}),
+        fileSystemPort: fileSystemBridge.port,
       };
-      worker.postMessage(request, [vmFileSystemBridge.port, runtimeFileSystemBridge.port]);
+      worker.postMessage(request, [fileSystemBridge.port]);
     } catch (error) {
-      vmFileSystemBridge.dispose();
-      runtimeFileSystemBridge.dispose();
+      fileSystemBridge.dispose();
       const message = error instanceof Error ? error.message : 'GeoSpec worker failed to start.';
       terminateWorker(message);
       throw new Error(message);

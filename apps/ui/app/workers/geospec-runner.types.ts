@@ -5,11 +5,8 @@ export type GeoSpecRunnerWorkerInitializeRequest = {
   type: 'initialize';
   requestId: string;
   sessionId: string;
-  projectRootPath: string;
   runtimeConfig: UiRuntimeConfigInput;
-  vmFileSystemPort: MessagePort;
-  runtimeFileSystemPort: MessagePort;
-  filePoolBuffer?: SharedArrayBuffer;
+  fileSystemPort: MessagePort;
 };
 
 export type GeoSpecRunnerWorkerRunRequest = {

@@ -291,11 +291,11 @@ const sendWorkerMessage = (
 
 const writeProjectFiles = async (options: {
   projectPath: string;
-  projectRootPath: string;
+  localRootPath: string;
   files: Record<string, string>;
 }): Promise<void> => {
   for (const [path, content] of Object.entries(options.files)) {
-    const relativePath = relative(options.projectRootPath, path);
+    const relativePath = relative(options.localRootPath, path);
     const targetPath = join(options.projectPath, relativePath);
     // oxlint-disable-next-line no-await-in-loop -- writes are tiny fixture files and ordering keeps diagnostics simple.
     await mkdir(nodeDirname(targetPath), { recursive: true });
@@ -304,21 +304,31 @@ const writeProjectFiles = async (options: {
   }
 };
 
+type NodeRuntimeExportResult =
+  | {
+      readonly success: true;
+      readonly data: readonly [
+        {
+          readonly bytes: Uint8Array<ArrayBuffer>;
+          readonly name: string;
+          readonly mimeType: string;
+        },
+      ];
+      readonly issues: readonly never[];
+    }
+  | { readonly success: false; readonly issues: readonly unknown[] };
+
 const exportProjectWithNodeRuntime = async (options: {
   format: string;
   input: unknown;
-  projectRootPath: string;
+  localRootPath: string;
   files: Record<string, string>;
-}): Promise<{
-  success: boolean;
-  data?: Array<{ bytes: Uint8Array<ArrayBuffer>; name?: string; mimeType?: string }>;
-  issues?: unknown[];
-}> => {
+}): Promise<NodeRuntimeExportResult> => {
   const projectPath = await mkdtemp(join(tmpdir(), 'tau-ui-geospec-jscad-runtime-'));
   try {
     await writeProjectFiles({
       projectPath,
-      projectRootPath: options.projectRootPath,
+      localRootPath: options.localRootPath,
       files: options.files,
     });
 
@@ -327,8 +337,8 @@ const exportProjectWithNodeRuntime = async (options: {
         ? (options.input as { source?: { path?: unknown }; parameters?: Record<string, unknown> })
         : {};
     const sourcePath = typeof input.source?.path === 'string' ? input.source.path : 'main.ts';
-    const file = sourcePath.startsWith(options.projectRootPath)
-      ? relative(options.projectRootPath, sourcePath)
+    const file = sourcePath.startsWith(options.localRootPath)
+      ? relative(options.localRootPath, sourcePath)
       : sourcePath;
     const script = `
       import { createNodeClient } from ${JSON.stringify(runtimeNodeModuleUrl)};
@@ -408,12 +418,14 @@ describe('geospec-runner.worker JSCAD integration', () => {
   });
 
   it('should run JSCAD GeoSpec tests through the worker with real loadModel and request-scoped runtime export', async () => {
-    const projectRootPath = '/projects/jscad-cutout';
+    const localRootPath = '/';
+    /* eslint-disable @typescript-eslint/naming-convention -- fixture keys are absolute filesystem paths. */
     const projectFiles = {
-      [`${projectRootPath}/main.ts`]: jscadCubeCutoutSource,
-      [`${projectRootPath}/main.geospec.ts`]: geospecSource,
-      [`${projectRootPath}/package.json`]: '{"type":"module"}\n',
+      '/main.ts': jscadCubeCutoutSource,
+      '/main.geospec.ts': geospecSource,
+      '/package.json': '{"type":"module"}\n',
     };
+    /* eslint-enable @typescript-eslint/naming-convention -- fixture keys are absolute filesystem paths. */
     const projectFileSystem = createInMemoryProjectFileSystem(projectFiles);
     const exportCalls: Array<{ format: string; input: unknown; bytes: number }> = [];
     workerMocks.createFileSystemBridgeProxy.mockReturnValue(projectFileSystem);
@@ -424,13 +436,13 @@ describe('geospec-runner.worker JSCAD integration', () => {
         const exported = await exportProjectWithNodeRuntime({
           format,
           input,
-          projectRootPath,
+          localRootPath,
           files: projectFiles,
         });
         exportCalls.push({
           format,
           input,
-          bytes: exported.success ? (exported.data[0]?.bytes.byteLength ?? 0) : 0,
+          bytes: exported.success ? exported.data[0].bytes.byteLength : 0,
         });
         return exported;
       },
@@ -443,10 +455,8 @@ describe('geospec-runner.worker JSCAD integration', () => {
       type: 'initialize',
       requestId: 'initialize-jscad',
       sessionId: 'session-jscad',
-      projectRootPath,
       runtimeConfig: defaultRuntimeConfig,
-      vmFileSystemPort: new MessageChannel().port1,
-      runtimeFileSystemPort: new MessageChannel().port1,
+      fileSystemPort: new MessageChannel().port1,
     });
     await vi.waitFor(
       () => {
@@ -505,11 +515,11 @@ describe('geospec-runner.worker JSCAD integration', () => {
     }
     expect(defaultExport.format).toBe('glb');
     expect(defaultExport.input).toMatchObject({
-      source: { path: `${projectRootPath}/main.ts` },
+      source: { path: '/main.ts' },
     });
     expect((defaultExport.input as { parameters?: unknown }).parameters).toBeUndefined();
     expect(parameterizedExport.input).toMatchObject({
-      source: { path: `${projectRootPath}/main.ts` },
+      source: { path: '/main.ts' },
       parameters: { cubeSize: 80, cylinderRadius: 10, cylinderHeight: 90 },
     });
     expect(defaultExport.bytes).toBeGreaterThan(1000);

@@ -116,7 +116,6 @@ import {
   buildPlug,
   buildStud,
   buildWasher,
-  hexAf,
 } from './fasteners.js';
 import {
   buildFrontCover,
@@ -232,7 +231,7 @@ const bankU = (bank: 'R' | 'L'): Vec3 =>
 const bankV = (bank: 'R' | 'L'): Vec3 =>
   bank === 'R' ? [0, c, -c] : [0, -c, -c];
 
-export const buildEngine = (withProbes: boolean): Entry[] => {
+export const buildEngine = (): Entry[] => {
   const entries: Entry[] = [];
   const push = (
     name: string,
@@ -1461,55 +1460,8 @@ export const buildEngine = (withProbes: boolean): Entry[] => {
     '#5b6066',
   );
 
-  if (withProbes) {
-    // REQ-087: Ø22 x 80 probes along each plug axis, outboard of the seat.
-    for (let cyl = 1; cyl <= 8; cyl++) {
-      const bank = cyl <= 4 ? 'R' : 'L';
-      const localX = bank === 'R' ? boreX(cyl) : boreX(cyl) - bankStagger;
-      const tip = plugTipOf(localX);
-      const start: Vec3 = [
-        tip[0] + (plugSeatT + 40) * plugDir[0],
-        tip[1] + (plugSeatT + 40) * plugDir[1],
-        tip[2] + (plugSeatT + 40) * plugDir[2],
-      ];
-      const place = alignZ(plugDir)
-        .compose(Placement.translate(start[0], start[1], start[2]))
-        .compose(headPlaceOf(bank));
-      push(`Plug Tool Probe ${cyl}`, buildProbe(place, 11, 80), '#ff8800');
-    }
-    // REQ-088: head-bolt torque-tool probes (Ø 1.6 x AF 17, length 40).
-    for (let bolt = 1; bolt <= 20; bolt++) {
-      const bank = bolt <= 10 ? 'R' : 'L';
-      const hole = deckMap.bolts[(bolt - 1) % 10]!;
-      const top = headPlaceOf(bank).pt([hole.x, hole.y, 84.85 + 11.5]);
-      const up = bankU(bank);
-      const place = alignZ(up).compose(
-        Placement.translate(top[0], top[1], top[2]),
-      );
-      push(
-        `Head Bolt Tool Probe ${bolt}`,
-        buildProbe(place, (1.6 * hexAf(11)) / 2, 40),
-        '#ff8800',
-      );
-    }
-  }
-
   return entries;
 };
-
-/**
- * Minimal sub-assembly: the entries of {@link buildEngine} whose `name` is in
- * `names`, in build order. Placements are absolute and `interfaces` travel with
- * each entry, so a subset is verdict-preserving for any GeoSpec proof that
- * references only those occurrences — while serializing a fraction of the
- * unique-casting topology, so the STEP export stays inside the load budget.
- * Names absent from the assembly are silently skipped (they surface downstream
- * as an `unsupported` selector resolution, never a wrong pass).
- */
-export const buildSubAssembly = (
-  names: ReadonlySet<string>,
-  withProbes = false,
-): Entry[] => buildEngine(withProbes).filter((entry) => names.has(entry.name));
 
 // --- Chain pose solver ---------------------------------------------------------
 
@@ -1691,14 +1643,6 @@ const solveChainPose = (
 };
 
 // --- Local small builders -----------------------------------------------------
-
-const buildProbe = (place: Placement, r: number, length: number): BuiltPart => {
-  const shape = place.shape(makeCylinder(r, length, [0, 0, 0], [0, 0, 1]));
-  return {
-    shape,
-    interfaces: { body: axisNear(place, [r, 0, length / 2], 'CYLINDRE', 0.1) },
-  };
-};
 
 /** Main bearing cap: extruded section with registers, notch, bolt stack. */
 const buildMainCap = (place: Placement): BuiltPart => {

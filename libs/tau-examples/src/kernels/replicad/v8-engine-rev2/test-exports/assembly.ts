@@ -5,5 +5,5 @@
 import { buildEngine } from '../lib/assembly.js';
 
 export default function main() {
-  return buildEngine(false);
+  return buildEngine();
 }

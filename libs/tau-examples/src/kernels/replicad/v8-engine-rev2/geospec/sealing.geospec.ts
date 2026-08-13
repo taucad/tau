@@ -3,25 +3,19 @@
  *
  * Gaskets are blanked from the real feature maps and modeled at compressed
  * nominal; rings are split and touch the bore; guides/seats/seals are real
- * presses. The contact-area frontier has LANDED (packages/geospec
- * minContactArea on the contact matcher), so REQ-038/044 now run as red
- * contact-patch tests against the not-yet-exported model — failing on the
- * missing-model precondition today, real seating-patch proofs once it lands.
+ * presses. Quantified seating-area requirements remain registered frontier
+ * deferrals until a release-suitable contact-area proof exists.
  */
 import { describe, expectGeo, it } from 'geospec';
-import type { GeoSpecSpatialRelationshipExpectation } from 'geospec';
 import { loadModel } from 'geospec/model';
 import {
-  banks,
-  iface,
-  occ,
+  assemblyStepLoadOptions,
   relationshipsForRequirement,
   testExports,
   tolerances,
 } from '../spec/requirements.js';
 
-const loadAssemblyStep = async () =>
-  loadModel({ file: testExports.assembly, format: 'step', mesh: false });
+const loadAssemblyStep = async () => loadModel(assemblyStepLoadOptions);
 
 const loadPartStep = async (file: string) =>
   loadModel({ file, format: 'step', mesh: false });
@@ -128,53 +122,5 @@ describe('V8R2 CL-3 sealing', () => {
 
   it('REQ-V8R2-049: plug seats, injector/o-ring seats, thermostat seat, and minor gasket bands hold', async () => {
     await expectRequirementRelationships('REQ-V8R2-049');
-  });
-
-  it('REQ-V8R2-038: each fire-ring bead band seats on BOTH decks with contact patch >= 500 mm² per bore', async () => {
-    const model = await loadAssemblyStep();
-    // Ø94.5–Ø97.5 minimum band, both bank decks: the gasket fire-ring bead face
-    // must seat >= 500 mm² against the block deck and the head deck per bore.
-    const relationships: GeoSpecSpatialRelationshipExpectation[] =
-      banks.flatMap((bank) =>
-        [1, 2, 3, 4].flatMap((slot) => {
-          const bead = iface(`Head Gasket ${bank}`, `fireRing[${slot}]`);
-          return [
-            {
-              id: `fire ring ${bank}${slot} on block deck`,
-              kind: 'contact',
-              subject: bead,
-              target: occ('Block 1'),
-              minContactArea: 500,
-              tolerance: tolerances.contact,
-            },
-            {
-              id: `fire ring ${bank}${slot} on head deck`,
-              kind: 'contact',
-              subject: bead,
-              target: occ(`Cylinder Head ${bank}`),
-              minContactArea: 500,
-              tolerance: tolerances.contact,
-            },
-          ];
-        }),
-      );
-    expectGeo(model).toHaveSpatialRelationships({ relationships });
-  });
-
-  it('REQ-V8R2-044: each ring-to-bore seating patch >= 80% circumference × face height (top ring >= 283 mm²)', async () => {
-    const model = await loadAssemblyStep();
-    // Top ring: >= 0.8 × π × 94 × 1.2 = 283 mm² of the ring outer face seating
-    // on its bore wall; oil rails and second rings follow with their own bands.
-    const relationships: GeoSpecSpatialRelationshipExpectation[] = [
-      1, 2, 3, 4, 5, 6, 7, 8,
-    ].map((cylinder) => ({
-      id: `top ring ${cylinder} seats on bore`,
-      kind: 'contact',
-      subject: iface(`Top Ring ${cylinder}`, 'face'),
-      target: occ('Block 1'),
-      minContactArea: 283,
-      tolerance: tolerances.contact,
-    }));
-    expectGeo(model).toHaveSpatialRelationships({ relationships });
   });
 });

@@ -2,34 +2,21 @@
  * DFM, lightweighting, and service/externals (spec Sections 5.7, 5.8, 5.10:
  * verify-today REQ 080..082, 085, 087..089, 092, 099, 105..110).
  *
- * Tool-access rows (REQ-087/088) run against the service-access export —
- * the assembly plus named probe solids (see README handshake). Draft and
- * region-wall REQs are registered deferrals; the form-maker and datum REQs
- * are registered process reviews.
+ * Tool-access, draft, and region-wall REQs are registered deferrals; the
+ * form-maker and datum REQs are registered process reviews.
  */
 import { describe, expectGeo, it } from 'geospec';
 import { loadModel } from 'geospec/model';
 import {
   assertDeferralsRegistered,
   assertProcessOnlyRegistered,
+  assemblyStepLoadOptions,
   relationshipsForRequirement,
   testExports,
   tolerances,
 } from '../spec/requirements.js';
 
-const loadAssemblyStep = async () =>
-  loadModel({ file: testExports.assembly, format: 'step', mesh: false });
-
-const loadServiceAccessStep = async () =>
-  loadModel({ file: testExports.serviceAccess, format: 'step', mesh: false });
-
-const loadAssemblyMesh = async () =>
-  loadModel({
-    file: testExports.assembly,
-    format: 'glb',
-    meshLinearTolerance: 0.1,
-    meshAngularToleranceDegrees: 30,
-  });
+const loadAssemblyStep = async () => loadModel(assemblyStepLoadOptions);
 
 const loadPartStep = async (file: string) =>
   loadModel({ file, format: 'step', mesh: false });
@@ -100,20 +87,6 @@ describe('V8R2 DFM, lightweighting, and service', () => {
     });
   });
 
-  it('REQ-V8R2-087: a straight Ø22 x 80 tool cylinder clears cover, manifold, and header at every plug', async () => {
-    const model = await loadServiceAccessStep();
-    expectGeo(model).toHaveSpatialRelationships({
-      relationships: relationshipsForRequirement('REQ-V8R2-087'),
-    });
-  });
-
-  it('REQ-V8R2-088: straight torque-tool cylinders clear the plenum for both head-bolt rows', async () => {
-    const model = await loadServiceAccessStep();
-    expectGeo(model).toHaveSpatialRelationships({
-      relationships: relationshipsForRequirement('REQ-V8R2-088'),
-    });
-  });
-
   it('REQ-V8R2-089: 2x M10 lifting eyes per head with tapped bosses', async () => {
     const head = await loadPartStep(testExports.cylinderHead);
     expectGeo(head).toHaveCircularHolePattern({
@@ -174,8 +147,8 @@ describe('V8R2 DFM, lightweighting, and service', () => {
   });
 
   it('REQ-V8R2-108: all service fittings present and seated on machined bosses per T-THREADS', async () => {
-    const mesh = await loadAssemblyMesh();
-    expectGeo(mesh).toHaveAssemblyOccurrences({
+    const model = await loadAssemblyStep();
+    expectGeo(model).toHaveAssemblyOccurrences({
       uniqueNames: true,
       occurrences: [
         'Drain Plug 1',

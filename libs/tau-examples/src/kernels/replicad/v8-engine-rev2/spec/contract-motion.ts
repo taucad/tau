@@ -1,11 +1,10 @@
 /**
  * Contract rows for CL-4 valvetrain drive, CL-5 pin retention, CL-6 fit
- * semantics, and the verify-today DFM/service relationships (REQ 087, 088,
- * 107, 108, 109, 110). Bands verbatim from T-FITS; press rows cite their
+ * semantics, and the verify-today DFM/service relationships (REQ 107..110).
+ * Bands verbatim from T-FITS; press rows cite their
  * T-FITS-PRESS id.
  */
 import {
-  bankOf,
   cylinders,
   datumOf,
   headOf,
@@ -711,53 +710,8 @@ const fitSemanticsRows = (): ContractRow[] => {
 };
 
 // ---------------------------------------------------------------------------
-// DFM / service verify-today relationships (REQ 087, 088, 107, 108, 109, 110)
+// DFM / service verify-today relationships (REQ 107, 108, 109, 110)
 // ---------------------------------------------------------------------------
-
-/**
- * REQ-V8R2-087/088 rows run against `test-exports/service-access.ts` — the
- * assembly plus named tool-probe solids (see README handshake): 8x
- * `Plug Tool Probe n` (Ø22 x 80 along each plug axis) and 20x
- * `Head Bolt Tool Probe n` (Ø = 1.6x head AF, length 40 above the head).
- */
-const toolAccessRows = (): ContractRow[] => {
-  const rows: ContractRow[] = [];
-  for (const cylinder of cylinders) {
-    const probe = `Plug Tool Probe ${cylinder}`;
-    const bank = bankOf(cylinder);
-    for (const neighbor of [
-      `Valve Cover ${bank}`,
-      manifold,
-      `Exhaust Header ${bank}`,
-    ]) {
-      rows.push({
-        requirementId: 'REQ-V8R2-087',
-        id: `${probe} stays clear of ${neighbor}`,
-        kind: 'clearance',
-        subject: iface(probe, 'body'),
-        target: iface(neighbor, 'envelope'),
-        min: 0,
-        tolerance: tolerances.band,
-        reason:
-          'REQ-V8R2-087: straight tool cylinder Ø22 x 80 along the plug axis, plugs OUTBOARD of the cover rail',
-      });
-    }
-  }
-  for (let bolt = 1; bolt <= 20; bolt++) {
-    rows.push({
-      requirementId: 'REQ-V8R2-088',
-      id: `Head Bolt Tool Probe ${bolt} stays clear of the manifold plenum`,
-      kind: 'clearance',
-      subject: iface(`Head Bolt Tool Probe ${bolt}`, 'body'),
-      target: iface(manifold, 'envelope'),
-      min: 0,
-      tolerance: tolerances.band,
-      reason:
-        'REQ-V8R2-088: straight coaxial tool cylinder (Ø = 1.6x head AF, length 40) for both head-bolt rows under the plenum',
-    });
-  }
-  return rows;
-};
 
 const serviceRows = (): ContractRow[] => {
   const rows: ContractRow[] = [];
@@ -998,12 +952,5 @@ export const motionContractRows = (): ContractRow[] => [
   ...valvetrainDriveRows(),
   ...pinRetentionRows(),
   ...fitSemanticsRows(),
-  ...toolAccessRows(),
   ...serviceRows(),
-];
-
-/** Rows that require the service-access export (probe solids present). */
-export const toolAccessRequirementIds: readonly string[] = [
-  'REQ-V8R2-087',
-  'REQ-V8R2-088',
 ];

@@ -12,8 +12,7 @@ import type { GeoSpecVoidContinuityExpectation } from 'geospec';
 import { loadModel } from 'geospec/model';
 import {
   assertDeferralsRegistered,
-  contractBoundOccurrences,
-  contractRowsForRequirement,
+  assemblyStepLoadOptions,
   relationshipsForRequirement,
   testExports,
   tolerances,
@@ -22,27 +21,12 @@ import {
 const loadPartStep = async (file: string) =>
   loadModel({ file, format: 'step', mesh: false });
 
-/**
- * Load only the named occurrences as a minimal sub-assembly (absolute
- * placements + interfaces preserved), so the STEP export serializes a fraction
- * of the heavy-casting topology and completes inside the load budget with an
- * identical verdict — instead of the full 650-part assembly, which times out.
- */
-const loadSubAssembly = async (include: readonly string[]) =>
-  loadModel({
-    file: testExports.subAssembly,
-    format: 'step',
-    mesh: false,
-    parameters: { include },
-  });
+const loadAssemblyStep = async () => loadModel(assemblyStepLoadOptions);
 
 const expectRequirementRelationships = async (
   requirementId: string,
 ): Promise<void> => {
-  const include = [
-    ...contractBoundOccurrences(contractRowsForRequirement(requirementId)),
-  ];
-  const model = await loadSubAssembly(include);
+  const model = await loadAssemblyStep();
   expectGeo(model).toHaveSpatialRelationships({
     relationships: relationshipsForRequirement(requirementId),
   });
@@ -58,53 +42,20 @@ const expectRequirementRelationships = async (
  * at distance s along a bank-R bore axis with in-deck lateral offset a maps to
  * y = 0.7071 * (s + a), z = 0.7071 * (s - a); the deck plane sits at s = 230
  * (2.1 deckHeight), so axis-aligned bounds can wall the tilted deck/crankcase
- * through the cell-centre y+z sum.
+ * through the y+z bound.
  */
-const expectVoidContinuity = async (
-  file: string,
-  expectation: GeoSpecVoidContinuityExpectation,
-): Promise<void> => {
-  const model = await loadPartStep(file);
-  expectGeo(model).toHaveVoidContinuity(expectation);
-};
-
 const occ = (name: string): { occurrence: string } => ({ occurrence: name });
 
-/** Occurrence names referenced by path waypoints (explicit [x,y,z] points contribute none). */
-const occWaypointNames = (
-  path: GeoSpecVoidContinuityExpectation['path'],
-): string[] =>
-  path
-    .filter(
-      (waypoint): waypoint is { occurrence: string } =>
-        !Array.isArray(waypoint),
-    )
-    .map((waypoint) => waypoint.occurrence);
-
-/**
- * Void-continuity on a minimal sub-assembly. The proof classifies ONLY
- * `expectation.material` and resolves the occurrence waypoints, so a
- * sub-assembly holding exactly `material ∪ occ-waypoints` feeds identical inputs
- * and yields an identical verdict to the full assembly — which times out on
- * export. Explicit [x,y,z] waypoints and `bounds` are absolute-frame, so they
- * need no part present.
- */
 const expectVoidContinuityOnAssembly = async (
   expectation: GeoSpecVoidContinuityExpectation,
 ): Promise<void> => {
-  const include = [
-    ...new Set([
-      ...(expectation.material ?? []),
-      ...occWaypointNames(expectation.path),
-    ]),
-  ];
-  const model = await loadSubAssembly(include);
+  const model = await loadAssemblyStep();
   expectGeo(model).toHaveVoidContinuity(expectation);
 };
 
 /**
  * Cylinder-1 seal set shared by the intake/exhaust tract claims: seated valves
- * plug seats and guide bores (F08/F09 clearances are sub-voxel), spark plug,
+ * plug seats and guide bores (F08/F09 clearances are below the proof tolerance), spark plug,
  * piston 1 + compression rings, gasket, and block close the chamber floor, so
  * the seat-throat side of a tract can never reach exterior air — a broken
  * tract strands the throat waypoint in its own void component.
@@ -321,11 +272,10 @@ describe('V8R2 CL-1 flow paths', () => {
       path: [occ('Throttle Body 1'), [80, 154.9, 187.4]],
       material: intakeTractMaterial,
       minCrossSection: 900,
-      resolution: 2,
       // X spans any throttle placement ahead of the front face through runner 1;
       // the y wall cuts the L-bank flange ports mid-runner; the z floor sits
       // under the chamber band (deck point z = 162.6 on the bore-1 axis).
-      bounds: { min: [-130, -45, 140], max: [260, 170, 345] }, // 2.17M voxels at 2 mm.
+      bounds: { min: [-130, -45, 140], max: [260, 170, 345] },
     });
     // Claim 2 — isolation from the coolant jacket and head-bolt holes: a tight
     // cylinder-1 box seals both probe spaces (the head-jacket crossover exits
@@ -345,8 +295,7 @@ describe('V8R2 CL-1 flow paths', () => {
         // material set, so the Ø12.5 head bore (3.5) is open void.
         [35.4, 157, 239],
       ],
-      resolution: 2,
-      bounds: { min: [20, 55, 140], max: [140, 172, 266] }, // 223k voxels at 2 mm.
+      bounds: { min: [20, 55, 140], max: [140, 172, 266] },
     });
   });
 
@@ -366,20 +315,17 @@ describe('V8R2 CL-1 flow paths', () => {
       ],
       material: exhaustTractMaterial,
       minCrossSection: 600,
-      resolution: 2,
       // Cylinder-1 zone; the primary tube is walled mid-run so a broken port
       // strands the mouth waypoint (stud channels stay sealed by the compressed
       // flange contact), and the throat side is sealed by the cylinder-1 set.
-      bounds: { min: [20, 55, 95], max: [140, 258, 266] }, // 526k voxels at 2 mm.
+      bounds: { min: [20, 55, 95], max: [140, 258, 266] },
     });
     // Claim 2 — all four primaries share ONE collector/outlet void (primaries
-    // enter through REAL openings, no tangent-kiss end disks). Header part
-    // alone, modeled in place (canon); material defaults to the whole part.
+    // enter through REAL openings, no tangent-kiss end disks).
     // The y wall sits past the deepest flange-face point (face y <= 235), so
     // each lumen enters the region already sealed: a tangent-kissed primary is
     // a stub in its own component instead of reaching the shared collector.
-    const header = await loadPartStep(testExports.exhaustHeader);
-    expectGeo(header).toHaveVoidContinuity({
+    await expectVoidContinuityOnAssembly({
       // Lumen centres just past the flange wall at the four port stations
       // x = boreXR (2.1); z = 114 = canon exit height 125.9 advanced 12.3
       // along the port normal to the y = 240 plane.
@@ -389,24 +335,25 @@ describe('V8R2 CL-1 flow paths', () => {
         [302, 240, 114],
         [413, 240, 114],
       ],
-      resolution: 2,
-      bounds: { min: [40, 236, 0], max: [515, 400, 220] }, // Header envelope behind the flange; 2.14M voxels at 2 mm.
+      material: ['Exhaust Header R'],
+      bounds: { min: [40, 236, 0], max: [515, 400, 220] },
     });
   });
 
   it('REQ-V8R2-004: combustion void isolated from lifter valley, water jacket, and adjacent barrel over deck-0..160', async () => {
-    // Barrel-wall integrity is a block-part property: prove it on the block
-    // export alone (part-local frame = assembly frame: the block anchors the
-    // Section 1.5 datums). Material defaults to the whole part. The 45-deg
+    // Barrel-wall integrity is a block property: isolate the authored block
+    // occurrence from the assembly subject. The block anchors the Section 1.5
+    // datums. The 45-deg
     // deck lets one axis-aligned box wall BOTH open ends of the barrels:
-    // cell-centre y+z <= 324 stays below the deck plane (y+z = 325.3), so no
+    // y+z <= 324 stays below the deck plane (y+z = 325.3), so no
     // over-deck exterior air enters; y+z >= 102 stays above deck-158, so the
     // barrel bottoms exit the region instead of meeting in the crankcase. The
     // y-z range keeps the outboard block exterior (|a| > 66) out too, so the
     // only voids present are the barrels, the jacket, and the valley — exactly
     // the spaces the criterion separates (v1's 33 mm valley slot goes red).
-    await expectVoidContinuity(testExports.block, {
+    await expectVoidContinuityOnAssembly({
       path: [[80, 127.3, 127.3]], // Barrel 1 void on the bore-1 axis (x = 80, 2.1 boreXR) at deck-50 (s = 180).
+      material: ['Block 1'],
       isolatedFrom: [
         // Lifter valley air on the vee centreline between bores 1-2
         // (x = (80 + 191) / 2), inside the V opening (valley walls at
@@ -419,8 +366,7 @@ describe('V8R2 CL-1 flow paths', () => {
         [80, 59.4, 138.6],
         [191, 127.3, 127.3], // Adjacent barrel: bore-2 axis (x = 80 + 111 borePitch, 2.1) at deck-50.
       ],
-      resolution: 2,
-      bounds: { min: [30, -8, 110], max: [240, 139, 186] }, // 295k voxels at 2 mm.
+      bounds: { min: [30, -8, 110], max: [240, 139, 186] },
     });
   });
 
@@ -475,10 +421,9 @@ describe('V8R2 CL-1 flow paths', () => {
         [257.4, 0, -20], // Oil space: crankcase/sump air on the crank axis plane at mid-block (x = mainX3, 2.1), below the Ø68 tunnel.
         [191, 127.3, 127.3], // Cylinder bore 2 void at deck-50 (piston 2 not in the material set).
       ],
-      resolution: 2,
       // Lid z = 210 sits under the head-top/crossover zone; floor z = -30 stays
       // above the pan rail; x = 475 walls the block rear face openings.
-      bounds: { min: [-50, -35, -30], max: [475, 205, 210] }, // 3.79M voxels at 2 mm.
+      bounds: { min: [-50, -35, -30], max: [475, 205, 210] },
     });
   });
 
@@ -492,8 +437,7 @@ describe('V8R2 CL-1 flow paths', () => {
     await expectVoidContinuityOnAssembly({
       path: [occ('Oil Pump Inner Rotor 1'), occ('Relief Valve Piston 1')],
       material: frontCoverOilMaterial,
-      resolution: 1,
-      bounds: { min: [-50, -60, -45], max: [30, 60, 120] }, // Front-cover envelope + gallery mouth; 1.58M voxels at 1 mm.
+      bounds: { min: [-50, -60, -45], max: [30, 60, 120] },
     });
     // Claim 2 — the main gallery MEETS all five Ø8 saddle feeds (drilled runs
     // intersect). Canon gallery datum shared with REQ-015: axis y = 0, z = 60,
@@ -514,10 +458,9 @@ describe('V8R2 CL-1 flow paths', () => {
         [479.4, 0, 38],
       ],
       material: ['Block 1'],
-      resolution: 1,
       // Gallery lane only: the front port (x = 0 face) and rear plug tap are
       // walled out, and the Ø28 bay windows live below the z = 36 floor.
-      bounds: { min: [25, -8, 36], max: [490, 8, 70] }, // 253k voxels at 1 mm.
+      bounds: { min: [25, -8, 36], max: [490, 8, 70] },
     });
     // Risers, lifter galleries, lifter bores, cam feeds, and the pickup -> pump
     // leg have no spec-fixed coordinates; their presence stays covered by the
@@ -525,7 +468,7 @@ describe('V8R2 CL-1 flow paths', () => {
   });
 
   it('REQ-V8R2-013: each crankpin bearing surface void-connected to its main journal through the Ø5 drilling — no blind stubs', async () => {
-    // Crankshaft PART in its local frame (canon, 1.5/3.2): mains axis = +X with
+    // Crankshaft occurrence in the canonical assembly frame (1.5/3.2): mains axis = +X with
     // the front face at x = 0 (spec mainX/crankpinX stations); throw phase is
     // measured from +Z toward +Y about +X (P1 up at the modeled TDC), so a
     // throw at phase t points along u = (0, sin t, cos t). Drill map (3.2):
@@ -537,44 +480,48 @@ describe('V8R2 CL-1 flow paths', () => {
     // Waypoints float just off both journal surfaces (r 34 and r 16); bounds
     // hug the drill lane, so the solid web between journal and pin blocks every
     // route except the Ø5 drilling itself — a blind mid-throw stub goes red.
-    const crank = await loadPartStep(testExports.crankshaft);
+    const c = Math.SQRT1_2;
     const drillings: Array<{
       label: string;
       mainX: number;
       pinX: number;
       u: [number, number];
     }> = [
-      { label: 'M1>P1', mainX: 35.4, pinX: 90.9, u: [0, 1] }, // Phase 0 -> +Z.
-      { label: 'M2>P1', mainX: 146.4, pinX: 90.9, u: [0, 1] }, // Phase 0 -> +Z.
-      { label: 'M2>P2', mainX: 146.4, pinX: 201.9, u: [1, 0] }, // Phase 90 -> +Y.
-      { label: 'M3>P2', mainX: 257.4, pinX: 201.9, u: [1, 0] }, // Phase 90 -> +Y.
-      { label: 'M3>P3', mainX: 257.4, pinX: 312.9, u: [-1, 0] }, // Phase 270 -> -Y.
-      { label: 'M4>P3', mainX: 368.4, pinX: 312.9, u: [-1, 0] }, // Phase 270 -> -Y.
-      { label: 'M4>P4', mainX: 368.4, pinX: 423.9, u: [0, -1] }, // Phase 180 -> -Z.
-      { label: 'M5>P4', mainX: 479.4, pinX: 423.9, u: [0, -1] }, // Phase 180 -> -Z.
+      { label: 'M1>P1', mainX: 35.4, pinX: 90.9, u: [c, c] }, // Installed phase 45°.
+      { label: 'M2>P1', mainX: 146.4, pinX: 90.9, u: [c, c] },
+      { label: 'M2>P2', mainX: 146.4, pinX: 201.9, u: [c, -c] }, // Installed phase 135°.
+      { label: 'M3>P2', mainX: 257.4, pinX: 201.9, u: [c, -c] },
+      { label: 'M3>P3', mainX: 257.4, pinX: 312.9, u: [-c, c] }, // Installed phase 315°.
+      { label: 'M4>P3', mainX: 368.4, pinX: 312.9, u: [-c, c] },
+      { label: 'M4>P4', mainX: 368.4, pinX: 423.9, u: [-c, -c] }, // Installed phase 225°.
+      { label: 'M5>P4', mainX: 479.4, pinX: 423.9, u: [-c, -c] },
     ];
     // Interval r 14..37 along the throw direction covers both mouth pockets;
     // +/-6 across it keeps the lane inside the web/counterweight silhouette.
     const throwSpan = (component: number): [number, number] => {
-      if (component > 0) {
-        return [14, 37];
+      if (component === 0) {
+        return [-6, 6];
       }
-      return component < 0 ? [-37, -14] : [-6, 6];
+      return [
+        Math.min(14 * component, 37 * component) - 6,
+        Math.max(14 * component, 37 * component) + 6,
+      ];
     };
     for (const { mainX, pinX, u } of drillings) {
       const exitX = pinX + (mainX > pinX ? 10 : -10);
       const [yMin, yMax] = throwSpan(u[0]);
       const [zMin, zMax] = throwSpan(u[1]);
-      expectGeo(crank).toHaveVoidContinuity({
+      // oxlint-disable-next-line no-await-in-loop -- Native void proofs stay serial to bound kernel memory and preserve deterministic evidence order.
+      await expectVoidContinuityOnAssembly({
         path: [
           [mainX, 34 * u[0], 34 * u[1]], // Mouth pocket just outside the main journal surface (r 32 + 2).
           [exitX, 16 * u[0], 16 * u[1]], // Mouth pocket just inside the pin near-surface (r 18 - 2), between pin and axis.
         ],
-        resolution: 1,
+        material: ['Crankshaft 1'],
         bounds: {
           min: [Math.min(mainX, exitX) - 3, yMin, zMin],
           max: [Math.max(mainX, exitX) + 3, yMax, zMax],
-        }, // ~17k voxels per drilling at 1 mm.
+        },
       });
     }
   });
@@ -592,8 +539,7 @@ describe('V8R2 CL-1 flow paths', () => {
         [15, 0, 60], // Main gallery just behind its front-face port (canon gallery datum y = 0 / z = 60 shared with REQ-010 claim 2).
       ],
       material: frontCoverOilMaterial,
-      resolution: 1,
-      bounds: { min: [-50, -60, -45], max: [30, 60, 120] }, // Front-cover envelope + gallery mouth; 1.58M voxels at 1 mm.
+      bounds: { min: [-50, -60, -45], max: [30, 60, 120] },
     });
   });
 

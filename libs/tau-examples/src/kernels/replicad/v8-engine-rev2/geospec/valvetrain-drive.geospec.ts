@@ -12,13 +12,13 @@ import { loadModel } from 'geospec/model';
 import {
   assertDeferralsRegistered,
   assertProcessOnlyRegistered,
+  assemblyStepLoadOptions,
   relationshipsForRequirement,
   testExports,
   tolerances,
 } from '../spec/requirements.js';
 
-const loadAssemblyStep = async () =>
-  loadModel({ file: testExports.assembly, format: 'step', mesh: false });
+const loadAssemblyStep = async () => loadModel(assemblyStepLoadOptions);
 
 const loadPartStep = async (file: string) =>
   loadModel({ file, format: 'step', mesh: false });

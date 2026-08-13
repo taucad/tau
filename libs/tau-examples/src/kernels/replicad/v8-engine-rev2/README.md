@@ -19,10 +19,9 @@ missing-export diagnostics. This project is intentionally **not** registered in
 
 ## Verification classes (spec Section 1.3 / 6.1)
 
-- **90 verify-today REQs** — executable red tests across the nine suite files
-  (includes the 7 landed void-continuity flow-path REQs and the 3 landed
-  contact-area seating-patch REQs 038/044/111).
-- **21 frontier-gated REQs** — documented deferrals in `spec/deferrals.ts`
+- **85 verify-today REQs** — executable tests across the nine suite files,
+  including the 7 landed void-continuity flow-path REQs.
+- **26 frontier-gated REQs** — documented deferrals in `spec/deferrals.ts`
   (REQ id + frontier + gate + quantified criterion held in reserve). Each
   cluster file asserts its own deferrals are registered; a frontier landing
   converts its entries to red tests in the same change. Never fake-pass these.
@@ -34,17 +33,16 @@ missing-export diagnostics. This project is intentionally **not** registered in
 
 ### Required exports (paths in `spec/requirements.ts#testExports`)
 
-| File                                                               | Content                                                                                                                                                      |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `test-exports/assembly.ts`                                         | Full assembly: exactly the 650 T-CENSUS occurrences (STEP + GLB evidence), no root occurrence node, zero extras                                              |
-| `test-exports/service-access.ts`                                   | Assembly plus tool probes: `Plug Tool Probe 1..8` (Ø22 x 80 on each plug axis) and `Head Bolt Tool Probe 1..20` (Ø = 1.6x head AF, length 40 above the head) |
-| `test-exports/block.ts`                                            | `Block 1` part                                                                                                                                               |
-| `test-exports/cylinder-head.ts`                                    | Single-bank R head (L bank installs the mirrored occurrence)                                                                                                 |
-| `test-exports/head-gasket.ts`                                      | Head gasket blank (36 openings)                                                                                                                              |
-| `test-exports/exhaust-header.ts`, `test-exports/exhaust-gasket.ts` | Per-bank header weldment and gasket                                                                                                                          |
-| `test-exports/crankshaft.ts`, `test-exports/camshaft.ts`           | Cranktrain parts                                                                                                                                             |
-| `test-exports/piston.ts`, `test-exports/connecting-rod.ts`         | Piston (with reliefs, grooves, drains) and rod (with fillets)                                                                                                |
-| `test-exports/front-cover.ts`                                      | Front cover (pump housing, seal bore chamfer)                                                                                                                |
+| File                                                               | Content                                                                                                         |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `test-exports/assembly.ts`                                         | Full assembly: exactly the 650 T-CENSUS occurrences (STEP + GLB evidence), no root occurrence node, zero extras |
+| `test-exports/block.ts`                                            | `Block 1` part                                                                                                  |
+| `test-exports/cylinder-head.ts`                                    | Single-bank R head (L bank installs the mirrored occurrence)                                                    |
+| `test-exports/head-gasket.ts`                                      | Head gasket blank (36 openings)                                                                                 |
+| `test-exports/exhaust-header.ts`, `test-exports/exhaust-gasket.ts` | Per-bank header weldment and gasket                                                                             |
+| `test-exports/crankshaft.ts`, `test-exports/camshaft.ts`           | Cranktrain parts                                                                                                |
+| `test-exports/piston.ts`, `test-exports/connecting-rod.ts`         | Piston (with reliefs, grooves, drains) and rod (with fillets)                                                   |
+| `test-exports/front-cover.ts`                                      | Front cover (pump housing, seal bore chamfer)                                                                   |
 
 Evidence discipline (same as v1): relationship and BRep-feature tests load
 STEP (`format: 'step', mesh: false`); only the occurrence census and the
@@ -88,7 +86,7 @@ stamp exactly these names:
 | Gaskets                                                                                     | `Head Gasket R\|L`: `block`, `head`, `boltHole[i]`, `coolant10[i]`, `coolant14[i]`, `dowelHole[i]`, `fireRing[i]`, `oilDrain[i]`, `pushrodHole[i]`; flange gaskets (`Intake/Valve Cover/Oil Pan/Front Cover/Rear Seal Housing/Water Pump/Thermostat/Throttle Gasket`): `a` (engine side), `b` (clamped side) + their opening families (`boltHole[i]`, `portOval[i]`, `coolantPort[i]`, `transferPort[i]`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Cranktrain dressing                                                                         | `Damper Hub 1`: `bore`, `keySlot`, `noseFace`, `rim`, `sealJournal`, `shoulderFace`; `Damper Elastomer 1`: `hubBond`, `ringBond`; `Damper Inertia Ring 1`: datum `beltPlane`, `bore`; `Damper Washer 1`: `clampFace`; `Crank Key 1`: `body`; `Flywheel 1`: `boltSeat[i]`, `ringGearSeat`, `spigotRecess`; `Ring Gear 1`: `shrink`; `Pilot Bushing 1`/`Core Plug n`/`Head Dowel n` (`+ slip`)/`Bellhousing Dowel n`/`Camshaft Bearing n` (`+ bore`)/`Small End Bushing n` (`+ bore`)/`Dipstick Tube 1` (`+ bore`): `press`; `Reluctor Ring 1`: `press`, `teeth`; `Front/Rear Main Seal 1`: `casePress`, `lip`                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Covers & systems                                                                            | `Valve Cover R\|L`: `boltHole[i]`, `boltSeat[i]`, `envelope`, `fillerNeck` (R), `pcvGrommet` (L), `rail`; `Front Cover 1`: `blockJoint`, `boltHole[i]`, `boltSeat[i]`, `camSensorBoss`, `filterLand`, `filterNipple`, `pickupPad`, `pickupTap[i]`, `pumpCoverTap[i]`, `pumpPocket`, `reliefBore`, `reliefPlugTap`, `sealBore`; `Rear Seal Housing 1`: `blockJoint`, `boltHole[i]`, `boltSeat[i]`, `sealBore`; `Oil Pan 1`: `boltHole[i]`, `boltSeat[i]`, `drainBoss`, `rail`; `Oil Pickup Tube 1`: `boltHole[i]`, `boltSeat[i]`, `pumpJoint`; `Oil Pump Inner Rotor 1`: `driveFlats`, `lobes`; `Oil Pump Outer Rotor 1`: `lobes`, `outer`, `sideFace`; `Oil Pump Cover 1`: `boltHole[i]`, `boltSeat[i]`, `plateFace`; `Water Pump Housing 1`: `blockJoint`, `boltHole[i]`, `boltSeat[i]`, `cartridgeBore`, `volute`; `Water Pump Shaft 1`: `cartridge`, `impellerEnd`, `pulleyEnd`; `Water Pump Impeller 1`: `hub`, `tips`; `Water Pump Pulley 1`: datum `beltPlane`, `hub`; `Thermostat Housing 1`: `boltHole[i]`, `boltSeat[i]`, `manifoldJoint`; `Thermostat 1`: `seat` |
-| Fasteners (every bolt/screw family)                                                         | `shank`, `thread`, `headFace`; `Rod Bolt n` adds `pilotBand`; studs: `headThread` + `shank`; nuts: `clampFace` (`stud`-side implied); plugs/sensors: `thread` or `body` (+ `tip` on the crank sensor); probes: `body`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Fasteners (every bolt/screw family)                                                         | `shank`, `thread`, `headFace`; `Rod Bolt n` adds `pilotBand`; studs: `headThread` + `shank`; nuts: `clampFace` (`stud`-side implied); plugs/sensors: `thread` or `body` (+ `tip` on the crank sensor)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ## Deferral policy
 
@@ -96,6 +94,6 @@ stamp exactly these names:
 never gets a geometry test before its frontier lands; (2) when a frontier
 lands, its deferral entries convert to red tests in the same change; (3) the
 registry tallies must keep matching Section 6.1 (9 rev2.1 + 6 rev2.1+ +
-6 rev2.2 by frontier; 10 process-only) — `deferred-frontiers.geospec.ts`
+11 rev2.2 by frontier; 10 process-only) — `deferred-frontiers.geospec.ts`
 enforces this and
-the 90/90 executable coverage of the verify-today set.
+the 85/85 executable coverage of the verify-today set.

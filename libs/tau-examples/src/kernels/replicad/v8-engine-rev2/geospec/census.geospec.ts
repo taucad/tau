@@ -15,6 +15,7 @@ import {
   assertFitTablesLoadBearing,
   assertProcessOnlyRegistered,
   assertSingleAuthoritativeRows,
+  assemblyStepLoadOptions,
   censusBySubsystem,
   expectedOccurrenceNames,
   expectedOccurrenceTotal,
@@ -24,16 +25,7 @@ import {
   tolerances,
 } from '../spec/requirements.js';
 
-const loadAssemblyStep = async () =>
-  loadModel({ file: testExports.assembly, format: 'step', mesh: false });
-
-const loadAssemblyMesh = async () =>
-  loadModel({
-    file: testExports.assembly,
-    format: 'glb',
-    meshLinearTolerance: 0.1,
-    meshAngularToleranceDegrees: 30,
-  });
+const loadAssemblyStep = async () => loadModel(assemblyStepLoadOptions);
 
 const loadPartStep = async (file: string) =>
   loadModel({ file, format: 'step', mesh: false });
@@ -78,7 +70,7 @@ describe('V8R2 census and contract closure', () => {
   });
 
   it('REQ-V8R2-100: mesh occurrence inventory equals T-CENSUS in both directions', async () => {
-    const model = await loadAssemblyMesh();
+    const model = await loadAssemblyStep();
     expectGeo(model).toHaveAssemblyOccurrences({
       uniqueNames: true,
       occurrences: [

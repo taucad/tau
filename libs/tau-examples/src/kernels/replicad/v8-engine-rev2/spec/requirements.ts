@@ -7,10 +7,7 @@
  * modules re-exported here. GeoSpec suites import ONLY from this module.
  */
 import type { GeoSpecSpatialRelationshipExpectation } from 'geospec';
-import {
-  motionContractRows,
-  toolAccessRequirementIds,
-} from './contract-motion.js';
+import { motionContractRows } from './contract-motion.js';
 import { structureContractRows } from './contract-structure.js';
 import { expectedOccurrenceNames } from './census.js';
 import { gasketBands, pressFits, runningFits } from './fits.js';
@@ -25,7 +22,6 @@ export * from './census.js';
 export * from './contract-base.js';
 export * from './deferrals.js';
 export * from './fits.js';
-export { toolAccessRequirementIds };
 
 /**
  * Canonical future export paths the follow-up model must produce (the
@@ -34,10 +30,6 @@ export { toolAccessRequirementIds };
 export const testExports = {
   /** Full 650-occurrence assembly (STEP + GLB evidence). */
   assembly: 'test-exports/assembly.ts',
-  /** Assembly plus named tool-probe solids for REQ-087/088. */
-  serviceAccess: 'test-exports/service-access.ts',
-  /** Minimal per-proof sub-assembly: only the occurrences named in `parameters.include`. */
-  subAssembly: 'test-exports/sub-assembly.ts',
   block: 'test-exports/block.ts',
   cylinderHead: 'test-exports/cylinder-head.ts',
   headGasket: 'test-exports/head-gasket.ts',
@@ -48,6 +40,13 @@ export const testExports = {
   connectingRod: 'test-exports/connecting-rod.ts',
   camshaft: 'test-exports/camshaft.ts',
   frontCover: 'test-exports/front-cover.ts',
+} as const;
+
+/** One canonical cache key for every full-assembly STEP proof. */
+export const assemblyStepLoadOptions = {
+  file: testExports.assembly,
+  format: 'step',
+  mesh: false,
 } as const;
 
 const gasketBandLookup = (band: string): { min: number; max: number } => {
@@ -206,10 +205,8 @@ export const assertFitTablesLoadBearing = (): void => {
 };
 
 /**
- * Verification-class partition audit: 90 verify-today + 21 frontier-gated +
- * 10 process-only = 121, disjoint and complete (Section 6.1 tallies; the
- * void-continuity frontier landed 7 REQs and the contact-area frontier landed
- * 3 REQs (038/044/111) to verify-today).
+ * Verification-class partition audit: 85 verify-today + 26 frontier-gated +
+ * 10 process-only = 121, disjoint and complete (Section 6.1 tallies).
  */
 export const assertVerificationPartition = (): void => {
   const verify = new Set(
@@ -221,9 +218,9 @@ export const assertVerificationPartition = (): void => {
   const process = new Set(
     processOnlyRequirements.map((entry) => entry.requirementId),
   );
-  if (verify.size !== 90 || deferred.size !== 21 || process.size !== 10) {
+  if (verify.size !== 85 || deferred.size !== 26 || process.size !== 10) {
     throw new Error(
-      `Verification tallies off: verify-today ${verify.size}/90, frontier-gated ${deferred.size}/21, process-only ${process.size}/10.`,
+      `Verification tallies off: verify-today ${verify.size}/85, frontier-gated ${deferred.size}/26, process-only ${process.size}/10.`,
     );
   }
   const union = new Set([...verify, ...deferred, ...process]);

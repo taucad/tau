@@ -8,12 +8,11 @@
 import { describe, expectGeo, it } from 'geospec';
 import { loadModel } from 'geospec/model';
 import {
+  assemblyStepLoadOptions,
   relationshipsForRequirement,
-  testExports,
 } from '../spec/requirements.js';
 
-const loadAssemblyStep = async () =>
-  loadModel({ file: testExports.assembly, format: 'step', mesh: false });
+const loadAssemblyStep = async () => loadModel(assemblyStepLoadOptions);
 
 const expectRequirementRelationships = async (
   requirementId: string,

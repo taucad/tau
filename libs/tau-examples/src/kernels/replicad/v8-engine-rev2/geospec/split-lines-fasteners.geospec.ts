@@ -11,20 +11,11 @@ import { describe, expectGeo, it } from 'geospec';
 import { loadModel } from 'geospec/model';
 import {
   assertDeferralsRegistered,
+  assemblyStepLoadOptions,
   relationshipsForRequirement,
-  testExports,
 } from '../spec/requirements.js';
 
-const loadAssemblyStep = async () =>
-  loadModel({ file: testExports.assembly, format: 'step', mesh: false });
-
-const loadAssemblyMesh = async () =>
-  loadModel({
-    file: testExports.assembly,
-    format: 'glb',
-    meshLinearTolerance: 0.1,
-    meshAngularToleranceDegrees: 30,
-  });
+const loadAssemblyStep = async () => loadModel(assemblyStepLoadOptions);
 
 const expectRequirementRelationships = async (
   requirementId: string,
@@ -65,7 +56,7 @@ describe('V8R2 CL-2 split lines and fasteners', () => {
   });
 
   it('REQ-V8R2-026: exactly 26 half-shell occurrences, mating seam faces contact at the split line', async () => {
-    const mesh = await loadAssemblyMesh();
+    const mesh = await loadAssemblyStep();
     const shellNames = [
       ...Array.from(
         { length: 5 },

@@ -9,8 +9,8 @@
 import type { FaceFinder } from 'replicad';
 import {
   axis,
-  datum,
   face,
+  frame,
   group,
 } from '@taucad/runtime/kernels/replicad/annotations';
 import type {
@@ -78,7 +78,7 @@ export const datumAt = (
 ): DatumDeclaration => {
   const wx = place.dir(xAxis);
   const wz = place.dir(zAxis);
-  return datum({ origin: place.pt(origin), xAxis: wx, zAxis: wz });
+  return frame({ origin: place.pt(origin), xAxis: wx, zAxis: wz });
 };
 
 export { Placement };

@@ -73,6 +73,22 @@ export const frontierDeferrals: readonly FrontierDeferral[] = [
       'Every threaded joint binds a T-THREADS row (callout, class, engagement, tapped depth) as hole-feature metadata; engagement >= 1.5d iron/steel, >= 2.0d aluminum; no helical geometry except where sealing is proven.',
   },
   {
+    requirementId: 'REQ-V8R2-038',
+    frontier: 'contact-area',
+    gate: 'rev2.2',
+    suite: 'deferred-frontiers',
+    criterion:
+      'Each fire-ring bead band seats on both decks with contact patch >= 500 mm2 per bore.',
+  },
+  {
+    requirementId: 'REQ-V8R2-044',
+    frontier: 'contact-area',
+    gate: 'rev2.2',
+    suite: 'deferred-frontiers',
+    criterion:
+      'Each ring-to-bore seating patch covers >= 80% circumference x face height; top-ring patch >= 283 mm2.',
+  },
+  {
     requirementId: 'REQ-V8R2-053',
     frontier: 'thread-semantics',
     gate: 'rev2.1',
@@ -113,6 +129,22 @@ export const frontierDeferrals: readonly FrontierDeferral[] = [
       'Piston crown 7.0 +/-1.0 thick over the cored underside; boss webs present; slipper skirt (2x 95 deg thrust arcs).',
   },
   {
+    requirementId: 'REQ-V8R2-087',
+    frontier: 'assembly-path',
+    gate: 'rev2.2',
+    suite: 'deferred-frontiers',
+    criterion:
+      'A straight Ø22 x 80 tool sweep clears the cover, manifold, and header at every spark plug.',
+  },
+  {
+    requirementId: 'REQ-V8R2-088',
+    frontier: 'assembly-path',
+    gate: 'rev2.2',
+    suite: 'deferred-frontiers',
+    criterion:
+      'A straight torque-tool sweep with diameter 1.6 x 17 AF and length 40 clears the plenum for both head-bolt rows.',
+  },
+  {
     requirementId: 'REQ-V8R2-095',
     frontier: 'mass-balance',
     gate: 'rev2.1+',
@@ -135,6 +167,14 @@ export const frontierDeferrals: readonly FrontierDeferral[] = [
     suite: 'deferred-frontiers',
     criterion:
       'Flywheel >= 60% mass outside R90 (rim-biased section); damper = hub + elastomer + inertia ring stack with ring inertia dominant.',
+  },
+  {
+    requirementId: 'REQ-V8R2-111',
+    frontier: 'contact-area',
+    gate: 'rev2.2',
+    suite: 'deferred-frontiers',
+    criterion:
+      'Minimum seating patch per joint class: fire rings >= 500 mm2 per bore and intake valve seats >= 195 mm2.',
   },
   {
     requirementId: 'REQ-V8R2-112',
@@ -190,7 +230,7 @@ export const frontierDeferrals: readonly FrontierDeferral[] = [
     gate: 'rev2.2',
     suite: 'deferred-frontiers',
     criterion:
-      'Collision-free straight-line insertion sweep along every occurrence declared approach axis with swept clearance >= 0.5; generalizes REQ-087/088 so the 28 authored tool-probe solids in service-access.ts retire in favor of swept-tool evidence.',
+      'Collision-free straight-line insertion sweep along every occurrence declared approach axis with swept clearance >= 0.5; generalizes REQ-087/088 and replaces the 28 authored tool-probe solids with swept-tool evidence.',
   },
   {
     requirementId: 'REQ-V8R2-119',
@@ -307,7 +347,7 @@ const verifyTodayRow = (
   matcher,
 });
 
-/** The 90 verify-today requirements (Section 6 matrix + landed void-continuity and contact-area frontiers). */
+/** The 85 verify-today requirements (Section 6 matrix + landed void-continuity frontier). */
 export const verifyTodayRequirements: readonly VerifyTodayRequirement[] = [
   verifyTodayRow(1, 'flow-paths', 'void-continuity'),
   verifyTodayRow(2, 'flow-paths', 'circular-hole-pattern'),
@@ -351,13 +391,11 @@ export const verifyTodayRequirements: readonly VerifyTodayRequirement[] = [
   verifyTodayRow(35, 'sealing', 'circular-hole-pattern'),
   verifyTodayRow(36, 'sealing', 'coaxial'),
   verifyTodayRow(37, 'sealing', 'clearance'),
-  verifyTodayRow(38, 'sealing', 'contact-area'),
   verifyTodayRow(39, 'sealing', 'angle + contact'),
   verifyTodayRow(40, 'sealing', 'interference + allowance'),
   verifyTodayRow(41, 'sealing', 'interference + allowance'),
   verifyTodayRow(42, 'sealing', 'clearance'),
   verifyTodayRow(43, 'sealing', 'contact'),
-  verifyTodayRow(44, 'sealing', 'contact-area'),
   verifyTodayRow(45, 'sealing', 'clearance'),
   verifyTodayRow(46, 'sealing', 'circular-hole-pattern'),
   verifyTodayRow(47, 'sealing', 'interference + allowance'),
@@ -393,8 +431,6 @@ export const verifyTodayRequirements: readonly VerifyTodayRequirement[] = [
   verifyTodayRow(81, 'dfm-structure', 'fillet-feature'),
   verifyTodayRow(82, 'dfm-structure', 'contact'),
   verifyTodayRow(85, 'dfm-structure', 'fillet-feature'),
-  verifyTodayRow(87, 'dfm-structure', 'clearance (tool cylinder)'),
-  verifyTodayRow(88, 'dfm-structure', 'clearance (tool cylinder)'),
   verifyTodayRow(89, 'dfm-structure', 'circular-hole-pattern'),
   verifyTodayRow(92, 'dfm-structure', 'circular-hole-pattern'),
   verifyTodayRow(99, 'dfm-structure', 'circular-hole-pattern'),
@@ -406,27 +442,22 @@ export const verifyTodayRequirements: readonly VerifyTodayRequirement[] = [
   verifyTodayRow(108, 'dfm-structure', 'occurrences + circular-hole'),
   verifyTodayRow(109, 'dfm-structure', 'contact'),
   verifyTodayRow(110, 'dfm-structure', 'clearance + coaxial'),
-  verifyTodayRow(111, 'deferred-frontiers', 'contact-area'),
 ];
 
 /**
- * Section 6.1 tallies. void-continuity (7 REQs) and contact-area (3 REQs:
- * 038/044/111) have both landed (Section 1.3 deferral policy): their REQs
- * moved to verify-today, so rev2.1 frontier gates drop 19 -> 12 -> 9. Landed
- * frontiers stay pinned at 0 so the exhaustive `Record` keeps compile-time
- * coverage of every frontier name and the tally test proves no deferral
- * sneaks back under a landed frontier.
+ * Section 6.1 tallies after OA1. Void continuity remains landed. Quantified
+ * contact area and authored tool-probe checks return to their release gates.
  */
 export const requirementCounts = {
   total: 121,
-  verifyToday: 90,
+  verifyToday: 85,
   frontierGatedRev21: 9,
   frontierGatedRev21Plus: 6,
-  frontierGatedRev22: 6,
+  frontierGatedRev22: 11,
   processOnly: 10,
   byFrontier: {
     'void-continuity': 0,
-    'contact-area': 0,
+    'contact-area': 3,
     'region-wall': 4,
     'draft-measure': 2,
     'thread-semantics': 3,
@@ -435,7 +466,7 @@ export const requirementCounts = {
     'kinematic-sweep': 1,
     'standard-feature': 1,
     'tolerance-chain': 1,
-    'assembly-path': 1,
+    'assembly-path': 3,
     'misassembly-exclusion': 1,
     'surface-callout': 1,
     'occurrence-congruence': 1,

@@ -5,10 +5,21 @@ import { inProcessTransport } from '#transport/in-process-transport.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { fromNodeFs } from '#filesystem/from-node-fs.js';
-import type { AnyRuntimeDefinition, RuntimeKernels, RuntimeTranscoders } from '#worker/runtime-definition.js';
+import type {
+  AnyRuntimeDefinition,
+  RuntimeKernels,
+  RuntimeMiddleware,
+  RuntimeTranscoders,
+} from '#worker/runtime-definition.js';
 
 type PresetRuntime = ReturnType<typeof presets.all>;
 type InProcessTransportFor<Runtime extends AnyRuntimeDefinition> = ReturnType<typeof inProcessTransport<Runtime>>;
+type PresetRuntimeClient = RuntimeClient<
+  RuntimeKernels<PresetRuntime>,
+  RuntimeMiddleware<PresetRuntime>,
+  RuntimeTranscoders<PresetRuntime>,
+  InProcessTransportFor<PresetRuntime>
+>;
 
 export type NodeRuntimeClientOptions<Runtime extends AnyRuntimeDefinition = AnyRuntimeDefinition> = Omit<
   RuntimeClientOptions<Runtime, InProcessTransportFor<Runtime>>,
@@ -32,7 +43,7 @@ export type DefaultNodeRuntimeClientOptions = Omit<
  * otherwise) into a single factory call. The returned client connects
  * on first command.
  *
- * @param projectPath - Root directory for filesystem-backed rendering. Omit
+ * @param projectPath - Host filesystem directory exposed to the runtime as `/`. Omit
  *   for inline-source mode; the client provisions an in-memory filesystem
  *   on the first `render({ source })` / `export({ source })` call.
  * @param options - Override client options. Pass `runtime` to use a custom worker-owned runtime definition.
@@ -63,15 +74,22 @@ export type DefaultNodeRuntimeClientOptions = Omit<
 export async function createNodeClient(
   projectPath?: string,
   options?: DefaultNodeRuntimeClientOptions,
-): Promise<RuntimeClient>;
+): Promise<PresetRuntimeClient>;
 export async function createNodeClient<const Runtime extends AnyRuntimeDefinition>(
   projectPath: string | undefined,
   options: NodeRuntimeClientOptions<Runtime>,
-): Promise<RuntimeClient<RuntimeKernels<Runtime>, RuntimeTranscoders<Runtime>, InProcessTransportFor<Runtime>>>;
+): Promise<
+  RuntimeClient<
+    RuntimeKernels<Runtime>,
+    RuntimeMiddleware<Runtime>,
+    RuntimeTranscoders<Runtime>,
+    InProcessTransportFor<Runtime>
+  >
+>;
 export async function createNodeClient(
   projectPath?: string,
   options?: DefaultNodeRuntimeClientOptions | NodeRuntimeClientOptions,
-): Promise<RuntimeClient> {
+): Promise<unknown> {
   const fileSystem: RuntimeFileSystem = projectPath ? fromNodeFs(projectPath) : fromMemoryFs();
   const runtime = options?.runtime ?? presets.all();
   const { runtime: _runtime, ...clientOptions } = options ?? {};

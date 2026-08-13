@@ -10,6 +10,7 @@ describe('createNodeClient', () => {
     expect(client.render).toBeTypeOf('function');
     expect(client.updateParameters).toBeTypeOf('function');
     expect(client.setOptions).toBeTypeOf('function');
+    expect(client.setRenderTimeout).toBeTypeOf('function');
     expect(client.export).toBeTypeOf('function');
     expect(client.terminate).toBeTypeOf('function');
     expect(client.on).toBeTypeOf('function');

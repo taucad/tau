@@ -824,6 +824,42 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     chB.port2.close();
   });
 
+  it('declares read bytes on the response transfer list instead of cloning them', async () => {
+    const provider = new MemoryProvider();
+    await provider.writeFile('/data.bin', new Uint8Array([4, 5, 6]));
+    const channel = new MessageChannel();
+    const posted: Array<{ frame: unknown; transfer: readonly Transferable[] | undefined }> = [];
+    const postMessage = channel.port1.postMessage.bind(channel.port1);
+    vi.spyOn(channel.port1, 'postMessage').mockImplementation(
+      (frame: unknown, transfer?: readonly Transferable[] | StructuredSerializeOptions) => {
+        const transferList = Array.isArray(transfer) ? (transfer as readonly Transferable[]) : undefined;
+        posted.push({ frame, transfer: transferList });
+        postMessage(frame as never, transferList as never);
+      },
+    );
+    const handle = exposeFileSystem({ readFile: provider.readFile.bind(provider) });
+    messageHandlers[0]!(
+      new MessageEvent('message', {
+        data: { type: filesystemBridgeConnectMessageType, port: channel.port1 },
+      }),
+    );
+    const client = createBridgeCall(fsBridgePort(channel.port2, 'fs-bridge-transfer-list-client'));
+
+    try {
+      await expect(client.call('readFile', ['/data.bin'])).resolves.toEqual(new Uint8Array([4, 5, 6]));
+
+      const responses = posted.filter(({ frame }) => (frame as { k?: string }).k === 'rs');
+      expect(responses).toHaveLength(1);
+      const payload = (responses[0]!.frame as { d: Uint8Array<ArrayBuffer> }).d;
+      expect(responses[0]!.transfer).toEqual([payload.buffer]);
+    } finally {
+      client.dispose();
+      handle.cleanup();
+      channel.port1.close();
+      channel.port2.close();
+    }
+  });
+
   it('transfers provider-owned reads without detaching authoritative bytes', async () => {
     const provider = new MemoryProvider();
     await provider.writeFile('/data.bin', new Uint8Array([1, 2, 3]));

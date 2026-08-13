@@ -153,4 +153,22 @@ export const idPrefix = {
    * underlying folder; immutable for the lifetime of a project bound to it.
    */
   workspace: 'wsp',
+  /**
+   * A subscription record ID (`subscription.id`, mirrored from Stripe by
+   * the `@better-auth/stripe` plugin).
+   */
+  subscription: 'sub',
+  /**
+   * A credit-ledger transaction ID (`credit_transaction.id`, append-only journal).
+   */
+  creditTx: 'ctx',
+  /**
+   * A credit reservation ID (`credit_reservation.id`, in-flight model-call holds).
+   */
+  creditRes: 'cres',
+  /**
+   * A chat turn ID. One per model call in the agent loop; keys credit
+   * reservations so retries and commits stay idempotent.
+   */
+  turn: 'turn',
 } as const satisfies Record<string, string>;

@@ -24,6 +24,7 @@ out-tsc
 
 # Test coverage
 coverage
+packages/geospec-engine/e2e/dist-fixture
 
 # Environment variables
 .env
@@ -71,3 +72,4 @@ test-results
 # Tau
 .tau/*
 !.tau/parameters
+packages/geospec-engine/provenance.json

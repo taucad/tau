@@ -7,21 +7,6 @@
  * @module
  */
 
-export {
-  proveContact,
-  proveClearance,
-  proveCoaxial,
-  proveContainment,
-  proveCoplanar,
-  proveDirectionAngle,
-  proveInsertion,
-  proveInterference,
-  proveRelationship,
-  type RelationshipProofContext,
-  type RelationshipProofInput,
-  type RelationshipProofNative,
-} from '#proofs/relationship-proofs.js';
-export { getSubjectProofContext } from '#proofs/subject-context.js';
 export type {
   RelationshipBroadPhase,
   RelationshipEndpointReport,

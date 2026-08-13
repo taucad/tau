@@ -1,7 +1,7 @@
 {
   "name": "geospec",
   "version": "0.0.1",
-  "description": "Vitest-style geometry specification runner for CAD models",
+  "description": "Geometry specification API for CAD models: DSL, selector language, diagnostics schema, and the executor seam",
   "type": "module",
   "sideEffects": false,
   "private": false,
@@ -12,12 +12,9 @@
   },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
-  "bin": {
-    "geospec": "./dist/cli.mjs"
-  },
   "files": [
     "dist",
-    "native",
+    "LICENSE",
     "README.md"
   ],
   "keywords": [
@@ -25,14 +22,14 @@
     "typescript"
   ],
   "author": "Richard Fontein",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "engines": {
     "node": ">=24.0.0"
   },
   "exports": {
     ".": "./src/index.ts",
     "./brep": "./src/brep/index.ts",
-    "./config": "./src/config/index.ts",
+    "./engine": "./src/engine/index.ts",
     "./inspection": "./src/inspection/index.ts",
     "./mesh": "./src/mesh/index.ts",
     "./model": "./src/model/index.ts",
@@ -42,17 +39,10 @@
     "./runner/web": "./src/runner/web/index.ts",
     "./runner/worker": "./src/runner/worker/index.ts",
     "./selector": "./src/selector/index.ts",
-    "./step": "./src/step/index.ts",
-    "./native/opencascade/single": {
-      "types": "./native/opencascade/dist/init.d.ts",
-      "default": "./native/opencascade/dist/init.js"
-    }
+    "./step": "./src/step/index.ts"
   },
   "publishConfig": {
     "access": "public",
-    "bin": {
-      "geospec": "./dist/cli.mjs"
-    },
     "exports": {
       ".": {
         "types": "./dist/index.d.mts",
@@ -64,10 +54,10 @@
         "import": "./dist/brep/index.mjs",
         "default": "./dist/brep/index.mjs"
       },
-      "./config": {
-        "types": "./dist/config/index.d.mts",
-        "import": "./dist/config/index.mjs",
-        "default": "./dist/config/index.mjs"
+      "./engine": {
+        "types": "./dist/engine/index.d.mts",
+        "import": "./dist/engine/index.mjs",
+        "default": "./dist/engine/index.mjs"
       },
       "./inspection": {
         "types": "./dist/inspection/index.d.mts",
@@ -118,28 +108,19 @@
         "types": "./dist/step/index.d.mts",
         "import": "./dist/step/index.mjs",
         "default": "./dist/step/index.mjs"
-      },
-      "./native/opencascade/single": {
-        "types": "./dist/native/opencascade/init.d.ts",
-        "import": "./dist/native/opencascade/init.js",
-        "default": "./dist/native/opencascade/init.js"
       }
     }
   },
   "imports": {
-    "#experiments/*.js": "./experiments/*.ts",
-    "#experiments/*": "./experiments/*",
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
   "dependencies": {
-    "@gltf-transform/core": "^4.4.0",
-    "@taucad/runtime": "workspace:*",
-    "@taucad/vm": "workspace:*",
-    "manifold-3d": "catalog:"
+    "@taucad/types": "workspace:*",
+    "@taucad/vm": "workspace:*"
   },
   "devDependencies": {
-    "@libcascade/toolchain": "3.0.0-canary.bce9b10b",
-    "@taucad/openscad": "workspace:*"
+    "@gltf-transform/core": "^4.4.0",
+    "@taucad/runtime": "workspace:*"
   }
 }

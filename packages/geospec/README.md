@@ -2,6 +2,15 @@
 
 GeoSpec is a CAD geometry testing library with Vitest-style authoring APIs.
 
+This package is the **matcher-API substrate** (Apache-2.0): the authoring DSL,
+the selector language, the diagnostics and evidence schemas, the matcher
+registry, and the executor seam. It executes no geometry on its own. Install
+[`@taucad/geospec-engine`](../geospec-engine) and import
+`@taucad/geospec-engine/register` once at startup to supply the engine — it
+also ships the `geospec` CLI. Without a registered engine every engine-backed
+entry point answers with a `GEOSPEC_ENGINE_UNAVAILABLE` diagnostic rather than
+crashing.
+
 ```ts
 import { describe, expectGeo, it } from 'geospec';
 import { loadModel } from 'geospec/model';
@@ -28,27 +37,24 @@ describe('bracket', () => {
 });
 ```
 
-Run standalone GeoSpec modules from Node:
+## Running specs
 
-```bash
-geospec run .
-geospec run . --include "parts/**/*.geospec.ts"
-geospec run . --exclude "**/*.slow.geospec.ts"
-geospec run . --file main.geospec.ts --test-name-pattern volume
-geospec run . -t "^(?!.*no meshing interference).*"
-geospec run . --file lib
-geospec run . --json
-```
+Execution lives in the engine. Install
+[`@taucad/geospec-engine`](../geospec-engine) and either run its `geospec` CLI
+or embed one of its runners — **both take the same path**, so a verdict never
+depends on how the spec was invoked. The CLI's flags, the worker pool and the
+runner factories are documented in that package's README.
 
-The CLI and Tau `test_model` tool share the same execution filters:
+The filters below are the shared vocabulary of the CLI, the embedded runners
+and the Tau `test_model` tool:
 
-- `files`: GeoSpec files or directory roots to run (`--file` in the CLI). Empty input recursively discovers from the project root.
-- `include`: GeoSpec file include globs (`--include` in the CLI), defaulting to `["**/*.geospec.{ts,js}"]`
-- `exclude`: GeoSpec file exclude globs (`--exclude` in the CLI)
+- `files`: GeoSpec files or directory roots to run. Empty input recursively discovers from the project root.
+- `include`: GeoSpec file include globs, defaulting to `["**/*.geospec.{ts,js}"]`
+- `exclude`: GeoSpec file exclude globs
 - `testNamePattern`: JavaScript regular expression matched against full `suite > test` names
-- `testTimeout`: async test timeout in milliseconds (`--test-timeout` in the CLI)
+- `testTimeout`: async test timeout in milliseconds
 
-The Tau runtime contract remains file/bytes based: render or export geometry, then pass GLB/glTF or STEP bytes into GeoSpec loaders. `geospec/model` is built on `@taucad/runtime` as a package dependency for CAD-source loading, while direct GLB/glTF and STEP loaders remain usable for already-exported evidence. Tau project tests should use `loadModel` from `geospec/model`; `@taucad/testing/tau` remains an internal compatibility adapter for Tau runners.
+The Tau runtime contract remains file/bytes based: render or export geometry, then pass GLB/glTF or STEP bytes into GeoSpec loaders. `geospec/model` is built on `@taucad/runtime` as a package dependency for CAD-source loading, while direct GLB/glTF and STEP loaders remain usable for already-exported evidence. Tau project tests should use `loadModel` from `geospec/model`.
 
 Runtime-originated diagnostics keep their runtime issue codes, such as `GEOMETRY_INVALID`, inside `GeometrySubject.diagnostics`. GeoSpec adds matcher-facing facets and spatial evidence around those diagnostics instead of remapping them into kernel-specific or GeoSpec-only aliases.
 
@@ -118,12 +124,6 @@ expectGeo(subject).toHaveSurfaceArea({ value: 12_345, tolerance: 1 });
 expectGeo(subject).toHaveVolume({ value: 120_000, tolerance: 10 });
 expectGeo(subject).toHaveMass({ value: 94.2, density: 0.000_785, tolerance: 0.5 });
 expectGeo(subject).toHaveCenterOfMass({ point: { x: 0, y: 0, z: 10 }, tolerance: 0.05 });
-expectGeo(actual).toHaveChamferDistanceTo(expected, {
-  mean: { lessThan: 0.02 },
-  max: { lessThan: 0.2 },
-  p95: { lessThan: 0.08 },
-  samples: 100_000,
-});
 ```
 
 Initial BRep feature matchers are available when a loader provides BRep evidence:
@@ -150,11 +150,10 @@ expectGeo(subject).toHaveVoidContinuity({
 `toHaveVoidContinuity` proves negative-space topology: the declared `path`
 waypoints must share one connected open void (outside every `material` solid),
 that void must not reach any `isolatedFrom` point, and its tightest sampled
-cross-section must meet `minCrossSection`. Connectivity and isolation are
-decided by a deterministic 6-connectivity flood fill over exact point-in-solid
-classification at `resolution`-spaced voxel centres; the cross-section is a
-sampled estimate reported with its quantization band (never approximated to a
-pass).
+cross-section must meet `minCrossSection`. The canonical proof uses Manifold
+Boolean shells, generalized winding-number body identity, and deterministic
+topological cross-sections. Its region padding, tessellation deflection, and
+section spacing are versioned engine constants rather than author options.
 
 Advanced tests that need raw selector/fact evidence can use the explicit
 inspection subpath:
@@ -167,24 +166,6 @@ const inspection = inspectGeometry({
   selectors: [{ kind: 'occurrence', name: /^Fastener \d+$/ }],
 });
 ```
-
-Large sampled mesh-distance checks use GeoSpec's canonical native/WASM mesh
-backend. The root import remains lazy; callers that need explicit lifecycle
-control can mount the backend through `geospec/mesh` with an initialized WASM
-module.
-
-```ts
-import { createOpenCascadeMeshBackend } from 'geospec/mesh';
-import initOpenCascade from 'geospec/native/opencascade/single';
-
-const oc = await initOpenCascade();
-const backend = createOpenCascadeMeshBackend(oc);
-```
-
-The custom C++ wrappers and the `@libcascade/toolchain` build config
-(`libcascade.config.ts`) live in `native/opencascade/`. GeoSpec does not run a production JavaScript
-triangle-distance fallback; native backend failures are returned as structured
-diagnostics.
 
 When a geometry assertion needs a parameter variant, pass that variant directly to `loadModel`. Omitting `parameters` exercises the defaults authored by the model:
 
@@ -209,3 +190,11 @@ describe('parameter variants', () => {
   });
 });
 ```
+
+## License
+
+**Apache-2.0.** This package is the permissive perimeter: your specs, your
+models and your verdicts carry no obligation from it, and neither does the
+fair-source engine that executes them. See
+[LICENSING.md](../../LICENSING.md) at the repository root for the routing map
+and the internal-use FAQ.

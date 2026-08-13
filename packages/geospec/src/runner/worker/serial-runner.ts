@@ -1,6 +1,4 @@
 import { runGeoSpecModule } from '#runner/run-geospec-module.js';
-import { createCachedModelLoader } from '#runner/model-load-cache.js';
-import { createGeoSpecResourceScope } from '#runner/resource-scope.js';
 import type {
   GeoSpecRunner,
   GeoSpecRunnerEvent,
@@ -60,9 +58,12 @@ export const countRunnerTests = (tests: readonly GeoSpecTestCase[]): { passed: n
  */
 export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpecRunner => {
   const state: { closed: boolean; aborted?: string } = { closed: false };
+  const listeners = new Set<(event: GeoSpecRunnerEvent) => void>();
 
   const emit = (event: GeoSpecRunnerEvent): void => {
-    options.onEvent?.(event);
+    for (const listener of listeners) {
+      listener(event);
+    }
   };
 
   const getAbortReason = (): string | undefined => state.aborted;
@@ -84,70 +85,49 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
       let selectedTests = 0;
       const fileResults: GeoSpecRunnerResult['files'] = [];
       const issues: VmIssue[] = [];
-      const resourceScope = createGeoSpecResourceScope({ profile: options.internalProfile?.resourceScope });
-      // R9 affinity telemetry: the first deterministic load key seen per file.
-      // Read through an accessor so control-flow analysis does not narrow the
-      // closure-written value to `undefined` at the read sites.
-      let currentFileLoadKey: string | undefined;
-      const takeFileLoadKey = (): string | undefined => currentFileLoadKey;
-      const modelLoader = createCachedModelLoader(options.modelLoader, {
-        stats: options.internalProfile?.aggregateModelLoadCache,
-        onLoadResolved: (subject) => {
-          resourceScope.trackSubject(subject);
-        },
-        onCacheKey: (key) => {
-          currentFileLoadKey ??= key;
-        },
-      });
-
-      try {
-        for (const file of files) {
-          const abortReason = getAbortReason();
-          if (abortReason !== undefined) {
-            const issue = createRunnerAbortedIssue(abortReason);
-            issues.push(issue);
-            failed += 1;
-            emit({ type: 'abort', reason: abortReason });
-            break;
-          }
-
-          emit({ type: 'file-start', file });
-          currentFileLoadKey = undefined;
-          const fileStartedAt = performance.now();
-          // oxlint-disable-next-line no-await-in-loop -- Within one worker, CAD tests run serially for deterministic evidence and bounded runtime pressure; the pool runner (R3) parallelizes across workers.
-          const result = await runGeoSpecModule({
-            filesystem: options.filesystem,
-            projectPath: options.projectPath,
-            entryPath: file,
-            testNamePattern: runOptions.testNamePattern,
-            testTimeout: runOptions.testTimeout,
-            ...(modelLoader ? { modelLoader } : {}),
-            ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
-            ...(options.builtinModules ? { builtinModules: options.builtinModules } : {}),
-            resourceScope,
-            ...(options.internalProfile ? { internalProfile: options.internalProfile } : {}),
-          });
-          const durationMs = performance.now() - fileStartedAt;
-          const primaryLoadKey = takeFileLoadKey();
-          emit({ type: 'file-complete', file, result, durationMs, ...(primaryLoadKey ? { primaryLoadKey } : {}) });
-          fileResults.push({ file, result, durationMs, ...(primaryLoadKey ? { primaryLoadKey } : {}) });
-
-          if (result.success) {
-            selectedTests += result.tests.length;
-            const counts = countRunnerTests(result.tests);
-            passed += counts.passed;
-            failed += counts.failed;
-          } else {
-            failed += 1;
-          }
-
-          if (runOptions.bail === true && failed > 0) {
-            issues.push(createRunnerBailIssue(file));
-            break;
-          }
+      for (const file of files) {
+        const abortReason = getAbortReason();
+        if (abortReason !== undefined) {
+          const issue = createRunnerAbortedIssue(abortReason);
+          issues.push(issue);
+          failed += 1;
+          emit({ type: 'abort', reason: abortReason });
+          break;
         }
-      } finally {
-        await resourceScope.dispose();
+
+        emit({ type: 'file-start', file });
+        const fileStartedAt = performance.now();
+        // oxlint-disable-next-line no-await-in-loop -- Within one worker, CAD tests run serially for deterministic evidence and bounded runtime pressure; the pool runner (R3) parallelizes across workers.
+        const result = await runGeoSpecModule({
+          filesystem: options.filesystem,
+          projectPath: options.projectPath,
+          entryPath: file,
+          testNamePattern: runOptions.testNamePattern,
+          testTimeout: runOptions.testTimeout,
+          matcherWallBackstop: runOptions.matcherWallBackstop,
+          forensic: runOptions.forensic,
+          ...(options.modelLoader ? { modelLoader: options.modelLoader } : {}),
+          ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
+          ...(options.builtinModules ? { builtinModules: options.builtinModules } : {}),
+          ...(options.internalProfile ? { internalProfile: options.internalProfile } : {}),
+        });
+        const durationMs = performance.now() - fileStartedAt;
+        emit({ type: 'file-complete', file, result, durationMs });
+        fileResults.push({ file, result, durationMs });
+
+        if (result.success) {
+          selectedTests += result.tests.length;
+          const counts = countRunnerTests(result.tests);
+          passed += counts.passed;
+          failed += counts.failed;
+        } else {
+          failed += 1;
+        }
+
+        if (runOptions.bail === true && failed > 0) {
+          issues.push(createRunnerBailIssue(file));
+          break;
+        }
       }
 
       if (selectedTests === 0 && failed === 0) {
@@ -166,6 +146,16 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
       };
       emit({ type: 'run-complete', result: aggregate });
       return aggregate;
+    },
+
+    on(event, handler) {
+      const listener = (emitted: GeoSpecRunnerEvent): void => {
+        if (emitted.type === event) {
+          handler(emitted as Extract<GeoSpecRunnerEvent, { type: typeof event }>);
+        }
+      };
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
 
     abort(reason?: string): void {

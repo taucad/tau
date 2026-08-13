@@ -1,12 +1,7 @@
-import type { GeometrySubject, GeoSpecUnit, MeshFileFormat } from '#mesh/types.js';
+import type { GeoSpecUnit } from '#geometry-unit.js';
+import type { GeometrySubject, MeshFileFormat } from '#mesh/types.js';
 import type { MeshSource } from '#mesh/load-mesh.js';
-import type {
-  GeoSpecNativeStepBackend,
-  GeoSpecNativeStepBackendFactory,
-  GeoSpecOpenCascadeStepModule,
-  StepSource,
-  StepStreamingMode,
-} from '#step/types.js';
+import type { StepSource, StepStreamingMode } from '#step/types.js';
 import type {
   ExportFormatsFor,
   ExportResult,
@@ -35,9 +30,16 @@ export type GeoSpecModelFormat = MeshFileFormat | 'step' | 'stp';
  */
 type GeoSpecRuntimeExportFormat = ExportFormatsFor<readonly KernelPlugin[], readonly TranscoderPlugin[]>;
 
+/**
+ *
+ */
 export type GeoSpecRuntimeClient = {
   connect(): Promise<void>;
   terminate(): void;
+  on?(
+    event: 'telemetry',
+    handler: (entries: Array<{ name: string; duration: number; startTime: number; workerTimeOrigin: number }>) => void,
+  ): () => void;
   export<const Format extends GeoSpecRuntimeExportFormat, const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(
     format: Format,
     options?: {
@@ -81,12 +83,10 @@ export type LoadModelSourceOptions = {
   path?: string;
   /** Human-readable source name recorded in provenance. */
   name?: string;
-  /** Geometry units. */
-  unit?: GeoSpecUnit;
+  /** Coordinate unit of raw GLB/glTF or mesh-buffer data before canonical millimetre normalization. */
+  sourceUnit?: GeoSpecUnit;
   /** Explicit parameters recorded in provenance. */
   parameters?: Record<string, unknown>;
-  /** OpenCascade.js module or factory used when loading STEP/BRep evidence. */
-  openCascade?: GeoSpecOpenCascadeStepModule | (() => Promise<GeoSpecOpenCascadeStepModule>);
   /** STEP reader strategy used for STEP sources. */
   stepStreaming?: StepStreamingMode;
   /** Whether STEP loading should also produce mesh evidence. Defaults to true. */
@@ -95,8 +95,6 @@ export type LoadModelSourceOptions = {
   meshLinearTolerance?: number;
   /** Angular tolerance in degrees used while meshing exact BRep evidence. */
   meshAngularToleranceDegrees?: number;
-  /** Backend-neutral native STEP reader module or factory. */
-  nativeStepBackend?: GeoSpecNativeStepBackend | GeoSpecNativeStepBackendFactory;
 };
 
 /**
@@ -119,8 +117,6 @@ export type LoadModelCodeOptions<Code extends Record<string, string> = Record<st
   sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
   /** Project root used by runtime integrations. */
   projectPath?: string;
-  /** OpenCascade.js module or factory used when loading STEP/BRep evidence. */
-  openCascade?: GeoSpecOpenCascadeStepModule | (() => Promise<GeoSpecOpenCascadeStepModule>);
   /** STEP reader strategy used for STEP exports. */
   stepStreaming?: StepStreamingMode;
   /** Whether STEP loading should also produce mesh evidence. Defaults to true. */
@@ -129,8 +125,6 @@ export type LoadModelCodeOptions<Code extends Record<string, string> = Record<st
   meshLinearTolerance?: number;
   /** Angular tolerance in degrees used while meshing exact BRep evidence. */
   meshAngularToleranceDegrees?: number;
-  /** Backend-neutral native STEP reader module or factory. */
-  nativeStepBackend?: GeoSpecNativeStepBackend | GeoSpecNativeStepBackendFactory;
 };
 
 /**
@@ -151,8 +145,6 @@ export type LoadModelFileOptions = {
   runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
   /** Source-specific runtime adapters, e.g. host-provided GPL-isolated kernels. */
   sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
-  /** OpenCascade.js module or factory used when loading STEP/BRep evidence. */
-  openCascade?: GeoSpecOpenCascadeStepModule | (() => Promise<GeoSpecOpenCascadeStepModule>);
   /** STEP reader strategy used for STEP exports. */
   stepStreaming?: StepStreamingMode;
   /** Whether STEP loading should also produce mesh evidence. Defaults to true. */
@@ -161,8 +153,6 @@ export type LoadModelFileOptions = {
   meshLinearTolerance?: number;
   /** Angular tolerance in degrees used while meshing exact BRep evidence. */
   meshAngularToleranceDegrees?: number;
-  /** Backend-neutral native STEP reader module or factory. */
-  nativeStepBackend?: GeoSpecNativeStepBackend | GeoSpecNativeStepBackendFactory;
 };
 
 /**
@@ -199,8 +189,6 @@ export type CreateModelLoaderOptions = {
   sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
   /** Project root used by runtime integrations. */
   projectPath?: string;
-  /** OpenCascade.js module or factory used when loading STEP/BRep evidence. */
-  openCascade?: GeoSpecOpenCascadeStepModule | (() => Promise<GeoSpecOpenCascadeStepModule>);
   /** STEP reader strategy used for STEP sources or exports. */
   stepStreaming?: StepStreamingMode;
   /** Whether STEP loading should also produce mesh evidence. Defaults to true. */
@@ -209,6 +197,4 @@ export type CreateModelLoaderOptions = {
   meshLinearTolerance?: number;
   /** Angular tolerance in degrees used while meshing exact BRep evidence. */
   meshAngularToleranceDegrees?: number;
-  /** Backend-neutral native STEP reader module or factory. */
-  nativeStepBackend?: GeoSpecNativeStepBackend | GeoSpecNativeStepBackendFactory;
 };

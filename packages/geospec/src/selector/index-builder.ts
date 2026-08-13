@@ -325,6 +325,7 @@ const completeFrameAxisX = (zAxis: Vec3): Vec3 => {
   const dot = best[0] * zAxis[0] + best[1] * zAxis[1] + best[2] * zAxis[2];
   const projected: Vec3 = [best[0] - dot * zAxis[0], best[1] - dot * zAxis[1], best[2] - dot * zAxis[2]];
   const length = Math.hypot(projected[0], projected[1], projected[2]);
+  /* v8 ignore next -- The least-aligned basis axis can never project to zero length. */
   return length > 1e-12 ? [projected[0] / length, projected[1] / length, projected[2] / length] : [1, 0, 0];
 };
 
@@ -473,10 +474,15 @@ export const buildSelectorIndex = (options: BuildSelectorIndexOptions): Selector
     ...(occurrence.instanceName === undefined ? {} : { instanceName: occurrence.instanceName }),
     transform: occurrence.transform,
     shapeIndex: occurrence.shapeIndex,
+    ...(occurrence.bounds === undefined ? {} : { bounds: occurrence.bounds }),
+    /* v8 ignore next -- Every occurrence gets an ordinal path in the walk above. */
     ordinalPath: ordinalPaths.get(occurrence.path) ?? [],
   }));
   const faces = buildFaceRows({ occurrences, faceFactsByOccurrence: options.faceFactsByOccurrence });
   for (const occurrence of occurrences) {
+    if (occurrence.bounds) {
+      continue;
+    }
     const bounds = boundsUnion(
       faces.filter((face) => face.occurrencePath === occurrence.path).map((face) => face.facts.bounds),
     );

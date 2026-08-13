@@ -27,24 +27,7 @@ export type ResolvedReplicadInterface =
 
 type Deletable = { delete?: () => void };
 type TCollectionAsciiStringLike = unknown;
-type StandardTransientLike = Deletable & {
-  IsKind?: (type: unknown) => boolean;
-};
-type StepRepresentationItemLike = StandardTransientLike;
-type StepRepresentationContextLike = StandardTransientLike;
-type StepRepresentationLike = StandardTransientLike & {
-  ContextOfItems: () => StepRepresentationContextLike;
-};
-type StepModelLike = {
-  NbEntities: () => number;
-  Value: (index: number) => StandardTransientLike;
-  AddWithRefs: (entity: StandardTransientLike, level: number, listAll: boolean) => void;
-  TypeName?: (entity: StandardTransientLike, complete: boolean) => string;
-};
-type StepProductRepresentationRow = {
-  representation: StepRepresentationLike;
-  productName?: string;
-};
+type StepModelLike = Deletable;
 type EntryDatumPlacements = {
   productName: string;
   datums: Array<Extract<ResolvedReplicadInterface, { kind: 'datum' }>>;
@@ -66,45 +49,34 @@ type PrototypeStepProduct = {
   interfaces?: ResolvedReplicadInterface[];
   occurrences: PreparedStepOccurrence[];
 };
-type StepEntityConstructors = {
-  NCollection_HArray1_handle_StepRepr_RepresentationItem?: new (
-    lower: number,
-    upper: number,
-    value: StepRepresentationItemLike,
-  ) => unknown;
-  StepGeom_Axis2Placement3d?: new () => StandardTransientLike & {
-    Init: (
-      name: TCollection_HAsciiString,
-      location: StandardTransientLike,
-      hasAxis: boolean,
-      axis: StandardTransientLike,
-      hasRefDirection: boolean,
-      refDirection: StandardTransientLike,
+type ReplicadAdditionalBindings = {
+  ReplicadStepModelTools?: new (
+    model: StepModelLike,
+    productName: string,
+    datumCount: number,
+    unitScale: number,
+  ) => Deletable & {
+    HasProductRepresentation: () => boolean;
+    AddDatum: (
+      name: string,
+      originX: number,
+      originY: number,
+      originZ: number,
+      xAxisX: number,
+      xAxisY: number,
+      xAxisZ: number,
+      zAxisX: number,
+      zAxisY: number,
+      zAxisZ: number,
     ) => void;
-  };
-  StepGeom_CartesianPoint?: new () => StandardTransientLike & {
-    Init3D: (name: TCollection_HAsciiString, x: number, y: number, z: number) => void;
-  };
-  StepGeom_Direction?: new () => StandardTransientLike & {
-    Init3D: (name: TCollection_HAsciiString, x: number, y: number, z: number) => void;
-  };
-  StepRepr_ConstructiveGeometryRepresentation?: new () => StepRepresentationLike & {
-    Init: (name: TCollection_HAsciiString, items: unknown, context: StepRepresentationContextLike) => void;
-  };
-  StepRepr_ConstructiveGeometryRepresentationRelationship?: new () => StandardTransientLike & {
-    Init: (
-      name: TCollection_HAsciiString,
-      description: TCollection_HAsciiString,
-      rep1: StepRepresentationLike,
-      rep2: StepRepresentationLike,
-    ) => void;
+    Commit: () => void;
   };
   TCollection_AsciiString?: new (value: string) => TCollectionAsciiStringLike;
 };
-type StepNamedStringLike = {
-  ToCString?: () => string;
-  ToExtString?: () => string;
-};
+
+type StepExportPhase = <Value>(name: string, operation: () => Value) => Value;
+
+const runWithoutTracing: StepExportPhase = (_name, operation) => operation();
 
 const wrapString = (oc: OpenCascadeInstance, value: string): TCollection_ExtendedString =>
   new oc.TCollection_ExtendedString(value, true);
@@ -116,27 +88,8 @@ const wrapInlineAscii = (
   oc: OpenCascadeInstance,
   value: string,
 ): TCollectionAsciiStringLike | TCollection_HAsciiString => {
-  const asciiCtor = (oc as unknown as StepEntityConstructors).TCollection_AsciiString;
+  const asciiCtor = (oc as unknown as ReplicadAdditionalBindings).TCollection_AsciiString;
   return asciiCtor ? new asciiCtor(value) : wrapAscii(oc, value);
-};
-
-const callStepMethod = <T>(value: unknown, methodName: string): T | undefined => {
-  if (typeof value !== 'object' || value === null) {
-    return undefined;
-  }
-  const method = (value as Record<string, unknown>)[methodName];
-  if (typeof method !== 'function') {
-    return undefined;
-  }
-  return method.call(value) as T;
-};
-
-const stepString = (value: unknown): string => {
-  if (typeof value === 'string') {
-    return value;
-  }
-  const stringLike = value as StepNamedStringLike | undefined;
-  return stringLike?.ToCString?.() ?? stringLike?.ToExtString?.() ?? '';
 };
 
 const parseHexSlice = (hex: string, index: number): number =>
@@ -426,7 +379,7 @@ const prepareStepProducts = (
 
 const buildDocument = (
   oc: OpenCascadeInstance,
-  shapes: Array<ShapeConfig & { resolvedInterfaces?: ResolvedReplicadInterface[] }>,
+  products: PrototypeStepProduct[],
 ): { document: TDocStd_Document; entryDatums: EntryDatumPlacements[] } => {
   const document = new oc.TDocStd_Document(wrapString(oc, 'XmlOcaf'));
   oc.XCAFDoc_ShapeTool.SetAutoNaming(false);
@@ -436,7 +389,6 @@ const buildDocument = (
   const materialTool = oc.XCAFDoc_DocumentTool.MaterialTool(mainLabel);
   const rootLabel = shapeTool.NewShape();
   const entryDatums: EntryDatumPlacements[] = [];
-  const products = prepareStepProducts(oc, shapes);
   oc.TDataStd_Name.Set(rootLabel, wrapString(oc, 'assembly'));
 
   for (const { productName, prototypeShape, firstOccurrence, interfaces, occurrences } of products) {
@@ -498,138 +450,89 @@ const buildDocument = (
   return { document, entryDatums };
 };
 
-const collectProductRepresentations = (model: StepModelLike): StepProductRepresentationRow[] => {
-  const rows: StepProductRepresentationRow[] = [];
-  for (let index = 1; index <= model.NbEntities(); index++) {
-    const entity = model.Value(index);
-    const typeName = model.TypeName?.(entity, false).toUpperCase();
-    if (typeName !== undefined && typeName !== 'SHAPE_DEFINITION_REPRESENTATION') {
-      continue;
-    }
-    const representation = (entity as { UsedRepresentation?: () => StepRepresentationLike }).UsedRepresentation?.();
-    if (representation) {
-      const representedDefinition = callStepMethod<unknown>(entity, 'Definition');
-      const propertyDefinition = callStepMethod<unknown>(representedDefinition, 'PropertyDefinition');
-      const characterizedDefinition = callStepMethod<unknown>(propertyDefinition, 'Definition');
-      const productDefinition = callStepMethod<unknown>(characterizedDefinition, 'ProductDefinition');
-      const formation = callStepMethod<unknown>(productDefinition, 'Formation');
-      const product = callStepMethod<unknown>(formation, 'OfProduct');
-      const productName = stepString(callStepMethod<unknown>(product, 'Name'));
-      rows.push({ representation, ...(productName ? { productName } : {}) });
-    }
-  }
-  return rows;
-};
-
-const requireDatumConstructors = (oc: OpenCascadeInstance): Required<StepEntityConstructors> => {
-  const step = oc as unknown as StepEntityConstructors;
-  const required = [
-    'NCollection_HArray1_handle_StepRepr_RepresentationItem',
-    'StepGeom_Axis2Placement3d',
-    'StepGeom_CartesianPoint',
-    'StepGeom_Direction',
-    'StepRepr_ConstructiveGeometryRepresentation',
-    'StepRepr_ConstructiveGeometryRepresentationRelationship',
-  ] as const;
-  const missing = required.filter((key) => !step[key]);
-  if (missing.length > 0) {
-    throw new Error(`GeoSpec datum export requires OCCT binding symbols: ${missing.join(', ')}`);
-  }
-  return step as Required<StepEntityConstructors>;
-};
-
-const makeDatumPlacement = (
-  oc: OpenCascadeInstance,
-  step: Required<StepEntityConstructors>,
-  datum: Extract<ResolvedReplicadInterface, { kind: 'datum' }>,
-): StepRepresentationItemLike => {
-  const point = new step.StepGeom_CartesianPoint();
-  point.Init3D(wrapAscii(oc, ''), datum.origin[0], datum.origin[1], datum.origin[2]);
-
-  const xAxis = new step.StepGeom_Direction();
-  xAxis.Init3D(wrapAscii(oc, ''), datum.xAxis[0], datum.xAxis[1], datum.xAxis[2]);
-
-  const zAxis = new step.StepGeom_Direction();
-  zAxis.Init3D(wrapAscii(oc, ''), datum.zAxis[0], datum.zAxis[1], datum.zAxis[2]);
-
-  const placement = new step.StepGeom_Axis2Placement3d();
-  placement.Init(wrapAscii(oc, datum.name), point, true, zAxis, true, xAxis);
-  return placement;
-};
-
-const appendDatumRepresentation = (options: {
-  oc: OpenCascadeInstance;
-  step: Required<StepEntityConstructors>;
-  model: StepModelLike;
-  productName: string;
-  subjectRepresentation: StepRepresentationLike;
-  datums: Array<Extract<ResolvedReplicadInterface, { kind: 'datum' }>>;
-}): void => {
-  const { oc, step, model, productName, subjectRepresentation, datums } = options;
-  for (const datum of datums) {
-    const placement = makeDatumPlacement(oc, step, datum);
-    const items = new step.NCollection_HArray1_handle_StepRepr_RepresentationItem(1, 1, placement);
-    const representation = new step.StepRepr_ConstructiveGeometryRepresentation();
-    representation.Init(wrapAscii(oc, datum.name), items, subjectRepresentation.ContextOfItems());
-
-    const relationship = new step.StepRepr_ConstructiveGeometryRepresentationRelationship();
-    relationship.Init(
-      wrapAscii(oc, 'geospec:datum'),
-      wrapAscii(oc, productName),
-      representation,
-      subjectRepresentation,
-    );
-    model.AddWithRefs(relationship, 0, true);
-  }
-};
-
 const appendDatumPlacements = (
   oc: OpenCascadeInstance,
   model: StepModelLike,
   entryDatums: EntryDatumPlacements[],
+  unitScale: number,
 ): void => {
   if (!entryDatums.some((entry) => entry.datums.length > 0)) {
     return;
   }
 
-  const step = requireDatumConstructors(oc);
-  const allRepresentations = collectProductRepresentations(model);
-  const representationsByProductName = new Map(
-    allRepresentations
-      .filter((entry): entry is StepProductRepresentationRow & { productName: string } => Boolean(entry.productName))
-      .map((entry) => [entry.productName, entry.representation]),
-  );
+  const StepModelTools = (oc as unknown as ReplicadAdditionalBindings).ReplicadStepModelTools;
+  if (!StepModelTools) {
+    throw new Error('GeoSpec datum export requires OCCT binding symbol: ReplicadStepModelTools');
+  }
 
   for (const entry of entryDatums) {
     if (entry.datums.length === 0) {
       continue;
     }
-    const representation = representationsByProductName.get(entry.productName);
-    if (!representation) {
-      throw new Error(`GeoSpec datum export could not find STEP product representation '${entry.productName}'`);
+
+    const tools = new StepModelTools(model, entry.productName, entry.datums.length, unitScale);
+    try {
+      if (!tools.HasProductRepresentation()) {
+        throw new Error(`GeoSpec datum export could not find STEP product representation '${entry.productName}'`);
+      }
+      for (const datum of entry.datums) {
+        tools.AddDatum(datum.name, ...datum.origin, ...datum.xAxis, ...datum.zAxis);
+      }
+      tools.Commit();
+    } finally {
+      tools.delete?.();
     }
-    appendDatumRepresentation({
-      oc,
-      step,
-      model,
-      productName: entry.productName,
-      subjectRepresentation: representation,
-      datums: entry.datums,
-    });
   }
+};
+
+/** Millimetres per STEP unit token, for post-Perform coordinate alignment with the write unit. */
+const mmPerStepUnit: Record<string, number> = {
+  MM: 1,
+  CM: 10,
+  M: 1000,
+  KM: 1_000_000,
+  INCH: 25.4,
+  FT: 304.8,
+  MI: 1_609_344,
+  MIL: 0.0254,
+  UM: 0.001,
+  UIN: 0.000_025_4,
+};
+
+const stepUnitScale = (modelUnit: string, writeUnit: string): number => {
+  const modelScale = mmPerStepUnit[modelUnit];
+  const writeScale = mmPerStepUnit[writeUnit];
+  if (modelScale === undefined || writeScale === undefined) {
+    throw new Error(`GeoSpec STEP export: unsupported unit pair ${modelUnit} → ${writeUnit}`);
+  }
+  return modelScale / writeScale;
 };
 
 export const exportSTEP = (
   oc: OpenCascadeInstance,
   shapes: Array<ShapeConfig & { resolvedInterfaces?: ResolvedReplicadInterface[] }>,
-  { unit, modelUnit }: { unit?: SupportedUnit; modelUnit?: SupportedUnit } = {},
+  {
+    unit,
+    modelUnit,
+    phase = runWithoutTracing,
+  }: {
+    unit?: SupportedUnit;
+    modelUnit?: SupportedUnit;
+    phase?: StepExportPhase;
+  } = {},
 ): Blob => {
-  const { document, entryDatums } = buildDocument(oc, shapes);
+  const products = phase('step.product.prepare', () => prepareStepProducts(oc, shapes));
+  const { document, entryDatums } = phase('step.document.build', () => buildDocument(oc, products));
 
-  if (unit ?? modelUnit) {
-    oc.Interface_Static.SetCVal('xstep.cascade.unit', (modelUnit ?? unit ?? 'MM').toUpperCase());
-    oc.Interface_Static.SetCVal('write.step.unit', (unit ?? modelUnit ?? 'MM').toUpperCase());
-  }
+  // Pin every Interface_Static this export depends on, unconditionally —
+  // statics are global per wasm instance, so a previous export's units would
+  // otherwise leak into this one and desynchronize the post-Perform datum
+  // coordinates from the written geometry (§9 of the mesh-split blueprint, F5
+  // of the AP242 interop audit).
+  const effectiveModelUnit = (modelUnit ?? unit ?? 'MM').toUpperCase();
+  const effectiveWriteUnit = (unit ?? modelUnit ?? 'MM').toUpperCase();
+  oc.Interface_Static.SetCVal('xstep.cascade.unit', effectiveModelUnit);
+  oc.Interface_Static.SetCVal('write.step.unit', effectiveWriteUnit);
 
   const session = new oc.XSControl_WorkSession();
   const writer = new oc.STEPCAFControl_Writer(session, false);
@@ -647,20 +550,29 @@ export const exportSTEP = (
 
   const filename = 'export.step';
   const progress = new oc.Message_ProgressRange();
-  const success = writer.Perform(document, filename, progress);
+  const success = phase('step.writer.perform', () => writer.Perform(document, filename, progress));
   if (!success) {
     throw new Error('WRITE STEP FILE FAILED.');
   }
 
   if (entryDatums.some((entry) => entry.datums.length > 0)) {
-    appendDatumPlacements(oc, writer.Writer().Model(false) as unknown as StepModelLike, entryDatums);
-    const status = writer.Write(filename);
-    if (status !== oc.IFSelect_ReturnStatus.IFSelect_RetDone) {
-      throw new Error(`WRITE STEP FILE FAILED (${status}).`);
-    }
+    // Datum origins are authored in the model frame; the writer scales shape
+    // geometry from the model unit to the write unit during Perform, so the
+    // post-Perform supplemental items must be scaled the same way.
+    phase('step.writer.finalize', () => {
+      const unitScale = stepUnitScale(effectiveModelUnit, effectiveWriteUnit);
+      appendDatumPlacements(oc, writer.Writer().Model(false) as unknown as StepModelLike, entryDatums, unitScale);
+      const status = writer.Write(filename);
+      if (status !== oc.IFSelect_ReturnStatus.IFSelect_RetDone) {
+        throw new Error(`WRITE STEP FILE FAILED (${status}).`);
+      }
+    });
   }
 
-  const file = oc.FS.readFile(`/${filename}`);
-  oc.FS.unlink(`/${filename}`);
+  const file = phase('step.file.transfer', () => {
+    const bytes = oc.FS.readFile(`/${filename}`);
+    oc.FS.unlink(`/${filename}`);
+    return bytes;
+  });
   return new Blob([file as BlobPart], { type: 'application/STEP' });
 };

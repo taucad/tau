@@ -1,12 +1,9 @@
 import { createEsbuildModuleVm } from '@taucad/vm';
 import { createCollector } from '#runner/collector.js';
 import { compileGeoSpecTestNamePattern, filterGeoSpecTests } from '#runner/filter.js';
-import { flushGeoSpecEvidenceStore } from '#cache/evidence-cache.js';
-import { createCachedModelLoader, isCachedModelLoader } from '#runner/model-load-cache.js';
-import { createGeoSpecResourceScope } from '#runner/resource-scope.js';
+import { getRegisteredGeoSpecHostBinding } from '#engine/registry.js';
 import type { GeoSpecRunResult, GeoSpecTestCase, RunGeoSpecModuleOptions } from '#runner/types.js';
 
-const defaultTestTimeout = 30_000;
 const geospecRunBindingsGlobalKey = '__GEOSPEC_RUN_BINDINGS__';
 
 type GeoSpecRunBinding = {
@@ -158,24 +155,16 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     filesystem: options.filesystem,
     projectPath: options.projectPath,
   });
-  const collector = createCollector();
+  const collector = createCollector({
+    ...(options.matcherWallBackstop === undefined ? {} : { matcherWallBackstop: options.matcherWallBackstop }),
+    ...(options.forensic === undefined ? {} : { forensic: options.forensic }),
+  });
   const runToken = createRunToken();
   const bindings = ensureRunBindings();
-  const ownsResourceScope = !options.resourceScope;
-  const resourceScope =
-    options.resourceScope ?? createGeoSpecResourceScope({ profile: options.internalProfile?.resourceScope });
-  // R10: the pool/serial runners supply a worker/run-lifetime cached loader
-  // (branded) whose onLoadResolved already tracks subjects into the shared
-  // scope; a per-file re-wrap could only ever hit keys the outer layer holds
-  // while re-serializing every include-set per file.
-  const modelLoader = isCachedModelLoader(options.modelLoader)
-    ? options.modelLoader
-    : createCachedModelLoader(options.modelLoader, {
-        stats: options.internalProfile?.moduleModelLoadCache,
-        onLoadResolved: (subject) => {
-          resourceScope.trackSubject(subject);
-        },
-      });
+  // D-S3: the model loader is INJECTED. The engine's runner hosts own its
+  // construction (caching, affinity, resource-scope tracking); this module
+  // compiles and executes the spec against whatever it is handed.
+  const { modelLoader } = options;
   bindings.set(runToken, {
     collector,
     ...(modelLoader ? { modelLoader } : {}),
@@ -215,7 +204,7 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     if (options.collectOnly === true) {
       // R3 shard splitting: register tests (async describes included) without
       // running any body — a never-matching pattern skips every scheduled test.
-      await collector.waitForCompletion(options.testTimeout ?? defaultTestTimeout, /(?!)/u);
+      await collector.waitForCompletion(options.testTimeout, /(?!)/u);
       return {
         success: true,
         passed: true,
@@ -223,7 +212,7 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
         bundle,
       };
     }
-    await collector.waitForCompletion(options.testTimeout ?? defaultTestTimeout, compiledTestNamePattern.pattern);
+    await collector.waitForCompletion(options.testTimeout, compiledTestNamePattern.pattern);
     const tests = filterGeoSpecTests(collector.tests, compiledTestNamePattern.pattern);
 
     return {
@@ -237,13 +226,10 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     if (bindings.size === 0) {
       Reflect.deleteProperty(runBindingsGlobal, geospecRunBindingsGlobalKey);
     }
-    if (ownsResourceScope) {
-      await resourceScope.dispose();
-    }
     vm.dispose();
     // R9: land write-behind evidence at every module/shard boundary so
     // pending entries become durable (and visible to sibling workers) off the
-    // matcher path. No-op when no store is installed.
-    await flushGeoSpecEvidenceStore();
+    // matcher path. No-op when no engine or store is installed.
+    await getRegisteredGeoSpecHostBinding<() => Promise<void>>('flushEvidenceStore')?.();
   }
 }

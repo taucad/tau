@@ -8,6 +8,7 @@ export type {
   GeoSpecPoolWorkerMessage,
 } from '#runner/pool/pool-messages.js';
 export type {
+  GeoSpecForensicEvent,
   GeoSpecRunner,
   GeoSpecRunnerEvent,
   GeoSpecRunnerFileResult,

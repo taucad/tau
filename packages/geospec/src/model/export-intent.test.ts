@@ -55,6 +55,10 @@ describe('resolveRuntimeExportIntent', () => {
         },
       },
     });
+    if ('success' in intent) {
+      throw new Error('Expected a resolved export intent.');
+    }
+    expect(Object.values(intent.provenance.route ?? {})).not.toContain(undefined);
     expect(runtime.bestRouteFor).toHaveBeenCalledWith('glb');
   });
 
@@ -81,6 +85,49 @@ describe('resolveRuntimeExportIntent', () => {
           unit: { length: 'millimeter' },
           sourceUnit: 'mm',
         },
+      },
+    });
+  });
+
+  it('should carry a linear-only tessellation through a route-unaware runtime', () => {
+    const intent = resolveRuntimeExportIntent({
+      runtime: createRuntime(),
+      format: 'glb',
+      meshLinearTolerance: 0.2,
+    });
+
+    expect(intent).toMatchObject({
+      options: { tessellation: { linearTolerance: 0.2 } },
+      provenance: { honored: { tessellation: { linearTolerance: 0.2 } } },
+    });
+  });
+
+  it('should carry requested mesh tessellation into export options and provenance', () => {
+    const runtime = createRuntime({
+      bestRouteFor: vi.fn(() => ({
+        kernelId: 'replicad',
+        sourceFormat: 'glb',
+        targetFormat: 'glb',
+        fidelity: 'mesh',
+        exportOptions: {
+          schema: { properties: { coordinateSystem: {}, unit: {}, tessellation: {} } },
+          defaults: {},
+        },
+      })),
+    });
+
+    const intent = resolveRuntimeExportIntent({
+      runtime,
+      format: 'glb',
+      meshLinearTolerance: 0.1,
+      meshAngularToleranceDegrees: 30,
+    });
+
+    expect(intent).toMatchObject({
+      options: { tessellation: { linearTolerance: 0.1, angularTolerance: 30 } },
+      provenance: {
+        requested: { tessellation: { linearTolerance: 0.1, angularToleranceDegrees: 30 } },
+        honored: { tessellation: { linearTolerance: 0.1, angularToleranceDegrees: 30 } },
       },
     });
   });
@@ -113,6 +160,19 @@ describe('resolveRuntimeExportIntent', () => {
           sourceUnit: 'mm',
         },
       },
+    });
+  });
+
+  it('should carry an angular-only tessellation before Tau route metadata is available', () => {
+    const intent = resolveRuntimeExportIntent({
+      runtime: createRuntime({ bestRouteFor: vi.fn(() => undefined), routesFor: vi.fn(() => []) }),
+      format: 'glb',
+      meshAngularToleranceDegrees: 12,
+    });
+
+    expect(intent).toMatchObject({
+      options: { tessellation: { angularTolerance: 12 } },
+      provenance: { honored: { tessellation: { angularToleranceDegrees: 12 } } },
     });
   });
 

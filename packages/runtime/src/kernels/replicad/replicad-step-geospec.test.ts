@@ -148,7 +148,29 @@ describe('Replicad — GeoSpec STEP export', () => {
     expect(stepText).toContain("PRODUCT('datumBase'");
     expect(stepText).toMatch(/ADVANCED_FACE\('mount'/);
     expect(stepText).toMatch(/AXIS2_PLACEMENT_3D\('alignmentDatum'/);
-    expect(stepText).toMatch(/geospec:datum/i);
+    // Rec-practice supplemental geometry (F6): identity on items, CGR named
+    // 'supplemental geometry', unnamed relationship — no custom dialect tags.
+    expect(stepText).toMatch(/CONSTRUCTIVE_GEOMETRY_REPRESENTATION\('supplemental geometry'/);
+    expect(stepText).not.toMatch(/geospec:datum/i);
+  });
+
+  it('should trace the complete model-to-STEP phase set', async () => {
+    performance.clearMeasures();
+    await exportStepText(datumModelSource);
+    const labels = performance.getEntriesByType('measure').map(({ name }) => name);
+    expect(labels).toEqual(
+      expect.arrayContaining([
+        'create.runOcMain',
+        'create.resolveInterfaces',
+        'create.serializeNativeHandle',
+        'export.exportSTEP',
+        'step.product.prepare',
+        'step.document.build',
+        'step.writer.perform',
+        'step.writer.finalize',
+        'step.file.transfer',
+      ]),
+    );
   });
 
   it('should export STEP from a rehydrated snapshot with serialized resolved interfaces', async () => {
@@ -156,7 +178,13 @@ describe('Replicad — GeoSpec STEP export', () => {
 
     // Drop the live handle so export restores from the serialized snapshot,
     // which now carries resolved face indices instead of finder closures.
-    (worker as unknown as { nativeHandle: unknown }).nativeHandle = undefined;
+    const artifact = (
+      worker as unknown as {
+        currentPublishedRender?: { liveNativeHandleSlot?: unknown };
+      }
+    ).currentPublishedRender;
+    expect(artifact).toBeDefined();
+    artifact!.liveNativeHandleSlot = undefined;
 
     const exportResult = await worker.exportGeometry('step');
     assertSuccess(exportResult, 'STEP export from rehydrated snapshot with resolved interfaces');

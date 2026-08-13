@@ -1,4 +1,4 @@
-import type { GeoSpecUnit } from '#config/define-geospec-config.js';
+import type { GeoSpecUnit } from '#geometry-unit.js';
 
 /**
  * STEP source forms accepted by {@link import('./load-step.js').loadStep}.
@@ -33,19 +33,6 @@ export type StepLoadProgressEvent = {
 };
 
 /**
- * Minimal OpenCascade.js module shape consumed by {@link loadStep}.
- *
- * @public
- */
-export type GeoSpecOpenCascadeStepModule = {
-  HEAPF64?: Float64Array<ArrayBuffer>;
-  FS?: {
-    writeFile(path: string, data: Uint8Array<ArrayBuffer>): void;
-    unlink(path: string): void;
-  };
-};
-
-/**
  * One placed occurrence recovered from an AP242 STEP structure read.
  *
  * `path` is dot-joined instance-name segments from the root (root omitted) per
@@ -62,6 +49,8 @@ export type XdeOccurrence = {
   transform: number[];
   /** Index into the native result's retained shape table (proof calls use it). */
   shapeIndex: number;
+  /** Analytic axis-aligned bounds of the placed occurrence in subject space. */
+  bounds?: { min: [number, number, number]; max: [number, number, number] };
 };
 
 /**
@@ -162,101 +151,6 @@ export type XdeReadResult = {
 };
 
 /**
- * Native handle over a parsed AP242 document that retains shapes so exact
- * BRep proof queries (extrema, classification, boolean common) and every
- * lazy analysis facet (lazy-evidence blueprint R3) run against resolved
- * entities without a second parse. Face indices follow the same
- * deterministic traversal order as {@link XdeSubshapeName.faceIndex};
- * pass `-1` to address the whole occurrence shape.
- *
- * @public
- */
-export type GeoSpecNativeXdeReadResult = {
-  isSuccess(): boolean;
-  /** JSON-encoded {@link XdeReadResult} (plus `error` on failure). */
-  resultJson(): string;
-  /** JSON: `{ distance, pointA: [x,y,z], pointB: [x,y,z] }` in subject frame. */
-  extrema(occurrenceA: number, faceA: number, occurrenceB: number, faceB: number): string;
-  /** JSON: `{ states: ('in'|'out'|'on')[] }` for points against the occurrence solid. */
-  classifyPoints(occurrence: number, pointsJson: string): string;
-  /** JSON: `{ volume, centroid: [x,y,z] }` of the exact boolean common. */
-  commonVolume(occurrenceA: number, occurrenceB: number): string;
-  /** JSON: per-face analytic facts for the occurrence's product shape. */
-  faceFacts(occurrence: number): string;
-  /** Facet: `{ topologyCounts, boundingBox }` over the retained root shape. */
-  analysisSummaryJson(): string;
-  /** Facet: `{ massProperties: { surfaceArea, volume, centerOfMass } }`. */
-  analysisMassPropertiesJson(): string;
-  /** Facet: `{ validity }` — one BRepCheck analysis, per-solid queries (R5). */
-  analysisValidityJson(optionsJson: string): string;
-  /** Facet: planar/cylindrical faces, holes, patterns, chamfers, fillets. */
-  analysisFaceFeaturesJson(): string;
-  /**
-   * Facet: `{ minimumWallThickness }`, `{}` when unsupported, or
-   * `{ budgetExceeded: { workUnits, limit } }` when the R13 work-unit budget
-   * (optionsJson `workUnitBudget`) is exhausted.
-   */
-  analysisWallThicknessJson(optionsJson: string): string;
-  /** Facet: tessellates the root shape; `{ triangleCount }`. */
-  meshTriangles(optionsJson: string): string;
-  /**
-   * Facet: tessellates ONE placed occurrence shape (subject frame) into the
-   * retained triangle buffer; `{ triangleCount, deflection }` where
-   * `deflection` is the achieved mesh deviation floored at the requested
-   * linear tolerance. Clobbers the root `meshTriangles` buffer by design —
-   * callers copy out immediately via the pointer accessors. Optional: absent
-   * on pre-hybrid wasm builds and fake natives; consumers fall back to exact
-   * classification.
-   */
-  occurrenceMeshTriangles?(occurrence: number, optionsJson: string): string;
-  /**
-   * Tessellate ONE face of a placed occurrence (`face` = the 0-based face
-   * ordinal `faceFacts`/`extrema` use) into the retained soup — the exact
-   * trimmed per-face footprint for the topological contact-patch engine (R1).
-   * Same clobber/pointer transfer contract as `occurrenceMeshTriangles`.
-   * Optional: absent on pre-facet wasm builds and fake natives; consumers fall
-   * back to the winding/classify lattice.
-   */
-  occurrenceFaceMeshTriangles?(occurrence: number, face: number, optionsJson: string): string;
-  /** Byte pointer into HEAPF64 for the retained triangle soup. */
-  meshTrianglePointer(): number;
-  meshTriangleCount(): number;
-  /** Embind handle-liveness probe (ledger disposal guard, blueprint A12). */
-  isDeleted?(): boolean;
-  delete?(): void;
-};
-
-/**
- * Backend-neutral native STEP reader module consumed by {@link loadStep}.
- *
- * OpenCascade is the current implementation and provenance source, but callers
- * can use this option name without coupling tests to that backend identity.
- *
- * @public
- */
-export type GeoSpecNativeStepBackend = GeoSpecOpenCascadeStepModule & {
-  GeoSpecXdeReader?: {
-    readText(data: string, optionsJson: string): GeoSpecNativeXdeReadResult;
-    readFile?(path: string, optionsJson: string): GeoSpecNativeXdeReadResult;
-  };
-  /**
-   * Embind class behind {@link GeoSpecNativeXdeReadResult}. Its prototype IS the
-   * backend's method table, so the optional-facet probe (R8) reads it instead of
-   * a handle: which facets a build exposes is a property of the wasm binary, not
-   * of any one subject, so a warm subject answers it without parsing. Absent on
-   * test fakes and hand-built backends, which are probed by materializing.
-   */
-  GeoSpecXdeReadResult?: { prototype?: Partial<GeoSpecNativeXdeReadResult> };
-};
-
-/**
- * Lazy native STEP backend factory.
- *
- * @public
- */
-export type GeoSpecNativeStepBackendFactory = () => Promise<GeoSpecNativeStepBackend>;
-
-/**
  * Options for loading STEP/XDE/BRep evidence.
  *
  * @public
@@ -270,8 +164,6 @@ export type LoadStepOptions = {
   meshAngularToleranceDegrees?: number;
   maxBytes?: number;
   signal?: AbortSignal;
-  nativeStepBackend?: GeoSpecNativeStepBackend | GeoSpecNativeStepBackendFactory;
-  openCascade?: GeoSpecOpenCascadeStepModule | (() => Promise<GeoSpecOpenCascadeStepModule>);
   onProgress?: (event: StepLoadProgressEvent) => void;
   parameters?: Record<string, unknown>;
   path?: string;

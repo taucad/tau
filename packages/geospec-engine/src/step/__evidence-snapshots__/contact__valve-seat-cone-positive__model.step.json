@@ -1,0 +1,491 @@
+{
+  "brep": {
+    "boundingBox": {
+      "center": [
+        0,
+        -1.7763568394002505e-15,
+        5
+      ],
+      "max": [
+        16.021229318200934,
+        16.016256230213994,
+        10.021229318200932
+      ],
+      "min": [
+        -16.021229318200934,
+        -16.016256230213997,
+        -0.021229318200932323
+      ],
+      "size": [
+        32.04245863640187,
+        32.032512460427995,
+        10.042458636401864
+      ]
+    },
+    "chamferFeatures": [
+      {
+        "distance": 3,
+        "selection": "revolved chamfer (axis z)"
+      }
+    ],
+    "circularHolePatterns": [],
+    "circularHoles": [
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 3.0049344963426865,
+          "min": -0.004934496342686437
+        },
+        "center": [
+          -6.554756737386924e-13,
+          -2.671474154367668e-16,
+          1.5000000000000002
+        ],
+        "diameter": 20,
+        "through": false
+      }
+    ],
+    "cylindricalFaces": [
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 6.004973187986942,
+          "min": -0.004973187986941973
+        },
+        "center": [
+          1.0533796057643485e-12,
+          -3.0531133177191795e-16,
+          3
+        ],
+        "radius": 16
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 3.0049344963426865,
+          "min": -0.004934496342686437
+        },
+        "center": [
+          -6.554756737386924e-13,
+          -2.671474154367668e-16,
+          1.5000000000000002
+        ],
+        "radius": 10
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 10.004936108675636,
+          "min": 5.995063891324365
+        },
+        "center": [
+          -8.597567102697212e-13,
+          4.01388324110366e-16,
+          8
+        ],
+        "radius": 13
+      }
+    ],
+    "filletFeatures": [],
+    "massProperties": {
+      "centerOfMass": [
+        8.94092217735889e-14,
+        1.3715202845667918e-16,
+        5.003138075313799
+      ],
+      "surfaceArea": 3340.020268781724,
+      "volume": 6006.725153663717
+    },
+    "minimumWallThickness": {
+      "algorithm": "occt-brep-extrema-material-interval",
+      "location": [
+        14.5,
+        0,
+        6
+      ],
+      "pointA": [
+        13,
+        0,
+        6
+      ],
+      "pointB": [
+        16,
+        0,
+        6
+      ],
+      "solidIndex": 0,
+      "supportA": {
+        "faceIndex": 0,
+        "supportType": "vertex",
+        "surfaceType": "cone"
+      },
+      "supportB": {
+        "faceIndex": 2,
+        "supportType": "vertex",
+        "surfaceType": "cylinder"
+      },
+      "tieCount": 2,
+      "tolerance": 0.000001,
+      "value": 3
+    },
+    "planarFaces": [
+      {
+        "area": 273.3185608623121,
+        "center": [
+          0,
+          5.226981044672e-15,
+          6
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "offset": 6
+      },
+      {
+        "area": 490.0884539600074,
+        "center": [
+          -1.4210854715202004e-14,
+          -3.547020227392169e-15,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "offset": 0
+      },
+      {
+        "area": 314.1592653589793,
+        "center": [
+          -1.7763568394002505e-15,
+          1.2789769243681803e-15,
+          3
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "offset": -3
+      },
+      {
+        "area": 530.929158456675,
+        "center": [
+          -1.7763568394002505e-15,
+          1.0248212535001444e-16,
+          10
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "offset": 10
+      }
+    ],
+    "topologyCounts": {
+      "compounds": 1,
+      "edges": 26,
+      "faces": 9,
+      "shells": 2,
+      "solids": 2,
+      "vertices": 52,
+      "wires": 11
+    },
+    "validity": {
+      "closedSolids": true,
+      "invalidSolidCount": 0,
+      "openEdgeCount": 0,
+      "solidCount": 2,
+      "valid": true
+    }
+  },
+  "capabilities": [
+    {
+      "feature": "bounding-box",
+      "kind": "brep"
+    },
+    {
+      "feature": "bounding-box",
+      "kind": "mesh"
+    },
+    {
+      "feature": "center-of-mass",
+      "kind": "mesh"
+    },
+    {
+      "feature": "chamfer-features",
+      "kind": "brep"
+    },
+    {
+      "feature": "circular-hole-patterns",
+      "kind": "brep"
+    },
+    {
+      "feature": "circular-holes",
+      "kind": "brep"
+    },
+    {
+      "feature": "component-overlap",
+      "kind": "mesh"
+    },
+    {
+      "feature": "connected-components",
+      "kind": "mesh"
+    },
+    {
+      "feature": "cylindrical-faces",
+      "kind": "brep"
+    },
+    {
+      "feature": "distance",
+      "kind": "mesh"
+    },
+    {
+      "feature": "fillet-features",
+      "kind": "brep"
+    },
+    {
+      "feature": "mass-properties",
+      "kind": "brep"
+    },
+    {
+      "feature": "planar-faces",
+      "kind": "brep"
+    },
+    {
+      "feature": "product-structure",
+      "kind": "step"
+    },
+    {
+      "feature": "reader-provenance",
+      "kind": "step"
+    },
+    {
+      "feature": "schema",
+      "kind": "step"
+    },
+    {
+      "feature": "surface-area",
+      "kind": "mesh"
+    },
+    {
+      "feature": "topology-counts",
+      "kind": "brep"
+    },
+    {
+      "feature": "triangles",
+      "kind": "mesh"
+    },
+    {
+      "feature": "units",
+      "kind": "step"
+    },
+    {
+      "feature": "validity",
+      "kind": "brep"
+    },
+    {
+      "feature": "volume",
+      "kind": "mesh"
+    },
+    {
+      "feature": "wall-thickness",
+      "kind": "brep"
+    },
+    {
+      "feature": "watertightness",
+      "kind": "mesh"
+    }
+  ],
+  "diagnostics": [],
+  "mesh": {
+    "format": "mesh-buffer",
+    "meshCount": 1,
+    "signedVolume": 6004.27042041477,
+    "surfaceArea": 3339.066792589865,
+    "triangleCount": 2432,
+    "triangleDigest": "sha256:d17600a890bdb07a084bda340f1ac44d5046cca55829b570136f74605efcecd6",
+    "vertexCount": 7296,
+    "watertight": false
+  },
+  "provenance": {
+    "contentHash": "sha256:03daaf6ac5524806b48d005ab6b49c3250d6abbd8c39ef5710ac40ee32704fb1",
+    "loader": "opencascade-step",
+    "unit": "mm"
+  },
+  "step": {
+    "capabilities": [
+      {
+        "feature": "product-structure",
+        "supported": true
+      },
+      {
+        "feature": "color",
+        "supported": false
+      },
+      {
+        "feature": "material",
+        "supported": false
+      },
+      {
+        "feature": "geometric-tolerance",
+        "reason": "GeoSpec P0 reports unsupported AP242 PMI/GD&T evidence explicitly.",
+        "supported": false
+      }
+    ],
+    "productStructure": [
+      {
+        "name": "seat",
+        "path": "seat",
+        "transform": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      {
+        "name": "valve",
+        "path": "valve",
+        "transform": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    ],
+    "readStrategy": {
+      "bytesRead": 24710,
+      "copiedToEmscriptenFs": false,
+      "inputKind": "path",
+      "nativeReadStream": true,
+      "strategy": "native-stream"
+    },
+    "schema": "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF {1 0 10303 442 1 1 4 }",
+    "unit": "mm",
+    "xde": {
+      "datumPlacements": [],
+      "datumSystems": [],
+      "freeShapeCount": 0,
+      "occurrences": [
+        {
+          "bounds": {
+            "max": [
+              16,
+              16,
+              6
+            ],
+            "min": [
+              -16,
+              -16,
+              0
+            ]
+          },
+          "instanceName": "seat",
+          "path": "seat",
+          "productName": "seat",
+          "shapeIndex": 0,
+          "transform": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "bounds": {
+            "max": [
+              13,
+              13,
+              10
+            ],
+            "min": [
+              -13,
+              -13,
+              3
+            ]
+          },
+          "instanceName": "valve",
+          "path": "valve",
+          "productName": "valve",
+          "shapeIndex": 1,
+          "transform": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      ],
+      "semanticDatums": [],
+      "subshapeNames": [
+        {
+          "faceIndex": 0,
+          "name": "seatCone",
+          "occurrencePath": "seat",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 1,
+          "name": "seatFace",
+          "occurrencePath": "valve",
+          "shapeType": "face"
+        }
+      ],
+      "supplementalPlanes": []
+    }
+  }
+}

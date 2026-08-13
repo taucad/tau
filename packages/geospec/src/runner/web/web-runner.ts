@@ -1,8 +1,14 @@
-import { createSerialGeoSpecRunner } from '#runner/worker/serial-runner.js';
-import type { GeoSpecRunner, GeoSpecRunnerOptions } from '#runner/worker/index.js';
+/**
+ * Browser runner contract (engine-backed host).
+ *
+ * @module
+ */
+
+import { requireRegisteredGeoSpecHostBinding } from '#engine/registry.js';
+import type { GeoSpecRunner, GeoSpecRunnerOptions } from '#runner/worker/runner-types.js';
 
 /**
- * Options for creating a browser GeoSpec runner.
+ * Options accepted by {@link createGeoSpecWebRunner}.
  *
  * @public
  */
@@ -17,8 +23,9 @@ export type GeoSpecWebRunnerOptions = GeoSpecRunnerOptions;
  *
  * @param options - Filesystem, project root, loaders, and lifecycle event hook.
  * @returns A runner with `run`, `abort`, and `close` lifecycle methods.
- *
  * @public
  */
 export const createGeoSpecWebRunner = (options: GeoSpecWebRunnerOptions): GeoSpecRunner =>
-  createSerialGeoSpecRunner(options);
+  requireRegisteredGeoSpecHostBinding<(options: GeoSpecWebRunnerOptions) => GeoSpecRunner>('createGeoSpecWebRunner')(
+    options,
+  );

@@ -1,7 +1,11 @@
-import type { GeoSpecUnit, GeometryDiagnostic, GeometryExportIntent } from '#mesh/types.js';
+import type { GeoSpecUnit } from '#geometry-unit.js';
+import type { GeometryDiagnostic, GeometryExportIntent } from '#mesh/types.js';
 import type { GeoSpecModelFormat, GeoSpecRuntimeClient } from '#model/types.js';
 import type { ExportRoute } from '@taucad/runtime/types';
 
+/**
+ *
+ */
 export type RuntimeBackedModelFormat = Exclude<GeoSpecModelFormat, 'mesh-buffer'>;
 
 /** Runtime route metadata used to decide whether a runtime export can honor GeoSpec evidence requirements. */
@@ -59,17 +63,39 @@ const hasSchemaProperty = (route: GeoSpecExportRoute | undefined, property: stri
 
 const isDirectRoute = (route: GeoSpecExportRoute): boolean => route.transcoderId === undefined;
 
-const requestedMeshIntent = (format: RuntimeBackedModelFormat): GeometryExportIntent['requested'] => ({
+type TessellationIntent = {
+  linearTolerance?: number;
+  angularToleranceDegrees?: number;
+};
+
+const requestedMeshIntent = (
+  format: RuntimeBackedModelFormat,
+  tessellation: TessellationIntent | undefined,
+): GeometryExportIntent['requested'] => ({
   format: format as GeometryExportIntent['requested']['format'],
   coordinateSystem: 'z-up',
   unit: { length: 'millimeter' },
+  ...(tessellation === undefined ? {} : { tessellation }),
 });
+
+const exportTessellation = (tessellation: TessellationIntent | undefined): Record<string, unknown> =>
+  tessellation === undefined
+    ? {}
+    : {
+        tessellation: {
+          ...(tessellation.linearTolerance === undefined ? {} : { linearTolerance: tessellation.linearTolerance }),
+          ...(tessellation.angularToleranceDegrees === undefined
+            ? {}
+            : { angularTolerance: tessellation.angularToleranceDegrees }),
+        },
+      };
 
 const canonicalMeshIntent = (options: {
   format: RuntimeBackedModelFormat;
   exportOptions: Record<string, unknown>;
+  tessellation?: TessellationIntent;
 }): RuntimeExportIntent => {
-  const requested = requestedMeshIntent(options.format);
+  const requested = requestedMeshIntent(options.format, options.tessellation);
   return {
     options: options.exportOptions,
     sourceUnit: 'mm',
@@ -80,6 +106,7 @@ const canonicalMeshIntent = (options: {
         coordinateSystem: 'z-up',
         unit: { length: 'millimeter' },
         sourceUnit: 'mm',
+        ...(options.tessellation === undefined ? {} : { tessellation: options.tessellation }),
       },
     },
   };
@@ -88,11 +115,11 @@ const canonicalMeshIntent = (options: {
 const routeToProvenance = (route: GeoSpecExportRoute | undefined): GeometryExportIntent['route'] | undefined =>
   route
     ? {
-        kernelId: route.kernelId,
-        sourceFormat: route.sourceFormat,
-        targetFormat: route.targetFormat,
-        transcoderId: route.transcoderId,
-        fidelity: route.fidelity,
+        ...(route.kernelId === undefined ? {} : { kernelId: route.kernelId }),
+        ...(route.sourceFormat === undefined ? {} : { sourceFormat: route.sourceFormat }),
+        ...(route.targetFormat === undefined ? {} : { targetFormat: route.targetFormat }),
+        ...(route.transcoderId === undefined ? {} : { transcoderId: route.transcoderId }),
+        ...(route.fidelity === undefined ? {} : { fidelity: route.fidelity }),
         direct: isDirectRoute(route),
       }
     : undefined;
@@ -122,8 +149,19 @@ const canonicalUnsupported = (options: {
 export const resolveRuntimeExportIntent = (options: {
   runtime: GeoSpecRuntimeClient;
   format: RuntimeBackedModelFormat;
+  meshLinearTolerance?: number;
+  meshAngularToleranceDegrees?: number;
 }): RuntimeExportIntent | RuntimeExportIntentFailure => {
   const { runtime, format } = options;
+  const tessellation: TessellationIntent | undefined =
+    options.meshLinearTolerance === undefined && options.meshAngularToleranceDegrees === undefined
+      ? undefined
+      : {
+          ...(options.meshLinearTolerance === undefined ? {} : { linearTolerance: options.meshLinearTolerance }),
+          ...(options.meshAngularToleranceDegrees === undefined
+            ? {}
+            : { angularToleranceDegrees: options.meshAngularToleranceDegrees }),
+        };
   const routeAware = hasRuntimeRoutes(runtime);
   const route = routeAware ? runtime.bestRouteFor(format) : undefined;
 
@@ -167,14 +205,16 @@ export const resolveRuntimeExportIntent = (options: {
     };
   }
 
-  const requested = requestedMeshIntent(format);
+  const requested = requestedMeshIntent(format, tessellation);
   if (!routeAware) {
     return canonicalMeshIntent({
       format,
       exportOptions: {
         coordinateSystem: 'z-up',
         unit: { length: 'millimeter' },
+        ...exportTessellation(tessellation),
       },
+      ...(tessellation === undefined ? {} : { tessellation }),
     });
   }
 
@@ -186,11 +226,15 @@ export const resolveRuntimeExportIntent = (options: {
           exportOptions: {
             coordinateSystem: 'z-up',
             unit: { length: 'millimeter' },
+            ...exportTessellation(tessellation),
           },
+          ...(tessellation === undefined ? {} : { tessellation }),
         });
   }
 
-  const missing = ['coordinateSystem', 'unit'].filter((property) => !hasSchemaProperty(route, property));
+  const missing = ['coordinateSystem', 'unit', ...(tessellation === undefined ? [] : ['tessellation'])].filter(
+    (property) => !hasSchemaProperty(route, property),
+  );
   if (missing.length > 0) {
     return canonicalUnsupported({ format, route, missing });
   }
@@ -199,6 +243,7 @@ export const resolveRuntimeExportIntent = (options: {
     options: {
       coordinateSystem: 'z-up',
       unit: { length: 'millimeter' },
+      ...exportTessellation(tessellation),
     },
     sourceUnit: 'mm',
     provenance: {
@@ -208,6 +253,7 @@ export const resolveRuntimeExportIntent = (options: {
         coordinateSystem: 'z-up',
         unit: { length: 'millimeter' },
         sourceUnit: 'mm',
+        ...(tessellation === undefined ? {} : { tessellation }),
       },
       route: routeToProvenance(route),
     },

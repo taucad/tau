@@ -6,6 +6,14 @@
 
 export { GeoSpecModelLoadError } from '#model/errors.js';
 export { createModelLoader, loadModel } from '#model/load-model.js';
+export { resolveRuntimeExportIntent } from '#model/export-intent.js';
+export type {
+  GeoSpecExportRoute,
+  RuntimeBackedModelFormat,
+  RuntimeClientWithRoutes,
+  RuntimeExportIntent,
+  RuntimeExportIntentFailure,
+} from '#model/export-intent.js';
 export type {
   CreateModelLoaderOptions,
   GeoSpecModelFormat,

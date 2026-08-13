@@ -25,7 +25,7 @@
     "wasm"
   ],
   "author": "Richard Fontein",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts",
     "./types": "./src/types/index.ts",
@@ -67,6 +67,7 @@
     "./kernels/tau": "./src/kernels/tau/tau.kernel.ts",
     "./bundler/esbuild": "./src/bundler/esbuild.bundler.ts",
     "./middleware/runtime-middleware": "./src/middleware/runtime-middleware.ts",
+    "./middleware/parameter-file-resolver": "./src/middleware/parameter-file-resolver.middleware.ts",
     "./middleware/parameter-cache": "./src/middleware/parameter-cache.middleware.ts",
     "./middleware/geometry-cache": "./src/middleware/geometry-cache.middleware.ts",
     "./middleware/gltf-coordinate-transform": "./src/middleware/gltf-coordinate-transform.middleware.ts",
@@ -211,6 +212,11 @@
         "types": "./dist/middleware/runtime-middleware.d.mts",
         "import": "./dist/middleware/runtime-middleware.mjs",
         "default": "./dist/middleware/runtime-middleware.mjs"
+      },
+      "./middleware/parameter-file-resolver": {
+        "types": "./dist/middleware/parameter-file-resolver.middleware.d.mts",
+        "import": "./dist/middleware/parameter-file-resolver.middleware.mjs",
+        "default": "./dist/middleware/parameter-file-resolver.middleware.mjs"
       },
       "./kernels/replicad": {
         "types": "./dist/kernels/replicad/replicad.kernel.d.mts",
@@ -370,7 +376,7 @@
     "esbuild-wasm": "catalog:",
     "json-schema-default": "catalog:",
     "manifold-3d": "catalog:",
-    "opencascade.js": "npm:@taucad/opencascade.js@3.0.0-beta.3",
+    "libcascade": "3.0.0-beta.3",
     "replicad": "0.23.4-beta.2",
     "replicad-opencascadejs": "0.23.0-beta.0",
     "source-map-js": "catalog:",

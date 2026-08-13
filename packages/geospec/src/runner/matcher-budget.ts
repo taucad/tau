@@ -31,8 +31,6 @@
 
 import type { GeometryDiagnostic } from '#mesh/types.js';
 
-const hasProcessEnvironment = typeof process !== 'undefined' && typeof process.env === 'object';
-
 /**
  * Thrown by {@link chargeBudget} when the active matcher exhausts its
  * deterministic work-unit budget. Caught by {@link withMatcherBudget} and
@@ -90,62 +88,18 @@ let activeBudget: ActiveBudget | undefined;
  * R2 span telemetry once suite-scale unit counts are recorded). One unit = one
  * native classification point, one extrema solve, or one pair volume.
  */
-const familyUnitBudgets: Record<string, number> = {
-  // A flood classifies ≤ maxVoxels (4M) cells per occurrence AABB, across the
-  // declared material set; 32M covers the heaviest healthy flow-paths tract
-  // claims with ≥4× headroom.
-  voidContinuity: 32_000_000,
-};
-
 /** Default unit budget for matcher families without a dedicated entry. */
 const defaultUnitBudget = 8_000_000;
 
-/**
- * Host-injected overrides for platforms without an environment (the browser's
- * typed runtime-config carrier — workers have no env).
- */
-let hostOverrides: { unitBudget?: number; wallBackstop?: number } = {};
-
-/** Set budget overrides from typed runtime config (browser hosts). */
-export const setMatcherBudgetOverrides = (overrides: { unitBudget?: number; wallBackstop?: number }): void => {
-  hostOverrides = overrides;
-};
-
-const positiveNumber = (raw: unknown): number | undefined => {
-  const value = Number(raw);
-  return Number.isFinite(value) && value > 0 ? value : undefined;
-};
-
-/**
- * Resolve the deterministic unit budget for a matcher family. Override order:
- * `GEOSPEC_MATCHER_UNIT_BUDGET` env (Node) → host overrides (browser typed
- * config) → per-family default.
- */
-const resolveUnitBudget = (matcher: string): number => {
-  if (hasProcessEnvironment) {
-    const env = positiveNumber(process.env['GEOSPEC_MATCHER_UNIT_BUDGET']);
-    if (env !== undefined) {
-      return env;
-    }
-  }
-  return hostOverrides.unitBudget ?? familyUnitBudgets[matcher] ?? defaultUnitBudget;
-};
+/** Resolve the versioned deterministic unit budget. */
+export const resolveMatcherWorkUnitBudget = (_matcher: string): number => defaultUnitBudget;
 
 /**
  * Resolve the non-verdict wall backstop. Generous by default (5× the heaviest
  * observed healthy matcher) so it can only fire on genuine infrastructure
- * failure. Override with `GEOSPEC_MATCHER_WALL_BACKSTOP_MS` (Node) or host
- * overrides (browser).
+ * failure.
  */
-const resolveWallBackstop = (): number => {
-  if (hasProcessEnvironment) {
-    const env = positiveNumber(process.env['GEOSPEC_MATCHER_WALL_BACKSTOP_MS']);
-    if (env !== undefined) {
-      return env;
-    }
-  }
-  return hostOverrides.wallBackstop ?? 600_000;
-};
+export const defaultMatcherWallBackstop = 600_000;
 
 /**
  * Charge deterministic work units against the active matcher budget. Heavy
@@ -190,7 +144,7 @@ const matcherTimeoutDiagnostic = (error: MatcherBudgetExceeded): GeometryDiagnos
   severity: 'error',
   message: `GeoSpec matcher '${error.matcher}' exhausted its ${error.budget} work-unit execution budget and was abandoned (oversized or non-terminating proof).`,
   suggestion:
-    'Narrow the claim (declare a material set or bounds), coarsen the sampling resolution, or raise GEOSPEC_MATCHER_UNIT_BUDGET if a healthy heavy proof legitimately needs more work.',
+    'Narrow the claim, adjust evidence precision where the matcher permits it, or report a reproducible corpus that proves the canonical budget needs recalibration.',
   details: { matcher: error.matcher, budget: error.budget, unitsUsed: error.unitsUsed, unit: 'work-units' },
 });
 
@@ -206,7 +160,7 @@ const matcherStalledDiagnostic = (error: MatcherWallBackstopExceeded): GeometryD
   severity: 'error',
   message: `GeoSpec matcher '${error.matcher}' exceeded the ${error.backstop} ms non-verdict wall backstop: infrastructure failure (extreme load or a non-terminating native call), not a geometry verdict.`,
   suggestion:
-    'Re-run with less machine contention (or fewer workers); raise GEOSPEC_MATCHER_WALL_BACKSTOP_MS only if a healthy proof legitimately runs this long.',
+    'Re-run with less machine contention or fewer workers, or pass a larger explicit runner matcherWallBackstop.',
   details: { matcher: error.matcher, backstop: error.backstop, infrastructure: true },
 });
 
@@ -217,23 +171,26 @@ const matcherStalledDiagnostic = (error: MatcherWallBackstopExceeded): GeometryD
  * {@link matcherStalledDiagnostic}; any other error propagates unchanged.
  * Saves and restores an outer budget so nesting is safe.
  *
- * @param matcher - Matcher kind, named in the diagnostic and used for the
- * per-family unit budget.
- * @param evaluate - The matcher's proof thunk.
+ * @param options - Matcher, proof thunk, and optional private test limits.
  * @returns The proof diagnostics, or a single bounded diagnostic on expiry.
  */
-export const withMatcherBudget = (matcher: string, evaluate: () => GeometryDiagnostic[]): GeometryDiagnostic[] => {
+export const withMatcherBudget = (options: {
+  matcher: string;
+  evaluate: () => GeometryDiagnostic[];
+  workUnitBudget?: number;
+  wallBackstop?: number;
+}): GeometryDiagnostic[] => {
   const previous = activeBudget;
-  const backstop = resolveWallBackstop();
+  const backstop = options.wallBackstop ?? defaultMatcherWallBackstop;
   activeBudget = {
-    matcher,
-    unitBudget: resolveUnitBudget(matcher),
+    matcher: options.matcher,
+    unitBudget: options.workUnitBudget ?? resolveMatcherWorkUnitBudget(options.matcher),
     unitsUsed: 0,
     backstop,
     backstopExpiresAt: Date.now() + backstop,
   };
   try {
-    return evaluate();
+    return options.evaluate();
   } catch (error) {
     if (error instanceof MatcherBudgetExceeded) {
       return [matcherTimeoutDiagnostic(error)];

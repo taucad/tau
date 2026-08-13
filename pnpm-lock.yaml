@@ -1076,6 +1076,9 @@ importers:
       langchain:
         specifier: 'catalog:'
         version: 1.5.0(@langchain/core@1.2.0(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.213.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.8.0(@opentelemetry/api@1.9.1))(openai@4.104.0(encoding@0.1.13)(ws@8.21.0)(zod@4.4.3))(ws@8.21.0))(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.213.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.8.0(@opentelemetry/api@1.9.1))(openai@4.104.0(encoding@0.1.13)(ws@8.21.0)(zod@4.4.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(ws@8.21.0)(zod-to-json-schema@3.25.2(zod@4.4.3))
+      libcascade:
+        specifier: 3.0.0-beta.3
+        version: 3.0.0-beta.3
       lucide-react:
         specifier: ^0.552.0
         version: 0.552.0(react@19.2.7)
@@ -1112,9 +1115,6 @@ importers:
       openai:
         specifier: ^4.104.0
         version: 4.104.0(encoding@0.1.13)(ws@8.21.0)(zod@4.4.3)
-      opencascade.js:
-        specifier: npm:@taucad/opencascade.js@3.0.0-beta.3
-        version: '@taucad/opencascade.js@3.0.0-beta.3'
       openscad-wasm-prebuilt:
         specifier: 'catalog:'
         version: 1.2.0
@@ -1212,8 +1212,8 @@ importers:
         specifier: file:tarballs/replicad-interface-export-migration/taulabs-replicad-0.23.4-beta.2.tgz
         version: '@taulabs/replicad@file:tarballs/replicad-interface-export-migration/taulabs-replicad-0.23.4-beta.2.tgz'
       replicad-opencascadejs:
-        specifier: file:tarballs/replicad-interface-export-migration/taulabs-replicad-opencascadejs-0.23.0-beta.0.tgz
-        version: '@taulabs/replicad-opencascadejs@file:tarballs/replicad-interface-export-migration/taulabs-replicad-opencascadejs-0.23.0-beta.0.tgz'
+        specifier: file:tarballs/replicad-interface-export-migration/replicad-opencascadejs-0.23.0.tgz
+        version: file:tarballs/replicad-interface-export-migration/replicad-opencascadejs-0.23.0.tgz
       rxjs:
         specifier: ^7.8.2
         version: 7.8.2
@@ -2291,19 +2291,50 @@ importers:
 
   packages/geospec:
     dependencies:
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../types
+      '@taucad/vm':
+        specifier: workspace:*
+        version: link:../vm
+    devDependencies:
       '@gltf-transform/core':
         specifier: ^4.4.0
         version: 4.4.0
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@taucad/vm':
+
+  packages/geospec-engine:
+    dependencies:
+      '@gltf-transform/core':
+        specifier: ^4.4.0
+        version: 4.4.0
+      '@taucad/runtime':
         specifier: workspace:*
-        version: link:../vm
+        version: link:../runtime
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../types
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../utils
+      geospec:
+        specifier: workspace:*
+        version: link:../geospec
       manifold-3d:
         specifier: 'catalog:'
         version: 3.3.2
     devDependencies:
+      '@libcascade/toolchain':
+        specifier: 3.0.0-beta.3
+        version: 3.0.0-beta.3
+      '@playwright/test':
+        specifier: 'catalog:'
+        version: 1.61.0
+      '@taucad/chat':
+        specifier: workspace:*
+        version: link:../../libs/chat
       '@taucad/openscad':
         specifier: workspace:*
         version: link:../../kernels/openscad
@@ -2443,18 +2474,18 @@ importers:
       json-schema-default:
         specifier: 'catalog:'
         version: 1.0.2
+      libcascade:
+        specifier: 3.0.0-beta.3
+        version: 3.0.0-beta.3
       manifold-3d:
         specifier: 'catalog:'
         version: 3.3.2
-      opencascade.js:
-        specifier: npm:@taucad/opencascade.js@3.0.0-beta.3
-        version: '@taucad/opencascade.js@3.0.0-beta.3'
       replicad:
         specifier: file:../../tarballs/replicad-interface-export-migration/taulabs-replicad-0.23.4-beta.2.tgz
         version: '@taulabs/replicad@file:tarballs/replicad-interface-export-migration/taulabs-replicad-0.23.4-beta.2.tgz'
       replicad-opencascadejs:
-        specifier: file:../../tarballs/replicad-interface-export-migration/taulabs-replicad-opencascadejs-0.23.0-beta.0.tgz
-        version: '@taulabs/replicad-opencascadejs@file:tarballs/replicad-interface-export-migration/taulabs-replicad-opencascadejs-0.23.0-beta.0.tgz'
+        specifier: file:../../tarballs/replicad-interface-export-migration/replicad-opencascadejs-0.23.0.tgz
+        version: file:tarballs/replicad-interface-export-migration/replicad-opencascadejs-0.23.0.tgz
       rolldown:
         specifier: '>=1.0.0-rc.1'
         version: 1.1.2
@@ -6252,6 +6283,11 @@ packages:
 
   '@levischuck/tiny-cbor@0.2.11':
     resolution: {integrity: sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow==}
+
+  '@libcascade/toolchain@3.0.0-beta.3':
+    resolution: {integrity: sha512-GMjIzO8GS3JksvY/mIy6XrIAsTAYuUcQkDKVuUnrNtNpDQx69KJ6iappKGqufVg4vD4Ddi4yJ1P4LdOowneJ2w==}
+    engines: {node: '>=22'}
+    hasBin: true
 
   '@loaderkit/resolve@1.0.6':
     resolution: {integrity: sha512-G8FdIoF5CypfwmD9rl8BXod5HDn8JqB0CCNBXDTaRZ+yRYhARrrSToX1zg1zy9jX3zLqigsELwhT4gNtkdQAUg==}
@@ -11551,19 +11587,11 @@ packages:
   '@taucad/kcl-wasm-lib@0.1.148':
     resolution: {integrity: sha512-2SX3iuzBun7thhw6cq8hUWmkxRT01yEMA5Mot7qVVysoBVCzHv8Al17URjNh3UCyrRMtGZXorp6v1+ImFyZNAQ==}
 
-  '@taucad/opencascade.js@3.0.0-beta.3':
-    resolution: {integrity: sha512-6ZOeP2Ke3cfJ9chA6CKSYl9MdKjC/L1lXpuRC/W2aswxfXSFHnl1kSsMJeqilKT1BGxqELYB7bfvrNMNtzC4kw==}
-    engines: {node: '>=22'}
-
   '@taulabs/assimpjs@0.0.19':
     resolution: {integrity: sha512-GA/uzj9Pmjqhh94nHuIDo0aKXJSSdiGkDKrF5NxDLKwRzPUq0Yv3FnD++DHP/G/NopERmMsXcHPcq+ldLz4UZg==}
 
-  '@taulabs/replicad-opencascadejs@file:tarballs/replicad-interface-export-migration/taulabs-replicad-opencascadejs-0.23.0-beta.0.tgz':
-    resolution: {integrity: sha512-eHY/BZq/8ffeSCbLxfWKML92xy+lgBKL0TzYUPJ9JhIwXjImRaV2ijPeHRWfXOjOjV8ionO4LF1ofCr/+i7BWg==, tarball: file:tarballs/replicad-interface-export-migration/taulabs-replicad-opencascadejs-0.23.0-beta.0.tgz}
-    version: 0.23.0-beta.0
-
   '@taulabs/replicad@file:tarballs/replicad-interface-export-migration/taulabs-replicad-0.23.4-beta.2.tgz':
-    resolution: {integrity: sha512-NLfaVKYVF+j4kRM1QUgPnbwsBXS9w1kB3A8UaV/fY+Dj1bdbokyg+NxWNOlKSwzKWPTmRIktfjTpEM5r/OV4CA==, tarball: file:tarballs/replicad-interface-export-migration/taulabs-replicad-0.23.4-beta.2.tgz}
+    resolution: {integrity: sha512-ABlgiYIbiiz/ih8CXJZuduZscu0LFkd8+C1ssI+mOuuJ44H1pbycPPG8pSOz063Hl5ZrRBr9RMkJigHWdb7PPA==, tarball: file:tarballs/replicad-interface-export-migration/taulabs-replicad-0.23.4-beta.2.tgz}
     version: 0.23.4-beta.2
 
   '@testing-library/dom@10.4.1':
@@ -17907,6 +17935,10 @@ packages:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
     engines: {node: '>= 0.8.0'}
 
+  libcascade@3.0.0-beta.3:
+    resolution: {integrity: sha512-g6XCzLj3phNQa7bFfodwqvIA5lUlze1faxwQQ5+GZAIH85+Za+tszhV8vOoq5vXuCeygd3tQn2ZseKdZ9JJgpw==}
+    engines: {node: '>=22'}
+
   license-webpack-plugin@4.0.2:
     resolution: {integrity: sha512-771TFWFD70G1wLTC4oU2Cw4qvtmNrIw+wRvBtn+okgHl7slJVi7zfNcdmqDL72BojM30VNJ2UHylr1o77U37Jw==}
     peerDependencies:
@@ -21014,6 +21046,10 @@ packages:
   replace-ext@1.0.1:
     resolution: {integrity: sha512-yD5BHCe7quCgBph4rMQ+0KkIRKwWCrHDOX1p1Gp6HwjPM5kVoCdKGNhN7ydqqsX6lJEnQDKZ/tFMiEdQ1dvPEw==}
     engines: {node: '>= 0.10'}
+
+  replicad-opencascadejs@file:tarballs/replicad-interface-export-migration/replicad-opencascadejs-0.23.0.tgz:
+    resolution: {integrity: sha512-V5GO/VTGnmZ1GWnreJPj+sBCCmSRn94uxirHx+i/Z63cutYBbNjou3XeCG2O9B+YvRgQScyb3y6F9pCCXuiSbA==, tarball: file:tarballs/replicad-interface-export-migration/replicad-opencascadejs-0.23.0.tgz}
+    version: 0.23.0
 
   require-directory@2.1.1:
     resolution: {integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==}
@@ -27222,6 +27258,11 @@ snapshots:
 
   '@levischuck/tiny-cbor@0.2.11': {}
 
+  '@libcascade/toolchain@3.0.0-beta.3':
+    dependencies:
+      jiti: 2.7.0
+      yaml: 2.9.0
+
   '@loaderkit/resolve@1.0.6':
     dependencies:
       '@braidai/lang': 1.1.2
@@ -33398,18 +33439,14 @@ snapshots:
 
   '@taucad/kcl-wasm-lib@0.1.148': {}
 
-  '@taucad/opencascade.js@3.0.0-beta.3': {}
-
   '@taulabs/assimpjs@0.0.19': {}
-
-  '@taulabs/replicad-opencascadejs@file:tarballs/replicad-interface-export-migration/taulabs-replicad-opencascadejs-0.23.0-beta.0.tgz': {}
 
   '@taulabs/replicad@file:tarballs/replicad-interface-export-migration/taulabs-replicad-0.23.4-beta.2.tgz':
     dependencies:
       '@types/opentype.js': 1.3.4
       flatbush: 4.6.2
       opentype.js: 1.3.4
-      replicad-opencascadejs: '@taulabs/replicad-opencascadejs@file:tarballs/replicad-interface-export-migration/taulabs-replicad-opencascadejs-0.23.0-beta.0.tgz'
+      replicad-opencascadejs: file:tarballs/replicad-interface-export-migration/replicad-opencascadejs-0.23.0.tgz
 
   '@testing-library/dom@10.4.1':
     dependencies:
@@ -41102,6 +41139,8 @@ snapshots:
       prelude-ls: 1.2.1
       type-check: 0.4.0
 
+  libcascade@3.0.0-beta.3: {}
+
   license-webpack-plugin@4.0.2(webpack@5.107.2):
     dependencies:
       webpack-sources: 3.5.0
@@ -45263,6 +45302,8 @@ snapshots:
   remove-trailing-separator@1.1.0: {}
 
   replace-ext@1.0.1: {}
+
+  replicad-opencascadejs@file:tarballs/replicad-interface-export-migration/replicad-opencascadejs-0.23.0.tgz: {}
 
   require-directory@2.1.1: {}
 

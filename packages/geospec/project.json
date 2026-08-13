@@ -4,19 +4,5 @@
   "sourceRoot": "packages/geospec",
   "projectType": "library",
   "tags": ["scope:shared", "type:lib"],
-  "targets": {
-    "build-wasm": {
-      "executor": "nx:run-commands",
-      "cache": false,
-      "parallelism": false,
-      "options": {
-        "cwd": "{projectRoot}",
-        "commands": [
-          "libcascade build --config native/opencascade/libcascade.config.ts",
-          "libcascade assemble --config native/opencascade/libcascade.config.ts"
-        ],
-        "parallel": false
-      }
-    }
-  }
+  "targets": {}
 }

@@ -6,8 +6,8 @@
 
 export { createGeoSpec, describe, expectGeo, geoSpecMatcherNames, it, test } from '#create-geospec.js';
 export type { GeoSpec } from '#create-geospec.js';
+export type { GeoSpecUnit } from '#geometry-unit.js';
 
-export type { GeoSpecConfig, GeoSpecRunnerConfig, GeoSpecToleranceConfig, GeoSpecUnit } from '#config/index.js';
 export type {
   GeoSpecAssertion,
   GeoSpecAssemblyOccurrenceExpectation,
@@ -15,7 +15,6 @@ export type {
   GeoSpecAxisExpectation,
   GeoSpecBoundingBoxExpectation,
   GeoSpecCenterOfMassExpectation,
-  GeoSpecChamferDistanceExpectation,
   GeoSpecChamferFeatureExpectation,
   GeoSpecCircularHoleExpectation,
   GeoSpecCylindricalFaceExpectation,
@@ -30,7 +29,6 @@ export type {
   GeoSpecMinimumWallThicknessExpectation,
   GeoSpecCircularHolePatternExpectation,
   GeoSpecFilletFeatureExpectation,
-  GeoSpecMinimumDistanceExpectation,
   GeoSpecNumericExpectation,
   GeoSpecPlanarFaceExpectation,
   GeoSpecPointExpectation,

@@ -73,19 +73,25 @@ import { loadReplicadMultiWasm } from '#kernels/replicad/replicad-wasm-multi-loa
 import { createEmptyGlb, createEmptyGltf, createEmptyGltfGeometry } from '#utils/glb-writer.js';
 import { resolveShapeName } from '#utils/shape-names.js';
 
-/* Ponytail: stderr forensic markers, env-gated — mirrors geospec's runner/forensic.ts
- * so `GEOSPEC_FORENSIC=1` cold-export runs show the kernel phase split. */
-const forensicEnabled = typeof process !== 'undefined' && Boolean(process.env['GEOSPEC_FORENSIC']);
-
-const forensicPhase = async <T>(label: string, operation: () => Promise<T> | T): Promise<T> => {
-  if (!forensicEnabled) {
+const tracedStep = <T>(tracer: RuntimeSpanTracer, label: string, operation: () => T): T => {
+  const span = tracer.startSpan(label);
+  try {
     return operation();
+  } finally {
+    span.end();
   }
-  const start = performance.now();
+};
+
+const tracedPhase = async <T>(
+  tracer: RuntimeSpanTracer,
+  label: string,
+  operation: () => Promise<T> | T,
+): Promise<T> => {
+  const span = tracer.startSpan(label);
   try {
     return await operation();
   } finally {
-    console.error(`[FORENSIC] ${label}\t${(performance.now() - start).toFixed(1)}`);
+    span.end();
   }
 };
 
@@ -196,32 +202,6 @@ type ReplicadContext = {
 
 type ReplicadLibrary = typeof ReplicadModule;
 
-type ReplicadBatchTelemetry = {
-  backend: 'native' | 'js-direct';
-  operation: 'fuse' | 'cut' | 'common';
-  argumentCount: number;
-  toolCount: number;
-  threadCount: number;
-  totalDuration: number;
-  wrapperDuration: number;
-  nativeDuration: number;
-  setupDuration: number;
-  buildDuration: number;
-  simplifyDuration: number;
-  shapeDuration: number;
-  reportDuration: number;
-  steps: number;
-  failedStep: number;
-  simplify: boolean;
-  nonDestructive: boolean;
-  glue: number;
-  fuzzyValue: number;
-  hasWarnings: boolean;
-  hasErrors: boolean;
-};
-
-type TraceAttributeValue = string | number | boolean;
-
 let replicadLibraryPromise: Promise<ReplicadLibrary> | undefined;
 
 const loadReplicadLibrary = async (): Promise<ReplicadLibrary> => {
@@ -239,9 +219,6 @@ const libraryPatterns = [
   { pattern: 'node_modules/replicad/', moduleName: 'replicad' },
 ];
 
-const replicadBatchTelemetrySymbol = Symbol.for('taucad.replicad.batchTelemetry');
-const replicadBatchBooleanOperations = new Set(['fuse', 'cut', 'intersect', 'fuseAll', 'cutAll', 'intersectAll']);
-
 const replicadLibraryTracePolicy = defineLibraryTracePolicy({
   library: 'replicad',
   spanPrefix: 'replicad.library',
@@ -256,119 +233,7 @@ const replicadLibraryTracePolicy = defineLibraryTracePolicy({
   shouldWrapValue(context) {
     return typeof context.value === 'function' || context.scope === 'user-main';
   },
-  extractResultTelemetry(context) {
-    if (!replicadBatchBooleanOperations.has(context.operation)) {
-      return undefined;
-    }
-
-    const telemetry = getReplicadBatchTelemetry(context.result);
-    if (!telemetry) {
-      return undefined;
-    }
-
-    return {
-      attributes: replicadBatchAttributes(telemetry),
-      summary: replicadBatchSummary(telemetry),
-    };
-  },
 });
-
-function getReplicadBatchTelemetry(result: unknown): ReplicadBatchTelemetry | undefined {
-  if (!isRecordObject(result)) {
-    return undefined;
-  }
-
-  const telemetry = (result as Record<PropertyKey, unknown>)[replicadBatchTelemetrySymbol];
-  if (!isRecordObject(telemetry)) {
-    return undefined;
-  }
-
-  const { backend, operation } = telemetry;
-  if ((backend !== 'native' && backend !== 'js-direct') || !isReplicadBatchOperation(operation)) {
-    return undefined;
-  }
-
-  return {
-    backend,
-    operation,
-    argumentCount: numericTelemetryValue(telemetry, 'argumentCount'),
-    toolCount: numericTelemetryValue(telemetry, 'toolCount'),
-    threadCount: numericTelemetryValue(telemetry, 'threadCount'),
-    totalDuration: numericTelemetryValue(telemetry, 'totalMs'),
-    wrapperDuration: numericTelemetryValue(telemetry, 'jsWrapperMs'),
-    nativeDuration: numericTelemetryValue(telemetry, 'totalNativeMs'),
-    setupDuration: numericTelemetryValue(telemetry, 'setupMs'),
-    buildDuration: numericTelemetryValue(telemetry, 'buildMs'),
-    simplifyDuration: numericTelemetryValue(telemetry, 'simplifyMs'),
-    shapeDuration: numericTelemetryValue(telemetry, 'shapeMs'),
-    reportDuration: numericTelemetryValue(telemetry, 'reportMs'),
-    steps: numericTelemetryValue(telemetry, 'steps'),
-    failedStep: numericTelemetryValue(telemetry, 'failedStep'),
-    simplify: booleanTelemetryValue(telemetry, 'simplify'),
-    nonDestructive: booleanTelemetryValue(telemetry, 'nonDestructive'),
-    glue: numericTelemetryValue(telemetry, 'glue'),
-    fuzzyValue: numericTelemetryValue(telemetry, 'fuzzyValue'),
-    hasWarnings: booleanTelemetryValue(telemetry, 'hasWarnings'),
-    hasErrors: booleanTelemetryValue(telemetry, 'hasErrors'),
-  };
-}
-
-function isReplicadBatchOperation(value: unknown): value is ReplicadBatchTelemetry['operation'] {
-  return value === 'fuse' || value === 'cut' || value === 'common';
-}
-
-function numericTelemetryValue(telemetry: Record<string, unknown>, key: string): number {
-  const value = telemetry[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-}
-
-function booleanTelemetryValue(telemetry: Record<string, unknown>, key: string): boolean {
-  return telemetry[key] === true;
-}
-
-function replicadBatchAttributes(telemetry: ReplicadBatchTelemetry): Record<string, TraceAttributeValue> {
-  const attributes: Record<string, TraceAttributeValue> = {};
-  attributes['batch.backend'] = telemetry.backend;
-  attributes['batch.operation'] = telemetry.operation;
-  attributes['batch.arguments'] = telemetry.argumentCount;
-  attributes['batch.tools'] = telemetry.toolCount;
-  attributes['batch.threadCount'] = telemetry.threadCount;
-  attributes['batch.steps'] = telemetry.steps;
-  attributes['batch.failedStep'] = telemetry.failedStep;
-  attributes['batch.total.ms'] = telemetry.totalDuration;
-  attributes['batch.jsWrapper.ms'] = telemetry.wrapperDuration;
-  attributes['batch.totalNative.ms'] = telemetry.nativeDuration;
-  attributes['batch.setup.ms'] = telemetry.setupDuration;
-  attributes['batch.build.ms'] = telemetry.buildDuration;
-  attributes['batch.simplify.ms'] = telemetry.simplifyDuration;
-  attributes['batch.shape.ms'] = telemetry.shapeDuration;
-  attributes['batch.report.ms'] = telemetry.reportDuration;
-  attributes['batch.simplify'] = telemetry.simplify;
-  attributes['batch.nonDestructive'] = telemetry.nonDestructive;
-  attributes['batch.glue'] = telemetry.glue;
-  attributes['batch.fuzzyValue'] = telemetry.fuzzyValue;
-  attributes['batch.hasWarnings'] = telemetry.hasWarnings;
-  attributes['batch.hasErrors'] = telemetry.hasErrors;
-  return attributes;
-}
-
-function replicadBatchSummary(telemetry: ReplicadBatchTelemetry): Record<string, number> {
-  const summary: Record<string, number> = {};
-  summary['batch.native.calls'] = telemetry.backend === 'native' ? 1 : 0;
-  summary['batch.direct.calls'] = telemetry.backend === 'js-direct' ? 1 : 0;
-  summary['batch.total.ms'] = telemetry.totalDuration;
-  summary['batch.jsWrapper.ms'] = telemetry.wrapperDuration;
-  summary['batch.totalNative.ms'] = telemetry.nativeDuration;
-  summary['batch.setup.ms'] = telemetry.setupDuration;
-  summary['batch.build.ms'] = telemetry.buildDuration;
-  summary['batch.simplify.ms'] = telemetry.simplifyDuration;
-  summary['batch.shape.ms'] = telemetry.shapeDuration;
-  summary['batch.report.ms'] = telemetry.reportDuration;
-  summary['batch.steps'] = telemetry.steps;
-  summary['batch.arguments'] = telemetry.argumentCount;
-  summary['batch.tools'] = telemetry.toolCount;
-  return summary;
-}
 
 // =============================================================================
 // Error enrichment helpers
@@ -537,13 +402,11 @@ export const replicadKernel = defineKernel({
     content: ['includeEdges', 'includeTopology'],
   },
   exportFormats: {
-    stl: { optionsSchema: replicadExportSchemas.stl, content: [] },
-    step: { optionsSchema: replicadExportSchemas.step, content: [] },
+    stl: { optionsSchema: replicadExportSchemas.stl },
+    step: { optionsSchema: replicadExportSchemas.step },
     glb: { optionsSchema: replicadExportSchemas.glb, content: ['includeEdges', 'includeTopology'] },
     gltf: { optionsSchema: replicadExportSchemas.gltf, content: ['includeEdges', 'includeTopology'] },
   },
-  nativeHandleScope: 'source',
-
   async initialize(options, runtime) {
     const replicadLibrary = await loadReplicadLibrary();
     const { mangledToOriginal: exportNameMap, exportNames: libraryExportNames } = preserveExportNames(replicadLibrary);
@@ -702,7 +565,7 @@ export const replicadKernel = defineKernel({
         phase: 'computingGeometry',
         stage: 'brep',
       });
-      const mainResult = await forensicPhase('create.runOcMain', async () => {
+      const mainResult = await tracedPhase(tracer, 'create.runOcMain', async () => {
         try {
           return await context.libraryTrace.runInScope({
             scope: 'user-main',
@@ -745,7 +608,7 @@ export const replicadKernel = defineKernel({
         phase: 'computingGeometry',
         stage: 'brep',
       });
-      const nativeHandle: NativeHandleEntry[] = await forensicPhase('create.resolveInterfaces', () => {
+      const nativeHandle: NativeHandleEntry[] = await tracedPhase(tracer, 'create.resolveInterfaces', () => {
         try {
           return normalizeRenderShapes(shapes, defaultName).map((entry) =>
             resolveEntryInterfaces(entry, context.replicadLibrary),
@@ -790,7 +653,7 @@ export const replicadKernel = defineKernel({
         phase: 'computingGeometry',
         stage: 'render-output',
       });
-      const renderedShapes = await forensicPhase('mesh.renderDisplayTessellation', () => {
+      const renderedShapes = await tracedPhase(tracer, 'mesh.renderDisplayTessellation', () => {
         try {
           return context.libraryTrace.runInScope({
             scope: 'render-output',
@@ -831,7 +694,7 @@ export const replicadKernel = defineKernel({
           phase: 'computingGeometry',
           stage: 'gltf-pack',
         });
-        const gltfBlob = await forensicPhase('mesh.packGltf', () => {
+        const gltfBlob = await tracedPhase(tracer, 'mesh.packGltf', () => {
           try {
             return convertReplicadGeometriesToGltf({
               geometries: includeEdges
@@ -864,7 +727,7 @@ export const replicadKernel = defineKernel({
     return context.libraryTrace.runInScope({
       scope: 'export',
       operation: async () => {
-        const { format, nativeHandle, options, content } = input;
+        const { format, nativeHandle } = input;
         const emptyGltfExport = () =>
           createKernelSuccess([
             createExportFile(
@@ -895,6 +758,7 @@ export const replicadKernel = defineKernel({
         switch (format) {
           case 'glb':
           case 'gltf': {
+            const { options, content } = input;
             if (nativeHandle.length === 0) {
               return emptyGltfExport();
             }
@@ -905,7 +769,7 @@ export const replicadKernel = defineKernel({
               ...shapeConfig,
               name: resolveShapeName({ index, name: shapeConfig.name, source: 'generated' }),
             }));
-            const renderedShapes = await forensicPhase('export.renderGlbTessellation', () =>
+            const renderedShapes = await tracedPhase(runtime.tracer, 'export.renderGlbTessellation', () =>
               render(namedShapes, {
                 tessellation: { linearTolerance, angularTolerance },
                 collectBrepEdges: content?.includeEdges === true || content?.includeTopology === true,
@@ -922,7 +786,7 @@ export const replicadKernel = defineKernel({
               return emptyGltfExport();
             }
 
-            const gltfData = await forensicPhase('export.packGltf', () =>
+            const gltfData = await tracedPhase(runtime.tracer, 'export.packGltf', () =>
               convertReplicadGeometriesToGltf({
                 geometries:
                   content?.includeEdges === true
@@ -944,6 +808,7 @@ export const replicadKernel = defineKernel({
           }
 
           case 'step': {
+            const { options } = input;
             if (nativeHandle.length === 0) {
               return noGeometryExportError();
             }
@@ -965,7 +830,11 @@ export const replicadKernel = defineKernel({
             }));
             let stepBlob: Blob;
             try {
-              stepBlob = await forensicPhase('export.exportSTEP', () => exportSTEP(context.openCascade, stepShapes));
+              stepBlob = await tracedPhase(runtime.tracer, 'export.exportSTEP', () =>
+                exportSTEP(context.openCascade, stepShapes, {
+                  phase: (label, operation) => tracedStep(runtime.tracer, label, operation),
+                }),
+              );
             } catch (error) {
               return stepExportError(error);
             }
@@ -974,6 +843,7 @@ export const replicadKernel = defineKernel({
           }
 
           case 'stl': {
+            const { options } = input;
             if (nativeHandle.length === 0) {
               return noGeometryExportError();
             }
@@ -1016,15 +886,8 @@ export const replicadKernel = defineKernel({
     });
   },
 
-  serializeNativeHandle({ nativeHandle }) {
-    const start = forensicEnabled ? performance.now() : undefined;
-    try {
-      return serializeReplicadHandle(nativeHandle);
-    } finally {
-      if (start !== undefined) {
-        console.error(`[FORENSIC] create.serializeNativeHandle\t${(performance.now() - start).toFixed(1)}`);
-      }
-    }
+  serializeNativeHandle({ nativeHandle }, runtime) {
+    return tracedStep(runtime.tracer, 'create.serializeNativeHandle', () => serializeReplicadHandle(nativeHandle));
   },
 
   deserializeNativeHandle({ serializedNativeHandle }, _runtime, context) {

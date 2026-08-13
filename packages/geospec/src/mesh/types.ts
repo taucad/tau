@@ -1,6 +1,7 @@
 import type { KernelIssueCode } from '@taucad/runtime/types';
-import type { GeoSpecUnit as ConfigGeoSpecUnit } from '#config/define-geospec-config.js';
-import type { GeoSpecNativeXdeReadResult, XdeReadResult } from '#step/types.js';
+import type { JSONValue } from '@taucad/types';
+import type { GeoSpecUnit } from '#geometry-unit.js';
+import type { XdeReadResult } from '#step/types.js';
 
 /**
  * Numeric 3D vector.
@@ -8,13 +9,6 @@ import type { GeoSpecNativeXdeReadResult, XdeReadResult } from '#step/types.js';
  * @public
  */
 export type Vec3 = readonly [number, number, number];
-
-/**
- * Default geometry units used in GeoSpec provenance.
- *
- * @public
- */
-export type GeoSpecUnit = ConfigGeoSpecUnit;
 
 /**
  * Geometry file formats supported by the P0 mesh loader.
@@ -65,12 +59,20 @@ export type GeometryExportIntent = {
     unit?: {
       length?: 'meter' | 'millimeter';
     };
+    tessellation?: {
+      linearTolerance?: number;
+      angularToleranceDegrees?: number;
+    };
   };
   honored?: {
     format: GeometryFileFormat;
     coordinateSystem?: 'y-up' | 'z-up';
     unit?: {
       length?: 'meter' | 'millimeter';
+    };
+    tessellation?: {
+      linearTolerance?: number;
+      angularToleranceDegrees?: number;
     };
     sourceUnit?: GeoSpecUnit;
   };
@@ -95,7 +97,7 @@ export type GeometryProvenance = {
   unit: GeoSpecUnit;
   loader: 'gltf-transform' | 'in-memory' | 'opencascade-step';
   contentHash?: string;
-  parameters?: Record<string, unknown>;
+  parameters?: Record<string, JSONValue>;
   exportIntent?: GeometryExportIntent;
 };
 
@@ -157,6 +159,9 @@ export type GeometryDiagnostic = {
   details?: unknown;
 };
 
+/** Diagnostic form permitted inside a wire-safe subject snapshot. @public */
+export type GeometryEvidenceDiagnostic = Omit<GeometryDiagnostic, 'details'> & { details?: JSONValue };
+
 /**
  * Mesh evidence loaded from geometry bytes or buffers.
  *
@@ -180,43 +185,6 @@ export type MeshTriangle = {
   c: [number, number, number];
   center: [number, number, number];
   area: number;
-};
-
-/**
- * Directional surface-distance distribution.
- *
- * @public
- */
-export type MeshDistanceDistribution = {
-  min: number;
-  mean: number;
-  max: number;
-  p50: number;
-  p95: number;
-  p99: number;
-  rms: number;
-  samples: number;
-};
-
-/**
- * Result of comparing two mesh subjects using deterministic point-to-surface
- * samples.
- *
- * @public
- */
-export type MeshDistanceStats = {
-  min: number;
-  mean: number;
-  max: number;
-  p50: number;
-  p95: number;
-  p99: number;
-  rms: number;
-  samples: number;
-  algorithm?: string;
-  seed?: number;
-  directedActualToExpected?: MeshDistanceDistribution;
-  directedExpectedToActual?: MeshDistanceDistribution;
 };
 
 /**
@@ -355,82 +323,15 @@ export type StepEvidence = {
  */
 export type GeometrySubject = {
   kind: 'geometry-subject';
+  /** Opaque engine-owned identifier used by every protocol claim. */
+  subjectId: string;
   mesh: MeshEvidence;
   brep?: BrepEvidence;
   step?: StepEvidence;
   provenance: GeometryProvenance;
   capabilities: GeometryCapability[];
-  diagnostics: GeometryDiagnostic[];
-  /**
-   * Native XDE handle retaining parsed shapes for exact BRep proof calls
-   * (extrema, classification, boolean common). Present only when the native
-   * backend exposes `GeoSpecXdeReader`.
-   *
-   * @internal
-   */
-  nativeXde?: GeoSpecNativeXdeReadResult;
-  /**
-   * On-demand tessellation of one placed occurrence shape (subject frame),
-   * for the hybrid void-occupancy engine (§17/§19: Manifold operates on the
-   * AP242-read BRep's tessellation). The closure copies the soup out of the
-   * wasm heap immediately, so callers own the returned buffer. Present only
-   * for native-BRep subjects whose backend exposes `occurrenceMeshTriangles`.
-   *
-   * @internal
-   */
-  occurrenceMesh?: OccurrenceMeshFetcher;
-  /**
-   * On-demand tessellation of ONE face of a placed occurrence (subject frame),
-   * for the topological contact-patch engine (spatial-relationship blueprint
-   * R1: the exact trimmed per-face footprint replaces the sampling lattice).
-   * Same transfer contract as {@link occurrenceMesh}. Present only for
-   * native-BRep subjects whose backend exposes `occurrenceFaceMeshTriangles`.
-   *
-   * @internal
-   */
-  occurrenceFaceMesh?: OccurrenceFaceMeshFetcher;
+  diagnostics: GeometryEvidenceDiagnostic[];
 };
-
-/**
- * Fetch the triangle soup of one placed occurrence at a requested tessellation
- * density. `deflection` in the result is the achieved mesh-vs-BRep deviation
- * bound, floored at the requested linear deflection (the wall-mesh soundness
- * lesson) — consumers size exactness bands from it.
- *
- * The returned soup is IMMUTABLE by contract: fetches are memoized per
- * (occurrence, deflection) and persisted across runs (suite audit R4), so
- * every consumer of the same tessellation shares one buffer.
- *
- * @public
- */
-export type OccurrenceMeshFetcher = (
-  occurrence: number,
-  options: { linearDeflection: number; angularDeflectionDegrees: number },
-) => OccurrenceMeshResult;
-
-/**
- * Fetch the triangle soup of ONE face of a placed occurrence at a requested
- * tessellation density — the exact trimmed per-face footprint the topological
- * contact-patch engine sums (spatial-relationship blueprint R1). `face` is the
- * same 0-based face ordinal `faceFacts`/`extrema` use. Same 9-doubles/triangle
- * soup layout and deflection contract as {@link OccurrenceMeshFetcher}.
- *
- * @public
- */
-export type OccurrenceFaceMeshFetcher = (
-  occurrence: number,
-  face: number,
-  options: { linearDeflection: number; angularDeflectionDegrees: number },
-) => OccurrenceMeshResult;
-
-/**
- * One occurrence tessellation: subject-frame triangle soup (9 doubles per
- * triangle, 3 vertices x 3 coords) plus the deflection bound, or a native
- * error.
- *
- * @public
- */
-export type OccurrenceMeshResult = { triangles: Float64Array<ArrayBuffer>; deflection: number } | { error: string };
 
 /**
  * Axis-aligned bounding box in glTF document units (meters).
@@ -652,11 +553,6 @@ export type BoundingBoxStats = {
 /**
  * Statistics about a parsed GLB geometry.
  *
- * `connectedComponents` is exposed as a tolerance-parameterised getter so
- * callers can probe spatial connectivity at multiple gap thresholds (mm)
- * without re-parsing the GLB. Implementations are expected to memoise per
- * `toleranceMm` value.
- *
  * `vertexCount` and `meshCount` are kept on the type for internal diagnostic
  * use (and for the kernel-author Vitest harness in
  * `kernel-geometry-testing.utils.ts`); they are no longer exposed via the
@@ -669,21 +565,7 @@ export type GeometryStats = {
   meshCount: number;
   triangleCount: number;
   meshQuality: MeshQualityStats;
-  /**
-   * Returns the number of spatially-disjoint chunks. Each TRIANGLES primitive is
-   * split into connected sub-meshes (welded vertex coincidence + triangle
-   * adjacency), then sub-meshes are treated as connected when their AABBs
-   * overlap within `toleranceMm` (millimetres). Tighten the tolerance to detect
-   * visibly-disjoint clusters; loosen it to collapse intentional small gaps
-   * between touching parts.
-   */
-  connectedComponents: (toleranceMm: number) => number;
-  /**
-   * Full cluster decomposition at `toleranceMm` (memoised per value).
-   */
-  analyseConnectedComponents: (toleranceMm: number) => ConnectedComponentsResult;
   watertight: boolean;
-  analyseWatertight: () => WatertightResult;
   boundingBox?: BoundingBoxStats;
 };
 

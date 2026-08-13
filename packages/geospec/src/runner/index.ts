@@ -4,7 +4,8 @@
  * @module
  */
 
-export { GeoSpecAssertionError } from '#runner/collector.js';
+export { GeoSpecAssertionError, clearCollectorGlobals, createCollector, installCollector } from '#runner/collector.js';
+export { chargeBudget, checkBudget } from '#runner/matcher-budget.js';
 export {
   compileGeoSpecTestNamePattern,
   filterGeoSpecTests,
@@ -32,7 +33,6 @@ export type {
   GeoSpecAxisExpectation,
   GeoSpecBoundingBoxExpectation,
   GeoSpecCenterOfMassExpectation,
-  GeoSpecChamferDistanceExpectation,
   GeoSpecChamferFeatureExpectation,
   GeoSpecCircularHoleExpectation,
   GeoSpecCircularHolePatternExpectation,
@@ -46,7 +46,6 @@ export type {
   GeoSpecMassExpectation,
   GeoSpecMatcher,
   GeoSpecMeshIntegrityExpectation,
-  GeoSpecMinimumDistanceExpectation,
   GeoSpecMinimumWallThicknessExpectation,
   GeoSpecNumericExpectation,
   GeoSpecPlanarFaceExpectation,

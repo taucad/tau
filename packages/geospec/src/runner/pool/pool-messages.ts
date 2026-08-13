@@ -24,6 +24,8 @@ export type GeoSpecPoolHostMessage =
       shard: GeoSpecPoolShard;
       testNamePattern?: string;
       testTimeout?: number;
+      matcherWallBackstop?: number;
+      forensic?: boolean;
     }
   | {
       /** List-only collection pass: register tests, run no bodies (R3 splitting). */
@@ -31,6 +33,8 @@ export type GeoSpecPoolHostMessage =
       shardId: number;
       file: string;
       testTimeout?: number;
+      matcherWallBackstop?: number;
+      forensic?: boolean;
     }
   | { type: 'shutdown' };
 
@@ -38,6 +42,13 @@ export type GeoSpecPoolHostMessage =
 export type GeoSpecPoolWorkerMessage =
   | { type: 'ready' }
   | { type: 'file-start'; shardId: number; file: string }
+  | {
+      type: 'forensic';
+      shardId: number;
+      name: string;
+      value: number;
+      unit: 'milliseconds' | 'count';
+    }
   | { type: 'tests-listed'; shardId: number; file: string; names: string[] }
   | { type: 'list-error'; shardId: number; file: string; message: string }
   | {

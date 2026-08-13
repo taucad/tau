@@ -126,10 +126,12 @@ const globPatternToRegExp = (pattern: string): RegExp => {
   const normalizedPattern = normalizeGeoSpecPath(pattern);
   let source = '^';
   for (let index = 0; index < normalizedPattern.length; ) {
+    /* v8 ignore start -- The loop bound already guarantees an in-range character. */
     const character = normalizedPattern[index];
     if (character === undefined) {
       break;
     }
+    /* v8 ignore stop */
 
     const next = normalizedPattern[index + 1];
     if (character === '*' && next === '*') {
@@ -180,6 +182,7 @@ const matchesAnyGeoSpecFilePattern = (path: string, patterns: readonly string[])
 
 const isIgnoredDirectory = (path: string, ignoredDirectories: ReadonlySet<string>): boolean => {
   const normalizedPath = normalizeGeoSpecPath(path).replace(/\/$/u, '');
+  /* v8 ignore next -- Split always yields at least one segment. */
   const directoryName = normalizedPath.split('/').at(-1) ?? normalizedPath;
   return ignoredDirectories.has(normalizedPath) || ignoredDirectories.has(directoryName);
 };

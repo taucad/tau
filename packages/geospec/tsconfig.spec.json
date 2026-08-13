@@ -10,7 +10,6 @@
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
     "target": "ESNext",
     "paths": {
-      "#experiments/*": ["./experiments/*"],
       "#*": ["./src/*"]
     }
   },
@@ -18,14 +17,12 @@
     "vitest.config.ts",
     "vitest.setup.ts",
     "tsdown.config.ts",
-    "native/opencascade/libcascade.config.ts",
     "src/**/*.test.ts",
     "src/**/*.spec.ts",
     "src/**/*.test-d.ts",
     "src/**/*.d.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
-    "experiments/**/*.ts",
     "src/**/*.js",
     "src/**/*.jsx"
   ]

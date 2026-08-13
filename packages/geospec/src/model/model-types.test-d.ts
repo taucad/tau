@@ -22,26 +22,29 @@ describe('geospec/model public types', () => {
     expectTypeOf(loadModel({ file: 'main.ts', parameters: { width: 30 } })).toEqualTypeOf<Promise<GeometrySubject>>();
   });
 
-  it('should keep unit options on direct sources only', () => {
-    expectTypeOf(loadModel({ source: new Uint8Array(), format: 'glb', unit: 'mm' })).toEqualTypeOf<
+  it('should keep source-unit declarations on direct raw geometry only', () => {
+    expectTypeOf(loadModel({ source: new Uint8Array(), format: 'glb', sourceUnit: 'mm' })).toEqualTypeOf<
       Promise<GeometrySubject>
     >();
 
-    // @ts-expect-error -- runtime-backed file loads do not expose unit options.
-    const invalidFileOptions: LoadModelFileOptions = { file: 'main.ts', unit: 'mm' };
+    // @ts-expect-error -- loadModel has no output-unit knob; every subject is canonical millimetres.
+    void loadModel({ source: new Uint8Array(), format: 'glb', unit: 'mm' });
+
+    // @ts-expect-error -- runtime-backed file loads do not expose source-unit options.
+    const invalidFileOptions: LoadModelFileOptions = { file: 'main.ts', sourceUnit: 'mm' };
     void invalidFileOptions;
 
     const code = Object.fromEntries([['main.ts', 'export default function main() {}']]) as Record<'main.ts', string>;
     const invalidCodeOptions: LoadModelCodeOptions<Record<'main.ts', string>> = {
       code,
       file: 'main.ts',
-      // @ts-expect-error -- runtime-backed code loads do not expose unit options.
-      unit: 'mm',
+      // @ts-expect-error -- runtime-backed code loads do not expose source-unit options.
+      sourceUnit: 'mm',
     };
     void invalidCodeOptions;
 
-    // @ts-expect-error -- shared defaults cannot override the runtime-backed unit contract.
-    createModelLoader({ unit: 'mm' });
+    // @ts-expect-error -- shared defaults cannot override the runtime-backed source-unit contract.
+    createModelLoader({ sourceUnit: 'mm' });
   });
 
   it('should keep kernel selection out of loadModel authoring options', () => {

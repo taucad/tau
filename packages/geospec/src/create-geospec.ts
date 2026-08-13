@@ -5,7 +5,6 @@
  */
 
 import { createCollector, getCollector } from '#runner/collector.js';
-import type { GeoSpecConfig } from '#config/index.js';
 import type { AnalyzeMeshResult, LoadMeshOptions, LoadMeshResult } from '#mesh/load-mesh.js';
 import type { GeoSpecMatcher } from '#runner/types.js';
 
@@ -15,7 +14,6 @@ import type { GeoSpecMatcher } from '#runner/types.js';
  * @public
  */
 export type GeoSpec = {
-  readonly config: GeoSpecConfig;
   loadMesh(options: LoadMeshOptions): Promise<LoadMeshResult>;
   analyzeMesh(options: LoadMeshOptions): Promise<AnalyzeMeshResult>;
 };
@@ -26,20 +24,18 @@ export type GeoSpec = {
  * The root factory stays lazy: mesh parsing code is loaded only when a mesh
  * method is called.
  *
- * @param config - Optional GeoSpec defaults.
  * @returns A GeoSpec API instance.
  * @public
  */
-export function createGeoSpec(config: GeoSpecConfig = {}): GeoSpec {
+export function createGeoSpec(): GeoSpec {
   return {
-    config,
     async loadMesh(options) {
       const mesh = await import('#mesh/index.js');
-      return mesh.loadMesh({ unit: config.unit, ...options });
+      return mesh.loadMesh(options);
     },
     async analyzeMesh(options) {
       const mesh = await import('#mesh/index.js');
-      return mesh.analyzeMesh({ unit: config.unit, ...options });
+      return mesh.analyzeMesh(options);
     },
   };
 }

@@ -59,8 +59,18 @@ export type GeoSpecRunnerEvent =
       workerMemoryBytes?: number;
     }
   | { type: 'run-complete'; result: GeoSpecRunnerResult }
+  | GeoSpecForensicEvent
   | { type: 'abort'; reason?: string }
   | { type: 'close' };
+
+/** One structured forensic measurement emitted by a runner. @public */
+export type GeoSpecForensicEvent = {
+  type: 'forensic';
+  name: string;
+  value: number;
+  unit: 'milliseconds' | 'count';
+  shardId?: number;
+};
 
 /**
  * Options accepted by a GeoSpec worker-style runner run.
@@ -74,6 +84,10 @@ export type GeoSpecRunnerRunOptions = {
   testNamePattern?: string | RegExp;
   /** Timeout for each async test callback, in milliseconds. */
   testTimeout?: number;
+  /** Non-verdict matcher wall backstop. Milliseconds. */
+  matcherWallBackstop?: number;
+  /** Emit structured forensic measurements for this run. */
+  forensic?: boolean;
   /**
    * Stop after the first failing file (R1). Interactive fail-fast only —
    * never the default for reward runs, which want the complete red set.
@@ -97,8 +111,6 @@ export type GeoSpecRunnerOptions = {
   stepLoader?: RunGeoSpecModuleOptions['stepLoader'];
   /** Additional in-memory modules made available to the VM. */
   builtinModules?: RunGeoSpecModuleOptions['builtinModules'];
-  /** Observe lifecycle events without receiving raw worker or port primitives. */
-  onEvent?: (event: GeoSpecRunnerEvent) => void;
   /** Internal profile counters used by opt-in benchmark tooling. */
   internalProfile?: GeoSpecRunProfile;
 };
@@ -111,6 +123,11 @@ export type GeoSpecRunnerOptions = {
 export type GeoSpecRunner = {
   /** Execute GeoSpec files and return a compact aggregate result. */
   run(options: GeoSpecRunnerRunOptions): Promise<GeoSpecRunnerResult>;
+  /** Subscribe to one lifecycle event type. */
+  on<Type extends GeoSpecRunnerEvent['type']>(
+    event: Type,
+    handler: (event: Extract<GeoSpecRunnerEvent, { type: Type }>) => void,
+  ): () => void;
   /** Request cooperative abort before the next file starts. */
   abort(reason?: string): void;
   /** Close the runner and release owned resources. */

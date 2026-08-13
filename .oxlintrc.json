@@ -470,7 +470,7 @@
       "error",
       "always",
       {
-        "ignorePattern": "pragma|ignore|prettier-ignore|webpack\\w+:|c8|type-coverage:|async-iife:",
+        "ignorePattern": "pragma|ignore|prettier-ignore|webpack\\w+:|c8|v8 ignore|type-coverage:|async-iife:",
         "ignoreInlineComments": true,
         "ignoreConsecutiveComments": true
       }
@@ -1292,7 +1292,7 @@
       "plugins": ["typescript"]
     },
     {
-      // opencascade.js exposes generated OCCT/Emscripten names whose constructor
+      // libcascade exposes generated OCCT/Emscripten names whose constructor
       // and factory conventions intentionally do not match JavaScript new-cap
       // heuristics.
       "files": ["libs/tau-examples/src/kernels/opencascade/**/*.ts"],

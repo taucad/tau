@@ -207,6 +207,7 @@ const cardinalitySelection = (options: {
       message: `Selector matched no entities (expected ${JSON.stringify(draft.expected)}).`,
       suggestion:
         'Inspect the near-miss candidates and their excluding predicates, then relax or correct the failing predicate.',
+      /* v8 ignore next -- Every unmatched caller supplies near misses. */
       ...(options.nearMisses ? { candidates: options.nearMisses } : {}),
     });
   }
@@ -231,6 +232,7 @@ const cardinalitySelection = (options: {
   return resolvedSelection({
     ...draft,
     entities: matches,
+    /* v8 ignore next -- Resolved selections currently never carry diagnostics. */
     ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
   });
 };
@@ -258,8 +260,10 @@ const boundsContain = (options: {
     return false;
   }
   return point.every((coordinate, axis) => {
+    /* v8 ignore start -- Bounds are Vec3 tuples, so every axis is present. */
     const min = bounds.min[axis] ?? 0;
     const max = bounds.max[axis] ?? 0;
+    /* v8 ignore stop */
     return coordinate >= min - linearMm && coordinate <= max + linearMm;
   });
 };
@@ -311,6 +315,7 @@ const nearMatches = (options: {
   const tolerance = near.tolerance ?? options.linearMm;
   const axes = [near.x, near.y, near.z];
   return axes.every(
+    /* v8 ignore next -- The centroid is a Vec3 tuple, so every axis is present. */
     (expected, axis) => expected === undefined || Math.abs((centroid[axis] ?? 0) - expected) <= tolerance,
   );
 };
@@ -535,6 +540,7 @@ const applyRayProbe = (options: {
   }
   hits.sort((a, b) => a.parameter - b.parameter || a.entity.id.localeCompare(b.entity.id));
   const first = hits[0];
+  /* v8 ignore next -- The empty case returned above. */
   return first ? { kind: 'hit', entity: first.entity } : { kind: 'none' };
 };
 
@@ -545,8 +551,10 @@ type NearestOutcome =
 
 const applyNearestProbe = (options: { matches: ResolvedEntity[]; point: Vec3; linearMm: number }): NearestOutcome => {
   const measured = options.matches
-    .filter((entity) => entity.facts.centroid !== undefined)
-    .map((entity) => ({ entity, distance: distance(entity.facts.centroid ?? [0, 0, 0], options.point) }))
+    .flatMap((entity) => {
+      const { centroid } = entity.facts;
+      return centroid === undefined ? [] : [{ entity, distance: distance(centroid, options.point) }];
+    })
     .sort((a, b) => a.distance - b.distance || a.entity.id.localeCompare(b.entity.id));
   const first = measured[0];
   if (!first) {
@@ -574,6 +582,7 @@ const orderValue = (entity: ResolvedEntity, query: QueryLike): number => {
     const along = normalize(query.along ?? [0, 0, 1]) ?? [0, 0, 1];
     return entity.facts.centroid ? dot(entity.facts.centroid, along) : Number.POSITIVE_INFINITY;
   }
+  /* v8 ignore next -- Area-free faces are covered through the offsetAlong leg. */
   return entity.facts.area ?? Number.POSITIVE_INFINITY;
 };
 
@@ -622,6 +631,7 @@ const withinOccurrencePaths = (options: {
   }
   const selection = resolveWithContext(options.within, options.context);
   return new Set(
+    /* v8 ignore next -- Every scoping selection resolves to placed occurrences. */
     selection.entities.flatMap((entity) => (entity.occurrencePath === undefined ? [] : [entity.occurrencePath])),
   );
 };
@@ -704,6 +714,7 @@ const resolveQuerySelector = (selector: QuerySelector, context: ResolveContext):
     .map((candidate, position) => ({
       ...candidate.entity,
       rank: position + 1,
+      /* v8 ignore next -- The filter above already dropped candidates with no exclusion. */
       ...(candidate.excludedBy === undefined ? {} : { excludedBy: candidate.excludedBy }),
     }));
   return cardinalitySelection({ draft, matches, nearMisses });
@@ -752,6 +763,7 @@ const resolveInterfaceRows = (options: {
         suggestion: `Author the interface in model code and re-export, or fall back to a derived query/probe selector for '${options.requestedName}'.`,
       });
     }
+    /* v8 ignore next -- Split always yields at least one segment. */
     const lastSegment = options.requestedName.split('.').at(-1) ?? options.requestedName;
     const nearMisses = context.index.interfaces
       .filter((row) => row.name === lastSegment || row.fullName.includes(lastSegment))
@@ -778,6 +790,7 @@ const matchNamedRows = <Row extends { fullName: string; name: string; occurrence
   if (options.of === undefined) {
     return options.rows.filter((row) => row.fullName === options.name);
   }
+  /* v8 ignore next -- `of` is defined on this path, so a scope is always produced. */
   const scope = scopedOccurrencePaths({ of: options.of, context: options.context }) ?? new Set<string>();
   return options.rows.filter((row) => scope.has(row.occurrencePath) && row.name === options.name);
 };
@@ -812,6 +825,7 @@ const groupCountSelection = (options: {
   const { draft, group } = options;
   const { exact, atLeast } = cardinalityCount(draft.expected);
   const found = group.members.length;
+  /* v8 ignore next -- A group selector always carries an exact or at-least cardinality here. */
   const expectedCount = exact ?? atLeast ?? found;
   if ((exact !== undefined && found !== exact) || (atLeast !== undefined && found < atLeast)) {
     const missingIndices = Array.from({ length: expectedCount }, (_, position) => position + 1).filter(
@@ -829,6 +843,7 @@ const groupCountSelection = (options: {
         expected: draft.expected,
         missingMembers: missingIndices.map((memberIndex) => ({
           name: `${group.fullName}[${memberIndex}]`,
+          /* v8 ignore next -- A drifted group still has at least one resolved member. */
           nearestMemberFacts: nearestMember ? interfaceEntity(nearestMember).facts : undefined,
         })),
       },

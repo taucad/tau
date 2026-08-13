@@ -13,12 +13,25 @@ const readPackageJson = async (): Promise<PackageJson> =>
   JSON.parse(await readFile(resolve(import.meta.dirname, '../package.json'), 'utf8')) as PackageJson;
 
 describe('geospec package metadata', () => {
-  it('declares @taucad/runtime as a direct dependency', async () => {
+  it('keeps @taucad/runtime a type-only dependency', async () => {
     const packageJson = await readPackageJson();
 
-    expect(packageJson.dependencies?.['@taucad/runtime']).toBe('workspace:*');
+    // The substrate compiles against the runtime's export-route types; it never
+    // calls the runtime. Only the engine takes it as a value dependency.
+    expect(packageJson.devDependencies?.['@taucad/runtime']).toBe('workspace:*');
+    expect(packageJson.dependencies?.['@taucad/runtime']).toBeUndefined();
     expect(packageJson.peerDependencies?.['@taucad/runtime']).toBeUndefined();
     expect(packageJson.peerDependenciesMeta?.['@taucad/runtime']).toBeUndefined();
+  });
+
+  it('declares no geometry-engine runtime dependencies', async () => {
+    const packageJson = await readPackageJson();
+
+    // Kernel adapters live in @taucad/geospec-engine (DL8): the Apache-2.0
+    // substrate must stay free of them so it can be consumed on its own.
+    for (const dependency of ['manifold-3d', '@gltf-transform/core', '@taucad/geospec-engine']) {
+      expect(packageJson.dependencies?.[dependency]).toBeUndefined();
+    }
   });
 
   it('does not expose source kernels as optional production peers', async () => {

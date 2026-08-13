@@ -43,6 +43,7 @@ export const compileGeoSpecTestNamePattern = (
         type: 'runtime',
         details: {
           testNamePattern,
+          /* v8 ignore next -- The RegExp constructor only ever throws a SyntaxError. */
           reason: error instanceof Error ? error.message : String(error),
         },
       },

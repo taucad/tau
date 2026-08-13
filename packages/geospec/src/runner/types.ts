@@ -3,7 +3,6 @@ import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
 import type { GeometrySelector } from '#selector/types.js';
 import type { GeoSpecModelLoader } from '#model/index.js';
 import type { GeoSpecRunProfile } from '#runner/profile.js';
-import type { GeoSpecResourceScope } from '#runner/resource-scope.js';
 import type { GeoSpecStepLoader } from '#step/index.js';
 
 /**
@@ -28,7 +27,6 @@ export type GeoSpecBoundingBoxExpectation = {
   size?: GeoSpecAxisExpectation;
   center?: GeoSpecAxisExpectation;
   tolerance?: number;
-  evidence?: 'auto' | 'mesh' | 'brep';
 };
 
 /**
@@ -124,7 +122,6 @@ export type GeoSpecPointExpectation = Vec3 | GeoSpecAxisExpectation;
 export type GeoSpecSurfaceAreaExpectation = {
   value: number | GeoSpecNumericExpectation;
   tolerance?: number;
-  evidence?: 'auto' | 'mesh' | 'brep';
 };
 
 /**
@@ -135,7 +132,6 @@ export type GeoSpecSurfaceAreaExpectation = {
 export type GeoSpecVolumeExpectation = {
   value: number | GeoSpecNumericExpectation;
   tolerance?: number;
-  evidence?: 'auto' | 'mesh' | 'brep';
 };
 
 /**
@@ -147,7 +143,6 @@ export type GeoSpecMassExpectation = {
   value: number | GeoSpecNumericExpectation;
   density?: number;
   tolerance?: number;
-  evidence?: 'auto' | 'mesh' | 'brep';
 };
 
 /**
@@ -159,25 +154,6 @@ export type GeoSpecMassExpectation = {
 export type GeoSpecCenterOfMassExpectation = {
   point: GeoSpecPointExpectation;
   tolerance?: number;
-  evidence?: 'auto' | 'mesh' | 'brep';
-};
-
-/**
- * Chamfer-distance expectation accepted by
- * `expectGeo(...).toHaveChamferDistanceTo(...)`.
- *
- * @public
- */
-export type GeoSpecChamferDistanceExpectation = {
-  min?: GeoSpecNumericExpectation;
-  mean?: GeoSpecNumericExpectation;
-  max?: GeoSpecNumericExpectation;
-  p50?: GeoSpecNumericExpectation;
-  p95?: GeoSpecNumericExpectation;
-  p99?: GeoSpecNumericExpectation;
-  rms?: GeoSpecNumericExpectation;
-  samples?: number;
-  seed?: number;
 };
 
 /**
@@ -257,9 +233,8 @@ export type GeoSpecVoidWaypoint = Vec3 | { occurrence: string };
  * lie in ONE connected open-void component (void = outside every `material`
  * solid), that component must not reach any `isolatedFrom` point, and its
  * tightest sampled cross-section must meet `minCrossSection`. Connectivity and
- * isolation are proven by a deterministic 6-connectivity flood-fill over exact
- * point-in-solid classification at `resolution`-spaced voxel centres;
- * `minCrossSection` is a sampled measure reported with its quantization band.
+ * isolation are proven from Boolean shell topology, generalized winding-number
+ * body identity, and deterministic cross-sections.
  *
  * @public
  */
@@ -271,14 +246,12 @@ export type GeoSpecVoidContinuityExpectation = {
    * in the subject (the whole-assembly negative space).
    */
   material?: string[];
-  /** Voxel edge length (mm) for the flood-fill sampling. Default 2.0. */
-  resolution?: number;
   /** Minimum required bottleneck cross-section (mm²), sampled. */
   minCrossSection?: number;
   /** Points that must NOT be reachable from the path void (isolation claim). */
   isolatedFrom?: Vec3[];
   /**
-   * Region voxelized for the flood-fill (subject frame). Defaults to the union
+   * Region bounded for the proof (subject frame). Defaults to the union
    * of the `material` occurrence bounds, which encloses every interior void.
    */
   bounds?: { min: Vec3; max: Vec3 };
@@ -342,19 +315,6 @@ export type GeoSpecCircularHolePatternExpectation = {
 export type GeoSpecFilletFeatureExpectation = {
   radius: number;
   selection?: string;
-  tolerance?: number;
-};
-
-/**
- * Minimum-distance expectation accepted by
- * `expectGeo(...).toHaveMinimumDistanceTo(...)`.
- *
- * @public
- */
-export type GeoSpecMinimumDistanceExpectation = {
-  value: GeoSpecNumericExpectation;
-  samples?: number;
-  seed?: number;
   tolerance?: number;
 };
 
@@ -464,8 +424,6 @@ export type GeoSpecSpatialRelationshipExpectation = {
   angleDegrees?: number;
   /** Declared insertion axis (subject-frame direction) for `kind: 'insertion'`. */
   axis?: Vec3;
-  /** Declared minimum contact area (mm²); currently deferred, not approximated. */
-  minContactArea?: number;
   min?: number;
   max?: number;
   minVolume?: number;
@@ -562,18 +520,6 @@ export type GeoSpecMatcher = {
    */
   toHaveCenterOfMass(expected: GeoSpecCenterOfMassExpectation): GeoSpecAssertion;
   /**
-   * Assert deterministic sampled distance between this subject and a reference.
-   */
-  toHaveChamferDistanceTo(reference: unknown, expected: GeoSpecChamferDistanceExpectation): GeoSpecAssertion;
-  /**
-   * Assert deterministic Hausdorff-style worst-case surface distance.
-   */
-  toHaveHausdorffDistanceTo(reference: unknown, expected: GeoSpecMinimumDistanceExpectation): GeoSpecAssertion;
-  /**
-   * Assert the minimum observed distance to a reference subject.
-   */
-  toHaveMinimumDistanceTo(reference: unknown, expected: GeoSpecMinimumDistanceExpectation): GeoSpecAssertion;
-  /**
    * Assert that exact BRep evidence reports a valid shape.
    */
   toBeValidBrep(expected?: GeoSpecValidBrepExpectation): GeoSpecAssertion;
@@ -643,9 +589,6 @@ export type GeoSpecAssertion = {
     | 'volume'
     | 'mass'
     | 'centerOfMass'
-    | 'chamferDistance'
-    | 'hausdorffDistance'
-    | 'minimumDistance'
     | 'validBrep'
     | 'topologyCounts'
     | 'stepUnits'
@@ -713,14 +656,16 @@ export type RunGeoSpecModuleOptions = {
   testNamePattern?: string | RegExp;
   /** Timeout for async test callbacks, in milliseconds. */
   testTimeout?: number;
+  /** Milliseconds. Non-verdict matcher infrastructure backstop. */
+  matcherWallBackstop?: number;
+  /** Emit structured forensic events for this run. */
+  forensic?: boolean;
   /** Model loader exposed to VM tests through `geospec/model`. */
   modelLoader?: GeoSpecModelLoader;
   /** STEP loader exposed to VM tests through `geospec/step`. */
   stepLoader?: GeoSpecStepLoader;
   /** Additional in-memory modules made available to the VM. */
   builtinModules?: Record<string, BuiltinModule>;
-  /** Internal resource scope shared by aggregate runners. */
-  resourceScope?: GeoSpecResourceScope;
   /** Internal profile counters used by opt-in benchmark tooling. */
   internalProfile?: GeoSpecRunProfile;
   /**

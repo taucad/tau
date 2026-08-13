@@ -12,11 +12,7 @@
     "@taucad/api-extractor": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/filesystem": "workspace:*",
-    "@taucad/openscad": "workspace:*",
-    "@taucad/runtime": "workspace:*",
-    "@taucad/tau-examples": "workspace:*",
     "@taucad/telemetry": "workspace:*",
-    "@taucad/testing": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "react": "catalog:",
@@ -24,6 +20,8 @@
     "resend": "catalog:"
   },
   "devDependencies": {
+    "@taucad/geospec-engine": "workspace:*",
+    "@taucad/runtime": "workspace:*",
     "@taucad/vite": "workspace:*",
     "geospec": "workspace:*"
   },

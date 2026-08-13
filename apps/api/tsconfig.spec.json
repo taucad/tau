@@ -7,7 +7,8 @@
     "erasableSyntaxOnly": false, // Incompatible with NestJS dependency injection.
     "types": ["node", "vitest/importMeta", "vite-plugin-node", "vitest"],
     "paths": {
-      "#*": ["./app/*"]
+      "#*": ["./app/*"],
+      "libcascade": ["../../libs/api-extractor/src/generated/opencascade/modules/libcascade/index.d.ts"]
     }
   },
   "include": [

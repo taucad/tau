@@ -1,16 +1,18 @@
 // @vitest-environment node
 /* eslint-disable @typescript-eslint/naming-convention -- file-path keys (e.g. 'main.geospec.ts') aren't camelCase */
+import { resolve } from 'node:path';
 import type { ToolRuntime } from '@langchain/core/tools';
 import { rpcName } from '@taucad/chat/constants';
 import type { RpcGeoSpecClient } from '@taucad/chat/rpc';
-import type { TauModelRendererOutput } from '@taucad/testing/tau';
-import { runTauGeoSpecTests } from '@taucad/testing/tau';
+import { Accessor, Document, WebIO } from '@gltf-transform/core';
 import { discoverGeoSpecFiles } from 'geospec/runner';
 import type { GeoSpecDiscoveryFileStat } from 'geospec/runner';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestModelTool } from '#api/tools/tools/tool-test-model.js';
 import { createTestApp } from '#testing/create-test-app.js';
 import type { TestApp } from '#testing/create-test-app.js';
+import { runTauGeoSpecTests } from '#testing/tau-geospec-harness.js';
+import type { TauModelRendererOutput } from '#testing/tau-geospec-harness.js';
 
 type TestVmFileSystem = {
   exists(path: string): Promise<boolean>;
@@ -94,204 +96,48 @@ const boxPositions = [
   10, 20, 30, 10, 0, 30,
 ];
 
-type Vec3 = [number, number, number];
-
-const vecSub = (left: Vec3, right: Vec3): Vec3 => [left[0] - right[0], left[1] - right[1], left[2] - right[2]];
-
-const vecCross = (left: Vec3, right: Vec3): Vec3 => [
-  left[1] * right[2] - left[2] * right[1],
-  left[2] * right[0] - left[0] * right[2],
-  left[0] * right[1] - left[1] * right[0],
-];
-
-const vecLength = (value: Vec3): number => Math.hypot(value[0], value[1], value[2]);
-
-const triangleArea = (a: Vec3, b: Vec3, c: Vec3): number => vecLength(vecCross(vecSub(b, a), vecSub(c, a))) / 2;
-
-const boxTriangles = (primitive: string, x: number, triangleOffset: number) =>
-  Array.from({ length: boxPositions.length / 9 }, (_, triangleIndex) => {
-    const offset = triangleIndex * 9;
-    const a: Vec3 = [boxPositions[offset]! + x, boxPositions[offset + 1]!, boxPositions[offset + 2]!];
-    const b: Vec3 = [boxPositions[offset + 3]! + x, boxPositions[offset + 4]!, boxPositions[offset + 5]!];
-    const c: Vec3 = [boxPositions[offset + 6]! + x, boxPositions[offset + 7]!, boxPositions[offset + 8]!];
-    return {
-      primitive,
-      triangleIndex: triangleOffset + triangleIndex,
-      a,
-      b,
-      c,
-      center: [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3] as Vec3,
-      area: triangleArea(a, b, c),
-    };
-  });
-
-const createComponentOverlapSubject = (rightBoxX: number): TauModelRendererOutput => {
-  const leftTriangles = boxTriangles('sun#0', 0, 0);
-  const rightTriangles = boxTriangles('ring#0', rightBoxX, leftTriangles.length);
-  const triangles = [...leftTriangles, ...rightTriangles];
-  const subject = {
-    kind: 'geometry-subject',
-    capabilities: [
-      { kind: 'mesh', feature: 'triangles' },
-      { kind: 'mesh', feature: 'component-overlap' },
-    ],
-    provenance: {
-      source: { kind: 'mesh-buffer', format: 'mesh-buffer', path: 'main.scad' },
-      unit: 'mm',
-      loader: 'api-headless-geospec-harness',
-      parameters: { fixture: 'component-overlap' },
-    },
-    diagnostics: [],
-    mesh: {
-      format: 'mesh-buffer',
-      stats: {
-        vertexCount: triangles.length * 3,
-        meshCount: 1,
-        triangleCount: triangles.length,
-        boundingBox: {
-          center: [(rightBoxX + 10) / 2, 10, 15],
-          size: [rightBoxX + 10, 20, 30],
-          primitives: [
-            { name: 'sun#0', color: '#ffcc00', vertices: 36, aabb: { min: [0, 0, 0], max: [10, 20, 30] } },
-            {
-              name: 'ring#0',
-              color: '#224466',
-              vertices: 36,
-              aabb: { min: [rightBoxX, 0, 0], max: [rightBoxX + 10, 20, 30] },
-            },
-          ],
-        },
-        meshQuality: {
-          triangleCount: triangles.length,
-          nonFiniteVertices: [],
-          degenerateTriangles: [],
-          duplicateFaces: [],
-          triangles,
-          surfaceArea: 4400,
-          signedVolume: 12_000,
-          centerOfMass: [(rightBoxX + 10) / 2, 10, 15],
-        },
-        connectedComponents: (_toleranceMm: number) => 2,
-        analyseConnectedComponents: (_toleranceMm: number) => ({ count: 2, clusters: [], gaps: [] }),
-        watertight: true,
-        analyseWatertight: () => ({
-          watertight: true,
-          irregularEdges: 0,
-          openBoundaryEdges: 0,
-          totalEdges: 36,
-          irregularEdgeFraction: 0,
-          perPrimitive: [],
-        }),
-      },
-    },
-  };
-
-  return subject as unknown as TauModelRendererOutput;
-};
-
-const createBrepSubject = (): TauModelRendererOutput => {
-  const subject = {
-    kind: 'geometry-subject',
-    capabilities: [
-      { kind: 'mesh', feature: 'mass-properties' },
-      { kind: 'brep', feature: 'planar-faces' },
-      { kind: 'brep', feature: 'cylindrical-faces' },
-      { kind: 'brep', feature: 'circular-holes' },
-      { kind: 'brep', feature: 'chamfer-features' },
-      { kind: 'brep', feature: 'wall-thickness' },
-    ],
-    provenance: {
-      source: { kind: 'bytes', format: 'glb', path: 'main.ts' },
-      unit: 'mm',
-      loader: 'api-headless-geospec-harness',
-      parameters: {},
-    },
-    diagnostics: [],
-    mesh: {
-      format: 'mesh-buffer',
-      stats: {
-        vertexCount: 8,
-        meshCount: 1,
-        triangleCount: 12,
-        boundingBox: { center: [0, 0, 10], size: [40, 30, 20], primitives: [] },
-        meshQuality: {
-          triangleCount: 12,
-          nonFiniteVertices: [],
-          degenerateTriangles: [],
-          duplicateFaces: [],
-          triangles: [
-            {
-              primitive: 'main',
-              triangleIndex: 0,
-              a: [-20, -15, 0],
-              b: [20, -15, 0],
-              c: [20, 15, 0],
-              center: [20 / 3, -5, 0],
-              area: 1200,
-            },
-            {
-              primitive: 'main',
-              triangleIndex: 1,
-              a: [-20, -15, 0],
-              b: [20, 15, 0],
-              c: [-20, 15, 0],
-              center: [-20 / 3, 5, 0],
-              area: 1200,
-            },
-          ],
-          surfaceArea: 5200,
-          signedVolume: 24_000,
-          centerOfMass: [0, 0, 10],
-        },
-        connectedComponents: (_toleranceMm: number) => 1,
-        analyseConnectedComponents: (_toleranceMm: number) => ({ count: 1, clusters: [], gaps: [] }),
-        watertight: true,
-        analyseWatertight: () => ({
-          watertight: true,
-          irregularEdges: 0,
-          openBoundaryEdges: 0,
-          totalEdges: 18,
-          irregularEdgeFraction: 0,
-          perPrimitive: [],
-        }),
-      },
-    },
-    brep: {
-      planarFaces: [{ normal: [0, 0, 1], offset: 20, area: 6000 }],
-      cylindricalFaces: [{ radius: 15, axis: 'z' }],
-      circularHoles: [{ diameter: 8, through: true, axis: 'z', center: [25, 15, 0] }],
-      chamferFeatures: [{ distance: 2, selection: 'outer top perimeter' }],
-      minimumWallThickness: { value: 2.5, location: [0, 0, 0] },
-    },
-  };
-
-  return subject as unknown as TauModelRendererOutput;
-};
-
-const createParameterizedBoundsSubject = (size: number): TauModelRendererOutput => {
-  const subject = createBrepSubject();
-  if (subject instanceof Uint8Array) {
-    throw new TypeError('Expected an in-memory geometry subject.');
+const createComponentOverlapSource = async (rightBoxX: number): Promise<TauModelRendererOutput> => {
+  const document = new Document();
+  const buffer = document.createBuffer();
+  const scene = document.createScene('assembly');
+  for (const [name, translation] of [
+    ['left', 0],
+    ['right', rightBoxX],
+  ] as const) {
+    const positions = document
+      .createAccessor()
+      .setType(Accessor.Type['VEC3']!)
+      .setBuffer(buffer)
+      .setArray(new Float32Array(boxPositions));
+    const primitive = document.createPrimitive().setMode(4).setAttribute('POSITION', positions);
+    const mesh = document.createMesh(name).addPrimitive(primitive);
+    scene.addChild(document.createNode(name).setTranslation([translation, 0, 0]).setMesh(mesh));
   }
-  return {
-    ...subject,
-    provenance: {
-      ...subject.provenance,
-      parameters: { cubeSize: size },
-    },
-    mesh: {
-      ...subject.mesh,
-      stats: {
-        ...subject.mesh.stats,
-        boundingBox: {
-          center: [0, 0, 0],
-          size: [size, size, size],
-          primitives: [],
-        },
-      },
-    },
-  };
+  return { format: 'glb', source: await new WebIO().writeBinary(document), sourceUnit: 'mm', name: 'assembly' };
 };
+
+const brepFixture = resolve(
+  import.meta.dirname,
+  '../../../../packages/geospec-engine/fixtures/contact/valve-seat-cone-positive/model.step',
+);
+
+const createBrepSource = (): TauModelRendererOutput => ({
+  source: brepFixture,
+  format: 'step',
+  name: 'valve-seat-cone-positive',
+});
+
+const createParameterizedBoundsSource = (size: number): TauModelRendererOutput => ({
+  format: 'mesh-buffer',
+  source: {
+    format: 'mesh-buffer',
+    positions: boxPositions.map((coordinate, index) => {
+      const divisor = [10, 20, 30][index % 3]!;
+      return (coordinate / divisor) * size;
+    }),
+    name: 'parameterized-box',
+  },
+});
 
 const setBrepGeoSpecTest = (filesystem: MemoryGeoSpecFileSystem): void => {
   filesystem.setText(
@@ -302,15 +148,15 @@ const setBrepGeoSpecTest = (filesystem: MemoryGeoSpecFileSystem): void => {
       "describe('api harness brep checks', () => {",
       "  it('should validate measurement and feature evidence', async () => {",
       "    const model = await loadModel({ file: 'main.ts', format: 'step' });",
-      '    expectGeo(model).toHaveSurfaceArea({ value: 5_200, tolerance: 0.001 });',
-      '    expectGeo(model).toHaveVolume({ value: 24_000, tolerance: 0.001 });',
-      '    expectGeo(model).toHaveMass({ value: 18.84, density: 0.000785, tolerance: 0.001 });',
-      '    expectGeo(model).toHaveCenterOfMass({ point: { x: 0, y: 0, z: 10 }, tolerance: 0.001 });',
-      '    expectGeo(model).toHavePlanarFace({ normal: { x: 0, y: 0, z: 1 }, offset: 20, area: { greaterThan: 5_000 }, tolerance: 0.05 });',
-      "    expectGeo(model).toHaveCylindricalFace({ radius: 15, axis: 'z', tolerance: 0.05 });",
-      "    expectGeo(model).toHaveCircularHole({ diameter: 8, through: true, axis: 'z', center: { x: 25, y: 15 }, tolerance: 0.05 });",
-      "    expectGeo(model).toHaveChamferFeature({ distance: 2, selection: 'outer top perimeter', tolerance: 0.05 });",
-      '    expectGeo(model).toHaveMinimumWallThickness({ value: { greaterThanOrEqual: 2 }, tolerance: 0.05 });',
+      '    expectGeo(model).toHaveSurfaceArea({ value: 3340.020268781724, tolerance: 0.001 });',
+      '    expectGeo(model).toHaveVolume({ value: 6006.725153663717, tolerance: 0.001 });',
+      '    expectGeo(model).toHaveMass({ value: 4.715279245626018, density: 0.000785, tolerance: 0.001 });',
+      '    expectGeo(model).toHaveCenterOfMass({ point: { x: 0, y: 0, z: 5.003138075313799 }, tolerance: 0.001 });',
+      '    expectGeo(model).toHavePlanarFace({ normal: { x: 0, y: 0, z: 1 }, offset: 6, area: { greaterThan: 270 }, tolerance: 0.05 });',
+      "    expectGeo(model).toHaveCylindricalFace({ radius: 16, axis: 'z', tolerance: 0.05 });",
+      "    expectGeo(model).toHaveCircularHole({ diameter: 20, through: false, axis: 'z', center: { x: 0, y: 0 }, tolerance: 0.05 });",
+      "    expectGeo(model).toHaveChamferFeature({ distance: 3, selection: 'revolved chamfer (axis z)', tolerance: 0.05 });",
+      '    expectGeo(model).toHaveMinimumWallThickness({ value: { greaterThanOrEqual: 3 }, tolerance: 0.05 });',
       '  });',
       '});',
     ].join('\n'),
@@ -357,7 +203,7 @@ const createHarnessGeoSpecClient = (
   filesystem: MemoryGeoSpecFileSystem,
   renderCalls: HarnessRenderInput[] = [],
   renderer: (input: HarnessRenderInput) => Promise<TauModelRendererOutput> | TauModelRendererOutput = () =>
-    createBrepSubject(),
+    createBrepSource(),
 ): RpcGeoSpecClient => ({
   async runTests(args) {
     const discovery = await discoverGeoSpecFiles({
@@ -456,7 +302,7 @@ describe('GeoSpec headless API harness integration', () => {
     const renderCalls: HarnessRenderInput[] = [];
     testApp = await createTestApp({
       geospecStub: createHarnessGeoSpecClient(filesystem, renderCalls, (input) =>
-        createParameterizedBoundsSubject(
+        createParameterizedBoundsSource(
           typeof input.parameters?.['cubeSize'] === 'number' ? input.parameters['cubeSize'] : 10,
         ),
       ),
@@ -483,7 +329,7 @@ describe('GeoSpec headless API harness integration', () => {
     const filesystem = new MemoryGeoSpecFileSystem();
     setComponentOverlapGeoSpecTest(filesystem);
     testApp = await createTestApp({
-      geospecStub: createHarnessGeoSpecClient(filesystem, [], () => createComponentOverlapSubject(15)),
+      geospecStub: createHarnessGeoSpecClient(filesystem, [], async () => createComponentOverlapSource(15)),
     });
 
     const result = (await callTestModel(testApp)) as {
@@ -508,7 +354,7 @@ describe('GeoSpec headless API harness integration', () => {
     const filesystem = new MemoryGeoSpecFileSystem();
     setComponentOverlapGeoSpecTest(filesystem);
     testApp = await createTestApp({
-      geospecStub: createHarnessGeoSpecClient(filesystem, [], () => createComponentOverlapSubject(9)),
+      geospecStub: createHarnessGeoSpecClient(filesystem, [], async () => createComponentOverlapSource(9)),
     });
 
     const result = (await callTestModel(testApp)) as {
@@ -553,13 +399,9 @@ describe('GeoSpec headless API harness integration', () => {
       }>;
     };
     const overlap = details.overlaps?.[0];
-    // Color evidence (leftColor/rightColor) is optional and geospec only
-    // populates it for GLB-backed subjects (buildRecordFromGltf); the triangle-
-    // soup path this synthetic mesh-buffer fixture exercises does not carry per-
-    // primitive color. Tracked separately — see the spawned color-propagation task.
     expect(overlap).toMatchObject({
-      leftLabel: 'sun#0',
-      rightLabel: 'ring#0',
+      leftLabel: 'left#0',
+      rightLabel: 'right#0',
       penetration: 'positive-volume',
     });
     expect(overlap?.intersectionVolume).toBeCloseTo(600, 2);

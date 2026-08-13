@@ -95,10 +95,10 @@
         "cwd": "{projectRoot}"
       }
     },
-    "benchmark:models": {
+    "test:geospec": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "node --import @oxc-node/core/register --import ./scripts/raw-loader.mts scripts/benchmark-models.mts",
+        "command": "vitest run --config vitest.integration.config.ts app/testing/geospec-harness-integration.test.ts app/testing/tau-replay.integration.test.ts",
         "cwd": "{projectRoot}"
       }
     },

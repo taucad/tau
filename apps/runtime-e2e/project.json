@@ -4,7 +4,7 @@
   "sourceRoot": "apps/runtime-e2e/src",
   "projectType": "application",
   "tags": ["scope:shared", "type:e2e"],
-  "implicitDependencies": ["runtime", "tau-examples", "geospec"],
+  "implicitDependencies": ["runtime", "tau-examples", "geospec", "geospec-engine"],
   "targets": {
     "benchmark": {
       "command": "tsx --require ./scripts/cjs-compat.cjs scripts/benchmark-kernels.mts",

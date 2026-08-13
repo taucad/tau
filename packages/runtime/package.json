@@ -48,6 +48,7 @@
     "./electron/preload": "./src/electron/preload.ts",
     "./electron/renderer": "./src/electron/renderer.ts",
     "./electron/utility": "./src/electron/utility.ts",
+    "./electron/vite": "./src/electron/vite.ts",
     "./node": "./src/node.ts",
     "./filesystem": "./src/filesystem/index.ts",
     "./filesystem/node": "./src/filesystem/from-node-fs.ts",
@@ -78,7 +79,7 @@
     "./vite": "./src/vite/index.ts",
     "./rolldown": "./src/rolldown/index.ts",
     "./nextjs/config": "./src/nextjs/config.ts",
-    "./nextjs/node-fs-unavailable": "./src/nextjs/node-fs-unavailable.ts"
+    "./nextjs/browser-node-builtins": "./src/nextjs/browser-node-builtins.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -202,6 +203,11 @@
         "types": "./dist/electron/utility.d.mts",
         "import": "./dist/electron/utility.mjs",
         "default": "./dist/electron/utility.mjs"
+      },
+      "./electron/vite": {
+        "types": "./dist/electron/vite.d.mts",
+        "import": "./dist/electron/vite.mjs",
+        "default": "./dist/electron/vite.mjs"
       },
       "./host": {
         "types": "./dist/host/index.d.mts",
@@ -338,10 +344,10 @@
         "import": "./dist/nextjs/config.mjs",
         "default": "./dist/nextjs/config.mjs"
       },
-      "./nextjs/node-fs-unavailable": {
-        "types": "./dist/nextjs/node-fs-unavailable.d.mts",
-        "import": "./dist/nextjs/node-fs-unavailable.mjs",
-        "default": "./dist/nextjs/node-fs-unavailable.mjs"
+      "./nextjs/browser-node-builtins": {
+        "types": "./dist/nextjs/browser-node-builtins.d.mts",
+        "import": "./dist/nextjs/browser-node-builtins.mjs",
+        "default": "./dist/nextjs/browser-node-builtins.mjs"
       }
     }
   },
@@ -391,12 +397,20 @@
   },
   "peerDependencies": {
     "electron": ">=30.0.0",
+    "electron-vite": "^5.0.0 || ^6.0.0-beta.1",
+    "next": ">=15.0.0 <17.0.0",
     "rolldown": ">=1.0.0-rc.1",
-    "vite": ">=7.0.0",
+    "vite": "^7.0.0 || ^8.0.0",
     "vitest": ">=2.0.0"
   },
   "peerDependenciesMeta": {
     "electron": {
+      "optional": true
+    },
+    "electron-vite": {
+      "optional": true
+    },
+    "next": {
       "optional": true
     },
     "rolldown": {
@@ -410,8 +424,10 @@
     }
   },
   "devDependencies": {
+    "electron-vite": "catalog:electron-vite7",
     "geist": "catalog:",
-    "vite": "catalog:",
+    "next": "catalog:next16",
+    "vite": "catalog:electron-vite7",
     "vitest": "4.1.5"
   }
 }

@@ -1,7 +1,7 @@
 /**
  * Rolldown integration for `@taucad/runtime` consumers.
  *
- * Mirrors the invariants of `@taucad/runtime/vite` (`runtime()`) for projects
+ * Mirrors the invariants of `@taucad/runtime/vite` (`tauRuntime()`) for projects
  * that build with Rolldown directly (e.g. `tsdown` / library bundles) rather
  * than Vite. Both plugins consume the same shared `runtime-invariants.ts`
  * module so consumer behaviour is identical regardless of bundler.
@@ -55,7 +55,7 @@ const mergeExternal = (existing: ExternalOption | undefined): ExternalOption => 
 };
 
 /**
- * Options for the {@link runtime} Rolldown plugin.
+ * Options for the {@link tauRuntime} Rolldown plugin.
  *
  * @public
  */
@@ -80,15 +80,15 @@ export type RuntimePluginOptions = {
  *
  * @example <caption>Drop-in usage in rolldown.config.ts</caption>
  * ```typescript
- * import { runtime } from '@taucad/runtime/rolldown';
+ * import { tauRuntime } from '@taucad/runtime/rolldown';
  * import { defineConfig } from 'rolldown';
  *
  * export default defineConfig({
- *   plugins: [runtime()],
+ *   plugins: [tauRuntime()],
  * });
  * ```
  */
-export function runtime(options: RuntimePluginOptions = {}): Plugin {
+export function tauRuntime(options: RuntimePluginOptions = {}): Plugin {
   const { forceEsmOutput = true } = options;
 
   return {

@@ -5,35 +5,71 @@
  */
 
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 
 import type { ForkOptions, IpcMain, IpcMainEvent, Session, UtilityProcess } from 'electron';
 import { ipcMain as defaultIpcMain, MessageChannelMain, session as defaultSession, utilityProcess } from 'electron';
 
 import { electronRuntimeChannel as runtimeChannel } from '#electron/constants.js';
 
-/** IPC channel used by Tau's Electron runtime bridge. */
+/**
+ * Default IPC channel used by Tau's Electron runtime bridge.
+ *
+ * @public
+ */
 export const electronRuntimeChannel = runtimeChannel;
 
+/**
+ * Options for {@link installElectronRuntimeHeaders}.
+ *
+ * @public
+ */
 export type ElectronRuntimeHeadersOptions = {
+  /** Electron session whose responses receive COOP and COEP headers. */
   readonly session?: Session;
 };
 
+/**
+ * Options for {@link registerElectronRuntimeMain}.
+ *
+ * @public
+ */
 export type RegisterElectronRuntimeMainOptions = {
+  /** IPC channel shared with preload. Defaults to {@link electronRuntimeChannel}. */
   readonly channel?: string;
+  /** Environment passed to each spawned utility process. */
   readonly env?: NodeJS.ProcessEnv;
+  /** Electron IPC main implementation, primarily for alternate hosts and tests. */
   readonly ipcMain?: IpcMain;
+  /** Receives utility-spawn and relay failures. */
   readonly onError?: (error: Error) => void;
+  /** Operating-system service name assigned to the utility process. */
   readonly serviceName?: string;
+  /** Utility-process standard I/O routing. */
   readonly stdio?: ForkOptions['stdio'];
+  /** Built utility-process module that calls `serveElectronRuntime`. */
   readonly utilityEntry: string | URL;
 };
 
+/**
+ * Disposable main-process runtime broker registration.
+ *
+ * @public
+ */
 export type ElectronRuntimeMainHandle = {
+  /** Unregister IPC listeners and terminate every utility host owned by this broker. */
   dispose(): void;
 };
 
 const toError = (error: unknown): Error => (error instanceof Error ? error : new Error(String(error)));
 
+/**
+ * Install COOP/COEP response headers for Electron renderer pages.
+ *
+ * @param options - Optional Electron session override.
+ * @returns Nothing.
+ * @public
+ */
 export const installElectronRuntimeHeaders = (options: ElectronRuntimeHeadersOptions = {}): void => {
   const targetSession = options.session ?? defaultSession.defaultSession;
   targetSession.webRequest.onHeadersReceived((details, callback) => {
@@ -47,17 +83,53 @@ export const installElectronRuntimeHeaders = (options: ElectronRuntimeHeadersOpt
   });
 };
 
+/**
+ * Register the main-process broker that owns one utility host per renderer client.
+ * Each relayed port carries an opaque lease used for exact-host close and timeout recovery.
+ *
+ * @param options - Utility entry and optional Electron wiring overrides.
+ * @returns A handle that unregisters IPC listeners and terminates remaining owned utilities.
+ * @public
+ *
+ * @example <caption>Register and dispose the Electron runtime broker</caption>
+ * ```typescript
+ * import { registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
+ *
+ * const runtimeMain = registerElectronRuntimeMain({
+ *   utilityEntry: new URL('./runtime.utility.js', import.meta.url),
+ * });
+ * runtimeMain.dispose();
+ * ```
+ */
 export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMainOptions): ElectronRuntimeMainHandle => {
   const channel = options.channel ?? electronRuntimeChannel;
+  const releaseChannel = `${channel}:release`;
   const targetIpcMain = options.ipcMain ?? defaultIpcMain;
-  const liveUtilities = new Set<UtilityProcess>();
+  const liveUtilities = new Map<
+    string,
+    { readonly utility: UtilityProcess; readonly sender: IpcMainEvent['sender'] }
+  >();
 
   const reportError = (error: unknown): void => {
     options.onError?.(toError(error));
   };
 
+  const releaseUtility = (hostId: string): void => {
+    const record = liveUtilities.get(hostId);
+    if (!record) {
+      return;
+    }
+    liveUtilities.delete(hostId);
+    try {
+      record.utility.kill();
+    } catch {
+      /* Best-effort */
+    }
+  };
+
   const listener = (event: IpcMainEvent): void => {
     let utility: UtilityProcess | undefined;
+    let hostId: string | undefined;
     try {
       const utilityEntry =
         options.utilityEntry instanceof URL ? fileURLToPath(options.utilityEntry) : options.utilityEntry;
@@ -67,9 +139,12 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
         stdio: options.stdio ?? 'inherit',
       });
       utility = spawnedUtility;
-      liveUtilities.add(spawnedUtility);
+      hostId = randomUUID();
+      liveUtilities.set(hostId, { utility: spawnedUtility, sender: event.sender });
       spawnedUtility.on('exit', () => {
-        liveUtilities.delete(spawnedUtility);
+        if (hostId) {
+          liveUtilities.delete(hostId);
+        }
       });
 
       const { port1: rendererPort, port2: utilityPort } = new MessageChannelMain();
@@ -79,38 +154,52 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
       if (!targetFrame) {
         throw new Error('registerElectronRuntimeMain: IPC event did not include senderFrame');
       }
-      targetFrame.postMessage(`${channel}:port`, undefined, [rendererPort]);
+      targetFrame.postMessage(`${channel}:port`, { hostId }, [rendererPort]);
 
       event.sender.once('destroyed', () => {
+        if (hostId) {
+          releaseUtility(hostId);
+        }
+      });
+    } catch (error) {
+      if (hostId) {
+        releaseUtility(hostId);
+      } else {
         try {
           utility?.kill();
         } catch {
           /* Best-effort */
         }
-      });
-    } catch (error) {
-      try {
-        utility?.kill();
-      } catch {
-        /* Best-effort */
       }
       reportError(error);
     }
   };
 
+  const releaseListener = (event: IpcMainEvent, payload: unknown): void => {
+    if (!payload || typeof payload !== 'object') {
+      return;
+    }
+    const { hostId } = payload as { hostId?: unknown };
+    if (typeof hostId !== 'string') {
+      return;
+    }
+    const record = liveUtilities.get(hostId);
+    if (!record || record.sender !== event.sender) {
+      return;
+    }
+    releaseUtility(hostId);
+  };
+
   targetIpcMain.on(channel, listener);
+  targetIpcMain.on(releaseChannel, releaseListener);
 
   return {
     dispose(): void {
       targetIpcMain.off(channel, listener);
-      for (const utility of liveUtilities) {
-        try {
-          utility.kill();
-        } catch {
-          /* Best-effort */
-        }
+      targetIpcMain.off(releaseChannel, releaseListener);
+      for (const hostId of liveUtilities.keys()) {
+        releaseUtility(hostId);
       }
-      liveUtilities.clear();
     },
   };
 };

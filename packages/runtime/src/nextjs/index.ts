@@ -38,5 +38,5 @@ export {
   RuntimeNotConnectedError,
   RuntimeTerminatedError,
 } from '#client/index.js';
-export { nextRuntimeConfig, nextRuntimeHeaders } from '#nextjs/config.js';
-export type { NextRuntimeHeaderRule, NextRuntimeHeadersOptions } from '#nextjs/config.js';
+export { nextRuntimeHeaders, withTauRuntime } from '#nextjs/config.js';
+export type { NextRuntimeHeaderRule, NextRuntimeHeadersOptions, NextRuntimeUserConfig } from '#nextjs/config.js';

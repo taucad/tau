@@ -28,6 +28,53 @@ export type NextRuntimeHeadersOptions = {
   subresource?: string | readonly string[];
 };
 
+type NextRuntimeTurbopackConfig = {
+  resolveAlias?: Record<string, unknown>;
+};
+
+type NextRuntimeWebpackConfig = {
+  plugins?: unknown[];
+  resolve?: {
+    alias?: Record<string, unknown>;
+  };
+};
+
+type NextRuntimeWebpackContext = {
+  isServer: boolean;
+  webpack: {
+    NormalModuleReplacementPlugin: new (
+      resourceRegExp: RegExp,
+      replaceResource: (resource: { request: string }) => void,
+    ) => unknown;
+  };
+};
+
+type NextRuntimeWebpackHook = (
+  config: NextRuntimeWebpackConfig,
+  context: NextRuntimeWebpackContext,
+) => NextRuntimeWebpackConfig | undefined;
+
+/**
+ * Stable Next.js configuration fields composed by {@link withTauRuntime}.
+ *
+ * @public
+ */
+export type NextRuntimeUserConfig = {
+  headers?: () => NextRuntimeHeaderRule[] | Promise<NextRuntimeHeaderRule[]>;
+  turbopack?: NextRuntimeTurbopackConfig;
+};
+
+type NextRuntimeConfigInput = NextRuntimeUserConfig & { webpack?: unknown };
+
+type WithTauRuntime = {
+  // oxlint-disable-next-line typescript/no-restricted-types -- Framework config types do not promise a string index signature.
+  <Config extends object>(
+    config: Config & NextRuntimeUserConfig,
+    options?: NextRuntimeHeadersOptions,
+  ): Config & NextRuntimeUserConfig;
+  (config?: NextRuntimeUserConfig, options?: NextRuntimeHeadersOptions): NextRuntimeUserConfig;
+};
+
 const documentHeaders: Readonly<Record<string, string>> = Object.freeze({
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Cross-Origin-Embedder-Policy': 'require-corp',
@@ -38,8 +85,38 @@ const subresourceHeaders: Readonly<Record<string, string>> = Object.freeze({
   'Cross-Origin-Resource-Policy': 'same-origin',
 });
 
-const wasmAssetRule = '*.wasm';
-const nodeFsUnavailableModule = '@taucad/runtime/nextjs/node-fs-unavailable';
+const browserNodeBuiltinsModule = '@taucad/runtime/nextjs/browser-node-builtins';
+const nodeBuiltinSpecifier = /^node:(?:fs(?:\/promises)?|url)$/;
+
+const isWebpackHook = (value: unknown): value is NextRuntimeWebpackHook => typeof value === 'function';
+
+const configureWebpack = (
+  config: NextRuntimeWebpackConfig,
+  context: NextRuntimeWebpackContext,
+): NextRuntimeWebpackConfig => {
+  if (context.isServer) {
+    return config;
+  }
+
+  const replacementPlugin = new context.webpack.NormalModuleReplacementPlugin(nodeBuiltinSpecifier, (resource) => {
+    resource.request = resource.request.slice('node:'.length);
+  });
+
+  return {
+    ...config,
+    plugins: [...(config.plugins ?? []), replacementPlugin],
+    resolve: {
+      ...config.resolve,
+      alias: {
+        ...config.resolve?.alias,
+        fs$: browserNodeBuiltinsModule,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js module name
+        'fs/promises$': browserNodeBuiltinsModule,
+        url$: browserNodeBuiltinsModule,
+      },
+    },
+  };
+};
 
 const toPatterns = (value: string | readonly string[] | undefined, fallback: readonly string[]): readonly string[] =>
   value === undefined ? fallback : typeof value === 'string' ? [value] : value;
@@ -53,6 +130,12 @@ const toHeaderEntries = (headers: Readonly<Record<string, string>>): Array<{ key
  * @param options - Optional route scoping.
  * @returns Header rules suitable for `next.config.ts`.
  * @public
+ * @example <caption>Scope runtime headers to a route</caption>
+ * ```typescript
+ * import { nextRuntimeHeaders } from '@taucad/runtime/nextjs/config';
+ *
+ * export default { headers: async () => nextRuntimeHeaders({ document: '/workspace/:path*' }) };
+ * ```
  */
 export function nextRuntimeHeaders(options: NextRuntimeHeadersOptions = {}): NextRuntimeHeaderRule[] {
   const documentPatterns = toPatterns(options.document, ['/:path*']);
@@ -64,32 +147,43 @@ export function nextRuntimeHeaders(options: NextRuntimeHeadersOptions = {}): Nex
 }
 
 /**
- * Build the Next.js config fragment needed by runtime-powered pages.
+ * Compose application-owned Next.js configuration with the runtime invariants.
  *
+ * @param config - Application-owned Next.js configuration.
  * @param options - Optional route scoping.
- * @returns A Next.js config fragment with `headers()`.
+ * @returns The composed Next.js configuration.
  * @public
+ * @example <caption>Compose application config</caption>
+ * ```typescript
+ * import { withTauRuntime } from '@taucad/runtime/nextjs/config';
+ *
+ * export default withTauRuntime({ distDir: '.next-custom' });
+ * ```
  */
-export function nextRuntimeConfig(options: NextRuntimeHeadersOptions = {}): {
-  turbopack: {
-    resolveAlias: Record<string, string>;
-    rules: Record<string, { type: 'asset' }>;
-  };
-  headers(): Promise<NextRuntimeHeaderRule[]>;
-} {
-  return {
+export const withTauRuntime: WithTauRuntime = (
+  config: NextRuntimeConfigInput = {},
+  options: NextRuntimeHeadersOptions = {},
+): NextRuntimeUserConfig => {
+  const appHeaders = config.headers;
+  const appWebpack = isWebpackHook(config.webpack) ? config.webpack : undefined;
+  const composed = { ...config };
+  Object.assign(composed, {
     turbopack: {
+      ...config.turbopack,
       resolveAlias: {
-        fs: nodeFsUnavailableModule,
+        ...config.turbopack?.resolveAlias,
+        fs: browserNodeBuiltinsModule,
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js module name
-        'node:fs': nodeFsUnavailableModule,
+        'node:fs': browserNodeBuiltinsModule,
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js module name
-        'node:fs/promises': nodeFsUnavailableModule,
-      },
-      rules: {
-        [wasmAssetRule]: { type: 'asset' },
+        'node:fs/promises': browserNodeBuiltinsModule,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js module name
+        'node:url': browserNodeBuiltinsModule,
       },
     },
-    headers: async () => nextRuntimeHeaders(options),
-  };
-}
+    webpack: (webpackConfig: NextRuntimeWebpackConfig, context: NextRuntimeWebpackContext) =>
+      configureWebpack(appWebpack?.(webpackConfig, context) ?? webpackConfig, context),
+    headers: async () => [...(appHeaders ? await appHeaders() : []), ...nextRuntimeHeaders(options)],
+  });
+  return composed;
+};

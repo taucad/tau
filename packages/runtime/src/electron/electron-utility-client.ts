@@ -9,15 +9,20 @@ import type { Channel } from '@taucad/rpc';
 import type { Geometry } from '@taucad/types';
 import type { GeometryTransport, RuntimeInitializeResult, RuntimeProtocol } from '#index.js';
 import { runtimeProtocolSchemas } from '#transport/index.js';
+import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
+import { triggerRenderTimeout } from '#transport/_internal/abort-channel.js';
+import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 import type {
   RuntimeInitializeMemoryHandle,
   RuntimeInitializePayload,
+  RuntimeTransportCloseResult,
   RuntimeTransportClient,
   TransportClientReady,
   TransportDescriptor,
 } from '#transport/index.js';
 
 import type { ElectronUtilityTransportOptions } from '#electron/electron-utility-transport.schemas.js';
+import { takeElectronRuntimeHostRelease } from '#electron/_internal/runtime-host-lease.js';
 
 const electronUtilityId = 'electron-utility';
 const sessionKey = 'tau.runtime/v1';
@@ -40,20 +45,6 @@ const debugLog = (origin: string, message: string, data?: Record<string, unknown
   console.log(`[tau-electron:${origin}] ${message}${payload}`);
 };
 
-/** */
-const abortReasonToCode = (reason: 'superseded' | 'timeout'): 0 | 1 | 2 => (reason === 'timeout' ? 2 : 1);
-
-/** */
-const buildHelloPayload = (): {
-  readonly server: 'kernel-runtime-worker';
-  readonly runtimeVersion: string;
-  readonly transportId: typeof electronUtilityId;
-} => ({
-  server: 'kernel-runtime-worker',
-  runtimeVersion: 'electron-utility',
-  transportId: electronUtilityId,
-});
-
 /**
  * Pure descriptor for Electron utility renderer client options.
  *
@@ -66,7 +57,6 @@ export const electronUtilityClientDescribe = (
   wire: 'electron-utility',
   memory: {
     geometryDelivery: 'copy',
-    fileDelivery: 'copy',
     abortSignal: 'wire-notify',
   },
   fileSystem: 'host-local',
@@ -82,6 +72,7 @@ export const electronUtilityClient = (
 ): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, typeof electronUtilityId> => {
   debugLog('renderer:client', 'constructed');
   const { port: receivedPort } = clientOptions;
+  const releaseRuntimeHost = takeElectronRuntimeHostRelease(receivedPort);
   const wrappedPort = wrapMessagePort<unknown>(receivedPort, {
     label: 'electron-utility:renderer',
   });
@@ -91,10 +82,34 @@ export const electronUtilityClient = (
   let channel: Channel<RuntimeProtocol> | undefined;
   let isClosed = false;
 
-  let resolveClosed: (() => void) | undefined;
-  const closed = new Promise<void>((resolve) => {
+  let resolveClosed: ((result: RuntimeTransportCloseResult) => void) | undefined;
+  const closed = new Promise<RuntimeTransportCloseResult>((resolve) => {
     resolveClosed = resolve;
   });
+
+  const finish = async (result: RuntimeTransportCloseResult): Promise<void> => {
+    if (isClosed) {
+      return;
+    }
+    isClosed = true;
+    debugLog('renderer:client', 'closing', { reason: result.cause });
+    try {
+      channel?.close(result.cause);
+    } catch {
+      /* Best-effort */
+    }
+    try {
+      wrappedPort.close();
+    } catch {
+      /* Best-effort */
+    }
+    try {
+      releaseRuntimeHost?.(result.cause === 'render-timeout' ? 'render-timeout' : 'requested');
+    } catch {
+      /* Best-effort */
+    }
+    resolveClosed?.(result);
+  };
 
   const open = async (): Promise<TransportClientReady> => {
     if (openPromise) {
@@ -114,7 +129,7 @@ export const electronUtilityClient = (
       debugLog('renderer:client', 'channel-ready');
       return {
         channel,
-        hello: buildHelloPayload(),
+        hello: buildHelloPayload(electronUtilityId),
       };
     })();
     return openPromise;
@@ -122,6 +137,26 @@ export const electronUtilityClient = (
 
   return {
     id: electronUtilityId,
+    reservePreview() {
+      return {};
+    },
+    renderTimeoutRecovery: {
+      kind: 'terminable',
+      abortRender(target): void {
+        if (!channel) {
+          return;
+        }
+        debugLog('renderer:client', 'render-timeout', target);
+        /* No SAB on this wire — `undefined` signal buffer, wire notify only.
+         * A closed-channel throw is caught by the sole caller
+         * (`handleRenderTimeout`), which has already armed host-termination
+         * escalation. */
+        triggerRenderTimeout(channel, undefined, target);
+      },
+      async terminate(): Promise<void> {
+        await finish({ cause: 'render-timeout' });
+      },
+    },
     describe(): TransportDescriptor<typeof electronUtilityId> {
       return electronUtilityClientDescribe(clientOptions);
     },
@@ -136,41 +171,11 @@ export const electronUtilityClient = (
       const memoryHandle: RuntimeInitializeMemoryHandle = {};
       return channel.call('initialize', { ...input, memoryHandle });
     },
-    abort(reason): void {
-      if (!channel) {
-        return;
-      }
-      debugLog('renderer:client', 'abort', { reason });
-      try {
-        channel.notify('abort', { reason: abortReasonToCode(reason) });
-      } catch {
-        /* Best-effort */
-      }
-    },
     async resolveGeometry(transport: GeometryTransport): Promise<Geometry> {
-      if (transport.format !== 'gltf') {
-        throw new Error(`electronUtilityClient: unsupported geometry format '${transport.format}'`);
-      }
-      const content = transport.content as { delivery: 'inline'; bytes: Uint8Array<ArrayBuffer> };
-      return { format: 'gltf', content: content.bytes, hash: transport.hash };
+      return materialiseGeometry(transport, undefined);
     },
-    async close(reason?: string): Promise<void> {
-      if (isClosed) {
-        return;
-      }
-      isClosed = true;
-      debugLog('renderer:client', 'closing', reason ? { reason } : undefined);
-      try {
-        channel?.close(reason);
-      } catch {
-        /* Best-effort */
-      }
-      try {
-        wrappedPort.close();
-      } catch {
-        /* Best-effort */
-      }
-      resolveClosed?.();
+    async close(): Promise<void> {
+      await finish({ cause: 'requested' });
     },
     closed,
   };

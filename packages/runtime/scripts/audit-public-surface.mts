@@ -31,6 +31,7 @@ import * as ts from 'typescript';
 const here = dirname(fileURLToPath(import.meta.url));
 const runtimeClientPath = resolve(here, '..', 'src', 'client', 'runtime-client-core.ts');
 const packageBarrelPath = resolve(here, '..', 'src', 'index.ts');
+const viteBarrelPath = resolve(here, '..', 'src', 'vite', 'index.ts');
 
 /**
  * Canonical `RuntimeClient` interface members. The set must match
@@ -39,12 +40,14 @@ const packageBarrelPath = resolve(here, '..', 'src', 'index.ts');
  */
 const allowedMembers: ReadonlySet<string> = new Set([
   'lifecycleState',
+  'renderStatus',
   'activeKernelId',
   'capabilities',
   'connect',
   'render',
   'updateParameters',
   'setOptions',
+  'setRenderTimeout',
   'export',
   'on',
   'terminate',
@@ -57,14 +60,13 @@ const allowedMembers: ReadonlySet<string> = new Set([
 /**
  * Members that were part of the pre-cutover surface and must NEVER appear
  * again. The current redesign collapsed these verbs into the event-driven
- * `render` / `updateParameters` / `setOptions` trio plus typed errors;
+ * render-intent methods plus typed errors;
  * reintroducing any of them silently regresses the public contract.
  */
 const forbiddenMembers: ReadonlySet<string> = new Set([
   'openFile',
   'setFile',
   'setParameters',
-  'setRenderTimeout',
   'notifyFileChanged',
   'cancelPendingRender',
   'geometryPool',
@@ -157,6 +159,7 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'RuntimeSourceFiles',
   'ExportResult',
   'RenderOutcome',
+  'RenderStatus',
   'RuntimeLifecycleState',
   'RuntimeConnectionCause',
   'RuntimeTerminatedCause',
@@ -194,12 +197,14 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'CollectTranscodeMap',
   'CollectTranscoderTargets',
   'ExportFormatsFor',
+  'ExportContentFor',
   'ExportOptionsFor',
   'KnownSourceFormats',
   'KnownTargetFormats',
   'KnownTranscoderIds',
   'MergeExportMap',
   'RenderOptionsFor',
+  'RenderContentFor',
 
   // Plugin authoring helpers
   'defineKernel',
@@ -229,6 +234,10 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'defineRuntimeTransport',
   'TransportPlugin',
   'RuntimeTransportClient',
+  'RuntimeTransportCloseResult',
+  'RuntimeTransportPreviewReservation',
+  'RuntimeTransportRenderTarget',
+  'RuntimeTransportTimeoutRecovery',
   'RuntimeTransportHost',
   'TransportClientReady',
   'TransportHostReady',
@@ -253,6 +262,35 @@ const forbiddenBarrelExports: ReadonlySet<string> = new Set(['RuntimeWorkerClien
 
 const barrelSource = readFileSync(packageBarrelPath, 'utf8');
 const barrelSourceFile = ts.createSourceFile(packageBarrelPath, barrelSource, ts.ScriptTarget.Latest, true);
+
+const allowedViteBarrelExports: ReadonlySet<string> = new Set([
+  'crossOriginIsolation',
+  'tauRuntime',
+  'RuntimePluginOptions',
+  'RuntimeVitePlugin',
+]);
+const viteBarrelSource = readFileSync(viteBarrelPath, 'utf8');
+const viteBarrelSourceFile = ts.createSourceFile(viteBarrelPath, viteBarrelSource, ts.ScriptTarget.Latest, true);
+const observedViteBarrelExports = new Set<string>();
+viteBarrelSourceFile.forEachChild((node) => {
+  if (!ts.isExportDeclaration(node) || !node.exportClause || !ts.isNamedExports(node.exportClause)) {
+    return;
+  }
+  for (const element of node.exportClause.elements) {
+    observedViteBarrelExports.add(element.name.text);
+  }
+});
+
+for (const observed of observedViteBarrelExports) {
+  if (!allowedViteBarrelExports.has(observed)) {
+    failures.push(`unexpected export \`${observed}\` from @taucad/runtime/vite`);
+  }
+}
+for (const required of allowedViteBarrelExports) {
+  if (!observedViteBarrelExports.has(required)) {
+    failures.push(`missing export \`${required}\` from @taucad/runtime/vite`);
+  }
+}
 
 const observedBarrelExports = new Set<string>();
 
@@ -317,5 +355,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `audit-public-surface.mts OK — RuntimeClient surface matches the allowlist; ${observedBarrelExports.size} sibling exports on src/index.ts match the allowlist.`,
+  `audit-public-surface.mts OK — RuntimeClient, package barrel, and Vite subpath surfaces match their allowlists (${observedBarrelExports.size} package-barrel exports).`,
 );

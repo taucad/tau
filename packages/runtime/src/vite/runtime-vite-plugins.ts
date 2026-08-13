@@ -1,7 +1,7 @@
 /**
  * Implementation for the `@taucad/runtime/vite` entry. Kept in this sibling
- * module (imported by `index.ts` via the same-package `#vite/*` map, exactly
- * like `#vite/ts-module-url.vite-plugin.js`) so the entry stays a pure barrel.
+ * module (imported by `index.ts` via the same-package `#vite/*` map) so the
+ * entry stays a pure barrel.
  *
  * The canonical header set and the WASM asset-inline callback are still
  * duplicated here (as tiny frozen values) rather than imported from
@@ -15,11 +15,66 @@
  * @see https://vite.dev/guide/api-plugin.html
  */
 
-import type { Plugin, PreviewServer, ViteDevServer } from 'vite';
-import { tsModuleUrlPlugin } from '#vite/ts-module-url.vite-plugin.js';
+import type { Plugin, PreviewServer, ResolvedConfig, ViteDevServer } from 'vite';
+import { runtimeSsrAssetsPlugin } from '#vite/runtime-ssr-assets.vite-plugin.js';
 
-const wasmAssetsInlineLimit = (filePath: string): false | undefined => (filePath.endsWith('.wasm') ? false : undefined);
+/**
+ * Version-neutral public shape of a Vite plugin returned by Tau factories.
+ * Hook types remain internal so consumers can use the same factory with every
+ * supported Vite major without importing Tau's development-time Vite types.
+ *
+ * @public
+ */
+export type RuntimeVitePlugin = {
+  readonly name: string;
+};
+
+type AssetsInlineLimit = ResolvedConfig['build']['assetsInlineLimit'];
+type AssetContent = Parameters<Exclude<AssetsInlineLimit, number | boolean>>[1];
+const gitLfsPrefix = new TextEncoder().encode('version https://git-lfs.github.com');
+
+const isGitLfsPlaceholder = (content: AssetContent): boolean =>
+  content.length >= gitLfsPrefix.length && gitLfsPrefix.every((byte, index) => content[index] === byte);
+
+const withWasmInlineInvariant =
+  (consumerLimit: AssetsInlineLimit): AssetsInlineLimit =>
+  (filePath, content): boolean | undefined => {
+    if (filePath.endsWith('.wasm')) {
+      return false;
+    }
+    if (typeof consumerLimit === 'function') {
+      return consumerLimit(filePath, content);
+    }
+    return !isGitLfsPlaceholder(content) && content.length < Number(consumerLimit);
+  };
 const nodeRuntimeExternals = ['esbuild', 'esbuild-wasm'] as const;
+const browserNodeBuiltinSources = new Set(['fs', 'node:fs', 'node:fs/promises', 'node:url']);
+const browserNodeBuiltinId = '\0taucad-runtime:browser-node-builtins';
+const browserNodeBuiltinModule = `
+const unavailable = (name) => () => {
+  throw new Error('Node ' + name + '() is unavailable in a browser runtime. A Node-only code path was executed in the client graph.');
+};
+export const fileURLToPath = unavailable('url.fileURLToPath');
+export const readFile = unavailable('fs.readFile');
+export const readFileSync = unavailable('fs.readFileSync');
+export const writeFileSync = unavailable('fs.writeFileSync');
+export const promises = { readFile };
+export default { promises, readFile, readFileSync, writeFileSync };
+`;
+
+const browserNodeBuiltins = (): Plugin => ({
+  name: 'taucad-runtime:browser-node-builtins',
+  enforce: 'pre',
+  resolveId(source) {
+    if (this.environment.config.consumer === 'client' && browserNodeBuiltinSources.has(source)) {
+      return browserNodeBuiltinId;
+    }
+    return null;
+  },
+  load(id) {
+    return id === browserNodeBuiltinId ? browserNodeBuiltinModule : null;
+  },
+});
 
 const documentHeaders: Readonly<Record<string, string>> = Object.freeze({
   'Cross-Origin-Opener-Policy': 'same-origin',
@@ -53,7 +108,7 @@ const documentHeaders: Readonly<Record<string, string>> = Object.freeze({
  * });
  * ```
  */
-export function crossOriginIsolation(): Plugin {
+export function crossOriginIsolation(): RuntimeVitePlugin {
   const applyHeaders = (server: ViteDevServer | PreviewServer): void => {
     server.middlewares.use((_request, response, next) => {
       for (const [name, value] of Object.entries(documentHeaders)) {
@@ -63,15 +118,16 @@ export function crossOriginIsolation(): Plugin {
     });
   };
 
-  return {
+  const plugin: Plugin = {
     name: 'taucad-runtime:cross-origin-isolation',
     configureServer: applyHeaders,
     configurePreviewServer: applyHeaders,
   };
+  return plugin;
 }
 
 /**
- * Options for the {@link runtime} Vite plugin.
+ * Options for the {@link tauRuntime} Vite plugin.
  *
  * @public
  */
@@ -93,8 +149,7 @@ export type RuntimePluginOptions = {
  * - prevents `.wasm` assets from being inlined as base64 (kills V8 caching
  *   and breaks Worker bootstrap)
  * - forces `worker.format: 'es'` so workers preserve `import.meta.url`
- * - bundles TypeScript files referenced via `new URL(..., import.meta.url)`
- *   as module chunks instead of raw `.ts` assets
+ * - emits runtime-owned static assets in SSR/Electron builds
  * - keeps native Node runtime helpers such as `esbuild` external in SSR /
  *   Electron utility builds so they can resolve their package-owned binaries
  *
@@ -110,33 +165,34 @@ export type RuntimePluginOptions = {
  *
  * @example <caption>Drop-in usage in vite.config.ts</caption>
  * ```typescript
- * import { runtime } from '@taucad/runtime/vite';
+ * import { tauRuntime } from '@taucad/runtime/vite';
  * import { defineConfig } from 'vite';
  *
  * export default defineConfig({
- *   plugins: [runtime()],
+ *   plugins: [tauRuntime()],
  * });
  * ```
  */
-export function runtime(options: RuntimePluginOptions = {}): Plugin[] {
+export function tauRuntime(options: RuntimePluginOptions = {}): RuntimeVitePlugin[] {
   const { crossOriginIsolation: includeCoi = true } = options;
 
   const invariants: Plugin = {
+    ...browserNodeBuiltins(),
     name: 'taucad-runtime:invariants',
-    enforce: 'pre',
     config: () => ({
-      build: {
-        assetsInlineLimit: wasmAssetsInlineLimit,
-      },
       worker: {
         format: 'es',
+        plugins: () => [browserNodeBuiltins()],
       },
       ssr: {
         external: [...nodeRuntimeExternals],
       },
     }),
+    configResolved(config) {
+      config.build.assetsInlineLimit = withWasmInlineInvariant(config.build.assetsInlineLimit);
+    },
   };
 
-  const plugins = [...tsModuleUrlPlugin(), invariants];
+  const plugins = [runtimeSsrAssetsPlugin(), invariants];
   return includeCoi ? [crossOriginIsolation(), ...plugins] : plugins;
 }

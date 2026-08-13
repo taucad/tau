@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { coiMiddleware } from '#cross-origin-isolation/express.js';
 import { documentHeaders } from '#cross-origin-isolation/index.js';
 
-type CoiServerResponse = ServerResponse & { append?: (name: string, value: unknown) => unknown };
+type CoiServerResponse = ServerResponse & { append?: (name: string, value?: string | string[]) => unknown };
 
 function asRequest(value: Record<string, unknown>): IncomingMessage {
   return value as unknown as IncomingMessage;
@@ -22,12 +22,12 @@ function createResponse() {
 
 function createExpressResponse() {
   const setCalls: Array<[string, string]> = [];
-  const appendCalls: Array<[string, unknown]> = [];
+  const appendCalls: Array<[string, string | string[] | undefined]> = [];
   const response = {
     setHeader(name: string, value: string) {
       setCalls.push([name, value]);
     },
-    append(name: string, value: unknown) {
+    append(name: string, value?: string | string[]) {
       appendCalls.push([name, value]);
       return response;
     },

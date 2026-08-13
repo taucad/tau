@@ -80,22 +80,28 @@ describe('Electron main runtime helpers', () => {
 
   it('registers the IPC bridge, relays ports, and tears down utility processes', async () => {
     const { registerElectronRuntimeMain } = await import('#electron/main.js');
-    const senderOnce = vi.fn();
-    const postMessage = vi.fn();
+    const senderOnce = vi.fn<(event: string, handler: () => void) => void>();
+    const postMessage = vi.fn<(channel: string, payload: { readonly hostId: string }, ports: unknown[]) => void>();
+    const sender = { once: senderOnce };
 
     const handle = registerElectronRuntimeMain({
-      env: { [tauElectronDebugEnvName]: '1' },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Node defines this environment variable name.
+      env: { NODE_ENV: 'test', [tauElectronDebugEnvName]: '1' },
       serviceName: 'tau-kernel-host',
       utilityEntry: '/dist/main/kernel-host.js',
     });
 
     listeners.get('taucad:connect-runtime')?.({
-      sender: { once: senderOnce },
+      sender,
       senderFrame: { postMessage },
     });
 
     expect(liveUtilities[0]?.postMessage).toHaveBeenCalledWith({ taucadRuntime: true }, [{ id: 'utility-port' }]);
-    expect(postMessage).toHaveBeenCalledWith('taucad:connect-runtime:port', undefined, [{ id: 'renderer-port' }]);
+    expect(postMessage).toHaveBeenCalledOnce();
+    const [relayChannel, relayPayload, relayPorts] = postMessage.mock.calls[0]!;
+    expect(relayChannel).toBe('taucad:connect-runtime:port');
+    expect(relayPayload.hostId).toBeTypeOf('string');
+    expect(relayPorts).toEqual([{ id: 'renderer-port' }]);
     expect(senderOnce).toHaveBeenCalledWith('destroyed', expect.any(Function));
 
     const [, destroyedHandler] = senderOnce.mock.calls[0] as ['destroyed', () => void];
@@ -104,6 +110,31 @@ describe('Electron main runtime helpers', () => {
 
     handle.dispose();
     expect(listeners.has('taucad:connect-runtime')).toBe(false);
-    expect(liveUtilities[0]?.kill).toHaveBeenCalledTimes(2);
+    expect(listeners.has('taucad:connect-runtime:release')).toBe(false);
+    expect(liveUtilities[0]?.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('kills only the utility process addressed by a renderer release', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const sender = { once: vi.fn() };
+    const postMessage = vi.fn();
+    const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
+
+    listeners.get('taucad:connect-runtime')?.({ sender, senderFrame: { postMessage } });
+    listeners.get('taucad:connect-runtime')?.({ sender, senderFrame: { postMessage } });
+    const firstPayload = postMessage.mock.calls[0]?.[1] as { hostId: string };
+
+    listeners.get('taucad:connect-runtime:release')?.(
+      { sender },
+      { hostId: firstPayload.hostId, reason: 'render-timeout' },
+    );
+
+    const first = liveUtilities.at(-2);
+    const second = liveUtilities.at(-1);
+    expect(first?.kill).toHaveBeenCalledOnce();
+    expect(second?.kill).not.toHaveBeenCalled();
+    handle.dispose();
+    expect(first?.kill).toHaveBeenCalledOnce();
+    expect(second?.kill).toHaveBeenCalledOnce();
   });
 });

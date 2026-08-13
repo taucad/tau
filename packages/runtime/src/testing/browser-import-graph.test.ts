@@ -11,6 +11,7 @@ import {
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'vite';
+import { tauRuntime } from '#vite/index.js';
 import { describe, expect, it } from 'vitest';
 
 const runtimeRoot = new URL('../', import.meta.url);
@@ -64,6 +65,66 @@ describe('runtime browser import graph guards', () => {
     }
   });
 
+  it('keeps the Electron renderer transport free of utility-host imports', () => {
+    const transportSource = readRuntime('electron/electron-utility-transport.ts');
+    const rendererSource = readRuntime('electron/renderer.ts');
+
+    expect(transportSource).not.toContain('electron-utility-host');
+    expect(transportSource).not.toContain('hostOptionsSchema');
+    expect(rendererSource).not.toContain('worker-internals');
+    expect(rendererSource).not.toContain('KernelRuntimeWorker');
+    expect(rendererSource).not.toContain('esbuild-core');
+  });
+
+  it('should exclude utility-host and esbuild code from an Electron renderer build', async () => {
+    const temporaryParent = join(fileURLToPath(workspaceRoot), 'tmp');
+    mkdirSync(temporaryParent, { recursive: true });
+    const temporaryRoot = mkdtempSync(join(temporaryParent, 'runtime-electron-renderer-vite-'));
+    const entryPath = join(temporaryRoot, 'entry.ts');
+    const htmlPath = join(temporaryRoot, 'index.html');
+    const outputDirectory = join(temporaryRoot, 'dist');
+
+    writeFileSync(
+      entryPath,
+      [
+        "import { createElectronClientOptions } from '@taucad/runtime/electron/renderer';",
+        'void createElectronClientOptions;',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      htmlPath,
+      '<!doctype html><html><body><script type="module" src="/entry.ts"></script></body></html>',
+      'utf8',
+    );
+
+    try {
+      await build({
+        configFile: false,
+        logLevel: 'silent',
+        root: temporaryRoot,
+        build: {
+          emptyOutDir: true,
+          minify: false,
+          outDir: outputDirectory,
+        },
+      });
+
+      const emittedFiles = collectRuntimeSourceFiles(pathToFileURL(`${outputDirectory}/`));
+      const javascript = emittedFiles
+        .filter((path) => path.endsWith('.js'))
+        .map((path) => readFileSync(path, 'utf8'))
+        .join('\n');
+
+      expect(emittedFiles.some((path) => path.endsWith('esbuild.wasm'))).toBe(false);
+      expect(javascript).not.toContain('KernelRuntimeWorker');
+      expect(javascript).not.toContain('electronUtilityHost');
+      expect(javascript).not.toContain('esbuild-core');
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   it('marks generated browser module imports as external to bundlers', () => {
     const importerSource = readRepo('vm/src/browser-module-import.ts');
 
@@ -71,11 +132,17 @@ describe('runtime browser import graph guards', () => {
     expect(importerSource).toContain('@vite-ignore');
   });
 
-  it('lets OpenCascade glue modules own built-in OpenCascade WASM asset URLs', () => {
+  it('keeps both built-in OpenCascade WASM assets visible to browser bundlers', () => {
     const opencascadeSource = readRuntime('kernels/opencascade/opencascade.kernel.ts');
 
-    expect(opencascadeSource).not.toContain("new URL('wasm/");
-    expect(opencascadeSource).not.toContain('new URL("wasm/');
+    expect(opencascadeSource).toContain("import('libcascade/single/init')");
+    expect(opencascadeSource).toContain("import('libcascade/multi/init')");
+    expect(opencascadeSource).toContain(
+      "const fullWasmUrl = new URL('wasm/opencascade_full.wasm', import.meta.url).href;",
+    );
+    expect(opencascadeSource).toContain(
+      "const multiWasmUrl = new URL('wasm/opencascade_full_multi.wasm', import.meta.url).href;",
+    );
   });
 
   it('keeps Replicad built-in multi WASM loader visible to browser bundlers', () => {
@@ -104,11 +171,17 @@ describe('runtime browser import graph guards', () => {
     mkdirSync(temporaryParent, { recursive: true });
     const temporaryRoot = mkdtempSync(join(temporaryParent, 'runtime-replicad-vite-'));
     const entryPath = join(temporaryRoot, 'entry.ts');
+    const workerPath = join(temporaryRoot, 'runtime.worker.ts');
     const htmlPath = join(temporaryRoot, 'index.html');
     const outputDirectory = join(temporaryRoot, 'dist');
 
     writeFileSync(
       entryPath,
+      "new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' });",
+      'utf8',
+    );
+    writeFileSync(
+      workerPath,
       [
         "import { replicad } from '@taucad/runtime/kernels/replicad';",
         "import { defineRuntime } from '@taucad/runtime/worker';",
@@ -128,13 +201,10 @@ describe('runtime browser import graph guards', () => {
         configFile: false,
         logLevel: 'silent',
         root: temporaryRoot,
-        worker: {
-          format: 'es',
-        },
+        plugins: tauRuntime({ crossOriginIsolation: false }),
         build: {
           emptyOutDir: true,
           target: 'esnext',
-          assetsInlineLimit: (filePath) => (filePath.endsWith('.wasm') ? false : undefined),
           outDir: outputDirectory,
           rollupOptions: {
             output: {
@@ -152,6 +222,7 @@ describe('runtime browser import graph guards', () => {
       expect(emittedFiles.some((path) => /(?:^|\/)replicad_multi-[^.]+\.js$/.test(path))).toBe(true);
       expect(emittedFiles.some((path) => /(?:^|\/)replicad_multi-[^.]+\.wasm$/.test(path))).toBe(true);
       expect(emittedFiles.some((path) => path.includes('replicad-wasm-multi-loader'))).toBe(false);
+      expect(emittedFiles.some((path) => path.includes('__vite-browser-external'))).toBe(false);
     } finally {
       rmSync(temporaryRoot, { recursive: true, force: true });
     }

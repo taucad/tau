@@ -27,11 +27,7 @@
 import { defineRuntimeTransport } from '#transport/index.js';
 
 import { electronUtilityClient } from '#electron/electron-utility-client.js';
-import { electronUtilityHost } from '#electron/electron-utility-host.js';
-import {
-  electronUtilityClientOptionsSchema,
-  electronUtilityHostOptionsSchema,
-} from '#electron/electron-utility-transport.schemas.js';
+import { electronUtilityClientOptionsSchema } from '#electron/electron-utility-transport.schemas.js';
 
 const electronUtilityId = 'electron-utility';
 
@@ -39,7 +35,5 @@ const electronUtilityId = 'electron-utility';
 export const electronUtilityTransport = defineRuntimeTransport({
   id: electronUtilityId,
   clientOptionsSchema: electronUtilityClientOptionsSchema,
-  hostOptionsSchema: electronUtilityHostOptionsSchema,
   client: electronUtilityClient,
-  host: electronUtilityHost,
 });

@@ -6,7 +6,6 @@
 
 import type { ChannelServerHandle, Port } from '@taucad/rpc';
 import type {
-  EncodedFileBytes,
   EncodedGeometry,
   HostInitializeBindings,
   RuntimeInitializeMemoryHandle,
@@ -17,7 +16,8 @@ import type { Geometry } from '@taucad/types';
 import type { RuntimeProtocol } from '#index.js';
 import { extractInlineFileSystem } from '#transport-internals.js';
 import { installWorkerCrashTrap, createWorkerDispatcher } from '#worker-internals.js';
-import { encodeFileAsOwnedCopy, encodeGeometryAsOwnedCopy } from '#transport/_internal/owned-transfer-bytes.js';
+import { encodeGeometryAsOwnedCopy } from '#transport/_internal/owned-transfer-bytes.js';
+import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 
 import type { ElectronUtilityHostOptions } from '#electron/electron-utility-transport.schemas.js';
 
@@ -54,7 +54,7 @@ const summariseFrame = (value: unknown): Record<string, unknown> => {
       typeof record['a'] === 'object' && record['a'] !== null
         ? Object.fromEntries(
             Object.entries(record['a'] as Record<string, unknown>).filter(([key]) =>
-              ['state', 'detail', 'rgen', 'kernelId', 'reason'].includes(key),
+              ['state', 'detail', 'renderId', 'kernelId', 'reason'].includes(key),
             ),
           )
         : undefined,
@@ -66,17 +66,6 @@ const summariseFrame = (value: unknown): Record<string, unknown> => {
     keys: Object.keys(record),
   };
 };
-
-/** */
-const buildHelloPayload = (): {
-  readonly server: 'kernel-runtime-worker';
-  readonly runtimeVersion: string;
-  readonly transportId: typeof electronUtilityId;
-} => ({
-  server: 'kernel-runtime-worker',
-  runtimeVersion: 'electron-utility',
-  transportId: electronUtilityId,
-});
 
 /** */
 const wrapMessagePortMain = (port: MessagePortMainLike, label: string): Port<unknown> => {
@@ -182,11 +171,6 @@ export const electronUtilityHost = (
     return encodeGeometryAsOwnedCopy(geometry);
   };
 
-  // oxlint-disable-next-line enforce-uint8array-arraybuffer/enforce-uint8array-arraybuffer -- binding signature uses Uint8Array
-  const encodeFile = (file: Uint8Array): EncodedFileBytes => {
-    return encodeFileAsOwnedCopy(file as Uint8Array<ArrayBuffer>);
-  };
-
   const open = async (): Promise<TransportHostReady> => {
     if (openPromise) {
       return openPromise;
@@ -233,7 +217,6 @@ export const electronUtilityHost = (
           const dispatcher = createWorkerDispatcher(worker, wireport, {
             inlineFileSystem: utilityFsBase,
             encodeGeometry,
-            encodeFile,
           });
           dispatcherHandle = dispatcher;
           debugLog('utility:host', 'dispatcher-wired');
@@ -241,7 +224,7 @@ export const electronUtilityHost = (
           debugLog('utility:host', 'crash-trap-installed');
           resolve({
             channel: dispatcher,
-            peerHello: buildHelloPayload(),
+            peerHello: buildHelloPayload(electronUtilityId),
           });
         } catch (error) {
           debugLog('utility:host', 'dispatcher-init-failed', {
@@ -258,28 +241,16 @@ export const electronUtilityHost = (
     id: electronUtilityId,
     open,
     adoptInitialize(_handle: RuntimeInitializeMemoryHandle): HostInitializeBindings {
-      const controller = new AbortController();
       return {
-        abort: {
-          signal: controller.signal,
-          strategy: 'wire-notify',
-        },
         geometryDelivery: {
           publish(geometry): EncodedGeometry {
             return encodeGeometry(geometry);
           },
           tier: 'copy',
         },
-        fileDelivery: {
-          publish(file): EncodedFileBytes {
-            return encodeFile(file);
-          },
-          tier: 'copy',
-        },
       };
     },
     encodeGeometry,
-    encodeFile,
     async close(reason?: string): Promise<void> {
       if (isClosed) {
         return;

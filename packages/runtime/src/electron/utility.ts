@@ -18,12 +18,38 @@ import type { ElectronUtilityHostOptions } from '#electron/electron-utility-tran
 export { electronUtilityHost } from '#electron/electron-utility-host.js';
 export type { ElectronUtilityHostOptions } from '#electron/electron-utility-transport.schemas.js';
 
+/**
+ * Options for {@link serveElectronRuntime} in an Electron utility entry.
+ *
+ * @public
+ */
 export type ServeElectronRuntimeOptions = {
+  /** Filesystem authority exposed as runtime `/` inside the utility host. */
   readonly fileSystem: RuntimeFileSystem;
+  /** Install a process-exit disposer. Defaults to true. */
   readonly installProcessTeardown?: boolean;
+  /** Executable runtime definition owned by this utility host. */
   readonly runtime: AnyRuntimeDefinition;
 };
 
+/**
+ * Serve one worker-owned runtime over the utility process port supplied by main.
+ *
+ * @param options - Runtime definition, opaque filesystem, and teardown behavior.
+ * @returns The utility-process runtime host handle.
+ * @public
+ *
+ * @example <caption>Start a utility-process runtime host</caption>
+ * ```typescript
+ * import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
+ * import { fromMemoryFs } from '@taucad/runtime/filesystem';
+ * import { serveElectronRuntime } from '@taucad/runtime/electron/utility';
+ *
+ * declare const runtime: AnyRuntimeDefinition;
+ *
+ * serveElectronRuntime({ runtime, fileSystem: fromMemoryFs() });
+ * ```
+ */
 export const serveElectronRuntime = (options: ServeElectronRuntimeOptions): RuntimeHostHandle => {
   const worker = createRuntimeWorker({ runtime: options.runtime });
   const host = createRuntimeHost({
@@ -42,10 +68,6 @@ export const serveElectronRuntime = (options: ServeElectronRuntimeOptions): Runt
       }
     };
     process.once('exit', teardown);
-    process.once('SIGTERM', () => {
-      teardown();
-      process.exit(0);
-    });
   }
 
   return host;

@@ -10,10 +10,9 @@
  */
 
 /**
- * Runtime packages that ship `new URL(literal, import.meta.url)` asset
- * references. Pre-bundling these copies them into a `node_modules/.vite/deps`
- * cache directory whose `import.meta.url` no longer points at the asset
- * source — every WASM/font fetch then 404s.
+ * Runtime root packages that ship `new URL(literal, import.meta.url)` asset
+ * references. Build adapters use these roots when the host build tool would
+ * otherwise externalize runtime source before it can emit those assets.
  *
  * Kept as a tuple so the resolved Vite/Rolldown configs are deeply readonly
  * and the regression tests can assert exact membership.
@@ -24,8 +23,8 @@ export const runtimePackages = ['@taucad/runtime', '@taucad/openscad'] as const;
 
 /**
  * Third-party packages whose WASM binaries the runtime forwards via
- * `new URL`. Pre-bundling them produces the same `import.meta.url`
- * corruption as for `runtimePackages`. The list mirrors
+ * `new URL`. Library-oriented Rolldown builds keep these dependencies
+ * external so their package-owned assets remain addressable. The list mirrors
  * [Appendix A](../../docs/research/runtime-zero-config-bundling.md#appendix-a-runtime-asset-inventory)
  * of the bundling research doc.
  *
@@ -33,7 +32,7 @@ export const runtimePackages = ['@taucad/runtime', '@taucad/openscad'] as const;
  */
 export const wasmBearingDeps = [
   'replicad-opencascadejs',
-  'opencascade.js',
+  'libcascade',
   'manifold-3d',
   '@kittycad/lib',
   'esbuild-wasm',

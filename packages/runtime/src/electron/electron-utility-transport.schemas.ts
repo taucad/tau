@@ -4,12 +4,10 @@
  * - `electronUtilityClientOptionsSchema` — supplied to {@link electronUtilityTransport}
  *   from the renderer; carries the renderer-received `MessagePort`
  *   that main shipped via `webContents.postMessage`.
- * - `electronUtilityHostOptionsSchema` — supplied to {@link electronUtilityHost}
- *   inside the utility process. Requires opaque `fileSystem` (e.g.
- *   `fromNodeFs(projectRoot)`).
+ * Host options remain a standalone utility-process type.
  */
 
-import { runtimeFileSystemSchema } from '#filesystem/index.js';
+import type { RuntimeFileSystem } from '#filesystem/index.js';
 import type { KernelRuntimeWorker } from '#worker-internals.js';
 import { z } from 'zod';
 
@@ -32,21 +30,11 @@ export const electronUtilityClientOptionsSchema = z.object({
   ),
 });
 
-export const electronUtilityHostOptionsSchema = z.object({
-  fileSystem: runtimeFileSystemSchema,
-  worker: z.custom<KernelRuntimeWorker>(
-    (value) =>
-      value !== null &&
-      typeof value === 'object' &&
-      typeof (value as { initialize?: unknown }).initialize === 'function' &&
-      typeof (value as { createGeometry?: unknown }).createGeometry === 'function' &&
-      typeof (value as { exportGeometry?: unknown }).exportGeometry === 'function',
-    { message: 'worker must be a KernelRuntimeWorker' },
-  ),
-});
-
 /** Renderer-side validated options inferred from schema. */
 export type ElectronUtilityTransportOptions = z.input<typeof electronUtilityClientOptionsSchema>;
 
-/** Utility-process validated options inferred from schema. */
-export type ElectronUtilityHostOptions = z.input<typeof electronUtilityHostOptionsSchema>;
+/** Utility-process options owned by the standalone host factory. */
+export type ElectronUtilityHostOptions = {
+  readonly fileSystem: RuntimeFileSystem;
+  readonly worker: KernelRuntimeWorker;
+};

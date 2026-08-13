@@ -1,16 +1,17 @@
 import type { ExternalOption, InputOptions, OutputOptions } from 'rolldown';
 import { describe, it, expect } from 'vitest';
-import { runtime } from '#rolldown/index.js';
+import { tauRuntime } from '#rolldown/index.js';
+import * as rolldownIntegration from '#rolldown/index.js';
 import { runtimePackages, wasmBearingDeps } from '#vite/runtime-invariants.js';
 
 type OptionsHandler = (options: InputOptions) => InputOptions | undefined;
 type OutputHandler = (output: OutputOptions) => OutputOptions | undefined;
 
 const callOptionsHook = (existing: ExternalOption | undefined): ExternalOption => {
-  const plugin = runtime();
+  const plugin = tauRuntime();
   const optionsHook = plugin.options;
   if (typeof optionsHook !== 'function') {
-    throw new TypeError('runtime() rolldown plugin must expose an options() hook');
+    throw new TypeError('tauRuntime() Rolldown plugin must expose an options() hook');
   }
   const handler = optionsHook as unknown as OptionsHandler;
   const result = handler({ external: existing });
@@ -21,18 +22,23 @@ const callOptionsHook = (existing: ExternalOption | undefined): ExternalOption =
 };
 
 const callOutputHook = (existing: OutputOptions): OutputOptions | undefined => {
-  const plugin = runtime();
+  const plugin = tauRuntime();
   const hook = plugin.outputOptions;
   if (typeof hook !== 'function') {
-    throw new TypeError('runtime() rolldown plugin must expose an outputOptions() hook');
+    throw new TypeError('tauRuntime() Rolldown plugin must expose an outputOptions() hook');
   }
   const handler = hook as unknown as OutputHandler;
   return handler(existing);
 };
 
-describe('runtime (rolldown plugin)', () => {
+describe('tauRuntime (Rolldown plugin)', () => {
+  it('should expose the self-identifying factory without the retired runtime alias', () => {
+    expect(tauRuntime).toBeTypeOf('function');
+    expect(rolldownIntegration).not.toHaveProperty('runtime');
+  });
+
   it('should be named taucad-runtime:invariants for parity with the Vite plugin', () => {
-    const plugin = runtime();
+    const plugin = tauRuntime();
 
     expect(plugin.name).toBe('taucad-runtime:invariants');
   });
@@ -90,10 +96,10 @@ describe('runtime (rolldown plugin)', () => {
   });
 
   it('should leave output format untouched when forceEsmOutput is false', () => {
-    const plugin = runtime({ forceEsmOutput: false });
+    const plugin = tauRuntime({ forceEsmOutput: false });
     const hook = plugin.outputOptions;
     if (typeof hook !== 'function') {
-      throw new TypeError('runtime() rolldown plugin must expose an outputOptions() hook');
+      throw new TypeError('tauRuntime() Rolldown plugin must expose an outputOptions() hook');
     }
 
     const handler = hook as unknown as OutputHandler;

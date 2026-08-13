@@ -27,10 +27,14 @@ describe('Electron renderer runtime helpers', () => {
       removeEventListener: vi.fn(),
     } as unknown as Window;
     const requestRuntimePort = vi.fn(() => {
-      listener?.({ data: { taucadRelay: 'taucad:connect-runtime:port' }, ports: [port] } as unknown as MessageEvent);
+      listener?.({
+        data: { taucadRelay: 'taucad:connect-runtime:port', hostId: 'host-1' },
+        ports: [port],
+      } as unknown as MessageEvent);
     });
     const bridge = {
       requestRuntimePort,
+      releaseRuntimeHost: vi.fn(),
       relayTag: { runtime: 'taucad:connect-runtime:port' },
     };
 
@@ -52,10 +56,14 @@ describe('Electron renderer runtime helpers', () => {
       removeEventListener: vi.fn(),
     } as unknown as Window;
     const requestRuntimePort = vi.fn(() => {
-      listener?.({ data: { taucadRelay: 'tau-runtime-port' }, ports: [port] } as unknown as MessageEvent);
+      listener?.({
+        data: { taucadRelay: 'tau-runtime-port', hostId: 'host-2' },
+        ports: [port],
+      } as unknown as MessageEvent);
     });
     const bridge = {
       requestRuntimePort,
+      releaseRuntimeHost: vi.fn(),
       relayTag: { runtime: 'tau-runtime-port' },
     };
 
@@ -69,10 +77,16 @@ describe('Electron renderer runtime helpers', () => {
       fileSystem: 'host-local',
       memory: {
         abortSignal: 'wire-notify',
-        fileDelivery: 'copy',
         geometryDelivery: 'copy',
       },
       wire: 'electron-utility',
     });
+
+    const transport = options.transport.materialize();
+    if (transport.renderTimeoutRecovery.kind !== 'terminable') {
+      throw new Error('Expected terminable Electron transport');
+    }
+    await transport.renderTimeoutRecovery.terminate();
+    expect(bridge.releaseRuntimeHost).toHaveBeenCalledExactlyOnceWith('host-2', 'render-timeout');
   });
 });

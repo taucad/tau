@@ -42,7 +42,8 @@
       "inputs": [
         "{projectRoot}/scripts/audit-public-surface.mts",
         "{projectRoot}/src/index.ts",
-        "{projectRoot}/src/client/runtime-client.ts"
+        "{projectRoot}/src/client/runtime-client.ts",
+        "{projectRoot}/src/vite/index.ts"
       ]
     }
   }

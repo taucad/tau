@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "inputVersion": "wave1-2026-08-12.2",
+  "basis": "Historical Wave-1 input baseline plus exact OA1/OQ1/OQ2/OQ5/OQ6/C0/C1/C3/C5 authorized deltas; the version-1 baseline remains immutable.",
+  "sourceRevision": "258d48fc3953da7a483e9f16deef9da62196bc1c",
+  "baseline": {
+    "path": "packages/geospec-engine/verification/wave1-input-baseline.json",
+    "sha256": "4e78cc87031fe787d056fa579aac1e4128d6238a77fd6cabb9ed96346d00ac9a"
+  },
+  "authorizedDeltas": {
+    "path": "packages/geospec-engine/verification/wave1-authorized-input-deltas.json",
+    "sha256": "5d2f71f8e5bd416ff7e1c39fe7ad3169c492c003c3fc56091ae403c23d0c274e",
+    "count": 89
+  },
+  "removedPaths": [
+    "libs/tau-examples/src/kernels/replicad/v8-engine-rev2/test-exports/service-access.ts",
+    "libs/tau-examples/src/kernels/replicad/v8-engine-rev2/test-exports/sub-assembly.ts",
+    "packages/geospec-engine/native/opencascade/.libcascade/geospec_opencascade_single.yml",
+    "packages/geospec-engine/native/opencascade/wrappers/geospec-mesh-metrics.cpp",
+    "packages/runtime/src/kernels/replicad/.DS_Store",
+    "packages/runtime/src/kernels/replicad/wasm/replicad_multi.js",
+    "packages/runtime/src/kernels/replicad/wasm/replicad_single.js"
+  ],
+  "categories": {
+    "corpus": {
+      "fileCount": 44,
+      "rootSha256": "efd07f23aa12b0e7c28e62656805aa28e269cb52d7a1e0a281f506f0c63e01a4"
+    },
+    "fixtures": {
+      "fileCount": 101,
+      "rootSha256": "48b2afaea3fc4bd56ac86cf8747f10213a698c550d62d549955d8b187a53f6fb"
+    },
+    "evidenceSnapshots": {
+      "fileCount": 44,
+      "rootSha256": "8eaf88e56dd5529daa20a7204dc2b08b2b488d5bb0cda98bc94d58727817c19d"
+    },
+    "nativeArtifacts": {
+      "fileCount": 16,
+      "rootSha256": "15736f8c95cf86a3c15a167fe87198da4ae4747c4d5d0d00203b7bf013eee742"
+    },
+    "runtimeKernelInputs": {
+      "fileCount": 58,
+      "rootSha256": "5636911f504abcfb9964c25d56ac9e05b1810cd79f6093ebaa61a14f63794464"
+    },
+    "referenceEngine": {
+      "fileCount": 352,
+      "rootSha256": "2b18a091f6cfc2ae4020a3ab18c52fdcb9f8cb8956fdf59dc9dfe7f3a6af358d"
+    }
+  }
+}

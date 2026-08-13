@@ -1,17 +1,13 @@
-import type { AnyShape, SimplePoint } from 'replicad';
+import type { SimplePoint } from 'replicad';
 import type * as ReplicadModule from 'replicad';
-import type {
-  AxisDeclaration,
-  DatumDeclaration,
-  FaceDeclaration,
-  InterfaceDeclarations,
-} from '#kernels/replicad/annotations/index.js';
+import type { AxisDeclaration, DatumDeclaration, FaceDeclaration } from '#kernels/replicad/annotations/index.js';
 import { isValidAuthoringKey, isValidInterfaceName } from '#kernels/replicad/annotations/index.js';
 import type { ResolvedReplicadInterface } from '#kernels/replicad/export/interface-export.js';
 import type { InputShape } from '#kernels/replicad/utils/render-output.js';
 
 type ReplicadLibrary = typeof ReplicadModule;
 type ReplicadFace = ReplicadModule.Face;
+type ReplicadVector = ReplicadModule.Vector;
 type FaceLikeDeclaration = FaceDeclaration | AxisDeclaration;
 type ResolvedFaceLikeInterface = Extract<ResolvedReplicadInterface, { kind: FaceLikeDeclaration['kind'] }>;
 type ResolvedDatumInterface = Extract<ResolvedReplicadInterface, { kind: 'datum' }>;
@@ -22,8 +18,7 @@ const unnamedEntryName = 'unnamed';
 type EntryName = NonNullable<InputShape['name']> | typeof unnamedEntryName;
 
 /** Live Replicad handle entry with author declarations and resolved STEP interface evidence. */
-export type NativeHandleEntry = Omit<InputShape, 'interfaces'> & {
-  interfaces?: InterfaceDeclarations;
+export type NativeHandleEntry = InputShape & {
   resolvedInterfaces?: ResolvedReplicadInterface[];
 };
 
@@ -48,6 +43,85 @@ const describeFaceCandidates = (faces: readonly ReplicadFace[]): string =>
           .join(', ')}]`,
     )
     .join('; ') + (faces.length > 8 ? `; ... ${faces.length - 8} more` : '');
+
+/**
+ * Per-entry face-query context. Replicad's `FaceFinder.find(shape)` re-lists
+ * `shape.faces` (a TopExp walk with O(n²) IsSame dedup) and recomputes face
+ * facts for every query, which dominated cold STEP export on entries with
+ * dozens of interface declarations. The context lists faces once per entry
+ * and memoizes the deterministic per-face facts finder filters read
+ * (`geomType`, `center`, no-argument `normalAt`), so each OCCT computation
+ * runs at most once per face while every filter observes the same values in
+ * the same order as an uncached run.
+ */
+type EntryFaceQueries = {
+  listFaces: () => readonly ReplicadFace[];
+  createFinder: () => ReplicadModule.FaceFinder;
+};
+
+const memoizeInstanceGetter = (face: ReplicadFace, key: 'geomType' | 'center'): void => {
+  const facePrototype: unknown = Object.getPrototypeOf(face);
+  const prototypeGetter = Object.getOwnPropertyDescriptor(facePrototype as Record<string, unknown>, key)?.get;
+  if (!prototypeGetter) {
+    return;
+  }
+
+  Object.defineProperty(face, key, {
+    configurable: true,
+    get(): unknown {
+      const value: unknown = prototypeGetter.call(face);
+      Object.defineProperty(face, key, { configurable: true, value });
+      return value;
+    },
+  });
+};
+
+const memoizeDefaultNormal = (face: ReplicadFace): void => {
+  const computeNormalAt = face.normalAt.bind(face);
+  let defaultNormal: ReplicadVector | undefined;
+  face.normalAt = (locationVector?: Parameters<ReplicadFace['normalAt']>[0]): ReplicadVector => {
+    if (locationVector) {
+      return computeNormalAt(locationVector);
+    }
+
+    defaultNormal ??= computeNormalAt();
+    return defaultNormal;
+  };
+};
+
+const createEntryFaceQueries = (entry: InputShape, replicadLibrary: ReplicadLibrary): EntryFaceQueries => {
+  class LazyNormalFaceFinder extends replicadLibrary.FaceFinder {
+    // Same filters, same order, same values as the base implementation; the
+    // normal is just computed on first read instead of eagerly per face.
+    public override shouldKeep(element: ReplicadFace): boolean {
+      let defaultNormal: ReplicadVector | undefined;
+      const filterInput = {
+        element,
+        get normal(): ReplicadVector {
+          defaultNormal ??= element.normalAt();
+          return defaultNormal;
+        },
+      };
+      return this.filters.every((filter) => filter(filterInput));
+    }
+  }
+
+  let faces: readonly ReplicadFace[] | undefined;
+  return {
+    createFinder: () => new LazyNormalFaceFinder(),
+    listFaces: () => {
+      if (!faces) {
+        faces = entry.shape.faces;
+        for (const face of faces) {
+          memoizeInstanceGetter(face, 'geomType');
+          memoizeInstanceGetter(face, 'center');
+          memoizeDefaultNormal(face);
+        }
+      }
+      return faces;
+    },
+  };
+};
 
 const validateDatumFrame = ({
   interfaceName,
@@ -75,15 +149,17 @@ const validateDatumFrame = ({
 const findFaceIndex = ({
   entryName,
   interfaceName,
-  shape,
+  faces,
   face,
 }: {
   entryName: EntryName;
   interfaceName: InterfaceName;
-  shape: AnyShape;
+  faces: readonly ReplicadFace[];
   face: ReplicadFace;
 }): number => {
-  const index = shape.faces.findIndex((candidate) => candidate.isSame(face));
+  // `face` comes from `faces`, whose listing dedups by IsSame, so identity
+  // lookup matches a fresh `shape.faces.findIndex(isSame)` scan.
+  const index = faces.indexOf(face);
   if (index !== -1) {
     return index;
   }
@@ -97,18 +173,18 @@ const resolveSingleFaceInterface = ({
   entryName,
   interfaceName,
   declaration,
-  shape,
-  replicadLibrary,
+  queries,
 }: {
   entryName: EntryName;
   interfaceName: InterfaceName;
   declaration: FaceLikeDeclaration;
-  shape: AnyShape;
-  replicadLibrary: ReplicadLibrary;
+  queries: EntryFaceQueries;
 }): ResolvedFaceLikeInterface => {
-  const finder = declaration.select(new replicadLibrary.FaceFinder());
-  // oxlint-disable-next-line no-array-callback-reference -- Replicad FaceFinder.find accepts a shape argument.
-  const candidates = finder.find(shape);
+  const finder = declaration.select(queries.createFinder());
+  const faces = queries.listFaces();
+  // Equivalent to `finder.find(shape)` (find lists shape.faces and filters
+  // with shouldKeep); reusing the per-entry listing skips the re-walk per query.
+  const candidates = faces.filter((face) => finder.shouldKeep(face));
 
   if (candidates.length !== 1) {
     const facts = candidates.length > 0 ? `; candidates: ${describeFaceCandidates(candidates)}` : '';
@@ -133,7 +209,7 @@ const resolveSingleFaceInterface = ({
   return {
     kind: declaration.kind,
     name: interfaceName,
-    faceIndex: findFaceIndex({ entryName, interfaceName, shape, face }),
+    faceIndex: findFaceIndex({ entryName, interfaceName, faces, face }),
   };
 };
 
@@ -151,11 +227,10 @@ export const resolveEntryInterfaces = (entry: InputShape, replicadLibrary: Repli
   }
 
   const entryName: EntryName = entry.name ?? unnamedEntryName;
+  const queries = createEntryFaceQueries(entry, replicadLibrary);
   const resolvedInterfaces: ResolvedReplicadInterface[] = [];
   const resolveFaceLike = (name: InterfaceName, declaration: FaceLikeDeclaration): void => {
-    resolvedInterfaces.push(
-      resolveSingleFaceInterface({ entryName, interfaceName: name, declaration, shape: entry.shape, replicadLibrary }),
-    );
+    resolvedInterfaces.push(resolveSingleFaceInterface({ entryName, interfaceName: name, declaration, queries }));
   };
 
   for (const [key, declaration] of Object.entries(interfaces)) {

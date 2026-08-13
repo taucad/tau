@@ -81,13 +81,13 @@ export const axis = (select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>)
 });
 
 /**
- * Declare a named datum frame exported as AP242 constructive geometry.
+ * Declare a named coordinate frame exported as AP242 supplemental geometry.
  *
- * @param options - Datum frame origin and axes.
- * @returns Datum interface declaration.
+ * @param options - Frame origin and axes.
+ * @returns Frame (datum placement) interface declaration.
  * @public
  */
-export const datum = ({
+export const frame = ({
   origin,
   xAxis = [1, 0, 0],
   zAxis = [0, 0, 1],
@@ -96,6 +96,19 @@ export const datum = ({
   xAxis?: SimplePoint;
   zAxis?: SimplePoint;
 }): DatumDeclaration => ({ kind: 'datum', origin, xAxis, zAxis });
+
+/**
+ * Declare a named coordinate frame exported as AP242 supplemental geometry.
+ *
+ * @param options - Frame origin and axes.
+ * @returns Frame (datum placement) interface declaration.
+ * @public
+ * @deprecated Use {@link frame} — this declares a coordinate *frame* in the
+ * supplemental-geometry channel, not a GD&T datum (the semantic
+ * `DATUM`/`DATUM_FEATURE` family); the old name is a homonym that conflates
+ * the two concepts. Behaviour is identical.
+ */
+export const datum = frame;
 
 /**
  * Declare a named group of face and axis annotations.

@@ -150,13 +150,13 @@ function shapeHandle(shape: Meshable): unknown {
   return shape.wrapped;
 }
 
-function readFloat32Array(openCascade: ReplicadInstancingOc, pointer: number, size: number): number[] {
+function readFloat64Array(openCascade: ReplicadInstancingOc, pointer: number, size: number): number[] {
   if (size === 0) {
     return [];
   }
 
-  const heap = new Float32Array(openCascade.wasmMemory.buffer);
-  return [...heap.subarray(pointer / 4, pointer / 4 + size)];
+  const heap = new Float64Array(openCascade.wasmMemory.buffer);
+  return [...heap.subarray(pointer / 8, pointer / 8 + size)];
 }
 
 function readUint32Array(openCascade: ReplicadInstancingOc, pointer: number, size: number): number[] {
@@ -265,8 +265,8 @@ export function extractPrototypeFaces({
   );
   try {
     return {
-      vertices: readFloat32Array(oc, raw.getVerticesPtr(), raw.getVerticesSize()),
-      normals: readFloat32Array(oc, raw.getNormalsPtr(), raw.getNormalsSize()),
+      vertices: readFloat64Array(oc, raw.getVerticesPtr(), raw.getVerticesSize()),
+      normals: readFloat64Array(oc, raw.getNormalsPtr(), raw.getNormalsSize()),
       triangles: readUint32Array(oc, raw.getTrianglesPtr(), raw.getTrianglesSize()),
       faceGroups: readFaceGroups(oc, raw.getFaceGroupsPtr(), raw.getFaceGroupsSize()),
     };
@@ -295,7 +295,7 @@ export function extractPrototypeEdges({
   );
   try {
     return {
-      lines: readFloat32Array(oc, raw.getLinesPtr(), raw.getLinesSize()),
+      lines: readFloat64Array(oc, raw.getLinesPtr(), raw.getLinesSize()),
       edgeGroups: readEdgeGroups(oc, raw.getEdgeGroupsPtr(), raw.getEdgeGroupsSize()),
     };
   } finally {
@@ -397,18 +397,28 @@ function transformTriplets(values: number[], matrix: readonly number[], transfor
   const transformed: number[] = [];
   for (let index = 0; index < values.length; index += 3) {
     const [x, y, z] = transform(matrix, [values[index] ?? 0, values[index + 1] ?? 0, values[index + 2] ?? 0]);
-    transformed.push(x, y, z);
+    transformed.push(Math.fround(x), Math.fround(y), Math.fround(z));
   }
   return transformed;
 }
 
-function transformLinePoints(values: number[], matrix: readonly number[]): number[] {
-  const transformed: number[] = [];
-  for (let index = 0; index < values.length; index += 3) {
-    const [x, y, z] = transformPoint(matrix, [values[index] ?? 0, values[index + 1] ?? 0, values[index + 2] ?? 0]);
-    transformed.push(x, y, z);
+function transformNormals(values: number[], matrix: readonly number[]): number[] {
+  const normals = normalMatrix(matrix);
+  if (
+    normals[0] === 1 &&
+    normals[1] === 0 &&
+    normals[2] === 0 &&
+    normals[3] === 0 &&
+    normals[4] === 1 &&
+    normals[5] === 0 &&
+    normals[6] === 0 &&
+    normals[7] === 0 &&
+    normals[8] === 1
+  ) {
+    return values.map((value) => Math.fround(value));
   }
-  return transformed;
+
+  return transformTriplets(values, normals, transformVector);
 }
 
 function transformTriangles(triangles: number[], determinant: number): number[] {
@@ -427,13 +437,19 @@ function applyFaceIds(
   groups: GeometryReplicad['faces']['faceGroups'],
   ids: number[] | undefined,
 ): GeometryReplicad['faces']['faceGroups'] {
-  if (!ids || ids.length !== groups.length) {
+  if (!ids) {
     return groups.map((group) => ({ ...group }));
+  }
+
+  if (ids.length !== groups.length) {
+    throw new Error(
+      `Replicad tessellation instancing face ID count mismatch: expected ${groups.length}, received ${ids.length}`,
+    );
   }
 
   return groups.map((group, index) => ({
     ...group,
-    faceId: ids[index] ?? group.faceId,
+    faceId: ids[index]!,
   }));
 }
 
@@ -441,13 +457,19 @@ function applyEdgeIds(
   groups: GeometryReplicad['edges']['edgeGroups'],
   ids: number[] | undefined,
 ): GeometryReplicad['edges']['edgeGroups'] {
-  if (!ids || ids.length !== groups.length) {
+  if (!ids) {
     return groups.map((group) => ({ ...group }));
+  }
+
+  if (ids.length !== groups.length) {
+    throw new Error(
+      `Replicad tessellation instancing edge ID count mismatch: expected ${groups.length}, received ${ids.length}`,
+    );
   }
 
   return groups.map((group, index) => ({
     ...group,
-    edgeId: ids[index] ?? group.edgeId,
+    edgeId: ids[index]!,
   }));
 }
 
@@ -455,7 +477,6 @@ export function transformReplicadGeometryInstance({
   prototype,
   instance,
 }: TransformReplicadGeometryInstanceOptions): GeometryReplicad {
-  const normals = normalMatrix(instance.locationMatrix);
   return {
     format: 'replicad',
     name: instance.name,
@@ -465,12 +486,12 @@ export function transformReplicadGeometryInstance({
     roughness: instance.roughness,
     faces: {
       vertices: transformTriplets(prototype.faces.vertices, instance.locationMatrix, transformPoint),
-      normals: transformTriplets(prototype.faces.normals, normals, transformVector),
+      normals: transformNormals(prototype.faces.normals, instance.locationMatrix),
       triangles: transformTriangles(prototype.faces.triangles, instance.determinant),
       faceGroups: applyFaceIds(prototype.faces.faceGroups, instance.faceIds),
     },
     edges: {
-      lines: transformLinePoints(prototype.edges.lines, instance.locationMatrix),
+      lines: transformTriplets(prototype.edges.lines, instance.locationMatrix, transformPoint),
       edgeGroups: applyEdgeIds(prototype.edges.edgeGroups, instance.edgeIds),
     },
   };

@@ -74,4 +74,32 @@ describe('transformReplicadGeometryInstance', () => {
 
     expect(result.faces.triangles).toEqual([0, 2, 1]);
   });
+
+  it('should reject occurrence face IDs whose cardinality differs from the prototype groups', () => {
+    expect(() =>
+      transformReplicadGeometryInstance({
+        prototype: prototypeGeometry,
+        instance: {
+          name: 'Mismatched faces',
+          locationMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+          determinant: 1,
+          faceIds: [100, 101],
+        },
+      }),
+    ).toThrow('Replicad tessellation instancing face ID count mismatch: expected 1, received 2');
+  });
+
+  it('should reject occurrence edge IDs whose cardinality differs from the prototype groups', () => {
+    expect(() =>
+      transformReplicadGeometryInstance({
+        prototype: prototypeGeometry,
+        instance: {
+          name: 'Mismatched edges',
+          locationMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+          determinant: 1,
+          edgeIds: [],
+        },
+      }),
+    ).toThrow('Replicad tessellation instancing edge ID count mismatch: expected 1, received 0');
+  });
 });

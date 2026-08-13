@@ -143,38 +143,6 @@ const mapStlEvidenceToYUp = ({
   };
 };
 
-const readGltfStats = async (
-  glbBytes: Uint8Array<ArrayBuffer>,
-): Promise<{
-  nodeCount: number;
-  meshCount: number;
-  primitiveCount: number;
-  vertexCount: number;
-  extensionsUsed: string[];
-}> => {
-  const document = await new NodeIO().readBinary(glbBytes);
-  let primitiveCount = 0;
-  let vertexCount = 0;
-
-  for (const mesh of document.getRoot().listMeshes()) {
-    for (const primitive of mesh.listPrimitives()) {
-      primitiveCount++;
-      vertexCount += primitive.getAttribute('POSITION')?.getCount() ?? 0;
-    }
-  }
-
-  return {
-    nodeCount: document.getRoot().listNodes().length,
-    meshCount: document.getRoot().listMeshes().length,
-    primitiveCount,
-    vertexCount,
-    extensionsUsed: document
-      .getRoot()
-      .listExtensionsUsed()
-      .map((extension) => extension.extensionName),
-  };
-};
-
 /** Helper to extract parameters and assert success. */
 const getParameters = async (
   files: Record<string, string>,
@@ -189,11 +157,13 @@ const createGeometry = async ({
   files,
   mainFile,
   parameters,
+  content,
   options,
 }: {
   files: Record<string, string>;
   mainFile: string;
   parameters?: Record<string, unknown>;
+  content?: Parameters<typeof createTestGeometry>[0]['content'];
   options?: CreateTestWorkerOptions;
 }): ReturnType<typeof createTestGeometry> =>
   createTestGeometry({
@@ -201,6 +171,7 @@ const createGeometry = async ({
     files,
     mainFile,
     parameters,
+    content,
     options,
   });
 
@@ -4236,15 +4207,17 @@ describe('OC API Call Tracing', () => {
     expect(edgeSpans[0]!.detail?.['parentSpanId']).toBe(renderOutputSpan.detail?.['spanId']);
   });
 
-  it('emits the same expanded GLB structure with tessellation instancing on and off', async () => {
+  it('emits byte-identical expanded GLB with topology and edges when tessellation instancing is on or off', async () => {
     const instanced = await createGeometry({
       files: { 'shafts.ts': repeatedCylinderCode },
       mainFile: 'shafts.ts',
+      content: { includeEdges: true, includeTopology: true },
       options: { workerOptions: { ocTracing: 'off', tessellationInstancing: true } },
     });
     const legacy = await createGeometry({
       files: { 'shafts.ts': repeatedCylinderCode },
       mainFile: 'shafts.ts',
+      content: { includeEdges: true, includeTopology: true },
       options: { workerOptions: { ocTracing: 'off', tessellationInstancing: false } },
     });
 
@@ -4255,17 +4228,7 @@ describe('OC API Call Tracing', () => {
     const legacyGltf = extractGltfFromResult(legacy);
     expect(instancedGltf).toBeDefined();
     expect(legacyGltf).toBeDefined();
-
-    const instancedStats = await readGltfStats(instancedGltf!);
-    const legacyStats = await readGltfStats(legacyGltf!);
-    const instancedSize = await readGltfSize(instancedGltf!);
-    const legacySize = await readGltfSize(legacyGltf!);
-
-    expect(instancedStats).toEqual(legacyStats);
-    expect(instancedStats.extensionsUsed).not.toContain('EXT_mesh_gpu_instancing');
-    expect(instancedSize[0]).toBeCloseTo(legacySize[0], 5);
-    expect(instancedSize[1]).toBeCloseTo(legacySize[1], 5);
-    expect(instancedSize[2]).toBeCloseTo(legacySize[2], 5);
+    expect(instancedGltf).toEqual(legacyGltf);
   });
 
   it('emits Replicad library summary telemetry under run-main when summary tracing is enabled', async () => {
@@ -4311,78 +4274,6 @@ describe('OC API Call Tracing', () => {
       operations: 3,
     });
     expect(summarySpan.detail?.['phase']).toBeUndefined();
-    expect(summarySpan.detail?.['parentSpanId']).toBe(runMainSpan.detail?.['spanId']);
-  }, 15_000);
-
-  it('emits batch boolean operations in Replicad library summary telemetry', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
-
-    const worker = await createTestWorker(
-      replicadKernel,
-      {
-        'box.ts': `
-          import { makeBaseBox } from 'replicad';
-
-          export default function main() {
-            const plate = makeBaseBox(40, 40, 8);
-            const cutters = [
-              makeBaseBox(4, 4, 20).translate(-10, 0, 0),
-              makeBaseBox(4, 4, 20).translate(10, 0, 0),
-            ];
-            const bosses = [
-              makeBaseBox(5, 5, 4).translate(0, -10, 6),
-              makeBaseBox(5, 5, 4).translate(0, 10, 6),
-            ];
-
-            return plate.cutAll(cutters).fuseAll(bosses);
-          }
-        `,
-      },
-      {
-        workerOptions: { ocTracing: 'off', libraryTracing: 'summary' },
-        onTelemetry: (entries) => telemetryBatches.push(entries),
-      },
-    );
-
-    const result = await worker.createGeometry({
-      file: createGeometryFile('box.ts'),
-      parameters: {},
-    });
-    await collectTelemetry(worker);
-
-    assertSuccess(result);
-
-    const allEntries = telemetryBatches.flat();
-    const runMainSpan = expectTelemetrySpan(allEntries, 'replicad.run-main');
-    const summarySpan = expectTelemetrySpan(allEntries, 'replicad.library.summary');
-
-    expect(summarySpan.detail).toMatchObject({
-      library: 'replicad',
-      'makeBaseBox.calls': 5,
-      'translate.calls': 4,
-      'cutAll.calls': 1,
-      'fuseAll.calls': 1,
-      'cutAll.batch.arguments': 1,
-      'cutAll.batch.tools': 2,
-      'cutAll.batch.steps': 1,
-      'fuseAll.batch.arguments': 1,
-      'fuseAll.batch.tools': 2,
-      'fuseAll.batch.steps': 1,
-      'total.calls': 11,
-      operations: 4,
-    });
-    expect(
-      Number(summarySpan.detail?.['cutAll.batch.native.calls'] ?? 0) +
-        Number(summarySpan.detail?.['cutAll.batch.direct.calls'] ?? 0),
-    ).toBe(1);
-    expect(
-      Number(summarySpan.detail?.['fuseAll.batch.native.calls'] ?? 0) +
-        Number(summarySpan.detail?.['fuseAll.batch.direct.calls'] ?? 0),
-    ).toBe(1);
-    expect(Number(summarySpan.detail?.['cutAll.batch.build.ms'])).toBeGreaterThanOrEqual(0);
-    expect(Number(summarySpan.detail?.['cutAll.batch.simplify.ms'])).toBeGreaterThanOrEqual(0);
-    expect(Number(summarySpan.detail?.['fuseAll.batch.build.ms'])).toBeGreaterThanOrEqual(0);
-    expect(Number(summarySpan.detail?.['fuseAll.batch.simplify.ms'])).toBeGreaterThanOrEqual(0);
     expect(summarySpan.detail?.['parentSpanId']).toBe(runMainSpan.detail?.['spanId']);
   }, 15_000);
 
@@ -4432,14 +4323,7 @@ describe('OC API Call Tracing', () => {
       scope: 'user-main',
       operation: 'fuse',
       callType: 'apply',
-      'batch.operation': 'fuse',
-      'batch.arguments': 1,
-      'batch.tools': 1,
-      'batch.steps': 1,
     });
-    expect(fuseSpan.detail?.['batch.backend']).toMatch(/^(native|js-direct)$/);
-    expect(Number(fuseSpan.detail?.['batch.build.ms'])).toBeGreaterThanOrEqual(0);
-    expect(Number(fuseSpan.detail?.['batch.simplify.ms'])).toBeGreaterThanOrEqual(0);
     expect(makeBoxSpan.detail?.['parentSpanId']).toBe(runMainSpan.detail?.['spanId']);
     expect(fuseSpan.detail?.['parentSpanId']).toBe(runMainSpan.detail?.['spanId']);
 

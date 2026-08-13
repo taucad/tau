@@ -182,7 +182,7 @@ function buildNodeFromReplicadGeometry({
       capabilities: {
         exports: [
           { fidelity: 'mesh', formats: ['glb', 'stl'], available: true },
-          { fidelity: 'brep', formats: ['step', 'stp', 'iges', 'igs', 'brep', 'dxf'], available: true },
+          { fidelity: 'brep', formats: ['step', 'stp', 'brep', 'dxf'], available: true },
         ],
         hasPreciseTopology: true,
       },

@@ -11,6 +11,7 @@ import { primitives } from '@jscad/modeling';
 import type { GeometryGltf, GeometrySvg } from '@taucad/types';
 import { jscadToGltf } from '#kernels/jscad/jscad-to-gltf.js';
 import type { KernelMiddlewareRuntime } from '#types/runtime-middleware.types.js';
+import type { ExportGeometryResult } from '#types/runtime.types.js';
 import { gltfEdgeDetection } from '#middleware/gltf-edge-detection.middleware.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import {
@@ -120,12 +121,19 @@ async function createCubeGltfWithoutLines(): Promise<Uint8Array<ArrayBuffer>> {
     .setType(Accessor.Type['VEC3']!)
     .setArray(positions);
 
+  const normals = new Float32Array(positions.length);
+  for (let index = 2; index < normals.length; index += 3) {
+    normals[index] = 1;
+  }
+  const normalAccessor = document.createAccessor().setBuffer(buffer).setType(Accessor.Type['VEC3']!).setArray(normals);
+
   const indexAccessor = document.createAccessor().setBuffer(buffer).setType(Accessor.Type['SCALAR']!).setArray(indices);
 
   const primitive = document
     .createPrimitive()
     .setMode(primitiveModeTriangles)
     .setAttribute('POSITION', positionAccessor)
+    .setAttribute('NORMAL', normalAccessor)
     .setIndices(indexAccessor);
 
   const mesh = document.createMesh().addPrimitive(primitive);
@@ -186,11 +194,20 @@ async function createCubeGltfWithLines(): Promise<Uint8Array<ArrayBuffer>> {
     .setType(Accessor.Type['SCALAR']!)
     .setArray(lineIndices);
 
+  const authoredLineMaterial = document
+    .createMaterial('authored-line-material')
+    .setBaseColorFactor([0.25, 0.5, 0.75, 1])
+    .setMetallicFactor(0.25)
+    .setRoughnessFactor(0.75)
+    .setDoubleSided(false)
+    .setAlphaMode('OPAQUE');
+
   const linePrimitive = document
     .createPrimitive()
     .setMode(primitiveModeLines)
     .setAttribute('POSITION', linePositionAccessor)
-    .setIndices(lineIndexAccessor);
+    .setIndices(lineIndexAccessor)
+    .setMaterial(authoredLineMaterial);
 
   const mesh = document.createMesh().addPrimitive(trianglePrimitive).addPrimitive(linePrimitive);
   const node = document.createNode().setMesh(mesh);
@@ -328,6 +345,27 @@ async function analyzeGltfPrimitives(gltfContent: Uint8Array<ArrayBuffer>): Prom
   return meshAnalysis;
 }
 
+async function readTriangleSnapshot(gltfContent: Uint8Array<ArrayBuffer>) {
+  const document = await new NodeIO().registerExtensions([KHRMaterialsUnlit]).readBinary(gltfContent);
+  return {
+    nodes: document
+      .getRoot()
+      .listNodes()
+      .map((node) => [...node.getMatrix()]),
+    primitives: document
+      .getRoot()
+      .listMeshes()
+      .flatMap((mesh) => mesh.listPrimitives())
+      .filter((primitive) => primitive.getMode() === primitiveModeTriangles)
+      .map((primitive) => ({
+        positions: [...primitive.getAttribute('POSITION')!.getArray()!],
+        normals: [...primitive.getAttribute('NORMAL')!.getArray()!],
+        indices: [...primitive.getIndices()!.getArray()!],
+        material: primitive.getMaterial()?.getBaseColorFactor() ?? null,
+      })),
+  };
+}
+
 // =============================================================================
 // Test Context Helpers
 // =============================================================================
@@ -340,7 +378,7 @@ function createEdgeDetectionContext(config?: EdgeDetectionOptions): {
     ReturnType<typeof createMockRuntime<Record<string, never>, EdgeDetectionOptions>>;
 } {
   return {
-    input: createMockInput(),
+    input: createMockInput({ content: { includeEdges: true } }),
     runtime: createMockRuntime<Record<string, never>, EdgeDetectionOptions>({
       options: config ?? { thresholdDegrees: 30 },
     }),
@@ -393,6 +431,29 @@ describe('gltfEdgeDetection', () => {
         }
       });
 
+      it('should preserve source surface data and only add LINES content', async () => {
+        const gltfData = await createCubeGltfWithoutLines();
+        const before = await readTriangleSnapshot(gltfData);
+        const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
+        const { input, runtime } = createEdgeDetectionContext();
+        const result = await gltfEdgeDetectionDefinition.wrapCreateGeometry!(
+          input,
+          createMockCreateGeometryHandler(handlerResult),
+          runtime,
+        );
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          const geometry = result.data as GeometryGltf;
+          expect(await readTriangleSnapshot(geometry.content)).toEqual(before);
+          const meshes = await analyzeGltfPrimitives(geometry.content);
+          expect(meshes[0]).toMatchObject({
+            triangleCount: 1,
+            lineCount: 1,
+          });
+        }
+      });
+
       it('should detect 12 edges for a cube (all 90-degree dihedral angles)', async () => {
         const gltfData = await createCubeGltfWithoutLines();
         const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
@@ -433,7 +494,7 @@ describe('gltfEdgeDetection', () => {
     });
 
     describe('meshes with existing line primitives', () => {
-      it('should skip detection and leave pre-existing LINES on the source mesh', async () => {
+      it('should preserve pre-existing LINES and add fallback lines for triangles', async () => {
         const gltfData = await createCubeGltfWithLines();
         const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
         const { input, runtime } = createEdgeDetectionContext();
@@ -453,12 +514,31 @@ describe('gltfEdgeDetection', () => {
 
           const sourceMesh = meshes[0]!;
           expect(sourceMesh.triangleCount).toBe(1);
-          expect(sourceMesh.lineCount).toBe(1);
+          expect(sourceMesh.lineCount).toBe(2);
           expect(sourceMesh.linePrimitiveVertexCounts[0]).toBe(2);
+          expect(sourceMesh.linePrimitiveVertexCounts[1]).toBe(24);
+
+          const io = new NodeIO().registerExtensions([KHRMaterialsUnlit]);
+          const document = await io.readBinary(geometry.content);
+          const authoredMaterial = document
+            .getRoot()
+            .listMaterials()
+            .find((material) => material.getName() === 'authored-line-material')!;
+          const generatedMaterial = document
+            .getRoot()
+            .listMaterials()
+            .find((material) => material.getName() === 'tau-edge-material')!;
+          expect(authoredMaterial.getBaseColorFactor()).toEqual([0.25, 0.5, 0.75, 1]);
+          expect(authoredMaterial.getMetallicFactor()).toBe(0.25);
+          expect(authoredMaterial.getRoughnessFactor()).toBe(0.75);
+          expect(authoredMaterial.getDoubleSided()).toBe(false);
+          expect(authoredMaterial.getAlphaMode()).toBe('OPAQUE');
+          expect(generatedMaterial.getBaseColorFactor()).toEqual([0, 0, 0, 1]);
+          expect(generatedMaterial.getExtension('KHR_materials_unlit')).not.toBeNull();
         }
       });
 
-      it('should return the original object when only pre-existing LINES are present', async () => {
+      it('should return a new object while retaining authored LINES', async () => {
         const gltfData = await createCubeGltfWithLines();
         const originalGeometry: GeometryGltf = {
           format: 'gltf',
@@ -472,13 +552,15 @@ describe('gltfEdgeDetection', () => {
         const result = await wrapCreateGeometry!(input, handler, runtime);
 
         if (result.success) {
-          expect(result.data).toBe(originalGeometry);
+          expect(result.data).not.toBe(originalGeometry);
           const geometry = result.data as GeometryGltf;
-          expect(geometry.content).toBe(gltfData);
+          expect(geometry.content).not.toBe(gltfData);
+          const meshes = await analyzeGltfPrimitives(geometry.content);
+          expect(meshes[0]!.lineCount).toBe(2);
         }
       });
 
-      it('should return the original JSCAD geometry object when JSCAD owns line primitives', async () => {
+      it('should retain JSCAD-authored lines when its triangle layout yields no additional fallback', async () => {
         const gltfData = jscadToGltf(primitives.cuboid({ size: [10, 10, 10] }));
         const originalGeometry: GeometryGltf = {
           format: 'gltf',
@@ -493,8 +575,7 @@ describe('gltfEdgeDetection', () => {
 
         expect(result.success).toBe(true);
         if (result.success) {
-          expect(result.data).toBe(originalGeometry);
-          const meshes = await analyzeGltfPrimitives(originalGeometry.content);
+          const meshes = await analyzeGltfPrimitives((result.data as GeometryGltf).content);
           expect(meshes).toHaveLength(1);
           expect(meshes[0]!.triangleCount).toBe(1);
           expect(meshes[0]!.lineCount).toBe(1);
@@ -523,8 +604,9 @@ describe('gltfEdgeDetection', () => {
           const meshWithLines = meshes.find((m) => m.meshName === 'MeshWithLines');
           expect(meshWithLines).toBeDefined();
           expect(meshWithLines!.triangleCount).toBe(1);
-          expect(meshWithLines!.lineCount).toBe(1);
+          expect(meshWithLines!.lineCount).toBe(2);
           expect(meshWithLines!.linePrimitiveVertexCounts[0]).toBe(2);
+          expect(meshWithLines!.linePrimitiveVertexCounts[1]).toBe(24);
 
           const meshWithoutLines = meshes.find((m) => m.meshName === 'MeshWithoutLines');
           expect(meshWithoutLines).toBeDefined();
@@ -645,11 +727,11 @@ describe('gltfEdgeDetection', () => {
           expect(material).not.toBeNull();
           expect(material!.getName()).toBe('tau-edge-material');
 
-          const baseColor = material!.getBaseColorFactor();
-          expect(baseColor[0]).toBeCloseTo(0, 5);
-          expect(baseColor[1]).toBeCloseTo(0, 5);
-          expect(baseColor[2]).toBeCloseTo(0, 5);
-          expect(baseColor[3]).toBeCloseTo(1, 5);
+          expect(material!.getBaseColorFactor()).toEqual([0, 0, 0, 1]);
+          expect(material!.getMetallicFactor()).toBe(0);
+          expect(material!.getRoughnessFactor()).toBe(1);
+          expect(material!.getDoubleSided()).toBe(true);
+          expect(material!.getAlphaMode()).toBe('OPAQUE');
 
           const unlitExtension = material!.getExtension('KHR_materials_unlit');
           expect(unlitExtension).not.toBeNull();
@@ -681,7 +763,7 @@ describe('gltfEdgeDetection', () => {
               }
             }
           }
-          expect(lineCount).toBe(2);
+          expect(lineCount).toBe(3);
         }
       });
 
@@ -705,5 +787,92 @@ describe('gltfEdgeDetection', () => {
         }
       });
     });
+  });
+
+  it('is a byte-identical passthrough when edges are false', async () => {
+    const gltfData = await createCubeGltfWithoutLines();
+    const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
+    const input = createMockInput({ content: { includeEdges: false } });
+    const runtime = createMockRuntime<Record<string, never>, EdgeDetectionOptions>({
+      options: { thresholdDegrees: 30 },
+    });
+    const handler = createMockCreateGeometryHandler(handlerResult);
+
+    const result = await gltfEdgeDetectionDefinition.wrapCreateGeometry!(input, handler, runtime);
+
+    expect(result).toBe(handlerResult);
+    expect(runtime.logger.trace).not.toHaveBeenCalled();
+  });
+
+  it('adds requested edges on the meshGeometry phase', async () => {
+    const gltfData = await createCubeGltfWithoutLines();
+    const handlerResult = createSuccessResult({ format: 'gltf', content: gltfData });
+    const runtime = createMockRuntime<Record<string, never>, EdgeDetectionOptions>({
+      options: { thresholdDegrees: 30 },
+    });
+    const handler = vi.fn().mockResolvedValue(handlerResult);
+
+    const result = await gltfEdgeDetectionDefinition.wrapMeshGeometry!(
+      { options: {}, content: { includeEdges: true } },
+      handler,
+      runtime,
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const primitives = await analyzeGltfPrimitives((result.data as GeometryGltf).content);
+      expect(primitives[0]!.lineCount).toBe(1);
+    }
+  });
+
+  it('adds requested edges to GLB export files and leaves other files untouched', async () => {
+    const gltfData = await createCubeGltfWithoutLines();
+    const textBytes = new Uint8Array([1, 2, 3]);
+    const handlerResult = {
+      success: true,
+      data: [
+        { name: 'model.glb', bytes: gltfData, mimeType: 'model/gltf-binary' },
+        { name: 'notes.txt', bytes: textBytes, mimeType: 'application/octet-stream' },
+      ],
+      issues: [],
+    } satisfies ExportGeometryResult;
+    const runtime = createMockRuntime<Record<string, never>, EdgeDetectionOptions>({
+      options: { thresholdDegrees: 30 },
+    });
+    const handler = vi.fn().mockResolvedValue(handlerResult);
+
+    const result = await gltfEdgeDetectionDefinition.wrapExportGeometry!(
+      { format: 'glb', options: {}, content: { includeEdges: true } },
+      handler,
+      runtime,
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const primitives = await analyzeGltfPrimitives(result.data[0]!.bytes);
+      expect(primitives[0]!.lineCount).toBe(1);
+      expect(result.data[1]!.bytes).toBe(textBytes);
+    }
+  });
+
+  it('does not parse export bytes when edges are false', async () => {
+    const malformed = new Uint8Array([1, 2, 3]);
+    const handlerResult = {
+      success: true,
+      data: [{ name: 'model.glb', bytes: malformed, mimeType: 'model/gltf-binary' }],
+      issues: [],
+    } satisfies ExportGeometryResult;
+    const runtime = createMockRuntime<Record<string, never>, EdgeDetectionOptions>({
+      options: { thresholdDegrees: 30 },
+    });
+    const handler = vi.fn().mockResolvedValue(handlerResult);
+
+    const result = await gltfEdgeDetectionDefinition.wrapExportGeometry!(
+      { format: 'glb', options: {}, content: { includeEdges: false } },
+      handler,
+      runtime,
+    );
+
+    expect(result).toBe(handlerResult);
   });
 });

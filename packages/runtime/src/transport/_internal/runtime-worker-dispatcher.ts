@@ -5,23 +5,23 @@
  * speaking the typed {@link RuntimeProtocol}. Calls (`initialize`,
  * `export`) are settled via `impl.call`; production drives renders
  * autonomously via the `openFile` notify and consumes `geometryComputed`
- * notifies correlated by `rgen` (mirrors LSP `didOpen` + diagnostics).
+ * notifies correlated by opaque `renderId` (mirrors LSP `didOpen` + diagnostics).
  *
  * Client → worker commands (`openFile`, `updateParameters`,
- * `setOptions`, `fileChanged`, `cleanup`,
- * `abort`, `stage-and-render`) ride the bidirectional `nt` notify
- * channel; autonomous worker events (`progress`, `geometryComputed`,
+ * `setOptions`, `abort`, `stage-and-render`) ride the bidirectional `nt`
+ * notify channel (`cleanup` is an acknowledged `call`, not a notify);
+ * autonomous worker events (`progress`, `geometryComputed`,
  * `parametersResolved`, `errorEvent`, `stateChanged`,
  * `activeKernelChanged`, `capabilitiesUpdated`, `log`, `logBatch`,
  * `telemetry`) fan out via `serverHandle.notify(...)`. `progress`,
  * `geometryComputed`, and `errorEvent` carry the originating render
- * generation (`rgen`) so consumers can ignore frames from superseded
+ * identity (`renderId`) so consumers can ignore frames from superseded
  * renders.
  *
  * Binary delivery for `export` results and `geometryComputed` notify
  * args hoists via {@link WithTransferables}; the transport encodes each
  * payload through its `pool → transfer → copy` ladder
- * (`encodeGeometry` / `encodeFile`) — the dispatcher itself never reads
+ * (`encodeGeometry`) — the dispatcher itself never reads
  * a `Port` capability set, so wire facts stay private to the transport.
  *
  * An unhandled-rejection trap wraps every awaited operation so errors
@@ -60,7 +60,6 @@ import { createErrorTrap } from '#framework/worker-error-trap.js';
 import { packageVersion } from '#utils/package-info.js';
 import type {
   EncodedGeometry,
-  EncodedFileBytes,
   HostInitializeBindings,
   RuntimeInitializeMemoryHandle,
 } from '#transport/runtime-transport.types.js';
@@ -79,14 +78,6 @@ export const runtimeChannelSessionKey = 'tau.runtime/v1';
  * @public
  */
 export type GeometryEncoder = (geometry: Geometry) => EncodedGeometry;
-
-/**
- * File-bytes encoder injected by the transport host. Symmetric with
- * {@link GeometryEncoder}.
- *
- * @public
- */
-export type FileBytesEncoder = (file: Uint8Array<ArrayBuffer>) => EncodedFileBytes;
 
 function applyGeometryEncoder(
   geometry: Geometry,
@@ -123,11 +114,7 @@ function normaliseIssueForWire<T extends { code?: unknown }>(issue: T): T & { co
   return isKernelIssueCode(issue.code) ? (issue as T & { code: KernelIssueCode }) : { ...issue, code: 'UNKNOWN' };
 }
 
-function prepareExportTransfer(
-  result: ExportGeometryResult,
-  _encodeFile: FileBytesEncoder | undefined,
-  outTransferables: Transferable[],
-): ExportGeometryResult {
+function prepareExportTransfer(result: ExportGeometryResult, outTransferables: Transferable[]): ExportGeometryResult {
   const issues = result.issues.map(normaliseIssueForWire);
   if (!result.success) {
     return { ...result, issues };
@@ -150,7 +137,7 @@ function prepareExportTransfer(
  * (worker, node-worker, host) leave this unset and continue to wire
  * the FS via `memoryHandle.fileSystemPort`.
  *
- * The `encodeGeometry` / `encodeFile` encoders are produced by the
+ * The geometry encoder is produced by the
  * transport host's `adoptInitialize(...)` bindings. The dispatcher
  * uses them verbatim so the wire-tier decision (pool/transfer/copy)
  * stays inside the transport plugin and the dispatcher never reads
@@ -166,12 +153,6 @@ export type WorkerDispatcherOptions = {
    * falls back to inline / copy delivery (no transferables, no pool).
    */
   readonly encodeGeometry?: GeometryEncoder;
-  /**
-   * Transport-supplied file-bytes encoder (typically
-   * `bindings.fileDelivery.publish`). When omitted the dispatcher
-   * falls back to inline / copy delivery for export results.
-   */
-  readonly encodeFile?: FileBytesEncoder;
   /**
    * Late-bound host bindings factory invoked when the dispatcher
    * receives the `initialize` RPC. The factory inspects the inbound
@@ -227,14 +208,13 @@ export function createWorkerDispatcher(
     serverHandle?.notify(name, args);
   };
 
-  /* Transport host injects geometry / file encoders via
+  /* Transport host injects its geometry encoder via
    * `dispatcherOptions`. When omitted (smoke tests, in-isolate hosts)
    * the dispatcher falls back to an inline-only encoder. When the
    * caller supplies `bindingsFactory`, the encoders are swapped to
    * the bindings' SAB-aware variants the moment `initialize` lands.
    * The dispatcher never reads `port.capabilities` directly. */
   let encodeGeometry: GeometryEncoder = dispatcherOptions?.encodeGeometry ?? inlineGeometryEncoder;
-  let encodeFile: FileBytesEncoder | undefined = dispatcherOptions?.encodeFile;
 
   const pendingLogs: LogEntry[] = [];
   let logFlushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -271,39 +251,39 @@ export function createWorkerDispatcher(
     }
     callbacksWired = true;
 
-    worker.onStateChanged = (state, detail) => {
-      notify('stateChanged', { state, ...(detail === undefined ? {} : { detail }) });
+    worker.onStateChanged = (event) => {
+      notify('stateChanged', event);
     };
 
-    worker.onGeometryComputed = (result, rgen) => {
+    worker.onGeometryComputed = ({ result, renderId }) => {
       flushLogs();
       worker.flushTelemetry();
       const transferables: Transferable[] = [];
       const transport = toTransportResult(result, encodeGeometry, transferables);
       const args: WithTransferables<RuntimeGeometryComputedArgs> = {
-        value: { result: transport, rgen },
+        value: { result: transport, renderId },
         transferables,
       };
       notify('geometryComputed', args);
     };
 
-    worker.onParametersResolved = (result, rgen) => {
-      notify('parametersResolved', { result, rgen });
+    worker.onParametersResolved = (event) => {
+      notify('parametersResolved', event);
     };
 
-    worker.onProgressUpdate = (phase, rgen, detail) => {
-      notify('progress', { phase, rgen, ...(detail === undefined ? {} : { detail }) });
+    worker.onProgressUpdate = (event) => {
+      notify('progress', event);
     };
 
-    worker.onError = (issues, rgen) => {
+    worker.onError = ({ issues, renderId }) => {
       notify('errorEvent', {
         issues: issues.map((issue) => normaliseIssueForWire(issue)),
-        ...(rgen === undefined ? {} : { rgen }),
+        ...(renderId === undefined ? {} : { renderId }),
       });
     };
 
-    worker.onActiveKernelChanged = (kernelId) => {
-      notify('activeKernelChanged', { kernelId });
+    worker.onActiveKernelChanged = (kernelId, renderId) => {
+      notify('activeKernelChanged', { kernelId, ...(renderId === undefined ? {} : { renderId }) });
     };
 
     worker.onCapabilitiesUpdated = (capabilities) => {
@@ -330,7 +310,7 @@ export function createWorkerDispatcher(
       }
 
       /* Late-bind the host bindings now that we have the inbound
-       * `memoryHandle`. The bindings' geometry / file encoders win
+       * `memoryHandle`. The bindings' geometry encoder wins
        * over the early-bound encoders supplied at dispatcher
        * construction time, so the same dispatcher transparently
        * upgrades from `transfer` to `pool` tier when the client
@@ -338,7 +318,6 @@ export function createWorkerDispatcher(
       if (dispatcherOptions?.bindingsFactory && memoryHandle) {
         const bindings = dispatcherOptions.bindingsFactory(memoryHandle);
         encodeGeometry = bindings.geometryDelivery.publish;
-        encodeFile = bindings.fileDelivery.publish;
       }
 
       await Promise.race([
@@ -364,7 +343,7 @@ export function createWorkerDispatcher(
   ) => {
     const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
     try {
-      return await Promise.race([worker.exportGeometry(args.format, args.options), trapPromise]);
+      return await Promise.race([worker.exportGeometry(args.format, args.options, args.content), trapPromise]);
     } finally {
       worker.flushTelemetry();
       cleanupTrap();
@@ -396,7 +375,7 @@ export function createWorkerDispatcher(
         case 'export': {
           const result = await handleExport(args as RuntimeProtocol['calls']['export']['args']);
           const transferables: Transferable[] = [];
-          const value = prepareExportTransfer(result, encodeFile, transferables);
+          const value = prepareExportTransfer(result, transferables);
           const envelope: WithTransferables<unknown> = {
             value,
             transferables,
@@ -406,57 +385,12 @@ export function createWorkerDispatcher(
         case 'exportModel': {
           const result = await handleExportModel(args as RuntimeProtocol['calls']['exportModel']['args']);
           const transferables: Transferable[] = [];
-          const value = prepareExportTransfer(result, encodeFile, transferables);
+          const value = prepareExportTransfer(result, transferables);
           const envelope: WithTransferables<unknown> = {
             value,
             transferables,
           };
           return envelope as unknown as CallResult;
-        }
-      }
-    },
-
-    notify(_context, name, args) {
-      switch (name) {
-        case 'openFile': {
-          const a = args as RuntimeProtocol['notifies']['openFile']['args'];
-          worker.handleOpenFile(a.file, a.parameters, a.options);
-          break;
-        }
-        case 'stage-and-render': {
-          const a = args as RuntimeProtocol['notifies']['stage-and-render']['args'];
-          /* Fire-and-forget: notify is synchronous, so rejection routing
-           * happens via .catch — making the handler async would block the
-           * dispatcher loop on every staged render. */
-          const stagePromise = worker.handleStageAndOpenFile({
-            stage: a.stage,
-            file: a.file,
-            parameters: a.parameters,
-            options: a.options,
-          });
-          // oxlint-disable-next-line eslint-plugin-promise/prefer-await-to-then -- intentional fire-and-forget routing inside synchronous notify handler
-          stagePromise.catch((error: unknown) => {
-            notify('errorEvent', { issues: errorToIssues(error) });
-          });
-          break;
-        }
-        case 'updateParameters': {
-          const a = args as RuntimeProtocol['notifies']['updateParameters']['args'];
-          worker.handleUpdateParameters(a.parameters);
-          break;
-        }
-        case 'setOptions': {
-          const a = args as RuntimeProtocol['notifies']['setOptions']['args'];
-          worker.handleSetOptions(a.options);
-          break;
-        }
-        case 'fileChanged': {
-          const a = args as RuntimeProtocol['notifies']['fileChanged']['args'];
-          // oxlint-disable-next-line promise/prefer-await-to-then -- intentional fire-and-forget routing inside synchronous notify handler
-          worker.notifyFileChanged(a.paths).catch((error: unknown) => {
-            notify('errorEvent', { issues: errorToIssues(error) });
-          });
-          break;
         }
         case 'cleanup': {
           if (logFlushTimer) {
@@ -464,15 +398,59 @@ export function createWorkerDispatcher(
             logFlushTimer = undefined;
           }
           flushLogs();
-          // oxlint-disable-next-line promise/prefer-await-to-then -- intentional fire-and-forget routing inside synchronous notify handler
-          worker.cleanup().catch((error: unknown) => {
-            notify('errorEvent', { issues: errorToIssues(error) });
+          await worker.cleanup();
+          return null as unknown as CallResult;
+        }
+      }
+    },
+
+    notify(_context, name, args) {
+      const runPreviewCommand = (renderId: string, command: () => unknown): void => {
+        const report = (error: unknown): void => {
+          notify('errorEvent', { issues: errorToIssues(error), renderId });
+        };
+        try {
+          const result = command();
+          if (result instanceof Promise) {
+            // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- RPC notifies are fire-and-forget; this boundary reports returned rejections.
+            void result.catch(report);
+          }
+        } catch (error) {
+          report(error);
+        }
+      };
+      switch (name) {
+        case 'openFile': {
+          const a = args as RuntimeProtocol['notifies']['openFile']['args'];
+          runPreviewCommand(a.renderId, () => {
+            worker.handleOpenFile(a);
+          });
+          break;
+        }
+        case 'stage-and-render': {
+          const a = args as RuntimeProtocol['notifies']['stage-and-render']['args'];
+          runPreviewCommand(a.renderId, async () => {
+            await worker.handleStageAndOpenFile(a);
+          });
+          break;
+        }
+        case 'updateParameters': {
+          const a = args as RuntimeProtocol['notifies']['updateParameters']['args'];
+          runPreviewCommand(a.renderId, () => {
+            worker.handleUpdateParameters(a);
+          });
+          break;
+        }
+        case 'setOptions': {
+          const a = args as RuntimeProtocol['notifies']['setOptions']['args'];
+          runPreviewCommand(a.renderId, () => {
+            worker.handleSetOptions(a);
           });
           break;
         }
         case 'abort': {
           const a = args as RuntimeProtocol['notifies']['abort']['args'];
-          worker.handleWireAbort(a.reason);
+          worker.handleWireAbort(a);
           break;
         }
         // Worker → client autonomous notifies are emitted via `serverHandle.notify`,

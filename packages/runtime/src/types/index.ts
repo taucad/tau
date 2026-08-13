@@ -9,29 +9,41 @@ export type {
   ExecuteResult,
   BuiltinModule,
   KernelBundler,
+} from '#types/runtime-bundler-service.types.js';
+export type {
   BundlerInitOptions,
+  BundlerRuntime,
   BundleInput,
   DetectImportsResult,
   BundlerDefinition,
   BundlerPluginFactory,
 } from '#types/runtime-bundler.types.js';
 export type * from '#types/runtime-middleware.types.js';
+export type * from '#types/runtime-content.types.js';
+export {
+  contentDefault,
+  normalizeRuntimeContent,
+  runtimeContentDefaults,
+  runtimeContentProperties,
+  runtimeContentSchema,
+  RuntimeContentUnsupportedError,
+} from '#types/runtime-content.types.js';
 export type {
   RuntimeLogOptions,
   RuntimeLogger,
   RuntimeFileSystemBase,
   RuntimeWatchRequest,
-  RuntimeWatchEventFilter,
   RuntimeWatchEvent,
   KernelFileSystem,
   KernelRuntime,
   GetParametersInput,
   CreateGeometryInput,
   GetDependenciesInput,
-  GetDependenciesResult,
   InitializeInput,
   ExportGeometryInput,
   CreateGeometryOutput,
+  MeshGeometryInput,
+  MeshGeometryOutput,
   KernelDefinition,
   AnyKernelDefinition,
   KernelPluginFactory,

@@ -7,11 +7,8 @@ import { describe, it, assertType } from 'vitest';
 import { z } from 'zod';
 
 import { defineRuntimeTransport } from '#transport/define-runtime-transport.js';
-import type {
-  RuntimeTransportClient,
-  RuntimeTransportHost,
-  TransportDescriptor,
-} from '#transport/runtime-transport.types.js';
+import type { RuntimeTransportClient } from '#transport/runtime-transport.types.js';
+import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type {
   TransportId,
   TransportProtocol,
@@ -38,27 +35,17 @@ const bundledTransport = defineRuntimeTransport({
     workerScript: z.string(),
     name: z.string().optional(),
   }),
-  hostOptionsSchema: z.object({
-    pool: z
-      .object({
-        bytes: z.number().int().nonnegative().default(0),
-      })
-      .optional(),
-  }),
   client: Object.assign(stubClient, {
     describe: (): TransportDescriptor<'web-worker'> => ({
       id: 'web-worker',
       wire: 'web-worker',
       memory: {
         geometryDelivery: 'transfer',
-        fileDelivery: 'transfer',
         abortSignal: 'sab-atomics',
       },
       fileSystem: 'unbound',
     }),
   }),
-  host: (): RuntimeTransportHost<RuntimeProtocol, Readonly<Record<string, unknown>>, 'web-worker'> =>
-    ({}) as RuntimeTransportHost<RuntimeProtocol, Readonly<Record<string, unknown>>, 'web-worker'>,
 });
 
 describe('transport callable generic inference end-to-end (C12)', () => {

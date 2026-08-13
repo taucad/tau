@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/naming-convention -- file-system path keys (e.g. '/projects/proj/main.ts') are not camelCase identifiers. */
+/* eslint-disable @typescript-eslint/naming-convention -- file-system path keys (e.g. '/main.ts') are not camelCase identifiers. */
 /* oxlint-disable unicorn-js/prevent-abbreviations -- handler-callback shorthand `fn`/`telemetryFn` mirrors the runtime API surface. */
 /* oxlint-disable enforce-uint8array-arraybuffer/enforce-uint8array-arraybuffer -- structural cast types in `(result as { data: Array<{ bytes: Uint8Array }> })` describe wire payloads, not runtime allocations. */
 /* oxlint-disable prefer-destructuring -- `(seen[0]!.result as { data: ... }).data` casts then accesses; not a destructure-friendly pattern. */
@@ -26,6 +26,7 @@ type DispatcherFixture = {
 
 type FixtureOptions = Parameters<typeof createWorkerDispatcher>[2];
 const testGeometry = { format: 'gltf', content: new Uint8Array([1]), hash: 'mock' } satisfies Geometry;
+const renderId = '550e8400-e29b-41d4-a716-446655440000';
 
 /** Build a dispatcher fixture wired against an in-memory `MessageChannel` pair. */
 async function buildFixture(worker: KernelWorker, options?: FixtureOptions): Promise<DispatcherFixture> {
@@ -80,7 +81,7 @@ function createMockWorker(overrides?: Partial<KernelWorker> & { geometryPool?: S
     setFilePoolBuffer: vi.fn(),
     handleWireAbort: vi.fn(),
     geometryPool: geometryPool ?? undefined,
-    capabilitiesManifest: { routes: [], renderSchemas: {} },
+    capabilitiesManifest: { routes: [], renderCapabilities: {} },
     ...rest,
   };
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock<T>() proxy not assignable to KernelWorker
@@ -115,11 +116,10 @@ describe('createWorkerDispatcher', () => {
             sourceFormat: 'glb',
             transcoderId: 'converter',
             fidelity: 'mesh',
-            schema: {},
-            defaults: {},
+            exportOptions: { schema: {}, defaults: {} },
           },
         ],
-        renderSchemas: {},
+        renderCapabilities: {},
       } as const satisfies CapabilitiesManifest;
 
       const worker = createMockWorker({ capabilitiesManifest: manifest });
@@ -252,27 +252,37 @@ describe('createWorkerDispatcher', () => {
       const worker = createMockWorker();
       fixture = await buildFixture(worker);
 
-      const file = { path: '/projects/proj', filename: 'main.ts' };
-      fixture.client.notify('openFile', { file, parameters: { foo: 'bar' }, options: { coordinateSystem: 'z-up' } });
+      const file = { path: '/', filename: 'main.ts' };
+      fixture.client.notify('openFile', {
+        renderId,
+        file,
+        parameters: { foo: 'bar' },
+        options: { coordinateSystem: 'z-up' },
+      });
       await flushMicrotasks();
 
-      expect(worker.handleOpenFile).toHaveBeenCalledWith(file, { foo: 'bar' }, { coordinateSystem: 'z-up' });
+      expect(worker.handleOpenFile).toHaveBeenCalledWith({
+        renderId,
+        file,
+        parameters: { foo: 'bar' },
+        options: { coordinateSystem: 'z-up' },
+      });
     });
 
     it('routes `stage-and-render` notify to worker.handleStageAndOpenFile', async () => {
       const worker = createMockWorker();
       fixture = await buildFixture(worker);
 
-      const stage = { '/projects/proj/main.ts': new Uint8Array([1, 2, 3]) };
-      const file = { path: '/projects/proj', filename: 'main.ts' };
-      fixture.client.notify('stage-and-render', { stage, file, parameters: { foo: 'bar' } });
+      const stage = { '/main.ts': new Uint8Array([1, 2, 3]) };
+      const file = { path: '/', filename: 'main.ts' };
+      fixture.client.notify('stage-and-render', { renderId, stage, file, parameters: { foo: 'bar' } });
       await flushMicrotasks();
 
       expect(worker.handleStageAndOpenFile).toHaveBeenCalledWith({
+        renderId,
         stage,
         file,
         parameters: { foo: 'bar' },
-        options: undefined,
       });
     });
 
@@ -288,8 +298,9 @@ describe('createWorkerDispatcher', () => {
       });
 
       fixture.client.notify('stage-and-render', {
-        stage: { '/projects/proj/main.ts': new Uint8Array([1]) },
-        file: { path: '/projects/proj', filename: 'main.ts' },
+        renderId,
+        stage: { '/main.ts': new Uint8Array([1]) },
+        file: { path: '/', filename: 'main.ts' },
         parameters: {},
       });
       await flushMicrotasks();
@@ -298,28 +309,97 @@ describe('createWorkerDispatcher', () => {
       expect(errors[0]!.issues[0]!.message).toContain('writeFile blew up');
     });
 
-    it('routes `updateParameters`, `setOptions`, `fileChanged`, and `abort` notifies', async () => {
+    it('routes `updateParameters`, `setOptions`, and `abort` notifies (T18)', async () => {
       const worker = createMockWorker();
       fixture = await buildFixture(worker);
 
-      fixture.client.notify('updateParameters', { parameters: { width: 10 } });
-      fixture.client.notify('setOptions', { options: { density: 'high' } });
-      fixture.client.notify('fileChanged', { paths: ['/a', '/b'] });
-      fixture.client.notify('abort', { reason: 2 });
+      fixture.client.notify('updateParameters', { renderId, parameters: { width: 10 } });
+      fixture.client.notify('setOptions', { renderId, options: { density: 'high' } });
+      fixture.client.notify('abort', { renderId, reason: 2 });
       await flushMicrotasks();
 
-      expect(worker.handleUpdateParameters).toHaveBeenCalledWith({ width: 10 });
-      expect(worker.handleSetOptions).toHaveBeenCalledWith({ density: 'high' });
-      expect(worker.notifyFileChanged).toHaveBeenCalledWith(['/a', '/b']);
-      expect(worker.handleWireAbort).toHaveBeenCalledWith(2);
+      expect(worker.handleUpdateParameters).toHaveBeenCalledWith({ renderId, parameters: { width: 10 } });
+      expect(worker.handleSetOptions).toHaveBeenCalledWith({ renderId, options: { density: 'high' } });
+      expect(worker.notifyFileChanged).not.toHaveBeenCalled();
+      expect(worker.handleWireAbort).toHaveBeenCalledWith({ renderId, reason: 2 });
     });
 
-    it('routes `cleanup` notify to worker.cleanup', async () => {
+    it('should surface a synchronous preview command failure as one scoped error (T8, T15, T26)', async () => {
+      const worker = createMockWorker({
+        handleOpenFile: vi.fn(() => {
+          throw new TypeError('invalid file locator');
+        }),
+      });
+      fixture = await buildFixture(worker);
+      const errors: Array<RuntimeProtocol['notifies']['errorEvent']['args']> = [];
+      fixture.client.onNotify('errorEvent', (args) => errors.push(args));
+
+      fixture.client.notify('openFile', {
+        renderId,
+        file: { path: 'relative', filename: 'main.ts' },
+        parameters: {},
+      });
+      await flushMicrotasks();
+
+      expect(errors).toEqual([
+        {
+          renderId,
+          issues: [{ message: 'invalid file locator', code: 'RUNTIME', type: 'runtime', severity: 'error' }],
+        },
+      ]);
+    });
+
+    it('should surface synchronous `updateParameters`/`setOptions` failures as scoped errors only (T15)', async () => {
+      const worker = createMockWorker({
+        handleUpdateParameters: vi.fn(() => {
+          throw new TypeError('updateParameters blew up');
+        }),
+        handleSetOptions: vi.fn(() => {
+          throw new TypeError('setOptions blew up');
+        }),
+      });
+      fixture = await buildFixture(worker);
+      const errors: Array<RuntimeProtocol['notifies']['errorEvent']['args']> = [];
+      fixture.client.onNotify('errorEvent', (args) => errors.push(args));
+
+      fixture.client.notify('updateParameters', { renderId, parameters: { width: 10 } });
+      fixture.client.notify('setOptions', { renderId, options: { density: 'high' } });
+      await flushMicrotasks();
+
+      expect(errors).toEqual([
+        {
+          renderId,
+          issues: [{ message: 'updateParameters blew up', code: 'RUNTIME', type: 'runtime', severity: 'error' }],
+        },
+        {
+          renderId,
+          issues: [{ message: 'setOptions blew up', code: 'RUNTIME', type: 'runtime', severity: 'error' }],
+        },
+      ]);
+    });
+
+    it('ignores a misrouted worker → client notify without touching the worker (T15)', async () => {
+      const worker = createMockWorker();
+      fixture = await buildFixture(worker);
+      const errors: Array<RuntimeProtocol['notifies']['errorEvent']['args']> = [];
+      fixture.client.onNotify('errorEvent', (args) => errors.push(args));
+
+      fixture.client.notify('activeKernelChanged', { kernelId: 'replicad', renderId });
+      fixture.client.notify('stateChanged', { renderId, abortGeneration: 1, state: 'idle' });
+      await flushMicrotasks();
+
+      expect(errors).toEqual([]);
+      expect(worker.handleOpenFile).not.toHaveBeenCalled();
+      expect(worker.handleUpdateParameters).not.toHaveBeenCalled();
+      expect(worker.handleSetOptions).not.toHaveBeenCalled();
+      expect(worker.handleWireAbort).not.toHaveBeenCalled();
+    });
+
+    it('acknowledges `cleanup` only after worker cleanup completes', async () => {
       const worker = createMockWorker();
       fixture = await buildFixture(worker);
 
-      fixture.client.notify('cleanup', undefined);
-      await flushMicrotasks();
+      await expect(fixture.client.call('cleanup', undefined)).resolves.toBeNull();
 
       expect(worker.cleanup).toHaveBeenCalledTimes(1);
     });
@@ -331,10 +411,10 @@ describe('createWorkerDispatcher', () => {
       const pool = new SharedPool(sab, { maxEntries: 64 });
       const content = new Uint8Array([42]);
 
-      let onGeometryComputed: ((result: unknown, rgen: number) => void) | undefined;
+      let onGeometryComputed: ((event: { result: unknown; renderId: string }) => void) | undefined;
       const worker = createMockWorker();
       Object.defineProperty(worker, 'onGeometryComputed', {
-        set(fn: (result: unknown, rgen: number) => void) {
+        set(fn: (event: { result: unknown; renderId: string }) => void) {
           onGeometryComputed = fn;
         },
         get() {
@@ -365,14 +445,14 @@ describe('createWorkerDispatcher', () => {
 
       await fixture.client.call('initialize', {});
 
-      onGeometryComputed!(
-        {
+      onGeometryComputed!({
+        result: {
           success: true,
           data: { format: 'gltf', content, hash: 'auto-0' },
           issues: [],
         },
-        1,
-      );
+        renderId,
+      });
       await flushMicrotasks();
 
       expect(seen).toHaveLength(1);
@@ -384,9 +464,11 @@ describe('createWorkerDispatcher', () => {
       expect(result.data.content.key).toBe('auto-0');
     });
 
-    it('emits `progress` and `parametersResolved` notifies with `rgen` from the autonomous worker callbacks', async () => {
-      let onProgressUpdate: ((phase: string, rgen: number, detail?: unknown) => void) | undefined;
-      let onParametersResolved: ((result: unknown, rgen: number) => void) | undefined;
+    it('emits `progress` and `parametersResolved` notifies with the opaque render ID', async () => {
+      let onProgressUpdate:
+        | ((event: { phase: string; detail?: Record<string, unknown>; renderId: string }) => void)
+        | undefined;
+      let onParametersResolved: ((event: { result: unknown; renderId: string }) => void) | undefined;
 
       const worker = createMockWorker();
       Object.defineProperty(worker, 'onProgressUpdate', {
@@ -408,35 +490,39 @@ describe('createWorkerDispatcher', () => {
 
       fixture = await buildFixture(worker);
 
-      const phases: Array<{ phase: string; rgen: number }> = [];
+      const phases: Array<{ phase: string; renderId: string }> = [];
       fixture.client.onNotify('progress', (args) => {
-        phases.push(args as { phase: string; rgen: number });
+        phases.push(args);
       });
-      const params: Array<{ result: unknown; rgen: number }> = [];
+      const params: Array<{ result: unknown; renderId: string }> = [];
       fixture.client.onNotify('parametersResolved', (args) => {
-        params.push(args as { result: unknown; rgen: number });
+        params.push(args);
       });
 
       // Wire callbacks via initialize.
       await fixture.client.call('initialize', {});
 
-      // Drive the autonomous-event surface as the kernel worker would for rgen=1.
-      onParametersResolved!({ success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] }, 1);
-      onProgressUpdate!('bundling', 1);
-      onProgressUpdate!('computingGeometry', 1);
+      onParametersResolved!({
+        result: { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] },
+        renderId,
+      });
+      onProgressUpdate!({ phase: 'bundling', renderId });
+      onProgressUpdate!({ phase: 'computingGeometry', renderId });
       await flushMicrotasks();
 
       expect(phases).toEqual([
-        { phase: 'bundling', rgen: 1 },
-        { phase: 'computingGeometry', rgen: 1 },
+        { phase: 'bundling', renderId },
+        { phase: 'computingGeometry', renderId },
       ]);
       expect(params).toHaveLength(1);
-      expect(params[0]!.rgen).toBe(1);
+      expect(params[0]!.renderId).toBe(renderId);
     });
 
     it('emits `stateChanged`, `activeKernelChanged`, and `capabilitiesUpdated`', async () => {
-      let onStateChanged: ((state: string, detail?: string) => void) | undefined;
-      let onActiveKernelChanged: ((id: string | undefined) => void) | undefined;
+      let onStateChanged:
+        | ((event: { state: string; detail?: string; renderId: string; abortGeneration: number }) => void)
+        | undefined;
+      let onActiveKernelChanged: ((id: string | undefined, renderId?: string) => void) | undefined;
       let onCapabilitiesUpdated: ((capabilities: unknown) => void) | undefined;
 
       const worker = createMockWorker();
@@ -467,27 +553,27 @@ describe('createWorkerDispatcher', () => {
 
       fixture = await buildFixture(worker);
 
-      const state: Array<{ state: string }> = [];
-      const kernels: Array<{ kernelId: string | undefined }> = [];
+      const state: Array<{ state: string; renderId: string; abortGeneration?: number }> = [];
+      const kernels: Array<{ kernelId?: string; renderId?: string }> = [];
       const caps: Array<{ capabilities: unknown }> = [];
-      fixture.client.onNotify('stateChanged', (args) => state.push(args as { state: string }));
-      fixture.client.onNotify('activeKernelChanged', (args) => kernels.push(args as { kernelId: string | undefined }));
+      fixture.client.onNotify('stateChanged', (args) => state.push(args));
+      fixture.client.onNotify('activeKernelChanged', (args) => kernels.push(args));
       fixture.client.onNotify('capabilitiesUpdated', (args) => caps.push(args as { capabilities: unknown }));
 
       await fixture.client.call('initialize', {});
 
-      onStateChanged!('rendering');
-      onActiveKernelChanged!('replicad');
-      onCapabilitiesUpdated!({ routes: [], renderSchemas: {} });
+      onStateChanged!({ state: 'rendering', renderId, abortGeneration: 1 });
+      onActiveKernelChanged!('replicad', renderId);
+      onCapabilitiesUpdated!({ routes: [], renderCapabilities: {} });
       await flushMicrotasks();
 
-      expect(state).toEqual([{ state: 'rendering' }]);
-      expect(kernels).toEqual([{ kernelId: 'replicad' }]);
-      expect(caps).toEqual([{ capabilities: { routes: [], renderSchemas: {} } }]);
+      expect(state).toEqual([{ state: 'rendering', renderId, abortGeneration: 1 }]);
+      expect(kernels).toEqual([{ kernelId: 'replicad', renderId }]);
+      expect(caps).toEqual([{ capabilities: { routes: [], renderCapabilities: {} } }]);
     });
 
     it('emits `errorEvent` from worker.onError', async () => {
-      let onError: ((issues: unknown[]) => void) | undefined;
+      let onError: ((event: { issues: unknown[]; renderId?: string }) => void) | undefined;
 
       const worker = createMockWorker();
       Object.defineProperty(worker, 'onError', {
@@ -505,7 +591,7 @@ describe('createWorkerDispatcher', () => {
 
       await fixture.client.call('initialize', {});
 
-      onError!([{ message: 'boom', code: 'KERNEL', type: 'kernel', severity: 'error' }]);
+      onError!({ issues: [{ message: 'boom', code: 'KERNEL', type: 'kernel', severity: 'error' }] });
       await flushMicrotasks();
 
       expect(seen).toEqual([{ issues: [{ message: 'boom', code: 'UNKNOWN', type: 'kernel', severity: 'error' }] }]);
@@ -513,8 +599,8 @@ describe('createWorkerDispatcher', () => {
   });
 
   describe('geometry transport types', () => {
-    type GeometryComputedListener = (args: { result: unknown; rgen: number }) => void;
-    type GeometryComputedFn = (result: unknown, rgen: number) => void;
+    type GeometryComputedListener = (args: { result: unknown; renderId: string }) => void;
+    type GeometryComputedFn = (event: { result: unknown; renderId: string }) => void;
 
     /**
      * Build a fixture wired to capture `geometryComputed` notify args
@@ -525,8 +611,8 @@ describe('createWorkerDispatcher', () => {
      * the dispatcher should apply.
      */
     async function buildGeometryFixture(encoder?: GeometryEncoder): Promise<{
-      seen: Array<{ result: unknown; rgen: number }>;
-      emit: GeometryComputedFn;
+      seen: Array<{ result: unknown; renderId: string }>;
+      emit: (result: unknown, generation: number) => void;
     }> {
       let onGeometryComputed: GeometryComputedFn | undefined;
       const worker = createMockWorker();
@@ -541,7 +627,7 @@ describe('createWorkerDispatcher', () => {
 
       fixture = await buildFixture(worker, encoder ? { encodeGeometry: encoder } : undefined);
 
-      const seen: Array<{ result: unknown; rgen: number }> = [];
+      const seen: Array<{ result: unknown; renderId: string }> = [];
       const listener: GeometryComputedListener = (args) => {
         seen.push(args);
       };
@@ -551,8 +637,8 @@ describe('createWorkerDispatcher', () => {
 
       return {
         seen,
-        emit: (result, rgen) => {
-          onGeometryComputed!(result, rgen);
+        emit: (result, _generation) => {
+          onGeometryComputed!({ result, renderId });
         },
       };
     }
@@ -623,7 +709,7 @@ describe('createWorkerDispatcher', () => {
       expect(stored).toEqual(expectedSnapshot);
 
       expect(seen).toHaveLength(1);
-      expect(seen[0]!.rgen).toBe(1);
+      expect(seen[0]!.renderId).toBe(renderId);
       const data = (seen[0]!.result as { data: { content: { delivery: string; key?: string } } }).data;
       expect(data.content.delivery).toBe('pooled');
       expect(data.content.key).toBe('dep-hash-0');
@@ -758,7 +844,7 @@ describe('createWorkerDispatcher', () => {
     });
 
     it('surfaces autonomous render rejections as `errorEvent` notifies', async () => {
-      let onError: ((issues: unknown[], rgen?: number) => void) | undefined;
+      let onError: ((event: { issues: unknown[]; renderId?: string }) => void) | undefined;
       const worker = createMockWorker();
       Object.defineProperty(worker, 'onError', {
         set(fn: typeof onError) {
@@ -770,20 +856,23 @@ describe('createWorkerDispatcher', () => {
       });
       fixture = await buildFixture(worker);
 
-      const seen: Array<{ issues: ReadonlyArray<{ message: string }>; rgen?: number }> = [];
+      const seen: Array<{ issues: ReadonlyArray<{ message: string }>; renderId?: string }> = [];
       fixture.client.onNotify('errorEvent', (args) => {
         seen.push(args);
       });
 
       await fixture.client.call('initialize', {});
 
-      onError!([{ message: 'WASM worker crash', code: 'KERNEL', type: 'kernel', severity: 'error' }], 7);
+      onError!({
+        issues: [{ message: 'WASM worker crash', code: 'KERNEL', type: 'kernel', severity: 'error' }],
+        renderId,
+      });
       await flushMicrotasks();
 
       expect(seen).toHaveLength(1);
       expect(seen[0]!.issues[0]!.message).toBe('WASM worker crash');
       expect(seen[0]!.issues[0]).toMatchObject({ code: 'UNKNOWN' });
-      expect(seen[0]!.rgen).toBe(7);
+      expect(seen[0]!.renderId).toBe(renderId);
     });
 
     it('catches unhandled rejections during export and rejects the call', async () => {

@@ -28,6 +28,7 @@ const mockDependencies: readonly Dependency[] = [
   },
   { type: 'framework', name: 'tau', version: '0.0.1' },
 ];
+const testSignal = new AbortController().signal;
 
 describe('defineMiddleware', () => {
   it('should create public plugin metadata and hide lifecycle details', async () => {
@@ -265,6 +266,7 @@ describe('createMiddlewareRuntime', () => {
     const filesystem = createMockFileSystem();
 
     const runtime = createMiddlewareRuntime({
+      signal: testSignal,
       onLog: onLog as OnWorkerLog,
       middlewareName: 'TestMiddleware',
       filesystem,
@@ -288,6 +290,7 @@ describe('createMiddlewareRuntime', () => {
     });
 
     const runtime = createMiddlewareRuntime<z.infer<typeof stateSchema>>({
+      signal: testSignal,
       onLog: onLog as OnWorkerLog,
       middlewareName: 'TestMiddleware',
       filesystem,
@@ -308,6 +311,7 @@ describe('createMiddlewareRuntime', () => {
     const filesystem = createMockFileSystem();
 
     const runtime = createMiddlewareRuntime({
+      signal: testSignal,
       onLog: onLog as OnWorkerLog,
       middlewareName: 'MyMiddleware',
       filesystem,
@@ -352,6 +356,7 @@ describe('wrap hook behavior', () => {
     });
 
     const runtime = createMiddlewareRuntime({
+      signal: testSignal,
       onLog: vi.fn() as OnWorkerLog,
       middlewareName: 'Test',
       filesystem: createMockFileSystem(),
@@ -408,6 +413,7 @@ describe('wrap hook behavior', () => {
       options: {},
     } as const;
     const runtime = createMiddlewareRuntime({
+      signal: testSignal,
       onLog: vi.fn() as OnWorkerLog,
       middlewareName: 'Test',
       filesystem: createMockFileSystem(),
@@ -460,6 +466,7 @@ describe('wrap hook behavior', () => {
     });
 
     const runtime = createMiddlewareRuntime<TestState>({
+      signal: testSignal,
       onLog: vi.fn() as OnWorkerLog,
       middlewareName: 'Test',
       filesystem: createMockFileSystem(),

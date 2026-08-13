@@ -1,5 +1,7 @@
 import { createCoordinateTransform, createNodeIo, createScalingTransform } from '@taucad/converter';
 import type { GeometryGltf } from '@taucad/types';
+import type { CreateGeometryResult } from '#types/runtime.types.js';
+import type { RuntimeLogger } from '#types/runtime-kernel.types.js';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
 
 /**
@@ -41,22 +43,30 @@ async function transformGltfGeometry(geometry: GeometryGltf): Promise<GeometryGl
  * - Exports bypass the middleware and return valid GLTF files
  * @public
  */
+async function transformResult(result: CreateGeometryResult, logger: RuntimeLogger): Promise<CreateGeometryResult> {
+  if (!result.success || result.data?.format !== 'gltf') {
+    return result;
+  }
+
+  logger.trace('Transforming GLTF geometry to Z-up/mm');
+
+  return {
+    ...result,
+    data: await transformGltfGeometry(result.data),
+  };
+}
+
 export const gltfCoordinateTransform = defineMiddleware({
   id: 'gltfCoordinateTransform',
   name: 'GltfCoordinateTransform',
 
   async wrapCreateGeometry(input, handler, { logger }) {
-    const result = await handler(input);
+    return transformResult(await handler(input), logger);
+  },
 
-    if (!result.success || result.data.format !== 'gltf') {
-      return result;
-    }
-
-    logger.trace('Transforming GLTF geometry to Z-up/mm');
-
-    return {
-      ...result,
-      data: await transformGltfGeometry(result.data),
-    };
+  // Display GLTF from kernels that defer tessellation flows through the mesh
+  // phase, so the same UI-frame transform applies there.
+  async wrapMeshGeometry(input, handler, { logger }) {
+    return transformResult(await handler(input), logger);
   },
 });

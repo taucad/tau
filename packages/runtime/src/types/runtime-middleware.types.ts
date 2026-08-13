@@ -11,12 +11,11 @@ import type { Dependency } from '#types/runtime-dependency.types.js';
 import type {
   RuntimeLogger,
   KernelFileSystem,
-  CreateGeometryInput,
   ExportGeometryRequest,
   GetDependenciesInput,
   GetParametersInput,
 } from '#types/runtime-kernel.types.js';
-import type { ContentInputFor, RuntimeContentKey } from '#types/runtime-content.types.js';
+import type { ContentHookInputFor, RuntimeContentKey } from '#types/runtime-content.types.js';
 
 // =============================================================================
 // Middleware State & Runtime
@@ -63,6 +62,11 @@ export type KernelMiddlewareRuntime<
   // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- Default represents z.infer<z.object({})>
   Options extends Record<string, unknown> = {},
 > = {
+  /**
+   * Operation-scoped cancellation signal shared with the active kernel call.
+   * Fresh for each operation; pass it to cancellable APIs and do not retain it.
+   */
+  readonly signal: AbortSignal;
   /** Logger with middleware name pre-configured as the component */
   logger: RuntimeLogger;
   /** Filesystem capability for runtime-path operations. `/` is the supplied filesystem root. */
@@ -96,11 +100,11 @@ export type KernelMiddlewareRuntime<
  * Uses internal geometry types (without hash) - hash is added by kernel-worker.ts.
  * @public
  */
-export type MiddlewareCreateGeometryRequest<Content extends RuntimeContentKey = RuntimeContentKey> = Omit<
-  CreateGeometryInput,
-  'content'
-> &
-  ContentInputFor<Content>;
+export type MiddlewareCreateGeometryRequest<Content extends RuntimeContentKey = RuntimeContentKey> = {
+  readonly entryPath: string;
+  readonly parameters: Record<string, unknown>;
+  readonly options?: Record<string, unknown>;
+} & ContentHookInputFor<Content>;
 
 /** Continue the create-geometry chain with the content visible to this middleware. @public */
 export type CreateGeometryHandler<Content extends RuntimeContentKey = RuntimeContentKey> = (
@@ -117,7 +121,7 @@ export type MeshGeometryRequest<Content extends RuntimeContentKey = RuntimeConte
   /** Kernel-specific render options (preview tessellation etc.). */
   options: Record<string, unknown>;
   /** Framework content projected to the selected render route. */
-} & ContentInputFor<Content>;
+} & ContentHookInputFor<Content>;
 
 /**
  * Handler function for the meshGeometry display phase.
@@ -139,7 +143,7 @@ export type MiddlewareExportGeometryRequest<Content extends RuntimeContentKey = 
   ExportGeometryRequest,
   'content'
 > &
-  ContentInputFor<Content>;
+  ContentHookInputFor<Content>;
 
 /** Continue the export-geometry chain with the content visible to this middleware. @public */
 export type ExportGeometryHandler<Content extends RuntimeContentKey = RuntimeContentKey> = (
@@ -285,7 +289,8 @@ export type WrapGetParametersHook<
  * const parameterResolver = defineMiddleware({
  *   id: 'parameter-resolver',
  *   name: 'ParameterResolver',
- *   getDependencies({ entryPath }, options) {
+ *   getDependencies({ entryPath }, { options, signal }) {
+ *     signal.throwIfAborted();
  *     return [{ path: `/${options.parametersDir}/${entryPath.slice(1)}.json` }];
  *   },
  * });
@@ -298,10 +303,28 @@ export type MiddlewareDependencyDeclaration = Readonly<{
   watchDebounce?: number;
 }>;
 
+/** Runtime services available while middleware declares operation dependencies. @public */
+export type MiddlewareDependencyRuntime<
+  // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- Default represents z.infer<z.object({})>
+  Options extends Record<string, unknown> = {},
+> = {
+  /**
+   * Operation-scoped cancellation signal. Fresh for each dependency-resolution
+   * operation; pass it to cancellable APIs and do not retain it.
+   */
+  readonly signal: AbortSignal;
+  /** Logger with middleware name pre-configured as the component. */
+  readonly logger: RuntimeLogger;
+  /** Filesystem capability for runtime-path operations. */
+  readonly filesystem: KernelFileSystem;
+  /** Resolved middleware options. */
+  readonly options: Options;
+};
+
 export type GetMiddlewareDependenciesHook<
   // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- Default represents z.infer<z.object({})>
   Options extends Record<string, unknown> = {},
 > = (
   input: GetDependenciesInput,
-  options: Options,
+  runtime: MiddlewareDependencyRuntime<Options>,
 ) => MiddlewareDependencyDeclaration[] | Promise<MiddlewareDependencyDeclaration[]>;

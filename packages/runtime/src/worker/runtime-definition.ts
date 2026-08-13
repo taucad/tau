@@ -21,16 +21,21 @@ type RuntimePluginOptions<
 type AwaitedRuntimeOptions<Runtime> = Awaited<Runtime>;
 
 type PublicKernelPlugin<Plugin> =
-  Plugin extends KernelPlugin<infer FormatMap, infer RenderOptions, infer Id>
-    ? KernelPlugin<FormatMap, RenderOptions, Id>
+  Plugin extends KernelPlugin<infer FormatMap, infer RenderOptions, infer Id, infer RenderContent, infer ExportContent>
+    ? KernelPlugin<FormatMap, RenderOptions, Id, RenderContent, ExportContent>
     : never;
 
-type PublicMiddlewarePlugin<Plugin> = Plugin extends MiddlewarePlugin<infer Id> ? MiddlewarePlugin<Id> : never;
+type PublicMiddlewarePlugin<Plugin> =
+  Plugin extends MiddlewarePlugin<infer Id, infer RenderContent, infer ExportContent>
+    ? MiddlewarePlugin<Id, RenderContent, ExportContent>
+    : never;
 
 type PublicBundlerPlugin<Plugin> = Plugin extends BundlerPlugin<infer Id> ? BundlerPlugin<Id> : never;
 
 type PublicTranscoderPlugin<Plugin> =
-  Plugin extends TranscoderPlugin<infer EdgeMap, infer From, infer Id> ? TranscoderPlugin<EdgeMap, From, Id> : never;
+  Plugin extends TranscoderPlugin<infer EdgeMap, infer From, infer Id, infer Content, infer PinnedSourceOptions>
+    ? TranscoderPlugin<EdgeMap, From, Id, Content, PinnedSourceOptions>
+    : never;
 
 type PublicKernelTuple<Plugins extends readonly AnyKernelPlugin[]> = {
   readonly [Index in keyof Plugins]: PublicKernelPlugin<Plugins[Index]>;
@@ -49,10 +54,22 @@ type PublicTranscoderTuple<Plugins extends readonly AnyTranscoderPlugin[]> = {
 };
 
 type RuntimeOptionsKernels<Options> =
-  AwaitedRuntimeOptions<Options> extends RuntimeDefinitionOptions<infer Kernels> ? Kernels : readonly never[];
+  AwaitedRuntimeOptions<Options> extends RuntimeDefinitionOptions<
+    infer Kernels,
+    readonly MiddlewarePlugin[],
+    readonly BundlerPlugin[],
+    readonly AnyTranscoderPlugin[]
+  >
+    ? Kernels
+    : readonly never[];
 
 type RuntimeOptionsMiddleware<Options> =
-  AwaitedRuntimeOptions<Options> extends RuntimeDefinitionOptions<readonly AnyKernelPlugin[], infer Middleware>
+  AwaitedRuntimeOptions<Options> extends RuntimeDefinitionOptions<
+    readonly AnyKernelPlugin[],
+    infer Middleware,
+    readonly BundlerPlugin[],
+    readonly AnyTranscoderPlugin[]
+  >
     ? Middleware
     : readonly never[];
 
@@ -60,7 +77,8 @@ type RuntimeOptionsBundlers<Options> =
   AwaitedRuntimeOptions<Options> extends RuntimeDefinitionOptions<
     readonly AnyKernelPlugin[],
     readonly MiddlewarePlugin[],
-    infer Bundlers
+    infer Bundlers,
+    readonly AnyTranscoderPlugin[]
   >
     ? Bundlers
     : readonly never[];

@@ -2,15 +2,12 @@ import type { Document, Primitive } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { createNodeIo } from '@taucad/converter';
 import type { GeometryGltf } from '@taucad/types';
+import { cadEdgeOverlayMaterialDefaults } from '@taucad/types/constants';
 import { z } from 'zod';
 import { detectEdges } from '#utils/edge-detection.js';
+import type { CreateGeometryResult } from '#types/runtime.types.js';
+import type { RuntimeLogger } from '#types/runtime-kernel.types.js';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
-
-/**
- * Edge color in RGBA format (normalized 0-1).
- * Default: black
- */
-const edgeColor: [number, number, number, number] = [0, 0, 0, 1];
 
 /**
  * Primitive mode for triangles in glTF.
@@ -23,17 +20,17 @@ const primitiveModeTriangles = 4;
 const primitiveModeLines = 1;
 
 /**
- * Create fallback edge primitives for triangle meshes in a glTF document that don't already have edges.
+ * Create fallback edge primitives for every eligible triangle mesh in a glTF document.
  *
- * For each mesh that has no existing LINE primitives:
+ * For each triangle primitive:
  * 1. Run edge detection to find sharp edges
  * 2. Create a new LINES primitive with the edge geometry
  * 3. Apply an unlit material with edge color
  *
- * Meshes that already contain LINE primitives (e.g., from Replicad's meshEdges or
- * JSCAD's fresh-retessellated export topology) are skipped. Kernel-owned edges
- * use better source topology than dihedral-angle detection on tessellated
- * triangle soup.
+ * Existing LINE primitives are preserved. The planner normally prefers a
+ * kernel-native edge route and therefore does not select this fallback there;
+ * once fallback is selected, authored lines do not prove that every triangle
+ * primitive already carries a complete auxiliary overlay.
  *
  * @param document - The glTF document to process
  * @param thresholdDegrees - the dihedral angle threshold in degrees for edge detection
@@ -52,10 +49,11 @@ function addEdgePrimitivesToDocument(document: Document, thresholdDegrees: numbe
 
       edgeMaterial = document
         .createMaterial('tau-edge-material')
-        .setBaseColorFactor(edgeColor)
-        .setMetallicFactor(0)
-        .setRoughnessFactor(1)
-        .setDoubleSided(true)
+        .setBaseColorFactor([...cadEdgeOverlayMaterialDefaults.baseColorFactor])
+        .setMetallicFactor(cadEdgeOverlayMaterialDefaults.metallicFactor)
+        .setRoughnessFactor(cadEdgeOverlayMaterialDefaults.roughnessFactor)
+        .setDoubleSided(cadEdgeOverlayMaterialDefaults.doubleSided)
+        .setAlphaMode(cadEdgeOverlayMaterialDefaults.alphaMode)
         .setExtension('KHR_materials_unlit', unlit);
     }
 
@@ -64,15 +62,6 @@ function addEdgePrimitivesToDocument(document: Document, thresholdDegrees: numbe
 
   // Process each mesh
   for (const mesh of document.getRoot().listMeshes()) {
-    // Skip meshes that already have LINE primitives (e.g., Replicad meshEdges or
-    // JSCAD fresh-retessellated owner-local lines).
-    // Native kernel edges are higher quality than dihedral-angle detection
-    // because they use exact CAD topology rather than tessellated approximation.
-    const hasExistingLines = mesh.listPrimitives().some((p) => p.getMode() === primitiveModeLines);
-    if (hasExistingLines) {
-      continue;
-    }
-
     const primitivesToAdd: Primitive[] = [];
 
     for (const primitive of mesh.listPrimitives()) {
@@ -182,31 +171,74 @@ async function addEdgePrimitivesToGltf(geometry: GeometryGltf, thresholdDegrees:
  * The browser-side renderer identifies primitives by Three.js object type:
  * - Mesh objects are surfaces (matcap applied, visibility toggleable)
  * - LineSegments objects are edges (converted to LineSegments2 for fat line rendering)
- * @public
+ * @param result - Geometry result returned by the wrapped operation.
+ * @param thresholdDegrees - Minimum triangle-normal angle classified as an edge.
+ * @param logger - Runtime logger for the active middleware operation.
+ * @returns The original result or a GLTF result enriched with line primitives.
  */
+async function addEdgesToResult(
+  result: CreateGeometryResult,
+  thresholdDegrees: number,
+  logger: RuntimeLogger,
+): Promise<CreateGeometryResult> {
+  // Add edges on the way back up (onion model "return journey")
+  if (!result.success || result.data?.format !== 'gltf') {
+    return result;
+  }
+
+  logger.trace('Adding edge primitives to GLTF geometry');
+
+  return {
+    ...result,
+    data: await addEdgePrimitivesToGltf(result.data, thresholdDegrees),
+  };
+}
+
+/** Add fallback GLTF edge primitives only when the selected route requests them. @public */
 export const gltfEdgeDetection = defineMiddleware({
   id: 'gltfEdgeDetection',
   name: 'GltfEdgeDetection',
   version: '2.0.0',
+  content: {
+    render: ['includeEdges'],
+    exportFormats: { glb: ['includeEdges'], gltf: ['includeEdges'] },
+  },
 
   optionsSchema: z.object({
     thresholdDegrees: z.number().default(30),
   }),
 
   async wrapCreateGeometry(input, handler, { logger, options }) {
-    // Execute downstream (no pre-processing needed)
     const result = await handler(input);
+    return input.content?.includeEdges ? addEdgesToResult(result, options.thresholdDegrees, logger) : result;
+  },
 
-    // Add edges on the way back up (onion model "return journey")
-    if (!result.success || result.data.format !== 'gltf') {
+  // Display GLTF from kernels that defer tessellation flows through the mesh
+  // phase, so the fallback edge primitives are added there too.
+  async wrapMeshGeometry(input, handler, { logger, options }) {
+    const result = await handler(input);
+    return input.content?.includeEdges ? addEdgesToResult(result, options.thresholdDegrees, logger) : result;
+  },
+
+  async wrapExportGeometry(input, handler, { logger, options }) {
+    const result = await handler(input);
+    if (!input.content?.includeEdges || !result.success) {
       return result;
     }
 
-    logger.trace('Adding edge primitives to GLTF geometry');
-
-    return {
-      ...result,
-      data: await addEdgePrimitivesToGltf(result.data, options.thresholdDegrees),
-    };
+    const files = await Promise.all(
+      result.data.map(async (file) => {
+        if (!file.name.endsWith('.glb') && !file.name.endsWith('.gltf')) {
+          return file;
+        }
+        const geometry = await addEdgePrimitivesToGltf(
+          { format: 'gltf', content: file.bytes },
+          options.thresholdDegrees,
+        );
+        return { ...file, bytes: geometry.content };
+      }),
+    );
+    logger.trace('Added edge primitives to exported GLTF');
+    return { ...result, data: files };
   },
 });

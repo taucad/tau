@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/member-ordering -- operation entrypoints stay adjacent to their private lane implementations in this stateful worker. */
+/* oxlint-disable unicorn/prefer-math-trunc, no-bitwise -- cancellation generations require ECMAScript ToUint32 wrap semantics. */
 import deepmerge from 'deepmerge';
 import { logLevels, lookupExportFidelity } from '@taucad/types/constants';
 import { joinPath, parentDirectory, resolveVirtualPath } from '@taucad/utils/path';
@@ -22,11 +23,8 @@ import type {
   RuntimeLogger,
   InitializeInput,
   GetParametersInput,
-  CreateGeometryInput,
   GetDependenciesInput,
-  GetDependenciesResult,
   ExportGeometryInput,
-  ExportGeometryRequest,
   KernelExportGeometryInput,
   RuntimeImplementationAsset,
 } from '#types/runtime-kernel.types.js';
@@ -34,19 +32,22 @@ import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type {
   KernelMiddlewareRuntime,
   CreateGeometryHandler,
+  MiddlewareCreateGeometryRequest,
   MeshGeometryHandler,
   MeshGeometryRequest,
   ExportGeometryHandler,
+  MiddlewareExportGeometryRequest,
   GetParametersHandler,
   MiddlewareDependencyDeclaration,
+  MiddlewareDependencyRuntime,
 } from '#types/runtime-middleware.types.js';
+import type { BundlerDefinition } from '#types/runtime-bundler.types.js';
 import type {
   KernelBundler,
   BuiltinModule,
   BundleResult,
   ExecuteResult,
-  BundlerDefinition,
-} from '#types/runtime-bundler.types.js';
+} from '#types/runtime-bundler-service.types.js';
 import type {
   Dependency,
   FileDependency,
@@ -59,11 +60,22 @@ import type {
   KernelDependency,
   ExportDependency,
   AssetDependency,
+  GetDependenciesResult,
 } from '#types/runtime-dependency.types.js';
 import type {
   TelemetryEntry,
   RenderPhase,
   RuntimeExportModelArgs,
+  RuntimePreviewIdentity,
+  RuntimeOpenFileArgs,
+  RuntimeStageAndRenderArgs,
+  RuntimeUpdateParametersArgs,
+  RuntimeSetOptionsArgs,
+  RuntimeStateChangedArgs,
+  RuntimeProgressArgs,
+  RuntimeParametersResolvedArgs,
+  RuntimeErrorEventArgs,
+  WireAbortReasonCode,
   WorkerState,
 } from '#types/runtime-protocol.types.js';
 import { signalSlot, abortReason as abortReasonEnum } from '#types/runtime-protocol.types.js';
@@ -100,11 +112,17 @@ import type {
   MaterializedRender,
   MaterializedRenderResult,
   NativeHandleSlot,
+  NativeBuildInput,
+  NativeBuildInputCarrier,
   OperationOwner,
   RenderIdentity,
   SerializedNativeHandleSlot,
 } from '#framework/render-artifact.js';
-import { createNativeHandleIdentityKey, createRenderIdentityKey } from '#framework/render-artifact.js';
+import {
+  createNativeHandleIdentityKey,
+  createRenderIdentityKey,
+  nativeBuildInputSymbol,
+} from '#framework/render-artifact.js';
 import { finalizeExportArtifactSet } from '#framework/export-artifact-finalizer.js';
 import { packageVersion as tauVersion } from '#utils/package-info.js';
 import { isNotFoundError } from '#filesystem/filesystem-errors.js';
@@ -116,6 +134,23 @@ type ObservedFileRevision = {
   readonly content?: Uint8Array<ArrayBuffer>;
   readonly expectedPrior?: Readonly<{ hash: string | undefined }>;
 };
+
+type RenderCancellationRecord = {
+  readonly renderId: string;
+  readonly generation: number;
+  readonly controller: AbortController;
+  reason?: 'superseded' | 'timeout';
+  executing: boolean;
+};
+
+const renderTimeoutIssue = {
+  message: 'Render timed out. Increase the timeout in viewer settings or simplify the model geometry.',
+  code: 'RENDER_TIMEOUT',
+  type: 'runtime',
+  severity: 'error',
+} as const satisfies KernelIssue;
+
+const neverAbortedSignal = new AbortController().signal;
 
 type TranscoderPluginEntry = TranscoderPlugin<Record<string, unknown>> &
   RuntimePluginDefinitionCarrier<TranscoderDefinition>;
@@ -160,7 +195,7 @@ type OwnerBoundExportPlan =
   | {
       success: true;
       owner: OperationOwner;
-      input: ExportGeometryRequest;
+      input: MiddlewareExportGeometryRequest;
       route: OwnerBoundExportRoute;
       dependency: ExportDependency;
     }
@@ -263,41 +298,38 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return lastSlashIndex === -1 ? filename : filename.slice(lastSlashIndex + 1);
   }
 
-  /** Callback for pushing state changes to the dispatcher (postMessage fallback). */
-  public onStateChanged?: (state: WorkerState, detail?: string) => void;
+  /** Callback for pushing one fully identified state change to the dispatcher. */
+  public onStateChanged?: (event: RuntimeStateChangedArgs) => void;
 
   /**
-   * Callback for pushing geometry results to the dispatcher. The `rgen`
-   * argument is the autonomous render generation that produced the
-   * result; downstream consumers gate frame application on `rgen >=
-   * lastApplied` to ignore frames from superseded renders.
+   * Callback for pushing geometry results to the dispatcher. The internal
+   * generation supports cooperative SAB polling; `renderId` is the opaque
+   * preview identity used for downstream frame correlation.
    */
-  public onGeometryComputed?: (result: HashedGeometryResult, rgen: number) => void;
+  public onGeometryComputed?: (event: { readonly result: HashedGeometryResult; readonly renderId: string }) => void;
 
   /**
-   * Callback for pushing parameter results to the dispatcher. The
-   * `rgen` argument correlates the resolved schema with the originating
-   * render generation so the consumer can pair early-arriving parameter
-   * frames with the eventual `geometryComputed` for the same `rgen`.
+   * Callback for pushing parameter results to the dispatcher. `renderId`
+   * correlates the schema with its preview; generation remains internal
+   * cooperative-cancellation state.
    */
-  public onParametersResolved?: (result: GetParametersResult, rgen: number) => void;
+  public onParametersResolved?: (event: RuntimeParametersResolvedArgs) => void;
 
   /**
-   * Callback for pushing progress updates to the dispatcher. The
-   * `rgen` argument lets the consumer discard progress frames from
-   * superseded renders.
+   * Callback for pushing progress updates to the dispatcher. The admission
+   * lets the consumer discard frames from superseded renders.
    */
-  public onProgressUpdate?: (phase: RenderPhase, rgen: number, detail?: Record<string, unknown>) => void;
+  public onProgressUpdate?: (event: RuntimeProgressArgs) => void;
 
   /**
-   * Callback for pushing errors to the dispatcher. `rgen` is supplied
+   * Callback for pushing errors to the dispatcher. `renderId` is supplied
    * for render-scoped failures and omitted for connection-scoped
    * issues (e.g. handshake failure, transcoder load).
    */
-  public onError?: (issues: KernelIssue[], rgen?: number) => void;
+  public onError?: (event: RuntimeErrorEventArgs) => void;
 
   /** Callback for pushing active kernel changes to the dispatcher. */
-  public onActiveKernelChanged?: (kernelId: string | undefined) => void;
+  public onActiveKernelChanged?: (kernelId: string | undefined, renderId?: string) => void;
 
   /** Callback for pushing updated capabilities manifest to the dispatcher. */
   public onCapabilitiesUpdated?: (capabilities: CapabilitiesManifest) => void;
@@ -308,6 +340,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Raw Zod schema for render option validation, keyed by kernel ID. Populated from kernel definitions. */
   protected readonly kernelRenderZodSchemaMap = new Map<string, z.ZodType>();
 
+  /** Exact construction-option schemas keyed by kernel ID. */
+  protected readonly kernelCreateOptionsZodSchemaMap = new Map<string, z.ZodObject<z.ZodRawShape>>();
+
   /** Native content declarations keyed by kernel ID and export format. */
   protected readonly kernelExportContentMap = new Map<
     string,
@@ -317,29 +352,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Native render content declarations keyed by kernel ID. */
   protected readonly kernelRenderContentMap = new Map<string, readonly RuntimeContentKey[]>();
 
-  /** Native-handle reuse scope declared by each loaded kernel. */
-  protected readonly kernelNativeHandleScopeMap = new Map<string, 'source' | 'operation'>();
-
   /** Validated init options and verified assets for selected-participant identity. */
   protected readonly kernelInitOptionsMap = new Map<string, Record<string, unknown>>();
   protected readonly kernelImplementationAssetsMap = new Map<string, readonly RuntimeImplementationAsset[]>();
 
-  /**
-   * Framework-managed native geometry handle currently loaded in memory.
-   * The handle is opaque to the framework; exports may use it only when the
-   * identity-bound nativeHandleSlot proves it belongs to the requested render.
-   */
-  protected nativeHandle: unknown;
-
-  /**
-   * Compatibility mirror for tests/subclasses that directly clear the old field.
-   * Export code resolves durable snapshots through serializedNativeHandleSlot.
-   */
-  protected lastSerializedNativeHandle: unknown;
-
   protected pendingNativeHandle: unknown;
-  protected nativeHandleSlot: NativeHandleSlot | undefined;
-  protected serializedNativeHandleSlot: SerializedNativeHandleSlot | undefined;
+
+  /**
+   * Live native handles this worker owns, mapped to the owner that can release
+   * them. A handle enters on creation (`createGeometry`, snapshot restore) and
+   * leaves when no worker field references it any more — see
+   * {@link disposeUnreachableNativeHandles}.
+   */
+  private readonly ownedNativeHandles = new Map<unknown, OperationOwner>();
 
   /** Fully initialized bundlers keyed by file extension. Shared context across extensions of the same bundler. */
   protected loadedBundlers = new Map<string, { definition: BundlerDefinition; ctx: unknown }>();
@@ -439,9 +464,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   private readonly middlewareLoggerCache = new Map<string, RuntimeLogger>();
 
-  /** Cached KernelRuntime instance -- invalidated when the active file changes. */
-  private cachedRuntime: KernelRuntime | undefined;
-
   /** Cached log origin object -- recreated only when activeFilePath changes */
   private cachedLogOrigin: { component: string; file: string } | undefined;
   private cachedLogOriginFile = '';
@@ -485,9 +507,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private operationTail: Promise<void> = Promise.resolve();
   /** Serializes authoritative watch rereads before they enter the operation lane. */
   private watchReconciliationTail: Promise<void> = Promise.resolve();
+  /** Holds same-path watch echoes until staged bytes and their cache revision publish together. */
+  private stagedWritePublication:
+    | {
+        readonly paths: ReadonlySet<string>;
+        readonly promise: Promise<void>;
+        readonly resolve: () => void;
+      }
+    | undefined;
   private operationAdmissionOpen = true;
   private cleanupPromise: Promise<void> | undefined;
-  private pendingWirePreviewGeneration: number | undefined;
+
+  private readonly renderCancellationRecords = new Map<string, RenderCancellationRecord>();
+  private activeRenderRecord: RenderCancellationRecord | undefined;
+  private operationSignal: AbortSignal | undefined;
 
   /** SharedArrayBuffer signal channel for bidirectional abort/state signaling. */
   private signalView: Int32Array | undefined;
@@ -524,6 +557,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return this._capabilitiesManifest;
   }
 
+  /** Render identity currently owning preview publication. */
+  protected get activeRenderId(): string | undefined {
+    return this.activeRenderRecord?.renderId;
+  }
+
   /** Current render generation for abort detection. */
   private renderGeneration = 0;
 
@@ -546,7 +584,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private paramDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** Last state pushed via `pushState`, used to deduplicate repeated emissions. */
-  private lastPushedState?: WorkerState;
+  private lastPushedState?: { readonly renderId: string; readonly state: WorkerState; readonly detail?: string };
 
   /**
    * Whether a render is currently in progress. Exposed for export-during-render decisions.
@@ -554,12 +592,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @returns True if a render is in progress, false otherwise.
    */
   public get isRendering(): boolean {
-    return this._renderInProgress;
+    return [...this.renderCancellationRecords.values()].some((record) => record.executing);
   }
-  private _renderInProgress = false;
-
-  /** Cached KernelBundler facade exposed via KernelRuntime */
-  private cachedBundlerFacade: KernelBundler | undefined;
 
   /** Pending module registrations queued before the bundler is loaded */
   private readonly pendingModuleRegistrations = new Map<string, BuiltinModule>();
@@ -687,23 +721,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * Wire-format cooperative abort entry-point used by SAB-less transports
-   * (e.g. {@link createWebSocketTransport}). The dispatcher invokes this
-   * for every `{ type: 'abort', reason }` message; we bump the local
-   * `renderGeneration` exactly as we would from an `Atomics`-driven SAB
-   * notification — and write the reason into the SAB when available so
-   * downstream `isAborted()` checks classify the abort correctly.
+   * Targeted wire timeout entry point used by every isolated transport.
+   * Supersession is represented by admitting a newer preview, not by this
+   * command. Unknown and inactive targets are ignored.
    *
-   * @param reason - Abort reason carried inline by the wire command.
+   * @param input - Opaque preview target and the only valid wire reason.
    */
-  public handleWireAbort(reason: number): void {
-    if (this.signalView) {
-      Atomics.store(this.signalView, signalSlot.abortReason, reason);
-      this.renderGeneration = Atomics.load(this.signalView, signalSlot.abortGeneration);
-    } else {
-      this.renderGeneration++;
+  public handleWireAbort(input: { readonly renderId: string; readonly reason: WireAbortReasonCode }): void {
+    const record = this.renderCancellationRecords.get(input.renderId);
+    if (!record || record !== this.activeRenderRecord) {
+      return;
     }
-    this.pendingWirePreviewGeneration = this.renderGeneration;
+    this.abortRenderRecord(record, 'timeout');
+    if (!this.signalView) {
+      this.renderGeneration = (this.renderGeneration + 1) >>> 0;
+    }
   }
 
   /**
@@ -727,42 +759,24 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * Handle a setFile command from the main thread.
-   * Stores the file, parameters, render options, aborts any in-progress render,
-   * and starts an immediate render (no debounce for initial file set).
-   *
-   * @param file - The geometry file to render.
-   * @param parameters - Parameter overrides.
-   * @param options - Optional kernel-specific render options.
-   */
-  /**
    * Stage byte payloads onto the worker-side {@link RuntimeFileSystem} and
-   * then dispatch the supplied entry through the same autonomous render
-   * flow as {@link KernelWorker.handleOpenFile}. Used by
-   * `RuntimeClient.openFile({ code })` to ship inline source code through
-   * the runtime without forcing consumers to wire up an inline-kind
-   * filesystem handle (TR7).
+   * render the supplied entry under the transported preview admission.
    *
    * @param request - Stage map plus the entry to open after staging completes.
    */
-  public async handleStageAndOpenFile(request: {
-    stage: Record<string, Uint8Array<ArrayBuffer>>;
-    file: RuntimeFileLocator;
-    parameters?: Record<string, unknown>;
-    options?: Record<string, unknown>;
-    content?: RuntimeContentInput;
-  }): Promise<void> {
-    const generation = this.adoptPreviewGeneration();
+  public async handleStageAndOpenFile(request: RuntimeStageAndRenderArgs): Promise<void> {
     const file = this.canonicalGeometryFile(request.file);
-    await this.enqueueOperation(async () => {
-      if (generation !== this.renderGeneration) {
-        return;
-      }
-      if (Object.keys(request.stage).length > 0) {
-        await this.writeFilesAndInvalidate(request.stage, generation);
+    const stage = this.canonicalStage(request.stage);
+    const record = this.admitTransportPreview(request);
+    if (!record) {
+      return;
+    }
+    await this.runQueuedCommand(record, async () => {
+      if (Object.keys(stage).length > 0) {
+        await this.writeFilesAndInvalidate(stage);
       }
       await this.applyOpenFileIntent({
-        generation,
+        record,
         file,
         parameters: request.parameters,
         operation: { options: request.options, content: request.content },
@@ -770,16 +784,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     });
   }
 
-  public handleOpenFile(
-    file: RuntimeFileLocator,
-    parameters?: Record<string, unknown>,
-    operation?: { readonly options?: Record<string, unknown>; readonly content?: RuntimeContentInput },
-  ): void {
-    const generation = this.adoptPreviewGeneration();
-    const canonicalFile = this.canonicalGeometryFile(file);
-    void this.runQueuedCommand(
-      async () => this.applyOpenFileIntent({ generation, file: canonicalFile, parameters, operation }),
-      generation,
+  public handleOpenFile(request: RuntimeOpenFileArgs): void {
+    const file = this.canonicalGeometryFile(request.file);
+    const record = this.admitTransportPreview(request);
+    if (!record) {
+      return;
+    }
+    void this.runQueuedCommand(record, async () =>
+      this.applyOpenFileIntent({
+        record,
+        file,
+        parameters: request.parameters,
+        operation: { options: request.options, content: request.content },
+      }),
     );
   }
 
@@ -789,17 +806,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * render after the {@link parameterDebounce} window (configured in
    * `runtime-framework.constants`).
    *
-   * @param parameters - Parameter overrides.
+   * @param request - Identified parameter update.
    */
-  public handleUpdateParameters(parameters: Record<string, unknown>): void {
-    const generation = this.adoptPreviewGeneration();
-    void this.runQueuedCommand(async () => {
-      if (generation !== this.renderGeneration) {
+  public handleUpdateParameters(request: RuntimeUpdateParametersArgs): void {
+    const record = this.admitTransportPreview(request);
+    if (!record) {
+      return;
+    }
+    void this.runQueuedCommand(record, async () => {
+      if (!this.currentFile) {
+        this.failUnscheduledPreview(record, 'Cannot update parameters before opening a runtime file');
         return;
       }
-      this.currentParameters = parameters;
-      this.scheduleRender(parameterDebounce, generation);
-    }, generation);
+      this.currentParameters = request.parameters;
+      this.scheduleRender(parameterDebounce, record);
+    });
   }
 
   /**
@@ -808,31 +829,33 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * render, and schedules an immediate re-render against the active file
    * with the existing parameters.
    *
-   * @param options - Replacement kernel-specific render options.
+   * @param request - Identified replacement render options.
    */
-  public handleSetOptions(options: Record<string, unknown>): void {
-    const generation = this.adoptPreviewGeneration();
-    void this.runQueuedCommand(async () => {
-      if (generation !== this.renderGeneration) {
+  public handleSetOptions(request: RuntimeSetOptionsArgs): void {
+    const record = this.admitTransportPreview(request);
+    if (!record) {
+      return;
+    }
+    void this.runQueuedCommand(record, async () => {
+      if (!this.currentFile) {
+        this.failUnscheduledPreview(record, 'Cannot set render options before opening a runtime file');
         return;
       }
-      this.currentRenderOptions = options;
+      this.currentRenderOptions = request.options;
       clearTimeout(this.paramDebounceTimer);
       this.paramDebounceTimer = undefined;
-      if (this.currentFile) {
-        await this.executeRender(generation);
-      }
-    }, generation);
+      await this.executeRender(record);
+    });
   }
 
   private async applyOpenFileIntent(input: {
-    readonly generation: number;
+    readonly record: RenderCancellationRecord;
     readonly file: RuntimeFileLocator;
     readonly parameters?: Record<string, unknown>;
     readonly operation?: { readonly options?: Record<string, unknown>; readonly content?: RuntimeContentInput };
   }): Promise<void> {
-    const { generation, file, parameters, operation } = input;
-    if (generation !== this.renderGeneration) {
+    const { record, file, parameters, operation } = input;
+    if (record !== this.activeRenderRecord || record.controller.signal.aborted) {
       return;
     }
     const canonicalFile = this.canonicalGeometryFile(file);
@@ -845,14 +868,16 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     this.setActiveFile(canonicalFile);
     const entryCandidate = {
-      generation,
+      generation: record.generation,
       paths: new Map([[this.activeFileAbsolutePath, fileChangeDebounce]]),
       middlewarePaths: new Map<string, number>(),
       coherent: true,
     };
     await this.reconcileObservedPaths(entryCandidate);
-    if (generation === this.renderGeneration) {
-      await this.executeRender(generation);
+    if (record === this.activeRenderRecord) {
+      // An abandoned reservation is terminalized by the render's own entry guard rather
+      // than dropped here, which would leave the record without a terminal state.
+      await this.executeRender(record);
     }
   }
 
@@ -869,27 +894,128 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return { path: parentDirectory(filePath), filename: KernelWorker.getBasename(filePath) };
   }
 
-  private adoptPreviewGeneration(): number {
-    const pending = this.pendingWirePreviewGeneration;
-    if (pending !== undefined) {
-      this.pendingWirePreviewGeneration = undefined;
-      this.renderGeneration = pending;
-      return pending;
+  private canonicalStage(stage: Record<string, Uint8Array<ArrayBuffer>>): Record<string, Uint8Array<ArrayBuffer>> {
+    const canonical: Record<string, Uint8Array<ArrayBuffer>> = {};
+    for (const [path, bytes] of Object.entries(stage)) {
+      const resolved = resolveVirtualPath(path);
+      if (resolved in canonical) {
+        throw new TypeError('Staged runtime paths must be unique after canonicalization');
+      }
+      canonical[resolved] = bytes;
     }
-    return this.reserveWorkerPreviewGeneration();
+    return canonical;
   }
 
-  private reserveWorkerPreviewGeneration(): number {
+  private admitTransportPreview(identity: RuntimePreviewIdentity): RenderCancellationRecord | undefined {
+    if (this.renderCancellationRecords.has(identity.renderId)) {
+      throw new TypeError(`Duplicate live preview renderId: ${identity.renderId}`);
+    }
+    let generation: number;
     if (this.signalView) {
-      this.renderGeneration = Atomics.add(this.signalView, signalSlot.abortGeneration, 1) + 1;
+      if (identity.abortGeneration === undefined) {
+        throw new TypeError('SAB-backed preview commands require abortGeneration');
+      }
+      generation = identity.abortGeneration >>> 0;
+      const current = Atomics.load(this.signalView, signalSlot.abortGeneration) >>> 0;
+      if (generation !== current) {
+        const activeRecord = this.activeRenderRecord;
+        const activeState = this.lastPushedState;
+        if (activeState?.renderId === identity.renderId) {
+          this.lastPushedState = undefined;
+        }
+        this.pushState('idle', {
+          renderId: identity.renderId,
+          generation,
+          controller: new AbortController(),
+          executing: false,
+          reason: 'superseded',
+        });
+        // Only a genuinely active phase is adoptable by a client whose selection the
+        // stale terminal just settled. Replaying a terminal state of a completed but
+        // unreleased successor publishes a frame nobody can adopt.
+        if (
+          activeRecord &&
+          activeRecord === this.activeRenderRecord &&
+          activeState?.renderId === activeRecord.renderId &&
+          (activeState.state === 'buffering' || activeState.state === 'rendering')
+        ) {
+          this.pushState(activeState.state, activeRecord, activeState.detail);
+        }
+        return undefined;
+      }
+    } else {
+      if (identity.abortGeneration !== undefined) {
+        throw new TypeError('Wire-only preview commands must omit abortGeneration');
+      }
+      generation = (this.renderGeneration + 1) >>> 0;
+    }
+    this.renderGeneration = generation;
+    return this.createRenderRecord(identity.renderId, generation);
+  }
+
+  private createAutonomousPreviewRecord(): RenderCancellationRecord {
+    const generation = this.reserveGeneration();
+    return this.createRenderRecord(crypto.randomUUID(), generation);
+  }
+
+  private reserveGeneration(): number {
+    if (this.signalView) {
+      this.renderGeneration = (Atomics.add(this.signalView, signalSlot.abortGeneration, 1) + 1) >>> 0;
       Atomics.notify(this.signalView, signalSlot.abortGeneration);
     } else {
-      this.renderGeneration++;
+      this.renderGeneration = (this.renderGeneration + 1) >>> 0;
     }
     return this.renderGeneration;
   }
 
-  private async enqueueOperation<T>(operation: () => Promise<T>): Promise<T> {
+  private createRenderRecord(renderId: string, generation: number): RenderCancellationRecord {
+    if (this.renderCancellationRecords.has(renderId)) {
+      throw new TypeError(`Duplicate live preview renderId: ${renderId}`);
+    }
+    if (this.activeRenderRecord) {
+      this.abortRenderRecord(this.activeRenderRecord, 'superseded');
+    }
+    if (this.lastPushedState?.renderId === renderId) {
+      this.lastPushedState = undefined;
+    }
+    const record = {
+      renderId,
+      generation,
+      controller: new AbortController(),
+      executing: false,
+    } satisfies RenderCancellationRecord;
+    this.renderCancellationRecords.set(renderId, record);
+    this.activeRenderRecord = record;
+    return record;
+  }
+
+  private abortRenderRecord(record: RenderCancellationRecord, reason: 'superseded' | 'timeout'): void {
+    if (record.reason) {
+      return;
+    }
+    record.reason = reason;
+    record.controller.abort(new RenderAbortedError());
+    if (record.executing) {
+      return;
+    }
+
+    if (reason === 'timeout') {
+      this.onError?.({ issues: [renderTimeoutIssue], renderId: record.renderId });
+      this.pushState('error', record);
+    } else {
+      this.pushState('idle', record);
+    }
+    this.releaseRenderRecord(record);
+  }
+
+  private releaseRenderRecord(record: RenderCancellationRecord): void {
+    this.renderCancellationRecords.delete(record.renderId);
+    if (this.activeRenderRecord === record) {
+      this.activeRenderRecord = undefined;
+    }
+  }
+
+  private async enqueueOperation<T>(operation: () => Promise<T>, signal = new AbortController().signal): Promise<T> {
     if (!this.operationAdmissionOpen) {
       throw new Error('Runtime worker is closing');
     }
@@ -897,19 +1023,45 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const next = Promise.withResolvers<void>();
     this.operationTail = next.promise;
     await previous;
+    this.operationSignal = signal;
     try {
       return await operation();
     } finally {
+      this.operationSignal = undefined;
+      this.pendingNativeHandle = undefined;
+      // Operations are serialized, so an operation boundary is the one point
+      // where every surviving reference to a native handle lives in a worker
+      // field. Anything else the operation created is garbage.
+      this.disposeUnreachableNativeHandles();
       next.resolve();
     }
   }
 
-  private async runQueuedCommand(operation: () => Promise<void>, generation: number): Promise<void> {
+  private async runQueuedCommand(record: RenderCancellationRecord, operation: () => Promise<void>): Promise<void> {
     try {
-      await this.enqueueOperation(operation);
+      await this.enqueueOperation(async () => {
+        if (record.controller.signal.aborted || !this.renderCancellationRecords.has(record.renderId)) {
+          return;
+        }
+        await operation();
+      }, record.controller.signal);
     } catch (error) {
-      this.onError?.(this.errorToRuntimeIssues(error), generation);
+      if (!this.operationAdmissionOpen || record.controller.signal.aborted || isRenderAbortedError(error)) {
+        return;
+      }
+      this.onError?.({ issues: this.errorToRuntimeIssues(error), renderId: record.renderId });
+      this.pushState('error', record);
+      this.releaseRenderRecord(record);
     }
+  }
+
+  private failUnscheduledPreview(record: RenderCancellationRecord, message: string): void {
+    this.onError?.({
+      renderId: record.renderId,
+      issues: [{ message, code: 'RUNTIME', type: 'runtime', severity: 'error' }],
+    });
+    this.pushState('error', record);
+    this.releaseRenderRecord(record);
   }
 
   private errorToRuntimeIssues(error: unknown): KernelIssue[] {
@@ -951,11 +1103,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   private invalidatePublishedArtifactState(): void {
     this.currentPublishedRender = undefined;
-    this.nativeHandle = undefined;
     this.pendingNativeHandle = undefined;
-    this.nativeHandleSlot = undefined;
-    this.serializedNativeHandleSlot = undefined;
-    this.lastSerializedNativeHandle = undefined;
     this.onPublishedArtifactInvalidated();
   }
 
@@ -966,6 +1114,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return this.cleanupPromise;
     }
     this.operationAdmissionOpen = false;
+    if (this.activeRenderRecord) {
+      this.abortRenderRecord(this.activeRenderRecord, 'superseded');
+    }
     clearTimeout(this.paramDebounceTimer);
     this.paramDebounceTimer = undefined;
     this.cleanupPromise = this.drainAndCleanup();
@@ -986,13 +1137,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.currentPreviewWatchPaths.clear();
     this.currentPreviewMiddlewarePaths.clear();
     this.watchedPaths.clear();
-    this.nativeHandle = undefined;
     this.pendingNativeHandle = undefined;
-    this.nativeHandleSlot = undefined;
-    this.serializedNativeHandleSlot = undefined;
-    this.lastSerializedNativeHandle = undefined;
     this.currentPublishedRender = undefined;
     this.currentFile = undefined;
+    // Nothing references the handles now — release them before onCleanup tears
+    // down the kernel that owns their memory.
+    this.disposeUnreachableNativeHandles();
     this.telemetryCollector?.dispose();
     this.telemetryCollector = undefined;
     this.fileSystem?.dispose();
@@ -1061,6 +1211,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         runtimes.set(
           id,
           createMiddlewareRuntime({
+            signal: this.operationSignal ?? neverAbortedSignal,
             onLog: this.onLog,
             middlewareName: middleware.name,
             filesystem: this.filesystem,
@@ -1312,11 +1463,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           if (!createOptionsResult.success) {
             return createKernelError(createOptionsResult.issues);
           }
-          const createContent = this.projectRuntimeContent(
-            plan.route.content,
-            this.getNativeExportContentKeys(owner, sourceExport.format),
-          );
-
           const resolvedArray = this.getExportExecutionList(plan);
           const dependencies = await this.computeDependencies({
             parameters: mergedParameters,
@@ -1332,15 +1478,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             parameters: mergedParameters,
             renderOptions: renderOptionsResult.options,
             content: plan.route.content,
-            createOptions: createOptionsResult.options,
-            createContent,
             dependencies,
             dependencyHash: await this.computeDependencyHash(dependencies),
             owner,
           });
 
           const activeMiddleware = this.getOuterExportExecutionList(plan);
-          const renderExactRequest = async (handlerInput: ExportGeometryRequest): Promise<ExportGeometryResult> => {
+          const renderExactRequest = async (
+            handlerInput: MiddlewareExportGeometryRequest,
+          ): Promise<ExportGeometryResult> => {
             let renderArtifact = this.getPublishedRenderForIdentity(renderIdentity);
             if (!renderArtifact) {
               const materialized = await this.materializeRender(
@@ -1402,9 +1548,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * in a single call. Per-render callbacks were retired in favour of autonomous notifies:
    * `parametersResolved` and `progress` events fan out via the top-level
    * {@link KernelWorker.onParametersResolved} / {@link KernelWorker.onProgressUpdate}
-   * fields wired by the dispatcher, threading the originating render generation (`rgen`)
-   * for frame-level correlation. This method remains as a synchronous helper for
-   * non-autonomous code paths (CLI, benchmarks) that drive a single render-and-await flow.
+   * fields wired by the dispatcher, threading the opaque preview identity for
+   * frame-level correlation. This method remains a request-scoped helper for
+   * non-autonomous code paths (CLI, benchmarks) that drive a single render-and-await flow:
+   * like {@link KernelWorker.exportModel} it admits no preview, publishes no lifecycle,
+   * and never touches the active preview record or its watch candidate.
    *
    * @param input - Render input containing file, parameters, and options.
    * @returns The computed geometry.
@@ -1414,7 +1562,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     parameters: Record<string, unknown>;
     options?: Record<string, unknown>;
   }): Promise<HashedGeometryResult> {
-    return this.enqueueOperation(async () => this.renderInLane(input));
+    const file = this.canonicalGeometryFile(input.file);
+    return this.enqueueOperation(async () => this.renderInLane({ ...input, file }));
   }
 
   private async renderInLane(input: {
@@ -1427,25 +1576,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const renderSpan = this.tracer.startSpan('kernel.render', {
       file: input.file.filename,
     });
-    const generation = this.reserveWorkerPreviewGeneration();
-    this.onProgress = (phase: RenderPhase) => {
-      this.onProgressUpdate?.(phase, generation);
-    };
     const dependencyContext: DependencyResolutionContext = {};
     const file = this.canonicalGeometryFile(input.file);
     this.setActiveFile(file);
-    this.previewWatchCandidate = {
-      generation,
-      paths: new Map(this.currentPreviewWatchPaths),
-      middlewarePaths: new Map(this.currentPreviewMiddlewarePaths),
-      coherent: false,
-    };
-    this.previewWatchCandidate.paths.set(this.activeFileAbsolutePath, fileChangeDebounce);
     const owner = await this.createOperationOwner(file, 'render-artifact');
 
     try {
       const parametersResult = await this.getParametersInLane(file, dependencyContext, owner);
-      this.onParametersResolved?.(parametersResult, generation);
 
       let mergedParameters = input.parameters;
       if (parametersResult.success) {
@@ -1469,16 +1606,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
       return result;
     } finally {
-      const candidate = this.previewWatchCandidate;
-      if (candidate.generation === generation && candidate.coherent && generation === this.renderGeneration) {
-        await this.reconcileObservedPaths(candidate);
-      } else if (!candidate.watchCommitRejected) {
-        await this.reconcileObservedPaths();
-      }
-      if (this.previewWatchCandidate.generation === generation) {
-        this.previewWatchCandidate = undefined;
-      }
-      this.onProgress = undefined;
+      await this.reconcileObservedPaths();
       renderSpan.end();
     }
   }
@@ -1487,12 +1615,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * Selectively invalidate file caches for changed paths.
    * Called by the kernel machine before render operations when files have changed.
    *
-   * @param changedPaths - Absolute paths of files that changed
+   * @param changedPaths - Paths within the runtime filesystem that changed.
    */
   public async notifyFileChanged(changedPaths: readonly string[]): Promise<void> {
     const paths = [...new Set(changedPaths.map((path) => resolveVirtualPath(path)))];
-    const generation = this.shouldScheduleExactPreview(paths) ? this.reserveWorkerPreviewGeneration() : undefined;
-    await this.enqueueOperation(async () => this.routeExactChangedPaths(paths, generation));
+    const record = this.shouldScheduleExactPreview(paths) ? this.createAutonomousPreviewRecord() : undefined;
+    try {
+      await this.enqueueOperation(async () => this.routeExactChangedPaths(paths, record), record?.controller.signal);
+    } catch (error) {
+      // Admission can close between the record and the lane it never reached.
+      if (record) {
+        this.abortRenderRecord(record, 'superseded');
+      }
+      throw error;
+    }
   }
 
   /**
@@ -1522,7 +1658,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     );
     const desiredSet = new Set(desired.keys());
     if (setsEqual(this.watchedPaths, desiredSet)) {
-      if (candidate && candidate.generation === this.renderGeneration) {
+      if (candidate && candidate.generation === this.currentRenderGeneration()) {
         this.currentPreviewWatchPaths = new Map(candidate.paths);
         this.currentPreviewMiddlewarePaths = new Map(candidate.middlewarePaths);
       }
@@ -1533,7 +1669,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const previous = this.watchUnsubscribe;
       this.watchedPaths = desiredSet;
       this.watchUnsubscribe = undefined;
-      if (candidate && candidate.generation === this.renderGeneration) {
+      if (candidate && candidate.generation === this.currentRenderGeneration()) {
         this.currentPreviewWatchPaths = new Map(candidate.paths);
         this.currentPreviewMiddlewarePaths = new Map(candidate.middlewarePaths);
       }
@@ -1583,7 +1719,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }),
       );
       dirty ||= validations.some((valid) => !valid);
-      if (candidate && candidate.generation !== this.renderGeneration) {
+      if (candidate && candidate.generation !== this.currentRenderGeneration()) {
         replacement.unsubscribe();
         return false;
       }
@@ -1622,7 +1758,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const initSpan = this.tracer.startSpan('kernel.bundler-init');
 
     try {
-      const definition = preloadedDefinition ?? (await resolveRuntimePluginDefinition('bundler', bundlerEntry));
+      const definition =
+        preloadedDefinition ?? (await resolveRuntimePluginDefinition<BundlerDefinition>('bundler', bundlerEntry));
 
       const { extensions } = bundlerEntry;
       for (const extension of extensions) {
@@ -1674,8 +1811,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             parameters: entry.parameters,
             renderOptions: entry.options ?? {},
             content: {},
-            createOptions: entry.options ?? {},
-            createContent: {},
             dependencies: [],
             dependencyHash: '',
             owner,
@@ -1695,8 +1830,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             parameters: entry.parameters,
             renderOptions: renderOptionsResult.options,
             content: {},
-            createOptions: renderOptionsResult.options,
-            createContent: {},
             dependencies: [],
             dependencyHash: '',
             owner,
@@ -1720,8 +1853,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             parameters: entry.parameters,
             renderOptions: renderOptionsResult.options,
             content: {},
-            createOptions: createOptionsResult.options,
-            createContent: {},
             dependencies: [],
             dependencyHash: '',
             owner,
@@ -1732,17 +1863,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       };
     }
 
-    const createContent = this.projectRuntimeContent(
-      renderContentResult.content,
-      entry.export
-        ? this.getNativeExportContentKeys(owner, entry.export.format)
-        : this.getNativeRenderContentKeys(owner),
-    );
-    const input: CreateGeometryInput = {
+    const input: NativeBuildInput = {
       entryPath: ownerFilePath,
       parameters: entry.parameters,
-      options: createOptionsResult.options,
-      content: renderContentResult.content,
+      ...createOptionsResult.input,
     };
 
     const createMiddleware = this.getCreateExecutionList(owner, renderContentResult.content, Boolean(entry.export));
@@ -1765,43 +1889,29 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       owner,
     });
     const dependencyHash = await this.computeDependencyHash(dependencies);
-    const kernelId = owner.binding?.kernelId;
-    const nativeHandleScope = kernelId ? (this.kernelNativeHandleScopeMap.get(kernelId) ?? 'operation') : 'operation';
     const nativeHandleDependencies = await this.computeDependencies({
       parameters: entry.parameters,
-      ...(nativeHandleScope === 'operation'
-        ? {
-            renderOptions: renderOptionsResult.options,
-            content: renderContentResult.content,
-            exportDependency: entry.export?.dependency,
-          }
-        : {}),
       resolvedMiddleware: createMiddleware,
       dependencyContext: options.dependencyContext,
       owner,
     });
-    const nativeHandleKey =
-      nativeHandleScope === 'source' ? await this.computeDependencyHash(nativeHandleDependencies) : dependencyHash;
-    const identity = this.createRenderIdentity({
-      file: entry.file,
-      parameters: entry.parameters,
-      renderOptions: renderOptionsResult.options,
-      content: renderContentResult.content,
-      createOptions: createOptionsResult.options,
-      createContent,
-      dependencies,
-      dependencyHash,
-      nativeHandleKey,
-      owner,
-    });
+    if ('options' in createOptionsResult.input) {
+      nativeHandleDependencies.push({
+        type: 'option',
+        key: 'native-build-options',
+        value: createOptionsResult.input.options,
+      });
+    }
+    const nativeHandleKey = await this.computeDependencyHash(nativeHandleDependencies);
     geoDepsSpan.end();
 
     const runtimes = new Map<string, KernelMiddlewareRuntime>();
-    for (const { middleware, options: middlewareOptions, enabled, id } of resolvedArray) {
+    for (const { middleware, options: middlewareOptions, enabled, id } of createMiddleware) {
       if (enabled && middleware.wrapCreateGeometry) {
         runtimes.set(
           id,
           createMiddlewareRuntime({
+            signal: this.operationSignal ?? neverAbortedSignal,
             onLog: this.onLog,
             middlewareName: middleware.name,
             filesystem: this.filesystem,
@@ -1817,32 +1927,49 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     this.onProgress?.('computingGeometry');
     const { tracer } = this;
-    let chain: CreateGeometryHandler = named('kernelHandler', async (handlerInput: CreateGeometryInput) => {
+    let chain: CreateGeometryHandler = named('kernelHandler', async (handlerInput: MiddlewareCreateGeometryRequest) => {
       const computeSpan = tracer.startSpan('kernel.compute');
-      identity.createOptions = handlerInput.options;
-      const result = await this.onCreateGeometryForOwner(
-        owner,
-        { ...handlerInput, content: createContent },
-        this.createRuntime(),
-      );
+      const createSchema = owner.binding?.kernelId
+        ? this.kernelCreateOptionsZodSchemaMap.get(owner.binding.kernelId)
+        : undefined;
+      const kernelInput: NativeBuildInput = {
+        entryPath: handlerInput.entryPath,
+        parameters: handlerInput.parameters,
+        ...(createSchema
+          ? {
+              options:
+                handlerInput.options ??
+                ('options' in createOptionsResult.input ? createOptionsResult.input.options : {}),
+            }
+          : {}),
+      };
+      const result = await this.onCreateGeometryForOwner(owner, kernelInput, this.createRuntime());
       computeSpan.end();
-      return result;
+      return { ...result, [nativeBuildInputSymbol]: kernelInput };
     });
 
-    for (let index = resolvedArray.length - 1; index >= 0; index--) {
-      const { middleware, enabled, id } = resolvedArray[index]!;
+    for (let index = createMiddleware.length - 1; index >= 0; index--) {
+      const { middleware, enabled, id } = createMiddleware[index]!;
       if (enabled && middleware.wrapCreateGeometry) {
         const inner = chain;
         const runtime = runtimes.get(id)!;
         const middlewareName = middleware.name;
         const wrapHook = middleware.wrapCreateGeometry;
 
-        chain = named(`middleware(${middlewareName})`, async (handlerInput: CreateGeometryInput) => {
+        chain = named(`middleware(${middlewareName})`, async (handlerInput: MiddlewareCreateGeometryRequest) => {
           const span = tracer.startSpan(`middleware.wrap(${middlewareName})`, {
             middleware: middlewareName,
           });
           try {
-            const result = await wrapHook(handlerInput, inner, runtime);
+            const result = await wrapHook(
+              this.withProviderRuntimeContent(
+                handlerInput,
+                renderContentResult.content,
+                middleware.content?.render ?? [],
+              ),
+              inner,
+              runtime,
+            );
             span.end();
             return result;
           } catch (error) {
@@ -1866,6 +1993,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     this.pendingNativeHandle = undefined;
     const internalResult = await chain(input);
+    const nativeBuildInput = (internalResult as CreateGeometryResult & NativeBuildInputCarrier)[nativeBuildInputSymbol];
+    const identity = this.createRenderIdentity({
+      file: entry.file,
+      parameters: entry.parameters,
+      renderOptions: renderOptionsResult.options,
+      content: renderContentResult.content,
+      dependencies,
+      dependencyHash,
+      nativeHandleKey,
+      ...(nativeBuildInput ? { nativeBuildInput } : {}),
+      owner,
+    });
 
     // Dependency discovery defines the filesystem snapshot represented by a
     // preview. Observe and revalidate every newly-added path before binding or
@@ -1889,7 +2028,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       identity,
       success: internalResult.success,
       serializedNativeHandle,
-      publish: false,
     });
 
     // Mesh phase — display path only. Kernels that defer their display artifact
@@ -1920,19 +2058,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     this.onProgress?.('postProcessing');
+    const { [nativeBuildInputSymbol]: _nativeBuildInput, ...publicDisplayResult } =
+      displayResult as CreateGeometryResult & NativeBuildInputCarrier;
     // One render request produces one public geometry artifact.
-    const result: MaterializedRenderResult = displayResult.success
+    const result: MaterializedRenderResult = publicDisplayResult.success
       ? {
-          ...displayResult,
+          ...publicDisplayResult,
           data:
-            displayResult.data === undefined
+            publicDisplayResult.data === undefined
               ? undefined
               : {
-                  ...displayResult.data,
+                  ...publicDisplayResult.data,
                   hash: dependencyHash,
                 },
         }
-      : displayResult;
+      : publicDisplayResult;
 
     const artifact: MaterializedRender = {
       identity,
@@ -1957,14 +2097,65 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * Display-path mesh phase: produce the viewer artifact from the native handle
-   * when `createGeometry` deferred it. Runs the `wrapMeshGeometry` middleware
-   * pipeline (display-mesh cache) around the kernel boundary; the native handle
-   * is materialized lazily inside the innermost handler, so a mesh-cache hit
-   * costs no kernel work and no handle deserialization.
+   * Take ownership of the handle `createGeometry` just produced.
+   *
+   * Ownership is what makes the release deterministic: the worker frees the
+   * handle once no field references it, instead of dropping the reference and
+   * waiting for a finalizer the kernel may not have. Pass `owner` for kernels
+   * that implement `disposeNativeHandle` — an unowned handle is never released.
+   *
+   * @param nativeHandle - Opaque handle returned by the kernel.
+   * @param owner - Owner whose kernel binding can release the handle.
    */
-  protected captureNativeHandle(nativeHandle: unknown): void {
+  protected captureNativeHandle(nativeHandle: unknown, owner?: OperationOwner): void {
     this.pendingNativeHandle = nativeHandle;
+    this.ownNativeHandle(nativeHandle, owner);
+  }
+
+  private ownNativeHandle(nativeHandle: unknown, owner: OperationOwner | undefined): void {
+    if (owner === undefined || nativeHandle === undefined || nativeHandle === null) {
+      return;
+    }
+
+    this.ownedNativeHandles.set(nativeHandle, owner);
+  }
+
+  /**
+   * Release every owned native handle no worker field still references.
+   *
+   * A rebuild replaces the published handle with a new one; without this the
+   * replaced geometry stays allocated for the life of the worker, and a WASM
+   * heap never shrinks, so an agentic rebuild loop ratchets toward OOM. Handles
+   * are compared by identity, so a handle reused across builds (same object
+   * still published) is retained, and each replaced handle is released once.
+   */
+  private disposeUnreachableNativeHandles(): void {
+    if (this.ownedNativeHandles.size === 0) {
+      return;
+    }
+
+    const retained = new Set<unknown>([
+      this.pendingNativeHandle,
+      this.currentPublishedRender?.liveNativeHandleSlot?.handle,
+    ]);
+
+    // Built on first release only: most operation boundaries drop nothing.
+    let runtime: KernelRuntime | undefined;
+    for (const [handle, owner] of this.ownedNativeHandles) {
+      if (retained.has(handle)) {
+        continue;
+      }
+
+      this.ownedNativeHandles.delete(handle);
+      try {
+        runtime ??= this.createRuntime();
+        this.disposeNativeHandleForOwner(owner, handle, runtime);
+      } catch (error) {
+        this.logger.warn('Native-handle disposal failed', {
+          data: { error: error instanceof Error ? error.message : String(error) },
+        });
+      }
+    }
   }
 
   protected createRenderIdentity(input: {
@@ -1972,8 +2163,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     parameters: Record<string, unknown>;
     renderOptions: Record<string, unknown>;
     content: RuntimeContentInput;
-    createOptions: Record<string, unknown>;
-    createContent: RuntimeContentInput;
+    nativeBuildInput?: NativeBuildInput;
     dependencies: Dependency[];
     dependencyHash: string;
     nativeHandleKey?: string;
@@ -1986,8 +2176,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       parameters: input.parameters,
       renderOptions: input.renderOptions,
       content: input.content,
-      createOptions: input.createOptions,
-      createContent: input.createContent,
+      ...(input.nativeBuildInput ? { nativeBuildInput: input.nativeBuildInput } : {}),
       dependencies: input.dependencies,
       dependencyHash: input.dependencyHash,
       nativeHandleKey: input.nativeHandleKey ?? input.dependencyHash,
@@ -1998,12 +2187,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     readonly identity: RenderIdentity;
     readonly success: boolean;
     readonly serializedNativeHandle: unknown;
-    readonly publish?: boolean;
   }): {
     liveNativeHandleSlot?: NativeHandleSlot;
     serializedNativeHandleSlot?: SerializedNativeHandleSlot;
   } {
-    const { identity, success, serializedNativeHandle, publish = true } = input;
+    const { identity, success, serializedNativeHandle } = input;
     const identityKey = createNativeHandleIdentityKey(identity);
     const { pendingNativeHandle } = this;
     this.pendingNativeHandle = undefined;
@@ -2018,11 +2206,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           }
         : undefined;
 
-    if (publish && liveNativeHandleSlot) {
-      this.nativeHandleSlot = liveNativeHandleSlot;
-      this.nativeHandle = pendingNativeHandle;
-    }
-
     const serializedNativeHandleSlot =
       success && serializedNativeHandle !== undefined && serializedNativeHandle !== null
         ? {
@@ -2032,11 +2215,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             serializedNativeHandle,
           }
         : undefined;
-
-    if (publish && serializedNativeHandleSlot) {
-      this.serializedNativeHandleSlot = serializedNativeHandleSlot;
-      this.lastSerializedNativeHandle = serializedNativeHandle;
-    }
 
     return { liveNativeHandleSlot, serializedNativeHandleSlot };
   }
@@ -2054,10 +2232,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     }
     this.currentPublishedRender = artifact;
-    this.nativeHandleSlot = artifact.liveNativeHandleSlot;
-    this.nativeHandle = artifact.liveNativeHandleSlot?.handle;
-    this.serializedNativeHandleSlot = artifact.serializedNativeHandleSlot;
-    this.lastSerializedNativeHandle = artifact.serializedNativeHandleSlot?.serializedNativeHandle;
     this.publishOperationOwner(artifact.owner);
   }
 
@@ -2071,54 +2245,38 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   protected getNativeHandleSlotForIdentity(
     identity: RenderIdentity,
-    artifact?: MaterializedRender,
+    artifact: MaterializedRender,
   ): NativeHandleSlot | undefined {
     const identityKey = createNativeHandleIdentityKey(identity);
-    const artifactSlot = artifact?.liveNativeHandleSlot;
+    const artifactSlot = artifact.liveNativeHandleSlot;
     if (artifactSlot?.identityKey === identityKey) {
       return artifactSlot;
     }
-    if (this.nativeHandleSlot?.identityKey === identityKey && this.nativeHandle === this.nativeHandleSlot.handle) {
-      return this.nativeHandleSlot;
-    }
-    return this.nativeHandleSlot?.identityKey === identityKey ? this.nativeHandleSlot : undefined;
+    return undefined;
   }
 
   protected getSerializedNativeHandleSlotForIdentity(
     identity: RenderIdentity,
-    artifact?: MaterializedRender,
+    artifact: MaterializedRender,
   ): SerializedNativeHandleSlot | undefined {
     const identityKey = createNativeHandleIdentityKey(identity);
-    const artifactSlot = artifact?.serializedNativeHandleSlot;
+    const artifactSlot = artifact.serializedNativeHandleSlot;
     if (artifactSlot?.identityKey === identityKey) {
       return artifactSlot;
     }
-    return this.serializedNativeHandleSlot?.identityKey === identityKey ? this.serializedNativeHandleSlot : undefined;
+    return undefined;
   }
 
-  protected useLiveNativeHandleSlot(identity: RenderIdentity, artifact?: MaterializedRender): boolean {
-    const slot = this.getNativeHandleSlotForIdentity(identity, artifact);
-    if (!slot || this.nativeHandle !== slot.handle) {
-      return false;
+  protected clearLiveNativeHandleSlot(artifact: MaterializedRender, slot: NativeHandleSlot): void {
+    if (artifact.liveNativeHandleSlot === slot) {
+      artifact.liveNativeHandleSlot = undefined;
     }
-    this.nativeHandle = slot.handle;
-    return true;
   }
 
-  protected clearLiveNativeHandleSlot(slot?: NativeHandleSlot): void {
-    if (slot && this.nativeHandleSlot !== slot) {
-      return;
+  protected clearSerializedNativeHandleSlot(artifact: MaterializedRender, slot: SerializedNativeHandleSlot): void {
+    if (artifact.serializedNativeHandleSlot === slot) {
+      artifact.serializedNativeHandleSlot = undefined;
     }
-    this.nativeHandleSlot = undefined;
-    this.nativeHandle = undefined;
-  }
-
-  protected clearSerializedNativeHandleSlot(slot?: SerializedNativeHandleSlot): void {
-    if (slot && this.serializedNativeHandleSlot !== slot) {
-      return;
-    }
-    this.serializedNativeHandleSlot = undefined;
-    this.lastSerializedNativeHandle = undefined;
   }
 
   protected configureRuntimePlugins(options: KernelWorkerOptions): void {
@@ -2164,76 +2322,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   protected hasBundlerForExtension(extension: string): boolean {
     return this.loadedBundlers.has(extension) || this.pendingBundlerInits.has(extension);
-  }
-
-  /**
-   * Ensure nativeHandle is available before export.
-   *
-   * The geometry cache middleware may serve createGeometry results from disk,
-   * bypassing the kernel entirely. In that case, the nativeHandle (set as a
-   * side-effect of onCreateGeometry) is never populated.
-   *
-   * Resolution order:
-   * 1. No-op if nativeHandle is already set
-   * 2. Re-run createGeometry as a fallback to materialize the handle
-   *
-   * Subclasses may restore a declared durable native-handle snapshot before
-   * falling back to this reheat path.
-   */
-  protected async ensureNativeHandle(
-    runtime: KernelRuntime,
-    renderIdentity?: LastSettledRenderIdentity,
-    renderArtifact?: MaterializedRender,
-  ): Promise<void> {
-    const identity = renderIdentity ?? this.currentPublishedRender?.identity;
-    if (!identity) {
-      return;
-    }
-
-    if (this.useLiveNativeHandleSlot(identity, renderArtifact)) {
-      return;
-    }
-
-    const { file } = identity;
-    this.setActiveFile(file);
-    const reheatParameters = identity.parameters;
-    this.logger.debug('Export reheat: re-running createGeometry to populate nativeHandle', {
-      data: {
-        entryPath: this.activeFileAbsolutePath,
-        parameterCount: Object.keys(reheatParameters).length,
-      },
-    });
-    const reheatSpan = this.tracer.startSpan('kernel.export-reheat');
-    try {
-      this.pendingNativeHandle = undefined;
-      const reheatResult = await this.onCreateGeometry(
-        {
-          entryPath: this.activeFileAbsolutePath,
-          parameters: reheatParameters,
-          options: identity.createOptions,
-          content: identity.createContent,
-        },
-        runtime,
-      );
-      this.bindNativeHandleSlots({
-        identity,
-        success: reheatResult.success,
-        serializedNativeHandle: reheatResult.success ? reheatResult.serializedNativeHandle : undefined,
-      });
-      this.logger.debug('Export reheat completed', {
-        data: {
-          success: reheatResult.success,
-          nativeHandleType: typeof this.nativeHandle,
-          nativeHandleSet: this.nativeHandle !== undefined,
-          issues: reheatResult.issues.map((i) => i.message),
-        },
-      });
-    } catch (error) {
-      this.logger.error('Export reheat threw', {
-        data: { error: error instanceof Error ? error.message : String(error) },
-      });
-    }
-    reheatSpan.end();
   }
 
   /**
@@ -2311,7 +2399,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * Hook called after file change notification.
    * Subclasses can override to perform additional invalidation (e.g., selection cache).
    *
-   * @param _changedPaths - absolute paths of files that changed
+   * @param _changedPaths - Paths within the runtime filesystem that changed.
    */
   protected onFileChanged(_changedPaths: readonly string[]): void {
     // Default: no-op. KernelRuntimeWorker overrides to clear selectionCache.
@@ -2395,7 +2483,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   protected async onCreateGeometryForOwner(
     _owner: OperationOwner,
-    input: CreateGeometryInput,
+    input: NativeBuildInput,
     runtime: KernelRuntime,
   ): Promise<CreateGeometryResult> {
     return this.onCreateGeometry(input, runtime);
@@ -2451,6 +2539,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     _runtime: KernelRuntime,
   ): Promise<unknown | undefined> {
     return undefined;
+  }
+
+  /** Release a dropped native handle through the kernel that created it. */
+  protected disposeNativeHandleForOwner(_owner: OperationOwner, _nativeHandle: unknown, _runtime: KernelRuntime): void {
+    // Workers without kernel-managed native memory have nothing to release.
   }
 
   /**
@@ -2509,10 +2602,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @param runtime - Runtime services (filesystem, logger)
    * @returns The computed geometry.
    */
-  protected abstract onCreateGeometry(
-    input: CreateGeometryInput,
-    runtime: KernelRuntime,
-  ): Promise<CreateGeometryResult>;
+  protected abstract onCreateGeometry(input: NativeBuildInput, runtime: KernelRuntime): Promise<CreateGeometryResult>;
 
   /**
    * Export geometry using the framework-stored native handle from the last createGeometry call.
@@ -2556,6 +2646,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   protected abstract getActiveKernelVersion(): string | undefined;
 
+  /**
+   * Display-path mesh phase: produce the viewer artifact from the native handle
+   * when `createGeometry` deferred it. Runs the `wrapMeshGeometry` middleware
+   * pipeline (display-mesh cache) around the kernel boundary; the native handle
+   * is materialized lazily inside the innermost handler, so a mesh-cache hit
+   * costs no kernel work and no handle deserialization.
+   */
   private async runMeshPhase(options: {
     owner: OperationOwner;
     identity: RenderIdentity;
@@ -2585,7 +2682,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const computeMesh = async (handlerInput: MeshGeometryRequest): Promise<CreateGeometryResult> => {
         const handle = await this.materializeNativeHandleForOwner({
           owner,
-          renderIdentity: identity,
           runtime,
           renderArtifact,
         });
@@ -2596,11 +2692,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
         return this.onMeshGeometryForOwner(
           owner,
-          {
-            nativeHandle: handle.handle,
-            options: handlerInput.options,
-            content: this.projectRuntimeContent(handlerInput.content, this.getNativeRenderContentKeys(owner)),
-          },
+          this.withProviderRuntimeContent(
+            { nativeHandle: handle.handle, options: handlerInput.options },
+            content,
+            this.getNativeRenderContentKeys(owner),
+          ),
           runtime,
         );
       };
@@ -2623,6 +2719,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           runtimes.set(
             id,
             createMiddlewareRuntime({
+              signal: this.operationSignal ?? neverAbortedSignal,
               onLog: this.onLog,
               middlewareName: middleware.name,
               filesystem: this.filesystem,
@@ -2647,7 +2744,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               middleware: middlewareName,
             });
             try {
-              const chainResult = await wrapHook(handlerInput, inner, middlewareRuntime);
+              const chainResult = await wrapHook(
+                this.withProviderRuntimeContent(handlerInput, content, middleware.content?.render ?? []),
+                inner,
+                middlewareRuntime,
+              );
               span.end();
               return chainResult;
             } catch (error) {
@@ -2669,7 +2770,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
       }
 
-      const meshResult = await chain({ options: renderOptions, content });
+      const meshResult = await chain({ options: renderOptions });
       if (!meshResult.success) {
         return meshResult;
       }
@@ -2698,37 +2799,46 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     };
   }
 
-  private async writeFilesAndInvalidate(
-    stage: Record<string, Uint8Array<ArrayBuffer>>,
-    previewGeneration?: number,
-  ): Promise<void> {
+  private async writeFilesAndInvalidate(stage: Record<string, Uint8Array<ArrayBuffer>>): Promise<void> {
     const entries = Object.entries(stage).map(([path, bytes]) => [resolveVirtualPath(path), bytes] as const);
     if (new Set(entries.map(([path]) => path)).size !== entries.length) {
       throw new TypeError('Staged runtime paths must be unique after canonicalization');
     }
+    const publicationSlot = Promise.withResolvers<void>();
+    const publication = {
+      paths: new Set(entries.map(([path]) => path)),
+      promise: publicationSlot.promise,
+      resolve: publicationSlot.resolve,
+    };
+    this.stagedWritePublication = publication;
     const changedPaths: string[] = [];
     const revisions = new Map<string, ObservedFileRevision>();
     const createdDirectories = new Set<string>();
-    for (const [absolutePath, bytes] of entries) {
-      const directory = parentDirectory(absolutePath);
-      if (directory && directory !== '/' && !createdDirectories.has(directory)) {
-        // oxlint-disable-next-line no-await-in-loop -- staging must preserve filesystem order for deterministic tests
-        await this.filesystem.mkdir(directory, { recursive: true });
-        createdDirectories.add(directory);
+    try {
+      for (const [absolutePath, bytes] of entries) {
+        const directory = parentDirectory(absolutePath);
+        if (directory && directory !== '/' && !createdDirectories.has(directory)) {
+          // oxlint-disable-next-line no-await-in-loop -- staging must preserve filesystem order for deterministic tests
+          await this.filesystem.mkdir(directory, { recursive: true });
+          createdDirectories.add(directory);
+        }
+        // oxlint-disable-next-line no-await-in-loop -- staging must complete before dependency resolution
+        await this.filesystem.writeFile(absolutePath, bytes);
+        changedPaths.push(absolutePath);
+        if (this.fileHashCache.has(absolutePath) || this.watchedPaths.has(absolutePath)) {
+          // oxlint-disable-next-line no-await-in-loop -- staging order and cache publication stay deterministic
+          revisions.set(absolutePath, { hash: await this.hashContent(bytes), content: bytes });
+        }
       }
-      // oxlint-disable-next-line no-await-in-loop -- staging must complete before dependency resolution
-      await this.filesystem.writeFile(absolutePath, bytes);
-      changedPaths.push(absolutePath);
-      if (this.fileHashCache.has(absolutePath) || this.watchedPaths.has(absolutePath)) {
-        // oxlint-disable-next-line no-await-in-loop -- staging order and cache publication stay deterministic
-        revisions.set(absolutePath, { hash: await this.hashContent(bytes), content: bytes });
+      if (changedPaths.length > 0) {
+        this._applyObservedRevisions(changedPaths, revisions);
+        this.onFileChanged(changedPaths);
       }
-    }
-    if (changedPaths.length > 0) {
-      const generation =
-        previewGeneration ??
-        (this.shouldScheduleExactPreview(changedPaths) ? this.reserveWorkerPreviewGeneration() : undefined);
-      await this.routeExactChangedPaths(changedPaths, generation, revisions);
+    } finally {
+      publication.resolve();
+      if (this.stagedWritePublication === publication) {
+        this.stagedWritePublication = undefined;
+      }
     }
   }
 
@@ -2974,30 +3084,26 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   private async materializeNativeHandleForOwner(options: {
     owner: OperationOwner;
-    renderIdentity: LastSettledRenderIdentity | undefined;
     runtime: KernelRuntime;
-    renderArtifact?: MaterializedRender;
+    renderArtifact: MaterializedRender;
   }): Promise<{ success: true; handle: unknown } | { success: false; result: ExportGeometryResult }> {
-    const { owner, renderIdentity, runtime, renderArtifact } = options;
-    const identity = renderIdentity ?? renderArtifact?.identity;
-    if (!identity) {
-      return { success: false, result: this.createExportRenderIdentityMissingResult() };
-    }
+    const { owner, runtime, renderArtifact } = options;
+    const { identity } = renderArtifact;
 
     const liveSlot = this.getNativeHandleSlotForIdentity(identity, renderArtifact);
-    const requiresPublishedOwnership = renderArtifact === this.currentPublishedRender;
-    if (this.isLiveNativeHandleSlotUsableForOwner(liveSlot, owner, requiresPublishedOwnership)) {
-      const validity = await this.validateNativeHandleSlot(owner, liveSlot, runtime);
+    if (this.isLiveNativeHandleSlotUsableForOwner(liveSlot, owner)) {
+      const validity = await this.validateNativeHandleSlot({ owner, renderArtifact, slot: liveSlot, runtime });
       if (validity) {
         return { success: true, handle: liveSlot.handle };
       }
     }
 
     const serializedSlot = this.getSerializedNativeHandleSlotForIdentity(identity, renderArtifact);
-    if (serializedSlot && this.serializedNativeHandleSlotMatchesOwner(serializedSlot, owner)) {
+    if (serializedSlot && this.serializedSlotMatchesOwner(serializedSlot, owner)) {
       const restored = await this.restoreSerializedNativeHandleSlot({
         owner,
         identity,
+        renderArtifact,
         slot: serializedSlot,
         runtime,
       });
@@ -3006,7 +3112,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     }
 
-    const reheatedSlot = await this.reheatNativeHandleForOwner(owner, identity, runtime);
+    const reheatedSlot = await this.reheatNativeHandleForOwner(owner, renderArtifact, runtime);
     if (this.isLiveNativeHandleSlotUsableForOwner(reheatedSlot, owner)) {
       return { success: true, handle: reheatedSlot.handle };
     }
@@ -3024,43 +3130,38 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     };
   }
 
-  private nativeHandleSlotMatchesOwner(slot: NativeHandleSlot, owner: OperationOwner): boolean {
+  private liveSlotMatchesOwner(slot: NativeHandleSlot, owner: OperationOwner): boolean {
     return slot.kernelId === owner.binding?.kernelId && slot.kernelVersion === owner.binding?.kernelVersion;
   }
 
-  private serializedNativeHandleSlotMatchesOwner(slot: SerializedNativeHandleSlot, owner: OperationOwner): boolean {
+  private serializedSlotMatchesOwner(slot: SerializedNativeHandleSlot, owner: OperationOwner): boolean {
     return slot.kernelId === owner.binding?.kernelId && slot.kernelVersion === owner.binding?.kernelVersion;
   }
 
   private isLiveNativeHandleSlotUsableForOwner(
     slot: NativeHandleSlot | undefined,
     owner: OperationOwner,
-    requiresPublishedOwnership = false,
   ): slot is NativeHandleSlot {
-    if (!slot) {
-      return false;
-    }
-    return (
-      this.nativeHandleSlotMatchesOwner(slot, owner) &&
-      (!requiresPublishedOwnership || (this.nativeHandleSlot === slot && this.nativeHandle === slot.handle))
-    );
+    return Boolean(slot && this.liveSlotMatchesOwner(slot, owner));
   }
 
-  private async validateNativeHandleSlot(
-    owner: OperationOwner,
-    slot: NativeHandleSlot,
-    runtime: KernelRuntime,
-  ): Promise<boolean> {
+  private async validateNativeHandleSlot(input: {
+    owner: OperationOwner;
+    renderArtifact: MaterializedRender;
+    slot: NativeHandleSlot;
+    runtime: KernelRuntime;
+  }): Promise<boolean> {
+    const { owner, renderArtifact, slot, runtime } = input;
     try {
       const isValid = await this.isNativeHandleValidForOwner(owner, slot.handle, runtime);
       if (isValid === false) {
-        this.clearLiveNativeHandleSlot(slot);
+        this.clearLiveNativeHandleSlot(renderArtifact, slot);
         this.logger.debug('Native handle is stale; export will reheat');
         return false;
       }
       return true;
     } catch (error) {
-      this.clearLiveNativeHandleSlot(slot);
+      this.clearLiveNativeHandleSlot(renderArtifact, slot);
       this.logger.warn('Native-handle validity check failed; export will reheat', {
         data: { error: error instanceof Error ? error.message : String(error) },
       });
@@ -3071,19 +3172,28 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private async restoreSerializedNativeHandleSlot(options: {
     owner: OperationOwner;
     identity: RenderIdentity;
+    renderArtifact: MaterializedRender;
     slot: SerializedNativeHandleSlot;
     runtime: KernelRuntime;
   }): Promise<{ success: true; handle: unknown } | { success: false }> {
-    const { owner, slot, runtime } = options;
+    const { owner, identity, renderArtifact, slot, runtime } = options;
     try {
       const handle = await this.deserializeNativeHandleForOwner(owner, slot.serializedNativeHandle, runtime);
       if (handle === undefined || handle === null) {
+        this.clearSerializedNativeHandleSlot(renderArtifact, slot);
         return { success: false };
       }
       this.logger.debug('Restoring nativeHandle via owner-bound deserializeNativeHandle');
+      this.ownNativeHandle(handle, owner);
+      renderArtifact.liveNativeHandleSlot = {
+        identityKey: createNativeHandleIdentityKey(identity),
+        kernelId: identity.selectedKernelId,
+        kernelVersion: identity.selectedKernelVersion,
+        handle,
+      };
       return { success: true, handle };
     } catch (error) {
-      this.clearSerializedNativeHandleSlot(slot);
+      this.clearSerializedNativeHandleSlot(renderArtifact, slot);
       this.logger.warn('Native-handle snapshot restore failed; export will reheat', {
         data: { error: error instanceof Error ? error.message : String(error) },
       });
@@ -3093,45 +3203,40 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   private async reheatNativeHandleForOwner(
     owner: OperationOwner,
-    identity: RenderIdentity,
+    renderArtifact: MaterializedRender,
     runtime: KernelRuntime,
   ): Promise<NativeHandleSlot | undefined> {
-    const entryPath = resolveVirtualPath(joinPath(owner.file.path, owner.file.filename));
-    const reheatParameters = identity.parameters;
+    const { identity } = renderArtifact;
+    const reheatInput = identity.nativeBuildInput;
+    if (!reheatInput) {
+      return undefined;
+    }
     this.logger.debug('Export reheat: re-running createGeometry to populate nativeHandle', {
       data: {
-        entryPath,
-        parameterCount: Object.keys(reheatParameters).length,
+        entryPath: reheatInput.entryPath,
+        parameterCount: Object.keys(reheatInput.parameters).length,
       },
     });
     const reheatSpan = this.tracer.startSpan('kernel.export-reheat');
     try {
       this.pendingNativeHandle = undefined;
-      const reheatResult = await this.onCreateGeometryForOwner(
-        owner,
-        {
-          entryPath,
-          parameters: reheatParameters,
-          options: identity.createOptions,
-          content: identity.createContent,
-        },
-        runtime,
-      );
-      const { liveNativeHandleSlot } = this.bindNativeHandleSlots({
+      const reheatResult = await this.onCreateGeometryForOwner(owner, reheatInput, runtime);
+      const slots = this.bindNativeHandleSlots({
         identity,
         success: reheatResult.success,
         serializedNativeHandle: reheatResult.success ? reheatResult.serializedNativeHandle : undefined,
-        publish: false,
       });
+      renderArtifact.liveNativeHandleSlot = slots.liveNativeHandleSlot;
+      renderArtifact.serializedNativeHandleSlot = slots.serializedNativeHandleSlot;
       this.logger.debug('Export reheat completed', {
         data: {
           success: reheatResult.success,
-          nativeHandleType: typeof liveNativeHandleSlot?.handle,
-          nativeHandleSet: liveNativeHandleSlot !== undefined,
+          nativeHandleType: typeof slots.liveNativeHandleSlot?.handle,
+          nativeHandleSet: slots.liveNativeHandleSlot !== undefined,
           issues: reheatResult.issues.map((i) => i.message),
         },
       });
-      return liveNativeHandleSlot;
+      return slots.liveNativeHandleSlot;
     } catch (error) {
       this.logger.error('Export reheat threw', {
         data: { error: error instanceof Error ? error.message : String(error) },
@@ -3147,7 +3252,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     renderIdentity: LastSettledRenderIdentity | undefined;
     renderArtifact?: MaterializedRender;
     activeMiddleware: ResolvedMiddleware[];
-    onCacheMiss?: (input: ExportGeometryRequest) => Promise<ExportGeometryResult>;
+    onCacheMiss?: (input: MiddlewareExportGeometryRequest) => Promise<ExportGeometryResult>;
   }): Promise<ExportGeometryResult> {
     if (!options.renderIdentity) {
       return this.createExportRenderIdentityMissingResult();
@@ -3172,6 +3277,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       runtimes.set(
         id,
         createMiddlewareRuntime({
+          signal: this.operationSignal ?? neverAbortedSignal,
           onLog: this.onLog,
           middlewareName: middleware.name,
           filesystem: this.filesystem,
@@ -3187,7 +3293,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const { onCacheMiss, renderArtifact } = options;
     const computeExport =
       onCacheMiss ??
-      (async (handlerInput: ExportGeometryRequest): Promise<ExportGeometryResult> => {
+      (async (handlerInput: MiddlewareExportGeometryRequest): Promise<ExportGeometryResult> => {
         if (!renderArtifact) {
           return this.createExportRenderIdentityMissingResult();
         }
@@ -3195,9 +3301,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       });
 
     const { tracer } = this;
-    let chain: ExportGeometryHandler = named('kernelHandler', async (handlerInput: ExportGeometryRequest) => {
+    let chain: ExportGeometryHandler = named('kernelHandler', async (handlerInput: MiddlewareExportGeometryRequest) => {
       const computeSpan = tracer.startSpan('kernel.export-compute');
-      const exportResult = await computeExport(handlerInput);
+      const exportResult = await computeExport(this.withoutRuntimeContent(handlerInput));
       computeSpan.end();
       return exportResult;
     });
@@ -3209,12 +3315,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const middlewareName = middleware.name;
       const wrapHook = middleware.wrapExportGeometry!;
 
-      chain = named(`middleware(${middlewareName})`, async (handlerInput: ExportGeometryRequest) => {
+      chain = named(`middleware(${middlewareName})`, async (handlerInput: MiddlewareExportGeometryRequest) => {
         const span = tracer.startSpan(`middleware.wrap(${middlewareName})`, {
           middleware: middlewareName,
         });
         try {
-          const chainResult = await wrapHook(handlerInput, inner, runtime);
+          const chainResult = await wrapHook(
+            this.withProviderRuntimeContent(
+              handlerInput,
+              options.plan.route.content,
+              middleware.content?.exportFormats?.[options.plan.route.targetFormat] ?? [],
+            ),
+            inner,
+            runtime,
+          );
           span.end();
           return chainResult;
         } catch (error) {
@@ -3242,38 +3356,40 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     plan: Extract<OwnerBoundExportPlan, { success: true }>,
     renderArtifact: MaterializedRender,
   ): Promise<ExportGeometryResult> {
-    const kernelId = plan.owner.binding?.kernelId;
-    const handleScope = kernelId ? (this.kernelNativeHandleScopeMap.get(kernelId) ?? 'operation') : 'operation';
-    if (handleScope === 'operation') {
-      const matchingDependency = renderArtifact.identity.dependencies.some(
-        (dependency) => dependency.type === 'export' && canonicalJson(dependency) === canonicalJson(plan.dependency),
+    const exportMaterialization =
+      plan.route.kind === 'direct'
+        ? { format: plan.route.targetFormat, options: plan.route.options }
+        : { format: plan.route.sourceFormat, options: plan.route.sourceOptions };
+    const desiredNativeHandleKey = await this.computeNativeHandleKey({
+      owner: plan.owner,
+      parameters: renderArtifact.identity.parameters,
+      renderOptions: renderArtifact.identity.renderOptions,
+      exportOptions: exportMaterialization.options,
+      content: plan.route.content,
+    });
+    if (!desiredNativeHandleKey.success) {
+      return createKernelError(desiredNativeHandleKey.issues);
+    }
+    if (!this.artifactMatchesNativeBuild(renderArtifact, plan.owner, desiredNativeHandleKey.key)) {
+      const materialized = await this.materializeRender(
+        {
+          file: renderArtifact.identity.file,
+          parameters: renderArtifact.identity.parameters,
+          options: renderArtifact.identity.renderOptions,
+          content: plan.route.content,
+          export: { ...exportMaterialization, dependency: plan.dependency },
+        },
+        { owner: plan.owner, publish: false },
       );
-      if (!matchingDependency) {
-        const exportMaterialization =
-          plan.route.kind === 'direct'
-            ? { format: plan.route.targetFormat, options: plan.route.options }
-            : { format: plan.route.sourceFormat, options: plan.route.sourceOptions };
-        const materialized = await this.materializeRender(
-          {
-            file: renderArtifact.identity.file,
-            parameters: renderArtifact.identity.parameters,
-            options: renderArtifact.identity.renderOptions,
-            content: plan.route.content,
-            export: { ...exportMaterialization, dependency: plan.dependency },
-          },
-          { owner: plan.owner, publish: false },
-        );
-        if (!materialized.artifact.result.success) {
-          return createKernelError(materialized.artifact.result.issues);
-        }
-        renderArtifact = materialized.artifact;
+      if (!materialized.artifact.result.success) {
+        return createKernelError(materialized.artifact.result.issues);
       }
+      renderArtifact = materialized.artifact;
     }
 
     const runtime = this.createRuntime();
     const nativeInput = await this.prepareNativeExportInput({
       plan,
-      renderIdentity: renderArtifact.identity,
       runtime,
       renderArtifact,
     });
@@ -3293,14 +3409,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   private async prepareNativeExportInput(options: {
     plan: Extract<OwnerBoundExportPlan, { success: true }>;
-    renderIdentity: LastSettledRenderIdentity | undefined;
     runtime: KernelRuntime;
-    renderArtifact?: MaterializedRender;
+    renderArtifact: MaterializedRender;
   }): Promise<{ success: true; input: KernelExportGeometryInput } | { success: false; result: ExportGeometryResult }> {
-    const { plan, renderIdentity, runtime, renderArtifact } = options;
+    const { plan, runtime, renderArtifact } = options;
     const nativeHandle = await this.materializeNativeHandleForOwner({
       owner: plan.owner,
-      renderIdentity,
       runtime,
       renderArtifact,
     });
@@ -3346,37 +3460,43 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * @param state - The worker state to emit.
    */
-  private pushState(state: WorkerState): void {
-    if (state === this.lastPushedState) {
+  private pushState(state: WorkerState, record: RenderCancellationRecord, detail?: string): void {
+    if (
+      this.lastPushedState !== undefined &&
+      this.lastPushedState.renderId === record.renderId &&
+      this.lastPushedState.state === state &&
+      this.lastPushedState.detail === detail
+    ) {
       return;
     }
-    this.lastPushedState = state;
-    this.onStateChanged?.(state);
-  }
-
-  /**
-   * Placeholder for percentage-based progress emissions. Progress events
-   * fan out via `postMessage` driven by {@link KernelWorker.onProgressUpdate};
-   * this hook keeps the percentage-based path structurally co-located with
-   * the state-transition path for future use.
-   *
-   * @param _percent - The percentage of progress to emit.
-   */
-  private pushProgress(_percent: number): void {
-    // Intentionally empty — see JSDoc.
+    this.lastPushedState = { renderId: record.renderId, state, ...(detail === undefined ? {} : { detail }) };
+    this.onStateChanged?.({
+      renderId: record.renderId,
+      abortGeneration: record.generation,
+      state,
+      ...(detail === undefined ? {} : { detail }),
+    });
   }
 
   /**
    * Check if the current render has been aborted by a newer generation.
    *
-   * @param generation - The render generation to check.
+   * @param record - The admitted render record to check.
    * @returns True if aborted, false otherwise.
    */
-  private isAborted(generation: number): boolean {
-    if (this.signalView) {
-      return Atomics.load(this.signalView, signalSlot.abortGeneration) !== generation;
-    }
-    return generation !== this.renderGeneration;
+  private isAborted(record: RenderCancellationRecord): boolean {
+    return record.controller.signal.aborted || record.generation !== this.currentRenderGeneration();
+  }
+
+  /**
+   * The transport-authoritative render generation: the shared atomic when the client can
+   * reserve generations itself, the local mirror otherwise. `renderGeneration` alone is
+   * stale under SAB, where client reservations never reach it.
+   *
+   * @returns The current generation every render-currency check must compare against.
+   */
+  private currentRenderGeneration(): number {
+    return this.signalView ? Atomics.load(this.signalView, signalSlot.abortGeneration) >>> 0 : this.renderGeneration;
   }
 
   /**
@@ -3384,19 +3504,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * @param renderDelay - Debounce delay before render fires. Milliseconds.
    */
-  private scheduleRender(renderDelay: number, generation = this.reserveWorkerPreviewGeneration()): void {
+  private scheduleRender(renderDelay: number, record: RenderCancellationRecord): void {
     clearTimeout(this.paramDebounceTimer);
-    this.pushState('buffering');
+    this.pushState('buffering', record);
     this.paramDebounceTimer = setTimeout(() => {
       this.paramDebounceTimer = undefined;
       if (!this.operationAdmissionOpen) {
         return;
       }
-      void this.runQueuedCommand(async () => {
-        if (generation === this.renderGeneration) {
-          await this.executeRender(generation);
-        }
-      }, generation);
+      void this.runQueuedCommand(record, async () => this.executeRender(record));
     }, renderDelay);
   }
 
@@ -3405,29 +3521,39 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * increment generation, bundle, execute, compute geometry, push results.
    * Checks abort at each async boundary.
    */
-  private async executeRender(generation: number): Promise<void> {
-    if (!this.currentFile || generation !== this.renderGeneration) {
+  private async executeRender(record: RenderCancellationRecord): Promise<void> {
+    if (!this.currentFile || record !== this.activeRenderRecord || this.isAborted(record)) {
+      // A record that lost ownership was terminalized by whatever replaced it; one that
+      // still owns the lane (an abandoned client reservation, a file-less schedule) has
+      // no other terminal boundary and would otherwise leak.
+      if (record === this.activeRenderRecord) {
+        this.abortRenderRecord(record, 'superseded');
+      }
       return;
     }
+    const { generation } = record;
+    record.executing = true;
 
     this.prepareUnobservedFileSystem(true);
 
-    if (this.signalView) {
-      Atomics.store(this.signalView, signalSlot.abortReason, abortReasonEnum.none);
-      setAbortContext(this.signalView, generation);
-    }
+    setAbortContext({
+      signal: record.controller.signal,
+      ...(this.signalView === undefined ? {} : { signalView: this.signalView }),
+      generation,
+      onSharedAbort: (reason) => {
+        this.abortRenderRecord(record, reason === abortReasonEnum.timeout ? 'timeout' : 'superseded');
+      },
+    });
 
-    this.pushState('rendering');
-    this.pushProgress(0);
-    this._renderInProgress = true;
+    this.pushState('rendering', record);
+    this.tracer.reset();
+    const renderSpan = this.tracer.startSpan('kernel.render', {
+      file: this.currentFile.filename,
+    });
 
     try {
-      this.tracer.reset();
-      const renderSpan = this.tracer.startSpan('kernel.render', {
-        file: this.currentFile.filename,
-      });
       this.onProgress = (phase: RenderPhase) => {
-        this.onProgressUpdate?.(phase, generation);
+        this.onProgressUpdate?.({ phase, renderId: record.renderId });
       };
       const dependencyContext: DependencyResolutionContext = {};
       this.setActiveFile(this.currentFile);
@@ -3440,8 +3566,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       this.previewWatchCandidate.paths.set(this.activeFileAbsolutePath, fileChangeDebounce);
       const owner = await this.createOperationOwner(this.currentFile, 'render-artifact');
 
-      if (this.isAborted(generation)) {
-        return;
+      if (this.isAborted(record)) {
+        throw new RenderAbortedError();
       }
 
       const contentResult = this.validateRuntimeContent(
@@ -3451,19 +3577,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       );
       if (!contentResult.success) {
         const result = createKernelError(contentResult.issues);
-        this.onGeometryComputed?.(result, generation);
-        this.onError?.(contentResult.issues, generation);
-        renderSpan.end();
-        this.pushState('error');
+        this.onGeometryComputed?.({ result, renderId: record.renderId });
+        this.onError?.({ issues: contentResult.issues, renderId: record.renderId });
+        this.pushState('error', record);
         return;
       }
 
       const renderWork = async (): Promise<HashedGeometryResult> => {
         const parametersResult = await this.getParametersInLane(this.currentFile!, dependencyContext, owner);
-        if (this.isAborted(generation)) {
+        if (this.isAborted(record)) {
           throw new RenderAbortedError();
         }
-        this.onParametersResolved?.(parametersResult, generation);
+        this.onParametersResolved?.({ result: parametersResult, renderId: record.renderId });
 
         let mergedParameters = this.currentParameters;
         if (parametersResult.success) {
@@ -3476,11 +3601,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
 
         await cooperativeYield();
-        if (this.isAborted(generation)) {
+        if (this.isAborted(record)) {
           throw new RenderAbortedError();
         }
-
-        this.pushProgress(30);
 
         const geometryResult = await this.createGeometryInLane(
           {
@@ -3493,7 +3616,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           owner,
         );
 
-        if (this.isAborted(generation)) {
+        if (this.isAborted(record)) {
           throw new RenderAbortedError();
         }
 
@@ -3501,41 +3624,32 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       };
 
       const result = await renderWork();
-      this.pushProgress(100);
       this.onProgress = undefined;
-      renderSpan.end();
 
       this.flushTelemetry();
-      this.onGeometryComputed?.(result, generation);
-      this.pushState(this.paramDebounceTimer ? 'buffering' : 'idle');
+      this.onGeometryComputed?.({ result, renderId: record.renderId });
+      this.pushState('idle', record);
     } catch (error) {
       this.onProgress = undefined;
-      if (isRenderAbortedError(error) || this.isAborted(generation)) {
-        const reason = this.signalView ? Atomics.load(this.signalView, signalSlot.abortReason) : abortReasonEnum.none;
+      if (isRenderAbortedError(error) || this.isAborted(record)) {
+        const { reason } = record;
 
-        if (reason === abortReasonEnum.timeout) {
-          const timeoutMessage =
-            'Render timed out. Increase the timeout in viewer settings or simplify the model geometry.';
-          this.onError?.(
-            [{ message: timeoutMessage, code: 'RENDER_TIMEOUT', type: 'runtime', severity: 'error' }],
-            generation,
-          );
-          this.pushState('error');
+        if (reason === 'timeout') {
+          this.onError?.({ issues: [renderTimeoutIssue], renderId: record.renderId });
+          this.pushState('error', record);
         } else {
-          this.pushState(this.paramDebounceTimer ? 'buffering' : 'idle');
+          this.pushState('idle', record);
         }
         return;
       }
 
-      this.onError?.(this.errorToRuntimeIssues(error), generation);
-      this.pushState('error');
+      this.onError?.({ issues: this.errorToRuntimeIssues(error), renderId: record.renderId });
+      this.pushState('error', record);
     } finally {
       clearAbortContext();
-      if (generation === this.renderGeneration) {
-        this._renderInProgress = false;
-      }
+      record.executing = false;
       const candidate = this.previewWatchCandidate;
-      if (candidate?.generation === generation && candidate.coherent && generation === this.renderGeneration) {
+      if (candidate?.generation === generation && candidate.coherent && generation === this.currentRenderGeneration()) {
         await this.reconcileObservedPaths(candidate);
       } else if (!candidate?.watchCommitRejected) {
         await this.reconcileObservedPaths();
@@ -3543,6 +3657,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       if (this.previewWatchCandidate?.generation === generation) {
         this.previewWatchCandidate = undefined;
       }
+      this.releaseRenderRecord(record);
+      renderSpan.end();
     }
   }
 
@@ -3613,20 +3729,35 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (!this.operationAdmissionOpen) {
       return;
     }
-    let generation: number | undefined;
+    let record: RenderCancellationRecord | undefined;
     try {
       await this.enqueueWatchReconciliation(async () => {
         const paths = event.type === 'reset' ? [...this.watchedPaths] : this.exactWatchEventPaths(event);
-        const revisions = await this.readChangedObservedRevisions(paths);
+        // The barrier has to be observed again after the read: a staged write that began
+        // while this reconciliation was reading would otherwise be judged against the
+        // pre-write revision and supersede its own admitted record.
+        const awaitStagedWrite = async (): Promise<boolean> => {
+          const stagedWrite = this.stagedWritePublication;
+          if (!stagedWrite || !paths.some((path) => stagedWrite.paths.has(path))) {
+            return false;
+          }
+          await stagedWrite.promise;
+          return true;
+        };
+        await awaitStagedWrite();
+        let revisions = await this.readChangedObservedRevisions(paths);
+        if (await awaitStagedWrite()) {
+          revisions = await this.readChangedObservedRevisions(paths);
+        }
         if (revisions.size === 0 || !this.operationAdmissionOpen) {
           return;
         }
         const changedPaths = [...revisions.keys()];
-        generation = this.shouldScheduleExactPreview(changedPaths) ? this.reserveWorkerPreviewGeneration() : undefined;
-        await this.enqueueOperation(async () => this.routeExactChangedPaths(changedPaths, generation, revisions));
+        record = this.shouldScheduleExactPreview(changedPaths) ? this.createAutonomousPreviewRecord() : undefined;
+        await this.enqueueOperation(async () => this.routeExactChangedPaths(changedPaths, record, revisions));
       });
     } catch (error) {
-      this.reportWatchRoutingError(error, generation);
+      this.reportWatchRoutingError(error, record);
     }
   }
 
@@ -3673,27 +3804,28 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return changed;
   }
 
-  private reportWatchRoutingError(error: unknown, generation: number | undefined): void {
-    if (!this.operationAdmissionOpen) {
-      return;
+  private reportWatchRoutingError(error: unknown, record: RenderCancellationRecord | undefined): void {
+    if (this.operationAdmissionOpen) {
+      const issues = this.errorToRuntimeIssues(error);
+      this.onError?.({ issues, ...(record === undefined ? {} : { renderId: record.renderId }) });
     }
-    this.onError?.(
-      this.errorToRuntimeIssues(error),
-      generation,
-      generation === undefined ? undefined : this.renderRecordForGeneration(generation)?.renderId,
-    );
+    // A closing worker still owes every admitted record its terminal state and release.
+    if (record) {
+      this.pushState('error', record);
+      this.releaseRenderRecord(record);
+    }
   }
 
   private shouldScheduleExactPreview(paths: readonly string[]): boolean {
     const candidate = this.previewWatchCandidate;
     const previewPaths =
-      candidate?.generation === this.renderGeneration ? candidate.paths : this.currentPreviewWatchPaths;
+      candidate?.generation === this.currentRenderGeneration() ? candidate.paths : this.currentPreviewWatchPaths;
     return Boolean(this.currentFile && paths.some((path) => previewPaths.has(path)));
   }
 
   private async routeExactChangedPaths(
     paths: readonly string[],
-    generation?: number,
+    record?: RenderCancellationRecord,
     revisions?: ReadonlyMap<string, ObservedFileRevision | undefined>,
   ): Promise<void> {
     if (revisions) {
@@ -3702,7 +3834,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       this._invalidateCachesForPaths(paths);
     }
     this.onFileChanged(paths);
-    if (generation === undefined || generation !== this.renderGeneration || !this.currentFile) {
+    if (record === undefined || record !== this.activeRenderRecord || !this.currentFile) {
       return;
     }
     this.invalidatePublishedArtifactState();
@@ -3710,7 +3842,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     for (const path of paths) {
       renderDebounce = Math.min(renderDebounce, this.currentPreviewWatchPaths.get(path) ?? fileChangeDebounce);
     }
-    this.scheduleRender(renderDebounce, generation);
+    this.scheduleRender(renderDebounce, record);
   }
 
   /**
@@ -3841,7 +3973,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
         try {
           // oxlint-disable-next-line no-await-in-loop -- Sequential to preserve init order
-          const definition = await resolveRuntimePluginDefinition('transcoder', entry);
+          const definition = await resolveRuntimePluginDefinition<TranscoderDefinition>('transcoder', entry);
 
           const rawOptions = entry.options ?? {};
           const validatedOptions = definition.optionsSchema ? definition.optionsSchema.parse(rawOptions) : rawOptions;
@@ -3941,7 +4073,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             }
           }
         }
-        const content = this.createContentCapability('export', [...contentKeys]);
+        const content = this.buildContentCapability('export', [...contentKeys]);
 
         kernelExports.push({ kernelId, format, schema, defaults, contentKeys: [...contentKeys] });
 
@@ -3974,7 +4106,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             b: `${transcoder.id}:${edge.from}->${edge.to}`,
           });
           const edgeKeys = new Set(edge.content ?? []);
-          const content = this.createContentCapability(
+          const content = this.buildContentCapability(
             'export',
             cap.contentKeys.filter((key) => edgeKeys.has(key)),
           );
@@ -4012,14 +4144,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           }
         }
       }
-      const content = this.createContentCapability('render', [...keys]);
+      const content = this.buildContentCapability('render', [...keys]);
       renderCapabilities[kernelId] = { renderOptions, ...(content ? { content } : {}) };
     }
 
     return { routes, renderCapabilities };
   }
 
-  private createContentCapability(
+  private buildContentCapability(
     operation: 'render' | 'export',
     keys: readonly RuntimeContentKey[],
   ): { schema: JSONSchema7; defaults: RuntimeContentInput } | undefined {
@@ -4071,15 +4203,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (plan.route.kind === 'direct') {
       return this.onExportGeometryForOwner(
         plan.owner,
-        {
-          ...input,
-          format: plan.route.targetFormat,
-          options: plan.route.options,
-          content: this.projectRuntimeContent(
-            plan.route.content,
-            this.getNativeExportContentKeys(plan.owner, plan.route.targetFormat),
-          ),
-        },
+        this.withProviderRuntimeContent(
+          { ...this.withoutRuntimeContent(input), format: plan.route.targetFormat, options: input.options },
+          plan.route.content,
+          this.getNativeExportContentKeys(plan.owner, plan.route.targetFormat),
+        ),
         runtime,
       );
     }
@@ -4103,23 +4231,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     const sourceInput: KernelExportGeometryInput = {
-      ...input,
+      ...this.withoutRuntimeContent(input),
       format: route.sourceFormat,
       options: route.sourceOptions,
-      content: route.content,
     };
     const contributors = this.getSourceContentContributors(plan.owner, route);
     let sourceHandler: ExportGeometryHandler = async (handlerInput) =>
       this.onExportGeometryForOwner(
         plan.owner,
-        {
-          ...sourceInput,
-          options: handlerInput.options,
-          content: this.projectRuntimeContent(
-            handlerInput.content,
-            this.getNativeExportContentKeys(plan.owner, route.sourceFormat),
-          ),
-        },
+        this.withProviderRuntimeContent(
+          { ...sourceInput, ...this.withoutRuntimeContent(handlerInput), options: handlerInput.options },
+          route.content,
+          this.getNativeExportContentKeys(plan.owner, route.sourceFormat),
+        ),
         runtime,
       );
     if (contributors.length > 0) {
@@ -4129,6 +4253,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         const contributor = contributors[index]!;
         const inner = sourceHandler;
         const middlewareRuntime = createMiddlewareRuntime({
+          signal: runtime.signal,
           onLog: this.onLog,
           middlewareName: contributor.middleware.name,
           filesystem: this.filesystem,
@@ -4140,7 +4265,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         });
         sourceHandler = async (handlerInput) => {
           try {
-            return await contributor.middleware.wrapExportGeometry!(handlerInput, inner, middlewareRuntime);
+            return await contributor.middleware.wrapExportGeometry!(
+              this.withProviderRuntimeContent(
+                handlerInput,
+                route.content,
+                contributor.middleware.content?.exportFormats?.[route.sourceFormat] ?? [],
+              ),
+              inner,
+              middlewareRuntime,
+            );
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             return createKernelError([
@@ -4158,7 +4291,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const kernelResult = await sourceHandler({
       format: route.sourceFormat,
       options: route.sourceOptions,
-      content: route.content,
     });
     if (!kernelResult.success) {
       return kernelResult;
@@ -4195,7 +4327,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return cached;
     }
 
-    const middleware = await resolveRuntimePluginDefinition('middleware', entry);
+    const middleware = await resolveRuntimePluginDefinition<KernelMiddleware>('middleware', entry);
 
     this.middlewareModuleCache.set(entry.id, middleware);
     return middleware;
@@ -4212,14 +4344,22 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private createFileSystem(): KernelFileSystem {
     const fileSystem = this.fileSystem!;
     const { tracer } = this;
+    const checkOperationAbort = (): void => {
+      (this.operationSignal ?? neverAbortedSignal).throwIfAborted();
+    };
 
     function readFile(path: string, encoding: 'utf8'): Promise<string>;
     function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
     async function readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
+      checkOperationAbort();
       const span = tracer.startSpan('fs.read', { path });
-      const data = encoding ? await fileSystem.readFile(path, encoding) : await fileSystem.readFile(path);
-      span.end();
-      return data;
+      try {
+        const data = encoding ? await fileSystem.readFile(path, encoding) : await fileSystem.readFile(path);
+        checkOperationAbort();
+        return data;
+      } finally {
+        span.end();
+      }
     }
 
     return createRuntimeFileSystem({
@@ -4230,26 +4370,66 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       readFile,
 
       async exists(path: string): Promise<boolean> {
+        checkOperationAbort();
         const span = tracer.startSpan('fs.exists', { path });
-        const fileExists = await fileSystem.exists(path);
-        span.end();
-        return fileExists;
+        try {
+          const fileExists = await fileSystem.exists(path);
+          checkOperationAbort();
+          return fileExists;
+        } finally {
+          span.end();
+        }
       },
 
       async readdir(path: string): Promise<string[]> {
+        checkOperationAbort();
         const span = tracer.startSpan('fs.readdir', { path });
-        const entries = await fileSystem.readdir(path);
-        span.end();
-        return entries;
+        try {
+          const entries = await fileSystem.readdir(path);
+          checkOperationAbort();
+          return entries;
+        } finally {
+          span.end();
+        }
       },
 
-      writeFile: async (path: string, data: Uint8Array<ArrayBuffer> | string) => fileSystem.writeFile(path, data),
-      mkdir: async (path: string, options?: { recursive?: boolean }) => fileSystem.mkdir(path, options),
-      unlink: async (path: string) => fileSystem.unlink(path),
-      rmdir: async (path: string) => fileSystem.rmdir(path),
-      rename: async (oldPath: string, newPath: string) => fileSystem.rename(oldPath, newPath),
-      stat: async (path: string) => fileSystem.stat(path),
-      lstat: async (path: string) => fileSystem.lstat(path),
+      async writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {
+        checkOperationAbort();
+        await fileSystem.writeFile(path, data);
+        checkOperationAbort();
+      },
+      async mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
+        checkOperationAbort();
+        await fileSystem.mkdir(path, options);
+        checkOperationAbort();
+      },
+      async unlink(path: string): Promise<void> {
+        checkOperationAbort();
+        await fileSystem.unlink(path);
+        checkOperationAbort();
+      },
+      async rmdir(path: string): Promise<void> {
+        checkOperationAbort();
+        await fileSystem.rmdir(path);
+        checkOperationAbort();
+      },
+      async rename(oldPath: string, newPath: string): Promise<void> {
+        checkOperationAbort();
+        await fileSystem.rename(oldPath, newPath);
+        checkOperationAbort();
+      },
+      async stat(path: string) {
+        checkOperationAbort();
+        const result = await fileSystem.stat(path);
+        checkOperationAbort();
+        return result;
+      },
+      async lstat(path: string) {
+        checkOperationAbort();
+        const result = await fileSystem.lstat(path);
+        checkOperationAbort();
+        return result;
+      },
     });
   }
 
@@ -4347,12 +4527,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const unresolvedPaths = [...new Set(depsResult.unresolved.map((path) => resolveVirtualPath(path)))];
     const absolutePaths = [...new Set(depsResult.resolved.map((path) => resolveVirtualPath(path)))];
     const previewCandidate = owner.kind === 'render-artifact' ? this.previewWatchCandidate : undefined;
-    if (previewCandidate) {
+    // Every render observes the paths its entry needs, including the ones that are missing;
+    // only an admitted preview also carries them in its watch candidate.
+    if (owner.kind === 'render-artifact') {
       for (const path of absolutePaths) {
-        previewCandidate.paths.set(path, fileChangeDebounce);
+        previewCandidate?.paths.set(path, fileChangeDebounce);
       }
       for (const path of unresolvedPaths) {
-        previewCandidate.paths.set(path, fileChangeDebounce);
+        previewCandidate?.paths.set(path, fileChangeDebounce);
         this.fileHashCache.set(path, 'missing');
       }
     }
@@ -4393,15 +4575,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     // 2. Middleware file dependencies (from getDependencies hooks)
     const middleware = resolvedMiddleware ?? this.getMiddleware();
     const middlewareDeclarations: MiddlewareDependencyDeclaration[] = [];
-    for (const { middleware: mw, options: mwOptions, enabled } of middleware) {
+    for (const { middleware: mw, options: mwOptions, enabled, id } of middleware) {
       if (enabled && mw.getDependencies) {
         const getDeps = mw.getDependencies as unknown as (
           input: GetDependenciesInput,
-          options: Record<string, unknown>,
+          runtime: MiddlewareDependencyRuntime<Record<string, unknown>>,
         ) => MiddlewareDependencyDeclaration[] | Promise<MiddlewareDependencyDeclaration[]>;
         try {
           // oxlint-disable-next-line no-await-in-loop -- Sequential to preserve deterministic ordering
-          const declarations = await getDeps(discoverInput, mwOptions);
+          const declarations = await getDeps(discoverInput, {
+            signal: this.operationSignal ?? neverAbortedSignal,
+            logger: this.getMiddlewareLogger(id, mw.name),
+            filesystem: this.filesystem,
+            options: mwOptions,
+          });
           middlewareDeclarations.push(
             ...declarations.map((declaration) => ({
               ...declaration,
@@ -4577,13 +4764,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * @returns a bundler interface that delegates to extension-specific bundler implementations
    */
-  private createBundlerFacade(): KernelBundler {
-    if (this.cachedBundlerFacade) {
-      return this.cachedBundlerFacade;
-    }
-
-    this.cachedBundlerFacade = {
+  private createBundlerFacade(signal: AbortSignal): KernelBundler {
+    const facade: KernelBundler = {
       bundle: async (entryPath: string): Promise<BundleResult> => {
+        signal.throwIfAborted();
         const cached = this.bundleResultCache.get(entryPath);
         if (cached) {
           return cached;
@@ -4597,7 +4781,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         const extension = KernelWorker.getFileExtension(entryPath);
         const bundler = await this.ensureBundlerForExtension(extension);
 
-        const bundleResult = await bundler.definition.bundle({ entryPath }, bundler.ctx);
+        const bundleResult = await bundler.definition.bundle({ entryPath }, { signal }, bundler.ctx);
+        signal.throwIfAborted();
         bundleSpan.end();
         this.bundleResultCache.set(entryPath, bundleResult);
         return bundleResult;
@@ -4608,7 +4793,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           return { resolved: cached.dependencies, unresolved: cached.unresolvedPaths };
         }
 
-        const result = await this.createBundlerFacade().bundle(entryPath);
+        const result = await facade.bundle(entryPath);
         return { resolved: result.dependencies, unresolved: result.unresolvedPaths };
       },
       registerModule: (name: string, entry: BuiltinModule): void => {
@@ -4622,7 +4807,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       },
     };
 
-    return this.cachedBundlerFacade;
+    return facade;
   }
 
   /**
@@ -4632,27 +4817,28 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * @returns KernelRuntime instance
    */
-  private createRuntime(): KernelRuntime {
-    this.cachedRuntime ??= {
+  private createRuntime(signal = this.operationSignal ?? neverAbortedSignal): KernelRuntime {
+    return {
+      signal,
       filesystem: this.filesystem,
       logger: this.logger,
       fileContentCache: this.fileContentCache,
-      bundler: this.createBundlerFacade(),
+      bundler: this.createBundlerFacade(signal),
       execute: async (code: string): Promise<ExecuteResult> => {
+        signal.throwIfAborted();
         await this.ensureBundlerContext();
 
         const executeSpan = this.tracer.startSpan('kernel.execute', {
           phase: 'computingGeometry',
         });
         const firstBundler = this.loadedBundlers.values().next().value!;
-        const result = await firstBundler.definition.execute(code, firstBundler.ctx);
+        const result = await firstBundler.definition.execute(code, { signal }, firstBundler.ctx);
+        signal.throwIfAborted();
         executeSpan.end();
         return result;
       },
       tracer: this.tracer,
     };
-
-    return this.cachedRuntime;
   }
 
   /**
@@ -4737,9 +4923,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     this.activeFilePath = localFilePath;
-
-    this.cachedRuntime = undefined;
-    this.cachedBundlerFacade = undefined;
   }
 
   /**
@@ -4756,19 +4939,68 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     renderOptions: Record<string, unknown>,
     exportOptions: Record<string, unknown> | undefined,
     owner: OperationOwner,
-  ): { success: true; options: Record<string, unknown> } | { success: false; issues: KernelIssue[] } {
+  ):
+    | { success: true; input: Pick<NativeBuildInput, 'options'> | Record<never, never> }
+    | { success: false; issues: KernelIssue[] } {
     const kernelId = owner.binding?.kernelId;
-    const renderSchema = kernelId ? this.kernelRenderZodSchemaMap.get(kernelId) : undefined;
-    if (!exportOptions || !renderSchema) {
-      return { success: true, options: renderOptions };
+    const createSchema = kernelId ? this.kernelCreateOptionsZodSchemaMap.get(kernelId) : undefined;
+    if (!createSchema) {
+      return { success: true, input: {} };
     }
 
-    const renderKeys = Object.keys(collectJsonSchemaProperties(toJSONSchema(renderSchema) as JSONSchema7));
-    return this.validateRenderOptions(
-      deepmerge(renderOptions, pickRecordProperties(exportOptions, renderKeys), {
+    const createKeys = Object.keys(createSchema.shape);
+    const candidate = deepmerge(
+      pickRecordProperties(renderOptions, createKeys),
+      pickRecordProperties(exportOptions ?? {}, createKeys),
+      {
         arrayMerge: (_target: unknown[], source: unknown[]) => source,
-      }),
-      owner,
+      },
+    );
+    const parseResult = createSchema.safeParse(candidate);
+    if (parseResult.success) {
+      return { success: true, input: { options: parseResult.data } };
+    }
+    return {
+      success: false,
+      issues: parseResult.error.issues.map((issue) => ({
+        message: `Create option validation failed: ${issue.path.join('.')} — ${issue.message}`,
+        code: 'RUNTIME',
+        severity: 'error',
+      })),
+    };
+  }
+
+  private async computeNativeHandleKey(input: {
+    owner: OperationOwner;
+    parameters: Record<string, unknown>;
+    renderOptions: Record<string, unknown>;
+    exportOptions?: Record<string, unknown>;
+    content: RuntimeContentInput;
+  }): Promise<{ success: true; key: string } | { success: false; issues: KernelIssue[] }> {
+    const createOptions = this.resolveCreateOptions(input.renderOptions, input.exportOptions, input.owner);
+    if (!createOptions.success) {
+      return createOptions;
+    }
+    const dependencies = await this.computeDependencies({
+      parameters: input.parameters,
+      resolvedMiddleware: this.getCreateExecutionList(input.owner, input.content, input.exportOptions !== undefined),
+      owner: input.owner,
+    });
+    if ('options' in createOptions.input) {
+      dependencies.push({ type: 'option', key: 'native-build-options', value: createOptions.input.options });
+    }
+    return { success: true, key: await this.computeDependencyHash(dependencies) };
+  }
+
+  private artifactMatchesNativeBuild(
+    artifact: MaterializedRender,
+    owner: OperationOwner,
+    nativeHandleKey: string,
+  ): boolean {
+    return (
+      artifact.identity.nativeHandleKey === nativeHandleKey &&
+      artifact.identity.selectedKernelId === owner.binding?.kernelId &&
+      artifact.identity.selectedKernelVersion === owner.binding?.kernelVersion
     );
   }
 
@@ -4864,20 +5096,44 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return Object.fromEntries(keys.map((key) => [key, content?.[key] ?? false])) as RuntimeContentInput;
   }
 
+  private withoutRuntimeContent<Input extends Record<PropertyKey, unknown>>(input: Input): Omit<Input, 'content'> {
+    const { content: _content, ...rest } = input as Input & { readonly content?: RuntimeContentInput };
+    return rest;
+  }
+
+  private withProviderRuntimeContent<Input extends Record<PropertyKey, unknown>>(
+    input: Input,
+    canonicalContent: RuntimeContentInput,
+    keys: readonly RuntimeContentKey[],
+  ): Omit<Input, 'content'> & { readonly content?: RuntimeContentInput } {
+    const rest = this.withoutRuntimeContent(input);
+    return keys.length === 0 ? rest : { ...rest, content: this.projectRuntimeContent(canonicalContent, keys) };
+  }
+
   private getCreateExecutionList(
     owner: OperationOwner,
     content: RuntimeContentInput,
     exportOperation: boolean,
   ): ResolvedMiddleware[] {
-    return this.getMiddleware().filter(
-      (resolved) =>
-        resolved.enabled &&
-        (Boolean(resolved.middleware.wrapCreateGeometry) ||
-          this.middlewareOnlyDeclaresDependencies(resolved.middleware)) &&
-        (exportOperation
-          ? resolved.middleware.content === undefined
-          : this.middlewareRunsForRender(resolved, owner, content)),
-    );
+    return this.getMiddleware().filter((resolved) => {
+      if (
+        !resolved.enabled ||
+        (!resolved.middleware.wrapCreateGeometry && !this.middlewareOnlyDeclaresDependencies(resolved.middleware))
+      ) {
+        return false;
+      }
+      if (exportOperation) {
+        return resolved.middleware.content === undefined;
+      }
+      if (
+        this.kernelHasMeshPhaseForOwner(owner) &&
+        resolved.middleware.content?.render &&
+        resolved.middleware.wrapMeshGeometry
+      ) {
+        return false;
+      }
+      return this.middlewareRunsForRender(resolved, owner, content);
+    });
   }
 
   private middlewareOnlyDeclaresDependencies(middleware: KernelMiddleware): boolean {

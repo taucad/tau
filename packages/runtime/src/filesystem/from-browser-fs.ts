@@ -86,7 +86,7 @@ const getDirectory = async (
  * const root = await window.showDirectoryPicker();
  * const client = createRuntimeClient({
  *   transport: webWorkerTransport({
- *     createWorker: () => new Worker(new URL('./runtime.worker.js', import.meta.url), { type: 'module' }),
+ *     createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
  *     fileSystem: fromBrowserFs(root),
  *   }),
  * });

@@ -20,7 +20,7 @@ function listAllGlbBuffers(result: CreateGeometryResult): Array<Uint8Array<Array
   if (!result.success) {
     return [];
   }
-  return result.data.format === 'gltf' ? [result.data.content] : [];
+  return result.data?.format === 'gltf' ? [result.data.content] : [];
 }
 
 /**

@@ -144,11 +144,9 @@ export const tau = defineKernel({
   extensions: [...supportedImportFormats],
   name: 'TauKernel',
   version: '1.0.0',
-  nativeHandleScope: 'source',
-  render: { content: [] },
   exportFormats: {
-    glb: { optionsSchema: tauExportSchemas.glb, content: [] },
-    gltf: { optionsSchema: tauExportSchemas.gltf, content: [] },
+    glb: { optionsSchema: tauExportSchemas.glb },
+    gltf: { optionsSchema: tauExportSchemas.gltf },
   },
 
   async initialize() {

@@ -16,7 +16,8 @@ describe('plugin factory public surface', () => {
       extensions: ['ts'],
       name: 'KernelDefinition',
       version: '1.0.0',
-      renderSchema: z.object({ detail: z.number().default(1) }),
+      render: { optionsSchema: z.object({ detail: z.number().default(1) }) },
+      exportFormats: {},
       async initialize() {
         return {};
       },

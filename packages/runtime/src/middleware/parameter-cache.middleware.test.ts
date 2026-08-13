@@ -390,7 +390,6 @@ describe('parameterCacheMiddleware', () => {
         const { input, runtime } = createCacheContext({
           cacheExists: false,
           dependencyHash,
-          input: { basePath: '/test/project' },
         });
         const handler = createMockGetParametersHandler();
 
@@ -398,7 +397,7 @@ describe('parameterCacheMiddleware', () => {
         await wrapGetParameters!(input, handler, runtime);
 
         expect(runtime.filesystem.mocks.readFile).toHaveBeenCalledWith(
-          `/test/project/.tau/cache/parameters/${dependencyHash}.json`,
+          `/.tau/cache/parameters/${dependencyHash}.json`,
           'utf8',
         );
       });

@@ -53,7 +53,7 @@ const createMockKernelWorker = (): KernelWorker => {
     setGeometryPoolBuffer: vi.fn(),
     setFilePoolBuffer: vi.fn(),
     handleWireAbort: vi.fn(),
-    capabilitiesManifest: { routes: [], renderSchemas: {} },
+    capabilitiesManifest: { routes: [], renderCapabilities: {} },
   };
   return base as unknown as KernelWorker;
 };
@@ -104,7 +104,6 @@ describe('webWorkerHost — real port acquisition (R3)', () => {
     expect(typeof host.open).toBe('function');
     expect(typeof host.adoptInitialize).toBe('function');
     expect(typeof host.encodeGeometry).toBe('function');
-    expect(typeof host.encodeFile).toBe('function');
     expect(host.closed).toBeInstanceOf(Promise);
   });
 

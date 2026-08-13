@@ -24,6 +24,7 @@ const createMockVm = (): ModuleVm => ({
 });
 
 describe('Esbuild runtime adapter', () => {
+  const bundlerRuntime = { signal: new AbortController().signal };
   const resolveEsbuildDefinition = async () => resolveRuntimePluginDefinition('bundler', esbuildBundler());
   let esbuildDefinition: Awaited<ReturnType<typeof resolveEsbuildDefinition>>;
 
@@ -37,14 +38,14 @@ describe('Esbuild runtime adapter', () => {
     const vm = createMockVm();
     vi.mocked(createEsbuildModuleVm).mockResolvedValue(vm);
 
-    const context = (await esbuildDefinition.initialize({ filesystem, projectPath: '/project' }, {})) as {
+    const context = (await esbuildDefinition.initialize({ filesystem }, {})) as {
       vm: ModuleVm;
     };
 
     expect(context.vm).toBe(vm);
     expect(createEsbuildModuleVm).toHaveBeenCalledWith({
       filesystem,
-      projectPath: '/project',
+      projectPath: '/',
       autoExportNames: ['main', 'defaultParams', 'getParameterDefinitions'],
       cacheExecution: true,
     });
@@ -57,7 +58,9 @@ describe('Esbuild runtime adapter', () => {
       dependencies: ['/project/model.test.ts'],
     });
 
-    const result = await esbuildDefinition.detectImports({ entryPath: '/project/model.test.ts' }, { vm });
+    const result = await esbuildDefinition.detectImports({ entryPath: '/project/model.test.ts' }, bundlerRuntime, {
+      vm,
+    });
 
     expect(vm.detectImports).toHaveBeenCalledWith('/project/model.test.ts');
     expect(result).toEqual({
@@ -88,7 +91,7 @@ describe('Esbuild runtime adapter', () => {
       ],
     });
 
-    const result = await esbuildDefinition.bundle({ entryPath: '/project/model.ts' }, { vm });
+    const result = await esbuildDefinition.bundle({ entryPath: '/project/model.ts' }, bundlerRuntime, { vm });
 
     expect(vm.bundle).toHaveBeenCalledWith('/project/model.ts');
     expect(result).toEqual({
@@ -128,7 +131,7 @@ describe('Esbuild runtime adapter', () => {
       ],
     });
 
-    const result = await esbuildDefinition.execute('throw new Error("boom");', { vm });
+    const result = await esbuildDefinition.execute('throw new Error("boom");', bundlerRuntime, { vm });
 
     expect(vm.execute).toHaveBeenCalledWith('throw new Error("boom");');
     expect(result).toEqual({
@@ -159,7 +162,7 @@ describe('Esbuild runtime adapter', () => {
       ],
     });
 
-    const result = await esbuildDefinition.execute('throw new Error("custom");', { vm });
+    const result = await esbuildDefinition.execute('throw new Error("custom");', bundlerRuntime, { vm });
 
     expect(result).toEqual({
       success: false,
@@ -204,7 +207,9 @@ describe('Esbuild runtime adapter', () => {
       unresolved: ['/project/missing.ts'],
     });
 
-    const result = await esbuildDefinition.resolveDependencies?.({ entryPath: '/project/main.ts' }, { vm });
+    const result = await esbuildDefinition.resolveDependencies?.({ entryPath: '/project/main.ts' }, bundlerRuntime, {
+      vm,
+    });
 
     expect(vm.resolveDependencies).toHaveBeenCalledWith('/project/main.ts');
     expect(result).toEqual({

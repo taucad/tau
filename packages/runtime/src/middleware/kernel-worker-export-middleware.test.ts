@@ -15,11 +15,14 @@ import { z } from 'zod';
 import type { ExportGeometryResult } from '#types/runtime.types.js';
 import type { ExportGeometryRequest } from '#types/runtime-kernel.types.js';
 import type { ExportGeometryHandler, KernelMiddlewareRuntime } from '#types/runtime-middleware.types.js';
-import type { Dependency } from '#types/runtime-dependency.types.js';
+import type { Dependency, ExportDependency } from '#types/runtime-dependency.types.js';
 import { exportMemoryCache, geometryCache } from '#middleware/geometry-cache.middleware.js';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
-import { MockKernelWorker } from '#testing/kernel-testing.utils.js';
+import { createGeometryFile, MockKernelWorker } from '#testing/kernel-testing.utils.js';
+import { imageEdgeSchemas } from '#transcoders/image/image-export-options.js';
+import type { MaterializedRender } from '#framework/render-artifact.js';
 
 describe('kernel-worker wrapExportGeometry middleware', () => {
   const resolveGeometryCacheMiddleware = async () => resolveRuntimePluginDefinition('middleware', geometryCache());
@@ -369,7 +372,7 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
     expect(captures[1]!.dependencies).toContainEqual({ type: 'parameter', parameters: { height: 20 } });
   });
 
-  it('should include render options in create and export dependency hashes', async () => {
+  it('should keep render-only options out of native-build identity while retaining them in export identity', async () => {
     const createCaptures: Array<{ hash: string; dependencies: readonly Dependency[] }> = [];
     const exportCaptures: Array<{ hash: string; dependencies: readonly Dependency[] }> = [];
     const middleware = defineMiddleware({
@@ -398,9 +401,10 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
     await worker.runExportGeometry('step');
 
     expect(createCaptures).toHaveLength(2);
-    expect(createCaptures[0]!.hash).not.toBe(createCaptures[1]!.hash);
-    expect(createCaptures[0]!.dependencies).toContainEqual({ type: 'render-options', options: { quality: 'coarse' } });
-    expect(createCaptures[1]!.dependencies).toContainEqual({ type: 'render-options', options: { quality: 'fine' } });
+    expect(createCaptures[0]!.hash).toBe(createCaptures[1]!.hash);
+    for (const capture of createCaptures) {
+      expect(capture.dependencies.some((dependency) => dependency.type === 'render-options')).toBe(false);
+    }
     expect(exportCaptures).toHaveLength(2);
     expect(exportCaptures[0]!.hash).not.toBe(exportCaptures[1]!.hash);
     expect(exportCaptures[0]!.dependencies).toContainEqual({ type: 'render-options', options: { quality: 'coarse' } });
@@ -446,6 +450,141 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
     );
   });
 
+  it('should include batch image views, labels, projection, and annotations in export dependency hashes', async () => {
+    const hashes: string[] = [];
+    const middleware = defineMiddleware({
+      id: 'ImageIdentityCapture',
+      name: 'ImageIdentityCapture',
+      async wrapExportGeometry(input, handler, runtime) {
+        hashes.push(runtime.dependencyHash);
+        return handler(input);
+      },
+    });
+    const transcoder = defineTranscoder({
+      id: 'image-identity',
+      name: 'ImageIdentity',
+      version: '1.0.0',
+      edges: [
+        {
+          from: 'glb',
+          to: 'webp',
+          fidelity: 'mesh',
+          optionsSchema: imageEdgeSchemas.webp,
+        },
+      ] as const,
+      async initialize() {
+        return {};
+      },
+      async transcode(input) {
+        return { success: true, data: input.files, issues: [] };
+      },
+      async cleanup() {
+        await Promise.resolve();
+      },
+    });
+    const worker = new MockKernelWorker({
+      middleware: [middleware],
+      transcoders: [transcoder()],
+      exportResult: defaultExportResult,
+      exportZodSchemas: { glb: z.object({}) },
+      onLog: onLog as OnWorkerLog,
+    });
+    const front = { id: 'front', label: 'Front', phi: 90, theta: 0 } as const;
+    const top = { id: 'top', label: 'Top', phi: 0, theta: 0 } as const;
+    const requests = [
+      { mode: 'batch', projection: 'orthographic', includeAxes: true, includeLabel: true, views: [front, top] },
+      { mode: 'batch', projection: 'orthographic', includeAxes: true, includeLabel: true, views: [top, front] },
+      { mode: 'batch', projection: 'orthographic', includeAxes: false, includeLabel: true, views: [front, top] },
+      { mode: 'batch', projection: 'perspective', includeAxes: true, includeLabel: true, views: [front, top] },
+      {
+        mode: 'batch',
+        projection: 'orthographic',
+        includeAxes: true,
+        includeLabel: true,
+        views: [{ ...front, label: 'Forward' }, top],
+      },
+      {
+        mode: 'batch',
+        projection: 'orthographic',
+        includeAxes: true,
+        includeLabel: true,
+        includeScale: true,
+        views: [front, top],
+      },
+    ] as const;
+
+    await worker.initialize({ callbacks: { onLog: onLog as OnWorkerLog }, transferables: {}, options: {} });
+    await worker.runCreateGeometry('main.ts', {});
+    for (const request of requests) {
+      // oxlint-disable-next-line no-await-in-loop -- each request contributes one ordered identity observation.
+      const result = await worker.runExportGeometry('webp', request);
+      expect(result.success).toBe(true);
+    }
+
+    expect(hashes).toHaveLength(requests.length);
+    expect(new Set(hashes).size).toBe(requests.length);
+  });
+
+  it('should include the selected transcoder version in export dependency hashes', async () => {
+    const capture = async (version: string) => {
+      let dependencyHash = '';
+      let dependencies: readonly Dependency[] = [];
+      const middleware = defineMiddleware({
+        id: `TranscoderCapture${version}`,
+        name: `TranscoderCapture${version}`,
+        async wrapExportGeometry(input, handler, runtime) {
+          dependencyHash = runtime.dependencyHash;
+          dependencies = runtime.dependencies;
+          return handler(input);
+        },
+      });
+      const transcoder = defineTranscoder({
+        id: 'test-image',
+        name: 'TestImage',
+        version,
+        edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }] as const,
+        async initialize() {
+          return {};
+        },
+        async transcode(input) {
+          return { success: true, data: input.files, issues: [] };
+        },
+        async cleanup() {
+          await Promise.resolve();
+        },
+      });
+      const worker = new MockKernelWorker({
+        middleware: [middleware],
+        transcoders: [transcoder()],
+        exportResult: {
+          success: true,
+          data: [{ bytes: new Uint8Array([1]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
+          issues: [],
+        },
+        exportZodSchemas: { glb: z.object({}) },
+        onLog: onLog as OnWorkerLog,
+      });
+
+      await worker.initialize({ callbacks: { onLog: onLog as OnWorkerLog }, transferables: {}, options: {} });
+      await worker.runCreateGeometry('main.ts', {});
+      const result = await worker.runExportGeometry('webp');
+      expect(result.success).toBe(true);
+      return { dependencyHash, dependencies };
+    };
+
+    const first = await capture('1.0.0');
+    const second = await capture('2.0.0');
+    expect(first.dependencyHash).not.toBe(second.dependencyHash);
+    const firstExport = first.dependencies.find(
+      (dependency): dependency is ExportDependency => dependency.type === 'export' && dependency.format === 'webp',
+    );
+    const secondExport = second.dependencies.find(
+      (dependency): dependency is ExportDependency => dependency.type === 'export' && dependency.format === 'webp',
+    );
+    expect(firstExport?.route?.transcoderVersion).toBe('1.0.0');
+    expect(secondExport?.route?.transcoderVersion).toBe('2.0.0');
+  });
+
   it('should include active kernel id and middleware signatures in export dependencies', async () => {
     let capturedDependencies: readonly Dependency[] = [];
     const middleware = defineMiddleware({
@@ -466,17 +605,56 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {});
-    await worker.runExportGeometry('step');
+    await worker.exportModel({ format: 'step', file: createGeometryFile('main.ts'), parameters: {} });
 
     expect(capturedDependencies).toContainEqual({ type: 'kernel', id: 'mock-kernel', version: '1.0.0' });
     expect(capturedDependencies).toContainEqual({
       type: 'middleware',
-      name: 'DependencyCapture',
+      id: 'DependencyCapture',
       version: '1.2.3',
       index: 0,
       options: { cache: true },
     });
+  });
+
+  it('should hash the phase-aware union of middleware that actually participates in export', async () => {
+    let capturedDependencies: readonly Dependency[] = [];
+    const unused = defineMiddleware({
+      id: 'Unused',
+      name: 'Unused',
+      async wrapMeshGeometry(input, handler) {
+        return handler(input);
+      },
+    });
+    const create = defineMiddleware({
+      id: 'Create',
+      name: 'Create',
+      async wrapCreateGeometry(input, handler) {
+        return handler(input);
+      },
+    });
+    const exportMiddleware = defineMiddleware({
+      id: 'Export',
+      name: 'Export',
+      async wrapExportGeometry(input, handler, runtime) {
+        capturedDependencies = runtime.dependencies;
+        return handler(input);
+      },
+    });
+    const noHooks = defineMiddleware({ id: 'NoHooks', name: 'NoHooks' });
+    const worker = new MockKernelWorker({
+      middleware: [unused, create, noHooks, exportMiddleware],
+      exportResult: defaultExportResult,
+      exportZodSchemas: { step: z.object({}) },
+      onLog: onLog as OnWorkerLog,
+    });
+
+    await worker.exportModel({ format: 'step', file: createGeometryFile('main.ts'), parameters: {} });
+
+    expect(capturedDependencies.filter((dependency) => dependency.type === 'middleware')).toEqual([
+      { type: 'middleware', id: 'Create', version: '1', index: 0, options: {} },
+      { type: 'middleware', id: 'Export', version: '1', index: 1, options: {} },
+    ]);
   });
 
   it('should cache repeated exports for the same settled render', async () => {
@@ -524,9 +702,10 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
     await worker.runCreateGeometry('main.ts', { height: 10 });
     await worker.runExportGeometry('step');
     const createCallsAfterCacheWrite = worker.createGeometryCalls;
-    const internals = worker as unknown as { nativeHandle: unknown; lastSerializedNativeHandle: unknown };
-    internals.nativeHandle = undefined;
-    internals.lastSerializedNativeHandle = undefined;
+    const artifact = (worker as unknown as { currentPublishedRender?: MaterializedRender }).currentPublishedRender;
+    expect(artifact).toBeDefined();
+    artifact!.liveNativeHandleSlot = undefined;
+    artifact!.serializedNativeHandleSlot = undefined;
 
     await worker.runExportGeometry('step');
 

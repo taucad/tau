@@ -145,24 +145,14 @@ export function createFrameClassifier(): (fileName: string) => FrameContext {
  * esbuild source maps contain paths prefixed with the namespace (e.g., `vfs:main.ts`).
  *
  * @param sourcePath - raw source path from the source map
- * @param projectPath - optional project root to strip from the path
- * @returns cleaned path relative to the project root
+ * @returns cleaned project-local path for user presentation
  */
-export function resolveSourcePath(sourcePath: string, projectPath?: string): string {
+export function resolveSourcePath(sourcePath: string): string {
   const cleanPath = sourcePath.startsWith(vfsNamespacePrefix)
     ? sourcePath.slice(vfsNamespacePrefix.length)
     : sourcePath;
 
-  if (projectPath && cleanPath.startsWith(projectPath)) {
-    const relative = cleanPath.slice(projectPath.length);
-    return relative.startsWith('/') ? relative.slice(1) : relative;
-  }
-
-  if (!cleanPath.startsWith('/')) {
-    return cleanPath;
-  }
-
-  return cleanPath.split('/').pop() ?? cleanPath;
+  return cleanPath.startsWith('/') ? cleanPath.slice(1) : cleanPath;
 }
 
 /**

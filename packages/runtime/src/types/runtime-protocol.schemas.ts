@@ -2,8 +2,8 @@
  * Runtime protocol Zod schemas — single source of truth for the wire
  * shape of every {@link RuntimeProtocol} call and notify.
  *
- * Type aliases in `runtime-protocol.types.ts` derive from these schemas
- * via `z.input` / `z.output`; the `Channel` server validates inbound
+ * Hand-written aliases in `runtime-protocol.types.ts` are kept structurally
+ * compatible with these schemas; the `Channel` server validates inbound
  * frames at the wire boundary when supplied via `protocolSchemas`.
  *
  * Validation depth is intentionally shallow: outer envelopes are
@@ -16,6 +16,7 @@
  */
 
 import { z } from 'zod';
+import { runtimeContentSchema } from '#types/runtime-content.types.js';
 import { fileExtensions } from '@taucad/types/constants';
 import type { FileExtension } from '@taucad/types';
 import type { WireProtocolSchemas } from '#types/wire-protocol-schemas.types.js';
@@ -114,7 +115,13 @@ const hashedGeometryResultTransportSchema = kernelResultSchema;
 
 const renderPhaseSchema = z.string();
 const workerStateSchema = z.enum(['idle', 'buffering', 'rendering', 'error']);
-const abortReasonCodeSchema = z.union([z.literal(0), z.literal(1), z.literal(2)]);
+const renderIdSchema = z.uuid();
+const abortGenerationSchema = z.number().int().min(0).max(4_294_967_295);
+const previewCommandIdentityShape = {
+  renderId: renderIdSchema,
+  abortGeneration: abortGenerationSchema.optional(),
+} as const;
+const wireAbortReasonCodeSchema = z.literal(2);
 const capabilitiesManifestSchema = z.unknown();
 
 const logEntrySchema = z.unknown();
@@ -172,6 +179,7 @@ export const runtimeExportArgsSchema = z
   .object({
     format: fileExtensionSchema,
     options: z.record(z.string(), z.unknown()).optional(),
+    content: runtimeContentSchema.optional(),
   })
   .strict();
 
@@ -185,6 +193,7 @@ export const runtimeExportModelArgsSchema = z
     options: z.record(z.string(), z.unknown()).optional(),
     format: fileExtensionSchema,
     exportOptions: z.record(z.string(), z.unknown()).optional(),
+    content: runtimeContentSchema.optional(),
   })
   .strict();
 
@@ -192,51 +201,53 @@ export const runtimeExportModelArgsSchema = z
 
 export const runtimeOpenFileArgsSchema = z
   .object({
+    ...previewCommandIdentityShape,
     file: geometryFileSchema,
     parameters: z.record(z.string(), z.unknown()),
     options: z.record(z.string(), z.unknown()).optional(),
+    content: runtimeContentSchema.optional(),
   })
   .strict();
 
 export const runtimeStageAndRenderArgsSchema = z
   .object({
+    ...previewCommandIdentityShape,
     stage: z.record(z.string(), z.instanceof(Uint8Array)),
     file: geometryFileSchema,
     parameters: z.record(z.string(), z.unknown()),
     options: z.record(z.string(), z.unknown()).optional(),
+    content: runtimeContentSchema.optional(),
   })
   .strict();
 
 export const runtimeUpdateParametersArgsSchema = z
   .object({
+    ...previewCommandIdentityShape,
     parameters: z.record(z.string(), z.unknown()),
   })
   .strict();
 
 export const runtimeSetOptionsArgsSchema = z
   .object({
+    ...previewCommandIdentityShape,
     options: z.record(z.string(), z.unknown()),
   })
   .strict();
 
-export const runtimeFileChangedArgsSchema = z
-  .object({
-    paths: z.array(z.string()),
-  })
-  .strict();
-
 /**
- * `cleanup` is a parameter-less notify. The application-level call
- * (`channel.notify('cleanup')`) carries no args, but the wire layer
+ * `cleanup` is a parameter-less acknowledged call. The application-level call
+ * (`channel.call('cleanup', undefined)`) carries no args, but the wire layer
  * normalises the missing payload to `null` (`{ a: value ?? null }` in
  * `createChannel`/`createChannelServer`) so the wire schema validates
- * `null`, not `undefined`. C18 covers both ends of that contract.
+ * `null`, not `undefined`.
  */
 export const runtimeCleanupArgsSchema = z.null();
+export const runtimeCleanupResultSchema = z.null();
 
 export const runtimeAbortArgsSchema = z
   .object({
-    reason: abortReasonCodeSchema,
+    renderId: renderIdSchema,
+    reason: wireAbortReasonCodeSchema,
   })
   .strict();
 
@@ -245,7 +256,7 @@ export const runtimeAbortArgsSchema = z
 export const runtimeProgressArgsSchema = z
   .object({
     phase: renderPhaseSchema,
-    rgen: z.number().int().nonnegative(),
+    renderId: renderIdSchema,
     detail: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
@@ -253,26 +264,28 @@ export const runtimeProgressArgsSchema = z
 export const runtimeGeometryComputedArgsSchema = z
   .object({
     result: hashedGeometryResultTransportSchema,
-    rgen: z.number().int().nonnegative(),
+    renderId: renderIdSchema,
   })
   .strict();
 
 export const runtimeParametersResolvedArgsSchema = z
   .object({
     result: getParametersResultSchema,
-    rgen: z.number().int().nonnegative(),
+    renderId: renderIdSchema,
   })
   .strict();
 
 export const runtimeErrorEventArgsSchema = z
   .object({
     issues: z.array(kernelIssueSchema),
-    rgen: z.number().int().nonnegative().optional(),
+    renderId: renderIdSchema.optional(),
   })
   .strict();
 
 export const runtimeStateChangedArgsSchema = z
   .object({
+    renderId: renderIdSchema,
+    abortGeneration: abortGenerationSchema,
     state: workerStateSchema,
     detail: z.string().optional(),
   })
@@ -281,6 +294,7 @@ export const runtimeStateChangedArgsSchema = z
 export const runtimeActiveKernelChangedArgsSchema = z
   .object({
     kernelId: z.string().optional(),
+    renderId: renderIdSchema.optional(),
   })
   .strict();
 
@@ -336,6 +350,7 @@ export const runtimeProtocolSchemas = {
     initialize: { args: runtimeInitializeArgsSchema, result: runtimeInitializeResultSchema },
     export: { args: runtimeExportArgsSchema, result: runtimeExportResultSchema },
     exportModel: { args: runtimeExportModelArgsSchema, result: runtimeExportResultSchema },
+    cleanup: { args: runtimeCleanupArgsSchema, result: runtimeCleanupResultSchema },
   },
   notifies: {
     // Consumer → host
@@ -343,8 +358,6 @@ export const runtimeProtocolSchemas = {
     'stage-and-render': runtimeStageAndRenderArgsSchema,
     updateParameters: runtimeUpdateParametersArgsSchema,
     setOptions: runtimeSetOptionsArgsSchema,
-    fileChanged: runtimeFileChangedArgsSchema,
-    cleanup: runtimeCleanupArgsSchema,
     abort: runtimeAbortArgsSchema,
 
     // Host → consumer

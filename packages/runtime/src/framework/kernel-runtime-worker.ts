@@ -23,18 +23,17 @@ import type {
   KernelIssue,
 } from '#types/runtime.types.js';
 import type {
-  CreateGeometryInput,
   ExportGeometryInput,
   GetDependenciesInput,
-  GetDependenciesResult,
   GetParametersInput,
   KernelDefinition,
   KernelExportFormats,
   KernelRuntime,
 } from '#types/runtime-kernel.types.js';
+import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import { KernelWorker } from '#framework/kernel-worker.js';
-import type { KernelBinding, OperationOwner } from '#framework/render-artifact.js';
+import type { KernelBinding, NativeBuildInput, OperationOwner } from '#framework/render-artifact.js';
 import { isRenderAbortedError } from '#framework/runtime-worker-client.js';
 import { preserveMethodNames } from '#framework/named.js';
 import { isWebAssemblyException } from '#kernels/occt/wasm-exception.js';
@@ -109,9 +108,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     this.loadedKernels.clear();
     this.kernelExportZodSchemasMap.clear();
     this.kernelRenderZodSchemaMap.clear();
+    this.kernelCreateOptionsZodSchemaMap.clear();
     this.kernelExportContentMap.clear();
     this.kernelRenderContentMap.clear();
-    this.kernelNativeHandleScopeMap.clear();
     this.kernelInitOptionsMap.clear();
     this.kernelImplementationAssetsMap.clear();
     this.activeKernelId = undefined;
@@ -197,7 +196,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   }
 
   protected override async onCreateGeometry(
-    input: CreateGeometryInput,
+    input: NativeBuildInput,
     runtime: KernelRuntime,
   ): Promise<CreateGeometryResult> {
     const owner = await this.createRequestOperationOwner(input, 'request', runtime);
@@ -206,7 +205,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
   protected override async onCreateGeometryForOwner(
     owner: OperationOwner,
-    input: CreateGeometryInput,
+    input: NativeBuildInput,
     runtime: KernelRuntime,
   ): Promise<CreateGeometryResult> {
     const selectionError = this.selectionErrors.get(input.entryPath);
@@ -230,16 +229,10 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       ]);
     }
 
-    const zodSchema = this.kernelRenderZodSchemaMap.get(kernel.entry.id);
-    const resolvedInput =
-      zodSchema && Object.keys(input.options).length === 0
-        ? { ...input, options: this.revalidateRenderOptions(input.options, zodSchema) }
-        : input;
-
     try {
-      const output = await kernel.definition.createGeometry(resolvedInput, runtime, kernel.ctx);
+      const output = await kernel.definition.createGeometry(input, runtime, kernel.ctx);
 
-      this.captureNativeHandle(output.nativeHandle);
+      this.captureNativeHandle(output.nativeHandle, owner);
 
       if (kernel.definition.serializeNativeHandle) {
         const serializedNativeHandle = kernel.definition.serializeNativeHandle(
@@ -428,6 +421,15 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     return kernel.definition.deserializeNativeHandle({ serializedNativeHandle }, runtime, kernel.ctx);
   }
 
+  protected override disposeNativeHandleForOwner(
+    owner: OperationOwner,
+    nativeHandle: unknown,
+    runtime: KernelRuntime,
+  ): void {
+    const kernel = this.getKernelForOwner(owner);
+    kernel?.definition.disposeNativeHandle?.({ nativeHandle }, runtime, kernel.ctx);
+  }
+
   protected override async resolveKernelBinding(
     input: { entryPath: string },
     runtime: KernelRuntime,
@@ -460,7 +462,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     }
 
     this.activeKernelId = nextKernelId;
-    this.onActiveKernelChanged?.(nextKernelId);
+    this.onActiveKernelChanged?.(nextKernelId, this.activeRenderId);
   }
 
   protected override getActiveKernelId(): string | undefined {
@@ -484,7 +486,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       return;
     }
     this.activeKernelId = undefined;
-    this.onActiveKernelChanged?.(undefined);
+    this.onActiveKernelChanged?.(undefined, this.activeRenderId);
   }
 
   private clearFileDerivedKernelState(): void {
@@ -498,7 +500,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   // =====================================================================
 
   private async createRequestOperationOwner(
-    input: GetDependenciesInput | GetParametersInput | CreateGeometryInput,
+    input: GetDependenciesInput | GetParametersInput | NativeBuildInput,
     kind: OperationOwner['kind'],
     runtime: KernelRuntime,
   ): Promise<OperationOwner> {
@@ -538,7 +540,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       id: config.id,
     });
     this.logger.debug(`Loading kernel module: ${config.id}`);
-    const definition = await resolveRuntimePluginDefinition('kernel', config);
+    const definition = await resolveRuntimePluginDefinition<KernelDefinition>('kernel', config);
     importSpan.end();
 
     // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Runtime guard for dynamic import
@@ -570,14 +572,20 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     );
     this.kernelExportContentMap.set(
       config.id,
-      Object.fromEntries(Object.entries(exportFormats).map(([format, declaration]) => [format, declaration.content])),
+      Object.fromEntries(
+        Object.entries(exportFormats).flatMap(([format, declaration]) =>
+          declaration.content ? [[format, declaration.content]] : [],
+        ),
+      ),
     );
-    this.kernelRenderContentMap.set(config.id, definition.render.content);
-    this.kernelNativeHandleScopeMap.set(config.id, definition.nativeHandleScope ?? 'operation');
+    this.kernelRenderContentMap.set(config.id, definition.render?.content ?? []);
     this.kernelInitOptionsMap.set(config.id, validatedOptions);
     this.kernelImplementationAssetsMap.set(config.id, implementationAssets);
-    if (definition.render.optionsSchema) {
+    if (definition.render?.optionsSchema) {
       this.kernelRenderZodSchemaMap.set(config.id, definition.render.optionsSchema);
+    }
+    if (definition.createOptionsSchema) {
+      this.kernelCreateOptionsZodSchemaMap.set(config.id, definition.createOptionsSchema);
     }
 
     this.rebuildAndPushCapabilities();
@@ -686,7 +694,11 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
           const detectSpan = runtime.tracer.startSpan('kernel.detect-bundle', {
             entryPath,
           });
-          const { detectedModules, dependencies } = await bundler.definition.detectImports({ entryPath }, bundler.ctx);
+          const { detectedModules, dependencies } = await bundler.definition.detectImports(
+            { entryPath },
+            { signal: runtime.signal },
+            bundler.ctx,
+          );
           detectSpan.end();
           this.cachedDetectionDeps = { resolved: dependencies, unresolved: [] };
 
@@ -750,14 +762,6 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
     this.selectionCache.set(entryPath, { id: entry.id, method: 'catchall' });
     return { kernel, method: 'catchall' };
-  }
-
-  private revalidateRenderOptions(
-    raw: Record<string, unknown>,
-    zodSchema: { safeParse(data: unknown): { success: boolean; data?: unknown } },
-  ): Record<string, unknown> {
-    const parseResult = zodSchema.safeParse(raw);
-    return parseResult.success ? (parseResult.data as Record<string, unknown>) : raw;
   }
 
   private getActiveKernel(): LoadedKernel {

@@ -40,7 +40,6 @@ describe('ESM import smoke tests', () => {
     expect(module_.fromFsLike).toBeTypeOf('function');
     expect(module_.fromFileSystemBridge).toBeTypeOf('function');
     expect(module_.fromBrowserFs).toBeTypeOf('function');
-    expect(module_.createRuntimeFileSystem).toBeTypeOf('function');
     expect(module_.isRuntimeFileSystem).toBeTypeOf('function');
   });
 

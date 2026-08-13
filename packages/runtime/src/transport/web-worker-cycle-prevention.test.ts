@@ -59,11 +59,11 @@ describe('web-worker transport split — cycle prevention (R1)', () => {
     expect(source).not.toMatch(/new URL\(\s*["']\.\.\/worker\/web\.js["']\s*,\s*import\.meta\.url\s*\)/);
   });
 
-  it('`web-worker-transport.ts` composes via `defineRuntimeTransport` and does NOT redeclare `client`/`host` bodies', () => {
+  it('`web-worker-transport.ts` defines only the client via `defineRuntimeTransport`', () => {
     const source = read(compositionPath);
     expect(source).toMatch(/defineRuntimeTransport\(/);
     expect(source).toMatch(/client:\s*webWorkerClient/);
-    expect(source).toMatch(/host:\s*webWorkerHost/);
+    expect(source).not.toMatch(/host:\s*webWorkerHost/);
     /* Composition file must not own a `new URL(` literal in code (chunk-emitter belongs in client only). */
     const stripped = stripComments(source);
     expect(stripped).not.toMatch(/new URL\(\s*["'][^"']*["']\s*,\s*import\.meta\.url/);

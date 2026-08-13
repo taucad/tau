@@ -228,52 +228,6 @@ describe('createKernelLibraryTracer', () => {
     expect(tracer.ended).toHaveBeenCalledOnce();
   });
 
-  it('should attach result-derived telemetry to per-call spans', () => {
-    const resultTelemetrySymbol = Symbol('resultTelemetry');
-    const library = {
-      make() {
-        return { [resultTelemetrySymbol]: { backend: 'native', buildDuration: 12 } };
-      },
-    };
-    const tracer = createMockTracer();
-    const handle = createKernelLibraryTracer({
-      library,
-      tracer,
-      mode: 'per-call',
-      policy: defineLibraryTracePolicy({
-        library: 'demo',
-        traceCall: () => ({ type: 'trace' }),
-        extractResultTelemetry(context) {
-          const result = context.result as {
-            [resultTelemetrySymbol]?: { backend: string; buildDuration: number };
-          };
-          const telemetry = result[resultTelemetrySymbol];
-          if (!telemetry) {
-            return undefined;
-          }
-
-          const attributes: Record<string, string | number> = {};
-          attributes['result.backend'] = telemetry.backend;
-          attributes['result.build.ms'] = telemetry.buildDuration;
-          return {
-            attributes,
-          };
-        },
-      }),
-    });
-
-    handle.runInScope({
-      scope: 'user-main',
-      operation: () => handle.tracedLibrary.make(),
-    });
-
-    const expectedAttributes: Record<string, string | number> = {};
-    expectedAttributes['result.backend'] = 'native';
-    expectedAttributes['result.build.ms'] = 12;
-
-    expect(tracer.ended).toHaveBeenCalledWith(expectedAttributes);
-  });
-
   it('should end per-call spans and rethrow async errors', async () => {
     const library = {
       async fail() {
@@ -357,50 +311,6 @@ describe('createKernelLibraryTracer', () => {
     expectedSummary['fail.errors'] = 1;
     expectedSummary['total.calls'] = 3;
     expectedSummary['total.errors'] = 1;
-
-    expect(tracer.startSpan).toHaveBeenCalledWith('demo.library.summary', expect.objectContaining(expectedSummary));
-  });
-
-  it('should aggregate result-derived summary metrics in summary mode', () => {
-    const library = {
-      batch(buildDuration: number) {
-        return { buildDuration };
-      },
-    };
-    const tracer = createMockTracer();
-    const handle = createKernelLibraryTracer({
-      library,
-      tracer,
-      mode: 'summary',
-      policy: defineLibraryTracePolicy({
-        library: 'demo',
-        traceCall: () => ({ type: 'trace' }),
-        extractResultTelemetry(context) {
-          const result = context.result as { buildDuration: number };
-          const summary: Record<string, number> = {};
-          summary['batch.native.calls'] = 1;
-          summary['batch.build.ms'] = result.buildDuration;
-
-          return {
-            summary,
-          };
-        },
-      }),
-    });
-
-    handle.runInScope({
-      scope: 'user-main',
-      operation: () => {
-        handle.tracedLibrary.batch(12);
-        handle.tracedLibrary.batch(8);
-      },
-    });
-    handle.emitSummary();
-
-    const expectedSummary: Record<string, number> = {};
-    expectedSummary['batch.calls'] = 2;
-    expectedSummary['batch.batch.native.calls'] = 2;
-    expectedSummary['batch.batch.build.ms'] = 20;
 
     expect(tracer.startSpan).toHaveBeenCalledWith('demo.library.summary', expect.objectContaining(expectedSummary));
   });

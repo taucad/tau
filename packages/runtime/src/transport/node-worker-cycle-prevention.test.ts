@@ -5,14 +5,12 @@
  * the node-worker transport mirrors the R1 web-worker structural split:
  *
  *   - `node-worker-host.ts`     ← host() factory only; NO `new URL` literals
- *   - `node-worker-client.ts`   ← client() factory + `defaultNodeWorkerUrl`
- *   - `node-worker-transport.ts`← thin composition via `defineRuntimeTransport`
+ *   - `node-worker-client.ts`   ← client() factory; consumes an application-owned URL
+ *   - `node-worker-transport.ts`← thin client definition via `defineRuntimeTransport`
  *   - `worker/node.ts`          ← bundled worker entry; static-imports the host only
  *
- * If any of these structural invariants regresses, Rolldown's `emitFile()`
- * deadlocks during `pnpm nx build` for any consumer that bundles the Node
- * subpath (CLI, server apps, Electron utility processes). This test pins the
- * file shapes so the regression cannot land silently.
+ * This test pins the one-way client/host dependency split and prevents a
+ * library-owned worker URL from recreating the historical chunk graph cycle.
  *
  * @vitest-environment node
  */
@@ -50,18 +48,19 @@ describe('node-worker transport split — cycle prevention (R2)', () => {
     expect(source).not.toMatch(/from ["']#transport\/node-worker-client/);
   });
 
-  it('`node-worker-client.ts` exports `nodeWorkerClient` and owns the `new URL(../worker/node.js, import.meta.url)` chunk-emit literal', () => {
-    const source = read(clientPath);
+  it('`node-worker-client.ts` exports `nodeWorkerClient` without owning an executable worker URL', () => {
+    const source = stripComments(read(clientPath));
     expect(source).toMatch(/export const nodeWorkerClient\b/);
-    expect(source).toMatch(/new URL\(\s*["']\.\.\/worker\/node\.js["']\s*,\s*import\.meta\.url\s*\)/);
+    expect(source).not.toMatch(/new URL\(/);
+    expect(source).not.toMatch(/options\.url\s*\?\?/);
   });
 
-  it('`node-worker-transport.ts` composes via `defineRuntimeTransport` and does NOT redeclare `client`/`host` bodies', () => {
+  it('`node-worker-transport.ts` defines only the client via `defineRuntimeTransport`', () => {
     const source = read(compositionPath);
     expect(source).toMatch(/defineRuntimeTransport\(/);
     expect(source).toMatch(/client:\s*nodeWorkerClient/);
-    expect(source).toMatch(/host:\s*nodeWorkerHost/);
-    /* Composition file must not own a `new URL(` literal in code (chunk-emitter belongs in client only). */
+    expect(source).not.toMatch(/host:\s*nodeWorkerHost/);
+    /* Composition must not choose an executable worker location. */
     const stripped = stripComments(source);
     expect(stripped).not.toMatch(/new URL\(\s*["'][^"']*["']\s*,\s*import\.meta\.url/);
   });

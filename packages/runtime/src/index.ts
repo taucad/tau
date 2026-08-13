@@ -53,12 +53,14 @@ export type {
   CollectTranscodeMap,
   CollectTranscoderTargets,
   ExportFormatsFor,
+  ExportContentFor,
   ExportOptionsFor,
   KnownSourceFormats,
   KnownTargetFormats,
   KnownTranscoderIds,
   MergeExportMap,
   RenderOptionsFor,
+  RenderContentFor,
 } from '#plugins/plugin-types.js';
 
 // Plugin authoring helpers
@@ -96,6 +98,10 @@ export type {
   TransportPlugin,
   RuntimeFromTransport,
   RuntimeTransportClient,
+  RuntimeTransportCloseResult,
+  RuntimeTransportPreviewReservation,
+  RuntimeTransportRenderTarget,
+  RuntimeTransportTimeoutRecovery,
   RuntimeTransportHost,
   TransportClientReady,
   TransportHostReady,

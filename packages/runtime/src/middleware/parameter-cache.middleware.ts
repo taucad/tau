@@ -11,7 +11,6 @@
  */
 
 import { LruMap } from '@taucad/utils/cache';
-import { joinPath } from '@taucad/utils/path';
 import type { GetParametersResult } from '#types/runtime.types.js';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
 
@@ -26,23 +25,19 @@ export const parameterMemoryCache = new LruMap<GetParametersResult>({ maxEntries
 /**
  * Get the cache file path for a given cache key.
  *
- * @param basePath - The base path for the build
  * @param cacheKey - identifier used to locate and deduplicate cached parameter files
  * @returns The full path to the cache file
  */
-function getCachePath(basePath: string, cacheKey: string): string {
-  return joinPath(basePath, '.tau/cache/parameters', `${cacheKey}.json`);
+function getCachePath(cacheKey: string): string {
+  return `/.tau/cache/parameters/${cacheKey}.json`;
 }
 
 /**
  * Get the cache directory path.
  *
- * @param basePath - The base path for the build
  * @returns The full path to the cache directory
  */
-function getCacheDirectory(basePath: string): string {
-  return joinPath(basePath, '.tau/cache/parameters');
-}
+const cacheDirectory = '/.tau/cache/parameters';
 
 /**
  * Parameter cache middleware.
@@ -59,7 +54,6 @@ export const parameterCache = defineMiddleware({
   version: '1.0.0',
 
   async wrapGetParameters(input, handler, { logger, filesystem, dependencyHash }) {
-    const { basePath } = input;
     const cacheKey = dependencyHash;
 
     // L1: In-memory cache (fast, no I/O)
@@ -70,7 +64,7 @@ export const parameterCache = defineMiddleware({
     }
 
     // L2: Filesystem cache
-    const cachePath = getCachePath(basePath, cacheKey);
+    const cachePath = getCachePath(cacheKey);
     try {
       const cachedData = await filesystem.readFile(cachePath, 'utf8');
       logger.debug(`Parameter cache hit for ${cacheKey}`);
@@ -89,7 +83,6 @@ export const parameterCache = defineMiddleware({
     if (result.success) {
       parameterMemoryCache.set(cacheKey, result);
       try {
-        const cacheDirectory = getCacheDirectory(basePath);
         await filesystem.ensureDir(cacheDirectory);
 
         await filesystem.writeFile(cachePath, JSON.stringify(result));

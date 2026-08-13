@@ -183,6 +183,12 @@ async function getKclUtilitiesWithEngine(context: ZooContext): Promise<KclUtilit
   return utils;
 }
 
+const createCancel =
+  (utilities: KclUtilities): (() => void) =>
+  () => {
+    void utilities.cancel();
+  };
+
 /**
  * Zoo (KCL) kernel options.
  * @public
@@ -202,12 +208,11 @@ export const zoo = defineKernel({
   extensions: ['kcl'],
   name: 'ZooKernel',
   version: '1.2.0',
-  nativeHandleScope: 'source',
   optionsSchema: zooOptionsSchema,
   render: { content: ['includeTopology'] },
   exportFormats: {
-    stl: { optionsSchema: zooExportSchemas.stl, content: [] },
-    step: { optionsSchema: zooExportSchemas.step, content: [] },
+    stl: { optionsSchema: zooExportSchemas.stl },
+    step: { optionsSchema: zooExportSchemas.step },
     glb: { optionsSchema: zooExportSchemas.glb, content: ['includeTopology'] },
     gltf: { optionsSchema: zooExportSchemas.gltf, content: ['includeTopology'] },
   },
@@ -263,7 +268,7 @@ export const zoo = defineKernel({
     }
   },
 
-  async createGeometry({ entryPath, parameters }, { filesystem, logger }, context) {
+  async createGeometry({ entryPath, parameters }, { filesystem, logger, signal }, context) {
     ensureFileSystemManager(context, filesystem);
     const relativeFilePath = toKclEnginePath(entryPath);
     const code = await filesystem.readFile(entryPath, 'utf8');
@@ -277,28 +282,38 @@ export const zoo = defineKernel({
       }
 
       const utilities = await getKclUtilitiesWithEngine(context);
-      await utilities.clearProgram();
-      const parseResult = await utilities.parseKcl(trimmedCode);
-      const criticalParseErrors = filterNonWarningErrors(parseResult.errors);
-      if (criticalParseErrors.length > 0) {
-        logger.warn('KCL parsing errors', { data: criticalParseErrors });
-        throw new KclBuildError(mapCompilationErrorsToKernelIssues(criticalParseErrors, trimmedCode, relativeFilePath));
-      }
+      signal.throwIfAborted();
+      const cancel = createCancel(utilities);
+      signal.addEventListener('abort', cancel, { once: true });
+      try {
+        await utilities.clearProgram();
+        const parseResult = await utilities.parseKcl(trimmedCode);
+        const criticalParseErrors = filterNonWarningErrors(parseResult.errors);
+        if (criticalParseErrors.length > 0) {
+          logger.warn('KCL parsing errors', { data: criticalParseErrors });
+          throw new KclBuildError(
+            mapCompilationErrorsToKernelIssues(criticalParseErrors, trimmedCode, relativeFilePath),
+          );
+        }
 
-      const modifiedProgram = KclUtilities.injectParametersIntoProgram(parseResult.program, parameters);
-      const executionResult = await utilities.executeProgram(modifiedProgram, relativeFilePath);
-      const criticalExecutionErrors = filterNonWarningErrors(executionResult.errors);
-      if (criticalExecutionErrors.length > 0) {
-        logger.warn('KCL execution errors', { data: criticalExecutionErrors });
-        throw new KclBuildError(
-          mapCompilationErrorsToKernelIssues(criticalExecutionErrors, trimmedCode, relativeFilePath),
-        );
-      }
+        const modifiedProgram = KclUtilities.injectParametersIntoProgram(parseResult.program, parameters);
+        const executionResult = await utilities.executeProgram(modifiedProgram, relativeFilePath);
+        signal.throwIfAborted();
+        const criticalExecutionErrors = filterNonWarningErrors(executionResult.errors);
+        if (criticalExecutionErrors.length > 0) {
+          logger.warn('KCL execution errors', { data: criticalExecutionErrors });
+          throw new KclBuildError(
+            mapCompilationErrorsToKernelIssues(criticalExecutionErrors, trimmedCode, relativeFilePath),
+          );
+        }
 
-      // Display GLTF fetch is deferred to meshGeometry so a BRep-only export
-      // skips the engine round-trip. An executed-but-empty scene is discovered
-      // at fetch/export time; exportGeometry's per-format empty guards cover it.
-      return { nativeHandle: createZooNativeHandle(true) };
+        // Display GLTF fetch is deferred to meshGeometry so a BRep-only export
+        // skips the engine round-trip. An executed-but-empty scene is discovered
+        // at fetch/export time; exportGeometry's per-format empty guards cover it.
+        return { nativeHandle: createZooNativeHandle(true) };
+      } finally {
+        signal.removeEventListener('abort', cancel);
+      }
     } catch (error) {
       if (error instanceof KclBuildError || error instanceof RenderArtifactFinalizationError) {
         throw error;
@@ -310,17 +325,26 @@ export const zoo = defineKernel({
     }
   },
 
-  async meshGeometry({ nativeHandle, content }, { logger }, context) {
+  async meshGeometry({ nativeHandle, content }, { logger, signal }, context) {
     if (!nativeHandle.hasGeometry) {
       return { geometry: createEmptyGltfGeometry() };
     }
 
     try {
       const utilities = await getKclUtilitiesWithEngine(context);
-      const exportResult = await utilities.exportFromMemory({
-        type: 'gltf',
-        storage: 'binary',
-      });
+      signal.throwIfAborted();
+      const cancel = createCancel(utilities);
+      signal.addEventListener('abort', cancel, { once: true });
+      let exportResult: Awaited<ReturnType<KclUtilities['exportFromMemory']>>;
+      try {
+        exportResult = await utilities.exportFromMemory({
+          type: 'gltf',
+          storage: 'binary',
+        });
+        signal.throwIfAborted();
+      } finally {
+        signal.removeEventListener('abort', cancel);
+      }
       const gltf = exportResult[0];
       if (!gltf) {
         return { geometry: createEmptyGltfGeometry() };
@@ -347,7 +371,7 @@ export const zoo = defineKernel({
   },
 
   async exportGeometry(input, { logger }, context) {
-    const { format, nativeHandle, options, content } = input;
+    const { format, nativeHandle } = input;
 
     if (!nativeHandle.hasGeometry) {
       return createNoGeometryZooExportResult(format);
@@ -358,6 +382,7 @@ export const zoo = defineKernel({
 
       switch (format) {
         case 'stl': {
+          const { options } = input;
           const { binary, coordinateSystem, unit } = options;
           const stlResult = await utilities.exportFromMemory({
             type: 'stl',
@@ -374,6 +399,7 @@ export const zoo = defineKernel({
         }
 
         case 'step': {
+          const { options } = input;
           const { coordinateSystem } = options;
           const stepResult = await utilities.exportFromMemory({
             type: 'step',
@@ -388,6 +414,7 @@ export const zoo = defineKernel({
         }
 
         case 'glb': {
+          const { options, content } = input;
           const { coordinateSystem, unit } = options;
           const glbResult = await utilities.exportFromMemory({ type: 'gltf', storage: 'binary' });
           if (glbResult.length === 0 || !glbResult[0]) {
@@ -413,6 +440,7 @@ export const zoo = defineKernel({
         }
 
         case 'gltf': {
+          const { options, content } = input;
           const { coordinateSystem, unit } = options;
           const gltfResult = await utilities.exportFromMemory({
             type: 'gltf',

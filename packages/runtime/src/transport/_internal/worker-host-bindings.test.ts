@@ -35,24 +35,4 @@ describe('createWorkerHostBindings', () => {
     });
     expect(sourceBytes).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
-
-  it('publishes transfer-tier files through wire-owned buffers', () => {
-    const bindings = createWorkerHostBindings({});
-    const sourceBytes = new Uint8Array([9, 8, 7]);
-
-    const first = bindings.fileDelivery.publish(sourceBytes);
-    const firstTransfer = first.transferables[0] as ArrayBuffer;
-
-    expect(first.tier).toBe('transfer');
-    expect(firstTransfer).not.toBe(sourceBytes.buffer);
-    expect(transfer(first.value, first.transferables)).toMatchObject({ delivery: 'inline' });
-    expect(sourceBytes).toEqual(new Uint8Array([9, 8, 7]));
-
-    const second = bindings.fileDelivery.publish(sourceBytes);
-
-    expect(second.transferables[0]).not.toBe(sourceBytes.buffer);
-    expect(second.transferables[0]).not.toBe(firstTransfer);
-    expect(transfer(second.value, second.transferables)).toMatchObject({ delivery: 'inline' });
-    expect(sourceBytes).toEqual(new Uint8Array([9, 8, 7]));
-  });
 });

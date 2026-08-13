@@ -5,6 +5,7 @@ import type { Geometry } from '@taucad/types';
 import type { ExportGeometryResult } from '#types/runtime.types.js';
 import type { GeometryTransport, RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import type {
+  RuntimeTransportCloseResult,
   TransportPlugin,
   RuntimeTransportClient,
   TransportClientReady,
@@ -22,8 +23,8 @@ const exportResult: ExportGeometryResult = {
     },
     {
       bytes: new Uint8Array([4, 5]),
-      name: 'buffers/model.bin',
-      mimeType: 'application/octet-stream',
+      name: 'textures/base.png',
+      mimeType: 'image/png',
     },
   ],
   issues: [],
@@ -65,18 +66,19 @@ function createFakeTransport() {
     onClose: vi.fn(() => () => undefined),
   };
 
-  let close: (() => void) | undefined;
+  let close: ((result: RuntimeTransportCloseResult) => void) | undefined;
   const transport: RuntimeTransportClient = {
     id: 'test-transport',
-    closed: new Promise<void>((resolve) => {
+    closed: new Promise<RuntimeTransportCloseResult>((resolve) => {
       close = resolve;
     }),
+    reservePreview: () => ({}),
+    renderTimeoutRecovery: { kind: 'unsupported' },
     describe: () => ({
       id: 'test-transport',
       wire: 'in-process',
       memory: {
         geometryDelivery: 'copy',
-        fileDelivery: 'copy',
         abortSignal: 'wire-notify',
       },
       fileSystem: 'inline',
@@ -88,13 +90,12 @@ function createFakeTransport() {
     initialize: vi.fn(async () => ({
       capabilities: {
         routes: [],
-        renderSchemas: {},
+        renderCapabilities: {},
       },
     })),
-    abort: vi.fn(),
     resolveGeometry: vi.fn(async (geometry: GeometryTransport): Promise<Geometry> => geometry as unknown as Geometry),
     close: vi.fn(async () => {
-      close?.();
+      close?.({ cause: 'requested' });
     }),
   };
 
@@ -117,7 +118,7 @@ describe('RuntimeClient request-scoped export', () => {
     client.render = render;
 
     const result = await client.export('glb', {
-      source: { path: 'main.ts' },
+      source: { path: 'lib/cube.ts' },
       parameters: { height: 10 },
       exportOptions: { binary: true },
     });
@@ -125,7 +126,7 @@ describe('RuntimeClient request-scoped export', () => {
     expect(render).not.toHaveBeenCalled();
     expect(exportCall).not.toHaveBeenCalled();
     expect(exportModelCall).toHaveBeenCalledWith({
-      file: { path: '/', filename: 'main.ts' },
+      file: { path: '/lib', filename: 'cube.ts' },
       parameters: { height: 10 },
       format: 'glb',
       exportOptions: { binary: true },
@@ -134,7 +135,7 @@ describe('RuntimeClient request-scoped export', () => {
     if (result.success) {
       expect(result.data.map(({ name, mimeType, bytes }) => ({ name, mimeType, bytes: [...bytes] }))).toEqual([
         { name: 'model.glb', mimeType: 'model/gltf-binary', bytes: [1, 2, 3] },
-        { name: 'buffers/model.bin', mimeType: 'application/octet-stream', bytes: [4, 5] },
+        { name: 'textures/base.png', mimeType: 'image/png', bytes: [4, 5] },
       ]);
     }
     client.terminate();
@@ -157,7 +158,7 @@ describe('RuntimeClient request-scoped export', () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.map(({ name }) => name)).toEqual(['model.glb', 'buffers/model.bin']);
+      expect(result.data.map(({ name }) => name)).toEqual(['model.glb', 'textures/base.png']);
     }
     expect(exportModelCall).toHaveBeenCalledOnce();
     const request = exportModelCall.mock.calls.at(0)?.[0];
@@ -194,7 +195,7 @@ describe('RuntimeClient request-scoped export', () => {
     client.terminate();
   });
 
-  it('should reject legacy flat export input', async () => {
+  it('should reject unsupported top-level export keys', async () => {
     const { plugin } = createFakeTransport();
     const client = createRuntimeClientWithTransport({
       transport: plugin,
@@ -204,11 +205,10 @@ describe('RuntimeClient request-scoped export', () => {
       options?: Record<string, unknown>,
     ) => Promise<ExportResult>;
 
-    await expect(exportFromJavaScript('glb', { file: 'main.ts' })).rejects.toThrow('source');
     await expect(exportFromJavaScript('glb', { source: { path: 'main.ts' }, renderOptions: {} })).rejects.toThrow(
       'renderOptions',
     );
-    await expect(exportFromJavaScript('glb', { binary: true })).rejects.toThrow('binary');
+    await expect(exportFromJavaScript('glb', { unexpected: true })).rejects.toThrow('unexpected');
     client.terminate();
   });
 });

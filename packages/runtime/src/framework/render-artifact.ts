@@ -4,6 +4,20 @@ import type { KernelResult } from '#types/runtime.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 
+/** Exact content-free input passed to the terminal kernel create hook. @internal */
+export type NativeBuildInput = {
+  readonly entryPath: string;
+  readonly parameters: Record<string, unknown>;
+} & ({ readonly options: Record<string, unknown> } | { readonly options?: never });
+
+/** Private result carrier used to preserve exact replay input through middleware and caches. @internal */
+export const nativeBuildInputSymbol: unique symbol = Symbol('nativeBuildInput');
+
+/** @internal */
+export type NativeBuildInputCarrier = {
+  readonly [nativeBuildInputSymbol]?: NativeBuildInput;
+};
+
 /**
  * Stable identity for one render request and its dependency graph.
  * @public
@@ -15,12 +29,11 @@ export type RenderIdentity = {
   parameters: Record<string, unknown>;
   renderOptions: Record<string, unknown>;
   content: RuntimeContentInput;
-  /** Exact value inputs used to construct the native handle and replay it after cache restoration failure. */
-  createOptions: Record<string, unknown>;
-  createContent: RuntimeContentInput;
+  /** Exact terminal kernel input used to replay native construction after snapshot restoration failure. */
+  nativeBuildInput?: NativeBuildInput;
   dependencies: Dependency[];
   dependencyHash: string;
-  /** Scope-aware key for the reusable native handle/create-cache entry. */
+  /** Exact create-input key for the reusable native handle/create-cache entry. */
   nativeHandleKey: string;
 };
 
@@ -118,7 +131,7 @@ export function createRenderIdentityKey(identity: RenderIdentity): string {
 
 /**
  * Create the comparison key used only for native-handle compatibility.
- * @param identity - Render identity carrying the precomputed scope-aware key.
+ * @param identity - Render identity carrying the precomputed exact native-build key.
  * @returns Stable key for live and serialized native-handle slots.
  * @public
  */

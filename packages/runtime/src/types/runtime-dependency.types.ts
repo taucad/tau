@@ -25,8 +25,8 @@ export type FileDependency = {
  */
 export type MiddlewareDependency = {
   type: 'middleware';
-  /** Name of the middleware */
-  name: string;
+  /** Stable middleware plugin identifier. */
+  id: string;
   /** Version of the middleware */
   version: string;
   /** Position in the middleware chain (0-indexed) */
@@ -82,6 +82,13 @@ export type RenderOptionsDependency = {
   options: Record<string, unknown>;
 };
 
+/** Framework content normalized for the selected operation route. @public */
+export type ContentDependency = {
+  type: 'content';
+  /** Supported properties with operation defaults applied. */
+  content: Record<string, boolean>;
+};
+
 /**
  * A kernel dependency representing the selected kernel for the active file.
  * Used to invalidate caches when two kernels can handle the same source path.
@@ -106,6 +113,8 @@ export type ExportDependency = {
   format: string;
   /** Zod-validated export options object -- serialized in the final dependency hash pass */
   options: Record<string, unknown>;
+  /** Framework content normalized for the selected export route. */
+  content?: Record<string, boolean>;
   /** Selected export route identity and validated route options. */
   route?: {
     kind: 'direct' | 'transcoded';
@@ -113,6 +122,15 @@ export type ExportDependency = {
     sourceFormat?: string;
     targetFormat: string;
     transcoderId?: string;
+    transcoderVersion?: string;
+    transcoderOptions?: Record<string, unknown>;
+    transcoderAssets?: ReadonlyArray<{ id: string; sha256: string }>;
+    contentContributors?: ReadonlyArray<{
+      id: string;
+      version: string;
+      index: number;
+      options: Record<string, unknown>;
+    }>;
     sourceOptions?: Record<string, unknown>;
     edgeOptions?: Record<string, unknown>;
   };
@@ -144,6 +162,20 @@ export type Dependency =
   | OptionDependency
   | ParameterDependency
   | RenderOptionsDependency
+  | ContentDependency
   | KernelDependency
   | ExportDependency
   | AssetDependency;
+
+/**
+ * Structured result from dependency resolution. Unresolved paths remain in
+ * the watch set so creating a missing file can trigger a later render.
+ *
+ * @public
+ */
+export type GetDependenciesResult = {
+  /** Paths within the runtime filesystem that were resolved and read. */
+  resolved: string[];
+  /** Paths that could not be resolved. */
+  unresolved: string[];
+};

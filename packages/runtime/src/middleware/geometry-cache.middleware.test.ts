@@ -10,9 +10,10 @@ import type {
   CreateGeometryHandler,
   ExportGeometryHandler,
   KernelMiddlewareRuntime,
+  MiddlewareCreateGeometryRequest,
 } from '#types/runtime-middleware.types.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
-import type { CreateGeometryInput, ExportGeometryRequest } from '#types/runtime-kernel.types.js';
+import type { ExportGeometryRequest } from '#types/runtime-kernel.types.js';
 import { exportMemoryCache, geometryCache, geometryMemoryCache } from '#middleware/geometry-cache.middleware.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import {
@@ -21,11 +22,27 @@ import {
   createGltfSuccessResult,
   createErrorResult,
   createMockDependencies,
-  createMockCreateGeometryHandler,
+  createMockCreateGeometryHandler as createBaseCreateGeometryHandler,
 } from '#testing/kernel-testing.utils.js';
+import { nativeBuildInputSymbol } from '#framework/render-artifact.js';
+import type { NativeBuildInput, NativeBuildInputCarrier } from '#framework/render-artifact.js';
+
+const nativeBuildInput: NativeBuildInput = {
+  entryPath: '/test.kcl',
+  parameters: {},
+  options: {},
+};
+
+const createMockCreateGeometryHandler = (result?: CreateGeometryResult): CreateGeometryHandler => {
+  const resolved = result ?? createGltfSuccessResult(new Uint8Array([1, 2, 3]));
+  if (resolved.success) {
+    Object.assign(resolved, { [nativeBuildInputSymbol]: nativeBuildInput });
+  }
+  return createBaseCreateGeometryHandler(resolved);
+};
 
 /**
- * Create serialized cache content (MessagePack binary format, v5).
+ * Create serialized build-cache content.
  * Mirrors the CacheEntry structure: stores the full KernelSuccessResult.
  */
 function createSerializedCacheContent(
@@ -33,12 +50,14 @@ function createSerializedCacheContent(
   issues: KernelIssue[] = [],
 ): Uint8Array<ArrayBuffer> {
   return msgpackEncode({
-    version: 5,
+    version: 7,
+    kind: 'build',
     result: {
       success: true,
       data: { format: 'gltf', content },
       issues,
     },
+    nativeBuildInput,
   });
 }
 
@@ -74,7 +93,7 @@ function createCacheTestContext(options?: {
   dependencyHash?: string;
   cacheOptions?: GeometryCacheOptions;
 }): {
-  input: CreateGeometryInput;
+  input: MiddlewareCreateGeometryRequest;
 
   runtime: KernelMiddlewareRuntime<Record<string, never>, GeometryCacheOptions> &
     ReturnType<typeof createMockRuntime<Record<string, never>, GeometryCacheOptions>>;
@@ -125,8 +144,6 @@ function createExportCacheTestContext(options?: {
       maxEntries: 100,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     },
-    projectRootPath: '/projects/export-test',
-    basePath: '/projects/export-test',
   });
 
   return {
@@ -174,13 +191,13 @@ describe('geometryCacheMiddleware', () => {
         expect(result.success).toBe(true);
 
         if (result.success) {
-          expect(result.data.format).toBe('gltf');
-          if (result.data.format === 'gltf') {
+          expect(result.data?.format).toBe('gltf');
+          if (result.data?.format === 'gltf') {
             // Content should be the cached Uint8Array
             expect(result.data.content).toBeInstanceOf(Uint8Array);
             expect(result.data.content).toEqual(gltfContent);
           } else {
-            throw new Error(`Unexpected geometry format: ${result.data.format}`);
+            throw new Error(`Unexpected geometry format: ${result.data?.format}`);
           }
         }
       });
@@ -524,7 +541,7 @@ describe('geometryCacheMiddleware', () => {
 
         runtime.filesystem.mocks.readdirStat.mockResolvedValue([
           {
-            path: '/projects/test-build/.tau/cache/geometry/old-cache.bin',
+            path: '/.tau/cache/geometry/old-cache.bin',
             name: 'old-cache.bin',
             type: 'file',
             size: 100,
@@ -549,7 +566,7 @@ describe('geometryCacheMiddleware', () => {
         });
 
         // Create 102 files (2 over the 100 max), stagger mtimeMs oldest first
-        const cacheDirectory = '/projects/test-build/.tau/cache/geometry';
+        const cacheDirectory = '/.tau/cache/geometry';
         const entries = Array.from({ length: 102 }, (_, index) => ({
           path: `${cacheDirectory}/cache-${index}.bin`,
           name: `cache-${index}.bin`,
@@ -687,7 +704,7 @@ describe('geometryCacheMiddleware', () => {
 
       const cached = geometryMemoryCache.get(runtime.dependencyHash);
       expect(cached).toBeDefined();
-      if (cached?.success && cached.data.format === 'gltf') {
+      if (cached?.success && cached.data?.format === 'gltf') {
         expect(cached.data.content.buffer).not.toBe(originalContent.buffer);
         expect(cached.data.content).toEqual(originalContent);
         originalContent[0] = 99;
@@ -716,7 +733,7 @@ describe('geometryCacheMiddleware', () => {
       expect(runtime.filesystem.mocks.writeFile).not.toHaveBeenCalled();
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.format).toBe('gltf');
+        expect(result.data?.format).toBe('gltf');
       }
     });
 
@@ -739,7 +756,7 @@ describe('geometryCacheMiddleware', () => {
       expect(runtime.filesystem.mocks.readFile).not.toHaveBeenCalled();
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.format).toBe('gltf');
+        expect(result.data?.format).toBe('gltf');
       }
     });
 
@@ -783,7 +800,7 @@ describe('geometryCacheMiddleware', () => {
 
     const { wrapCreateGeometry } = geometryCacheMiddleware;
     const first = await wrapCreateGeometry!(input, handler, runtime);
-    if (first.success && first.data.format === 'gltf') {
+    if (first.success && first.data?.format === 'gltf') {
       structuredClone(first.data.content, { transfer: [first.data.content.buffer] });
     }
 
@@ -791,13 +808,48 @@ describe('geometryCacheMiddleware', () => {
 
     expect(handler).toHaveBeenCalledOnce();
     expect(second.success).toBe(true);
-    if (second.success && second.data.format === 'gltf') {
+    if (second.success && second.data?.format === 'gltf') {
       expect(second.data.content).toEqual(new Uint8Array([1, 2, 3]));
       expect(second.data.content.buffer).not.toBe(content.buffer);
     }
   });
 
   describe('serializedNativeHandle storage', () => {
+    it('preserves exact replay input through result spread and L1/L2 round-trips', async () => {
+      const replayInput: NativeBuildInput = {
+        entryPath: '/generated/model.scad',
+        parameters: { dimensions: { width: 12, depths: [3, 5] } },
+        options: { tessellation: { segments: 64 } },
+      };
+      const terminalResult = {
+        ...createGltfSuccessResult(new Uint8Array([1, 2, 3])),
+        serializedNativeHandle: { brep: 'CACHED_BREP' },
+        [nativeBuildInputSymbol]: replayInput,
+      };
+      const spreadHandler: CreateGeometryHandler = vi.fn(async () => ({ ...terminalResult }));
+      const { input, runtime } = createCacheTestContext({ cacheExists: false });
+
+      const first = await geometryCacheMiddleware.wrapCreateGeometry!(input, spreadHandler, runtime);
+      const second = await geometryCacheMiddleware.wrapCreateGeometry!(input, spreadHandler, runtime);
+
+      expect((first as CreateGeometryResult & NativeBuildInputCarrier)[nativeBuildInputSymbol]).toEqual(replayInput);
+      expect((second as CreateGeometryResult & NativeBuildInputCarrier)[nativeBuildInputSymbol]).toEqual(replayInput);
+
+      const written: unknown = runtime.filesystem.mocks.writeFile.mock.calls[0]?.[1];
+      expect(written).toBeInstanceOf(Uint8Array);
+      if (!(written instanceof Uint8Array)) {
+        throw new TypeError('Expected cached bytes.');
+      }
+      geometryMemoryCache.clear();
+      runtime.filesystem.mocks.readFile.mockResolvedValue(written);
+      const fromFilesystem = await geometryCacheMiddleware.wrapCreateGeometry!(input, spreadHandler, runtime);
+
+      expect((fromFilesystem as CreateGeometryResult & NativeBuildInputCarrier)[nativeBuildInputSymbol]).toEqual(
+        replayInput,
+      );
+      expect(spreadHandler).toHaveBeenCalledOnce();
+    });
+
     it('should store serializedNativeHandle in cache entry when present in result', async () => {
       const { input, runtime } = createCacheTestContext({ cacheExists: false });
       const serializedNativeHandle = { brep: 'BREP_DATA', meta: { name: 'part' } };
@@ -820,13 +872,15 @@ describe('geometryCacheMiddleware', () => {
     it('should restore serializedNativeHandle from L2 cache on cache hit', async () => {
       const serializedNativeHandle = { brep: 'CACHED_BREP' };
       const cacheData = msgpackEncode({
-        version: 5,
+        version: 7,
+        kind: 'build',
         result: {
           success: true,
           data: { format: 'gltf', content: new Uint8Array([4, 5, 6]) },
           issues: [],
           serializedNativeHandle,
         },
+        nativeBuildInput,
       });
 
       const runtime = createMockRuntime<Record<string, never>, GeometryCacheOptions>({
@@ -850,12 +904,13 @@ describe('geometryCacheMiddleware', () => {
       expect(handler).not.toHaveBeenCalled();
     });
 
-    it('should ignore legacy v3 entries that use the retired snapshot shape', async () => {
+    it('should ignore a v6 build entry without exact replay input', async () => {
       const legacyCacheData = msgpackEncode({
-        version: 3,
+        version: 6,
+        kind: 'build',
         result: {
           success: true,
-          data: [{ format: 'gltf', content: new Uint8Array([4, 5, 6]) }],
+          data: { format: 'gltf', content: new Uint8Array([4, 5, 6]) },
           issues: [],
           serializedNativeHandle: { brep: 'LEGACY_BREP' },
         },
@@ -874,6 +929,36 @@ describe('geometryCacheMiddleware', () => {
 
       const { wrapCreateGeometry } = geometryCacheMiddleware;
       const result = await wrapCreateGeometry!(input, handler, runtime);
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(result).toEqual(handlerResult);
+    });
+
+    it.each([
+      ['array parameters', { entryPath: '/test.kcl', parameters: [] }],
+      ['array options', { entryPath: '/test.kcl', parameters: {}, options: [] }],
+    ])('should ignore v7 build entries with malformed replay %s', async (_label, malformedInput) => {
+      const cacheData = msgpackEncode({
+        version: 7,
+        kind: 'build',
+        result: {
+          success: true,
+          data: { format: 'gltf', content: new Uint8Array([4, 5, 6]) },
+          issues: [],
+          serializedNativeHandle: { brep: 'INVALID' },
+        },
+        nativeBuildInput: malformedInput,
+      });
+      const handlerResult = createGltfSuccessResult(new Uint8Array([7, 8, 9]));
+      const runtime = createMockRuntime<Record<string, never>, GeometryCacheOptions>({
+        filesystemOverrides: { readFileResult: cacheData },
+        dependencies: createMockDependencies(),
+        dependencyHash: 'c'.repeat(64),
+        options: { maxEntries: 100, maxAge: 7 * 24 * 60 * 60 * 1000 },
+      });
+      const handler = createMockCreateGeometryHandler(handlerResult);
+
+      const result = await geometryCacheMiddleware.wrapCreateGeometry!(createMockInput(), handler, runtime);
 
       expect(handler).toHaveBeenCalledOnce();
       expect(result).toEqual(handlerResult);

@@ -14,16 +14,20 @@ import type { JSONSchema7 } from '@taucad/json-schema';
 import type {
   CollectFormatMap,
   CollectKernelIds,
+  ExportContentFor,
   KernelPlugin,
   KnownSourceFormats,
   KnownTargetFormats,
   KnownTranscoderIds,
   MergeExportMap,
+  MiddlewarePlugin,
+  RenderContentFor,
   RenderOptionsFor,
   TranscoderPlugin,
 } from '#plugins/plugin-types.js';
-import type { TransportDescriptor } from '#transport/runtime-transport.types.js';
+import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type { KernelIssueCode } from '#types/kernel-issue-codes.js';
+import type { RuntimeContentInput, RuntimeContentKey } from '#types/runtime-content.types.js';
 
 // =============================================================================
 // Error Types
@@ -256,9 +260,13 @@ export type BundlerRegistrations = BundlerRegistration[];
  * Result type for createGeometry.
  * Used by kernel workers and middleware - geometry doesn't have hash yet.
  * The hash is added by kernel-worker.ts after the middleware chain.
+ *
+ * `data` is `undefined` when the kernel deferred its display artifact to the
+ * `meshGeometry` phase (BRep kernels) — the orchestrator runs the mesh phase
+ * on the display path and never on the export path.
  * @public
  */
-export type CreateGeometryResult = KernelResult<GeometryResponse>;
+export type CreateGeometryResult = KernelResult<GeometryResponse | undefined>;
 
 /**
  * Completed result type for createGeometry.
@@ -316,8 +324,9 @@ export type ExportGeometryResult = KernelResult<ExportFile[]>;
  */
 // oxlint-disable @typescript-eslint/no-explicit-any -- variance: bag projection over heterogeneous tuples
 export type ExportRoute<
-  Kernels extends ReadonlyArray<KernelPlugin<any, any, any>> = KernelPlugin[],
-  Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any>> = TranscoderPlugin[],
+  Kernels extends ReadonlyArray<KernelPlugin<any, any, any, any, any>> = KernelPlugin[],
+  Middleware extends ReadonlyArray<MiddlewarePlugin<any, any, any>> = MiddlewarePlugin[],
+  Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any, any, any>> = TranscoderPlugin[],
   Format extends KnownTargetFormats<Kernels, Transcoders> = KnownTargetFormats<Kernels, Transcoders>,
   Kernel extends CollectKernelIds<Kernels> = CollectKernelIds<Kernels>,
 > = {
@@ -326,20 +335,30 @@ export type ExportRoute<
   sourceFormat: KnownSourceFormats<Kernels>;
   transcoderId?: KnownTranscoderIds<Transcoders>;
   fidelity: ExportFidelity;
-  schema: JSONSchema7;
-  defaults: Format extends keyof MergeExportMap<CollectFormatMap<Kernels>, Transcoders>
-    ? MergeExportMap<CollectFormatMap<Kernels>, Transcoders>[Format]
-    : Record<string, unknown>;
+  exportOptions: {
+    schema: JSONSchema7;
+    defaults: Format extends keyof MergeExportMap<
+      CollectFormatMap<ReadonlyArray<Extract<Kernels[number], KernelPlugin<any, any, Kernel, any, any>>>>,
+      Transcoders
+    >
+      ? MergeExportMap<
+          CollectFormatMap<ReadonlyArray<Extract<Kernels[number], KernelPlugin<any, any, Kernel, any, any>>>>,
+          Transcoders
+        >[Format]
+      : Record<string, unknown>;
+  };
+  /** Framework content supported by this exact concrete route. Omitted when empty. */
+  content?: ContentCapability<ExportContentFor<Kernels, Middleware, Transcoders, Format, Kernel>>;
 };
 // oxlint-enable @typescript-eslint/no-explicit-any
 
 /**
  * Pre-computed JSON Schema and defaults for a kernel's render options.
- * Indexed by kernel id in {@link CapabilitiesManifest.renderSchemas} for O(1)
+ * Indexed by kernel id in {@link CapabilitiesManifest.renderCapabilities} for O(1)
  * lookup of the active kernel's render-option form.
  *
  * The `Kernel` generic narrows `defaults` to the specific render options
- * inferred from the registered kernel's `renderSchema` via
+ * inferred from the registered kernel's `render.optionsSchema` via
  * {@link RenderOptionsFor}.
  *
  * @template Kernels - Tuple of registered `KernelPlugin`s
@@ -347,12 +366,17 @@ export type ExportRoute<
  * @public
  */
 // oxlint-disable @typescript-eslint/no-explicit-any -- variance: bag projection over heterogeneous tuples
-export type KernelRenderSchema<
-  Kernels extends ReadonlyArray<KernelPlugin<any, any, any>> = KernelPlugin[],
+export type RenderCapability<
+  Kernels extends ReadonlyArray<KernelPlugin<any, any, any, any, any>> = KernelPlugin[],
+  Middleware extends ReadonlyArray<MiddlewarePlugin<any, any, any>> = MiddlewarePlugin[],
   Kernel extends CollectKernelIds<Kernels> = CollectKernelIds<Kernels>,
 > = {
-  schema: JSONSchema7;
-  defaults: RenderOptionsFor<Kernels, Kernel>;
+  renderOptions: {
+    schema: JSONSchema7;
+    defaults: RenderOptionsFor<Kernels, Kernel>;
+  };
+  /** Framework content supported by this kernel's composed render route. */
+  content?: ContentCapability<RenderContentFor<Kernels, Middleware, Kernel>>;
 };
 // oxlint-enable @typescript-eslint/no-explicit-any
 
@@ -375,20 +399,24 @@ export type KernelRenderSchema<
  */
 // oxlint-disable @typescript-eslint/no-explicit-any -- variance: bag projection over heterogeneous tuples
 export type CapabilitiesManifest<
-  Kernels extends ReadonlyArray<KernelPlugin<any, any, any>> = KernelPlugin[],
-  Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any>> = TranscoderPlugin[],
+  Kernels extends ReadonlyArray<KernelPlugin<any, any, any, any, any>> = KernelPlugin[],
+  Middleware extends ReadonlyArray<MiddlewarePlugin<any, any, any>> = MiddlewarePlugin[],
+  Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any, any, any>> = TranscoderPlugin[],
 > = {
-  routes: ReadonlyArray<ExportRoute<Kernels, Transcoders>>;
+  routes: ReadonlyArray<ExportRoute<Kernels, Middleware, Transcoders>>;
   // Inline the per-kernel schema shape (rather than referencing
-  // `KernelRenderSchema<Kernels, K>`) so the mapped-type expansion does not
+  // `RenderCapability<Kernels, K>`) so the mapped-type expansion does not
   // bind the named generic invariantly. This preserves narrow → wide
   // assignability at the structural level: every narrow
   // `{ <id>?: { schema; defaults } }` collapses cleanly into the wide
   // index signature `{ [x: string]?: { schema; defaults } }`.
-  renderSchemas: {
+  renderCapabilities: {
     [K in CollectKernelIds<Kernels>]?: {
-      schema: JSONSchema7;
-      defaults: RenderOptionsFor<Kernels, K>;
+      renderOptions: {
+        schema: JSONSchema7;
+        defaults: RenderOptionsFor<Kernels, K>;
+      };
+      content?: ContentCapability<RenderContentFor<Kernels, Middleware, K>>;
     };
   };
 };
@@ -431,10 +459,17 @@ export type TransportCapabilities = {
  */
 // oxlint-disable @typescript-eslint/no-explicit-any -- variance: bag projection over heterogeneous tuples
 export type RuntimeCapabilities<
-  Kernels extends ReadonlyArray<KernelPlugin<any, any, any>> = KernelPlugin[],
-  Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any>> = TranscoderPlugin[],
-> = CapabilitiesManifest<Kernels, Transcoders> & {
+  Kernels extends ReadonlyArray<KernelPlugin<any, any, any, any, any>> = KernelPlugin[],
+  Middleware extends ReadonlyArray<MiddlewarePlugin<any, any, any>> = MiddlewarePlugin[],
+  Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any, any, any>> = TranscoderPlugin[],
+> = CapabilitiesManifest<Kernels, Middleware, Transcoders> & {
   readonly autonomousRenderLoop: boolean;
   readonly transport: TransportCapabilities;
 };
 // oxlint-enable @typescript-eslint/no-explicit-any
+
+/** JSON Schema plus operation defaults for the content keys on one route. @public */
+export type ContentCapability<Keys extends RuntimeContentKey = RuntimeContentKey> = {
+  schema: JSONSchema7;
+  defaults: Pick<RuntimeContentInput, Keys>;
+};

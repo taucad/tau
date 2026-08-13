@@ -14,7 +14,7 @@
 
 /* oxlint-disable no-barrel-files/no-barrel-files -- public client entrypoint facade */
 
-import type { FileExtension, GeometryFile, LogEntry } from '@taucad/types';
+import type { FileExtension, LogEntry } from '@taucad/types';
 import { Topic } from '@taucad/events';
 import type {
   HashedGeometryResult,
@@ -34,29 +34,32 @@ import type {
   WorkerState,
 } from '#types/runtime-protocol.types.js';
 import { RuntimeWorkerClient, RenderTimeoutError } from '#framework/runtime-worker-client.js';
-import type {
-  RuntimeTransportClient,
-  TransportDescriptor,
-  TransportPlugin,
-} from '#transport/runtime-transport.types.js';
+import type { RuntimeTransportClient, TransportPlugin } from '#transport/runtime-transport.types.js';
+import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type { RuntimeFromTransport } from '#transport/transport-projections.js';
 import type {
   KernelPlugin,
+  MiddlewarePlugin,
   TranscoderPlugin,
   CollectKernelIds,
   CollectRenderOptions,
+  ExportContentFor,
   ExportFormatsFor,
   ExportOptionsFor,
   KnownTargetFormats,
+  RenderContentFor,
 } from '#plugins/plugin-types.js';
 import type {
   AnyRuntimeDefinition,
   RuntimeConfigInput,
   RuntimeConfigProvider,
   RuntimeKernels,
+  RuntimeMiddleware,
   RuntimeTranscoders,
 } from '#worker/runtime-definition.js';
-import type { Simplify } from 'type-fest';
+import type { ContentRequestFor, RuntimeContentInput } from '#types/runtime-content.types.js';
+import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
+import { resolveVirtualPath } from '@taucad/utils/path';
 
 export type { RuntimeConfigInput, RuntimeConfigOutput, RuntimeConfigProvider } from '#worker/runtime-definition.js';
 
@@ -95,8 +98,8 @@ type KnownSourceKeys<Files extends RuntimeSourceFiles> = Extract<keyof Files, st
 type RuntimeSourceEntryField<Files extends RuntimeSourceFiles> =
   string extends KnownSourceKeys<Files>
     ? {
-        /** Key in `source.files` that starts evaluation. Required when key count is unknown at compile time. */
-        readonly entry: string;
+        /** Key in `source.files` that starts evaluation. Required at runtime when an unknown file map has multiple entries. */
+        readonly entry?: string;
       }
     : true extends IsUnion<KnownSourceKeys<Files>>
       ? {
@@ -125,7 +128,7 @@ export type InlineRuntimeSource<Files extends RuntimeSourceFiles = RuntimeSource
  */
 export type FilesystemRuntimeSource = {
   /** Path within the runtime filesystem. May be relative or begin with `/`; RuntimeClient normalizes it before dispatch. */
-  readonly path: string | GeometryFile;
+  readonly path: string;
   readonly files?: never;
   readonly entry?: never;
 };
@@ -145,26 +148,21 @@ export type RuntimeSource<Files extends RuntimeSourceFiles = RuntimeSourceFiles>
  */
 export type RuntimeRenderInput<
   Kernels extends readonly KernelPlugin[],
+  Middleware extends readonly MiddlewarePlugin[],
   Files extends RuntimeSourceFiles = RuntimeSourceFiles,
 > = {
   readonly source: RuntimeSource<Files>;
   readonly parameters?: Record<string, unknown>;
   readonly renderOptions?: CollectRenderOptions<Kernels>;
-};
+} & ContentRequestFor<RenderContentFor<Kernels, Middleware>>;
 
 /**
  * Autonomous render option update input.
  * @public
  */
-export type RuntimeSetOptionsInput<Kernels extends readonly KernelPlugin[]> =
-  | {
-      readonly renderOptions: CollectRenderOptions<Kernels>;
-      readonly renderTimeout?: number;
-    }
-  | {
-      readonly renderOptions?: undefined;
-      readonly renderTimeout: number;
-    };
+export type RuntimeSetOptionsInput<Kernels extends readonly KernelPlugin[]> = {
+  readonly renderOptions: CollectRenderOptions<Kernels>;
+};
 
 type RuntimeExportSourceInput<Files extends RuntimeSourceFiles = RuntimeSourceFiles> =
   | {
@@ -183,12 +181,13 @@ type RuntimeExportSourceInput<Files extends RuntimeSourceFiles = RuntimeSourceFi
  */
 export type RuntimeExportOptions<
   Kernels extends readonly KernelPlugin[],
+  Middleware extends readonly MiddlewarePlugin[],
   Transcoders extends readonly TranscoderPlugin[],
   Format extends ExportFormatsFor<Kernels, Transcoders>,
   Files extends RuntimeSourceFiles = RuntimeSourceFiles,
 > = RuntimeExportSourceInput<Files> & {
   readonly exportOptions?: ExportOptionsFor<Kernels, Transcoders, Format>;
-};
+} & ContentRequestFor<ExportContentFor<Kernels, Middleware, Transcoders, Format>>;
 
 /**
  * Consumer-facing complete ordered export artifact set.
@@ -200,9 +199,11 @@ export type ExportResult = ExportGeometryResult;
  * Discriminated union returned by `render`/`updateParameters`/`setOptions`.
  *
  * Resolves with `superseded: false` and the produced geometry on a settled
- * render, or `superseded: true` when a newer call wins before this one
- * settles. Supersession is a normal lifecycle transition — the only failure
- * cases are typed errors (`RenderTimeoutError`, `RuntimeTerminatedError`).
+ * render, or `superseded: true` when a newer selected preview wins before this
+ * one settles. The successor may come from another public preview command or
+ * an autonomous watched-filesystem rerender; its geometry is published through
+ * the `geometry` event. Supersession is a normal lifecycle transition — the
+ * only failure cases are typed errors (`RenderTimeoutError`, `RuntimeTerminatedError`).
  *
  * @public
  */
@@ -413,14 +414,15 @@ async function resolveRuntimeClientConfig(config: unknown): Promise<unknown> {
  * Typed discriminator for {@link RuntimeTerminatedError.causeKind}.
  *
  * - `'explicit'` — consumer called {@link RuntimeClient.terminate}.
- * - `'connection-failed'` — `connect()` threw and the client was demoted to
- *   the terminal state to prevent half-initialised use.
  * - `'transport-closed'` — the transport closed unexpectedly (e.g. worker
  *   crashed, websocket dropped).
+ * - `'render-timeout'` — timeout cancellation was not acknowledged during
+ *   bounded recovery, so the isolated runtime host was terminated. Construct
+ *   a new client before issuing more work.
  *
  * @public
  */
-export type RuntimeTerminatedCause = 'explicit' | 'connection-failed' | 'transport-closed';
+export type RuntimeTerminatedCause = 'explicit' | 'transport-closed' | 'render-timeout';
 
 /**
  * Thrown by every command API after {@link RuntimeClient.terminate} has been
@@ -446,7 +448,11 @@ export class RuntimeTerminatedError extends Error {
    * @public
    */
   public constructor(causeKind: RuntimeTerminatedCause = 'explicit') {
-    super('RuntimeClient has been terminated.');
+    super(
+      causeKind === 'render-timeout'
+        ? 'The isolated runtime host did not recover from a render timeout and was terminated. Create a new RuntimeClient before issuing more work.'
+        : 'RuntimeClient has been terminated.',
+    );
     this.name = 'RuntimeTerminatedError';
     this.causeKind = causeKind;
   }
@@ -464,16 +470,16 @@ export function isRuntimeTerminatedError(error: unknown): error is RuntimeTermin
 }
 
 /**
- * Resolve a string file path into a `GeometryFile`.
+ * Split a canonical runtime entry path into its worker-protocol locator.
  *
  * - `'main.ts'` --> `{ path: '/', filename: 'main.ts' }`
  * - `'/src/model.ts'` --> `{ path: '/src', filename: 'model.ts' }`
- * - `'/projects/test/bench.ts'` --> `{ path: '/projects/test', filename: 'bench.ts' }`
+ * - `'/examples/bench.ts'` --> `{ path: '/examples', filename: 'bench.ts' }`
  *
  * @param file - file path string to resolve
  * @returns geometry file with separated path and filename
  */
-function resolveFileString(file: string): GeometryFile {
+function resolveFileString(file: string): RuntimeFileLocator {
   const lastSlash = file.lastIndexOf('/');
   if (lastSlash === -1) {
     return { path: '/', filename: file };
@@ -486,26 +492,23 @@ function resolveFileString(file: string): GeometryFile {
   };
 }
 
-type NormalizedRuntimeSource = {
-  readonly stage?: Record<string, Uint8Array<ArrayBuffer>>;
-  readonly file: GeometryFile;
+const canonicalRuntimePath = (path: string): string => {
+  if (/^[A-Za-z][A-Za-z\d+.-]*:/u.test(path)) {
+    throw new TypeError(`Runtime source path must not be a URL: ${JSON.stringify(path)}`);
+  }
+  const canonical = resolveVirtualPath(path.startsWith('/') ? path : `/${path}`);
+  if (canonical === '/' || canonical.endsWith('/')) {
+    throw new TypeError(`Runtime source path must identify a file: ${JSON.stringify(path)}`);
+  }
+  return canonical;
 };
 
-const runtimeOperationKeys = new Set(['source', 'parameters', 'renderOptions', 'exportOptions']);
-const legacyExportTopLevelKeys = new Set([
-  'code',
-  'file',
-  'entry',
-  'options',
-  'renderOptions',
-  'changedPaths',
-  'binary',
-  'tessellation',
-  'coordinateSystem',
-  'unit',
-  'linearTolerance',
-  'angularTolerance',
-]);
+type NormalizedRuntimeSource = {
+  readonly stage?: Record<string, Uint8Array<ArrayBuffer>>;
+  readonly file: RuntimeFileLocator;
+};
+
+const exportInputKeys = new Set(['source', 'parameters', 'exportOptions', 'content']);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -542,60 +545,72 @@ const normalizeRuntimeSource = (source: RuntimeSource | unknown): NormalizedRunt
     if (!entry) {
       throw new TypeError('Runtime source `entry` is required when `files` contains multiple files.');
     }
-    if (!Object.hasOwn(files, entry)) {
-      throw new TypeError(`Runtime source entry "${entry}" must be one of the files keys.`);
-    }
-
     const stage: Record<string, Uint8Array<ArrayBuffer>> = {};
+    const rawPathByCanonical = new Map<string, string>();
     for (const [filename, content] of entries) {
-      const absolutePath = filename.startsWith('/') ? filename : `/${filename}`;
-      stage[absolutePath] = toStagedBytes(filename, content);
+      const canonicalPath = canonicalRuntimePath(filename);
+      const collision = rawPathByCanonical.get(canonicalPath);
+      if (collision !== undefined) {
+        throw new TypeError(
+          `Runtime source files ${JSON.stringify(collision)} and ${JSON.stringify(filename)} resolve to ${canonicalPath}.`,
+        );
+      }
+      rawPathByCanonical.set(canonicalPath, filename);
+      stage[canonicalPath] = toStagedBytes(filename, content);
     }
-    const absoluteEntry = entry.startsWith('/') ? entry : `/${entry}`;
-    return { stage, file: resolveFileString(absoluteEntry) };
+    const canonicalEntry = canonicalRuntimePath(entry);
+    if (!rawPathByCanonical.has(canonicalEntry)) {
+      throw new TypeError(`Runtime source entry "${entry}" must resolve to one of the files keys.`);
+    }
+    return { stage, file: resolveFileString(canonicalEntry) };
   }
   if ('path' in source) {
     const { path } = source;
     if (typeof path === 'string') {
-      return { file: resolveFileString(path) };
+      return { file: resolveFileString(canonicalRuntimePath(path)) };
     }
-    if (isRecord(path) && typeof path['path'] === 'string' && typeof path['filename'] === 'string') {
-      return { file: path as GeometryFile };
-    }
-    throw new TypeError('Runtime source `path` must be a string or GeometryFile.');
+    throw new TypeError('Runtime source `path` must be a string.');
   }
   throw new TypeError('Runtime source must include either `files` or `path`.');
 };
 
-const assertNoLegacyExportShape = (input: Record<string, unknown>): void => {
+const assertExportInputShape = (input: Record<string, unknown>): void => {
   for (const key of Object.keys(input)) {
-    if (!runtimeOperationKeys.has(key)) {
+    if (!exportInputKeys.has(key)) {
       throw new TypeError(
-        `RuntimeClient.export options use top-level { source?, parameters?, exportOptions? }; move "${key}" into source or exportOptions.`,
-      );
-    }
-    if (legacyExportTopLevelKeys.has(key)) {
-      throw new TypeError(
-        `RuntimeClient.export no longer accepts top-level "${key}"; use source and exportOptions instead.`,
+        `RuntimeClient.export options support only source, parameters, exportOptions, and content; received "${key}".`,
       );
     }
   }
-  if ('parameters' in input && !('source' in input)) {
+  if ('parameters' in input && input['source'] === undefined) {
     throw new TypeError('RuntimeClient.export parameters require a source.');
   }
 };
 
 const assertNoFlatSetOptions = (input: Record<string, unknown>): void => {
-  const allowed = new Set(['renderOptions', 'renderTimeout']);
   for (const key of Object.keys(input)) {
-    if (!allowed.has(key)) {
-      throw new TypeError(
-        `RuntimeClient.setOptions uses { renderOptions?, renderTimeout? }; move "${key}" into renderOptions.`,
-      );
+    if (key !== 'renderOptions') {
+      throw new TypeError(`RuntimeClient.setOptions uses { renderOptions }; move "${key}" into renderOptions.`);
     }
   }
-  if (!('renderOptions' in input) && !('renderTimeout' in input)) {
-    throw new TypeError('RuntimeClient.setOptions requires renderOptions or renderTimeout.');
+  if (!('renderOptions' in input)) {
+    throw new TypeError('RuntimeClient.setOptions requires renderOptions.');
+  }
+  if (!isRecord(input['renderOptions'])) {
+    throw new TypeError('RuntimeClient.setOptions renderOptions must be an object.');
+  }
+};
+
+/** Reject a non-record command input before it reaches admission and dies at silent wire validation. */
+const assertRecordInput = (operation: string, field: string, value: unknown): void => {
+  if (value !== undefined && !isRecord(value)) {
+    throw new TypeError(`RuntimeClient.${operation} ${field} must be an object.`);
+  }
+};
+
+const assertValidRenderTimeout = (renderTimeout: number): void => {
+  if (!Number.isFinite(renderTimeout) || renderTimeout < 0) {
+    throw new TypeError('renderTimeout must be a finite, non-negative number of milliseconds.');
   }
 };
 
@@ -644,13 +659,13 @@ type RuntimeClientBaseOptions<Transport extends AnyTransportPlugin> = {
    */
   transport: Transport;
   /**
-   * Wall-clock render timeout in milliseconds. 0 disables the timeout.
+   * Wall-clock deadline applied independently to each preview. Milliseconds.
+   * Zero disables timeout enforcement.
    *
-   * Enforced client-side per-`rgen` by {@link RuntimeWorkerClient} — the
-   * client raises an `abort` notify (carrying the affected `rgen`) and
-   * the worker-side kernel proxy throws the next time it polls. The
-   * runtime client surfaces {@link RenderTimeoutError} via the pending
-   * render settlement.
+   * Enforced client-side per preview. The affected promise rejects with
+   * {@link RenderTimeoutError} at the deadline; isolated transports then
+   * target that preview for cooperative cancellation and terminate an
+   * unresponsive host after the recovery grace period.
    */
   renderTimeout?: number;
 };
@@ -680,6 +695,12 @@ type ClientKernels<Runtime> = Runtime extends AnyRuntimeDefinition
     ? RuntimeKernels<Runtime>
     : Array<KernelPlugin<any, any, any>>
   : Array<KernelPlugin<any, any, any>>;
+
+type ClientMiddleware<Runtime> = Runtime extends AnyRuntimeDefinition
+  ? RuntimeMiddleware<Runtime> extends ReadonlyArray<MiddlewarePlugin<any, any, any>>
+    ? RuntimeMiddleware<Runtime>
+    : Array<MiddlewarePlugin<any, any, any>>
+  : Array<MiddlewarePlugin<any, any, any>>;
 
 type ClientTranscoders<Runtime> = Runtime extends AnyRuntimeDefinition
   ? RuntimeTranscoders<Runtime> extends ReadonlyArray<TranscoderPlugin<any, any, any>>
@@ -726,6 +747,7 @@ type RuntimeSubscribeOptions = {
 // oxlint-disable @typescript-eslint/no-explicit-any -- variance: default accepts any plugin generic
 export type RuntimeClient<
   Kernels extends ReadonlyArray<KernelPlugin<any, any, any>> = KernelPlugin[],
+  Middleware extends ReadonlyArray<MiddlewarePlugin<any, any, any>> = MiddlewarePlugin[],
   Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any>> = TranscoderPlugin[],
   Transport extends AnyTransportPlugin = AnyTransportPlugin,
 > = {
@@ -750,7 +772,7 @@ export type RuntimeClient<
    * Available after the worker handshake completes (i.e. once the
    * `capabilitiesUpdated` event has fired). Returns `undefined` before then.
    */
-  readonly capabilities: RuntimeCapabilities<Kernels, Transcoders> | undefined;
+  readonly capabilities: RuntimeCapabilities<Kernels, Middleware, Transcoders> | undefined;
 
   /** Active kernel ID from the worker, available after the first render selects a kernel. */
   readonly activeKernelId: CollectKernelIds<Kernels> | undefined;
@@ -758,9 +780,12 @@ export type RuntimeClient<
   /**
    * Current lifecycle state of the client.
    *
-   * Transitions strictly forwards through `unconnected` → `connecting` →
-   * `connected` → `terminated`. Consumers can poll this getter for
-   * defensive UI gating; command APIs throw {@link RuntimeNotConnectedError}
+   * Advances through `unconnected` → `connecting` → `connected` →
+   * `terminated`. The only backwards transition is a failed connection
+   * attempt, which demotes `connecting` back to `unconnected` so a retry can
+   * start a fresh attempt; `terminated` is irreversible. Consumers can poll
+   * this getter for defensive UI gating; command APIs throw
+   * {@link RuntimeNotConnectedError}
    * or {@link RuntimeTerminatedError} for the off-path states.
    *
    * @public
@@ -783,26 +808,42 @@ export type RuntimeClient<
    * route matches the requested format. Consumers building format pickers
    * should subscribe to `'capabilities'` to refresh derived UI state.
    */
-  routesFor(format: KnownTargetFormats<Kernels, Transcoders>): ReadonlyArray<ExportRoute<Kernels, Transcoders>>;
+  routesFor<const Format extends KnownTargetFormats<Kernels, Transcoders>>(
+    format: Format,
+  ): ReadonlyArray<ExportRoute<Kernels, Middleware, Transcoders, Format>>;
 
   /**
    * Selects the best {@link ExportRoute} for `format` using the framework
    * tiebreak rules:
    *
-   * 1. When `kernelId` is supplied, prefer routes for that kernel; fall back
-   *    to the manifest-order routes when no candidate matches.
+   * 1. When `kernelId` is supplied, retain only routes for that kernel.
    * 2. Prefer `brep` fidelity over `mesh` fidelity.
    * 3. Prefer direct routes (`transcoderId === undefined`) over transcoded
    *    routes.
    * 4. Otherwise return the first manifest-order match.
    *
-   * Returns `undefined` when no route matches the requested format or when
-   * the manifest has not yet been received.
+   * Returns `undefined` when no route matches the requested format, kernel,
+   * and content requirements, or when the manifest has not yet been received.
    */
-  bestRouteFor(
-    format: Simplify<KnownTargetFormats<Kernels, Transcoders>>,
-    kernelId?: CollectKernelIds<Kernels>,
-  ): ExportRoute<Kernels, Transcoders> | undefined;
+  bestRouteFor<
+    const Format extends KnownTargetFormats<Kernels, Transcoders> & string,
+    const Kernel extends CollectKernelIds<Kernels> | undefined = undefined,
+  >(
+    format: Format,
+    options?: {
+      readonly kernelId?: Kernel;
+    } & ContentRequestFor<
+      ExportContentFor<
+        Kernels,
+        Middleware,
+        Transcoders,
+        Format,
+        Kernel extends string ? Kernel : CollectKernelIds<Kernels>
+      >
+    >,
+  ):
+    | ExportRoute<Kernels, Middleware, Transcoders, Format, Kernel extends string ? Kernel : CollectKernelIds<Kernels>>
+    | undefined;
 
   /**
    * Open the transport and initialize the kernel runtime.
@@ -821,19 +862,21 @@ export type RuntimeClient<
   connect(): Promise<void>;
 
   /**
-   * Export geometry from the last render in the specified format.
+   * Export geometry in the specified format.
    *
-   * Re-exports the geometry produced by the most recent `render`,
-   * `updateParameters`, or `setOptions` call. Throws
-   * {@link NoRenderOutcomeError} when no prior render has settled — callers
-   * without one should pass `source` to self-render before exporting.
+   * With no `source`, re-exports the geometry produced by the most recent
+   * `render`, `updateParameters`, or `setOptions` call and throws
+   * {@link NoRenderOutcomeError} when no prior render has settled. With
+   * `options.source`, performs a request-scoped render and export without
+   * replacing the active preview source. Request-scoped `parameters` require
+   * that same call to provide `source`.
    *
    * When `Kernels`/`Transcoders` carry type information (from typed plugins),
    * the options are type-checked against the declared per-format schemas
    * through the nested `exportOptions` field.
    *
    * @param format - Export format identifier (e.g., 'stl', 'step', '3mf')
-   * @param options - Per-call source and format-specific export options
+   * @param options - Optional request-scoped source, parameters, content, and format-specific export options
    * @returns Export result with an ordered, non-empty ExportFile array
    * @public
    */
@@ -842,15 +885,16 @@ export type RuntimeClient<
     const Files extends RuntimeSourceFiles = RuntimeSourceFiles,
   >(
     format: F,
-    options?: RuntimeExportOptions<Kernels, Transcoders, F, Files>,
+    options?: RuntimeExportOptions<Kernels, Middleware, Transcoders, F, Files>,
   ): Promise<ExportResult>;
 
   /**
    * Render a source through the autonomous render loop.
    *
    * Resolves with `{ superseded: false, geometry }` when the render this call
-   * triggered settles, or with `{ superseded: true }` when a newer
-   * `render`/`updateParameters`/`setOptions` call wins before settlement.
+   * triggered settles, or with `{ superseded: true }` when a newer public
+   * preview command or autonomous watched-filesystem rerender wins before
+   * settlement. Successor geometry is published through the `geometry` event.
    *
    * Inline `source.files` stages bytes onto the transport's filesystem via the
    * `stage-and-render` notify and auto-connects on first call. Filesystem
@@ -862,7 +906,7 @@ export type RuntimeClient<
    * @public
    */
   render<const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(
-    input: RuntimeRenderInput<Kernels, Files>,
+    input: RuntimeRenderInput<Kernels, Middleware, Files>,
   ): Promise<RenderOutcome>;
 
   /**
@@ -877,14 +921,23 @@ export type RuntimeClient<
   /**
    * Replace the active per-render kernel options with the supplied bag.
    * `setOptions` is a full **replace**, not a patch-merge: keys absent
-   * from the call are dropped. Use this for runtime updates such as
-   * `renderTimeout`. Awaits the next render's settlement.
+   * from the call are dropped. Awaits the next render's settlement.
    *
    * @param options - Replacement kernel-specific render options
    * @returns Promise that settles with a {@link RenderOutcome}
    * @public
    */
   setOptions(options: RuntimeSetOptionsInput<Kernels>): Promise<RenderOutcome>;
+
+  /**
+   * Set the wall-clock timeout used by subsequent renders on this connected client.
+   * The update is synchronous and does not affect an in-flight render.
+   *
+   * @param renderTimeout - Milliseconds. Zero disables timeout enforcement.
+   * @returns Nothing.
+   * @public
+   */
+  setRenderTimeout(renderTimeout: number): void;
 
   /**
    * Subscribe to client events. Returns an unsubscribe function.
@@ -916,7 +969,7 @@ export type RuntimeClient<
   on(event: 'error', handler: (issues: KernelIssue[]) => void, options?: RuntimeSubscribeOptions): () => void;
   on(
     event: 'capabilities',
-    handler: (manifest: CapabilitiesManifest<Kernels, Transcoders>) => void,
+    handler: (manifest: CapabilitiesManifest<Kernels, Middleware, Transcoders>) => void,
     options?: RuntimeSubscribeOptions,
   ): () => void;
   on(
@@ -986,7 +1039,7 @@ export type RuntimeClient<
  *
  * const client = createRuntimeClient({
  *   transport: webWorkerTransport({
- *     createWorker: () => new Worker(new URL('./runtime.worker.js', import.meta.url), { type: 'module' }),
+ *     createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
  *     fileSystem: fromMemoryFs(),
  *   }),
  * });
@@ -1000,6 +1053,7 @@ export function createRuntimeClientWithTransport<
   options: RuntimeClientOptionsWithTransport<Runtime, Transport>,
 ): RuntimeClient<
   ClientKernels<RuntimeForClient<Runtime, Transport>>,
+  ClientMiddleware<RuntimeForClient<Runtime, Transport>>,
   ClientTranscoders<RuntimeForClient<Runtime, Transport>>,
   Transport
 >;
@@ -1026,7 +1080,18 @@ export function createRuntimeClientWithTransport(
   const configProvider = options.config;
 
   let workerClient: RuntimeWorkerClient | undefined;
+  let workerClientWired = false;
+  let activeRenderTimeout = options.renderTimeout ?? 0;
+  assertValidRenderTimeout(activeRenderTimeout);
+  if (activeRenderTimeout > 0 && transport.renderTimeoutRecovery.kind === 'unsupported') {
+    throw new TypeError(
+      'renderTimeout must be 0 because this transport cannot enforce a wall-clock render deadline. Use a worker-backed transport with terminable timeout recovery.',
+    );
+  }
+  let terminalCause: RuntimeTerminatedCause | undefined;
   let lifecycleState: RuntimeLifecycleState = 'unconnected';
+  let intentAdmissionOpen = true;
+  let gracefulShutdownPromise: Promise<void> | undefined;
   let latestWorkerState: WorkerState = 'idle';
   let latestRenderStatus: RenderStatus = 'idle';
   let hasRenderFailure = false;
@@ -1075,8 +1140,9 @@ export function createRuntimeClientWithTransport(
   }
 
   function assertActive(operation: string): void {
+    assertIntentAdmissionOpen();
     if (lifecycleState === 'terminated') {
-      throw new RuntimeTerminatedError();
+      throw new RuntimeTerminatedError(terminalCause);
     }
     if (lifecycleState !== 'connected') {
       throw new RuntimeNotConnectedError(operation);
@@ -1092,8 +1158,15 @@ export function createRuntimeClientWithTransport(
    * The terminal state always throws -- termination is irreversible.
    */
   function assertNotTerminated(): void {
+    assertIntentAdmissionOpen();
     if (lifecycleState === 'terminated') {
-      throw new RuntimeTerminatedError();
+      throw new RuntimeTerminatedError(terminalCause);
+    }
+  }
+
+  function assertIntentAdmissionOpen(): void {
+    if (!intentAdmissionOpen) {
+      throw new RuntimeTerminatedError(terminalCause);
     }
   }
 
@@ -1101,14 +1174,16 @@ export function createRuntimeClientWithTransport(
   let _activeKernelId: string | undefined;
 
   /**
-   * Tracks the latest in-flight render for render / updateParameters /
-   * setOptions so a newer call can resolve the prior Promise as
-   * `{ superseded: true }`. Settles on the next geometry (success) or
-   * error (timeout / kernel failure) event.
+   * Tracks only the latest public preview Promise. A newer selected preview —
+   * including an autonomous watched-filesystem rerender — resolves a different
+   * pending Promise as `{ superseded: true }`. Selection and stale-frame
+   * filtering are owned by RuntimeWorkerClient.
    */
   type PendingRender = {
+    readonly renderId: string;
     resolve: (outcome: RenderOutcome) => void;
     reject: (error: Error) => void;
+    renderTimeout: number;
   };
   let pendingRender: PendingRender | undefined;
   let hasSettledRender = false;
@@ -1122,16 +1197,11 @@ export function createRuntimeClientWithTransport(
    */
   let lastEmittedGeometryHashKey: string | undefined;
 
-  /**
-   * Tracks an in-flight `connect()` so `terminate()` can reject it on the next
-   * microtask with `RuntimeTerminatedError({ causeKind: 'explicit' })` rather
-   * than leaving the awaiting caller hanging until `ensureConnected()` resolves
-   * (or rejects with the wrong typed error).
-   */
-  type PendingConnect = {
-    reject: (error: Error) => void;
+  type ConnectionAttempt = {
+    readonly promise: Promise<RuntimeWorkerClient>;
+    readonly reject: (error: Error) => void;
   };
-  let pendingConnect: PendingConnect | undefined;
+  let connectionAttempt: ConnectionAttempt | undefined;
 
   /**
    * Tracks every in-flight `export()` so `terminate()` can reject each one on
@@ -1174,23 +1244,23 @@ export function createRuntimeClientWithTransport(
     }
   }
 
-  function resolvePendingRender(geometry: HashedGeometryResult): void {
+  function resolvePendingRender(geometry: HashedGeometryResult, renderId: string): void {
     const prior = pendingRender;
-    if (prior) {
+    if (prior?.renderId === renderId) {
       pendingRender = undefined;
       prior.resolve({ superseded: false, geometry });
     }
   }
 
-  function rejectPendingRender(issues: KernelIssue[]): void {
+  /** Render-scoped only: an absent `renderId` must never match, so it cannot be passed. */
+  function rejectPendingRender(issues: KernelIssue[], renderId: string): void {
     const prior = pendingRender;
-    if (!prior) {
+    if (prior?.renderId !== renderId) {
       return;
     }
     pendingRender = undefined;
     if (issues.some((issue) => issue.code === 'RENDER_TIMEOUT')) {
-      const renderTimeout = options.renderTimeout ?? 0;
-      prior.reject(new RenderTimeoutError(renderTimeout));
+      prior.reject(new RenderTimeoutError(prior.renderTimeout));
       return;
     }
     const message = issues.map((issue) => issue.message).join('; ');
@@ -1198,10 +1268,10 @@ export function createRuntimeClientWithTransport(
   }
 
   // oxlint-disable-next-line @typescript-eslint/promise-function-async -- Promise.withResolvers captures the slot for later settlement by superseding intents
-  function trackPendingRender(): Promise<RenderOutcome> {
+  function trackPendingRender(renderId: string): Promise<RenderOutcome> {
     supersedePendingRender();
     const slot = Promise.withResolvers<RenderOutcome>();
-    pendingRender = { resolve: slot.resolve, reject: slot.reject };
+    pendingRender = { renderId, resolve: slot.resolve, reject: slot.reject, renderTimeout: activeRenderTimeout };
     return slot.promise;
   }
 
@@ -1218,17 +1288,18 @@ export function createRuntimeClientWithTransport(
     activeKernelChanged: new Topic<string | undefined>({ name: 'RuntimeClient.activeKernelChanged' }),
   };
 
-  async function ensureConnected(): Promise<RuntimeWorkerClient> {
-    if (lifecycleState === 'terminated') {
-      throw new RuntimeTerminatedError();
+  function getWorkerClient(): RuntimeWorkerClient {
+    if (!workerClient) {
+      workerClient = new RuntimeWorkerClient({ transport });
+      /* Admission is synchronous and intentionally precedes lazy connection.
+       * Seed the configured deadline before the first admission so its captured
+       * timeout cannot default to zero while initialize() is still pending. */
+      workerClient.setRenderTimeout(activeRenderTimeout);
     }
-    if (workerClient && lifecycleState === 'connected') {
+    if (workerClientWired) {
       return workerClient;
     }
-
-    setLifecycleState('connecting');
-
-    workerClient = new RuntimeWorkerClient({ transport });
+    workerClientWired = true;
 
     workerClient.onLog((entry) => {
       handlers.log.emit(entry);
@@ -1236,17 +1307,44 @@ export function createRuntimeClientWithTransport(
     workerClient.onTelemetry((entries) => {
       handlers.telemetry.emit([...entries]);
     });
-    workerClient.onState(({ state, detail }) => {
+    workerClient.onState(({ renderId, state, detail, geometryObserved }) => {
+      if (
+        (state === 'buffering' || state === 'rendering') &&
+        pendingRender !== undefined &&
+        pendingRender.renderId !== renderId
+      ) {
+        supersedePendingRender();
+      }
       latestWorkerState = state;
       if (state === 'buffering' || state === 'rendering') {
         hasRenderFailure = false;
-      } else if (state === 'error') {
+      }
+      if (state === 'error') {
         hasRenderCommandInFlight = false;
+        rejectPendingRender(
+          [
+            {
+              message: detail ?? 'Runtime render failed',
+              code: 'RUNTIME',
+              type: 'runtime',
+              severity: 'error',
+            },
+          ],
+          renderId,
+        );
+      }
+      /* A selected preview that reaches terminal `idle` without ever emitting
+       * geometry produced nothing for its public promise — the stale-SAB
+       * command whose autonomous successor already completed. Settle it as
+       * superseded instead of leaving it hanging with a cleared deadline. */
+      if (state === 'idle' && !geometryObserved && pendingRender?.renderId === renderId) {
+        hasRenderCommandInFlight = false;
+        supersedePendingRender();
       }
       handlers.state.emit({ state, detail });
       publishRenderStatus();
     });
-    workerClient.onGeometry((resolved) => {
+    workerClient.onGeometry((resolved, renderId) => {
       hasRenderCommandInFlight = false;
       if (resolved.success) {
         hasSettledRender = true;
@@ -1254,7 +1352,7 @@ export function createRuntimeClientWithTransport(
       } else {
         hasRenderFailure = true;
       }
-      resolvePendingRender(resolved);
+      resolvePendingRender(resolved, renderId);
       emitGeometry(resolved);
       publishRenderStatus();
     });
@@ -1264,12 +1362,30 @@ export function createRuntimeClientWithTransport(
     workerClient.onProgress(({ phase, detail }) => {
       handlers.progress.emit({ phase, detail });
     });
-    workerClient.onError((issues) => {
+    workerClient.onError((issues, renderId) => {
       const mutableIssues: KernelIssue[] = [...issues];
       hasRenderFailure = true;
       hasRenderCommandInFlight = false;
-      rejectPendingRender(mutableIssues);
+      /* A connection-scoped error carries no `renderId`; it is diagnostics
+       * only and must never settle a render-scoped promise. */
+      if (renderId !== undefined) {
+        rejectPendingRender(mutableIssues, renderId);
+      }
       handlers.error.emit(mutableIssues);
+      publishRenderStatus();
+    });
+    workerClient.onLocalTimeout(({ renderId, renderTimeout, issues }) => {
+      const prior = pendingRender;
+      if (prior && prior.renderId !== renderId) {
+        return;
+      }
+      if (prior?.renderId === renderId) {
+        pendingRender = undefined;
+        prior.reject(new RenderTimeoutError(renderTimeout));
+      }
+      hasRenderFailure = true;
+      hasRenderCommandInFlight = false;
+      handlers.error.emit([...issues]);
       publishRenderStatus();
     });
     workerClient.onKernelChange((kernelId) => {
@@ -1280,50 +1396,122 @@ export function createRuntimeClientWithTransport(
       _capabilities = capabilities;
       handlers.capabilities.emit(capabilities);
     });
-
-    let resolvingConfig = true;
-    try {
-      const config = await resolveRuntimeClientConfig(configProvider);
-      resolvingConfig = false;
-      await workerClient.initialize({ config });
-    } catch (error) {
-      if (readLifecycleState() !== 'terminated') {
-        hasRenderFailure = true;
-        setLifecycleState('unconnected');
-      }
-      const message = error instanceof Error ? error.message : 'Failed to initialise kernel runtime';
-      // The worker dispatcher's `error` response carries `KernelIssue[]`
-      // under `error.cause`. We classify the failure by inspecting the
-      // typed `KernelIssue.code` discriminator — never the message string.
-      const issues = (error as { cause?: unknown }).cause;
-      const issueCodes: KernelIssueCode[] = Array.isArray(issues)
-        ? issues
-            .filter(
-              (issue): issue is { code: KernelIssueCode } =>
-                typeof issue === 'object' && issue !== null && 'code' in issue && isKernelIssueCode(issue.code),
-            )
-            .map((issue) => issue.code)
-        : [];
-      const causeKind: RuntimeConnectionCause =
-        resolvingConfig || isRuntimeConfigLikeError(error)
-          ? 'runtime-config'
-          : issueCodes.includes('KERNEL_BINDING_FAILED')
-            ? 'kernel-binding'
-            : 'capabilities-resolution';
-      throw new RuntimeConnectionError(message, causeKind, error);
-    }
-
-    _capabilities = workerClient.capabilities;
-    if (_capabilities) {
-      handlers.capabilities.emit(_capabilities);
-    }
-
-    if (options.renderTimeout !== undefined) {
-      workerClient.setOptions({ renderTimeout: options.renderTimeout });
-    }
-
-    setLifecycleState('connected');
     return workerClient;
+  }
+
+  function terminateFromTransport(causeKind: RuntimeTerminatedCause): void {
+    if (lifecycleState === 'terminated') {
+      return;
+    }
+    terminalCause = causeKind;
+    intentAdmissionOpen = false;
+    const error = new RuntimeTerminatedError(causeKind);
+    connectionAttempt?.reject(error);
+    connectionAttempt = undefined;
+    pendingRender?.reject(error);
+    pendingRender = undefined;
+    for (const slot of pendingExports) {
+      slot.reject(error);
+    }
+    pendingExports.clear();
+    workerClient?.terminate();
+    workerClient = undefined;
+    setLifecycleState('terminated');
+    hasSettledRender = false;
+    latestWorkerState = 'idle';
+    hasRenderFailure = false;
+    hasRenderCommandInFlight = false;
+    lastEmittedGeometryHashKey = undefined;
+    for (const topic of Object.values(handlers)) {
+      topic.dispose();
+    }
+  }
+
+  const observeTransportClosure = async (): Promise<void> => {
+    const result = await transport.closed;
+    if (result.cause === 'requested') {
+      terminateFromTransport(terminalCause ?? 'explicit');
+      return;
+    }
+    terminateFromTransport(result.cause === 'render-timeout' ? 'render-timeout' : 'transport-closed');
+  };
+  void observeTransportClosure();
+
+  // oxlint-disable-next-line promise-function-async -- all callers must receive the shared single-flight promise by identity.
+  function ensureConnected(): Promise<RuntimeWorkerClient> {
+    if (lifecycleState === 'terminated') {
+      return Promise.reject(new RuntimeTerminatedError(terminalCause));
+    }
+    if (workerClient && lifecycleState === 'connected') {
+      return Promise.resolve(workerClient);
+    }
+    if (connectionAttempt) {
+      return connectionAttempt.promise;
+    }
+
+    setLifecycleState('connecting');
+    const connectedWorkerClient = getWorkerClient();
+    const slot = Promise.withResolvers<RuntimeWorkerClient>();
+    const attempt: ConnectionAttempt = { promise: slot.promise, reject: slot.reject };
+    connectionAttempt = attempt;
+
+    const resolveConnectionAttempt = async (): Promise<void> => {
+      let resolvingConfig = true;
+      try {
+        const config = await resolveRuntimeClientConfig(configProvider);
+        resolvingConfig = false;
+        await connectedWorkerClient.initialize({ config });
+        if (readLifecycleState() === 'terminated') {
+          throw new RuntimeTerminatedError(terminalCause);
+        }
+        _capabilities = connectedWorkerClient.capabilities;
+        if (_capabilities) {
+          handlers.capabilities.emit(_capabilities);
+        }
+        connectedWorkerClient.setRenderTimeout(activeRenderTimeout);
+        setLifecycleState('connected');
+        slot.resolve(connectedWorkerClient);
+      } catch (error) {
+        if (readLifecycleState() !== 'terminated') {
+          /* Discard the half-wired client: it may already hold channel
+           * subscriptions, so a retry must build a fresh, singly-wired one. */
+          connectedWorkerClient.terminate();
+          if (workerClient === connectedWorkerClient) {
+            workerClient = undefined;
+            workerClientWired = false;
+          }
+          hasRenderFailure = true;
+          setLifecycleState('unconnected');
+        }
+        if (error instanceof RuntimeTerminatedError || error instanceof RuntimeConnectionError) {
+          slot.reject(error);
+          return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to initialise kernel runtime';
+        const issues = (error as { cause?: unknown }).cause;
+        const issueCodes: KernelIssueCode[] = Array.isArray(issues)
+          ? issues
+              .filter(
+                (issue): issue is { code: KernelIssueCode } =>
+                  typeof issue === 'object' && issue !== null && 'code' in issue && isKernelIssueCode(issue.code),
+              )
+              .map((issue) => issue.code)
+          : [];
+        const causeKind: RuntimeConnectionCause =
+          resolvingConfig || isRuntimeConfigLikeError(error)
+            ? 'runtime-config'
+            : issueCodes.includes('KERNEL_BINDING_FAILED')
+              ? 'kernel-binding'
+              : 'capabilities-resolution';
+        slot.reject(new RuntimeConnectionError(message, causeKind, error));
+      } finally {
+        if (connectionAttempt === attempt) {
+          connectionAttempt = undefined;
+        }
+      }
+    };
+    void resolveConnectionAttempt();
+    return attempt.promise;
   }
 
   /**
@@ -1373,64 +1561,23 @@ export function createRuntimeClientWithTransport(
       };
     },
 
-    async connect(): Promise<void> {
+    // oxlint-disable-next-line promise-function-async -- preserves the shared connection promise rather than wrapping it.
+    connect(): Promise<void> {
+      assertIntentAdmissionOpen();
       if (lifecycleState === 'terminated') {
-        throw new RuntimeTerminatedError();
+        return Promise.reject(new RuntimeTerminatedError(terminalCause));
       }
       if (lifecycleState === 'connected') {
-        return;
+        return Promise.resolve();
       }
-      // Deferred slot capture: terminate() needs a handle on this connect's
-      // reject path before the awaited handshake settles, so the resolvers
-      // are externalised via `Promise.withResolvers()` and stored in
-      // `pendingConnect` for the lifecycle-cancellation path.
-      const slot = Promise.withResolvers<void>();
-      pendingConnect = { reject: slot.reject };
-      void trackInFlight(slot.promise);
-
-      try {
+      const settleConnection = async (): Promise<void> => {
         await ensureConnected();
-        // The optional chain is load-bearing: terminate() can clear
-        // `pendingConnect` while the handshake awaits, so the field is not
-        // statically guaranteed to still hold the freshly-assigned slot.
-        // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- pendingConnect is mutated cross-await by terminate()
-        if (pendingConnect?.reject === slot.reject) {
-          pendingConnect = undefined;
-        }
-        slot.resolve();
-      } catch (error) {
-        // Same load-bearing optional chain — see resolve path above.
-        // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- pendingConnect is mutated cross-await by terminate()
-        if (pendingConnect?.reject !== slot.reject) {
-          // The terminated lifecycle path already rejected this slot via the
-          // `pendingConnect` handle; do not double-reject.
-          return slot.promise;
-        }
-        pendingConnect = undefined;
-        if (readLifecycleState() !== 'terminated') {
-          hasRenderFailure = true;
-          setLifecycleState('unconnected');
-        }
-        if (
-          error instanceof RuntimeTerminatedError ||
-          error instanceof RuntimeConnectionError ||
-          error instanceof RuntimeNotConnectedError
-        ) {
-          slot.reject(error);
-        } else {
-          slot.reject(
-            new RuntimeConnectionError(
-              error instanceof Error ? error.message : 'RuntimeClient connection failed',
-              'capabilities-resolution',
-              error,
-            ),
-          );
-        }
-      }
-      return slot.promise;
+      };
+      return trackInFlight(settleConnection());
     },
 
     async export(format: FileExtension, inputOrOptions?: Record<string, unknown>): Promise<ExportResult> {
+      assertIntentAdmissionOpen();
       let requestScopedExport: RuntimeExportModelArgs | undefined;
       let resolvedExportOptions: Record<string, unknown> | undefined;
 
@@ -1438,7 +1585,7 @@ export function createRuntimeClientWithTransport(
         if (!isRecord(inputOrOptions)) {
           throw new TypeError('RuntimeClient.export options must be an object.');
         }
-        assertNoLegacyExportShape(inputOrOptions);
+        assertExportInputShape(inputOrOptions);
       }
 
       if (inputOrOptions?.['source'] !== undefined) {
@@ -1451,6 +1598,9 @@ export function createRuntimeClientWithTransport(
           ...(inputOrOptions['exportOptions'] === undefined
             ? {}
             : { exportOptions: inputOrOptions['exportOptions'] as Record<string, unknown> }),
+          ...(inputOrOptions['content'] === undefined
+            ? {}
+            : { content: inputOrOptions['content'] as RuntimeContentInput }),
         };
       } else if (inputOrOptions?.['exportOptions'] !== undefined) {
         resolvedExportOptions = inputOrOptions['exportOptions'] as Record<string, unknown>;
@@ -1492,7 +1642,10 @@ export function createRuntimeClientWithTransport(
           internalResult = await trackInFlight(
             new Promise<Awaited<ReturnType<typeof client.exportGeometry>>>((resolve, reject) => {
               exportReject = reject;
-              client.exportGeometry(format, resolvedExportOptions).then(resolve).catch(reject);
+              client
+                .exportGeometry(format, resolvedExportOptions, inputOrOptions?.['content'] as RuntimeContentInput)
+                .then(resolve)
+                .catch(reject);
             }),
           );
         }
@@ -1503,39 +1656,48 @@ export function createRuntimeClientWithTransport(
     },
 
     async render<const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(
-      input: RuntimeRenderInput<KernelPlugin[], Files>,
+      input: RuntimeRenderInput<KernelPlugin[], MiddlewarePlugin[], Files>,
     ): Promise<RenderOutcome> {
       // Both inline and filesystem source forms route through the supplied transport,
       // which owns the host-side filesystem. Lazy auto-connect is therefore
       // safe in either branch — the transport handles missing-FS errors at
       // its own boundary if the consumer forgot to wire one.
       assertNotTerminated();
-      beginRenderCommand({ publish: lifecycleState === 'connected' });
-      const settlement = trackInFlight(trackPendingRender());
-
+      assertRecordInput('render', 'parameters', input.parameters);
+      assertRecordInput('render', 'renderOptions', input.renderOptions);
+      assertRecordInput('render', 'content', input.content);
+      const normalized = normalizeRuntimeSource(input.source);
       const parameters = input.parameters ?? {};
-      const { renderOptions } = input;
+      const { renderOptions, content } = input;
+      const admissionClient = getWorkerClient();
+      const admission = admissionClient.admitPreview();
+      beginRenderCommand({ publish: lifecycleState === 'connected' });
+      const settlement = trackInFlight(trackPendingRender(admission.renderId));
 
       try {
-        const normalized = normalizeRuntimeSource(input.source);
         const client = await ensureConnected();
         if (normalized.stage) {
-          client.stageAndOpenFile({
-            stage: normalized.stage,
-            file: normalized.file,
-            parameters,
-            options: renderOptions,
-          });
+          client.stageAndOpenFile(
+            {
+              stage: normalized.stage,
+              file: normalized.file,
+              parameters,
+              options: renderOptions,
+              content,
+            },
+            admission,
+          );
         } else {
-          client.openFile(normalized.file, parameters, renderOptions);
+          client.openFile(normalized.file, { parameters, options: renderOptions, content }, admission);
         }
       } catch (error) {
+        admissionClient.settleSelectedPreview(admission.renderId);
         const prior = pendingRender;
-        hasRenderFailure = true;
-        hasRenderCommandInFlight = false;
-        publishRenderStatus();
-        if (prior) {
+        if (prior?.renderId === admission.renderId) {
           pendingRender = undefined;
+          hasRenderFailure = true;
+          hasRenderCommandInFlight = false;
+          publishRenderStatus();
           prior.reject(error instanceof Error ? error : new Error(String(error)));
         }
       }
@@ -1547,18 +1709,24 @@ export function createRuntimeClientWithTransport(
       // `updateParameters` always requires an active render context, which
       // implies a prior `connect()` — the strict gate is appropriate.
       assertActive('updateParameters');
+      if (!isRecord(parameters)) {
+        throw new TypeError('RuntimeClient.updateParameters parameters must be an object.');
+      }
+      const admissionClient = getWorkerClient();
+      const admission = admissionClient.admitPreview();
       beginRenderCommand();
-      const settlement = trackInFlight(trackPendingRender());
+      const settlement = trackInFlight(trackPendingRender(admission.renderId));
       try {
         const client = await ensureConnected();
-        client.updateParameters(parameters);
+        client.updateParameters(parameters, admission);
       } catch (error) {
+        admissionClient.settleSelectedPreview(admission.renderId);
         const prior = pendingRender;
-        hasRenderFailure = true;
-        hasRenderCommandInFlight = false;
-        publishRenderStatus();
-        if (prior) {
+        if (prior?.renderId === admission.renderId) {
           pendingRender = undefined;
+          hasRenderFailure = true;
+          hasRenderCommandInFlight = false;
+          publishRenderStatus();
           prior.reject(error instanceof Error ? error : new Error(String(error)));
         }
       }
@@ -1567,27 +1735,38 @@ export function createRuntimeClientWithTransport(
 
     async setOptions(updatedOptions: RuntimeSetOptionsInput<KernelPlugin[]>): Promise<RenderOutcome> {
       assertActive('setOptions');
+      assertNoFlatSetOptions(updatedOptions as Record<string, unknown>);
+      const admissionClient = getWorkerClient();
+      const admission = admissionClient.admitPreview();
       beginRenderCommand();
-      const settlement = trackInFlight(trackPendingRender());
+      const settlement = trackInFlight(trackPendingRender(admission.renderId));
       try {
-        assertNoFlatSetOptions(updatedOptions as Record<string, unknown>);
         const client = await ensureConnected();
-        const renderOptions = updatedOptions.renderOptions ?? {};
-        client.setOptions({
-          ...renderOptions,
-          ...(updatedOptions.renderTimeout === undefined ? {} : { renderTimeout: updatedOptions.renderTimeout }),
-        });
+        client.setOptions(updatedOptions.renderOptions, admission);
       } catch (error) {
+        admissionClient.settleSelectedPreview(admission.renderId);
         const prior = pendingRender;
-        hasRenderFailure = true;
-        hasRenderCommandInFlight = false;
-        publishRenderStatus();
-        if (prior) {
+        if (prior?.renderId === admission.renderId) {
           pendingRender = undefined;
+          hasRenderFailure = true;
+          hasRenderCommandInFlight = false;
+          publishRenderStatus();
           prior.reject(error instanceof Error ? error : new Error(String(error)));
         }
       }
       return settlement;
+    },
+
+    setRenderTimeout(renderTimeout: number): void {
+      assertActive('setRenderTimeout');
+      assertValidRenderTimeout(renderTimeout);
+      if (renderTimeout > 0 && transport.renderTimeoutRecovery.kind === 'unsupported') {
+        throw new TypeError(
+          'renderTimeout must be 0 because this transport cannot enforce a wall-clock render deadline. Use a worker-backed transport with terminable timeout recovery.',
+        );
+      }
+      workerClient!.setRenderTimeout(renderTimeout);
+      activeRenderTimeout = renderTimeout;
     },
 
     on(event: string, handler: (...args: never[]) => void, options?: RuntimeSubscribeOptions): () => void {
@@ -1595,7 +1774,7 @@ export function createRuntimeClientWithTransport(
       // `client.on('geometry', ...)` is loud rather than silently subscribing
       // to a dead handler set that will never fire.
       if (lifecycleState === 'terminated') {
-        throw new RuntimeTerminatedError();
+        throw new RuntimeTerminatedError(terminalCause);
       }
 
       switch (event) {
@@ -1653,24 +1832,51 @@ export function createRuntimeClientWithTransport(
       }
     },
 
-    routesFor(format: FileExtension): readonly ExportRoute[] {
+    routesFor<const Format extends FileExtension>(
+      format: Format,
+    ): ReadonlyArray<ExportRoute<KernelPlugin[], MiddlewarePlugin[], TranscoderPlugin[], Format>> {
       if (!_capabilities) {
         return [];
       }
-      return _capabilities.routes.filter((route) => route.targetFormat === format);
+      // SAFETY: the runtime predicate below narrows the route target to the
+      // exact literal Format; TypeScript cannot express that refinement over
+      // the generic ExportRoute conditional type.
+      return _capabilities.routes.filter((route) => route.targetFormat === format) as unknown as ReadonlyArray<
+        ExportRoute<KernelPlugin[], MiddlewarePlugin[], TranscoderPlugin[], Format>
+      >;
     },
 
-    bestRouteFor(format: FileExtension, kernelId?: string): ExportRoute | undefined {
+    bestRouteFor<const Format extends FileExtension, const Kernel extends string | undefined = undefined>(
+      format: Format,
+      options?: { readonly kernelId?: Kernel; readonly content?: RuntimeContentInput },
+    ):
+      | ExportRoute<
+          KernelPlugin[],
+          MiddlewarePlugin[],
+          TranscoderPlugin[],
+          Format,
+          Kernel extends string ? Kernel : string
+        >
+      | undefined {
       if (!_capabilities) {
         return undefined;
       }
-      const matches = _capabilities.routes.filter((route) => route.targetFormat === format);
+      const requestedContent = Object.keys(options?.content ?? {});
+      const matches = _capabilities.routes.filter((route) => {
+        if (route.targetFormat !== format) {
+          return false;
+        }
+        const supportedContent = route.content?.schema.properties ?? {};
+        return requestedContent.every((key) => key in supportedContent);
+      });
       if (matches.length === 0) {
         return undefined;
       }
 
-      const kernelMatches = kernelId ? matches.filter((route) => route.kernelId === kernelId) : matches;
-      const candidates = kernelMatches.length > 0 ? kernelMatches : matches;
+      const candidates = options?.kernelId ? matches.filter((route) => route.kernelId === options.kernelId) : matches;
+      if (candidates.length === 0) {
+        return undefined;
+      }
 
       const indexed = candidates.map((route, index) => ({ route, index }));
       indexed.sort((a, b) => {
@@ -1685,7 +1891,15 @@ export function createRuntimeClientWithTransport(
         return a.index - b.index;
       });
 
-      return indexed[0]?.route;
+      return indexed[0]?.route as
+        | ExportRoute<
+            KernelPlugin[],
+            MiddlewarePlugin[],
+            TranscoderPlugin[],
+            Format,
+            Kernel extends string ? Kernel : string
+          >
+        | undefined;
     },
 
     /**
@@ -1740,22 +1954,41 @@ export function createRuntimeClientWithTransport(
         return;
       }
 
-      if (options?.drain === true && inFlightIntents.size > 0) {
-        const drained = [...inFlightIntents].map(async (promise) => {
-          try {
-            await promise;
-          } catch {
-            /* Swallow so the drain only waits without surfacing intent failures. */
-          }
-        });
-        await Promise.allSettled(drained);
-
-        if ((lifecycleState as RuntimeLifecycleState) === 'terminated') {
-          return;
+      if (options?.drain === true) {
+        if (!gracefulShutdownPromise) {
+          intentAdmissionOpen = false;
+          const admitted = [...inFlightIntents];
+          gracefulShutdownPromise = (async () => {
+            await Promise.allSettled(admitted);
+            if ((lifecycleState as RuntimeLifecycleState) === 'terminated') {
+              return;
+            }
+            const gracefulWorker = workerClient;
+            await gracefulWorker?.cleanup();
+            if ((lifecycleState as RuntimeLifecycleState) === 'terminated') {
+              return;
+            }
+            gracefulWorker?.terminate();
+            terminalCause = 'explicit';
+            await transport.close();
+            workerClient = undefined;
+            setLifecycleState('terminated');
+            hasSettledRender = false;
+            latestWorkerState = 'idle';
+            hasRenderFailure = false;
+            hasRenderCommandInFlight = false;
+            lastEmittedGeometryHashKey = undefined;
+            for (const topic of Object.values(handlers)) {
+              topic.dispose();
+            }
+          })();
         }
+        return gracefulShutdownPromise;
       }
 
+      intentAdmissionOpen = false;
       this.terminate();
+      await transport.close();
     },
 
     terminate(): void {
@@ -1773,12 +2006,14 @@ export function createRuntimeClientWithTransport(
       if (lifecycleState === 'terminated') {
         return;
       }
+      intentAdmissionOpen = false;
+      terminalCause = 'explicit';
 
-      const priorConnect = pendingConnect;
+      const priorConnect = connectionAttempt;
       const priorRender = pendingRender;
       const priorExports = [...pendingExports];
 
-      pendingConnect = undefined;
+      connectionAttempt = undefined;
       pendingRender = undefined;
       pendingExports.clear();
 
@@ -1795,10 +2030,9 @@ export function createRuntimeClientWithTransport(
         }
       });
 
-      workerClient?.cleanup();
       workerClient?.terminate();
 
-      void transport.close('Runtime client terminated');
+      void transport.close();
 
       workerClient = undefined;
       setLifecycleState('terminated');

@@ -247,7 +247,6 @@ export const jscad = defineKernel({
   builtinModuleNames: ['@jscad/modeling'],
   name: 'JscadKernel',
   version: '1.0.0',
-  nativeHandleScope: 'source',
   render: { content: ['includeEdges'] },
   exportFormats: {
     glb: { optionsSchema: jscadExportSchemas.glb, content: ['includeEdges'] },

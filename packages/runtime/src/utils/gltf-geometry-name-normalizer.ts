@@ -1,5 +1,6 @@
 import type { Document, JSONDocument, Mesh, Node } from '@gltf-transform/core';
 import { NodeIO } from '@gltf-transform/core';
+import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { registerTauGltfExtensions } from '@taucad/gltf-extensions';
 import type { GeometryNameSource } from '#utils/geometry-names.js';
 import { resolveMaterialName, resolveSceneName } from '#utils/geometry-names.js';
@@ -146,7 +147,7 @@ export async function normalizeGltfGeometryNames(
     sceneNamePolicy = 'preserve',
   }: NormalizeGltfGeometryNamesOptions,
 ): Promise<Uint8Array<ArrayBuffer>> {
-  const io = registerTauGltfExtensions(new NodeIO());
+  const io = registerTauGltfExtensions(new NodeIO()).registerExtensions([KHRMaterialsUnlit]);
   const document =
     format === 'glb'
       ? await io.readBinary(bytes)

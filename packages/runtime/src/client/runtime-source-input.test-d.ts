@@ -7,12 +7,11 @@
 
 import { describe, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
-import type { ExportFile, GeometryFile, GeometryResponse } from '@taucad/types';
+import type { ExportFile, GeometryResponse } from '@taucad/types';
 import { createRuntimeClient } from '#client/runtime-client.js';
 import type {
   ExportResult,
   RenderOutcome,
-  RuntimeClient,
   RuntimeSource,
   RuntimeSourceContent,
   RuntimeSourceFiles,
@@ -21,10 +20,11 @@ import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { defineKernel } from '#types/runtime-kernel.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
+import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import type { KernelPlugin } from '#plugins/plugin-types.js';
 
 const code = 'export default () => null;';
 const bytes = new Uint8Array([1, 2, 3]);
-const geometryFile = { path: '/project', filename: 'main.ts' } satisfies GeometryFile;
 
 describe('RuntimeSource inline source', () => {
   it('should accept a single-key file map without entry', () => {
@@ -75,14 +75,10 @@ describe('RuntimeSource inline source', () => {
     void source;
   });
 
-  it('should require entry for wide file maps', () => {
+  it('should allow wide file maps and defer multi-file entry validation to runtime', () => {
     const files: RuntimeSourceFiles = { 'main.ts': code };
-    const source: RuntimeSource = { files, entry: 'main.ts' };
+    const source: RuntimeSource = { files };
     expectTypeOf(source).toExtend<RuntimeSource>();
-
-    // @ts-expect-error -- wide records require entry
-    const invalid: RuntimeSource = { files };
-    void invalid;
   });
 
   it('should accept string and Uint8Array content', () => {
@@ -94,27 +90,16 @@ describe('RuntimeSource inline source', () => {
     expectTypeOf(source.files['asset.bin']).toEqualTypeOf<Uint8Array<ArrayBuffer>>();
     expectTypeOf<RuntimeSourceContent>().toEqualTypeOf<string | Uint8Array<ArrayBuffer>>();
   });
-
-  it('should reject path on inline sources', () => {
-    // @ts-expect-error -- inline source cannot also use path
-    const source: RuntimeSource<{ 'main.ts': string }> = {
-      files: { 'main.ts': code },
-      path: '/main.ts',
-    };
-    void source;
-  });
 });
 
 describe('RuntimeSource filesystem source', () => {
-  it('should accept string and GeometryFile paths', () => {
+  it('should accept string paths', () => {
     const stringSource: RuntimeSource = { path: '/project/main.ts' };
-    const fileSource: RuntimeSource = { path: geometryFile };
 
-    expectTypeOf(stringSource.path).toEqualTypeOf<string | GeometryFile>();
-    expectTypeOf(fileSource.path).toEqualTypeOf<string | GeometryFile>();
+    expectTypeOf(stringSource.path).toEqualTypeOf<string>();
   });
 
-  it('should reject files, entry, and path/content shorthand on filesystem sources', () => {
+  it('should reject files and entry on filesystem sources', () => {
     // @ts-expect-error -- filesystem source cannot also use files
     const mixed: RuntimeSource = {
       path: '/project/main.ts',
@@ -128,13 +113,6 @@ describe('RuntimeSource filesystem source', () => {
       entry: 'main.ts',
     };
     void withEntry;
-
-    const shorthand: RuntimeSource = {
-      path: 'main.ts',
-      // @ts-expect-error -- { path, content } shorthand is not part of the public source API
-      content: code,
-    };
-    void shorthand;
   });
 });
 
@@ -144,15 +122,21 @@ const kernel = defineKernel({
   extensions: ['ts'],
   name: 'TypedKernel',
   version: '1.0.0',
-  renderSchema: z.object({
-    tessellation: z.object({
-      linearTolerance: z.number(),
-      angularTolerance: z.number(),
+  render: {
+    optionsSchema: z.object({
+      tessellation: z.object({
+        linearTolerance: z.number(),
+        angularTolerance: z.number(),
+      }),
     }),
-  }),
-  exportSchemas: {
-    step: z.object({ tolerance: z.number().default(0.1), unit: z.enum(['mm', 'in']).default('mm') }),
-    stl: z.object({ binary: z.boolean() }),
+    content: ['includeEdges'],
+  },
+  exportFormats: {
+    step: {
+      optionsSchema: z.object({ tolerance: z.number().default(0.1), unit: z.enum(['mm', 'in']).default('mm') }),
+    },
+    stl: { optionsSchema: z.object({ binary: z.boolean() }) },
+    glb: { optionsSchema: z.object({}), content: ['includeEdges'] },
   },
   async initialize() {
     return {};
@@ -164,7 +148,10 @@ const kernel = defineKernel({
     return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
   },
   async createGeometry() {
-    return { geometry: testGeometry, nativeHandle: {} };
+    return { nativeHandle: {} };
+  },
+  async meshGeometry() {
+    return { geometry: testGeometry };
   },
   async exportGeometry() {
     return { success: true, data: [], issues: [] };
@@ -183,6 +170,7 @@ describe('RuntimeClient.render input types', () => {
         renderOptions: { tessellation: { linearTolerance: 0.1, angularTolerance: 12 } },
       }),
     ).toEqualTypeOf<Promise<RenderOutcome>>();
+    void client.render({ source: { files: { 'main.ts': code } }, content: { includeEdges: true } });
   });
 
   it('should infer multi-file keys and require entry', () => {
@@ -198,15 +186,27 @@ describe('RuntimeClient.render input types', () => {
 
     // @ts-expect-error -- plugin render config belongs under renderOptions
     void client.render({ source: { files: { 'main.ts': code } }, tessellation: {} });
+
+    void client.render({
+      source: { files: { 'main.ts': code } },
+      // @ts-expect-error -- this render route advertises edges only.
+      content: { includeTopology: true },
+    });
   });
 });
 
 describe('RuntimeClient.setOptions input types', () => {
-  it('should accept renderOptions, renderTimeout, or both', () => {
+  it('should accept renderOptions and expose a synchronous timeout setter', () => {
     void client.setOptions({ renderOptions: { tessellation: { linearTolerance: 0.1, angularTolerance: 12 } } });
+
+    expectTypeOf(client.setRenderTimeout(60_000)).toEqualTypeOf<void>();
+
+    // @ts-expect-error -- timeout is runtime-client control state, not render options
     void client.setOptions({ renderTimeout: 60_000 });
+
     void client.setOptions({
       renderOptions: { tessellation: { linearTolerance: 0.1, angularTolerance: 12 } },
+      // @ts-expect-error -- timeout cannot be combined with render options
       renderTimeout: 60_000,
     });
   });
@@ -232,6 +232,7 @@ describe('RuntimeClient.export input types', () => {
   it('should accept format-only and nested export options', () => {
     expectTypeOf(client.export('step')).toEqualTypeOf<Promise<ExportResult>>();
     expectTypeOf(client.export('step', { exportOptions: { tolerance: 0.01 } })).toEqualTypeOf<Promise<ExportResult>>();
+    void client.export('glb', { content: { includeEdges: true } });
   });
 
   it('should accept request-scoped source export', () => {
@@ -251,21 +252,91 @@ describe('RuntimeClient.export input types', () => {
     // @ts-expect-error -- invalid nested export option
     void client.export('step', { exportOptions: { binary: true } });
 
+    void client.export('step', {
+      // @ts-expect-error -- STEP does not advertise framework content.
+      content: { includeEdges: true },
+    });
+
     // @ts-expect-error -- parameters require source
     void client.export('step', { parameters: { width: 10 } });
 
     // @ts-expect-error -- export has no preview render options
     void client.export('step', { source: { files: { 'main.ts': code } }, renderOptions: {} });
+  });
+});
 
-    // @ts-expect-error -- old self-render code input is rejected
-    void client.export('step', { code: { 'main.ts': code } });
+const contentEmptyKernel = defineKernel({
+  id: 'contentEmptyKernel',
+  extensions: ['empty'],
+  name: 'Content-empty kernel',
+  version: '1.0.0',
+  exportFormats: { glb: { optionsSchema: z.object({}) } },
+  async initialize() {
+    return {};
+  },
+  async getDependencies() {
+    return { resolved: [], unresolved: [] };
+  },
+  async getParameters() {
+    return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+  },
+  async createGeometry(input) {
+    expectTypeOf(input).not.toHaveProperty('content');
+    return { geometry: testGeometry, nativeHandle: {} };
+  },
+  async exportGeometry(input) {
+    expectTypeOf(input).not.toHaveProperty('content');
+    return { success: true, data: [], issues: [] };
+  },
+});
+type ContentEmptyKernelRenderContent =
+  ReturnType<typeof contentEmptyKernel> extends KernelPlugin<
+    // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- type-test wildcard.
+    any,
+    // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- type-test wildcard.
+    any,
+    // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- type-test wildcard.
+    any,
+    infer Content,
+    // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- type-test wildcard.
+    any
+  >
+    ? Content
+    : never;
+expectTypeOf<ContentEmptyKernelRenderContent>().toEqualTypeOf<never>();
 
-    // @ts-expect-error -- old self-render file input is rejected
-    void client.export('step', { file: 'main.ts' });
+const contentEmptyRuntime = defineRuntime({ kernels: [contentEmptyKernel()] });
+const contentEmptyClient = createRuntimeClient({
+  transport: inProcessTransport({ runtime: contentEmptyRuntime, fileSystem: fromMemoryFs() }),
+});
+
+const edgeProvider = defineMiddleware({
+  id: 'edgeProvider',
+  name: 'Edge provider',
+  content: { render: ['includeEdges'], exportFormats: { glb: ['includeEdges'] } },
+  async wrapCreateGeometry(input, handler) {
+    expectTypeOf(input.content).toEqualTypeOf<{ readonly includeEdges?: boolean } | undefined>();
+    return handler(input);
+  },
+});
+const composedRuntime = defineRuntime({ kernels: [contentEmptyKernel()], middleware: [edgeProvider()] });
+const composedClient = createRuntimeClient({
+  transport: inProcessTransport({ runtime: composedRuntime, fileSystem: fromMemoryFs() }),
+});
+
+describe('content capability composition', () => {
+  it('rejects consumer content when no provider declares it', () => {
+    // @ts-expect-error -- no render provider supports edges.
+    void contentEmptyClient.render({ source: { files: { 'main.empty': code } }, content: { includeEdges: true } });
+    // @ts-expect-error -- no GLB provider supports edges.
+    void contentEmptyClient.export('glb', { content: { includeEdges: true } });
+    // @ts-expect-error -- the only GLB route is content-empty.
+    void contentEmptyClient.bestRouteFor('glb', { content: { includeEdges: true } });
   });
 
-  it('should expose no public openFile member', () => {
-    expectTypeOf<RuntimeClient>().not.toHaveProperty('openFile');
-    expectTypeOf<RuntimeClient>().toHaveProperty('render');
+  it('lets middleware add consumer support without widening kernel hooks', () => {
+    void composedClient.render({ source: { files: { 'main.empty': code } }, content: { includeEdges: true } });
+    void composedClient.export('glb', { content: { includeEdges: true } });
+    void composedClient.bestRouteFor('glb', { content: { includeEdges: true } });
   });
 });

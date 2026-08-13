@@ -16,14 +16,14 @@ import type { Geometry } from '@taucad/types';
 import type { inProcessClientOptionsSchema } from '#transport/in-process-transport.schemas.js';
 import type { GeometryTransport, RuntimeInitializeResult, RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import type {
-  EncodedFileBytes,
   EncodedGeometry,
   RuntimeInitializeMemoryHandle,
   RuntimeInitializePayload,
+  RuntimeTransportCloseResult,
   RuntimeTransportClient,
   TransportClientReady,
-  TransportDescriptor,
 } from '#transport/runtime-transport.types.js';
+import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import { runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
@@ -31,7 +31,7 @@ import { resolveRuntimeFileSystem } from '#transport/_internal/runtime-filesyste
 import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
 import { allocatePools } from '#transport/_internal/sab-pools.js';
 import type { AllocatedPools } from '#transport/_internal/sab-pools.js';
-import { triggerAbort } from '#transport/_internal/abort-channel.js';
+import { reservePreview } from '#transport/_internal/abort-channel.js';
 import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 
@@ -72,7 +72,6 @@ export const inProcessClientDescribe = (
     wire: 'in-process',
     memory: {
       geometryDelivery: sabAvailable ? 'pool' : 'copy',
-      fileDelivery: sabAvailable ? 'pool' : 'copy',
       abortSignal: sabAvailable ? 'sab-atomics' : 'wire-notify',
     },
     fileSystem: options.fileSystem === undefined ? 'unbound' : 'inline',
@@ -94,9 +93,8 @@ export const inProcessClient = (
   }
   const fileSystemHandle = fileSystem === undefined ? undefined : resolveRuntimeFileSystem(fileSystem);
   const inlineFileSystem = fileSystemHandle?.kind === 'inline' ? fileSystemHandle.create() : undefined;
-
-  let bridge: ReturnType<typeof buildFileSystemBridge>;
   let pooled: AllocatedPools | undefined;
+  let bridge: ReturnType<typeof buildFileSystemBridge>;
   let channelPair: MessageChannel | undefined;
   let wrappedClientPort: ReturnType<typeof wrapMessagePort<unknown>> | undefined;
   let wrappedHostPort: ReturnType<typeof wrapMessagePort<unknown>> | undefined;
@@ -104,8 +102,8 @@ export const inProcessClient = (
   let channel: Channel<RuntimeProtocol> | undefined;
   let isClosed = false;
 
-  let resolveClosed: (() => void) | undefined;
-  const closed = new Promise<void>((resolve) => {
+  let resolveClosed: ((result: RuntimeTransportCloseResult) => void) | undefined;
+  const closed = new Promise<RuntimeTransportCloseResult>((resolve) => {
     resolveClosed = resolve;
   });
 
@@ -114,7 +112,6 @@ export const inProcessClient = (
     readonly clientPort: ReturnType<typeof wrapMessagePort<unknown>>;
     readonly hostPort: ReturnType<typeof wrapMessagePort<unknown>>;
     readonly geometryPool: AllocatedPools['geometryPool'];
-    readonly filePool: AllocatedPools['filePool'];
   } => {
     if (!pooled || !channelPair || !wrappedClientPort || !wrappedHostPort) {
       pooled = allocatePools({
@@ -128,7 +125,6 @@ export const inProcessClient = (
     return {
       pooled,
       geometryPool: pooled.geometryPool,
-      filePool: pooled.filePool,
       clientPort: wrappedClientPort,
       hostPort: wrappedHostPort,
     };
@@ -166,20 +162,6 @@ export const inProcessClient = (
     };
   };
 
-  const encodeFile: (file: Uint8Array<ArrayBuffer>) => EncodedFileBytes = (file) => {
-    const { filePool } = ensurePoolsAndPorts();
-    if (filePool) {
-      const hash = `inline-${file.byteLength}`;
-      if (!filePool.has(hash)) {
-        filePool.store(hash, file);
-      }
-      if (filePool.has(hash)) {
-        return { value: { delivery: 'pooled', key: hash }, transferables: [], tier: 'pool' };
-      }
-    }
-    return { value: { delivery: 'inline', bytes: file }, transferables: [], tier: 'copy' };
-  };
-
   const open = async (): Promise<TransportClientReady> => {
     if (openPromise) {
       return openPromise;
@@ -202,7 +184,6 @@ export const inProcessClient = (
       createWorkerDispatcher(worker, hostPort, {
         inlineFileSystem,
         encodeGeometry,
-        encodeFile,
       });
       channel = createChannelClient<RuntimeProtocol>({
         port: ensurePoolsAndPorts().clientPort,
@@ -220,6 +201,10 @@ export const inProcessClient = (
 
   return {
     id: inProcessId,
+    reservePreview() {
+      return reservePreview(ensurePoolsAndPorts().pooled.signalBuffer);
+    },
+    renderTimeoutRecovery: { kind: 'unsupported' },
     describe(): TransportDescriptor<typeof inProcessId> {
       return inProcessClientDescribe(options);
     },
@@ -254,22 +239,16 @@ export const inProcessClient = (
         throw error;
       }
     },
-    abort(reason): void {
-      if (!channel || !pooled) {
-        return;
-      }
-      triggerAbort(channel, pooled.signalBuffer, reason);
-    },
     async resolveGeometry(transport: GeometryTransport): Promise<Geometry> {
       return materialiseGeometry(transport, pooled?.geometryPool);
     },
-    async close(reason?: string): Promise<void> {
+    async close(): Promise<void> {
       if (isClosed) {
         return;
       }
       isClosed = true;
       try {
-        channel?.close(reason);
+        channel?.close('requested');
       } catch {
         /* Best-effort */
       }
@@ -288,7 +267,7 @@ export const inProcessClient = (
       } catch {
         /* Best-effort */
       }
-      resolveClosed?.();
+      resolveClosed?.({ cause: 'requested' });
     },
     closed,
   };

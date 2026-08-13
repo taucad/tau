@@ -22,15 +22,51 @@ export const runtimeContentDefaults = {
 } as const satisfies Readonly<Record<'render' | 'export', Required<RuntimeContentInput>>>;
 
 /** Literal declaration used by kernel, middleware, and transcoder authors. @public */
-export type RuntimeContentDeclaration = readonly RuntimeContentKey[];
+export type RuntimeContentDeclaration = readonly [RuntimeContentKey, ...RuntimeContentKey[]];
 
-/** Content input projected to the properties supported by one concrete route. @public */
-export type ContentInputFor<Keys extends RuntimeContentKey> = [Keys] extends [never]
+/** Consumer content request projected to the properties supported by one concrete route. @public */
+export type ContentRequestFor<Keys extends RuntimeContentKey> = [Keys] extends [never]
   ? { readonly content?: never }
+  : { readonly content?: Pick<RuntimeContentInput, Keys> };
+
+/** Provider content input projected to the properties fulfilled by one concrete hook. @public */
+export type ContentHookInputFor<Keys extends RuntimeContentKey> = [Keys] extends [never]
+  ? // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- omission means the provider has no content property
+    {}
   : { readonly content?: Pick<RuntimeContentInput, Keys> };
 
 /** Extract the key union carried by a literal content declaration. @public */
 export type ContentKeysOf<Declaration> = Declaration extends readonly RuntimeContentKey[] ? Declaration[number] : never;
+
+/** Validate positive content declarations at a plugin authoring boundary. @internal */
+export function validateRuntimeContentDeclarations(
+  pluginId: string,
+  declarations: ReadonlyArray<readonly [path: string, value: unknown]>,
+): void {
+  for (const [path, value] of declarations) {
+    if (value === undefined) {
+      continue;
+    }
+    if (!Array.isArray(value)) {
+      throw new TypeError(`Plugin "${pluginId}" content declaration "${path}" must be an array.`);
+    }
+    if (value.length === 0) {
+      throw new TypeError(`Plugin "${pluginId}" content declaration "${path}" must not be empty.`);
+    }
+
+    const seen = new Set<RuntimeContentKey>();
+    for (const key of value) {
+      if (typeof key !== 'string' || !Object.hasOwn(runtimeContentProperties, key)) {
+        throw new TypeError(`Plugin "${pluginId}" content declaration "${path}" contains unknown key ${String(key)}.`);
+      }
+      const contentKey = key as RuntimeContentKey;
+      if (seen.has(contentKey)) {
+        throw new TypeError(`Plugin "${pluginId}" content declaration "${path}" contains duplicate key "${key}".`);
+      }
+      seen.add(contentKey);
+    }
+  }
+}
 
 /**
  * Return the framework default for one supported content property.

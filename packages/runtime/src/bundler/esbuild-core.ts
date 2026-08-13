@@ -7,7 +7,6 @@ import {
   createVfsPlugin as vmCreateVfsPlugin,
   executeCode as vmExecuteCode,
   extractExternalImports as vmExtractExternalImports,
-  extractProjectDependencies as vmExtractProjectDependencies,
   initializeEsbuild as vmInitializeEsbuild,
 } from '@taucad/vm/internal';
 import type {
@@ -37,10 +36,6 @@ export function createVfsPlugin(options: VfsPluginOptions): Plugin {
 
 export function createDetectionPlugin(options: DetectionPluginOptions): Plugin {
   return vmCreateDetectionPlugin(options);
-}
-
-export function extractProjectDependencies(metafile: Metafile | undefined, projectPath: string): string[] {
-  return vmExtractProjectDependencies(metafile, projectPath);
 }
 
 export function extractExternalImports(metafile: Metafile | undefined): string[] {

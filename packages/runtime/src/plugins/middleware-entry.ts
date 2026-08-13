@@ -5,3 +5,14 @@ export { parameterCache } from '#middleware/parameter-cache.middleware.js';
 export { geometryCache } from '#middleware/geometry-cache.middleware.js';
 export { gltfCoordinateTransform } from '#middleware/gltf-coordinate-transform.middleware.js';
 export { gltfEdgeDetection } from '#middleware/gltf-edge-detection.middleware.js';
+export type {
+  GetMiddlewareDependenciesHook,
+  KernelMiddlewareRuntime,
+  MiddlewareDependencyDeclaration,
+  MiddlewareDependencyRuntime,
+  MiddlewareState,
+  WrapCreateGeometryHook,
+  WrapExportGeometryHook,
+  WrapGetParametersHook,
+  WrapMeshGeometryHook,
+} from '#types/runtime-middleware.types.js';

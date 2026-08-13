@@ -116,13 +116,13 @@ describe('rooted filesystem production topology', () => {
           backend: 'webaccess',
           directoryHandle: workspaceHandle,
           workspaceId: 'wsp_runtime_external',
-          providerBasePath: `/projects/${alphaProjectId}`,
+          providerBasePath: `/${alphaProjectId}`,
         },
         {
           projectId: betaProjectId,
           backend: 'memory',
           storageRootKey: 'memory:vertical-beta',
-          providerBasePath: `/projects/${betaProjectId}`,
+          providerBasePath: `/${betaProjectId}`,
         },
       ],
       roots: [{ backend: 'webaccess', directoryHandle: workspaceHandle, workspaceId: 'wsp_runtime_external' }],
@@ -234,7 +234,7 @@ describe('rooted filesystem production topology', () => {
       await delay(75);
       expect(geometries).toHaveLength(1);
 
-      await webAccessProvider.writeFile(`/projects/${alphaProjectId}/shape.ts`, shapeSource(9));
+      await webAccessProvider.writeFile(`/${alphaProjectId}/shape.ts`, shapeSource(9));
       if (externalObserverCallback === undefined) {
         throw new Error('Expected native filesystem observation to be active');
       }
@@ -242,7 +242,7 @@ describe('rooted filesystem production topology', () => {
         {
           type: 'modified',
           changedHandle: fileHandle('shape.ts'),
-          relativePathComponents: ['projects', alphaProjectId, 'shape.ts'],
+          relativePathComponents: [alphaProjectId, 'shape.ts'],
         },
       ]);
       await vi.waitFor(
@@ -262,7 +262,7 @@ describe('rooted filesystem production topology', () => {
         {
           type: 'modified',
           changedHandle: fileHandle('shape.ts'),
-          relativePathComponents: ['projects', alphaProjectId, 'shape.ts'],
+          relativePathComponents: [alphaProjectId, 'shape.ts'],
         },
       ]);
       await delay(125);

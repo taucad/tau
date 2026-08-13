@@ -28,12 +28,6 @@ export type AllocatedPools = {
 export type AllocatePoolsOptions = {
   readonly geometry?: { readonly bytes: number; readonly maxEntries?: number; readonly maxEntryBytes?: number };
   readonly files?: { readonly bytes: number; readonly maxEntries?: number; readonly maxEntryBytes?: number };
-  /**
-   * Pre-allocated file pool buffer (ownership remains with the
-   * caller — the file-manager machine in browser builds). When
-   * supplied the `files` option is ignored.
-   */
-  readonly filePoolBuffer?: SharedArrayBuffer;
 };
 
 const tryAllocateSab = (bytes: number, maxByteLength?: number): SharedArrayBuffer | undefined => {
@@ -66,12 +60,8 @@ export const allocatePools = (options: AllocatePoolsOptions): AllocatedPools => 
     }
   }
 
-  const ownedFilePool = options.filePoolBuffer === undefined && options.files !== undefined;
-  let { filePoolBuffer } = options;
+  let filePoolBuffer = options.files ? tryAllocateSab(options.files.bytes) : undefined;
   let filePool: SharedPool | undefined;
-  if (ownedFilePool) {
-    filePoolBuffer = tryAllocateSab(options.files.bytes);
-  }
   if (filePoolBuffer) {
     try {
       filePool = new SharedPool(filePoolBuffer, {
@@ -79,9 +69,7 @@ export const allocatePools = (options: AllocatePoolsOptions): AllocatedPools => 
         maxEntryBytes: options.files?.maxEntryBytes,
       });
     } catch {
-      if (ownedFilePool) {
-        filePoolBuffer = undefined;
-      }
+      filePoolBuffer = undefined;
       filePool = undefined;
     }
   }

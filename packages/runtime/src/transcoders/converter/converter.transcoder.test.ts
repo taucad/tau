@@ -67,6 +67,12 @@ describe('converter transcoder', () => {
       expect('optionsSchema' in stlEdge!).toBe(false);
     });
 
+    it('should pin every converter source GLB to spec-native Y-up meters', () => {
+      for (const edge of converterDefinition.edges) {
+        expect(edge.sourceOptions).toEqual({ coordinateSystem: 'y-up', unit: { length: 'meter' } });
+      }
+    });
+
     it('should include common export formats', () => {
       const toFormats = converterDefinition.edges.map((edge) => edge.to);
 

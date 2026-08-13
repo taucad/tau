@@ -382,7 +382,6 @@ describe('TauKernel', () => {
         {
           entryPath: '/models/main.gltf',
           parameters: {},
-          options: {},
         },
         runtime,
         {},
@@ -408,7 +407,7 @@ describe('TauKernel', () => {
       const result = await tauDefinition.createGeometry(
         mock<Parameters<typeof tauDefinition.createGeometry>[0]>({
           entryPath: '/models/part.step',
-          options: {},
+          parameters: {},
         }),
         runtime,
         {},
@@ -447,7 +446,7 @@ describe('TauKernel', () => {
       const result = await tauDefinition.createGeometry(
         mock<Parameters<typeof tauDefinition.createGeometry>[0]>({
           entryPath: '/models/part.glb',
-          options: {},
+          parameters: {},
         }),
         runtime,
         {},
@@ -469,7 +468,7 @@ describe('TauKernel', () => {
       const result = await tauDefinition.createGeometry(
         mock<Parameters<typeof tauDefinition.createGeometry>[0]>({
           entryPath: '/models/part.glb',
-          options: {},
+          parameters: {},
         }),
         runtime,
         {},
@@ -480,7 +479,9 @@ describe('TauKernel', () => {
         return evidence.map(({ centroid, normals, positions, winding }) => ({ centroid, normals, positions, winding }));
       };
       expect(await selectGeometry(findGltfGeometryContent(result.geometry))).toEqual(await selectGeometry(glbData));
-      expect(await readSceneEvidence(findGltfGeometryContent(result.geometry))).toEqual(await readSceneEvidence(glbData));
+      expect(await readSceneEvidence(findGltfGeometryContent(result.geometry))).toEqual(
+        await readSceneEvidence(glbData),
+      );
     });
 
     it('should throw with structured issues when importToGlb fails', async () => {
@@ -494,7 +495,7 @@ describe('TauKernel', () => {
         await tauDefinition.createGeometry(
           mock<Parameters<typeof tauDefinition.createGeometry>[0]>({
             entryPath: '/models/part.step',
-            options: {},
+            parameters: {},
           }),
           runtime,
           {},
@@ -514,7 +515,11 @@ describe('TauKernel', () => {
       const runtime = createMockKernelRuntime();
       const nativeHandle = await createNamedGlb();
 
-      const result = await tauDefinition.exportGeometry({ format: 'glb', options: {}, nativeHandle }, runtime, {});
+      const result = await tauDefinition.exportGeometry(
+        { format: 'glb', options: { coordinateSystem: 'y-up', unit: { length: 'meter' } }, nativeHandle },
+        runtime,
+        {},
+      );
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -572,7 +577,11 @@ describe('TauKernel', () => {
       const nativeHandle = new Uint8Array([1, 2, 3]);
 
       const result = await tauDefinition.exportGeometry(
-        { format: 'stl' as 'glb', options: {}, nativeHandle },
+        {
+          format: 'stl' as 'glb',
+          options: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
+          nativeHandle,
+        },
         runtime,
         {},
       );
@@ -587,7 +596,11 @@ describe('TauKernel', () => {
       const runtime = createMockKernelRuntime();
 
       const result = await tauDefinition.exportGeometry(
-        { format: 'glb', options: {}, nativeHandle: new Uint8Array(0) },
+        {
+          format: 'glb',
+          options: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
+          nativeHandle: new Uint8Array(0),
+        },
         runtime,
         {},
       );

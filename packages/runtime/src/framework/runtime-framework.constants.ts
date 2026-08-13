@@ -18,6 +18,9 @@ export const logFlushDebounce = 250;
 /** Polling interval used when `Atomics.waitAsync` is unavailable. Matches one frame at 60 fps. Milliseconds. */
 export const waitAsyncPollInterval = 16;
 
+/** Grace allowed for an isolated host to acknowledge render cancellation before termination. Milliseconds. */
+export const renderTimeoutRecoveryGrace = 1000;
+
 /** Byte length of the SharedArrayBuffer signal channel (2 Int32 slots x 4 bytes). */
 export const signalBufferByteLength = 8;
 

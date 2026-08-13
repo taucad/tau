@@ -261,6 +261,26 @@ export class ZooWebSocketTransport {
   };
 
   private createConnectionError(code: number, reason: string): KclError {
+    // Tau billing gate codes (apps/api billing.constants.ts `zooCloseCodes`).
+    // The wire reasons are enum-like markers — replace with user-facing copy.
+    if (code === 4401) {
+      return new KclAuthError('Sign in to Tau to use the Zoo kernel.', 401);
+    }
+
+    if (code === 4402) {
+      return new KclAuthError(
+        "You're out of Tau credits — add credits in Plans & Billing to keep modeling with Zoo.",
+        402,
+      );
+    }
+
+    if (code === 4403) {
+      return new KclAuthError(
+        'The Zoo kernel requires a Tau Pro subscription. Upgrade in Plans & Billing to continue.',
+        403,
+      );
+    }
+
     if (code === 1006) {
       return KclConnectionError.apiUnavailable(
         'The connection was closed unexpectedly. Please check your network connection and try again.',

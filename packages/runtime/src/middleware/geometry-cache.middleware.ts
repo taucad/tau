@@ -21,19 +21,34 @@ import { encode as msgpackEncode, decode as msgpackDecode } from '@msgpack/msgpa
 import type { ExportFile, GeometryResponse } from '@taucad/types';
 import { z } from 'zod';
 import { LruMap } from '@taucad/utils/cache';
-import { joinPath } from '@taucad/utils/path';
 import type { KernelFileSystem } from '#types/runtime-kernel.types.js';
 import type { ExportGeometryResult, KernelSuccessResult } from '#types/runtime.types.js';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import { nativeBuildInputSymbol } from '#framework/render-artifact.js';
+import type { NativeBuildInput, NativeBuildInputCarrier } from '#framework/render-artifact.js';
+
+type BuildCacheResult = KernelSuccessResult<GeometryResponse | undefined> & NativeBuildInputCarrier;
 
 /**
  * In-memory L1 cache for deserialized geometry results.
  * Module-scoped so each worker gets its own cache.
  * Smaller than parameter cache due to larger value sizes (binary GLTF).
  * Exported for test isolation (`beforeEach` → `.clear()`).
+ *
+ * After the mesh/build/export split, entries for kernels that defer display to
+ * `meshGeometry` carry `data: undefined` plus a `serializedNativeHandle` — the
+ * build-cache role. Mesh-native kernels keep inline display data as before.
  * @public
  */
-export const geometryMemoryCache = new LruMap<KernelSuccessResult<GeometryResponse>>({ maxEntries: 20 });
+export const geometryMemoryCache = new LruMap<BuildCacheResult>({ maxEntries: 20 });
+
+/**
+ * In-memory L1 cache for display-mesh results produced by the `meshGeometry` phase.
+ * Keyed on the same dependency hash as the build entry (render options are part
+ * of the hash). Exported for test isolation.
+ * @public
+ */
+export const meshMemoryCache = new LruMap<KernelSuccessResult<GeometryResponse>>({ maxEntries: 20 });
 
 /**
  * In-memory L1 cache for export results.
@@ -46,18 +61,41 @@ export const exportMemoryCache = new LruMap<KernelSuccessResult<ExportFile[]>>({
 /**
  * Cache entry structure for MessagePack serialization.
  * Stores the full KernelSuccessResult so that all fields (geometry, issues,
- * and any future additions) are persisted implicitly.
+ * serializedNativeHandle, and any future additions) are persisted implicitly.
+ *
+ * Version 7: build entries carry the exact terminal kernel input separately
+ * from the public result. Older entries and build entries without replay input
+ * are treated as misses.
  */
-type CacheEntry = {
-  version: 5;
-  result: KernelSuccessResult<GeometryResponse>;
-};
+type CacheEntry =
+  | {
+      version: 7;
+      kind: 'build';
+      result: KernelSuccessResult<GeometryResponse | undefined>;
+      nativeBuildInput: NativeBuildInput;
+    }
+  | {
+      version: 7;
+      kind: 'mesh';
+      result: KernelSuccessResult<GeometryResponse>;
+    };
 
 type ExportCacheEntry = {
   version: 1;
   kind: 'export';
   result: KernelSuccessResult<ExportFile[]>;
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNativeBuildInput(value: unknown): value is NativeBuildInput {
+  if (!isRecord(value) || typeof value['entryPath'] !== 'string' || !isRecord(value['parameters'])) {
+    return false;
+  }
+  return !Object.hasOwn(value, 'options') || isRecord(value['options']);
+}
 
 /**
  * Serialize a successful geometry result for cache storage using MessagePack.
@@ -67,8 +105,18 @@ type ExportCacheEntry = {
  * @param result - The successful geometry result to serialize
  * @returns Binary MessagePack-encoded data
  */
-function serializeResult(result: KernelSuccessResult<GeometryResponse>): Uint8Array<ArrayBuffer> {
-  const entry: CacheEntry = { version: 5, result };
+function serializeBuildResult(result: BuildCacheResult): Uint8Array<ArrayBuffer> {
+  const nativeBuildInput = result[nativeBuildInputSymbol];
+  if (!nativeBuildInput) {
+    throw new Error('Cannot cache a native build without exact replay input');
+  }
+  const { [nativeBuildInputSymbol]: _nativeBuildInput, ...publicResult } = result;
+  const entry: CacheEntry = { version: 7, kind: 'build', result: publicResult, nativeBuildInput };
+  return msgpackEncode(entry);
+}
+
+function serializeMeshResult(result: KernelSuccessResult<GeometryResponse>): Uint8Array<ArrayBuffer> {
+  const entry: CacheEntry = { version: 7, kind: 'mesh', result };
   return msgpackEncode(entry);
 }
 
@@ -80,28 +128,52 @@ function serializeResult(result: KernelSuccessResult<GeometryResponse>): Uint8Ar
  * @returns The deserialized result with geometry and issues
  * @throws Error if cache format is invalid or incompatible version
  */
-function deserializeResult(data: Uint8Array<ArrayBuffer>): KernelSuccessResult<GeometryResponse> {
+function deserializeResult(data: Uint8Array<ArrayBuffer>, kind: CacheEntry['kind']): CacheEntry {
   const decoded: unknown = msgpackDecode(data);
 
   if (
     typeof decoded !== 'object' ||
     decoded === null ||
     !('version' in decoded) ||
-    decoded.version !== 5 ||
-    !('result' in decoded)
+    decoded.version !== 7 ||
+    !('kind' in decoded) ||
+    decoded.kind !== kind ||
+    !('result' in decoded) ||
+    (kind === 'build' && (!('nativeBuildInput' in decoded) || !isNativeBuildInput(decoded.nativeBuildInput)))
   ) {
     throw new Error('Invalid or incompatible cache format');
   }
 
   const entry = decoded as CacheEntry;
 
+  // MessagePack serializes `undefined` as null, so decoded build-cache entries
+  // (deferred display, no data) carry a nullish `data` — normalize back to the
+  // wire contract before the entry is used.
+  entry.result.data ??= undefined;
+
   // Copy GLTF Uint8Arrays to ensure we have proper ArrayBuffers
   // (MessagePack may return views into a shared buffer)
-  if (entry.result.data.format === 'gltf') {
+  if (entry.result.data?.format === 'gltf') {
     entry.result.data.content = new Uint8Array(entry.result.data.content);
   }
 
-  return entry.result;
+  return entry;
+}
+
+function deserializeBuildResult(data: Uint8Array<ArrayBuffer>): BuildCacheResult {
+  const entry = deserializeResult(data, 'build');
+  if (entry.kind !== 'build') {
+    throw new Error('Invalid build cache entry');
+  }
+  return { ...entry.result, [nativeBuildInputSymbol]: entry.nativeBuildInput };
+}
+
+function deserializeMeshResult(data: Uint8Array<ArrayBuffer>): KernelSuccessResult<GeometryResponse> {
+  const { result } = deserializeResult(data, 'mesh');
+  if (result.data === undefined) {
+    throw new Error('Invalid mesh cache entry: missing display geometry');
+  }
+  return { ...result, data: result.data };
 }
 
 function serializeExportResult(result: KernelSuccessResult<ExportFile[]>): Uint8Array<ArrayBuffer> {
@@ -138,12 +210,18 @@ function cloneGeometry(geometry: GeometryResponse): GeometryResponse {
   return { ...geometry, content: new Uint8Array(geometry.content) };
 }
 
-function cloneSuccessResult(result: KernelSuccessResult<GeometryResponse>): KernelSuccessResult<GeometryResponse> {
+function cloneSuccessResult<T extends GeometryResponse | undefined>(
+  result: KernelSuccessResult<T>,
+): KernelSuccessResult<T> {
   return {
     ...result,
-    data: cloneGeometry(result.data),
+    data: (result.data === undefined ? undefined : cloneGeometry(result.data)) as T,
     issues: [...result.issues],
   };
+}
+
+function cloneBuildSuccessResult(result: BuildCacheResult): BuildCacheResult {
+  return { ...cloneSuccessResult(result), [nativeBuildInputSymbol]: result[nativeBuildInputSymbol] };
 }
 
 function cloneExportFile(file: ExportFile): ExportFile {
@@ -162,27 +240,33 @@ function cloneExportSuccessResult(result: KernelSuccessResult<ExportFile[]>): Ke
  * Get the cache file path for a given cache key.
  * Uses .bin extension for MessagePack binary storage.
  *
- * @param basePath - The base path for the build
  * @param cacheKey - identifier used to locate and deduplicate cached geometry files
  * @returns The full path to the cache file
  */
-function getCachePath(basePath: string, cacheKey: string): string {
-  return joinPath(basePath, '.tau/cache/geometry', `${cacheKey}.bin`);
+function getCachePath(cacheKey: string): string {
+  return `/.tau/cache/geometry/${cacheKey}.bin`;
 }
 
-function getExportCachePath(basePath: string, cacheKey: string): string {
-  return joinPath(basePath, '.tau/cache/geometry', `export-${cacheKey}.bin`);
+/**
+ * Get the cache file path for a display-mesh entry.
+ *
+ * @param cacheKey - identifier used to locate and deduplicate cached display meshes
+ * @returns The full path to the mesh cache file
+ */
+function getMeshCachePath(cacheKey: string): string {
+  return `/.tau/cache/geometry/mesh-${cacheKey}.bin`;
+}
+
+function getExportCachePath(cacheKey: string): string {
+  return `/.tau/cache/geometry/export-${cacheKey}.bin`;
 }
 
 /**
  * Get the cache directory path.
  *
- * @param basePath - The base path for the build
  * @returns The full path to the cache directory
  */
-function getCacheDirectory(basePath: string): string {
-  return joinPath(basePath, '.tau/cache/geometry');
-}
+const cacheDirectory = '/.tau/cache/geometry';
 
 /**
  * Check if the result has webrtc format.
@@ -280,24 +364,23 @@ export const geometryCache = defineMiddleware({
   }),
 
   async wrapCreateGeometry(input, handler, { logger, filesystem, dependencyHash, options }) {
-    const { basePath } = input;
     const cacheKey = dependencyHash;
 
     // L1: In-memory cache (fast, no I/O or deserialization)
     const memoryCached = geometryMemoryCache.get(cacheKey);
     if (memoryCached) {
       logger.debug(`Geometry memory cache hit for ${cacheKey}`);
-      return cloneSuccessResult(memoryCached);
+      return cloneBuildSuccessResult(memoryCached);
     }
 
     // L2: Filesystem cache
-    const cachePath = getCachePath(basePath, cacheKey);
+    const cachePath = getCachePath(cacheKey);
     try {
       const cachedData = await filesystem.readFile(cachePath);
       logger.debug(`Cache hit for ${cacheKey}`);
 
-      const result = deserializeResult(cachedData);
-      geometryMemoryCache.set(cacheKey, cloneSuccessResult(result));
+      const result = deserializeBuildResult(cachedData);
+      geometryMemoryCache.set(cacheKey, cloneBuildSuccessResult(result));
       return result;
     } catch (error) {
       logger.debug(`Cache miss for ${cacheKey}: ${String(error)}`);
@@ -306,18 +389,25 @@ export const geometryCache = defineMiddleware({
     // Compute: execute downstream
     const result = await handler(input);
 
-    // Write back to L2 and populate L1 (skip webrtc for both)
+    // Write back to L2 and populate L1. Skip webrtc (live streams) and entries
+    // with nothing durable to serve — no display data and no native-handle
+    // snapshot (e.g. zoo's live-only session) — a hit on such an entry would
+    // short-circuit the kernel and then force a redundant reheat.
     if (result.success) {
-      if (hasVideoStreamGeometry(result.data)) {
+      const replayInput = (result as BuildCacheResult)[nativeBuildInputSymbol];
+      if (result.data !== undefined && hasVideoStreamGeometry(result.data)) {
         logger.debug(`Skipping cache for ${cacheKey}: contains webrtc geometry`);
+      } else if (!replayInput) {
+        logger.debug(`Skipping cache for ${cacheKey}: missing exact native-build replay input`);
+      } else if (result.data === undefined && result.serializedNativeHandle === undefined) {
+        logger.debug(`Skipping cache for ${cacheKey}: no display data and no native-handle snapshot`);
       } else {
-        geometryMemoryCache.set(cacheKey, cloneSuccessResult(result));
+        geometryMemoryCache.set(cacheKey, cloneBuildSuccessResult(result));
 
         try {
-          const cacheDirectory = getCacheDirectory(basePath);
           await filesystem.ensureDir(cacheDirectory);
 
-          const serialized = serializeResult(result);
+          const serialized = serializeBuildResult(result);
           await filesystem.writeFile(cachePath, serialized);
           logger.debug(`Cached geometry at ${cacheKey}`);
 
@@ -336,7 +426,61 @@ export const geometryCache = defineMiddleware({
     return result;
   },
 
-  async wrapExportGeometry(input, handler, { logger, filesystem, dependencyHash, options, projectRootPath }) {
+  async wrapMeshGeometry(input, handler, { logger, filesystem, dependencyHash, options }) {
+    const cacheKey = dependencyHash;
+
+    // L1: In-memory cache
+    const memoryCached = meshMemoryCache.get(cacheKey);
+    if (memoryCached) {
+      logger.debug(`Mesh memory cache hit for ${cacheKey}`);
+      return cloneSuccessResult(memoryCached);
+    }
+
+    // L2: Filesystem cache
+    const cachePath = getMeshCachePath(cacheKey);
+    try {
+      const cachedData = await filesystem.readFile(cachePath);
+      logger.debug(`Mesh cache hit for ${cacheKey}`);
+
+      const result = deserializeMeshResult(cachedData);
+      meshMemoryCache.set(cacheKey, cloneSuccessResult(result));
+      return result;
+    } catch (error) {
+      logger.debug(`Mesh cache miss for ${cacheKey}: ${String(error)}`);
+    }
+
+    const result = await handler(input);
+
+    if (result.success && result.data !== undefined) {
+      if (hasVideoStreamGeometry(result.data)) {
+        logger.debug(`Skipping mesh cache for ${cacheKey}: contains webrtc geometry`);
+        return result;
+      }
+      const displayResult = { ...result, data: result.data };
+      meshMemoryCache.set(cacheKey, cloneSuccessResult(displayResult));
+
+      try {
+        await filesystem.ensureDir(cacheDirectory);
+
+        const serialized = serializeMeshResult(displayResult);
+        await filesystem.writeFile(cachePath, serialized);
+        logger.debug(`Cached display mesh at ${cacheKey}`);
+
+        await cleanupOldCacheEntries({
+          filesystem,
+          cacheDirectory,
+          maxAge: options.maxAge,
+          maxEntries: options.maxEntries,
+        });
+      } catch (error) {
+        logger.warn(`Mesh cache write error for ${cacheKey}: ${String(error)}`);
+      }
+    }
+
+    return result;
+  },
+
+  async wrapExportGeometry(input, handler, { logger, filesystem, dependencyHash, options }) {
     const cacheKey = dependencyHash;
 
     const memoryCached = exportMemoryCache.get(cacheKey);
@@ -345,7 +489,7 @@ export const geometryCache = defineMiddleware({
       return cloneExportSuccessResult(memoryCached);
     }
 
-    const cachePath = getExportCachePath(projectRootPath, cacheKey);
+    const cachePath = getExportCachePath(cacheKey);
     try {
       const cachedData = await filesystem.readFile(cachePath);
       logger.debug(`Export cache hit for ${cacheKey}`);
@@ -362,7 +506,6 @@ export const geometryCache = defineMiddleware({
       exportMemoryCache.set(cacheKey, cloneExportSuccessResult(result));
 
       try {
-        const cacheDirectory = getCacheDirectory(projectRootPath);
         await filesystem.ensureDir(cacheDirectory);
 
         const serialized = serializeExportResult(result);

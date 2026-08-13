@@ -9,7 +9,7 @@
  */
 
 import type { Geometry } from '@taucad/types';
-import type { EncodedFileBytes, EncodedGeometry } from '#transport/runtime-transport.types.js';
+import type { EncodedGeometry } from '#transport/runtime-transport.types.js';
 
 const cloneBytes = (bytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => new Uint8Array(bytes);
 
@@ -45,18 +45,3 @@ export const encodeGeometryAsOwnedCopy = (geometry: Geometry): EncodedGeometry =
     tier: 'copy',
   };
 };
-
-export const encodeFileAsOwnedTransfer = (file: Uint8Array<ArrayBuffer>): EncodedFileBytes => {
-  const bytes = cloneBytes(file);
-  return {
-    value: { delivery: 'inline', bytes },
-    transferables: [bytes.buffer],
-    tier: 'transfer',
-  };
-};
-
-export const encodeFileAsOwnedCopy = (file: Uint8Array<ArrayBuffer>): EncodedFileBytes => ({
-  value: { delivery: 'inline', bytes: cloneBytes(file) },
-  transferables: [],
-  tier: 'copy',
-});

@@ -3,6 +3,7 @@
 import { encode as msgpackEncode } from '@msgpack/msgpack';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ZooWebSocketTransport } from '#kernels/zoo/transport/zoo-websocket-transport.js';
+import { KclAuthError } from '#kernels/zoo/kcl-errors.js';
 import {
   zooTestInstallFakeWebSocket,
   zooTestFakeSocketCapture,
@@ -125,6 +126,28 @@ describe('ZooWebSocketTransport', () => {
     zooTestFakeSocketCapture.current?.close(code, reason);
     expect(onClosed).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    { code: 4401, reason: 'UNAUTHENTICATED', expectedStatus: 401, messagePattern: /sign in to tau/i },
+    { code: 4403, reason: 'PRO_KERNELS_REQUIRED', expectedStatus: 403, messagePattern: /pro subscription/i },
+  ])(
+    'maps the Tau billing-gate close code $code to a typed auth error before auth completes',
+    async ({ code, reason, expectedStatus, messagePattern }) => {
+      const transport = new ZooWebSocketTransport({ baseUrl: 'ws://fake.example/modeling-commands' });
+      const init = transport.initialize();
+      await Promise.resolve();
+
+      zooTestFakeSocketCapture.current?.close(code, reason);
+
+      const error = await init.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(error).toBeInstanceOf(KclAuthError);
+      expect((error as KclAuthError).statusCode).toBe(expectedStatus);
+      expect((error as KclAuthError).message).toMatch(messagePattern);
+    },
+  );
 
   it('clears handlers on dispose', async () => {
     const transport = new ZooWebSocketTransport({ baseUrl: 'ws://fake.example/modeling-commands' });

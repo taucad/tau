@@ -7,7 +7,6 @@
 import { z } from 'zod';
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
-import type { KernelWorker } from '#framework/kernel-worker.js';
 
 type WebWorkerLike = {
   postMessage(value: unknown, transfer?: readonly Transferable[]): void;
@@ -21,10 +20,6 @@ const createWorkerSchema = z.custom<() => WebWorkerLike>((value) => typeof value
 
 const runtimeFileSystemSchema = z.custom<RuntimeFileSystem>(
   (value) => value === undefined || isRuntimeFileSystem(value),
-);
-
-const sharedArrayBufferSchema = z.custom<SharedArrayBuffer>(
-  (value) => typeof SharedArrayBuffer !== 'undefined' && value instanceof SharedArrayBuffer,
 );
 
 export const webWorkerClientOptionsSchema = z
@@ -66,31 +61,9 @@ export const webWorkerClientOptionsSchema = z
      * Optional filesystem handle produced by a `fromX` factory.
      */
     fileSystem: runtimeFileSystemSchema.optional(),
-    /**
-     * Caller-owned `SharedArrayBuffer` for the file-content pool.
-     * Forwarded verbatim into the worker via `memoryHandle.filePoolBuffer`.
-     */
-    filePoolBuffer: sharedArrayBufferSchema.optional(),
   })
   .strict()
   .refine((value) => value.url !== undefined || typeof value.createWorker === 'function', {
     message: 'webWorkerTransport requires `createWorker` or an explicit worker `url`',
     path: ['createWorker'],
   });
-
-/**
- * Worker-side `KernelWorker` instance the host wires its
- * `ChannelServer` against. Validated structurally — the worker
- * surface is large and we don't want a Zod schema for every
- * `KernelWorker` method, so we accept any non-null object as a
- * KernelWorker (the dispatcher's runtime checks reject unfit
- * shapes downstream).
- */
-const kernelWorkerSchema = z.custom<KernelWorker>((value) => typeof value === 'object' && value !== null);
-
-export const webWorkerHostOptionsSchema = z
-  .object({
-    /** Worker-side {@link KernelWorker} instance to bridge into the channel. */
-    worker: kernelWorkerSchema,
-  })
-  .strict();

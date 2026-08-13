@@ -22,19 +22,18 @@ import type {
   KernelErrorResult,
   GetParametersResult,
   ExportGeometryResult,
-  ExportRoute,
 } from '#types/runtime.types.js';
 import type { TelemetryEntry } from '#types/runtime-protocol.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
+import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
+import type { NativeBuildInput } from '#framework/render-artifact.js';
 import type {
   RuntimeLogger,
   KernelRuntime,
   AnyKernelDefinition,
   KernelFileSystem,
   GetDependenciesInput,
-  GetDependenciesResult,
   GetParametersInput,
-  CreateGeometryInput,
   ExportGeometryInput,
   RuntimeFileSystemBase,
 } from '#types/runtime-kernel.types.js';
@@ -45,8 +44,9 @@ import type {
   MiddlewareState,
   CreateGeometryHandler,
   GetParametersHandler,
+  MiddlewareCreateGeometryRequest,
 } from '#types/runtime-middleware.types.js';
-import type { Dependency } from '#types/runtime-dependency.types.js';
+import type { Dependency, GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { KernelMiddleware, MiddlewarePluginFactory } from '#middleware/runtime-middleware.js';
 import type { BundlerPlugin, KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
 import {
@@ -55,6 +55,12 @@ import {
   runtimePluginDefinitionSymbol,
 } from '#plugins/plugin-runtime-definition.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
+import type {
+  AnyRuntimeDefinition,
+  RuntimeKernels,
+  RuntimeMiddleware,
+  RuntimeTranscoders,
+} from '#worker/runtime-definition.js';
 import { z } from 'zod';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import type { ResolvedMiddleware } from '#framework/kernel-worker.js';
@@ -448,7 +454,7 @@ const defaultMockDependencyHash = 'a'.repeat(64);
  *
  * @template State - The state shape (defaults to empty object)
  * @template Options - The options shape (defaults to empty object)
- * @param mockOptions - optional overrides for filesystem, dependencies, and options
+ * @param mockOptions - Optional overrides for filesystem, dependencies, options, and cancellation signal
  * @returns A fully mocked middleware runtime
  * @public
  */
@@ -462,6 +468,7 @@ export function createMockRuntime<
   dependencies?: readonly Dependency[];
   dependencyHash?: string;
   options?: Options;
+  signal?: AbortSignal;
 }): KernelMiddlewareRuntime<State, Options> & {
   logger: ReturnType<typeof createMockLogger>;
   filesystem: MockFileSystem;
@@ -474,6 +481,7 @@ export function createMockRuntime<
 
     options: (mockOptions?.options ?? {}) as Options,
     dependencies: mockOptions?.dependencies ?? [],
+    signal: mockOptions?.signal ?? new AbortController().signal,
     dependencyHash: mockOptions?.dependencyHash ?? defaultMockDependencyHash,
   };
 }
@@ -582,13 +590,13 @@ export function assertFailure<T>(result: KernelResult<T>, context?: string): ass
 }
 
 /**
- * Create a CreateGeometryInput for testing.
+ * Create a middleware create request for testing.
  *
  * @param overrides - optional partial input to override default values
- * @returns a mock CreateGeometryInput with sensible defaults
+ * @returns a mock middleware create request with sensible defaults
  * @public
  */
-export function createMockInput(overrides?: Partial<CreateGeometryInput>): CreateGeometryInput {
+export function createMockInput(overrides?: Partial<MiddlewareCreateGeometryRequest>): MiddlewareCreateGeometryRequest {
   return {
     entryPath: '/test.kcl',
     parameters: {},
@@ -604,7 +612,7 @@ export function createMockInput(overrides?: Partial<CreateGeometryInput>): Creat
  * @returns An internal normalized directory-and-basename locator.
  * @public
  */
-export function createGeometryFile(filename: string) {
+export function createGeometryFile(filename: string): RuntimeFileLocator {
   const filePath = resolveVirtualPath(joinPath('/', filename));
   return {
     filename: filePath.slice(filePath.lastIndexOf('/') + 1),
@@ -633,6 +641,8 @@ export type CreateTestWorkerOptions = {
   bundlers?: readonly BundlerPlugin[];
   /** Middleware plugins to register for the test worker */
   middleware?: readonly MiddlewarePlugin[];
+  /** Transcoder plugins to register for the test worker. */
+  transcoders?: readonly TranscoderPlugin[];
   /** Pre-loaded bundler definition (bypasses dynamic import; auto-loaded for JS/TS kernels if not provided) */
   bundlerDefinition?: BundlerDefinition;
   /** Skip automatic bundler loading for JS/TS kernels (default: false) */
@@ -698,7 +708,7 @@ export async function createTestWorker(
   let kernelDefinition: AnyKernelDefinition;
   if (isKernelFactory(definition)) {
     factoryKernel = definition(options?.workerOptions);
-    kernelDefinition = await resolveRuntimePluginDefinition('kernel', factoryKernel);
+    kernelDefinition = await resolveRuntimePluginDefinition<AnyKernelDefinition>('kernel', factoryKernel);
   } else {
     kernelDefinition = definition;
   }
@@ -717,6 +727,7 @@ export async function createTestWorker(
     kernels: [kernel],
     middleware: options?.middleware ?? [],
     bundlers: options?.bundlers ?? [],
+    transcoders: options?.transcoders ?? [],
   });
   const worker = new KernelRuntimeWorker({ runtime });
 
@@ -742,7 +753,7 @@ export async function createTestWorker(
             esbuild: () => BundlerPlugin;
           }
         ).esbuild();
-    bundlerDefinition ??= await resolveRuntimePluginDefinition('bundler', dummyConfig);
+    bundlerDefinition ??= await resolveRuntimePluginDefinition<BundlerDefinition>('bundler', dummyConfig);
     await worker.ensureLoadedBundler(dummyConfig, bundlerDefinition);
   }
 
@@ -829,11 +840,14 @@ export async function createTestGeometry(input: {
 /**
  * Creates a mock KernelRuntime for kernel method testing.
  *
- * @param options - optional filesystem overrides for the mock runtime
+ * @param options - Optional filesystem and cancellation overrides for the mock runtime
  * @returns A mocked runtime with logger, filesystem, and no-op bundler/executor
  * @public
  */
-export function createMockKernelRuntime(options?: { filesystemOverrides?: MockFileSystemOptions }): KernelRuntime & {
+export function createMockKernelRuntime(options?: {
+  filesystemOverrides?: MockFileSystemOptions;
+  signal?: AbortSignal;
+}): KernelRuntime & {
   logger: ReturnType<typeof createMockLogger>;
   filesystem: MockFileSystem;
 } {
@@ -860,6 +874,7 @@ export function createMockKernelRuntime(options?: { filesystemOverrides?: MockFi
   }
 
   return {
+    signal: options?.signal ?? new AbortController().signal,
     logger: createMockLogger(),
     filesystem: createMockFileSystem(options?.filesystemOverrides),
     fileContentCache: new Map(),
@@ -892,30 +907,31 @@ const noop = () => {
  * All methods are vitest mocks with sensible defaults (connect resolves,
  * export returns a successful stub, on returns an unsubscribe no-op, etc.).
  *
+ * Pass the same runtime definition type used by `createRuntimeClient` when a
+ * consumer needs its concrete kernel, middleware, and transcoder projections.
+ * Omitting it preserves the wide `RuntimeClient` test type.
+ *
+ * @template Runtime - Optional concrete runtime definition whose plugin tuples
+ *   are projected onto the returned client.
  * @returns A fully typed RuntimeClient backed by vitest mocks
  *
  * @public
- *
- * @example <caption>Stubbing a runtime client</caption>
- * ```typescript
- * import { createMockRuntimeClient } from '@taucad/runtime/testing';
- *
- * const client = createMockRuntimeClient();
- * ```
  */
-export function createMockRuntimeClient(): RuntimeClient {
-  const createRoute = (format: FileExtension): ExportRoute => ({
-    targetFormat: format,
-    kernelId: 'test-kernel',
-    sourceFormat: 'gltf',
-    fidelity: format === 'step' || format === 'stp' ? 'brep' : 'mesh',
-    exportOptions: { schema: {}, defaults: {} },
-  });
-
-  const routesFor = vi.fn((format: FileExtension) => [createRoute(format)]) as unknown as RuntimeClient['routesFor'];
-  const bestRouteFor = vi.fn((format: FileExtension) =>
-    createRoute(format),
-  ) as unknown as RuntimeClient['bestRouteFor'];
+export function createMockRuntimeClient(): RuntimeClient;
+export function createMockRuntimeClient<Runtime extends AnyRuntimeDefinition>(): RuntimeClient<
+  RuntimeKernels<Runtime>,
+  RuntimeMiddleware<Runtime>,
+  RuntimeTranscoders<Runtime>
+>;
+/**
+ * Implements the wide and runtime-projected mock client overloads.
+ *
+ * @returns A RuntimeClient backed by Vitest mocks.
+ * @public
+ */
+export function createMockRuntimeClient(): unknown {
+  const routesFor = vi.fn(() => []) as unknown as RuntimeClient['routesFor'];
+  const bestRouteFor = vi.fn(() => undefined) as unknown as RuntimeClient['bestRouteFor'];
 
   return mock<RuntimeClient>({
     lifecycleState: 'connected',
@@ -968,8 +984,6 @@ export type MockKernelWorkerOptions = {
   renderZodSchema?: z.ZodType;
   /** Pre-set the nativeHandle on construction (simulates prior createGeometry) */
   nativeHandle?: unknown;
-  /** Native-handle reuse scope for the mock kernel (defaults to first-party `source` semantics). */
-  nativeHandleScope?: 'source' | 'operation';
   /** Worker-owned transcoder plugins to load during initialize. */
   transcoders?: readonly TranscoderPlugin[];
 };
@@ -1012,6 +1026,7 @@ export class MockKernelWorker extends KernelWorker {
   private readonly testResolvedMiddleware: ResolvedMiddleware[];
   private readonly mockComputeResult: CreateGeometryResult;
   private readonly mockExportResult: ExportGeometryResult;
+  private readonly handleToCapture: unknown;
 
   public constructor(options: MockKernelWorkerOptions) {
     super({ transcoders: options.transcoders ?? [] });
@@ -1037,6 +1052,7 @@ export class MockKernelWorker extends KernelWorker {
       ],
       issues: [],
     };
+    this.handleToCapture = options.nativeHandle ?? { kind: 'mock-native-handle' };
 
     // Set up onLog - use provided or no-op (must be done before _logger)
     // @ts-expect-error - Test utility accessing internals
@@ -1054,14 +1070,9 @@ export class MockKernelWorker extends KernelWorker {
     const zodSchemas = options.exportZodSchemas ?? { glb: z.object({}), gltf: z.object({}) };
     this.kernelExportZodSchemasMap.set('mock-kernel', zodSchemas);
     this.kernelRenderContentMap.set('mock-kernel', []);
-    this.kernelNativeHandleScopeMap.set('mock-kernel', options.nativeHandleScope ?? 'source');
 
     if (options.renderZodSchema) {
       this.kernelRenderZodSchemaMap.set('mock-kernel', options.renderZodSchema);
-    }
-
-    if (options.nativeHandle !== undefined) {
-      this.nativeHandle = options.nativeHandle;
     }
   }
 
@@ -1128,12 +1139,11 @@ export class MockKernelWorker extends KernelWorker {
   }
 
   protected override async onCreateGeometry(
-    _input: CreateGeometryInput,
+    _input: NativeBuildInput,
     _runtime: KernelRuntime,
   ): Promise<CreateGeometryResult> {
     this.createGeometryCalls++;
-    this.nativeHandle ??= { kind: 'mock-native-handle' };
-    this.captureNativeHandle(this.nativeHandle);
+    this.captureNativeHandle(this.handleToCapture);
     return this.mockComputeResult;
   }
 

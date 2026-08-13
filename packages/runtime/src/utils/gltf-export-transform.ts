@@ -1,5 +1,6 @@
 import { NodeIO } from '@gltf-transform/core';
 import type { JSONDocument } from '@gltf-transform/core';
+import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { createCoordinateTransform, createScalingTransform } from '@taucad/converter';
 import { registerTauGltfExtensions } from '@taucad/gltf-extensions';
 import { kittyCadBoundaryRepresentationExtension, tauCadTopologyExtension } from '@taucad/types/constants';
@@ -88,7 +89,7 @@ export async function transformGltfExportBytes(
     return bytes;
   }
 
-  const io = registerTauGltfExtensions(new NodeIO());
+  const io = registerTauGltfExtensions(new NodeIO()).registerExtensions([KHRMaterialsUnlit]);
   const document =
     options.format === 'glb'
       ? await io.readBinary(bytes)

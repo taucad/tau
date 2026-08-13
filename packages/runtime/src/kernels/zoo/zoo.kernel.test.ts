@@ -4,7 +4,7 @@ import type { JSONDocument } from '@gltf-transform/core';
 import { NodeIO } from '@gltf-transform/core';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import { zoo as zooKernel } from '#kernels/zoo/zoo.kernel.js';
-import type { KclUtilities } from '#kernels/zoo/kcl-utils.js';
+import { KclUtilities } from '#kernels/zoo/kcl-utils.js';
 import { createMockKernelRuntime, createTestWorker, createGeometryFile } from '#testing/kernel-testing.utils.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import { writeGlb, writeGltfJson } from '#utils/glb-writer.js';
@@ -896,6 +896,61 @@ cone = startSketchOn(XZ)
     });
   });
 
+  describe('createGeometry cancellation', () => {
+    it('cancels the engine once and rejects its pending command when the operation signal aborts', async () => {
+      const controller = new AbortController();
+      let rejectCommand!: (error: Error) => void;
+      let markCommandPending!: () => void;
+      const commandPending = new Promise<void>((resolve) => {
+        markCommandPending = resolve;
+      });
+      const executeProgram = vi.fn(
+        async () =>
+          new Promise<never>((_resolve, reject) => {
+            rejectCommand = reject;
+            markCommandPending();
+          }),
+      );
+      const cancel = vi.fn(async () => {
+        rejectCommand(new Error('kcl execution was interrupted'));
+      });
+      const context: Parameters<typeof zooDefinition.createGeometry>[2] = {
+        baseUrl: 'ws://fake.example/modeling-commands',
+        fileSystemManager: undefined,
+        kclUtils: {
+          initializeEngine: vi.fn().mockResolvedValue(undefined),
+          clearProgram: vi.fn().mockResolvedValue(undefined),
+          parseKcl: vi.fn().mockResolvedValue({ program: {}, errors: [] }),
+          executeProgram,
+          cancel,
+        } as unknown as KclUtilities,
+      };
+      const injectParameters = vi
+        .spyOn(KclUtilities, 'injectParametersIntoProgram')
+        .mockImplementation((program) => program);
+      try {
+        const operation = zooDefinition.createGeometry(
+          { entryPath: '/main.kcl', parameters: {} },
+          createMockKernelRuntime({
+            signal: controller.signal,
+            filesystemOverrides: { readFileResult: 'cube = startSketchOn(XY)' },
+          }),
+          context,
+        );
+        const rejection = expect(operation).rejects.toThrow();
+        await commandPending;
+
+        controller.abort(new Error('render timeout'));
+        await rejection;
+
+        expect(cancel).toHaveBeenCalledOnce();
+        expect(executeProgram).toHaveBeenCalledOnce();
+      } finally {
+        injectParameters.mockRestore();
+      }
+    });
+  });
+
   describe('exportGeometry', () => {
     it('should use live engine-session native handles instead of durable snapshots', async () => {
       expect(zooDefinition.serializeNativeHandle).toBeUndefined();
@@ -911,7 +966,6 @@ cone = startSketchOn(XZ)
         {
           entryPath: '/main.kcl',
           parameters: {},
-          options: {},
         },
         createMockKernelRuntime({ filesystemOverrides: { readFileResult: '' } }),
         context,

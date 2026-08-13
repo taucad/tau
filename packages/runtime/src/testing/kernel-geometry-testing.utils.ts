@@ -190,7 +190,7 @@ function isGltfResponse(response: GeometryResponse): response is { format: 'gltf
  * @public
  */
 export function extractGltfFromResult(result: CreateGeometryResult): Uint8Array<ArrayBuffer> | undefined {
-  if (!result.success) {
+  if (!result.success || result.data === undefined) {
     return undefined;
   }
 
@@ -313,12 +313,12 @@ const expectVector3ToBeCloseTo = ({
  * import { createGeometryTestHelpers, createTestWorker, createGeometryFile } from '@taucad/runtime/testing';
  *
  * declare const myKernel: Parameters<typeof createTestWorker>[0];
- * declare const myKernelOptions: Parameters<typeof createTestWorker>[1];
+ * declare const modelSource: string;
  *
  * const helpers = createGeometryTestHelpers();
- * const worker = await createTestWorker(myKernel, myKernelOptions);
+ * const worker = await createTestWorker(myKernel, { 'main.ts': modelSource });
  * const result = await worker.createGeometry({
- *   file: createGeometryFile('main.ts', 'export default () => [];'),
+ *   file: createGeometryFile('main.ts'),
  *   parameters: {},
  * });
  * await helpers.expectMeshCount(result, 1);

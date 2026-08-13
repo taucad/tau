@@ -168,7 +168,7 @@ describe('runtime-worker middleware onion chain', () => {
         const geometry = result.data;
         const cachedGeometry = cachedResult.data;
 
-        if (geometry.format === 'gltf' && cachedGeometry.format === 'gltf') {
+        if (geometry.format === 'gltf' && cachedGeometry?.format === 'gltf') {
           expect(geometry.content).toEqual(cachedGeometry.content);
         }
       }

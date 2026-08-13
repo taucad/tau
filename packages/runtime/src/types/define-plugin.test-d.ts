@@ -15,12 +15,18 @@ import { defineBundler } from '#types/runtime-bundler.types.js';
 import { defineKernel } from '#types/runtime-kernel.types.js';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
+import type { TranscodeInput } from '#types/runtime-transcoder.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import type { RuntimeConfigInput, RuntimeConfigOutput } from '#worker/runtime-definition.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 
 const testGeometry = { format: 'gltf', content: new Uint8Array([1]) } satisfies GeometryResponse;
+const typedRenderSchema = z.object({
+  tessellation: z.object({
+    linearTolerance: z.number(),
+  }),
+});
 
 const makeKernel = () =>
   defineKernel({
@@ -32,17 +38,11 @@ const makeKernel = () =>
       endpoint: z.string(),
       retries: z.number().default(2),
     }),
-    render: {
-      optionsSchema: z.object({
-        tessellation: z.object({
-          linearTolerance: z.number(),
-        }),
-      }),
-      content: [],
-    },
+    createOptionsSchema: typedRenderSchema,
+    render: { optionsSchema: typedRenderSchema },
     exportFormats: {
-      step: { optionsSchema: z.object({ tolerance: z.number().default(0.1) }), content: [] },
-      stl: { optionsSchema: z.object({ binary: z.boolean() }), content: [] },
+      step: { optionsSchema: z.object({ tolerance: z.number().default(0.1) }) },
+      stl: { optionsSchema: z.object({ binary: z.boolean() }) },
     },
     async initialize(options) {
       return { endpoint: options.endpoint };
@@ -84,7 +84,6 @@ describe('defineKernel', () => {
       extensions: ['ts'],
       name: 'Bad',
       version: '1.0.0',
-      render: { content: [] },
       exportFormats: {},
       // @ts-expect-error -- unknown authoring keys are rejected at definition time.
       worker: () => undefined,
@@ -112,7 +111,6 @@ describe('defineKernel', () => {
       extensions: ['snap'],
       name: 'SnapshotKernel',
       version: '1.0.0',
-      render: { content: [] },
       exportFormats: {},
       async initialize() {
         return { contextValue: 'ready' };
@@ -160,7 +158,6 @@ describe('defineKernel', () => {
       extensions: ['snap'],
       name: 'HalfSnapshotKernel',
       version: '1.0.0',
-      render: { content: [] },
       exportFormats: {},
       async initialize() {
         return {};
@@ -181,6 +178,264 @@ describe('defineKernel', () => {
       async exportGeometry() {
         return { success: true, data: [], issues: [] };
       },
+    });
+  });
+});
+
+const minimalKernelDefinition = {
+  id: 'minimalKernel',
+  extensions: ['minimal'],
+  name: 'MinimalKernel',
+  version: '1.0.0',
+  exportFormats: {},
+  async initialize() {
+    return {};
+  },
+  async getDependencies() {
+    return { resolved: [], unresolved: [] };
+  },
+  async getParameters() {
+    return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+  },
+  async createGeometry() {
+    return { geometry: testGeometry, nativeHandle: {} };
+  },
+  async exportGeometry() {
+    return { success: true, data: [], issues: [] };
+  },
+};
+
+describe('positive-only kernel declarations', () => {
+  it('accepts omitted render and export content', () => {
+    defineKernel(minimalKernelDefinition);
+    defineKernel({
+      ...minimalKernelDefinition,
+      id: 'schemaOnlyRender',
+      render: { optionsSchema: z.object({ quality: z.number().default(1) }) },
+      exportFormats: { glb: { optionsSchema: z.object({}) } },
+    });
+  });
+
+  it('rejects empty and unknown kernel content declarations', () => {
+    defineKernel({
+      ...minimalKernelDefinition,
+      id: 'emptyRenderContent',
+      render: {
+        // @ts-expect-error -- content declarations are positive and non-empty.
+        content: [],
+      },
+      async meshGeometry() {
+        return { geometry: testGeometry };
+      },
+    });
+    defineKernel({
+      ...minimalKernelDefinition,
+      id: 'emptyExportContent',
+      exportFormats: {
+        glb: {
+          optionsSchema: z.object({}),
+          // @ts-expect-error -- content declarations are positive and non-empty.
+          content: [],
+        },
+      },
+    });
+    defineKernel({
+      ...minimalKernelDefinition,
+      id: 'unknownRenderContent',
+      render: {
+        // @ts-expect-error -- only canonical framework content keys are accepted.
+        content: ['includeSketches'],
+      },
+      async meshGeometry() {
+        return { geometry: testGeometry };
+      },
+    });
+    defineKernel({
+      ...minimalKernelDefinition,
+      id: 'unknownExportContent',
+      exportFormats: {
+        glb: {
+          optionsSchema: z.object({}),
+          // @ts-expect-error -- only canonical framework content keys are accepted.
+          content: ['includeSketches'],
+        },
+      },
+    });
+  });
+
+  it('requires meshGeometry for positive native render content', () => {
+    // @ts-expect-error -- render content is fulfilled at the mesh boundary.
+    defineKernel({ ...minimalKernelDefinition, id: 'renderContentWithoutMesh', render: { content: ['includeEdges'] } });
+    defineKernel({
+      ...minimalKernelDefinition,
+      id: 'renderContentWithMesh',
+      render: { content: ['includeEdges'] },
+      async meshGeometry(input) {
+        expectTypeOf(input.content).toEqualTypeOf<{ readonly includeEdges?: boolean } | undefined>();
+        return { geometry: testGeometry };
+      },
+    });
+  });
+
+  it('accepts only object create option schemas and rejects the removed scope flag', () => {
+    defineKernel({
+      ...minimalKernelDefinition,
+      id: 'objectCreateSchema',
+      createOptionsSchema: z.object({ quality: z.number().default(1) }),
+      async createGeometry(input) {
+        expectTypeOf(input.options).toEqualTypeOf<{ quality: number }>();
+        expectTypeOf(input).not.toHaveProperty('content');
+        const output = { geometry: testGeometry, nativeHandle: {} };
+        expectTypeOf(output).not.toHaveProperty('nativeBuildInput');
+        return output;
+      },
+    });
+
+    // @ts-expect-error -- createOptionsSchema must be a Zod object.
+    defineKernel({ ...minimalKernelDefinition, id: 'scalarCreateSchema', createOptionsSchema: z.string() });
+    // @ts-expect-error -- createOptionsSchema must be a Zod object.
+    defineKernel({ ...minimalKernelDefinition, id: 'arrayCreateSchema', createOptionsSchema: z.array(z.string()) });
+    defineKernel({
+      ...minimalKernelDefinition,
+      id: 'unionCreateSchema',
+      // @ts-expect-error -- createOptionsSchema must be a Zod object.
+      createOptionsSchema: z.union([z.object({ a: z.string() }), z.object({ b: z.string() })]),
+    });
+    defineKernel({
+      ...minimalKernelDefinition,
+      id: 'transformedCreateSchema',
+      // @ts-expect-error -- transformed object schemas are not direct Zod objects.
+      createOptionsSchema: z.object({ quality: z.number() }).transform((value) => value),
+    });
+    defineKernel({
+      ...minimalKernelDefinition,
+      id: 'removedNativeScope',
+      // @ts-expect-error -- native compatibility is derived from exact build identity.
+      nativeHandleScope: 'source',
+    });
+  });
+
+  it('omits content and options from source-only create hooks', () => {
+    defineKernel({
+      ...minimalKernelDefinition,
+      id: 'sourceOnlyCreate',
+      async createGeometry(input) {
+        expectTypeOf(input).not.toHaveProperty('content');
+        expectTypeOf(input).not.toHaveProperty('options');
+        // @ts-expect-error -- framework content never reaches kernel construction.
+        void input.content;
+        // @ts-expect-error -- options exist only with createOptionsSchema.
+        void input.options;
+        return { geometry: testGeometry, nativeHandle: {} };
+      },
+    });
+  });
+});
+
+describe('positive-only middleware and transcoder declarations', () => {
+  it('accepts omission and rejects empty or unknown middleware declarations', () => {
+    defineMiddleware({ id: 'omittedMiddlewareContent', name: 'Omitted middleware content' });
+    defineMiddleware({
+      id: 'invalidMiddlewareRenderContent',
+      name: 'Invalid middleware render content',
+      content: {
+        // @ts-expect-error -- middleware render content must be non-empty.
+        render: [],
+      },
+    });
+    defineMiddleware({
+      id: 'invalidMiddlewareExportContent',
+      name: 'Invalid middleware export content',
+      content: {
+        exportFormats: {
+          // @ts-expect-error -- middleware export content must be non-empty.
+          glb: [],
+        },
+      },
+    });
+    defineMiddleware({
+      id: 'unknownMiddlewareRenderContent',
+      name: 'Unknown middleware render content',
+      content: {
+        // @ts-expect-error -- unknown middleware render content is rejected.
+        render: ['includeSketches'],
+      },
+    });
+    defineMiddleware({
+      id: 'unknownMiddlewareExportContent',
+      name: 'Unknown middleware export content',
+      content: {
+        exportFormats: {
+          // @ts-expect-error -- unknown middleware export content is rejected.
+          glb: ['includeSketches'],
+        },
+      },
+    });
+  });
+
+  it('gives content-empty middleware hooks no content property', () => {
+    defineMiddleware({
+      id: 'contentEmptyHooks',
+      name: 'Content-empty hooks',
+      async wrapCreateGeometry(input, handler) {
+        expectTypeOf(input).not.toHaveProperty('content');
+        // @ts-expect-error -- omission removes the provider property.
+        void input.content;
+        return handler(input);
+      },
+      async wrapMeshGeometry(input, handler) {
+        expectTypeOf(input).not.toHaveProperty('content');
+        return handler(input);
+      },
+      async wrapExportGeometry(input, handler) {
+        expectTypeOf(input).not.toHaveProperty('content');
+        return handler(input);
+      },
+    });
+  });
+
+  it('accepts omitted transcoder content and rejects empty or unknown declarations', () => {
+    const base = {
+      name: 'Type transcoder',
+      version: '1.0.0',
+      async initialize() {
+        return {};
+      },
+      async transcode(input: TranscodeInput) {
+        return { success: true, data: input.files, issues: [] };
+      },
+      async cleanup() {},
+    };
+    defineTranscoder({
+      ...base,
+      id: 'omittedTranscoderContent',
+      edges: [{ from: 'glb', to: 'stl', fidelity: 'mesh' }] as const,
+    });
+    defineTranscoder({
+      ...base,
+      id: 'emptyTranscoderContent',
+      edges: [
+        {
+          from: 'glb',
+          to: 'stl',
+          fidelity: 'mesh',
+          // @ts-expect-error -- transcoder content must be non-empty.
+          content: [],
+        },
+      ] as const,
+    });
+    defineTranscoder({
+      ...base,
+      id: 'unknownTranscoderContent',
+      edges: [
+        {
+          from: 'glb',
+          to: 'stl',
+          fidelity: 'mesh',
+          // @ts-expect-error -- unknown transcoder content is rejected.
+          content: ['includeSketches'],
+        },
+      ] as const,
     });
   });
 });
@@ -390,7 +645,7 @@ describe('route-scoped content projections', () => {
           .strict(),
         content: ['includeEdges', 'includeTopology'],
       },
-      step: { optionsSchema: z.object({ tolerance: z.number().default(0.01) }).strict(), content: [] },
+      step: { optionsSchema: z.object({ tolerance: z.number().default(0.01) }).strict() },
     },
     async initialize() {
       return {};
@@ -402,6 +657,13 @@ describe('route-scoped content projections', () => {
       return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
     },
     async createGeometry(input) {
+      expectTypeOf(input).not.toHaveProperty('content');
+      expectTypeOf(input).not.toHaveProperty('options');
+      // @ts-expect-error -- kernel construction is always content-free.
+      void input.content;
+      return { nativeHandle: {} };
+    },
+    async meshGeometry(input) {
       expectTypeOf<typeof input.content>().toEqualTypeOf<
         | {
             readonly includeEdges?: boolean;
@@ -409,9 +671,11 @@ describe('route-scoped content projections', () => {
           }
         | undefined
       >();
-      return { geometry: testGeometry, nativeHandle: {} };
+      return { geometry: testGeometry };
     },
     async exportGeometry(input) {
+      // @ts-expect-error -- mixed format unions require format narrowing before content access.
+      void input.content;
       if (input.format === 'glb') {
         expectTypeOf<typeof input.content>().toEqualTypeOf<
           | {
@@ -422,7 +686,9 @@ describe('route-scoped content projections', () => {
         >();
       }
       if (input.format === 'step') {
-        expectTypeOf<typeof input.content>().toEqualTypeOf<undefined>();
+        expectTypeOf(input).not.toHaveProperty('content');
+        // @ts-expect-error -- omitted STEP support removes the provider property.
+        void input.content;
       }
       return { success: true, data: [], issues: [] };
     },
@@ -433,8 +699,7 @@ describe('route-scoped content projections', () => {
     extensions: ['fallback'],
     name: 'FallbackKernel',
     version: '1.0.0',
-    render: { content: [] },
-    exportFormats: { glb: { optionsSchema: z.object({}), content: [] } },
+    exportFormats: { glb: { optionsSchema: z.object({}) } },
     async initialize() {
       return {};
     },
@@ -444,10 +709,13 @@ describe('route-scoped content projections', () => {
     async getParameters() {
       return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
     },
-    async createGeometry() {
+    async createGeometry(input) {
+      expectTypeOf(input).not.toHaveProperty('content');
+      expectTypeOf(input).not.toHaveProperty('options');
       return { geometry: testGeometry, nativeHandle: {} };
     },
-    async exportGeometry() {
+    async exportGeometry(input) {
+      expectTypeOf(input).not.toHaveProperty('content');
       return { success: true, data: [], issues: [] };
     },
   })();
@@ -460,6 +728,14 @@ describe('route-scoped content projections', () => {
       exportFormats: { glb: ['includeEdges'] },
     },
     async wrapCreateGeometry(input, handler) {
+      expectTypeOf<typeof input.content>().toEqualTypeOf<{ readonly includeEdges?: boolean } | undefined>();
+      return handler(input);
+    },
+    async wrapMeshGeometry(input, handler) {
+      expectTypeOf<typeof input.content>().toEqualTypeOf<{ readonly includeEdges?: boolean } | undefined>();
+      return handler(input);
+    },
+    async wrapExportGeometry(input, handler) {
       expectTypeOf<typeof input.content>().toEqualTypeOf<{ readonly includeEdges?: boolean } | undefined>();
       return handler(input);
     },

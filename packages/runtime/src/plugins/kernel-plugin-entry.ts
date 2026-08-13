@@ -19,7 +19,6 @@ export type {
   CreateGeometryOutput,
   ExportGeometryInput,
   GetDependenciesInput,
-  GetDependenciesResult,
   GetParametersInput,
   InitializeInput,
   KernelDefinition,
@@ -30,9 +29,9 @@ export type {
   RuntimeLogger,
   RuntimeLogOptions,
   RuntimeWatchEvent,
-  RuntimeWatchEventFilter,
   RuntimeWatchRequest,
 } from '#types/runtime-kernel.types.js';
+export type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 
 export type {
   CreateGeometryResult,

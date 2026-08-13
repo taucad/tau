@@ -15,7 +15,7 @@ import { wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem
  * Create an opaque {@link RuntimeFileSystem} backed by Node.js
  * `fs.promises`. Pass the result to
  * `inProcessTransport({ runtime, fileSystem })`,
- * `nodeWorkerTransport({ fileSystem })`, or `webWorkerTransport({ fileSystem })`.
+ * `nodeWorkerTransport({ url, fileSystem })`, or `webWorkerTransport({ fileSystem })`.
  *
  * @param basePath - Host filesystem directory exposed as runtime `/`.
  * Runtime paths are resolved within this directory; the host path itself is

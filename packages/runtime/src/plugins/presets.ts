@@ -4,11 +4,13 @@
 
 import { replicad, opencascade, zoo, jscad, manifold, tau } from '#plugins/kernel-factories.js';
 import { parameterCache } from '#middleware/parameter-cache.middleware.js';
+import { parameterFileResolver } from '#middleware/parameter-file-resolver.middleware.js';
 import { geometryCache } from '#middleware/geometry-cache.middleware.js';
 import { gltfCoordinateTransform } from '#middleware/gltf-coordinate-transform.middleware.js';
 import { gltfEdgeDetection } from '#middleware/gltf-edge-detection.middleware.js';
 import { esbuild } from '#bundler/esbuild.bundler.js';
 import { converterTranscoder } from '#transcoders/converter/converter.transcoder.js';
+import { imageTranscoder } from '#transcoders/image/image.transcoder.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 
 /**
@@ -42,9 +44,15 @@ export const presets = {
   all() {
     return defineRuntime({
       kernels: [zoo(), replicad(), opencascade(), manifold(), jscad(), tau()],
-      middleware: [parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()],
+      middleware: [
+        parameterFileResolver(),
+        parameterCache(),
+        geometryCache(),
+        gltfCoordinateTransform(),
+        gltfEdgeDetection(),
+      ],
       bundlers: [esbuild()],
-      transcoders: [converterTranscoder()],
+      transcoders: [converterTranscoder(), imageTranscoder()],
     });
   },
 };

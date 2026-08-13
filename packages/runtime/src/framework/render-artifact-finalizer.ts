@@ -1,10 +1,15 @@
 import type { GeometryGltf, GeometryResponse, GeometrySvg } from '@taucad/types';
-import type { CreateGeometryOutput } from '#types/runtime-kernel.types.js';
+import type { CreateGeometryOutput, MeshGeometryOutput } from '#types/runtime-kernel.types.js';
 import type { KernelIssue } from '#types/runtime.types.js';
 
 export type RenderArtifactFinalizerInput<NativeHandle = unknown> = {
   readonly artifacts: readonly GeometryResponse[];
   readonly nativeHandle: NativeHandle;
+  readonly issues?: readonly KernelIssue[];
+};
+
+export type MeshArtifactFinalizerInput = {
+  readonly artifacts: readonly GeometryResponse[];
   readonly issues?: readonly KernelIssue[];
 };
 
@@ -62,11 +67,7 @@ const normalizeGeometry = (geometry: GeometryResponse): GeometryResponse => {
   return geometry;
 };
 
-export const finalizeRenderOutput = <NativeHandle>({
-  artifacts,
-  nativeHandle,
-  issues,
-}: RenderArtifactFinalizerInput<NativeHandle>): CreateGeometryOutput<NativeHandle> => {
+const selectSingleArtifact = (artifacts: readonly GeometryResponse[]): GeometryResponse => {
   if (artifacts.length === 0) {
     fail(createIssue('NO_RENDER_GEOMETRY', 'Kernel render produced no public geometry artifact.'));
   }
@@ -89,9 +90,28 @@ export const finalizeRenderOutput = <NativeHandle>({
     );
   }
 
+  return normalizeGeometry(artifacts[0]!);
+};
+
+export const finalizeRenderOutput = <NativeHandle>({
+  artifacts,
+  nativeHandle,
+  issues,
+}: RenderArtifactFinalizerInput<NativeHandle>): CreateGeometryOutput<NativeHandle> => {
   return {
-    geometry: normalizeGeometry(artifacts[0]!),
+    geometry: selectSingleArtifact(artifacts),
     nativeHandle,
+    issues: issues === undefined ? undefined : [...issues],
+  };
+};
+
+/**
+ * Finalize the display artifact produced by a kernel's `meshGeometry` phase.
+ * Applies the same single-artifact invariants as {@link finalizeRenderOutput}.
+ */
+export const finalizeMeshOutput = ({ artifacts, issues }: MeshArtifactFinalizerInput): MeshGeometryOutput => {
+  return {
+    geometry: selectSingleArtifact(artifacts),
     issues: issues === undefined ? undefined : [...issues],
   };
 };

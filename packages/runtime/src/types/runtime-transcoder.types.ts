@@ -11,10 +11,13 @@
 import type { z } from 'zod';
 import type { ExportFidelity, ExportFile, FileExtension } from '@taucad/types';
 import type { KernelResult } from '#types/runtime.types.js';
-import type { RuntimeLogger } from '#types/runtime-kernel.types.js';
+import type { RuntimeImplementationAsset, RuntimeLogger } from '#types/runtime-kernel.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import type { TranscoderPlugin } from '#plugins/plugin-types.js';
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
+import type { ContentKeysOf, RuntimeContentDeclaration, RuntimeContentKey } from '#types/runtime-content.types.js';
+import { validateRuntimeContentDeclarations } from '#types/runtime-content.types.js';
 
 // =============================================================================
 // Transcoder Edge and Input Types
@@ -42,6 +45,10 @@ export type TranscoderEdge<
   to: To;
   fidelity: ExportFidelity;
   optionsSchema?: Schema;
+  /** Final content properties this edge preserves or consumes. */
+  content?: RuntimeContentDeclaration;
+  /** Source-format options pinned by the edge and removed from consumer options. */
+  sourceOptions?: Record<string, unknown>;
 };
 
 /**
@@ -120,6 +127,9 @@ export type TranscoderDefinition<
   /** Semantic version string for diagnostics */
   version: string;
 
+  /** Selected implementation assets whose verified digests participate in artifact identity. */
+  implementationAssets?: readonly RuntimeImplementationAsset[];
+
   /** Zod schema for validating and typing transcoder options */
   optionsSchema?: z.ZodType<Options>;
 
@@ -151,6 +161,8 @@ type TranscoderDefinitionConfig<
   name: string;
   /** Semantic version string for diagnostics */
   version: string;
+  /** Selected implementation assets. */
+  implementationAssets?: readonly RuntimeImplementationAsset[];
   /** Statically declared format conversion edges. */
   edges: Edges;
   /** Initialize transcoder with typed options */
@@ -167,16 +179,37 @@ type EdgeOptionMap<Edges extends readonly TranscoderEdge[]> = {
 
 type SourceFormat<Edges extends readonly TranscoderEdge[]> = Edges[number]['from'] & string;
 
+type EdgeContentMap<Edges extends readonly TranscoderEdge[]> = {
+  [Edge in Edges[number] as Edge['to'] & string]: Edge extends { content: infer Content }
+    ? ContentKeysOf<Content>
+    : never;
+};
+
+type EdgePinnedSourceOptionsMap<Edges extends readonly TranscoderEdge[]> = {
+  [Edge in Edges[number] as Edge['to'] & string]: Edge extends { sourceOptions: infer SourceOptions }
+    ? keyof SourceOptions
+    : never;
+};
+
 export type TranscoderPluginFactory<
   Id extends string,
   EdgeMap extends Record<string, unknown>,
   From extends string,
   Options = undefined,
+  ContentMap extends Record<string, RuntimeContentKey> = Record<string, RuntimeContentKey>,
+  PinnedSourceOptionsMap extends Record<string, PropertyKey> = Record<string, PropertyKey>,
 > = Options extends undefined
-  ? () => TranscoderPlugin<EdgeMap, From, Id>
+  ? () => TranscoderPlugin<EdgeMap, From, Id, ContentMap, PinnedSourceOptionsMap> &
+      RuntimePluginDefinitionCarrier<TranscoderDefinition>
   : Partial<Options> extends Options
-    ? (options?: Options) => TranscoderPlugin<EdgeMap, From, Id>
-    : (options: Options) => TranscoderPlugin<EdgeMap, From, Id>;
+    ? (
+        options?: Options,
+      ) => TranscoderPlugin<EdgeMap, From, Id, ContentMap, PinnedSourceOptionsMap> &
+        RuntimePluginDefinitionCarrier<TranscoderDefinition>
+    : (
+        options: Options,
+      ) => TranscoderPlugin<EdgeMap, From, Id, ContentMap, PinnedSourceOptionsMap> &
+        RuntimePluginDefinitionCarrier<TranscoderDefinition>;
 
 /**
  * Define a transcoder module with full type inference.
@@ -222,7 +255,14 @@ export function defineTranscoder<
   definition: TranscoderDefinitionConfig<Id, Context, z.output<OptionsSchema> & Record<string, unknown>, Edges> & {
     optionsSchema: OptionsSchema;
   },
-): TranscoderPluginFactory<Id, EdgeOptionMap<Edges>, SourceFormat<Edges>, z.input<OptionsSchema>>;
+): TranscoderPluginFactory<
+  Id,
+  EdgeOptionMap<Edges>,
+  SourceFormat<Edges>,
+  z.input<OptionsSchema>,
+  EdgeContentMap<Edges>,
+  EdgePinnedSourceOptionsMap<Edges>
+>;
 export function defineTranscoder<
   const Id extends string,
   Context,
@@ -231,11 +271,22 @@ export function defineTranscoder<
   definition: TranscoderDefinitionConfig<Id, Context, Record<string, unknown>, Edges> & {
     optionsSchema?: undefined;
   },
-): TranscoderPluginFactory<Id, EdgeOptionMap<Edges>, SourceFormat<Edges>>;
+): TranscoderPluginFactory<
+  Id,
+  EdgeOptionMap<Edges>,
+  SourceFormat<Edges>,
+  undefined,
+  EdgeContentMap<Edges>,
+  EdgePinnedSourceOptionsMap<Edges>
+>;
 export function defineTranscoder(
   definition: TranscoderDefinitionConfig<string, unknown, Record<string, unknown>, readonly TranscoderEdge[]>,
 ): TranscoderPluginFactory<string, Record<string, unknown>, string, Record<string, unknown>> {
   const { id, ...transcoderDefinition } = definition;
+  validateRuntimeContentDeclarations(
+    id,
+    transcoderDefinition.edges.map((edge, index) => [`edges.${index}.content`, edge.content] as const),
+  );
   const factory = ((options?: Record<string, unknown>) =>
     attachRuntimePluginDefinition({ id, options }, () => transcoderDefinition)) as TranscoderPluginFactory<
     string,

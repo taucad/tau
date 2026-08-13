@@ -14,9 +14,9 @@ import { defineRuntimeTransport } from '#transport/define-runtime-transport.js';
 import type {
   RuntimeTransportClient,
   RuntimeTransportHost,
-  TransportDescriptor,
   TransportPlugin,
 } from '#transport/runtime-transport.types.js';
+import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type {
   TransportClientOptions,
   TransportHostOptions,
@@ -31,7 +31,6 @@ const stubDescribe =
     wire: 'cross-process',
     memory: {
       geometryDelivery: 'copy',
-      fileDelivery: 'copy',
       abortSignal: 'wire-notify',
     },
     fileSystem: 'unbound',
@@ -56,7 +55,6 @@ const standaloneHostFixture = (_options: z.input<typeof schemaHost>): RuntimeTra
 describe('defineRuntimeTransport generic inference (C11)', () => {
   it('preserves the literal id on the wired TransportPlugin', () => {
     const emptyClientSchema = z.object({}).strict();
-    const emptyHostSchema = z.object({}).strict();
 
     const stubClientBind = (_options: z.infer<typeof emptyClientSchema>): RuntimeTransportClient =>
       stubClient('my-transport');
@@ -65,9 +63,7 @@ describe('defineRuntimeTransport generic inference (C11)', () => {
     const transport = defineRuntimeTransport({
       id: 'my-transport',
       clientOptionsSchema: emptyClientSchema,
-      hostOptionsSchema: emptyHostSchema,
       client: stubClientBind,
-      host: () => stubHost('my-transport'),
     });
 
     assertType<TransportPluginId<ReturnType<typeof transport>>>('my-transport');
@@ -88,8 +84,6 @@ describe('defineRuntimeTransport generic inference (C11)', () => {
         retries: z.number().default(3),
       }),
       client: clientFactory,
-      hostOptionsSchema: schemaHost,
-      host: () => stubHost('with-client-options'),
     });
 
     type InferredClient = TransportClientOptions<typeof transport>;
@@ -112,9 +106,7 @@ describe('defineRuntimeTransport generic inference (C11)', () => {
     const transport = defineRuntimeTransport({
       id: 'shape-check',
       clientOptionsSchema: empty,
-      hostOptionsSchema: empty,
       client: clientFactory,
-      host: () => stubHost('shape-check'),
     });
 
     assertType<TransportPlugin>(transport({}));

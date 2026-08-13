@@ -200,7 +200,7 @@ describe('gltfCoordinateTransformMiddleware', () => {
         expect(transformed.success).toBe(true);
 
         if (transformed.success) {
-          expect(transformed.data.format).toBe('gltf');
+          expect(transformed.data?.format).toBe('gltf');
         }
       });
 
@@ -232,7 +232,7 @@ describe('gltfCoordinateTransformMiddleware', () => {
         const transformed = await wrapCreateGeometry!(input, handler, runtime);
 
         if (transformed.success) {
-          expect(transformed.data.format).toBe('gltf');
+          expect(transformed.data?.format).toBe('gltf');
         }
       });
     });

@@ -17,17 +17,18 @@ import type { Geometry } from '@taucad/types';
 import type {
   RuntimeInitializeMemoryHandle,
   RuntimeInitializePayload,
+  RuntimeTransportCloseResult,
   RuntimeTransportClient,
   TransportClientReady,
-  TransportDescriptor,
 } from '#transport/runtime-transport.types.js';
+import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import { runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
 import type { GeometryTransport, RuntimeInitializeResult, RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import { allocatePools } from '#transport/_internal/sab-pools.js';
-import { triggerAbort } from '#transport/_internal/abort-channel.js';
+import { reservePreview, triggerRenderTimeout } from '#transport/_internal/abort-channel.js';
 import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 import { webWorkerId } from '#transport/_internal/web-worker-id.js';
@@ -73,10 +74,9 @@ export type WebWorkerTransportOptions = {
   readonly createWorker?: () => WebWorkerLike;
   readonly sharedMemory?: { readonly geometry?: { readonly bytes: number } };
   readonly fileSystem?: RuntimeFileSystem;
-  readonly filePoolBuffer?: SharedArrayBuffer;
 };
 
-const wrapWorkerAsPort = (worker: WebWorkerLike, label: string): Port<unknown> => {
+const wrapWorkerAsPort = (worker: WebWorkerLike): Port<unknown> => {
   const listeners = new Set<(event: { data: unknown }) => void>();
   let closed = false;
   return {
@@ -106,11 +106,6 @@ const wrapWorkerAsPort = (worker: WebWorkerLike, label: string): Port<unknown> =
         worker.removeEventListener('message', listener);
       }
       listeners.clear();
-      try {
-        worker.terminate();
-      } catch (error) {
-        throw new Error(`${label}: terminate failed`, { cause: error });
-      }
     },
   };
 };
@@ -127,7 +122,6 @@ export const webWorkerClientDescribe = (options: WebWorkerTransportOptions): Tra
   const fsKind = options.fileSystem ? 'inline' : 'unbound';
   const sabAvailable = typeof SharedArrayBuffer === 'function';
   const geometryDelivery = sabAvailable && options.sharedMemory?.geometry !== undefined ? 'pool' : 'transfer';
-  const fileDelivery = sabAvailable && options.filePoolBuffer !== undefined ? 'pool' : 'transfer';
   const abortSignal = sabAvailable ? 'sab-atomics' : 'wire-notify';
 
   return {
@@ -135,7 +129,6 @@ export const webWorkerClientDescribe = (options: WebWorkerTransportOptions): Tra
     wire: 'web-worker',
     memory: {
       geometryDelivery,
-      fileDelivery,
       abortSignal,
     },
     fileSystem: fsKind,
@@ -168,7 +161,6 @@ export const webWorkerClient = (
   const ensurePools = (): ReturnType<typeof allocatePools> => {
     pools ??= allocatePools({
       geometry: options.sharedMemory?.geometry,
-      filePoolBuffer: options.filePoolBuffer,
     });
     return pools;
   };
@@ -178,12 +170,43 @@ export const webWorkerClient = (
   let worker: WebWorkerLike | undefined;
   let port: Port<unknown> | undefined;
   let channel: Channel<RuntimeProtocol> | undefined;
+  let removeWorkerFailureListeners: (() => void) | undefined;
   let isClosed = false;
 
-  let resolveClosed: (() => void) | undefined;
-  const closed = new Promise<void>((resolve) => {
+  let resolveClosed: ((result: RuntimeTransportCloseResult) => void) | undefined;
+  const closed = new Promise<RuntimeTransportCloseResult>((resolve) => {
     resolveClosed = resolve;
   });
+
+  const finish = async (result: RuntimeTransportCloseResult): Promise<void> => {
+    if (isClosed) {
+      return;
+    }
+    isClosed = true;
+    try {
+      channel?.close(result.cause);
+    } catch {
+      /* Best-effort */
+    }
+    try {
+      port?.close();
+    } catch {
+      /* Best-effort */
+    }
+    removeWorkerFailureListeners?.();
+    removeWorkerFailureListeners = undefined;
+    try {
+      worker?.terminate();
+    } catch {
+      /* Best-effort */
+    }
+    try {
+      bridge?.dispose();
+    } catch {
+      /* Best-effort */
+    }
+    resolveClosed?.(result);
+  };
 
   const open = async (): Promise<TransportClientReady> => {
     if (openPromise) {
@@ -206,7 +229,27 @@ export const webWorkerClient = (
         const url = typeof options.url === 'string' ? options.url : options.url.href;
         worker = Reflect.construct(workerCtor, [url, { type: 'module' }]) as WebWorkerLike;
       }
-      port = wrapWorkerAsPort(worker, `web-worker:${webWorkerId}`);
+      const eventWorker = worker as WebWorkerLike & {
+        addEventListener(
+          type: 'error' | 'messageerror',
+          listener: (event: { error?: unknown; message?: string }) => void,
+        ): void;
+        removeEventListener(
+          type: 'error' | 'messageerror',
+          listener: (event: { error?: unknown; message?: string }) => void,
+        ): void;
+      };
+      const onWorkerFailure = (event: { error?: unknown; message?: string }): void => {
+        const error = event.error instanceof Error ? event.error : new Error(event.message ?? 'Web Worker failed');
+        void finish({ cause: 'wire-failure', error });
+      };
+      eventWorker.addEventListener('error', onWorkerFailure);
+      eventWorker.addEventListener('messageerror', onWorkerFailure);
+      removeWorkerFailureListeners = () => {
+        eventWorker.removeEventListener('error', onWorkerFailure);
+        eventWorker.removeEventListener('messageerror', onWorkerFailure);
+      };
+      port = wrapWorkerAsPort(worker);
       channel = createChannelClient<RuntimeProtocol>({
         port,
         sessionKey: runtimeChannelSessionKey,
@@ -226,6 +269,20 @@ export const webWorkerClient = (
 
   return {
     id: webWorkerId,
+    reservePreview() {
+      return reservePreview(ensurePools().signalBuffer);
+    },
+    renderTimeoutRecovery: {
+      kind: 'terminable',
+      abortRender(target): void {
+        if (channel) {
+          triggerRenderTimeout(channel, ensurePools().signalBuffer, target);
+        }
+      },
+      async terminate(): Promise<void> {
+        await finish({ cause: 'render-timeout' });
+      },
+    },
     describe(): TransportDescriptor<WebWorkerId> {
       return webWorkerClientDescribe(options);
     },
@@ -264,41 +321,11 @@ export const webWorkerClient = (
         throw error;
       }
     },
-    abort(reason): void {
-      if (!channel) {
-        return;
-      }
-      triggerAbort(channel, ensurePools().signalBuffer, reason);
-    },
     async resolveGeometry(transport: GeometryTransport): Promise<Geometry> {
       return materialiseGeometry(transport, ensurePools().geometryPool);
     },
-    async close(reason?: string): Promise<void> {
-      if (isClosed) {
-        return;
-      }
-      isClosed = true;
-      try {
-        channel?.close(reason);
-      } catch {
-        /* Best-effort */
-      }
-      try {
-        port?.close();
-      } catch {
-        /* Best-effort */
-      }
-      try {
-        worker?.terminate();
-      } catch {
-        /* Best-effort */
-      }
-      try {
-        bridge?.dispose();
-      } catch {
-        /* Best-effort */
-      }
-      resolveClosed?.();
+    async close(): Promise<void> {
+      await finish({ cause: 'requested' });
     },
     closed,
   };

@@ -18,6 +18,7 @@ const baseKernelDefinition = {
   extensions: ['x'],
   name: 'Kernel',
   version: '1.0.0',
+  exportFormats: {},
   async initialize() {
     return {};
   },

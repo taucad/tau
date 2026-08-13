@@ -52,21 +52,22 @@ export { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 export type {
   TransportPlugin,
   RuntimeTransportClient,
+  RuntimeTransportCloseResult,
+  RuntimeTransportPreviewReservation,
+  RuntimeTransportRenderTarget,
+  RuntimeTransportTimeoutRecovery,
   RuntimeTransportHost,
   RuntimeInitializePayload,
   RuntimeInitializeMemoryHandle,
   EncodedGeometry,
-  EncodedFileBytes,
   HostInitializeBindings,
   HostInitializeBindingsCore,
-  HostAbortBinding,
   HostGeometryDeliveryBinding,
-  HostFileDeliveryBinding,
   TransportClientReady,
   TransportHostReady,
   TransportHelloPayload,
-  TransportDescriptor,
 } from '#transport/runtime-transport.types.js';
+export type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 
 export type {
   TransportPluginId,

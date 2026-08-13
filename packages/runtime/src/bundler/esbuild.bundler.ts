@@ -13,7 +13,7 @@
 import type { KernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import type { KernelIssue, KernelIssueType } from '#types/runtime.types.js';
-import type { BundleResult, ExecuteResult } from '#types/runtime-bundler.types.js';
+import type { BundleResult, ExecuteResult } from '#types/runtime-bundler-service.types.js';
 import { defineBundler } from '#types/runtime-bundler.types.js';
 import { createEsbuildModuleVm } from '@taucad/vm';
 import type { BundleResult as VmBundleResult, VmExecuteResult, VmIssue } from '@taucad/vm';
@@ -85,26 +85,33 @@ export const esbuild = defineBundler({
   optionsSchema: esbuildOptionsSchema,
   extensions: (options) => options?.extensions ?? ['ts', 'js', 'tsx', 'jsx'],
 
-  async initialize({ filesystem, projectPath }, _options) {
+  async initialize({ filesystem }, _options) {
     const vm = await createEsbuildModuleVm({
       filesystem,
-      projectPath,
+      projectPath: '/',
       autoExportNames,
       cacheExecution: true,
     });
     return { vm };
   },
 
-  async detectImports({ entryPath }, context) {
+  async detectImports({ entryPath }, { signal }, context) {
+    signal.throwIfAborted();
     return context.vm.detectImports(entryPath);
   },
 
-  async bundle({ entryPath }, context) {
-    return toBundleResult(await context.vm.bundle(entryPath));
+  async bundle({ entryPath }, { signal }, context) {
+    signal.throwIfAborted();
+    const result = await context.vm.bundle(entryPath);
+    signal.throwIfAborted();
+    return toBundleResult(result);
   },
 
-  async execute(code, context) {
-    return toExecuteResult(await context.vm.execute(code));
+  async execute(code, { signal }, context) {
+    signal.throwIfAborted();
+    const result = await context.vm.execute(code);
+    signal.throwIfAborted();
+    return toExecuteResult(result);
   },
 
   registerModule(name, builtinModule, context) {
@@ -115,8 +122,11 @@ export const esbuild = defineBundler({
     });
   },
 
-  async resolveDependencies({ entryPath }, context) {
-    return context.vm.resolveDependencies(entryPath);
+  async resolveDependencies({ entryPath }, { signal }, context) {
+    signal.throwIfAborted();
+    const result = await context.vm.resolveDependencies(entryPath);
+    signal.throwIfAborted();
+    return result;
   },
 
   async cleanup(context) {

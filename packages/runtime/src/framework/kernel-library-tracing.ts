@@ -26,18 +26,6 @@ export type KernelLibraryTraceValueContext = {
   value: unknown;
 };
 
-/** Completed function result shape seen by a library trace policy. */
-export type KernelLibraryTraceResultContext = KernelLibraryTraceCallContext & {
-  result: unknown;
-  elapsed: number;
-};
-
-/** Additional telemetry derived from a completed function result. */
-export type KernelLibraryTraceResultTelemetry = {
-  attributes?: SpanAttributes;
-  summary?: Record<string, number>;
-};
-
 /** Policy decision for a library call. */
 export type KernelLibraryTraceDecision =
   | {
@@ -56,7 +44,6 @@ export type KernelLibraryTracePolicy = {
   summarySpanName?: string;
   traceCall(context: KernelLibraryTraceCallContext): KernelLibraryTraceDecision;
   shouldWrapValue?(context: KernelLibraryTraceValueContext): boolean;
-  extractResultTelemetry?(context: KernelLibraryTraceResultContext): KernelLibraryTraceResultTelemetry | undefined;
 };
 
 /** Active-scope operation for a traced library handle. */
@@ -86,21 +73,12 @@ type CallStats = {
   calls: number;
   errors: number;
   totalDuration: number;
-  metrics: Record<string, number>;
 };
 
 type SummaryRecordInput = {
   operation: string;
   elapsed: number;
   failed: boolean;
-  metrics?: Record<string, number>;
-};
-
-type ExtractResultTelemetryInput = {
-  policy: KernelLibraryTracePolicy;
-  callContext: KernelLibraryTraceCallContext;
-  result: unknown;
-  elapsed: number;
 };
 
 /**
@@ -198,21 +176,17 @@ export function createKernelLibraryTracer<Library extends Record<PropertyKey, un
     return proxy as T;
   };
 
-  const recordSummary = ({ operation, elapsed, failed, metrics }: SummaryRecordInput): void => {
+  const recordSummary = ({ operation, elapsed, failed }: SummaryRecordInput): void => {
     if (options.mode !== 'summary') {
       return;
     }
 
-    const current = summary.get(operation) ?? { calls: 0, errors: 0, totalDuration: 0, metrics: {} };
+    const current = summary.get(operation) ?? { calls: 0, errors: 0, totalDuration: 0 };
     current.calls++;
     current.totalDuration += elapsed;
     if (failed) {
       current.errors++;
     }
-    for (const [key, value] of Object.entries(metrics ?? {})) {
-      current.metrics[key] = (current.metrics[key] ?? 0) + value;
-    }
-
     summary.set(operation, current);
   };
 
@@ -262,9 +236,8 @@ export function createKernelLibraryTracer<Library extends Record<PropertyKey, un
         return result.then(
           (value) => {
             const elapsed = performance.now() - startedAt;
-            const telemetry = extractResultTelemetry({ policy, callContext, result: value, elapsed });
-            recordSummary({ operation: tracedOperation, elapsed, failed: false, metrics: telemetry?.summary });
-            span?.end(telemetry?.attributes);
+            recordSummary({ operation: tracedOperation, elapsed, failed: false });
+            span?.end();
             return wrapValue(value, input.memberPath);
           },
           (error: unknown) => {
@@ -276,9 +249,8 @@ export function createKernelLibraryTracer<Library extends Record<PropertyKey, un
       }
 
       const elapsed = performance.now() - startedAt;
-      const telemetry = extractResultTelemetry({ policy, callContext, result, elapsed });
-      recordSummary({ operation: tracedOperation, elapsed, failed: false, metrics: telemetry?.summary });
-      span?.end(telemetry?.attributes);
+      recordSummary({ operation: tracedOperation, elapsed, failed: false });
+      span?.end();
       return wrapValue(result, input.memberPath);
     } catch (error) {
       recordSummary({ operation: tracedOperation, elapsed: performance.now() - startedAt, failed: true });
@@ -327,9 +299,6 @@ export function createKernelLibraryTracer<Library extends Record<PropertyKey, un
         attributes[`${operation}.calls`] = stats.calls;
         attributes[`${operation}.ms`] = stats.totalDuration;
         attributes[`${operation}.errors`] = stats.errors;
-        for (const [key, value] of Object.entries(stats.metrics)) {
-          attributes[`${operation}.${key}`] = value;
-        }
         attributes['total.calls'] = Number(attributes['total.calls']) + stats.calls;
         attributes['total.ms'] = Number(attributes['total.ms']) + stats.totalDuration;
         attributes['total.errors'] = Number(attributes['total.errors']) + stats.errors;
@@ -340,23 +309,6 @@ export function createKernelLibraryTracer<Library extends Record<PropertyKey, un
       summary.clear();
     },
   };
-}
-
-function extractResultTelemetry({
-  policy,
-  callContext,
-  result,
-  elapsed,
-}: ExtractResultTelemetryInput): KernelLibraryTraceResultTelemetry | undefined {
-  try {
-    return policy.extractResultTelemetry?.({
-      ...callContext,
-      result,
-      elapsed,
-    });
-  } catch {
-    return undefined;
-  }
 }
 
 function createOffTraceHandle<Library>(library: Library): KernelLibraryTraceHandle<Library> {

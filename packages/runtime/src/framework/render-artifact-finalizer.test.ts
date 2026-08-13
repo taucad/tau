@@ -42,9 +42,9 @@ describe('finalizeRenderOutput', () => {
       nativeHandle,
     });
 
-    expect(result.geometry.format).toBe('gltf');
-    if (result.geometry.format !== 'gltf') {
-      throw new Error(`Expected glTF geometry, received ${result.geometry.format}`);
+    expect(result.geometry?.format).toBe('gltf');
+    if (result.geometry?.format !== 'gltf') {
+      throw new Error(`Expected glTF geometry, received ${result.geometry?.format}`);
     }
     expect(result.geometry.content.byteLength).toBeGreaterThan(0);
     expect(result.nativeHandle).toBe(nativeHandle);

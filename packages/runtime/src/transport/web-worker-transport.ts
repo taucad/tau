@@ -1,4 +1,4 @@
-/* oxlint-disable no-barrel-files/no-barrel-files -- composition file: re-exports paired client/host types from sibling files */
+/* oxlint-disable no-barrel-files/no-barrel-files -- composition file: re-exports topology types from sibling files */
 
 /**
  * Bundled web-worker transport — composition file.
@@ -6,11 +6,11 @@
  * Hosts the kernel inside a dedicated browser `Worker`. The transport
  * advertises the highest-tier wire (SAB-backed memory, signal-slot
  * abort, transferable / pooled geometry) on its descriptor and exposes
- * the canonical fat handles through paired `client` / `host` factories.
+ * the client plugin consumed by `createRuntimeClient`.
  *
  * Application code owns the worker module URL through `createWorker`
- * or `url`; the runtime transport owns only the client/host channel
- * mechanics. This keeps framework worker chunks in the app graph
+ * or `url`; the runtime transport owns the client channel mechanics.
+ * The standalone worker entry owns `webWorkerHost`. This keeps framework worker chunks in the app graph
  * instead of hiding a bundler-specific URL in the library import graph.
  *
  * @public
@@ -26,7 +26,7 @@
  *
  * const client = createRuntimeClient<typeof runtime>({
  *   transport: webWorkerTransport({
- *     createWorker: () => new Worker(new URL('./runtime.worker.js', import.meta.url), { type: 'module' }),
+ *     createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
  *     fileSystem: fromMemoryFs(),
  *   }),
  * });
@@ -43,7 +43,7 @@
  *
  * const client = createRuntimeClient<typeof runtime>({
  *   transport: webWorkerTransport({
- *     url: new URL('./runtime.worker.js', import.meta.url),
+ *     url: new URL('./runtime.worker.ts', import.meta.url),
  *     fileSystem: fromMemoryFs(),
  *   }),
  * });
@@ -51,26 +51,20 @@
  */
 
 import { defineRuntimeTransport } from '#transport/define-runtime-transport.js';
-import { webWorkerClientOptionsSchema, webWorkerHostOptionsSchema } from '#transport/web-worker-transport.schemas.js';
+import { webWorkerClientOptionsSchema } from '#transport/web-worker-transport.schemas.js';
 import { webWorkerId } from '#transport/_internal/web-worker-id.js';
 import { webWorkerClient } from '#transport/web-worker-client.js';
-import { webWorkerHost } from '#transport/web-worker-host.js';
 
 export type { WebWorkerLike, WebWorkerTransportOptions } from '#transport/web-worker-client.js';
 export type { WebWorkerHostOptions } from '#transport/web-worker-host.js';
 
 /**
- * Bundled web-worker transport plugin (`webWorkerTransport`). Pairs
- * {@link webWorkerClient} and {@link webWorkerHost} via
- * {@link defineRuntimeTransport} so consumers can pass the result to
- * `createRuntimeClient` / `createRuntimeHost` directly.
+ * Bundled web-worker client transport plugin (`webWorkerTransport`).
  *
  * @public
  */
 export const webWorkerTransport = defineRuntimeTransport({
   id: webWorkerId,
   clientOptionsSchema: webWorkerClientOptionsSchema,
-  hostOptionsSchema: webWorkerHostOptionsSchema,
   client: webWorkerClient,
-  host: webWorkerHost,
 });

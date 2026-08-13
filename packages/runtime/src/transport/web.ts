@@ -51,14 +51,17 @@ export type CreateWebWorkerClientOptionsOptions<Runtime extends AnyRuntimeDefini
   'fileSystem'
 > & {
   /**
-   * Optional seed files for the transport-owned in-memory filesystem. Omitting
-   * this still creates an empty memory filesystem for inline source staging.
+   * Optional runtime-path-to-content map for the transport-owned in-memory
+   * filesystem. Omitting this still creates an empty memory filesystem for inline source staging.
    * Pass `fileSystem` for custom FS authority.
    */
   readonly files?: Record<string, string>;
-  /** Explicit transport-owned filesystem. Mutually exclusive with `files`. */
+  /** Explicit transport-owned filesystem exposed to plugins as runtime `/`. Mutually exclusive with `files`. */
   readonly fileSystem?: RuntimeFileSystem;
-  /** Optional runtime client render timeout. */
+  /**
+   * Wall-clock deadline applied independently to each preview. Milliseconds.
+   * Zero disables timeout enforcement.
+   */
   readonly renderTimeout?: number;
 } & ([RuntimeConfigInput<Runtime>] extends [never]
     ? { readonly config?: never }
@@ -75,7 +78,21 @@ export type CreateWebWorkerClientOptionsOptions<Runtime extends AnyRuntimeDefini
  * definition; this helper assembles the browser transport and a per-session
  * in-memory filesystem for inline source staging.
  *
+ * @param options - Worker factory, optional filesystem/config, and client deadline.
+ * @returns Module-scope client options for {@link createRuntimeClient} or `useRuntime`.
  * @public
+ *
+ * @example <caption>Create a browser worker runtime client</caption>
+ * ```typescript
+ * import { createRuntimeClient } from '@taucad/runtime/client';
+ * import { createWebWorkerClientOptions } from '@taucad/runtime/transport/web';
+ *
+ * const clientOptions = createWebWorkerClientOptions({
+ *   createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
+ *   renderTimeout: 60_000,
+ * });
+ * const client = createRuntimeClient(clientOptions);
+ * ```
  */
 export const createWebWorkerClientOptions = <Runtime extends AnyRuntimeDefinition | undefined = undefined>(
   options: CreateWebWorkerClientOptionsOptions<Runtime>,

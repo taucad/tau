@@ -1,10 +1,12 @@
-import { cadMaterialDefaults } from '@taucad/types/constants';
+import { cadEdgeOverlayMaterialDefaults, cadMaterialDefaults } from '@taucad/types/constants';
 import type { Color, IndexedPolyhedron, VertexTransformFunction } from '#framework/common.js';
 import { transformVerticesGltf } from '#framework/common.js';
 import { srgbTupleToLinear } from '#utils/color-space.js';
 import { writeGlb, writeGltfJson } from '#utils/glb-writer.js';
 import type { GlbInput, GlbNode, GlbPrimitive } from '#utils/glb-writer.js';
 import { formatShapeName } from '#utils/shape-names.js';
+
+const khrMaterialsUnlitExtension = 'KHR_materials_unlit';
 
 /**
  * Geometry data for a single color group, optimized for glTF primitive creation.
@@ -283,18 +285,22 @@ function buildGlbInput(
       positions: linePositions,
       indices: lineIndices,
       material: {
-        baseColorFactor: [0.141, 0.259, 0.141, 1],
-        metallicFactor: 0,
-        roughnessFactor: 1,
-        doubleSided: true,
-        alphaMode: 'OPAQUE',
+        ...cadEdgeOverlayMaterialDefaults,
+        baseColorFactor: [...cadEdgeOverlayMaterialDefaults.baseColorFactor],
+        extensions: {
+          [khrMaterialsUnlitExtension]: {},
+        },
       },
     });
   }
 
   nodes.push({ name: formatShapeName(0), primitives });
 
-  return { nodes };
+  const hasLinePrimitives = primitives.some((primitive) => primitive.mode === 1);
+  return {
+    nodes,
+    ...(hasLinePrimitives ? { extensionsUsed: [khrMaterialsUnlitExtension] } : {}),
+  };
 }
 
 /**

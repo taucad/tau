@@ -14,6 +14,10 @@ import { converterExportOptions } from '#transcoders/converter/converter-export-
 type ConverterOptionsKey = keyof typeof converterExportOptions;
 
 const hasConverterOptions = (format: string): format is ConverterOptionsKey => format in converterExportOptions;
+const specNativeGlbSource = {
+  coordinateSystem: 'y-up',
+  unit: { length: 'meter' },
+} as const;
 
 /**
  * Static edges declared as a `readonly` tuple so that each element preserves its
@@ -24,19 +28,25 @@ const hasConverterOptions = (format: string): format is ConverterOptionsKey => f
  * `supportedExportFormats` (excluding `glb`).
  */
 const edges = [
-  { from: 'glb', to: '3mf', fidelity: 'mesh', optionsSchema: converterExportOptions['3mf'].schema },
-  { from: 'glb', to: '3ds', fidelity: 'mesh' },
-  { from: 'glb', to: 'dae', fidelity: 'mesh' },
-  { from: 'glb', to: 'fbx', fidelity: 'mesh' },
-  { from: 'glb', to: 'gltf', fidelity: 'mesh' },
-  { from: 'glb', to: 'obj', fidelity: 'mesh' },
-  { from: 'glb', to: 'ply', fidelity: 'mesh' },
-  { from: 'glb', to: 'stl', fidelity: 'mesh' },
-  { from: 'glb', to: 'step', fidelity: 'mesh' },
-  { from: 'glb', to: 'usda', fidelity: 'mesh' },
-  { from: 'glb', to: 'usdz', fidelity: 'mesh' },
-  { from: 'glb', to: 'x', fidelity: 'mesh' },
-  { from: 'glb', to: 'x3d', fidelity: 'mesh' },
+  {
+    from: 'glb',
+    to: '3mf',
+    fidelity: 'mesh',
+    optionsSchema: converterExportOptions['3mf'].schema,
+    sourceOptions: specNativeGlbSource,
+  },
+  { from: 'glb', to: '3ds', fidelity: 'mesh', sourceOptions: specNativeGlbSource },
+  { from: 'glb', to: 'dae', fidelity: 'mesh', sourceOptions: specNativeGlbSource },
+  { from: 'glb', to: 'fbx', fidelity: 'mesh', sourceOptions: specNativeGlbSource },
+  { from: 'glb', to: 'gltf', fidelity: 'mesh', sourceOptions: specNativeGlbSource },
+  { from: 'glb', to: 'obj', fidelity: 'mesh', sourceOptions: specNativeGlbSource },
+  { from: 'glb', to: 'ply', fidelity: 'mesh', sourceOptions: specNativeGlbSource },
+  { from: 'glb', to: 'stl', fidelity: 'mesh', sourceOptions: specNativeGlbSource },
+  { from: 'glb', to: 'step', fidelity: 'mesh', sourceOptions: specNativeGlbSource },
+  { from: 'glb', to: 'usda', fidelity: 'mesh', sourceOptions: specNativeGlbSource },
+  { from: 'glb', to: 'usdz', fidelity: 'mesh', sourceOptions: specNativeGlbSource },
+  { from: 'glb', to: 'x', fidelity: 'mesh', sourceOptions: specNativeGlbSource },
+  { from: 'glb', to: 'x3d', fidelity: 'mesh', sourceOptions: specNativeGlbSource },
 ] as const;
 
 export const converterTranscoder = defineTranscoder({
@@ -53,7 +63,6 @@ export const converterTranscoder = defineTranscoder({
     if (input.files.length === 0) {
       return {
         success: false,
-        data: [],
         issues: [
           { message: 'No input files provided for transcoding', code: 'RUNTIME', type: 'runtime', severity: 'error' },
         ],
@@ -76,7 +85,6 @@ export const converterTranscoder = defineTranscoder({
       const message = error instanceof Error ? error.message : 'Transcoding failed';
       return {
         success: false,
-        data: [],
         issues: [{ message, code: 'RUNTIME', type: 'runtime', severity: 'error' }],
       };
     }

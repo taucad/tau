@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
+import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import type { IndexedPolyhedron } from '#framework/common.js';
 import { createGlb, createGltf } from '#utils/export-glb.js';
 
@@ -90,6 +91,14 @@ const meshWithInvalidFace: IndexedPolyhedron = {
     [1, 0, 0, 1],
     [0, 1, 0, 1],
   ],
+};
+
+const readGlbJson = (glb: Uint8Array<ArrayBuffer>): { extensionsRequired?: string[] } => {
+  const view = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+  const jsonChunkLength = view.getUint32(12, true);
+  return JSON.parse(new TextDecoder().decode(glb.slice(20, 20 + jsonChunkLength)).trim()) as {
+    extensionsRequired?: string[];
+  };
 };
 
 // ===================================================================
@@ -205,7 +214,7 @@ describe('createGlb', () => {
 
   it('should include line primitives when meshData.lines is provided', async () => {
     const glb = createGlb(meshWithLines);
-    const document = await new NodeIO().readBinary(glb);
+    const document = await new NodeIO().registerExtensions([KHRMaterialsUnlit]).readBinary(glb);
     const meshes = document.getRoot().listMeshes();
 
     expect(
@@ -226,6 +235,20 @@ describe('createGlb', () => {
     ).toEqual(['', '']);
     const linePrimitive = primitives[1]!;
     expect(linePrimitive.getMode()).toBe(1);
+    const lineMaterial = linePrimitive.getMaterial()!;
+    expect(lineMaterial.getBaseColorFactor()).toEqual([0, 0, 0, 1]);
+    expect(lineMaterial.getMetallicFactor()).toBe(0);
+    expect(lineMaterial.getRoughnessFactor()).toBe(1);
+    expect(lineMaterial.getDoubleSided()).toBe(true);
+    expect(lineMaterial.getAlphaMode()).toBe('OPAQUE');
+    expect(lineMaterial.getExtension('KHR_materials_unlit')).not.toBeNull();
+    expect(
+      document
+        .getRoot()
+        .listExtensionsUsed()
+        .map((extension) => extension.extensionName),
+    ).toEqual(['KHR_materials_unlit']);
+    expect(readGlbJson(glb).extensionsRequired).toBeUndefined();
   });
 
   it('should return a Uint8Array', async () => {

@@ -217,11 +217,9 @@ export const manifold = defineKernel({
   builtinModuleNames: ['manifold-3d', 'manifold-3d/manifoldCAD'],
   name: 'ManifoldKernel',
   version: '1.0.0',
-  nativeHandleScope: 'source',
   optionsSchema: manifoldOptionsSchema,
-  render: { content: [] },
   exportFormats: {
-    glb: { optionsSchema: manifoldExportSchemas.glb, content: [] },
+    glb: { optionsSchema: manifoldExportSchemas.glb },
   },
 
   async initialize(options, runtime) {

@@ -168,8 +168,8 @@ describe('WorkspaceFileService cross-tab authority delivery', () => {
     const databasePrefix = `permanent-delete-${databaseSequence++}`;
     const writer = await createAuthority(databasePrefix);
     const projectId = 'proj_zzzzzzzzzzzzzzzzzzzzz';
-    const directoryName = `delete-me--${projectId}`;
-    const directory = `/projects/${directoryName}`;
+    const directoryName = 'delete-me';
+    const directory = `/${directoryName}`;
     await writer.provider.mkdir(directory, { recursive: true });
     await writer.provider.writeFile(
       `${directory}/tau.json`,
@@ -186,9 +186,9 @@ describe('WorkspaceFileService cross-tab authority delivery', () => {
     await writer.provider.writeFile(`${directory}/main.ts`, new TextEncoder().encode('export default {};'));
 
     const reader = await createAuthority(databasePrefix);
-    await expect(reader.service.readdir('/projects')).resolves.toContain(directoryName);
+    await expect(reader.service.readdir('/')).resolves.toContain(directoryName);
     const watchEvents: WatchEvent[] = [];
-    const stop = reader.service.watch({ paths: ['/projects'], recursive: true }, (event) => watchEvents.push(event));
+    const stop = reader.service.watch({ paths: ['/'], recursive: true }, (event) => watchEvents.push(event));
 
     await expect(
       writer.service.permanentlyDeleteProjectDirectory({
@@ -202,7 +202,7 @@ describe('WorkspaceFileService cross-tab authority delivery', () => {
       expect(watchEvents).toContainEqual({ type: 'reset' });
     });
     await vi.waitFor(async () => {
-      await expect(reader.service.readdir('/projects')).resolves.not.toContain(directoryName);
+      await expect(reader.service.readdir('/')).resolves.not.toContain(directoryName);
     });
     stop();
   });

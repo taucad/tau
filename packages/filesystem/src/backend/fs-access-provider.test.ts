@@ -375,6 +375,25 @@ describe('FileSystemAccessProvider', () => {
       await provider.refresh();
       await expect(provider.readdir('/cached')).resolves.toEqual(['new.txt']);
     });
+
+    it('keeps handles outside the named prefixes when refresh is scoped', async () => {
+      const replaceDirectory = async (name: string): Promise<void> => {
+        await rootHandle.removeEntry(name, { recursive: true });
+        const replacement = await rootHandle.getDirectoryHandle(name, { create: true });
+        await replacement.getFileHandle('new.txt', { create: true });
+      };
+      await provider.mkdir('/scoped/nested', { recursive: true });
+      await provider.mkdir('/untouched');
+      await expect(provider.readdir('/scoped/nested')).resolves.toEqual([]);
+      await expect(provider.readdir('/untouched')).resolves.toEqual([]);
+
+      await replaceDirectory('scoped');
+      await replaceDirectory('untouched');
+      await provider.refresh(['/scoped']);
+
+      await expect(provider.readdir('/scoped')).resolves.toEqual(['new.txt']);
+      await expect(provider.readdir('/untouched')).resolves.toEqual([]);
+    });
   });
 
   describe('readFileStream', () => {
@@ -466,6 +485,129 @@ describe('FileSystemAccessProvider', () => {
       await vi.waitFor(() => {
         expect(cancel).toHaveBeenCalledOnce();
       });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // metadata-only stat / readdirWithStats (P1, P2)
+  // ---------------------------------------------------------------------------
+
+  describe('metadata-only listing', () => {
+    /**
+     * Root handle whose files declare a size far larger than the bytes they can
+     * materialise, so any full-content read is both observable and impossible
+     * to mistake for a metadata read.
+     *
+     * @param names - Basenames to expose as binary children.
+     * @returns The fake root handle plus the read/concurrency counters.
+     */
+    const createInstrumentedRoot = (names: readonly string[]) => {
+      const counters = { fullReads: 0, sliceBytes: 0, inFlight: 0, maxInFlight: 0 };
+      const head = new Uint8Array(1024);
+      head[3] = 0x00;
+      const makeFileHandle = (name: string) => ({
+        kind: 'file',
+        name,
+        getFile: async () => {
+          counters.inFlight++;
+          counters.maxInFlight = Math.max(counters.maxInFlight, counters.inFlight);
+          await new Promise((resolve) => {
+            setTimeout(resolve, 1);
+          });
+          counters.inFlight--;
+          return {
+            size: 50_000_000,
+            lastModified: 4242,
+            slice: (start: number, end: number) => ({
+              arrayBuffer: async () => {
+                counters.sliceBytes += end - start;
+                return head.slice(start, end).buffer;
+              },
+            }),
+            arrayBuffer: async () => {
+              counters.fullReads++;
+              return new ArrayBuffer(0);
+            },
+          };
+        },
+      });
+      const root = {
+        kind: 'directory',
+        name: 'root',
+        entries: async function* () {
+          for (const name of names) {
+            yield [name, makeFileHandle(name)] as [string, unknown];
+          }
+        },
+        getFileHandle: async (name: string) => {
+          if (!names.includes(name)) {
+            throw new DOMException(`File not found: ${name}`, 'NotFoundError');
+          }
+          return makeFileHandle(name);
+        },
+        getDirectoryHandle: async (name: string) => {
+          throw new DOMException(`Directory not found: ${name}`, 'NotFoundError');
+        },
+      };
+      return { root: root as unknown as FileSystemDirectoryHandle, counters };
+    };
+
+    it('should stat a huge file without reading its contents', async () => {
+      const { root, counters } = createInstrumentedRoot(['huge.glb']);
+      const instrumented = new FileSystemAccessProvider(root);
+
+      await expect(instrumented.stat('/huge.glb')).resolves.toEqual({
+        type: 'file',
+        size: 50_000_000,
+        mtimeMs: 4242,
+        contentKind: 'binary',
+      });
+      expect(counters.fullReads).toBe(0);
+      expect(counters.sliceBytes).toBeLessThanOrEqual(512);
+    });
+
+    it('should list stats without reading contents and with bounded concurrency', async () => {
+      const names = Array.from({ length: 64 }, (_, index) => `asset-${index}.glb`);
+      const { root, counters } = createInstrumentedRoot(names);
+      const instrumented = new FileSystemAccessProvider(root);
+
+      const entries = await instrumented.readdirWithStats('/');
+
+      expect(entries).toHaveLength(64);
+      expect(entries.map((entry) => entry.name)).toEqual(names);
+      expect(entries[0]).toEqual({
+        name: 'asset-0.glb',
+        type: 'file',
+        size: 50_000_000,
+        mtimeMs: 4242,
+        contentKind: 'binary',
+      });
+      expect(counters.fullReads).toBe(0);
+      expect(counters.maxInFlight).toBeGreaterThan(1);
+      expect(counters.maxInFlight).toBeLessThanOrEqual(16);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // readdirEntries
+  // ---------------------------------------------------------------------------
+
+  describe('readdirEntries', () => {
+    it('should return each entry name with its kind', async () => {
+      await provider.writeFile('/src/index.ts', 'export {}');
+      await provider.mkdir('/src/utils');
+
+      await expect(provider.readdirEntries('/src')).resolves.toEqual([
+        { name: 'index.ts', kind: 'file' },
+        { name: 'utils', kind: 'dir' },
+      ]);
+    });
+
+    it('should exclude Chromium swap entries', async () => {
+      await provider.writeFile('/main.ts.crswap', 'swap');
+      await provider.writeFile('/main.ts', 'source');
+
+      await expect(provider.readdirEntries('/')).resolves.toEqual([{ name: 'main.ts', kind: 'file' }]);
     });
   });
 

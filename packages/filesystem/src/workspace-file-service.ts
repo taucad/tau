@@ -1,7 +1,23 @@
-import { parseAdoptableProjectManifestBytes, parseProjectManifestBytes, projectIdSchema } from '@taucad/types';
-import type { FileContentMetadata, FileStat, FileStatEntry, FileSystemBackend } from '@taucad/types';
+import {
+  parseAdoptableProjectManifestBytes,
+  parseProjectManifestBytes,
+  projectIdSchema,
+  projectToManifest,
+  serializeProjectManifest,
+} from '@taucad/types';
+import { idPrefix } from '@taucad/types/constants';
+import { generatePrefixedId } from '@taucad/utils/id';
+import type {
+  AdoptableProjectManifest,
+  FileContentMetadata,
+  FileStat,
+  FileStatEntry,
+  FileSystemBackend,
+  ProjectManifest,
+} from '@taucad/types';
 import type {
   ChangeEvent,
+  DirectoryEntry,
   FileSystemProvider,
   FileTreeNode,
   TreeEntry,
@@ -40,6 +56,7 @@ import { getEventOrigin, tagEventAuthorities, tagEventOrigin } from '#event-orig
 import { isSafeRelativePath, parentDirectory, joinPath, normalizePath, resolveVirtualPath } from '@taucad/utils/path';
 import { MissingWorkspaceHandleError, RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
 import { fileMetadataFields, getFileContentMetadata } from '#content-metadata.js';
+import { readDirectoryEntries } from '#backend/directory-entries.js';
 
 /** Milliseconds. */
 const kernelCoalescingWindow = 75;
@@ -50,6 +67,21 @@ const kernelCoalescingWindow = 75;
  * Mirrored by the UI-side `bundledTypesWorkspaceRootSegment` constant.
  */
 const bundledTypesAbsolutePrefix = '/node_modules';
+
+/** Concurrent `getFile()` calls per directory while walking an external snapshot. */
+const externalSnapshotConcurrency = 16;
+
+/** Concurrent `tau.json` probes while scanning a discovery root. */
+const manifestProbeConcurrency = 16;
+
+/**
+ * Changed-path budget above which a snapshot diff stops being worth scoping:
+ * past this many entries the per-path cache sweeps cost more than one full drop.
+ */
+const maxLocalizedExternalChanges = 64;
+
+/** Snapshot body published when the walked physical root is absent. */
+const missingExternalSnapshot = '<missing>';
 
 type NativeFileSystemChangeRecord = {
   readonly type: 'appeared' | 'disappeared' | 'modified' | 'moved' | 'unknown' | 'errored';
@@ -100,6 +132,49 @@ export class UnboundProjectRouteError extends Error {
     this.name = 'UnboundProjectRouteError';
     this.projectId = projectId;
   }
+}
+
+/**
+ * A physical project directory is an immediate, non-dot-prefixed child of the
+ * workspace root: `<root>/<slug>`. Dot-prefixed children (`.tau`, `.git`) hold
+ * app state and are never projects.
+ *
+ * @param path - Canonical provider-relative path.
+ * @returns Whether the path names a project directory.
+ */
+function isProjectDirectoryPath(path: string): boolean {
+  const segments = path.split('/').filter(Boolean);
+  return segments.length === 1 && !segments[0]!.startsWith('.');
+}
+
+/**
+ * Manifest bytes whose *only* defect is the identity — the exact condition
+ * discovery reports as `adoption-required` and the Adopt action re-validates
+ * before it writes (R11). Anything else stays quarantined.
+ *
+ * @param bytes - Encoded `tau.json`.
+ * @returns The identity-less manifest, or `undefined` when adoption is unsafe.
+ */
+function readAdoptableManifest(bytes: Uint8Array<ArrayBuffer>): AdoptableProjectManifest | undefined {
+  const parsed = parseProjectManifestBytes(bytes);
+  if (parsed.success) {
+    return undefined;
+  }
+  const idOnlyInvalid =
+    parsed.issue.code === 'manifest-invalid' && parsed.issue.issues.every((issue) => issue.path[0] === 'id');
+  const adoptable = idOnlyInvalid ? parseAdoptableProjectManifestBytes(bytes) : undefined;
+  return adoptable?.success === true ? adoptable.data : undefined;
+}
+
+/**
+ * Workspace app state (`<root>/.tau/**`, `.git/**`, …): never a project, never
+ * an input to discovery, and never worth an external-change fan-out.
+ *
+ * @param physicalPath - Canonical provider-relative path.
+ * @returns Whether the path lives under a dot-prefixed root child.
+ */
+function isWorkspaceStatePath(physicalPath: string): boolean {
+  return physicalPath.split('/')[1]?.startsWith('.') === true;
 }
 
 function isUnderBundledTypesMount(absolutePath: string): boolean {
@@ -508,14 +583,11 @@ export class WorkspaceFileService {
     const { provider, path: resolvedPath } = await this._resolve(canonicalPath, { scope: optionsObject?.scope });
     const encoding = options === 'utf8' || optionsObject?.encoding === 'utf8' ? 'utf8' : undefined;
 
-    if (encoding === 'utf8') {
-      return provider.readFile(resolvedPath, 'utf8');
-    }
     const data = await provider.readFile(resolvedPath);
     if (optionsObject?.scope === undefined) {
       this._filePool?.store(canonicalPath, data);
     }
-    return data;
+    return encoding === 'utf8' ? new TextDecoder().decode(data) : data;
   }
 
   /**
@@ -650,9 +722,15 @@ export class WorkspaceFileService {
     );
     const firstFailure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
     if (firstFailure !== undefined) {
-      this._filePool?.clear();
-      this._inMemoryTree.clear();
-      this._directoryStatRoot = undefined;
+      // Every settled write already recorded itself; only the rejected paths hold
+      // untrustworthy derivatives, so the batch's successes keep their cached state.
+      for (const [index, result] of results.entries()) {
+        if (result.status === 'rejected') {
+          const { path } = ownedFiles[index]!;
+          this._filePool?.invalidate(path);
+          this._inMemoryTreeRemoveFile(path);
+        }
+      }
       const operationsByBackend = Map.groupBy(
         ownedFiles.map(({ path, resolution }) => ({ path, resolution })),
         ({ resolution }) => resolution.backend,
@@ -1462,27 +1540,28 @@ export class WorkspaceFileService {
    * Safety-reconcile one routed project, or every configured webaccess root when omitted.
    *
    * @param root - Optional routed project root.
+   * @returns `true` when every root this call covered is under live `FileSystemObserver`
+   *          delivery, which lets the caller poll on a slow safety-net cadence instead.
    */
-  public async pollExternalChanges(root?: string): Promise<void> {
+  public async pollExternalChanges(root?: string): Promise<boolean> {
     if (root === undefined) {
-      const polls: Array<Promise<void>> = [];
-      for (const state of this._observedWebAccessRoots.values()) {
-        polls.push(this._pollExternalRoot(state));
-      }
-      await Promise.all(polls);
-      return;
+      const states = [...this._observedWebAccessRoots.values()];
+      await Promise.all(states.map(async (state) => this._pollExternalRoot(state)));
+      return states.length > 0 && states.every(({ nativeActive }) => nativeActive);
     }
     const resolution = this._mountTable.resolve(root);
     const { entry } = resolution;
     if (entry?.storageRootKey === undefined) {
-      return;
+      return false;
     }
     const state = [...this._observedWebAccessRoots.values()].find(
       (candidate) => candidate.provider === resolution.provider && candidate.storageRootKey === entry.storageRootKey,
     );
-    if (state !== undefined) {
-      await this._pollExternalRoot(state, entry.providerBasePath);
+    if (state === undefined) {
+      return false;
     }
+    await this._pollExternalRoot(state, entry.providerBasePath);
+    return state.nativeActive;
   }
 
   // --- Backend management ---
@@ -1512,7 +1591,9 @@ export class WorkspaceFileService {
   }
 
   /**
-   * Discover physical project manifests.
+   * Discover physical project manifests. A project is any immediate child
+   * directory of a configured root carrying `tau.json`; dot-prefixed children
+   * hold app state and are never scanned.
    *
    * @returns Manifests and per-root completeness from the configured physical roots.
    */
@@ -1524,41 +1605,30 @@ export class WorkspaceFileService {
       const { root, scope, storageRootKey } = resolvedRoot;
       let provider: FileSystemProvider;
       try {
+        // Out-of-band writes reach the provider through the external-change path
+        // (native observer, safety poll, or a sibling-tab notification), so a scan
+        // never has to drop the handle cache to see them.
         provider = await this._registry.getProvider(scope);
-        await provider.refresh?.();
       } catch (error) {
         roots.push({ status: 'inaccessible', root, reason: error instanceof Error ? error.message : String(error) });
         continue;
       }
       let directories: string[];
       try {
-        if (!(await provider.exists('/projects'))) {
-          roots.push({ status: 'complete', root });
-          continue;
-        }
-        directories = await provider.readdir('/projects');
+        // The workspace root exists by definition; a project is any immediate
+        // child directory carrying `tau.json`. Entry kinds come from the listing
+        // so files never cost a `stat`, and dotdirs are excluded by name alone.
+        const entries = await readDirectoryEntries(provider, '/');
+        directories = entries
+          .filter((entry) => entry.kind === 'dir' && !entry.name.startsWith('.'))
+          .map((entry) => entry.name)
+          .sort();
       } catch (error) {
         roots.push({ status: 'inaccessible', root, reason: error instanceof Error ? error.message : String(error) });
         continue;
       }
-      const rootEntries: ProjectDiscoveryEntry[] = [];
-      let childFailure: unknown;
-      for (const directory of directories.sort()) {
-        const relativeDirectory = `/projects/${directory}`;
-        let bytes: Uint8Array<ArrayBuffer>;
-        try {
-          const stat = await provider.stat(relativeDirectory);
-          if (stat.type !== 'dir') {
-            continue;
-          }
-          bytes = await provider.readFile(`${relativeDirectory}/tau.json`);
-        } catch (error) {
-          if (isNotFoundError(error)) {
-            continue;
-          }
-          childFailure = error;
-          break;
-        }
+      const probe = async (directory: string): Promise<ProjectDiscoveryEntry | undefined> => {
+        const relativeDirectory = `/${directory}`;
         const locator: ProjectLocator =
           root.backend === 'webaccess'
             ? {
@@ -1568,47 +1638,39 @@ export class WorkspaceFileService {
                 workspaceId: root.workspaceId,
               }
             : { backend: root.backend, storageRootKey, relativeDirectory };
-        const parsed = parseProjectManifestBytes(bytes);
-        if (!parsed.success) {
-          const idOnlyInvalid =
-            parsed.issue.code === 'manifest-invalid' && parsed.issue.issues.every((issue) => issue.path[0] === 'id');
-          const adoptable = idOnlyInvalid ? parseAdoptableProjectManifestBytes(bytes) : undefined;
-          if (adoptable?.success) {
-            rootEntries.push({
-              status: 'adoption-required',
-              manifest: adoptable.data,
-              locator,
-              issue: parsed.issue,
-            });
-            continue;
+        let bytes: Uint8Array<ArrayBuffer>;
+        try {
+          bytes = await provider.readFile(`${relativeDirectory}/tau.json`);
+        } catch (error) {
+          if (isNotFoundError(error)) {
+            return undefined;
           }
-          rootEntries.push({
+          // One unreadable child must not blank an otherwise readable root:
+          // report it in place and keep scanning. `inaccessible` stays
+          // reserved for failures of the root listing or its provider.
+          return {
             status: 'invalid',
             locator,
-            issue: parsed.issue,
-          });
-          continue;
+            issue: { code: 'manifest-unreadable', message: error instanceof Error ? error.message : String(error) },
+          };
         }
-        rootEntries.push({
-          status: 'valid',
-          manifest: parsed.data,
-          locator,
-        });
+        const parsed = parseProjectManifestBytes(bytes);
+        if (parsed.success) {
+          return { status: 'valid', manifest: parsed.data, locator };
+        }
+        const adoptable = readAdoptableManifest(bytes);
+        return adoptable === undefined
+          ? { status: 'invalid', locator, issue: parsed.issue }
+          : { status: 'adoption-required', manifest: adoptable, locator, issue: parsed.issue };
+      };
+      // Chunked awaits bound the probe concurrency; the pre-sorted input keeps
+      // the result order independent of completion order.
+      for (let offset = 0; offset < directories.length; offset += manifestProbeConcurrency) {
+        const chunk = await Promise.all(
+          directories.slice(offset, offset + manifestProbeConcurrency).map(async (directory) => probe(directory)),
+        );
+        discovered.push(...chunk.filter((entry) => entry !== undefined));
       }
-      if (childFailure !== undefined) {
-        roots.push({
-          status: 'inaccessible',
-          root,
-          reason:
-            childFailure instanceof Error
-              ? childFailure.message
-              : typeof childFailure === 'string'
-                ? childFailure
-                : 'Unknown project discovery failure',
-        });
-        continue;
-      }
-      discovered.push(...rootEntries);
       roots.push({ status: 'complete', root });
     }
     /* oxlint-enable eslint/no-await-in-loop -- End bounded serial root scan. */
@@ -1646,6 +1708,43 @@ export class WorkspaceFileService {
   }
 
   /**
+   * Give an `adoption-required` project directory a fresh Tau identity in
+   * place. Service-side because the write must re-validate adoptability under
+   * the same physical lock every other project mutation takes — a UI-side
+   * read/modify/write could adopt a directory a sibling tab just repaired.
+   *
+   * @param locator - Discovery locator of the directory to adopt.
+   * @returns The manifest now on disk, identity included.
+   */
+  public async adoptProjectDirectory(locator: ProjectLocator): Promise<ProjectManifest> {
+    const path = resolveVirtualPath(locator.relativeDirectory);
+    if (path !== locator.relativeDirectory || !isProjectDirectoryPath(path)) {
+      throw new TypeError(`Adoption target must be a canonical project directory: ${locator.relativeDirectory}`);
+    }
+    const root = this._discoveryRoots.find((candidate) => candidate.storageRootKey === locator.storageRootKey);
+    if (root === undefined) {
+      throw new TypeError(`Adoption target is not a configured discovery root: ${locator.storageRootKey}`);
+    }
+    const provider = await this._registry.getProvider(root.scope);
+    const physicalLock = `${locator.storageRootKey}:${path}`;
+    return this._crossTabCoordinator.withLocks([physicalLock], async () =>
+      this._resourceQueue.queueForMany([physicalLock], async () => {
+        const manifestPath = `${path}/tau.json`;
+        const adoptable = readAdoptableManifest(await provider.readFile(manifestPath));
+        if (adoptable === undefined) {
+          throw new TypeError(`Project directory is not adoptable: ${path}`);
+        }
+        const manifest = projectToManifest({ ...adoptable, id: generatePrefixedId(idPrefix.project) });
+        await provider.writeFile(manifestPath, serializeProjectManifest(manifest));
+        // Ponytail: no logical route to invalidate — an unadopted project was
+        // never mounted, so the caller's discovery refetch is the only reader.
+        this._crossTabCoordinator.notifyDirectoryChange(path, this._scopedPhysicalAuthority(root.scope, path));
+        return manifest;
+      }),
+    );
+  }
+
+  /**
    * Permanently remove one exact physical project directory. Identity is
    * re-established under the same project-wide lock that all logical project
    * mutations acquire, so no write can race the verification/delete window.
@@ -1664,9 +1763,8 @@ export class WorkspaceFileService {
     if (path !== input.providerBasePath) {
       throw new TypeError('Permanent delete target must already be canonical.');
     }
-    const segments = path.split('/').filter(Boolean);
-    if (segments.length !== 2 || segments[0] !== 'projects') {
-      throw new TypeError('Permanent delete target must be an immediate child of /projects.');
+    if (!isProjectDirectoryPath(path)) {
+      throw new TypeError('Permanent delete target must be an immediate child of the workspace root.');
     }
     const uncheckedScope = input.scope as WorkspaceScope;
     if (uncheckedScope.backend === 'memory') {
@@ -1941,9 +2039,10 @@ export class WorkspaceFileService {
       if (providerBasePath !== config.providerBasePath) {
         throw new TypeError(`Project provider path must already be canonical: ${config.providerBasePath}`);
       }
-      const providerPathParts = providerBasePath.split('/').filter(Boolean);
-      if (providerPathParts.length !== 2 || providerPathParts[0] !== 'projects') {
-        throw new TypeError(`Project provider path must be an immediate child of /projects: ${providerBasePath}`);
+      if (!isProjectDirectoryPath(providerBasePath)) {
+        throw new TypeError(
+          `Project provider path must be an immediate child of the workspace root: ${providerBasePath}`,
+        );
       }
       const scope = this._toScope(config);
       const storageRootKey = this._registry.resolveStorageRootKey(scope);
@@ -2231,7 +2330,11 @@ export class WorkspaceFileService {
     state: ObservedWebAccessRoot,
     records: readonly NativeFileSystemChangeRecord[],
   ): Promise<void> {
-    const admittedRecords = records.filter((record) => !this._isChromiumSwapOnlyRecord(record));
+    const admittedRecords = records.filter(
+      (record) =>
+        !this._isChromiumSwapOnlyRecord(record) &&
+        !isWorkspaceStatePath(this._physicalPath(record.relativePathComponents)),
+    );
     if (admittedRecords.length === 0) {
       return;
     }
@@ -2262,11 +2365,14 @@ export class WorkspaceFileService {
       return { record, physicalPath, oldPhysicalPath, mappings, knownKinds };
     });
 
-    await state.provider.refresh?.();
+    const physicalPaths = prepared.flatMap(({ physicalPath, oldPhysicalPath }) =>
+      oldPhysicalPath === undefined ? [physicalPath] : [physicalPath, oldPhysicalPath],
+    );
+    await state.provider.refresh?.(physicalPaths);
     if (this._observedWebAccessRoots.get(state.storageRootKey) !== state) {
       return;
     }
-    this._invalidateExternalDerivatives();
+    this._invalidateExternalDerivatives({ state, physicalPaths });
     let discoveryChanged = false;
     for (const change of prepared) {
       const { record, physicalPath, mappings, knownKinds } = change;
@@ -2482,23 +2588,77 @@ export class WorkspaceFileService {
     })();
   }
 
-  private _invalidateExternalDerivatives(): void {
-    this._filePool?.clear();
+  /**
+   * Drop the derivatives an external change invalidated.
+   *
+   * @param scoped - Root and provider-physical paths whose subtrees changed. Omit
+   *                 for a full drop when the change cannot be localized.
+   */
+  private _invalidateExternalDerivatives(scoped?: {
+    state: ObservedWebAccessRoot;
+    physicalPaths: readonly string[];
+  }): void {
+    if (scoped === undefined) {
+      this._filePool?.clear();
+    } else {
+      for (const physicalPath of scoped.physicalPaths) {
+        for (const { path } of this._logicalMappingsForPhysicalPath(scoped.state, physicalPath)) {
+          this._filePool?.invalidate(path);
+        }
+      }
+    }
+    // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
+    // ponytail: the tree is dropped whole even for a localized change — InMemoryFileTree
+    // cannot express "this subtree is unknown", and a scoped removal would publish a
+    // stale absence. Give it a subtree-invalidation state if the rebuild scan shows up hot.
     this._inMemoryTree.clear();
     this._directoryStatRoot = undefined;
   }
 
+  /**
+   * Provider-physical paths whose subtrees differ between two snapshots.
+   *
+   * @param previous - Snapshot captured on the last pass.
+   * @param next - Snapshot captured on this pass.
+   * @returns Changed paths, or `undefined` when the diff cannot be localized.
+   */
+  private _diffExternalSnapshot(previous: string, next: string): string[] | undefined {
+    if (previous === missingExternalSnapshot || next === missingExternalSnapshot) {
+      return undefined;
+    }
+    const rowsByPath = (snapshot: string): Map<string, string> =>
+      new Map(snapshot === '' ? [] : snapshot.split('\n').map((row) => [row.slice(0, row.indexOf('\0')), row]));
+    const previousRows = rowsByPath(previous);
+    const nextRows = rowsByPath(next);
+    // Every snapshot row is relative to the workspace root, rooted or discovery-wide.
+    const changed: string[] = [];
+    for (const [relative, row] of previousRows) {
+      if (nextRows.get(relative) !== row) {
+        changed.push(`/${relative}`);
+      }
+    }
+    for (const relative of nextRows.keys()) {
+      if (!previousRows.has(relative)) {
+        changed.push(`/${relative}`);
+      }
+    }
+    return changed.length > maxLocalizedExternalChanges ? undefined : changed;
+  }
+
   private _emitGlobalDiscoveryChange(state: ObservedWebAccessRoot): void {
-    this._emitChangeEvent({ type: 'directoryChanged', path: '/projects', backend: 'webaccess' });
-    this._crossTabCoordinator.notifyDirectoryChange('/projects', {
+    this._emitChangeEvent({ type: 'directoryChanged', path: '/', backend: 'webaccess' });
+    this._crossTabCoordinator.notifyDirectoryChange('/', {
       storageRootKey: state.storageRootKey,
-      providerBasePath: '/projects',
+      providerBasePath: '/',
     });
   }
 
   private _isDiscoveryRelevantPhysicalPath(path: string): boolean {
+    if (isWorkspaceStatePath(path)) {
+      return false;
+    }
     const segments = path.split('/').filter(Boolean);
-    return segments[0] === 'projects' && (segments.length <= 2 || segments.at(-1) === 'tau.json');
+    return segments.length <= 1 || (segments.length === 2 && segments[1] === 'tau.json');
   }
 
   private async _createExternalSnapshot(state: ObservedWebAccessRoot, providerBasePath?: string): Promise<string> {
@@ -2507,24 +2667,52 @@ export class WorkspaceFileService {
     type IterableDirectoryHandle = FileSystemDirectoryHandle & {
       entries(): AsyncIterableIterator<[string, EntryHandle]>;
     };
-    const walk = async (handle: FileSystemDirectoryHandle, relative: string): Promise<void> => {
+    const admittedEntries = async (handle: FileSystemDirectoryHandle): Promise<Array<[string, EntryHandle]>> => {
       const entries: Array<[string, EntryHandle]> = [];
       for await (const entry of (handle as IterableDirectoryHandle).entries()) {
-        entries.push(entry);
-      }
-      for (const [name, child] of entries.toSorted(([left], [right]) => left.localeCompare(right))) {
-        if (isChromiumSwapArtifactName(name)) {
-          continue;
+        if (!isChromiumSwapArtifactName(entry[0])) {
+          entries.push(entry);
         }
-        const childRelative = relative === '' ? name : `${relative}/${name}`;
+      }
+      return entries.toSorted(([left], [right]) => left.localeCompare(right));
+    };
+    // Resolve one row per name in chunks, so metadata reads overlap without unbounded handle pressure.
+    const resolveRows = async <T>(
+      names: readonly T[],
+      toRow: (item: T) => Promise<[name: string, row: string | undefined]>,
+    ): Promise<Map<string, string>> => {
+      const resolved = new Map<string, string>();
+      for (let offset = 0; offset < names.length; offset += externalSnapshotConcurrency) {
+        // oxlint-disable-next-line no-await-in-loop -- Chunked awaits are what bound concurrency to externalSnapshotConcurrency.
+        const chunk = await Promise.all(
+          names.slice(offset, offset + externalSnapshotConcurrency).map(async (item) => toRow(item)),
+        );
+        for (const [name, row] of chunk) {
+          if (row !== undefined) {
+            resolved.set(name, row);
+          }
+        }
+      }
+      return resolved;
+    };
+    const fileRow = async (name: string, relative: string, handle: FileSystemFileHandle): Promise<[string, string]> => {
+      const file = await handle.getFile();
+      return [name, `${relative}\0file\0${file.size}\0${file.lastModified}`];
+    };
+    const walk = async (handle: FileSystemDirectoryHandle, relative: string): Promise<void> => {
+      const entries = await admittedEntries(handle);
+      const childRelative = (name: string): string => (relative === '' ? name : `${relative}/${name}`);
+      const fileRows = await resolveRows(
+        entries.filter((entry): entry is [string, FileSystemFileHandle] => entry[1].kind === 'file'),
+        async ([name, child]) => fileRow(name, childRelative(name), child),
+      );
+      for (const [name, child] of entries) {
         if (child.kind === 'directory') {
-          rows.push([childRelative, 'dir', 0, 0].join('\0'));
+          rows.push([childRelative(name), 'dir', 0, 0].join('\0'));
           // oxlint-disable-next-line no-await-in-loop -- Recursive fallback polling is intentionally sequential.
-          await walk(child, childRelative);
+          await walk(child, childRelative(name));
         } else {
-          // oxlint-disable-next-line no-await-in-loop -- File metadata reads are sequential to bound handle pressure.
-          const file = await child.getFile();
-          rows.push(`${childRelative}\0file\0${file.size}\0${file.lastModified}`);
+          rows.push(fileRows.get(name)!);
         }
       }
     };
@@ -2532,9 +2720,9 @@ export class WorkspaceFileService {
       this._mountTable
         .listMounts()
         .filter((entry) => entry.provider === state.provider && entry.storageRootKey === state.storageRootKey)
-        .map(({ providerBasePath }) => providerBasePath.split('/').filter(Boolean))
-        .filter((parts) => parts.length === 2 && parts[0] === 'projects')
-        .map((parts) => parts[1]!),
+        .map(({ providerBasePath }) => providerBasePath)
+        .filter((providerPath) => isProjectDirectoryPath(providerPath))
+        .map((providerPath) => providerPath.slice(1)),
     );
     try {
       if (providerBasePath !== undefined) {
@@ -2547,19 +2735,31 @@ export class WorkspaceFileService {
         await walk(handle, parts.join('/'));
         return rows.join('\n');
       }
-      const projects = await state.directoryHandle.getDirectoryHandle('projects');
-      const entries: Array<[string, EntryHandle]> = [];
-      for await (const entry of (projects as IterableDirectoryHandle).entries()) {
-        entries.push(entry);
-      }
-      for (const [name, child] of entries.toSorted(([left], [right]) => left.localeCompare(right))) {
-        if (isChromiumSwapArtifactName(name)) {
-          continue;
-        }
+      // App state under a dot-prefixed root child never feeds discovery (F1).
+      const rootEntries = await admittedEntries(state.directoryHandle);
+      const entries = rootEntries.filter(([name]) => !name.startsWith('.'));
+      const topLevelRows = await resolveRows(entries, async ([name, child]) => {
         if (child.kind === 'file') {
-          // oxlint-disable-next-line no-await-in-loop -- File metadata reads are sequential to bound handle pressure.
-          const file = await child.getFile();
-          rows.push(`${name}\0file\0${file.size}\0${file.lastModified}`);
+          return fileRow(name, name, child);
+        }
+        if (mountedProjectDirectories.has(name)) {
+          return [name, undefined];
+        }
+        try {
+          // Project discovery only depends on the immediate directory and its manifest.
+          const manifestHandle = await child.getFileHandle('tau.json');
+          const manifest = await manifestHandle.getFile();
+          return [name, `${name}/tau.json\0file\0${manifest.size}\0${manifest.lastModified}`];
+        } catch (error) {
+          if (!isNotFoundError(error)) {
+            throw error;
+          }
+          return [name, undefined];
+        }
+      });
+      for (const [name, child] of entries) {
+        if (child.kind === 'file') {
+          rows.push(topLevelRows.get(name)!);
           continue;
         }
         rows.push([name, 'dir', 0, 0].join('\0'));
@@ -2568,22 +2768,14 @@ export class WorkspaceFileService {
           await walk(child, name);
           continue;
         }
-        try {
-          // Project discovery only depends on the immediate directory and its manifest.
-          // oxlint-disable-next-line no-await-in-loop -- Manifest metadata reads are sequential to bound handle pressure.
-          const manifestHandle = await child.getFileHandle('tau.json');
-          // oxlint-disable-next-line no-await-in-loop -- Manifest metadata reads are sequential to bound handle pressure.
-          const manifest = await manifestHandle.getFile();
-          rows.push(`${name}/tau.json\0file\0${manifest.size}\0${manifest.lastModified}`);
-        } catch (error) {
-          if (!isNotFoundError(error)) {
-            throw error;
-          }
+        const manifestRow = topLevelRows.get(name);
+        if (manifestRow !== undefined) {
+          rows.push(manifestRow);
         }
       }
     } catch (error) {
       if (isNotFoundError(error)) {
-        return '<missing>';
+        return missingExternalSnapshot;
       }
       throw error;
     }
@@ -2616,11 +2808,12 @@ export class WorkspaceFileService {
     if (previous === next) {
       return;
     }
-    await state.provider.refresh?.();
+    const physicalPaths = this._diffExternalSnapshot(previous, next);
+    await state.provider.refresh?.(physicalPaths);
     if (this._observedWebAccessRoots.get(state.storageRootKey) !== state) {
       return;
     }
-    this._invalidateExternalDerivatives();
+    this._invalidateExternalDerivatives(physicalPaths === undefined ? undefined : { state, physicalPaths });
     this._emitExternalRootSummaries(state, scope === '*' ? undefined : scope);
     this._emitGlobalDiscoveryChange(state);
     state.pollSnapshots.set(scope, next);
@@ -3440,15 +3633,11 @@ export class WorkspaceFileService {
     if (path !== input.providerBasePath) {
       throw new TypeError('Pending project target must already be canonical');
     }
-    const segments = path.split('/').filter(Boolean);
-    const suffix = `--${projectId}`;
-    if (
-      segments.length !== 2 ||
-      segments[0] !== 'projects' ||
-      !segments[1]?.endsWith(suffix) ||
-      segments[1].length <= suffix.length
-    ) {
-      throw new TypeError('Pending project target is not an allocated project directory');
+    // The pending operation carries its own allocated directory name; identity
+    // is established by the post-commit manifest read-back and the replay
+    // checks, not by parsing the id back out of the basename.
+    if (!isProjectDirectoryPath(path)) {
+      throw new TypeError('Pending project target is not a project directory');
     }
     const rawFiles: unknown = input.files;
     if (rawFiles === null || typeof rawFiles !== 'object' || Array.isArray(rawFiles)) {
@@ -3514,6 +3703,46 @@ export class WorkspaceFileService {
     }
   }
 
+  /**
+   * Project whose lock a mutation must hold. A logical `/projects/<id>` path
+   * names its project directly; otherwise the mutation may still land inside a
+   * project's physical directory, because flat-layout project directories are
+   * ordinary root children reachable through the workspace-root mount.
+   *
+   * @param logicalPath - Canonical logical mutation path.
+   * @param resolution - Mount resolution carrying the physical target.
+   * @returns Owning project id, or `undefined` when no project owns the bytes.
+   */
+  private _projectLockOwner(logicalPath: string, resolution: MountResolution): string | undefined {
+    const segments = logicalPath.split('/');
+    if (segments[1] === 'projects' && segments[2]) {
+      return segments[2];
+    }
+    const storageRootKey = resolution.entry?.storageRootKey;
+    if (storageRootKey === undefined) {
+      return undefined;
+    }
+    const physicalPath = resolveVirtualPath(resolution.path);
+    // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
+    // ponytail: linear over mounts, which is one entry per open project. Index
+    // by storage root if a workspace ever mounts projects by the hundred.
+    for (const mount of this._mountTable.listMounts()) {
+      const base = mount.providerBasePath;
+      if (
+        mount.storageRootKey !== storageRootKey ||
+        !isProjectDirectoryPath(base) ||
+        (physicalPath !== base && !physicalPath.startsWith(`${base}/`))
+      ) {
+        continue;
+      }
+      const owner = mount.prefix.split('/');
+      if (owner[1] === 'projects' && owner[2]) {
+        return owner[2];
+      }
+    }
+    return undefined;
+  }
+
   private _mutationLockPaths(operations: ReadonlyArray<{ path: string; resolution: MountResolution }>): string[] {
     const locks = new Set<string>();
     const addHierarchy = (path: string, boundary: string, format: (value: string) => string): void => {
@@ -3534,9 +3763,9 @@ export class WorkspaceFileService {
     for (const { path, resolution } of operations) {
       const normalized = resolveVirtualPath(path);
       addHierarchy(normalized, resolution.entry?.prefix ?? normalized, (value) => value);
-      const segments = normalized.split('/');
-      if (segments[1] === 'projects' && segments[2]) {
-        locks.add(`project:${segments[2]}`);
+      const projectId = this._projectLockOwner(normalized, resolution);
+      if (projectId !== undefined) {
+        locks.add(`project:${projectId}`);
       }
       const { entry } = resolution;
       if (entry?.storageRootKey !== undefined) {
@@ -3593,6 +3822,11 @@ export class WorkspaceFileService {
     resolution: MountResolution,
     context?: WorkspaceMutationContext,
   ): void {
+    // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
+    // ponytail: full drop, not the path-scoped one `writeFiles` uses. Both callers are
+    // half-finished *recursive* directory mutations, so everything under `path` is
+    // untrustworthy — and neither SharedPool nor InMemoryFileTree can drop a subtree.
+    // Scope it once SharedPool grows a prefix invalidation, if this error path is ever hot.
     this._filePool?.clear();
     this._inMemoryTree.clear();
     this._directoryStatRoot = undefined;
@@ -3626,13 +3860,11 @@ export class WorkspaceFileService {
   }
 
   private async _rmdirRecursive(provider: FileSystemProvider, directoryPath: string): Promise<void> {
-    const entries = await provider.readdir(directoryPath);
+    const entries = await readDirectoryEntries(provider, directoryPath);
     for (const entry of entries) {
-      const fullPath = joinPath(directoryPath, entry);
-      // oxlint-disable-next-line no-await-in-loop -- Sequential stat required for ordered deletion
-      const entryStat = await provider.stat(fullPath);
+      const fullPath = joinPath(directoryPath, entry.name);
       // oxlint-disable-next-line no-await-in-loop -- Sequential traversal required for recursive deletion
-      await (entryStat.type === 'dir' ? this._rmdirRecursive(provider, fullPath) : provider.unlink(fullPath));
+      await (entry.kind === 'dir' ? this._rmdirRecursive(provider, fullPath) : provider.unlink(fullPath));
     }
     await provider.rmdir(directoryPath);
   }
@@ -3704,13 +3936,11 @@ export class WorkspaceFileService {
     targetPath: string,
   ): Promise<void> {
     await targetProvider.mkdir(targetPath, { recursive: true });
-    const entries = await sourceProvider.readdir(sourcePath);
+    const entries = await readDirectoryEntries(sourceProvider, sourcePath);
     for (const entry of entries) {
-      const sourceEntry = joinPath(sourcePath, entry);
-      const targetEntry = joinPath(targetPath, entry);
-      // oxlint-disable-next-line no-await-in-loop -- Sequential stat required for ordered traversal
-      const entryStat = await sourceProvider.stat(sourceEntry);
-      if (entryStat.type === 'dir') {
+      const sourceEntry = joinPath(sourcePath, entry.name);
+      const targetEntry = joinPath(targetPath, entry.name);
+      if (entry.kind === 'dir') {
         // oxlint-disable-next-line no-await-in-loop -- Sequential recursion required
         await this._copyDirectoryAcrossProviders(sourceProvider, sourceEntry, targetProvider, targetEntry);
       } else {
@@ -3726,6 +3956,7 @@ export class WorkspaceFileService {
     provider: {
       readdir(path: string): Promise<string[]>;
       stat(path: string): Promise<FileStat>;
+      readdirEntries?(path: string): Promise<DirectoryEntry[]>;
       readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
     },
     path: string,
@@ -3737,12 +3968,10 @@ export class WorkspaceFileService {
     const directories: string[] = [];
 
     const collect = async (currentPath: string, basePath: string): Promise<void> => {
-      const entries = await provider.readdir(currentPath);
+      const entries = await readDirectoryEntries(provider, currentPath);
       for (const entry of entries) {
-        const fullPath = joinPath(currentPath, entry);
-        // oxlint-disable-next-line no-await-in-loop -- Sequential stat required for recursive collection
-        const stat = await provider.stat(fullPath);
-        if (stat.type === 'file') {
+        const fullPath = joinPath(currentPath, entry.name);
+        if (entry.kind === 'file') {
           const relativePath = basePath === '/' ? fullPath.slice(1) : fullPath.slice(basePath.length + 1);
           // oxlint-disable-next-line no-await-in-loop -- Sequential reads required for recursive collection
           files[relativePath] = await provider.readFile(fullPath);

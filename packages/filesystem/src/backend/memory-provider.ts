@@ -5,8 +5,9 @@
  * filesystem operations (tests, scratch spaces).
  */
 
-import type { FileStat, ProviderCapabilities } from '#types.js';
+import type { DirectoryEntry, FileStat, ProviderCapabilities } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
+import { indexDirectoryEntries } from '#backend/directory-entries.js';
 import { fileStatFromBytes } from '#content-metadata.js';
 
 /**
@@ -60,6 +61,17 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    * @returns The names of files and subdirectories directly inside `path`.
    */
   public async readdir(path: string): Promise<string[]> {
+    const entries = await this.readdirEntries(path);
+    return entries.map((entry) => entry.name);
+  }
+
+  /**
+   * List immediate children of `path` with their kinds.
+   *
+   * @param path - Absolute directory path to enumerate.
+   * @returns Each entry's name paired with its kind.
+   */
+  public async readdirEntries(path: string): Promise<DirectoryEntry[]> {
     const normalizedPath = path === '/' ? '/' : path;
     if (this._files.has(normalizedPath)) {
       throw this._enotdir(path);
@@ -69,29 +81,7 @@ export class MemoryProvider extends AbstractFileSystemProvider {
     }
 
     const prefix = normalizedPath === '/' ? '/' : `${normalizedPath}/`;
-    const entries = new Set<string>();
-
-    for (const filePath of this._files.keys()) {
-      if (filePath.startsWith(prefix)) {
-        const rest = filePath.slice(prefix.length);
-        const firstSegment = rest.split('/')[0];
-        if (firstSegment) {
-          entries.add(firstSegment);
-        }
-      }
-    }
-
-    for (const directoryPath of this._dirs) {
-      if (directoryPath !== normalizedPath && directoryPath.startsWith(prefix)) {
-        const rest = directoryPath.slice(prefix.length);
-        const firstSegment = rest.split('/')[0];
-        if (firstSegment) {
-          entries.add(firstSegment);
-        }
-      }
-    }
-
-    return [...entries];
+    return indexDirectoryEntries(prefix, this._files.keys(), this._dirs);
   }
 
   /**

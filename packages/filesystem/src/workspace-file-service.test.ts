@@ -13,7 +13,12 @@ import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
 import { SharedPool } from '@taucad/memory';
 import type { ChangeEvent, FileSystemProvider, WatchEvent } from '#types.js';
 import { getEventOrigin } from '#event-origin-registry.js';
-import { parseProjectManifestBytes, projectToManifest, serializeProjectManifest } from '@taucad/types';
+import {
+  parseProjectManifestBytes,
+  projectManifestSchemaUrl,
+  projectToManifest,
+  serializeProjectManifest,
+} from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
 
 const encoder = new TextEncoder();
@@ -91,11 +96,8 @@ describe('WorkspaceFileService', () => {
       directory: string,
       project: ProjectManifest,
     ): Promise<void> => {
-      if (!(await provider.exists('/projects'))) {
-        await provider.mkdir('/projects');
-      }
-      await provider.mkdir(`/projects/${directory}`);
-      await provider.writeFile(`/projects/${directory}/tau.json`, serializeProjectManifest(projectToManifest(project)));
+      await provider.mkdir(`/${directory}`);
+      await provider.writeFile(`/${directory}/tau.json`, serializeProjectManifest(projectToManifest(project)));
     };
 
     it('discovers valid manifests and applies deterministic duplicate-id ordering', async () => {
@@ -110,8 +112,8 @@ describe('WorkspaceFileService', () => {
 
       const result = await service.listProjectManifests();
       expect(result.entries.map((entry) => [entry.locator.relativeDirectory, entry.status])).toEqual([
-        ['/projects/a-original', 'duplicate-id'],
-        ['/projects/b-copy', 'duplicate-id'],
+        ['/a-original', 'duplicate-id'],
+        ['/b-copy', 'duplicate-id'],
       ]);
       expect(result.roots).toEqual([{ status: 'complete', root: { backend: 'indexeddb' } }]);
     });
@@ -123,10 +125,9 @@ describe('WorkspaceFileService', () => {
         unknown
       >;
       source['id'] = 'copied-folder';
-      await provider.mkdir('/projects');
-      await provider.mkdir('/projects/dropped');
+      await provider.mkdir('/dropped');
       const bytes = encoder.encode(JSON.stringify(source));
-      await provider.writeFile('/projects/dropped/tau.json', bytes);
+      await provider.writeFile('/dropped/tau.json', bytes);
       await service.configureProjectRoots({
         projects: [],
         roots: [{ backend: 'indexeddb' }],
@@ -136,12 +137,72 @@ describe('WorkspaceFileService', () => {
         entries: [
           {
             status: 'adoption-required',
-            locator: { relativeDirectory: '/projects/dropped' },
+            locator: { relativeDirectory: '/dropped' },
             manifest: { name: 'Dropped' },
           },
         ],
       });
-      expect(await provider.readFile('/projects/dropped/tau.json')).toEqual(bytes);
+      expect(await provider.readFile('/dropped/tau.json')).toEqual(bytes);
+    });
+
+    // R11 — `adoption-required` used to be a dead-end banner.
+    describe('adoptProjectDirectory', () => {
+      const adoptable = {
+        $schema: projectManifestSchemaUrl,
+        name: 'Dropped',
+        description: 'copied without its identity',
+        tags: ['gearbox', 'v2'],
+        assets: { main: { entryPath: 'main.ts', thumbnail: 'thumb.png' } },
+      };
+
+      const writeRaw = async (provider: FileSystemProvider, directory: string, value: unknown): Promise<void> => {
+        await provider.mkdir(`/${directory}`);
+        await provider.writeFile(`/${directory}/tau.json`, encoder.encode(JSON.stringify(value)));
+        await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      };
+
+      const locatorFor = async (directory: string) => {
+        const { entries } = await service.listProjectManifests();
+        const entry = entries.find((candidate) => candidate.locator.relativeDirectory === `/${directory}`);
+        if (!entry) {
+          throw new Error(`No discovery entry for /${directory}`);
+        }
+        return entry.locator;
+      };
+
+      it('mints an identity in place and preserves every other field byte-stably', async () => {
+        const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+        await writeRaw(provider, 'dropped', { ...adoptable, id: 'copied-folder' });
+
+        const adopted = await service.adoptProjectDirectory(await locatorFor('dropped'));
+
+        expect(adopted).toEqual({ ...adoptable, id: adopted.id });
+        expect(adopted.id).toMatch(/^proj_[\dA-Za-z]{21}$/);
+        expect(await provider.readFile('/dropped/tau.json')).toEqual(serializeProjectManifest(adopted));
+        expect(await service.listProjectManifests()).toMatchObject({
+          entries: [{ status: 'valid', manifest: { id: adopted.id, name: 'Dropped' } }],
+        });
+      });
+
+      it('refuses a manifest that already carries a valid identity', async () => {
+        const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+        const identified = manifestProject('proj_eeeeeeeeeeeeeeeeeeeee', 'Identified');
+        await writeRaw(provider, 'identified', identified);
+        const locator = await locatorFor('identified');
+
+        await expect(service.adoptProjectDirectory(locator)).rejects.toThrow(TypeError);
+        expect(decoder.decode(await provider.readFile('/identified/tau.json'))).toBe(JSON.stringify(identified));
+      });
+
+      it('refuses a manifest whose damage is not confined to its id', async () => {
+        const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+        const broken = { ...adoptable, id: 'copied-folder', assets: { main: { entryPath: '../escape.ts' } } };
+        await writeRaw(provider, 'broken', broken);
+        const locator = await locatorFor('broken');
+
+        await expect(service.adoptProjectDirectory(locator)).rejects.toThrow(TypeError);
+        expect(decoder.decode(await provider.readFile('/broken/tau.json'))).toBe(JSON.stringify(broken));
+      });
     });
 
     it('strictly quarantines unsafe structural and presentation data', async () => {
@@ -150,43 +211,118 @@ describe('WorkspaceFileService', () => {
         ...projectToManifest(manifestProject('proj_ccccccccccccccccccccc')),
         assets: { main: { entryPath: '../escape.ts' } },
       };
-      await provider.mkdir('/projects');
-      await provider.mkdir('/projects/unsafe');
-      await provider.writeFile('/projects/unsafe/tau.json', encoder.encode(JSON.stringify(unsafe)));
+      await provider.mkdir('/unsafe');
+      await provider.writeFile('/unsafe/tau.json', encoder.encode(JSON.stringify(unsafe)));
       const salvaged = {
         ...projectToManifest(manifestProject('proj_ddddddddddddddddddddd')),
         name: 42,
       };
-      await provider.mkdir('/projects/salvaged');
-      await provider.writeFile('/projects/salvaged/tau.json', encoder.encode(JSON.stringify(salvaged)));
+      await provider.mkdir('/salvaged');
+      await provider.writeFile('/salvaged/tau.json', encoder.encode(JSON.stringify(salvaged)));
       await service.configureProjectRoots({
         projects: [],
         roots: [{ backend: 'indexeddb' }],
       });
 
       const { entries } = await service.listProjectManifests();
-      expect(entries.find((entry) => entry.locator.relativeDirectory === '/projects/unsafe')).toMatchObject({
+      expect(entries.find((entry) => entry.locator.relativeDirectory === '/unsafe')).toMatchObject({
         status: 'invalid',
       });
-      expect(entries.find((entry) => entry.locator.relativeDirectory === '/projects/salvaged')).toMatchObject({
+      expect(entries.find((entry) => entry.locator.relativeDirectory === '/salvaged')).toMatchObject({
         status: 'invalid',
       });
     });
 
-    it('marks a root inaccessible when a child read fails for a reason other than absence', async () => {
+    it('reports one unreadable child directory without discarding the rest of the root', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const readable = manifestProject('proj_rrrrrrrrrrrrrrrrrrrrr');
+      await writeManifest(provider, 'b-readable', readable);
+      await provider.mkdir('/a-unreadable');
+      vi.spyOn(provider, 'readFile').mockRejectedValueOnce(new Error('storage unavailable'));
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+
+      await expect(service.listProjectManifests()).resolves.toMatchObject({
+        entries: [
+          {
+            status: 'invalid',
+            locator: { relativeDirectory: '/a-unreadable' },
+            issue: { code: 'manifest-unreadable', message: 'storage unavailable' },
+          },
+          { status: 'valid', manifest: { id: readable.id }, locator: { relativeDirectory: '/b-readable' } },
+        ],
+        roots: [{ status: 'complete', root: { backend: 'indexeddb' } }],
+      });
+    });
+
+    it('marks a root inaccessible when the root listing itself fails', async () => {
       const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
       await writeManifest(provider, 'b-readable', manifestProject('proj_rrrrrrrrrrrrrrrrrrrrr'));
-      await provider.mkdir('/projects/a-unreadable');
-      vi.spyOn(provider, 'readFile').mockRejectedValueOnce(new Error('storage unavailable'));
+      vi.spyOn(provider, 'readdirEntries').mockRejectedValueOnce(new Error('root unavailable'));
       await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
 
       await expect(service.listProjectManifests()).resolves.toEqual({
         entries: [],
-        roots: [{ status: 'inaccessible', root: { backend: 'indexeddb' }, reason: 'storage unavailable' }],
+        roots: [{ status: 'inaccessible', root: { backend: 'indexeddb' }, reason: 'root unavailable' }],
       });
     });
 
-    it('refreshes an owned provider before discovering out-of-band project creation', async () => {
+    it('discovers manifest-bearing root children and never probes dot-directories or files', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      await writeManifest(provider, 'alpha', manifestProject('proj_aaaaaaaaaaaaaaaaaaaaa'));
+      await writeManifest(provider, 'beta', manifestProject('proj_bbbbbbbbbbbbbbbbbbbbb'));
+      await writeManifest(provider, '.tau', manifestProject('proj_ttttttttttttttttttttt'));
+      await provider.mkdir('/.tau/imports', { recursive: true });
+      await provider.mkdir('/no-manifest');
+      await provider.writeFile('/loose.txt', encoder.encode('loose'));
+      const stat = vi.spyOn(provider, 'stat');
+      const readFile = vi.spyOn(provider, 'readFile');
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+
+      const result = await service.listProjectManifests();
+
+      expect(result.entries.map((entry) => [entry.locator.relativeDirectory, entry.status])).toEqual([
+        ['/alpha', 'valid'],
+        ['/beta', 'valid'],
+      ]);
+      expect(readFile.mock.calls.map(([path]) => path)).toEqual([
+        '/alpha/tau.json',
+        '/beta/tau.json',
+        '/no-manifest/tau.json',
+      ]);
+      expect(stat).not.toHaveBeenCalled();
+    });
+
+    it('probes manifests with bounded concurrency in deterministic order', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const names = Array.from({ length: 40 }, (_, index) => `p${String(index).padStart(2, '0')}`);
+      for (const [index, name] of names.entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- Fixture writes are sequential for determinism.
+        await writeManifest(provider, name, manifestProject(`proj_${String(index).padStart(21, 'z')}`));
+      }
+      let inFlight = 0;
+      let maxInFlight = 0;
+      const readManifest = provider.readFile.bind(provider);
+      vi.spyOn(provider, 'readFile').mockImplementation((async (path: string) => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => {
+          setTimeout(resolve, 0);
+        });
+        try {
+          return await readManifest(path);
+        } finally {
+          inFlight--;
+        }
+      }) as FileSystemProvider['readFile']);
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+
+      const result = await service.listProjectManifests();
+
+      expect(result.entries.map((entry) => entry.locator.relativeDirectory)).toEqual(names.map((name) => `/${name}`));
+      expect(maxInFlight).toBe(16);
+    });
+
+    it('discovers out-of-band project creation from the external-change path without refreshing per scan', async () => {
       const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
       await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
       const dbName = (provider as unknown as { _dbName: string })._dbName;
@@ -195,18 +331,33 @@ describe('WorkspaceFileService', () => {
       await peer.initialize();
       const project = manifestProject('proj_ooooooooooooooooooooo', 'Out of band');
       await writeManifest(peer, 'out-of-band', project);
+      const refresh = vi.spyOn(provider, 'refresh');
+      const sender = new BroadcastChannel('tau-fs-changes');
 
       try {
+        sender.postMessage({
+          type: 'directory-change',
+          path: '/',
+          authority: {
+            storageRootKey: providerRegistry.resolveStorageRootKey({ backend: 'indexeddb' }),
+            providerBasePath: '/',
+          },
+        });
+        await waitFor(() => refresh.mock.calls.length > 0);
+        refresh.mockClear();
+
         await expect(service.listProjectManifests()).resolves.toMatchObject({
           entries: [
             {
               status: 'valid',
               manifest: { id: project.id },
-              locator: { relativeDirectory: '/projects/out-of-band' },
+              locator: { relativeDirectory: '/out-of-band' },
             },
           ],
         });
+        expect(refresh).not.toHaveBeenCalled();
       } finally {
+        sender.close();
         peer.dispose();
       }
     });
@@ -214,7 +365,7 @@ describe('WorkspaceFileService', () => {
 
   describe('permanentlyDeleteProjectDirectory', () => {
     const projectId = 'proj_eeeeeeeeeeeeeeeeeeeee';
-    const directory = `/projects/readable-project--${projectId}`;
+    const directory = '/readable-project';
     const scope: StorageRootConfig = { backend: 'indexeddb' };
 
     beforeEach(async () => {
@@ -319,9 +470,10 @@ describe('WorkspaceFileService', () => {
 
     it.each([
       { name: 'an invalid project id', projectId: '../invalid', providerBasePath: directory },
-      { name: 'a non-canonical path', projectId, providerBasePath: `/projects/../projects/readable--${projectId}` },
+      { name: 'a non-canonical path', projectId, providerBasePath: '/readable-project/../readable-project' },
       { name: 'a nested project path', projectId, providerBasePath: `${directory}/nested` },
-      { name: 'a path outside /projects', projectId, providerBasePath: `/trash/readable--${projectId}` },
+      { name: 'a workspace-state directory', projectId, providerBasePath: '/.tau' },
+      { name: 'the workspace root itself', projectId, providerBasePath: '/' },
     ])('rejects $name before provider access', async ({ projectId: inputProjectId, providerBasePath }) => {
       const getProvider = vi.spyOn(providerRegistry, 'getProvider');
 
@@ -453,7 +605,7 @@ describe('WorkspaceFileService', () => {
 
   describe('commitPendingProjectDirectory', () => {
     const projectId = 'proj_ppppppppppppppppppppp';
-    const directory = `/projects/pending-project--${projectId}`;
+    const directory = '/pending-project';
     const scope: StorageRootConfig = { backend: 'indexeddb' };
     let commitProvider: FileSystemProvider;
     const mainFile = 'main.ts';
@@ -581,22 +733,12 @@ describe('WorkspaceFileService', () => {
         input: { manifest: encoder.encode('{invalid') },
       },
       {
-        name: 'a manifest whose project identity differs',
-        input: {
-          manifest: serializeProjectManifest(
-            projectToManifest({
-              id: 'proj_qqqqqqqqqqqqqqqqqqqqq',
-              name: 'Different Project',
-              description: '',
-              tags: [],
-              assets: { main: { entryPath: 'main.ts' } },
-            }),
-          ),
-        },
+        name: 'a nested target',
+        input: { providerBasePath: '/projects/pending-project' },
       },
       {
-        name: 'an unallocated target',
-        input: { providerBasePath: '/projects/pending-project' },
+        name: 'a workspace-state target',
+        input: { providerBasePath: '/.tau' },
       },
       {
         name: 'an absolute journal path',
@@ -2719,8 +2861,53 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
         mountTable,
       });
 
-      return { service: svc, pool, eventBus };
+      return { service: svc, pool, eventBus, provider };
     }
+
+    it('stores utf8 reads in the pool under the same conditions as byte reads', async () => {
+      const { service: svc, pool } = await createWorkspaceFileServiceWithPool();
+      await svc.writeFile('/decoded.txt', 'decoded content');
+
+      await expect(svc.readFile('/decoded.txt', 'utf8')).resolves.toBe('decoded content');
+
+      expect(decoder.decode(pool.resolveCopy('/decoded.txt'))).toBe('decoded content');
+    });
+
+    it('keeps a scoped utf8 read out of the pool', async () => {
+      const { service: svc, pool } = await createWorkspaceFileServiceWithPool();
+      await svc.writeFile('/scoped.txt', 'scoped content');
+      const scope = { backend: 'memory', storageRootKey: 'memory:test-root' } as const;
+
+      await expect(svc.readFile('/scoped.txt', { encoding: 'utf8', scope })).resolves.toBe('scoped content');
+
+      expect(pool.has('/scoped.txt')).toBe(false);
+    });
+
+    it('keeps cached state for the writes that survived a partial batch failure', async () => {
+      const { service: svc, pool, provider } = await createWorkspaceFileServiceWithPool();
+      await svc.writeFile('/keep.txt', 'keep');
+      await svc.writeFile('/doomed.txt', 'before');
+      await svc.readFile('/keep.txt');
+      await svc.readFile('/doomed.txt');
+      await svc.getDirectoryStat('/');
+      const readdirWithStats = vi.spyOn(provider, 'readdirWithStats');
+      const writeFile = provider.writeFile.bind(provider);
+      vi.spyOn(provider, 'writeFile').mockImplementation(async (path, data) => {
+        if (path === '/doomed.txt') {
+          throw new Error('write failed');
+        }
+        return writeFile(path, data);
+      });
+
+      await expect(
+        svc.writeFiles({ '/ok.txt': { content: 'ok' }, '/doomed.txt': { content: 'after' } }),
+      ).rejects.toThrow('write failed');
+
+      expect(pool.has('/keep.txt')).toBe(true);
+      expect(pool.has('/doomed.txt')).toBe(false);
+      await expect(svc.getDirectoryStat('/')).resolves.toContainEqual(expect.objectContaining({ path: 'ok.txt' }));
+      expect(readdirWithStats).not.toHaveBeenCalled();
+    });
 
     it('should store binary content in pool after readFile', async () => {
       const { service: svc, pool } = await createWorkspaceFileServiceWithPool();
@@ -2823,6 +3010,20 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
 
       await svc.writeFile('/invalidate.txt', 'updated');
       expect(pool.has('/invalidate.txt')).toBe(false);
+    });
+
+    it('keeps pooled bytes readable after the returned buffer is transferred away', async () => {
+      const { service: svc, pool } = await createWorkspaceFileServiceWithPool();
+      await svc.writeFile('/transferred.bin', 'pooled payload');
+
+      const first = (await svc.readFile('/transferred.bin')) as Uint8Array<ArrayBuffer>;
+      // The bridge transfers read results to the main thread, which detaches
+      // this buffer on the worker side. The pool must already hold its own copy.
+      structuredClone(first, { transfer: [first.buffer] });
+      expect(first.buffer.detached).toBe(true);
+
+      expect(decoder.decode(pool.resolveCopy('/transferred.bin'))).toBe('pooled payload');
+      await expect(svc.readFile('/transferred.bin', 'utf8')).resolves.toBe('pooled payload');
     });
   });
 
@@ -2936,5 +3137,46 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       ).rejects.toThrow('protected prefix');
       expect(getProvider).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('flat workspace layout locks', () => {
+  const projectId = 'proj_lllllllllllllllllllll';
+
+  const configureFlatProject = async (
+    context: Awaited<ReturnType<typeof createWorkspaceFileService>>,
+  ): Promise<void> => {
+    await context.service.configureProjectRoots({
+      projects: [{ projectId, backend: 'memory', storageRootKey: 'memory:0', providerBasePath: '/cube-design' }],
+      roots: [],
+    });
+  };
+
+  it('locks the owning project for a root-mount write into its physical directory', async () => {
+    const context = await createWorkspaceFileService();
+    await configureFlatProject(context);
+    const queueForMany = vi.spyOn(context.resourceQueue, 'queueForMany');
+
+    try {
+      await context.service.writeFile('/cube-design/main.ts', 'physical route');
+
+      expect(queueForMany.mock.calls.at(-1)?.[0]).toContain(`project:${projectId}`);
+    } finally {
+      context.service.dispose();
+    }
+  });
+
+  it('leaves an unmounted root child free of project locks', async () => {
+    const context = await createWorkspaceFileService();
+    await configureFlatProject(context);
+    const queueForMany = vi.spyOn(context.resourceQueue, 'queueForMany');
+
+    try {
+      await context.service.writeFile('/loose-directory/main.ts', 'no project');
+
+      expect(queueForMany.mock.calls.at(-1)?.[0].filter((lock) => lock.startsWith('project:'))).toEqual([]);
+    } finally {
+      context.service.dispose();
+    }
   });
 });

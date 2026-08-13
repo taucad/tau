@@ -8,12 +8,18 @@
  * @see https://developer.mozilla.org/en-US/docs/Web/API/File_System_API
  */
 
-import type { FileReadStreamOptions, FileStat, ProviderCapabilities } from '#types.js';
+import type { DirectoryEntry, FileReadStreamOptions, FileStat, ProviderCapabilities } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
-import { fileStatFromBytes } from '#content-metadata.js';
+import { fileStatFromFile } from '#content-metadata.js';
 import { validateFileReadStreamOptions } from '#backend/stream-utils.js';
 
 const handleCacheMaxEntries = 10_000;
+
+/**
+ * Concurrent `getFile()` calls per directory listing. High enough to hide
+ * per-handle latency, low enough not to swamp the File System Access queue.
+ */
+const statConcurrency = 16;
 
 type FileSystemDirectoryEntryHandle = FileSystemDirectoryHandle | FileSystemFileHandle;
 type IterableFileSystemDirectoryHandle = FileSystemDirectoryHandle & {
@@ -85,17 +91,9 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     this._assertReady();
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
     const created = await this._createFileHandle(path);
-    let writable: FileSystemWritableFileStream | undefined;
     try {
-      writable = await created.fileHandle.createWritable();
-      await writable.write(bytes);
-      await writable.close();
+      await this._writeBytes(created.fileHandle, bytes);
     } catch (error) {
-      try {
-        await writable?.abort(error);
-      } catch {
-        // Preserve the write/close failure that caused the abort.
-      }
       await this._cleanupFailedFileCreation(path, created);
       throw error;
     }
@@ -108,17 +106,31 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * @returns The names of files and subdirectories directly inside `path`.
    */
   public async readdir(path: string): Promise<string[]> {
+    const entries = await this.readdirEntries(path);
+    return entries.map((entry) => entry.name);
+  }
+
+  /**
+   * List immediate children of `path` with their kinds, so callers can branch
+   * on file-vs-directory without a `stat` per child.
+   *
+   * @param path - Absolute directory path to enumerate.
+   * @returns Each entry's name paired with its kind.
+   */
+  public async readdirEntries(path: string): Promise<DirectoryEntry[]> {
     this._assertReady();
     const directoryHandle = await this._resolveDirectoryHandle(path);
-    const entries: string[] = [];
-    for await (const [name] of directoryEntries(directoryHandle)) {
-      entries.push(name);
+    const entries: DirectoryEntry[] = [];
+    for await (const [name, handle] of directoryEntries(directoryHandle)) {
+      entries.push({ name, kind: handle.kind === 'directory' ? 'dir' : 'file' });
     }
     return entries;
   }
 
   /**
-   * Batched readdir + stat — eliminates the N+1 stat round-trips per directory listing.
+   * Batched readdir + stat — eliminates the N+1 stat round-trips per directory
+   * listing. Child metadata comes from the `File` object; contents are read only
+   * when {@link fileStatFromFile} needs them, in chunks of {@link statConcurrency}.
    *
    * @param path - Absolute directory path to enumerate.
    * @returns Each entry's name paired with its stat metadata.
@@ -126,17 +138,24 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
     this._assertReady();
     const directoryHandle = await this._resolveDirectoryHandle(path);
+    const handles: Array<[string, FileSystemDirectoryEntryHandle]> = [];
+    for await (const entry of directoryEntries(directoryHandle)) {
+      handles.push(entry);
+    }
+
     const result: Array<{ name: string } & FileStat> = [];
-    for await (const [name, handle] of directoryEntries(directoryHandle)) {
-      if (handle.kind === 'directory') {
-        result.push({ name, type: 'dir', size: 0, mtimeMs: 0 });
-      } else {
-        // oxlint-disable-next-line no-await-in-loop -- Sequential within single directory iteration
-        const file = await handle.getFile();
-        // oxlint-disable-next-line no-await-in-loop -- Metadata classification requires exact file bytes
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        result.push({ name, ...fileStatFromBytes(bytes, file.lastModified) });
-      }
+    for (let offset = 0; offset < handles.length; offset += statConcurrency) {
+      // oxlint-disable-next-line no-await-in-loop -- Chunked awaits are what bounds concurrency to statConcurrency.
+      const chunk = await Promise.all(
+        handles
+          .slice(offset, offset + statConcurrency)
+          .map(async ([name, handle]) =>
+            handle.kind === 'directory'
+              ? ({ name, type: 'dir', size: 0, mtimeMs: 0 } satisfies { name: string } & FileStat)
+              : { name, ...(await fileStatFromFile(await handle.getFile())) },
+          ),
+      );
+      result.push(...chunk);
     }
     return result;
   }
@@ -161,8 +180,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     let fileError: unknown;
     try {
       const fileHandle = await parentHandle.getFileHandle(name);
-      const file = await fileHandle.getFile();
-      return fileStatFromBytes(new Uint8Array(await file.arrayBuffer()), file.lastModified);
+      return await fileStatFromFile(await fileHandle.getFile());
     } catch (error) {
       fileError = error;
     }
@@ -269,10 +287,20 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     this._invalidateHandleCachePrefix(from);
   }
 
-  /** Drop cached directory handles before applying sibling-authority facts. */
-  public async refresh(): Promise<void> {
+  /**
+   * Drop cached directory handles before applying sibling-authority facts.
+   *
+   * @param prefixes - Absolute paths whose subtrees changed. Omit to drop the whole cache.
+   */
+  public async refresh(prefixes?: readonly string[]): Promise<void> {
     this._assertReady();
-    this._handleCache.clear();
+    if (prefixes === undefined) {
+      this._handleCache.clear();
+      return;
+    }
+    for (const prefix of prefixes) {
+      this._invalidateHandleCachePrefix(prefix);
+    }
   }
 
   /**
@@ -395,6 +423,30 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   // ---------------------------------------------------------------------------
   // Protected instance methods
   // ---------------------------------------------------------------------------
+
+  /**
+   * Replace a file's contents. The writable stream is the only write API
+   * available to user-picked roots; {@link import('#backend/opfs-provider.js').OPFSProvider}
+   * overrides this with sync access handles.
+   *
+   * @param fileHandle - Handle for the already-created target file.
+   * @param bytes - Full new contents.
+   */
+  protected async _writeBytes(fileHandle: FileSystemFileHandle, bytes: Uint8Array<ArrayBuffer>): Promise<void> {
+    let writable: FileSystemWritableFileStream | undefined;
+    try {
+      writable = await fileHandle.createWritable();
+      await writable.write(bytes);
+      await writable.close();
+    } catch (error) {
+      try {
+        await writable?.abort(error);
+      } catch {
+        // Preserve the write/close failure that caused the abort.
+      }
+      throw error;
+    }
+  }
 
   protected async readFileRaw(path: string): Promise<Uint8Array<ArrayBuffer>> {
     this._assertReady();

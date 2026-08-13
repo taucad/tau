@@ -190,7 +190,7 @@ describe('bindMutationContextForPort', () => {
       const wrapper = bindMutationContextForPort(handlers, mutationContext);
       const input: Parameters<typeof wrapper.commitPendingProjectDirectory>[0] = {
         projectId: 'proj_ppppppppppppppppppppp',
-        providerBasePath: '/projects/pending--proj_ppppppppppppppppppppp',
+        providerBasePath: '/pending',
         scope: { backend: 'memory', storageRootKey: 'memory:0' },
         files: { 'main.ts': { content: new Uint8Array([1]) } },
         manifest: new Uint8Array([2]),
@@ -415,7 +415,7 @@ describe('createFileSystemBridgeProxy', () => {
     try {
       const pending = proxy.commitPendingProjectDirectory({
         projectId: 'proj_ppppppppppppppppppppp',
-        providerBasePath: '/projects/pending--proj_ppppppppppppppppppppp',
+        providerBasePath: '/pending',
         scope: { backend: 'memory', storageRootKey: 'memory:0' },
         files: { 'main.ts': { content } },
         manifest,
@@ -918,7 +918,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
         {
           projectId,
           ...oldScope,
-          providerBasePath: `/projects/${projectId}`,
+          providerBasePath: `/${projectId}`,
         },
       ],
       roots: [],
@@ -941,7 +941,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
           projectId,
           backend: 'memory',
           storageRootKey: 'memory:bridge-stale-new',
-          providerBasePath: `/projects/${projectId}`,
+          providerBasePath: `/${projectId}`,
         },
       ],
       roots: [],
@@ -966,7 +966,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       });
 
       expect(received).toEqual([]);
-      await expect(oldProvider.readFile(`/projects/${projectId}/queued.txt`, 'utf8')).resolves.toBe('old provider');
+      await expect(oldProvider.readFile(`/${projectId}/queued.txt`, 'utf8')).resolves.toBe('old provider');
       await expect(service.exists(`/projects/${projectId}/queued.txt`)).resolves.toBe(false);
     } finally {
       release.resolve();
@@ -1002,13 +1002,13 @@ describe('exposeFileSystem skip-originator dispatch', () => {
           projectId: alphaProjectId,
           backend: 'memory',
           storageRootKey: 'memory:bridge-alpha',
-          providerBasePath: `/projects/${alphaProjectId}`,
+          providerBasePath: `/${alphaProjectId}`,
         },
         {
           projectId: betaProjectId,
           backend: 'memory',
           storageRootKey: 'memory:bridge-beta',
-          providerBasePath: `/projects/${betaProjectId}`,
+          providerBasePath: `/${betaProjectId}`,
         },
       ],
       roots: [],

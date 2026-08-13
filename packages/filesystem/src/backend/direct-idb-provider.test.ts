@@ -146,6 +146,100 @@ describe('DirectIdbProvider', () => {
   // readdir
   // ---------------------------------------------------------------------------
 
+  describe('metadata without row reads', () => {
+    const rowReads = (target: DirectIdbProvider) =>
+      vi.spyOn(target as unknown as { _idbGet: (key: string) => Promise<unknown> }, '_idbGet');
+
+    it('should stat a written file without fetching its row', async () => {
+      await provider.writeFile('/big.bin', new Uint8Array([1, 2, 0, 4, 5]));
+      const spy = rowReads(provider);
+
+      await expect(provider.stat('/big.bin')).resolves.toEqual({
+        type: 'file',
+        size: 5,
+        mtimeMs: 0,
+        contentKind: 'binary',
+      });
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('should stat a read file without a second row fetch', async () => {
+      await provider.writeFile('/notes.txt', 'a\nb');
+      await provider.refresh();
+      await provider.readFile('/notes.txt');
+      const spy = rowReads(provider);
+
+      await expect(provider.stat('/notes.txt')).resolves.toEqual({
+        type: 'file',
+        size: 3,
+        mtimeMs: 0,
+        contentKind: 'text',
+        lineCount: 2,
+      });
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('should fall back to the row when no metadata is cached', async () => {
+      await provider.writeFile('/cold.txt', 'a\nb\nc');
+      await provider.refresh();
+      const spy = rowReads(provider);
+
+      await expect(provider.stat('/cold.txt')).resolves.toEqual({
+        type: 'file',
+        size: 5,
+        mtimeMs: 0,
+        contentKind: 'text',
+        lineCount: 3,
+      });
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it('should reflect an overwrite in cached metadata', async () => {
+      await provider.writeFile('/file.txt', 'a');
+      await provider.stat('/file.txt');
+      await provider.writeFile('/file.txt', 'a\nb\nc');
+
+      await expect(provider.stat('/file.txt')).resolves.toMatchObject({ size: 5, lineCount: 3 });
+    });
+
+    it('should drop cached metadata for a deleted path', async () => {
+      await provider.writeFile('/gone.txt', 'a');
+      await provider.stat('/gone.txt');
+      await provider.unlink('/gone.txt');
+
+      await expect(provider.stat('/gone.txt')).rejects.toThrow('ENOENT');
+    });
+
+    it('should follow a renamed file to its new path', async () => {
+      await provider.writeFile('/from.txt', 'a\nb');
+      await provider.stat('/from.txt');
+      await provider.rename('/from.txt', '/to.txt');
+
+      await expect(provider.stat('/from.txt')).rejects.toThrow('ENOENT');
+      await expect(provider.stat('/to.txt')).resolves.toMatchObject({ size: 3, lineCount: 2 });
+    });
+  });
+
+  describe('readdirEntries', () => {
+    it('should return each entry name with its kind', async () => {
+      await provider.writeFile('/dir/a.txt', 'a');
+      await provider.writeFile('/dir/sub/b.txt', 'b');
+      await provider.mkdir('/dir/empty');
+
+      const entries = await provider.readdirEntries('/dir');
+
+      expect([...entries].sort((left, right) => left.name.localeCompare(right.name))).toEqual([
+        { name: 'a.txt', kind: 'file' },
+        { name: 'empty', kind: 'dir' },
+        { name: 'sub', kind: 'dir' },
+      ]);
+    });
+
+    it('should throw for a non-existent directory', async () => {
+      await expect(provider.readdirEntries('/nonexistent')).rejects.toThrow('ENOENT');
+    });
+  });
+
   describe('readdir', () => {
     it('should list files in root directory', async () => {
       await provider.writeFile('/a.txt', 'a');

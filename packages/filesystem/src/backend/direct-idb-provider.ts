@@ -7,8 +7,10 @@
  * path set on init (~26ms for 10k entries vs ~12s ZenFS full scan).
  */
 
-import type { FileStat, ProviderCapabilities } from '#types.js';
+import type { FileContentMetadata } from '@taucad/types';
+import type { DirectoryEntry, FileStat, ProviderCapabilities } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
+import { indexDirectoryEntries } from '#backend/directory-entries.js';
 import { getFileContentMetadata } from '#content-metadata.js';
 
 const storeName = 'files';
@@ -49,6 +51,15 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
   private _paths = new Set<string>();
   /** In-memory directory set: derived from file paths. */
   private _dirs = new Set<string>(['/']);
+  /**
+   * Metadata for rows this provider has written or read, so `stat` does not
+   * fetch the whole blob again.
+   *
+   * ponytail: coherent because this provider is the only writer in its tab and
+   * {@link refresh} clears it; a peer tab's write is visible only after the
+   * refresh the cross-tab coordinator already triggers.
+   */
+  private _fileMeta = new Map<string, { size: number } & FileContentMetadata>();
   /** Pending writes accumulated for the next batched IDB transaction. */
   private readonly _writeBatch: Array<{
     path: string;
@@ -85,6 +96,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       const snapshot = await this._readPathIndexSnapshot();
       this._paths = snapshot.paths;
       this._dirs = snapshot.directories;
+      this._fileMeta = new Map();
     } catch (error) {
       database.close();
       if (this._db === database) {
@@ -100,6 +112,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     const snapshot = await this._readPathIndexSnapshot();
     this._paths = snapshot.paths;
     this._dirs = snapshot.directories;
+    this._fileMeta = new Map();
   }
 
   /**
@@ -135,6 +148,18 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    * @returns The names of files and subdirectories directly inside `path`.
    */
   public async readdir(path: string): Promise<string[]> {
+    const entries = await this.readdirEntries(path);
+    return entries.map((entry) => entry.name);
+  }
+
+  /**
+   * List immediate children of `path` with their kinds, resolved from the
+   * in-memory path index — no row reads.
+   *
+   * @param path - Absolute directory path to enumerate.
+   * @returns Each entry's name paired with its kind.
+   */
+  public async readdirEntries(path: string): Promise<DirectoryEntry[]> {
     this._ensureOpen();
     const normalizedPath = path === '/' ? '/' : path;
     if (this._paths.has(normalizedPath)) {
@@ -145,29 +170,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     }
 
     const prefix = normalizedPath === '/' ? '/' : `${normalizedPath}/`;
-    const entries = new Set<string>();
-
-    for (const filePath of this._paths) {
-      if (filePath.startsWith(prefix)) {
-        const rest = filePath.slice(prefix.length);
-        const firstSegment = rest.split('/')[0];
-        if (firstSegment) {
-          entries.add(firstSegment);
-        }
-      }
-    }
-
-    for (const directoryPath of this._dirs) {
-      if (directoryPath !== normalizedPath && directoryPath.startsWith(prefix)) {
-        const rest = directoryPath.slice(prefix.length);
-        const firstSegment = rest.split('/')[0];
-        if (firstSegment) {
-          entries.add(firstSegment);
-        }
-      }
-    }
-
-    return [...entries];
+    return indexDirectoryEntries(prefix, this._paths, this._dirs);
   }
 
   /**
@@ -180,7 +183,11 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     const names = await this.readdir(path);
     const prefix = path === '/' ? '/' : `${path}/`;
     const result: Array<{ name: string } & FileStat> = [];
-    const fileMetadataPaths: Array<{ index: number; fullPath: string }> = [];
+    const fileMetadataPaths: Array<{
+      index: number;
+      fullPath: string;
+      cached: ({ size: number } & FileContentMetadata) | undefined;
+    }> = [];
     const missingIndexes = new Set<number>();
 
     for (const name of names) {
@@ -193,15 +200,20 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
           mtimeMs: 0,
         });
       } else {
-        fileMetadataPaths.push({ index: result.length, fullPath });
-        result.push({
-          name,
-          type: 'file',
-          size: 0,
-          mtimeMs: 0,
-          contentKind: 'text',
-          lineCount: 1,
-        });
+        const cached = this._fileMeta.get(fullPath);
+        fileMetadataPaths.push({ index: result.length, fullPath, cached });
+        result.push(
+          cached
+            ? { name, type: 'file', mtimeMs: 0, ...cached }
+            : {
+                name,
+                type: 'file',
+                size: 0,
+                mtimeMs: 0,
+                contentKind: 'text',
+                lineCount: 1,
+              },
+        );
       }
     }
 
@@ -211,20 +223,22 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
         let remaining = fileMetadataPaths.length;
 
         const store = tx.objectStore(storeName);
-        const bindRequest = (request: IDBRequest, entryFullPath: string, entryIndex: number) => {
+        const bindRequest = (
+          request: IDBRequest,
+          entry: { entryFullPath: string; entryIndex: number; cached: boolean },
+        ) => {
+          const { entryFullPath, entryIndex, cached } = entry;
           request.addEventListener('success', () => {
-            const data = request.result as Uint8Array<ArrayBuffer> | undefined;
-            if (data === undefined) {
+            const row = request.result as Uint8Array<ArrayBuffer> | IDBValidKey | undefined;
+            if (row === undefined) {
               this._purgeFileProjection(entryFullPath);
               missingIndexes.add(entryIndex);
-            } else {
-              const metadata = getFileContentMetadata(data);
+            } else if (!cached) {
               result[entryIndex] = {
                 name: result[entryIndex]!.name,
                 type: 'file',
-                size: data.byteLength,
                 mtimeMs: 0,
-                ...metadata,
+                ...this._rememberFileMeta(entryFullPath, row as Uint8Array<ArrayBuffer>),
               };
             }
             remaining--;
@@ -236,8 +250,13 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
             reject(request.error ?? new Error(`IDB get failed for '${entryFullPath}'`));
           });
         };
-        for (const { index, fullPath } of fileMetadataPaths) {
-          bindRequest(store.get(fullPath), fullPath, index);
+        for (const { index, fullPath, cached } of fileMetadataPaths) {
+          // Cached rows only need an existence probe; uncached rows need the bytes.
+          bindRequest(cached ? store.getKey(fullPath) : store.get(fullPath), {
+            entryFullPath: fullPath,
+            entryIndex: index,
+            cached: cached !== undefined,
+          });
         }
       });
     }
@@ -256,21 +275,29 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     if (this._dirs.has(path)) {
       return { type: 'dir', size: 0, mtimeMs: 0 };
     }
+    const cached = this._fileMeta.get(path);
+    if (cached && this._paths.has(path)) {
+      // The durable row still decides existence — `getKey` confirms it without
+      // transferring (and structured-cloning) the whole blob.
+      if (await this._idbHasKey(path)) {
+        return { type: 'file', mtimeMs: 0, ...cached };
+      }
+      this._purgeFileProjection(path);
+      throw this._enoent(path);
+    }
     if (this._paths.has(path)) {
       const data = await this._idbGet(path);
       if (data === undefined) {
         this._purgeFileProjection(path);
         throw this._enoent(path);
       }
-      const metadata = getFileContentMetadata(data);
-      return { type: 'file', size: data.byteLength, mtimeMs: 0, ...metadata };
+      return { type: 'file', mtimeMs: 0, ...this._rememberFileMeta(path, data) };
     }
     const repaired = await this._idbGet(path);
     if (repaired !== undefined) {
-      const metadata = getFileContentMetadata(repaired);
       this._paths.add(path);
       this._ensureParentDirs(path);
-      return { type: 'file', size: repaired.byteLength, mtimeMs: 0, ...metadata };
+      return { type: 'file', mtimeMs: 0, ...this._rememberFileMeta(path, repaired) };
     }
     throw this._enoent(path);
   }
@@ -289,7 +316,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       throw this._enoent(path);
     }
     await this._idbDelete(path);
-    this._paths.delete(path);
+    this._purgeFileProjection(path);
   }
 
   /**
@@ -372,8 +399,9 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       });
     });
     this._ensureParentDirs(to);
-    this._paths.delete(from);
+    this._purgeFileProjection(from);
     this._paths.add(to);
+    this._rememberFileMeta(to, data);
   }
 
   private async _renameDirectory(from: string, to: string): Promise<void> {
@@ -432,9 +460,10 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     for (const oldPath of filePaths) {
       this._purgeFileProjection(oldPath);
     }
-    for (const oldPath of fileData.keys()) {
+    for (const [oldPath, data] of fileData) {
       const newPath = to + oldPath.slice(from.length);
       this._paths.add(newPath);
+      this._rememberFileMeta(newPath, data);
     }
     for (const directory of directoriesToMove) {
       const newDirectory = to + directory.slice(from.length);
@@ -465,6 +494,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     }
     this._paths.add(path);
     this._ensureParentDirs(path);
+    this._rememberFileMeta(path, data);
     return new Uint8Array(data);
   }
 
@@ -549,9 +579,10 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       });
     });
 
-    for (const { path } of batch) {
+    for (const { path, data } of batch) {
       this._ensureParentDirs(path);
       this._paths.add(path);
+      this._rememberFileMeta(path, data);
     }
   }
 
@@ -653,6 +684,21 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
 
   private _purgeFileProjection(path: string): void {
     this._paths.delete(path);
+    this._fileMeta.delete(path);
+  }
+
+  /**
+   * Cache the metadata of bytes this provider already holds, so a later `stat`
+   * needs no row read.
+   *
+   * @param path - Absolute file path the bytes belong to.
+   * @param data - Row contents.
+   * @returns The cached size and content metadata.
+   */
+  private _rememberFileMeta(path: string, data: Uint8Array<ArrayBuffer>): { size: number } & FileContentMetadata {
+    const metadata = { size: data.byteLength, ...getFileContentMetadata(data) };
+    this._fileMeta.set(path, metadata);
+    return metadata;
   }
 
   private _assertNoFileAncestor(path: string): void {
@@ -690,6 +736,26 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       });
       request.addEventListener('error', () => {
         reject(request.error ?? new Error(`IDB get failed for '${key}'`));
+      });
+    });
+  }
+
+  /**
+   * Test for a durable row without reading its value.
+   *
+   * @param key - Row key to probe.
+   * @returns `true` when the row exists.
+   */
+  private async _idbHasKey(key: string): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+      const tx = this._db!.transaction(storeName, 'readonly');
+      const request = tx.objectStore(storeName).getKey(key);
+
+      request.addEventListener('success', () => {
+        resolve(request.result !== undefined);
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error(`IDB getKey failed for '${key}'`));
       });
     });
   }

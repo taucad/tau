@@ -1,4 +1,5 @@
 export type {
+  DirectoryEntry,
   ProviderCapabilities,
   FileStat,
   FileStatEntry,
@@ -22,6 +23,9 @@ export type {
 export { ProviderRegistry } from '#provider-registry.js';
 export type { ProviderRegistryOptions } from '#provider-registry.js';
 
+export { resolveStorageRootKey } from '#storage-root-key.js';
+export type { StorageRootIdentity } from '#storage-root-key.js';
+
 export { BoundedFileCache } from '#bounded-file-cache.js';
 export { ResourceQueue } from '#resource-queue.js';
 export { ChangeEventBus } from '#change-event-bus.js';
@@ -35,9 +39,11 @@ export type { WatchRegistryOptions } from '#watch-registry.js';
 export { streamChunkSize, bufferToStream } from '#backend/stream-utils.js';
 export { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 export {
+  countLineBytes,
   countTextLines,
   fileMetadataFields,
   fileStatFromBytes,
+  fileStatFromFile,
   getFileContentMetadata,
   headSniffByteLength,
   seemsBinary,

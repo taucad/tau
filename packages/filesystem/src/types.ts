@@ -25,6 +25,16 @@ export type ProviderCapabilities = {
 };
 
 /**
+ * Directory child with its kind, so callers can branch on file-vs-directory
+ * without a `stat` round-trip per entry.
+ * @public
+ */
+export type DirectoryEntry = {
+  readonly name: string;
+  readonly kind: 'file' | 'dir';
+};
+
+/**
  * Backend-agnostic filesystem provider exposing POSIX-like operations.
  * @public
  */
@@ -48,8 +58,13 @@ export type FileSystemProvider = {
   readFileStream?(path: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>>;
   /** Optional batched readdir+stat. When present, eliminates N+1 stat calls per directory listing. */
   readdirWithStats?(path: string): Promise<Array<{ name: string } & FileStat>>;
-  /** Refresh provider projections after an out-of-band mutation. */
-  refresh?(): Promise<void>;
+  /** Optional readdir carrying entry kinds. When present, tree walks skip the stat-per-child. */
+  readdirEntries?(path: string): Promise<DirectoryEntry[]>;
+  /**
+   * Refresh provider projections after an out-of-band mutation. Pass the absolute
+   * paths whose subtrees changed to scope the invalidation; omit them to drop everything.
+   */
+  refresh?(prefixes?: readonly string[]): Promise<void>;
 };
 
 /**

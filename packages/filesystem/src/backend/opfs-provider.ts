@@ -8,6 +8,21 @@
 import type { ProviderCapabilities } from '#types.js';
 import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
 
+/**
+ * Subset of `FileSystemSyncAccessHandle` this provider uses. Declared locally
+ * because the type ships in TypeScript's `webworker` lib, not `dom`.
+ */
+type SyncAccessHandle = {
+  write(data: Uint8Array<ArrayBuffer>, options?: { at?: number }): number;
+  truncate(size: number): void;
+  flush(): void;
+  close(): void;
+};
+
+type SyncAccessCapableFileHandle = FileSystemFileHandle & {
+  createSyncAccessHandle?: () => Promise<SyncAccessHandle>;
+};
+
 /** Filesystem provider backed by the origin-private filesystem. @public */
 export class OPFSProvider extends FileSystemAccessProvider {
   /**
@@ -45,6 +60,58 @@ export class OPFSProvider extends FileSystemAccessProvider {
   public override dispose(): void {
     this._initialized = false;
     super.dispose();
+  }
+
+  /**
+   * Write through a sync access handle — one acquisition instead of the
+   * writable stream's three awaits plus its `.crswap` sibling file.
+   *
+   * A sync handle is exclusive: a concurrent holder makes acquisition throw
+   * `NoModificationAllowedError`. One microtask retry covers the common
+   * back-to-back-write case; anything still failing falls back to the
+   * writable stream so no write that used to succeed starts failing.
+   *
+   * ponytail: whole-file replacement only. `appendFile` is a read + concat +
+   * `writeFile` at the RPC layer, so it inherits this path already; there is
+   * no positional-write provider API to route.
+   *
+   * @param fileHandle - Handle for the already-created target file.
+   * @param bytes - Full new contents.
+   */
+  protected override async _writeBytes(
+    fileHandle: FileSystemFileHandle,
+    bytes: Uint8Array<ArrayBuffer>,
+  ): Promise<void> {
+    const acquire = (fileHandle as SyncAccessCapableFileHandle).createSyncAccessHandle;
+    if (typeof acquire !== 'function') {
+      await super._writeBytes(fileHandle, bytes);
+      return;
+    }
+
+    let handle: SyncAccessHandle | undefined;
+    for (let attempt = 0; attempt < 2 && handle === undefined; attempt++) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- The retry only exists to await a second attempt.
+        handle = await acquire.call(fileHandle);
+      } catch {
+        // oxlint-disable-next-line no-await-in-loop -- Yield once so a same-tick holder can close.
+        await Promise.resolve();
+      }
+    }
+    if (handle === undefined) {
+      await super._writeBytes(fileHandle, bytes);
+      return;
+    }
+
+    try {
+      // Write before truncate: a crash in between leaves the new content plus a
+      // stale tail rather than an empty file.
+      handle.write(bytes, { at: 0 });
+      handle.truncate(bytes.byteLength);
+      handle.flush();
+    } finally {
+      handle.close();
+    }
   }
 
   protected override _assertReady(): void {

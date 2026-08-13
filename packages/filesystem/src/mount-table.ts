@@ -60,6 +60,7 @@ export type MountConfig =
  */
 export type ProjectRootConfig = MountConfig & {
   readonly projectId: string;
+  /** Physical project directory: an immediate, non-dot-prefixed child of the workspace root (`/<slug>`). */
   readonly providerBasePath: string;
 };
 
@@ -83,7 +84,12 @@ export type ProjectRootConfiguration = {
   readonly roots: readonly StorageRootConfig[];
 };
 
-/** Stable locator for a discovered project directory. @public */
+/**
+ * Stable locator for a discovered project directory. `relativeDirectory` is the
+ * physical directory relative to the workspace root (`/<slug>`), never the
+ * logical `/projects/<projectId>` route.
+ * @public
+ */
 export type ProjectLocator =
   | {
       readonly backend: 'indexeddb' | 'opfs';
@@ -106,6 +112,17 @@ export type ProjectDiscoveryEntry =
     }
   | {
       readonly status: 'duplicate-id';
+      readonly manifest: ProjectManifest;
+      readonly locator: ProjectLocator;
+    }
+  | {
+      /**
+       * The project is discoverable here, but its persisted route still points
+       * at a storage root this pass could not observe, so re-pointing would be
+       * unsafe. Synthesized by the UI reconciliation layer — the worker scan
+       * never emits it.
+       */
+      readonly status: 'route-blocked';
       readonly manifest: ProjectManifest;
       readonly locator: ProjectLocator;
     }

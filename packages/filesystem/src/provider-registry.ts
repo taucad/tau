@@ -4,6 +4,7 @@ import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
 import { OPFSProvider } from '#backend/opfs-provider.js';
 import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
 import type { WorkspaceScope } from '#mount-table.js';
+import { resolveStorageRootKey } from '#storage-root-key.js';
 import { MissingWorkspaceHandleError } from '#workspace-errors.js';
 /**
  * Configuration for {@link ProviderRegistry}.
@@ -136,28 +137,7 @@ export class ProviderRegistry {
    * @returns Canonical storage-root key.
    */
   public resolveStorageRootKey(scope: WorkspaceScope): string {
-    switch (scope.backend) {
-      case 'indexeddb': {
-        return `indexeddb:${this._databasePrefix}`;
-      }
-      case 'opfs': {
-        return 'opfs:origin';
-      }
-      case 'webaccess': {
-        return `webaccess:${scope.workspaceId}`;
-      }
-      case 'memory': {
-        const { storageRootKey } = scope;
-        if (
-          typeof storageRootKey !== 'string' ||
-          !storageRootKey.startsWith('memory:') ||
-          storageRootKey.slice('memory:'.length).trim().length === 0
-        ) {
-          throw new TypeError('Memory storage root must use memory:<scope>.');
-        }
-        return storageRootKey;
-      }
-    }
+    return resolveStorageRootKey(scope, this._databasePrefix);
   }
 
   private async _createProvider(scope: WorkspaceScope): Promise<FileSystemProvider> {

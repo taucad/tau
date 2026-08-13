@@ -148,6 +148,7 @@ describe('WorkspaceFileService — unified scope routing', () => {
       mock<FileSystemProvider>({
         exists: standaloneExists,
         readdir: standaloneReaddir,
+        readdirEntries: undefined,
       }),
     );
 
@@ -184,7 +185,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
           projectId,
           backend: 'memory',
           storageRootKey,
-          providerBasePath: `/projects/${projectId}`,
+          providerBasePath: `/${projectId}`,
         }),
       ),
       roots: [],
@@ -199,13 +200,13 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
           projectId: alphaProjectId,
           backend: 'memory',
           storageRootKey: 'memory:duplicate',
-          providerBasePath: '/projects/duplicate',
+          providerBasePath: '/duplicate',
         },
         {
           projectId: betaProjectId,
           backend: 'memory',
           storageRootKey: 'memory:duplicate',
-          providerBasePath: '/projects/duplicate',
+          providerBasePath: '/duplicate',
         },
       ],
     },
@@ -216,13 +217,13 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
           projectId: betaProjectId,
           backend: 'memory',
           storageRootKey: 'memory:valid-before-invalid',
-          providerBasePath: `/projects/${betaProjectId}`,
+          providerBasePath: `/${betaProjectId}`,
         },
         {
           projectId: '../invalid',
           backend: 'memory',
           storageRootKey: 'memory:invalid',
-          providerBasePath: '/projects/invalid',
+          providerBasePath: '/invalid',
         },
       ],
     },
@@ -241,7 +242,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
         path: `/projects/${alphaProjectId}`,
         authority: {
           storageRootKey: 'memory:authority-a',
-          providerBasePath: `/projects/${alphaProjectId}`,
+          providerBasePath: `/${alphaProjectId}`,
         },
       });
       await new Promise((resolve) => {
@@ -254,7 +255,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
         path: `/projects/${alphaProjectId}`,
         authority: {
           storageRootKey: 'memory:authority-b',
-          providerBasePath: `/projects/${alphaProjectId}`,
+          providerBasePath: `/${alphaProjectId}`,
         },
       });
       await vi.waitFor(async () => {
@@ -457,7 +458,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     await expect(rooted.exists('/')).rejects.toMatchObject({ code: 'ESTALE' });
   });
 
-  it.each(['/', '/projects', '/projects/nested/child', '/other/project'])(
+  it.each(['/', '/.tau', '/projects/nested/child', '/other/project'])(
     'rejects invalid configured provider base %s before provider lookup',
     async (providerBasePath) => {
       const { service, providerRegistry } = await createService();
@@ -514,7 +515,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
       backend: 'memory',
       storageRootKey: 'memory:alpha-queued-new',
     });
-    await replacementProvider.mkdir(`/projects/${alphaProjectId}`, { recursive: true });
+    await replacementProvider.mkdir(`/${alphaProjectId}`, { recursive: true });
     const replacement = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
     const replacementEvents: WatchEvent[] = [];
     const stopReplacement = replacement.watch({ paths: ['/queued.txt'] }, (event) => replacementEvents.push(event));
@@ -525,7 +526,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
       setTimeout(resolve, 100);
     });
 
-    await expect(oldProvider.readFile(`/projects/${alphaProjectId}/queued.txt`, 'utf8')).resolves.toBe('old provider');
+    await expect(oldProvider.readFile(`/${alphaProjectId}/queued.txt`, 'utf8')).resolves.toBe('old provider');
     await expect(replacement.exists('/queued.txt')).resolves.toBe(false);
     expect(replacementEvents).toEqual([]);
     expect(await service.getDirectoryStat(`/projects/${alphaProjectId}`)).toEqual([]);

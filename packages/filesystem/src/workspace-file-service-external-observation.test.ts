@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { SharedPool } from '@taucad/memory';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { isEventGloballyVisible } from '#event-origin-registry.js';
 import { MountTable } from '#mount-table.js';
@@ -42,8 +43,8 @@ const fileHandle = (name: string): FileSystemFileHandle => {
 
 const alphaProjectId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
 const betaProjectId = 'proj_bbbbbbbbbbbbbbbbbbbbb';
-const alphaPhysicalRoot = '/projects/alpha-project';
-const betaPhysicalRoot = '/projects/beta-project';
+const alphaPhysicalRoot = '/alpha-project';
+const betaPhysicalRoot = '/beta-project';
 
 const activeServices: WorkspaceFileService[] = [];
 
@@ -133,9 +134,8 @@ describe('WorkspaceFileService external webaccess observation', () => {
       native: true,
       awaitBootstrap: false,
       beforeConfigure: async ({ handle }) => {
-        const projects = await handle.getDirectoryHandle('projects');
-        const entries = projects.entries.bind(projects);
-        vi.spyOn(projects, 'entries').mockImplementation(async function* () {
+        const entries = handle.entries.bind(handle);
+        vi.spyOn(handle, 'entries').mockImplementation(async function* () {
           baselineStarted.resolve();
           await releaseBaseline.promise;
           yield* entries();
@@ -154,7 +154,7 @@ describe('WorkspaceFileService external webaccess observation', () => {
       {
         type: 'modified',
         changedHandle: fileHandle('main.ts'),
-        relativePathComponents: ['projects', 'alpha-project', 'main.ts'],
+        relativePathComponents: ['alpha-project', 'main.ts'],
       },
     ]);
     await vi.waitFor(() => {
@@ -169,14 +169,96 @@ describe('WorkspaceFileService external webaccess observation', () => {
     let unmountedEntries: ReturnType<typeof vi.spyOn>;
     await createWebAccessService({
       beforeConfigure: async ({ provider, handle }) => {
-        await provider.writeFile('/projects/discovery-only/deep/file.ts', 'not routed');
-        const projects = await handle.getDirectoryHandle('projects');
-        const unmounted = await projects.getDirectoryHandle('discovery-only');
+        await provider.writeFile('/discovery-only/deep/file.ts', 'not routed');
+        const unmounted = await handle.getDirectoryHandle('discovery-only');
         unmountedEntries = vi.spyOn(unmounted, 'entries');
       },
     });
 
     expect(unmountedEntries?.mock.calls).toHaveLength(0);
+  });
+
+  it('invalidates only the changed subtree when the external diff is localizable', async () => {
+    const { service, provider } = await createWebAccessService();
+    const pool = new SharedPool(new SharedArrayBuffer(128 * 1024), { maxEntries: 32 });
+    service.setFilePool(pool);
+    const alphaFile = `/projects/${alphaProjectId}/main.ts`;
+    const betaFile = `/projects/${betaProjectId}/main.ts`;
+    await service.readFile(alphaFile);
+    await service.readFile(betaFile);
+    expect(pool.has(alphaFile)).toBe(true);
+    expect(pool.has(betaFile)).toBe(true);
+
+    const refresh = vi.spyOn(provider, 'refresh');
+    await provider.writeFile(`${alphaPhysicalRoot}/main.ts`, 'changed out of band');
+    await service.pollExternalChanges();
+
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledWith([`${alphaPhysicalRoot}/main.ts`]);
+    expect(pool.has(alphaFile)).toBe(false);
+    expect(pool.has(betaFile)).toBe(true);
+  });
+
+  it('falls back to a full invalidation when the external diff cannot be localized', async () => {
+    const { service, provider, handle } = await createWebAccessService({
+      beforeConfigure: async ({ provider: seedProvider }) => {
+        for (let index = 0; index < 70; index++) {
+          // oxlint-disable-next-line no-await-in-loop -- Fixture writes are sequential for determinism.
+          await seedProvider.writeFile(`${alphaPhysicalRoot}/file-${index}.ts`, 'seed');
+        }
+      },
+    });
+    const pool = new SharedPool(new SharedArrayBuffer(128 * 1024), { maxEntries: 32 });
+    service.setFilePool(pool);
+    const alphaFile = `/projects/${alphaProjectId}/main.ts`;
+    const betaFile = `/projects/${betaProjectId}/main.ts`;
+    await service.readFile(alphaFile);
+    await service.readFile(betaFile);
+
+    const refresh = vi.spyOn(provider, 'refresh');
+    await handle.removeEntry('alpha-project', { recursive: true });
+    await handle.removeEntry('beta-project', { recursive: true });
+    await service.pollExternalChanges();
+
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledWith(undefined);
+    expect(pool.has(alphaFile)).toBe(false);
+    expect(pool.has(betaFile)).toBe(false);
+  });
+
+  it('reads external snapshot file metadata with bounded concurrency', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const instrumentedFile = (name: string): FileSystemFileHandle =>
+      ({
+        kind: 'file',
+        name,
+        async getFile() {
+          inFlight++;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await Promise.resolve();
+          inFlight--;
+          return new File(['x'], name, { lastModified: 1 });
+        },
+      }) as unknown as FileSystemFileHandle;
+
+    await createWebAccessService({
+      beforeConfigure: async ({ provider, handle }) => {
+        for (let index = 0; index < 40; index++) {
+          // oxlint-disable-next-line no-await-in-loop -- Fixture writes are sequential for determinism.
+          await provider.writeFile(`${alphaPhysicalRoot}/file-${index}.ts`, 'x');
+        }
+        const alpha = await handle.getDirectoryHandle('alpha-project');
+        const entries = alpha.entries.bind(alpha);
+        vi.spyOn(alpha, 'entries').mockImplementation(async function* () {
+          for await (const [name, child] of entries()) {
+            yield child.kind === 'file' ? [name, instrumentedFile(name)] : [name, child];
+          }
+        } as never);
+      },
+    });
+
+    expect(maxInFlight).toBe(16);
   });
 
   it('retains one observer and provider across wrappers for the same directory entry', async () => {
@@ -209,12 +291,12 @@ describe('WorkspaceFileService external webaccess observation', () => {
     expect(TestFileSystemObserver.instances).toHaveLength(2);
     await expect(service.readFile(`/projects/${alphaProjectId}/main.ts`, 'utf8')).resolves.toBe('replacement');
     const events: WatchEvent[] = [];
-    service.watch({ paths: ['/projects'], recursive: true }, (event) => events.push(event));
+    service.watch({ paths: ['/'], recursive: true }, (event) => events.push(event));
     observer.callback([
       {
         type: 'modified',
         changedHandle: fileHandle('main.ts'),
-        relativePathComponents: ['projects', 'alpha-project', 'main.ts'],
+        relativePathComponents: ['alpha-project', 'main.ts'],
       },
     ]);
     await service.pollExternalChanges();
@@ -261,13 +343,13 @@ describe('WorkspaceFileService external webaccess observation', () => {
       native: true,
       beforeConfigure: ({ service, provider }) => {
         refresh = vi.spyOn(provider, 'refresh');
-        service.watch({ paths: ['/projects'], recursive: true }, (event) => events.push(event));
+        service.watch({ paths: ['/'], recursive: true }, (event) => events.push(event));
         TestFileSystemObserver.observeHook = () => {
           TestFileSystemObserver.instances[0]!.callback([
             {
               type: 'modified',
               changedHandle: fileHandle('main.ts'),
-              relativePathComponents: ['projects', 'alpha-project', 'main.ts'],
+              relativePathComponents: ['alpha-project', 'main.ts'],
             },
           ]);
           throw new DOMException('observer rejected', 'NotAllowedError');
@@ -282,7 +364,7 @@ describe('WorkspaceFileService external webaccess observation', () => {
       {
         type: 'modified',
         changedHandle: fileHandle('main.ts'),
-        relativePathComponents: ['projects', 'alpha-project', 'main.ts'],
+        relativePathComponents: ['alpha-project', 'main.ts'],
       },
     ]);
     await service.pollExternalChanges();
@@ -328,7 +410,7 @@ describe('WorkspaceFileService external webaccess observation', () => {
       {
         type: 'modified',
         changedHandle: fileHandle('main.ts'),
-        relativePathComponents: ['projects', 'alpha-project', 'main.ts'],
+        relativePathComponents: ['alpha-project', 'main.ts'],
       },
     ]);
 
@@ -354,8 +436,8 @@ describe('WorkspaceFileService external webaccess observation', () => {
       {
         type: 'moved',
         changedHandle: fileHandle('renamed.ts'),
-        relativePathComponents: ['projects', 'alpha-project', 'renamed.ts'],
-        relativePathMovedFrom: ['projects', 'alpha-project', 'main.ts'],
+        relativePathComponents: ['alpha-project', 'renamed.ts'],
+        relativePathMovedFrom: ['alpha-project', 'main.ts'],
       },
     ]);
 
@@ -376,13 +458,55 @@ describe('WorkspaceFileService external webaccess observation', () => {
       {
         type: 'moved',
         changedHandle: fileHandle('tau.json.bak'),
-        relativePathComponents: ['projects', 'alpha-project', 'tau.json.bak'],
-        relativePathMovedFrom: ['projects', 'alpha-project', 'tau.json'],
+        relativePathComponents: ['alpha-project', 'tau.json.bak'],
+        relativePathMovedFrom: ['alpha-project', 'tau.json'],
       },
     ]);
 
     await vi.waitFor(() => {
-      expect(events).toContainEqual({ type: 'directoryChanged', path: '/projects', backend: 'webaccess' });
+      expect(events).toContainEqual({ type: 'directoryChanged', path: '/', backend: 'webaccess' });
+    });
+  });
+
+  it('keeps workspace app-state writes out of project discovery', async () => {
+    const { service, eventBus } = await createWebAccessService({ native: true });
+    const events: unknown[] = [];
+    const rootedEvents: WatchEvent[] = [];
+    eventBus.subscribe((event) => events.push(event));
+    const stop = service
+      .createRootedFileSystem(`/projects/${alphaProjectId}`)
+      .watch({ paths: ['/'], recursive: true }, (event) => rootedEvents.push(event));
+
+    TestFileSystemObserver.instances[0]!.callback([
+      {
+        type: 'modified',
+        changedHandle: fileHandle('transcript.json'),
+        relativePathComponents: ['.tau', 'transcripts', 'transcript.json'],
+      },
+    ]);
+    await service.pollExternalChanges();
+
+    expect(events).toEqual([]);
+    expect(rootedEvents).toEqual([]);
+    stop();
+  });
+
+  it('publishes discovery for a manifest appearing in a new root child', async () => {
+    const { provider, eventBus } = await createWebAccessService({ native: true });
+    const events: unknown[] = [];
+    eventBus.subscribe((event) => events.push(event));
+    await provider.writeFile('/gamma-project/tau.json', '{}');
+
+    TestFileSystemObserver.instances[0]!.callback([
+      {
+        type: 'appeared',
+        changedHandle: fileHandle('tau.json'),
+        relativePathComponents: ['gamma-project', 'tau.json'],
+      },
+    ]);
+
+    await vi.waitFor(() => {
+      expect(events).toContainEqual({ type: 'directoryChanged', path: '/', backend: 'webaccess' });
     });
   });
 
@@ -403,8 +527,8 @@ describe('WorkspaceFileService external webaccess observation', () => {
       {
         type: 'moved',
         changedHandle: fileHandle('main.ts'),
-        relativePathComponents: ['projects', 'alpha-project', 'main.ts'],
-        relativePathMovedFrom: ['projects', 'alpha-project', 'main.ts.crswap'],
+        relativePathComponents: ['alpha-project', 'main.ts'],
+        relativePathMovedFrom: ['alpha-project', 'main.ts.crswap'],
       },
     ]);
 
@@ -412,7 +536,7 @@ describe('WorkspaceFileService external webaccess observation', () => {
       expect(rootedEvents).toEqual([{ type: 'reset' }]);
     });
     expect(globalPaths).toContain(`/projects/${alphaProjectId}`);
-    expect(globalPaths).not.toContain('/projects');
+    expect(globalPaths).not.toContain('/');
     stop();
   });
 
@@ -420,7 +544,7 @@ describe('WorkspaceFileService external webaccess observation', () => {
     const { service } = await createWebAccessService({ native: true });
     const observer = TestFileSystemObserver.instances[0]!;
     const events: WatchEvent[] = [];
-    service.watch({ paths: ['/projects'], recursive: true }, (event) => events.push(event));
+    service.watch({ paths: ['/'], recursive: true }, (event) => events.push(event));
 
     await service.configureProjectRoots({ projects: [], roots: [] });
     expect(observer.disconnect).toHaveBeenCalledOnce();
@@ -429,7 +553,7 @@ describe('WorkspaceFileService external webaccess observation', () => {
       {
         type: 'modified',
         changedHandle: fileHandle('main.ts'),
-        relativePathComponents: ['projects', 'alpha-project', 'main.ts'],
+        relativePathComponents: ['alpha-project', 'main.ts'],
       },
     ]);
     await Promise.resolve();
@@ -553,9 +677,7 @@ describe('WorkspaceFileService external webaccess observation', () => {
       .watch({ paths: ['/'], recursive: true }, (event) => events.push(event));
     await provider.writeFile(`${alphaPhysicalRoot}/main.ts`, 'unknown record changed bytes');
 
-    TestFileSystemObserver.instances[0]!.callback([
-      { type: 'unknown', relativePathComponents: ['projects', 'alpha-project'] },
-    ]);
+    TestFileSystemObserver.instances[0]!.callback([{ type: 'unknown', relativePathComponents: ['alpha-project'] }]);
     await vi.waitFor(() => {
       expect(events).toEqual([{ type: 'reset' }]);
     });
@@ -567,7 +689,7 @@ describe('WorkspaceFileService external webaccess observation', () => {
   it('keeps unchanged native-active safety polls silent', async () => {
     const { service } = await createWebAccessService({ native: true });
     const events: WatchEvent[] = [];
-    service.watch({ paths: ['/projects'], recursive: true }, (event) => events.push(event));
+    service.watch({ paths: ['/'], recursive: true }, (event) => events.push(event));
 
     await service.pollExternalChanges();
 
@@ -587,7 +709,7 @@ describe('WorkspaceFileService external webaccess observation', () => {
       {
         type: 'appeared',
         changedHandle: fileHandle('main.ts.1.crswap'),
-        relativePathComponents: ['projects', 'alpha-project', 'main.ts.1.crswap'],
+        relativePathComponents: ['alpha-project', 'main.ts.1.crswap'],
       },
     ]);
     await service.pollExternalChanges();
@@ -610,8 +732,8 @@ describe('WorkspaceFileService external webaccess observation', () => {
       {
         type: 'moved',
         changedHandle: fileHandle('main.ts'),
-        relativePathComponents: ['projects', 'alpha-project', 'main.ts'],
-        relativePathMovedFrom: ['projects', 'alpha-project', 'main.ts.crswap'],
+        relativePathComponents: ['alpha-project', 'main.ts'],
+        relativePathMovedFrom: ['alpha-project', 'main.ts.crswap'],
       },
     ]);
 
@@ -624,22 +746,20 @@ describe('WorkspaceFileService external webaccess observation', () => {
     const { service, provider } = await createWebAccessService();
     const globalEvents: WatchEvent[] = [];
     const alphaEvents: WatchEvent[] = [];
-    service.watch({ paths: ['/projects'], recursive: true }, (event) => globalEvents.push(event));
+    service.watch({ paths: ['/'], recursive: true }, (event) => globalEvents.push(event));
     service
       .createRootedFileSystem(`/projects/${alphaProjectId}`)
       .watch({ paths: ['/'], recursive: true }, (event) => alphaEvents.push(event));
 
     await service.pollExternalChanges();
     expect(globalEvents).toEqual([]);
-    await provider.writeFile('/projects/dropped-project/tau.json', '{}');
+    await provider.writeFile('/dropped-project/tau.json', '{}');
     await service.pollExternalChanges();
 
     expect(globalEvents).toEqual([{ type: 'reset' }, { type: 'reset' }, { type: 'reset' }]);
     expect(alphaEvents).toEqual([{ type: 'reset' }]);
     const manifests = await service.listProjectManifests();
-    const droppedProject = manifests.entries.find(
-      ({ locator }) => locator.relativeDirectory === '/projects/dropped-project',
-    );
+    const droppedProject = manifests.entries.find(({ locator }) => locator.relativeDirectory === '/dropped-project');
     expect(droppedProject?.status).toBe('invalid');
     await service.pollExternalChanges();
     expect(globalEvents).toHaveLength(3);

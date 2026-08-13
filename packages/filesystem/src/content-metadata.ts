@@ -68,6 +68,24 @@ export function seemsBinary(head: Uint8Array<ArrayBuffer>): boolean {
 export const countTextLines = (text: string): number => text.split('\n').length;
 
 /**
+ * Count text lines straight from bytes — same semantics as {@link countTextLines}
+ * without decoding the buffer into a string first.
+ *
+ * @param bytes - Raw file bytes.
+ * @returns Number of logical lines.
+ * @public
+ */
+export function countLineBytes(bytes: Uint8Array<ArrayBuffer>): number {
+  let lines = 1;
+  let index = bytes.indexOf(0x0a);
+  while (index !== -1) {
+    lines++;
+    index = bytes.indexOf(0x0a, index + 1);
+  }
+  return lines;
+}
+
+/**
  * Rebuild content metadata as an exact discriminated shape.
  *
  * @param metadata - Existing file content metadata.
@@ -91,7 +109,7 @@ export function getFileContentMetadata(bytes: Uint8Array<ArrayBuffer>): FileCont
 
   return {
     contentKind: 'text',
-    lineCount: countTextLines(new TextDecoder().decode(bytes)),
+    lineCount: countLineBytes(bytes),
   };
 }
 
@@ -110,4 +128,29 @@ export function fileStatFromBytes(bytes: Uint8Array<ArrayBuffer>, mtimeMs: numbe
     mtimeMs,
     ...fileMetadataFields(getFileContentMetadata(bytes)),
   };
+}
+
+/**
+ * Build a file stat from a `File` handle without reading more content than the
+ * classification needs: size and mtime come from the handle, the binary/text
+ * decision from the leading {@link headSniffByteLength} bytes. Only text files
+ * larger than the sniff window are read in full, and only to count lines.
+ *
+ * @param file - File object from `FileSystemFileHandle.getFile()`.
+ * @returns File stat with content metadata.
+ * @public
+ */
+export async function fileStatFromFile(file: File): Promise<FileStat> {
+  const base = { type: 'file', size: file.size, mtimeMs: file.lastModified } as const;
+  if (file.size === 0) {
+    return { ...base, contentKind: 'text', lineCount: 1 };
+  }
+
+  const head = new Uint8Array(await file.slice(0, headSniffByteLength).arrayBuffer());
+  if (seemsBinary(head)) {
+    return { ...base, contentKind: 'binary' };
+  }
+
+  const bytes = file.size <= headSniffByteLength ? head : new Uint8Array(await file.arrayBuffer());
+  return { ...base, contentKind: 'text', lineCount: countLineBytes(bytes) };
 }

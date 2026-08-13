@@ -40,7 +40,7 @@ function setupAbortContext(generation: number) {
   const buffer = new SharedArrayBuffer(16);
   const view = new Int32Array(buffer);
   Atomics.store(view, signalSlot.abortGeneration, generation);
-  setAbortContext(view, generation);
+  setAbortContext({ signal: new AbortController().signal, signalView: view, generation });
   return view;
 }
 
@@ -336,7 +336,7 @@ describe('in-flight cooperative abort', () => {
       expect(() => proxied.step2()).toThrow(RenderAbortedError);
 
       clearAbortContext();
-      setAbortContext(view, 2);
+      setAbortContext({ signal: new AbortController().signal, signalView: view, generation: 2 });
 
       const freshOc = createMultiStepOc();
       const freshProxied = wrapOcForExceptions(freshOc);

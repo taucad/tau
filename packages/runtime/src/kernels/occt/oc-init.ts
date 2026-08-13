@@ -3,8 +3,8 @@
  *
  * Both OC-based kernels (Replicad and OpenCascade) load OCJS WASM in two
  * variants — a single-threaded build and a pthread (multi-threaded) build —
- * through the identical Emscripten `MODULARIZE` factory + `instantiateWasm`
- * dance. That boilerplate lives here so neither kernel re-implements it.
+ * through the identical generated initializer contract. URL wiring lives here
+ * while Emscripten retains ownership of compilation and instantiation.
  *
  * The function is generic on the concrete OpenCascade instance type, so each
  * kernel keeps its own WASM-binding type at the call site (the Replicad kernel
@@ -13,21 +13,24 @@
  */
 
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
-import { compileWasmStreaming } from '#framework/wasm-loader.js';
+
+/** Emscripten options shared by the generated and custom initializers. */
+export type OcctModuleOptions = {
+  locateFile?: (path: string, scriptDirectory: string) => string;
+  print?: (text: string) => void;
+  printErr?: (text: string) => void;
+};
 
 /**
  * Emscripten module factory — the default export of an OCJS JS glue file.
  *
- * Accepts the Emscripten module options object and resolves to a fully
- * initialised OpenCascade instance. Options are typed as a permissive record
- * because the OCJS `init()` glue declares `options?: Record<string, unknown>`;
- * the only fields this module sets (`instantiateWasm`, `print`, `printErr`)
- * are typed explicitly at the call site.
+ * Accepts the common Emscripten module options and resolves to a fully
+ * initialised OpenCascade instance.
  *
  * @template Instance - the concrete OpenCascade instance type for the kernel
  * @public
  */
-export type OcctModuleFactory<Instance> = (options?: Record<string, unknown>) => Promise<Instance>;
+export type OcctModuleFactory<Instance> = (options?: OcctModuleOptions) => Promise<Instance>;
 
 /** Options for initialising an OCCT WASM module. */
 export type InitOcctOptions = {
@@ -35,7 +38,7 @@ export type InitOcctOptions = {
   print?: (text: string) => void;
   /** Handler for C++ `stderr` messages. Defaults to a no-op (silences logs). */
   printErr?: (text: string) => void;
-  /** Optional span tracer for instrumenting compilation and instantiation steps. */
+  /** Optional span tracer for instrumenting Emscripten initialisation. */
   tracer?: RuntimeSpanTracer;
 };
 
@@ -49,68 +52,37 @@ const noop = (): void => {};
  * Emscripten modules: the caller resolves the WASM URL and the JS bindings
  * factory (single- vs multi-threaded) and passes both in.
  *
- * Compiles the WASM binary via streaming compilation, then invokes the factory
- * with a custom `instantiateWasm` hook that reuses the pre-compiled
- * `WebAssembly.Module` (avoiding double compilation). The compiled module is
- * forwarded to `successCallback` as a second argument so pthread workers in the
- * multi-threaded build receive the same `WebAssembly.Module` via `postMessage`;
- * for single-threaded builds the second argument is harmless.
+ * Passes the resolved WASM URL through Emscripten's supported `locateFile`
+ * option. The generated initializer remains responsible for loading glue,
+ * configuring pthread workers, compiling WASM, and propagating failures.
  *
  * @template Instance - the concrete OpenCascade instance type for the kernel
  * @param wasmUrl - absolute URL to the `.wasm` binary for streaming fetch.
  *   When omitted, the Emscripten glue resolves its own bundled WASM via
  *   `locateFile`/`new URL(...)`; this avoids duplicating package-owned WASM
  *   assets in framework bundlers that already follow the glue import graph.
- * @param bindingsFactory - the Emscripten module factory (default export of the JS glue)
+ * @param initializer - generated initializer or custom Emscripten module factory
  * @param options - optional callbacks for stdout/stderr and tracing instrumentation
  * @returns the fully initialised OpenCascade instance
  * @public
  */
 export async function initOcct<Instance>(
   wasmUrl: string | undefined,
-  bindingsFactory: OcctModuleFactory<Instance>,
+  initializer: OcctModuleFactory<Instance>,
   options?: InitOcctOptions,
 ): Promise<Instance> {
-  const { tracer } = options ?? {};
-  if (!wasmUrl) {
-    return bindingsFactory({
+  const span = options?.tracer?.startSpan('wasm.emscripten-init');
+  try {
+    return await initializer({
+      ...(wasmUrl
+        ? {
+            locateFile: (path, scriptDirectory) => (path.endsWith('.wasm') ? wasmUrl : `${scriptDirectory}${path}`),
+          }
+        : {}),
       print: options?.print ?? noop,
       printErr: options?.printErr ?? noop,
     });
+  } finally {
+    span?.end();
   }
-
-  const compiledModule = await compileWasmStreaming(wasmUrl, tracer);
-
-  const instantiateSpan = tracer?.startSpan('wasm.emscripten-init');
-  const instance = await bindingsFactory({
-    instantiateWasm(
-      imports: WebAssembly.Imports,
-      successCallback: (instance: WebAssembly.Instance, module?: WebAssembly.Module) => void,
-    ) {
-      const instSpan = tracer?.startSpan('wasm.instantiate');
-      // async-iife: bootstrap — Emscripten's instantiateWasm hook is a
-      // synchronous callback that hands control back via `successCallback`;
-      // there is no Promise to thread back to the caller.
-      void (async () => {
-        try {
-          const wasmInstance = await WebAssembly.instantiate(compiledModule, imports);
-          instSpan?.end();
-          // Pass the module alongside the instance so pthread workers (multi
-          // build) receive the same WebAssembly.Module via postMessage. For
-          // single-threaded builds the second arg is harmless.
-          successCallback(wasmInstance, compiledModule);
-        } catch (error) {
-          instSpan?.end();
-          throw error instanceof Error ? error : new Error(String(error));
-        }
-      })();
-
-      return {};
-    },
-    print: options?.print ?? noop,
-    printErr: options?.printErr ?? noop,
-  });
-  instantiateSpan?.end();
-
-  return instance;
 }

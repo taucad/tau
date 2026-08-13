@@ -7,11 +7,12 @@ import { NodeIO } from '@gltf-transform/core';
 import type { GeometryResponse } from '@taucad/types';
 import { opencascade as opencascadeKernel } from '#kernels/opencascade/opencascade.kernel.js';
 import { getModuleRegistry } from '#kernels/kernel-module-helpers.js';
-import type { OpenCascadeInstance } from '#kernels/opencascade/wasm/opencascade_full.js';
+import type { OpenCascadeInstance, TopoDS_Shape } from '#kernels/opencascade/wasm/opencascade_full.js';
 import { assertFailure, assertSuccess, createGeometryFile, createTestWorker } from '#testing/kernel-testing.utils.js';
 import { createGeometryTestHelpers } from '#testing/kernel-geometry-testing.utils.js';
 import { mapZupMillimetersToYupMeters, readCoordinateEvidence } from '#testing/coordinate-testing.utils.js';
 import type { KernelDefinition } from '#types/runtime-kernel.types.js';
+import type { MaterializedRender } from '#framework/render-artifact.js';
 
 // =============================================================================
 // Test Utilities
@@ -32,12 +33,7 @@ type OpenCascadeSnapshotForTest = {
 
 type RuntimeWorkerInternalsForTest = {
   loadedKernels: Map<string, { definition: KernelDefinition }>;
-  nativeHandle: unknown;
-  serializedNativeHandleSlot?: { serializedNativeHandle: unknown };
-  currentPublishedRender?: {
-    serializedNativeHandleSlot?: { serializedNativeHandle: unknown };
-  };
-  lastSerializedNativeHandle: unknown;
+  currentPublishedRender?: MaterializedRender;
 };
 
 function expectOpenCascadeSnapshot(value: unknown): OpenCascadeSnapshotForTest {
@@ -63,6 +59,13 @@ function expectOpenCascadeSnapshot(value: unknown): OpenCascadeSnapshotForTest {
 
 function getWorkerInternals(worker: Awaited<ReturnType<typeof createTestWorker>>): RuntimeWorkerInternalsForTest {
   return worker as unknown as RuntimeWorkerInternalsForTest;
+}
+
+/** Embind shapes held by the worker's live native handle. */
+function readLiveShapes(worker: Awaited<ReturnType<typeof createTestWorker>>): TopoDS_Shape[] {
+  const nativeHandle = getWorkerInternals(worker).currentPublishedRender?.liveNativeHandleSlot?.handle;
+  expect(nativeHandle, 'expected a live native handle').toBeInstanceOf(Array);
+  return (nativeHandle as Array<{ shape: TopoDS_Shape }>).map((entry) => entry.shape);
 }
 
 function getLoadedOpenCascadeDefinition(worker: Awaited<ReturnType<typeof createTestWorker>>): KernelDefinition {
@@ -126,8 +129,8 @@ function extractGltfBytes(result: { data: GeometryResponse }): Uint8Array<ArrayB
 }
 
 function assertStepRoundTripVolumeMm3(stepBytes: Uint8Array<ArrayBuffer>, expectedMm3: number): void {
-  const oc = getModuleRegistry().get('opencascade.js') as unknown as OpenCascadeInstance | undefined;
-  expect(oc, 'expected worker to have registered opencascade.js module').toBeDefined();
+  const oc = getModuleRegistry().get('libcascade') as unknown as OpenCascadeInstance | undefined;
+  expect(oc, 'expected worker to have registered libcascade module').toBeDefined();
   const cascade = oc!;
 
   const importPath = `/tmp/roundtrip_${Date.now()}_${String(expectedMm3).replace('.', '_')}.step`;
@@ -165,32 +168,41 @@ afterEach(() => {
 describe('OpenCascade Kernel', { timeout: 30_000 }, () => {
   let worker: Awaited<ReturnType<typeof createTestWorker>>;
 
+  it('should expose libcascade as its only authored-code module coordinate', () => {
+    const plugin = opencascadeKernel();
+
+    expect(plugin.builtinModuleNames).toEqual(['libcascade']);
+    expect(plugin.detectImport?.test("import init from 'libcascade';")).toBe(true);
+    expect(plugin.detectImport?.test("import init from 'opencascade';")).toBe(false);
+    expect(plugin.detectImport?.test("import init from 'opencascade.js';")).toBe(false);
+  });
+
   beforeAll(async () => {
     worker = await createTestWorker(opencascadeKernel, {
-      'box-import.ts': `import { BRepPrimAPI_MakeBox } from 'opencascade.js';\nexport default function main() { return new BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
-      'box-import-js.ts': `import { BRepPrimAPI_MakeBox } from 'opencascade.js';\nexport default function main() { return new BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
+      'box-import.ts': `import oc, { BRepPrimAPI_MakeBox } from 'libcascade';\nexport default function main() { if (oc.BRepPrimAPI_MakeBox !== BRepPrimAPI_MakeBox) throw new Error('libcascade default and named exports diverged'); return new oc.BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
+      'box-import-js.ts': `import { BRepPrimAPI_MakeBox } from 'libcascade';\nexport default function main() { return new BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
       'no-import.ts': `export default function main() { return { x: 1 }; }`,
       'model.scad': `cube([10, 10, 10]);`,
-      'box-require.js': `const { BRepPrimAPI_MakeBox } = require('opencascade.js');\nmodule.exports = function main() { return new BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
+      'box-require.js': `const { BRepPrimAPI_MakeBox } = require('libcascade');\nmodule.exports = function main() { return new BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
       'params.ts': `
-import { BRepPrimAPI_MakeBox } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox } from 'libcascade';
 export const defaultParams = { width: 10, height: 20, depth: 30 };
 export default function main(params = defaultParams) {
   return new BRepPrimAPI_MakeBox(params.width, params.height, params.depth).Shape();
 }`,
       'no-params.ts': `
-import { BRepPrimAPI_MakeBox } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   return new BRepPrimAPI_MakeBox(10, 20, 30).Shape();
 }`,
       'box.ts': `
-import { BRepPrimAPI_MakeBox } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 20, 30);
   return box.Shape();
 }`,
       'coordinate.ts': `
-import { BRepPrimAPI_MakeBox, gp_Pnt } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox, gp_Pnt } from 'libcascade';
 export default function main() {
   const origin = new gp_Pnt(7, 11, 13);
   const box = new BRepPrimAPI_MakeBox(origin, 10, 20, 30);
@@ -200,32 +212,32 @@ export default function main() {
   return [{ shape, name: 'Asymmetric Box', color: '#ff0000' }];
 }`,
       'multi.ts': `
-import { BRepPrimAPI_MakeBox } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const box1 = new BRepPrimAPI_MakeBox(10, 10, 10);
   const box2 = new BRepPrimAPI_MakeBox(20, 20, 20);
   return [box1.Shape(), box2.Shape()];
 }`,
       'named.ts': `
-import { BRepPrimAPI_MakeBox } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 10, 10);
   return [{ shape: box.Shape(), name: 'MyBox', color: '#ff0000' }];
 }`,
       'named-pbr.ts': `
-import { BRepPrimAPI_MakeBox } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 10, 10);
   return [{ shape: box.Shape(), name: 'PbrBox', color: '#ff0000', metalness: 0.2, roughness: 0.7, density: 1.25 }];
 }`,
       'parameterized.ts': `
-import { BRepPrimAPI_MakeBox } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox } from 'libcascade';
 export const defaultParams = { size: 10 };
 export default function main(params = defaultParams) {
   return new BRepPrimAPI_MakeBox(params.size, params.size, params.size).Shape();
 }`,
       'assembly.ts': `
-import { BRepPrimAPI_MakeBox } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const box1 = new BRepPrimAPI_MakeBox(10, 10, 10);
   const box2 = new BRepPrimAPI_MakeBox(20, 20, 20);
@@ -235,7 +247,7 @@ export default function main() {
   ];
 }`,
       'fuse.ts': `
-import { BRepPrimAPI_MakeBox, Message_ProgressRange, BRepAlgoAPI_Fuse } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox, Message_ProgressRange, BRepAlgoAPI_Fuse } from 'libcascade';
 export default function main() {
   const box1 = new BRepPrimAPI_MakeBox(10, 10, 10).Shape();
   const box2 = new BRepPrimAPI_MakeBox(10, 10, 10).Shape();
@@ -247,7 +259,7 @@ export default function main() {
   return result;
 }`,
       'common.ts': `
-import { BRepPrimAPI_MakeBox, Message_ProgressRange, BRepAlgoAPI_Common } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox, Message_ProgressRange, BRepAlgoAPI_Common } from 'libcascade';
 export default function main() {
   const box1 = new BRepPrimAPI_MakeBox(20, 20, 20).Shape();
   const box2 = new BRepPrimAPI_MakeBox(10, 10, 10).Shape();
@@ -259,7 +271,7 @@ export default function main() {
   return result;
 }`,
       'cut.ts': `
-import { BRepPrimAPI_MakeBox, Message_ProgressRange, BRepAlgoAPI_Cut } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox, Message_ProgressRange, BRepAlgoAPI_Cut } from 'libcascade';
 export default function main() {
   const box1 = new BRepPrimAPI_MakeBox(20, 20, 20).Shape();
   const box2 = new BRepPrimAPI_MakeBox(10, 10, 10).Shape();
@@ -271,7 +283,7 @@ export default function main() {
   return result;
 }`,
       'fillet.ts': `
-import { BRepPrimAPI_MakeBox, BRepFilletAPI_MakeFillet, ChFi3d_FilletShape, TopExp_Explorer, TopAbs_ShapeEnum, TopoDS } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox, BRepFilletAPI_MakeFillet, ChFi3d_FilletShape, TopExp_Explorer, TopAbs_ShapeEnum, TopoDS } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(20, 20, 20).Shape();
   const fillet = new BRepFilletAPI_MakeFillet(box, ChFi3d_FilletShape.ChFi3d_Rational);
@@ -286,7 +298,7 @@ export default function main() {
   return result;
 }`,
       'transform.ts': `
-import { BRepPrimAPI_MakeBox, gp_Trsf, gp_Vec, BRepBuilderAPI_Transform } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox, gp_Trsf, gp_Vec, BRepBuilderAPI_Transform } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 10, 10).Shape();
   const trsf = new gp_Trsf();
@@ -300,7 +312,7 @@ export default function main() {
   return result;
 }`,
       'compound.ts': `
-import { TopoDS_Builder, TopoDS_Compound, BRepPrimAPI_MakeBox } from 'opencascade.js';
+import { TopoDS_Builder, TopoDS_Compound, BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const builder = new TopoDS_Builder();
   const compound = new TopoDS_Compound();
@@ -312,13 +324,13 @@ export default function main() {
   return compound;
 }`,
       'empty.ts': `
-import init from 'opencascade.js';
+import init from 'libcascade';
 export default function main() {}`,
       'default-not-function.ts': `
-import 'opencascade.js';
+import 'libcascade';
 export default 42;`,
       'bad-call.ts': `
-import { BRepPrimAPI_MakeBox, BRepFilletAPI_MakeFillet, ChFi3d_FilletShape, TopExp_Explorer, TopAbs_ShapeEnum, TopoDS } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox, BRepFilletAPI_MakeFillet, ChFi3d_FilletShape, TopExp_Explorer, TopAbs_ShapeEnum, TopoDS } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 10, 10).Shape();
   const fillet = new BRepFilletAPI_MakeFillet(box, ChFi3d_FilletShape.ChFi3d_Rational);
@@ -330,7 +342,7 @@ export default function main() {
   return fillet.Shape();
 }`,
       'throw-in-params.ts': `
-import 'opencascade.js';
+import 'libcascade';
 const trap = {};
 Object.defineProperty(trap, 'badKey', {
   enumerable: true,
@@ -342,7 +354,7 @@ export const defaultParams = trap;
 export default function main() {}
 `,
       'bad-wedge-arity.ts': `
-import { BRepPrimAPI_MakeWedge, gp_Pnt, gp_Dir, gp_Ax2 } from 'opencascade.js';
+import { BRepPrimAPI_MakeWedge, gp_Pnt, gp_Dir, gp_Ax2 } from 'libcascade';
 export default function main() {
   const ax = new gp_Ax2(new gp_Pnt(0, 0, 0), new gp_Dir(0, 0, 1));
   return new BRepPrimAPI_MakeWedge(ax, 1, 1, 1, 0, 1, 0, 0, 0, 1).Shape();
@@ -424,8 +436,8 @@ export default function main() {
     });
 
     it('should serialize native handles as versioned geometry-only BRep snapshots', async () => {
-      const oc = getModuleRegistry().get('opencascade.js') as unknown as OpenCascadeInstance | undefined;
-      expect(oc, 'expected worker to have registered opencascade.js module').toBeDefined();
+      const oc = getModuleRegistry().get('libcascade') as unknown as OpenCascadeInstance | undefined;
+      expect(oc, 'expected worker to have registered libcascade module').toBeDefined();
       const cascade = oc!;
       const writeSpy = vi.spyOn(cascade.BRepTools, 'Write');
 
@@ -454,6 +466,42 @@ export default function main() {
       );
     });
 
+    it('should delete the replaced build shapes and keep the live ones usable', async () => {
+      const geometryFile = createGeometryFile('params.ts');
+
+      const first = await worker.createGeometry({
+        file: geometryFile,
+        parameters: { width: 10, height: 20, depth: 30 },
+      });
+      assertSuccess(first, 'first build for native-handle disposal');
+      const firstShapes = readLiveShapes(worker);
+      const firstDeleteSpies = firstShapes.map((shape) => vi.spyOn(shape, 'delete'));
+      expect(firstDeleteSpies.length).toBeGreaterThan(0);
+
+      const second = await worker.createGeometry({
+        file: geometryFile,
+        parameters: { width: 11, height: 20, depth: 30 },
+      });
+      assertSuccess(second, 'rebuild for native-handle disposal');
+      const secondShapes = readLiveShapes(worker);
+      const secondDeleteSpies = secondShapes.map((shape) => vi.spyOn(shape, 'delete'));
+
+      // The replaced build is freed exactly once — embind attaches no finalizer,
+      // so a missed delete strands its geometry in a heap that never shrinks.
+      for (const spy of firstDeleteSpies) {
+        expect(spy).toHaveBeenCalledTimes(1);
+      }
+      expect(secondShapes).not.toEqual(expect.arrayContaining(firstShapes));
+
+      // The published build must survive: exporting it would throw on a
+      // prematurely deleted handle.
+      const exportResult = await worker.exportGeometry('step');
+      assertSuccess(exportResult, 'STEP export after rebuild');
+      for (const spy of secondDeleteSpies) {
+        expect(spy).not.toHaveBeenCalled();
+      }
+    });
+
     it('should render an empty GLB when main returns undefined (empty body)', async () => {
       const geometryFile = createGeometryFile('empty.ts');
       const result = await worker.createGeometry({ file: geometryFile, parameters: {} });
@@ -474,8 +522,6 @@ export default function main() {
 
     it('should fail export with no geometry', async () => {
       const internals = getWorkerInternals(worker);
-      internals.nativeHandle = undefined;
-      internals.lastSerializedNativeHandle = undefined;
       internals.currentPublishedRender = undefined;
       const result = await worker.exportGeometry('step');
       expect(result.success).toBe(false);
@@ -608,7 +654,8 @@ export default function main() {
       const definition = getLoadedOpenCascadeDefinition(worker);
       const createGeometrySpy = vi.spyOn(definition, 'createGeometry');
       const internals = getWorkerInternals(worker);
-      internals.nativeHandle = undefined;
+      expect(internals.currentPublishedRender).toBeDefined();
+      internals.currentPublishedRender!.liveNativeHandleSlot = undefined;
 
       const exportResult = await worker.exportGeometry('step');
 
@@ -629,7 +676,8 @@ export default function main() {
       const createGeometrySpy = vi.spyOn(definition, 'createGeometry');
       const internals = getWorkerInternals(worker);
 
-      internals.nativeHandle = undefined;
+      expect(internals.currentPublishedRender).toBeDefined();
+      internals.currentPublishedRender!.liveNativeHandleSlot = undefined;
       const glbResult = await worker.exportGeometry('glb', {
         coordinateSystem: 'z-up',
         unit: { length: 'millimeter' },
@@ -641,7 +689,7 @@ export default function main() {
       expect(size[1]).toBeCloseTo(20, 4);
       expect(size[2]).toBeCloseTo(30, 4);
 
-      internals.nativeHandle = undefined;
+      internals.currentPublishedRender!.liveNativeHandleSlot = undefined;
       const stlResult = await worker.exportGeometry('stl', {
         binary: true,
         tessellation: { linearTolerance: 0.5, angularTolerance: 15 },
@@ -660,7 +708,8 @@ export default function main() {
       const definition = getLoadedOpenCascadeDefinition(worker);
       const createGeometrySpy = vi.spyOn(definition, 'createGeometry');
       const internals = getWorkerInternals(worker);
-      internals.nativeHandle = undefined;
+      expect(internals.currentPublishedRender).toBeDefined();
+      internals.currentPublishedRender!.liveNativeHandleSlot = undefined;
       const corruptSnapshot = {
         kind: 'opencascade-native-handle',
         version: 1,
@@ -668,10 +717,6 @@ export default function main() {
         occtFormatVersion: 'TopTools_FormatVersion_CURRENT',
         entries: [{ brep: new Uint8Array([0, 1, 2, 3]), metadata: { name: 'Shape 1' } }],
       };
-      internals.lastSerializedNativeHandle = corruptSnapshot;
-      if (internals.serializedNativeHandleSlot) {
-        internals.serializedNativeHandleSlot.serializedNativeHandle = corruptSnapshot;
-      }
       if (internals.currentPublishedRender?.serializedNativeHandleSlot) {
         internals.currentPublishedRender.serializedNativeHandleSlot.serializedNativeHandle = corruptSnapshot;
       }
@@ -916,12 +961,12 @@ export default function main() {
   });
 
   // =============================================================================
-  // GD&T (deferred until full opencascade.js build has XCAF symbols)
+  // GD&T (deferred until full libcascade build has XCAF symbols)
   // =============================================================================
 
   describe('GD&T', () => {
     it.skip('should create an XCAF document with dimension annotations', () => {
-      // Deferred until full opencascade.js build has XCAF symbols properly bound.
+      // Deferred until full libcascade build has XCAF symbols properly bound.
       // This test requires TDocStd_Application, XCAFDoc_DocumentTool, XCAFDimTolObjects_DimensionObject.
     });
   });

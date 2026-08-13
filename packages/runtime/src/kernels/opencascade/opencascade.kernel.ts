@@ -2,11 +2,11 @@
 /**
  * OpenCascade Kernel Module
  *
- * Direct OpenCASCADE kernel that exposes the raw opencascade.js API
+ * Direct OpenCASCADE kernel that exposes the raw libcascade API
  * without the Replicad abstraction layer. Users write TypeScript/JavaScript
  * that directly calls OpenCASCADE classes (gp_Pnt, BRepPrimAPI_MakeBox, etc.).
  *
- * Uses a standalone opencascade.js full WASM build for the OpenCASCADE runtime.
+ * Uses a standalone libcascade full WASM build for the OpenCASCADE runtime.
  */
 
 import type { GeometryGltf } from '@taucad/types';
@@ -36,6 +36,7 @@ import { detectMultiThreadSupport, activateOccParallelism } from '#kernels/occt/
 import { createIncrementalMesh, meshShapesToGltf, parseHexColor } from '#kernels/opencascade/opencascade-mesh.js';
 import type { ShapeEntry } from '#kernels/opencascade/opencascade.types.js';
 import { formatOcRuntimeError } from '#kernels/occt/oc-error-formatter.js';
+import { createOcScope } from '#kernels/occt/oc-scope.js';
 import { RenderArtifactFinalizationError, finalizeRenderOutput } from '#framework/render-artifact-finalizer.js';
 import { runOcMain } from '#kernels/occt/oc-run-main.js';
 import { wrapOcForExceptions, wrapOcWithTracing } from '#kernels/occt/oc-tracing.js';
@@ -46,6 +47,9 @@ import { createEmptyGlb, createEmptyGltf, createEmptyGltfGeometry } from '#utils
 import { resolveShapeName, uniqueShapeName } from '#utils/shape-names.js';
 
 import type { OpenCascadeInstance, TopoDS_Shape } from '#kernels/opencascade/wasm/opencascade_full.js';
+
+const fullWasmUrl = new URL('wasm/opencascade_full.wasm', import.meta.url).href;
+const multiWasmUrl = new URL('wasm/opencascade_full_multi.wasm', import.meta.url).href;
 
 // =============================================================================
 // Types
@@ -68,16 +72,16 @@ export type OpenCascadeOptions = {
   /**
    * WASM build variant or custom build configuration.
    *
-   * - `'full'` (default) -- single-threaded, exceptions-enabled full opencascade.js build.
+   * - `'full'` (default) -- single-threaded, exceptions-enabled full libcascade build.
    * - `'multi'` -- pthread-enabled full build; requires `SharedArrayBuffer` + cross-origin
    *   isolation (Node 22+, or browsers with `crossOriginIsolated=true`). Loads bindings from
-   *   the `opencascade.js/multi` subpath and activates OCCT global parallelism after init.
+   *   the `libcascade/multi` subpath and activates OCCT global parallelism after init.
    * - `'auto'` -- pick `'multi'` when `SharedArrayBuffer` is usable, otherwise fall back to `'full'`.
    * - `OpenCascadeWasmConfig` -- custom WASM/JS URLs for runtime injection.
    *
-   * Defaults to `'full'`. Built-in variants let the OCJS glue module resolve
-   * its adjacent WASM, so framework bundlers have a single owner for each
-   * binary. Custom config keeps the explicit `wasmUrl` override path.
+   * Defaults to `'full'`. Built-in variants resolve the locally bundled WASM
+   * assets through `new URL(..., import.meta.url)`. Custom config keeps the
+   * explicit `wasmUrl` override path.
    *
    * @default 'full'
    */
@@ -135,10 +139,8 @@ let nativeHandleSnapshotCounter = 0;
  * - **`'auto'`**: pick `'multi'` when `SharedArrayBuffer` + cross-origin isolation
  *   are available, otherwise fall back to `'full'`.
  * - **`'full'`** / **`'multi'`**: pin the variant explicitly. Static-string
- *   `import()` lets bundlers code-split the selected glue module. The
- *   Emscripten glue owns its adjacent `.wasm` URL; this prevents framework
- *   bundlers from emitting a duplicate asset from both the kernel module and
- *   the OCJS glue module.
+ *   `import()` lets bundlers code-split the selected glue module; static
+ *   `new URL(...)` expressions let them emit the matching local WASM asset.
  * - **Custom config** (`{ wasmUrl, wasmBindingsUrl }`): variable `import()` with
  *   `@vite-ignore` to bypass bundler analysis. Works in Node for any module format.
  *
@@ -174,15 +176,17 @@ async function resolveWasm(
   }
 
   if (variant === 'multi') {
-    const moduleExports = await import('opencascade.js/multi');
+    const moduleExports = await import('libcascade/multi/init');
     return {
+      wasmUrl: multiWasmUrl,
       bindingsFactory: moduleExports.default,
       variant: 'multi',
     };
   }
 
-  const moduleExports = await import('#kernels/opencascade/wasm/opencascade_full.js');
+  const moduleExports = await import('libcascade/single/init');
   return {
+    wasmUrl: fullWasmUrl,
     bindingsFactory: moduleExports.default,
     variant: 'full',
   };
@@ -195,13 +199,13 @@ async function resolveWasm(
 function registerOcModule(oc: OpenCascadeInstance, runtime: KernelRuntime): void {
   const registry = getModuleRegistry();
   const ocRecord = oc as Record<string, unknown>;
-  registry.set('opencascade.js', ocRecord);
+  registry.set('libcascade', ocRecord);
 
   const exportNames = Object.keys(ocRecord).filter((key) => /^[$_a-z][\w$]*$/i.test(key));
   const namedExports = exportNames.map((key) => `export const ${key} = __mod.${key};`).join('\n');
-  const code = `const __mod = globalThis.${KERNEL_MODULES_KEY}.get('opencascade.js');\n${namedExports}\nexport default function init() {}\n`;
+  const code = `const __mod = globalThis.${KERNEL_MODULES_KEY}.get('libcascade');\n${namedExports}\nexport default __mod;\n`;
 
-  runtime.bundler.registerModule('opencascade.js', { code, version: '3.0.0' });
+  runtime.bundler.registerModule('libcascade', { code, version: '3.0.0-beta.3' });
 }
 
 function shapeEntryFromKernelReturnItem(item: unknown): ShapeEntry | undefined {
@@ -255,6 +259,43 @@ function normalizeShapes(value: unknown): ShapeEntry[] {
 
 function isOpenCascadeShape(value: unknown): value is TopoDS_Shape {
   return isRecordObject(value) && typeof value['IsNull'] === 'function';
+}
+
+/**
+ * Live-handle reference count per embind shape wrapper.
+ *
+ * Embind attaches no finalizer to a raw class handle, so a native handle the
+ * framework drops (rebuild, invalidation, teardown) must be deleted explicitly
+ * or its geometry is stranded in a WASM heap that never shrinks. Two live
+ * handles can share one shape — module-level state survives parameter-only
+ * rebuilds, so `main` can return the same `TopoDS_Shape` object across builds —
+ * so the count keeps `.delete()` to exactly once, on the last release.
+ */
+const liveShapeReferences = new WeakMap<TopoDS_Shape, number>();
+
+function retainShapeEntries(entries: ShapeEntry[]): ShapeEntry[] {
+  for (const { shape } of entries) {
+    liveShapeReferences.set(shape, (liveShapeReferences.get(shape) ?? 0) + 1);
+  }
+
+  return entries;
+}
+
+function releaseShapeEntries(entries: ShapeEntry[]): void {
+  for (const { shape } of entries) {
+    const remaining = (liveShapeReferences.get(shape) ?? 1) - 1;
+    if (remaining > 0) {
+      liveShapeReferences.set(shape, remaining);
+      continue;
+    }
+
+    liveShapeReferences.delete(shape);
+    try {
+      shape.delete();
+    } catch {
+      // Already released — model code is free to delete the shapes it returns.
+    }
+  }
 }
 
 function createSnapshotTemporaryPath(index: number): string {
@@ -365,6 +406,61 @@ function assertSerializedNativeHandle(
 }
 
 /**
+ * Mesh one shape entry and write it as a standalone STL file.
+ *
+ * @param oc - WASM OpenCascade instance
+ * @param entry - Shape and metadata from the native handle
+ * @param options - Tessellation tolerances and target coordinate system
+ * @returns The STL export file for this entry.
+ */
+function exportOpencascadeStlEntry(
+  oc: OpenCascadeInstance,
+  entry: ShapeEntry,
+  options: {
+    linearTolerance: number;
+    angularTolerance: number;
+    inParallel: boolean;
+    coordinateSystem?: 'y-up' | 'z-up';
+  },
+): ReturnType<typeof createExportFile> {
+  const scope = createOcScope();
+
+  try {
+    let exportShape = entry.shape;
+
+    if (options.coordinateSystem === 'y-up') {
+      const origin = scope.track(new oc.gp_Pnt(0, 0, 0));
+      const direction = scope.track(new oc.gp_Dir(1, 0, 0));
+      const axis = scope.track(new oc.gp_Ax1(origin, direction));
+      const trsf = scope.track(new oc.gp_Trsf());
+      trsf.SetRotation(axis, Math.PI / 2);
+      const transform = scope.track(new oc.BRepBuilderAPI_Transform(entry.shape, trsf, true, false));
+      // Only the rotated copy is ours to free — `entry.shape` belongs to the native handle.
+      exportShape = scope.track(transform.Shape());
+    }
+
+    oc.BRepTools.Clean(exportShape, false);
+    scope.track(createIncrementalMesh(oc, exportShape, options));
+
+    const filePath = `/tmp/export_${Date.now()}.stl`;
+    const writer = scope.track(new oc.StlAPI_Writer());
+    const progress = scope.track(new oc.Message_ProgressRange());
+    writer.Write(exportShape, filePath, progress);
+    const rawData = oc.FS.readFile(filePath) as Uint8Array<ArrayBuffer>;
+    const data = new Uint8Array(rawData);
+    oc.FS.unlink(filePath);
+
+    if (!entry.name) {
+      throw new Error('OpenCascade ShapeEntry names must be normalized before STL export.');
+    }
+
+    return createExportFile('stl', entry.name, data);
+  } finally {
+    scope.dispose();
+  }
+}
+
+/**
  * XCAF STEP assembly export (`STEPCAFControl_Writer.Perform` — must not use `Transfer(..., '', ...)`:
  * an empty string is a non-null `const char*` and enables multi-file mode with no geometry in the main file).
  *
@@ -376,131 +472,107 @@ function exportOpencascadeStepAssembly(
   oc: OpenCascadeInstance,
   nativeHandle: ShapeEntry[],
 ): { ok: true; bytes: Uint8Array<ArrayBuffer> } | { ok: false } {
-  const documentName = new oc.TCollection_ExtendedString();
-  const document = new oc.TDocStd_Document(documentName);
-  const mainLabel = document.Main();
-  const shapeTool = oc.XCAFDoc_DocumentTool.ShapeTool(mainLabel);
-  const colorTool = oc.XCAFDoc_DocumentTool.ColorTool(mainLabel);
+  const scope = createOcScope();
 
-  // GeoSpec AP242 profile (blueprint R1): every export is a proper root
-  // assembly — one component per entry (identity placement), names on both the
-  // instance and product labels, never free shapes. A single entry still
-  // yields a one-component assembly. Auto-naming off so only authored names
-  // reach the STEP output.
-  oc.XCAFDoc_ShapeTool.SetAutoNaming(false);
-  const rootLabel = shapeTool.NewShape();
-  const rootName = new oc.TCollection_ExtendedString('assembly', true);
-  oc.TDataStd_Name.Set(rootLabel, rootName);
-  rootName.delete();
+  try {
+    const documentName = scope.track(new oc.TCollection_ExtendedString());
+    const document = scope.track(new oc.TDocStd_Document(documentName));
+    const mainLabel = scope.track(document.Main());
+    const shapeTool = scope.track(oc.XCAFDoc_DocumentTool.ShapeTool(mainLabel));
+    const colorTool = scope.track(oc.XCAFDoc_DocumentTool.ColorTool(mainLabel));
 
-  for (const entry of nativeHandle) {
-    if (entry.shape.IsNull()) {
-      continue;
-    }
+    // GeoSpec AP242 profile (blueprint R1): every export is a proper root
+    // assembly — one component per entry (identity placement), names on both the
+    // instance and product labels, never free shapes. A single entry still
+    // yields a one-component assembly. Auto-naming off so only authored names
+    // reach the STEP output.
+    oc.XCAFDoc_ShapeTool.SetAutoNaming(false);
+    const rootLabel = scope.track(shapeTool.NewShape());
+    const rootName = scope.track(new oc.TCollection_ExtendedString('assembly', true));
+    oc.TDataStd_Name.Set(rootLabel, rootName);
 
-    const label = shapeTool.AddShape(entry.shape, false);
-    const identity = new oc.TopLoc_Location();
-    const instanceLabel = shapeTool.AddComponent(rootLabel, label, identity);
-    identity.delete();
-
-    if (entry.name) {
-      const entryName = new oc.TCollection_ExtendedString(entry.name, true);
-      // Product label (PRODUCT name) and instance label (NEXT_ASSEMBLY_USAGE_OCCURRENCE name).
-      oc.TDataStd_Name.Set(label, entryName);
-      oc.TDataStd_Name.Set(instanceLabel, entryName);
-      entryName.delete();
-    }
-    instanceLabel.delete();
-
-    if (entry.color) {
-      const [r, g, b] = parseHexColor(entry.color);
-      const color = new oc.Quantity_Color(r, g, b, oc.Quantity_TypeOfColor.Quantity_TOC_sRGB);
-      colorTool.SetColor(label, color, oc.XCAFDoc_ColorType.XCAFDoc_ColorSurf);
-      color.delete();
-    }
-
-    if (entry.metalness !== undefined || entry.roughness !== undefined) {
-      const visTool = oc.XCAFDoc_DocumentTool.VisMaterialTool(mainLabel);
-      const pbrMat = new oc.XCAFDoc_VisMaterialPBR();
-      if (entry.color) {
-        const [r, g, b] = parseHexColor(entry.color);
-        const baseColor = new oc.Quantity_ColorRGBA(r, g, b, entry.opacity ?? 1);
-        pbrMat.BaseColor = baseColor;
-        baseColor.delete();
+    for (const entry of nativeHandle) {
+      if (entry.shape.IsNull()) {
+        continue;
       }
-      pbrMat.Metallic = entry.metalness ?? cadMaterialDefaults.metalnessFactor;
-      pbrMat.Roughness = entry.roughness ?? cadMaterialDefaults.roughnessFactor;
-      pbrMat.IsDefined = true;
-      const visMat = new oc.XCAFDoc_VisMaterial();
-      visMat.SetPbrMaterial(pbrMat);
-      const matName = new oc.TCollection_AsciiString('tau-material');
-      const visMatLabel = visTool.AddMaterial(visMat, matName);
-      visTool.SetShapeMaterial(label, visMatLabel);
-      matName.delete();
-      visMatLabel.delete();
-      visMat.delete();
-      pbrMat.delete();
-      visTool.delete();
+
+      // Per-entry handles are freed each iteration; the document keeps the
+      // geometry the writer reads later.
+      const entryScope = createOcScope();
+      try {
+        const label = entryScope.track(shapeTool.AddShape(entry.shape, false));
+        const identity = entryScope.track(new oc.TopLoc_Location());
+        const instanceLabel = entryScope.track(shapeTool.AddComponent(rootLabel, label, identity));
+
+        if (entry.name) {
+          const entryName = entryScope.track(new oc.TCollection_ExtendedString(entry.name, true));
+          // Product label (PRODUCT name) and instance label (NEXT_ASSEMBLY_USAGE_OCCURRENCE name).
+          oc.TDataStd_Name.Set(label, entryName);
+          oc.TDataStd_Name.Set(instanceLabel, entryName);
+        }
+
+        if (entry.color) {
+          const [r, g, b] = parseHexColor(entry.color);
+          const color = entryScope.track(new oc.Quantity_Color(r, g, b, oc.Quantity_TypeOfColor.Quantity_TOC_sRGB));
+          colorTool.SetColor(label, color, oc.XCAFDoc_ColorType.XCAFDoc_ColorSurf);
+        }
+
+        if (entry.metalness !== undefined || entry.roughness !== undefined) {
+          const visTool = entryScope.track(oc.XCAFDoc_DocumentTool.VisMaterialTool(mainLabel));
+          const pbrMat = entryScope.track(new oc.XCAFDoc_VisMaterialPBR());
+          if (entry.color) {
+            const [r, g, b] = parseHexColor(entry.color);
+            const baseColor = entryScope.track(new oc.Quantity_ColorRGBA(r, g, b, entry.opacity ?? 1));
+            pbrMat.BaseColor = baseColor;
+          }
+          pbrMat.Metallic = entry.metalness ?? cadMaterialDefaults.metalnessFactor;
+          pbrMat.Roughness = entry.roughness ?? cadMaterialDefaults.roughnessFactor;
+          pbrMat.IsDefined = true;
+          const visMat = entryScope.track(new oc.XCAFDoc_VisMaterial());
+          visMat.SetPbrMaterial(pbrMat);
+          const matName = entryScope.track(new oc.TCollection_AsciiString('tau-material'));
+          const visMatLabel = entryScope.track(visTool.AddMaterial(visMat, matName));
+          visTool.SetShapeMaterial(label, visMatLabel);
+        }
+
+        if (entry.density !== undefined) {
+          const matTool = entryScope.track(oc.XCAFDoc_DocumentTool.MaterialTool(mainLabel));
+          const materialName = entryScope.track(new oc.TCollection_HAsciiString('tau-material'));
+          const description = entryScope.track(new oc.TCollection_HAsciiString(''));
+          const densityName = entryScope.track(new oc.TCollection_HAsciiString('g/cm3'));
+          const densityValueType = entryScope.track(new oc.TCollection_HAsciiString('POSITIVE_RATIO_MEASURE'));
+          matTool.SetMaterial(label, materialName, description, entry.density, densityName, densityValueType);
+        }
+      } finally {
+        entryScope.dispose();
+      }
     }
 
-    if (entry.density !== undefined) {
-      const matTool = oc.XCAFDoc_DocumentTool.MaterialTool(mainLabel);
-      const materialName = new oc.TCollection_HAsciiString('tau-material');
-      const description = new oc.TCollection_HAsciiString('');
-      const densityName = new oc.TCollection_HAsciiString('g/cm3');
-      const densityValueType = new oc.TCollection_HAsciiString('POSITIVE_RATIO_MEASURE');
-      matTool.SetMaterial(label, materialName, description, entry.density, densityName, densityValueType);
-      densityValueType.delete();
-      densityName.delete();
-      description.delete();
-      materialName.delete();
-      matTool.delete();
+    shapeTool.UpdateAssemblies();
+
+    const session = scope.track(new oc.XSControl_WorkSession());
+    const writer = scope.track(new oc.STEPCAFControl_Writer(session, false));
+    writer.SetColorMode(true);
+    writer.SetNameMode(true);
+    writer.SetMaterialMode(true);
+    oc.Interface_Static.SetIVal('write.surfacecurve.mode', 1);
+    oc.Interface_Static.SetIVal('write.step.assembly', 2);
+    oc.Interface_Static.SetIVal('write.step.schema', 5);
+
+    const progress = scope.track(new oc.Message_ProgressRange());
+    const filePath = `/tmp/export_${Date.now()}.step`;
+    if (!writer.Perform(document, filePath, progress)) {
+      return { ok: false };
     }
 
-    label.delete();
+    const rawData = oc.FS.readFile(filePath) as Uint8Array<ArrayBuffer>;
+    const bytes = new Uint8Array(rawData);
+    oc.FS.unlink(filePath);
+
+    return { ok: true, bytes };
+  } finally {
+    scope.dispose();
   }
-
-  shapeTool.UpdateAssemblies();
-  rootLabel.delete();
-
-  const session = new oc.XSControl_WorkSession();
-  const writer = new oc.STEPCAFControl_Writer(session, false);
-  writer.SetColorMode(true);
-  writer.SetNameMode(true);
-  writer.SetMaterialMode(true);
-  oc.Interface_Static.SetIVal('write.surfacecurve.mode', 1);
-  oc.Interface_Static.SetIVal('write.step.assembly', 2);
-  oc.Interface_Static.SetIVal('write.step.schema', 5);
-
-  const progress = new oc.Message_ProgressRange();
-  const filePath = `/tmp/export_${Date.now()}.step`;
-  const ok = writer.Perform(document, filePath, progress);
-  if (!ok) {
-    progress.delete();
-    writer.delete();
-    session.delete();
-    colorTool.delete();
-    shapeTool.delete();
-    mainLabel.delete();
-    documentName.delete();
-    document.delete();
-    return { ok: false };
-  }
-
-  const rawData = oc.FS.readFile(filePath) as Uint8Array<ArrayBuffer>;
-  const bytes = new Uint8Array(rawData);
-  oc.FS.unlink(filePath);
-
-  progress.delete();
-  writer.delete();
-  session.delete();
-  colorTool.delete();
-  shapeTool.delete();
-  mainLabel.delete();
-  documentName.delete();
-  document.delete();
-
-  return { ok: true, bytes };
 }
 
 // =============================================================================
@@ -512,17 +584,16 @@ export const opencascade = defineKernel({
   id: 'opencascade',
   extensions: ['ts', 'js'],
   detectImport: opencascadeDetectPattern,
-  builtinModuleNames: ['opencascade.js'],
+  builtinModuleNames: ['libcascade'],
   name: 'OpenCascadeKernel',
   version: '1.1.0',
-  nativeHandleScope: 'source',
   optionsSchema: opencascadeOptionsSchema,
-  render: { optionsSchema: opencascadeRenderSchema, content: [] },
+  render: { optionsSchema: opencascadeRenderSchema },
   exportFormats: {
-    stl: { optionsSchema: opencascadeExportSchemas.stl, content: [] },
-    step: { optionsSchema: opencascadeExportSchemas.step, content: [] },
-    glb: { optionsSchema: opencascadeExportSchemas.glb, content: [] },
-    gltf: { optionsSchema: opencascadeExportSchemas.gltf, content: [] },
+    stl: { optionsSchema: opencascadeExportSchemas.stl },
+    step: { optionsSchema: opencascadeExportSchemas.step },
+    glb: { optionsSchema: opencascadeExportSchemas.glb },
+    gltf: { optionsSchema: opencascadeExportSchemas.gltf },
   },
 
   async initialize(options, runtime) {
@@ -654,7 +725,7 @@ export const opencascade = defineKernel({
 
       // Tessellation is deferred to meshGeometry — the raw TopoDS shapes are the
       // nativeHandle, and a BRep-only export never pays for a display mesh.
-      return { nativeHandle: shapeEntries };
+      return { nativeHandle: retainShapeEntries(shapeEntries) };
     } catch (error) {
       if (error instanceof OcctBuildError || error instanceof RenderArtifactFinalizationError) {
         throw error;
@@ -761,45 +832,14 @@ export const opencascade = defineKernel({
         const angularToleranceRad = angularTolerance * (Math.PI / 180);
         const { coordinateSystem } = options;
 
-        const results = nativeHandle.map((entry) => {
-          let exportShape = entry.shape;
-
-          if (coordinateSystem === 'y-up') {
-            const origin = new oc.gp_Pnt(0, 0, 0);
-            const direction = new oc.gp_Dir(1, 0, 0);
-            const axis = new oc.gp_Ax1(origin, direction);
-            const trsf = new oc.gp_Trsf();
-            trsf.SetRotation(axis, Math.PI / 2);
-            const transform = new oc.BRepBuilderAPI_Transform(entry.shape, trsf, true, false);
-            exportShape = transform.Shape();
-            origin.delete();
-            direction.delete();
-            axis.delete();
-            trsf.delete();
-            transform.delete();
-          }
-
-          oc.BRepTools.Clean(exportShape, false);
-          const mesh = createIncrementalMesh(oc, exportShape, {
+        const results = nativeHandle.map((entry) =>
+          exportOpencascadeStlEntry(oc, entry, {
             linearTolerance,
             angularTolerance: angularToleranceRad,
             inParallel: context.isParallelMeshing,
-          });
-          const filePath = `/tmp/export_${Date.now()}.stl`;
-          const writer = new oc.StlAPI_Writer();
-          const progress = new oc.Message_ProgressRange();
-          writer.Write(exportShape, filePath, progress);
-          const rawData = oc.FS.readFile(filePath) as Uint8Array<ArrayBuffer>;
-          const data = new Uint8Array(rawData);
-          oc.FS.unlink(filePath);
-          mesh.delete();
-          progress.delete();
-          writer.delete();
-          if (!entry.name) {
-            throw new Error('OpenCascade ShapeEntry names must be normalized before STL export.');
-          }
-          return createExportFile('stl', entry.name, data);
-        });
+            coordinateSystem,
+          }),
+        );
 
         return createKernelSuccess(results);
       }
@@ -818,6 +858,10 @@ export const opencascade = defineKernel({
     }
   },
 
+  disposeNativeHandle({ nativeHandle }) {
+    releaseShapeEntries(nativeHandle);
+  },
+
   serializeNativeHandle({ nativeHandle }, _runtime, context): OpenCascadeSerializedNativeHandle {
     return {
       kind: 'opencascade-native-handle',
@@ -830,7 +874,9 @@ export const opencascade = defineKernel({
 
   deserializeNativeHandle({ serializedNativeHandle }, _runtime, context) {
     assertSerializedNativeHandle(serializedNativeHandle);
-    return serializedNativeHandle.entries.map((entry, index) => deserializeShapeEntry(context.oc, entry, index));
+    return retainShapeEntries(
+      serializedNativeHandle.entries.map((entry, index) => deserializeShapeEntry(context.oc, entry, index)),
+    );
   },
 });
 

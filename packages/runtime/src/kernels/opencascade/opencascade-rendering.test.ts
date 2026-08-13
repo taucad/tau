@@ -25,13 +25,13 @@ import { assertSuccess, createGeometryFile, createTestWorker } from '#testing/ke
 import type { CreateGeometryResult } from '#types/runtime.types.js';
 
 const buildNonPbrSource = (hex: string, opacity: number): string => `
-import { BRepPrimAPI_MakeCylinder } from 'opencascade.js';
+import { BRepPrimAPI_MakeCylinder } from 'libcascade';
 export default function main() {
   return { shape: new BRepPrimAPI_MakeCylinder(5, 20).Shape(), color: '${hex}', opacity: ${opacity} };
 }`;
 
 const buildPbrSource = (hex: string, opacity: number): string => `
-import { BRepPrimAPI_MakeCylinder } from 'opencascade.js';
+import { BRepPrimAPI_MakeCylinder } from 'libcascade';
 export default function main() {
   return {
     shape: new BRepPrimAPI_MakeCylinder(5, 20).Shape(),
@@ -101,7 +101,7 @@ describe('OpenCASCADE — color rendering parity', { timeout: 180_000 }, () => {
       const file = 'pbr.ts';
       const worker = await createTestWorker(opencascadeKernel, {
         [file]: `
-import { BRepPrimAPI_MakeCylinder } from 'opencascade.js';
+import { BRepPrimAPI_MakeCylinder } from 'libcascade';
 export default function main() {
   return {
     shape: new BRepPrimAPI_MakeCylinder(5, 20).Shape(),
@@ -131,7 +131,7 @@ export default function main() {
     const file = 'default.ts';
     const worker = await createTestWorker(opencascadeKernel, {
       [file]: `
-import { BRepPrimAPI_MakeCylinder } from 'opencascade.js';
+import { BRepPrimAPI_MakeCylinder } from 'libcascade';
 export default function main() {
   return new BRepPrimAPI_MakeCylinder(5, 20).Shape();
 }`,
@@ -142,7 +142,7 @@ export default function main() {
     })) as CreateGeometryResult;
     assertSuccess(result, 'occt uncoloured createGeometry');
 
-    expect(result.data.format).toBe('gltf');
+    expect(result.data?.format).toBe('gltf');
 
     try {
       const baseColor = await getMaterialBaseColor(result);

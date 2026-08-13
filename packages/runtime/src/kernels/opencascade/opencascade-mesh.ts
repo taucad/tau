@@ -10,6 +10,7 @@ import { NodeIO } from '@gltf-transform/core';
 import { cadMaterialDefaults } from '@taucad/types/constants';
 import type { OpenCascadeInstance } from '#kernels/opencascade/wasm/opencascade_full.js';
 import type { ShapeEntry } from '#kernels/opencascade/opencascade.types.js';
+import { createOcScope } from '#kernels/occt/oc-scope.js';
 import { srgbToLinear } from '#utils/color-space.js';
 import { normalizeGltfGeometryNames } from '#utils/gltf-geometry-name-normalizer.js';
 
@@ -113,121 +114,103 @@ export async function meshShapesToGltf(
   shapes: ShapeEntry[],
   options: MeshOptions,
 ): Promise<Uint8Array<ArrayBuffer>> {
-  const documentName = new oc.TCollection_ExtendedString();
-  const document = new oc.TDocStd_Document(documentName);
-  const mainLabel = document.Main();
-  const shapeTool = oc.XCAFDoc_DocumentTool.ShapeTool(mainLabel);
-  const colorTool = oc.XCAFDoc_DocumentTool.ColorTool(mainLabel);
+  const scope = createOcScope();
+  let result: Uint8Array<ArrayBuffer>;
 
-  const labels: Array<{ delete(): void }> = [];
+  try {
+    const documentName = scope.track(new oc.TCollection_ExtendedString());
+    const document = scope.track(new oc.TDocStd_Document(documentName));
+    const mainLabel = scope.track(document.Main());
+    const shapeTool = scope.track(oc.XCAFDoc_DocumentTool.ShapeTool(mainLabel));
+    const colorTool = scope.track(oc.XCAFDoc_DocumentTool.ColorTool(mainLabel));
 
-  for (const entry of shapes) {
-    if (entry.shape.IsNull()) {
-      continue;
-    }
-
-    oc.BRepTools.Clean(entry.shape, false);
-    const mesh = createIncrementalMesh(oc, entry.shape, options);
-
-    const label = shapeTool.NewShape();
-    labels.push(label);
-    shapeTool.SetShape(label, entry.shape);
-
-    const shapeLabelName = new oc.TCollection_ExtendedString(requireShapeEntryName(entry));
-    oc.TDataStd_Name.Set(label, shapeLabelName);
-    shapeLabelName.delete();
-
-    if (entry.color) {
-      const [r, g, b] = parseHexColor(entry.color);
-      const color = new oc.Quantity_Color(r, g, b, oc.Quantity_TypeOfColor.Quantity_TOC_sRGB);
-      colorTool.SetColor(label, color, oc.XCAFDoc_ColorType.XCAFDoc_ColorSurf);
-      color.delete();
-    }
-
-    if (entry.metalness !== undefined || entry.roughness !== undefined) {
-      const visTool = oc.XCAFDoc_DocumentTool.VisMaterialTool(mainLabel);
-      const pbrMat = new oc.XCAFDoc_VisMaterialPBR();
-      if (entry.color) {
-        const [sr, sg, sb] = parseHexColor(entry.color);
-        // The 4-double `Quantity_ColorRGBA` constructor treats inputs as
-        // **linear** RGB. CSS hex strings are sRGB, so convert per channel —
-        // see docs/policy/color-space-policy.md.
-        const baseColor = new oc.Quantity_ColorRGBA(
-          srgbToLinear(sr),
-          srgbToLinear(sg),
-          srgbToLinear(sb),
-          entry.opacity ?? 1,
-        );
-        pbrMat.BaseColor = baseColor;
-        baseColor.delete();
+    for (const entry of shapes) {
+      if (entry.shape.IsNull()) {
+        continue;
       }
-      pbrMat.Metallic = entry.metalness ?? cadMaterialDefaults.metalnessFactor;
-      pbrMat.Roughness = entry.roughness ?? cadMaterialDefaults.roughnessFactor;
-      pbrMat.IsDefined = true;
-      const visMat = new oc.XCAFDoc_VisMaterial();
-      visMat.SetPbrMaterial(pbrMat);
-      const matName = new oc.TCollection_AsciiString('tau-material');
-      const visMatLabel = visTool.AddMaterial(visMat, matName);
-      visTool.SetShapeMaterial(label, visMatLabel);
-      matName.delete();
-      visMatLabel.delete();
-      visMat.delete();
-      pbrMat.delete();
-      visTool.delete();
+
+      // Per-entry temporaries are freed each iteration; labels outlive the loop
+      // because `writer.Perform` reads them from the document.
+      const entryScope = createOcScope();
+      try {
+        oc.BRepTools.Clean(entry.shape, false);
+        entryScope.track(createIncrementalMesh(oc, entry.shape, options));
+
+        const label = scope.track(shapeTool.NewShape());
+        shapeTool.SetShape(label, entry.shape);
+
+        const shapeLabelName = entryScope.track(new oc.TCollection_ExtendedString(requireShapeEntryName(entry)));
+        oc.TDataStd_Name.Set(label, shapeLabelName);
+
+        if (entry.color) {
+          const [r, g, b] = parseHexColor(entry.color);
+          const color = entryScope.track(new oc.Quantity_Color(r, g, b, oc.Quantity_TypeOfColor.Quantity_TOC_sRGB));
+          colorTool.SetColor(label, color, oc.XCAFDoc_ColorType.XCAFDoc_ColorSurf);
+        }
+
+        if (entry.metalness !== undefined || entry.roughness !== undefined) {
+          const visTool = entryScope.track(oc.XCAFDoc_DocumentTool.VisMaterialTool(mainLabel));
+          const pbrMat = entryScope.track(new oc.XCAFDoc_VisMaterialPBR());
+          if (entry.color) {
+            const [sr, sg, sb] = parseHexColor(entry.color);
+            // The 4-double `Quantity_ColorRGBA` constructor treats inputs as
+            // **linear** RGB. CSS hex strings are sRGB, so convert per channel —
+            // see docs/policy/color-space-policy.md.
+            const baseColor = entryScope.track(
+              new oc.Quantity_ColorRGBA(srgbToLinear(sr), srgbToLinear(sg), srgbToLinear(sb), entry.opacity ?? 1),
+            );
+            pbrMat.BaseColor = baseColor;
+          }
+          pbrMat.Metallic = entry.metalness ?? cadMaterialDefaults.metalnessFactor;
+          pbrMat.Roughness = entry.roughness ?? cadMaterialDefaults.roughnessFactor;
+          pbrMat.IsDefined = true;
+          const visMat = entryScope.track(new oc.XCAFDoc_VisMaterial());
+          visMat.SetPbrMaterial(pbrMat);
+          const matName = entryScope.track(new oc.TCollection_AsciiString('tau-material'));
+          const visMatLabel = entryScope.track(visTool.AddMaterial(visMat, matName));
+          visTool.SetShapeMaterial(label, visMatLabel);
+        }
+      } finally {
+        entryScope.dispose();
+      }
     }
 
-    mesh.delete();
+    const outputPath = `/tmp/export_${Date.now()}.glb`;
+    const writerPath = scope.track(new oc.TCollection_AsciiString(outputPath));
+    const writer = scope.track(new oc.RWGltf_CafWriter(writerPath, true));
+
+    const converter = scope.track(new oc.RWMesh_CoordinateSystemConverter());
+    converter.SetInputLengthUnit(0.001);
+    converter.SetInputCoordinateSystem(oc.RWMesh_CoordinateSystem.RWMesh_CoordinateSystem_Zup);
+    converter.SetOutputLengthUnit(options.unit?.length === 'millimeter' ? 0.001 : 1);
+    const outputSystem =
+      options.coordinateSystem === 'z-up'
+        ? oc.RWMesh_CoordinateSystem.RWMesh_CoordinateSystem_Zup
+        : oc.RWMesh_CoordinateSystem.RWMesh_CoordinateSystem_glTF;
+    converter.SetOutputCoordinateSystem(outputSystem);
+    writer.SetCoordinateSystemConverter(converter);
+
+    const pbrMat = scope.track(new oc.XCAFDoc_VisMaterialPBR());
+    pbrMat.Metallic = cadMaterialDefaults.metalnessFactor;
+    pbrMat.Roughness = cadMaterialDefaults.roughnessFactor;
+    const visMat = scope.track(new oc.XCAFDoc_VisMaterial());
+    visMat.SetPbrMaterial(pbrMat);
+    const defaultStyle = scope.track(new oc.XCAFPrs_Style());
+    defaultStyle.SetMaterial(visMat);
+    writer.SetDefaultStyle(defaultStyle);
+
+    const progress = scope.track(new oc.Message_ProgressRange());
+    const fileInfo = scope.track(new oc.TColStd_IndexedDataMapOfStringString());
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- WASM binding enum type mismatch
+    writer.Perform(document, fileInfo as unknown, progress);
+
+    const glbData = oc.FS.readFile(outputPath, { encoding: 'binary' }) as Uint8Array<ArrayBuffer>;
+    result = new Uint8Array(glbData);
+
+    oc.FS.unlink(outputPath);
+  } finally {
+    scope.dispose();
   }
-
-  const outputPath = `/tmp/export_${Date.now()}.glb`;
-  const writerPath = new oc.TCollection_AsciiString(outputPath);
-  const writer = new oc.RWGltf_CafWriter(writerPath, true);
-
-  const converter = new oc.RWMesh_CoordinateSystemConverter();
-  converter.SetInputLengthUnit(0.001);
-  converter.SetInputCoordinateSystem(oc.RWMesh_CoordinateSystem.RWMesh_CoordinateSystem_Zup);
-  converter.SetOutputLengthUnit(options.unit?.length === 'millimeter' ? 0.001 : 1);
-  const outputSystem =
-    options.coordinateSystem === 'z-up'
-      ? oc.RWMesh_CoordinateSystem.RWMesh_CoordinateSystem_Zup
-      : oc.RWMesh_CoordinateSystem.RWMesh_CoordinateSystem_glTF;
-  converter.SetOutputCoordinateSystem(outputSystem);
-  writer.SetCoordinateSystemConverter(converter);
-
-  const pbrMat = new oc.XCAFDoc_VisMaterialPBR();
-  pbrMat.Metallic = cadMaterialDefaults.metalnessFactor;
-  pbrMat.Roughness = cadMaterialDefaults.roughnessFactor;
-  const visMat = new oc.XCAFDoc_VisMaterial();
-  visMat.SetPbrMaterial(pbrMat);
-  const defaultStyle = new oc.XCAFPrs_Style();
-  defaultStyle.SetMaterial(visMat);
-  writer.SetDefaultStyle(defaultStyle);
-
-  const progress = new oc.Message_ProgressRange();
-  const fileInfo = new oc.TColStd_IndexedDataMapOfStringString();
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- WASM binding enum type mismatch
-  writer.Perform(document, fileInfo as unknown, progress);
-
-  const glbData = oc.FS.readFile(outputPath, { encoding: 'binary' }) as Uint8Array<ArrayBuffer>;
-  const result = new Uint8Array(glbData);
-
-  oc.FS.unlink(outputPath);
-  for (const label of labels) {
-    label.delete();
-  }
-  fileInfo.delete();
-  defaultStyle.delete();
-  visMat.delete();
-  pbrMat.delete();
-  converter.delete();
-  progress.delete();
-  writerPath.delete();
-  writer.delete();
-  colorTool.delete();
-  shapeTool.delete();
-  mainLabel.delete();
-  documentName.delete();
-  document.delete();
 
   const tagged = await tagGlbMeshAndNodesFromShapeEntries(result, shapes);
   return normalizeGltfGeometryNames(tagged, {

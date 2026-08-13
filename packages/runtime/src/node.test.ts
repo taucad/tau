@@ -73,7 +73,7 @@ describe('createNodeClient', () => {
       source: {
         files: {
           'main.ts': `
-            import { BRepPrimAPI_MakeBox } from 'opencascade.js';
+            import { BRepPrimAPI_MakeBox } from 'libcascade';
 
             export default function main() {
               return new BRepPrimAPI_MakeBox(10, 20, 30).Shape();

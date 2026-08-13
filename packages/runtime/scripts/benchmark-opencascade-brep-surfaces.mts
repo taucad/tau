@@ -847,7 +847,7 @@ const glbExportViaOpenCascadeKernel = async (oc: Oc, shape: any): Promise<number
 };
 
 const opencascadeKernelV8Source = String.raw`
-import initOpenCascade from 'opencascade.js';
+import initOpenCascade from 'libcascade';
 void initOpenCascade;
 
 const assertShape = (shape: any, label: string) => {
@@ -1023,14 +1023,14 @@ const createOpenCascadeKernelContext = async (variant: string): Promise<BenchCon
   await client.connect();
   return {
     client,
-    file: { filename: 'main.ts', path: basePath },
+    file: mainPath,
   };
 };
 
 const opencascadeKernelExportGlb = async (context: BenchContext): Promise<number> => {
   const client = context['client'] as ReturnType<typeof createRuntimeClient>;
   const result = await client.export('glb', {
-    source: { path: context['file'] as { filename: string; path: string } },
+    source: { path: context['file'] as string },
     parameters: {},
   });
   if (!result.success) {
@@ -1520,7 +1520,7 @@ const stringOption = (value: string | boolean | undefined, fallback: string): st
 };
 
 const initOpenCascade = async (variant: string): Promise<Oc> => {
-  const moduleName = variant === 'multi' ? 'opencascade.js/multi' : 'opencascade.js';
+  const moduleName = variant === 'multi' ? 'libcascade/multi' : 'libcascade';
   const module = await import(moduleName);
   const oc = await module.default({
     print() {

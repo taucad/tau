@@ -126,8 +126,8 @@ export default function main(p = defaultParams) {}
     mainFile: 'main.ts',
     backendProvider: 'opencascade',
     longDescription:
-      'Direct access to the OpenCASCADE Technology (OCCT) kernel via opencascade.js. Full control over BRep operations, precise geometry, and advanced CAD algorithms without abstraction layers.',
-    emptyCode: `import {} from 'opencascade.js';
+      'Direct access to the OpenCASCADE Technology (OCCT) kernel via libcascade. Full control over BRep operations, precise geometry, and advanced CAD algorithms without abstraction layers.',
+    emptyCode: `import {} from 'libcascade';
 
 export const defaultParams = {};
 

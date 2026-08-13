@@ -3,11 +3,10 @@
  */
 
 /**
- * Canonical regex for detecting opencascade.js usage in source code.
- * The module specifier is always 'opencascade.js' (the .js suffix is required).
+ * Canonical regex for detecting libcascade usage in source code.
+ * The module specifier is always 'libcascade'.
  *
  * Branches: ESM import, CJS require.
  * @public
  */
-export const opencascadeDetectPattern =
-  /import.*from\s+["']opencascade\.js["']|require\s*\(\s*["']opencascade\.js["']\s*\)/s;
+export const opencascadeDetectPattern = /import.*from\s+["']libcascade["']|require\s*\(\s*["']libcascade["']\s*\)/s;

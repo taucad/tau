@@ -15,7 +15,7 @@ import { createGeometryTestHelpers } from '#testing/kernel-geometry-testing.util
 // RED-STATE TDD — these tests intentionally FAIL today.
 //
 // The `wasm: 'multi'` option resolves the pthread bindings from the published
-// `opencascade.js/multi` subpath. The OCJS glue module now owns its adjacent
+// `libcascade/multi` subpath. The OCJS glue module now owns its adjacent
 // WASM asset URL so framework bundlers emit a single copy instead of seeing a
 // second `@taucad/runtime`-owned static URL.
 //
@@ -38,14 +38,14 @@ type OccParallelProbe = {
 /**
  * Read the OCCT parallelism statics off the in-process module registry. The
  * kernel registers its (exception-wrapped) OpenCascade instance under
- * `'opencascade.js'`, and the global parallel mode set during init is observable
+ * `'libcascade'`, and the global parallel mode set during init is observable
  * through it.
  *
  * @returns the registered instance narrowed to the parallelism statics
  */
 function readParallelProbe(): OccParallelProbe {
-  const oc = getModuleRegistry().get('opencascade.js') as OccParallelProbe | undefined;
-  expect(oc, 'expected worker to have registered opencascade.js module').toBeDefined();
+  const oc = getModuleRegistry().get('libcascade') as OccParallelProbe | undefined;
+  expect(oc, 'expected worker to have registered libcascade module').toBeDefined();
   return oc!;
 }
 
@@ -57,7 +57,7 @@ describe('OpenCascade Kernel (multi-threaded)', { timeout: 60_000 }, () => {
       opencascadeKernel,
       {
         'box.ts': `
-import { BRepPrimAPI_MakeBox } from 'opencascade.js';
+import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   return new BRepPrimAPI_MakeBox(10, 20, 30).Shape();
 }`,

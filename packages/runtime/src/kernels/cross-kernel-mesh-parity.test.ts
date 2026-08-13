@@ -128,7 +128,7 @@ export default function main() {
 
     const occtWorker = await createTestWorker(opencascadeKernel, {
       'cylinder.ts': `
-import { BRepPrimAPI_MakeCylinder } from 'opencascade.js';
+import { BRepPrimAPI_MakeCylinder } from 'libcascade';
 export default function main() {
   return new BRepPrimAPI_MakeCylinder(5, 20).Shape();
 }`,
@@ -234,7 +234,7 @@ export default function main() {
 
         const occtWorker = await createTestWorker(opencascadeKernel, {
           'colored-cylinder.ts': `
-import { BRepPrimAPI_MakeCylinder } from 'opencascade.js';
+import { BRepPrimAPI_MakeCylinder } from 'libcascade';
 export default function main() {
   return { shape: new BRepPrimAPI_MakeCylinder(5, 20).Shape(), color: '${hex}' };
 }`,
@@ -299,7 +299,7 @@ export default function main() {
 
     const occtWorker = await createTestWorker(opencascadeKernel, {
       'pbr-cylinder.ts': `
-import { BRepPrimAPI_MakeCylinder } from 'opencascade.js';
+import { BRepPrimAPI_MakeCylinder } from 'libcascade';
 export default function main() {
   return { shape: new BRepPrimAPI_MakeCylinder(5, 20).Shape(), color: '${testColor}', metalness: ${testMetallic}, roughness: ${testRoughness} };
 }`,

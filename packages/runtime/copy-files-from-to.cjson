@@ -3,30 +3,21 @@
     // OpenCascade WASM files for Replicad kernel.
     // - single: pthread-free build, default for COOP/COEP-less environments.
     // - multi: pthread build, picked by default when SharedArrayBuffer is usable.
-    // Keep JS glue, WASM binaries, and declarations version-coherent.
-    {
-      "from": "./node_modules/replicad-opencascadejs/dist/replicad_single.js",
-      "to": "src/kernels/replicad/wasm/replicad_single.js"
-    },
+    // Generated package initializers own JS glue and pthread worker wiring;
+    // Tau keeps explicit WASM URLs and declarations for its runtime assets.
     {
       "from": "./node_modules/replicad-opencascadejs/dist/replicad_single.wasm",
       "to": "src/kernels/replicad/wasm/replicad_single.wasm"
     },
     {
-      "from": "./node_modules/replicad-opencascadejs/dist/replicad_single.d.ts",
-      "to": "src/kernels/replicad/wasm/replicad_single.d.ts"
-    },
-    {
-      "from": "./node_modules/replicad-opencascadejs/dist/replicad_multi.js",
-      "to": "src/kernels/replicad/wasm/replicad_multi.js"
-    },
-    {
       "from": "./node_modules/replicad-opencascadejs/dist/replicad_multi.wasm",
       "to": "src/kernels/replicad/wasm/replicad_multi.wasm"
     },
+    // One declaration file covers both variants since `libcascade assemble`
+    // unioned them; the per-variant .d.ts are no longer published.
     {
-      "from": "./node_modules/replicad-opencascadejs/dist/replicad_multi.d.ts",
-      "to": "src/kernels/replicad/wasm/replicad_multi.d.ts"
+      "from": "./node_modules/replicad-opencascadejs/dist/types.d.ts",
+      "to": "src/kernels/replicad/wasm/types.d.ts"
     },
     // KCL WASM file for Zoo kernel
     {
@@ -48,28 +39,27 @@
       "from": "./node_modules/manifold-3d/manifold.wasm",
       "to": "src/kernels/manifold/wasm/manifold.wasm"
     },
-    // OpenCascade full kernel — JS factory, WASM binary, and type declarations
+    // OpenCascade kernel — keep Tau's historical opencascade_full asset names,
+    // but let libcascade's generated initializers own the JS glue.
     {
-      "from": "./node_modules/opencascade.js/dist/opencascade_full.js",
-      "to": "src/kernels/opencascade/wasm/opencascade_full.js"
-    },
-    {
-      "from": "./node_modules/opencascade.js/dist/opencascade_full.wasm",
+      "from": "./node_modules/libcascade/dist/opencascade_single.wasm",
       "to": "src/kernels/opencascade/wasm/opencascade_full.wasm"
     },
     {
-      "from": "./node_modules/opencascade.js/dist/opencascade_full.d.ts",
+      "from": "./node_modules/libcascade/dist/types.d.ts",
       "to": "src/kernels/opencascade/wasm/opencascade_full.d.ts"
     },
-    // Multi-threaded (pthread) OpenCascade WASM. The `opencascade.js/multi`
-    // JS factory is resolved via the package subpath export at runtime; only
+    // Multi-threaded (pthread) OpenCascade WASM. The `libcascade/multi/init`
+    // initializer is resolved via the package subpath export at runtime; only
     // the binary is served from the local asset copy (loaded through
     // `new URL('wasm/opencascade_full_multi.wasm', import.meta.url)`).
     {
-      "from": "./node_modules/opencascade.js/dist/opencascade_full_multi.wasm",
+      "from": "./node_modules/libcascade/dist/opencascade_multi.wasm",
       "to": "src/kernels/opencascade/wasm/opencascade_full_multi.wasm"
     }
   ],
-  // Always overwrite files
-  "whenFileExists": "overwrite"
+  "copyFilesSettings": {
+    // Always refresh vendored runtime assets from installed packages.
+    "whenFileExists": "overwrite"
+  }
 }

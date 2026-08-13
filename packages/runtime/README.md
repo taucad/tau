@@ -47,6 +47,9 @@ follows the same shape:
    so consumers can branch on supersession without try/catch flow control.
    The first command call lazy-connects the transport and (for inline
    `source.files` input) auto-provisions an in-memory filesystem.
+   `client.setRenderTimeout(renderTimeout)` is different: it is a synchronous,
+   connected-client control-plane setter for subsequent renders and never
+   sends render intent to the worker.
 3. **Consume** — `client.on('geometry' | 'error' | 'progress' | …, handler)`
    subscribes to the single ordered event stream the worker produces.
    Subscriptions auto-dispose on `client.terminate()`.
@@ -54,6 +57,7 @@ follows the same shape:
 ```mermaid
 flowchart LR
   c["createRuntimeClient"] --> command["render / updateParameters / setOptions / export"]
+  c --> control["setRenderTimeout"]
   command --> consume["client.on('geometry')"]
   consume --> command
   consume --> term["client.terminate"]
@@ -64,17 +68,18 @@ host-wiring concern (SAB pools, FS bridges, worker URLs, deferred filesystem
 attachment) is owned by the wired {@link TransportPlugin} callable passed at
 construction (`{ transport: webWorkerTransport({ ... }) }`). Opaque
 filesystems are produced by the public factories
-(`fromMemoryFs`, `fromNodeFs`, `fromBrowserFs`, `fromFsLikeOpaque`,
-`fromWorkerOpaque`); raw `MessagePort`s are not part of the public surface.
+(`fromMemoryFs`, `fromNodeFs`, `fromBrowserFs`, `fromFsLike`,
+`fromFileSystemBridge`); raw `MessagePort`s are not part of the public surface.
 See [Embedding in a Host](../../apps/ui/content/docs/runtime/guides/embedding-in-a-host.mdx).
 
 ## Autonomous render loop (editors and live UIs)
 
 `render` hands the worker a `(source, parameters)` pair and lets it own
-re-rendering. New calls supersede in-flight ones; the prior `RenderOutcome`
-resolves with `{ superseded: true }` and the latest one carries the geometry.
-For inline `source.files` input the runtime auto-provisions the filesystem on the
-first call.
+re-rendering. A newer public preview command or an autonomous watched-filesystem
+preview can supersede an in-flight call, whose `RenderOutcome` resolves with
+`{ superseded: true }`. Subscribe to `geometry` for the authoritative selected
+preview; an autonomous successor has no second public outcome. For inline
+`source.files` input the runtime auto-provisions the filesystem on the first call.
 
 ```typescript
 import { createRuntimeClient, presets } from '@taucad/runtime';
@@ -111,7 +116,7 @@ do right now:
 
 | State         | Reachable methods                             | Notes                                                                                                                           |
 | ------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `unconnected` | every public method                           | The default after construction. Command methods (`render`/`updateParameters`/`setOptions`/`export`) lazy-connect on first call. |
+| `unconnected` | all public methods except `setRenderTimeout`  | The default after construction. Command methods (`render`/`updateParameters`/`setOptions`/`export`) lazy-connect on first call. |
 | `connecting`  | `lifecycleState`                              | Concurrent command calls await the in-flight handshake.                                                                         |
 | `connected`   | every public method                           | Steady state.                                                                                                                   |
 | `terminated`  | `lifecycleState`, `terminate()`, `shutdown()` | All other methods throw `RuntimeTerminatedError`. `shutdown()` is idempotent.                                                   |
@@ -132,9 +137,75 @@ Two complementary termination methods are exposed:
   rejects every in-flight intent with `RuntimeTerminatedError`, and
   releases the kernel-host port. Use this for hard-stop / unmount paths.
 - `shutdown({ drain? })` — asynchronous, cooperative. Awaits in-flight
-  intents to settle when `drain: true`, then performs the same teardown
-  as `terminate()`. Use this for orderly shutdown (e.g. `beforeunload`
-  guards, server graceful-exit handlers). Both methods are idempotent.
+  intents to settle when `drain: true`, awaits one acknowledged worker cleanup
+  behind the serialized operation lane, then closes transport-owned resources.
+  `drain: false` is a hard close and makes no remote-cleanup guarantee. Use a
+  draining shutdown for orderly server/test teardown. Both methods are idempotent.
+
+## Render timeouts and cancellation
+
+Worker-backed clients can enforce a wall-clock deadline for each preview. The
+matching Promise rejects locally with `RenderTimeoutError`; it does not wait for
+the worker to acknowledge cancellation, so the same contract holds without
+`SharedArrayBuffer`.
+
+```typescript
+import { createRuntimeClient, isRenderTimeoutError } from '@taucad/runtime/client';
+import { createWebWorkerClientOptions } from '@taucad/runtime/transport/web';
+import type { runtime } from './runtime.worker';
+
+const clientOptions = createWebWorkerClientOptions<typeof runtime>({
+  createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
+  renderTimeout: 60_000,
+});
+
+const client = createRuntimeClient<typeof runtime>(clientOptions);
+
+try {
+  await client.render({ source: { files: { 'main.ts': 'export default () => model;' } } });
+} catch (error) {
+  if (!isRenderTimeoutError(error)) throw error;
+  console.error(error.message);
+}
+```
+
+After deadline settlement, the runtime targets only the timed-out render and
+waits for bounded cooperative recovery. A responsive isolated host is retained.
+An unresponsive host is terminated; work queued during recovery rejects with
+`RuntimeTerminatedError` and `causeKind === 'render-timeout'`. Construct a new
+client from the same module-scope options spec before retrying.
+
+`setRenderTimeout(renderTimeout)` changes only later previews. Milliseconds.
+Zero disables it. Same-isolate `inProcessTransport` rejects a non-zero timeout
+because synchronous work can block the deadline timer itself, regardless of SAB
+availability.
+
+Plugin authors receive the same fresh operation signal through
+`KernelRuntime.signal`, `KernelMiddlewareRuntime.signal`,
+`MiddlewareDependencyRuntime.signal`, and `BundlerRuntime.signal`:
+
+```typescript
+import { defineMiddleware } from '@taucad/runtime/middleware';
+
+export const remoteCalibration = defineMiddleware({
+  id: 'remote-calibration',
+  name: 'Remote calibration',
+  async wrapCreateGeometry(input, handler, { signal }) {
+    const response = await fetch('/api/calibration', { signal });
+    signal.throwIfAborted();
+    const parameters = { ...input.parameters, ...(await response.json()) };
+    signal.throwIfAborted();
+    return handler({ ...input, parameters });
+  },
+});
+```
+
+Pass the signal to cancellable platform APIs, check it around non-cancellable
+awaits, and never retain it after the operation. Do not use `Promise.race()` to
+claim that mutating work stopped while it continues in the background.
+
+See [Configure Render Timeouts](../../apps/ui/content/docs/runtime/guides/render-timeouts.mdx)
+and [Cooperate with Cancellation](../../apps/ui/content/docs/runtime/guides/cooperate-with-cancellation.mdx).
 
 ## Filesystem ownership
 
@@ -151,12 +222,20 @@ remain writable so caches and generated files persist inside the project tree.
 See [Path Namespaces](../../apps/ui/content/docs/runtime/concepts/path-namespaces.mdx)
 for consumer, plugin-author, and host-adapter examples.
 
+Watch-capable rooted filesystems own precise-versus-reset event semantics. The
+worker acknowledges entry observation before discovery, replaces its complete
+multi-path subscription with overlap-and-swap, and keeps current-preview watch
+ownership independent from successful artifact publication. Watcherless adapters
+reread volatile file state at each explicit source-bearing operation while
+retaining kernel initialization and persistent project-local caches. Exact-source
+exports use request-local ownership and cannot replace the active preview.
+
 ## Transports
 
 `@taucad/runtime/transport` ships pluggable {@link RuntimeTransportPlugin}
-implementations. Each plugin exposes paired `client(options)` / `host(options)`
-factories that own the wire (channel construction, SAB allocation, abort
-signalling, geometry pool resolution, FS bridging):
+implementations. A transport plugin is the client-side declaration that owns
+channel construction, SAB allocation, abort signalling, geometry pool
+resolution, and FS bridging:
 
 - `inProcessTransport` — same realm; lowest latency. The runtime worker
   runs on the calling thread over an internal `MessageChannel`.
@@ -166,15 +245,38 @@ signalling, geometry pool resolution, FS bridging):
   client surfaces typed termination errors.
 - `nodeWorkerTransport` — Node.js `worker_threads`. Uses
   `MessageChannelMain`-style port handoff so the host and worker share
-  the same `Port<unknown>` shape as the browser.
+  the same `Port<unknown>` shape as the browser. The application supplies
+  the worker entry URL because only its build owns that executable module.
 
-Custom transports (e.g. `electronUtilityTransport`) are authored with
-`defineRuntimeTransport({ id, clientOptionsSchema?, hostOptionsSchema?, client, host })`.
+Custom client transports are authored with
+`defineRuntimeTransport({ id, clientOptionsSchema?, client })`. Host factories
+remain standalone, environment-specific exports such as `webWorkerHost`,
+`nodeWorkerHost`, and `electronUtilityHost`; importing a renderer/client subpath
+therefore cannot pull host workers or Node-only code into its graph.
+Their materialized client reserves each preview synchronously, exposes
+`renderTimeoutRecovery: { kind: 'terminable' | 'unsupported' }`, and resolves
+`closed` once with a typed cause (`requested`, `render-timeout`, `host-exit`, or
+`wire-failure`). Terminable transports must abort the exact supplied render and
+terminate only the host owned by that client.
 
 All transports produce the same `Port<unknown>` so the channel — and
 therefore everything above it — is transport-agnostic. Cross-origin
 isolated pages also receive zero-copy geometry transfers via a
 `SharedArrayBuffer` pool that the transport allocates internally.
+
+## Framework build integration
+
+- Vite and React Router: add `tauRuntime()` from `@taucad/runtime/vite`.
+- Next.js: export `withTauRuntime(appConfig?, headerOptions?)` from `next.config.ts`.
+- electron-vite: wrap the ordinary three-process config with
+  `electronRuntimeConfig(...)` from `@taucad/runtime/electron/vite` and import
+  the utility entry with electron-vite's native `?modulePath` query.
+
+The framework helpers are version-neutral: the same implementation is qualified
+with React Router 7/Vite 7 and React Router 8/Vite 8, electron-vite 5/Vite 7 and
+electron-vite 6 beta/Vite 8, and Next.js 15/Webpack and Next.js 16/Turbopack.
+Consumers do not need package aliases, semver branches, or version-specific
+configuration.
 
 ## Plugin entry points
 
@@ -196,6 +298,6 @@ isolated pages also receive zero-copy geometry transfers via a
 
 - Quick start — `apps/ui/content/docs/runtime/getting-started/quick-start.mdx`
 - Live rendering (autonomous loop, `RenderOutcome`, supersession) — `apps/ui/content/docs/runtime/guides/live-rendering.mdx`
-- Embedding in a host (port bridges, `filePoolBuffer` SAB, deferred FS) — `apps/ui/content/docs/runtime/guides/embedding-in-a-host.mdx`
+- Embedding in a host (rooted bridge factories and deferred FS binding) — `apps/ui/content/docs/runtime/guides/embedding-in-a-host.mdx`
 - Architecture invariants — `docs/architecture/runtime-topology.md`
 - Per-kernel guides — `apps/ui/content/docs/runtime/`

@@ -3,7 +3,7 @@ title: 'Library API Policy'
 description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, flat options, max 3 params, naming, subpath exports, events, plugins, lazy init, escape hatches.'
 status: active
 created: '2026-02-23'
-updated: '2026-07-21'
+updated: '2026-08-15'
 related:
   - docs/policy/api-evolution-policy.md
   - docs/policy/resource-cleanup-policy.md
@@ -479,7 +479,7 @@ Every options type that consumers declare as a standalone constant should have a
 ```typescript
 // Without helper: requires explicit type import
 import type { RuntimeClientOptions } from '@taucad/runtime';
-import { defineRuntime } from '@taucad/runtime/worker';
+import { defineRuntime } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 const runtime = defineRuntime({ kernels: [replicad()] });
@@ -616,9 +616,9 @@ export type RenderOutcome =
 const outcome = await client.render({ source: { path: '/main.ts' }, parameters });
 
 if (outcome.superseded) {
-  // A newer render / updateParameters / setOptions call took ownership of
-  // the worker before this one settled. The newer call's RenderOutcome
-  // carries the authoritative geometry — this caller can safely no-op.
+  // A newer public command or an autonomous watched-filesystem preview took
+  // ownership before this call settled. The selected preview's authoritative
+  // geometry arrives over the event channel; this caller can safely no-op.
   return;
 }
 
@@ -639,9 +639,10 @@ true | false` lets TypeScript narrow without any runtime helper.
 - **Carry the result on the success branch only.** Putting `geometry?:
 HashedGeometryResult` on both branches forces every caller into a
   needless null check; the discriminant exists to avoid that.
-- **Document the supersession trigger** in the JSDoc. Consumers need to
-  know which sibling calls invalidate the in-flight outcome so they
-  can reason about ordering without reading the runtime source.
+- **Document every supersession trigger** in the JSDoc. Consumers need to
+  know when autonomous work, not only a sibling public call, can invalidate an
+  in-flight outcome. Do not promise a successor `RenderOutcome` when the
+  successor can be event-only.
 
 ## 21. Keep Plugin-Owned Operation Options Nested
 
@@ -686,6 +687,29 @@ await client.export('glb', {
 This rule refines the flat-options preference in §3. Plugin factory configuration should still stay flat (`replicad({ wasm, linearTolerance })`), because the plugin owns that entire options object. Operation inputs are different: the runtime owns the operation envelope, while kernels/transcoders own nested option bags.
 
 Framework-wide semantic requirements belong in a stable runtime-owned parent such as `content`, not in plugin option bags and not as phase selectors. Each property is independently capability-declared and route-inferred: supporting `includeEdges` does not imply support for `includeTopology`. Unsupported keys must disappear from exact inferred operation types and be rejected by runtime validation. Authors declare what a route can fulfill; consumers never choose an internal source phase.
+
+Provider capability declarations are positive-only. Omit an unsupported declaration instead of spelling a negative value; use a non-empty literal tuple only when the route fulfills content. The `defineX` boundary validates declarations once, rejecting empty tuples, duplicates, and unknown keys.
+
+CORRECT:
+
+```typescript
+render: { content: ['includeEdges'] as const },
+exportFormats: {
+  glb: { optionsSchema: glbSchema, content: ['includeEdges'] as const },
+  step: { optionsSchema: stepSchema }, // format supported; no framework content
+},
+```
+
+INCORRECT:
+
+```typescript
+render: { content: [] },
+exportFormats: {
+  glb: { optionsSchema: glbSchema, content: ['includeEdges', 'includeEdges'] },
+},
+```
+
+Provider hook inputs follow the same contract: when a provider declares no content, its method input omits `content`; this is distinct from the consumer envelope, where requesting an unsupported property is a type and runtime error. Do not add empty capability objects or arrays to advertise absence.
 
 Hook return objects follow the same ownership rule and must avoid reserved-word member names when consumers are expected to destructure the result. Prefer `exportGeometry` over a hook member named `export`, because `const { export } = useRuntime()` is a syntax error.
 

@@ -3,7 +3,7 @@ title: 'JSDoc Policy'
 description: 'Standards for JSDoc documentation: @public/@internal visibility, compilable examples, real-world usage, language tags, and @example <caption> requirements.'
 status: active
 created: '2026-03-11'
-updated: '2026-03-11'
+updated: '2026-08-15'
 related:
   - docs/policy/documentation-policy.md
   - docs/policy/library-api-policy.md
@@ -149,7 +149,7 @@ CORRECT:
  *
  * @example <caption>Browser setup</caption>
  * ```typescript
- * import { defineRuntime } from '@taucad/runtime/worker';
+ * import { defineRuntime } from '@taucad/runtime';
  * import { replicad } from '@taucad/runtime/kernels';
  * export const runtime = defineRuntime({ kernels: [replicad()] });
  * ```

@@ -3,7 +3,7 @@ title: 'Kernel Architecture Policy'
 description: 'CAD runtime worker architecture from editor to geometry computation. Covers ProjectMachine, CadMachine, RuntimeClient, plugin model, transport, and lifecycle.'
 status: active
 created: '2026-02-18'
-updated: '2026-07-21'
+updated: '2026-08-07'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -168,11 +168,11 @@ The `render()` method accepts two input shapes via generic overloads:
 
 ### Geometry Event
 
-When any render completes (success or failure), the `geometry` event fires with the full `HashedGeometryResult`. This enables fire-and-forget render calls where the consumer subscribes once and receives all results reactively.
+When the selected preview completes (success or failure), the `geometry` event fires with the full `HashedGeometryResult`. This is the authoritative output stream for both public commands and autonomous watched-filesystem rerenders. Stale previews never publish.
 
 ### Auto-Cancellation (Latest-Wins)
 
-When a follow-up render request arrives while a previous render is in-flight, the previous render is cooperatively superseded via the abort signal slot. The prior outcome resolves as `{ status: 'superseded' }` on the discriminated `RenderOutcome` returned from `render`/`updateParameters`/`setOptions` — never as a thrown exception. Only the latest render's result fires the `geometry` event. For pull consumers (CLI), renders are sequential so supersession never triggers.
+When a newer selected preview arrives while a public render is in-flight, the previous preview is cooperatively superseded via the abort signal slot. The successor may be a public `render`/`updateParameters`/`setOptions` command or an autonomous watched-filesystem rerender. The prior outcome resolves as `{ superseded: true }` — never as a thrown exception — and only the selected preview publishes to the `geometry` event. Autonomous successors have no public Promise of their own, so consumers must not assume a newer `RenderOutcome` carries their geometry. Pull consumers such as the CLI use request-scoped export and do not enter this preview race.
 
 ### Render Timeout Ownership
 
@@ -227,17 +227,15 @@ type RuntimeTransport = {
 ```
 1. User edits code in Monaco editor
    │
-2. FileManager writes file → emits fileWritten event
+2. Filesystem authority writes the file and emits a concrete runtime-path watch event
    │
-3. use-project.tsx iterates all geometryUnits with changed path (absolute)
+3. KernelRuntimeWorker matches the path against its active entry and dependency watch set
+   │  ├─ Related path → invalidate affected caches and schedule one preview
+   │  └─ Unrelated path → no render work
    │
-4. Each CadMachine receives setFile event
-   │  ├─ Different file → immediate render
-   │  └─ Same file → 500ms debounce (bufferingFile state)
+4. CadMachine reflects the worker-owned render lifecycle
    │
-5. CadMachine enters rendering state → sends createGeometry to KernelMachine
-   │
-6. KernelMachine pipeline:
+5. KernelMachine pipeline:
    │  ├─ Lazily creates RuntimeClient (ensureRuntimeClient)
    │  ├─ Subscribes to geometry/progress/parametersResolved events once
    │  ├─ RuntimeClient creates Worker + Transport on first connect
@@ -246,11 +244,11 @@ type RuntimeTransport = {
    │  ├─ filesystem watch events invalidate caches inside the worker
    │  └─ Auto-cancellation: new render supersedes in-flight render
    │
-7. CadMachine receives geometryComputed → updates context.geometry
+6. CadMachine receives geometryComputed → updates context.geometry
    │
-8. ViewerContent useEffect bridges geometry → GraphicsMachine
+7. ViewerContent useEffect bridges geometry → GraphicsMachine
    │
-9. GraphicsMachine → CadViewer → GltfMesh renders to WebGL canvas
+8. GraphicsMachine → CadViewer → GltfMesh renders to WebGL canvas
 ```
 
 ### Debouncing
@@ -364,7 +362,7 @@ Kernel modules define geometry computation logic. Each kernel is an ES module lo
 - `initialize(options, runtime)` — load WASM, register builtin modules. `options` is type-safe via the `Options` generic inferred from `optionsSchema`
 - `getDependencies(input, runtime, ctx)` — return file dependencies
 - `getParameters(input, runtime, ctx)` — extract parameters from code
-- `createGeometry(input, runtime, ctx)` — evaluate source → `{ nativeHandle, geometry? }`. The nativeHandle carries **all export-facing evidence** (shapes, resolved interfaces, datum frames). Manifold and Tau return display-ready inline `geometry`; Replicad, OpenCascade, Zoo, JSCAD, and OpenSCAD return reusable native evidence and implement `meshGeometry`. The input carries framework-resolved construction values, never render/export route intent
+- `createGeometry(input, runtime, ctx)` — evaluate source → `{ nativeHandle, geometry? }`. The nativeHandle carries **all export-facing evidence** (shapes, resolved interfaces, datum frames). Manifold and Tau return display-ready inline `geometry`; Replicad, OpenCascade, Zoo, JSCAD, and OpenSCAD return reusable native evidence and implement `meshGeometry`. Every input contains only `entryPath` and `parameters`; `options` exists only when the kernel positively declares a Zod-object `createOptionsSchema`. Content and render/export route intent never cross this boundary
 - `meshGeometry(input, runtime, ctx)` _(optional)_ — nativeHandle → display artifact (`GeometryResponse`) at preview tessellation or display packing. Runs **only on the display path**, at the kernel boundary; export-only requests never call it. Contract invariant: a kernel provides a display path either via inline `geometry` or via `meshGeometry` — the orchestrator rejects display renders when neither exists
 - `exportGeometry(input, runtime, ctx)` — export using the framework-materialized nativeHandle. Mesh formats tessellate internally at export quality; BRep formats (STEP/IGES) never tessellate
 
@@ -437,7 +435,7 @@ createRuntimeClient({
 });
 ```
 
-Two explicit slots (`preview` and `export`) make the quality distinction visible and intentional. Preview tessellation is used by the display path (`meshGeometry` for kernels that defer it, inline `createGeometry` otherwise); export tessellation is normally used by `exportGeometry` for mesh formats. When tessellation changes native construction, as in OpenSCAD, the framework projects source-export fields declared by the render schema over render defaults and passes the validated result to `createGeometry`. BRep exports (STEP/IGES) tessellate nothing.
+Two explicit slots (`preview` and `export`) make the quality distinction visible and intentional. Preview tessellation is used by the display path (`meshGeometry` for kernels that defer it, inline `createGeometry` otherwise); export tessellation is normally used by `exportGeometry` for mesh formats. When tessellation changes native construction, as in OpenSCAD, the kernel declares those construction keys with `createOptionsSchema`. The framework projects the matching resolved render or selected source-export values, deep-merges them over the schema defaults, validates once, and passes only that result to `createGeometry`. BRep exports (STEP/IGES) tessellate nothing.
 
 2. **Per-call overrides** — passed as `callOptions` to individual methods:
 
@@ -477,8 +475,8 @@ RuntimeClient.render({ source, parameters, renderOptions? })
       → RuntimeCommand { type: 'openFile', options? }
         → dispatcher → KernelWorker.handleOpenFile(..., options?)
           → KernelWorker.createGeometry(..., options?)          // publish path
-            → resolve schema-projected construction values
-              → CreateGeometryInput { options, content }        // values only; no route discriminator
+            → resolve optional createOptionsSchema projection
+              → CreateGeometryInput { entryPath, parameters, options? }
               → KernelDefinition.createGeometry(input, runtime, ctx)
             → MeshGeometryInput { nativeHandle, options }        // when geometry deferred
               → KernelDefinition.meshGeometry(input, runtime, ctx)
@@ -510,7 +508,9 @@ The `geometryCache()` middleware persists three role-aligned entries under `.tau
 | **mesh**   | `mesh-{hash}.bin`   | `meshGeometry`   | Display `GeometryResponse` at preview tessellation                              |
 | **export** | `export-{hash}.bin` | Final export leg | Target `ExportFile[]` after selected content contributors/transcoders           |
 
-A source-scoped build key has one operation-invariant create-result shape: request-specific display packing belongs in `meshGeometry`, while file encoding belongs in `exportGeometry`. A warm export deserializes the build entry's native handle instead of reheating, and any export-only request writes no mesh entry. Cache temperature must not change export output: live, reheated, and deserialized handles produce structurally identical STEP (verified by the replicad conformance suite), and `exportSTEP` pins its `Interface_Static` state on every call so unit statics cannot leak between exports sharing a wasm instance.
+The native-build key is exact rather than scope-selected. It covers source/import hashes, parameters, kernel version and initialization, implementation assets, concrete mutative create-phase middleware and dependencies, and the parsed create options when `createOptionsSchema` exists. The complete artifact `dependencyHash` remains separate and additionally covers the selected route, target options, requested content, contributors, and transcoders. Request-specific display packing belongs in `meshGeometry`; file encoding belongs in `exportGeometry`.
+
+A warm exact-match export reuses the artifact's live native slot, restores its serialized slot, or reheats from that artifact's retained `CreateGeometryInput`, in that order, through one resolver. Any export-only request writes no mesh entry. Cache temperature must not change export output: live, reheated, and deserialized handles produce structurally identical STEP (verified by the replicad conformance suite), and `exportSTEP` pins its `Interface_Static` state on every call so unit statics cannot leak between exports sharing a wasm instance.
 
 ### File-Level Caches
 
@@ -555,7 +555,9 @@ Clients that intend to share cache entries MUST be byte-identical everywhere the
 
 ### Content-Aware Export Sourcing
 
-`content` is the framework-level request for semantic output content, independently inferred per selected route property. `includeEdges` is supported only where the selected route can preserve edge primitives; `includeTopology` is independently advertised and inferred. Rendering defaults `includeTopology` to `true`; exports default it to `false`. Unsupported properties are rejected by route-aware types and runtime validation rather than broadcast to every kernel.
+`content` is the framework-level request for semantic output content, independently inferred per selected route property. Provider declarations are optional, positive-only, non-empty tuples: omit `content` when the route fulfills no framework content, and omit `render` when it has neither options nor content. `defineKernel`, `defineMiddleware`, and `defineTranscoder` reject empty tuples, duplicate keys, and unknown keys once at definition time. Supporting `includeEdges` does not imply `includeTopology`; unsupported consumer properties disappear from exact route-aware types and are rejected before kernel work, while provider hooks simply receive no `content` property when they declare none.
+
+Rendering defaults `includeTopology` to `true` only on routes that declare it; exports default supported content properties to `false`. `includeEdges` is supported only where the selected route can preserve edge primitives. These declarations do not enable or disable export formats: for example, omitting topology content from Zoo's STL/STEP definitions leaves STL/STEP export support intact.
 
 Image routes use the export leg so callers can select export tessellation and content without overloading renderer options. On a final-cache miss, the runtime materializes the selected source artifact once, applies selected content contributors and transcoders, and caches only the final target. Direct glTF routes may request edges; image transcoders consume the resulting glTF source. Interop routes retain their own coordinate/unit/tessellation conventions and do not receive display-only mesh middleware. A separately persisted source stage requires evidence and an explicit lifecycle contract; it is not part of the current middleware API.
 
@@ -563,7 +565,11 @@ Image routes use the export leg so callers can select export tessellation and co
 
 One private promise tail serializes every operation that can mutate shared kernel or filesystem-derived state: staging, synchronous and autonomous render materialization, exact export, file-change routing, and cleanup. No second kernel context or scheduler abstraction exists. Request-local `OperationOwner` values keep exact exports from replacing the active preview, its published artifact, its native-handle ownership, or its rerender policy.
 
+Materialized artifacts are the sole owners of reusable live and serialized native-handle slots. The worker keeps no mirrored native payload or fallback slot. One resolver performs live validation, serialized restoration, and exact-input reheat; every path uses the operation's single `AbortSignal`. At the serialized operation boundary, pending handles are cleared before the existing reachability sweep so cancelled or failed unpublished materializations are disposed exactly once.
+
 A preview intent reserves exactly one abort-generation token synchronously at admission. The SharedArrayBuffer path carries the reserved token on the wire; wire-only and direct paths reserve through the same contract. Queued execution adopts that value unchanged. A timeout may advance its separate local abort plane, but it does not reserve another preview generation. Stale queued generations can therefore neither publish geometry nor commit watch ownership.
+
+Every admitted preview has a total lifecycle. `KernelWorker` emits a terminal `idle` or `error` state for a superseded or timed-out preview even when it is still buffered or queued and never enters geometry execution. Only after that terminal frame may a successor become active. `RuntimeWorkerClient` is the sole selected-preview admission boundary and filters all render-scoped frames, including after asynchronous geometry materialization. `RuntimeClient` owns public Promise settlement and derived status; it must not maintain a second current/retired render-ID state machine.
 
 ### Current-Preview Observation
 

@@ -694,8 +694,8 @@ export type KernelPluginFactory<
  *     return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
  *   },
  *   async createGeometry(input, runtime, context) {
- *     runtime.signal.throwIfAborted();
- *     const bytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
+ *     const response = await fetch('/geometry', { signal: runtime.signal });
+ *     const bytes = new Uint8Array(await response.arrayBuffer());
  *     return { geometry: { format: 'gltf', content: bytes }, nativeHandle: {} };
  *   },
  *   async exportGeometry(input, runtime, context) {

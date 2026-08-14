@@ -340,7 +340,12 @@ describe('image transcoder', () => {
 
   describe('cleanup', () => {
     it('should clean up without error', async () => {
-      await expect(imageDefinition.cleanup(context)).resolves.toBeUndefined();
+      const { cleanup } = imageDefinition;
+      expect(cleanup).toBeDefined();
+      if (!cleanup) {
+        return;
+      }
+      await expect(cleanup(context)).resolves.toBeUndefined();
     });
   });
 });

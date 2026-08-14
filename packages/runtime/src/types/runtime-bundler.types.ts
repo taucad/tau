@@ -7,7 +7,6 @@
 
 import type { z } from 'zod';
 import type { KernelFileSystem } from '#types/runtime-kernel.types.js';
-import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { BuiltinModule, BundleResult, ExecuteResult } from '#types/runtime-bundler-service.types.js';
 import type { BundlerPlugin } from '#plugins/plugin-types.js';
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
@@ -22,7 +21,7 @@ import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-def
  * supplied filesystem root, not the host operating system root.
  * @public
  */
-export type BundlerInitOptions = {
+export type BundlerInitRuntime = {
   /** Filesystem interface for reading files by runtime path. */
   filesystem: KernelFileSystem;
 };
@@ -37,7 +36,7 @@ export type BundlerRuntime = {
 };
 
 /**
- * Entry path for bundler operations (detectImports, bundle, resolveDependencies).
+ * Entry path for bundler operations (detectImports and bundle).
  * @public
  */
 export type BundleInput = {
@@ -90,8 +89,8 @@ export type BundlerDefinition<Context = unknown, Options extends Record<string, 
   /** Zod schema for validating and typing bundler options. Options type is inferred from this schema. */
   optionsSchema?: z.ZodType<Options>;
 
-  /** Initialize the bundler. Receives framework init options plus user-provided options. */
-  initialize(initOptions: BundlerInitOptions, options: Options): Promise<Context>;
+  /** Initialize the bundler. Receives user-provided options plus framework runtime services. */
+  initialize(options: Options, runtime: BundlerInitRuntime): Promise<Context>;
 
   /**
    * Detect which bare-specifier modules are imported transitively.
@@ -108,16 +107,10 @@ export type BundlerDefinition<Context = unknown, Options extends Record<string, 
   bundle(input: BundleInput, runtime: BundlerRuntime, context: Context): Promise<BundleResult>;
 
   /** Execute bundled code (tied to this bundler's output format). */
-  execute(code: string, runtime: BundlerRuntime, context: Context): Promise<ExecuteResult>;
+  execute(input: { code: string }, runtime: BundlerRuntime, context: Context): Promise<ExecuteResult>;
 
   /** Register a builtin module for resolution during bundle(). */
-  registerModule(name: string, builtinModule: BuiltinModule, context: Context): void;
-
-  /**
-   * Optional fast-path dependency resolution without full bundling.
-   * Falls back to bundle().dependencies when not implemented.
-   */
-  resolveDependencies?(input: BundleInput, runtime: BundlerRuntime, context: Context): Promise<GetDependenciesResult>;
+  registerModule(input: { name: string; module: BuiltinModule }, context: Context): void;
 
   /** Clean up bundler resources (e.g., esbuild.stop()). */
   cleanup?(context: Context): Promise<void>;
@@ -134,18 +127,16 @@ type BundlerDefinitionConfig<Id extends string, Context, Options extends Record<
   version: string;
   /** File extensions handled by this bundler, static or derived from plugin options. */
   extensions: BundlerExtensions<Options>;
-  /** Initialize the bundler. Receives framework init options plus user-provided options. */
-  initialize(initOptions: BundlerInitOptions, options: Options): Promise<Context>;
+  /** Initialize the bundler. Receives user-provided options plus framework runtime services. */
+  initialize(options: Options, runtime: BundlerInitRuntime): Promise<Context>;
   /** Detect which bare-specifier modules are imported transitively. */
   detectImports(input: BundleInput, runtime: BundlerRuntime, context: Context): Promise<DetectImportsResult>;
   /** Produce runnable code with all registered modules resolved. */
   bundle(input: BundleInput, runtime: BundlerRuntime, context: Context): Promise<BundleResult>;
   /** Execute bundled code (tied to this bundler's output format). */
-  execute(code: string, runtime: BundlerRuntime, context: Context): Promise<ExecuteResult>;
+  execute(input: { code: string }, runtime: BundlerRuntime, context: Context): Promise<ExecuteResult>;
   /** Register a builtin module for resolution during bundle(). */
-  registerModule(name: string, builtinModule: BuiltinModule, context: Context): void;
-  /** Optional fast-path dependency resolution without full bundling. */
-  resolveDependencies?(input: BundleInput, runtime: BundlerRuntime, context: Context): Promise<GetDependenciesResult>;
+  registerModule(input: { name: string; module: BuiltinModule }, context: Context): void;
   /** Clean up bundler resources (e.g., esbuild.stop()). */
   cleanup?(context: Context): Promise<void>;
 };
@@ -178,18 +169,18 @@ export type BundlerPluginFactory<Id extends string, Options = undefined> = Optio
  *     return { filesystem };
  *   },
  *   async detectImports({ entryPath }, { signal }, context) {
- *     signal.throwIfAborted();
+ *     await fetch('/bundler/detect-imports', { method: 'POST', body: entryPath, signal });
  *     return { detectedModules: [], dependencies: [entryPath] };
  *   },
  *   async bundle({ entryPath }, { signal }, context) {
- *     signal.throwIfAborted();
+ *     await fetch('/bundler/bundle', { method: 'POST', body: entryPath, signal });
  *     return { code: '', sourceMap: undefined, issues: [], success: true, dependencies: [], unresolvedPaths: [] };
  *   },
- *   async execute(code, { signal }, context) {
- *     signal.throwIfAborted();
+ *   async execute({ code }, { signal }, context) {
+ *     await fetch('/bundler/execute', { method: 'POST', body: code, signal });
  *     return { success: true, value: undefined };
  *   },
- *   registerModule(name, builtinModule, context) {},
+ *   registerModule({ name, module }, context) {},
  * });
  * ```
  */

@@ -11,7 +11,7 @@ export type {
 export type {
   BundleInput,
   BundlerDefinition,
-  BundlerInitOptions,
+  BundlerInitRuntime,
   BundlerPluginFactory,
   BundlerRuntime,
   DetectImportsResult,

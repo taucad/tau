@@ -736,7 +736,7 @@ export async function createTestWorker(
     workerOptions: options?.workerOptions,
   });
 
-  // Auto-load bundler for JS/TS kernels (needed for bundle/execute/resolveDependencies).
+  // Auto-load bundler for JS/TS kernels (needed for bundle/execute).
   // Lazy import avoids pulling esbuild-wasm at module load time, which crashes in
   // jsdom environments due to a TextEncoder Uint8Array realm mismatch.
   const needsBundler =
@@ -852,6 +852,9 @@ export function createMockKernelRuntime(options?: {
   filesystem: MockFileSystem;
 } {
   const noopBundler: KernelRuntime['bundler'] = {
+    async resolveDependencies() {
+      return { resolved: [], unresolved: [] };
+    },
     async bundle(): Promise<{
       code: string;
       issues: never[];
@@ -860,9 +863,6 @@ export function createMockKernelRuntime(options?: {
       unresolvedPaths: never[];
     }> {
       return { code: '', issues: [], success: false, dependencies: [], unresolvedPaths: [] };
-    },
-    async resolveDependencies(): Promise<GetDependenciesResult> {
-      return { resolved: [], unresolved: [] };
     },
     registerModule(): void {
       // No-op for tests

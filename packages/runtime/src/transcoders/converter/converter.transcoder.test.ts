@@ -247,7 +247,12 @@ describe('converter transcoder', () => {
 
   describe('cleanup', () => {
     it('should clean up without error', async () => {
-      await expect(converterDefinition.cleanup(context)).resolves.toBeUndefined();
+      const { cleanup } = converterDefinition;
+      expect(cleanup).toBeDefined();
+      if (!cleanup) {
+        return;
+      }
+      await expect(cleanup(context)).resolves.toBeUndefined();
     });
   });
 });

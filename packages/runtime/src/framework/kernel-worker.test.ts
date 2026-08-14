@@ -1025,7 +1025,6 @@ describe('KernelWorker lifecycle', () => {
         success: true,
       });
 
-      const rawResolveDependenciesSpy = vi.fn().mockResolvedValue(['/main.ts']);
       const mockBundlerDefinition = {
         name: 'MockBundler',
         version: '1.0.0',
@@ -1035,7 +1034,6 @@ describe('KernelWorker lifecycle', () => {
         bundle: vi.fn(),
         execute: vi.fn(),
         registerModule: vi.fn(),
-        resolveDependencies: rawResolveDependenciesSpy,
       };
 
       // Inject mock bundler directly into loadedBundlers
@@ -1047,8 +1045,6 @@ describe('KernelWorker lifecycle', () => {
       const result = await facade.resolveDependencies('/main.ts');
 
       expect(result).toEqual({ resolved: expectedDependencies, unresolved: [] });
-      // The raw bundler's resolveDependencies should NOT have been called
-      expect(rawResolveDependenciesSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -3150,7 +3146,7 @@ describe('transcoder loading', () => {
 
     expect(mockModule.transcode).toHaveBeenCalledWith(
       expect.objectContaining({ from: 'glb', to: 'usdz' }),
-      expect.any(Object),
+      expect.objectContaining({ signal: expect.any(AbortSignal) as unknown as AbortSignal }),
       expect.any(Object),
     );
   });

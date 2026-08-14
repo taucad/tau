@@ -11,7 +11,7 @@ export type {
   KernelBundler,
 } from '#types/runtime-bundler-service.types.js';
 export type {
-  BundlerInitOptions,
+  BundlerInitRuntime,
   BundlerRuntime,
   BundleInput,
   DetectImportsResult,

@@ -471,7 +471,9 @@ describe('defineBundler', () => {
         jsx: z.boolean().default(false),
       }),
       extensions: (options) => (options?.jsx ? ['ts', 'tsx'] : ['ts']),
-      async initialize(_init, _options) {
+      async initialize(options, runtime) {
+        expectTypeOf(options.jsx).toEqualTypeOf<boolean>();
+        expectTypeOf(runtime.filesystem.readFile).toBeFunction();
         return {};
       },
       async detectImports(input) {
@@ -482,10 +484,14 @@ describe('defineBundler', () => {
         expectTypeOf(input.entryPath).toEqualTypeOf<string>();
         return { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] };
       },
-      async execute() {
+      async execute(input) {
+        expectTypeOf(input.code).toEqualTypeOf<string>();
         return { success: true, value: undefined };
       },
-      registerModule() {},
+      registerModule(input) {
+        expectTypeOf(input.name).toEqualTypeOf<string>();
+        expectTypeOf(input.module.code).toEqualTypeOf<string>();
+      },
     });
 
     assertType<(options?: { jsx?: boolean | undefined }) => BundlerPlugin>(bundler);
@@ -506,7 +512,8 @@ describe('defineTranscoder', () => {
       async initialize() {
         return {};
       },
-      async transcode(input) {
+      async transcode(input, runtime) {
+        expectTypeOf(runtime.signal).toEqualTypeOf<AbortSignal>();
         if (input.to === 'stl') {
           expectTypeOf(input.options).toEqualTypeOf<{ binary: boolean }>();
         }
@@ -515,7 +522,6 @@ describe('defineTranscoder', () => {
         }
         return { success: true, data: input.files, issues: [] };
       },
-      async cleanup() {},
     });
 
     assertType<() => TranscoderPlugin>(transcoder);

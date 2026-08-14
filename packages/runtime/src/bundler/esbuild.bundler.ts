@@ -7,7 +7,6 @@
  * - bundle: full production bundle with all registered modules resolved
  * - execute: run bundled JS/TS code via dynamic import (Blob URL or data URL)
  * - registerModule: register/update builtin modules for bundle resolution
- * - resolveDependencies: fast-path dependency resolution via metafile
  */
 
 import type { KernelIssueCode } from '#types/kernel-issue-codes.js';
@@ -85,48 +84,33 @@ export const esbuild = defineBundler({
   optionsSchema: esbuildOptionsSchema,
   extensions: (options) => options?.extensions ?? ['ts', 'js', 'tsx', 'jsx'],
 
-  async initialize({ filesystem }, _options) {
+  async initialize(_options, { filesystem }) {
     const vm = await createEsbuildModuleVm({
       filesystem,
-      projectPath: '/',
       autoExportNames,
       cacheExecution: true,
     });
     return { vm };
   },
 
-  async detectImports({ entryPath }, { signal }, context) {
-    signal.throwIfAborted();
+  async detectImports({ entryPath }, _runtime, context) {
     return context.vm.detectImports(entryPath);
   },
 
-  async bundle({ entryPath }, { signal }, context) {
-    signal.throwIfAborted();
-    const result = await context.vm.bundle(entryPath);
-    signal.throwIfAborted();
-    return toBundleResult(result);
+  async bundle({ entryPath }, _runtime, context) {
+    return toBundleResult(await context.vm.bundle(entryPath));
   },
 
-  async execute(code, { signal }, context) {
-    signal.throwIfAborted();
-    const result = await context.vm.execute(code);
-    signal.throwIfAborted();
-    return toExecuteResult(result);
+  async execute({ code }, _runtime, context) {
+    return toExecuteResult(await context.vm.execute(code));
   },
 
-  registerModule(name, builtinModule, context) {
+  registerModule({ name, module: builtinModule }, context) {
     context.vm.registerModule(name, {
       code: builtinModule.code,
       version: builtinModule.version,
       globalName: builtinModule.globalName,
     });
-  },
-
-  async resolveDependencies({ entryPath }, { signal }, context) {
-    signal.throwIfAborted();
-    const result = await context.vm.resolveDependencies(entryPath);
-    signal.throwIfAborted();
-    return result;
   },
 
   async cleanup(context) {

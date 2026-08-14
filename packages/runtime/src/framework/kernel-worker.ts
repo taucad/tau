@@ -987,7 +987,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
   }
 
-  private async enqueueOperation<T>(operation: () => Promise<T>, signal = new AbortController().signal): Promise<T> {
+  private async enqueueOperation<T>(operation: () => Promise<T>, signal = neverAbortedSignal): Promise<T> {
     if (!this.operationAdmissionOpen) {
       throw new Error('Runtime worker is closing');
     }
@@ -1123,7 +1123,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     for (const transcoder of this.loadedTranscoders.values()) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- Sequential to preserve cleanup order
-        await transcoder.definition.cleanup(transcoder.context);
+        await transcoder.definition.cleanup?.(transcoder.context);
       } catch {
         // Best-effort cleanup
       }
@@ -3857,7 +3857,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const rawOptions = bundlerOptions ?? {};
       const validatedOptions = definition.optionsSchema ? definition.optionsSchema.parse(rawOptions) : rawOptions;
 
-      const context = await definition.initialize({ filesystem: this.filesystem }, validatedOptions);
+      const context = await definition.initialize(validatedOptions, { filesystem: this.filesystem });
       const loaded = { definition, ctx: context };
 
       for (const extension of extensions) {
@@ -3866,7 +3866,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
 
       for (const [name, entry] of this.pendingModuleRegistrations) {
-        definition.registerModule(name, entry, context);
+        definition.registerModule({ name, module: entry }, context);
       }
 
       if (this.pendingBundlerInits.size === 0) {
@@ -3933,7 +3933,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     });
 
     try {
-      const transcoderRuntime: TranscoderRuntime = {
+      const transcoderRuntime: Omit<TranscoderRuntime, 'signal'> = {
         logger: this.logger,
         tracer: this.tracer,
       };
@@ -4187,6 +4187,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const transcoderRuntime: TranscoderRuntime = {
       logger: this.logger,
       tracer: this.tracer,
+      signal: runtime.signal,
     };
 
     const { route } = plan;
@@ -4771,7 +4772,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       registerModule: (name: string, entry: BuiltinModule): void => {
         if (this.loadedBundlers.size > 0) {
           for (const bundler of new Set(this.loadedBundlers.values())) {
-            bundler.definition.registerModule(name, entry, bundler.ctx);
+            bundler.definition.registerModule({ name, module: entry }, bundler.ctx);
           }
         } else {
           this.pendingModuleRegistrations.set(name, entry);
@@ -4804,7 +4805,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           phase: 'computingGeometry',
         });
         const firstBundler = this.loadedBundlers.values().next().value!;
-        const result = await firstBundler.definition.execute(code, { signal }, firstBundler.ctx);
+        const result = await firstBundler.definition.execute({ code }, { signal }, firstBundler.ctx);
         signal.throwIfAborted();
         executeSpan.end();
         return result;

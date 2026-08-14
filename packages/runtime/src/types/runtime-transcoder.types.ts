@@ -98,6 +98,8 @@ export type TranscodeResult = KernelResult<ExportFile[]>;
 export type TranscoderRuntime = {
   logger: RuntimeLogger;
   tracer: RuntimeSpanTracer;
+  /** Cancellation signal owned by the active export operation. */
+  signal: AbortSignal;
 };
 
 // =============================================================================
@@ -140,13 +142,13 @@ export type TranscoderDefinition<
   edges: Edges;
 
   /** Initialize transcoder with typed options */
-  initialize(options: Options, runtime: TranscoderRuntime): Promise<Context>;
+  initialize(options: Options, runtime: Omit<TranscoderRuntime, 'signal'>): Promise<Context>;
 
   /** Execute the format conversion */
   transcode(input: TranscodeInput<Edges>, runtime: TranscoderRuntime, context: Context): Promise<TranscodeResult>;
 
   /** Tear down transcoder resources */
-  cleanup(context: Context): Promise<void>;
+  cleanup?(context: Context): Promise<void>;
 };
 
 type TranscoderDefinitionConfig<
@@ -166,11 +168,11 @@ type TranscoderDefinitionConfig<
   /** Statically declared format conversion edges. */
   edges: Edges;
   /** Initialize transcoder with typed options */
-  initialize(options: Options, runtime: TranscoderRuntime): Promise<Context>;
+  initialize(options: Options, runtime: Omit<TranscoderRuntime, 'signal'>): Promise<Context>;
   /** Execute the format conversion */
   transcode(input: TranscodeInput<Edges>, runtime: TranscoderRuntime, context: Context): Promise<TranscodeResult>;
   /** Tear down transcoder resources */
-  cleanup(context: Context): Promise<void>;
+  cleanup?(context: Context): Promise<void>;
 };
 
 type EdgeOptionMap<Edges extends readonly TranscoderEdge[]> = {

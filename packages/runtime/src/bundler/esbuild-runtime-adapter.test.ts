@@ -38,14 +38,13 @@ describe('Esbuild runtime adapter', () => {
     const vm = createMockVm();
     vi.mocked(createEsbuildModuleVm).mockResolvedValue(vm);
 
-    const context = (await esbuildDefinition.initialize({ filesystem }, {})) as {
+    const context = (await esbuildDefinition.initialize({}, { filesystem })) as {
       vm: ModuleVm;
     };
 
     expect(context.vm).toBe(vm);
     expect(createEsbuildModuleVm).toHaveBeenCalledWith({
       filesystem,
-      projectPath: '/',
       autoExportNames: ['main', 'defaultParams', 'getParameterDefinitions'],
       cacheExecution: true,
     });
@@ -131,7 +130,7 @@ describe('Esbuild runtime adapter', () => {
       ],
     });
 
-    const result = await esbuildDefinition.execute('throw new Error("boom");', bundlerRuntime, { vm });
+    const result = await esbuildDefinition.execute({ code: 'throw new Error("boom");' }, bundlerRuntime, { vm });
 
     expect(vm.execute).toHaveBeenCalledWith('throw new Error("boom");');
     expect(result).toEqual({
@@ -162,7 +161,7 @@ describe('Esbuild runtime adapter', () => {
       ],
     });
 
-    const result = await esbuildDefinition.execute('throw new Error("custom");', bundlerRuntime, { vm });
+    const result = await esbuildDefinition.execute({ code: 'throw new Error("custom");' }, bundlerRuntime, { vm });
 
     expect(result).toEqual({
       success: false,
@@ -182,11 +181,13 @@ describe('Esbuild runtime adapter', () => {
     const vm = createMockVm();
 
     esbuildDefinition.registerModule(
-      'geospec',
       {
-        code: 'export const describe = () => {};',
-        version: '0.0.0-test',
-        globalName: 'GeoSpec',
+        name: 'geospec',
+        module: {
+          code: 'export const describe = () => {};',
+          version: '0.0.0-test',
+          globalName: 'GeoSpec',
+        },
       },
       { vm },
     );
@@ -198,23 +199,5 @@ describe('Esbuild runtime adapter', () => {
       globalName: 'GeoSpec',
     });
     expect(vm.dispose).toHaveBeenCalledOnce();
-  });
-
-  it('should delegate dependency resolution to the VM', async () => {
-    const vm = createMockVm();
-    vi.mocked(vm.resolveDependencies).mockResolvedValue({
-      resolved: ['/project/main.ts'],
-      unresolved: ['/project/missing.ts'],
-    });
-
-    const result = await esbuildDefinition.resolveDependencies?.({ entryPath: '/project/main.ts' }, bundlerRuntime, {
-      vm,
-    });
-
-    expect(vm.resolveDependencies).toHaveBeenCalledWith('/project/main.ts');
-    expect(result).toEqual({
-      resolved: ['/project/main.ts'],
-      unresolved: ['/project/missing.ts'],
-    });
   });
 });

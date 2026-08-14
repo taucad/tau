@@ -5,7 +5,7 @@
   "compilerOptions": {
     "outDir": "./out-tsc/lib",
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
-    "types": ["node", "electron", "vite/client"],
+    "types": ["node", "electron", "electron-vite/node", "vite/client"],
     "jsx": "react-jsx",
     "module": "ESNext",
     "moduleResolution": "Bundler",

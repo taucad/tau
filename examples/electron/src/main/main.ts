@@ -9,6 +9,7 @@ import { join } from 'node:path';
 
 import { app, BrowserWindow } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
+import utilityEntry from '../tau/kernel-host?modulePath';
 
 process.on('uncaughtException', (error) => {
   console.error('[tau-electron:main] uncaughtException', error);
@@ -17,7 +18,7 @@ process.on('unhandledRejection', (reason) => {
   console.error('[tau-electron:main] unhandledRejection', reason);
 });
 
-const isDevelopment = process.env['ELECTRON_RENDERER_URL'] !== undefined;
+const isDevelopment = process.env.ELECTRON_RENDERER_URL !== undefined;
 
 async function createMainWindow(): Promise<BrowserWindow> {
   const window = new BrowserWindow({
@@ -27,20 +28,20 @@ async function createMainWindow(): Promise<BrowserWindow> {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: join(import.meta.dirname, '../preload/preload.js'),
+      preload: join(import.meta.dirname, '../preload/preload.mjs'),
       sandbox: false,
     },
   });
 
   await (isDevelopment
-    ? window.loadURL(process.env['ELECTRON_RENDERER_URL']!)
+    ? window.loadURL(process.env.ELECTRON_RENDERER_URL!)
     : window.loadFile(join(import.meta.dirname, '../renderer/index.html')));
 
   window.show();
   return window;
 }
 
-const bootstrap = async (): Promise<void> => {
+export const bootstrapElectronApp = async (): Promise<void> => {
   await app.whenReady();
   installElectronRuntimeHeaders();
   registerElectronRuntimeMain({
@@ -49,7 +50,7 @@ const bootstrap = async (): Promise<void> => {
       console.error('[tau-electron:main] runtime bridge failed', error);
     },
     serviceName: 'tau-kernel-host',
-    utilityEntry: join(import.meta.dirname, 'kernel-host.js'),
+    utilityEntry,
   });
   await createMainWindow();
 
@@ -69,7 +70,7 @@ app.on('window-all-closed', () => {
 /* Electron delays `ready` until main ESM module evaluation completes, so
  * bootstrap must be detached rather than awaited at top level. */
 /* oxlint-disable promise/prefer-await-to-then, unicorn/prefer-top-level-await -- see comment above */
-bootstrap().catch((error: unknown) => {
+bootstrapElectronApp().catch((error: unknown) => {
   console.error('[tau-electron:main] bootstrap failed', error);
   app.exit(1);
 });

@@ -10,6 +10,28 @@ pnpm nx build example-electron
 pnpm nx serve example-electron
 ```
 
+## Build configuration
+
+The app is Tau's electron-vite 6 beta/Vite 8 qualification lane. Its config contains
+only application-owned roots, output directories, and Tailwind:
+
+```typescript
+import { defineConfig } from 'electron-vite';
+import { electronRuntimeConfig } from '@taucad/runtime/electron/vite';
+
+export default defineConfig(
+  electronRuntimeConfig({
+    main: {},
+    preload: {},
+    renderer: {},
+  }),
+);
+```
+
+`src/main/index.ts` imports `../tau/kernel-host?modulePath`; electron-vite owns
+the utility output path and runtime assets are emitted from their literal ESM
+URLs. No dependency exclusion list, multi-entry map, or asset copier is needed.
+
 ## Topology
 
 ```mermaid
@@ -28,6 +50,7 @@ flowchart LR
 - The `src/tau/` folder is the app-owned Tau runtime boundary.
 - `src/tau/kernel-host.ts` owns executable plugins and calls `serveElectronRuntime({ runtime, fileSystem })`.
 - The main process registers a public runtime bridge with `registerElectronRuntimeMain(...)`.
+- `electronRuntimeConfig(...)` installs Tau's main/renderer build invariants and configures electron-vite's native externalizer.
 - The preload script exposes the bridge with `exposeElectronRuntime()`.
 - The renderer uses `@taucad/react` plus `createElectronClientOptions(...)`; the helper owns the port request and transport setup.
 - The runtime definition includes parameter and geometry cache middleware so repeated parameter/source states use the cache-hit render path.
@@ -53,5 +76,5 @@ import { openscad } from '@taucad/openscad/kernel';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { geometryCache } from '@taucad/runtime/middleware/geometry-cache';
 import { parameterCache } from '@taucad/runtime/middleware/parameter-cache';
-import { defineRuntime } from '@taucad/runtime/worker';
+import { defineRuntime } from '@taucad/runtime';
 ```

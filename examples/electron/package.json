@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "type": "module",
   "private": true,
+  "license": "Apache-2.0",
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "electron-vite",
@@ -28,7 +29,8 @@
     "@types/react-dom": "catalog:",
     "@types/three": "^0.184.1",
     "electron": "^36.9.5",
-    "electron-vite": "^4.0.1",
-    "tailwindcss": "^4.3.1"
+    "electron-vite": "catalog:electron-vite8",
+    "tailwindcss": "^4.3.1",
+    "vite": "catalog:electron-vite8"
   }
 }

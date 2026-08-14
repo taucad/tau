@@ -775,8 +775,10 @@ function requireOmap() {
 			let pairHasKey = false;
 			if (_toString.call(pair) !== "[object Object]") return false;
 			let pairKey;
-			for (pairKey in pair) if (_hasOwnProperty.call(pair, pairKey)) if (!pairHasKey) pairHasKey = true;
-			else return false;
+			for (pairKey in pair) if (_hasOwnProperty.call(pair, pairKey)) {
+				if (!pairHasKey) pairHasKey = true;
+				else return false;
+			}
 			if (!pairHasKey) return false;
 			if (objectKeys.indexOf(pairKey) === -1) objectKeys.push(pairKey);
 			else return false;
@@ -1127,9 +1129,10 @@ function requireLoader() {
 		if (typeof keyNode === "object" && _class(keyNode) === "[object Object]") keyNode = "[object Object]";
 		keyNode = String(keyNode);
 		if (_result === null) _result = {};
-		if (keyTag === "tag:yaml.org,2002:merge") if (Array.isArray(valueNode)) for (let index = 0, quantity = valueNode.length; index < quantity; index += 1) mergeMappings(state, _result, valueNode[index], overridableKeys);
-		else mergeMappings(state, _result, valueNode, overridableKeys);
-		else {
+		if (keyTag === "tag:yaml.org,2002:merge") {
+			if (Array.isArray(valueNode)) for (let index = 0, quantity = valueNode.length; index < quantity; index += 1) mergeMappings(state, _result, valueNode[index], overridableKeys);
+			else mergeMappings(state, _result, valueNode, overridableKeys);
+		} else {
 			if (!state.json && !_hasOwnProperty.call(overridableKeys, keyNode) && _hasOwnProperty.call(_result, keyNode)) {
 				state.line = startLine || state.line;
 				state.lineStart = startLineStart || state.lineStart;
@@ -1414,14 +1417,16 @@ function requireLoader() {
 		state.result = "";
 		while (ch !== 0) {
 			ch = state.input.charCodeAt(++state.position);
-			if (ch === 43 || ch === 45) if (CHOMPING_CLIP === chomping) chomping = ch === 43 ? CHOMPING_KEEP : CHOMPING_STRIP;
-			else throwError(state, "repeat of a chomping mode identifier");
-			else if ((tmp = fromDecimalCode(ch)) >= 0) if (tmp === 0) throwError(state, "bad explicit indentation width of a block scalar; it cannot be less than one");
-			else if (!detectedIndent) {
-				textIndent = nodeIndent + tmp - 1;
-				detectedIndent = true;
-			} else throwError(state, "repeat of an indentation width identifier");
-			else break;
+			if (ch === 43 || ch === 45) {
+				if (CHOMPING_CLIP === chomping) chomping = ch === 43 ? CHOMPING_KEEP : CHOMPING_STRIP;
+				else throwError(state, "repeat of a chomping mode identifier");
+			} else if ((tmp = fromDecimalCode(ch)) >= 0) {
+				if (tmp === 0) throwError(state, "bad explicit indentation width of a block scalar; it cannot be less than one");
+				else if (!detectedIndent) {
+					textIndent = nodeIndent + tmp - 1;
+					detectedIndent = true;
+				} else throwError(state, "repeat of an indentation width identifier");
+			} else break;
 		}
 		if (isWhiteSpace(ch)) {
 			do
@@ -1452,16 +1457,17 @@ function requireLoader() {
 				}
 				break;
 			}
-			if (folding) if (isWhiteSpace(ch)) {
-				atMoreIndented = true;
-				state.result += common2.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
-			} else if (atMoreIndented) {
-				atMoreIndented = false;
-				state.result += common2.repeat("\n", emptyLines + 1);
-			} else if (emptyLines === 0) {
-				if (didReadContent) state.result += " ";
-			} else state.result += common2.repeat("\n", emptyLines);
-			else state.result += common2.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
+			if (folding) {
+				if (isWhiteSpace(ch)) {
+					atMoreIndented = true;
+					state.result += common2.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
+				} else if (atMoreIndented) {
+					atMoreIndented = false;
+					state.result += common2.repeat("\n", emptyLines + 1);
+				} else if (emptyLines === 0) {
+					if (didReadContent) state.result += " ";
+				} else state.result += common2.repeat("\n", emptyLines);
+			} else state.result += common2.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
 			didReadContent = true;
 			detectedIndent = true;
 			emptyLines = 0;
@@ -1590,8 +1596,10 @@ function requireLoader() {
 					_keyLineStart = state.lineStart;
 					_keyPos = state.position;
 				}
-				if (composeNode(state, nodeIndent, CONTEXT_BLOCK_OUT, true, allowCompact)) if (atExplicitKey) keyNode = state.result;
-				else valueNode = state.result;
+				if (composeNode(state, nodeIndent, CONTEXT_BLOCK_OUT, true, allowCompact)) {
+					if (atExplicitKey) keyNode = state.result;
+					else valueNode = state.result;
+				}
 				if (!atExplicitKey) {
 					storeMappingPair(state, _result, overridableKeys, keyTag, keyNode, valueNode, _keyLine, _keyLineStart, _keyPos);
 					keyTag = keyNode = valueNode = null;
@@ -1639,12 +1647,14 @@ function requireLoader() {
 			} else throwError(state, "unexpected end of the stream within a verbatim tag");
 		} else {
 			while (ch !== 0 && !isWsOrEol(ch)) {
-				if (ch === 33) if (!isNamed) {
-					tagHandle = state.input.slice(_position - 1, state.position + 1);
-					if (!PATTERN_TAG_HANDLE.test(tagHandle)) throwError(state, "named tag handle cannot contain such characters");
-					isNamed = true;
-					_position = state.position + 1;
-				} else throwError(state, "tag suffix cannot contain exclamation marks");
+				if (ch === 33) {
+					if (!isNamed) {
+						tagHandle = state.input.slice(_position - 1, state.position + 1);
+						if (!PATTERN_TAG_HANDLE.test(tagHandle)) throwError(state, "named tag handle cannot contain such characters");
+						isNamed = true;
+						_position = state.position + 1;
+					} else throwError(state, "tag suffix cannot contain exclamation marks");
+				}
 				ch = state.input.charCodeAt(++state.position);
 			}
 			tagName = state.input.slice(_position, state.position);
@@ -1748,21 +1758,22 @@ function requireLoader() {
 			if (CONTEXT_FLOW_IN === nodeContext || CONTEXT_FLOW_OUT === nodeContext) flowIndent = parentIndent;
 			else flowIndent = parentIndent + 1;
 			blockIndent = state.position - state.lineStart;
-			if (indentStatus === 1) if (allowBlockCollections && (readBlockSequence(state, blockIndent) || readBlockMapping(state, blockIndent, flowIndent)) || readFlowCollection(state, flowIndent)) hasContent = true;
-			else {
-				const ch = state.input.charCodeAt(state.position);
-				if (propertyStart !== null && allowBlockStyles && !allowBlockCollections && ch !== 124 && ch !== 62 && tryReadBlockMappingFromProperty(state, propertyStart, propertyStart.position - propertyStart.lineStart, flowIndent)) hasContent = true;
-				else if (allowBlockScalars && readBlockScalar(state, flowIndent) || readSingleQuotedScalar(state, flowIndent) || readDoubleQuotedScalar(state, flowIndent)) hasContent = true;
-				else if (readAlias(state)) {
-					hasContent = true;
-					if (state.tag !== null || state.anchor !== null) throwError(state, "alias node should not have any properties");
-				} else if (readPlainScalar(state, flowIndent, CONTEXT_FLOW_IN === nodeContext)) {
-					hasContent = true;
-					if (state.tag === null) state.tag = "?";
+			if (indentStatus === 1) {
+				if (allowBlockCollections && (readBlockSequence(state, blockIndent) || readBlockMapping(state, blockIndent, flowIndent)) || readFlowCollection(state, flowIndent)) hasContent = true;
+				else {
+					const ch = state.input.charCodeAt(state.position);
+					if (propertyStart !== null && allowBlockStyles && !allowBlockCollections && ch !== 124 && ch !== 62 && tryReadBlockMappingFromProperty(state, propertyStart, propertyStart.position - propertyStart.lineStart, flowIndent)) hasContent = true;
+					else if (allowBlockScalars && readBlockScalar(state, flowIndent) || readSingleQuotedScalar(state, flowIndent) || readDoubleQuotedScalar(state, flowIndent)) hasContent = true;
+					else if (readAlias(state)) {
+						hasContent = true;
+						if (state.tag !== null || state.anchor !== null) throwError(state, "alias node should not have any properties");
+					} else if (readPlainScalar(state, flowIndent, CONTEXT_FLOW_IN === nodeContext)) {
+						hasContent = true;
+						if (state.tag === null) state.tag = "?";
+					}
+					if (state.anchor !== null) storeAnchor(state, state.anchor, state.result);
 				}
-				if (state.anchor !== null) storeAnchor(state, state.anchor, state.result);
-			}
-			else if (indentStatus === 0) hasContent = allowBlockCollections && readBlockSequence(state, blockIndent);
+			} else if (indentStatus === 0) hasContent = allowBlockCollections && readBlockSequence(state, blockIndent);
 		}
 		if (state.tag === null) {
 			if (state.anchor !== null) storeAnchor(state, state.anchor, state.result);
@@ -2271,8 +2282,10 @@ function requireDumper() {
 			if (state.replacer) objectValue = state.replacer.call(object, objectKey, objectValue);
 			if (!writeNode(state, level + 1, objectKey, true, true, true)) continue;
 			const explicitPair = state.tag !== null && state.tag !== "?" || state.dump && state.dump.length > 1024;
-			if (explicitPair) if (state.dump && CHAR_LINE_FEED === state.dump.charCodeAt(0)) pairBuffer += "?";
-			else pairBuffer += "? ";
+			if (explicitPair) {
+				if (state.dump && CHAR_LINE_FEED === state.dump.charCodeAt(0)) pairBuffer += "?";
+				else pairBuffer += "? ";
+			}
 			pairBuffer += state.dump;
 			if (explicitPair) pairBuffer += generateNextLine(state, level);
 			if (!writeNode(state, level + 1, objectValue, true, explicitPair)) continue;
@@ -2289,9 +2302,10 @@ function requireDumper() {
 		for (let index = 0, length = typeList.length; index < length; index += 1) {
 			const type2 = typeList[index];
 			if ((type2.instanceOf || type2.predicate) && (!type2.instanceOf || typeof object === "object" && object instanceof type2.instanceOf) && (!type2.predicate || type2.predicate(object))) {
-				if (explicit) if (type2.multi && type2.representName) state.tag = type2.representName(object);
-				else state.tag = type2.tag;
-				else state.tag = "?";
+				if (explicit) {
+					if (type2.multi && type2.representName) state.tag = type2.representName(object);
+					else state.tag = type2.tag;
+				} else state.tag = "?";
 				if (type2.represent) {
 					const style = state.styleMap[type2.tag] || type2.defaultStyle;
 					let _result;
@@ -2323,22 +2337,24 @@ function requireDumper() {
 		if (duplicate && state.usedDuplicates[duplicateIndex]) state.dump = "*ref_" + duplicateIndex;
 		else {
 			if (objectOrArray && duplicate && !state.usedDuplicates[duplicateIndex]) state.usedDuplicates[duplicateIndex] = true;
-			if (type2 === "[object Object]") if (block && Object.keys(state.dump).length !== 0) {
-				writeBlockMapping(state, level, state.dump, compact);
-				if (duplicate) state.dump = "&ref_" + duplicateIndex + state.dump;
-			} else {
-				writeFlowMapping(state, level, state.dump);
-				if (duplicate) state.dump = "&ref_" + duplicateIndex + " " + state.dump;
-			}
-			else if (type2 === "[object Array]") if (block && state.dump.length !== 0) {
-				if (state.noArrayIndent && !isblockseq && level > 0) writeBlockSequence(state, level - 1, state.dump, compact);
-				else writeBlockSequence(state, level, state.dump, compact);
-				if (duplicate) state.dump = "&ref_" + duplicateIndex + state.dump;
-			} else {
-				writeFlowSequence(state, level, state.dump);
-				if (duplicate) state.dump = "&ref_" + duplicateIndex + " " + state.dump;
-			}
-			else if (type2 === "[object String]") {
+			if (type2 === "[object Object]") {
+				if (block && Object.keys(state.dump).length !== 0) {
+					writeBlockMapping(state, level, state.dump, compact);
+					if (duplicate) state.dump = "&ref_" + duplicateIndex + state.dump;
+				} else {
+					writeFlowMapping(state, level, state.dump);
+					if (duplicate) state.dump = "&ref_" + duplicateIndex + " " + state.dump;
+				}
+			} else if (type2 === "[object Array]") {
+				if (block && state.dump.length !== 0) {
+					if (state.noArrayIndent && !isblockseq && level > 0) writeBlockSequence(state, level - 1, state.dump, compact);
+					else writeBlockSequence(state, level, state.dump, compact);
+					if (duplicate) state.dump = "&ref_" + duplicateIndex + state.dump;
+				} else {
+					writeFlowSequence(state, level, state.dump);
+					if (duplicate) state.dump = "&ref_" + duplicateIndex + " " + state.dump;
+				}
+			} else if (type2 === "[object String]") {
 				if (state.tag !== "?") writeScalar(state, state.dump, level, iskey, inblock);
 			} else if (type2 === "[object Undefined]") return false;
 			else {

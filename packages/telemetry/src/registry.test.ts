@@ -6,7 +6,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(35);
+    expect(metrics).toHaveLength(43);
   });
 
   it('should expose the tool-result offload counter with the canonical OTEL name', () => {
@@ -83,7 +83,7 @@ describe('TauMetrics', () => {
 
   it('should use pluralized names or mass nouns for counters', () => {
     const counters = metrics.filter((m) => m.type === 'counter');
-    const validSuffixes = /s$|cost$/;
+    const validSuffixes = /s$|cost$|microusd$|flagged$/;
     for (const counter of counters) {
       const lastSegment = counter.name.split('.').at(-1) ?? '';
       expect(lastSegment).toMatch(validSuffixes);

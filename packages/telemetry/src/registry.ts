@@ -480,4 +480,69 @@ export const TauMetrics = {
       'indexeddb.store': z.string().optional(),
     }),
   }),
+
+  // --- Billing / credit ledger (blueprint C11/C12; no per-user labels — cardinality) ---
+
+  billingReservationFailures: defineCounter({
+    name: 'tau.billing.credit_reservation_failures',
+    unit: '{failure}',
+    description: 'Pre-flight credit reservations rejected for insufficient balance',
+    attributes: z.object({
+      'gen_ai.request.model': z.string().optional(),
+    }),
+  }),
+
+  billingCreditCommitted: defineCounter({
+    name: 'tau.billing.credit_committed_microusd',
+    unit: 'microusd',
+    description: 'User-facing charged cost committed to the credit ledger',
+    attributes: z.object({
+      'tau.billing.category': z.string().optional(),
+    }),
+  }),
+
+  billingCommitFailures: defineCounter({
+    name: 'tau.billing.credit_commit_failures',
+    unit: '{failure}',
+    description: 'Post-response ledger commit/release failures (floor-swept later)',
+    attributes: z.object({
+      'tau.billing.category': z.string().optional(),
+    }),
+  }),
+
+  billingReservationSweeps: defineCounter({
+    name: 'tau.billing.reservation_sweeps',
+    unit: '{reservation}',
+    description: 'Expired credit reservations settled at their input floor by the sweeper',
+    attributes: z.object({}),
+  }),
+
+  billingLedgerDrift: defineGauge({
+    name: 'tau.billing.ledger_drift',
+    unit: 'microusd',
+    description:
+      'Max absolute per-account drift between the journal sum and materialised balances (C12 — alert on non-zero)',
+    attributes: z.object({}),
+  }),
+
+  billingDriftedAccounts: defineGauge({
+    name: 'tau.billing.drifted_accounts',
+    unit: '{account}',
+    description: 'Accounts whose journal sum disagrees with materialised balances',
+    attributes: z.object({}),
+  }),
+
+  billingNegativeBalanceAccounts: defineGauge({
+    name: 'tau.billing.negative_balance_accounts',
+    unit: '{account}',
+    description: 'Accounts currently in debt (spend blocked, Q37)',
+    attributes: z.object({}),
+  }),
+
+  billingAccountsFlagged: defineCounter({
+    name: 'tau.billing.accounts_flagged',
+    unit: '{account}',
+    description: 'Accounts left negative by a refund clawback of already-spent credits (Q37 dispute-abuse signal)',
+    attributes: z.object({}),
+  }),
 } as const;

@@ -1,9 +1,11 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import process from 'node:process';
 
 import matter from 'gray-matter';
 import { z } from 'zod';
+
+import { readManifest, repoPath } from '#repos/lib.js';
 
 const root = resolve(import.meta.dirname, '../..');
 const policyDirectory = join(root, 'docs/policy');
@@ -16,8 +18,16 @@ const stalenessDays = 180;
 // for references into them, so public CI stays green without a private-repo secret.
 const relocatableDirectories = ['docs/research', 'docs/reference'];
 const unavailableRelocatable = relocatableDirectories.filter((directory) => !existsSync(join(root, directory)));
+const { manifest: repositories } = readManifest(root);
+const unavailableRepositories = Object.entries(repositories.repos)
+  .map(([name, repo]) => repoPath({ name, repo, manifest: repositories, root }))
+  .filter((directory) => !existsSync(directory));
 const skipsMissingReference = (reference: string): boolean =>
-  unavailableRelocatable.some((d) => reference === d || reference.startsWith(`${d}/`));
+  unavailableRelocatable.some((d) => reference === d || reference.startsWith(`${d}/`)) ||
+  unavailableRepositories.some((directory) => {
+    const absolute = resolve(root, reference);
+    return absolute === directory || absolute.startsWith(`${directory}${sep}`);
+  });
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be ISO 8601 date (YYYY-MM-DD)');
 
@@ -151,6 +161,12 @@ const research = listMarkdown(researchDirectory);
 if (unavailableRelocatable.length > 0) {
   console.log(
     `Note: ${unavailableRelocatable.join(', ')} unavailable (private tau-brain not cloned) — skipping their validation and references into them.`,
+  );
+}
+
+if (unavailableRepositories.length > 0) {
+  console.log(
+    `Note: ${unavailableRepositories.length} managed repositories unavailable — skipping references into those optional checkouts.`,
   );
 }
 

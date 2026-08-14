@@ -3,8 +3,9 @@ title: 'Worker Lifecycle Policy'
 description: 'Standard patterns for creating, managing, and terminating Web Workers in Tau, plus worker topology: when a feature warrants its own worker, runtime-client consumers, and bridge writes. Covers lazy creation, termination, cleanup, mobile budgets, XState/React integration.'
 status: active
 created: '2026-03-04'
-updated: '2026-07-14'
+updated: '2026-07-21'
 related:
+  - docs/policy/compatibility-policy.md
   - docs/policy/runtime-architecture-policy.md
   - docs/research/worker-management.md
   - docs/research/headless-thumbnail-rendering-architecture-v4.md

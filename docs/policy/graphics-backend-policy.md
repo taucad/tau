@@ -3,8 +3,9 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js stacks, TSL materials, snapshots, and e2e parity'
 status: active
 created: '2026-05-07'
-updated: '2026-07-19'
+updated: '2026-07-21'
 related:
+  - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
   - docs/research/webgpu-migration-graphics-stack.md
   - docs/research/screenshot-viewport-shared-material-state-bleed.md

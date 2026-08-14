@@ -85,8 +85,8 @@ const documentHeaders: Readonly<Record<string, string>> = Object.freeze({
 /**
  * Vite plugin that sets the canonical cross-origin isolation headers on every
  * dev and preview server response. Required for `SharedArrayBuffer` (used by
- * multi-threaded OpenCASCADE, the file pool, the geometry pool, and the
- * signal-buffer abort channel).
+ * multi-threaded OpenCASCADE, the geometry pool, and the signal-buffer abort
+ * channel).
  *
  * Uses `configureServer` middleware (not `server.headers`) so headers apply
  * to all responses including those served by framework plugins like React

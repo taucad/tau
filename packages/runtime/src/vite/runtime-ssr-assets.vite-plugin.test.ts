@@ -69,11 +69,11 @@ describe('runtimeSsrAssetsPlugin', () => {
   it('should emit existing runtime-owned assets once and preserve URL value shapes', async () => {
     const plugin = runtimeSsrAssetsPlugin();
     const context = createContext();
-    context.emitFile.mockReturnValueOnce('js-ref').mockReturnValueOnce('wasm-ref');
+    context.emitFile.mockReturnValueOnce('font-ref').mockReturnValueOnce('wasm-ref');
     await configure(plugin, true, context);
 
     const code = [
-      `const js = new URL('../kernels/replicad/wasm/replicad_single.js', import.meta.url);`,
+      `const font = new URL('../kernels/replicad/fonts/Geist-Regular.ttf', import.meta.url);`,
       `const wasm = new URL('../kernels/replicad/wasm/replicad_single.wasm', import.meta.url).href;`,
       `const duplicate = new URL('../kernels/replicad/wasm/replicad_single.wasm', import.meta.url).href;`,
     ].join('\n');
@@ -81,17 +81,16 @@ describe('runtimeSsrAssetsPlugin', () => {
 
     expect(context.emitFile).toHaveBeenCalledTimes(2);
     expect(context.addWatchFile).toHaveBeenCalledTimes(2);
-    expect(result?.code).toContain('new URL(import.meta.ROLLUP_FILE_URL_js-ref)');
+    expect(result?.code).toContain('new URL(import.meta.ROLLUP_FILE_URL_font-ref)');
     expect(result?.code).toContain('import.meta.ROLLUP_FILE_URL_wasm-ref');
   });
 
-  it('should emit JS, WASM, font, and source-map asset classes', async () => {
+  it('should emit WASM, font, and source-map asset classes', async () => {
     const plugin = runtimeSsrAssetsPlugin();
     const context = createContext();
     await configure(plugin, true, context);
 
     const code = [
-      `new URL('../kernels/replicad/wasm/replicad_single.js', import.meta.url);`,
       `new URL('../kernels/replicad/wasm/replicad_single.wasm', import.meta.url);`,
       `new URL('../kernels/replicad/fonts/Geist-Regular.ttf', import.meta.url);`,
       `new URL('../kernels/replicad/sourcemaps/replicad.js.map', import.meta.url);`,
@@ -99,7 +98,6 @@ describe('runtimeSsrAssetsPlugin', () => {
     await transform({ plugin, code, id: importer, context });
 
     expect(context.emitFile.mock.calls.map((call) => (call[0] as { name: string }).name)).toEqual([
-      'replicad_single.js',
       'replicad_single.wasm',
       'Geist-Regular.ttf',
       'replicad.js.map',
@@ -166,7 +164,7 @@ describe('runtimeSsrAssetsPlugin', () => {
     await configure(plugin, true, context);
     const code = [
       `const embedded = "${'a'.repeat(1024 * 1024)}";`,
-      `const asset = new URL('../kernels/replicad/wasm/replicad_single.js', import.meta.url).href;`,
+      `const asset = new URL('../kernels/replicad/wasm/replicad_single.wasm', import.meta.url).href;`,
     ].join('\n');
 
     const result = await transform({ plugin, code, id: importer, context });
@@ -183,10 +181,10 @@ describe('runtimeSsrAssetsPlugin', () => {
     expect(context.resolve).toHaveBeenCalled();
   });
 
-  it('should emit a real runtime JS glue asset in a Vite SSR build', async () => {
+  it('should emit a real runtime WASM asset in a Vite SSR build', async () => {
     const outputDirectory = mkdtempSync(path.resolve(tmpdir(), 'tau-runtime-ssr-assets-'));
     temporaryDirectories.push(outputDirectory);
-    const entry = fileURLToPath(new URL('../kernels/replicad/replicad-wasm-single-loader.ts', import.meta.url));
+    const entry = fileURLToPath(new URL('../kernels/replicad/replicad.kernel.ts', import.meta.url));
 
     await build({
       configFile: false,
@@ -196,6 +194,6 @@ describe('runtimeSsrAssetsPlugin', () => {
     });
 
     const emitted = readdirSync(outputDirectory, { recursive: true }).map(String);
-    expect(emitted.some((file) => /replicad_single-[\w-]+\.js$/.test(file))).toBe(true);
+    expect(emitted.some((file) => /replicad_single-[\w-]+\.wasm$/.test(file))).toBe(true);
   });
 });

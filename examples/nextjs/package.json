@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "type": "module",
   "private": true,
+  "license": "Apache-2.0",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -14,7 +15,7 @@
     "@rjsf/validator-ajv8": "^5.24.13",
     "@taucad/react": "workspace:*",
     "@taucad/runtime": "workspace:*",
-    "next": "^16.2.9",
+    "next": "catalog:next16",
     "react": "catalog:",
     "react-dom": "catalog:",
     "three": "^0.184.0",

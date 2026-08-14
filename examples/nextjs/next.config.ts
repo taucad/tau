@@ -1,3 +1,3 @@
-import { nextRuntimeConfig } from '@taucad/runtime/nextjs/config';
+import { withTauRuntime } from '@taucad/runtime/nextjs/config';
 
-export default nextRuntimeConfig();
+export default withTauRuntime();

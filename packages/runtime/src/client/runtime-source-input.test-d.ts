@@ -196,28 +196,19 @@ describe('RuntimeClient.render input types', () => {
 });
 
 describe('RuntimeClient.setOptions input types', () => {
-  it('should accept renderOptions and expose a synchronous timeout setter', () => {
-    void client.setOptions({ renderOptions: { tessellation: { linearTolerance: 0.1, angularTolerance: 12 } } });
+  it('should accept the kernel options bag and expose a synchronous timeout setter', () => {
+    void client.setOptions({ tessellation: { linearTolerance: 0.1, angularTolerance: 12 } });
 
     expectTypeOf(client.setRenderTimeout(60_000)).toEqualTypeOf<void>();
 
     // @ts-expect-error -- timeout is runtime-client control state, not render options
     void client.setOptions({ renderTimeout: 60_000 });
 
-    void client.setOptions({
-      renderOptions: { tessellation: { linearTolerance: 0.1, angularTolerance: 12 } },
-      // @ts-expect-error -- timeout cannot be combined with render options
-      renderTimeout: 60_000,
-    });
+    // @ts-expect-error -- kernel options are not wrapped
+    void client.setOptions({ renderOptions: { tessellation: { linearTolerance: 0.1, angularTolerance: 12 } } });
   });
 
-  it('should reject empty and flat option inputs', () => {
-    // @ts-expect-error -- empty input has no effect and is rejected
-    void client.setOptions({});
-
-    // @ts-expect-error -- plugin render config belongs under renderOptions
-    void client.setOptions({ tessellation: { linearTolerance: 0.1, angularTolerance: 12 } });
-
+  it('should reject legacy option envelopes', () => {
     // @ts-expect-error -- old `options` field is rejected
     void client.setOptions({ options: {} });
   });

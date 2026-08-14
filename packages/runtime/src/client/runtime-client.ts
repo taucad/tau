@@ -29,7 +29,6 @@ export type {
   InlineRuntimeSource,
   RuntimeExportOptions,
   RuntimeRenderInput,
-  RuntimeSetOptionsInput,
   RuntimeSource,
   RuntimeSourceContent,
   RuntimeSourceFiles,

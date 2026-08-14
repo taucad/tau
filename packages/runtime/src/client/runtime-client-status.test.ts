@@ -349,27 +349,6 @@ describe('RuntimeClient renderStatus', () => {
     client.terminate();
   });
 
-  it('should validate setOptions before admission without superseding the active preview (T4)', async () => {
-    const { client, handlers, handlersReady, notify, reservePreview } = createStatusClientFixture();
-    await client.connect();
-    await handlersReady;
-
-    const valid = client.render({ source: { path: '/valid.ts' } });
-    await Promise.resolve();
-    const validRenderId = renderIdFromNotify(notify, 0);
-    // @ts-expect-error -- deliberately exercises the runtime guard against legacy flat options
-    await expect(client.setOptions({ renderTimeout: 50 })).rejects.toThrow();
-    const preSettlement = await Promise.race([valid.then(() => 'settled'), Promise.resolve('pending')]);
-
-    expect(preSettlement).toBe('pending');
-    expect(reservePreview).toHaveBeenCalledOnce();
-    expect(notify).toHaveBeenCalledOnce();
-
-    handlers.geometryComputed?.({ ...successGeometry('valid'), renderId: validRenderId });
-    await expect(valid).resolves.toMatchObject({ superseded: false });
-    client.terminate();
-  });
-
   it('should construct a replacement admission before retiring the selected preview (T5)', async () => {
     let reservationCount = 0;
     const { client, handlers, handlersReady, notify } = createStatusClientFixture({
@@ -1232,8 +1211,8 @@ describe('RuntimeClient render timeout control plane', () => {
       client.render({ source: { path: '/main.ts' }, content: 'nope' }),
     ).rejects.toThrow(TypeError);
     await expect(
-      // Untyped plugin generics widen `renderOptions`, so only the runtime guard rejects this.
-      client.setOptions({ renderOptions: 'nope' }),
+      // Untyped plugin generics widen the options bag, so only the runtime guard rejects this.
+      client.setOptions('nope'),
     ).rejects.toThrow(TypeError);
 
     expect(reservePreview).not.toHaveBeenCalled();
@@ -1396,7 +1375,7 @@ describe('RuntimeClient render timeout control plane', () => {
     notify.mockClear();
     abort.mockClear();
 
-    const settlement = client.setOptions({ renderOptions: {} });
+    const settlement = client.setOptions({});
     await Promise.resolve();
 
     expect(abort).not.toHaveBeenCalled();

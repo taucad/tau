@@ -156,14 +156,6 @@ export type RuntimeRenderInput<
   readonly renderOptions?: CollectRenderOptions<Kernels>;
 } & ContentRequestFor<RenderContentFor<Kernels, Middleware>>;
 
-/**
- * Autonomous render option update input.
- * @public
- */
-export type RuntimeSetOptionsInput<Kernels extends readonly KernelPlugin[]> = {
-  readonly renderOptions: CollectRenderOptions<Kernels>;
-};
-
 type RuntimeExportSourceInput<Files extends RuntimeSourceFiles = RuntimeSourceFiles> =
   | {
       readonly source: RuntimeSource<Files>;
@@ -587,20 +579,6 @@ const assertExportInputShape = (input: Record<string, unknown>): void => {
   }
 };
 
-const assertNoFlatSetOptions = (input: Record<string, unknown>): void => {
-  for (const key of Object.keys(input)) {
-    if (key !== 'renderOptions') {
-      throw new TypeError(`RuntimeClient.setOptions uses { renderOptions }; move "${key}" into renderOptions.`);
-    }
-  }
-  if (!('renderOptions' in input)) {
-    throw new TypeError('RuntimeClient.setOptions requires renderOptions.');
-  }
-  if (!isRecord(input['renderOptions'])) {
-    throw new TypeError('RuntimeClient.setOptions renderOptions must be an object.');
-  }
-};
-
 /** Reject a non-record command input before it reaches admission and dies at silent wire validation. */
 const assertRecordInput = (operation: string, field: string, value: unknown): void => {
   if (value !== undefined && !isRecord(value)) {
@@ -927,7 +905,7 @@ export type RuntimeClient<
    * @returns Promise that settles with a {@link RenderOutcome}
    * @public
    */
-  setOptions(options: RuntimeSetOptionsInput<Kernels>): Promise<RenderOutcome>;
+  setOptions(options: CollectRenderOptions<Kernels>): Promise<RenderOutcome>;
 
   /**
    * Set the wall-clock timeout used by subsequent renders on this connected client.
@@ -1733,16 +1711,16 @@ export function createRuntimeClientWithTransport(
       return settlement;
     },
 
-    async setOptions(updatedOptions: RuntimeSetOptionsInput<KernelPlugin[]>): Promise<RenderOutcome> {
+    async setOptions(updatedOptions: CollectRenderOptions<KernelPlugin[]>): Promise<RenderOutcome> {
       assertActive('setOptions');
-      assertNoFlatSetOptions(updatedOptions as Record<string, unknown>);
+      assertRecordInput('setOptions', 'options', updatedOptions);
       const admissionClient = getWorkerClient();
       const admission = admissionClient.admitPreview();
       beginRenderCommand();
       const settlement = trackInFlight(trackPendingRender(admission.renderId));
       try {
         const client = await ensureConnected();
-        client.setOptions(updatedOptions.renderOptions, admission);
+        client.setOptions(updatedOptions, admission);
       } catch (error) {
         admissionClient.settleSelectedPreview(admission.renderId);
         const prior = pendingRender;

@@ -153,7 +153,6 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'InlineRuntimeSource',
   'RuntimeExportOptions',
   'RuntimeRenderInput',
-  'RuntimeSetOptionsInput',
   'RuntimeSource',
   'RuntimeSourceContent',
   'RuntimeSourceFiles',

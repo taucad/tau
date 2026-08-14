@@ -17,7 +17,6 @@ export type {
   RuntimeExportOptions,
   RuntimeLifecycleState,
   RuntimeRenderInput,
-  RuntimeSetOptionsInput,
   RuntimeSource,
   RuntimeSourceContent,
   RuntimeSourceFiles,

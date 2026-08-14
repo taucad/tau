@@ -4,6 +4,7 @@
   "description": "Tau workspace scripts and CLI tools",
   "type": "module",
   "private": true,
+  "license": "Apache-2.0",
   "bin": {
     "repos": "./dist/repos.mjs"
   },

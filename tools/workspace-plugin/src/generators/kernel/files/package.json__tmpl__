@@ -14,7 +14,7 @@
   "files": ["dist", "README.md"],
   "keywords": ["cad", "kernel", "<%= name %>"],
   "author": "Richard Fontein",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts",
     "./kernel": "./src/<%= name %>.kernel.ts"

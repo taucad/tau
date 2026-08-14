@@ -33,7 +33,7 @@ describe('kernel generator', () => {
     }>(tree, 'kernels/example/package.json');
 
     expect(packageJson.name).toBe('@taucad/example');
-    expect(packageJson.license).toBe('MIT');
+    expect(packageJson.license).toBe('Apache-2.0');
     expect(packageJson.exports?.['./kernel']).toBe('./src/example.kernel.ts');
     expect(packageJson.publishConfig?.exports?.['./kernel']).toEqual({
       types: './dist/example.kernel.d.mts',

@@ -3,7 +3,7 @@ title: 'Filesystem Authority Policy'
 description: 'The single-filesystem-authority invariant: one FM-worker authority per host, one provider instance per storage root, mounts as pure routing from persistent config, manifest-based discovery, cross-tab coherence, and webaccess handle lifecycle rules.'
 status: active
 created: '2026-07-13'
-updated: '2026-07-21'
+updated: '2026-07-22'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/runtime-api-policy.md
@@ -12,6 +12,8 @@ related:
   - docs/research/headless-thumbnail-rendering-architecture-v4.md
   - docs/research/runtime-model-load-project-root-regression-v3.md
   - docs/research/tau-json-project-library-state-boundary.md
+  - docs/research/pending-project-import-recovery-bootstrap-isolation.md
+  - docs/research/filesystem-post-implementation-congruency-audit.md
 ---
 
 # Filesystem Authority Policy
@@ -49,7 +51,7 @@ All filesystem I/O runs in one place per host — the file-manager worker in the
 
 ### 2. One provider instance per storage root
 
-A storage root is one IndexedDB database, the origin's OPFS root, one webaccess directory entry, or an explicitly named memory root. Exactly one provider instance exists per `storageRootKey`: `indexeddb:<database-prefix>`, `opfs:origin`, `webaccess:<workspaceId>`, or a caller-supplied `memory:<scope>`. Mount resolution and scoped reads reuse that instance — per-mount fresh instances are forbidden. Webaccess workspace creation uses `FileSystemDirectoryHandle.isSameEntry()` to preserve the existing `workspaceId` when the user selects the same physical directory again; folder names are never identity.
+A storage root is one IndexedDB database, the origin's OPFS root, one webaccess directory entry, or an explicitly named memory root. Exactly one provider instance exists per `storageRootKey`: `indexeddb:<database-prefix>`, `opfs:origin`, `webaccess:<workspaceId>`, or a caller-supplied `memory:<nonempty-scope>`. Reject missing, malformed, or cross-backend memory keys before provider lookup; never mint an implicit counter key. Mount resolution and scoped reads reuse that instance — per-mount fresh instances are forbidden. Webaccess workspace creation uses `FileSystemDirectoryHandle.isSameEntry()` to preserve the existing `workspaceId` when the user selects the same physical directory again; folder names are never identity.
 
 **Why**: Providers hydrate in-memory indexes once per instance (`DirectIdbProvider._paths`); two instances over one database means one instance's writes are invisible to the other's index — the ENOENT-despite-row-exists class.
 
@@ -70,11 +72,13 @@ mountTable.mount(prefix, provider, config);
 
 ### 3. Mounts are pure routing, registered from persistent config
 
-`MountTable` entries map a virtual path prefix to `(provider, providerBasePath)` by longest-prefix match — nothing else. Routing is registered at FM-worker boot and replaced from `ProjectRootConfiguration` whenever persisted project bindings change. Discovery returns physical locators; the main-thread project manager persists any newly discovered logical route and calls `syncProjectRoots()`. Page navigation must not mount or unmount routing; page lifecycle governs watch scopes and UI services only. Creating a rooted view captures the exact resolved mount entry, provider, and provider base path; later operations on that view never re-enter global longest-prefix routing.
+`MountTable` entries map a virtual path prefix to `(provider, providerBasePath)` by longest-prefix match — nothing else. Routing is registered at FM-worker boot and replaced from `ProjectRootConfiguration` whenever persisted project bindings change. Discovery returns physical locators; the main-thread project manager persists any newly discovered logical route and calls `syncProjectRoots()`. Page navigation must not mount or unmount routing; page lifecycle governs watch scopes and UI services only. Creating a rooted view captures the exact resolved mount entry, provider, storage-root key, and provider base path; later operations on that view never re-enter global longest-prefix routing.
 
 **Why**: Requirement A — a path that resolves only while its page is open is not a filesystem, and every consumer that outlives the page (thumbnail worker, discovery, cross-tab events) breaks.
 
-> **Adoption**: project mounts are page-lifecycle-coupled today (`file-manager.machine.ts` mounts on project open); v4 R3 moves registration to worker boot.
+Reserve `/projects/<id>` for boot-owned persistent project routes. Every configured physical project base, including named memory fixtures, must already be canonical and be an immediate child of `/projects`; reject `/`, `/projects`, ancestors, descendants, and overlapping project bases before provider acquisition. Public dynamic mount/unmount is allowed only at `/previews/<instance>` and the boot-owned `/node_modules` projection, and both prefix and provider base must already be canonical before provider lookup. Authority bootstrap installs `/` directly through `MountTable`; no public dynamic root mount exists. Preview snapshots never replace a project route.
+
+Serialize complete project-root configuration calls in invocation order. Disposal removes matching routes and discovery roots together; a later discovery scan must not recreate a disposed provider from stale topology.
 
 ### 4. Use the namespace owned by each boundary
 
@@ -86,7 +90,11 @@ Trusted authority and administration APIs take canonical authority-global virtua
 
 The authority owns a discovery plane: scan configured storage roots for `/projects/*/tau.json`, parse and validate manifests as untrusted input (`docs/policy/project-manifest-policy.md` Rules 4 and 14), preserve the physical `ProjectLocator`, detect duplicate logical IDs, serve the project list, and emit change events when projects appear or disappear. Use `FileSystemObserver` where available and visibility-aware polling otherwise. An invalid manifest, adoption-required directory, or duplicate ID quarantines only that entry with a structured status; it must never sink the whole list.
 
-After discovery, the UI may left-join host-local `ProjectLibraryState` for recency, soft-delete visibility, and revision initialization. That row never establishes existence, supplies manifest content, or changes the physical locator. A missing row is seeded only after a valid manifest is discovered; an inaccessible root does not prove absence and must not trigger local-state cleanup. React Query remains the current listing cache. The authority gains no additional memory or persistent manifest projection without a measured need and a separately reviewed rebuild/invalidation contract.
+After discovery, the UI may left-join host-local `ProjectLibraryState` for recency, soft-delete visibility, and revision initialization. That row never establishes existence, supplies manifest content, or changes the physical locator. A missing row is seeded only after a valid manifest is discovered; an inaccessible, omitted, or incomplete root does not prove absence and must not trigger rebind or local-state cleanup. Only a recognized not-found/type-mismatch result from a complete current scan establishes absence; permission, security, and I/O failures remain uncertainty. React Query remains the current listing cache. The authority gains no additional memory or persistent manifest projection without a measured need and a separately reviewed rebuild/invalidation contract.
+
+Project bootstrap MUST establish pending-operation quarantine before locator reconciliation. It reads the durable journal once per application session, derives the exact physical locator for each pending operation, and removes those locators from ordinary adoption, conflict, and route-cleanup decisions. Initial discovery then publishes unrelated valid projects before one fully observed session-owned recovery loop starts.
+
+Route access and project listing classify against a current discovery pass after this discovery-readiness barrier; they do not await recovery completion. A slow or failed operation produces a typed recovery state for only its own project. Failure to initialize the worker, read the journal, synchronize roots, or perform discovery remains a systemic error and must reject rather than appear as an empty library. Root-configuration changes synchronize authority routes and invalidate the React Query listing; they do not restart the session recovery loop.
 
 **Why**: Existence is the manifest on disk (manifest policy Rule 1); a registry that must be told about projects locks out disk-level and agent-driven creation.
 
@@ -100,7 +108,11 @@ Each backend (`indexeddb`, `webaccess`, `opfs`, `memory`) is an independent stor
 
 ### 8. Scoped providers are cached; only authority operations may mutate them
 
-Standalone providers (used to browse or discover a backend without mounting it, e.g. the files route grid) reuse the same per-root instances from `ProviderRegistry` (Rule 2). Feature code receives read-only discovery results, never a raw provider. Mutations normally use a mounted authority path. The narrow exceptions—project adoption/remint, creation at an allocated physical basename, and confirmed permanent deletion at an observed `ProjectLocator`—remain named `WorkspaceFileService` authority operations. They take an explicit storage scope and exact physical path, acquire logical-project and physical-directory locks, re-establish identity where applicable, and publish the ordinary authority invalidation/events.
+Standalone providers (used to browse or discover a backend without mounting it, e.g. the files route grid) reuse the same per-root instances from `ProviderRegistry` (Rule 2). Feature code receives read-only discovery results, never a raw provider. Mutations normally use a mounted authority path; generic scoped `unlink`/`rmdir` APIs and Files-route mutations are forbidden. The narrow exceptions—journal-backed project commit at an allocated physical basename and confirmed permanent deletion at an observed `ProjectLocator`—remain named `WorkspaceFileService` authority operations. They take an explicit durable storage scope and exact physical path, acquire logical-project and canonical physical locks, re-establish identity, and publish ordinary authority invalidation/events. Directory invalidations include the physical identity because a pending locator may still be quarantined and therefore have no logical mount in a sibling tab.
+
+Adoption and re-mint remain read-only quarantine outcomes until a product requirement justifies one named expected-manifest mutation. Never write a new manifest through a stale discovery result or a generic conditional-write surface.
+
+Before journaling permanent deletion, run a fresh uniqueness-aware discovery and require exactly one valid current occurrence. Check `deletedAt` and insert the pending operation in one existing IndexedDB transaction; Restore rejects while that operation exists. Re-discover after an `absent` result before local cleanup. If final directory removal fails after marker unlink, best-effort restore the exact manifest bytes already verified and retain replay state.
 
 **Why**: Reads through a shared instance are coherent by construction. Raw provider mutation would bypass locks, invalidation, and change events; a named authority operation preserves those guarantees when no mounted logical route can safely identify the target.
 
@@ -132,11 +144,15 @@ Any user-driven workspace change MUST go through the binding-transaction helper 
 
 Missing or stale bindings surface `WorkspaceDirectoryRequiredError('missing')` via the recovery overlay; legacy projects without an explicit `workspaceId` are prompted on first load. The v2 → v3 IDB migration only promotes the legacy `'root'` handle to a regular workspace row — it does not auto-bind projects.
 
-### 12. Project creation is a single bind → route-sync → write → verify transaction
+### 12. Project creation is journal → authority commit → local resources
 
-Project creation MUST persist the project's backend binding, synchronize authority routes, write the seed file set and `tau.json`, then read back and validate the manifest — as one serialized transaction inside `useProjectManager.createProject`. Webaccess creation resolves `(directoryHandle, workspaceId)` before persisting the binding; there is no ambient handle-priming step. `memory` is rejected with `WorkspaceDirectoryRequiredError('unsupported')` — durable projects must commit to a durable backend at creation.
+Project creation and duplication MUST first persist one pending operation containing the complete manifest, authored file snapshot, exact allocated physical locator, storage identity, and intended local resources. They then call `WorkspaceFileService.commitPendingProjectDirectory()` with that immutable snapshot. The command validates every path and byte payload before mutation, acquires both logical-project and physical-directory locks, replaces only an exactly reserved manifest-less target, writes files deterministically, writes `tau.json` last, and verifies its project ID.
 
-The transaction is the only legitimate way to write a project's seed files. UI surfaces (`/projects/new`, duplicate, remix-from-publication) MUST go through the project manager; ad-hoc mount/write flows are forbidden because they omit persistent binding, route synchronization, or manifest verification. Creation writes `tau.json` last so discovery never observes a half-created project.
+An existing valid same-ID manifest is an idempotent committed result: replay resumes local library/chat/editor resources without rewriting project bytes. An invalid manifest, a different-ID manifest, an unreserved basename, or an unsafe journal path is an ownership failure and must preserve the target and the pending row. After a committed result, persist the project route, synchronize authority routes, restore local resources, remove any legacy row, and only then clear the journal.
+
+Direct create and duplicate calls await their own commit. Startup replay follows Rule 5: it is observed but does not block unrelated discovery, listing, or route access. Webaccess replay resolves the persisted workspace handle and permission for that operation; a missing workspace becomes a typed per-project recovery failure rather than an empty library. `memory` remains rejected with `WorkspaceDirectoryRequiredError('unsupported')` because durable projects require durable storage.
+
+The transaction is the only legitimate way to write seed files. UI surfaces (`/projects/new`, duplicate, remix-from-publication, and import) MUST go through the project manager; ad-hoc mount/write flows are forbidden because they omit journal ownership, locks, route synchronization, or manifest verification.
 
 ### 13. Root FM is pinned to `indexeddb`; `initialBackend` is required
 
@@ -150,9 +166,13 @@ The root provider MUST NOT consume the `filesystem-backend` cookie at mount time
 
 Failure to dispose after replacing a handle is a bug — the registry would otherwise continue serving the previous provider instance under the stable root key.
 
+After provider initialization settles, `getProvider()` must verify that the promise map still owns that exact pending promise. If disposal or replacement revoked it, dispose the resolved provider and reject the original caller; never return a provider whose root key is no longer current.
+
 ### 15. Rooted views are the runtime reachability boundary
 
 `WorkspaceFileService.createRootedFileSystem(authorityRoot)` must resolve `authorityRoot` once to an exact project mount and return the ordinary full read/write/watch filesystem surface rebased to local `/`. Reads, writes, directory operations, rename operands, existence checks, and watches all resolve segment-by-segment inside that captured subtree. `..` may collapse local segments but may never ascend above `/`; a mount replacement invalidates the captured view instead of retargeting it.
+
+The captured mount entry also owns every post-I/O side effect. An admitted old-provider operation may complete against that provider, but it must not update a replacement route's pool, tree, or watches. Qualify remote facts with the existing physical pair `{ storageRootKey, providerBasePath }`; apply them only to matching projections after provider refresh completes.
 
 The view is not read-only. Source files, generated files, `/.tau/cache`, and project-local `/node_modules` are all writable and persist through the underlying provider. No rights matrix, write allowlist, grant lifecycle, route generation, receipt, or service worker participates in this boundary. Runtime and headless code receive the opaque filesystem and local path only; project selection and authority-global routing remain in trusted composition code.
 

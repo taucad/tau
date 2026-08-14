@@ -3,11 +3,13 @@ title: 'Filesystem Policy'
 description: 'Standards for filesystem access, data transfer, caching, concurrency, and watcher architecture in the Tau application. Covers read/write semantics, bridge RPC, and kernel/UI watch planes.'
 status: active
 created: '2026-03-05'
-updated: '2026-07-21'
+updated: '2026-07-22'
 related:
+  - docs/policy/compatibility-policy.md
   - docs/policy/filesystem-authority-policy.md
   - docs/policy/runtime-api-policy.md
   - docs/research/runtime-model-load-project-root-regression-v3.md
+  - docs/research/runtime-rooted-filesystem-residual-migration.md
   - docs/research/filesystem-architecture.md
   - docs/research/fs-capabilities.md
   - docs/research/large-repo-import-performance.md
@@ -15,6 +17,8 @@ related:
   - docs/research/origin-client-id-propagation-audit.md
   - docs/research/project-updated-at-activity-boundary.md
   - docs/research/revision-restore-runtime-watcher-gap.md
+  - docs/research/pending-project-import-recovery-bootstrap-isolation.md
+  - docs/research/filesystem-post-implementation-congruency-audit.md
 ---
 
 # Filesystem Policy
@@ -28,12 +32,12 @@ A single-writer topology with zero-copy binary transfer and bounded caches preve
 ## Core Principles
 
 1. **Registry-owned providers, one mutation authority** — `ProviderRegistry` is the sole provider owner; non-owning mounts only route; all mutations flow through `WorkspaceFileService` queues
-2. **Zero-copy binary transfer** — `Uint8Array` payloads must use `postMessage` transfer lists, never structured clone alone
+2. **Transfer only owned binary buffers** — use transfer lists for disposable boundary-owned bytes; clone borrowed provider storage before transfer so reads never detach authority state
 3. **Lazy loading over eager recursion** — never traverse a directory tree deeper than the consumer needs
 4. **Bounded caches** — every in-memory cache must have an eviction policy (TTL, max size, or LRU)
 5. **Debounce refresh, don't spam** — background tree refreshes must be debounced; rapid mutations must coalesce
 6. **Kernel watcher fast path first** — file change -> kernel invalidation must not route through `use-project.tsx` fanout
-7. **Server-side watch filtering** — path/include/exclude/event filtering happens in the worker, not in clients
+7. **Server-side watch matching** — path/include/exclude matching happens in the worker, not in clients; do not expose unused event-kind filters
 8. **Loss-aware event streams** — watcher overflow/dropped-event conditions must trigger explicit resync behavior
 9. **Bridge skip-originator is internal** — when a filesystem bridge port initiates a mutation, the resulting `ChangeEvent` may carry an originating port id for intra-process routing only (`tagEventOrigin` / `getEventOrigin` on `@taucad/filesystem`). The filesystem bridge adapter (`@taucad/fs-bridge` `exposeFileSystem`) skips delivering `fileChanged` back to that port. This metadata is **not** part of the wire shape of `ChangeEvent`, is **not** passed as a second argument to `ChangeEventBus.emit`, and **must not** surface in consumer-facing UI APIs.
 10. **Filesystem transport reports facts, not project recency** — filesystem APIs emit typed content-change facts; project-domain participants and machines decide whether those facts are activity.
@@ -46,8 +50,8 @@ Self-write suppression (so an editor port does not receive its own `fileChanged`
 
 - **Author boundary:** `WorkspaceFileService` mutating methods accept optional `context?: { originClientId?: string }`. Context is bound at port-connect time via `bindMutationContextForPort` (in `filesystem-bridge.ts`), which wraps each connection's handler with a per-port closure that injects `{ originClientId: portId }` as the trailing argument on every mutating call. Before `ChangeEventBus.emit(event)`, the worker calls `tagEventOrigin(event, id)` when context is present. The bridge primitive (`createBridgeServer`) is unaware of context — it dispatches user args verbatim.
 - **Merge rule:** `EventCoalescer` / `coalesceChangeEvents` reads origins via `getEventOrigin` so mixed-origin batches clear the tag (every port receives the merged event), matching the blueprint Finding 14 rule.
-- **Forwarders:** `ChangeEventBus`, `WatchRegistry`, and `ThrottledWorker` chunk paths do not take a parallel `originClientId` parameter; the event object is the sole carrier.
-- **Registry:** `packages/filesystem/src/event-origin-registry.ts` (`WeakMap<ChangeEvent, string>`) plus `clearEventOrigin` when a coalesced survivor must lose its tag.
+- **Forwarders:** `ChangeEventBus` and `WatchRegistry` do not take a parallel `originClientId` parameter; the event object is the sole carrier.
+- **Registry:** `packages/filesystem/src/event-origin-registry.ts` stores origin metadata in a `WeakMap`; coalescing creates an untagged survivor when the merged path history has mixed origins.
 
 For rationale and alternatives considered, see [`docs/research/origin-client-id-propagation-audit.md`](../research/origin-client-id-propagation-audit.md).
 
@@ -87,19 +91,15 @@ Use `resolveVirtualPath` as the single virtual-path boundary. Require an absolut
 
 A rooted view supports the same writes, queues, cache invalidation, persistence, and events as global WFS operations. Do not add cache-only writes, read-only source trees, or path allowlists. Rebase watch requests and emitted events to local `/`, and never deliver sibling-project events. Scoped runtime bridges use transfer/copy delivery and must not receive the authority-global shared file pool, because a pool hit would bypass rooted RPC dispatch.
 
+A rooted view preserves the exact canonical virtual paths carried by concrete create, change, delete, and rename events regardless of backing-filesystem naming semantics. It must not lowercase, normalize Unicode, infer aliases, or widen a concrete event to `reset`. Only explicit information-loss signals—such as overflow, observer `unknown`/`errored`, stale-root detection, backend replacement, or an irreducibly summarized change—use reset recovery. Preserve the hidden mutation origin through rooted writes and suppress only the originating scoped port's echo.
+
+Every admitted operation retains the exact captured mount entry through provider I/O and every resulting cache, tree, event, and watch side effect. After suspension, do not attribute old-provider work to a replacement or nested route. Cross-tab facts carry the existing physical identity `{ storageRootKey, providerBasePath }` and refresh only a matching projection before delivery.
+
 ## Read Rules
 
 ### Rule 1: Shallow reads by default
 
 Always read a single directory level unless the consumer provably needs deep recursion.
-
-```typescript
-// CORRECT: Shallow read for tree display
-readShallowDirectory(path, backend);
-
-// INCORRECT: Full recursive read for tree display
-readBackendFileTree(backend); // Traverses entire FS depth-first
-```
 
 Deep reads are permitted only for: `getDirectoryContents` (ZIP/copy), startup-only `getDirectoryStat` hydration, and `readFiles` (kernel dependency batch). Deep reads are forbidden in mutation-triggered refresh paths.
 
@@ -109,18 +109,7 @@ When listing a single directory, `readdir` + parallel `Promise.all(stat(...))` i
 
 **Backend performance context:** IndexedDB transaction creation has fixed overhead (~0.1–0.3ms each) regardless of payload size. Parallelizing stat calls within a directory lets the browser pipeline IDB transactions instead of sequentially awaiting each one.
 
-```typescript
-// CORRECT: Parallel stat for one directory
-const entries = await fs.readdir(path);
-const stats = await Promise.all(entries.map((e) => fs.stat(joinPath(path, e))));
-
-// INCORRECT: Sequential stat for one directory
-for (const entry of entries) {
-  const stat = await fs.stat(joinPath(path, entry)); // Sequential IDB transactions
-}
-```
-
-**For metadata-only queries (tree display, file counts):** Prefer the in-memory tree at the `FileService` layer over provider stat calls. See Rule 33.
+**For metadata-only queries (tree display, file counts):** Prefer the in-memory tree in `WorkspaceFileService` over provider stat calls. See Rule 33.
 
 ### Rule 3: Read caching expectations
 
@@ -144,19 +133,13 @@ Source files are typically <100 KB. Binary CAD files (STL, STEP, glTF) can be 10
 
 ### Rule 5: Write serialization scope
 
-All mutating operations (`writeFile`, `writeFiles`, `mkdir`, `rename`, `unlink`, `rmdir`) must route through `ResourceQueue` at the narrowest conflict key.
+All mutating operations (`writeFile`, `writeFiles`, `mkdir`, `rename`, `unlink`, `rmdir`) must route through `ResourceQueue` and cross-tab locks using the narrowest **physical** conflict key. Mount resolution retains `storageRootKey`, `providerBasePath`, and the resolved provider path so mounted and named authority operations touching the same bytes acquire the same token. A subtree/composite operation acquires every owner/path token needed for its admitted mutation set before the first mutation. Named project operations also retain their logical-project token.
 
-**Why**: Same-path writes need FIFO ordering, but global serialization blocks unrelated files. Path-keyed providers removed the old ZenFS parent-directory listing TOCTOU, so `WorkspaceFileService` serializes by exact path and lets independent writes run in parallel.
+Generic scoped mutation APIs are forbidden. Ordinary mutation uses a mounted authority path; only the named project commit and permanent-delete operations may mutate an unmounted physical locator, after re-establishing identity under the shared physical lock.
+
+**Why**: A logical route and a physical locator may name the same bytes; exact virtual-path locks alone do not serialize them, while a global lock blocks unrelated files.
 
 If a future backend reintroduces parent-directory read-modify-write metadata, use the parent directory as the queue key for that backend. Do not reintroduce a global write queue.
-
-```typescript
-// CORRECT: serialize at the narrowest known conflict key
-await resourceQueue.queueFor(path, () => provider.writeFile(path, data));
-
-// INCORRECT: Global serialization (unnecessarily blocks independent writes)
-await globalQueue.serialized(() => provider.writeFile(path, data));
-```
 
 ### Rule 5a: Batch mutations preserve canonical per-resource semantics
 
@@ -164,47 +147,29 @@ Implement batch and composite mutations by delegating each resource to the canon
 
 Delivery coalescers may batch exact mutation facts after commit. They must not replace affected paths with a lossy root-directory summary.
 
-```typescript
-// CORRECT: one RPC, canonical semantics for every path
-await Promise.all(Object.entries(files).map(async ([path, file]) => writeFile(path, file.content, context)));
-
-// INCORRECT: duplicate a subset of writeFile and summarize the batch at root
-await Promise.all(Object.entries(files).map(([path, file]) => provider.writeFile(path, file.content)));
-eventBus.emit({ type: 'directoryChanged', path: '/', backend: rootBackend });
-```
-
 **Why**: A successful provider write is incomplete while writer caches retain old bytes or exact-path watchers cannot observe the committed path.
+
+Batch results must be truthful. Without a provider transaction, wait for every admitted operation, report every completed and failed resource, and invalidate every resource whose commit state may have changed. Never claim atomicity, reverse completed operations with overwrite rollback, or reject while sibling writes continue in the background.
 
 ### Rule 5b: Provider projections change only after durable commit
 
-Providers that maintain in-memory path, directory, size, mtime, or content-metadata projections update them only after the backing mutation commits. `FileSystemAccessProvider` aborts the writable stream when write or close fails. `DirectIdbProvider` performs same-store file rename as one put+delete transaction and stages write, bulk-import, and rename projection changes until transaction completion. A failed or aborted transaction leaves the prior projection intact; if commit state is uncertain, rehydrate before serving another metadata read.
+Providers that maintain in-memory path, directory, size, mtime, or content-metadata projections update them only after the backing mutation commits. `FileSystemAccessProvider` aborts the writable stream when write or close fails. `DirectIdbProvider` performs same-store file rename as one put+delete transaction and stages write and rename projection changes until transaction completion. A failed or aborted transaction leaves the prior projection intact; if commit state is uncertain, rehydrate before serving another metadata read.
 
 **Why**: Mutating the projection before durable completion turns a failed write into a false successful `stat`/`readdir`, which is data corruption at the API boundary.
 
-### Rule 6: Transfer, don't clone
+### Rule 5c: Providers expose one valid path tree
 
-Binary data sent to the worker for writes must use `extractTransferables` to build a transfer list. The sender's buffer is detached after transfer — do not reference it after `postMessage`.
+Every provider must independently enforce one entry kind per canonical path. A file cannot be an ancestor or directory, `mkdir` cannot replace a file, `writeFile` cannot replace a directory, and `unlink`/`rmdir` must reject the wrong kind. Exact self-rename is a no-op; moving a directory beneath itself fails before mutation. A persistent provider must preserve explicit empty directories across reopen.
 
-```typescript
-// CORRECT: Transfer
-port.postMessage(response, extractTransferables(response));
+All fallible validation and serialization for a destructive multi-path ingress completes before the first provider mutation. Use an inline `Set` parent walk for small payload preflights; do not add a trie or second metadata authority.
 
-// INCORRECT: Structured clone (double memory, double copy)
-port.postMessage(response);
-```
+### Rule 6: Transfer only bytes owned by the sending boundary
+
+Use `extractTransferables` when the sending boundary owns a disposable byte buffer. If a provider, cache, or caller retains the bytes, clone once at the boundary and transfer that owned clone. The transferred buffer is detached; no retained state may reference it.
 
 ### Rule 7: Mutation → targeted invalidation
 
 After a mutation (delete, rename, upload), invalidate only the parent directory of the affected path, not the entire tree. The caller must provide the affected path so the UI can selectively refresh.
-
-```typescript
-// CORRECT: Invalidate parent
-const parentPath = path.substring(0, path.lastIndexOf('/')) || '/';
-reloadDirectory(parentPath, backend);
-
-// INCORRECT: Reload entire tree
-loadColumnTree(backend); // Full recursive traversal
-```
 
 ### Rule 7a: No project-recency flags in filesystem APIs
 
@@ -227,17 +192,6 @@ Recommended debounce: 300-500ms after the last mutation event. VS Code uses 500m
 ### Rule 9: Deduplication via in-flight map
 
 Use a synchronous `Map<key, Promise>` (not React state) to deduplicate concurrent requests for the same directory. This prevents race conditions across render cycles.
-
-```typescript
-// CORRECT: Synchronous dedup via ref
-const inflightRef = useRef(new Map<string, Promise>());
-if (inflightRef.current.has(key)) return inflightRef.current.get(key);
-const promise = readShallowDirectory(path, backend);
-inflightRef.current.set(key, promise);
-
-// INCORRECT: React state check (async, racy)
-if (loadingPaths.has(path)) return; // State may be stale
-```
 
 ### Rule 10: Error recovery on expand
 
@@ -294,7 +248,7 @@ Do not mix these planes into a single coarse "watch everything" stream.
 
 ```mermaid
 flowchart LR
-    FileServiceWrite["FileService mutation"]
+    FileServiceWrite["WorkspaceFileService mutation"]
     EventBus["ChangeEventBus"]
     KernelWatchRouter["Kernel watch router"]
     TreeWatchRouter["Tree watch router"]
@@ -312,14 +266,12 @@ flowchart LR
 
 ### Rule 19: Watch API contract is first-class and explicit
 
-`FileService.watch(...)` must support an explicit request contract:
+`WorkspaceFileService.watch(...)` must support an explicit request contract:
 
 - `paths`: absolute normalized watch roots
 - `recursive`: default `false`
 - `includes`: optional include patterns
 - `excludes`: optional exclude patterns
-- `filter`: optional event type mask (`added|updated|deleted|renamed`)
-- `correlationId`: optional identifier echoed in outgoing events
 
 `watch()` must return an unsubscribe function (`() => void`) and be wrappable into `Disposable` via `toDisposable`, per `library-api-policy.md`.
 
@@ -332,27 +284,29 @@ Identical watch requests must share one underlying subscription. Keep:
 
 Unsubscribe decrements ref count. Actual disposal happens only when ref count reaches zero.
 
-### Rule 21: Event pipeline requires normalize -> coalesce -> filter -> deliver
+### Rule 21: Event pipeline requires normalize -> coalesce -> match -> deliver
 
 Before delivery, watcher events must pass this worker-side pipeline:
 
 1. **Normalize** paths and event shapes.
 2. **Coalesce** short bursts into canonical events.
-3. **Filter** by path scope, include/exclude globs, and event type mask.
-4. **Deliver** only matched events to subscribed ports.
+3. **Match** concrete events by canonical requested paths, recursion, includes, and excludes.
+4. **Classify explicit loss** — overflow, observer `unknown`/`errored`, stale-root, backend replacement, or an irreducibly summarized directory change — as reset only for affected watch scopes.
+5. **Deliver** the resulting concrete event or explicit loss signal to subscribed ports.
 
 Coalescing requirements:
 
-- `added -> deleted` within the same window cancels out.
-- `deleted -> added` within the same window collapses to `updated`.
-- Parent directory delete suppresses child delete spam.
-- Rename emits both old/new path invalidation semantics.
+- A write does not prove creation; write followed by delete retains the final delete.
+- Delete followed by write collapses to change.
+- A typed ancestor-directory delete or rename resets exact descendant watches instead of guessing child facts.
+- Rename preserves both old/new path invalidation semantics.
+- Coalescing must clone a survivor before changing hidden origin metadata; subscriptions never mutate one shared event.
 
 ### Rule 22: Kernel path is direct and low-latency
 
 For render reactivity, use this path only:
 
-`FileService change event -> runtime worker watch handler -> worker cache invalidation -> worker emits filesChanged -> CadMachine debounce -> render`
+`WorkspaceFileService change event -> runtime worker watch handler -> serialized cache/current-preview router -> worker debounce -> autonomous render`
 
 INCORRECT:
 
@@ -360,21 +314,25 @@ INCORRECT:
 - Sending `changedPaths` on each render command as the primary invalidation mechanism
 - A separate `fileChanged` command from main thread to worker for every edit
 
-### Rule 23: Watch set updates must be incremental
+### Rule 23: Complete watch replacement must preserve continuous coverage
 
-After each successful render/compile, compute the dependency set and diff it against the previous set:
+Current-preview observation is independent of successful artifact publication. A fresh entry is observed and acknowledged before dependency discovery. When a generation produces a complete dependency candidate:
 
-- add newly required paths
-- remove stale paths
-- keep unchanged paths subscribed
+- keep the old complete multi-path request live
+- subscribe the complete replacement and await one registration acknowledgement
+- batch-revalidate only paths added relative to the old request
+- route candidate-only events during validation as dirty handoff mismatches
+- commit the preview map and replacement handle atomically only when the candidate remains current and clean
+- dispose the old handle only after commitment; dispose only the replacement when dirty or superseded
 
-Avoid full unsubscribe/resubscribe when only a small subset changed.
+The steady state is one multi-path subscription, not one stream per dependency. Unchanged paths stay continuously covered by the overlapping old request; no filesystem revision protocol or permanent root watch is required.
 
 ### Rule 24: Overflow and dropped-event handling is mandatory
 
 Watcher streams are not lossless under all conditions. Define explicit overflow behavior:
 
-- emit an overflow/reset event to subscribers
+- emit internal `WatchEvent { type: 'reset' }` to watch subscribers
+- map worker-to-client overflow or refresh failure to the existing transport-wide `ChangeEvent { type: 'backendChanged' }`; do not add another wire variant
 - kernel subscribers clear dependency-related caches and request a fresh dependency pass on next render
 - tree subscribers trigger targeted parent/subtree resync (not blind full tree unless required)
 
@@ -392,24 +350,28 @@ Treat `FileSystemObserver` as progressive enhancement, not a universal baseline.
 
 Every successful local or remote mutation, and every concrete observer event, enters the same invalidation plane: invalidate shared file-pool bytes and provider/file-tree projections, repair a DirectIDB index miss from backing storage when necessary, emit the ordinary change event, and refresh discovery when a project manifest may have appeared or disappeared. Web Locks serialize multi-path mutations when available; BroadcastChannel notification and invalidation still occur when locks are unavailable.
 
+Apply remote facts in arrival order. Resolve only an already registry-owned provider by `storageRootKey`; notification data must not instantiate a provider. Build refreshed provider metadata off to the side and swap it only after successful hydration; a refresh failure emits `backendChanged` through the same channel consumed by kernel, tree, and fs-client caches. One `EventCoalescer` is the only bounded queue in the worker delivery path.
+
 ### Rule 26: Exclude self-generated churn from kernel watch streams
 
-Kernel watchers must exclude non-user-source churn paths, at minimum:
+Runtime dependency watchers must exclude only the runtime cache namespace:
 
-- `.tau/cache/**`
-- other generated internal artifacts
+- `/.tau/cache/**`
 
-`node_modules/**` may be excluded from kernel watch streams when dependency resolution does not require runtime file-level invalidation there.
+The exclusion applies to concrete cache-path events, including peer writes. It must not suppress genuine reset or overflow signals because those signals no longer contain a complete path set. Do not treat `/src/.tau/cache/**` as cache. Do not exclude `/node_modules/**`; installed or vendored package files may be live bundle inputs.
 
-### Rule 27: Path namespaces and canonicalization must be explicit
+### Rule 27: Concrete paths remain exact
 
 All watch matching must use normalized paths in the namespace owned by the watched filesystem. Runtime watches therefore use runtime paths beginning with `/`; authority-global watches use explicitly qualified authority-global paths:
 
 - normalize separators and duplicate slashes
-- define case handling by backend capability (case-sensitive vs insensitive)
-- preserve old/new path semantics for case-only renames on insensitive backends
+- preserve the exact spelling carried by every concrete provider event
+- preserve both old and new canonical paths for renames, matching a request when either endpoint qualifies
+- reserve reset for explicit information loss rather than backing-filesystem case or Unicode behavior
 
-Do not compare raw incoming paths directly.
+Do not lowercase, Unicode-normalize, or synthesize equivalence keys in the registry or runtime.
+
+Tau accepts that a rare out-of-band case-only or Unicode-equivalent edit may not match a differently spelled dependency path on some Web Access roots. A refresh or project reopen may be required in that case. If measured product behavior later requires alias-aware matching, add a provider-native canonical identity contract; do not reintroduce a speculative case-sensitivity boolean or broaden ordinary concrete events.
 
 ### Rule 28: Lifecycle safety for ports and watches
 
@@ -421,8 +383,8 @@ On port disconnect/dispose:
 
 On backend mount change:
 
-- invalidate watch subscriptions tied to old backend
-- emit backend reset events so clients can resync
+- make previously materialized rooted views reject new admissions with `ESTALE`
+- dispose old service/client/watch ownership once and create a fresh rooted binding from the new successful service identity
 
 ### Rule 29: Tree refresh remains incremental after startup
 
@@ -448,9 +410,9 @@ A watcher path that cannot be observed cannot be trusted at scale.
 
 Minimum required test coverage for watcher correctness and performance:
 
-- **Contract tests**: `watch` request parsing, include/exclude/filter matching, recursive behavior.
+- **Contract tests**: `watch` request parsing, include/exclude matching, recursive behavior, and structural request identity.
 - **Dedup tests**: N identical requests -> 1 underlying subscription; proper ref-count disposal.
-- **Coalescing tests**: add-delete, delete-add, rename bursts, parent delete child suppression.
+- **Coalescing tests**: overwrite-delete, delete-write, rename bursts, typed ancestor-directory reset, and origin isolation.
 - **Overflow tests**: forced queue overflow emits reset and triggers deterministic resync path.
 - **Kernel integration tests**: file change invalidates caches and emits `filesChanged` without main-thread relay.
 - **Tree integration tests**: mutation updates only affected directory/subtree entries.
@@ -464,15 +426,34 @@ Minimum required test coverage for watcher correctness and performance:
 
 When a bridge proxy is disposed, the main-thread port (`port2`) is closed. The worker-side port (`port1`) should also be cleaned up. Each `exposeFileSystem` handler should track active ports and close them when the counterpart disconnects.
 
-### Rule 32: Timeout awareness
+### Rule 32: Report mutation deadlines causally
 
-All bridge calls have a 30-second timeout. Long-running operations (large file writes, directory copies) should not exceed this. If they might, the operation should be split into chunks or the timeout extended per-call.
+A bridge client may report that a mutation timed out only when the server-side operation is causally cancelled before that result is returned. Never reject a mutation locally while allowing the authority to continue writing in the background.
+
+Keep the 30-second default for ordinary bridge calls. A journal-backed, idempotent authority command may explicitly opt out of the wall-clock client timer when its durable operation can be replayed and its caller does not place unrelated discovery or navigation behind completion. Configure that exception by method identity; do not add a generic “disable timeouts” option.
+
+CORRECT:
+
+```typescript
+createBridgeProxy(port, {
+  resolveCallTimeout: (method) => (method === 'commitPendingProjectDirectory' ? 'none' : undefined),
+});
+```
+
+INCORRECT:
+
+```typescript
+await Promise.race([authorityMutation(), rejectAfter(30_000)]);
+// The authority mutation continues after the caller reports failure.
+```
+
+**Why**: A client-only deadline creates split truth: durable storage may commit after the journal owner has already classified the same operation as failed.
 
 ## Provider Performance Rules
 
 ### Rule 33: In-memory file tree for metadata queries
 
-`FileService.getDirectoryStat` and related metadata queries must use an in-memory file tree at the `FileService` layer, not per-path provider stat/readdir calls. Backend metadata calls pay per-operation IndexedDB transaction overhead (~0.1–0.3ms each); for 6265 files this accumulates to seconds.
+`WorkspaceFileService.getDirectoryStat` and related metadata queries must use its in-memory file tree, not per-path provider stat/readdir calls. Backend metadata calls pay per-operation IndexedDB transaction overhead (~0.1–0.3ms each); for 6265 files this accumulates to seconds.
 
 The in-memory tree seeds from the provider's hydrated path index (`DirectIdbProvider._paths`) and is maintained incrementally on writes (not rebuilt).
 
@@ -486,9 +467,9 @@ const stat = await provider.stat(path);
 const entries = await provider.readdir(path);
 ```
 
-### Rule 34: Bulk import uses batched transactions
+### Rule 34: Bulk writes use provider-native batching
 
-For bulk import operations (GitHub import, ZIP upload), write file batches in as few IndexedDB transactions as possible — per-write transaction overhead dominates at thousands of files. After a batched write, the provider's in-memory path index and the in-memory file tree (Rule 33) must be updated (or re-hydrated) before the next read.
+For bulk writes (GitHub import, ZIP upload), the canonical `writeFiles` path may let the IndexedDB provider drain admitted writes in as few native transactions as possible — per-transaction overhead dominates at thousands of files. Do not expose a second provider `bulkImport` mutation path. After commit, update the provider path index and `WorkspaceFileService` tree before the next read; after uncertain failure, refresh before serving metadata.
 
 ### Rule 35: Provider hydration awareness
 

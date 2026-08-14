@@ -9,6 +9,7 @@ related:
   - docs/research/comlink-rpc-practices.md
   - docs/research/fs-bridge-port-migration.md
   - docs/research/runtime-model-load-project-root-regression-v3.md
+  - docs/research/runtime-rooted-filesystem-residual-migration.md
 ---
 
 # RPC & Filesystem Bridge Policy
@@ -46,7 +47,7 @@ The kernel package has two distinct communication systems, each purpose-built fo
 ┌───────────────────────────────────────────────────────────────┐
 │ Layer 1: RuntimeFileSystemBase (provider primitives)           │
 │         + KernelFileSystem (Base + enhanced helpers)           │
-│ createRuntimeFileSystem(base) adds default helpers             │
+│ An internal worker decorator adds canonical helper methods     │
 ├───────────────────────────────────────────────────────────────┤
 │ Layer 2: Constructors (from* factories)                       │
 │ Return the opaque RuntimeFileSystem (transport-ready):        │
@@ -96,16 +97,11 @@ type KernelFileSystem = RuntimeFileSystemBase & {
 };
 ```
 
-**`createRuntimeFileSystem(base)`** wraps a `RuntimeFileSystemBase` with default implementations for the enhanced methods. Backends may supply optimized overrides:
-
-```typescript
-const fs = createRuntimeFileSystem(base); // defaults: readFiles = Promise.all(paths.map(readFile)), etc.
-const fs = createRuntimeFileSystem({ ...base, readFiles: optimizedBatchRead }); // override
-```
+The runtime worker applies one internal decorator that canonicalizes every primitive path and synthesizes the enhanced methods. It is not a public constructor, and backends cannot override the helpers to bypass that confinement boundary.
 
 **Design decisions:**
 
-- **Type split keeps the interface clean.** Filesystem backends implement the provider primitives (`RuntimeFileSystemBase`). The wrapper adds helpers for kernel authors, while application consumers handle only the opaque `RuntimeFileSystem` brand.
+- **Type split keeps the interface clean.** Filesystem backends implement the provider primitives (`RuntimeFileSystemBase`). The runtime worker adds helpers for kernel authors, while application consumers handle only the opaque `RuntimeFileSystem` brand.
 - **Simplified stat return.** Returns `FileStat = { type: 'file' | 'dir'; size; mtimeMs }` (from `@taucad/types`) instead of a full Node.js `Stats` object. This avoids serialization complexity across MessagePort while providing the metadata kernels actually need. `FileStatEntry` extends `FileStat` with `path` and `name` for directory listing results. `NativeStats` and `toFileStat()` (from `@taucad/types/constants`) handle the conversion from Node.js-style `isDirectory()` methods.
 - **`lstat` mirrors `stat`.** Required by `isomorphic-git`. Implementations without symlink support (ZenFS, in-memory) delegate `lstat` to `stat`.
 - **`exists` is explicit.** While `stat` + catch achieves the same result, `exists` is a common enough operation that an explicit method reduces boilerplate and improves readability.
@@ -154,6 +150,8 @@ Client                          Server
 
 Every request carries a monotonically increasing `id`. The server dispatches by method name, calls the function, and responds with `{ id, result }` or `{ id, error }`. Errors are serialized as `BridgeError` objects preserving name, stack, errno code, and metadata.
 
+The channel hello carries immutable filesystem capabilities for a binding. Long-lived watch registration uses one internal ready frame emitted only after the host returns its unsubscribe handle; one multi-path request therefore has one acknowledgement. Public `watch()` and watch-event shapes remain transport-agnostic.
+
 #### Primitives
 
 | Function                                   | Level | Purpose                                                                                                                                        |
@@ -164,7 +162,6 @@ Every request carries a monotonically increasing `id`. The server dispatches by 
 | `createBridgeProxy<T>(port)`               | Low   | Generic **`Proxy`**-based RPC client (**`Port`**-backed wire)                                                                                  |
 | `catchMessages(port)`                      | Low   | Buffer incoming messages during initialization, replay on demand                                                                               |
 | `extractTransferables(value)`              | Low   | Walk nested values and collect **`ArrayBuffer`** transferables (de-duplicated)                                                                 |
-| `createRuntimeFileSystem(base)`            | Mid   | Wrap **`RuntimeFileSystemBase`** with default enhanced method implementations                                                                  |
 | `exposeFileSystem(handlers, options?)`     | High  | Worker-side: listen for incoming bridge ports                                                                                                  |
 | `createFileSystemBridge(worker, options?)` | High  | Client isolate: **`MessageChannel`** + transfer to FS worker — returns **`FileSystemBridge`** (wrapped **`Port`** for **`createBridgeProxy`**) |
 
@@ -255,7 +252,7 @@ The runtime package must be completely decoupled from ZenFS. The package provide
 
 3. **Constructors normalize, not extend.** Each `from*` function converts a source API to exactly the `RuntimeFileSystemBase` interface -- the 11 primitives, no extra methods, no source-specific behavior leaking through.
 
-4. **Zero-copy binary transfer.** `extractTransferables` scans values for `ArrayBuffer` instances and includes them in the `postMessage` transfer list. This avoids expensive structured-clone copies for large file content (CAD files can be tens of MB).
+4. **Owned binary transfer.** `extractTransferables` scans values for `ArrayBuffer` instances and includes them in the `postMessage` transfer list. A filesystem bridge clones borrowed provider/cache read results first, then transfers the boundary-owned copy; generic RPC handlers may transfer a buffer directly only when they own it and no retained state references it.
 
 5. **Initialization safety.** `catchMessages(port)` buffers incoming messages until the server is ready, then replays them. This prevents lost requests during worker initialization.
 

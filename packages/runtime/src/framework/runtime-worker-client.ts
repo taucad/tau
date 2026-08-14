@@ -170,14 +170,20 @@ type QueuedPreview = {
   readonly send: () => void;
 };
 
-const timeoutIssue = {
-  message: 'Render timed out. Increase the timeout in viewer settings or simplify the model geometry.',
+/**
+ * Create the fact-only issue emitted when a preview deadline expires.
+ *
+ * @param renderTimeout - Milliseconds.
+ * @returns The timeout issue for the worker or client deadline.
+ */
+export const renderTimeoutIssue = (renderTimeout?: number): KernelIssue => ({
+  message: renderTimeout === undefined ? 'Render timed out.' : `Render timed out after ${renderTimeout} ms.`,
   code: 'RENDER_TIMEOUT',
   type: 'runtime',
   severity: 'error',
-} as const satisfies KernelIssue;
+});
 
-const assertValidRenderTimeout = (renderTimeout: number): void => {
+export const assertValidRenderTimeout = (renderTimeout: number): void => {
   if (!Number.isFinite(renderTimeout) || renderTimeout < 0) {
     throw new TypeError('renderTimeout must be a finite, non-negative number of milliseconds.');
   }
@@ -683,7 +689,7 @@ export class RuntimeWorkerClient {
     this.localTimeouts.emit({
       renderId: admission.renderId,
       renderTimeout: admission.renderTimeout,
-      issues: [timeoutIssue],
+      issues: [renderTimeoutIssue(admission.renderTimeout)],
     });
     const recovery = this.transport.renderTimeoutRecovery;
     if (recovery.kind !== 'terminable') {

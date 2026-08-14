@@ -11,6 +11,7 @@ import {
 import type { RenderStatus } from '#client/runtime-client-core.js';
 import { RenderTimeoutError } from '#framework/runtime-worker-client.js';
 import type { GeometryTransport, RuntimeProtocol, WorkerState } from '#types/runtime-protocol.types.js';
+import type { KernelIssue } from '#types/runtime.types.js';
 import type {
   RuntimeTransportClient,
   RuntimeTransportRenderTarget,
@@ -769,9 +770,9 @@ describe('RuntimeClient render timeout control plane', () => {
 
   it('rejects at the local deadline even when the worker never acknowledges timeout cancellation', async () => {
     const { client, handlers, notify, abort, terminateHost } = createStatusClientFixture({ renderTimeout: 75 });
-    const errors: string[] = [];
+    const errors: KernelIssue[] = [];
     client.on('error', (issues) => {
-      errors.push(...issues.map((issue) => issue.code));
+      errors.push(...issues);
     });
     await client.connect();
     vi.useFakeTimers();
@@ -784,7 +785,14 @@ describe('RuntimeClient render timeout control plane', () => {
 
     await vi.advanceTimersByTimeAsync(75);
     await renderTimeoutSettlement;
-    expect(errors).toEqual(['RENDER_TIMEOUT']);
+    expect(errors).toEqual([
+      {
+        message: 'Render timed out after 75 ms.',
+        code: 'RENDER_TIMEOUT',
+        type: 'runtime',
+        severity: 'error',
+      },
+    ]);
     expect(abort).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ renderId }));
     expect(terminateHost).not.toHaveBeenCalled();
 

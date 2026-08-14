@@ -2934,7 +2934,12 @@ describe('abort reason propagation', () => {
 
     expect(onError).toHaveBeenCalledOnce();
     expect(onError.mock.calls[0]?.[0].renderId).toBe(renderId);
-    expect(onError.mock.calls[0]?.[0].issues.some((issue) => issue.code === 'RENDER_TIMEOUT')).toBe(true);
+    expect(onError.mock.calls[0]?.[0].issues).toContainEqual({
+      message: 'Render timed out.',
+      code: 'RENDER_TIMEOUT',
+      type: 'runtime',
+      severity: 'error',
+    });
     expect(states.at(-1)).toBe('error');
   });
 

@@ -33,7 +33,7 @@ import type {
   RenderPhase,
   WorkerState,
 } from '#types/runtime-protocol.types.js';
-import { RuntimeWorkerClient, RenderTimeoutError } from '#framework/runtime-worker-client.js';
+import { RuntimeWorkerClient, RenderTimeoutError, assertValidRenderTimeout } from '#framework/runtime-worker-client.js';
 import type { RuntimeTransportClient, TransportPlugin } from '#transport/runtime-transport.types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type { RuntimeFromTransport } from '#transport/transport-projections.js';
@@ -583,12 +583,6 @@ const assertExportInputShape = (input: Record<string, unknown>): void => {
 const assertRecordInput = (operation: string, field: string, value: unknown): void => {
   if (value !== undefined && !isRecord(value)) {
     throw new TypeError(`RuntimeClient.${operation} ${field} must be an object.`);
-  }
-};
-
-const assertValidRenderTimeout = (renderTimeout: number): void => {
-  if (!Number.isFinite(renderTimeout) || renderTimeout < 0) {
-    throw new TypeError('renderTimeout must be a finite, non-negative number of milliseconds.');
   }
 };
 

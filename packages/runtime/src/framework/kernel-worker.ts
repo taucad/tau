@@ -80,7 +80,7 @@ import type {
 } from '#types/runtime-protocol.types.js';
 import { signalSlot, abortReason as abortReasonEnum } from '#types/runtime-protocol.types.js';
 import type { TranscoderDefinition, TranscoderEdge, TranscoderRuntime } from '#types/runtime-transcoder.types.js';
-import { isRenderAbortedError, RenderAbortedError } from '#framework/runtime-worker-client.js';
+import { isRenderAbortedError, renderTimeoutIssue, RenderAbortedError } from '#framework/runtime-worker-client.js';
 import { setAbortContext, clearAbortContext } from '#framework/cooperative-abort.js';
 import { createRuntimeFileSystem } from '#filesystem/create-runtime-filesystem.js';
 import { toJSONSchema } from 'zod';
@@ -142,13 +142,6 @@ type RenderCancellationRecord = {
   reason?: 'superseded' | 'timeout';
   executing: boolean;
 };
-
-const renderTimeoutIssue = {
-  message: 'Render timed out. Increase the timeout in viewer settings or simplify the model geometry.',
-  code: 'RENDER_TIMEOUT',
-  type: 'runtime',
-  severity: 'error',
-} as const satisfies KernelIssue;
 
 const neverAbortedSignal = new AbortController().signal;
 
@@ -979,7 +972,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     if (reason === 'timeout') {
-      this.onError?.({ issues: [renderTimeoutIssue], renderId: record.renderId });
+      this.onError?.({ issues: [renderTimeoutIssue()], renderId: record.renderId });
       this.pushState('error', record);
     } else {
       this.pushState('idle', record);
@@ -3614,7 +3607,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         const { reason } = record;
 
         if (reason === 'timeout') {
-          this.onError?.({ issues: [renderTimeoutIssue], renderId: record.renderId });
+          this.onError?.({ issues: [renderTimeoutIssue()], renderId: record.renderId });
           this.pushState('error', record);
         } else {
           this.pushState('idle', record);

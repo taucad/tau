@@ -3,7 +3,7 @@ title: 'GeoSpec Policy'
 description: 'Rules for GeoSpec matcher API design, evidence naming, diagnostics, failure messages, C++/WASM implementation, and high-assurance geometry test authoring.'
 status: active
 created: '2026-06-23'
-updated: '2026-07-07'
+updated: '2026-08-13'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/testing-policy.md
@@ -12,6 +12,7 @@ related:
   - docs/research/geospec-hybrid-wasm-matcher-architecture.md
   - docs/research/geospec-production-assertions-audit.md
   - docs/research/geospec-production-assertions-catalog.md
+  - docs/research/geospec-v2-wave1-canonical-engine-closeout-blueprint.md
   - docs/research/v8-engine-brep-current-manufacturability-audit.md
 ---
 
@@ -127,7 +128,7 @@ expectGeo(stepSubject).toBeValidBrep({ maxTolerance: 0.01 });
 expectGeo(glbSubject).toHaveMeshIntegrity({ finitePositions: true });
 ```
 
-A matcher may support `evidence: 'auto' | 'mesh' | 'brep'` only when both evidence modes answer the same engineering question. If the semantics differ, use separate options or separate matchers.
+Evidence routing is engine-owned and deterministic by subject capability. When BRep evidence exists, a scalar or exact relationship matcher uses it; mesh evidence answers only mesh-grade claims or genuinely mesh-only subjects. Do not expose an author-visible `evidence` selector: it makes backend choice part of intent and permits callers to weaken the proof without changing the engineering question. Provenance reports which evidence answered. If two representations answer different questions, use separate options or separate matchers.
 
 ## 6. Use AABB Only As Broad-Phase Relationship Evidence
 
@@ -317,7 +318,7 @@ const open = voxelFloodFill(region, resolution); // resolution-dependent; unfals
 
 ## 17. Prefer Exact Geometry Over Discretized Sampling
 
-Answer a geometric or topological question with exact geometric operations — boolean, connected-component decomposition, planar section, point classification — not with voxel grids, uniform lattices, or image processing over a discretized field. Discretized sampling is broad-phase or last-resort evidence only, held to the same standard as AABB (§6): it may prune candidates or provide diagnostics, but must carry an explicit resolution/tolerance contract and must never be the default proof for connectivity, cross-section, interference, or clearance.
+Answer a geometric or topological question with geometry operations — boolean, connected-component decomposition, generalized winding-number classification, planar section, or exact point classification — not with voxel grids, uniform lattices, or image processing over a discretized field. Voxel evidence must never participate in a final GeoSpec verdict. A correctness-preserving broad phase may prune work, but uncertainty must fall through to the canonical proof rather than becoming a sampled verdict.
 
 **Why**: Sampling approximates an exact question, introducing resolution-dependence and aliasing — a sub-cell wall tunnels through, a sub-cell void disappears — while the exact operation is both more correct and, done in C++, faster.
 
@@ -369,7 +370,7 @@ GeoSpec's native module may embed more than one geometry engine and select per o
 
 **Why**: No single kernel is best at everything — exact-BRep booleans are fragile on complex geometry, while a mesh-CSG engine is robust and fast but not analytically exact; pairing them yields both exactness and robustness.
 
-For an exact-BRep kernel, the mesh a CSG engine operates on must be **derived from the AP242-read BRep** (tessellated after the STEP round-trip), preserving the AP242 substrate (§21). For a mesh-only kernel, the kernel mesh is the substrate directly.
+For an exact-BRep kernel, a mesh that substitutes for exact-BRep evidence must be **derived from the AP242-read BRep** (tessellated after the STEP round-trip), preserving the AP242 substrate (§21). A separately declared rendered-export assertion may instead test the authored GLB itself, because the exported mesh is then the subject of the claim rather than an approximation of an exact-BRep claim. For a mesh-only kernel, the kernel mesh is the substrate directly.
 
 ## 20. Evolve The Native Surface To Fit The Matcher
 
@@ -400,7 +401,7 @@ GeoSpec tests multiple geometry kernels, and the evidence substrate follows each
 | Mesh-only (OpenSCAD, JSCAD, …)       | Rendered mesh     | The kernel mesh **is** the substrate — proofs run on it directly; there is no BRep to require.                                                                                    |
 | Exact-BRep (replicad/OpenCascade, …) | AP242 STEP BRep   | Exact-geometry proofs run on geometry round-tripped through **AP242 STEP** — the interchange is part of what is certified. Mesh evidence is also available for mesh-grade checks. |
 
-For an exact-BRep kernel, never substitute a kernel-native serialization — OCCT `.brep`, a kernel's internal solid format, or a pre-STEP tessellation — to make the load cheaper: it certifies the kernel, not the AP242 exchange the shop floor receives, so the AP242 round-trip cost is inherent to that assurance and must be reduced by serializing less (minimal per-proof evidence), never by leaving AP242. Mesh (GLB) evidence — whether primary (mesh-only kernels) or derived (BRep kernels, tessellated from the STEP-read BRep, §19) — is first-class for mesh-grade integrity, spatial localization, and topology/CSG compute, but it does not substitute for the AP242 exact-BRep substrate where exactness is asserted (§10).
+For an exact-BRep kernel, never substitute a kernel-native serialization — OCCT `.brep`, a kernel's internal solid format, or a pre-STEP tessellation — to make the load cheaper: it certifies the kernel, not the AP242 exchange the shop floor receives. Reduce total evidence-production wall by reusing canonical AP242 evidence. A subset artifact is justified only when its producer avoids whole-model construction and a benchmark proves a total-wall win; filtering after whole-model construction is not optimization. Mesh (GLB) evidence — whether primary for mesh-only kernels, derived from AP242 when substituting for BRep, or explicitly asserted as a rendered export (§19) — is first-class for mesh-grade integrity, spatial localization, and topology/CSG compute, but it does not substitute for the AP242 exact-BRep substrate where exactness is asserted (§10).
 
 **Why**: GeoSpec must certify what each kernel actually delivers — a mesh from a mesh-only kernel, the AP242 interchange from a BRep kernel; bypassing AP242 for a faster kernel-native format would certify geometry no downstream consumer receives.
 

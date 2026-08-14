@@ -100,7 +100,6 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
         // oxlint-disable-next-line no-await-in-loop -- Within one worker, CAD tests run serially for deterministic evidence and bounded runtime pressure; the pool runner (R3) parallelizes across workers.
         const result = await runGeoSpecModule({
           filesystem: options.filesystem,
-          projectPath: options.projectPath,
           entryPath: file,
           testNamePattern: runOptions.testNamePattern,
           testTimeout: runOptions.testTimeout,

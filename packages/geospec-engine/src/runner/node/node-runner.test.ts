@@ -47,7 +47,6 @@ describe('createGeoSpecNodeRunner', () => {
   it('should execute a file serially', async () => {
     const runner = createGeoSpecNodeRunner({
       filesystem: memoryFileSystem({ '/a.geospec.ts': passingSpec('node') }),
-      projectPath: '/',
     });
 
     const result = await runner.run({ files: ['/a.geospec.ts'] });

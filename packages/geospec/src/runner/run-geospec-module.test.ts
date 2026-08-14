@@ -54,7 +54,6 @@ const filesystemWith = (entries: readonly SourceEntry[]): MemoryFileSystem => {
 const runModule = async (entries: readonly SourceEntry[], options: Record<string, unknown> = {}) =>
   runGeoSpecModule({
     filesystem: filesystemWith(entries),
-    projectPath: '/',
     entryPath: entries[0]?.[0] ?? '/spec.geospec.ts',
     ...options,
   });
@@ -228,7 +227,6 @@ describe('serial runner shell', () => {
       ['/first.geospec.ts', passing('first')],
       ['/second.geospec.ts', passing('second')],
     ]),
-    projectPath: '/',
   });
 
   it('should run every file and emit the lifecycle events', async () => {
@@ -300,7 +298,6 @@ describe('serial runner shell', () => {
         ['/a.geospec.ts', 'throw new Error("boom");'],
         ['/b.geospec.ts', passing('second')],
       ]),
-      projectPath: '/',
     });
 
     const result = await runner.run({ files: ['/a.geospec.ts', '/b.geospec.ts'], bail: true });

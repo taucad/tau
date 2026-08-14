@@ -52,7 +52,6 @@ const loadedSubject = async (): Promise<GeometrySubject> => {
 
 const runnerOptions = (files: Readonly<Record<string, string>>): GeoSpecRunnerOptions => ({
   filesystem: memoryFileSystem(files),
-  projectPath: '/',
 });
 
 describe('countRunnerTests', () => {
@@ -294,7 +293,6 @@ describe('the optional runner dependencies', () => {
           describe('deps', () => { it('sees the builtin', () => { if (note !== 'ok') throw new Error(note); }); });
         `,
       }),
-      projectPath: '/',
       stepLoader: async () => exposed(emptyStepSubject()),
       builtinModules: { 'project/extra': { version: '1', code: "export const note = 'ok';" } },
       internalProfile: profileCounters(),
@@ -326,7 +324,6 @@ describe('the remaining serial legs', () => {
           });
         `,
       }),
-      projectPath: '/',
       modelLoader: async () => exposed(model),
     });
     runner.on('forensic', (event) => events.push(event));
@@ -384,7 +381,6 @@ describe('the remaining serial legs', () => {
           describe('affinity', () => { it('loads', async () => { await loadModel({ file: 'main.ts' }); }); });
         `,
       }),
-      projectPath: '/',
       modelLoader: async () => exposed(subject),
     });
 

@@ -269,7 +269,6 @@ export const profileCanonicalPerTestLoadPath = async (options: {
     filesystem.setText('/project/main.geospec.ts', canonicalPerTestGeoSpecSource);
     const runner = createSerialGeoSpecRunner({
       filesystem,
-      projectPath: '/project',
       modelLoader: async () => {
         underlyingModelLoaderCalls += 1;
         return exposeEngineSubject(await createSubjectFromGlb({ bytes: options.glbBytes, io, samples }));

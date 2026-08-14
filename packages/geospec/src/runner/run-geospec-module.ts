@@ -140,7 +140,7 @@ export const analyzeBrep = ({ subject }) => {
 /**
  * Execute an ESM GeoSpec module using the shared Tau VM substrate.
  *
- * @param options - filesystem, project root, and test entry path.
+ * @param options - filesystem and test entry path.
  * @returns collected test cases or structured VM issues.
  *
  * @public
@@ -153,7 +153,6 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
 
   const vm = await createEsbuildModuleVm({
     filesystem: options.filesystem,
-    projectPath: options.projectPath,
   });
   const collector = createCollector({
     ...(options.matcherWallBackstop === undefined ? {} : { matcherWallBackstop: options.matcherWallBackstop }),

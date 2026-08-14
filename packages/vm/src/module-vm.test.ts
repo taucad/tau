@@ -63,7 +63,7 @@ describe('createEsbuildModuleVm', () => {
     );
     filesystem.setText('/project/shape.ts', 'export const makeBox = () => ({ kind: "box", size: 1 });');
 
-    const vm = await createEsbuildModuleVm({ filesystem, projectPath: '/project' });
+    const vm = await createEsbuildModuleVm({ filesystem });
     activeVm = vm;
     vm.registerModule('geospec', {
       version: '0.0.0-test',
@@ -102,7 +102,7 @@ describe('createEsbuildModuleVm', () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText('/project/model.ts', "import value from '#internal'; export const result = value;");
 
-    const vm = await createEsbuildModuleVm({ filesystem, projectPath: '/project' });
+    const vm = await createEsbuildModuleVm({ filesystem });
     activeVm = vm;
 
     const result = await vm.bundle('/project/model.ts');
@@ -127,7 +127,7 @@ describe('createEsbuildModuleVm', () => {
     );
     filesystem.setText('/project/present.ts', 'export const value = 7;');
 
-    const vm = await createEsbuildModuleVm({ filesystem, projectPath: '/project' });
+    const vm = await createEsbuildModuleVm({ filesystem });
     activeVm = vm;
 
     const result = await vm.resolveDependencies('/project/main.ts');
@@ -159,7 +159,7 @@ describe('createEsbuildModuleVm', () => {
     filesystem.setText('/project/assets/part.step', 'ISO-10303-21;');
     filesystem.setText('/project/assets/other.step', 'ISO-10303-21;');
 
-    const vm = await createEsbuildModuleVm({ filesystem, projectPath: '/project' });
+    const vm = await createEsbuildModuleVm({ filesystem });
     activeVm = vm;
 
     const result = await vm.resolveDependencies('/project/main.ts');
@@ -173,7 +173,7 @@ describe('createEsbuildModuleVm', () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText('/project/model.test.ts', "import { describe } from 'geospec'; export const result = describe;");
 
-    const vm = await createEsbuildModuleVm({ filesystem, projectPath: '/project' });
+    const vm = await createEsbuildModuleVm({ filesystem });
     activeVm = vm;
 
     const result = await vm.bundle('/project/model.test.ts');
@@ -191,7 +191,7 @@ describe('createEsbuildModuleVm', () => {
 
   it('should return structured execution issues when bundled code throws', async () => {
     const filesystem = new MemoryFileSystem();
-    const vm = await createEsbuildModuleVm({ filesystem, projectPath: '/project' });
+    const vm = await createEsbuildModuleVm({ filesystem });
     activeVm = vm;
 
     const result = await vm.execute('throw new TypeError("boom from vm test");');
@@ -212,7 +212,7 @@ describe('createEsbuildModuleVm', () => {
   it('should re-execute identical code by default for repeatable VM consumers', async () => {
     const key = '__TAUCAD_VM_REPEATABLE_DEFAULT__';
     const filesystem = new MemoryFileSystem();
-    const vm = await createEsbuildModuleVm({ filesystem, projectPath: '/project' });
+    const vm = await createEsbuildModuleVm({ filesystem });
     activeVm = vm;
 
     try {
@@ -240,7 +240,6 @@ describe('createEsbuildModuleVm', () => {
     const filesystem = new MemoryFileSystem();
     const vm = await createEsbuildModuleVm({
       filesystem,
-      projectPath: '/project',
       cacheExecution: true,
     });
     activeVm = vm;

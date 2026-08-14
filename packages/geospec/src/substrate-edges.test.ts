@@ -231,7 +231,6 @@ describe('concurrent module runs', () => {
     const run = async () =>
       runGeoSpecModule({
         filesystem: filesystemOf([]) as unknown as VmFileSystem,
-        projectPath: '/',
         entryPath: '/spec.geospec.ts',
         builtinModules: {},
       });
@@ -254,12 +253,10 @@ describe('concurrent module runs', () => {
     const [first, second] = await Promise.all([
       runGeoSpecModule({
         filesystem: filesystem as unknown as VmFileSystem,
-        projectPath: '/',
         entryPath: '/a.geospec.ts',
       }),
       runGeoSpecModule({
         filesystem: filesystem as unknown as VmFileSystem,
-        projectPath: '/',
         entryPath: '/b.geospec.ts',
       }),
     ]);
@@ -290,7 +287,7 @@ describe('serial runner edges', () => {
   it('should use the bare abort message for an empty reason', async () => {
     // oxlint-disable-next-line eslint/prefer-const -- the event handler closes over the runner it creates.
     let runner: ReturnType<typeof createSerialGeoSpecRunner>;
-    runner = createSerialGeoSpecRunner({ filesystem, projectPath: '/' });
+    runner = createSerialGeoSpecRunner({ filesystem });
     runner.on('file-complete', () => {
       runner.abort('');
     });
@@ -311,7 +308,6 @@ describe('serial runner edges', () => {
 
     const runner = createSerialGeoSpecRunner({
       filesystem,
-      projectPath: '/',
       modelLoader: async () => subject,
       stepLoader: async () => subject,
       builtinModules: { extra: { version: '1', code: 'export const x = 1;' } },

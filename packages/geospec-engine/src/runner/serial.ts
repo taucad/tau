@@ -203,9 +203,6 @@ export const executeGeoSpecFile = async (options: {
     async () =>
       runGeoSpecModule({
         filesystem: runner.filesystem,
-        projectPath: runner.projectPath,
-        // VM-rooted, never a host path: `runGeoSpecModule` resolves it against the
-        // project root itself, so joining the root in produces `<root><root>/…`.
         entryPath: file,
         ...(options.testNamePattern === undefined ? {} : { testNamePattern: options.testNamePattern }),
         ...(options.testTimeout === undefined ? {} : { testTimeout: options.testTimeout }),

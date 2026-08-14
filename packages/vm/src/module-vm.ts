@@ -20,8 +20,6 @@ import type { VmExecuteResult, VmFileSystem } from '#types.js';
 export type EsbuildModuleVmOptions = {
   /** Filesystem used for virtual project files and CDN cache writes. */
   filesystem: VmFileSystem;
-  /** Absolute project root path used to resolve entry points. */
-  projectPath: string;
   /** Enable inline source maps in bundled output. */
   sourceMaps?: boolean;
   /** Names to auto-export from CommonJS-style entry modules. */
@@ -68,7 +66,7 @@ export type ModuleVm = {
 /**
  * Create an esbuild-backed ESM module VM.
  *
- * @param options - filesystem, project root, and bundler behavior.
+ * @param options - filesystem and bundler behavior.
  * @returns a ready-to-use module VM.
  *
  * @public
@@ -79,7 +77,7 @@ export type ModuleVm = {
  * import type { EsbuildModuleVmOptions } from '@taucad/vm';
  *
  * declare const filesystem: EsbuildModuleVmOptions['filesystem'];
- * const vm = await createEsbuildModuleVm({ filesystem, projectPath: '/project' });
+ * const vm = await createEsbuildModuleVm({ filesystem });
  * vm.registerModule('geospec', { version: '0.0.0', code: 'export const describe = () => {}' });
  * const bundled = await vm.bundle('/project/model.test.ts');
  * const module = await vm.execute(bundled.code);
@@ -91,7 +89,6 @@ export async function createEsbuildModuleVm(options: EsbuildModuleVmOptions): Pr
 
   const bundler = new EsbuildBundler({
     filesystem: options.filesystem,
-    projectPath: options.projectPath,
     builtinModules,
     sourceMaps: options.sourceMaps,
     autoExportNames: options.autoExportNames,
@@ -111,7 +108,6 @@ export async function createEsbuildModuleVm(options: EsbuildModuleVmOptions): Pr
         plugins: [
           createDetectionPlugin({
             filesystem: options.filesystem,
-            projectPath: options.projectPath,
           }),
         ],
         external: [],
@@ -122,7 +118,7 @@ export async function createEsbuildModuleVm(options: EsbuildModuleVmOptions): Pr
         const result = await esbuild.build(buildOptions);
         return {
           detectedModules: extractExternalImports(result.metafile),
-          dependencies: extractProjectDependencies(result.metafile, options.projectPath),
+          dependencies: extractProjectDependencies(result.metafile),
         };
       } catch {
         return { detectedModules: [], dependencies: [] };

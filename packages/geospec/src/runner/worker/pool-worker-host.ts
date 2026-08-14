@@ -18,8 +18,6 @@ import type { RunGeoSpecModuleOptions } from '#runner/types.js';
 export type GeoSpecPoolWorkerHostOptions = {
   /** Filesystem containing the project and test modules. */
   filesystem: RunGeoSpecModuleOptions['filesystem'];
-  /** Absolute project root path. */
-  projectPath: string;
   /** Model loader exposed to authored tests through `geospec/model`. */
   modelLoader?: RunGeoSpecModuleOptions['modelLoader'];
   /** STEP loader exposed to authored tests through `geospec/step`. */

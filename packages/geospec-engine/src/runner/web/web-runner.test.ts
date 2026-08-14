@@ -60,7 +60,6 @@ describe('createGeoSpecWebRunner', () => {
   it('should execute a file serially, exactly like the Node host', async () => {
     const runner = createGeoSpecWebRunner({
       filesystem: memoryFileSystem({ '/a.geospec.ts': passingSpec('web') }),
-      projectPath: '/',
     });
 
     const result = await runner.run({ files: ['/a.geospec.ts'] });

@@ -35,7 +35,6 @@ const startHost = (
   let deliver: ((message: GeoSpecPoolHostMessage) => void) | undefined;
   startGeoSpecPoolWorkerHost({
     filesystem: memoryFileSystem(files),
-    projectPath: '/',
     postMessage: (message) => posted.push(message),
     onHostMessage: (listener) => {
       deliver = listener;
@@ -179,7 +178,6 @@ describe('startGeoSpecPoolWorkerHost', () => {
     let deliver: ((message: GeoSpecPoolHostMessage) => void) | undefined;
     startGeoSpecPoolWorkerHost({
       filesystem: memoryFileSystem({ '/a.geospec.ts': passingSpec('a') }),
-      projectPath: '/',
       postMessage: (message) => {
         if (message.type === 'shard-complete') {
           throw new Error('could not be cloned');
@@ -212,7 +210,6 @@ describe('startGeoSpecPoolWorkerHost', () => {
     let deliver: ((message: GeoSpecPoolHostMessage) => void) | undefined;
     startGeoSpecPoolWorkerHost({
       filesystem: memoryFileSystem({ '/a.geospec.ts': passingSpec('a') }),
-      projectPath: '/',
       postMessage: (message) => {
         if (message.type === 'tests-listed') {
           // A non-Error throw: the host must still name it.

@@ -37,7 +37,6 @@ const collectedNames = (result: GeoSpecRunResult): string[] =>
 export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions): void => {
   const runner = {
     filesystem: options.filesystem,
-    projectPath: options.projectPath,
     ...(options.modelLoader ? { modelLoader: options.modelLoader } : {}),
     ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
     ...(options.builtinModules ? { builtinModules: options.builtinModules } : {}),

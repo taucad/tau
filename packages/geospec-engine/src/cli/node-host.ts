@@ -46,12 +46,7 @@ export const createNodeGeoSpecCliHost = (options?: { reportStream?: (text: strin
           ...(cacheDirectory === undefined ? {} : { cacheDirectory }),
         });
         return createSerialGeoSpecRunner({
-          // The VM world is rooted at `/`: the filesystem is confined to the
-          // real project directory and every path inside the VM is relative to
-          // it. Handing the VM the host path too would resolve `<root>/<entry>`
-          // *again* under the root and produce `<root><root>/<entry>`.
           filesystem: createNodeVmFileSystem(projectPath),
-          projectPath: '/',
           // The model loader is NOT in the VM world: it drives the Tau runtime
           // against the real directory.
           modelLoader: createModelLoader({ projectPath }),

@@ -92,8 +92,7 @@ function capturePluginHandlers(filesystem: MockFileSystem): CapturedHandlers {
     filesystem,
     moduleManager: new ModuleManager(filesystem),
     builtinModules: new Map(),
-    projectPath: '/project',
-    entryPath: '/project/main.ts',
+    entryPath: '/main.ts',
     autoExportNames: ['main'],
   });
 
@@ -312,7 +311,7 @@ describe('ESBuild VM – CDN absolute-path resolution', () => {
       importer: 'main.ts',
       namespace: esbuildNamespace.vfs,
       kind: 'import-statement',
-      resolveDir: '/project',
+      resolveDir: '/',
       suffix: '',
       pluginData: undefined,
       with: {},
@@ -339,8 +338,8 @@ describe('extractProjectDependencies', () => {
       outputs: {},
     };
 
-    const result = extractProjectDependencies(metafile, '/projects/project');
-    expect(result).toEqual(['/projects/project/main.ts', '/projects/project/utils/helpers.ts']);
+    const result = extractProjectDependencies(metafile);
+    expect(result).toEqual(['/main.ts', '/utils/helpers.ts']);
   });
 
   it('should exclude node_modules paths that start with /', () => {
@@ -352,25 +351,8 @@ describe('extractProjectDependencies', () => {
       outputs: {},
     };
 
-    const result = extractProjectDependencies(metafile, '/projects/project');
-    expect(result).toEqual(['/projects/project/main.ts']);
-  });
-
-  it('should keep local files imported from outside projectPath', () => {
-    // When projectPath is a subdirectory (e.g. the CLI points it at the entry
-    // file's own directory), an import like `../lib/block.ts` resolves above
-    // projectPath and lands in the metafile as an absolute vfs path. It must be
-    // retained so edits to it invalidate the geometry cache.
-    const metafile: Metafile = {
-      inputs: {
-        'vfs:main.ts': { bytes: 100, imports: [], format: undefined },
-        'vfs:/projects/other/lib/block.ts': { bytes: 50, imports: [], format: undefined },
-      },
-      outputs: {},
-    };
-
-    const result = extractProjectDependencies(metafile, '/projects/project');
-    expect(result).toEqual(['/projects/project/main.ts', '/projects/other/lib/block.ts']);
+    const result = extractProjectDependencies(metafile);
+    expect(result).toEqual(['/main.ts']);
   });
 
   it('should exclude non-vfs namespace entries', () => {
@@ -383,12 +365,12 @@ describe('extractProjectDependencies', () => {
       outputs: {},
     };
 
-    const result = extractProjectDependencies(metafile, '/projects/project');
-    expect(result).toEqual(['/projects/project/main.ts']);
+    const result = extractProjectDependencies(metafile);
+    expect(result).toEqual(['/main.ts']);
   });
 
   it('should return empty array for undefined metafile', () => {
-    const result = extractProjectDependencies(undefined, '/projects/project');
+    const result = extractProjectDependencies(undefined);
     expect(result).toEqual([]);
   });
 
@@ -400,20 +382,8 @@ describe('extractProjectDependencies', () => {
       outputs: {},
     };
 
-    const result = extractProjectDependencies(metafile, '/projects/project');
+    const result = extractProjectDependencies(metafile);
     expect(result).toEqual([]);
-  });
-
-  it('should handle projectPath with trailing slash', () => {
-    const metafile: Metafile = {
-      inputs: {
-        'vfs:main.ts': { bytes: 100, imports: [], format: undefined },
-      },
-      outputs: {},
-    };
-
-    const result = extractProjectDependencies(metafile, '/projects/project/');
-    expect(result).toEqual(['/projects/project/main.ts']);
   });
 });
 
@@ -558,8 +528,7 @@ describe('ESBuild VM – unresolved path tracking', () => {
       filesystem: fs,
       moduleManager: new ModuleManager(fs),
       builtinModules: new Map(),
-      projectPath: '/project',
-      entryPath: '/project/main.ts',
+      entryPath: '/main.ts',
       autoExportNames: ['main'],
       unresolvedPaths: tracked,
     });
@@ -597,27 +566,27 @@ describe('ESBuild VM – unresolved path tracking', () => {
         importer: 'main.ts',
         namespace: esbuildNamespace.vfs,
         kind: 'import-statement',
-        resolveDir: '/project',
+        resolveDir: '/',
         suffix: '',
         pluginData: undefined,
         with: {},
       });
 
-      expect(unresolvedPaths).toContain('/project/lib/foundation.ts');
-      expect(unresolvedPaths).toContain('/project/lib/foundation.tsx');
-      expect(unresolvedPaths).toContain('/project/lib/foundation.js');
-      expect(unresolvedPaths).toContain('/project/lib/foundation.jsx');
+      expect(unresolvedPaths).toContain('/lib/foundation.ts');
+      expect(unresolvedPaths).toContain('/lib/foundation.tsx');
+      expect(unresolvedPaths).toContain('/lib/foundation.js');
+      expect(unresolvedPaths).toContain('/lib/foundation.jsx');
     });
 
     it('should not add extension variants when file resolves successfully', async () => {
-      filesystem.mocks.exists.mockImplementation(async (path: string) => path === '/project/lib/foundation.ts');
+      filesystem.mocks.exists.mockImplementation(async (path: string) => path === '/lib/foundation.ts');
 
       await mainOnResolve({
         path: './lib/foundation',
         importer: 'main.ts',
         namespace: esbuildNamespace.vfs,
         kind: 'import-statement',
-        resolveDir: '/project',
+        resolveDir: '/',
         suffix: '',
         pluginData: undefined,
         with: {},
@@ -634,27 +603,27 @@ describe('ESBuild VM – unresolved path tracking', () => {
         importer: 'main.ts',
         namespace: esbuildNamespace.vfs,
         kind: 'import-statement',
-        resolveDir: '/project',
+        resolveDir: '/',
         suffix: '',
         pluginData: undefined,
         with: {},
       });
 
-      expect(unresolvedPaths.has('/project/lib/foundation.ts.ts')).toBe(false);
-      expect(unresolvedPaths.has('/project/lib/foundation.ts.tsx')).toBe(false);
+      expect(unresolvedPaths.has('/lib/foundation.ts.ts')).toBe(false);
+      expect(unresolvedPaths.has('/lib/foundation.ts.tsx')).toBe(false);
     });
   });
 
   describe('TypeScript ESM extension resolution (.js -> .ts)', () => {
     it('should resolve .js import to .ts file when .js does not exist but .ts does', async () => {
-      filesystem.mocks.exists.mockImplementation(async (path: string) => path === '/project/lib/nozzle.ts');
+      filesystem.mocks.exists.mockImplementation(async (path: string) => path === '/lib/nozzle.ts');
 
       const result = await mainOnResolve({
         path: './lib/nozzle.js',
         importer: 'main.ts',
         namespace: esbuildNamespace.vfs,
         kind: 'import-statement',
-        resolveDir: '/project',
+        resolveDir: '/',
         suffix: '',
         pluginData: undefined,
         with: {},
@@ -669,14 +638,14 @@ describe('ESBuild VM – unresolved path tracking', () => {
     });
 
     it('should resolve .jsx import to .tsx file when .jsx does not exist but .tsx does', async () => {
-      filesystem.mocks.exists.mockImplementation(async (path: string) => path === '/project/components/button.tsx');
+      filesystem.mocks.exists.mockImplementation(async (path: string) => path === '/components/button.tsx');
 
       const result = await mainOnResolve({
         path: './components/button.jsx',
         importer: 'main.ts',
         namespace: esbuildNamespace.vfs,
         kind: 'import-statement',
-        resolveDir: '/project',
+        resolveDir: '/',
         suffix: '',
         pluginData: undefined,
         with: {},
@@ -691,14 +660,14 @@ describe('ESBuild VM – unresolved path tracking', () => {
     });
 
     it('should return .js path as-is when .js file exists', async () => {
-      filesystem.mocks.exists.mockImplementation(async (path: string) => path === '/project/lib/utils.js');
+      filesystem.mocks.exists.mockImplementation(async (path: string) => path === '/lib/utils.js');
 
       const result = await mainOnResolve({
         path: './lib/utils.js',
         importer: 'main.ts',
         namespace: esbuildNamespace.vfs,
         kind: 'import-statement',
-        resolveDir: '/project',
+        resolveDir: '/',
         suffix: '',
         pluginData: undefined,
         with: {},
@@ -713,14 +682,14 @@ describe('ESBuild VM – unresolved path tracking', () => {
     });
 
     it('should return .ts path as-is when .ts file exists', async () => {
-      filesystem.mocks.exists.mockImplementation(async (path: string) => path === '/project/lib/utils.ts');
+      filesystem.mocks.exists.mockImplementation(async (path: string) => path === '/lib/utils.ts');
 
       const result = await mainOnResolve({
         path: './lib/utils.ts',
         importer: 'main.ts',
         namespace: esbuildNamespace.vfs,
         kind: 'import-statement',
-        resolveDir: '/project',
+        resolveDir: '/',
         suffix: '',
         pluginData: undefined,
         with: {},
@@ -747,7 +716,7 @@ describe('ESBuild VM – unresolved path tracking', () => {
         with: {},
       });
 
-      expect(unresolvedPaths).toContain('/project/lib/foundation.ts');
+      expect(unresolvedPaths).toContain('/lib/foundation.ts');
     });
 
     it('should not add node_modules paths to unresolvedPaths on failure', async () => {
@@ -775,7 +744,7 @@ describe('ESBuild VM – unresolved path tracking', () => {
         with: {},
       });
 
-      expect(unresolvedPaths.has('/project/lib/foundation.ts')).toBe(false);
+      expect(unresolvedPaths.has('/lib/foundation.ts')).toBe(false);
     });
   });
 });
@@ -822,7 +791,7 @@ describe('ESBuild VM – query suffix + import attribute handling', () => {
           importer: 'main.ts',
           namespace: esbuildNamespace.vfs,
           kind: 'import-statement',
-          resolveDir: '/project',
+          resolveDir: '/',
           suffix: '',
           pluginData: undefined,
           with: {},
@@ -835,14 +804,14 @@ describe('ESBuild VM – query suffix + import attribute handling', () => {
     );
 
     it('should leave imports without a recognised query untouched (no suffix field)', async () => {
-      filesystem.mocks.exists.mockImplementation(async (path: string) => path === '/project/lib/utils.ts');
+      filesystem.mocks.exists.mockImplementation(async (path: string) => path === '/lib/utils.ts');
 
       const result = (await mainOnResolve({
         path: './lib/utils.ts',
         importer: 'main.ts',
         namespace: esbuildNamespace.vfs,
         kind: 'import-statement',
-        resolveDir: '/project',
+        resolveDir: '/',
         suffix: '',
         pluginData: undefined,
         with: {},
@@ -861,7 +830,7 @@ describe('ESBuild VM – query suffix + import attribute handling', () => {
         importer: 'main.ts',
         namespace: esbuildNamespace.vfs,
         kind: 'import-statement',
-        resolveDir: '/project',
+        resolveDir: '/',
         suffix: '',
         pluginData: undefined,
         with: {},
@@ -901,7 +870,7 @@ describe('ESBuild VM – query suffix + import attribute handling', () => {
       expect(result.contents).toEqual(bytes);
       // Confirms we read raw bytes (no 'utf8' arg) so esbuild's loader handles decoding.
       const readArgs = filesystem.mocks.readFile.mock.calls[0]!;
-      expect(readArgs[0]).toBe('/project/lib/cube.step');
+      expect(readArgs[0]).toBe('/lib/cube.step');
       expect(readArgs[1]).toBeUndefined();
     });
 
@@ -918,7 +887,7 @@ describe('ESBuild VM – query suffix + import attribute handling', () => {
 
       expect(result.loader).toBe('ts');
       expect(typeof result.contents).toBe('string');
-      expect(filesystem.mocks.readFile).toHaveBeenCalledWith('/project/lib/utils.ts', 'utf8');
+      expect(filesystem.mocks.readFile).toHaveBeenCalledWith('/lib/utils.ts', 'utf8');
     });
   });
 
@@ -959,7 +928,7 @@ describe('ESBuild VM – query suffix + import attribute handling', () => {
       })) as { contents: string; loader: string };
 
       expect(result.loader).toBe('json');
-      expect(filesystem.mocks.readFile).toHaveBeenCalledWith('/project/data/config.json', 'utf8');
+      expect(filesystem.mocks.readFile).toHaveBeenCalledWith('/data/config.json', 'utf8');
     });
   });
 });
@@ -980,8 +949,8 @@ describe('extractProjectDependencies — query/fragment stripping', () => {
       outputs: {},
     };
 
-    const result = extractProjectDependencies(metafile, '/projects/project');
-    expect(result).toEqual(['/projects/project/main.ts', '/projects/project/lib/cube.step']);
+    const result = extractProjectDependencies(metafile);
+    expect(result).toEqual(['/main.ts', '/lib/cube.step']);
   });
 
   it('should collapse `#fragment` metafile keys onto their underlying file path', () => {
@@ -992,8 +961,8 @@ describe('extractProjectDependencies — query/fragment stripping', () => {
       outputs: {},
     };
 
-    const result = extractProjectDependencies(metafile, '/projects/project');
-    expect(result).toEqual(['/projects/project/lib/cube.step']);
+    const result = extractProjectDependencies(metafile);
+    expect(result).toEqual(['/lib/cube.step']);
   });
 });
 

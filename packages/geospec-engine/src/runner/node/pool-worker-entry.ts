@@ -45,12 +45,7 @@ export const startNodePoolWorker = (
   const { projectPath } = options;
   installNodeEvidenceStore(options);
   startGeoSpecPoolWorkerHost({
-    // The VM world is rooted at `/` over a filesystem confined to the real
-    // project directory; the model loader keeps the host path because it drives
-    // the Tau runtime on disk. Handing the VM the host path too resolves it
-    // twice under the root.
     filesystem: createNodeVmFileSystem(projectPath),
-    projectPath: '/',
     modelLoader: createModelLoader({ projectPath }),
     postMessage: (message) => {
       port.postMessage(message);

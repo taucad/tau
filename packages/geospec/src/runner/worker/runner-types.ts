@@ -103,8 +103,6 @@ export type GeoSpecRunnerRunOptions = {
 export type GeoSpecRunnerOptions = {
   /** Filesystem containing the project and test modules. */
   filesystem: VmFileSystem;
-  /** Absolute project root path. */
-  projectPath: string;
   /** Model loader exposed to authored tests through `geospec/model`. */
   modelLoader?: RunGeoSpecModuleOptions['modelLoader'];
   /** STEP loader exposed to authored tests through `geospec/step`. */

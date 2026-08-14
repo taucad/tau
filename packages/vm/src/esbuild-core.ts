@@ -61,8 +61,6 @@ export type BundleResult = {
 export type BundlerOptions = {
   /** Filesystem interface for reading/writing files */
   filesystem: VmFileSystem;
-  /** Base path for the project (e.g., /projects/project) */
-  projectPath: string;
   /** Built-in modules to use as fallback */
   builtinModules: Map<string, BuiltinModule>;
   /** Enable source maps */
@@ -424,7 +422,6 @@ export type VfsPluginOptions = {
   filesystem: VmFileSystem;
   moduleManager: ModuleManager;
   builtinModules: Map<string, BuiltinModule>;
-  projectPath: string;
   entryPath: string;
   autoExportNames: string[];
   /** Collects absolute paths of project files accessed during the build, even on failure. */
@@ -443,7 +440,7 @@ export type VfsPluginOptions = {
  *
  * Project files use project-relative paths (e.g., `main.ts`, `src/utils.ts`) within
  * the `vfs` namespace. All filesystem I/O reconstructs absolute paths from the
- * relative esbuild path + projectPath.
+ * relative esbuild path under `/`.
  *
  * Bare specifier resolution:
  * 1. Builtins (replicad, jscad, zod) -> `builtin` namespace (memory)
@@ -460,7 +457,6 @@ export function createVfsPlugin(options: VfsPluginOptions): Plugin {
     filesystem,
     moduleManager,
     builtinModules,
-    projectPath,
     entryPath,
     autoExportNames,
     accessedProjectFiles,
@@ -469,7 +465,7 @@ export function createVfsPlugin(options: VfsPluginOptions): Plugin {
 
   // Path conversion helpers: esbuild sees project-relative paths in the vfs namespace,
   // but all filesystem I/O uses absolute paths.
-  const projectPrefix = projectPath.endsWith('/') ? projectPath : projectPath + '/';
+  const projectPrefix = '/';
 
   /**
    * Convert absolute filesystem path to project-relative path for esbuild identity.
@@ -804,7 +800,6 @@ export function createVfsPlugin(options: VfsPluginOptions): Plugin {
  */
 export class EsbuildBundler {
   private readonly filesystem: VmFileSystem;
-  private readonly projectPath: string;
   private readonly builtinModules: Map<string, BuiltinModule>;
   private readonly moduleManager: ModuleManager;
   private readonly sourceMaps: boolean;
@@ -812,21 +807,11 @@ export class EsbuildBundler {
 
   public constructor(options: BundlerOptions) {
     this.filesystem = options.filesystem;
-    this.projectPath = options.projectPath;
     this.builtinModules = options.builtinModules;
     this.sourceMaps = options.sourceMaps ?? true;
     this.autoExportNames = options.autoExportNames ?? defaultAutoExportNames;
 
     this.moduleManager = new ModuleManager(options.filesystem);
-  }
-
-  /**
-   * Get the project path this bundler was configured for.
-   *
-   * @returns absolute project path
-   */
-  public getProjectPath(): string {
-    return this.projectPath;
   }
 
   /**
@@ -896,7 +881,6 @@ const module = { exports };
             filesystem: this.filesystem,
             moduleManager: this.moduleManager,
             builtinModules: this.builtinModules,
-            projectPath: this.projectPath,
             entryPath,
             autoExportNames: this.autoExportNames,
             accessedProjectFiles,
@@ -995,7 +979,7 @@ const module = { exports };
    * @returns Absolute paths of all project files involved in the bundle
    */
   private extractDependencies(metafile: Metafile | undefined): string[] {
-    return extractProjectDependencies(metafile, this.projectPath);
+    return extractProjectDependencies(metafile);
   }
 
   /**
@@ -1040,7 +1024,6 @@ const module = { exports };
  */
 export type DetectionPluginOptions = {
   filesystem: VmFileSystem;
-  projectPath: string;
 };
 
 /**
@@ -1058,8 +1041,8 @@ export type DetectionPluginOptions = {
  *
  * @public
  */
-export function createDetectionPlugin({ filesystem, projectPath }: DetectionPluginOptions): Plugin {
-  const projectPrefix = projectPath.endsWith('/') ? projectPath : projectPath + '/';
+export function createDetectionPlugin({ filesystem }: DetectionPluginOptions): Plugin {
+  const projectPrefix = '/';
 
   function toRelative(absolutePath: string): string {
     return absolutePath.startsWith(projectPrefix) ? absolutePath.slice(projectPrefix.length) : absolutePath;
@@ -1149,21 +1132,16 @@ export function createDetectionPlugin({ filesystem, projectPath }: DetectionPlug
  *
  * Project files live in the `vfs` namespace; CDN modules cached under the
  * node_modules mount are excluded (tracked via asset hashes). Files imported
- * from outside `projectPath` (e.g. `../lib/foo.ts`) carry absolute paths and are
- * retained so edits to them invalidate the geometry cache.
- *
  * @param metafile - esbuild metafile output, or undefined if unavailable
- * @param projectPath - absolute project path for prefix matching
  * @returns array of absolute file paths for project dependencies
  *
  * @public
  */
-export function extractProjectDependencies(metafile: Metafile | undefined, projectPath: string): string[] {
+export function extractProjectDependencies(metafile: Metafile | undefined): string[] {
   if (!metafile) {
     return [];
   }
 
-  const projectPrefix = projectPath.endsWith('/') ? projectPath : projectPath + '/';
   const dependencies: string[] = [];
 
   for (const inputKey of Object.keys(metafile.inputs)) {
@@ -1175,16 +1153,12 @@ export function extractProjectDependencies(metafile: Metafile | undefined, proje
     const relativePath = stripPathQuery(inputKey.slice(vfsNamespacePrefix.length));
 
     // A CDN module cached under the node_modules mount is tracked via asset
-    // hashes, not as a project dependency. Any other absolute path is a project
-    // file imported from outside projectPath (e.g. `../lib/foo.ts`) and must be
-    // kept so edits to it invalidate the geometry cache.
+    // hashes, not as a project dependency.
     if (isNodeModulesPath(relativePath)) {
       continue;
     }
 
-    // Absolute paths already point at the file; only project-relative paths need
-    // the project prefix reattached.
-    dependencies.push(relativePath.startsWith('/') ? relativePath : `${projectPrefix}${relativePath}`);
+    dependencies.push(relativePath.startsWith('/') ? relativePath : `/${relativePath}`);
   }
 
   return dependencies;
@@ -1318,5 +1292,4 @@ export type EsbuildBundlerContext = {
   bundler: EsbuildBundler;
   builtinModules: Map<string, BuiltinModule>;
   filesystem: VmFileSystem;
-  projectPath: string;
 };

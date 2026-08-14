@@ -648,8 +648,6 @@ export type GeoSpecTestCase = {
 export type RunGeoSpecModuleOptions = {
   /** Filesystem containing the test module and its project imports. */
   filesystem: VmFileSystem;
-  /** Absolute project root path. */
-  projectPath: string;
   /** Absolute ESM test entry path. */
   entryPath: string;
   /** JavaScript regular expression matched against full `suite > test` names. */

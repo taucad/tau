@@ -24,6 +24,7 @@ describe('ESM import smoke tests', () => {
     expect(module_.createKernelError).toBeTypeOf('function');
     expect(module_.defineKernel).toBeTypeOf('function');
     expect(module_.defineBundler).toBeTypeOf('function');
+    expect(module_.defineRuntime).toBeTypeOf('function');
   });
 
   it('should resolve presets from the dedicated presets subpath', async () => {

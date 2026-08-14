@@ -19,7 +19,8 @@
  * Custom worker entries can compose the same primitives directly:
  *
  * ```typescript
- * import { createRuntimeWorker, defineRuntime } from '@taucad/runtime/worker';
+ * import { defineRuntime } from '@taucad/runtime';
+ * import { createRuntimeWorker } from '@taucad/runtime/worker';
  * import { nodeWorkerHost } from '@taucad/runtime/transport/node';
  *
  * const runtime = defineRuntime({});

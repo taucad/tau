@@ -8,6 +8,7 @@ import { assertType, describe, expectTypeOf, it } from 'vitest';
 import type { GeometryResponse } from '@taucad/types';
 import { z } from 'zod';
 import type { RuntimeClientOptions } from '#client/runtime-client-core.js';
+import type { AnyRuntimeDefinition, RuntimeDefinition, RuntimeDefinitionOptions } from '#index.js';
 import type { ExportRoute } from '#types/runtime.types.js';
 import { createRuntimeClient } from '#client/runtime-client.js';
 import type { BundlerPlugin, KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
@@ -523,6 +524,11 @@ describe('defineTranscoder', () => {
 });
 
 describe('defineRuntime and client projections', () => {
+  it('exports runtime authoring types from the root entry', () => {
+    expectTypeOf<RuntimeDefinition>().toExtend<AnyRuntimeDefinition>();
+    expectTypeOf<RuntimeDefinitionOptions>().toExtend<{ readonly kernels?: readonly never[] }>();
+  });
+
   it('threads plugin factories through a typed runtime definition', () => {
     const runtime = defineRuntime({
       kernels: [makeKernel()({ endpoint: 'wss://example.test' })],

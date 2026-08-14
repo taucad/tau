@@ -27,7 +27,7 @@ import { wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem
  * import { createRuntimeClient } from '@taucad/runtime';
  * import { inProcessTransport } from '@taucad/runtime/transport/in-process';
  * import { fromNodeFs } from '@taucad/runtime/filesystem/node';
- * import { defineRuntime } from '@taucad/runtime/worker';
+ * import { defineRuntime } from '@taucad/runtime';
  * import { replicad } from '@taucad/runtime/kernels/replicad';
  * import { esbuild } from '@taucad/runtime/bundler/esbuild';
  *

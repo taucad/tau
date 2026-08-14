@@ -21,8 +21,8 @@
  * Worker entries should call the helper explicitly:
  *
  * ```typescript
+ * import { defineRuntime } from '@taucad/runtime';
  * import { serveWebWorkerRuntime } from '@taucad/runtime/worker/web';
- * import { defineRuntime } from '@taucad/runtime/worker';
  *
  * const runtime = defineRuntime({});
  * await serveWebWorkerRuntime({ runtime });

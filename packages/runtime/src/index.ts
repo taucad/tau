@@ -68,6 +68,8 @@ export { defineKernel } from '#types/runtime-kernel.types.js';
 export { defineMiddleware } from '#middleware/runtime-middleware.js';
 export { defineBundler } from '#types/runtime-bundler.types.js';
 export { defineTranscoder } from '#types/runtime-transcoder.types.js';
+export { defineRuntime } from '#worker/runtime-definition.js';
+export type { AnyRuntimeDefinition, RuntimeDefinition, RuntimeDefinitionOptions } from '#worker/runtime-definition.js';
 
 // Filesystem factories (browser-safe; `fromNodeFs` is at `@taucad/runtime/filesystem/node`).
 // Consumers always work with the opaque `RuntimeFileSystem`; transports

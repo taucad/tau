@@ -211,6 +211,10 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'defineMiddleware',
   'defineBundler',
   'defineTranscoder',
+  'defineRuntime',
+  'AnyRuntimeDefinition',
+  'RuntimeDefinition',
+  'RuntimeDefinitionOptions',
 
   // Filesystem (browser-safe opaque RuntimeFileSystem + factories)
   'RuntimeFileSystem',

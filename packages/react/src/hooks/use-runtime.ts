@@ -3,21 +3,30 @@ import type { FileExtension, Geometry } from '@taucad/types';
 import type {
   CapabilitiesManifest,
   ExportFormatsFor,
+  ExportContentFor,
   ExportOptionsFor,
   ExportResult,
   HashedGeometryResult,
   KernelPlugin,
+  MiddlewarePlugin,
   RenderOutcome,
   RenderStatus as RuntimeRenderStatus,
   RuntimeFromTransport,
   RuntimeProtocol,
   RuntimeRenderInput,
+  RuntimeSource,
   RuntimeSourceFiles,
   TransportPlugin,
   TranscoderPlugin,
+  ContentRequestFor,
 } from '@taucad/runtime';
 import type { RuntimeClientOptionsWithTransport } from '@taucad/runtime/client';
-import type { AnyRuntimeDefinition, RuntimeKernels, RuntimeTranscoders } from '@taucad/runtime/worker';
+import type {
+  AnyRuntimeDefinition,
+  RuntimeKernels,
+  RuntimeMiddleware,
+  RuntimeTranscoders,
+} from '@taucad/runtime/worker';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import type { JSONSchema7 } from '@taucad/json-schema';
 
@@ -68,10 +77,21 @@ type UseRuntimeTranscoders<Runtime extends AnyRuntimeDefinition | undefined, Tra
       : readonly TranscoderPlugin[]
     : readonly TranscoderPlugin[];
 
+type UseRuntimeMiddleware<Runtime extends AnyRuntimeDefinition | undefined, Transport extends RuntimeTransportPlugin> =
+  RuntimeDefinitionForHook<Runtime, Transport> extends AnyRuntimeDefinition
+    ? RuntimeMiddleware<RuntimeDefinitionForHook<Runtime, Transport>> extends readonly MiddlewarePlugin[]
+      ? RuntimeMiddleware<RuntimeDefinitionForHook<Runtime, Transport>>
+      : readonly MiddlewarePlugin[]
+    : readonly MiddlewarePlugin[];
+
 type UseRuntimeCapabilities<
   Runtime extends AnyRuntimeDefinition | undefined,
   Transport extends RuntimeTransportPlugin,
-> = CapabilitiesManifest<UseRuntimeKernels<Runtime, Transport>, UseRuntimeTranscoders<Runtime, Transport>>;
+> = CapabilitiesManifest<
+  UseRuntimeKernels<Runtime, Transport>,
+  UseRuntimeMiddleware<Runtime, Transport>,
+  UseRuntimeTranscoders<Runtime, Transport>
+>;
 
 /**
  * Export options accepted by {@link UseRuntimeResult.exportGeometry}.
@@ -92,7 +112,14 @@ export type UseRuntimeExportGeometryOptions<
     UseRuntimeTranscoders<Runtime, Transport>,
     Format
   >;
-};
+} & ContentRequestFor<
+  ExportContentFor<
+    UseRuntimeKernels<Runtime, Transport>,
+    UseRuntimeMiddleware<Runtime, Transport>,
+    UseRuntimeTranscoders<Runtime, Transport>,
+    Format
+  >
+>;
 
 /**
  * Export helper returned from {@link useRuntime}.
@@ -134,9 +161,12 @@ type RuntimeClientExportGeometryInput = {
   readonly source?: unknown;
   readonly parameters?: unknown;
   readonly exportOptions?: unknown;
+  readonly content?: unknown;
 };
 type RuntimeClientHandle = {
-  readonly render: (input: RuntimeRenderInput<readonly KernelPlugin[]>) => Promise<RenderOutcome>;
+  readonly render: (
+    input: RuntimeRenderInput<readonly KernelPlugin[], readonly MiddlewarePlugin[]>,
+  ) => Promise<RenderOutcome>;
   readonly updateParameters: (parameters: RuntimeParameterRecord) => Promise<RenderOutcome>;
   readonly exportGeometry: (format: FileExtension, options?: RuntimeClientExportGeometryInput) => Promise<ExportResult>;
   readonly terminate: () => void;
@@ -192,7 +222,10 @@ export type UseRuntimeOptions<
   Transport extends RuntimeTransportPlugin = RuntimeTransportPlugin,
   Files extends RuntimeSourceFiles = RuntimeSourceFiles,
 > = UseRuntimeBaseOptions<Runtime, Transport> &
-  Omit<RuntimeRenderInput<UseRuntimeKernels<Runtime, Transport>, Files>, 'parameters'> &
+  Omit<
+    RuntimeRenderInput<UseRuntimeKernels<Runtime, Transport>, UseRuntimeMiddleware<Runtime, Transport>, Files>,
+    'parameters'
+  > &
   UseRuntimeParameterOptions;
 
 /**
@@ -321,10 +354,19 @@ const pruneParameterOverrides = (
   return Object.keys(pruned).length === 0 ? emptyParameters : pruned;
 };
 
-const withRuntimeParameters = <Kernels extends readonly KernelPlugin[], Files extends RuntimeSourceFiles>(
-  input: Omit<RuntimeRenderInput<Kernels, Files>, 'parameters'>,
+const withRuntimeParameters = <
+  Kernels extends readonly KernelPlugin[],
+  Middleware extends readonly MiddlewarePlugin[],
+  Files extends RuntimeSourceFiles,
+>(
+  input: Omit<RuntimeRenderInput<Kernels, Middleware, Files>, 'parameters'>,
   parameters: RuntimeParameterRecord,
-): RuntimeRenderInput<Kernels, Files> => (Object.keys(parameters).length === 0 ? input : { ...input, parameters });
+): RuntimeRenderInput<Kernels, Middleware, Files> =>
+  (Object.keys(parameters).length === 0 ? input : { ...input, parameters }) as RuntimeRenderInput<
+    Kernels,
+    Middleware,
+    Files
+  >;
 
 const isRuntimeSourceRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -383,8 +425,9 @@ const getRuntimeSourceInputError = (source: unknown): Error | undefined => {
  * 3. **Command** — `client.render({ source, parameters, renderOptions })` is invoked
  *    whenever `source`, `parameters`, `renderOptions`, or `enabled` changes. Multiple
  *    rapid changes naturally supersede each other via `RenderOutcome` —
- *    the prior settlement resolves with `{ superseded: true }` and the
- *    latest call's geometry arrives over the `'geometry'` event channel.
+ *    the prior settlement resolves with `{ superseded: true }` when a newer
+ *    public command or watched-filesystem preview takes ownership. The selected
+ *    preview's geometry arrives over the `'geometry'` event channel.
  * 4. **Consume** — geometry, status, parameter schema, and capabilities
  *    are exposed as React state, updating reactively as worker events
  *    flow through the event surface.
@@ -398,7 +441,7 @@ const getRuntimeSourceInputError = (source: unknown): Error | undefined => {
  * @example <caption>Render a CAD model with replicad and esbuild</caption>
  * ```typescript
  * import { useRuntime } from '@taucad/react';
- * import { defineRuntime } from '@taucad/runtime/worker';
+ * import { defineRuntime } from '@taucad/runtime';
  * import { fromMemoryFs } from '@taucad/runtime/filesystem';
  * import { inProcessTransport } from '@taucad/runtime/transport/in-process';
  * import { replicad } from '@taucad/runtime/kernels/replicad';
@@ -427,6 +470,13 @@ const getRuntimeSourceInputError = (source: unknown): Error | undefined => {
  * ```
  */
 export function useRuntime<
+  const Files extends RuntimeSourceFiles,
+  const Runtime extends AnyRuntimeDefinition | undefined = undefined,
+  const Transport extends RuntimeTransportPlugin = RuntimeTransportPlugin,
+>(
+  options: UseRuntimeOptions<Runtime, Transport, Files> & { readonly source: RuntimeSource<Files> },
+): UseRuntimeResult<Runtime, Transport>;
+export function useRuntime<
   const Runtime extends AnyRuntimeDefinition | undefined = undefined,
   const Transport extends RuntimeTransportPlugin = RuntimeTransportPlugin,
   const Files extends RuntimeSourceFiles = RuntimeSourceFiles,
@@ -453,7 +503,7 @@ export function useRuntime<
   const { parameters: legacyParameters, ...renderInput } = renderInputWithLegacyParameters;
   const hasLegacyParameters = legacyParameters !== undefined;
   const runtimeRenderInput = renderInput as Omit<
-    RuntimeRenderInput<UseRuntimeKernels<Runtime, Transport>, Files>,
+    RuntimeRenderInput<UseRuntimeKernels<Runtime, Transport>, UseRuntimeMiddleware<Runtime, Transport>, Files>,
     'parameters'
   >;
   const renderRequestKey = stableStringify(runtimeRenderInput);
@@ -473,9 +523,9 @@ export function useRuntime<
   const [capabilities, setCapabilities] = useState<UseRuntimeCapabilities<Runtime, Transport> | undefined>();
   const [clientGeneration, setClientGeneration] = useState(0);
   const clientRef = useRef<RuntimeClientHandle | undefined>(undefined);
-  const renderInputRef = useRef<RuntimeRenderInput<UseRuntimeKernels<Runtime, Transport>, Files>>(
-    withRuntimeParameters(runtimeRenderInput, parameters),
-  );
+  const renderInputRef = useRef<
+    RuntimeRenderInput<UseRuntimeKernels<Runtime, Transport>, UseRuntimeMiddleware<Runtime, Transport>, Files>
+  >(withRuntimeParameters(runtimeRenderInput, parameters));
   const commandRequestKeyRef = useRef(commandRequestKey);
   const settledCommandRequestKeyRef = useRef<string | undefined>(undefined);
   const activeRenderRequestKeyRef = useRef<string | undefined>(undefined);
@@ -528,7 +578,9 @@ export function useRuntime<
           export: (format: FileExtension, options?: RuntimeClientExportGeometryInput) => Promise<ExportResult>;
         };
         const renderClient = client as {
-          render: (input: RuntimeRenderInput<readonly KernelPlugin[]>) => Promise<RenderOutcome>;
+          render: (
+            input: RuntimeRenderInput<readonly KernelPlugin[], readonly MiddlewarePlugin[]>,
+          ) => Promise<RenderOutcome>;
           updateParameters: (parameters: RuntimeParameterRecord) => Promise<RenderOutcome>;
         };
 
@@ -651,7 +703,12 @@ export function useRuntime<
         }
         const outcome = shouldUpdateParameters
           ? await client.updateParameters(parameters)
-          : await client.render(renderInputRef.current as unknown as RuntimeRenderInput<readonly KernelPlugin[]>);
+          : await client.render(
+              renderInputRef.current as unknown as RuntimeRenderInput<
+                readonly KernelPlugin[],
+                readonly MiddlewarePlugin[]
+              >,
+            );
         if (!outcome.superseded && outcome.geometry.success) {
           settledCommandRequestKeyRef.current = commandRequestKey;
         }
@@ -687,7 +744,8 @@ export function useRuntime<
     const exportInput = hasSettledCurrentRender
       ? formatOptions
       : {
-          ...(renderInputRef.current as RuntimeClientExportGeometryInput),
+          source: renderInputRef.current.source,
+          ...(renderInputRef.current.parameters ? { parameters: renderInputRef.current.parameters } : {}),
           ...(formatOptions as RuntimeClientExportGeometryInput | undefined),
         };
     return client.exportGeometry(format as FileExtension, exportInput);

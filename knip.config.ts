@@ -45,7 +45,7 @@ const config: KnipConfig = {
       ignore: ['tarballs/**'],
       ignoreDependencies: [
         'replicad-opencascadejs',
-        'opencascade.js',
+        'libcascade',
         '@arethetypeswrong/cli',
         'madge',
         '@nx/nest',

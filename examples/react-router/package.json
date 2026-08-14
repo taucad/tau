@@ -2,6 +2,7 @@
   "name": "@taucad/example-react-router",
   "version": "0.0.1",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "react-router dev",
@@ -12,24 +13,24 @@
     "@rjsf/core": "^5.24.13",
     "@rjsf/utils": "^5.24.13",
     "@rjsf/validator-ajv8": "^5.24.13",
-    "@react-router/node": "catalog:",
+    "@react-router/node": "catalog:react-router8",
     "@taucad/react": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "isbot": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "react-router": "catalog:",
+    "react-router": "catalog:react-router8",
     "three": "catalog:",
     "tslib": "catalog:"
   },
   "devDependencies": {
-    "@react-router/dev": "catalog:",
+    "@react-router/dev": "catalog:react-router8",
     "@tailwindcss/vite": "^4.3.1",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@types/three": "catalog:",
     "tailwindcss": "^4.3.1",
     "typescript": "catalog:",
-    "vite": "catalog:"
+    "vite": "catalog:react-router8"
   }
 }

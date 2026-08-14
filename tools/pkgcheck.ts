@@ -230,6 +230,9 @@ async function runAttw(): Promise<CheckResult> {
     mkdirSync(stagingDirectory, { recursive: true });
 
     const publishPackage = applyPublishConfig(packageJson);
+    // This staging package contains already-built outputs, not the source files
+    // that package lifecycle scripts may invoke.
+    delete publishPackage.scripts;
     writeFileSync(join(stagingDirectory, 'package.json'), JSON.stringify(publishPackage, undefined, 2));
 
     const distributionSource = join(absoluteRoot, 'dist');

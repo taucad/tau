@@ -21,6 +21,7 @@ export const observabilityMiddleware = defineMiddleware({
   id: 'observability',
   name: 'Observability',
   version: '2',
+  mutates: false,
   optionsSchema: z.object({ reportUrl: z.string().optional().default('') }),
 
   async wrapCreateGeometry(input, handler, { logger, options }) {

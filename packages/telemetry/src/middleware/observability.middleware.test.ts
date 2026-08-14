@@ -6,7 +6,7 @@ import {
   createMockCreateGeometryHandler,
   resolveRuntimePluginDefinition,
 } from '@taucad/runtime/testing';
-import type { ExportGeometryInput, ExportGeometryResult } from '@taucad/runtime/types';
+import type { ExportGeometryHandler, ExportGeometryInput, ExportGeometryResult } from '@taucad/runtime/types';
 import { IngestEntryName } from '#ingest.js';
 import { observability } from '#middleware.js';
 import type { FileExtension } from '@taucad/types';
@@ -27,7 +27,7 @@ const createMockExportInput = (format: FileExtension = 'step'): ExportGeometryIn
 });
 
 const createMockExportHandler = (result?: ExportGeometryResult) =>
-  vi.fn<(input: ExportGeometryInput) => Promise<ExportGeometryResult>>().mockResolvedValue(
+  vi.fn<ExportGeometryHandler>().mockResolvedValue(
     result ?? {
       success: true,
       data: [{ name: 'output.stl', bytes: new Uint8Array([1, 2, 3]), mimeType: 'model/stl' }],

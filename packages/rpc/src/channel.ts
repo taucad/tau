@@ -10,6 +10,7 @@ import type {
   WireStreamNext,
   WireStreamComplete,
   WireStreamError,
+  WireVersionMismatchHandler,
 } from '#wire.js';
 import { isWireMessage } from '#wire.js';
 import { WireValidationError } from '#wire-validation-error.js';
@@ -511,6 +512,30 @@ const warnFlowWindowOnce = (): void => {
   console.warn('[@taucad/rpc] flow-window frame received; flow control is reserved for a future revision and ignored');
 };
 
+const createWireVersionMismatchReporter = (): WireVersionMismatchHandler => {
+  let warned = false;
+  return ({ expected, received, kind }) => {
+    if (warned) {
+      return;
+    }
+    warned = true;
+    console.warn(
+      `[@taucad/rpc] wire version mismatch: expected ${expected}, received ${String(received)} for "${kind}"; frame dropped`,
+    );
+  };
+};
+
+const createUnknownNotifyReporter = (receiver: 'client' | 'server'): ((name: string) => void) => {
+  const warned = new Set<string>();
+  return (name) => {
+    if (warned.has(name)) {
+      return;
+    }
+    warned.add(name);
+    console.warn(`[@taucad/rpc] unknown notify "${name}" received by ${receiver}; frame dropped`);
+  };
+};
+
 /**
  * Test-only: reset the once-warned flags so each test sees a fresh log.
  *
@@ -567,6 +592,8 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
   const notifyHandlers = new Map<string, Array<(args: unknown) => void>>();
   type PendingFrame = { frame: WireMessage; transfer?: readonly Transferable[] };
   const sendQueue: PendingFrame[] = [];
+  const reportWireVersionMismatch = createWireVersionMismatchReporter();
+  const reportUnknownNotify = createUnknownNotifyReporter('client');
 
   let isReady = false;
   let resolveReady: () => void = (): void => undefined;
@@ -660,6 +687,10 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
   };
 
   const handleNotifyFrame = (frame: WireNotify): void => {
+    if (protocolSchemas && !Object.hasOwn(protocolSchemas.notifies, frame.n)) {
+      reportUnknownNotify(frame.n);
+      return;
+    }
     const handlers = notifyHandlers.get(frame.n);
     if (!handlers) {
       return;
@@ -690,7 +721,7 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
   };
 
   const onWire = (raw: unknown): void => {
-    if (!isWireMessage(raw)) {
+    if (!isWireMessage(raw, reportWireVersionMismatch)) {
       return;
     }
     switch (raw.k) {
@@ -973,9 +1004,11 @@ export const createChannelServer = <P extends RpcProtocol = EmptyRpcProtocol>(
   const context: ChannelContext = { sessionKey };
   const inFlightCalls = new Map<string, AbortController>();
   const inFlightStreams = new Map<string, AbortController>();
+  const reportWireVersionMismatch = createWireVersionMismatchReporter();
+  const reportUnknownNotify = createUnknownNotifyReporter('server');
 
   const onWire = (raw: unknown): void => {
-    if (!isWireMessage(raw)) {
+    if (!isWireMessage(raw, reportWireVersionMismatch)) {
       return;
     }
     if (raw.k === 'rq') {
@@ -1028,6 +1061,10 @@ export const createChannelServer = <P extends RpcProtocol = EmptyRpcProtocol>(
       return;
     }
     if (raw.k === 'nt') {
+      if (protocolSchemas && !Object.hasOwn(protocolSchemas.notifies, raw.n)) {
+        reportUnknownNotify(raw.n);
+        return;
+      }
       let validatedArgs: unknown;
       try {
         validatedArgs = validateWireFrame({

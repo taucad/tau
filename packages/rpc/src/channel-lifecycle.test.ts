@@ -512,6 +512,49 @@ describe('@taucad/rpc Channel reserved flow control kinds (R15, F13)', () => {
   });
 });
 
+describe('@taucad/rpc Channel wire-version diagnostics', () => {
+  it('should warn once per channel for known-kind frames with the wrong wire version', async () => {
+    const channel = new MessageChannel();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const portServer = wrapMessagePort<unknown>(channel.port1);
+      const portClient = wrapMessagePort<unknown>(channel.port2);
+      portServer.start?.();
+      portClient.start?.();
+      const handle = createChannelServer({
+        port: portServer,
+        sessionKey: 'wrong-version',
+        impl: {
+          call: async () => 0,
+          async *listen() {
+            yield 0;
+          },
+        },
+      });
+      const client = createChannelClient({ port: portClient, sessionKey: 'wrong-version' });
+      await client.ready;
+
+      channel.port1.postMessage({ v: 2, k: 'nt', n: 'progress', a: null });
+      channel.port1.postMessage({ v: 3, k: 'nt', n: 'progress', a: null });
+      channel.port2.postMessage({ v: 2, k: 'rq', i: 'one', n: 'call', a: null });
+      channel.port2.postMessage({ v: 3, k: 'rq', i: 'two', n: 'call', a: null });
+      await flushTicks(2);
+
+      const mismatchCalls = warnSpy.mock.calls.filter(
+        ([message]) => typeof message === 'string' && message.includes('wire version mismatch'),
+      );
+      expect(mismatchCalls).toHaveLength(2);
+
+      handle.dispose();
+      client.close();
+    } finally {
+      warnSpy.mockRestore();
+      channel.port1.close();
+      channel.port2.close();
+    }
+  });
+});
+
 describe('@taucad/rpc Channel lifecycle bye (R8, F8)', () => {
   let channel: MessageChannel;
   let serverHandle: { dispose: () => void } | undefined;

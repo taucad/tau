@@ -49,6 +49,8 @@ export type {
   WireStreamNext,
   WireStreamSubscribe,
   WireStreamUnsubscribe,
+  WireVersionMismatchDiagnostic,
+  WireVersionMismatchHandler,
 } from '#wire.js';
 export { isWireMessage, wireVersion } from '#wire.js';
 

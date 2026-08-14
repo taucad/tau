@@ -203,6 +203,79 @@ describe('Wire-protocol validation (C14)', () => {
     srv.dispose();
   });
 
+  it('server drops unknown notify names with one diagnostic', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { client, server } = wirePair();
+    const notifyHandler = vi.fn();
+    const srv = createChannelServer<Protocol>({
+      port: server,
+      sessionKey: 'test',
+      protocolSchemas,
+      impl: {
+        async call() {
+          throw new Error('not used');
+        },
+        notify(_context, name, args) {
+          notifyHandler(name, args);
+        },
+        listen: () => {
+          throw new Error('not impl');
+        },
+      },
+    });
+    const cli = createChannelClient<Protocol>({ port: client, sessionKey: 'test' });
+    await cli.ready;
+
+    const notify = cli.notify as (name: string, args: unknown) => void;
+    notify('futureEvent', { value: 1 });
+    notify('futureEvent', { value: 2 });
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 20);
+    });
+
+    expect(notifyHandler).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unknown notify "futureEvent"'));
+
+    warn.mockRestore();
+    cli.close();
+    srv.dispose();
+  });
+
+  it('client drops unknown notify names with one diagnostic', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { client, server } = wirePair();
+    const srv = createChannelServer<Protocol>({
+      port: server,
+      sessionKey: 'test',
+      protocolSchemas,
+      impl: {
+        async call() {
+          throw new Error('not used');
+        },
+        listen: () => {
+          throw new Error('not impl');
+        },
+      },
+    });
+    const cli = createChannelClient<Protocol>({ port: client, sessionKey: 'test', protocolSchemas });
+    await cli.ready;
+
+    const notify = srv.notify as (name: string, args: unknown) => void;
+    notify('futureEvent', { value: 1 });
+    notify('futureEvent', { value: 2 });
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 20);
+    });
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unknown notify "futureEvent"'));
+
+    warn.mockRestore();
+    cli.close();
+    srv.dispose();
+  });
+
   it('client rejects malformed call results with WireValidationError', async () => {
     const { client, server } = wirePair();
     const srv = createChannelServer<Protocol>({

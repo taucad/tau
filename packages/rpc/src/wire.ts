@@ -11,6 +11,16 @@
  */
 export const wireVersion = 1;
 
+/** Diagnostic emitted before a known wire-frame kind is dropped for version skew. @public */
+export type WireVersionMismatchDiagnostic = {
+  readonly expected: number;
+  readonly received: unknown;
+  readonly kind: string;
+};
+
+/** Sink for version-skew diagnostics produced by {@link isWireMessage}. @public */
+export type WireVersionMismatchHandler = (diagnostic: WireVersionMismatchDiagnostic) => void;
+
 /**
  * Structured error payload. `m` is mandatory and human-readable; `c` is an optional
  * machine-readable code; `s` is an optional stack (typically dev-only).
@@ -363,18 +373,20 @@ const perKindValidators: Readonly<Record<string, (frame: WireFrameLike, raw: Wir
  * fields. Frames with `_`-prefixed kinds (transport-internal) and unknown kinds are rejected.
  *
  * @param value - Arbitrary inbound payload from a {@link Port}
+ * @param onVersionMismatch - Optional diagnostic sink for known kinds carrying the wrong version.
  * @returns `true` when `value` matches a known v1 wire envelope shape
  * @public
  */
-export const isWireMessage = (value: unknown): value is WireMessage => {
+export const isWireMessage = (value: unknown, onVersionMismatch?: WireVersionMismatchHandler): value is WireMessage => {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
   const frame = value as WireFrameLike;
-  if (frame.v !== wireVersion) {
+  if (!isString(frame.k) || frame.k.startsWith('_') || !knownKinds.has(frame.k)) {
     return false;
   }
-  if (!isString(frame.k) || frame.k.startsWith('_') || !knownKinds.has(frame.k)) {
+  if (frame.v !== wireVersion) {
+    onVersionMismatch?.({ expected: wireVersion, received: frame.v, kind: frame.k });
     return false;
   }
   const validator = perKindValidators[frame.k];

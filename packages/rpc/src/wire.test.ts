@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { isWireMessage, wireVersion } from '#wire.js';
 import type {
   WireRequest,
@@ -188,6 +188,16 @@ describe('isWireMessage — rejection paths', () => {
   it('rejects a frame with the wrong version', () => {
     expect(isWireMessage({ v: 2, k: 'rq', i: 'x', n: 'n', a: null })).toBe(false);
     expect(isWireMessage({ v: 0, k: 'rq', i: 'x', n: 'n', a: null })).toBe(false);
+  });
+
+  it('diagnoses a wrong version only for known frame kinds', () => {
+    const onVersionMismatch = vi.fn();
+
+    expect(isWireMessage({ v: 2, k: 'rq', i: 'x', n: 'n', a: null }, onVersionMismatch)).toBe(false);
+    expect(isWireMessage({ v: 2, k: 'unknown', i: 'x' }, onVersionMismatch)).toBe(false);
+
+    expect(onVersionMismatch).toHaveBeenCalledOnce();
+    expect(onVersionMismatch).toHaveBeenCalledWith({ expected: wireVersion, received: 2, kind: 'rq' });
   });
 
   it('rejects a frame with an unknown kind', () => {

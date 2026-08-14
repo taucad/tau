@@ -21,7 +21,7 @@ pnpm add @taucad/openscad @taucad/runtime
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { defineRuntime } from '@taucad/runtime/worker';
+import { defineRuntime } from '@taucad/runtime';
 import { replicad } from '@taucad/runtime/kernels';
 import { openscad } from '@taucad/openscad';
 

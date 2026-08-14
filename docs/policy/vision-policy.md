@@ -48,7 +48,7 @@ Solve code-first mechanical CAD. Tau today is an AI-native, multi-kernel CAD pla
 - **AI agent** — LangGraph agent with file editing, kernel execution, TDD via GeoSpec, screenshot verification. The agent writes geometry code, runs it, measures the result, iterates.
 - **Converter** (`@taucad/converter`) — 41 input formats, 11 output formats. STEP, STL, glTF, USDZ, IFC, and more. Convert any file format to another.
 - **Browser-native** — No install. Web Workers for computation, WebGL for rendering. Embeddable components for third-party apps.
-- **Open source** — Published `@taucad/*` packages on npm. MIT licensed.
+- **Open source** — Published `@taucad/*` packages on npm. Apache-2.0 licensed (the GeoSpec engine is fair source, per `LICENSING.md`).
 - **Files are the interface** — Everything is a file. Geometry, tests, metadata. Agent skills, subagents, scripts. A single data plane makes computational engineering precise, reproducible, with provenance by design. No lock-in on the _artifact_: designs, tests, and history stay portable and runnable outside Tau. What is monetized is high-assurance verification at scale — never access to your own files.
 
 This phase proves the thesis: geometry defined as code can be created, modified, tested, and iterated on by AI agents with human oversight.

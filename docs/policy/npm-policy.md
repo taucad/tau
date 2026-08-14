@@ -3,8 +3,9 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-07-07'
+updated: '2026-08-10'
 related:
+  - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
   - docs/policy/version-policy.md
   - docs/policy/library-api-policy.md
@@ -33,7 +34,7 @@ Most of these properties are configuration, not code. This policy codifies the c
 
 ## Scope
 
-Applies to every package under `packages/*` and `kernels/*` whose `package.json` declares `"private": false` (currently: `@taucad/runtime`, `@taucad/converter`, `@taucad/json-schema`, `@taucad/js`, `@taucad/cli`, `@taucad/openscad`, `@taucad/filesystem`, `@taucad/memory`, `@taucad/rpc`, `@taucad/fs-client`, `@taucad/telemetry`, `@taucad/testing`, `@taucad/react`, `@taucad/events`, `@taucad/fs-bridge`, `@taucad/gltf-extensions`, `@taucad/types`, `@taucad/units`, `@taucad/utils`, `@taucad/vm`, and `geospec`).
+Applies to every package under `packages/*` and `kernels/*` whose `package.json` declares `"private": false` (currently: `@taucad/runtime`, `@taucad/converter`, `@taucad/json-schema`, `@taucad/js`, `@taucad/cli`, `@taucad/openscad`, `@taucad/filesystem`, `@taucad/memory`, `@taucad/rpc`, `@taucad/fs-client`, `@taucad/telemetry`, `@taucad/react`, `@taucad/events`, `@taucad/fs-bridge`, `@taucad/gltf-extensions`, `@taucad/types`, `@taucad/units`, `@taucad/utils`, `@taucad/vm`, `geospec`, and `@taucad/geospec-engine`).
 
 Internal workspace libraries under `libs/*` are `"private": true` and exempt from this policy; they must either remain internal or be bundled into a publishable package via `deps.alwaysBundle` (see Rule 4).
 
@@ -102,7 +103,7 @@ CORRECT:
 ```json
 {
   "dependencies": {
-    "opencascade.js": "npm:@taucad/opencascade.js@^3.0.0-beta",
+    "libcascade": "^3.0.0",
     "replicad": "npm:@taulabs/replicad@0.23.4-beta.2"
   }
 }
@@ -113,7 +114,7 @@ INCORRECT:
 ```json
 {
   "dependencies": {
-    "opencascade.js": "file:../../tarballs/opencascade-fork/taucad-opencascade.js-3.0.0-beta.d3056ef.tgz",
+    "libcascade": "file:../../tarballs/opencascade-fork/libcascade-3.0.0.tgz",
     "replicad": "file:../../tarballs/replicad-fork/taulabs-replicad-0.23.4-beta.2.tgz"
   }
 }
@@ -166,7 +167,7 @@ Optional fields by package shape:
 
 When a publishable package depends on a private workspace library (anything under `libs/*`, or any `packages/*` package the user does not want to expose as a separate install), bundle it via tsdown's `deps.alwaysBundle`. Move the dep specifier from `dependencies` to `devDependencies` so it is not re-installed by consumers.
 
-Use a single regex per package that names every workspace dep explicitly. Do not use a catch-all `/^@taucad\//` — externally-published `@taucad/*` packages (e.g., `@taucad/kcl-wasm-lib`, `@taucad/opencascade.js`) must stay external.
+Use a single regex per package that names every workspace dep explicitly. Do not use a catch-all `/^@taucad\//` — externally-published packages (e.g., `@taucad/kcl-wasm-lib`, `libcascade`) must stay external.
 
 CORRECT:
 
@@ -233,27 +234,27 @@ Do **not** emit `import` or `default` for type-only entries.
 
 Every publishable package must declare these fields. Missing fields fail `publint`.
 
-| Field                    | Required value                                                                                     |
-| ------------------------ | -------------------------------------------------------------------------------------------------- |
-| `name`                   | `@taucad/<pkg>`                                                                                    |
-| `version`                | SemVer per `docs/policy/version-policy.md` (managed by Nx Release)                                 |
-| `description`            | One-line, ≤120 chars, shown on npmjs.com search                                                    |
-| `keywords`               | At least 3 relevant terms                                                                          |
-| `license`                | `MIT` (or as agreed for kernel-specific exceptions, see `kernels/openscad` for GPL-2.0)            |
-| `author`                 | Same canonical author across all packages                                                          |
-| `repository`             | `{ "type": "git", "url": "git+https://github.com/taucad/tau.git", "directory": "packages/<pkg>" }` |
-| `homepage`               | `https://tau.new/docs/<pkg>` (or repo URL until docs land)                                         |
-| `bugs`                   | `{ "url": "https://github.com/taucad/tau/issues" }`                                                |
-| `type`                   | `"module"`                                                                                         |
-| `engines`                | `{ "node": ">=22" }` (matches Node 22 LTS WebSocket global and stable ESM resolver)                |
-| `sideEffects`            | `false` unless the package has top-level side effects (rare)                                       |
-| `files`                  | `["dist", "README.md", "CHANGELOG.md"]` — never include source, tests, or configs                  |
-| `main`                   | `./dist/index.mjs` for packages with a root runtime export                                         |
-| `types`                  | `./dist/index.d.mts` for packages with a root export                                               |
-| `exports`                | Map every public subpath to its source `.ts` (workspace dev)                                       |
-| `publishConfig.exports`  | Map every public subpath to its ESM output (publish-time override)                                 |
-| `publishConfig.access`   | `"public"` for scoped packages                                                                     |
-| `scripts.prepublishOnly` | `"pnpm nx run <pkg>:pkgcheck"`                                                                     |
+| Field                    | Required value                                                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`                   | `@taucad/<pkg>`                                                                                                                      |
+| `version`                | SemVer per `docs/policy/version-policy.md` (managed by Nx Release)                                                                   |
+| `description`            | One-line, ≤120 chars, shown on npmjs.com search                                                                                      |
+| `keywords`               | At least 3 relevant terms                                                                                                            |
+| `license`                | Per the license partition in Rule 12 — `Apache-2.0` for every package in this scope except the GPL kernel and the fair-source engine |
+| `author`                 | Same canonical author across all packages                                                                                            |
+| `repository`             | `{ "type": "git", "url": "git+https://github.com/taucad/tau.git", "directory": "packages/<pkg>" }`                                   |
+| `homepage`               | `https://tau.new/docs/<pkg>` (or repo URL until docs land)                                                                           |
+| `bugs`                   | `{ "url": "https://github.com/taucad/tau/issues" }`                                                                                  |
+| `type`                   | `"module"`                                                                                                                           |
+| `engines`                | `{ "node": ">=24.0.0" }` (matches the workspace's minimum supported Node release)                                                    |
+| `sideEffects`            | `false` unless the package has top-level side effects (rare)                                                                         |
+| `files`                  | `["dist", "README.md", "CHANGELOG.md"]` — never include source, tests, or configs                                                    |
+| `main`                   | `./dist/index.mjs` for packages with a root runtime export                                                                           |
+| `types`                  | `./dist/index.d.mts` for packages with a root export                                                                                 |
+| `exports`                | Map every public subpath to its source `.ts` (workspace dev)                                                                         |
+| `publishConfig.exports`  | Map every public subpath to its ESM output (publish-time override)                                                                   |
+| `publishConfig.access`   | `"public"` for scoped packages                                                                                                       |
+| `scripts.prepublishOnly` | `"pnpm nx run <pkg>:pkgcheck"`                                                                                                       |
 
 INCORRECT (missing `engines`, `sideEffects`, `bugs`, `homepage`, `prepublishOnly`):
 
@@ -371,6 +372,41 @@ Publishable packages must declare `"private": false` (or omit the field entirely
 
 `libs/*` packages (internal-only) **must** declare `"private": true` and are never published.
 
+### 12. License Field and `LICENSE` File Per Partition Bucket
+
+Every workspace package — published _and_ private — declares a `license` field, and its value is fixed by the ratified
+license partition. No package may be license-less; no package picks its own.
+
+| Bucket                | Projects                                                                                                                                                                 | `license` field      | `LICENSE` file                                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------- | -------------------------------------------------------------------------------------------------------- |
+| Perimeter (published) | `packages/{cli,converter,events,filesystem,fs-bridge,fs-client,geospec,gltf-extensions,json-schema,memory,react,rpc,runtime,telemetry,testing,types,units,utils,vm}`     | `Apache-2.0`         | Required — canonical Apache-2.0 text                                                                     |
+| Engine (published)    | `packages/geospec-engine`                                                                                                                                                | `FSL-1.1-Apache-2.0` | Required — FSL 1.1 Apache-2.0-future text                                                                |
+| Kernel (published)    | `kernels/openscad`                                                                                                                                                       | `GPL-2.0-or-later`   | Required — GPL text (bundles GPL WASM)                                                                   |
+| Applications          | `apps/{ui,api}`, `libs/{billing,chat,lsp,lsp-fs,api-extractor}`                                                                                                          | `AGPL-3.0-only`      | Required — AGPL v3 text **plus the section 7 additional permission** for combination with the FSL engine |
+| Internal (private)    | `packages/render`, `libs/{oxlint,vite,tau-examples}`, `scripts`, `tools/workspace-plugin`, `apps/runtime-e2e`, `apps/react-e2e/apps/*`, `examples/*`, the workspace root | `Apache-2.0`         | Not required (never distributed)                                                                         |
+
+Rules that follow from the table:
+
+- The `LICENSE` file is named exactly `LICENSE` — npm includes it in the tarball regardless of the `files` array, so
+  it never needs a `files` entry. Verify with `npm pack --dry-run | grep LICENSE` before publishing.
+- License texts are **verbatim**. Do not add a preamble, a summary, or extra restrictions to a license text; GitHub's
+  licensee stops recognising a modified text, and stacking restrictions onto AGPL is void under its own sections 7 and 10. Additional _permissions_ (the section 7 grant on the AGPL projects) are appended as a clearly delimited block
+  after the unmodified license text.
+- Private packages get the field but no text. The field is what keeps the partition auditable — a missing `license` on
+  a private package is the defect this rule closes.
+- The engine is described as **fair source** or **source-available**, never as open source. The perimeter, the apps,
+  and the kernel are open source.
+- New packages inherit `Apache-2.0` from the workspace generator template
+  (`tools/workspace-plugin/src/generators/{package,kernel}/files/package.json__tmpl__`). Moving a new package into
+  another bucket is a deliberate edit, not a default.
+
+Routing prose for consumers lives in `LICENSING.md` at the repository root; the partition's decision record is
+`docs/research/licensing-strategy.md` and `docs/research/geospec-v2-licensing-options.md`.
+
+**Why**: the tarball is the unit of distribution, so the SPDX field and the license text must travel with each package
+independently. A mixed-license monorepo is safe and standard practice, but only when every package states its own
+license unambiguously.
+
 ## Decision Tables
 
 ### When to Bundle vs Externalise a Dep
@@ -408,6 +444,7 @@ Before merging a PR that touches a publishable package's `package.json` or `tsdo
 - [ ] README covers every required section (Rule 8)
 - [ ] Build-time integrations declared as optional peers (Rule 10)
 - [ ] `"private": false` (or omitted) on publishable packages (Rule 11)
+- [ ] `license` field matches the partition bucket and a verbatim `LICENSE` file is present where required (Rule 12)
 
 ## Known Limitations
 

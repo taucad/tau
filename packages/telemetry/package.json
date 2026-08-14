@@ -20,7 +20,7 @@
     "typescript"
   ],
   "author": "Richard Fontein",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts",
     "./middleware": "./src/middleware.ts",

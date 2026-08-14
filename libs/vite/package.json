@@ -15,11 +15,6 @@
       "import": "./src/base64-loader.vite-plugin.ts",
       "default": "./src/base64-loader.vite-plugin.ts"
     },
-    "./optimize-deps-from-cache": {
-      "types": "./src/optimize-deps-from-cache.vite-plugin.ts",
-      "import": "./src/optimize-deps-from-cache.vite-plugin.ts",
-      "default": "./src/optimize-deps-from-cache.vite-plugin.ts"
-    },
     "./oxc-runtime-esm": {
       "types": "./src/oxc-runtime-esm.vite-plugin.ts",
       "import": "./src/oxc-runtime-esm.vite-plugin.ts",

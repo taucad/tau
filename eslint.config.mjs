@@ -216,7 +216,6 @@ const config = [
       '**/stats.html',
       '**/out-tsc',
       '**/generated',
-      '**/native/opencascade/geospec_opencascade_single.*',
       '**/assets',
       '**/.source/**/*',
       '**/.netlify',
@@ -241,7 +240,10 @@ const config = [
       // GeoSpec fixture generation scripts are verbatim-normative model-code
       // inputs run through the runtime VM (see fixtures/README.md), not
       // library sources — same class as prompt examples and experiments.
-      'packages/geospec/fixtures/scripts/**',
+      'packages/geospec-engine/fixtures/scripts/**',
+      // Opt-in benchmark experiments: engine-internal, unpublished, and outside
+      // the package tsconfig until PE2 rebuilds what they measure.
+      'packages/geospec-engine/experiments/**',
     ],
   },
 

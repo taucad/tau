@@ -462,7 +462,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     }
 
     this.activeKernelId = nextKernelId;
-    this.onActiveKernelChanged?.(nextKernelId, this.activeRenderId);
+    this.onActiveKernelChanged?.({ kernelId: nextKernelId, renderId: this.activeRenderId });
   }
 
   protected override getActiveKernelId(): string | undefined {
@@ -486,7 +486,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       return;
     }
     this.activeKernelId = undefined;
-    this.onActiveKernelChanged?.(undefined, this.activeRenderId);
+    this.onActiveKernelChanged?.({ renderId: this.activeRenderId });
   }
 
   private clearFileDerivedKernelState(): void {

@@ -22,6 +22,7 @@ import type {
   runtimeInitializeArgsSchema,
   runtimeInitializeResultSchema,
   runtimeExportArgsSchema,
+  runtimeExportModelArgsSchema,
   runtimeExportResultSchema,
   runtimeOpenFileArgsSchema,
   runtimeStageAndRenderArgsSchema,
@@ -32,14 +33,23 @@ import type {
   runtimeStateChangedArgsSchema,
   runtimeActiveKernelChangedArgsSchema,
   runtimeAbortArgsSchema,
+  runtimeUpdateParametersArgsSchema,
+  runtimeSetOptionsArgsSchema,
+  runtimeLogArgsSchema,
+  runtimeLogBatchArgsSchema,
+  runtimeTelemetryArgsSchema,
+  runtimeCapabilitiesUpdatedArgsSchema,
   transportHelloPayloadSchema,
 } from '#types/runtime-protocol.schemas.js';
 import type {
   RuntimeInitializeArgs,
   RuntimeExportArgs,
+  RuntimeExportModelArgs,
   RuntimeOpenFileArgs,
   RuntimeStageAndRenderArgs,
   RuntimeProgressArgs,
+  RuntimeUpdateParametersArgs,
+  RuntimeSetOptionsArgs,
   RuntimeStateChangedArgs,
   RuntimeProtocol,
   WireAbortReasonCode,
@@ -65,6 +75,11 @@ describe('runtime-protocol types derive from schemas (C16)', () => {
     assertType<Derived>(branded<RuntimeExportArgs>());
   });
 
+  it('RuntimeExportModelArgs is structurally z.input<typeof runtimeExportModelArgsSchema>', () => {
+    type Derived = z.input<typeof runtimeExportModelArgsSchema>;
+    assertType<RuntimeExportModelArgs>(branded<Derived>());
+  });
+
   it('export result schema envelope exposes a discriminated success/issues shape', () => {
     type Derived = z.output<typeof runtimeExportResultSchema>;
     assertType<Derived>(branded<{ success: false; issues: never[] }>());
@@ -78,6 +93,18 @@ describe('runtime-protocol types derive from schemas (C16)', () => {
   it('RuntimeStageAndRenderArgs is structurally z.input<typeof runtimeStageAndRenderArgsSchema>', () => {
     type Derived = z.input<typeof runtimeStageAndRenderArgsSchema>;
     assertType<RuntimeStageAndRenderArgs>(branded<Derived>());
+  });
+
+  it('RuntimeUpdateParametersArgs is structurally z.input<typeof runtimeUpdateParametersArgsSchema>', () => {
+    type Derived = z.input<typeof runtimeUpdateParametersArgsSchema>;
+    assertType<RuntimeUpdateParametersArgs>(branded<Derived>());
+    assertType<Derived>(branded<RuntimeUpdateParametersArgs>());
+  });
+
+  it('RuntimeSetOptionsArgs is structurally z.input<typeof runtimeSetOptionsArgsSchema>', () => {
+    type Derived = z.input<typeof runtimeSetOptionsArgsSchema>;
+    assertType<RuntimeSetOptionsArgs>(branded<Derived>());
+    assertType<Derived>(branded<RuntimeSetOptionsArgs>());
   });
 
   it('RuntimeProgressArgs is structurally z.input<typeof runtimeProgressArgsSchema>', () => {
@@ -109,6 +136,33 @@ describe('runtime-protocol types derive from schemas (C16)', () => {
     type Derived = z.input<typeof runtimeActiveKernelChangedArgsSchema>;
     type Declared = RuntimeProtocol['notifies']['activeKernelChanged']['args'];
     assertType<Declared>(branded<Derived>());
+    assertType<Derived>(branded<Declared>());
+  });
+
+  it('log args agree with the schema', () => {
+    type Derived = z.input<typeof runtimeLogArgsSchema>;
+    type Declared = RuntimeProtocol['notifies']['log']['args'];
+    assertType<{ entry: unknown }>(branded<Derived>());
+    assertType<Derived>(branded<Declared>());
+  });
+
+  it('logBatch args agree with the schema', () => {
+    type Derived = z.input<typeof runtimeLogBatchArgsSchema>;
+    type Declared = RuntimeProtocol['notifies']['logBatch']['args'];
+    assertType<{ entries: unknown[] }>(branded<Derived>());
+    assertType<{ readonly entries: readonly unknown[] }>(branded<Declared>());
+  });
+
+  it('telemetry args agree with the schema', () => {
+    type Derived = z.input<typeof runtimeTelemetryArgsSchema>;
+    type Declared = RuntimeProtocol['notifies']['telemetry']['args'];
+    assertType<Declared>(branded<Derived>());
+  });
+
+  it('capabilitiesUpdated args agree with the schema', () => {
+    type Derived = z.input<typeof runtimeCapabilitiesUpdatedArgsSchema>;
+    type Declared = RuntimeProtocol['notifies']['capabilitiesUpdated']['args'];
+    assertType<{ capabilities: unknown }>(branded<Derived>());
     assertType<Derived>(branded<Declared>());
   });
 

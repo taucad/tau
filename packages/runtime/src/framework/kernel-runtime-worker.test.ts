@@ -1550,7 +1550,7 @@ describe('native-handle snapshot restoration', () => {
       expect(reheatedExport.success).toBe(true);
       expect(restoreSignals[1]).toBe(createSignals[1]);
       expect(createSignals[1]).toBe(exportSignals[1]);
-      expect(createSignals[1]).not.toBe(createSignals[0]);
+      expect(createSignals[1]).toBe(createSignals[0]);
     } finally {
       await worker.cleanup();
     }

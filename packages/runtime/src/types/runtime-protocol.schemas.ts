@@ -91,7 +91,7 @@ const exportGeometryResultSchema = z.discriminatedUnion('success', [
     .strict(),
 ]);
 
-const getParametersResultSchema = z.union([
+export const getParametersResultSchema = z.union([
   z
     .object({
       success: z.literal(true),

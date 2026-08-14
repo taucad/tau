@@ -517,7 +517,7 @@ describe('createWorkerDispatcher', () => {
       let onStateChanged:
         | ((event: { state: string; detail?: string; renderId: string; abortGeneration: number }) => void)
         | undefined;
-      let onActiveKernelChanged: ((id: string | undefined, renderId?: string) => void) | undefined;
+      let onActiveKernelChanged: ((event: { kernelId?: string; renderId?: string }) => void) | undefined;
       let onCapabilitiesUpdated: ((capabilities: unknown) => void) | undefined;
 
       const worker = createMockWorker();
@@ -558,7 +558,7 @@ describe('createWorkerDispatcher', () => {
       await fixture.client.call('initialize', {});
 
       onStateChanged!({ state: 'rendering', renderId, abortGeneration: 1 });
-      onActiveKernelChanged!('replicad', renderId);
+      onActiveKernelChanged!({ kernelId: 'replicad', renderId });
       onCapabilitiesUpdated!({ routes: [], renderCapabilities: {} });
       await flushMicrotasks();
 

@@ -75,6 +75,7 @@ import type {
   RuntimeProgressArgs,
   RuntimeParametersResolvedArgs,
   RuntimeErrorEventArgs,
+  RuntimeProtocol,
   WireAbortReasonCode,
   WorkerState,
 } from '#types/runtime-protocol.types.js';
@@ -322,7 +323,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   public onError?: (event: RuntimeErrorEventArgs) => void;
 
   /** Callback for pushing active kernel changes to the dispatcher. */
-  public onActiveKernelChanged?: (kernelId: string | undefined, renderId?: string) => void;
+  public onActiveKernelChanged?: (event: RuntimeProtocol['notifies']['activeKernelChanged']['args']) => void;
 
   /** Callback for pushing updated capabilities manifest to the dispatcher. */
   public onCapabilitiesUpdated?: (capabilities: CapabilitiesManifest) => void;

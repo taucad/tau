@@ -356,9 +356,10 @@ export const runtimeProtocolClientNotifyNames = [
 /**
  * Worker → client autonomous event names. These 10 event names cover
  * every W→C notify path in the kernel runtime protocol.
- * `geometryComputed` carries transferables; `progress` and
- * `geometryComputed` carry `renderId` so consumers can ignore frames from
- * superseded renders.
+ * `geometryComputed` carries transferables. Six events carry `renderId`:
+ * `parametersResolved`, `geometryComputed`, `errorEvent`, `progress`,
+ * `activeKernelChanged`, and `stateChanged`; the two optional sites also
+ * cover connection-scoped work.
  * @internal
  */
 export const runtimeProtocolWorkerNotifyNames = [

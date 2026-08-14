@@ -13,10 +13,10 @@
  * autonomous worker events (`progress`, `geometryComputed`,
  * `parametersResolved`, `errorEvent`, `stateChanged`,
  * `activeKernelChanged`, `capabilitiesUpdated`, `log`, `logBatch`,
- * `telemetry`) fan out via `serverHandle.notify(...)`. `progress`,
- * `geometryComputed`, and `errorEvent` carry the originating render
- * identity (`renderId`) so consumers can ignore frames from superseded
- * renders.
+ * `telemetry`) fan out via `serverHandle.notify(...)`. Six events carry
+ * render identity: `parametersResolved`, `geometryComputed`, `errorEvent`,
+ * `progress`, `activeKernelChanged`, and `stateChanged`; the two optional
+ * sites also cover connection-scoped work.
  *
  * Binary delivery for `export` results and `geometryComputed` notify
  * args hoists via {@link WithTransferables}; the transport encodes each
@@ -282,7 +282,7 @@ export function createWorkerDispatcher(
       });
     };
 
-    worker.onActiveKernelChanged = (kernelId, renderId) => {
+    worker.onActiveKernelChanged = ({ kernelId, renderId }) => {
       notify('activeKernelChanged', { kernelId, ...(renderId === undefined ? {} : { renderId }) });
     };
 

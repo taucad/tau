@@ -8,6 +8,7 @@ import type {
   RuntimeOpenFileArgs,
   RuntimePreviewIdentity,
   RuntimeParametersResolvedArgs,
+  RuntimeProtocol,
   RuntimeProgressArgs,
   RuntimeSetOptionsArgs,
   RuntimeStageAndRenderArgs,
@@ -54,5 +55,8 @@ describe('preview admission type surface', () => {
     expectTypeOf<NonNullable<KernelWorker['onError']>>()
       .parameter(0)
       .toEqualTypeOf<{ readonly issues: readonly KernelIssue[]; readonly renderId?: string }>();
+    expectTypeOf<NonNullable<KernelWorker['onActiveKernelChanged']>>()
+      .parameter(0)
+      .toEqualTypeOf<RuntimeProtocol['notifies']['activeKernelChanged']['args']>();
   });
 });

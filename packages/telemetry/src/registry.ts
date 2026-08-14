@@ -129,6 +129,31 @@ export const TauMetrics = {
     attributes: z.object({
       'gen_ai.tool.name': z.string().optional(),
       'gen_ai.tool.status': z.string().optional(),
+      'gen_ai.request.model': z.string().optional(),
+      'gen_ai.provider.name': z.string().optional(),
+      'gen_ai.file_edit.interface': z.string().optional(),
+      'gen_ai.file_edit.outcome': z.string().optional(),
+      'gen_ai.file_edit.recovery': z.string().optional(),
+      'gen_ai.file_edit.operation_count': z.number().int().nonnegative().optional(),
+      'gen_ai.file_edit.hunk_count': z.number().int().nonnegative().optional(),
+    }),
+  }),
+
+  genAiToolDuration: defineHistogram({
+    name: 'gen_ai.tool.duration',
+    unit: 's',
+    description: 'Tool execution latency by bounded outcome',
+    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+    attributes: z.object({
+      'gen_ai.tool.name': z.string().optional(),
+      'gen_ai.tool.status': z.string().optional(),
+      'gen_ai.request.model': z.string().optional(),
+      'gen_ai.provider.name': z.string().optional(),
+      'gen_ai.file_edit.interface': z.string().optional(),
+      'gen_ai.file_edit.outcome': z.string().optional(),
+      'gen_ai.file_edit.recovery': z.string().optional(),
+      'gen_ai.file_edit.operation_count': z.number().int().nonnegative().optional(),
+      'gen_ai.file_edit.hunk_count': z.number().int().nonnegative().optional(),
     }),
   }),
 

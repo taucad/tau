@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Metric names use OTEL dot notation. */
 import { describe, it, expect } from 'vitest';
 import { TauMetrics } from '#registry.js';
 
@@ -5,7 +6,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(34);
+    expect(metrics).toHaveLength(35);
   });
 
   it('should expose the tool-result offload counter with the canonical OTEL name', () => {
@@ -28,6 +29,18 @@ describe('TauMetrics', () => {
     expect(TauMetrics.genAiToolInputRepairs.name).toBe('gen_ai.tool_input.repairs');
     expect(TauMetrics.genAiToolInputRepairs.type).toBe('counter');
     expect(TauMetrics.genAiToolInputRepairs.unit).toBe('{repair}');
+  });
+
+  it('should expose the tool-duration histogram with bounded file-edit dimensions', () => {
+    expect(TauMetrics.genAiToolDuration.name).toBe('gen_ai.tool.duration');
+    expect(TauMetrics.genAiToolDuration.type).toBe('histogram');
+    expect(
+      TauMetrics.genAiToolDuration.attributes.safeParse({
+        'gen_ai.file_edit.interface': 'patch',
+        'gen_ai.file_edit.operation_count': 2,
+        'gen_ai.file_edit.hunk_count': 1,
+      }).success,
+    ).toBe(true);
   });
 
   it('should expose the interrupt-recovery counter with the canonical OTEL name', () => {

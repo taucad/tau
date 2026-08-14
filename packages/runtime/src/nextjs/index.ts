@@ -39,4 +39,4 @@ export {
   RuntimeTerminatedError,
 } from '#client/index.js';
 export { nextRuntimeHeaders, withTauRuntime } from '#nextjs/config.js';
-export type { NextRuntimeHeaderRule, NextRuntimeHeadersOptions, NextRuntimeUserConfig } from '#nextjs/config.js';
+export type { NextRuntimeHeaderRule, NextRuntimeHeadersOptions } from '#nextjs/config.js';

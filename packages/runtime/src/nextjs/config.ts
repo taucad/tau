@@ -1,5 +1,7 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- Next.js config-safe subpath */
 
+import type { NextConfig } from 'next';
+
 /**
  * Minimal shape accepted by Next.js `headers()`.
  *
@@ -28,10 +30,6 @@ export type NextRuntimeHeadersOptions = {
   subresource?: string | readonly string[];
 };
 
-type NextRuntimeTurbopackConfig = {
-  resolveAlias?: Record<string, unknown>;
-};
-
 type NextRuntimeWebpackConfig = {
   plugins?: unknown[];
   resolve?: {
@@ -39,8 +37,9 @@ type NextRuntimeWebpackConfig = {
   };
 };
 
-type NextRuntimeWebpackContext = {
-  isServer: boolean;
+type NextRuntimeWebpackHook = NonNullable<NextConfig['webpack']>;
+
+type NextRuntimeWebpackContext = Pick<Parameters<NextRuntimeWebpackHook>[1], 'isServer'> & {
   webpack: {
     NormalModuleReplacementPlugin: new (
       resourceRegExp: RegExp,
@@ -49,30 +48,20 @@ type NextRuntimeWebpackContext = {
   };
 };
 
-type NextRuntimeWebpackHook = (
+type NarrowNextRuntimeWebpackHook = (
   config: NextRuntimeWebpackConfig,
   context: NextRuntimeWebpackContext,
 ) => NextRuntimeWebpackConfig | undefined;
 
-/**
- * Stable Next.js configuration fields composed by {@link withTauRuntime}.
- *
- * @public
- */
-export type NextRuntimeUserConfig = {
-  headers?: () => NextRuntimeHeaderRule[] | Promise<NextRuntimeHeaderRule[]>;
-  turbopack?: NextRuntimeTurbopackConfig;
-};
+type InstalledWebpackHook = (
+  config: NextRuntimeWebpackConfig,
+  context: NextRuntimeWebpackContext,
+) => NextRuntimeWebpackConfig;
 
-type NextRuntimeConfigInput = NextRuntimeUserConfig & { webpack?: unknown };
-
-type WithTauRuntime = {
-  // oxlint-disable-next-line typescript/no-restricted-types -- Framework config types do not promise a string index signature.
-  <Config extends object>(
-    config: Config & NextRuntimeUserConfig,
-    options?: NextRuntimeHeadersOptions,
-  ): Config & NextRuntimeUserConfig;
-  (config?: NextRuntimeUserConfig, options?: NextRuntimeHeadersOptions): NextRuntimeUserConfig;
+type NextRuntimeConfig = Omit<NextConfig, 'headers' | 'turbopack' | 'webpack'> & {
+  headers: NonNullable<NextConfig['headers']>;
+  turbopack: NonNullable<NextConfig['turbopack']>;
+  webpack: InstalledWebpackHook;
 };
 
 const documentHeaders: Readonly<Record<string, string>> = Object.freeze({
@@ -88,7 +77,7 @@ const subresourceHeaders: Readonly<Record<string, string>> = Object.freeze({
 const browserNodeBuiltinsModule = '@taucad/runtime/nextjs/browser-node-builtins';
 const nodeBuiltinSpecifier = /^node:(?:fs(?:\/promises)?|url)$/;
 
-const isWebpackHook = (value: unknown): value is NextRuntimeWebpackHook => typeof value === 'function';
+const isWebpackHook = (value: unknown): value is NarrowNextRuntimeWebpackHook => typeof value === 'function';
 
 const configureWebpack = (
   config: NextRuntimeWebpackConfig,
@@ -160,14 +149,11 @@ export function nextRuntimeHeaders(options: NextRuntimeHeadersOptions = {}): Nex
  * export default withTauRuntime({ distDir: '.next-custom' });
  * ```
  */
-export const withTauRuntime: WithTauRuntime = (
-  config: NextRuntimeConfigInput = {},
-  options: NextRuntimeHeadersOptions = {},
-): NextRuntimeUserConfig => {
+export const withTauRuntime = (config: NextConfig = {}, options: NextRuntimeHeadersOptions = {}): NextRuntimeConfig => {
   const appHeaders = config.headers;
   const appWebpack = isWebpackHook(config.webpack) ? config.webpack : undefined;
-  const composed = { ...config };
-  Object.assign(composed, {
+  return {
+    ...config,
     turbopack: {
       ...config.turbopack,
       resolveAlias: {
@@ -184,6 +170,5 @@ export const withTauRuntime: WithTauRuntime = (
     webpack: (webpackConfig: NextRuntimeWebpackConfig, context: NextRuntimeWebpackContext) =>
       configureWebpack(appWebpack?.(webpackConfig, context) ?? webpackConfig, context),
     headers: async () => [...(appHeaders ? await appHeaders() : []), ...nextRuntimeHeaders(options)],
-  });
-  return composed;
+  };
 };

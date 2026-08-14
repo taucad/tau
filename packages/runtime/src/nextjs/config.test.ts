@@ -1,11 +1,17 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Next config keys intentionally mirror framework aliases. */
 import type { NextConfig } from 'next';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { nextRuntimeHeaders, withTauRuntime } from '#nextjs/config.js';
 import * as nextConfigIntegration from '#nextjs/config.js';
 
 describe('withTauRuntime', () => {
+  it('should return framework-conformant config and headers types', () => {
+    const config = withTauRuntime();
+    expectTypeOf(config).toExtend<NextConfig>();
+    expectTypeOf(config.headers).toExtend<NextConfig['headers']>();
+  });
+
   it('should expose the ecosystem-shaped composer without the retired config name', () => {
     expect(withTauRuntime).toBeTypeOf('function');
     expect(nextConfigIntegration).not.toHaveProperty('nextRuntimeConfig');
@@ -13,9 +19,6 @@ describe('withTauRuntime', () => {
 
   it('should return COI headers and Turbopack settings for runtime workers', async () => {
     const config = withTauRuntime({}, { document: '/workspace/:path*' });
-    if (!config.headers || !config.turbopack) {
-      throw new Error('withTauRuntime did not install its required Next.js config');
-    }
 
     await expect(config.headers()).resolves.toEqual(nextRuntimeHeaders({ document: '/workspace/:path*' }));
     expect(config.turbopack).not.toHaveProperty('rules');
@@ -96,7 +99,7 @@ describe('withTauRuntime', () => {
       fs: '@taucad/runtime/nextjs/browser-node-builtins',
       'node:fs': '@taucad/runtime/nextjs/browser-node-builtins',
     });
-    expect(config.turbopack.rules['*.wasm']).toEqual({ loaders: ['consumer-wasm-loader'] });
+    expect(config.turbopack.rules?.['*.wasm']).toEqual({ loaders: ['consumer-wasm-loader'] });
   });
 
   it('should compose the application Webpack hook before browser runtime invariants', () => {

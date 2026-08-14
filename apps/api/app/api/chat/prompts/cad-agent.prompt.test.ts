@@ -1386,7 +1386,6 @@ describe('getCadSystemPrompt', () => {
       expect(block).toContain('parameters: { width, height }');
       expect(countOccurrences(block, 'parameters: { width, height }')).toBe(1);
       expect(block).not.toMatch(/^\s*{\s*"requirements"\s*:/);
-      expect(block).not.toContain('@taucad/testing/tau');
     });
 
     it('should route BRep feature examples only to BRep-capable kernels', async () => {

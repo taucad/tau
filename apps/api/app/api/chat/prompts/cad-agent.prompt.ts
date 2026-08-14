@@ -33,7 +33,7 @@
 import type { KernelProvider } from '@taucad/runtime';
 import { toolName } from '@taucad/chat/constants';
 import type { ChatMode } from '@taucad/chat/constants';
-import { renderAvailableChecksCopy, renderCanonicalExample } from '@taucad/testing';
+import { renderAvailableChecksCopy, renderCanonicalExample } from '#api/chat/prompts/geospec-examples.prompt.js';
 import type { KernelConfig } from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.types.js';
 import { getKernelConfig } from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.js';
 import { createSectionRegistry } from '#api/chat/prompts/prompt-section-registry.js';

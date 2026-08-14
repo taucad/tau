@@ -14,7 +14,6 @@ import { ChatService } from '#api/chat/chat.service.js';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 import { ModelService } from '#api/models/model.service.js';
 import { FileEditService } from '#api/file-edit/file-edit.service.js';
-import { GeometryAnalysisService } from '#api/analysis/geometry-analysis.service.js';
 import { AuthGuard } from '#auth/auth.guard.js';
 import type { CreateChatDto } from '#api/chat/chat.dto.js';
 import { MetricsService } from '#telemetry/metrics.js';
@@ -192,8 +191,6 @@ describe('ChatController', () => {
 
     const mockFileEditService = {};
 
-    const mockGeometryAnalysisService = {};
-
     const mockCheckpointerService = {
       getCheckpointer: vi.fn(() => ({
         getTuple: vi.fn().mockResolvedValue(null),
@@ -218,10 +215,6 @@ describe('ChatController', () => {
         {
           provide: FileEditService,
           useValue: mockFileEditService,
-        },
-        {
-          provide: GeometryAnalysisService,
-          useValue: mockGeometryAnalysisService,
         },
         {
           provide: MetricsService,

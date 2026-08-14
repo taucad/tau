@@ -3,9 +3,8 @@ import { tool } from '@langchain/core/tools';
 import { assertRpcSuccess } from '@taucad/chat/utils';
 import type { ChatTool } from '@taucad/chat';
 import { testModelInputSchema } from '@taucad/chat/schemas/tools/test-model';
-import type { TestModelInput } from '@taucad/chat/schemas/tools/test-model';
+import type { TestModelInput, TestModelOutput } from '@taucad/chat/schemas/tools/test-model';
 import type { KernelProvider } from '@taucad/runtime';
-import type { TestModelOutput } from '@taucad/testing';
 import { rpcName, toolName } from '@taucad/chat/constants';
 import type { ChatRpcConfigurable } from '#api/tools/tool.types.js';
 

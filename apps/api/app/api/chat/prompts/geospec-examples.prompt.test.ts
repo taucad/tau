@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  availableChecksCopy,
   canonicalBrepGeoSpecTestExample,
   canonicalGeoSpecTestExample,
   renderAvailableChecksCopy,
   renderCanonicalExample,
-} from '#prompt-examples.js';
+} from '#api/chat/prompts/geospec-examples.prompt.js';
+
+const availableChecksCopy = renderAvailableChecksCopy({ includeBrepFeatures: true });
 
 describe('canonicalGeoSpecTestExample', () => {
   it('should expose executable GeoSpec syntax keyed by the <file> placeholder', () => {

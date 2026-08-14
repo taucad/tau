@@ -12,7 +12,6 @@ import { ChatService } from '#api/chat/chat.service.js';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 import { ModelService } from '#api/models/model.service.js';
 import { FileEditService } from '#api/file-edit/file-edit.service.js';
-import { GeometryAnalysisService } from '#api/analysis/geometry-analysis.service.js';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { CreateChatDto } from '#api/chat/chat.dto.js';
 import { sendSimpleModelStream } from '#api/chat/utils/simple-model-stream.js';
@@ -65,7 +64,6 @@ export class ChatController {
     private readonly chatRpcService: ChatRpcService,
     private readonly modelService: ModelService,
     private readonly fileEditService: FileEditService,
-    private readonly geometryAnalysisService: GeometryAnalysisService,
     private readonly metricsService: MetricsService,
     private readonly providerRequestRecorder: ProviderRequestRecorder,
   ) {}
@@ -154,7 +152,6 @@ export class ChatController {
             thread_id: chatId,
             chatRpcService: this.chatRpcService,
             fileEditService: this.fileEditService,
-            geometryAnalysisService: this.geometryAnalysisService,
           },
           signal: abortController.signal,
         },
@@ -178,7 +175,6 @@ export class ChatController {
           thread_id: chatId,
           chatRpcService: this.chatRpcService,
           fileEditService: this.fileEditService,
-          geometryAnalysisService: this.geometryAnalysisService,
         },
       };
       const clientMessages = await this.prepareClientMessages(uiMessages, modelId);

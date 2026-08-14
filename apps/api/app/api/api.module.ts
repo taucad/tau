@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { AnalysisModule } from '#api/analysis/analysis.module.js';
 import { ChatModule } from '#api/chat/chat.module.js';
 import { CodeCompletionModule } from '#api/code-completion/code-completion.module.js';
 import { FileEditModule } from '#api/file-edit/file-edit.module.js';
@@ -20,7 +19,6 @@ import { PublicationsModule } from '#api/publications/publications.module.js';
     WebSocketModule,
 
     // Production modules
-    AnalysisModule,
     ChatModule,
     CodeCompletionModule,
     FileEditModule,

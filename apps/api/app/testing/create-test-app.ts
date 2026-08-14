@@ -24,7 +24,6 @@ import { ModelService } from '#api/models/model.service.js';
 import { ProviderService } from '#api/providers/provider.service.js';
 import { ToolService } from '#api/tools/tool.service.js';
 import { FileEditService } from '#api/file-edit/file-edit.service.js';
-import { GeometryAnalysisService } from '#api/analysis/geometry-analysis.service.js';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { TracerService } from '#telemetry/tracer.service.js';
@@ -107,7 +106,6 @@ const mockAuthInstance = {
     ProviderService,
     ToolService,
     FileEditService,
-    GeometryAnalysisService,
     MetricsService,
     TracerService,
     CheckpointerService,

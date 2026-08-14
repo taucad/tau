@@ -77,9 +77,6 @@
       "path": "./kernels/openscad"
     },
     {
-      "path": "./packages/testing"
-    },
-    {
       "path": "./packages/events"
     },
     {

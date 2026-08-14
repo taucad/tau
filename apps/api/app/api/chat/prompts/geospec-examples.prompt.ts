@@ -1,8 +1,7 @@
 /**
- * Single-source-of-truth copy for the `test_requirements` example block and
- * the `Available checks` blurb the agent sees. Rendered identically in:
- *  - the cad-agent system prompt (`apps/api/.../cad-agent.prompt.ts`)
- *  - the GeoSpec-first CAD agent prompt (`apps/api/.../cad-agent.prompt.ts`)
+ * Single-source-of-truth copy for the GeoSpec example block and the
+ * `Available checks` blurb the agent sees, consumed by
+ * {@link ./cad-agent.prompt.ts}.
  *
  * Single-sourcing prevents the agent from ever seeing two slightly-different
  * phrasings of the same check vocabulary.
@@ -16,8 +15,6 @@
  *
  * Includes examples for mesh checks, assembly overlap, and physical
  * measurements that every mesh-capable kernel can run.
- *
- * @public
  */
 export const canonicalGeoSpecTestExample = `import { describe, expectGeo, it } from 'geospec';
 import { loadModel } from 'geospec/model';
@@ -83,8 +80,6 @@ describe('main geometry', () => {
  * Canonical BRep feature example for kernels that can expose exact BRep
  * evidence. Mesh-only kernels must not see this block because those matchers
  * intentionally report unsupported diagnostics without BRep evidence.
- *
- * @public
  */
 export const canonicalBrepGeoSpecTestExample = `import { describe, expectGeo, it } from 'geospec';
 import { loadModel } from 'geospec/model';
@@ -166,8 +161,6 @@ describe('main exact features', () => {
 
 /**
  * Options for rendering the shared agent-facing GeoSpec example.
- *
- * @public
  */
 export type RenderCanonicalExampleOptions = {
   /** Include exact BRep feature matcher examples for BRep-capable kernels. */
@@ -182,7 +175,6 @@ export type RenderCanonicalExampleOptions = {
  *   `'scad'`, `'js'`). A leading dot is stripped defensively.
  * @param options - Rendering options for optional capability-specific examples.
  * @returns A markdown code block ready to interpolate into a system prompt
- * @public
  */
 export const renderCanonicalExample = (fileExtension: string, options: RenderCanonicalExampleOptions = {}): string => {
   const extension = fileExtension.startsWith('.') ? fileExtension.slice(1) : fileExtension;
@@ -221,9 +213,7 @@ GeoSpec records structured diagnostics.
                          with \`pairs: [{ left: /housing/i, right: /planet gear/i }]\`, and
                          permit deliberate press-fits with \`allowances: [{ kind:
                          'intentionalInterference', left: /pin/i, right: /bore/i, maxVolume:
-                         5, reason: 'press fit' }]\` instead of dropping the global check.
-- chamferDistance      — "How close is this geometry to a reference geometry?" Use
-                         \`toHaveChamferDistanceTo\` for sampled shape comparison.`;
+                         5, reason: 'press fit' }]\` instead of dropping the global check.`;
 
 const brepAvailableChecksCopy = `BRep/STEP matchers require exact BRep evidence: load with \`loadModel({ file, format: 'step' })\`.
 On a mesh-only subject (no \`format: 'step'\`) they report unsupported diagnostics — e.g.
@@ -255,7 +245,6 @@ use \`connectedComponents\` for that intent (it answers "how many spatial chunks
  *
  * @param options - Capability switches for the active kernel.
  * @returns Agent-facing check vocabulary copy.
- * @public
  */
 export const renderAvailableChecksCopy = (options: RenderCanonicalExampleOptions = {}): string =>
   [
@@ -265,11 +254,3 @@ export const renderAvailableChecksCopy = (options: RenderCanonicalExampleOptions
   ]
     .filter(Boolean)
     .join('\n');
-
-/**
- * Single-sourced "Available checks" blurb including BRep checks. Use
- * {@link renderAvailableChecksCopy} when rendering kernel-specific prompts.
- *
- * @public
- */
-export const availableChecksCopy = renderAvailableChecksCopy({ includeBrepFeatures: true });

@@ -1,7 +1,7 @@
 import { ToolMessage, HumanMessage, AIMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { toolName } from '@taucad/chat/constants';
-import type { TestModelOutput, TestFailure } from '@taucad/testing';
+import type { TestModelOutput, TestFailure } from '@taucad/chat/schemas/tools/test-model';
 import type {
   CreateFileOutput,
   DeleteFileOutput,

@@ -1,6 +1,6 @@
 import { FlaskConical, X, Lightbulb, Check } from 'lucide-react';
 import type { ToolInvocation } from '@taucad/chat';
-import type { TestFailure, TestPass } from '@taucad/testing';
+import type { TestFailure, TestPass } from '@taucad/chat/schemas/tools/test-model';
 import { toolName } from '@taucad/chat/constants';
 import { useChatSelector } from '#hooks/use-chat.js';
 import {

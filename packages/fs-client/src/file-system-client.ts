@@ -1,4 +1,4 @@
-import type { FileStat, FileStatEntry } from '@taucad/types';
+import type { FileStat, FileStatEntry, ProjectManifest } from '@taucad/types';
 import type {
   FileTreeNode,
   MkdirOptions,
@@ -13,6 +13,7 @@ import type {
   CommitPendingProjectDirectoryResult,
   PermanentDeleteProjectDirectoryInput,
   PermanentDeleteProjectDirectoryResult,
+  ProjectLocator,
 } from '@taucad/filesystem';
 
 /**
@@ -136,6 +137,8 @@ export type FileSystemClient = {
   commitPendingProjectDirectory(
     input: CommitPendingProjectDirectoryInput,
   ): Promise<CommitPendingProjectDirectoryResult>;
+  /** Mint a fresh identity for an `adoption-required` project directory (R11). */
+  adoptProjectDirectory(locator: ProjectLocator): Promise<ProjectManifest>;
   /** Permanently remove one exact physical project after verifying its manifest identity. */
   permanentlyDeleteProjectDirectory(
     input: PermanentDeleteProjectDirectoryInput,

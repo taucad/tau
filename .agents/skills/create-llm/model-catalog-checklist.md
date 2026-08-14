@@ -4,17 +4,16 @@ Use this checklist after loading `SKILL.md` for model/provider work.
 
 ## File Map
 
-| Concern                | Primary files                                      |
-| ---------------------- | -------------------------------------------------- |
-| Model catalog          | `apps/api/app/api/models/model.constants.ts`       |
-| Model schema           | `apps/api/app/api/models/model.schema.ts`          |
-| Provider schema        | `apps/api/app/api/providers/provider.schema.ts`    |
-| Provider runtime       | `apps/api/app/api/providers/provider.service.ts`   |
-| Environment config     | `apps/api/app/config/environment.config.ts`        |
-| Context cap tests      | `apps/api/app/api/models/model.service.test.ts`    |
-| Live smoke env mapping | `apps/api/app/testing/skip-helpers.ts`             |
-| Live smoke scenarios   | `apps/api/app/testing/model-integration.test.ts`   |
-| Benchmark env mapping  | `apps/api/app/benchmarks/model-benchmark-suite.ts` |
+| Concern                | Primary files                                    |
+| ---------------------- | ------------------------------------------------ |
+| Model catalog          | `apps/api/app/api/models/model.constants.ts`     |
+| Model schema           | `apps/api/app/api/models/model.schema.ts`        |
+| Provider schema        | `apps/api/app/api/providers/provider.schema.ts`  |
+| Provider runtime       | `apps/api/app/api/providers/provider.service.ts` |
+| Environment config     | `apps/api/app/config/environment.config.ts`      |
+| Context cap tests      | `apps/api/app/api/models/model.service.test.ts`  |
+| Live smoke env mapping | `apps/api/app/testing/skip-helpers.ts`           |
+| Live smoke scenarios   | `apps/api/app/testing/model-integration.test.ts` |
 
 ## Research Checklist
 

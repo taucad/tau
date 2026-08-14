@@ -5,16 +5,27 @@
 
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { encode as msgpackEncode } from '@msgpack/msgpack';
-import type { CreateGeometryResult, ExportGeometryResult, KernelIssue } from '#types/runtime.types.js';
+import type {
+  CreateGeometryResult,
+  ExportGeometryResult,
+  KernelIssue,
+  MeshGeometryResult,
+} from '#types/runtime.types.js';
 import type {
   CreateGeometryHandler,
   ExportGeometryHandler,
   KernelMiddlewareRuntime,
+  MeshGeometryHandler,
   MiddlewareCreateGeometryRequest,
 } from '#types/runtime-middleware.types.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
 import type { ExportGeometryRequest } from '#types/runtime-kernel.types.js';
-import { exportMemoryCache, geometryCache, geometryMemoryCache } from '#middleware/geometry-cache.middleware.js';
+import {
+  exportMemoryCache,
+  geometryCache,
+  geometryMemoryCache,
+  meshMemoryCache,
+} from '#middleware/geometry-cache.middleware.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import {
   createMockRuntime,
@@ -165,6 +176,7 @@ describe('geometryCacheMiddleware', () => {
 
   beforeEach(() => {
     geometryMemoryCache.clear();
+    meshMemoryCache.clear();
     exportMemoryCache.clear();
   });
 
@@ -975,6 +987,53 @@ describe('geometryCacheMiddleware', () => {
       const cached = geometryMemoryCache.get(runtime.dependencyHash);
       expect(cached).toBeDefined();
       expect(cached?.serializedNativeHandle).toBeUndefined();
+    });
+  });
+
+  describe('wrapMeshGeometry', () => {
+    const input = { options: {} };
+
+    it('returns a valid filesystem mesh-cache hit without calling the handler', async () => {
+      const cachedResult: MeshGeometryResult = createGltfSuccessResult(new Uint8Array([1, 2, 3]));
+      const { runtime } = createCacheTestContext();
+      runtime.filesystem.mocks.readFile.mockResolvedValue(
+        msgpackEncode({ version: 7, kind: 'mesh', result: cachedResult }),
+      );
+      const handler: MeshGeometryHandler = vi.fn();
+
+      const result = await geometryCacheMiddleware.wrapMeshGeometry!(input, handler, runtime);
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(result).toEqual(cachedResult);
+    });
+
+    it('writes a successful mesh once and serves the next call from memory', async () => {
+      const handlerResult: MeshGeometryResult = createGltfSuccessResult(new Uint8Array([4, 5, 6]));
+      const { runtime } = createCacheTestContext();
+      const handler: MeshGeometryHandler = vi.fn().mockResolvedValue(handlerResult);
+
+      await geometryCacheMiddleware.wrapMeshGeometry!(input, handler, runtime);
+      runtime.filesystem.mocks.readFile.mockClear();
+      const result = await geometryCacheMiddleware.wrapMeshGeometry!(input, handler, runtime);
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(runtime.filesystem.mocks.writeFile).toHaveBeenCalledOnce();
+      expect(runtime.filesystem.mocks.readFile).not.toHaveBeenCalled();
+      expect(result).toEqual(handlerResult);
+    });
+
+    it('treats a mesh-cache result without display data as a miss', async () => {
+      const handlerResult: MeshGeometryResult = createGltfSuccessResult(new Uint8Array([7, 8, 9]));
+      const { runtime } = createCacheTestContext();
+      runtime.filesystem.mocks.readFile.mockResolvedValue(
+        msgpackEncode({ version: 7, kind: 'mesh', result: { success: true, issues: [] } }),
+      );
+      const handler: MeshGeometryHandler = vi.fn().mockResolvedValue(handlerResult);
+
+      const result = await geometryCacheMiddleware.wrapMeshGeometry!(input, handler, runtime);
+
+      expect(handler).toHaveBeenCalledOnce();
+      expect(result).toBe(handlerResult);
     });
   });
 

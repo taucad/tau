@@ -166,6 +166,20 @@ describe('parameterCacheMiddleware', () => {
           expect(result.data.jsonSchema.properties).toHaveProperty('customProp');
         }
       });
+
+      it('should treat a persisted result with an invalid parameter bag as a cache miss', async () => {
+        const { input, runtime } = createCacheContext();
+        runtime.filesystem.mocks.readFile.mockResolvedValue(
+          JSON.stringify({ success: true, data: { defaultParameters: [], jsonSchema: {} }, issues: [] }),
+        );
+        const handlerResult = createSuccessResult({ defaultParameters: { fresh: true } });
+        const handler = createMockGetParametersHandler(handlerResult);
+
+        const result = await parameterCacheMiddleware.wrapGetParameters!(input, handler, runtime);
+
+        expect(handler).toHaveBeenCalledOnce();
+        expect(result).toBe(handlerResult);
+      });
     });
 
     describe('cache miss', () => {

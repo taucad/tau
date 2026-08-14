@@ -12,6 +12,7 @@
 
 import { LruMap } from '@taucad/utils/cache';
 import type { GetParametersResult } from '#types/runtime.types.js';
+import { getParametersResultSchema } from '#types/runtime-protocol.schemas.js';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
 
 /**
@@ -69,7 +70,11 @@ export const parameterCache = defineMiddleware({
       const cachedData = await filesystem.readFile(cachePath, 'utf8');
       logger.debug(`Parameter cache hit for ${cacheKey}`);
 
-      const cachedResult = JSON.parse(cachedData) as GetParametersResult;
+      const parsed = getParametersResultSchema.safeParse(JSON.parse(cachedData));
+      if (!parsed.success) {
+        throw parsed.error;
+      }
+      const cachedResult = parsed.data as GetParametersResult;
       parameterMemoryCache.set(cacheKey, cachedResult);
       return cachedResult;
     } catch (error) {

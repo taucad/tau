@@ -42,22 +42,20 @@ export function myPluginName(): Plugin {
 
 ### Plugin naming rules
 
-- `name` field: prefix with `vite:` (e.g. `vite:optimize-deps-from-cache`)
-- Export name: camelCase matching the plugin purpose (e.g. `optimizeDepsFromCache`)
-- File name: kebab-case + `.vite-plugin.ts` (e.g. `optimize-deps-from-cache.vite-plugin.ts`)
+- `name` field: prefix with `vite:` (e.g. `vite:base64-loader`)
+- Export name: camelCase matching the plugin purpose (e.g. `base64Loader`)
+- File name: kebab-case + `.vite-plugin.ts` (e.g. `base64-loader.vite-plugin.ts`)
 
 ### When returning multiple plugins
 
-Export a function returning `Plugin[]` and spread in the consumer:
+Export a function returning `Plugin[]`; Vite flattens nested plugin arrays:
 
 ```typescript
 export function myPlugins(): Plugin[] {
   return [pluginA(), pluginB()];
 }
-// Consumer: ...myPlugins()
+// Consumer: plugins: [myPlugins()]
 ```
-
-See `ts-module-url.vite-plugin.ts` for a real example.
 
 ## 2) Add Subpath Export
 
@@ -89,12 +87,10 @@ plugins: [
 
 ## Existing Plugins Reference
 
-| Plugin                     | Hook(s)                                          | Purpose                                     |
-| -------------------------- | ------------------------------------------------ | ------------------------------------------- |
-| `cross-origin-isolation`   | `configureServer`, `configurePreviewServer`      | COOP/COEP headers for SharedArrayBuffer     |
-| `ts-module-url`            | `resolveId`, `load` (build); `transform` (serve) | Resolve `.ts` in `new URL()`                |
-| `base64-loader`            | `transform`                                      | Base64-encode `?base64` imports             |
-| `optimize-deps-from-cache` | `config`                                         | Pre-inject deps from previous session cache |
+| Plugin            | Hook(s)     | Purpose                                        |
+| ----------------- | ----------- | ---------------------------------------------- |
+| `base64-loader`   | `transform` | Base64-encode `?base64` imports                |
+| `oxc-runtime-esm` | `resolveId` | Resolve OXC CommonJS helper paths to ESM paths |
 
 ## Vite 8 Best Practices
 

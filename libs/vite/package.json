@@ -4,6 +4,7 @@
   "description": "Shared Vite plugins for the Tau monorepo",
   "type": "module",
   "private": true,
+  "license": "Apache-2.0",
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"

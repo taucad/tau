@@ -6,6 +6,8 @@ _Image: A semantic diagram_
 
 Semantic figure caption
 
+Caption survives omitted video.
+
 ## Structured evidence
 
 - First item

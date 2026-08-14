@@ -1,11 +1,12 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { chromium } from '@playwright/test';
+import type { Browser } from '@playwright/test';
 import { PDFParse } from 'pdf-parse';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -16,8 +17,9 @@ import {
   createLegacyHtmlSnapshot,
   readHtmlSnapshot,
 } from '#reference-html.js';
+import { PublicRequestError } from '#reference-download.js';
 import type { PublicRequestOptions } from '#reference-download.js';
-import type { HtmlCaptureReport, ReferencePaths } from '#reference-to-md.js';
+import type { HtmlCaptureOmissions, HtmlCaptureReport, ReferencePaths } from '#reference-to-md.js';
 
 const temporaryDirectories: string[] = [];
 const servers: Array<ReturnType<typeof createServer>> = [];
@@ -57,6 +59,20 @@ const report = (overrides: Partial<HtmlCaptureReport> = {}): HtmlCaptureReport =
   ...overrides,
 });
 
+const omissions = (overrides: Partial<HtmlCaptureOmissions> = {}): HtmlCaptureOmissions => ({
+  mediaRequests: 0,
+  peripheralRequests: 0,
+  blockedCapabilities: 0,
+  failedSubresources: 0,
+  subframes: 0,
+  nonReadingRequests: 0,
+  failedImages: 0,
+  ...overrides,
+});
+
+const v3Report = (overrides: Partial<HtmlCaptureReport> = {}): HtmlCaptureReport =>
+  report({ profile: 'html-v3', requestAttempts: 1, omissions: omissions(), ...overrides });
+
 const temporaryHtmlPaths = (): Extract<ReferencePaths, { format: 'html' }> => {
   const root = mkdtempSync(join(tmpdir(), 'tau-html-reference-test-'));
   temporaryDirectories.push(root);
@@ -71,10 +87,26 @@ const temporaryHtmlPaths = (): Extract<ReferencePaths, { format: 'html' }> => {
   };
 };
 
+const launchWithoutCapabilityInitScript = async (): Promise<Browser> => {
+  const browser = await chromium.launch({ headless: true });
+  const newContext = browser.newContext.bind(browser);
+  browser.newContext = async (options) => {
+    const context = await newContext(options);
+    context.addInitScript = async () => ({
+      dispose: async () => undefined,
+      [Symbol.asyncDispose]: async () => undefined,
+      [Symbol.dispose]: () => undefined,
+    });
+    return context;
+  };
+  return browser;
+};
+
 const successfulPage = `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
+	<html>
+	  <head>
+	    <meta charset="utf-8">
+	    <link rel="manifest" href="/ignored-manifest.webmanifest">
     <style>
       @page { size: 800px 1000px; margin: 0; }
       @font-face { font-family: Fixture; src: url('/font.woff2') format('woff2'); }
@@ -96,6 +128,12 @@ const successfulPage = `<!doctype html>
         <img alt="A semantic diagram">
         <figcaption>Semantic figure caption</figcaption>
       </figure>
+      <figure>
+        <video controls preload="metadata" src="/ignored-video.mp4"></video>
+        <track default kind="captions" src="/ignored-track.vtt">
+        <figcaption>Caption survives omitted video.</figcaption>
+      </figure>
+      <video><track id="forced-track" default kind="captions" src="/forced-track.vtt"></video>
       <svg class="visual" viewBox="0 0 100 100"><rect width="100" height="100" fill="#ff0000"></rect></svg>
       <canvas id="canvas" class="visual" width="100" height="100"></canvas>
       <canvas id="webgl" class="visual" width="100" height="100"></canvas>
@@ -138,6 +176,7 @@ const successfulPage = `<!doctype html>
     <footer>Footer noise</footer>
     <script>
       const canvas = document.querySelector('#canvas');
+      document.querySelector('#forced-track').track.mode = 'showing';
       const context = canvas.getContext('2d');
       context.fillStyle = '#00ff00';
       context.fillRect(0, 0, 100, 100);
@@ -208,10 +247,82 @@ const nestedArticlePage = `<!doctype html>
 </main>
 <script>navigator.sendBeacon = () => true;</script>`;
 
+const mediaStormPage = `<!doctype html>
+<main>
+  <h1>Bounded media storm</h1>
+  ${Array.from({ length: 500 }, (_, index) => `<video preload="metadata" src="/storm-${index}.mp4"></video>`).join('')}
+</main>
+<script>document.querySelectorAll('video').forEach((video) => video.load())</script>`;
+
+const requestStormPage = (kind: 'post' | 'subframe' | 'mixed'): string => `<!doctype html>
+<main><h1>Bounded ${kind} storm</h1></main>
+<script>
+  const main = document.querySelector('main');
+  const posts = ${kind === 'post' ? 500 : kind === 'mixed' ? 250 : 0};
+  const frames = ${kind === 'subframe' ? 500 : kind === 'mixed' ? 125 : 0};
+  const media = ${kind === 'mixed' ? 125 : 0};
+  for (let index = 0; index < posts; index += 1) fetch('/storm-post-' + index, { method: 'POST' }).catch(() => undefined);
+  for (let index = 0; index < frames; index += 1) {
+    const frame = document.createElement('iframe');
+    frame.src = '/storm-frame-' + index;
+    main.append(frame);
+  }
+  for (let index = 0; index < media; index += 1) {
+    const video = document.createElement('video');
+    video.src = '/storm-media-' + index + '.mp4';
+    main.append(video);
+    video.load();
+  }
+</script>`;
+
+const partialEvidencePage = `<!doctype html>
+<main>
+  <h1>Partial evidence</h1>
+  <p>Baseline evidence survives local failures.</p>
+  <figure><img src="/missing-image" alt="Broken diagram"><figcaption>Broken figure caption.</figcaption></figure>
+  <button disabled aria-expanded="false" aria-controls="failed-panel">Unavailable accordion</button>
+  <section id="failed-panel" hidden><p>Unavailable panel evidence.</p></section>
+  <iframe src="/frame"></iframe>
+</main>
+<script>fetch('/post', { method: 'POST' }).catch(() => undefined)</script>`;
+
+const optionalFailurePage = (path: string): string => `<!doctype html>
+<main><h1>Optional failure</h1><p>Ordinary evidence remains.</p><img alt="Optional image" src="/${path}"></main>`;
+
+const aggregateFailurePage = `<!doctype html>
+<main><h1>Aggregate failure</h1>${Array.from(
+  { length: 5 },
+  (_, index) => `<img alt="Oversized ${index}" src="/oversized-${index}">`,
+).join('')}</main>`;
+
+const oversizedBody = Buffer.alloc(20 * 1024 * 1024 + 1);
+
 const startFixtureServer = async (): Promise<{
+  requestedPaths: string[];
   request(options: PublicRequestOptions): Promise<IncomingMessage>;
 }> => {
+  const requestedPaths: string[] = [];
   const server = createServer((request, response) => {
+    if (request.url?.startsWith('/oversized-')) {
+      response.writeHead(200, { 'content-type': 'application/octet-stream' });
+      response.end(oversizedBody);
+      return;
+    }
+    if (request.url === '/missing-image') {
+      response.writeHead(404, { 'content-type': 'image/png', 'content-length': '0' });
+      response.end();
+      return;
+    }
+    if (request.url === '/unsupported-encoding') {
+      response.writeHead(200, { 'content-encoding': 'gzip', 'content-length': '1' });
+      response.end('x');
+      return;
+    }
+    if (request.url === '/invalid-length') {
+      response.writeHead(200, { 'content-length': String(20 * 1024 * 1024 + 1) });
+      response.end();
+      return;
+    }
     if (request.url === '/font.woff2') {
       response.writeHead(200, {
         'content-type': 'font/woff2',
@@ -228,21 +339,47 @@ const startFixtureServer = async (): Promise<{
     const capability = request.url?.split('/capability/')[1];
     const capabilityScript = {
       websocket: 'new WebSocket("wss://fixture.test/socket")',
+      eventsource: 'new EventSource("/events")',
       worker: 'new Worker("/worker.js")',
+      sharedworker: 'new SharedWorker("/worker.js")',
+      webtransport: 'new WebTransport("https://fixture.test/transport")',
+      webrtc: 'new RTCPeerConnection()',
       popup: 'window.open("https://fixture.test/popup")',
       serviceworker: 'navigator.serviceWorker.register("/sw.js")',
+      beacon: 'document.querySelector("main").append(String(navigator.sendBeacon("/beacon", "x")))',
       dialog: 'alert("forbidden")',
       download:
         '(() => { const link = document.createElement("a"); link.href = "data:text/plain,forbidden"; link.download = "forbidden.txt"; document.body.append(link); link.click(); })()',
+      filechooser:
+        '(() => { const details = document.createElement("details"); details.innerHTML = "<summary>Choose file</summary><input type=file>"; document.querySelector("main").append(details); details.querySelector("summary").addEventListener("click", () => details.querySelector("input").click()); })()',
     }[capability ?? ''];
+    const optionalFailure = request.url?.match(/^\/optional-(.+)$/u)?.[1];
     const body =
       request.url === '/forbidden'
         ? '<main><h1>Forbidden request</h1></main><script>fetch("/post", { method: "POST" }).catch(() => undefined)</script>'
         : request.url === '/nested-article'
           ? nestedArticlePage
-          : capabilityScript
-            ? `<main><h1>Forbidden capability</h1></main><script>${capabilityScript}</script>`
-            : successfulPage;
+          : request.url === '/partial-evidence'
+            ? partialEvidencePage
+            : request.url === '/aggregate-failure'
+              ? aggregateFailurePage
+              : request.url === '/post-storm'
+                ? requestStormPage('post')
+                : request.url === '/subframe-storm'
+                  ? requestStormPage('subframe')
+                  : request.url === '/mixed-storm'
+                    ? requestStormPage('mixed')
+                    : request.url === '/capability-storm'
+                      ? '<main><h1>Capability storm</h1></main><script>for (let index = 0; index < 501; index += 1) navigator.sendBeacon("/beacon-" + index, "x")</script>'
+                      : request.url === '/binding-forgery'
+                        ? '<main><h1>Binding isolation</h1></main><script>const leaked = Object.getOwnPropertyNames(globalThis).filter((name) => name.startsWith("__tauReferenceDenied_")); for (const name of leaked) globalThis[name]("sendBeacon"); document.querySelector("main").append("Reporter leaks: " + leaked.length)</script>'
+                        : optionalFailure
+                          ? optionalFailurePage(optionalFailure)
+                          : request.url === '/media-storm'
+                            ? mediaStormPage
+                            : capabilityScript
+                              ? `<main><h1>Forbidden capability</h1></main><script>${capabilityScript}</script>`
+                              : successfulPage;
     response.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
       'content-length': Buffer.byteLength(body),
@@ -255,8 +392,19 @@ const startFixtureServer = async (): Promise<{
   });
   const { port } = server.address() as AddressInfo;
   return {
-    request: async (options) =>
-      new Promise<IncomingMessage>((resolve, reject) => {
+    requestedPaths,
+    request: async (options) => {
+      requestedPaths.push(options.url.pathname);
+      if (options.url.pathname === '/private-address') {
+        throw new PublicRequestError('unsafe-address', 'fixture resolved to a private address');
+      }
+      if (options.url.pathname === '/transport-failure') {
+        throw new PublicRequestError('transport', 'fixture transport failed');
+      }
+      if (options.url.pathname === '/unknown-failure') {
+        throw new Error('unknown injected failure');
+      }
+      return new Promise<IncomingMessage>((resolve, reject) => {
         const outgoing = httpRequest(
           {
             hostname: '127.0.0.1',
@@ -269,7 +417,8 @@ const startFixtureServer = async (): Promise<{
         );
         outgoing.once('error', reject);
         outgoing.end();
-      }),
+      });
+    },
   };
 };
 
@@ -311,6 +460,112 @@ describe('HTML semantic snapshot', () => {
     expect(() => readHtmlSnapshot(paths.snapshot)).toThrow('unsupported element (script)');
   });
 
+  it('should require bounded media omission provenance for html-v2 snapshots', () => {
+    const paths = temporaryHtmlPaths();
+    const oldSnapshot = createHtmlSnapshotFromHtml({
+      baseUrl: 'https://fixture.test/page',
+      report: report(),
+      html: '<main><h1>Evidence</h1></main>',
+    });
+    writeFileSync(paths.snapshot, oldSnapshot);
+    expect(readHtmlSnapshot(paths.snapshot).report.omittedMediaRequests).toBeUndefined();
+
+    writeFileSync(paths.snapshot, oldSnapshot.replace('content="html-v1"', 'content="html-v2"'));
+    expect(() => readHtmlSnapshot(paths.snapshot)).toThrow('html-v2 requires a media omission count');
+
+    for (const omittedMediaRequests of [-1, 1.5, 501]) {
+      expect(() =>
+        createHtmlSnapshotFromHtml({
+          baseUrl: 'https://fixture.test/page',
+          report: report({ profile: 'html-v2', omittedMediaRequests }),
+          html: '<main><h1>Evidence</h1></main>',
+        }),
+      ).toThrow('media omission count is invalid');
+    }
+
+    writeFileSync(
+      paths.snapshot,
+      createHtmlSnapshotFromHtml({
+        baseUrl: 'https://fixture.test/page',
+        report: report({ profile: 'html-v2', omittedMediaRequests: 2 }),
+        html: '<main><h1>Evidence</h1></main>',
+      }),
+    );
+    expect(readHtmlSnapshot(paths.snapshot).report.omittedMediaRequests).toBe(2);
+  });
+
+  it('should validate complete and internally consistent html-v3 provenance', () => {
+    const paths = temporaryHtmlPaths();
+    expect(() =>
+      createHtmlSnapshotFromHtml({
+        baseUrl: 'https://fixture.test/page',
+        report: report({ profile: 'html-v3' }),
+        html: '<main><h1>Evidence</h1></main>',
+      }),
+    ).toThrow('html-v3 requires request and omission counts');
+
+    for (const requestAttempts of [-1, 1.5, 501]) {
+      expect(() =>
+        createHtmlSnapshotFromHtml({
+          baseUrl: 'https://fixture.test/page',
+          report: v3Report({ requestAttempts }),
+          html: '<main><h1>Evidence</h1></main>',
+        }),
+      ).toThrow('request attempt count is invalid');
+    }
+    for (const failedSubresources of [-1, 1.5, 501]) {
+      expect(() =>
+        createHtmlSnapshotFromHtml({
+          baseUrl: 'https://fixture.test/page',
+          report: v3Report({
+            requestAttempts: 500,
+            omissions: omissions({ failedSubresources }),
+          }),
+          html: '<main><h1>Evidence</h1></main>',
+        }),
+      ).toThrow('failedSubresources count is invalid');
+    }
+
+    expect(() =>
+      createHtmlSnapshotFromHtml({
+        baseUrl: 'https://fixture.test/page',
+        report: v3Report({ requestAttempts: 1, omissions: omissions({ mediaRequests: 2 }) }),
+        html: '<main><h1>Evidence</h1></main>',
+      }),
+    ).toThrow('request omission counts are inconsistent');
+    expect(() =>
+      createHtmlSnapshotFromHtml({
+        baseUrl: 'https://fixture.test/page',
+        report: v3Report({ omissions: omissions({ failedSubresources: 1 }) }),
+        html: '<main><h1>Evidence</h1></main>',
+      }),
+    ).toThrow('cannot claim standards-complete with evidence loss');
+    expect(() =>
+      createHtmlSnapshotFromHtml({
+        baseUrl: 'https://fixture.test/page',
+        report: v3Report({ semanticRoot: 'body' }),
+        html: '<main><h1>Evidence</h1></main>',
+      }),
+    ).toThrow('cannot claim standards-complete with evidence loss');
+
+    const snapshot = createHtmlSnapshotFromHtml({
+      baseUrl: 'https://fixture.test/page',
+      report: v3Report({
+        requestAttempts: 2,
+        omissions: omissions({ mediaRequests: 1, peripheralRequests: 1 }),
+      }),
+      html: '<main><h1>Evidence</h1></main>',
+    });
+    writeFileSync(paths.snapshot, snapshot.replace('<meta name="tau-reference-images-failed" content="0">', ''));
+    expect(() => readHtmlSnapshot(paths.snapshot)).toThrow('html-v3 requires request and omission counts');
+    writeFileSync(paths.snapshot, snapshot);
+    expect(readHtmlSnapshot(paths.snapshot).report).toMatchObject({
+      profile: 'html-v3',
+      requestAttempts: 2,
+      omissions: { mediaRequests: 1, peripheralRequests: 1 },
+    });
+  });
+
   it('should preserve locally migrated Markdown exactly in a legacy inert snapshot', async () => {
     const paths = temporaryHtmlPaths();
     const markdown = '# Existing body\n\n```json\n{"kept": true}\n```\n';
@@ -324,11 +579,49 @@ describe('HTML semantic snapshot', () => {
         }),
       }),
     );
+    const before = readFileSync(paths.snapshot);
     await expect(convertHtmlSnapshot(paths.snapshot)).resolves.toMatchObject({ markdown });
+    expect(readFileSync(paths.snapshot)).toEqual(before);
+  });
+
+  it('should read and convert html-v1 and html-v2 snapshots without rewriting them', async () => {
+    await Promise.all(
+      [report(), report({ profile: 'html-v2', omittedMediaRequests: 0 })].map(async (capture) => {
+        const paths = temporaryHtmlPaths();
+        writeFileSync(
+          paths.snapshot,
+          createHtmlSnapshotFromHtml({
+            baseUrl: 'https://fixture.test/page',
+            report: capture,
+            html: '<main><h1>Evidence</h1><p>Old profile body.</p></main>',
+          }),
+        );
+        const before = readFileSync(paths.snapshot);
+        await convertHtmlSnapshot(paths.snapshot);
+        expect(readFileSync(paths.snapshot)).toEqual(before);
+      }),
+    );
   });
 });
 
 describe('HTML browser capture', () => {
+  it('should keep browser failures fatal and leave no temporary output', async () => {
+    const paths = temporaryHtmlPaths();
+    await expect(
+      captureHtmlReference({
+        id: 'browser-failure',
+        url: 'https://fixture.test/browser-failure',
+        paths,
+        dependencies: {
+          launchBrowser: async () => {
+            throw new Error('browser launch failed');
+          },
+        },
+      }),
+    ).rejects.toThrow('browser launch failed');
+    expect(readdirSync(dirname(paths.artifact))).toEqual([]);
+  });
+
   it('should capture visual pixels, standardized interaction states, and legible Markdown', async () => {
     const fixture = await startFixtureServer();
     const paths = temporaryHtmlPaths();
@@ -341,18 +634,34 @@ describe('HTML browser capture', () => {
 
     const snapshot = readHtmlSnapshot(paths.snapshot);
     expect(snapshot.report).toMatchObject({
-      profile: 'html-v1',
+      profile: 'html-v3',
       semanticRoot: 'main',
       completeness: 'standards-complete',
       discovered: 5,
       visited: 5,
       failed: 0,
       skipped: 0,
+      omissions: {
+        mediaRequests: 2,
+        peripheralRequests: 2,
+        blockedCapabilities: 0,
+        failedSubresources: 0,
+        subframes: 0,
+        nonReadingRequests: 0,
+        failedImages: 0,
+      },
     });
+    expect(snapshot.report.requestAttempts).toBe(6);
     expect(snapshot.html).toContain('Lazy details evidence 1.');
     expect(snapshot.html).toContain('Lazy accordion evidence.');
     expect(snapshot.html).toContain('Lazy second tab evidence.');
     expect(snapshot.html).toContain('Below-the-fold lazy evidence.');
+    expect(snapshot.html).toContain('Caption survives omitted video.');
+    expect(snapshot.html).not.toContain('<video');
+    expect(snapshot.html).not.toContain('ignored-video.mp4');
+    expect(fixture.requestedPaths).not.toContain('/ignored-video.mp4');
+    expect(fixture.requestedPaths).not.toContain('/ignored-manifest.webmanifest');
+    expect(fixture.requestedPaths).not.toContain('/ignored-track.vtt');
     expect(snapshot.html).not.toMatch(
       /Navigation noise|Footer noise|copy-button|Arbitrary button must stay untouched/u,
     );
@@ -364,6 +673,8 @@ describe('HTML browser capture', () => {
     expect(converted.markdown).toContain('*Image: A semantic diagram*');
     expect(converted.markdown).toContain('Lazy accordion evidence.');
     expect(converted.markdown).toContain('Lazy second tab evidence.');
+    expect(converted.markdown).toContain('Caption survives omitted video.');
+    expect(converted.markdown).not.toContain('ignored-video.mp4');
     expect(converted.markdown).toContain('``` text\nconst answer = 42;\n```');
     expect(converted.markdown.match(/## Responsive evidence/gu)).toHaveLength(1);
     expect(converted.markdown.match(/## Native details one/gu)).toHaveLength(1);
@@ -376,6 +687,7 @@ describe('HTML browser capture', () => {
       expect(info.info?.Producer).toMatch(/Skia/u);
       const text = await parser.getText();
       expect(text.text.match(/Persistent header/gu)).toHaveLength(1);
+      expect(text.text).toContain('Caption survives omitted video.');
       const screenshots = await parser.getScreenshot({ first: 1, scale: 1 });
       const first = screenshots.pages[0];
       expect(first).toBeDefined();
@@ -429,6 +741,57 @@ describe('HTML browser capture', () => {
     }
   }, 120_000);
 
+  it.each(['media-storm', 'post-storm', 'subframe-storm', 'mixed-storm'])(
+    'should count every %s route before classification and clean up at the shared request limit',
+    async (path) => {
+      const fixture = await startFixtureServer();
+      const paths = temporaryHtmlPaths();
+      await expect(
+        captureHtmlReference({
+          id: path,
+          url: `https://fixture.test/${path}`,
+          paths,
+          dependencies: { request: fixture.request },
+        }),
+      ).rejects.toThrow('browser request count exceeds 500');
+      expect(() => readFileSync(paths.artifact)).toThrow();
+      expect(() => readFileSync(paths.snapshot)).toThrow();
+      expect(readdirSync(dirname(paths.artifact))).toEqual([]);
+    },
+    120_000,
+  );
+
+  it('should bound ambient capability attempts and leave no output', async () => {
+    const fixture = await startFixtureServer();
+    const paths = temporaryHtmlPaths();
+    await expect(
+      captureHtmlReference({
+        id: 'capability-storm',
+        url: 'https://fixture.test/capability-storm',
+        paths,
+        dependencies: { request: fixture.request },
+      }),
+    ).rejects.toThrow('browser capability attempt count exceeds 500');
+    expect(readdirSync(dirname(paths.artifact))).toEqual([]);
+  }, 120_000);
+
+  it('should keep the code-owned capability reporter unavailable to page scripts', async () => {
+    const fixture = await startFixtureServer();
+    const paths = temporaryHtmlPaths();
+    await captureHtmlReference({
+      id: 'binding-forgery',
+      url: 'https://fixture.test/binding-forgery',
+      paths,
+      dependencies: { request: fixture.request },
+    });
+    const snapshot = readHtmlSnapshot(paths.snapshot);
+    expect(snapshot.report).toMatchObject({
+      completeness: 'standards-complete',
+      omissions: { blockedCapabilities: 0 },
+    });
+    expect(snapshot.html).toContain('Reporter leaks: 0');
+  }, 120_000);
+
   it('should prefer article content and skip blocked frames and malformed controls', async () => {
     const fixture = await startFixtureServer();
     const paths = temporaryHtmlPaths();
@@ -441,18 +804,20 @@ describe('HTML browser capture', () => {
 
     const snapshot = readHtmlSnapshot(paths.snapshot);
     expect(snapshot.report).toMatchObject({
+      requestAttempts: 2,
       semanticRoot: 'article',
       completeness: 'partial',
       discovered: 1,
       visited: 0,
       failed: 0,
       skipped: 1,
+      omissions: { subframes: 1 },
     });
     expect(snapshot.html).toContain('Article evidence');
     expect(snapshot.html).not.toContain('Main-only noise');
   }, 120_000);
 
-  it('should block non-reading requests without failing the capture', async () => {
+  it('should block and disclose non-reading requests without discarding the capture', async () => {
     const fixture = await startFixtureServer();
     const paths = temporaryHtmlPaths();
     await captureHtmlReference({
@@ -461,19 +826,200 @@ describe('HTML browser capture', () => {
       paths,
       dependencies: { request: fixture.request },
     });
+    expect(readHtmlSnapshot(paths.snapshot).report).toMatchObject({
+      requestAttempts: 2,
+      completeness: 'partial',
+      omissions: { nonReadingRequests: 1 },
+    });
     expect(() => readFileSync(paths.artifact)).not.toThrow();
-    expect(() => readFileSync(paths.snapshot)).not.toThrow();
   }, 120_000);
 
   it.each([
-    ['websocket', 'WebSocket'],
-    ['worker', 'Worker'],
-    ['popup', 'window.open'],
-    ['serviceworker', 'ServiceWorker'],
-    ['dialog', 'browser dialog is forbidden'],
-    ['download', 'browser download is forbidden'],
+    ['private-address', 'unsafe-address'],
+    ['transport-failure', 'transport'],
+    ['downgrade', 'unsafe-redirect'],
+    ['unsupported-encoding', 'content-encoding'],
+    ['invalid-length', 'content-length'],
+    ['oversized-0', 'response-size'],
   ])(
-    'should fail closed when page JavaScript attempts %s',
+    'should keep main document %s failures fatal',
+    async (path, reason) => {
+      const fixture = await startFixtureServer();
+      const paths = temporaryHtmlPaths();
+      await expect(
+        captureHtmlReference({
+          id: path,
+          url: `https://fixture.test/${path}`,
+          paths,
+          dependencies: { request: fixture.request },
+        }),
+      ).rejects.toThrow(`browser main document resource failed (${reason})`);
+      expect(readdirSync(dirname(paths.artifact))).toEqual([]);
+    },
+    120_000,
+  );
+
+  it.each(['websocket', 'worker'])(
+    'should keep the Playwright %s defense effective if init-script shims are bypassed',
+    async (path) => {
+      const fixture = await startFixtureServer();
+      const paths = temporaryHtmlPaths();
+      await captureHtmlReference({
+        id: `route-${path}`,
+        url: `https://fixture.test/capability/${path}`,
+        paths,
+        dependencies: { request: fixture.request, launchBrowser: launchWithoutCapabilityInitScript },
+      });
+      expect(readHtmlSnapshot(paths.snapshot).report).toMatchObject({
+        requestAttempts: path === 'worker' ? 2 : 1,
+        completeness: 'partial',
+        omissions: { blockedCapabilities: 1 },
+      });
+      if (path === 'worker') {
+        expect(fixture.requestedPaths).toContain('/worker.js');
+      }
+    },
+    120_000,
+  );
+
+  it.each([
+    'private-address',
+    'transport-failure',
+    'downgrade',
+    'unsupported-encoding',
+    'invalid-length',
+    'oversized-0',
+  ])(
+    'should preserve ordinary evidence when optional subresource %s fails safely',
+    async (path) => {
+      const fixture = await startFixtureServer();
+      const paths = temporaryHtmlPaths();
+      await captureHtmlReference({
+        id: `optional-${path}`,
+        url: `https://fixture.test/optional-${path}`,
+        paths,
+        dependencies: { request: fixture.request },
+      });
+      const snapshot = readHtmlSnapshot(paths.snapshot);
+      expect(snapshot.report).toMatchObject({
+        requestAttempts: 2,
+        completeness: 'partial',
+        omissions: { failedSubresources: 1, failedImages: 1 },
+      });
+      expect(snapshot.html).toContain('Ordinary evidence remains.');
+      expect(snapshot.html).not.toContain(`/${path}`);
+    },
+    120_000,
+  );
+
+  it('should keep unknown optional request errors fatal', async () => {
+    const fixture = await startFixtureServer();
+    const paths = temporaryHtmlPaths();
+    await expect(
+      captureHtmlReference({
+        id: 'optional-unknown-failure',
+        url: 'https://fixture.test/optional-unknown-failure',
+        paths,
+        dependencies: { request: fixture.request },
+      }),
+    ).rejects.toThrow('unknown injected failure');
+    expect(readdirSync(dirname(paths.artifact))).toEqual([]);
+  }, 120_000);
+
+  it('should charge bytes from failed subresources against the aggregate limit', async () => {
+    const fixture = await startFixtureServer();
+    const paths = temporaryHtmlPaths();
+    await expect(
+      captureHtmlReference({
+        id: 'aggregate-failure',
+        url: 'https://fixture.test/aggregate-failure',
+        paths,
+        dependencies: { request: fixture.request },
+      }),
+    ).rejects.toThrow('browser aggregate response bytes exceed 104857600');
+    expect(readdirSync(dirname(paths.artifact))).toEqual([]);
+  }, 120_000);
+
+  it('should retain baseline, alt, caption, PDF, and exact partial provenance across local evidence loss', async () => {
+    const fixture = await startFixtureServer();
+    const paths = temporaryHtmlPaths();
+    await captureHtmlReference({
+      id: 'partial-evidence',
+      url: 'https://fixture.test/partial-evidence',
+      paths,
+      dependencies: { request: fixture.request },
+    });
+
+    const snapshot = readHtmlSnapshot(paths.snapshot);
+    expect(snapshot.report).toMatchObject({
+      requestAttempts: 4,
+      completeness: 'partial',
+      discovered: 1,
+      visited: 1,
+      failed: 1,
+      skipped: 0,
+      omissions: {
+        failedSubresources: 0,
+        subframes: 1,
+        nonReadingRequests: 1,
+        failedImages: 1,
+      },
+    });
+    expect(snapshot.html.match(/<img alt="Broken diagram">/gu)).toHaveLength(1);
+    expect(snapshot.html).toContain('Baseline evidence survives local failures.');
+    expect(snapshot.html).toContain('Broken figure caption.');
+    expect(snapshot.html).not.toMatch(/<iframe|<button|missing-image/u);
+    const converted = await convertHtmlSnapshot(paths.snapshot);
+    expect(converted.markdown).toBe(
+      'Baseline evidence survives local failures.\n\n*Image: Broken diagram*\n\nBroken figure caption.\n',
+    );
+    const parser = new PDFParse({ data: readFileSync(paths.artifact) });
+    try {
+      const text = await parser.getText();
+      expect(text.text).toContain('Broken figure caption.');
+      const screenshots = await parser.getScreenshot({ first: 1, scale: 1 });
+      const first = screenshots.pages[0];
+      expect(first?.width).toBeGreaterThan(0);
+      expect(first?.height).toBeGreaterThan(0);
+    } finally {
+      await parser.destroy();
+    }
+  }, 120_000);
+
+  it.each(['websocket', 'eventsource', 'worker', 'sharedworker', 'webtransport', 'webrtc', 'serviceworker', 'beacon'])(
+    'should block and disclose ambient page capability %s',
+    async (path) => {
+      const fixture = await startFixtureServer();
+      const paths = temporaryHtmlPaths();
+      await captureHtmlReference({
+        id: path,
+        url: `https://fixture.test/capability/${path}`,
+        paths,
+        dependencies: { request: fixture.request },
+      });
+      const snapshot = readHtmlSnapshot(paths.snapshot);
+      expect(snapshot.report).toMatchObject({
+        requestAttempts: 1,
+        completeness: 'partial',
+        omissions: { blockedCapabilities: 1 },
+      });
+      if (path === 'beacon') {
+        expect(snapshot.html).toContain('false');
+      }
+      expect(fixture.requestedPaths).not.toContain('/events');
+      expect(fixture.requestedPaths).not.toContain('/worker.js');
+      expect(fixture.requestedPaths).not.toContain('/beacon');
+    },
+    120_000,
+  );
+
+  it.each([
+    ['popup', 'window.open'],
+    ['dialog', 'dialog'],
+    ['download', 'download'],
+    ['filechooser', 'filechooser'],
+  ])(
+    'should fail closed when page JavaScript attempts disruptive capability %s',
     async (path, diagnostic) => {
       const fixture = await startFixtureServer();
       const paths = temporaryHtmlPaths();
@@ -501,7 +1047,7 @@ describe('HTML browser capture', () => {
         paths,
         dependencies: { request: fixture.request },
       }),
-    ).rejects.toThrow('browser redirect target is forbidden');
+    ).rejects.toThrow('browser main document resource failed (unsafe-redirect)');
     expect(() => readFileSync(paths.artifact)).toThrow();
     expect(() => readFileSync(paths.snapshot)).toThrow();
   });

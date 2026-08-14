@@ -14,20 +14,29 @@ import type { IncomingMessage, OutgoingHttpHeaders } from 'node:http';
 import { basename, dirname, join } from 'node:path';
 
 import { chromium } from '@playwright/test';
-import type { Browser, BrowserContext, Locator, Page, Request, Route } from '@playwright/test';
+import type {
+  Browser,
+  BrowserContext,
+  Locator,
+  Page,
+  Request,
+  Route,
+  Worker as PlaywrightWorker,
+} from '@playwright/test';
 import { JSDOM } from 'jsdom';
 
 import { validatePdfArtifact } from '#pdf-to-md.js';
 import { convertWithReferencePandoc } from '#reference-pandoc.js';
-import { requestPublicUrl } from '#reference-download.js';
+import { PublicRequestError, requestPublicUrl } from '#reference-download.js';
 import type { PublicRequestOptions } from '#reference-download.js';
 import { isPublicUrl } from '#reference-markdown.js';
-import type { HtmlCaptureReport, ReferencePaths } from '#reference-to-md.js';
+import type { HtmlCaptureOmissions, HtmlCaptureReport, ReferencePaths } from '#reference-to-md.js';
 
 const maximumHtmlBytes = 20 * 1024 * 1024;
 const maximumSemanticNodes = 250_000;
 const maximumSemanticDepth = 128;
 const maximumRequests = 500;
+const maximumCapabilityAttempts = 500;
 const maximumResponseBytes = 20 * 1024 * 1024;
 const maximumAggregateBytes = 100 * 1024 * 1024;
 const maximumInteractionStates = 100;
@@ -37,6 +46,7 @@ const maximumLazyScrollSteps = 100;
 const navigationTimeoutMilliseconds = 30_000;
 const captureTimeoutMilliseconds = 60_000;
 const idleTimeoutMilliseconds = 10_000;
+const interactionTimeoutMilliseconds = 2000;
 
 const semanticTags = new Set([
   'a',
@@ -109,6 +119,21 @@ const snapshotMetadataNames = [
   'tau-reference-states-failed',
   'tau-reference-states-skipped',
 ] as const;
+const mediaOmissionMetadataName = 'tau-reference-media-requests-omitted';
+const v3SnapshotMetadataNames = {
+  requestAttempts: 'tau-reference-request-attempts',
+  peripheralRequests: 'tau-reference-peripheral-requests-omitted',
+  blockedCapabilities: 'tau-reference-capabilities-blocked',
+  failedSubresources: 'tau-reference-subresources-failed',
+  subframes: 'tau-reference-subframes-omitted',
+  nonReadingRequests: 'tau-reference-non-reading-requests-omitted',
+  failedImages: 'tau-reference-images-failed',
+} as const;
+const supportedSnapshotMetadataNames = [
+  ...snapshotMetadataNames,
+  mediaOmissionMetadataName,
+  ...Object.values(v3SnapshotMetadataNames),
+] as const;
 const hopByHopHeaders = new Set([
   'connection',
   'keep-alive',
@@ -141,11 +166,63 @@ type SemanticNode =
 type CapturedFragment = { label: string; raw: RawDomNode };
 
 type RouteState = {
-  requests: number;
+  requestAttempts: number;
+  capabilityAttempts: number;
+  omissions: HtmlCaptureOmissions;
   aggregateBytes: number;
   inFlight: number;
   fatal?: Error;
 };
+
+type ResourceFailureReason =
+  | 'unsafe-address'
+  | 'unsafe-redirect'
+  | 'transport'
+  | 'content-encoding'
+  | 'content-length'
+  | 'response-size';
+
+type RouteFulfillmentOutcome = { kind: 'fulfilled' } | { kind: 'resource-failed'; reason: ResourceFailureReason };
+
+type SnapshotDomResult = { kind: 'captured'; raw: RawDomNode } | { kind: 'capture-fatal'; message: string };
+
+class CaptureWideError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'CaptureWideError';
+  }
+}
+
+const ambientCapabilities = new Set([
+  'Worker',
+  'SharedWorker',
+  'WebSocket',
+  'WebTransport',
+  'RTCPeerConnection',
+  'webkitRTCPeerConnection',
+  'EventSource',
+  'sendBeacon',
+  'ServiceWorker',
+]);
+const disruptiveCapabilities = new Set([
+  'window.open',
+  'showOpenFilePicker',
+  'showSaveFilePicker',
+  'showDirectoryPicker',
+  'popup',
+  'download',
+  'dialog',
+  'filechooser',
+]);
+const omissionNames = [
+  'mediaRequests',
+  'peripheralRequests',
+  'blockedCapabilities',
+  'failedSubresources',
+  'subframes',
+  'nonReadingRequests',
+  'failedImages',
+] satisfies ReadonlyArray<keyof HtmlCaptureOmissions>;
 
 const throwIfFatal = (state: RouteState): void => {
   if (state.fatal) {
@@ -387,12 +464,75 @@ const validateReport = (report: HtmlCaptureReport): void => {
   if (report.visited + report.skipped > report.discovered || report.failed > report.visited) {
     throw new Error('HTML snapshot interaction counts are inconsistent');
   }
-  if (report.completeness === 'standards-complete' && (report.failed !== 0 || report.skipped !== 0)) {
-    throw new Error('HTML snapshot cannot claim standards-complete with failed or skipped states');
+  if (report.profile === 'html-v2' && report.omittedMediaRequests === undefined) {
+    throw new Error('HTML snapshot html-v2 requires a media omission count');
+  }
+  if (
+    report.omittedMediaRequests !== undefined &&
+    (!Number.isSafeInteger(report.omittedMediaRequests) ||
+      report.omittedMediaRequests < 0 ||
+      report.omittedMediaRequests > maximumRequests)
+  ) {
+    throw new Error('HTML snapshot media omission count is invalid');
+  }
+  if (report.profile === 'html-v3') {
+    if (report.requestAttempts === undefined || report.omissions === undefined) {
+      throw new Error('HTML snapshot html-v3 requires request and omission counts');
+    }
+    if (report.omittedMediaRequests !== undefined) {
+      throw new Error('HTML snapshot html-v3 may not use the html-v2 media field');
+    }
+  } else if (report.requestAttempts !== undefined || report.omissions !== undefined) {
+    throw new Error('HTML snapshot v3 counts require the html-v3 profile');
+  }
+  if (report.profile !== 'html-v2' && report.omittedMediaRequests !== undefined) {
+    throw new Error('HTML snapshot media omission count requires the html-v2 profile');
+  }
+  if (
+    report.requestAttempts !== undefined &&
+    (!Number.isSafeInteger(report.requestAttempts) ||
+      report.requestAttempts < 0 ||
+      report.requestAttempts > maximumRequests)
+  ) {
+    throw new Error('HTML snapshot request attempt count is invalid');
+  }
+  if (report.omissions) {
+    for (const name of omissionNames) {
+      const value = report.omissions[name];
+      const maximum =
+        name === 'blockedCapabilities'
+          ? maximumCapabilityAttempts
+          : name === 'failedImages'
+            ? maximumSemanticNodes
+            : maximumRequests;
+      if (!Number.isSafeInteger(value) || value < 0 || value > maximum) {
+        throw new Error(`HTML snapshot ${name} count is invalid`);
+      }
+    }
+    const requestOmissions =
+      report.omissions.mediaRequests +
+      report.omissions.peripheralRequests +
+      report.omissions.failedSubresources +
+      report.omissions.subframes +
+      report.omissions.nonReadingRequests;
+    if (report.requestAttempts === undefined || requestOmissions > report.requestAttempts) {
+      throw new Error('HTML snapshot request omission counts are inconsistent');
+    }
+  }
+  const evidenceLoss =
+    report.failed !== 0 ||
+    report.skipped !== 0 ||
+    (report.omissions?.blockedCapabilities ?? 0) !== 0 ||
+    (report.omissions?.failedSubresources ?? 0) !== 0 ||
+    (report.omissions?.subframes ?? 0) !== 0 ||
+    (report.omissions?.nonReadingRequests ?? 0) !== 0 ||
+    (report.omissions?.failedImages ?? 0) !== 0;
+  if (report.completeness === 'standards-complete' && (report.semanticRoot === 'body' || evidenceLoss)) {
+    throw new Error('HTML snapshot cannot claim standards-complete with evidence loss');
   }
 };
 
-const metadataValues = (report: HtmlCaptureReport): Record<(typeof snapshotMetadataNames)[number], string> => ({
+const metadataValues = (report: HtmlCaptureReport): Record<string, string> => ({
   'tau-reference-capture-profile': report.profile,
   'tau-reference-chromium-version': report.chromiumVersion,
   'tau-reference-final-url': report.finalUrl,
@@ -403,7 +543,39 @@ const metadataValues = (report: HtmlCaptureReport): Record<(typeof snapshotMetad
   'tau-reference-states-empty': String(report.empty),
   'tau-reference-states-failed': String(report.failed),
   'tau-reference-states-skipped': String(report.skipped),
+  ...(report.omittedMediaRequests === undefined
+    ? {}
+    : { [mediaOmissionMetadataName]: String(report.omittedMediaRequests) }),
+  ...(report.requestAttempts === undefined || report.omissions === undefined
+    ? {}
+    : {
+        [v3SnapshotMetadataNames.requestAttempts]: String(report.requestAttempts),
+        [mediaOmissionMetadataName]: String(report.omissions.mediaRequests),
+        [v3SnapshotMetadataNames.peripheralRequests]: String(report.omissions.peripheralRequests),
+        [v3SnapshotMetadataNames.blockedCapabilities]: String(report.omissions.blockedCapabilities),
+        [v3SnapshotMetadataNames.failedSubresources]: String(report.omissions.failedSubresources),
+        [v3SnapshotMetadataNames.subframes]: String(report.omissions.subframes),
+        [v3SnapshotMetadataNames.nonReadingRequests]: String(report.omissions.nonReadingRequests),
+        [v3SnapshotMetadataNames.failedImages]: String(report.omissions.failedImages),
+      }),
 });
+
+const captureCompleteness = (options: {
+  semanticRoot: HtmlCaptureReport['semanticRoot'];
+  failed: number;
+  skipped: number;
+  omissions: HtmlCaptureOmissions;
+}): HtmlCaptureReport['completeness'] =>
+  options.semanticRoot === 'body' ||
+  options.failed !== 0 ||
+  options.skipped !== 0 ||
+  options.omissions.blockedCapabilities !== 0 ||
+  options.omissions.failedSubresources !== 0 ||
+  options.omissions.subframes !== 0 ||
+  options.omissions.nonReadingRequests !== 0 ||
+  options.omissions.failedImages !== 0
+    ? 'partial'
+    : 'standards-complete';
 
 export const buildHtmlSnapshot = (options: { report: HtmlCaptureReport; nodes: readonly SemanticNode[] }): string => {
   validateReport(options.report);
@@ -414,7 +586,7 @@ export const buildHtmlSnapshot = (options: { report: HtmlCaptureReport; nodes: r
   const metadata = metadataValues(options.report);
   const head = [
     '<meta charset="utf-8">',
-    ...snapshotMetadataNames.map((name) => `<meta name="${name}" content="${escapeAttribute(metadata[name])}">`),
+    ...Object.entries(metadata).map(([name, value]) => `<meta name="${name}" content="${escapeAttribute(value)}">`),
   ].join('');
   const body = nodes.map((node) => serializeSemanticNode(node)).join('');
   const snapshot = `<!doctype html><html><head>${head}</head><body><main>${body}</main></body></html>\n`;
@@ -525,7 +697,7 @@ export const readHtmlSnapshot = (path: string): { html: string; report: HtmlCapt
       if (
         !name ||
         content === null ||
-        !snapshotMetadataNames.includes(name as (typeof snapshotMetadataNames)[number])
+        !supportedSnapshotMetadataNames.includes(name as (typeof supportedSnapshotMetadataNames)[number])
       ) {
         throw new Error('HTML snapshot contains unsupported metadata');
       }
@@ -538,6 +710,17 @@ export const readHtmlSnapshot = (path: string): { html: string; report: HtmlCapt
       if (!metadata.has(name)) {
         throw new Error(`HTML snapshot is missing metadata (${name})`);
       }
+    }
+    const profile = metadata.get('tau-reference-capture-profile') ?? '';
+    const v3OnlyMetadataNames = Object.values(v3SnapshotMetadataNames);
+    if (profile === 'html-v3') {
+      for (const name of [mediaOmissionMetadataName, ...v3OnlyMetadataNames]) {
+        if (!metadata.has(name)) {
+          throw new Error('HTML snapshot html-v3 requires request and omission counts');
+        }
+      }
+    } else if (v3OnlyMetadataNames.some((name) => metadata.has(name))) {
+      throw new Error('HTML snapshot v3 metadata requires the html-v3 profile');
     }
 
     let nodes = 0;
@@ -575,7 +758,7 @@ export const readHtmlSnapshot = (path: string): { html: string; report: HtmlCapt
     }
 
     const report: HtmlCaptureReport = {
-      profile: metadata.get('tau-reference-capture-profile') ?? '',
+      profile,
       chromiumVersion: metadata.get('tau-reference-chromium-version') ?? '',
       finalUrl: metadata.get('tau-reference-final-url') ?? '',
       semanticRoot: (metadata.get('tau-reference-semantic-root') ?? '') as HtmlCaptureReport['semanticRoot'],
@@ -585,6 +768,38 @@ export const readHtmlSnapshot = (path: string): { html: string; report: HtmlCapt
       empty: parseCount(metadata.get('tau-reference-states-empty'), 'empty'),
       failed: parseCount(metadata.get('tau-reference-states-failed'), 'failed'),
       skipped: parseCount(metadata.get('tau-reference-states-skipped'), 'skipped'),
+      requestAttempts:
+        profile === 'html-v3'
+          ? parseCount(metadata.get(v3SnapshotMetadataNames.requestAttempts), 'request attempt count')
+          : undefined,
+      omittedMediaRequests:
+        profile !== 'html-v3' && metadata.has(mediaOmissionMetadataName)
+          ? parseCount(metadata.get(mediaOmissionMetadataName), 'media omission count')
+          : undefined,
+      omissions:
+        profile === 'html-v3'
+          ? {
+              mediaRequests: parseCount(metadata.get(mediaOmissionMetadataName), 'mediaRequests'),
+              peripheralRequests: parseCount(
+                metadata.get(v3SnapshotMetadataNames.peripheralRequests),
+                'peripheralRequests',
+              ),
+              blockedCapabilities: parseCount(
+                metadata.get(v3SnapshotMetadataNames.blockedCapabilities),
+                'blockedCapabilities',
+              ),
+              failedSubresources: parseCount(
+                metadata.get(v3SnapshotMetadataNames.failedSubresources),
+                'failedSubresources',
+              ),
+              subframes: parseCount(metadata.get(v3SnapshotMetadataNames.subframes), 'subframes'),
+              nonReadingRequests: parseCount(
+                metadata.get(v3SnapshotMetadataNames.nonReadingRequests),
+                'nonReadingRequests',
+              ),
+              failedImages: parseCount(metadata.get(v3SnapshotMetadataNames.failedImages), 'failedImages'),
+            }
+          : undefined,
     };
     validateReport(report);
     return { html, report };
@@ -625,7 +840,7 @@ export const convertHtmlSnapshot = async (
       input: dom.serialize(),
     });
     return {
-      markdown: markdown.replaceAll(/ {2}\n/gu, '\\' + '\n'),
+      markdown: markdown.replaceAll(/ {2}\n/gu, '\u005C\n'),
       detail: 'sandboxed Pandoc rendered HTML conversion',
       capture: report,
     };
@@ -634,66 +849,70 @@ export const convertHtmlSnapshot = async (
   }
 };
 
-const snapshotDom = (root: Element, options?: { excludeInteractionStates?: boolean }): RawDomNode => {
-  const source = options?.excludeInteractionStates ? (root.cloneNode(true) as Element) : root;
-  if (options?.excludeInteractionStates) {
-    const controls = [
-      ...source.querySelectorAll('[aria-expanded][aria-controls]:not([role="tab"]), [role="tab"][aria-controls]'),
-    ];
-    const panelIds = new Set(controls.map((control) => control.getAttribute('aria-controls')).filter(Boolean));
-    for (const element of source.querySelectorAll('details')) {
-      element.remove();
-    }
-    for (const element of controls) {
-      element.remove();
-    }
-    for (const element of source.querySelectorAll('[id]')) {
-      if (panelIds.has(element.id)) {
+const snapshotDom = (root: Element, options?: { excludeInteractionStates?: boolean }): SnapshotDomResult => {
+  try {
+    const source = options?.excludeInteractionStates ? (root.cloneNode(true) as Element) : root;
+    if (options?.excludeInteractionStates) {
+      const controls = [
+        ...source.querySelectorAll('[aria-expanded][aria-controls]:not([role="tab"]), [role="tab"][aria-controls]'),
+      ];
+      const panelIds = new Set(controls.map((control) => control.getAttribute('aria-controls')).filter(Boolean));
+      for (const element of source.querySelectorAll('details')) {
         element.remove();
       }
-    }
-  }
-  let nodes = 0;
-  let characters = 0;
-  const walk = (node: Node, depth: number): RawDomNode | undefined => {
-    nodes += 1;
-    if (nodes > 250_000) {
-      throw new Error('rendered DOM exceeds maximum node count');
-    }
-    if (depth > 128) {
-      throw new Error('rendered DOM exceeds maximum nesting depth');
-    }
-    if (node.nodeType === Node.TEXT_NODE) {
-      const value = node.nodeValue ?? '';
-      characters += value.length;
-      if (characters > 20 * 1024 * 1024) {
-        throw new Error('rendered DOM exceeds maximum text size');
+      for (const element of controls) {
+        element.remove();
       }
-      return { type: 'text', value };
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) {
-      return undefined;
-    }
-    const element = node as Element;
-    const attributes = Object.fromEntries(
-      ['href', 'alt', 'role', 'class', 'colspan', 'rowspan']
-        .filter((name) => element.hasAttribute(name))
-        .map((name) => [name, element.getAttribute(name) ?? '']),
-    );
-    const children: RawDomNode[] = [];
-    for (const child of element.childNodes) {
-      const captured = walk(child, depth + 1);
-      if (captured) {
-        children.push(captured);
+      for (const element of source.querySelectorAll('[id]')) {
+        if (panelIds.has(element.id)) {
+          element.remove();
+        }
       }
     }
-    return { type: 'element', tag: element.tagName.toLowerCase(), attributes, children };
-  };
-  const captured = walk(source, 1);
-  if (!captured) {
-    throw new Error('rendered DOM root is not an element');
+    let nodes = 0;
+    let characters = 0;
+    const walk = (node: Node, depth: number): RawDomNode | undefined => {
+      nodes += 1;
+      if (nodes > 250_000) {
+        throw new Error('rendered DOM exceeds maximum node count');
+      }
+      if (depth > 128) {
+        throw new Error('rendered DOM exceeds maximum nesting depth');
+      }
+      if (node.nodeType === Node.TEXT_NODE) {
+        const value = node.nodeValue ?? '';
+        characters += value.length;
+        if (characters > 20 * 1024 * 1024) {
+          throw new Error('rendered DOM exceeds maximum text size');
+        }
+        return { type: 'text', value };
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) {
+        return undefined;
+      }
+      const element = node as Element;
+      const attributes = Object.fromEntries(
+        ['href', 'alt', 'role', 'class', 'colspan', 'rowspan']
+          .filter((name) => element.hasAttribute(name))
+          .map((name) => [name, element.getAttribute(name) ?? '']),
+      );
+      const children: RawDomNode[] = [];
+      for (const child of element.childNodes) {
+        const captured = walk(child, depth + 1);
+        if (captured) {
+          children.push(captured);
+        }
+      }
+      return { type: 'element', tag: element.tagName.toLowerCase(), attributes, children };
+    };
+    const captured = walk(source, 1);
+    if (!captured) {
+      throw new Error('rendered DOM root is not an element');
+    }
+    return { kind: 'captured', raw: captured };
+  } catch (error) {
+    return { kind: 'capture-fatal', message: error instanceof Error ? error.message : String(error) };
   }
-  return captured;
 };
 
 const remaining = (deadline: number, now: () => number, label: string): number => {
@@ -737,7 +956,7 @@ const settlePage = async (options: {
   now: () => number;
   lazyScroll: boolean;
 }): Promise<void> => {
-  await withDeadline(
+  const failedImages = await withDeadline(
     options.page.evaluate(
       async ({ lazyScroll, maximumSteps }) => {
         await document.fonts.ready;
@@ -745,15 +964,20 @@ const settlePage = async (options: {
           const style = getComputedStyle(image);
           return image.currentSrc !== '' && style.display !== 'none' && style.visibility !== 'hidden';
         });
-        await Promise.all(
+        const imageResults = await Promise.all(
           visibleImages.map(async (image) => {
             try {
               await image.decode();
+              return 0;
             } catch {
-              throw new Error(`visible image failed to decode (${new URL(image.currentSrc).origin})`);
+              image.removeAttribute('src');
+              image.removeAttribute('srcset');
+              image.style.setProperty('display', 'none', 'important');
+              return 1;
             }
           }),
         );
+        const failedImages = imageResults.reduce<number>((total, value) => total + value, 0);
         for (const animation of document.getAnimations()) {
           const endTime = Number(animation.effect?.getComputedTiming().endTime);
           try {
@@ -767,7 +991,7 @@ const settlePage = async (options: {
           }
         }
         if (!lazyScroll) {
-          return;
+          return failedImages;
         }
         let previousHeight = 0;
         let stableBottomSamples = 0;
@@ -785,7 +1009,7 @@ const settlePage = async (options: {
           previousHeight = height;
           if (stableBottomSamples >= 2) {
             window.scrollTo(0, 0);
-            return;
+            return failedImages;
           }
         }
         window.scrollTo(0, 0);
@@ -795,6 +1019,7 @@ const settlePage = async (options: {
     ),
     { deadline: options.deadline, now: options.now, label: 'page settlement' },
   );
+  options.routeState.omissions.failedImages += failedImages;
 
   let previousDimensions = '';
   let stableSamples = 0;
@@ -836,10 +1061,21 @@ const selectedRoot = async (page: Page): Promise<{ locator: Locator; name: 'main
   return { locator: page.locator('body'), name: 'body' };
 };
 
-const captureLocator = async (locator: Locator): Promise<RawDomNode> => locator.evaluate(snapshotDom, {});
+const captureLocator = async (locator: Locator): Promise<RawDomNode> => {
+  const result = await locator.evaluate(snapshotDom, {});
+  if (result.kind === 'capture-fatal') {
+    throw new CaptureWideError(result.message);
+  }
+  return result.raw;
+};
 
-const captureBaseline = async (locator: Locator): Promise<RawDomNode> =>
-  locator.evaluate(snapshotDom, { excludeInteractionStates: true });
+const captureBaseline = async (locator: Locator): Promise<RawDomNode> => {
+  const result = await locator.evaluate(snapshotDom, { excludeInteractionStates: true });
+  if (result.kind === 'capture-fatal') {
+    throw new CaptureWideError(result.message);
+  }
+  return result.raw;
+};
 
 const cleanLabel = (value: string, fallback: string): string => {
   const label = value.replaceAll(/\s+/gu, ' ').trim();
@@ -848,6 +1084,44 @@ const cleanLabel = (value: string, fallback: string): string => {
 
 const cssAttributeValue = (value: string): string =>
   value.replaceAll('\\', String.raw`\\`).replaceAll('"', String.raw`\"`);
+
+const tryInteractionClick = async (options: {
+  locator: Locator;
+  routeState: RouteState;
+  deadline: number;
+  now: () => number;
+  label: string;
+}): Promise<boolean> => {
+  try {
+    await options.locator.click({
+      timeout: Math.min(interactionTimeoutMilliseconds, remaining(options.deadline, options.now, options.label)),
+    });
+    return true;
+  } catch {
+    throwIfFatal(options.routeState);
+    remaining(options.deadline, options.now, options.label);
+    return false;
+  }
+};
+
+const tryInteractionCapture = async (options: {
+  locator: Locator;
+  routeState: RouteState;
+  deadline: number;
+  now: () => number;
+  label: string;
+}): Promise<RawDomNode | undefined> => {
+  try {
+    return await captureLocator(options.locator);
+  } catch (error) {
+    if (error instanceof CaptureWideError) {
+      throw error;
+    }
+    throwIfFatal(options.routeState);
+    remaining(options.deadline, options.now, options.label);
+    return undefined;
+  }
+};
 
 const collectInteractionStates = async (options: {
   root: Locator;
@@ -880,6 +1154,7 @@ const collectInteractionStates = async (options: {
   const fragments: CapturedFragment[] = [];
   let visited = 0;
   let empty = 0;
+  let failed = 0;
   let skipped = malformed;
   const detailOpen = await details.evaluateAll((elements) =>
     elements.map((element) => (element as HTMLDetailsElement).open),
@@ -887,33 +1162,46 @@ const collectInteractionStates = async (options: {
   for (let index = 0; index < detailCount; index += 1) {
     const detail = details.nth(index);
     const summary = detail.locator(':scope > summary').first();
+    if ((await summary.count()) !== 1) {
+      skipped += 1;
+      continue;
+    }
     const label = cleanLabel((await summary.textContent()) ?? '', `Details ${index + 1}`);
-    try {
-      if (!(await detail.evaluate((element) => (element as HTMLDetailsElement).open))) {
-        await summary.click();
-        await settlePage({ ...options, lazyScroll: false });
+    visited += 1;
+    if (!(await detail.evaluate((element) => (element as HTMLDetailsElement).open))) {
+      if (!(await tryInteractionClick({ ...options, locator: summary, label: `native details "${label}"` }))) {
+        failed += 1;
+        continue;
       }
-      const raw = await captureLocator(detail);
-      if (raw.type === 'element') {
-        raw.children = raw.children.filter((child) => child.type !== 'element' || child.tag !== 'summary');
-      }
-      visited += 1;
-      if (rawText(raw).trim() === '') {
-        empty += 1;
-      } else {
-        fragments.push({ label, raw });
-      }
-    } catch (error) {
-      throw new Error(
-        `failed to collect native details "${label}": ${error instanceof Error ? error.message : String(error)}`,
-      );
+      await settlePage({ ...options, lazyScroll: false });
+    }
+    const raw = await tryInteractionCapture({ ...options, locator: detail, label: `native details "${label}"` });
+    if (!raw) {
+      failed += 1;
+      continue;
+    }
+    if (raw.type === 'element') {
+      raw.children = raw.children.filter((child) => child.type !== 'element' || child.tag !== 'summary');
+    }
+    if (rawText(raw).trim() === '') {
+      empty += 1;
+    } else {
+      fragments.push({ label, raw });
     }
   }
-  await details.evaluateAll((elements, values) => {
-    for (const [index, element] of elements.entries()) {
-      (element as HTMLDetailsElement).open = values[index] ?? false;
+  try {
+    await details.evaluateAll((elements, values) => {
+      for (const [index, element] of elements.entries()) {
+        (element as HTMLDetailsElement).open = values[index] ?? false;
+      }
+    }, detailOpen);
+  } catch {
+    throwIfFatal(options.routeState);
+    remaining(options.deadline, options.now, 'native details restoration');
+    if (visited > failed) {
+      failed += 1;
     }
-  }, detailOpen);
+  }
 
   for (let index = 0; index < accordionCount; index += 1) {
     const control = accordions.nth(index);
@@ -929,27 +1217,41 @@ const collectInteractionStates = async (options: {
       continue;
     }
     const initiallyExpanded = (await control.getAttribute('aria-expanded')) === 'true';
-    try {
-      if (!initiallyExpanded) {
-        await control.click();
-        await settlePage({ ...options, lazyScroll: false });
+    visited += 1;
+    let stateFailed = false;
+    if (!initiallyExpanded) {
+      if (!(await tryInteractionClick({ ...options, locator: control, label: `accordion "${label}"` }))) {
+        failed += 1;
+        continue;
       }
-      const raw = await captureLocator(panel);
-      visited += 1;
+      await settlePage({ ...options, lazyScroll: false });
+    }
+    const raw = await tryInteractionCapture({ ...options, locator: panel, label: `accordion "${label}"` });
+    if (raw) {
       if (rawText(raw).trim() === '') {
         empty += 1;
       } else {
         fragments.push({ label, raw });
       }
+    } else {
+      stateFailed = true;
+    }
+    try {
       const expanded = (await control.getAttribute('aria-expanded')) === 'true';
       if (expanded !== initiallyExpanded) {
-        await control.click();
-        await settlePage({ ...options, lazyScroll: false });
+        if (await tryInteractionClick({ ...options, locator: control, label: `accordion "${label}" restoration` })) {
+          await settlePage({ ...options, lazyScroll: false });
+        } else {
+          stateFailed = true;
+        }
       }
-    } catch (error) {
-      throw new Error(
-        `failed to collect accordion "${label}": ${error instanceof Error ? error.message : String(error)}`,
-      );
+    } catch {
+      throwIfFatal(options.routeState);
+      remaining(options.deadline, options.now, `accordion "${label}" restoration`);
+      stateFailed = true;
+    }
+    if (stateFailed) {
+      failed += 1;
     }
   }
 
@@ -969,28 +1271,40 @@ const collectInteractionStates = async (options: {
       skipped += 1;
       continue;
     }
-    try {
-      if ((await tab.getAttribute('aria-selected')) !== 'true') {
-        await tab.click();
-        await settlePage({ ...options, lazyScroll: false });
+    visited += 1;
+    if ((await tab.getAttribute('aria-selected')) !== 'true') {
+      if (!(await tryInteractionClick({ ...options, locator: tab, label: `tab "${label}"` }))) {
+        failed += 1;
+        continue;
       }
-      const raw = await captureLocator(panel);
-      visited += 1;
-      if (rawText(raw).trim() === '') {
-        empty += 1;
-      } else {
-        fragments.push({ label, raw });
-      }
-    } catch (error) {
-      throw new Error(`failed to collect tab "${label}": ${error instanceof Error ? error.message : String(error)}`);
+      await settlePage({ ...options, lazyScroll: false });
+    }
+    const raw = await tryInteractionCapture({ ...options, locator: panel, label: `tab "${label}"` });
+    if (!raw) {
+      failed += 1;
+      continue;
+    }
+    if (rawText(raw).trim() === '') {
+      empty += 1;
+    } else {
+      fragments.push({ label, raw });
     }
   }
   if (initiallySelected >= 0 && initiallySelected < tabCount) {
-    await tabs.nth(initiallySelected).click();
-    await settlePage({ ...options, lazyScroll: false });
+    if (
+      await tryInteractionClick({
+        ...options,
+        locator: tabs.nth(initiallySelected),
+        label: 'tab restoration',
+      })
+    ) {
+      await settlePage({ ...options, lazyScroll: false });
+    } else if (visited > failed) {
+      failed += 1;
+    }
   }
 
-  return { fragments, discovered, visited, empty, failed: 0, skipped };
+  return { fragments, discovered, visited, empty, failed, skipped };
 };
 /* oxlint-enable eslint/no-await-in-loop -- Sequential settlement and state collection end here. */
 
@@ -1086,7 +1400,7 @@ const fulfillSafely = async (options: {
   deadline: number;
   now: () => number;
   request: (options: PublicRequestOptions) => Promise<IncomingMessage>;
-}): Promise<void> => {
+}): Promise<RouteFulfillmentOutcome> => {
   const request = options.route.request();
   const method = request.method();
   if (method !== 'GET' && method !== 'HEAD') {
@@ -1094,44 +1408,41 @@ const fulfillSafely = async (options: {
   }
   const url = new URL(request.url());
   if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.username !== '' || url.password !== '') {
-    throw new Error('browser requests require credential-free HTTP(S)');
+    return { kind: 'resource-failed', reason: 'unsafe-address' };
   }
   const depth = redirectDepth(request);
   if (depth > 3) {
-    throw new Error('browser redirect limit exceeded');
+    return { kind: 'resource-failed', reason: 'unsafe-redirect' };
   }
   const redirectedFrom = request.redirectedFrom();
   if (redirectedFrom) {
     const prior = new URL(redirectedFrom.url());
     if (prior.protocol === 'https:' && url.protocol !== 'https:') {
-      throw new Error('browser redirect attempted an HTTPS downgrade');
+      return { kind: 'resource-failed', reason: 'unsafe-redirect' };
     }
   }
-  if (request.resourceType() === 'media' || request.resourceType() === 'eventsource') {
-    throw new Error(`browser resource type is forbidden (${request.resourceType()})`);
-  }
-  if (request.isNavigationRequest() && request.frame().parentFrame()) {
-    throw new Error('subframe navigation is forbidden');
-  }
-  options.state.requests += 1;
-  if (options.state.requests > maximumRequests) {
-    throw new Error(`browser request count exceeds ${maximumRequests}`);
-  }
-
   options.state.inFlight += 1;
   try {
-    const response = await options.request({
-      url,
-      method,
-      headers: sanitizedRequestHeaders(request),
-      deadline: Math.min(options.deadline, options.now() + navigationTimeoutMilliseconds),
-      idleTimeoutMilliseconds,
-    });
+    let response: IncomingMessage;
+    try {
+      response = await options.request({
+        url,
+        method,
+        headers: sanitizedRequestHeaders(request),
+        deadline: Math.min(options.deadline, options.now() + navigationTimeoutMilliseconds),
+        idleTimeoutMilliseconds,
+      });
+    } catch (error) {
+      if (error instanceof PublicRequestError) {
+        return { kind: 'resource-failed', reason: error.reason };
+      }
+      throw error;
+    }
     const encoding = response.headers['content-encoding'];
     const normalizedEncoding = typeof encoding === 'string' ? encoding : encoding?.[0];
     if (normalizedEncoding && normalizedEncoding.toLowerCase() !== 'identity') {
-      response.resume();
-      throw new Error(`browser response used unsupported content encoding (${normalizedEncoding})`);
+      response.destroy();
+      return { kind: 'resource-failed', reason: 'content-encoding' };
     }
     const declaredText = response.headers['content-length'];
     const declared = Array.isArray(declaredText) ? Number(declaredText[0]) : Number(declaredText);
@@ -1139,121 +1450,165 @@ const fulfillSafely = async (options: {
       declaredText !== undefined &&
       (!Number.isSafeInteger(declared) || declared < 0 || declared > maximumResponseBytes)
     ) {
-      response.resume();
-      throw new Error(`browser response Content-Length is invalid or exceeds ${maximumResponseBytes}`);
+      response.destroy();
+      return { kind: 'resource-failed', reason: 'content-length' };
     }
     const chunks: Array<Uint8Array<ArrayBuffer>> = [];
     let bytes = 0;
-    for await (const value of response) {
-      const chunk = Uint8Array.from(value as Uint8Array<ArrayBuffer>);
-      bytes += chunk.length;
-      if (bytes > maximumResponseBytes) {
-        throw new Error(`browser response exceeds ${maximumResponseBytes} bytes`);
+    try {
+      for await (const value of response) {
+        const chunk = Uint8Array.from(value as Uint8Array<ArrayBuffer>);
+        bytes += chunk.length;
+        options.state.aggregateBytes += chunk.length;
+        if (options.state.aggregateBytes > maximumAggregateBytes) {
+          response.destroy();
+          throw new CaptureWideError(`browser aggregate response bytes exceed ${maximumAggregateBytes}`);
+        }
+        if (bytes > maximumResponseBytes) {
+          response.destroy();
+          return { kind: 'resource-failed', reason: 'response-size' };
+        }
+        chunks.push(chunk);
       }
-      if (options.state.aggregateBytes + bytes > maximumAggregateBytes) {
-        throw new Error(`browser aggregate response bytes exceed ${maximumAggregateBytes}`);
+    } catch (error) {
+      if (error instanceof CaptureWideError) {
+        throw error;
       }
-      chunks.push(chunk);
+      return { kind: 'resource-failed', reason: 'transport' };
     }
     if (declaredText !== undefined && bytes !== declared) {
-      throw new Error('browser response Content-Length did not match received bytes');
+      return { kind: 'resource-failed', reason: 'content-length' };
     }
-    options.state.aggregateBytes += bytes;
     const status = response.statusCode ?? 0;
     if (status < 100 || status > 599) {
-      throw new Error(`browser response status is invalid (${status})`);
+      return { kind: 'resource-failed', reason: 'transport' };
     }
     const headers = responseHeaders(response);
     if (status >= 300 && status < 400) {
       const { location } = headers;
       if (!location) {
-        throw new Error('browser redirect response is missing Location');
+        return { kind: 'resource-failed', reason: 'unsafe-redirect' };
       }
-      const redirected = new URL(location, url);
+      let redirected: URL;
+      try {
+        redirected = new URL(location, url);
+      } catch {
+        return { kind: 'resource-failed', reason: 'unsafe-redirect' };
+      }
       if (
         (redirected.protocol !== 'https:' && redirected.protocol !== 'http:') ||
         redirected.username !== '' ||
         redirected.password !== '' ||
         (url.protocol === 'https:' && redirected.protocol !== 'https:')
       ) {
-        throw new Error('browser redirect target is forbidden');
+        return { kind: 'resource-failed', reason: 'unsafe-redirect' };
       }
     }
-    await options.route.fulfill({
-      status,
-      headers,
-      body: method === 'HEAD' ? undefined : Buffer.concat(chunks),
-    });
+    try {
+      await options.route.fulfill({
+        status,
+        headers,
+        body: method === 'HEAD' ? undefined : Buffer.concat(chunks),
+      });
+    } catch {
+      return { kind: 'resource-failed', reason: 'transport' };
+    }
+    return { kind: 'fulfilled' };
   } finally {
     options.state.inFlight -= 1;
   }
 };
 
-const installCapabilityBlocks = async (context: BrowserContext, setFatal: (error: Error) => void): Promise<void> => {
-  await context.exposeBinding('__tauReferenceDenied', (_source, capability: unknown) => {
-    setFatal(new Error(`browser capability is forbidden (${String(capability)})`));
+const installCapabilityBlocks = async (
+  context: BrowserContext,
+  recordCapability: (capability: string) => void,
+): Promise<void> => {
+  const bindingName = `__tauReferenceDenied_${randomUUID().replaceAll('-', '')}`;
+  await context.exposeBinding(bindingName, (_source, capability: unknown) => {
+    recordCapability(String(capability));
   });
-  await context.addInitScript(() => {
-    const host = globalThis as typeof globalThis & {
-      __tauReferenceDenied?(capability: string): Promise<void>;
-    };
-    const deny = (name: string): void => {
-      void host.__tauReferenceDenied?.(name);
-      throw new Error(`browser capability is forbidden (${name})`);
-    };
-    for (const name of [
-      'Worker',
-      'SharedWorker',
-      'WebSocket',
-      'WebTransport',
-      'RTCPeerConnection',
-      'webkitRTCPeerConnection',
-      'EventSource',
-    ]) {
-      if (name in host) {
-        Object.defineProperty(host, name, {
+  await context.addInitScript(
+    ({ bindingName }) => {
+      const host = globalThis as typeof globalThis & Record<string, unknown>;
+      const exposed = host[bindingName];
+      if (typeof exposed !== 'function') {
+        throw new TypeError('reference capability reporter is unavailable');
+      }
+      Reflect.deleteProperty(host, bindingName);
+      const report = exposed as (capability: string) => Promise<void>;
+      const securityError = (name: string): DOMException =>
+        new DOMException(`browser capability is forbidden (${name})`, 'SecurityError');
+      const deny = (name: string): never => {
+        void report(name);
+        throw securityError(name);
+      };
+      for (const name of [
+        'Worker',
+        'SharedWorker',
+        'WebSocket',
+        'WebTransport',
+        'RTCPeerConnection',
+        'webkitRTCPeerConnection',
+        'EventSource',
+      ]) {
+        if (name in host) {
+          Object.defineProperty(host, name, {
+            configurable: false,
+            value: function blockedCapability() {
+              deny(name);
+            },
+          });
+        }
+      }
+      if ('sendBeacon' in navigator) {
+        const blockedSendBeacon = (): false => {
+          void report('sendBeacon');
+          return false;
+        };
+        Object.defineProperty(navigator, 'sendBeacon', {
           configurable: false,
-          value: function blockedCapability() {
-            deny(name);
+          get: () => blockedSendBeacon,
+          set: () => undefined,
+        });
+      }
+      if ('serviceWorker' in navigator) {
+        Object.defineProperty(navigator.serviceWorker, 'register', {
+          configurable: false,
+          value: async () => {
+            void report('ServiceWorker');
+            throw securityError('ServiceWorker');
           },
         });
       }
-    }
-    if ('sendBeacon' in navigator) {
-      const blockedSendBeacon = () => {
-        deny('sendBeacon');
-      };
-      Object.defineProperty(navigator, 'sendBeacon', {
-        configurable: false,
-        get: () => blockedSendBeacon,
-        set: () => undefined,
-      });
-    }
-    if ('serviceWorker' in navigator) {
-      Object.defineProperty(navigator.serviceWorker, 'register', {
+      for (const name of ['showOpenFilePicker', 'showSaveFilePicker', 'showDirectoryPicker']) {
+        if (name in host) {
+          Object.defineProperty(host, name, {
+            configurable: false,
+            value: () => {
+              deny(name);
+            },
+          });
+        }
+      }
+      Object.defineProperty(host, 'open', {
         configurable: false,
         value: () => {
-          deny('ServiceWorker');
+          deny('window.open');
         },
       });
-    }
-    for (const name of ['showOpenFilePicker', 'showSaveFilePicker', 'showDirectoryPicker']) {
-      if (name in host) {
-        Object.defineProperty(host, name, {
-          configurable: false,
-          value: () => {
-            deny(name);
-          },
-        });
-      }
-    }
-    Object.defineProperty(host, 'open', {
-      configurable: false,
-      value: () => {
-        deny('window.open');
-      },
+    },
+    { bindingName },
+  );
+};
+
+const closeWorker = async (worker: PlaywrightWorker): Promise<void> => {
+  try {
+    await worker.evaluate(() => {
+      globalThis.close();
     });
-  });
+  } catch {
+    // The worker may already have stopped after its routed script was denied.
+  }
 };
 
 const temporaryPath = (destination: string): string =>
@@ -1337,7 +1692,21 @@ export const captureHtmlReference = async (options: {
   mkdirSync(dirname(options.paths.snapshot), { recursive: true });
   const pdfTemporary = temporaryPath(options.paths.artifact);
   const snapshotTemporary = temporaryPath(options.paths.snapshot);
-  const routeState: RouteState = { requests: 0, aggregateBytes: 0, inFlight: 0 };
+  const routeState: RouteState = {
+    requestAttempts: 0,
+    capabilityAttempts: 0,
+    aggregateBytes: 0,
+    inFlight: 0,
+    omissions: {
+      mediaRequests: 0,
+      peripheralRequests: 0,
+      blockedCapabilities: 0,
+      failedSubresources: 0,
+      subframes: 0,
+      nonReadingRequests: 0,
+      failedImages: 0,
+    },
+  };
   let browser: Browser | undefined;
 
   try {
@@ -1357,49 +1726,121 @@ export const captureHtmlReference = async (options: {
     const setFatal = (error: Error): void => {
       routeState.fatal ??= error;
     };
-    await installCapabilityBlocks(context, setFatal);
+    const recordCapability = (capability: string): void => {
+      routeState.capabilityAttempts += 1;
+      if (routeState.capabilityAttempts > maximumCapabilityAttempts) {
+        setFatal(new Error(`browser capability attempt count exceeds ${maximumCapabilityAttempts}`));
+        return;
+      }
+      if (ambientCapabilities.has(capability)) {
+        routeState.omissions.blockedCapabilities += 1;
+        return;
+      }
+      if (disruptiveCapabilities.has(capability)) {
+        setFatal(new Error(`browser capability is forbidden (${capability})`));
+        return;
+      }
+      setFatal(new Error('browser reported an unknown blocked capability'));
+    };
+    await installCapabilityBlocks(context, recordCapability);
     await context.routeWebSocket('**/*', (webSocket) => {
-      setFatal(new Error('browser capability is forbidden (WebSocket)'));
+      recordCapability('WebSocket');
       void webSocket.close();
     });
     await context.route('**/*', async (route) => {
       const routeRequest = route.request();
+      routeState.requestAttempts += 1;
+      if (routeState.requestAttempts > maximumRequests) {
+        setFatal(new Error(`browser request count exceeds ${maximumRequests}`));
+        await route.abort('blockedbyclient').catch(() => undefined);
+        return;
+      }
       if (routeRequest.isNavigationRequest() && routeRequest.frame().parentFrame()) {
+        routeState.omissions.subframes += 1;
         await route.abort('blockedbyclient').catch(() => undefined);
         return;
       }
       const method = routeRequest.method();
       if (method !== 'GET' && method !== 'HEAD') {
+        routeState.omissions.nonReadingRequests += 1;
+        await route.abort('blockedbyclient').catch(() => undefined);
+        return;
+      }
+      const resourceType = routeRequest.resourceType();
+      if (resourceType === 'media') {
+        routeState.omissions.mediaRequests += 1;
+        await route.abort('blockedbyclient').catch(() => undefined);
+        return;
+      }
+      if (resourceType === 'texttrack' || resourceType === 'manifest') {
+        routeState.omissions.peripheralRequests += 1;
+        await route.abort('blockedbyclient').catch(() => undefined);
+        return;
+      }
+      if (resourceType === 'eventsource') {
+        recordCapability('EventSource');
+        await route.abort('blockedbyclient').catch(() => undefined);
+        return;
+      }
+      let fetchDestination: string | undefined;
+      try {
+        const allHeaders = await routeRequest.allHeaders();
+        fetchDestination = allHeaders['sec-fetch-dest']?.toLowerCase();
+      } catch (error) {
+        setFatal(error instanceof Error ? error : new Error(String(error)));
+        await route.abort('blockedbyclient').catch(() => undefined);
+        return;
+      }
+      if (
+        resourceType === 'worker' ||
+        resourceType === 'sharedworker' ||
+        fetchDestination === 'worker' ||
+        fetchDestination === 'sharedworker' ||
+        fetchDestination === 'serviceworker'
+      ) {
+        recordCapability(
+          resourceType === 'sharedworker' || fetchDestination === 'sharedworker' ? 'SharedWorker' : 'Worker',
+        );
         await route.abort('blockedbyclient').catch(() => undefined);
         return;
       }
       try {
-        await fulfillSafely({ route, state: routeState, deadline, now, request });
+        const outcome = await fulfillSafely({ route, state: routeState, deadline, now, request });
+        if (outcome.kind === 'resource-failed') {
+          if (routeRequest.isNavigationRequest() && !routeRequest.frame().parentFrame()) {
+            setFatal(new Error(`browser main document resource failed (${outcome.reason})`));
+          } else {
+            routeState.omissions.failedSubresources += 1;
+          }
+          await route.abort('blockedbyclient').catch(() => undefined);
+        }
       } catch (error) {
         setFatal(error instanceof Error ? error : new Error(String(error)));
         await route.abort('blockedbyclient').catch(() => undefined);
       }
     });
     const page = await context.newPage();
+    const workerClosures = new Set<Promise<void>>();
     context.on('page', (candidate) => {
       if (candidate !== page) {
-        setFatal(new Error('browser popup is forbidden'));
+        recordCapability('popup');
         void candidate.close();
       }
     });
     page.on('download', (download) => {
-      setFatal(new Error('browser download is forbidden'));
+      recordCapability('download');
       void download.cancel();
     });
     page.on('dialog', (dialog) => {
-      setFatal(new Error('browser dialog is forbidden'));
+      recordCapability('dialog');
       void dialog.dismiss();
     });
     page.on('filechooser', () => {
-      setFatal(new Error('browser file chooser is forbidden'));
+      recordCapability('filechooser');
     });
     page.on('worker', (worker) => {
-      setFatal(new Error(`browser worker is forbidden (${printableUrl(new URL(worker.url()))})`));
+      recordCapability('Worker');
+      workerClosures.add(closeWorker(worker));
     });
 
     try {
@@ -1416,6 +1857,11 @@ export const captureHtmlReference = async (options: {
     throwIfFatal(routeState);
     await settlePage({ page, routeState, deadline, now, lazyScroll: true });
     const root = await selectedRoot(page);
+    const finalUrl = new URL(page.url());
+    if (!isPublicUrl(finalUrl.href) || finalUrl.username !== '' || finalUrl.password !== '') {
+      throw new Error('HTML capture finished on a non-public or credential-bearing URL');
+    }
+    const baselineRaw = await captureBaseline(root.locator);
     const interaction = await collectInteractionStates({
       root: root.locator,
       page,
@@ -1424,13 +1870,20 @@ export const captureHtmlReference = async (options: {
       now,
     });
     await settlePage({ page, routeState, deadline, now, lazyScroll: false });
+    await Promise.all(workerClosures);
     throwIfFatal(routeState);
-
-    const finalUrl = new URL(page.url());
-    if (!isPublicUrl(finalUrl.href) || finalUrl.username !== '' || finalUrl.password !== '') {
-      throw new Error('HTML capture finished on a non-public or credential-bearing URL');
+    const settledFinalUrl = new URL(page.url());
+    if (
+      !isPublicUrl(settledFinalUrl.href) ||
+      settledFinalUrl.username !== '' ||
+      settledFinalUrl.password !== '' ||
+      settledFinalUrl.origin !== finalUrl.origin ||
+      settledFinalUrl.pathname !== finalUrl.pathname ||
+      settledFinalUrl.search !== finalUrl.search
+    ) {
+      throw new Error('recognized interaction changed the trusted top-level URL');
     }
-    const baselineRaw = await captureBaseline(root.locator);
+
     const baselineNodes = semanticFromRaw(baselineRaw, finalUrl.href, false);
     const known = new Set<string>();
     const addSignatures = (nodes: readonly SemanticNode[]): void => {
@@ -1456,9 +1909,14 @@ export const captureHtmlReference = async (options: {
         children: [{ kind: 'element', tag: 'h2', children: [{ kind: 'text', value: fragment.label }] }, ...nodes],
       });
     }
-    const completeness = root.name === 'body' || interaction.skipped > 0 ? 'partial' : 'standards-complete';
+    const completeness = captureCompleteness({
+      semanticRoot: root.name,
+      failed: interaction.failed,
+      skipped: interaction.skipped,
+      omissions: routeState.omissions,
+    });
     const report: HtmlCaptureReport = {
-      profile: 'html-v1',
+      profile: 'html-v3',
       chromiumVersion: browser.version(),
       finalUrl: finalUrl.href,
       semanticRoot: root.name,
@@ -1468,6 +1926,8 @@ export const captureHtmlReference = async (options: {
       empty: interaction.empty,
       failed: interaction.failed,
       skipped: interaction.skipped,
+      requestAttempts: routeState.requestAttempts,
+      omissions: { ...routeState.omissions },
     };
     const snapshot = buildHtmlSnapshot({ report, nodes: [...baselineNodes, ...additional] });
     writeFileSync(snapshotTemporary, snapshot, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
@@ -1475,7 +1935,7 @@ export const captureHtmlReference = async (options: {
     await page.emulateMedia({ media: 'screen', colorScheme: 'light', reducedMotion: 'reduce' });
     await page.addStyleTag({
       content:
-        '*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}html{color-scheme:light!important}img,svg,canvas{max-height:85vh!important;object-fit:contain!important;break-inside:avoid-page!important}',
+        '*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}html{color-scheme:light!important}audio,video{display:none!important}img,svg,canvas{max-height:85vh!important;object-fit:contain!important;break-inside:avoid-page!important}',
     });
     await page.locator('body *').evaluateAll((elements) => {
       for (const element of elements) {
@@ -1506,7 +1966,7 @@ export const captureHtmlReference = async (options: {
     readHtmlSnapshot(snapshotTemporary);
     commitPair({ pdfTemporary, snapshotTemporary, paths: options.paths });
     console.log(
-      `${options.id}: captured HTML pair from ${printableUrl(finalUrl)} (${routeState.requests} requests, ${routeState.aggregateBytes} bytes)`,
+      `${options.id}: captured HTML pair from ${printableUrl(finalUrl)} (${routeState.requestAttempts} requests, ${routeState.aggregateBytes} bytes, ${routeState.omissions.mediaRequests} media requests omitted)`,
     );
   } finally {
     await browser?.close().catch(() => undefined);

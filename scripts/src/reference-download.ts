@@ -55,6 +55,18 @@ export type PublicRequestOptions = {
   idleTimeoutMilliseconds: number;
 };
 
+export type PublicRequestFailureReason = 'unsafe-address' | 'transport';
+
+export class PublicRequestError extends Error {
+  public readonly reason: PublicRequestFailureReason;
+
+  public constructor(reason: PublicRequestFailureReason, message: string) {
+    super(message);
+    this.name = 'PublicRequestError';
+    this.reason = reason;
+  }
+}
+
 export type DownloadArtifactOptions = {
   id: string;
   format: DownloadFormat;
@@ -81,12 +93,12 @@ const printableUrl = (url: URL): string => `${url.origin}${url.pathname}`;
 
 export const assertPublicAddresses = (addresses: readonly LookupAddress[]): void => {
   if (addresses.length === 0) {
-    throw new Error('request host did not resolve to an address');
+    throw new PublicRequestError('unsafe-address', 'request host did not resolve to an address');
   }
 
   for (const { address } of addresses) {
     if (!ipaddr.isValid(address) || ipaddr.process(address).range() !== 'unicast') {
-      throw new Error(`request host resolved to a non-public address (${address})`);
+      throw new PublicRequestError('unsafe-address', `request host resolved to a non-public address (${address})`);
     }
   }
 };
@@ -115,23 +127,37 @@ export const requestPublicUrl = async (
 ): Promise<IncomingMessage> => {
   const { url } = options;
   if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.username !== '' || url.password !== '') {
-    throw new Error('public requests require credential-free HTTP(S)');
+    throw new PublicRequestError('unsafe-address', 'public requests require credential-free HTTP(S)');
   }
-  const addresses = await dependencies.lookup(url.hostname, { all: true, verbatim: true });
+  let addresses: LookupAddress[];
+  try {
+    addresses = await dependencies.lookup(url.hostname, { all: true, verbatim: true });
+  } catch (error) {
+    throw new PublicRequestError('transport', error instanceof Error ? error.message : String(error));
+  }
   assertPublicAddresses(addresses);
   const pinned = [...addresses].sort((left, right) =>
     `${left.family}:${left.address}`.localeCompare(`${right.family}:${right.address}`),
   )[0];
   if (!pinned) {
-    throw new Error('request host did not resolve to an address');
+    throw new PublicRequestError('unsafe-address', 'request host did not resolve to an address');
   }
 
   const remaining = options.deadline - Date.now();
   if (remaining <= 0) {
-    throw new Error('public request exceeded its total timeout');
+    throw new PublicRequestError('transport', 'public request exceeded its total timeout');
   }
 
   return new Promise<IncomingMessage>((resolve, reject) => {
+    let totalTimer: ReturnType<typeof setTimeout> | undefined;
+    const rejectTransport = (error: unknown): void => {
+      clearTimeout(totalTimer);
+      reject(
+        error instanceof PublicRequestError
+          ? error
+          : new PublicRequestError('transport', error instanceof Error ? error.message : String(error)),
+      );
+    };
     const pinnedLookup = ((
       _hostname: string,
       options: unknown,
@@ -147,34 +173,35 @@ export const requestPublicUrl = async (
       callback(null, pinned.address, pinned.family);
     }) as LookupFunction;
 
-    const request = (url.protocol === 'https:' ? dependencies.requestHttps : dependencies.requestHttp)(
-      url,
-      {
-        headers: options.headers,
-        lookup: pinnedLookup,
-        method: options.method,
-        ...(url.protocol === 'https:' ? { servername: url.hostname } : {}),
-      },
-      (response) => {
-        const clear = (): void => {
-          clearTimeout(totalTimer);
-        };
-        response.once('end', clear);
-        response.once('close', clear);
-        resolve(response);
-      },
-    );
-    const totalTimer = setTimeout(() => {
-      request.destroy(new Error('public request exceeded its total timeout'));
-    }, remaining);
-    request.setTimeout(options.idleTimeoutMilliseconds, () => {
-      request.destroy(new Error('public request exceeded its idle timeout'));
-    });
-    request.once('error', (error) => {
-      clearTimeout(totalTimer);
-      reject(error);
-    });
-    request.end();
+    try {
+      const request = (url.protocol === 'https:' ? dependencies.requestHttps : dependencies.requestHttp)(
+        url,
+        {
+          headers: options.headers,
+          lookup: pinnedLookup,
+          method: options.method,
+          ...(url.protocol === 'https:' ? { servername: url.hostname } : {}),
+        },
+        (response) => {
+          const clear = (): void => {
+            clearTimeout(totalTimer);
+          };
+          response.once('end', clear);
+          response.once('close', clear);
+          resolve(response);
+        },
+      );
+      totalTimer = setTimeout(() => {
+        request.destroy(new PublicRequestError('transport', 'public request exceeded its total timeout'));
+      }, remaining);
+      request.setTimeout(options.idleTimeoutMilliseconds, () => {
+        request.destroy(new PublicRequestError('transport', 'public request exceeded its idle timeout'));
+      });
+      request.once('error', rejectTransport);
+      request.end();
+    } catch (error) {
+      rejectTransport(error);
+    }
   });
 };
 

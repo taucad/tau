@@ -219,7 +219,7 @@ describe('reference Markdown', () => {
     ).toBe('artifact changed');
   });
 
-  it('should require both HTML hashes and report exact pair staleness', () => {
+  it('should require both HTML hashes, expose capture provenance, and report exact pair staleness', () => {
     const root = temporaryRepo('html');
     const paths = referencePaths(root, 'a-paper', 'html');
     const currentEntry = entry('html');
@@ -245,6 +245,46 @@ describe('reference Markdown', () => {
       detail: 'HTML conversion',
       body: 'Evidence',
     });
+    expect(markdown).not.toContain('Media requests omitted:');
+    expect(
+      buildReferenceMarkdown({
+        id: 'a-paper',
+        entry: currentEntry,
+        paths,
+        artifactSha256: 'a'.repeat(64),
+        snapshotSha256: 'b'.repeat(64),
+        capture: { ...capture, profile: 'html-v2', omittedMediaRequests: 6 },
+        detail: 'HTML conversion',
+        body: 'Evidence',
+      }),
+    ).toContain('> Media requests omitted: 6');
+    expect(
+      buildReferenceMarkdown({
+        id: 'a-paper',
+        entry: currentEntry,
+        paths,
+        artifactSha256: 'a'.repeat(64),
+        snapshotSha256: 'b'.repeat(64),
+        capture: {
+          ...capture,
+          profile: 'html-v3',
+          requestAttempts: 7,
+          omissions: {
+            mediaRequests: 1,
+            peripheralRequests: 2,
+            blockedCapabilities: 0,
+            failedSubresources: 1,
+            subframes: 1,
+            nonReadingRequests: 1,
+            failedImages: 1,
+          },
+        },
+        detail: 'HTML conversion',
+        body: 'Evidence',
+      }),
+    ).toContain(
+      '> Evidence loss: requests=7 media=1 peripheral=2 capabilities=0 subresources=1 subframes=1 non-reading=1 images=1',
+    );
     expect(
       staleReason({
         markdown,

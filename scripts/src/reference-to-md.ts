@@ -89,6 +89,16 @@ export type ReferencePaths =
 
 export type HtmlCaptureCompleteness = 'standards-complete' | 'partial' | 'legacy-pdf-only';
 
+export type HtmlCaptureOmissions = {
+  mediaRequests: number;
+  peripheralRequests: number;
+  blockedCapabilities: number;
+  failedSubresources: number;
+  subframes: number;
+  nonReadingRequests: number;
+  failedImages: number;
+};
+
 export type HtmlCaptureReport = {
   profile: string;
   chromiumVersion: string;
@@ -100,6 +110,9 @@ export type HtmlCaptureReport = {
   empty: number;
   failed: number;
   skipped: number;
+  requestAttempts?: number;
+  omittedMediaRequests?: number;
+  omissions?: HtmlCaptureOmissions;
 };
 
 type ReferenceState = ReferencePaths & {
@@ -531,6 +544,14 @@ export const buildReferenceMarkdown = (options: {
       `> Final URL: ${options.capture.finalUrl}`,
       `> Semantic root: \`${options.capture.semanticRoot}\``,
       `> Capture completeness: \`${options.capture.completeness}\``,
+      ...(options.capture.omittedMediaRequests === undefined
+        ? []
+        : [`> Media requests omitted: ${options.capture.omittedMediaRequests}`]),
+      ...(options.capture.requestAttempts === undefined || options.capture.omissions === undefined
+        ? []
+        : [
+            `> Evidence loss: requests=${options.capture.requestAttempts} media=${options.capture.omissions.mediaRequests} peripheral=${options.capture.omissions.peripheralRequests} capabilities=${options.capture.omissions.blockedCapabilities} subresources=${options.capture.omissions.failedSubresources} subframes=${options.capture.omissions.subframes} non-reading=${options.capture.omissions.nonReadingRequests} images=${options.capture.omissions.failedImages}`,
+          ]),
       `> Interaction states: discovered=${options.capture.discovered} visited=${options.capture.visited} empty=${options.capture.empty} failed=${options.capture.failed} skipped=${options.capture.skipped}`,
     );
   }

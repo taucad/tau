@@ -3,10 +3,11 @@ title: 'glTF Construction Policy'
 description: 'Rules for constructing glTF/GLB binaries in the runtime, governing the direct writer, buffer layout, material encoding, and kernel integration patterns'
 status: active
 created: '2026-03-24'
-updated: '2026-07-16'
+updated: '2026-07-19'
 related:
   - docs/policy/geometry-naming-policy.md
   - docs/policy/rendering-pipeline-policy.md
+  - docs/research/headless-capture-z-up-axis-semantics-parity.md
   - docs/research/headless-gltf-interleaved-accessor-corruption-v2.md
   - docs/research/headless-thumbnail-coordinate-orientation-parity.md
   - docs/research/runtime-overhead-forensics.md
@@ -208,7 +209,9 @@ Low-level parsers that intentionally accept arbitrary byte views before runtime 
 
 ## 5. Coordinate System
 
-Canonical render geometry and internal GLB source artifacts use the glTF-native **Y-up/metres** convention. Direct GLB/glTF export routes may also honor another coordinate system or unit when that route explicitly advertises the option. Every artifact boundary must convert from its declared input convention to its declared output convention **exactly once**.
+Canonical kernel render geometry uses the glTF-native **Y-up/metres** convention. Internal GLB source artifacts must use the coordinate system and unit declared by their selected route. Spec-oriented interop routes ordinarily request Y-up/metres; a derivative that visibly names model axes must instead request the user-facing semantic frame it promises to display. Tau annotated image routes therefore request Z-up/metres, while unannotated and annotated image modes share that one source contract. Direct GLB/glTF export routes may honor any coordinate system or unit that the route explicitly advertises.
+
+The renderer's declared up axis, camera labels, axis annotations, and physical-scale interpretation must agree with the source artifact's declared frame. Every artifact boundary must convert from its declared input convention to its declared output convention **exactly once**.
 
 For the canonical Z-up/millimetres to Y-up/metres conversion:
 
@@ -313,7 +316,8 @@ Do not assert only byte length, byte inequality, or `instanceof Uint8Array` — 
 - [ ] Tau-generated auxiliary edges use `cadEdgeOverlayMaterialDefaults` and `KHR_materials_unlit`
 - [ ] Authored/imported line materials remain unchanged in artifacts and headless rendering
 - [ ] Names follow `docs/policy/geometry-naming-policy.md`
-- [ ] Canonical render/source GLB is Y-up/metres; direct exports match their explicitly declared convention
+- [ ] Canonical kernel render GLB is Y-up/metres; each internal source and direct export matches its selected route's explicitly declared convention
+- [ ] Derivatives that visibly name axes request the user-facing semantic frame, and renderer up/labels/scale agree with that frame
 - [ ] Each boundary applies its declared coordinate/unit conversion exactly once
 - [ ] Coordinate tests parse asymmetric world-space evidence and assert positions, centroids, normals, handedness, and node transforms
 - [ ] Tests include at least one offset-view fixture proving runtime normalizes GLB bytes to an exact view

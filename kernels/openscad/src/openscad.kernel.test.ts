@@ -1,5 +1,6 @@
 /* oxlint-disable max-lines -- comprehensive kernel test suite */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { z } from 'zod';
 import { NodeIO } from '@gltf-transform/core';
 import { openscad as openscadKernel } from '#openscad.kernel.js';
 import * as openscadKernelModule from '#openscad.kernel.js';
@@ -12,7 +13,11 @@ import {
   extractGltfFromResult,
   getTestFileSystem,
   getTestParameters,
+  resolveRuntimePluginDefinition,
 } from '@taucad/runtime/testing';
+import { defineTranscoder } from '@taucad/runtime';
+import { defineMiddleware } from '@taucad/runtime/middleware';
+import type { AnyKernelDefinition } from '@taucad/runtime/kernel';
 
 /* eslint-disable @typescript-eslint/naming-convention -- OpenSCAD uses snake_case for parameter names */
 
@@ -21,8 +26,10 @@ import {
 // =============================================================================
 
 /** Create a runtime worker for testing with the provided files. */
-const createWorker = async (files: Record<string, string>): ReturnType<typeof createTestWorker> =>
-  createTestWorker(openscadKernel, files);
+const createWorker = async (
+  files: Record<string, string>,
+  options?: Parameters<typeof createTestWorker>[2],
+): ReturnType<typeof createTestWorker> => createTestWorker(openscadKernel, files, options);
 
 /** Helper to extract parameters and assert success. */
 const getParameters = async (
@@ -61,8 +68,12 @@ async function createGeometryAndGetOffData(
     parameters: {},
   });
 
-  // NativeHandle is protected on KernelWorker; for OpenSCAD it holds the raw OFF string
-  const offData = (worker as unknown as { nativeHandle: string | undefined }).nativeHandle;
+  const artifact = (
+    worker as unknown as {
+      currentPublishedRender?: { liveNativeHandleSlot?: { handle: unknown } };
+    }
+  ).currentPublishedRender;
+  const offData = artifact?.liveNativeHandleSlot?.handle as string | undefined;
 
   return {
     offData,
@@ -86,6 +97,76 @@ const readGltfNodeMeshNames = async (
       .getRoot()
       .listMeshes()
       .map((mesh) => mesh.getName()),
+  };
+};
+
+type CoordinatePoint = [number, number, number];
+type OpenScadCoordinateEvidence = {
+  centroid: CoordinatePoint;
+  normals: CoordinatePoint[];
+  positions: CoordinatePoint[];
+};
+
+const compareCoordinatePoints = (left: CoordinatePoint, right: CoordinatePoint): number =>
+  left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
+
+const roundCoordinate = (value: number): number => {
+  const rounded = Math.round(value * 1e6) / 1e6;
+  return Object.is(rounded, -0) ? 0 : rounded;
+};
+
+const readOpenScadCoordinateEvidence = async (bytes: Uint8Array<ArrayBuffer>): Promise<OpenScadCoordinateEvidence> => {
+  const document = await new NodeIO().readBinary(bytes);
+  const positions: CoordinatePoint[] = [];
+  const normals: CoordinatePoint[] = [];
+  for (const mesh of document.getRoot().listMeshes()) {
+    for (const primitive of mesh.listPrimitives()) {
+      if (primitive.getMode() !== 4) {
+        continue;
+      }
+      const position = primitive.getAttribute('POSITION');
+      const normal = primitive.getAttribute('NORMAL');
+      if (!position) {
+        continue;
+      }
+      for (let index = 0; index < position.getCount(); index++) {
+        const point = position.getElement(index, [0, 0, 0]);
+        positions.push([roundCoordinate(point[0]!), roundCoordinate(point[1]!), roundCoordinate(point[2]!)]);
+        if (normal) {
+          const direction = normal.getElement(index, [0, 0, 0]);
+          normals.push([
+            roundCoordinate(direction[0]!),
+            roundCoordinate(direction[1]!),
+            roundCoordinate(direction[2]!),
+          ]);
+        }
+      }
+    }
+  }
+  const sum: CoordinatePoint = [0, 0, 0];
+  for (const point of positions) {
+    sum[0] += point[0];
+    sum[1] += point[1];
+    sum[2] += point[2];
+  }
+  return {
+    centroid: sum.map((value) => roundCoordinate(value / positions.length)) as CoordinatePoint,
+    normals: normals.sort(compareCoordinatePoints),
+    positions: positions.sort(compareCoordinatePoints),
+  };
+};
+
+const mapOpenScadEvidenceToYUpMeters = (evidence: OpenScadCoordinateEvidence): OpenScadCoordinateEvidence => {
+  const mapPoint = ([x, y, z]: CoordinatePoint): CoordinatePoint => [
+    roundCoordinate(x / 1000),
+    roundCoordinate(z / 1000),
+    roundCoordinate(-y / 1000),
+  ];
+  const mapNormal = ([x, y, z]: CoordinatePoint): CoordinatePoint => [x, z, roundCoordinate(-y)];
+  return {
+    centroid: mapPoint(evidence.centroid),
+    normals: evidence.normals.map(mapNormal).sort(compareCoordinatePoints),
+    positions: evidence.positions.map(mapPoint).sort(compareCoordinatePoints),
   };
 };
 
@@ -131,19 +212,43 @@ describe('OpenSCAD Kernel', () => {
     expect(Object.hasOwn(openscadKernelModule, 'default')).toBe(false);
   });
 
+  it('should declare only construction/render schemas and positive content capabilities', async () => {
+    const definitionValue = await resolveRuntimePluginDefinition<unknown>('kernel', openscadKernel());
+    if (typeof definitionValue !== 'object' || definitionValue === null) {
+      throw new TypeError('Expected the OpenSCAD kernel definition to be an object');
+    }
+    const definition = definitionValue as {
+      createOptionsSchema?: unknown;
+      render?: unknown;
+      exportFormats: Record<string, Record<PropertyKey, unknown>>;
+    };
+    expect(definition.createOptionsSchema).toBeDefined();
+    expect(definition.render).toEqual({ optionsSchema: definition.createOptionsSchema });
+    expect(Object.hasOwn(definition, 'nativeHandleScope')).toBe(false);
+    for (const format of Object.values(definition.exportFormats)) {
+      expect(Object.hasOwn(format, 'content')).toBe(false);
+    }
+  });
+
   it('should serialize OFF native handles and restore them for export', async () => {
     const worker = await createWorker({ 'cube.scad': 'cube([10, 10, 10]);' });
     const result = await worker.createGeometry({
       file: createGeometryFile('cube.scad'),
       parameters: {},
     });
-    const offData = (worker as unknown as { nativeHandle?: unknown }).nativeHandle;
+    const artifact = (
+      worker as unknown as {
+        currentPublishedRender?: { liveNativeHandleSlot?: { handle: unknown } };
+      }
+    ).currentPublishedRender;
+    const offData = artifact?.liveNativeHandleSlot?.handle;
 
     assertSuccess(result, 'openscad native handle serialization createGeometry');
     expect(offData).toEqual(expect.any(String));
     expect(result.serializedNativeHandle).toEqual(offData);
 
-    (worker as unknown as { nativeHandle?: unknown }).nativeHandle = undefined;
+    expect(artifact).toBeDefined();
+    artifact!.liveNativeHandleSlot = undefined;
     const exportResult = await worker.exportGeometry('glb');
 
     assertSuccess(exportResult, 'openscad native handle restoration exportGeometry');
@@ -2166,9 +2271,9 @@ describe('OpenSCAD Kernel – unresolved dependency tracking', () => {
     // need the watch set to include the unresolved paths so creating
     // those files later triggers a re-render.
     const watchedPaths = worker.getWatchedPaths();
-    expect(watchedPaths).toContain('/projects/test/assembly.scad');
-    expect(watchedPaths).toContain('/projects/test/parts/base.scad');
-    expect(watchedPaths).toContain('/projects/test/parts/top.scad');
+    expect(watchedPaths).toContain('/assembly.scad');
+    expect(watchedPaths).toContain('/parts/base.scad');
+    expect(watchedPaths).toContain('/parts/top.scad');
   });
 
   it('should re-render when previously missing include file is created', async () => {
@@ -2188,10 +2293,10 @@ describe('OpenSCAD Kernel – unresolved dependency tracking', () => {
 
     // Write the missing include file directly to the live filesystem
     const fs = getTestFileSystem();
-    await fs.mkdir('/projects/test/lib', { recursive: true });
-    await fs.writeFile('/projects/test/lib/utils.scad', 'my_size = 20;');
+    await fs.mkdir('/lib', { recursive: true });
+    await fs.writeFile('/lib/utils.scad', 'my_size = 20;');
 
-    await worker.notifyFileChanged(['/projects/test/lib/utils.scad']);
+    await worker.notifyFileChanged(['/lib/utils.scad']);
 
     const result2 = await worker.createGeometry({
       file: geometryFile,
@@ -2346,22 +2451,201 @@ describe('Export', () => {
   it('should produce different face counts with different tessellation options on export', async () => {
     const worker = await createWorker({ 'sphere.scad': sphereCode });
     const geometryFile = createGeometryFile('sphere.scad');
-    await worker.createGeometry({ file: geometryFile, parameters: {} });
+    try {
+      const coarseExport = await worker.exportModel({
+        format: 'glb',
+        file: geometryFile,
+        parameters: {},
+        exportOptions: {
+          tessellation: { segments: 8, minimumAngle: 30, minimumSize: 5 },
+        },
+      });
+      assertSuccess(coarseExport);
 
-    const coarseExport = await worker.exportGeometry('glb', {
-      tessellation: { segments: 8, minimumAngle: 30, minimumSize: 5 },
+      const fineExport = await worker.exportModel({
+        format: 'glb',
+        file: geometryFile,
+        parameters: {},
+        exportOptions: {
+          tessellation: { segments: 64, minimumAngle: 3, minimumSize: 0.5 },
+        },
+      });
+      assertSuccess(fineExport);
+
+      const coarseVertices = await getVertexCount(coarseExport.data[0]!.bytes);
+      const fineVertices = await getVertexCount(fineExport.data[0]!.bytes);
+      expect(fineVertices).toBeGreaterThan(coarseVertices * 1.5);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('reuses OFF for equal construction values and rebuilds only when tessellation changes', async () => {
+    const definition = await resolveRuntimePluginDefinition<AnyKernelDefinition>('kernel', openscadKernel());
+    const createGeometrySpy = vi.spyOn(definition, 'createGeometry');
+    const meshGeometrySpy = vi.spyOn(definition, 'meshGeometry');
+    const image = defineTranscoder({
+      id: 'openscad-image-test',
+      name: 'OpenSCAD image test',
+      version: '1.0.0',
+      edges: [
+        {
+          from: 'glb',
+          to: 'webp',
+          fidelity: 'mesh',
+          optionsSchema: z.object({ width: z.number() }),
+        },
+      ] as const,
+      async initialize() {
+        return {};
+      },
+      async transcode(input) {
+        return { success: true, data: input.files, issues: [] };
+      },
+      async cleanup() {
+        return undefined;
+      },
     });
-    assertSuccess(coarseExport);
+    const worker = await createTestWorker(
+      definition,
+      { 'sphere.scad': sphereCode },
+      { extensions: ['scad'], transcoders: [image()] },
+    );
+    const geometryFile = createGeometryFile('sphere.scad');
+    const tessellation = { segments: 32, minimumAngle: 12, minimumSize: 2 };
 
-    const fineExport = await worker.exportGeometry('glb', {
-      tessellation: { segments: 64, minimumAngle: 3, minimumSize: 0.5 },
+    try {
+      const displayed = await worker.createGeometry({
+        file: geometryFile,
+        parameters: {},
+        options: { tessellation },
+      });
+      assertSuccess(displayed);
+      const published = (worker as unknown as { currentPublishedRender?: unknown }).currentPublishedRender;
+      expect(createGeometrySpy).toHaveBeenCalledOnce();
+      expect(meshGeometrySpy).toHaveBeenCalledOnce();
+
+      assertSuccess(await worker.exportGeometry('glb'));
+      assertSuccess(
+        await worker.exportGeometry('gltf', {
+          tessellation,
+          coordinateSystem: 'z-up',
+          unit: { length: 'millimeter' },
+        }),
+      );
+      expect(createGeometrySpy).toHaveBeenCalledOnce();
+      expect(meshGeometrySpy).toHaveBeenCalledOnce();
+
+      assertSuccess(
+        await worker.exportGeometry('webp', {
+          tessellation,
+          coordinateSystem: 'z-up',
+          unit: { length: 'millimeter' },
+          width: 512,
+        }),
+      );
+      assertSuccess(
+        await worker.exportGeometry('webp', {
+          tessellation,
+          coordinateSystem: 'y-up',
+          unit: { length: 'meter' },
+          width: 1024,
+        }),
+      );
+      expect(createGeometrySpy).toHaveBeenCalledOnce();
+      expect(meshGeometrySpy).toHaveBeenCalledOnce();
+
+      assertSuccess(
+        await worker.exportGeometry('glb', {
+          tessellation: { ...tessellation, segments: 64 },
+          coordinateSystem: 'y-up',
+          unit: { length: 'meter' },
+        }),
+      );
+      expect(createGeometrySpy).toHaveBeenCalledTimes(2);
+      expect(meshGeometrySpy).toHaveBeenCalledOnce();
+      expect((worker as unknown as { currentPublishedRender?: unknown }).currentPublishedRender).toBe(published);
+    } finally {
+      await worker.cleanup();
+      createGeometrySpy.mockRestore();
+      meshGeometrySpy.mockRestore();
+    }
+  });
+
+  it('reheats a corrupt matching snapshot with the exact requested tessellation', async () => {
+    const definition = await resolveRuntimePluginDefinition<AnyKernelDefinition>('kernel', openscadKernel());
+    const createGeometrySpy = vi.spyOn(definition, 'createGeometry');
+    const worker = await createTestWorker(definition, { 'sphere.scad': sphereCode }, { extensions: ['scad'] });
+    const tessellation = { segments: 48, minimumAngle: 6, minimumSize: 1 };
+
+    try {
+      assertSuccess(
+        await worker.createGeometry({
+          file: createGeometryFile('sphere.scad'),
+          parameters: {},
+          options: { tessellation },
+        }),
+      );
+      const artifact = (
+        worker as unknown as {
+          currentPublishedRender?: {
+            liveNativeHandleSlot?: unknown;
+            serializedNativeHandleSlot?: { serializedNativeHandle: unknown };
+          };
+        }
+      ).currentPublishedRender;
+      expect(artifact?.serializedNativeHandleSlot).toBeDefined();
+      artifact!.liveNativeHandleSlot = undefined;
+      artifact!.serializedNativeHandleSlot!.serializedNativeHandle = { invalid: true };
+
+      const exported = await worker.exportGeometry('glb', { tessellation });
+
+      assertSuccess(exported);
+      expect(createGeometrySpy).toHaveBeenCalledTimes(2);
+      expect(createGeometrySpy.mock.calls[1]?.[0]).toMatchObject({ options: { tessellation } });
+    } finally {
+      await worker.cleanup();
+      createGeometrySpy.mockRestore();
+    }
+  });
+
+  it('should skip display meshing for cold export and mesh the subsequent display once', async () => {
+    let meshCalls = 0;
+    const phaseCounter = defineMiddleware({
+      id: 'openscad-mesh-phase-counter',
+      name: 'OpenSCAD mesh phase counter',
+      async wrapMeshGeometry(input, handler) {
+        meshCalls++;
+        return handler(input);
+      },
     });
-    assertSuccess(fineExport);
+    const worker = await createWorker(
+      { 'sphere.scad': sphereCode },
+      {
+        middleware: [phaseCounter()],
+      },
+    );
+    const geometryFile = createGeometryFile('sphere.scad');
 
-    const coarseVertices = await getVertexCount(coarseExport.data[0]!.bytes);
-    const fineVertices = await getVertexCount(fineExport.data[0]!.bytes);
+    try {
+      const exported = await worker.exportModel({
+        format: 'glb',
+        file: geometryFile,
+        parameters: {},
+        exportOptions: {
+          tessellation: { segments: 32, minimumAngle: 6, minimumSize: 1 },
+        },
+      });
+      assertSuccess(exported);
+      expect(await getVertexCount(exported.data[0]!.bytes)).toBeGreaterThan(0);
+      expect(meshCalls).toBe(0);
 
-    expect(fineVertices).toBeGreaterThan(coarseVertices * 1.5);
+      const displayed = await worker.createGeometry({ file: geometryFile, parameters: {} });
+      await geometryHelpers.expectValidGltf(displayed);
+      expect(meshCalls).toBe(1);
+    } finally {
+      await worker.cleanup();
+    }
   });
 
   it('should always override user-defined $fn on export', async () => {
@@ -2389,41 +2673,53 @@ describe('Export', () => {
     expect(highVertices).toBeGreaterThan(lowVertices * 1.5);
   });
 
-  it('should produce different GLB output for y-up vs z-up coordinate system', async () => {
-    const boxCode = 'cube([20, 10, 30]);';
-    const worker = await createWorker({ 'box.scad': boxCode });
-    const geometryFile = createGeometryFile('box.scad');
+  it('should convert asymmetric GLB geometry from z-up millimeters to y-up meters exactly once', async () => {
+    const worker = await createWorker({
+      'coordinate-evidence.scad': `
+        color("red") translate([7, 11, 13]) cube([10, 20, 30]);
+        color("blue") translate([-17, 23, 31]) cube([4, 6, 8]);
+      `,
+    });
+    const geometryFile = createGeometryFile('coordinate-evidence.scad');
     await worker.createGeometry({ file: geometryFile, parameters: {} });
 
-    const yUpExport = await worker.exportGeometry('glb', { coordinateSystem: 'y-up' });
-    const zUpExport = await worker.exportGeometry('glb', { coordinateSystem: 'z-up' });
+    const yUpExport = await worker.exportGeometry('glb', {
+      coordinateSystem: 'y-up',
+      unit: { length: 'meter' },
+    });
+    const zUpExport = await worker.exportGeometry('glb', {
+      coordinateSystem: 'z-up',
+      unit: { length: 'millimeter' },
+    });
 
     assertSuccess(yUpExport);
     assertSuccess(zUpExport);
 
-    const yUpBytes = yUpExport.data[0]!.bytes;
-    const zUpBytes = zUpExport.data[0]!.bytes;
-
-    // Different coordinate systems must produce different byte output
-    expect(Buffer.from(yUpBytes).equals(Buffer.from(zUpBytes))).toBe(false);
+    const yUpEvidence = await readOpenScadCoordinateEvidence(yUpExport.data[0]!.bytes);
+    const zUpEvidence = await readOpenScadCoordinateEvidence(zUpExport.data[0]!.bytes);
+    expect(yUpEvidence).toEqual(mapOpenScadEvidenceToYUpMeters(zUpEvidence));
   });
 
-  it('should export empty GLB and glTF files after an empty render', async () => {
+  it('should export empty GLB and glTF files before an empty display render', async () => {
     const worker = await createWorker({ 'empty.scad': '' });
     const geometryFile = createGeometryFile('empty.scad');
-    const createResult = await worker.createGeometry({ file: geometryFile, parameters: {} });
-    await geometryHelpers.expectValidGltf(createResult);
-    await geometryHelpers.expectMeshCount(createResult, 0);
+    try {
+      const glbResult = await worker.exportModel({ format: 'glb', file: geometryFile, parameters: {} });
+      assertSuccess(glbResult);
+      const document = await new NodeIO().readBinary(glbResult.data[0]!.bytes);
+      expect(document.getRoot().listMeshes()).toHaveLength(0);
 
-    const glbResult = await worker.exportGeometry('glb');
-    assertSuccess(glbResult);
-    const document = await new NodeIO().readBinary(glbResult.data[0]!.bytes);
-    expect(document.getRoot().listMeshes()).toHaveLength(0);
+      const gltfResult = await worker.exportModel({ format: 'gltf', file: geometryFile, parameters: {} });
+      assertSuccess(gltfResult);
+      const json = JSON.parse(new TextDecoder().decode(gltfResult.data[0]!.bytes)) as { meshes: unknown[] };
+      expect(json.meshes).toEqual([]);
 
-    const gltfResult = await worker.exportGeometry('gltf');
-    assertSuccess(gltfResult);
-    const json = JSON.parse(new TextDecoder().decode(gltfResult.data[0]!.bytes)) as { meshes: unknown[] };
-    expect(json.meshes).toEqual([]);
+      const createResult = await worker.createGeometry({ file: geometryFile, parameters: {} });
+      await geometryHelpers.expectValidGltf(createResult);
+      await geometryHelpers.expectMeshCount(createResult, 0);
+    } finally {
+      await worker.cleanup();
+    }
   });
 });
 

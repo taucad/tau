@@ -457,10 +457,11 @@ export const openscad: KernelPluginFactory<'openscad', OpenScadFormatMap, OpenSc
   extensions: ['scad'],
   name: 'OpenScadKernel',
   version: '1.0.0',
-  render: { optionsSchema: openscadRenderSchema, content: [] },
+  createOptionsSchema: openscadRenderSchema,
+  render: { optionsSchema: openscadRenderSchema },
   exportFormats: {
-    glb: { optionsSchema: openscadExportSchemas.glb, content: [] },
-    gltf: { optionsSchema: openscadExportSchemas.gltf, content: [] },
+    glb: { optionsSchema: openscadExportSchemas.glb },
+    gltf: { optionsSchema: openscadExportSchemas.gltf },
   },
 
   async initialize(): Promise<OpenScadContext> {

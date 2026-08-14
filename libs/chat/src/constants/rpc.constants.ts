@@ -79,6 +79,20 @@ export const readOnlyRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
 ]);
 
 /**
+ * How long the server waits for a client to answer one RPC, in milliseconds.
+ *
+ * This is the outermost budget in the chain, and it is deliberately shared: a
+ * client-side timeout that outlives it never reaches the user, because the
+ * server has already answered with the generic
+ * `RPC execution timed out … the client may be disconnected or unresponsive`.
+ * Every client budget — worker startup, a test run, an abort grace period —
+ * must therefore be sized to expire inside this one.
+ *
+ * @public
+ */
+export const rpcExecutionTimeout = 60_000;
+
+/**
  * Error codes for RPC infrastructure failures.
  * These represent issues with the RPC transport/execution itself,
  * not business-level errors from the client.

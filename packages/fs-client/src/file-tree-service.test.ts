@@ -330,6 +330,72 @@ describe('FileTreeService rooted search and external polling', () => {
     vi.useRealTimers();
   });
 
+  it('drops to the safety-net cadence while the worker reports native observation', async () => {
+    vi.useFakeTimers();
+    const pollExternalChanges = vi.fn().mockResolvedValue(true);
+    const { tree, disposeChannel } = createTreeHarness({
+      proxy: mock<FileSystemClient>({ pollExternalChanges }),
+    });
+
+    tree.startPolling();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(pollExternalChanges).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(pollExternalChanges).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(pollExternalChanges).toHaveBeenCalledTimes(2);
+
+    tree.stopPolling();
+    tree.dispose();
+    disposeChannel();
+    vi.useRealTimers();
+  });
+
+  it('restores the fast cadence as soon as native observation stops', async () => {
+    vi.useFakeTimers();
+    const pollExternalChanges = vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false);
+    const { tree, disposeChannel } = createTreeHarness({
+      proxy: mock<FileSystemClient>({ pollExternalChanges }),
+    });
+
+    tree.startPolling();
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(pollExternalChanges).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(pollExternalChanges).toHaveBeenCalledTimes(3);
+
+    tree.stopPolling();
+    tree.dispose();
+    disposeChannel();
+    vi.useRealTimers();
+  });
+
+  it('polls the newly reset root on the fast cadence after a native-observed root', async () => {
+    vi.useFakeTimers();
+    const pollExternalChanges = vi.fn().mockResolvedValue(true);
+    const { tree, disposeChannel } = createTreeHarness({
+      proxy: mock<FileSystemClient>({ pollExternalChanges }),
+    });
+
+    tree.startPolling();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(pollExternalChanges).toHaveBeenCalledOnce();
+
+    tree.reset('/projects/def');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(pollExternalChanges).toHaveBeenCalledTimes(2);
+    expect(pollExternalChanges).toHaveBeenNthCalledWith(2, '/projects/def');
+
+    tree.stopPolling();
+    tree.dispose();
+    disposeChannel();
+    vi.useRealTimers();
+  });
+
   it('adds one global reconciliation after every five completed rooted polls', async () => {
     vi.useFakeTimers();
     const pollExternalChanges = vi.fn().mockResolvedValue(undefined);

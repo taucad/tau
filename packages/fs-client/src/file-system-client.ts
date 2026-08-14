@@ -173,8 +173,12 @@ export type FileSystemClient = {
     options?: { maxResults?: number; includeDirectories?: boolean },
   ): Promise<FileStatEntry[]>;
 
-  /** Reconcile out-of-band changes under one routed root, or every configured webaccess root when omitted. */
-  pollExternalChanges(root?: string): Promise<void>;
+  /**
+   * Reconcile out-of-band changes under one routed root, or every configured webaccess root when omitted.
+   * Resolves `true` when the worker has live `FileSystemObserver` delivery for the polled root(s),
+   * so the caller can fall back to a slow safety-net cadence.
+   */
+  pollExternalChanges(root?: string): Promise<boolean>;
 
   watch(request: WatchRequest, handler: (event: WatchEvent) => void): () => void;
 };

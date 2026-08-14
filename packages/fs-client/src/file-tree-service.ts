@@ -27,6 +27,8 @@ const defaultRefreshDebounce = 100;
 const watchIntervalFocused = 2000;
 /** Milliseconds. */
 const watchIntervalBlurred = 10_000;
+/** Milliseconds. Safety-net cadence while the worker observes the root natively. */
+const watchIntervalNativeSafetyNet = 60_000;
 /** Milliseconds. */
 const pollingTelemetryWindow = 60_000;
 // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
@@ -128,6 +130,9 @@ export class FileTreeService {
   private pendingRefreshPath: string | undefined;
   private pollingTimer: ReturnType<typeof setTimeout> | undefined;
   private visibilityUnsub: (() => void) | undefined;
+  /** Set from the worker's last poll result: native observation makes the poll a safety net. */
+  private nativelyObserved = false;
+  private reschedulePoll: (() => void) | undefined;
   private pollingEpoch = 0;
   private pollingTelemetry: PollingTelemetryState | undefined;
   private contentUnsubscribe: (() => void) | undefined;
@@ -495,7 +500,11 @@ export class FileTreeService {
       if (epoch !== this.pollingEpoch) {
         return;
       }
-      const pollInterval = this.visibility.isVisible() ? watchIntervalFocused : watchIntervalBlurred;
+      const pollInterval = this.nativelyObserved
+        ? watchIntervalNativeSafetyNet
+        : this.visibility.isVisible()
+          ? watchIntervalFocused
+          : watchIntervalBlurred;
       this.pollingTimer = setTimeout(async () => {
         this.pollingTimer = undefined;
         const visible = this.visibility.isVisible();
@@ -503,7 +512,7 @@ export class FileTreeService {
         let success = false;
         telemetry.inFlight = true;
         try {
-          await this.proxy.pollExternalChanges(this.paths.toAbsoluteWorkspacePath(''));
+          this.nativelyObserved = await this.proxy.pollExternalChanges(this.paths.toAbsoluteWorkspacePath(''));
           completedTicks++;
           if (completedTicks % globalReconcileTickInterval === 0) {
             await this.proxy.pollExternalChanges();
@@ -531,13 +540,14 @@ export class FileTreeService {
 
     poll();
 
-    this.visibilityUnsub = this.visibility.onVisibilityChange(() => {
+    this.reschedulePoll = (): void => {
       if (this.pollingTimer !== undefined) {
         clearTimeout(this.pollingTimer);
         this.pollingTimer = undefined;
         poll();
       }
-    });
+    };
+    this.visibilityUnsub = this.visibility.onVisibilityChange(this.reschedulePoll);
   }
 
   /**
@@ -545,6 +555,8 @@ export class FileTreeService {
    */
   public stopPolling(): void {
     this.pollingEpoch++;
+    this.nativelyObserved = false;
+    this.reschedulePoll = undefined;
     if (this.pollingTimer !== undefined) {
       clearTimeout(this.pollingTimer);
       this.pollingTimer = undefined;
@@ -606,6 +618,9 @@ export class FileTreeService {
       this.refreshTimer = undefined;
     }
     this.pendingRefreshPath = undefined;
+    // The new root has not reported native observation yet: poll it promptly.
+    this.nativelyObserved = false;
+    this.reschedulePoll?.();
 
     const newTree = new Map<string, FileEntry>();
     if (initialEntries) {

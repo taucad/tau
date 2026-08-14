@@ -87,6 +87,7 @@ const baseConfig: UserConfig = {
     },
   ],
   tsconfig: 'tsconfig.build.json',
+  target: 'es2024',
   unbundle: true,
 };
 

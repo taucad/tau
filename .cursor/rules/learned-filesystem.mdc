@@ -18,6 +18,7 @@ capped at 200 chars and 12 bullets per section.
 - `normalize*`-style helpers inside a service module are a smell — investigate whether the inputs can be made canonical at their source (caller, schema, mount-table key) rather than papering over inconsistencies at the consumer boundary.
 - Implement `writeFiles` through canonical `writeFile`; a provider write is incomplete until writer caches are invalidated and exact-path watchers receive the mutation.
 - Give runtime/headless only an opaque writable rooted filesystem plus local `/` paths; trusted filesystem composition owns global routes and authorization, never runtime layers.
+- Concrete watch/write events keep exact virtual paths; only explicit information-loss signals enter conservative resync. Never infer loss from provider case metadata.
 
 ## Learned Workspace Facts
 

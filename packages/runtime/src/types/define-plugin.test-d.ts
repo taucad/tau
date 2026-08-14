@@ -386,7 +386,11 @@ describe('positive-only middleware and transcoder declarations', () => {
       },
       async wrapMeshGeometry(input, handler) {
         expectTypeOf(input).not.toHaveProperty('content');
-        return handler(input);
+        const result = await handler(input);
+        if (result.success) {
+          expectTypeOf(result.data).toEqualTypeOf<GeometryResponse>();
+        }
+        return result;
       },
       async wrapExportGeometry(input, handler) {
         expectTypeOf(input).not.toHaveProperty('content');

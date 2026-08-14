@@ -43,7 +43,7 @@ import { wrapOcForExceptions, wrapOcWithTracing } from '#kernels/occt/oc-tracing
 import type { OcTracingSummary } from '#kernels/occt/oc-tracing.js';
 import type { KernelIssue } from '#types/runtime.types.js';
 import { opencascadeDetectPattern } from '#kernels/opencascade/opencascade.constants.js';
-import { createEmptyGlb, createEmptyGltf, createEmptyGltfGeometry } from '#utils/glb-writer.js';
+import { createEmptyGlb, createEmptyGltfGeometry } from '#utils/glb-writer.js';
 import { resolveShapeName, uniqueShapeName } from '#utils/shape-names.js';
 
 import type { OpenCascadeInstance, TopoDS_Shape } from '#kernels/opencascade/wasm/opencascade_full.js';
@@ -205,7 +205,7 @@ function registerOcModule(oc: OpenCascadeInstance, runtime: KernelRuntime): void
   const namedExports = exportNames.map((key) => `export const ${key} = __mod.${key};`).join('\n');
   const code = `const __mod = globalThis.${KERNEL_MODULES_KEY}.get('libcascade');\n${namedExports}\nexport default __mod;\n`;
 
-  runtime.bundler.registerModule('libcascade', { code, version: '3.0.0-beta.3' });
+  runtime.bundler.registerModule('libcascade', { code, version: '3.0.0' });
 }
 
 function shapeEntryFromKernelReturnItem(item: unknown): ShapeEntry | undefined {
@@ -593,7 +593,6 @@ export const opencascade = defineKernel({
     stl: { optionsSchema: opencascadeExportSchemas.stl },
     step: { optionsSchema: opencascadeExportSchemas.step },
     glb: { optionsSchema: opencascadeExportSchemas.glb },
-    gltf: { optionsSchema: opencascadeExportSchemas.gltf },
   },
 
   async initialize(options, runtime) {
@@ -771,24 +770,17 @@ export const opencascade = defineKernel({
 
   async exportGeometry(input, _runtime, context) {
     const { format, nativeHandle, options } = input;
-    const emptyGltfExport = () =>
-      createKernelSuccess([
-        createExportFile(
-          format,
-          format === 'glb' ? 'model.glb' : 'model.gltf',
-          asBuffer(format === 'glb' ? createEmptyGlb() : createEmptyGltf()),
-        ),
-      ]);
+    const emptyGlbExport = () =>
+      createKernelSuccess([createExportFile(format, 'model.glb', asBuffer(createEmptyGlb()))]);
     const noGeometryExportError = () =>
       createKernelError([
         { message: 'No geometry available for export', code: 'RUNTIME', type: 'runtime', severity: 'error' },
       ]);
 
     switch (format) {
-      case 'glb':
-      case 'gltf': {
+      case 'glb': {
         if (nativeHandle.length === 0) {
-          return emptyGltfExport();
+          return emptyGlbExport();
         }
 
         const { linearTolerance, angularTolerance } = options.tessellation;
@@ -802,9 +794,7 @@ export const opencascade = defineKernel({
           unit,
         });
 
-        return createKernelSuccess([
-          createExportFile(format, format === 'glb' ? 'model.glb' : 'model.gltf', asBuffer(gltfData)),
-        ]);
+        return createKernelSuccess([createExportFile(format, 'model.glb', asBuffer(gltfData))]);
       }
 
       case 'step': {

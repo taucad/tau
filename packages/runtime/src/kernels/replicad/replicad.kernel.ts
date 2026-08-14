@@ -561,11 +561,11 @@ export const replicadKernel = defineKernel({
       entryUrl = executeResult.entryUrl;
 
       const module = executeResult.value as RuntimeModuleExports;
-      const mainSpan = tracer.startSpan('replicad.run-main', {
-        phase: 'computingGeometry',
-        stage: 'brep',
-      });
       const mainResult = await tracedPhase(tracer, 'create.runOcMain', async () => {
+        const mainSpan = tracer.startSpan('replicad.run-main', {
+          phase: 'computingGeometry',
+          stage: 'brep',
+        });
         try {
           return await context.libraryTrace.runInScope({
             scope: 'user-main',
@@ -604,11 +604,11 @@ export const replicadKernel = defineKernel({
       // interfaces (pure BRep queries) onto the nativeHandle. The handle carries
       // all export-facing evidence — tessellation is deferred to meshGeometry
       // and never runs on a BRep-only export path.
-      const interfaceSpan = tracer.startSpan('replicad.resolve-interfaces', {
-        phase: 'computingGeometry',
-        stage: 'brep',
-      });
       const nativeHandle: NativeHandleEntry[] = await tracedPhase(tracer, 'create.resolveInterfaces', () => {
+        const interfaceSpan = tracer.startSpan('replicad.resolve-interfaces', {
+          phase: 'computingGeometry',
+          stage: 'brep',
+        });
         try {
           return normalizeRenderShapes(shapes, defaultName).map((entry) =>
             resolveEntryInterfaces(entry, context.replicadLibrary),
@@ -649,11 +649,11 @@ export const replicadKernel = defineKernel({
       }));
 
       let renderMode: 'flat' | 'tessellation-instanced' | 'mixed' = 'flat';
-      const renderOutputSpan = tracer.startSpan('replicad.render-output', {
-        phase: 'computingGeometry',
-        stage: 'render-output',
-      });
       const renderedShapes = await tracedPhase(tracer, 'mesh.renderDisplayTessellation', () => {
+        const renderOutputSpan = tracer.startSpan('replicad.render-output', {
+          phase: 'computingGeometry',
+          stage: 'render-output',
+        });
         try {
           return context.libraryTrace.runInScope({
             scope: 'render-output',
@@ -689,12 +689,12 @@ export const replicadKernel = defineKernel({
 
       const artifacts: Array<GeometryGltf | GeometrySvg> = [];
       if (shapes3d.length > 0) {
-        const gltfSpan = tracer.startSpan('replicad.mesh-to-gltf', {
-          shapeCount: shapes3d.length,
-          phase: 'computingGeometry',
-          stage: 'gltf-pack',
-        });
         const gltfBlob = await tracedPhase(tracer, 'mesh.packGltf', () => {
+          const gltfSpan = tracer.startSpan('replicad.mesh-to-gltf', {
+            shapeCount: shapes3d.length,
+            phase: 'computingGeometry',
+            stage: 'gltf-pack',
+          });
           try {
             return convertReplicadGeometriesToGltf({
               geometries: includeEdges

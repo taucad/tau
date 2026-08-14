@@ -10,6 +10,7 @@ import { SharedPool } from '@taucad/memory';
 import type {
   HashedGeometryResult,
   CreateGeometryResult,
+  MeshGeometryResult,
   ExportGeometryResult,
   GetParametersResult,
   KernelIssue,
@@ -2479,7 +2480,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     _owner: OperationOwner,
     _input: { nativeHandle: unknown; options: Record<string, unknown>; content?: RuntimeContentInput },
     _runtime: KernelRuntime,
-  ): Promise<CreateGeometryResult> {
+  ): Promise<MeshGeometryResult> {
     return createKernelError([
       {
         message: 'meshGeometry is not supported by this worker.',
@@ -2634,7 +2635,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     resolvedMiddleware: ResolvedMiddleware[];
     createResult: Extract<CreateGeometryResult, { success: true }>;
     renderArtifact: MaterializedRender;
-  }): Promise<CreateGeometryResult> {
+  }): Promise<MeshGeometryResult> {
     const { owner, identity, renderOptions, content, resolvedMiddleware, createResult, renderArtifact } = options;
 
     if (!this.kernelHasMeshPhaseForOwner(owner)) {
@@ -2652,7 +2653,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const meshSpan = this.tracer.startSpan('kernel.mesh', { phase: 'computingGeometry' });
     try {
       const runtime = this.createRuntime();
-      const computeMesh = async (handlerInput: MeshGeometryRequest): Promise<CreateGeometryResult> => {
+      const computeMesh = async (handlerInput: MeshGeometryRequest): Promise<MeshGeometryResult> => {
         const handle = await this.materializeNativeHandleForOwner({
           owner,
           runtime,

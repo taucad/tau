@@ -568,16 +568,6 @@ export default function main() {
       expect(exportResult.data.length).toBeGreaterThan(0);
     });
 
-    it('should export to GLTF format', async () => {
-      const geometryFile = createGeometryFile('box.ts');
-      const createResult = await worker.createGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(createResult, 'createGeometry for GLTF export');
-
-      const exportResult = await worker.exportGeometry('gltf');
-      assertSuccess(exportResult, 'GLTF export');
-      expect(exportResult.data[0]?.name).toContain('gltf');
-    });
-
     it('should export to GLB format', async () => {
       const geometryFile = createGeometryFile('box.ts');
       const createResult = await worker.createGeometry({ file: geometryFile, parameters: {} });
@@ -588,7 +578,7 @@ export default function main() {
       expect(exportResult.data[0]?.name).toContain('glb');
     });
 
-    it('should export empty GLB and glTF files after an empty render but keep STEP and STL unavailable', async () => {
+    it('should export an empty GLB after an empty render but keep STEP and STL unavailable', async () => {
       const geometryFile = createGeometryFile('empty.ts');
       const createResult = await worker.createGeometry({ file: geometryFile, parameters: {} });
       assertSuccess(createResult, 'empty createGeometry for export');
@@ -597,11 +587,6 @@ export default function main() {
       assertSuccess(glbResult, 'empty GLB export');
       const document = await new NodeIO().readBinary(glbResult.data[0]!.bytes);
       expect(document.getRoot().listMeshes()).toHaveLength(0);
-
-      const gltfResult = await worker.exportGeometry('gltf');
-      assertSuccess(gltfResult, 'empty glTF export');
-      const json = JSON.parse(new TextDecoder().decode(gltfResult.data[0]!.bytes)) as { meshes: unknown[] };
-      expect(json.meshes).toEqual([]);
 
       assertFailure(await worker.exportGeometry('step'), 'empty STEP export');
       assertFailure(await worker.exportGeometry('stl'), 'empty STL export');

@@ -493,7 +493,7 @@ export function createMockRuntime<
  * @returns A successful result wrapping the provided geometry
  * @public
  */
-export function createSuccessResult(geometry: GeometryResponse): CreateGeometryResult {
+export function createSuccessResult(geometry: GeometryResponse): KernelSuccessResult<GeometryResponse> {
   return {
     success: true,
     data: geometry,
@@ -508,7 +508,7 @@ export function createSuccessResult(geometry: GeometryResponse): CreateGeometryR
  * @returns A successful result with one GLTF geometry
  * @public
  */
-export function createGltfSuccessResult(content: Uint8Array<ArrayBuffer>): CreateGeometryResult {
+export function createGltfSuccessResult(content: Uint8Array<ArrayBuffer>): KernelSuccessResult<GeometryResponse> {
   return createSuccessResult({ format: 'gltf', content });
 }
 
@@ -523,7 +523,7 @@ export function createGltfSuccessResult(content: Uint8Array<ArrayBuffer>): Creat
 export function createGltfSuccessResultWithIssues(
   content: Uint8Array<ArrayBuffer>,
   issues: KernelIssue[],
-): CreateGeometryResult {
+): KernelSuccessResult<GeometryResponse> {
   return {
     success: true,
     data: { format: 'gltf', content },

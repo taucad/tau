@@ -22,7 +22,7 @@ import {
   getMaterialBaseColor,
 } from '#testing/color-testing.utils.js';
 import { assertSuccess, createGeometryFile, createTestWorker } from '#testing/kernel-testing.utils.js';
-import type { CreateGeometryResult } from '#types/runtime.types.js';
+import type { HashedGeometryResult } from '#types/runtime.types.js';
 
 const buildNonPbrSource = (hex: string, opacity: number): string => `
 import { BRepPrimAPI_MakeCylinder } from 'libcascade';
@@ -49,13 +49,13 @@ type RenderCase = {
   readonly variant: string;
 };
 
-async function renderColored({ source, hex, opacity, variant }: RenderCase): Promise<CreateGeometryResult> {
+async function renderColored({ source, hex, opacity, variant }: RenderCase): Promise<HashedGeometryResult> {
   const file = 'colored.ts';
   const worker = await createTestWorker(opencascadeKernel, { [file]: source });
-  const result = (await worker.createGeometry({
+  const result = await worker.createGeometry({
     file: createGeometryFile(file),
     parameters: {},
-  })) as CreateGeometryResult;
+  });
   assertSuccess(result, `opencascade ${variant} (${hex}, alpha=${opacity})`);
   return result;
 }
@@ -111,10 +111,10 @@ export default function main() {
   };
 }`,
       });
-      const result = (await worker.createGeometry({
+      const result = await worker.createGeometry({
         file: createGeometryFile(file),
         parameters: {},
-      })) as CreateGeometryResult;
+      });
       assertSuccess(result, 'occt PBR createGeometry');
 
       const baseColor = await getMaterialBaseColor(result);
@@ -136,13 +136,13 @@ export default function main() {
   return new BRepPrimAPI_MakeCylinder(5, 20).Shape();
 }`,
     });
-    const result = (await worker.createGeometry({
+    const result = await worker.createGeometry({
       file: createGeometryFile(file),
       parameters: {},
-    })) as CreateGeometryResult;
+    });
     assertSuccess(result, 'occt uncoloured createGeometry');
 
-    expect(result.data?.format).toBe('gltf');
+    expect(result.data.format).toBe('gltf');
 
     try {
       const baseColor = await getMaterialBaseColor(result);

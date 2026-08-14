@@ -18,6 +18,7 @@
 import '#framework/worker-preload-polyfill.js';
 import type {
   CreateGeometryResult,
+  MeshGeometryResult,
   ExportGeometryResult,
   GetParametersResult,
   KernelIssue,
@@ -297,7 +298,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     owner: OperationOwner,
     input: { nativeHandle: unknown; options: Record<string, unknown>; content?: RuntimeContentInput },
     runtime: KernelRuntime,
-  ): Promise<CreateGeometryResult> {
+  ): Promise<MeshGeometryResult> {
     const kernel = this.getKernelForOwner(owner);
     const meshGeometry = kernel?.definition.meshGeometry;
     if (!kernel || !meshGeometry) {

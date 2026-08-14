@@ -201,8 +201,9 @@ export async function meshShapesToGltf(
 
     const progress = scope.track(new oc.Message_ProgressRange());
     const fileInfo = scope.track(new oc.TColStd_IndexedDataMapOfStringString());
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- WASM binding enum type mismatch
-    writer.Perform(document, fileInfo as unknown, progress);
+    if (!writer.Perform(document, fileInfo, progress)) {
+      throw new Error('OpenCascade failed to export GLB');
+    }
 
     const glbData = oc.FS.readFile(outputPath, { encoding: 'binary' }) as Uint8Array<ArrayBuffer>;
     result = new Uint8Array(glbData);

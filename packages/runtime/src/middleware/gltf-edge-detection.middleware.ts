@@ -176,11 +176,11 @@ async function addEdgePrimitivesToGltf(geometry: GeometryGltf, thresholdDegrees:
  * @param logger - Runtime logger for the active middleware operation.
  * @returns The original result or a GLTF result enriched with line primitives.
  */
-async function addEdgesToResult(
-  result: CreateGeometryResult,
+async function addEdgesToResult<Result extends CreateGeometryResult>(
+  result: Result,
   thresholdDegrees: number,
   logger: RuntimeLogger,
-): Promise<CreateGeometryResult> {
+): Promise<Result> {
   // Add edges on the way back up (onion model "return journey")
   if (!result.success || result.data?.format !== 'gltf') {
     return result;

@@ -6,7 +6,12 @@
  */
 
 import type { PartialDeep } from 'type-fest';
-import type { CreateGeometryResult, ExportGeometryResult, GetParametersResult } from '#types/runtime.types.js';
+import type {
+  CreateGeometryResult,
+  ExportGeometryResult,
+  GetParametersResult,
+  MeshGeometryResult,
+} from '#types/runtime.types.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
 import type {
   RuntimeLogger,
@@ -131,7 +136,7 @@ export type MeshGeometryRequest<Content extends RuntimeContentKey = RuntimeConte
  */
 export type MeshGeometryHandler<Content extends RuntimeContentKey = RuntimeContentKey> = (
   input: MeshGeometryRequest<Content>,
-) => Promise<CreateGeometryResult>;
+) => Promise<MeshGeometryResult>;
 
 /**
  * Handler function for exportGeometry.
@@ -226,7 +231,7 @@ export type WrapMeshGeometryHook<
   input: MeshGeometryRequest<Content>,
   handler: MeshGeometryHandler<Content>,
   runtime: KernelMiddlewareRuntime<State, Options>,
-) => Promise<CreateGeometryResult>;
+) => Promise<MeshGeometryResult>;
 
 /**
  * Wrap-style hook for exportGeometry.
@@ -289,9 +294,9 @@ export type WrapGetParametersHook<
  * const parameterResolver = defineMiddleware({
  *   id: 'parameter-resolver',
  *   name: 'ParameterResolver',
- *   getDependencies({ entryPath }, { options, signal }) {
- *     signal.throwIfAborted();
- *     return [{ path: `/${options.parametersDir}/${entryPath.slice(1)}.json` }];
+ *   async getDependencies({ entryPath }, { signal }) {
+ *     const response = await fetch(`/parameter-path?entry=${encodeURIComponent(entryPath)}`, { signal });
+ *     return [{ path: await response.text() }];
  *   },
  * });
  * ```

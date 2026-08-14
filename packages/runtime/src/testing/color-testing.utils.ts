@@ -8,7 +8,7 @@ import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { expect } from 'vitest';
 import { srgbHexToLinearTuple } from '#utils/color-space.js';
 import { extractGltfFromResult } from '#testing/kernel-geometry-testing.utils.js';
-import type { CreateGeometryResult } from '#types/runtime.types.js';
+import type { HashedGeometryResult } from '#types/runtime.types.js';
 
 const primitiveModeTriangles = 4;
 
@@ -16,11 +16,11 @@ function createNodeIo(): NodeIO {
   return new NodeIO().registerExtensions([KHRMaterialsUnlit]);
 }
 
-function listAllGlbBuffers(result: CreateGeometryResult): Array<Uint8Array<ArrayBuffer>> {
+function listAllGlbBuffers(result: HashedGeometryResult): Array<Uint8Array<ArrayBuffer>> {
   if (!result.success) {
     return [];
   }
-  return result.data?.format === 'gltf' ? [result.data.content] : [];
+  return result.data.format === 'gltf' ? [result.data.content] : [];
 }
 
 /**
@@ -60,7 +60,7 @@ export const colorParityCases: readonly ColorParityCase[] = [
 ] as const;
 
 /**
- * Read the `baseColorFactor` of a material from a `CreateGeometryResult`'s
+ * Read the `baseColorFactor` of a material from a `HashedGeometryResult`'s
  * embedded GLB.
  *
  * @param result - kernel `createGeometry` result with at least one GLB response
@@ -70,7 +70,7 @@ export const colorParityCases: readonly ColorParityCase[] = [
  * @public
  */
 export async function getMaterialBaseColor(
-  result: CreateGeometryResult,
+  result: HashedGeometryResult,
   materialIndex = 0,
 ): Promise<[number, number, number, number]> {
   const glb = extractGltfFromResult(result);
@@ -96,7 +96,7 @@ export async function getMaterialBaseColor(
  * @public
  */
 export async function getAllMaterialBaseColors(
-  result: CreateGeometryResult,
+  result: HashedGeometryResult,
 ): Promise<Array<[number, number, number, number]>> {
   const buffers = listAllGlbBuffers(result);
   if (buffers.length === 0) {
@@ -124,7 +124,7 @@ export async function getAllMaterialBaseColors(
  * @public
  */
 export async function getTrianglePrimitiveBaseColors(
-  result: CreateGeometryResult,
+  result: HashedGeometryResult,
 ): Promise<Array<[number, number, number, number]>> {
   const buffers = listAllGlbBuffers(result);
   if (buffers.length === 0) {
@@ -151,14 +151,14 @@ export async function getTrianglePrimitiveBaseColors(
 }
 
 /**
- * Read the `alphaMode` of a material from a `CreateGeometryResult`'s GLB.
+ * Read the `alphaMode` of a material from a `HashedGeometryResult`'s GLB.
  *
  * @param result - kernel `createGeometry` result with at least one GLB response
  * @param materialIndex - which material to read (defaults to 0)
  * @returns one of `'OPAQUE'`, `'MASK'`, `'BLEND'`
  * @public
  */
-export async function getMaterialAlphaMode(result: CreateGeometryResult, materialIndex = 0): Promise<string> {
+export async function getMaterialAlphaMode(result: HashedGeometryResult, materialIndex = 0): Promise<string> {
   const glb = extractGltfFromResult(result);
   if (!glb) {
     throw new Error('No GLB data found in result');

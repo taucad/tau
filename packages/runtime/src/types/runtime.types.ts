@@ -268,6 +268,9 @@ export type BundlerRegistrations = BundlerRegistration[];
  */
 export type CreateGeometryResult = KernelResult<GeometryResponse | undefined>;
 
+/** Result of the display-only mesh phase. Successful results always carry geometry. @public */
+export type MeshGeometryResult = KernelResult<GeometryResponse>;
+
 /**
  * Completed result type for createGeometry.
  * Returned to consumers - geometry has hash for React keys and caching.

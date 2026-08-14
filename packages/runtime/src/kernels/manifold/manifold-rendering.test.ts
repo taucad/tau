@@ -13,14 +13,14 @@ import { describe, expect, it } from 'vitest';
 import { manifold as manifoldKernel } from '#kernels/manifold/manifold.kernel.js';
 import { expectLinearBaseColor, getAllMaterialBaseColors, getMaterialBaseColor } from '#testing/color-testing.utils.js';
 import { assertSuccess, createGeometryFile, createTestWorker } from '#testing/kernel-testing.utils.js';
-import type { CreateGeometryResult } from '#types/runtime.types.js';
+import type { HashedGeometryResult } from '#types/runtime.types.js';
 
-async function renderSource(file: string, source: string): Promise<CreateGeometryResult> {
+async function renderSource(file: string, source: string): Promise<HashedGeometryResult> {
   const worker = await createTestWorker(manifoldKernel, { [file]: source });
-  const result = (await worker.createGeometry({
+  const result = await worker.createGeometry({
     file: createGeometryFile(file),
     parameters: {},
-  })) as CreateGeometryResult;
+  });
   assertSuccess(result, `manifold ${file}`);
   return result;
 }

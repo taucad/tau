@@ -43,9 +43,6 @@ const occtStlExportSchema = z
 /** Zod schema for OCCT-based GLB export options. */
 const occtGlbExportSchema = occtExportTessellationSchema.extend(coordinateSystemSchema.shape).extend(unitSchema.shape);
 
-/** Zod schema for OCCT-based GLTF export options. */
-const occtGltfExportSchema = occtExportTessellationSchema.extend(coordinateSystemSchema.shape).extend(unitSchema.shape);
-
 /**
  * OpenCascade kernel initialization options schema.
  * @public
@@ -88,5 +85,4 @@ export const opencascadeExportSchemas = {
   stl: occtStlExportSchema,
   step: coordinateSystemSchema,
   glb: occtGlbExportSchema,
-  gltf: occtGltfExportSchema,
 } as const satisfies Record<string, z.ZodType>;

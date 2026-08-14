@@ -23,7 +23,6 @@ import { opencascade as opencascadeKernel } from '#kernels/opencascade/opencasca
 import { assertSuccess, createGeometryFile, createTestWorker } from '#testing/kernel-testing.utils.js';
 import { extractGltfFromResult } from '#testing/kernel-geometry-testing.utils.js';
 import { colorParityCases, expectLinearBaseColor } from '#testing/color-testing.utils.js';
-import type { CreateGeometryResult } from '#types/runtime.types.js';
 
 type VertexNormal = {
   px: number;
@@ -118,10 +117,10 @@ export default function main() {
   return makeCylinder(5, 20);
 }`,
     });
-    const replicadResult = (await replicadWorker.createGeometry({
+    const replicadResult = await replicadWorker.createGeometry({
       file: geometryFile,
       parameters: {},
-    })) as CreateGeometryResult;
+    });
     assertSuccess(replicadResult, 'replicad createGeometry');
     const replicadGlb = extractGltfFromResult(replicadResult);
     expect(replicadGlb, 'Replicad GLB data').toBeDefined();
@@ -133,10 +132,10 @@ export default function main() {
   return new BRepPrimAPI_MakeCylinder(5, 20).Shape();
 }`,
     });
-    const occtResult = (await occtWorker.createGeometry({
+    const occtResult = await occtWorker.createGeometry({
       file: geometryFile,
       parameters: {},
-    })) as CreateGeometryResult;
+    });
     assertSuccess(occtResult, 'occt createGeometry');
     const occtGlb = extractGltfFromResult(occtResult);
     expect(occtGlb, 'OCCT GLB data').toBeDefined();
@@ -224,10 +223,10 @@ export default function main() {
   return { shape: makeCylinder(5, 20), color: '${hex}' };
 }`,
         });
-        const replicadResult = (await replicadWorker.createGeometry({
+        const replicadResult = await replicadWorker.createGeometry({
           file: geometryFile,
           parameters: {},
-        })) as CreateGeometryResult;
+        });
         assertSuccess(replicadResult, `replicad createGeometry (${hex})`);
         const replicadGlb = extractGltfFromResult(replicadResult);
         expect(replicadGlb, 'Replicad GLB data').toBeDefined();
@@ -239,10 +238,10 @@ export default function main() {
   return { shape: new BRepPrimAPI_MakeCylinder(5, 20).Shape(), color: '${hex}' };
 }`,
         });
-        const occtResult = (await occtWorker.createGeometry({
+        const occtResult = await occtWorker.createGeometry({
           file: geometryFile,
           parameters: {},
-        })) as CreateGeometryResult;
+        });
         assertSuccess(occtResult, `occt createGeometry (${hex})`);
         const occtGlb = extractGltfFromResult(occtResult);
         expect(occtGlb, 'OCCT GLB data').toBeDefined();
@@ -289,10 +288,10 @@ export default function main() {
   return { shape: makeCylinder(5, 20), color: '${testColor}', metalness: ${testMetallic}, roughness: ${testRoughness} };
 }`,
     });
-    const replicadResult = (await replicadWorker.createGeometry({
+    const replicadResult = await replicadWorker.createGeometry({
       file: geometryFile,
       parameters: {},
-    })) as CreateGeometryResult;
+    });
     assertSuccess(replicadResult, 'replicad createGeometry (PBR)');
     const replicadGlb = extractGltfFromResult(replicadResult);
     expect(replicadGlb, 'Replicad GLB data').toBeDefined();
@@ -304,10 +303,10 @@ export default function main() {
   return { shape: new BRepPrimAPI_MakeCylinder(5, 20).Shape(), color: '${testColor}', metalness: ${testMetallic}, roughness: ${testRoughness} };
 }`,
     });
-    const occtResult = (await occtWorker.createGeometry({
+    const occtResult = await occtWorker.createGeometry({
       file: geometryFile,
       parameters: {},
-    })) as CreateGeometryResult;
+    });
     assertSuccess(occtResult, 'occt createGeometry (PBR)');
     const occtGlb = extractGltfFromResult(occtResult);
     expect(occtGlb, 'OCCT GLB data').toBeDefined();

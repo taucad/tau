@@ -6,7 +6,7 @@
  * @public
  */
 
-import { z } from 'zod';
+import type { ZodType } from 'zod';
 import { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
 
 const tauGlbExportSchema = coordinateSystemSchema
@@ -21,10 +21,9 @@ const tauGlbExportSchema = coordinateSystemSchema
 /**
  * Tau per-format export schemas.
  * GLB supports explicit coordinate/unit conversion from its Y-up/metre native
- * handle. glTF remains a converter pass-through.
+ * handle.
  * @public
  */
 export const tauExportSchemas = {
   glb: tauGlbExportSchema,
-  gltf: z.object({}),
-} as const satisfies Record<string, z.ZodType>;
+} as const satisfies Record<string, ZodType>;

@@ -146,7 +146,6 @@ export const tau = defineKernel({
   version: '1.0.0',
   exportFormats: {
     glb: { optionsSchema: tauExportSchemas.glb },
-    gltf: { optionsSchema: tauExportSchemas.gltf },
   },
 
   async initialize() {
@@ -228,7 +227,7 @@ export const tau = defineKernel({
     if (nativeHandle.length === 0) {
       return createKernelError([
         {
-          message: 'No geometry available for export. Please build geometries before exporting.',
+          message: 'No geometry available for export.',
           code: 'RUNTIME',
           type: 'runtime',
           severity: 'error',
@@ -236,38 +235,15 @@ export const tau = defineKernel({
       ]);
     }
 
-    switch (format) {
-      case 'glb': {
-        logger.log('Exporting geometry', { data: { format } });
-        const bytes = await transformGltfExportBytes(nativeHandle, {
-          format,
-          coordinateSystem: input.options.coordinateSystem,
-          unit: input.options.unit,
-        });
-        const file = createExportFile(format, `model.${format}`, bytes);
-        logger.log('Successfully exported geometry');
-        return createKernelSuccess([file]);
-      }
-
-      case 'gltf': {
-        logger.log('Exporting geometry', { data: { format } });
-        const file = createExportFile(format, `model.${format}`, new Uint8Array(nativeHandle));
-        logger.log('Successfully exported geometry');
-        return createKernelSuccess([file]);
-      }
-
-      default: {
-        const _exhaustive: never = format;
-        return createKernelError([
-          {
-            message: `Tau kernel only supports glb and gltf export. Use a transcoder for '${_exhaustive as string}'.`,
-            code: 'KERNEL_CAPABILITY_MISSING',
-            type: 'runtime',
-            severity: 'error',
-          },
-        ]);
-      }
-    }
+    logger.log('Exporting geometry', { data: { format } });
+    const bytes = await transformGltfExportBytes(nativeHandle, {
+      format,
+      coordinateSystem: input.options.coordinateSystem,
+      unit: input.options.unit,
+    });
+    const file = createExportFile(format, `model.${format}`, bytes);
+    logger.log('Successfully exported geometry');
+    return createKernelSuccess([file]);
   },
 
   serializeNativeHandle({ nativeHandle }) {

@@ -43,7 +43,10 @@ async function transformGltfGeometry(geometry: GeometryGltf): Promise<GeometryGl
  * - Exports bypass the middleware and return valid GLTF files
  * @public
  */
-async function transformResult(result: CreateGeometryResult, logger: RuntimeLogger): Promise<CreateGeometryResult> {
+async function transformResult<Result extends CreateGeometryResult>(
+  result: Result,
+  logger: RuntimeLogger,
+): Promise<Result> {
   if (!result.success || result.data?.format !== 'gltf') {
     return result;
   }

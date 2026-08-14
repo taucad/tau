@@ -17,7 +17,7 @@ import {
   getTrianglePrimitiveBaseColors,
 } from '#testing/color-testing.utils.js';
 import { assertSuccess, createGeometryFile, createTestWorker } from '#testing/kernel-testing.utils.js';
-import type { CreateGeometryResult } from '#types/runtime.types.js';
+import type { HashedGeometryResult } from '#types/runtime.types.js';
 
 function hexToJscadTuple(hex: string, opacity: number): string {
   const clean = hex.startsWith('#') ? hex.slice(1) : hex;
@@ -33,15 +33,15 @@ export default function main() {
   return colors.colorize(${hexToJscadTuple(hex, opacity)}, primitives.cube({ size: 10 }));
 }`;
 
-async function renderColored(hex: string, opacity: number): Promise<CreateGeometryResult> {
+async function renderColored(hex: string, opacity: number): Promise<HashedGeometryResult> {
   const file = 'colored.ts';
   const worker = await createTestWorker(jscadKernel, {
     [file]: buildSourceFor(hex, opacity),
   });
-  const result = (await worker.createGeometry({
+  const result = await worker.createGeometry({
     file: createGeometryFile(file),
     parameters: {},
-  })) as CreateGeometryResult;
+  });
   assertSuccess(result, `jscad createGeometry (${hex}, alpha=${opacity})`);
   return result;
 }
@@ -72,10 +72,10 @@ export default function main() {
   ];
 }`,
     });
-    const result = (await worker.createGeometry({
+    const result = await worker.createGeometry({
       file: createGeometryFile(file),
       parameters: {},
-    })) as CreateGeometryResult;
+    });
     assertSuccess(result, 'jscad multi-color createGeometry');
 
     const baseColors = await getTrianglePrimitiveBaseColors(result);
@@ -94,10 +94,10 @@ export default function main() {
   return primitives.cube({ size: 10 });
 }`,
     });
-    const result = (await worker.createGeometry({
+    const result = await worker.createGeometry({
       file: createGeometryFile(file),
       parameters: {},
-    })) as CreateGeometryResult;
+    });
     assertSuccess(result, 'jscad uncoloured createGeometry');
 
     const baseColor = await getMaterialBaseColor(result);

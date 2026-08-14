@@ -359,7 +359,6 @@ describe('TauKernel', () => {
         unit: { length: 'millimeter' },
       });
       expect(tauExportSchemas.glb.safeParse({ unknown: true }).success).toBe(false);
-      expect(tauExportSchemas.gltf.parse({ coordinateSystem: 'z-up' })).toEqual({});
     });
   });
 
@@ -558,39 +557,6 @@ describe('TauKernel', () => {
         }
       },
     );
-
-    it('should return glTF file when format is gltf', async () => {
-      const runtime = createMockKernelRuntime();
-      const nativeHandle = await createNamedGlb();
-
-      const result = await tauDefinition.exportGeometry({ format: 'gltf', options: {}, nativeHandle }, runtime, {});
-
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data).toHaveLength(1);
-        expect(result.data[0]!.name).toBe('model.gltf');
-      }
-    });
-
-    it('should reject unsupported formats with error result', async () => {
-      const runtime = createMockKernelRuntime();
-      const nativeHandle = new Uint8Array([1, 2, 3]);
-
-      const result = await tauDefinition.exportGeometry(
-        {
-          format: 'stl' as 'glb',
-          options: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
-          nativeHandle,
-        },
-        runtime,
-        {},
-      );
-
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.issues[0]!.message).toContain('Use a transcoder');
-      }
-    });
 
     it('should return error result when nativeHandle is empty', async () => {
       const runtime = createMockKernelRuntime();

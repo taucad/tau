@@ -13,7 +13,7 @@ import type { PartialDeep } from 'type-fest';
 import { expect } from 'vitest';
 import type { GeometryResponse } from '@taucad/types';
 import type { ExportResult } from '#client/runtime-client.js';
-import type { CreateGeometryResult } from '#types/runtime.types.js';
+import type { CreateGeometryResult, HashedGeometryResult } from '#types/runtime.types.js';
 
 // =============================================================================
 // Types
@@ -302,7 +302,7 @@ const expectVector3ToBeCloseTo = ({
 };
 
 /**
- * Create geometry test helpers for asserting on CreateGeometryResult.
+ * Create geometry test helpers for asserting on HashedGeometryResult.
  *
  * @returns An object of assertion helpers for validating geometry results
  *
@@ -328,28 +328,28 @@ export function createGeometryTestHelpers(): {
   /**
    * Assert that the result contains valid GLTF data.
    */
-  expectValidGltf: (result: CreateGeometryResult) => Promise<void>;
+  expectValidGltf: (result: HashedGeometryResult) => Promise<void>;
 
   /**
    * Assert the total vertex count across all meshes.
    */
-  expectVertexCount: (result: CreateGeometryResult, expectedCount: number) => Promise<void>;
+  expectVertexCount: (result: HashedGeometryResult, expectedCount: number) => Promise<void>;
 
   /**
    * Assert the total face count across all meshes.
    */
-  expectFaceCount: (result: CreateGeometryResult, expectedCount: number) => Promise<void>;
+  expectFaceCount: (result: HashedGeometryResult, expectedCount: number) => Promise<void>;
 
   /**
    * Assert the number of meshes in the geometry.
    */
-  expectMeshCount: (result: CreateGeometryResult, expectedCount: number) => Promise<void>;
+  expectMeshCount: (result: HashedGeometryResult, expectedCount: number) => Promise<void>;
 
   /**
    * Assert the bounding box size with optional tolerance.
    */
   expectBoundingBoxSize: (
-    result: CreateGeometryResult,
+    result: HashedGeometryResult,
     expectedSize: [number, number, number],
     tolerance?: number,
   ) => Promise<void>;
@@ -358,7 +358,7 @@ export function createGeometryTestHelpers(): {
    * Assert the bounding box center with optional tolerance.
    */
   expectBoundingBoxCenter: (
-    result: CreateGeometryResult,
+    result: HashedGeometryResult,
     expectedCenter: [number, number, number],
     tolerance?: number,
   ) => Promise<void>;
@@ -366,9 +366,9 @@ export function createGeometryTestHelpers(): {
   /**
    * Assert all geometry properties at once.
    */
-  expectGeometry: (result: CreateGeometryResult, expected: GeometryExpectation) => Promise<void>;
+  expectGeometry: (result: HashedGeometryResult, expected: GeometryExpectation) => Promise<void>;
 } {
-  const getReportFromResult = async (result: CreateGeometryResult): Promise<InspectReport> => {
+  const getReportFromResult = async (result: HashedGeometryResult): Promise<InspectReport> => {
     const glbData = extractGltfFromResult(result);
     if (!glbData) {
       throw new Error('No GLTF data found in result');
@@ -378,7 +378,7 @@ export function createGeometryTestHelpers(): {
   };
 
   return {
-    async expectValidGltf(result: CreateGeometryResult): Promise<void> {
+    async expectValidGltf(result: HashedGeometryResult): Promise<void> {
       expect(result.success, 'Expected result.success to be true').toBe(true);
 
       const glbData = extractGltfFromResult(result);
@@ -389,26 +389,26 @@ export function createGeometryTestHelpers(): {
       }
     },
 
-    async expectVertexCount(result: CreateGeometryResult, expectedCount: number): Promise<void> {
+    async expectVertexCount(result: HashedGeometryResult, expectedCount: number): Promise<void> {
       const report = await getReportFromResult(result);
       const stats = getGeometryStatsFromInspect(report);
       expect(stats.vertexCount, `Expected vertex count: ${expectedCount}`).toBe(expectedCount);
     },
 
-    async expectFaceCount(result: CreateGeometryResult, expectedCount: number): Promise<void> {
+    async expectFaceCount(result: HashedGeometryResult, expectedCount: number): Promise<void> {
       const report = await getReportFromResult(result);
       const stats = getGeometryStatsFromInspect(report);
       expect(stats.faceCount, `Expected face count: ${expectedCount}`).toBe(expectedCount);
     },
 
-    async expectMeshCount(result: CreateGeometryResult, expectedCount: number): Promise<void> {
+    async expectMeshCount(result: HashedGeometryResult, expectedCount: number): Promise<void> {
       const report = await getReportFromResult(result);
       const stats = getGeometryStatsFromInspect(report);
       expect(stats.meshCount, `Expected mesh count: ${expectedCount}`).toBe(expectedCount);
     },
 
     async expectBoundingBoxSize(
-      result: CreateGeometryResult,
+      result: HashedGeometryResult,
       expectedSize: [number, number, number],
       tolerance = defaultTolerance,
     ): Promise<void> {
@@ -427,7 +427,7 @@ export function createGeometryTestHelpers(): {
     },
 
     async expectBoundingBoxCenter(
-      result: CreateGeometryResult,
+      result: HashedGeometryResult,
       expectedCenter: [number, number, number],
       tolerance = defaultTolerance,
     ): Promise<void> {
@@ -445,7 +445,7 @@ export function createGeometryTestHelpers(): {
       }
     },
 
-    async expectGeometry(result: CreateGeometryResult, expected: GeometryExpectation): Promise<void> {
+    async expectGeometry(result: HashedGeometryResult, expected: GeometryExpectation): Promise<void> {
       const report = await getReportFromResult(result);
       const stats = getGeometryStatsFromInspect(report);
       const boundingBox = getBoundingBoxFromInspect(report);

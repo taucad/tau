@@ -211,10 +211,9 @@ type MiddlewarePluginFactoryWithoutOptions<
  *   id: 'logging',
  *   name: 'Logging',
  *   async wrapCreateGeometry(input, handler, { logger, signal }) {
- *     signal.throwIfAborted();
+ *     await fetch('/runtime-events', { method: 'POST', body: 'Computing geometry...', signal });
  *     logger.debug('Computing geometry...');
  *     const result = await handler(input);
- *     signal.throwIfAborted();
  *     logger.debug('Geometry computed');
  *     return result;
  *   },

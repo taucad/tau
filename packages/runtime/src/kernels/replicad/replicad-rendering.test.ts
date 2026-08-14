@@ -16,7 +16,7 @@ import {
   getMaterialBaseColor,
 } from '#testing/color-testing.utils.js';
 import { assertSuccess, createGeometryFile, createTestWorker } from '#testing/kernel-testing.utils.js';
-import type { CreateGeometryResult } from '#types/runtime.types.js';
+import type { HashedGeometryResult } from '#types/runtime.types.js';
 
 const buildSourceFor = (hex: string, opacity: number): string => `
 import { makeCylinder } from 'replicad';
@@ -24,15 +24,15 @@ export default function main() {
   return { shape: makeCylinder(5, 20), color: '${hex}', opacity: ${opacity} };
 }`;
 
-async function renderColored(hex: string, opacity: number): Promise<CreateGeometryResult> {
+async function renderColored(hex: string, opacity: number): Promise<HashedGeometryResult> {
   const file = 'colored.ts';
   const worker = await createTestWorker(replicadKernel, {
     [file]: buildSourceFor(hex, opacity),
   });
-  const result = (await worker.createGeometry({
+  const result = await worker.createGeometry({
     file: createGeometryFile(file),
     parameters: {},
-  })) as CreateGeometryResult;
+  });
   assertSuccess(result, `replicad createGeometry (${hex}, alpha=${opacity})`);
   return result;
 }
@@ -63,10 +63,10 @@ export default function main() {
   ];
 }`,
     });
-    const result = (await worker.createGeometry({
+    const result = await worker.createGeometry({
       file: createGeometryFile(file),
       parameters: {},
-    })) as CreateGeometryResult;
+    });
     assertSuccess(result, 'replicad multi-color createGeometry');
 
     const baseColors = await getAllMaterialBaseColors(result);
@@ -85,10 +85,10 @@ export default function main() {
   return makeCylinder(5, 20);
 }`,
     });
-    const result = (await worker.createGeometry({
+    const result = await worker.createGeometry({
       file: createGeometryFile(file),
       parameters: {},
-    })) as CreateGeometryResult;
+    });
     assertSuccess(result, 'replicad uncoloured createGeometry');
 
     const baseColor = await getMaterialBaseColor(result);

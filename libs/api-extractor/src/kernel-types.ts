@@ -43,7 +43,7 @@ export const manifoldTypes: KernelTypesMap = parseTypesMap(manifoldRaw);
 
 /** All kernel declarations projected as root packages with relative declaration files. @public */
 export const kernelTypePackageMaps: readonly BundledTypesPackageMap[] = [
-  projectPackageTypes('opencascade.js', opencascadeTypes),
+  projectPackageTypes('libcascade', opencascadeTypes),
   projectPackageTypes('replicad', replicadTypes),
   projectPackageTypes('@jscad/modeling', jscadModelingTypes),
   projectPackageTypes('manifold-3d', manifoldTypes),

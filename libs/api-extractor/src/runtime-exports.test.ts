@@ -15,7 +15,7 @@ import { kclStdlibReference } from '#kcl-reference.js';
 
 describe('@taucad/api-extractor runtime subpaths', () => {
   it('should expose raw declaration maps and package-shaped projections for all kernels', () => {
-    expect(Object.keys(opencascadeTypes).length).toBeGreaterThan(0);
+    expect(Object.keys(opencascadeTypes)).toEqual(['libcascade']);
     expect(Object.keys(replicadTypes).length).toBeGreaterThan(0);
     expect(Object.keys(jscadModelingTypes).length).toBeGreaterThan(0);
     expect(Object.keys(manifoldTypes).length).toBeGreaterThan(0);
@@ -28,13 +28,11 @@ describe('@taucad/api-extractor runtime subpaths', () => {
         packages[packageName] = packageTypes;
       }
     }
-    expect(Object.keys(packages).sort()).toEqual(
-      ['opencascade.js', 'replicad', '@jscad/modeling', 'manifold-3d'].sort(),
-    );
+    expect(Object.keys(packages).sort()).toEqual(['libcascade', 'replicad', '@jscad/modeling', 'manifold-3d'].sort());
 
     const jscadPackage = packages['@jscad/modeling'];
     const manifoldPackage = packages['manifold-3d'];
-    const opencascadePackage = packages['opencascade.js'];
+    const opencascadePackage = packages['libcascade'];
     const replicadPackage = packages['replicad'];
     expect(jscadPackage?.content).toBe(jscadModelingTypes['@jscad/modeling']);
     expect(Object.keys(jscadPackage?.files ?? {}).sort()).toEqual(
@@ -46,7 +44,7 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     expect(jscadPackage?.files?.['colors/index.d.ts']).toBe(jscadModelingTypes['@jscad/modeling/colors']);
     expect(manifoldPackage?.content).toBe(manifoldTypes['manifold-3d']);
     expect(manifoldPackage?.files?.['manifoldCAD/index.d.ts']).toBe(manifoldTypes['manifold-3d/manifoldCAD']);
-    expect(opencascadePackage?.content).toBe(opencascadeTypes['opencascade.js']);
+    expect(opencascadePackage?.content).toBe(opencascadeTypes['libcascade']);
     expect(Object.keys(opencascadePackage?.files ?? {})).toEqual([]);
     expect(replicadPackage?.content).toBe(replicadTypes['replicad']);
     expect(Object.keys(replicadPackage?.files ?? {})).toEqual([]);
@@ -82,7 +80,6 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     expect(content).toContain("from './runner/types.js'");
     for (const declarationFile of [
       'brep/index.d.ts',
-      'config/index.d.ts',
       'mesh/index.d.ts',
       'model/index.d.ts',
       'runner/index.d.ts',
@@ -93,6 +90,7 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     ]) {
       expect(typeof files[declarationFile]).toBe('string');
     }
+    expect(files['config/index.d.ts']).toBeUndefined();
 
     expect(packageJson['name']).toBe('geospec');
     const exportsValue = packageJson['exports'];
@@ -100,6 +98,7 @@ describe('@taucad/api-extractor runtime subpaths', () => {
       throw new TypeError('Generated GeoSpec package.json exports must be an object.');
     }
     const packageExports: Record<string, unknown> = exportsValue as Record<string, unknown>;
+    expect(packageExports['./config']).toBeUndefined();
     const expectedPublicExports = [
       ['./brep', './brep/index.d.ts'],
       ['./model', './model/index.d.ts'],
@@ -157,7 +156,10 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     expect(runnerTypes).toContain('testNamePattern?: string | RegExp');
     expect(runnerTypes).toContain('JavaScript regular expression matched against full `suite > test` names.');
     expect(runnerTypes).toContain('toBeValidBrep');
-    expect(runnerTypes).toContain('toHaveHausdorffDistanceTo');
+    expect(runnerTypes).not.toContain('toHaveChamferDistanceTo');
+    expect(runnerTypes).not.toContain('toHaveHausdorffDistanceTo');
+    expect(runnerTypes).not.toContain('toHaveMinimumDistanceTo');
+    expect(runnerTypes).not.toContain('minContactArea');
     expect(runnerTypes).toContain('toHaveCircularHolePattern');
     expect(runnerTypes).toContain('toHaveFilletFeature');
     expect(runnerTypes).toContain('toHavePlanarFace');
@@ -183,7 +185,7 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     const meshOverlapTypes = files['mesh/overlap.d.ts'] ?? '';
 
     expect(meshIndexTypes).toContain('analyzeMeshOverlap');
-    expect(meshOverlapTypes).toContain('Analyze whether separate mesh components physically occupy the same solid');
+    expect(meshOverlapTypes).toContain("Find positive-volume intersections between a subject's components.");
     expect(meshOverlapTypes).toContain('AnalyzeMeshOverlapOptions');
     expect(meshOverlapTypes).toContain('MeshComponentOverlap');
   });

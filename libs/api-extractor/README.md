@@ -14,7 +14,6 @@ GeoSpec declarations are generated from `packages/geospec/src` into `src/generat
 
 - `/node_modules/geospec/package.json`
 - `/node_modules/geospec/index.d.ts`
-- `/node_modules/geospec/config/index.d.ts`
 - `/node_modules/geospec/mesh/index.d.ts`
 - `/node_modules/geospec/model/index.d.ts`
 - `/node_modules/geospec/runner/index.d.ts`

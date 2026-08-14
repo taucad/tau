@@ -17,7 +17,6 @@ const outputDirectory = join(import.meta.dirname, 'generated/geospec');
 
 const publicEntries = [
   ['index.d.ts', 'geospec'],
-  ['config/index.d.ts', 'geospec/config'],
   ['brep/index.d.ts', 'geospec/brep'],
   ['mesh/index.d.ts', 'geospec/mesh'],
   ['model/index.d.ts', 'geospec/model'],
@@ -102,7 +101,6 @@ const rewriteInternalAliases = (files: Record<string, string>): Record<string, s
 const buildPackageJson = (): Record<string, unknown> => {
   const packageExportEntries = [
     ['.', './index.d.ts'],
-    ['./config', './config/index.d.ts'],
     ['./brep', './brep/index.d.ts'],
     ['./mesh', './mesh/index.d.ts'],
     ['./model', './model/index.d.ts'],

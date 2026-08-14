@@ -1,24 +1,17 @@
 /**
- * Type-level tests for the opencascade.js bundled type declarations.
+ * Type-level tests for the libcascade bundled type declarations.
  *
  * Verifies that the generated .d.ts resolves correctly when registered
- * at file:///node_modules/opencascade.js/index.d.ts via Monaco's addExtraLib.
+ * at file:///node_modules/libcascade/index.d.ts via Monaco's addExtraLib.
  */
 
 import { describe, expectTypeOf, it } from 'vitest';
-import type {
-  gp_Pnt,
-  BRepPrimAPI_MakeBox,
-  TopExp_Explorer,
-  TopoDS_Shape,
-  OpenCascadeInstance,
-} from 'opencascade.js';
-import type initOC from 'opencascade.js';
+import { BRepPrimAPI_MakeBox, gp_Pnt, TopExp_Explorer, type OpenCascadeInstance, type TopoDS_Shape } from 'libcascade';
+import oc from 'libcascade';
 
-describe('opencascade.js module resolution', () => {
-  it('default export is an init function returning Promise<OpenCascadeInstance>', () => {
-    expectTypeOf<typeof initOC>().toBeFunction();
-    expectTypeOf<ReturnType<typeof initOC>>().toEqualTypeOf<Promise<OpenCascadeInstance>>();
+describe('libcascade module resolution', () => {
+  it('default export is the initialized OpenCascade instance', () => {
+    expectTypeOf<typeof oc>().toEqualTypeOf<OpenCascadeInstance>();
   });
 
   it('exports key OCCT class types', () => {
@@ -26,6 +19,12 @@ describe('opencascade.js module resolution', () => {
     expectTypeOf<BRepPrimAPI_MakeBox>().toBeObject();
     expectTypeOf<TopExp_Explorer>().toBeObject();
     expectTypeOf<TopoDS_Shape>().toBeObject();
+  });
+
+  it('exports initialized OCCT classes as named runtime values', () => {
+    expectTypeOf<typeof gp_Pnt>().toBeConstructibleWith();
+    expectTypeOf<typeof BRepPrimAPI_MakeBox>().toBeConstructibleWith();
+    expectTypeOf<typeof TopExp_Explorer>().toBeConstructibleWith();
   });
 
   it('OpenCascadeInstance has FS property', () => {

@@ -157,7 +157,7 @@ export type RpcGeoSpecClient = {
  * Abstract skill resolver for live skill activation.
  *
  * Browser implementations merge workspace `.agents/skills`, installed Tau
- * Store skills, virtual system skills, and legacy `.tau/skills`. API-side
+ * Store skills, and virtual system skills. API-side
  * tool execution calls this through RPC so prompt-visible catalog metadata is
  * only a discovery hint, not activation authority.
  *

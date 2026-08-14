@@ -3,8 +3,7 @@ import z from 'zod';
 
 /**
  * Schema for a single skill's metadata as discovered from `.agents/skills/`
- * SKILL.md frontmatter. Legacy `.tau/skills/` entries may be present during
- * migration, but `.agents/skills/` is the canonical location.
+ * SKILL.md frontmatter — the only filesystem skills root.
  *
  * @public
  */

@@ -37,8 +37,8 @@ describe('extract-replicad-types', () => {
   // ---------------------------------------------------------------------------
 
   it('preserves replicad-opencascadejs imports', () => {
-    expect(output).toContain("import { gp_Pnt } from 'replicad-opencascadejs'");
-    expect(output).toContain("import { TopoDS_Shape } from 'replicad-opencascadejs'");
+    expect(output).toContain("import type { gp_Pnt } from 'replicad-opencascadejs'");
+    expect(output).toContain("import type { TopoDS_Shape } from 'replicad-opencascadejs'");
   });
 
   it('preserves opentype.js import', () => {

@@ -224,7 +224,7 @@ export function extractApi(): ApiEntry[] {
  * Exported for testing.
  */
 export function buildBundledTypes(): Record<string, string> {
-  const originalTypes = readFileSync(typeDefinitionsPath, 'utf8');
+  const originalTypes = readFileSync(typeDefinitionsPath, 'utf8').replaceAll(/\r\n?/g, '\n');
 
   return {
     replicad: [

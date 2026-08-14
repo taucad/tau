@@ -3281,22 +3281,3 @@ private:
     return json.str();
   }
 };
-
-// Dormant data-symbol stubs for the visualization-stripped verification
-// kernel. TKDESTEP's vis-material support drags XCAFDoc_VisMaterial.o and
-// XCAFPrs_Texture.o into the link, and those reference two Graphic3d vtable/
-// typeinfo symbols from the excluded TKService toolkit. Undefined *function*
-// symbols become abort stubs via -sERROR_ON_UNDEFINED_SYMBOLS=0 (see
-// .libcascade/geospec_opencascade_single.yml), but wasm-ld cannot leave *data*
-// symbols undefined, so
-// they are defined here as zero-filled blobs. They are only dereferenced when
-// constructing visualization texture objects (XCAFDoc_VisMaterial::
-// FillMaterialAspect and friends), which no STEP read/proof path executes.
-// Weak: this wrapper file is included into every generated binding TU, so a
-// strong definition would duplicate across them.
-extern "C" {
-// vtable for Graphic3d_TextureSet
-char _ZTV20Graphic3d_TextureSet[64] __attribute__((weak, aligned(8))) = {};
-// typeinfo for Graphic3d_Texture2D
-char _ZTI19Graphic3d_Texture2D[64] __attribute__((weak, aligned(8))) = {};
-}

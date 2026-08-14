@@ -16,20 +16,30 @@ const IS_NODE = typeof process !== 'undefined' && typeof process.versions?.node 
  * actually requires are emitted.
  */
 const CAPABILITIES = {
+  threads: () =>
+    typeof SharedArrayBuffer !== 'undefined' && (globalThis.crossOriginIsolated ?? IS_NODE),
 };
 
 /** Remediation printed when a requested variant's requirement is unmet. */
-const CAPABILITY_HINTS = {};
+const CAPABILITY_HINTS = {
+  "threads": "Threads need SharedArrayBuffer, which browsers gate behind cross-origin isolation (Cross-Origin-Opener-Policy: same-origin + Cross-Origin-Embedder-Policy: require-corp)."
+};
 
 /** Declared variants, in configuration order. */
 const VARIANTS = [
   {
     "name": "single",
     "requires": []
+  },
+  {
+    "name": "multi",
+    "requires": [
+      "threads"
+    ]
   }
 ];
 
-/** Pre-import override: `globalThis[Symbol.for('geospec_opencascade.select')] = 'single'`. */
+/** Pre-import override: `globalThis[Symbol.for('geospec_opencascade.select')] = 'multi'`. */
 export const SELECT_OVERRIDE = Symbol.for('geospec_opencascade.select');
 
 const unsupported = (variant) =>
@@ -68,6 +78,8 @@ const glueUrl = (variant) => {
   switch (variant) {
     case 'single':
       return new URL('./geospec_opencascade_single.js', import.meta.url).href;
+    case 'multi':
+      return new URL('./geospec_opencascade_multi.js', import.meta.url).href;
   }
   return undefined;
 };
@@ -91,7 +103,7 @@ const loadGlue = (variant) => {
   const href = glueUrl(variant);
   if (href === undefined) {
     throw new Error(
-      `Unknown variant "${variant}". Declared: single.`,
+      `Unknown variant "${variant}". Declared: single, multi.`,
     );
   }
   return import(/* webpackIgnore: true */ /* @vite-ignore */ href);
@@ -122,7 +134,7 @@ export const createInstance = async (options = {}) => {
   const variant = VARIANTS.find((candidate) => candidate.name === name);
   if (variant === undefined) {
     throw new Error(
-      `Unknown variant "${name}". Declared: single.`,
+      `Unknown variant "${name}". Declared: single, multi.`,
     );
   }
 

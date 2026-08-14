@@ -2327,8 +2327,8 @@ importers:
         version: 3.3.2
     devDependencies:
       '@libcascade/toolchain':
-        specifier: 3.0.0-beta.3
-        version: 3.0.0-beta.3
+        specifier: file:../../repos/opencascade.js/.local-pack/libcascade-toolchain-3.0.0-beta.0-closure-final.tgz
+        version: file:repos/opencascade.js/.local-pack/libcascade-toolchain-3.0.0-beta.0-closure-final.tgz
       '@playwright/test':
         specifier: 'catalog:'
         version: 1.61.0
@@ -6284,8 +6284,9 @@ packages:
   '@levischuck/tiny-cbor@0.2.11':
     resolution: {integrity: sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow==}
 
-  '@libcascade/toolchain@3.0.0-beta.3':
-    resolution: {integrity: sha512-GMjIzO8GS3JksvY/mIy6XrIAsTAYuUcQkDKVuUnrNtNpDQx69KJ6iappKGqufVg4vD4Ddi4yJ1P4LdOowneJ2w==}
+  '@libcascade/toolchain@file:repos/opencascade.js/.local-pack/libcascade-toolchain-3.0.0-beta.0-closure-final.tgz':
+    resolution: {integrity: sha512-OnFJdZRuUzwUqbnAvAeS+mT3YjrnW+yOD5nU0A/5/X0nYVdK47gbkJaOhAMMLPzq0MsBQqmJySdMgJQ9lNiGIQ==, tarball: file:repos/opencascade.js/.local-pack/libcascade-toolchain-3.0.0-beta.0-closure-final.tgz}
+    version: 3.0.0-beta.0
     engines: {node: '>=22'}
     hasBin: true
 
@@ -27258,7 +27259,7 @@ snapshots:
 
   '@levischuck/tiny-cbor@0.2.11': {}
 
-  '@libcascade/toolchain@3.0.0-beta.3':
+  '@libcascade/toolchain@file:repos/opencascade.js/.local-pack/libcascade-toolchain-3.0.0-beta.0-closure-final.tgz':
     dependencies:
       jiti: 2.7.0
       yaml: 2.9.0

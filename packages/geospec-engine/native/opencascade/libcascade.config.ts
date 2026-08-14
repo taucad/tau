@@ -33,7 +33,6 @@ export default defineBuild({
     MODULARIZE: true,
     EXPORT_ES6: true,
     WASM_BIGINT: true,
-    EVAL_CTORS: 2,
     ALLOW_MEMORY_GROWTH: true,
     INITIAL_MEMORY: '100MB',
     MAXIMUM_MEMORY: '4GB',
@@ -50,18 +49,19 @@ export default defineBuild({
       'decrementExceptionRefcount',
     ],
     EXPORTED_FUNCTIONS: ['_malloc', '_free'],
+    ENVIRONMENT: ['web', 'worker', 'node'],
     // Mimalloc: ~4.6% geomean / ~8.6% on boolean-heavy OCCT work for a flag
     // (lazy-evidence blueprint R6, per the ocjs benchmark survey).
     MALLOC: 'mimalloc',
-    // The XDE wrapper's commonVolume proof uses BRepAlgoAPI_Common internally,
-    // which pulls OCCT OSD_MemInfo and its glibc mallinfo reference. The wasm
-    // path never calls that reporter; allow Emscripten's dormant
-    // missing-function stub for this custom Boolean-analysis build.
-    ERROR_ON_UNDEFINED_SYMBOLS: false,
   },
   /* eslint-enable @typescript-eslint/naming-convention -- Back to normal identifier rules. */
   compilerFlags: { lto: true, optimize: 'O3', exceptions: 'wasm', simd: true, noEntry: true },
-  // N=1: single-threaded only. GeoSpec runs Node-side and fans out with
-  // worker_threads, not with pthreads inside one instance.
-  variants: [{ name: 'single' }],
+  variants: [
+    { name: 'single', settings: { EVAL_CTORS: 2 } },
+    {
+      name: 'multi',
+      compilerFlags: { threads: true },
+      settings: { SHARED_MEMORY: true },
+    },
+  ],
 });

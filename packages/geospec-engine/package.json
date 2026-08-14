@@ -84,10 +84,10 @@
     "manifold-3d": "catalog:"
   },
   "devDependencies": {
-    "@libcascade/toolchain": "3.0.0-beta.3",
-    "@taucad/openscad": "workspace:*",
+    "@libcascade/toolchain": "file:../../repos/opencascade.js/.local-pack/libcascade-toolchain-3.0.0-beta.0-closure-final.tgz",
+    "@playwright/test": "catalog:",
     "@taucad/chat": "workspace:*",
-    "@playwright/test": "catalog:"
+    "@taucad/openscad": "workspace:*"
   },
   "scripts": {
     "prepack": "node scripts/generate-provenance.mjs"

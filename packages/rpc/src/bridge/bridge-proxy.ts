@@ -6,7 +6,7 @@ import type { BridgeCallOptions, BridgeWatchEvent, BridgeWatchRequest } from '#b
  * Create a generic `Proxy`-based RPC client backed by a MessagePort.
  *
  * @param port - RPC {@link Port} ({@link wrapMessagePort} wraps raw `MessagePort`s).
- * @param options - Optional shared file pool for zero-IPC cached reads.
+ * @param options - Optional call-argument and timeout hooks.
  * @returns Proxy that forwards method calls over the bridge.
  * @public
  */

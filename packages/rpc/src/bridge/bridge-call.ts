@@ -17,7 +17,7 @@ import type { BridgeCallOptions, BridgeWatchEvent, BridgeWatchRequest } from '#b
  * Create a low-level RPC call/listen/dispose triple backed by a MessagePort.
  *
  * @param port - RPC {@link Port} ({@link wrapMessagePort} wraps raw `MessagePort`s).
- * @param options - Optional shared file pool for zero-IPC cached reads.
+ * @param options - Optional call-argument and timeout hooks.
  * @returns Object with call, listen, watch, and dispose methods.
  * @public
  */

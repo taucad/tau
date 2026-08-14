@@ -20,7 +20,7 @@
     "typescript"
   ],
   "author": "Richard Fontein",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "exports": {
     "./workspace-path-resolver": "./src/workspace-path-resolver.ts",
     "./path-subscriber-registry": "./src/path-subscriber-registry.ts",

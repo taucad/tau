@@ -17,7 +17,7 @@
  *    `initialize` and `capabilitiesUpdated`.
  *
  * Subsumed responsibilities (no longer here):
- * - SAB allocation (signal/geometry pool/file pool) → transport.client.
+ * - SAB allocation (signal/geometry pool) → transport.client.
  * - `MessagePort` plumbing & `fileSystemPort` forwarding → transport.client.
  * - SAB reservation and targeted timeout signalling → transport.
  * - Geometry materialisation → `transport.resolveGeometry(payload)`.

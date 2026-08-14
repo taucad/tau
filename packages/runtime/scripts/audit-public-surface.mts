@@ -242,12 +242,6 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'TransportClientReady',
   'TransportHostReady',
 
-  // Cache primitives consumed by middleware authors
-  'lruCache',
-  'sharedPoolCache',
-  'FileContentCache',
-  'LruCacheOptions',
-
   // Helpers
   'createKernelSuccess',
   'createKernelError',

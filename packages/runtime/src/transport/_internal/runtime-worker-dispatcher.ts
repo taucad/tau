@@ -305,10 +305,6 @@ export function createWorkerDispatcher(
       if (memoryHandle?.geometryPoolBuffer) {
         worker.setGeometryPoolBuffer(memoryHandle.geometryPoolBuffer);
       }
-      if (memoryHandle?.filePoolBuffer) {
-        worker.setFilePoolBuffer(memoryHandle.filePoolBuffer);
-      }
-
       /* Late-bind the host bindings now that we have the inbound
        * `memoryHandle`. The bindings' geometry encoder wins
        * over the early-bound encoders supplied at dispatcher

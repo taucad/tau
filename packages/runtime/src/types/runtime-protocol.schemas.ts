@@ -149,7 +149,6 @@ export const runtimeInitializeMemoryHandleSchema = z
   .object({
     signalBuffer: sharedArrayBufferSchema.optional(),
     geometryPoolBuffer: sharedArrayBufferSchema.optional(),
-    filePoolBuffer: sharedArrayBufferSchema.optional(),
     /* `MessagePort` is the global DOM type in browser/Worker contexts
      * and resolves to the structurally-equivalent worker_threads
      * `MessagePort` in Node. Either backs the runtime FS bridge so the

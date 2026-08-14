@@ -1,10 +1,10 @@
 /**
  * Canonical cross-origin isolation headers and runtime helpers.
  *
- * Consumers of `@taucad/runtime` that need `SharedArrayBuffer` (file pool,
- * geometry pool, signal-buffer abort channel, multi-threaded WASM) must serve
- * a `crossOriginIsolated` document. This module is the single source of truth
- * for the header set — every framework adapter (`@taucad/runtime/vite`,
+ * Consumers of `@taucad/runtime` that need `SharedArrayBuffer` (geometry pool,
+ * signal-buffer abort channel, multi-threaded WASM) must serve a
+ * `crossOriginIsolated` document. This module is the single source of truth for
+ * the header set — every framework adapter (`@taucad/runtime/vite`,
  * `@taucad/runtime/react-router`, …) depends on it.
  *
  * @public

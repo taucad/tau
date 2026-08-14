@@ -116,7 +116,6 @@ export const inProcessClient = (
     if (!pooled || !channelPair || !wrappedClientPort || !wrappedHostPort) {
       pooled = allocatePools({
         geometry: options.geometry ?? { bytes: 64 * 1024 * 1024 },
-        files: options.files ?? { bytes: 8 * 1024 * 1024 },
       });
       channelPair = new MessageChannel();
       wrappedClientPort = wrapMessagePort<unknown>(channelPair.port1, { label: 'in-process:client' });
@@ -222,7 +221,6 @@ export const inProcessClient = (
       const memoryHandle: RuntimeInitializeMemoryHandle = {
         ...(pooled.signalBuffer ? { signalBuffer: pooled.signalBuffer } : {}),
         ...(pooled.geometryPoolBuffer ? { geometryPoolBuffer: pooled.geometryPoolBuffer } : {}),
-        ...(pooled.filePoolBuffer ? { filePoolBuffer: pooled.filePoolBuffer } : {}),
         ...(bridge ? { fileSystemPort: bridge.port } : {}),
       };
       const args = { ...input, memoryHandle };

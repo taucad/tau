@@ -1,12 +1,12 @@
 /**
- * Allocation helpers for the SAB-backed signal + geometry-pool +
- * file-pool buffers used by every bundled transport. Centralised
+ * Allocation helpers for the SAB-backed signal + geometry-pool
+ * buffers used by every bundled transport. Centralised
  * so the in-process / web-worker / node-worker / electron transports
  * share one allocation strategy and one degradation path when
  * `SharedArrayBuffer` is unavailable (no cross-origin isolation).
  *
- * Returned record may have `signalBuffer` / `geometryPool` /
- * `filePool` set to `undefined`; consumers degrade to copy-tier
+ * Returned record may have `signalBuffer` / `geometryPool` set to
+ * `undefined`; consumers degrade to copy-tier
  * delivery when a slot is missing.
  *
  * @internal
@@ -20,14 +20,11 @@ export type AllocatedPools = {
   readonly signalBuffer: SharedArrayBuffer | undefined;
   readonly geometryPoolBuffer: SharedArrayBuffer | undefined;
   readonly geometryPool: SharedPool | undefined;
-  readonly filePoolBuffer: SharedArrayBuffer | undefined;
-  readonly filePool: SharedPool | undefined;
 };
 
 /** */
 export type AllocatePoolsOptions = {
   readonly geometry?: { readonly bytes: number; readonly maxEntries?: number; readonly maxEntryBytes?: number };
-  readonly files?: { readonly bytes: number; readonly maxEntries?: number; readonly maxEntryBytes?: number };
 };
 
 const tryAllocateSab = (bytes: number, maxByteLength?: number): SharedArrayBuffer | undefined => {
@@ -60,25 +57,9 @@ export const allocatePools = (options: AllocatePoolsOptions): AllocatedPools => 
     }
   }
 
-  let filePoolBuffer = options.files ? tryAllocateSab(options.files.bytes) : undefined;
-  let filePool: SharedPool | undefined;
-  if (filePoolBuffer) {
-    try {
-      filePool = new SharedPool(filePoolBuffer, {
-        maxEntries: options.files?.maxEntries,
-        maxEntryBytes: options.files?.maxEntryBytes,
-      });
-    } catch {
-      filePoolBuffer = undefined;
-      filePool = undefined;
-    }
-  }
-
   return {
     signalBuffer,
     geometryPoolBuffer,
     geometryPool,
-    filePoolBuffer,
-    filePool,
   };
 };

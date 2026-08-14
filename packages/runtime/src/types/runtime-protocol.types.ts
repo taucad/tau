@@ -65,14 +65,6 @@ export type GeometryTransport = GeometryResponseTransport & { readonly hash: str
 export type HashedGeometryResultTransport = KernelResult<GeometryTransport>;
 
 /**
- * Caller-owned `SharedArrayBuffer` that backs file-content caching across
- * the File Manager Worker and the Kernel Worker. The runtime never allocates
- * or owns this buffer — it is forwarded verbatim through the transport.
- * @internal
- */
-export type FilePoolHandle = SharedArrayBuffer;
-
-/**
  * Transport-owned `SharedArrayBuffer` that backs zero-copy geometry transfer
  * between the worker and the main thread. Consumers never see the bytes.
  * @internal
@@ -89,7 +81,7 @@ export type SignalBufferHandle = SharedArrayBuffer;
 
 /**
  * Opaque payload assembled by the transport's `initialize` implementation so
- * the worker side can wire up signal/geometry/file pools without the runtime
+ * the worker side can wire up signal/geometry pools without the runtime
  * client ever touching `SharedArrayBuffer`/`Atomics`/`signalSlot`.
  *
  * The shape is structural by design — every field is optional so SAB-less
@@ -105,7 +97,6 @@ export type SignalBufferHandle = SharedArrayBuffer;
 export type InitializeMemoryHandle = {
   signalBuffer?: SignalBufferHandle;
   geometryPoolBuffer?: GeometryPoolHandle;
-  filePoolBuffer?: FilePoolHandle;
   fileSystemPort?: MessagePort;
 };
 

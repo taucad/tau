@@ -45,7 +45,6 @@ const createMockKernelWorker = (): KernelWorker => {
     flushTelemetry: vi.fn(),
     setSignalBuffer: vi.fn(),
     setGeometryPoolBuffer: vi.fn(),
-    setFilePoolBuffer: vi.fn(),
     handleWireAbort: vi.fn(),
     capabilitiesManifest: { routes: [], renderCapabilities: {} },
   };

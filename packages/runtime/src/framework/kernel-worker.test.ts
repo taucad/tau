@@ -3008,15 +3008,6 @@ describe('shared pools', () => {
     }).not.toThrow();
   });
 
-  it('should accept file pool buffer via setFilePoolBuffer', () => {
-    const worker = createConfiguredWorker();
-    const buffer = new SharedArrayBuffer(8192);
-
-    expect(() => {
-      worker.setFilePoolBuffer(buffer);
-    }).not.toThrow();
-  });
-
   it('should expose geometryPool after setGeometryPoolBuffer and initialize', async () => {
     const worker = createConfiguredWorker();
     const buffer = new SharedArrayBuffer(256 * 1024);
@@ -3032,23 +3023,6 @@ describe('shared pools', () => {
 
     expect(worker.geometryPool).toBeDefined();
     expect(worker.geometryPool).toBeInstanceOf(SharedPool);
-  });
-
-  it('should expose filePool after setFilePoolBuffer and initialize', async () => {
-    const worker = createConfiguredWorker();
-    const buffer = new SharedArrayBuffer(256 * 1024);
-    worker.setFilePoolBuffer(buffer);
-
-    expect(worker.filePool).toBeUndefined();
-
-    await worker.initialize({
-      callbacks: { onLog: vi.fn() },
-      transferables: {},
-      options: {},
-    });
-
-    expect(worker.filePool).toBeDefined();
-    expect(worker.filePool).toBeInstanceOf(SharedPool);
   });
 });
 

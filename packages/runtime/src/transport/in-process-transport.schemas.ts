@@ -2,7 +2,7 @@
  * Zod schemas for the bundled in-process transport.
  *
  * In-process is the simplest transport: same V8 isolate, no wire
- * crossing. The client allocates SAB-backed signal/geometry/file
+ * crossing. The client allocates SAB-backed signal/geometry
  * pools (always available because there's no cross-origin
  * isolation question).
  *
@@ -44,16 +44,6 @@ export const inProcessClientOptionsSchema = z
      * SAB is unconditionally available in the same isolate.
      */
     geometry: z
-      .object({
-        bytes: z.number().int().positive(),
-        maxEntries: z.number().int().positive().optional(),
-        maxEntryBytes: z.number().int().positive().optional(),
-      })
-      .optional(),
-    /**
-     * File-content shared-pool sizing.
-     */
-    files: z
       .object({
         bytes: z.number().int().positive(),
         maxEntries: z.number().int().positive().optional(),

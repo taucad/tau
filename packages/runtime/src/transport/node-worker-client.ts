@@ -265,7 +265,6 @@ export const nodeWorkerClient = (
       const memoryHandle: RuntimeInitializeMemoryHandle = {
         ...(pooled.signalBuffer ? { signalBuffer: pooled.signalBuffer } : {}),
         ...(pooled.geometryPoolBuffer ? { geometryPoolBuffer: pooled.geometryPoolBuffer } : {}),
-        ...(pooled.filePoolBuffer ? { filePoolBuffer: pooled.filePoolBuffer } : {}),
         ...(bridge ? { fileSystemPort: bridge.port } : {}),
       };
       const transferables: Transferable[] = bridge ? [bridge.port] : [];

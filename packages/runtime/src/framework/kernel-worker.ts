@@ -526,18 +526,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private signalView: Int32Array | undefined;
 
   private _geometryPoolBuffer: SharedArrayBuffer | undefined;
-  private _filePoolBuffer: SharedArrayBuffer | undefined;
   private _geometryPool: SharedPool | undefined;
-  private _filePool: SharedPool | undefined;
 
   /** Shared memory pool for zero-IPC geometry data exchange. */
   public get geometryPool(): SharedPool | undefined {
     return this._geometryPool;
-  }
-
-  /** Shared memory pool for zero-IPC file content caching. */
-  public get filePool(): SharedPool | undefined {
-    return this._filePool;
   }
 
   /** Loaded transcoder instances keyed by plugin id. */
@@ -654,10 +647,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (this._geometryPoolBuffer) {
       this._geometryPool = new SharedPool(this._geometryPoolBuffer);
     }
-    if (this._filePoolBuffer) {
-      this._filePool = new SharedPool(this._filePoolBuffer);
-    }
-
     /* Filesystem wiring — three precedence rules (TR16):
      * 1. `inlineFileSystem` takes precedence: same V8 cluster fast-path,
      *    no MessagePort serialization or bridge proxy.
@@ -746,16 +735,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   public setGeometryPoolBuffer(buffer: SharedArrayBuffer): void {
     this._geometryPoolBuffer = buffer;
-  }
-
-  /**
-   * Set the SharedArrayBuffer for the file pool.
-   * Called by the dispatcher during initialization.
-   *
-   * @param buffer - SharedArrayBuffer for the file pool.
-   */
-  public setFilePoolBuffer(buffer: SharedArrayBuffer): void {
-    this._filePoolBuffer = buffer;
   }
 
   /**

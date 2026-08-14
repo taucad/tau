@@ -118,8 +118,6 @@ export { defineRuntimeTransport } from '#transport/index.js';
 export * from '#types/index.js';
 
 // File content cache (TR11)
-export { lruCache, sharedPoolCache } from '#cache/file-content-cache.js';
-export type { FileContentCache, LruCacheOptions } from '#cache/file-content-cache.js';
 
 // Helpers
 export { createKernelSuccess, createKernelError } from '#kernels/kernel-helpers.js';

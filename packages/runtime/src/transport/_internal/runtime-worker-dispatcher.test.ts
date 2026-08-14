@@ -78,7 +78,6 @@ function createMockWorker(overrides?: Partial<KernelWorker> & { geometryPool?: S
     flushTelemetry: vi.fn(),
     setSignalBuffer: vi.fn(),
     setGeometryPoolBuffer: vi.fn(),
-    setFilePoolBuffer: vi.fn(),
     handleWireAbort: vi.fn(),
     geometryPool: geometryPool ?? undefined,
     capabilitiesManifest: { routes: [], renderCapabilities: {} },
@@ -231,19 +230,15 @@ describe('createWorkerDispatcher', () => {
 
       const signalBuffer = new SharedArrayBuffer(8, { maxByteLength: 16 });
       const geometryBuffer = new SharedArrayBuffer(4096);
-      const fileBuffer = new SharedArrayBuffer(8192);
-
       await fixture.client.call('initialize', {
         memoryHandle: {
           signalBuffer,
           geometryPoolBuffer: geometryBuffer,
-          filePoolBuffer: fileBuffer,
         },
       });
 
       expect(worker.setSignalBuffer).toHaveBeenCalledTimes(1);
       expect(worker.setGeometryPoolBuffer).toHaveBeenCalledTimes(1);
-      expect(worker.setFilePoolBuffer).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -3,7 +3,7 @@
 import { encode as msgpackEncode } from '@msgpack/msgpack';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ZooWebSocketTransport } from '#kernels/zoo/transport/zoo-websocket-transport.js';
-import { KclAuthError } from '#kernels/zoo/kcl-errors.js';
+import { KclError } from '#kernels/zoo/kcl-errors.js';
 import {
   zooTestInstallFakeWebSocket,
   zooTestFakeSocketCapture,
@@ -31,7 +31,7 @@ describe('ZooWebSocketTransport', () => {
     zooTestRestoreWebSocket(OriginalWebSocket);
   });
 
-  it('completes initialize after modeling_session_data without sending Authorization headers', async () => {
+  it('completes initialize after modeling_session_data without sending Authorization headers when token is omitted', async () => {
     const transport = new ZooWebSocketTransport({ baseUrl: 'ws://fake.example/modeling-commands' });
     const init = transport.initialize();
 
@@ -47,6 +47,26 @@ describe('ZooWebSocketTransport', () => {
     zooTestFakeSocketCapture.current?.testEmitMessage(JSON.stringify(authSuccess));
     await init;
     expect(transport.connected).toBe(true);
+  });
+
+  it('sends the Zoo authorization headers frame when token is provided', async () => {
+    const transport = new ZooWebSocketTransport({
+      baseUrl: 'ws://fake.example/modeling-commands',
+      token: 'zoo-token',
+    });
+    const init = transport.initialize();
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    expect(zooTestFakeSocketCapture.current?.sentFrames.map((frame) => JSON.parse(frame) as unknown)).toContainEqual({
+      type: 'headers',
+      headers: { Authorization: 'Bearer zoo-token' },
+    });
+
+    zooTestFakeSocketCapture.current?.testEmitMessage(JSON.stringify(authSuccess));
+    await init;
   });
 
   it('forwards binary frames as raw bytes + decoded msgpack to onMessage', async () => {
@@ -128,26 +148,25 @@ describe('ZooWebSocketTransport', () => {
   });
 
   it.each([
-    { code: 4401, reason: 'UNAUTHENTICATED', expectedStatus: 401, messagePattern: /sign in to tau/i },
-    { code: 4403, reason: 'PRO_KERNELS_REQUIRED', expectedStatus: 403, messagePattern: /pro subscription/i },
-  ])(
-    'maps the Tau billing-gate close code $code to a typed auth error before auth completes',
-    async ({ code, reason, expectedStatus, messagePattern }) => {
-      const transport = new ZooWebSocketTransport({ baseUrl: 'ws://fake.example/modeling-commands' });
-      const init = transport.initialize();
-      await Promise.resolve();
+    { code: 4401, reason: 'UNAUTHENTICATED', message: 'Consumer-defined sign-in copy' },
+    { code: 4403, reason: 'ENTITLEMENT_REQUIRED', message: 'Consumer-defined entitlement copy' },
+  ])('maps injected close-error copy for code $code before auth completes', async ({ code, reason, message }) => {
+    const transport = new ZooWebSocketTransport({
+      baseUrl: 'ws://fake.example/modeling-commands',
+      closeErrors: { [code]: message },
+    });
+    const init = transport.initialize();
+    await Promise.resolve();
 
-      zooTestFakeSocketCapture.current?.close(code, reason);
+    zooTestFakeSocketCapture.current?.close(code, reason);
 
-      const error = await init.then(
-        () => undefined,
-        (error: unknown) => error,
-      );
-      expect(error).toBeInstanceOf(KclAuthError);
-      expect((error as KclAuthError).statusCode).toBe(expectedStatus);
-      expect((error as KclAuthError).message).toMatch(messagePattern);
-    },
-  );
+    const error = await init.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(error).toBeInstanceOf(KclError);
+    expect((error as KclError).msg).toBe(message);
+  });
 
   it('clears handlers on dispose', async () => {
     const transport = new ZooWebSocketTransport({ baseUrl: 'ws://fake.example/modeling-commands' });

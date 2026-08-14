@@ -4,6 +4,7 @@ import type { JSONDocument } from '@gltf-transform/core';
 import { NodeIO } from '@gltf-transform/core';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import { zoo as zooKernel } from '#kernels/zoo/zoo.kernel.js';
+import { zooOptionsSchema } from '#kernels/zoo/zoo.schemas.js';
 import { KclUtilities } from '#kernels/zoo/kcl-utils.js';
 import { createMockKernelRuntime, createTestWorker, createGeometryFile } from '#testing/kernel-testing.utils.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
@@ -197,6 +198,19 @@ describe('ZooWorker', () => {
 
   beforeAll(async () => {
     zooDefinition = await resolveZooDefinition();
+  });
+
+  it('parses direct-Zoo connection defaults and optional proxy error copy', () => {
+    expect(
+      zooOptionsSchema.parse({
+        token: 'zoo-token',
+        closeErrors: { 4401: 'Sign in through the embedding application.' },
+      }),
+    ).toEqual({
+      baseUrl: 'wss://api.zoo.dev/ws/modeling/commands',
+      token: 'zoo-token',
+      closeErrors: { 4401: 'Sign in through the embedding application.' },
+    });
   });
 
   // ===========================================================================
@@ -904,18 +918,21 @@ cone = startSketchOn(XZ)
       const commandPending = new Promise<void>((resolve) => {
         markCommandPending = resolve;
       });
-      const executeProgram = vi.fn(
-        async () =>
-          new Promise<never>((_resolve, reject) => {
-            rejectCommand = reject;
-            markCommandPending();
-          }),
-      );
       const cancel = vi.fn(async () => {
         rejectCommand(new Error('kcl execution was interrupted'));
       });
+      const executeProgram = vi.fn(
+        async (_program, _path, options: { signal: AbortSignal }) =>
+          new Promise<never>((_resolve, reject) => {
+            rejectCommand = reject;
+            options.signal.addEventListener('abort', () => void cancel(), { once: true });
+            markCommandPending();
+          }),
+      );
       const context: Parameters<typeof zooDefinition.createGeometry>[2] = {
         baseUrl: 'ws://fake.example/modeling-commands',
+        closeErrors: undefined,
+        token: undefined,
         fileSystemManager: undefined,
         kclUtils: {
           initializeEngine: vi.fn().mockResolvedValue(undefined),
@@ -944,7 +961,9 @@ cone = startSketchOn(XZ)
         await rejection;
 
         expect(cancel).toHaveBeenCalledOnce();
-        expect(executeProgram).toHaveBeenCalledOnce();
+        expect(executeProgram).toHaveBeenCalledExactlyOnceWith(expect.anything(), 'main.kcl', {
+          signal: controller.signal,
+        });
       } finally {
         injectParameters.mockRestore();
       }
@@ -959,6 +978,8 @@ cone = startSketchOn(XZ)
 
       const context: Parameters<typeof zooDefinition.createGeometry>[2] = {
         baseUrl: 'ws://fake.example/modeling-commands',
+        closeErrors: undefined,
+        token: undefined,
         fileSystemManager: undefined,
         kclUtils: undefined,
       };
@@ -1025,6 +1046,8 @@ cone = startSketchOn(XZ)
     it('should export empty GLB and glTF files for empty handles but reject STEP and STL', async () => {
       const context: Parameters<typeof zooDefinition.exportGeometry>[2] = {
         baseUrl: 'ws://fake.example/modeling-commands',
+        closeErrors: undefined,
+        token: undefined,
         fileSystemManager: undefined,
         kclUtils: undefined,
       };
@@ -1089,6 +1112,8 @@ cone = startSketchOn(XZ)
         ]);
       const context: Parameters<typeof zooDefinition.exportGeometry>[2] = {
         baseUrl: 'ws://fake.example/modeling-commands',
+        closeErrors: undefined,
+        token: undefined,
         fileSystemManager: undefined,
         kclUtils: {
           initializeEngine: vi.fn().mockResolvedValue(undefined),
@@ -1096,17 +1121,19 @@ cone = startSketchOn(XZ)
         } as unknown as KclUtilities,
       };
 
+      const runtime = createMockKernelRuntime();
       const result = await zooDefinition.exportGeometry(
         {
           format: 'glb',
           nativeHandle: { kind: 'zoo-live-engine-session', hasGeometry: true },
           options: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
         },
-        createMockKernelRuntime(),
+        runtime,
         context,
       );
 
       expect(result.success).toBe(true);
+      expect(exportFromMemory).toHaveBeenCalledWith(expect.anything(), { signal: runtime.signal });
       if (result.success) {
         expect(await readGlbNodeNames(result.data[0]!.bytes)).toEqual(['Shape 1']);
         expect(await readGlbMaterialAndSceneNames(result.data[0]!.bytes)).toEqual({
@@ -1121,6 +1148,8 @@ cone = startSketchOn(XZ)
       const exportFromMemory = vi.fn().mockResolvedValue([{ contents: sourceGlb }]);
       const context: Parameters<typeof zooDefinition.exportGeometry>[2] = {
         baseUrl: 'ws://fake.example/modeling-commands',
+        closeErrors: undefined,
+        token: undefined,
         fileSystemManager: undefined,
         kclUtils: {
           initializeEngine: vi.fn().mockResolvedValue(undefined),
@@ -1166,6 +1195,8 @@ cone = startSketchOn(XZ)
         ]);
       const context: Parameters<typeof zooDefinition.exportGeometry>[2] = {
         baseUrl: 'ws://fake.example/modeling-commands',
+        closeErrors: undefined,
+        token: undefined,
         fileSystemManager: undefined,
         kclUtils: {
           initializeEngine: vi.fn().mockResolvedValue(undefined),

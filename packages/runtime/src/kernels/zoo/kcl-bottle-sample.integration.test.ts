@@ -24,7 +24,7 @@ const memoryFs = (): KernelFileSystem =>
 describe('KclUtilities bottle-shaped execute (stub engine)', () => {
   it('executeProgram returns non-empty variables via stubbed engine execute', async () => {
     const fs = new FileSystemManager(memoryFs());
-    const utils = new KclUtilities({ fileSystemManager: fs });
+    const utils = new KclUtilities({ baseUrl: 'ws://fake.example/modeling-commands', fileSystemManager: fs });
     await utils.initializeWasm();
     const { program } = await utils.parseKcl(`width = 12
 height = 20
@@ -58,7 +58,7 @@ height = 20
 describe('KclUtilities executeMockKcl (real WASM, no WebSocket)', () => {
   it('evaluates a trivial program via executeMock (covers eval_prelude / std path)', async () => {
     const fs = new FileSystemManager(memoryFs());
-    const utils = new KclUtilities({ fileSystemManager: fs });
+    const utils = new KclUtilities({ baseUrl: 'ws://fake.example/modeling-commands', fileSystemManager: fs });
     await utils.initializeWasm();
     const { program } = await utils.parseKcl('width = 12\nheight = 20\n');
     const outcome = await utils.executeMockKcl(program, 'main.kcl');
@@ -72,7 +72,7 @@ describe('KclUtilities executeMockKcl (real WASM, no WebSocket)', () => {
 describe('KclUtilities cancel', () => {
   it('rejectAllPendingCommand surfaces execution_interrupted on in-flight execute', async () => {
     const fs = new FileSystemManager(memoryFs());
-    const utils = new KclUtilities({ fileSystemManager: fs });
+    const utils = new KclUtilities({ baseUrl: 'ws://fake.example/modeling-commands', fileSystemManager: fs });
     await utils.initializeWasm();
     const { program } = await utils.parseKcl('x = 1\n');
 

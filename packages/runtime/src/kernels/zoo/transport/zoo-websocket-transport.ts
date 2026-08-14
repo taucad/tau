@@ -64,6 +64,8 @@ export class ZooWebSocketTransport {
   private isConnected = false;
   private readonly pendingEngineMessages: Array<{ raw: Uint8Array<ArrayBuffer>; decoded: WebSocketResponse }> = [];
   private readonly baseUrl: string;
+  private readonly closeErrors: Record<string, string> | undefined;
+  private readonly token: string | undefined;
   private initializationContext: InitializationContext | undefined;
   private readonly messageTopic = new Topic<ZooTransportMessageEvent>({
     name: 'zoo-websocket.message',
@@ -78,8 +80,10 @@ export class ZooWebSocketTransport {
     },
   });
 
-  public constructor(optionsReadonly: { baseUrl: string }) {
+  public constructor(optionsReadonly: { baseUrl: string; closeErrors?: Record<string, string>; token?: string }) {
     this.baseUrl = optionsReadonly.baseUrl;
+    this.closeErrors = optionsReadonly.closeErrors;
+    this.token = optionsReadonly.token;
   }
 
   /**
@@ -234,7 +238,17 @@ export class ZooWebSocketTransport {
   }
 
   private readonly onWebSocketOpen = (_event: Event): void => {
-    log.debug('WebSocket open — awaiting modeling_session_data (auth via Tau API proxy / same-origin)');
+    if (this.token) {
+      this.sendRaw({
+        type: 'headers',
+        headers: {
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP header name
+          Authorization: `Bearer ${this.token}`,
+        },
+      });
+    }
+
+    log.debug('WebSocket open — awaiting modeling_session_data');
   };
 
   private readonly onWebSocketClose = (event: CloseEvent): void => {
@@ -261,30 +275,13 @@ export class ZooWebSocketTransport {
   };
 
   private createConnectionError(code: number, reason: string): KclError {
-    // Tau billing gate codes (apps/api billing.constants.ts `zooCloseCodes`).
-    // The wire reasons are enum-like markers — replace with user-facing copy.
-    if (code === 4401) {
-      return new KclAuthError('Sign in to Tau to use the Zoo kernel.', 401);
-    }
-
-    if (code === 4402) {
-      return new KclAuthError(
-        "You're out of Tau credits — add credits in Plans & Billing to keep modeling with Zoo.",
-        402,
-      );
-    }
-
-    if (code === 4403) {
-      return new KclAuthError(
-        'The Zoo kernel requires a Tau Pro subscription. Upgrade in Plans & Billing to continue.',
-        403,
-      );
+    const customMessage = this.closeErrors?.[code];
+    if (customMessage) {
+      return new KclConnectionError(customMessage);
     }
 
     if (code === 1006) {
-      return KclConnectionError.apiUnavailable(
-        'The connection was closed unexpectedly. Please check your network connection and try again.',
-      );
+      return KclConnectionError.apiUnavailable('The connection was closed unexpectedly.');
     }
 
     if (code === 1001 || code === 1011) {
@@ -292,16 +289,14 @@ export class ZooWebSocketTransport {
     }
 
     if (code === 1008 || code === 1002) {
-      return new KclAuthError(reason || 'Invalid Zoo API key. Please check that your Zoo API key is correct.', 401);
+      return new KclAuthError(reason || 'The Zoo API rejected the connection credentials.', 401);
     }
 
     if (code === 1000) {
-      return new KclAuthError('Invalid Zoo API key. Please check that your Zoo API key is correct.', 401);
+      return new KclAuthError('The Zoo API connection closed before authorization completed.', 401);
     }
 
-    return KclConnectionError.webSocketFailed(
-      reason || `Connection closed with code ${code}. Please check your network and try again.`,
-    );
+    return KclConnectionError.webSocketFailed(reason || `Connection closed with code ${code}.`);
   }
 
   private readonly onWebSocketError = (event: Event): void => {
@@ -317,11 +312,7 @@ export class ZooWebSocketTransport {
       if (event.target instanceof WebSocket) {
         const { readyState } = event.target;
         if (readyState === 0) {
-          initContext.reject(
-            KclConnectionError.apiUnavailable(
-              'Unable to connect to the Zoo CAD API. Please check your network connection and ensure the service is accessible.',
-            ),
-          );
+          initContext.reject(KclConnectionError.apiUnavailable('Unable to connect to the Zoo CAD API.'));
         } else {
           const readyStateText = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][readyState] ?? 'UNKNOWN';
           initContext.reject(

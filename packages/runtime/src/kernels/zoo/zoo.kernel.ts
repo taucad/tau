@@ -40,6 +40,8 @@ import { createEmptyGlb, createEmptyGltf, createEmptyGltfGeometry } from '#utils
 
 type ZooContext = {
   baseUrl: string;
+  closeErrors: Record<string, string> | undefined;
+  token: string | undefined;
   kclUtils: KclUtilities | undefined;
   fileSystemManager: FileSystemManager | undefined;
 };
@@ -70,7 +72,7 @@ const createNoGeometryZooExportResult = (format: ZooExportFormat) => {
     case 'stl': {
       return createKernelError([
         {
-          message: 'No geometry available for export. Please build geometries before exporting.',
+          message: 'No geometry available for export.',
           code: 'RUNTIME',
           severity: 'error',
         },
@@ -163,6 +165,8 @@ function getKclUtilitiesInstance(context: ZooContext): KclUtilities {
 
     context.kclUtils = new KclUtilities({
       baseUrl: context.baseUrl,
+      closeErrors: context.closeErrors,
+      token: context.token,
       fileSystemManager: context.fileSystemManager,
     });
   }
@@ -183,19 +187,17 @@ async function getKclUtilitiesWithEngine(context: ZooContext): Promise<KclUtilit
   return utils;
 }
 
-const createCancel =
-  (utilities: KclUtilities): (() => void) =>
-  () => {
-    void utilities.cancel();
-  };
-
 /**
  * Zoo (KCL) kernel options.
  * @public
  */
 export type ZooOptions = {
-  /** WebSocket base URL for the Zoo engine connection. Defaults to 'wss://api.zoo.dev'. */
+  /** WebSocket URL for the Zoo engine connection. */
   baseUrl?: string;
+  /** Consumer-defined messages for private WebSocket close codes. */
+  closeErrors?: Record<string, string>;
+  /** Zoo API token for direct connections. Browser-embedded tokens are visible to the browser environment. */
+  token?: string;
 };
 
 // =============================================================================
@@ -220,6 +222,8 @@ export const zoo = defineKernel({
   async initialize(options) {
     return {
       baseUrl: options.baseUrl,
+      closeErrors: options.closeErrors,
+      token: options.token,
       kclUtils: undefined as KclUtilities | undefined,
       fileSystemManager: undefined as FileSystemManager | undefined,
     };
@@ -282,38 +286,28 @@ export const zoo = defineKernel({
       }
 
       const utilities = await getKclUtilitiesWithEngine(context);
-      signal.throwIfAborted();
-      const cancel = createCancel(utilities);
-      signal.addEventListener('abort', cancel, { once: true });
-      try {
-        await utilities.clearProgram();
-        const parseResult = await utilities.parseKcl(trimmedCode);
-        const criticalParseErrors = filterNonWarningErrors(parseResult.errors);
-        if (criticalParseErrors.length > 0) {
-          logger.warn('KCL parsing errors', { data: criticalParseErrors });
-          throw new KclBuildError(
-            mapCompilationErrorsToKernelIssues(criticalParseErrors, trimmedCode, relativeFilePath),
-          );
-        }
-
-        const modifiedProgram = KclUtilities.injectParametersIntoProgram(parseResult.program, parameters);
-        const executionResult = await utilities.executeProgram(modifiedProgram, relativeFilePath);
-        signal.throwIfAborted();
-        const criticalExecutionErrors = filterNonWarningErrors(executionResult.errors);
-        if (criticalExecutionErrors.length > 0) {
-          logger.warn('KCL execution errors', { data: criticalExecutionErrors });
-          throw new KclBuildError(
-            mapCompilationErrorsToKernelIssues(criticalExecutionErrors, trimmedCode, relativeFilePath),
-          );
-        }
-
-        // Display GLTF fetch is deferred to meshGeometry so a BRep-only export
-        // skips the engine round-trip. An executed-but-empty scene is discovered
-        // at fetch/export time; exportGeometry's per-format empty guards cover it.
-        return { nativeHandle: createZooNativeHandle(true) };
-      } finally {
-        signal.removeEventListener('abort', cancel);
+      await utilities.clearProgram({ signal });
+      const parseResult = await utilities.parseKcl(trimmedCode);
+      const criticalParseErrors = filterNonWarningErrors(parseResult.errors);
+      if (criticalParseErrors.length > 0) {
+        logger.warn('KCL parsing errors', { data: criticalParseErrors });
+        throw new KclBuildError(mapCompilationErrorsToKernelIssues(criticalParseErrors, trimmedCode, relativeFilePath));
       }
+
+      const modifiedProgram = KclUtilities.injectParametersIntoProgram(parseResult.program, parameters);
+      const executionResult = await utilities.executeProgram(modifiedProgram, relativeFilePath, { signal });
+      const criticalExecutionErrors = filterNonWarningErrors(executionResult.errors);
+      if (criticalExecutionErrors.length > 0) {
+        logger.warn('KCL execution errors', { data: criticalExecutionErrors });
+        throw new KclBuildError(
+          mapCompilationErrorsToKernelIssues(criticalExecutionErrors, trimmedCode, relativeFilePath),
+        );
+      }
+
+      // Display GLTF fetch is deferred to meshGeometry so a BRep-only export
+      // skips the engine round-trip. An executed-but-empty scene is discovered
+      // at fetch/export time; exportGeometry's per-format empty guards cover it.
+      return { nativeHandle: createZooNativeHandle(true) };
     } catch (error) {
       if (error instanceof KclBuildError || error instanceof RenderArtifactFinalizationError) {
         throw error;
@@ -332,19 +326,13 @@ export const zoo = defineKernel({
 
     try {
       const utilities = await getKclUtilitiesWithEngine(context);
-      signal.throwIfAborted();
-      const cancel = createCancel(utilities);
-      signal.addEventListener('abort', cancel, { once: true });
-      let exportResult: Awaited<ReturnType<KclUtilities['exportFromMemory']>>;
-      try {
-        exportResult = await utilities.exportFromMemory({
+      const exportResult = await utilities.exportFromMemory(
+        {
           type: 'gltf',
           storage: 'binary',
-        });
-        signal.throwIfAborted();
-      } finally {
-        signal.removeEventListener('abort', cancel);
-      }
+        },
+        { signal },
+      );
       const gltf = exportResult[0];
       if (!gltf) {
         return { geometry: createEmptyGltfGeometry() };
@@ -370,7 +358,7 @@ export const zoo = defineKernel({
     }
   },
 
-  async exportGeometry(input, { logger }, context) {
+  async exportGeometry(input, { logger, signal }, context) {
     const { format, nativeHandle } = input;
 
     if (!nativeHandle.hasGeometry) {
@@ -384,12 +372,15 @@ export const zoo = defineKernel({
         case 'stl': {
           const { options } = input;
           const { binary, coordinateSystem, unit } = options;
-          const stlResult = await utilities.exportFromMemory({
-            type: 'stl',
-            storage: binary ? 'binary' : 'ascii',
-            coords: mapCoordinateSystemToKclCoords(coordinateSystem),
-            units: unit.length === 'meter' ? 'm' : 'mm',
-          });
+          const stlResult = await utilities.exportFromMemory(
+            {
+              type: 'stl',
+              storage: binary ? 'binary' : 'ascii',
+              coords: mapCoordinateSystemToKclCoords(coordinateSystem),
+              units: unit.length === 'meter' ? 'm' : 'mm',
+            },
+            { signal },
+          );
           if (stlResult.length === 0 || !stlResult[0]) {
             return createKernelError([
               { message: 'No STL data received from KCL export', code: 'RUNTIME', severity: 'error' },
@@ -401,10 +392,13 @@ export const zoo = defineKernel({
         case 'step': {
           const { options } = input;
           const { coordinateSystem } = options;
-          const stepResult = await utilities.exportFromMemory({
-            type: 'step',
-            coords: mapCoordinateSystemToKclCoords(coordinateSystem),
-          });
+          const stepResult = await utilities.exportFromMemory(
+            {
+              type: 'step',
+              coords: mapCoordinateSystemToKclCoords(coordinateSystem),
+            },
+            { signal },
+          );
           if (stepResult.length === 0 || !stepResult[0]) {
             return createKernelError([
               { message: 'No STEP data received from KCL export', code: 'RUNTIME', severity: 'error' },
@@ -416,7 +410,7 @@ export const zoo = defineKernel({
         case 'glb': {
           const { options, content } = input;
           const { coordinateSystem, unit } = options;
-          const glbResult = await utilities.exportFromMemory({ type: 'gltf', storage: 'binary' });
+          const glbResult = await utilities.exportFromMemory({ type: 'gltf', storage: 'binary' }, { signal });
           if (glbResult.length === 0 || !glbResult[0]) {
             return createKernelError([
               { message: 'No GLB data received from KCL export', code: 'RUNTIME', severity: 'error' },
@@ -442,11 +436,14 @@ export const zoo = defineKernel({
         case 'gltf': {
           const { options, content } = input;
           const { coordinateSystem, unit } = options;
-          const gltfResult = await utilities.exportFromMemory({
-            type: 'gltf',
-            storage: 'embedded',
-            presentation: 'pretty',
-          });
+          const gltfResult = await utilities.exportFromMemory(
+            {
+              type: 'gltf',
+              storage: 'embedded',
+              presentation: 'pretty',
+            },
+            { signal },
+          );
           if (gltfResult.length === 0 || !gltfResult[0]) {
             return createKernelError([
               { message: 'No GLTF data received from KCL export', code: 'RUNTIME', severity: 'error' },

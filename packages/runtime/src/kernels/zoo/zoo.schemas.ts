@@ -26,7 +26,9 @@ const stlUnitSchema = z.object({
  * @public
  */
 export const zooOptionsSchema = z.object({
-  baseUrl: z.string().default('wss://api.zoo.dev'),
+  baseUrl: z.string().default('wss://api.zoo.dev/ws/modeling/commands'),
+  closeErrors: z.record(z.string(), z.string()).optional(),
+  token: z.string().optional(),
 });
 
 /**

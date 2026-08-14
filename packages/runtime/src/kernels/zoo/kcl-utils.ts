@@ -122,9 +122,16 @@ export type KclExportResult = {
   error?: string;
 };
 
+type KclOperationOptions = {
+  settings?: PartialDeep<Configuration>;
+  signal?: AbortSignal;
+};
+
 type KclUtilitiesOptions = {
   /** Base URL for the modeling API */
-  baseUrl?: string;
+  baseUrl: string;
+  closeErrors?: Record<string, string>;
+  token?: string;
   /** Stream dimensions for engine */
   streamDimensions?: {
     width: number;
@@ -278,6 +285,8 @@ export class KclUtilities {
   private engineManager: EngineConnection | undefined;
   private mockContext: Context | undefined;
   private readonly baseUrl: string;
+  private readonly closeErrors: Record<string, string> | undefined;
+  private readonly token: string | undefined;
   private readonly fileSystemManager: FileSystemManager;
   // Add execution state tracking
   private hasExecutedProgram = false;
@@ -289,7 +298,9 @@ export class KclUtilities {
   private engineSocketCloseUnsubscribe: (() => void) | undefined;
 
   public constructor(options: KclUtilitiesOptions) {
-    this.baseUrl = options.baseUrl ?? 'wss://api.zoo.dev';
+    this.baseUrl = options.baseUrl;
+    this.closeErrors = options.closeErrors;
+    this.token = options.token;
     this.fileSystemManager = options.fileSystemManager;
   }
 
@@ -491,51 +502,55 @@ export class KclUtilities {
   public async executeProgram(
     program: Program,
     path: string,
-    settings?: PartialDeep<Configuration>,
+    { settings, signal }: KclOperationOptions = {},
   ): Promise<KclExecutionResult> {
-    return this.serializeExclusive(async () => {
-      if (!this.isEngineInitialized) {
-        await this.initializeEngine();
-      }
-
-      if (!this.wasmModule) {
-        throw KclError.simple({
-          kind: 'engine',
-          message: 'WASM module not loaded',
-        });
-      }
-
-      if (!this.engineManager) {
-        throw KclError.simple({
-          kind: 'engine',
-          message: 'Engine manager not initialized',
-        });
-      }
-
-      try {
-        const programJson = JSON.stringify(program);
-        const settingsJson = buildKclSettingsJson(settings);
-        const executeResult: unknown = await this.engineManager.context?.execute(programJson, path, settingsJson);
-
-        this.hasExecutedProgram = true;
-
-        const delta = normalizeSceneGraphDelta(executeResult);
-        const outcome = normalizeKclExecutionResult(delta.execOutcome);
-        await this.engineManager.bridge?.flushPending();
-        return outcome;
-      } catch (error) {
-        log.error('KCL execution error details:', error);
-
-        const extracted = extractWasmKclErrorDetails(error);
-        if (extracted) {
-          throw new KclWasmError(extracted.wasmError, extracted.partialOutcome);
+    return this.withAbort(signal, async () =>
+      this.serializeExclusive(async () => {
+        if (!this.isEngineInitialized) {
+          await this.initializeEngine();
         }
 
-        const errorMessage =
-          error instanceof Error ? `KCL execution failed: ${error.message}` : `KCL execution failed: ${String(error)}`;
-        throw KclError.simple({ kind: 'engine', message: errorMessage });
-      }
-    });
+        if (!this.wasmModule) {
+          throw KclError.simple({
+            kind: 'engine',
+            message: 'WASM module not loaded',
+          });
+        }
+
+        if (!this.engineManager) {
+          throw KclError.simple({
+            kind: 'engine',
+            message: 'Engine manager not initialized',
+          });
+        }
+
+        try {
+          const programJson = JSON.stringify(program);
+          const settingsJson = buildKclSettingsJson(settings);
+          const executeResult: unknown = await this.engineManager.context?.execute(programJson, path, settingsJson);
+
+          this.hasExecutedProgram = true;
+
+          const delta = normalizeSceneGraphDelta(executeResult);
+          const outcome = normalizeKclExecutionResult(delta.execOutcome);
+          await this.engineManager.bridge?.flushPending();
+          return outcome;
+        } catch (error) {
+          log.error('KCL execution error details:', error);
+
+          const extracted = extractWasmKclErrorDetails(error);
+          if (extracted) {
+            throw new KclWasmError(extracted.wasmError, extracted.partialOutcome);
+          }
+
+          const errorMessage =
+            error instanceof Error
+              ? `KCL execution failed: ${error.message}`
+              : `KCL execution failed: ${String(error)}`;
+          throw KclError.simple({ kind: 'engine', message: errorMessage });
+        }
+      }),
+    );
   }
 
   /**
@@ -551,50 +566,54 @@ export class KclUtilities {
   public async executeProgramWithSceneDelta(
     program: Program,
     path: string,
-    settings?: PartialDeep<Configuration>,
+    { settings, signal }: KclOperationOptions = {},
   ): Promise<KclSceneGraphDelta> {
-    return this.serializeExclusive(async () => {
-      if (!this.isEngineInitialized) {
-        await this.initializeEngine();
-      }
-
-      if (!this.wasmModule) {
-        throw KclError.simple({
-          kind: 'engine',
-          message: 'WASM module not loaded',
-        });
-      }
-
-      if (!this.engineManager) {
-        throw KclError.simple({
-          kind: 'engine',
-          message: 'Engine manager not initialized',
-        });
-      }
-
-      try {
-        const programJson = JSON.stringify(program);
-        const settingsJson = buildKclSettingsJson(settings);
-        const executeResult: unknown = await this.engineManager.context?.execute(programJson, path, settingsJson);
-
-        this.hasExecutedProgram = true;
-
-        const delta = normalizeSceneGraphDelta(executeResult);
-        await this.engineManager.bridge?.flushPending();
-        return delta;
-      } catch (error) {
-        log.error('KCL execution error details:', error);
-
-        const extracted = extractWasmKclErrorDetails(error);
-        if (extracted) {
-          throw new KclWasmError(extracted.wasmError, extracted.partialOutcome);
+    return this.withAbort(signal, async () =>
+      this.serializeExclusive(async () => {
+        if (!this.isEngineInitialized) {
+          await this.initializeEngine();
         }
 
-        const errorMessage =
-          error instanceof Error ? `KCL execution failed: ${error.message}` : `KCL execution failed: ${String(error)}`;
-        throw KclError.simple({ kind: 'engine', message: errorMessage });
-      }
-    });
+        if (!this.wasmModule) {
+          throw KclError.simple({
+            kind: 'engine',
+            message: 'WASM module not loaded',
+          });
+        }
+
+        if (!this.engineManager) {
+          throw KclError.simple({
+            kind: 'engine',
+            message: 'Engine manager not initialized',
+          });
+        }
+
+        try {
+          const programJson = JSON.stringify(program);
+          const settingsJson = buildKclSettingsJson(settings);
+          const executeResult: unknown = await this.engineManager.context?.execute(programJson, path, settingsJson);
+
+          this.hasExecutedProgram = true;
+
+          const delta = normalizeSceneGraphDelta(executeResult);
+          await this.engineManager.bridge?.flushPending();
+          return delta;
+        } catch (error) {
+          log.error('KCL execution error details:', error);
+
+          const extracted = extractWasmKclErrorDetails(error);
+          if (extracted) {
+            throw new KclWasmError(extracted.wasmError, extracted.partialOutcome);
+          }
+
+          const errorMessage =
+            error instanceof Error
+              ? `KCL execution failed: ${error.message}`
+              : `KCL execution failed: ${String(error)}`;
+          throw KclError.simple({ kind: 'engine', message: errorMessage });
+        }
+      }),
+    );
   }
 
   /**
@@ -608,61 +627,63 @@ export class KclUtilities {
    */
   public async exportFromMemory(
     options: ExportOptions,
-    settings: PartialDeep<Configuration> = {},
+    { settings = {}, signal }: KclOperationOptions = {},
   ): Promise<ExportedFile[]> {
-    if (!this.hasExecutedProgram) {
-      throw new KclExportError('No program has been executed yet. Call executeKcl first.');
-    }
+    return this.withAbort(signal, async () => {
+      if (!this.hasExecutedProgram) {
+        throw new KclExportError('No program has been executed yet. Call executeKcl first.');
+      }
 
-    if (!this.isEngineInitialized) {
-      throw KclError.simple({
-        kind: 'engine',
-        message: 'Engine not initialized',
-      });
-    }
+      if (!this.isEngineInitialized) {
+        throw KclError.simple({
+          kind: 'engine',
+          message: 'Engine not initialized',
+        });
+      }
 
-    // Get the context used for execution
-    const context = this.engineManager?.context;
-    if (!context) {
-      throw KclError.simple({
-        kind: 'engine',
-        message: 'No context available for export',
-      });
-    }
+      // Get the context used for execution
+      const context = this.engineManager?.context;
+      if (!context) {
+        throw KclError.simple({
+          kind: 'engine',
+          message: 'No context available for export',
+        });
+      }
 
-    // Create export format configuration
-    const exportFormat = this.createExportFormat(options);
+      // Create export format configuration
+      const exportFormat = this.createExportFormat(options);
 
-    try {
-      // Export the model using operations already in memory
-      const result = (await context.export(JSON.stringify(exportFormat), buildKclSettingsJson(settings))) as Array<{
-        name: string;
-        contents: ArrayBuffer;
-      }>;
+      try {
+        // Export the model using operations already in memory
+        const result = (await context.export(JSON.stringify(exportFormat), buildKclSettingsJson(settings))) as Array<{
+          name: string;
+          contents: ArrayBuffer;
+        }>;
 
-      // Convert the result to our format
-      const files: ExportedFile[] = [];
-      if (Array.isArray(result)) {
-        for (const file of result) {
-          files.push({
-            name: file.name,
-            contents: new Uint8Array(file.contents),
-          });
+        // Convert the result to our format
+        const files: ExportedFile[] = [];
+        if (Array.isArray(result)) {
+          for (const file of result) {
+            files.push({
+              name: file.name,
+              contents: new Uint8Array(file.contents),
+            });
+          }
         }
-      }
 
-      return files;
-    } catch (error) {
-      // Zoo SDK boundary — substring detection is encapsulated in
-      // `isZooEmptyExportError`. Replace with a typed `code` check when Zoo
-      // ships structured errors.
-      if (isZooEmptyExportError(error)) {
-        return [];
-      }
+        return files;
+      } catch (error) {
+        // Zoo SDK boundary — substring detection is encapsulated in
+        // `isZooEmptyExportError`. Replace with a typed `code` check when Zoo
+        // ships structured errors.
+        if (isZooEmptyExportError(error)) {
+          return [];
+        }
 
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      throw new KclExportError(`Export failed: ${errorMessage}`, options.type);
-    }
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        throw new KclExportError(`Export failed: ${errorMessage}`, options.type);
+      }
+    });
   }
 
   /**
@@ -691,15 +712,17 @@ export class KclUtilities {
    *
    * @param settings - optional KCL configuration overrides for the scene reset
    */
-  public async clearProgram(settings?: PartialDeep<Configuration>): Promise<void> {
-    const context = this.engineManager?.context;
-    if (context && typeof context.bustCacheAndResetScene === 'function') {
-      const bustUnknown: unknown = await context.bustCacheAndResetScene(buildKclSettingsJson(settings), null);
-      const normalized = normalizeKclExecutionResult(bustUnknown);
-      this.lastDefaultPlanes = normalized.defaultPlanes;
-    }
+  public async clearProgram({ settings, signal }: KclOperationOptions = {}): Promise<void> {
+    return this.withAbort(signal, async () => {
+      const context = this.engineManager?.context;
+      if (context && typeof context.bustCacheAndResetScene === 'function') {
+        const bustUnknown: unknown = await context.bustCacheAndResetScene(buildKclSettingsJson(settings), null);
+        const normalized = normalizeKclExecutionResult(bustUnknown);
+        this.lastDefaultPlanes = normalized.defaultPlanes;
+      }
 
-    this.hasExecutedProgram = false;
+      this.hasExecutedProgram = false;
+    });
   }
 
   /**
@@ -726,6 +749,23 @@ export class KclUtilities {
    */
   private async serializeExclusive<T>(run: () => Promise<T>): Promise<T> {
     return this.withExclusiveLock(run);
+  }
+
+  private async withAbort<T>(signal: AbortSignal | undefined, work: () => Promise<T>): Promise<T> {
+    signal?.throwIfAborted();
+    if (!signal) {
+      return work();
+    }
+
+    const cancel = (): void => {
+      void this.cancel();
+    };
+    signal.addEventListener('abort', cancel, { once: true });
+    try {
+      return await work();
+    } finally {
+      signal.removeEventListener('abort', cancel);
+    }
   }
 
   private async withExclusiveLock<T>(run: () => Promise<T>): Promise<T> {
@@ -757,6 +797,8 @@ export class KclUtilities {
 
     const engineManager = new EngineConnection({
       baseUrl: this.baseUrl,
+      closeErrors: this.closeErrors,
+      token: this.token,
       wasmModule: this.wasmModule,
       fileSystemManager: this.fileSystemManager,
     });

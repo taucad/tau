@@ -70,13 +70,23 @@ export class MockEngineConnection {
  */
 export class EngineConnection {
   private readonly baseUrl: string;
+  private readonly closeErrors: Record<string, string> | undefined;
+  private readonly token: string | undefined;
   private readonly wasmModule: WasmModule;
   private readonly fileSystemManager: FileSystemManager;
 
   private session: ZooEngineSession | undefined;
 
-  public constructor(options: { baseUrl: string; wasmModule: WasmModule; fileSystemManager: FileSystemManager }) {
+  public constructor(options: {
+    baseUrl: string;
+    closeErrors?: Record<string, string>;
+    token?: string;
+    wasmModule: WasmModule;
+    fileSystemManager: FileSystemManager;
+  }) {
     this.baseUrl = options.baseUrl;
+    this.closeErrors = options.closeErrors;
+    this.token = options.token;
     this.wasmModule = options.wasmModule;
     this.fileSystemManager = options.fileSystemManager;
   }
@@ -123,7 +133,11 @@ export class EngineConnection {
       await this.cleanup();
     }
 
-    const transport = new ZooWebSocketTransport({ baseUrl: this.baseUrl });
+    const transport = new ZooWebSocketTransport({
+      baseUrl: this.baseUrl,
+      closeErrors: this.closeErrors,
+      token: this.token,
+    });
     const bridge = new ZooEngineBridge(transport);
     await transport.initialize();
     const session = new ZooEngineSession({

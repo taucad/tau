@@ -87,7 +87,7 @@ describe('KclUtilities engine reconnect after WebSocket close', () => {
 
   it('marks engine not ready and calls createEngineManager again after re-init following remote close', async () => {
     const fs = new FileSystemManager(memoryFs());
-    const utils = new KclUtilities({ fileSystemManager: fs });
+    const utils = new KclUtilities({ baseUrl: 'ws://fake.example/modeling-commands', fileSystemManager: fs });
     await utils.initializeWasm();
     const { program } = await utils.parseKcl('x = 1\n');
 
@@ -122,7 +122,7 @@ describe('KclUtilities engine reconnect after WebSocket close', () => {
 
   it('cleanup after socket close does not throw', async () => {
     const fs = new FileSystemManager(memoryFs());
-    const utils = new KclUtilities({ fileSystemManager: fs });
+    const utils = new KclUtilities({ baseUrl: 'ws://fake.example/modeling-commands', fileSystemManager: fs });
     await utils.initializeWasm();
 
     const init = utils.initializeEngine();

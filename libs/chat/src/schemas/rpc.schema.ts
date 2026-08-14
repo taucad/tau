@@ -13,10 +13,9 @@ import { z as zod } from 'zod';
 import { rpcName } from '#constants/rpc.constants.js';
 import { diffStatsWithContentSchema } from '#schemas/tools/diff.schema.js';
 import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
-import { geoSpecRunFilterInputSchema } from '#schemas/tools/test-model.tool.schema.js';
+import { geoSpecRunFilterInputSchema, testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
 import { exportGeometryFormatSchema } from '#schemas/tools/export-geometry.tool.schema.js';
 import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
-import { testModelOutputSchema } from '@taucad/testing';
 
 // =============================================================================
 // RPC Error Types

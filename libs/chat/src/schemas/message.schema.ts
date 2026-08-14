@@ -10,7 +10,6 @@ import { commonReasoningMetadataSchema } from '#schemas/common-reasoning-metadat
 import type { MyUIMessage } from '#types/message.types.js';
 import { usageDataSchema, contextCompactionDataSchema, contextUsageDataSchema } from '#schemas/message-data.schema.js';
 import { editFileInputSchema, editFileOutputSchema } from '#schemas/tools/edit-file.tool.schema.js';
-import { testModelOutputSchema } from '@taucad/testing';
 import { webBrowserInputSchema, webBrowserOutputSchema } from '#schemas/tools/web-browser.tool.schema.js';
 import { webSearchInputSchema, webSearchOutputSchema } from '#schemas/tools/web-search.tool.schema.js';
 import { readFileInputSchema, readFileOutputSchema } from '#schemas/tools/read-file.tool.schema.js';
@@ -29,7 +28,7 @@ import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/sc
 import { toolName } from '#constants/tool.constants.js';
 import type { ToolName } from '#types/tool.types.js';
 import { getToolInputSchema } from '#schemas/tool-input.registry.js';
-import { testModelInputSchema } from '#schemas/tools/test-model.tool.schema.js';
+import { testModelInputSchema, testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
 
 // Copied from https://github.com/vercel/ai/blob/0ed1ee6f34a252a9d1970d99ea8585529cbceeed/packages/ai/src/ui/validate-ui-messages.ts.
 // This is necessary as the AI SDK's `validateUIMessages` function is async and nestjs-zod does

@@ -7,7 +7,7 @@ import type { DeleteFileOutput } from '#schemas/tools/delete-file.tool.schema.js
 import type { GrepOutput } from '#schemas/tools/grep.tool.schema.js';
 import type { GlobSearchOutput } from '#schemas/tools/glob-search.tool.schema.js';
 import type { GetKernelResultOutput } from '#schemas/tools/get-kernel-result.tool.schema.js';
-import type { TestModelOutput } from '@taucad/testing';
+import type { TestModelOutput } from '#schemas/tools/test-model.tool.schema.js';
 import type { EditFileOutput } from '#schemas/tools/edit-file.tool.schema.js';
 import type { ScreenshotOutput } from '#schemas/tools/screenshot.tool.schema.js';
 

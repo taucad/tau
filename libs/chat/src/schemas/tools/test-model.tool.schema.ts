@@ -84,3 +84,78 @@ export const geoSpecRunFilterInputSchema = z
 export const testModelInputSchema = geoSpecRunFilterInputSchema;
 /** @public */
 export type TestModelInput = z.input<typeof testModelInputSchema>;
+
+const geometryDiagnosticSchema = z
+  .object({
+    code: z.string(),
+    severity: z.enum(['error', 'warning', 'info']),
+    message: z.string(),
+    suggestion: z.string().optional(),
+    spatial: z
+      .object({
+        min: z.tuple([z.number(), z.number(), z.number()]).optional(),
+        max: z.tuple([z.number(), z.number(), z.number()]).optional(),
+        center: z.tuple([z.number(), z.number(), z.number()]).optional(),
+      })
+      .optional(),
+    details: z.unknown().optional(),
+  })
+  .describe('Structured GeoSpec diagnostic preserved from the matcher runner');
+
+/**
+ * Test failure result -- failures include detailed feedback for the LLM and
+ * are tagged with the source file whose geometry failed the requirement.
+ */
+const testFailureSchema = z.object({
+  id: z.string().describe('ID of the failed requirement'),
+  requirement: z.string().describe('Description of the requirement that failed'),
+  reason: z.string().describe('Why the test failed'),
+  suggestion: z.string().describe('Actionable suggestion to fix the issue'),
+  targetFile: z.string().describe('Source file whose geometry produced this failure'),
+  diagnostics: z
+    .array(geometryDiagnosticSchema)
+    .optional()
+    .describe('Structured GeoSpec matcher diagnostics for UI / programmatic consumers'),
+});
+/**
+ * Inferred failed-test row emitted by the GeoSpec runner / agent tooling.
+ * @public
+ */
+export type TestFailure = z.infer<typeof testFailureSchema>;
+
+/**
+ * Test pass result -- passes are simpler, just id/description/targetFile.
+ */
+const testPassSchema = z.object({
+  id: z.string().describe('ID of the passed requirement'),
+  requirement: z.string().describe('Description of the requirement that passed'),
+  targetFile: z.string().describe('Source file whose geometry satisfied this requirement'),
+});
+/**
+ * Inferred passing-test row for summarising satisfied requirements.
+ * @public
+ */
+export type TestPass = z.infer<typeof testPassSchema>;
+
+/**
+ * Output schema for test_model tool.
+ * Includes both failures (with detailed feedback) and passes (for UI display).
+ * `geometryArtifactPaths` maps each tested source file to the captured GLB
+ * artifact written for that geometry unit.
+ * @public
+ */
+export const testModelOutputSchema = z.object({
+  failures: z.array(testFailureSchema).describe('Array of failed tests with actionable feedback'),
+  passes: z.array(testPassSchema).describe('Array of passed tests'),
+  passed: z.number().describe('Number of tests that passed'),
+  total: z.number().describe('Total number of tests run'),
+  geometryArtifactPaths: z
+    .record(z.string(), z.string())
+    .optional()
+    .describe('Map of source file path → captured GLB artifact path'),
+});
+/**
+ * Inferred aggregate output from `test_model` / GeoSpec evaluation runs.
+ * @public
+ */
+export type TestModelOutput = z.infer<typeof testModelOutputSchema>;

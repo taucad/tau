@@ -6,10 +6,7 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "types": ["node"],
-    "target": "ESNext",
-    "paths": {
-      "#*": ["./src/*"]
-    }
+    "target": "ESNext"
   },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"]

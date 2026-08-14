@@ -10,11 +10,6 @@
     "#*": "./src/*"
   },
   "exports": {
-    "./ts-module-url": {
-      "types": "./src/ts-module-url.vite-plugin.ts",
-      "import": "./src/ts-module-url.vite-plugin.ts",
-      "default": "./src/ts-module-url.vite-plugin.ts"
-    },
     "./base64-loader": {
       "types": "./src/base64-loader.vite-plugin.ts",
       "import": "./src/base64-loader.vite-plugin.ts",
@@ -33,7 +28,6 @@
   },
   "dependencies": {
     "@oxc-project/runtime": "0.128.0",
-    "strip-literal": "catalog:",
     "vite": "catalog:"
   }
 }

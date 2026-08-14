@@ -4,6 +4,7 @@
   "description": "Shared oxlint plugins and lint configurations for the Tau monorepo",
   "type": "module",
   "private": true,
+  "license": "Apache-2.0",
   "exports": {
     "./tau-lint": {
       "import": "./src/tau-lint.js",

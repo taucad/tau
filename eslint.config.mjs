@@ -227,7 +227,6 @@ const config = [
       '**/vitest.integration.config.ts',
       'tarballs/**',
       'experiments/**',
-      'packages/render/spike/**',
       '**/wasm/**',
       'repos/**',
       // Symlink twin of libs/tau-examples/.agents/skills — linting it would

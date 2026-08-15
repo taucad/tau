@@ -23,7 +23,7 @@ Current model, in brief:
 - Packages in the release group use fixed versioning.
 - Published packages are listed in `docs/policy/release-policy.md`.
 - Bundled internal libraries stay in the fixed version group but are not published independently.
-- `@taucad/render` and `@taucad/fs-client` are private and outside the release group.
+- `@taucad/fs-client` is private and outside the release group.
 
 When release config matters, inspect the resolved Nx config instead of copying package scope from memory:
 
@@ -56,8 +56,8 @@ Mirror the current CI validation gates before publishing:
 
 ```bash
 pnpm registry:check
-pnpm nx run-many -t build --projects=packages/*,kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm --exclude=render
-pnpm nx run-many -t pkgcheck --projects=packages/*,kernels/* --exclude=render
+pnpm nx run-many -t build --projects=packages/*,kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
+pnpm nx run-many -t pkgcheck --projects=packages/*,kernels/*
 ```
 
 ## Normal Release Workflow
@@ -111,9 +111,9 @@ The publish workflow lives in `.github/workflows/publish.yml` and currently runs
 
 ```bash
 pnpm registry:check
-pnpm nx run-many -t build --projects=packages/*,kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm --exclude=render
-pnpm nx run-many -t pkgcheck --projects=packages/*,kernels/* --exclude=render
-pnpm nx release publish --exclude=render,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
+pnpm nx run-many -t build --projects=packages/*,kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
+pnpm nx run-many -t pkgcheck --projects=packages/*,kernels/*
+pnpm nx release publish --exclude=events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
 ```
 
 The job uses npm Trusted Publishing through GitHub OIDC and sets `NPM_CONFIG_PROVENANCE=true`.
@@ -126,8 +126,8 @@ Before publishing, run the same release gates as CI:
 
 ```bash
 pnpm registry:check
-pnpm nx run-many -t build --projects=packages/*,kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm --exclude=render
-pnpm nx run-many -t pkgcheck --projects=packages/*,kernels/* --exclude=render
+pnpm nx run-many -t build --projects=packages/*,kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
+pnpm nx run-many -t pkgcheck --projects=packages/*,kernels/*
 ```
 
 For a local tarball spot-check, inspect the exact filename returned by `pnpm pack`:

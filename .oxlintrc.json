@@ -27,7 +27,6 @@
     "**/content/docs/**",
     "tarballs/**",
     "experiments/**",
-    "packages/render/spike/**",
     "**/*.jscad.js",
     "**/fixtures/scripts/**"
   ],

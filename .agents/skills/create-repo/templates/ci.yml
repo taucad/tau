@@ -17,6 +17,7 @@ jobs:
   preflight:
     runs-on: ubuntu-latest
     outputs:
+      kind: ${{ steps.release.outputs.kind }}
       npm-publish: ${{ steps.release.outputs.npm_publish }}
       version: ${{ steps.release.outputs.version }}
     steps:
@@ -50,12 +51,25 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
         with:
           node-version: '@@CREATE_REPO_node-latest@@'
       - run: pnpm nx run @@CREATE_REPO_slug@@:quality
       - run: node --test tests/ci/ci-release.test.mjs tests/ci/release-attestations.test.mjs
+      - name: Require a Version Plan for release-affecting changes
+        if: needs.preflight.outputs.kind != 'release-pull-request' && needs.preflight.outputs.kind != 'release'
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            pnpm nx release plan:check --base="origin/$BASE_REF" --head=HEAD
+          else
+            pnpm nx release plan:check --base=HEAD~1 --head=HEAD
+          fi
 
   docs-prose:
     needs: preflight

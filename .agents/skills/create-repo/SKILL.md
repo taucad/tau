@@ -140,9 +140,10 @@ tests together.
 
 1. Use one root project with `nx:run-commands` targets, toolchain fingerprints
    in `namedInputs`, and a fan-in `quality` target.
-2. Configure `nx release` with Version Plans and git-inert settings: Nx mutates
-   files; CI owns commits, tags, pushes, registries, and releases. Root and
-   platform packages form one fixed release group.
+2. Configure `nx release` with Version Plans,
+   `adjustSemverBumpsForZeroMajorVersion: false`, and git-inert settings: Nx
+   mutates files; CI owns commits, tags, pushes, registries, and releases. Root
+   and platform packages form one fixed release group.
 3. Copy `prepare-release.mjs`, `ci-release.mjs`, their tests, and the repo-local
    `release-@@CREATE_REPO_slug@@` skill. Keep release policy pure and unit tested.
 4. The sole automatic publish trigger is the exact commit subject

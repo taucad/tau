@@ -212,6 +212,34 @@ function dropGoogleReplayOutputVersion(
   return (toolCalls?.length ?? 0) > 0 ? dropOutputVersion(responseMetadata) : responseMetadata;
 }
 
+/**
+ * Lets LangChain's Responses converter replay a same-provider OpenAI response
+ * from its preserved raw `response_metadata.output`.
+ *
+ * That raw output is the only lossless copy of a reasoning + custom-tool turn:
+ * V1 content drops the reasoning `rs_*` id and the custom-call `ctc_*` item
+ * identity. Keeping `output_version: 'v1'` forces the lossy content-block
+ * converter and OpenAI rejects the orphaned custom call on the next turn.
+ */
+function preferNativeOpenAiResponsesOutput(message: AIMessage): AIMessage {
+  const { response_metadata: responseMetadata } = message;
+  const { output } = responseMetadata as { output?: unknown };
+  if (
+    responseMetadata.output_version !== 'v1' ||
+    responseMetadata.model_provider !== 'openai' ||
+    !Array.isArray(output) ||
+    output.length === 0 ||
+    !output.every((item) => isRecord(item) && typeof item['type'] === 'string')
+  ) {
+    return message;
+  }
+
+  return rebuildAiMessage(message, {
+    content: message.content,
+    responseMetadata: dropOutputVersion(responseMetadata),
+  });
+}
+
 function normalizeContentBlock(block: unknown, targetIsAnthropic: boolean): unknown {
   if (!isRecord(block)) {
     return block;
@@ -715,6 +743,13 @@ function normalizeToolMessageForResponses(message: ToolMessage): ToolMessage {
 }
 
 function normalizeAiMessage(message: AIMessage, targetProvider: ProviderId): BaseMessage {
+  if (targetProvider === 'openai') {
+    const nativeReplay = preferNativeOpenAiResponsesOutput(message);
+    if (nativeReplay !== message) {
+      return nativeReplay;
+    }
+  }
+
   const { content } = message;
 
   if (!Array.isArray(content)) {

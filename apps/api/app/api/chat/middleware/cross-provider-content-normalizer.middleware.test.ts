@@ -4,6 +4,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createCrossProviderContentNormalizerMiddleware } from '#api/chat/middleware/cross-provider-content-normalizer.middleware.js';
 import { invokeWrapModelCall } from '#testing/middleware-testing.utils.js';
 
+const createProviderAiMessage = (fields: Record<string, unknown>): AIMessage =>
+  new AIMessage(fields as unknown as ConstructorParameters<typeof AIMessage>[0]);
+
 describe('createCrossProviderContentNormalizerMiddleware', () => {
   let handler: ReturnType<typeof vi.fn>;
 
@@ -244,13 +247,13 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
         id: 'call_read_1',
         name: 'read_file',
         args: { targetFile: 'main.ts' },
-        type: 'tool_call',
+        type: 'tool_call' as const,
       },
     ];
 
     it('strips Anthropic tool_use blocks for vertexai while preserving tool_calls', async () => {
       const middleware = createCrossProviderContentNormalizerMiddleware('vertexai');
-      const aiMessage = new AIMessage({
+      const aiMessage = createProviderAiMessage({
         content: [
           { type: 'text', text: 'Reading the file.' },
           {
@@ -274,7 +277,7 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
 
     it('strips V1 tool_call family blocks for vertexai while preserving tool_calls', async () => {
       const middleware = createCrossProviderContentNormalizerMiddleware('vertexai');
-      const aiMessage = new AIMessage({
+      const aiMessage = createProviderAiMessage({
         content: [
           { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: { targetFile: 'main.ts' } },
           { type: 'tool_call_chunk', id: 'call_read_1', name: 'read_file', args: '{"target' },
@@ -294,7 +297,7 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
 
     it('strips v1 tool_call blocks for vertexai without LangChain constructor re-adding them', async () => {
       const middleware = createCrossProviderContentNormalizerMiddleware('vertexai');
-      const aiMessage = new AIMessage({
+      const aiMessage = createProviderAiMessage({
         content: [
           { type: 'text', text: 'Reading the file.' },
           { type: 'tool_call', id: 'call_read_1', name: 'read_file', args: { targetFile: 'main.ts' } },
@@ -316,7 +319,7 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
 
     it('drops v1 output metadata during vertexai legacy cleanup so constructor tool blocks stay stripped', async () => {
       const middleware = createCrossProviderContentNormalizerMiddleware('vertexai');
-      const aiMessage = new AIMessage({
+      const aiMessage = createProviderAiMessage({
         content: [],
         // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
         response_metadata: { model_provider: 'anthropic' },
@@ -367,7 +370,7 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
 
     it('maps thinking and strips tool_use for vertexai in one pass (mixed reasoning + tool)', async () => {
       const middleware = createCrossProviderContentNormalizerMiddleware('vertexai');
-      const aiMessage = new AIMessage({
+      const aiMessage = createProviderAiMessage({
         content: [
           { type: 'thinking', thinking: 'plan', signature: 'sig' },
           {
@@ -392,7 +395,7 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
     it('heals empty tool_call args from tool_calls for anthropic target', async () => {
       const middleware = createCrossProviderContentNormalizerMiddleware('anthropic');
       const healedArgs = { targetFile: 'main.ts' };
-      const aiMessage = new AIMessage({
+      const aiMessage = createProviderAiMessage({
         content: [{ type: 'tool_call', id: 'call_read_1', name: 'read_file', args: '' }],
         // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
         tool_calls: [{ id: 'call_read_1', name: 'read_file', args: healedArgs, type: 'tool_call' }],
@@ -414,7 +417,7 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
     it('dedupes repeated native tool_use ids for anthropic target', async () => {
       const middleware = createCrossProviderContentNormalizerMiddleware('anthropic');
       const healedArgs = { targetFile: 'main.ts' };
-      const aiMessage = new AIMessage({
+      const aiMessage = createProviderAiMessage({
         content: [
           { type: 'text', text: 'Reading.' },
           { type: 'tool_use', id: 'call_read_1', name: 'read_file', input: '' },
@@ -837,7 +840,7 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
     it('heals empty tool_call args from tool_calls for xai target', async () => {
       const middleware = createCrossProviderContentNormalizerMiddleware('xai');
       const healedArgs = { targetFile: 'main.ts' };
-      const aiMessage = new AIMessage({
+      const aiMessage = createProviderAiMessage({
         content: [{ type: 'tool_call', id: 'call_read_1', name: 'read_file', args: '' }],
         // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
         response_metadata: { output_version: 'v1', model_provider: 'openai' },
@@ -904,7 +907,7 @@ describe('createCrossProviderContentNormalizerMiddleware', () => {
 
     it('leaves V1 assistant message without text blocks untouched for openai target', async () => {
       const middleware = createCrossProviderContentNormalizerMiddleware('openai');
-      const aiMessage = new AIMessage({
+      const aiMessage = createProviderAiMessage({
         content: [{ type: 'tool_call', id: 'call_read_1', name: 'read_file', args: { targetFile: 'main.ts' } }],
         // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
         response_metadata: { output_version: 'v1', model_provider: 'anthropic' },

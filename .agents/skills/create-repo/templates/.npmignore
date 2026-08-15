@@ -1,0 +1,9 @@
+*
+!dist/
+!dist/**
+!README.md
+!CHANGELOG.md
+!BREAKING_CHANGES.md
+!NOTICE
+!license
+!package.json

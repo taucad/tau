@@ -1,0 +1,334 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'publish-main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      npm-publish: ${{ steps.release.outputs.npm_publish }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            git diff --name-only --diff-filter=ACDMRT "origin/${{ github.base_ref }}...HEAD" > /tmp/changed-files
+          else
+            git diff-tree --no-commit-id --name-only --diff-filter=ACDMRT -r HEAD > /tmp/changed-files
+          fi
+          node scripts/ci-release.mjs \
+            --event "$EVENT_NAME" \
+            --ref "$REF_NAME" \
+            --sha "$SOURCE_SHA" \
+            --package-version "$(node -p "require('./package.json').version")" \
+            --subject "$(git log -1 --pretty=%s)" \
+            --changed-files-file /tmp/changed-files
+
+  quality:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: '@@CREATE_REPO_node-latest@@'
+      - run: pnpm nx run @@CREATE_REPO_slug@@:quality
+      - run: node --test tests/ci/ci-release.test.mjs tests/ci/release-attestations.test.mjs
+
+  docs-prose:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: '@@CREATE_REPO_node-latest@@'
+      - run: pnpm nx run @@CREATE_REPO_slug@@:docs-prose
+
+  node:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['@@CREATE_REPO_node-floor@@', '@@CREATE_REPO_node-latest@@']
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: ${{ matrix.node }}
+      - run: pnpm nx run @@CREATE_REPO_slug@@:test
+
+  native:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            gpu-setup: '@@CREATE_REPO_linux-gpu-setup@@'
+            artifact: linux-x64-gnu
+          - os: macos-latest
+            gpu-setup: '@@CREATE_REPO_macos-gpu-setup@@'
+            artifact: darwin-arm64
+          - os: windows-latest
+            gpu-setup: '@@CREATE_REPO_windows-gpu-setup@@'
+            artifact: win32-x64-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: '@@CREATE_REPO_node-latest@@'
+      - name: Configure software GPU
+        shell: bash
+        run: ${{ matrix.gpu-setup }}
+      - name: Test and build native candidate
+        shell: bash
+        run: '@@CREATE_REPO_native-test-build-command@@'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-${{ matrix.artifact }}
+          path: candidate-native/${{ matrix.artifact }}/*.tgz
+          if-no-files-found: error
+
+  candidate:
+    needs: [preflight, quality, docs-prose, node, native]
+    runs-on: ubuntu-latest
+    outputs:
+      filename: ${{ steps.pack.outputs.filename }}
+      integrity: ${{ steps.pack.outputs.integrity }}
+      version: ${{ steps.pack.outputs.version }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: '@@CREATE_REPO_node-latest@@'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: native-*
+          path: candidate
+          merge-multiple: true
+      - run: '@@CREATE_REPO_candidate-assemble-command@@'
+      - id: pack
+        shell: bash
+        run: |
+          mkdir -p candidate
+          npm pack --ignore-scripts --pack-destination candidate
+          node scripts/candidate-manifest.mjs candidate
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: npm-candidate
+          path: candidate/
+          if-no-files-found: error
+
+  consumer:
+    needs: candidate
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['@@CREATE_REPO_node-floor@@', '@@CREATE_REPO_node-latest@@']
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: npm-candidate
+          path: candidate
+      - run: '@@CREATE_REPO_clean-room-consumer-command@@'
+
+  browser:
+    needs: candidate
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: '@@CREATE_REPO_node-latest@@'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: npm-candidate
+          path: candidate
+      - run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+      - run: '@@CREATE_REPO_browser-candidate-command@@'
+        env:
+          BROWSER: ${{ matrix.browser }}
+
+  benchmark:
+    if: github.event_name == 'pull_request'
+    needs: candidate
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: '@@CREATE_REPO_node-latest@@'
+      - run: '@@CREATE_REPO_same-runner-benchmark-command@@'
+
+  security:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: '@@CREATE_REPO_node-latest@@'
+      - run: '@@CREATE_REPO_security-command@@'
+
+  publish:
+    if: needs.preflight.outputs.npm-publish == 'true'
+    needs: [preflight, candidate, consumer, browser, security]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: npm-candidate
+          path: candidate
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '@@CREATE_REPO_node-latest@@'
+          registry-url: https://registry.npmjs.org
+      - name: Publish exact candidates with provenance
+        shell: bash
+        run: |
+          node -e "for (const p of require('./candidate/manifest.json').packages) console.log([p.name,p.version,p.filename,p.integrity].join('\t'))" > /tmp/packages
+          while IFS=$'\t' read -r name version filename integrity; do
+            published="$(npm view "$name@$version" dist.integrity 2>/dev/null || true)"
+            if [[ -n "$published" ]]; then
+              [[ "$published" == "$integrity" ]]
+              continue
+            fi
+            npm publish "candidate/$filename" --access public --provenance
+          done < /tmp/packages
+
+  registry-verify:
+    if: always() && needs.preflight.outputs.npm-publish == 'true' && needs.publish.result == 'success'
+    needs: [preflight, candidate, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: npm-candidate
+          path: candidate
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '@@CREATE_REPO_node-latest@@'
+          registry-url: https://registry.npmjs.org
+      - name: Verify registry bytes and provenance
+        shell: bash
+        run: |
+          node -e "for (const p of require('./candidate/manifest.json').packages) console.log([p.name,p.version,p.integrity].join('\t'))" > /tmp/packages
+          while IFS=$'\t' read -r name version integrity; do
+            [[ "$(npm view "$name@$version" dist.integrity)" == "$integrity" ]]
+          done < /tmp/packages
+          workspace="$PWD"
+          directory="$(mktemp -d)"
+          cd "$directory"
+          npm init --yes >/dev/null
+          mapfile -t package_specs < <(node -e "for (const p of require('$workspace/candidate/manifest.json').packages) console.log(p.name+'@'+p.version)")
+          npm install --force --ignore-scripts "${package_specs[@]}"
+          npm audit signatures --json --include-attestations > /tmp/npm-audit-signatures.json
+          cd "$workspace"
+          node scripts/verify-release-attestations.mjs \
+            /tmp/npm-audit-signatures.json \
+            candidate/manifest.json \
+            '${{ github.sha }}' \
+            '${{ github.run_id }}' \
+            '${{ github.run_attempt }}'
+      - name: Record the verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag='v${{ needs.preflight.outputs.version }}'
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --target '${{ github.sha }}' --generate-notes
+
+  ci-gate:
+    if: always()
+    needs:
+      [
+        preflight,
+        quality,
+        docs-prose,
+        node,
+        native,
+        candidate,
+        consumer,
+        browser,
+        benchmark,
+        security,
+        publish,
+        registry-verify,
+      ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert required job results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          PUBLISH: ${{ needs.preflight.outputs.npm-publish }}
+        run: |
+          node <<'NODE'
+          const needs = JSON.parse(process.env.RESULTS);
+          const required = ['preflight', 'quality', 'docs-prose', 'node', 'native', 'candidate', 'consumer', 'browser', 'security'];
+          if (needs.preflight?.result === 'success' && process.env.PUBLISH === 'true') {
+            required.push('publish', 'registry-verify');
+          }
+          const failures = required.filter((name) => needs[name]?.result !== 'success');
+          const benchmark = needs.benchmark?.result;
+          if (!['success', 'skipped'].includes(benchmark)) failures.push('benchmark');
+          if (failures.length) throw new Error(`required jobs did not pass: ${failures.join(', ')}`);
+          NODE

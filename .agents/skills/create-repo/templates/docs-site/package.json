@@ -1,0 +1,33 @@
+{
+  "name": "@@CREATE_REPO_slug@@-docs",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "generate:source": "fumadocs-mdx",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "fumadocs-mdx && tsc --noEmit"
+  },
+  "dependencies": {
+    "@@CREATE_REPO_npm-name@@": "file:..",
+    "fumadocs-core": "@@CREATE_REPO_fumadocs-core-version@@",
+    "fumadocs-mdx": "@@CREATE_REPO_fumadocs-mdx-version@@",
+    "fumadocs-typescript": "@@CREATE_REPO_fumadocs-typescript-version@@",
+    "fumadocs-ui": "@@CREATE_REPO_fumadocs-ui-version@@",
+    "next": "@@CREATE_REPO_next-version@@",
+    "react": "@@CREATE_REPO_react-version@@",
+    "react-dom": "@@CREATE_REPO_react-version@@"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "@@CREATE_REPO_tailwind-version@@",
+    "@types/node": "@@CREATE_REPO_types-node-version@@",
+    "@types/react": "@@CREATE_REPO_types-react-version@@",
+    "@types/react-dom": "@@CREATE_REPO_types-react-dom-version@@",
+    "tailwindcss": "@@CREATE_REPO_tailwind-version@@",
+    "typescript": "@@CREATE_REPO_typescript-version@@",
+    "vitest": "@@CREATE_REPO_vitest-version@@"
+  }
+}

@@ -61,6 +61,7 @@ Project skills in `.agent/skills/` provide guided workflows. Read the relevant `
 | `create-research`       | Writing or updating `docs/research/*.md` investigation documents                           |
 | `adding-tools`          | Adding new tools to the AI chat system                                                     |
 | `create-package`        | Scaffolding new `@taucad/*` packages via workspace generator                               |
+| `create-repo`           | Bootstrapping, retrofitting, or auditing standalone taucad repositories                    |
 | `create-vite-plugin`    | Adding a Vite plugin to `@taucad/vite`                                                     |
 | `add-monaco-language`   | Adding Monaco + Shiki highlighting for a new file extension / TextMate grammar             |
 | `new-kernel`            | Adding a first-party CAD kernel to `@taucad/runtime`                                       |

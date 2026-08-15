@@ -1,0 +1,63 @@
+{
+  "name": "@@CREATE_REPO_slug@@",
+  "$schema": "./node_modules/nx/schemas/project-schema.json",
+  "root": ".",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": { "command": "pnpm tsdown" }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": { "command": "pnpm vitest run --coverage" }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": { "command": "pnpm tsc --noEmit" }
+    },
+    "check:dead-code": {
+      "executor": "nx:run-commands",
+      "options": { "command": "pnpm run check:dead-code" }
+    },
+    "check:size": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": { "command": "pnpm run check:size" }
+    },
+    "docs": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": { "command": "pnpm run docs:build && pnpm run docs:test" }
+    },
+    "format": {
+      "executor": "nx:run-commands",
+      "options": { "command": "pnpm run format:check" }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": { "command": "pnpm run lint" }
+    },
+    "prose": {
+      "executor": "nx:run-commands",
+      "options": { "command": "pnpm run prose" }
+    },
+    "workflows": {
+      "executor": "nx:run-commands",
+      "options": { "command": "pnpm run workflows" }
+    },
+    "validate-pack": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": { "command": "node scripts/validate-pack.mjs" }
+    },
+    "quality": {
+      "executor": "nx:noop",
+      "dependsOn": ["build", "check:size", "test", "typecheck", "validate-pack"]
+    },
+    "docs-prose": {
+      "executor": "nx:noop",
+      "dependsOn": ["check:dead-code", "docs", "format", "lint", "prose", "workflows"]
+    }
+  }
+}

@@ -219,6 +219,41 @@ function extractRegexGroup(message: string, pattern: RegExp): string | undefined
   return match?.[1];
 }
 
+/**
+ * First-party ledger exhaustion (billing B2). The marker + µ$ amounts survive
+ * the agent stream's error channel inside `error.message` (only the string
+ * crosses `toUIMessageStream`); this re-extracts them into the friendly copy
+ * `chat-error-credits.tsx` renders.
+ */
+function normalizeInsufficientCreditsError(
+  rawMessage: string,
+): Pick<ChatError, 'category' | 'code' | 'message' | 'raw'> | undefined {
+  if (!rawMessage.includes('INSUFFICIENT_CREDITS')) {
+    return undefined;
+  }
+  const balanceMicro = extractRegexGroup(rawMessage, /balanceMicro=(-?\d+)/);
+  const requiredMicro = extractRegexGroup(rawMessage, /requiredMicro=(-?\d+)/);
+  const formatMicro = (value: string | undefined): string | undefined => {
+    if (value === undefined) {
+      return undefined;
+    }
+    const micro = Number(value);
+    return Number.isFinite(micro) ? (micro / 1_000_000).toFixed(2) : undefined;
+  };
+  const balance = formatMicro(balanceMicro);
+  const required = formatMicro(requiredMicro);
+  const details =
+    balance !== undefined && required !== undefined
+      ? `Your credit balance is $${balance} and this request needs about $${required}. Add credits to continue.`
+      : 'Your credit balance is too low for this request. Add credits to continue.';
+  return {
+    category: errorCategory.credits,
+    code: 'INSUFFICIENT_CREDITS',
+    message: details,
+    raw: rawMessage,
+  };
+}
+
 function normalizeTauImplementationBugError(
   error: unknown,
   rawMessage: string,
@@ -338,8 +373,15 @@ export function normalizeError(error: unknown): string {
     category = errorCategory.cancelled;
   }
 
+  const insufficientCreditsError = normalizeInsufficientCreditsError(rawMessage);
+  if (insufficientCreditsError && category !== errorCategory.cancelled) {
+    category = insufficientCreditsError.category;
+    code = insufficientCreditsError.code;
+    message = insufficientCreditsError.message;
+  }
+
   const tauImplementationBugError = normalizeTauImplementationBugError(error, rawMessage);
-  if (tauImplementationBugError && category !== errorCategory.cancelled) {
+  if (tauImplementationBugError && category !== errorCategory.cancelled && code === undefined) {
     category = tauImplementationBugError.category;
     code = tauImplementationBugError.code;
     message = tauImplementationBugError.message;

@@ -603,3 +603,43 @@ describe('normalizeError', () => {
     });
   });
 });
+
+describe('first-party billing errors (B2)', () => {
+  it('should extract µ$ amounts from the INSUFFICIENT_CREDITS marker into friendly copy', () => {
+    const marker =
+      'INSUFFICIENT_CREDITS: Your credit balance is $0.12 and this request needs about $1.11. Add credits to continue. balanceMicro=123000 requiredMicro=1111500';
+
+    const result = parseNormalizedError(normalizeError(new Error(marker)));
+
+    expect(result.category).toBe('credits');
+    expect(result.code).toBe('INSUFFICIENT_CREDITS');
+    expect(result.message).toBe(
+      'Your credit balance is $0.12 and this request needs about $1.11. Add credits to continue.',
+    );
+  });
+
+  it('should survive the stream error channel where only the message string remains', () => {
+    const marker = 'INSUFFICIENT_CREDITS: out of credits balanceMicro=-5000000 requiredMicro=200000';
+
+    const result = parseNormalizedError(normalizeError(marker));
+
+    expect(result.category).toBe('credits');
+    expect(result.message).toContain('$-5.00');
+  });
+
+  it('should fall back to generic credits copy when the marker carries no amounts', () => {
+    const result = parseNormalizedError(normalizeError(new Error('INSUFFICIENT_CREDITS: exhausted')));
+
+    expect(result.category).toBe('credits');
+    expect(result.message).toBe('Your credit balance is too low for this request. Add credits to continue.');
+  });
+
+  it('should map first-party 402 statuses to the credits category (S35)', () => {
+    const paymentRequired = Object.assign(new Error('Payment Required'), { status: 402 });
+
+    const result = parseNormalizedError(normalizeError(paymentRequired));
+
+    expect(result.category).toBe('credits');
+    expect(result.httpStatus).toBe(402);
+  });
+});

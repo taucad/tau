@@ -52,7 +52,7 @@ describe('autonomous preview invalidation', () => {
           projectId,
           backend: 'memory',
           storageRootKey: 'memory:parameter-update-project',
-          providerBasePath: `/projects/${projectId}`,
+          providerBasePath: `/${projectId}`,
         },
       ],
       roots: [],

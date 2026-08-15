@@ -474,7 +474,7 @@ test.describe('Section view contour fill regression', () => {
       const listener = backend === 'webgpu' ? attachWebGpuValidationListener(page) : undefined;
 
       try {
-        await page.goto(`/projects/jscad_section_cap_fixture/preview?graphicsBackend=${backend}`);
+        await page.goto(`/examples/jscad_section_cap_fixture?graphicsBackend=${backend}`);
         await expect(page.getByRole('img', { name: /3d model preview/i })).toBeVisible({ timeout: 60_000 });
         await expect(page.getByTestId('bbox-viewer')).toBeVisible({ timeout: 60_000 });
         await page.waitForFunction(() =>
@@ -507,7 +507,7 @@ test.describe('Section view contour fill regression', () => {
       const listener = backend === 'webgpu' ? attachWebGpuValidationListener(page) : undefined;
 
       try {
-        await page.goto(`/projects/jscad_cube_cylinder_section_fixture/preview?graphicsBackend=${backend}`);
+        await page.goto(`/examples/jscad_cube_cylinder_section_fixture?graphicsBackend=${backend}`);
         await expect(page.getByRole('img', { name: /3d model preview/i })).toBeVisible({ timeout: 60_000 });
         await expect(page.getByTestId('bbox-viewer')).toBeVisible({ timeout: 60_000 });
         await page.waitForFunction(() =>
@@ -540,7 +540,7 @@ test.describe('Section view contour fill regression', () => {
       const listener = backend === 'webgpu' ? attachWebGpuValidationListener(page) : undefined;
 
       try {
-        await page.goto(`/projects/proj_flower_attachment_section_outline_fixture/preview?graphicsBackend=${backend}`);
+        await page.goto(`/examples/proj_flower_attachment_section_outline_fixture?graphicsBackend=${backend}`);
         await expect(page.getByRole('img', { name: /3d model preview/i })).toBeVisible({ timeout: 60_000 });
         await expect(page.getByTestId('bbox-viewer')).toBeVisible({ timeout: 60_000 });
         await page.waitForFunction(() =>
@@ -597,7 +597,7 @@ test.describe('Section view contour fill regression', () => {
       const listener = backend === 'webgpu' ? attachWebGpuValidationListener(page) : undefined;
 
       try {
-        await page.goto(`/projects/jscad_non_manifold_section_fixture/preview?graphicsBackend=${backend}`);
+        await page.goto(`/examples/jscad_non_manifold_section_fixture?graphicsBackend=${backend}`);
         await expect(page.getByRole('img', { name: /3d model preview/i })).toBeVisible({ timeout: 60_000 });
         await expect(page.getByTestId('bbox-viewer')).toBeVisible({ timeout: 60_000 });
         await page.waitForFunction(() =>

@@ -1,5 +1,10 @@
 import { authoringTypeMaps, geospecTypes } from '@taucad/api-extractor/authoring-types';
-import { jscadModelingTypes, kernelTypePackageMaps, manifoldTypes } from '@taucad/api-extractor/kernel-types';
+import {
+  jscadModelingTypes,
+  kernelTypePackageMaps,
+  manifoldTypes,
+  opencascadeTypes,
+} from '@taucad/api-extractor/kernel-types';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { populateBundledTypesMount } from '@taucad/filesystem/bundled-types-mount';
 import { describe, expect, it } from 'vitest';
@@ -21,7 +26,7 @@ const createMemoryFileService = async (): Promise<WorkspaceFileService> => {
 };
 
 describe('bundled kernel types mount', () => {
-  it('should mount the generated JSCAD package and its scoped subpath modules', async () => {
+  it('should mount the generated packages under their canonical package roots', async () => {
     const fileService = await createMemoryFileService();
     try {
       const payload = [...kernelTypePackageMaps, ...authoringTypeMaps].flatMap((typesMap) =>
@@ -43,6 +48,11 @@ describe('bundled kernel types mount', () => {
       await expect(fileService.readFile('/node_modules/manifold-3d/manifoldCAD/index.d.ts', 'utf8')).resolves.toBe(
         manifoldTypes['manifold-3d/manifoldCAD'],
       );
+      await expect(fileService.readFile('/node_modules/libcascade/index.d.ts', 'utf8')).resolves.toBe(
+        opencascadeTypes['libcascade'],
+      );
+      await expect(fileService.exists('/node_modules/opencascade/index.d.ts')).resolves.toBe(false);
+      await expect(fileService.exists('/node_modules/opencascade.js/index.d.ts')).resolves.toBe(false);
 
       const geospecPackage = geospecTypes['geospec'];
       const geospecRunnerWeb = geospecPackage?.files?.['runner/web/index.d.ts'];

@@ -91,13 +91,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: '@@CREATE_REPO_linux-runner@@'
             gpu-setup: '@@CREATE_REPO_linux-gpu-setup@@'
             artifact: linux-x64-gnu
-          - os: macos-latest
+          - os: '@@CREATE_REPO_macos-runner@@'
             gpu-setup: '@@CREATE_REPO_macos-gpu-setup@@'
             artifact: darwin-arm64
-          - os: windows-latest
+          - os: '@@CREATE_REPO_windows-runner@@'
             gpu-setup: '@@CREATE_REPO_windows-gpu-setup@@'
             artifact: win32-x64-msvc
     runs-on: ${{ matrix.os }}

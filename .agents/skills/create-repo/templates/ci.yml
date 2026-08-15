@@ -17,6 +17,7 @@ jobs:
   preflight:
     runs-on: ubuntu-latest
     outputs:
+      kind: ${{ steps.release.outputs.kind }}
       npm-publish: ${{ steps.release.outputs.npm_publish }}
       version: ${{ steps.release.outputs.version }}
     steps:
@@ -29,10 +30,10 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref }}
-          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           if [[ "$EVENT_NAME" == pull_request ]]; then
-            git diff --name-only --diff-filter=ACDMRT "origin/$BASE_REF...HEAD" > /tmp/changed-files
+            git diff --name-only --diff-filter=ACDMRT "origin/$BASE_REF...$SOURCE_SHA" > /tmp/changed-files
           else
             git diff-tree --no-commit-id --name-only --diff-filter=ACDMRT -r HEAD > /tmp/changed-files
           fi
@@ -41,7 +42,7 @@ jobs:
             --ref "$REF_NAME" \
             --sha "$SOURCE_SHA" \
             --package-version "$(node -p "require('./package.json').version")" \
-            --subject "$(git log -1 --pretty=%s)" \
+            --subject "$(git log -1 --pretty=%s "$SOURCE_SHA")" \
             --changed-files-file /tmp/changed-files
 
   quality:
@@ -50,12 +51,36 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
         with:
           node-version: '@@CREATE_REPO_node-latest@@'
       - run: pnpm nx run @@CREATE_REPO_slug@@:quality
       - run: node --test tests/ci/ci-release.test.mjs tests/ci/release-attestations.test.mjs
+      - name: Require a Version Plan for release-affecting changes
+        if: needs.preflight.outputs.kind != 'release-pull-request' && needs.preflight.outputs.kind != 'release'
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            pnpm nx release plan:check --base="origin/$BASE_REF" --head=HEAD
+          elif [[ "$EVENT_NAME" == push ]]; then
+            if [[ "$BEFORE_SHA" == 0000000000000000000000000000000000000000 ]]; then
+              echo "::error::Cannot validate Version Plans without a previous push SHA"
+              exit 1
+            fi
+            git merge-base --is-ancestor "$BEFORE_SHA" HEAD || {
+              echo "::error::Cannot validate Version Plans across a force-push"
+              exit 1
+            }
+            pnpm nx release plan:check --base="$BEFORE_SHA" --head=HEAD
+          else
+            pnpm nx release plan:check --base=HEAD~1 --head=HEAD
+          fi
 
   docs-prose:
     needs: preflight

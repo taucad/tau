@@ -41,7 +41,7 @@ Applicability:
 | ---- | ---------------------------------------------------------------------------------------------------------------- |
 | R    | One root Nx project uses `nx:run-commands`; `quality` fans into every gate.                                      |
 | R    | `namedInputs` include runtime and native toolchain fingerprints.                                                 |
-| R    | Nx Release uses Version Plans and git-inert settings.                                                            |
+| R    | Nx Release uses Version Plans, standard pre-1.0 SemVer bumps, and git-inert settings.                            |
 | R    | Version-plan checks ignore only tests, docs, and governance paths that cannot change the package.                |
 | R    | `prepare-release.mjs` validates requested versus planned version.                                                |
 | R    | Release policy is a pure module with unit tests for PR, main, manual, and malformed release commits.             |

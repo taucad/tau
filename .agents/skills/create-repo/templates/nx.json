@@ -15,6 +15,7 @@
     "projectsRelationship": "fixed",
     "version": {
       "specifierSource": "version-plans",
+      "adjustSemverBumpsForZeroMajorVersion": false,
       "preVersionCommand": "pnpm nx run @@CREATE_REPO_slug@@:quality"
     },
     "versionPlans": {

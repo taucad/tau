@@ -31,6 +31,8 @@ Reject other arguments.
 5. Require changes only to `package.json`, `pnpm-lock.yaml`, `CHANGELOG.md`, and
    consumed `.nx/version-plans/*.md` files.
 6. Run `pnpm nx run @@CREATE_REPO_slug@@:quality` and `git diff --check`.
+   The dry-run proves the Version Plan before generation; the release policy
+   validates that the generated commit consumes it.
 7. For submit, commit exactly `chore(release): @@CREATE_REPO_slug@@ v<version>`, push, and
    open a pull request describing the package, version, plan, and validations.
 

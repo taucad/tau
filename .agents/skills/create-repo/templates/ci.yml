@@ -138,6 +138,9 @@ jobs:
           pattern: native-*
           path: candidate
           merge-multiple: true
+      - name: Configure Linux host
+        shell: bash
+        run: '@@CREATE_REPO_linux-gpu-setup@@'
       - run: '@@CREATE_REPO_candidate-assemble-command@@'
       - id: pack
         shell: bash
@@ -169,6 +172,9 @@ jobs:
         with:
           name: npm-candidate
           path: candidate
+      - name: Configure Linux host
+        shell: bash
+        run: '@@CREATE_REPO_linux-gpu-setup@@'
       - run: '@@CREATE_REPO_clean-room-consumer-command@@'
 
   browser:

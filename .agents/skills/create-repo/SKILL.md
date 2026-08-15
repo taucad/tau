@@ -149,7 +149,9 @@ the npm Trusted Publisher identity.
 
 1. `preflight` derives immutable release metadata once.
 2. Quality and host jobs use SHA-pinned actions, least privilege, frozen
-   installs, and checksum-pinned standalone tools from `DEPS.json`.
+   installs, and checksum-pinned standalone tools from `DEPS.json`. Run the
+   bound Linux host setup before candidate or consumer commands that execute
+   the runtime.
 3. Build once, assemble one candidate set, and test those exact tarballs in
    every clean consumer job. Publish platform packages before the root package.
    Prefix local `npm/` package paths with `./` so npm cannot resolve them as

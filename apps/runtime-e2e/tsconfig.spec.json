@@ -2,10 +2,12 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./out-tsc/spec",
-    "types": ["node", "vitest/importMeta", "vitest"],
+    "noEmit": true,
+    "types": ["node", "vite/client", "vitest/importMeta", "vitest"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "target": "ESNext",
+    "allowImportingTsExtensions": true,
     "paths": {
       "#*": ["./src/*"]
     }

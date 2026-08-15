@@ -4,11 +4,15 @@
   "description": "Cross-package runtime regression + benchmark backbone (fixture-driven tests over tau-examples, runtime, and geospec).",
   "type": "module",
   "private": true,
+  "license": "Apache-2.0",
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
   "devDependencies": {
+    "@taucad/api-extractor": "workspace:*",
+    "@taucad/filesystem": "workspace:*",
+    "@taucad/fs-bridge": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/tau-examples": "workspace:*",
     "geospec": "workspace:*"

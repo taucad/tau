@@ -72,7 +72,7 @@ const { values } = parseArgs({
     libraryTracing: { type: 'string', default: 'off' },
     operation: { type: 'string', default: 'export' },
     'tessellation-instancing': { type: 'string' },
-    'with-brep-edges': { type: 'boolean', default: false },
+    'include-edges': { type: 'boolean', default: false },
     linearTolerance: { type: 'string', default: '0.01' },
     angularTolerance: { type: 'string', default: '20' },
     cpuProfile: { type: 'boolean', default: false },
@@ -104,7 +104,7 @@ ${c.dim}Options:${c.reset}
       ${c.cyan}--libraryTracing${c.reset} <v> Replicad library tracing: off (default) | summary | per-call
       ${c.cyan}--operation${c.reset} <v>     Operation to time: export (default) | render
       ${c.cyan}--tessellation-instancing${c.reset} <v> Replicad toggle: true | false (default: kernel default)
-      ${c.cyan}--with-brep-edges${c.reset} Include Replicad BRep edge tessellation in the benchmark
+      ${c.cyan}--include-edges${c.reset}    Request edge content in the benchmark
       ${c.cyan}--linearTolerance${c.reset} <n> Render/export linear tolerance in mm (default: 0.01)
       ${c.cyan}--angularTolerance${c.reset} <n> Render/export angular tolerance in degrees (default: 20)
       ${c.cyan}--cpuProfile${c.reset}        Enable V8 CPU profiling for per-function timing breakdown
@@ -366,7 +366,7 @@ async function runSuite(): Promise<void> {
   const operation = resolveOperationOption();
   const tessellation = resolveTessellationOption();
   const tessellationInstancing = resolveTessellationInstancingOption();
-  const withBrepEdges = values['with-brep-edges'];
+  const includeEdges = values['include-edges'];
 
   const provenance = loadProvenance();
   const wasmOption = resolveWasmOption();
@@ -389,7 +389,7 @@ async function runSuite(): Promise<void> {
     'Tessellation Instancing',
     tessellationInstancing === undefined ? 'kernel default' : tessellationInstancing ? 'enabled' : 'disabled',
   );
-  label('BRep Edges', withBrepEdges ? 'enabled' : 'disabled');
+  label('Edge Content', includeEdges ? 'enabled' : 'disabled');
   label('WASM', typeof wasmOption === 'string' ? wasmOption : 'custom');
   if (typeof wasmOption === 'string' && wasmOption === 'auto') {
     label('Auto', 'kernel will pick multi when SAB available, else single');
@@ -407,7 +407,7 @@ async function runSuite(): Promise<void> {
     operation,
     tessellation,
     tessellationInstancing,
-    withBrepEdges,
+    includeEdges,
     wasm: wasmOption,
     onProgress: onBenchmarkProgress,
     onIterationProgress: onBenchmarkIterationProgress,

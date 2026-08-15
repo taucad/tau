@@ -99,8 +99,8 @@ export type BenchmarkRunnerOptions = {
   tessellation?: BenchmarkTessellation;
   /** Replicad tessellation instancing toggle for direct legacy-vs-instanced comparisons. */
   tessellationInstancing?: boolean;
-  /** Include Replicad BRep edge extraction in benchmarked render/export paths. */
-  withBrepEdges?: boolean;
+  /** Request edge content in benchmarked render/export paths. */
+  includeEdges?: boolean;
   /** WASM variant or custom config. Defaults to `'auto'` (multi when supported, else single). */
   wasm?: 'auto' | 'single' | 'multi' | { wasmUrl: string; wasmBindingsUrl: string };
   onProgress?: (completed: number, total: number, caseName: string) => void;
@@ -218,7 +218,7 @@ function extractLibrarySummary(telemetryBatches: TelemetryEntry[][]): TraceSumma
 // Runner
 // =============================================================================
 
-const basePath = '/projects/test';
+const projectRoot = '/';
 
 /**
  * Runs a set of benchmark cases against the Replicad kernel, capturing telemetry and computing statistics.
@@ -239,7 +239,7 @@ export async function runBenchmarks(
     operation = 'export',
     tessellation,
     tessellationInstancing,
-    withBrepEdges,
+    includeEdges = false,
     wasm = 'auto',
     onProgress,
     onIterationProgress,
@@ -259,7 +259,7 @@ export async function runBenchmarks(
 
     const absoluteFiles: Record<string, string> = {};
     for (const [filename, content] of Object.entries(benchCase.files)) {
-      absoluteFiles[`${basePath}/${filename}`] = content;
+      absoluteFiles[`${projectRoot}${filename}`] = content;
     }
 
     const kernelOptions = {
@@ -267,7 +267,6 @@ export async function runBenchmarks(
       libraryTracing,
       wasm,
       ...(tessellationInstancing === undefined ? {} : { tessellationInstancing }),
-      withBrepEdges,
     };
     const renderOptions = tessellation ? { tessellation } : undefined;
 
@@ -323,8 +322,9 @@ export async function runBenchmarks(
       let failureMessage: string | undefined;
       if (operation === 'render') {
         const renderResult = await client.render({
-          source: { path: `${basePath}/${benchCase.mainFile}` },
+          source: { path: `${projectRoot}${benchCase.mainFile}` },
           parameters: {},
+          content: { includeEdges },
           renderOptions,
         });
         if (renderResult.superseded) {
@@ -334,8 +334,9 @@ export async function runBenchmarks(
         }
       } else {
         const exportResult = await client.export('glb', {
-          source: { path: { filename: benchCase.mainFile, path: basePath } },
+          source: { path: `${projectRoot}${benchCase.mainFile}` },
           parameters: {},
+          content: { includeEdges },
           ...(renderOptions === undefined ? {} : { exportOptions: renderOptions }),
         });
         if (!exportResult.success) {

@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "playwright.config.ts",
+    "specs/**/*.ts",
+    "support/**/*.ts",
+    "support/**/*.tsx",
+    "apps/electron/workspace/**/*.ts"
+  ],
+  "exclude": ["apps/**/.next/**", "apps/**/.next-*/**", "apps/**/dist/**", "apps/**/dist-*/**"]
+}

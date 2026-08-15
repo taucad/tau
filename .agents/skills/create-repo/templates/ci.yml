@@ -91,13 +91,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: '@@CREATE_REPO_linux-runner@@'
             gpu-setup: '@@CREATE_REPO_linux-gpu-setup@@'
             artifact: linux-x64-gnu
-          - os: macos-latest
+          - os: '@@CREATE_REPO_macos-runner@@'
             gpu-setup: '@@CREATE_REPO_macos-gpu-setup@@'
             artifact: darwin-arm64
-          - os: windows-latest
+          - os: '@@CREATE_REPO_windows-runner@@'
             gpu-setup: '@@CREATE_REPO_windows-gpu-setup@@'
             artifact: win32-x64-msvc
     runs-on: ${{ matrix.os }}
@@ -179,12 +179,19 @@ jobs:
       - run: '@@CREATE_REPO_clean-room-consumer-command@@'
 
   browser:
+    name: browser (${{ matrix.browser }})
     needs: candidate
     strategy:
       fail-fast: false
       matrix:
-        browser: [chromium, firefox, webkit]
-    runs-on: ubuntu-latest
+        include:
+          - browser: chromium
+            os: '@@CREATE_REPO_chromium-runner@@'
+          - browser: firefox
+            os: '@@CREATE_REPO_firefox-runner@@'
+          - browser: webkit
+            os: '@@CREATE_REPO_webkit-runner@@'
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

@@ -54,7 +54,7 @@ Bind all values before copying files:
 | Vale pack        | Default `Tau`                                         |
 | docs site        | `yes` or `no`                                         |
 | benchmark axes   | Bytes always; wall-clock optional                     |
-| host matrix      | Exact Node, browser, native OS, and GPU legs          |
+| host matrix      | Exact Node, browser runner, native OS, and GPU legs   |
 
 Template tokens use the collision-free form `@@CREATE_REPO_<name>@@`. Replace
 only those tokens; GitHub expressions and ESLint `{{term}}` messages are not
@@ -164,6 +164,8 @@ the npm Trusted Publisher identity.
    every clean consumer job. Publish platform packages before the root package.
    Prefix local `npm/` package paths with `./` so npm cannot resolve them as
    registry or Git shorthands. Do not rebuild in consumer or publish jobs.
+   Bind browser runners and headless modes that expose every required platform
+   capability; API presence without a usable adapter is not a passing smoke.
 4. Publish idempotently through OIDC. If the version exists, compare registry
    bytes and provenance instead of overwriting it.
 5. `registry-verify` installs from the registry and checks the provenance

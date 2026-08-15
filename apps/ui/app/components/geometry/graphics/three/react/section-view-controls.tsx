@@ -792,7 +792,7 @@ export function SectionViewControls({
       </mesh>
 
       <SectionTransformControls
-        object={transformControlsRef as React.RefObject<THREE.Object3D>}
+        object={transformControlsRef}
         mode='translate'
         highlightAxis={highlightedTransformAxis}
         space='local'
@@ -825,7 +825,7 @@ export function SectionViewControls({
         }}
       />
       <SectionTransformControls
-        object={transformControlsRef as React.RefObject<THREE.Object3D>}
+        object={transformControlsRef}
         mode='rotate'
         highlightAxis={highlightedTransformAxis}
         space='local'

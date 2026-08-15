@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BufferAttribute } from 'three';
+import type { BufferAttribute, Intersection } from 'three';
 import { LinearMipmapLinearFilter, Mesh, Raycaster, Vector3 } from 'three';
 import {
   __resetSelectorLabelAtlasForTests,
@@ -118,7 +118,7 @@ describe('selector-label-atlas', () => {
 
   it('should expose a non-raycastable label behavior', () => {
     const mesh = new Mesh(createSelectorLabelGeometry('XY'), getSelectorLabelAtlasMaterial());
-    const intersections: unknown[] = [];
+    const intersections: Intersection[] = [];
 
     disabledSelectorLabelRaycast.call(mesh, new Raycaster(new Vector3(0, 0, 1), new Vector3(0, 0, -1)), intersections);
 

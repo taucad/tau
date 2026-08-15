@@ -1,11 +1,12 @@
 {
   "name": "@taucad/react-e2e-nextjs",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "dependencies": {
     "@taucad/react": "workspace:*",
     "@taucad/runtime": "workspace:*",
-    "next": "^16.2.9",
+    "next": "catalog:next15",
     "react": "catalog:",
     "react-dom": "catalog:"
   }

@@ -32,10 +32,10 @@ export type GlbSummary = {
   readonly size: readonly [number, number, number];
 };
 
-const GLB_MAGIC = 0x4654_6c67;
-const JSON_CHUNK = 0x4e4f_534a;
-const BIN_CHUNK = 0x004e_4942;
-const FLOAT = 5126;
+const glbMagic = 0x46_54_6c_67;
+const jsonChunk = 0x4e_4f_53_4a;
+const binChunk = 0x00_4e_49_42;
+const floatComponentType = 5126;
 
 const vectorMin = (a: readonly number[], b: readonly number[]): [number, number, number] => [
   Math.min(a[0] ?? 0, b[0] ?? 0),
@@ -49,11 +49,17 @@ const vectorMax = (a: readonly number[], b: readonly number[]): [number, number,
   Math.max(a[2] ?? 0, b[2] ?? 0),
 ];
 
+const toVector3 = (values: readonly number[]): [number, number, number] => [
+  values[0] ?? 0,
+  values[1] ?? 0,
+  values[2] ?? 0,
+];
+
 const parseGlb = (
-  bytes: Uint8Array<ArrayBufferLike>,
-): { readonly json: GlbJson; readonly bin: Uint8Array<ArrayBufferLike> } => {
+  bytes: Uint8Array<ArrayBuffer>,
+): { readonly json: GlbJson; readonly bin: Uint8Array<ArrayBuffer> } => {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (view.getUint32(0, true) !== GLB_MAGIC) {
+  if (view.getUint32(0, true) !== glbMagic) {
     throw new Error('Expected a GLB payload.');
   }
   const declaredLength = view.getUint32(8, true);
@@ -63,16 +69,16 @@ const parseGlb = (
 
   let offset = 12;
   let json: GlbJson | undefined;
-  let bin: Uint8Array<ArrayBufferLike> = new Uint8Array();
+  let bin: Uint8Array<ArrayBuffer> = new Uint8Array();
   while (offset < bytes.byteLength) {
     const chunkLength = view.getUint32(offset, true);
     const chunkType = view.getUint32(offset + 4, true);
     const chunkStart = offset + 8;
     const chunk = bytes.subarray(chunkStart, chunkStart + chunkLength);
-    if (chunkType === JSON_CHUNK) {
+    if (chunkType === jsonChunk) {
       json = JSON.parse(new TextDecoder().decode(chunk).trimEnd()) as GlbJson;
     }
-    if (chunkType === BIN_CHUNK) {
+    if (chunkType === binChunk) {
       bin = chunk;
     }
     offset = chunkStart + chunkLength;
@@ -86,7 +92,7 @@ const parseGlb = (
 
 const readAccessorBounds = (
   json: GlbJson,
-  bin: Uint8Array<ArrayBufferLike>,
+  bin: Uint8Array<ArrayBuffer>,
   accessorIndex: number,
 ): { readonly min: readonly [number, number, number]; readonly max: readonly [number, number, number] } => {
   const accessor = json.accessors?.[accessorIndex];
@@ -95,11 +101,11 @@ const readAccessorBounds = (
   }
   if (accessor.min && accessor.max) {
     return {
-      min: [accessor.min[0] ?? 0, accessor.min[1] ?? 0, accessor.min[2] ?? 0],
-      max: [accessor.max[0] ?? 0, accessor.max[1] ?? 0, accessor.max[2] ?? 0],
+      min: toVector3(accessor.min),
+      max: toVector3(accessor.max),
     };
   }
-  if (accessor.componentType !== FLOAT || accessor.type !== 'VEC3' || accessor.bufferView === undefined) {
+  if (accessor.componentType !== floatComponentType || accessor.type !== 'VEC3' || accessor.bufferView === undefined) {
     throw new Error('POSITION accessor lacks min/max and is not a float VEC3 accessor.');
   }
 
@@ -127,7 +133,7 @@ const readAccessorBounds = (
   return { min, max };
 };
 
-export const summarizeGlb = (bytes: Uint8Array<ArrayBufferLike>): GlbSummary => {
+export const summarizeGlb = (bytes: Uint8Array<ArrayBuffer>): GlbSummary => {
   const { json, bin } = parseGlb(bytes);
   const primitives = (json.meshes ?? []).flatMap((mesh) => mesh.primitives ?? []);
   if (primitives.length === 0) {

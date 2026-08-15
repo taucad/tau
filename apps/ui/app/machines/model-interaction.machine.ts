@@ -15,13 +15,13 @@ export type ViewerHoverSuppressionReason =
   | 'toolOverlay';
 
 export type ModelInteractionUnitState = {
-  manifest?: GeometryComponentManifest;
-  hoveredComponentId?: string;
-  selectedComponentIds: string[];
-  focusedComponentId?: string;
-  hiddenComponentIds: string[];
-  isolatedComponentIds: string[];
-  opacityByComponentId: Record<string, number>;
+  readonly manifest?: GeometryComponentManifest;
+  readonly hoveredComponentId?: string;
+  readonly selectedComponentIds: readonly string[];
+  readonly focusedComponentId?: string;
+  readonly hiddenComponentIds: readonly string[];
+  readonly isolatedComponentIds: readonly string[];
+  readonly opacityByComponentId: Readonly<Record<string, number>>;
 };
 
 export type ModelInteractionContext = {
@@ -81,10 +81,10 @@ const createEmptyUnitState = (): ModelInteractionUnitState => ({
 // into a fresh object and never mutates it in place.
 const emptyUnitState: ModelInteractionUnitState = Object.freeze({
   ...createEmptyUnitState(),
-  selectedComponentIds: Object.freeze([]) as string[],
-  hiddenComponentIds: Object.freeze([]) as string[],
-  isolatedComponentIds: Object.freeze([]) as string[],
-  opacityByComponentId: Object.freeze({}) as Record<string, number>,
+  selectedComponentIds: Object.freeze([]),
+  hiddenComponentIds: Object.freeze([]),
+  isolatedComponentIds: Object.freeze([]),
+  opacityByComponentId: Object.freeze({}),
 });
 
 const createUnitStateFromPersisted = (
@@ -183,7 +183,7 @@ const pruneIdsForManifest = (manifest: GeometryComponentManifest, ids: readonly 
 
 const pruneOpacityForManifest = (
   manifest: GeometryComponentManifest,
-  opacityByComponentId: Record<string, number>,
+  opacityByComponentId: Readonly<Record<string, number>>,
 ): Record<string, number> =>
   Object.fromEntries(
     Object.entries(opacityByComponentId).filter(([componentId]) => Boolean(manifest.nodesById[componentId])),
@@ -207,13 +207,13 @@ function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
-function recordsEqual(a: Record<string, number>, b: Record<string, number>): boolean {
+function recordsEqual(a: Readonly<Record<string, number>>, b: Readonly<Record<string, number>>): boolean {
   const entriesA = Object.entries(a);
   const entriesB = Object.entries(b);
   return entriesA.length === entriesB.length && entriesA.every(([key, value]) => b[key] === value);
 }
 
-function omitRecordKey<Value>(record: Record<string, Value>, key: string): Record<string, Value> {
+function omitRecordKey<Value>(record: Readonly<Record<string, Value>>, key: string): Record<string, Value> {
   return Object.fromEntries(Object.entries(record).filter(([candidate]) => candidate !== key));
 }
 

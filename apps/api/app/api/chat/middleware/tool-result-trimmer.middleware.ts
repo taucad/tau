@@ -345,11 +345,15 @@ const toolResultTrimmers: Record<string, (result: unknown) => unknown> = {
     if (!hasDefined(result, 'diffStats')) {
       return result;
     }
+    const diffStats = result.diffStats;
+    if (!diffStats) {
+      return result;
+    }
 
     return {
       diffStats: {
-        linesAdded: result.diffStats.linesAdded,
-        linesRemoved: result.diffStats.linesRemoved,
+        linesAdded: diffStats.linesAdded,
+        linesRemoved: diffStats.linesRemoved,
         // REMOVED: originalContent, modifiedContent - LLM just wrote this
       },
     };
@@ -366,12 +370,16 @@ const toolResultTrimmers: Record<string, (result: unknown) => unknown> = {
     if (!hasDefined(result, 'diffStats')) {
       return result;
     }
+    const diffStats = result.diffStats;
+    if (!diffStats) {
+      return result;
+    }
 
     return {
       message: result.message,
       diffStats: {
-        linesAdded: result.diffStats.linesAdded,
-        linesRemoved: result.diffStats.linesRemoved,
+        linesAdded: diffStats.linesAdded,
+        linesRemoved: diffStats.linesRemoved,
         // REMOVED: originalContent, modifiedContent - captured for restore, not for the LLM
       },
     };

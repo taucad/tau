@@ -5,7 +5,7 @@
     "module": "preserve",
     "moduleResolution": "bundler",
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node", "electron-vite/node"]
   },
   "include": [
     "src/**/*.ts",

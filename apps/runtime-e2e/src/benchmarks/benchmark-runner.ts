@@ -30,7 +30,6 @@ type TraceSummary = Record<
     calls: number;
     totalMs: number;
     errors?: number;
-    metrics?: Record<string, number>;
   }
 >;
 type BenchmarkOperation = 'export' | 'render';
@@ -205,26 +204,10 @@ function extractLibrarySummary(telemetryBatches: TelemetryEntry[][]): TraceSumma
     const operation = callsKey.replace('.calls', '');
     const msValue = detail[`${operation}.ms`];
     const errorsValue = detail[`${operation}.errors`];
-    const metrics: Record<string, number> = {};
-    const operationPrefix = `${operation}.`;
-    for (const [key, value] of Object.entries(detail)) {
-      if (!key.startsWith(operationPrefix) || typeof value !== 'number') {
-        continue;
-      }
-
-      const metricName = key.slice(operationPrefix.length);
-      if (metricName === 'calls' || metricName === 'ms' || metricName === 'errors') {
-        continue;
-      }
-
-      metrics[metricName] = value;
-    }
-
     result[operation] = {
       calls: detail[callsKey] as number,
       totalMs: typeof msValue === 'number' ? msValue : 0,
       errors: typeof errorsValue === 'number' ? errorsValue : undefined,
-      metrics: Object.keys(metrics).length > 0 ? metrics : undefined,
     };
   }
 

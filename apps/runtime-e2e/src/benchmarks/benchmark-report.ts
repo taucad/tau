@@ -16,14 +16,6 @@ function formatMs(ms: number): string {
   return ms < 1 ? `${(ms * 1000).toFixed(0)}µs` : `${ms.toFixed(2)}ms`;
 }
 
-function formatOptionalDuration(duration: number | undefined): string {
-  return typeof duration === 'number' ? formatMs(duration) : '—';
-}
-
-function formatOptionalCount(count: number | undefined): string {
-  return typeof count === 'number' && count > 0 ? String(count) : '—';
-}
-
 function generateBarChart(results: BenchmarkResult[], comparison?: BenchmarkRunResult): string {
   const maxMean = Math.max(...results.map((r) => r.mean));
   const barHeight = 28;
@@ -161,29 +153,14 @@ function generateLibraryTracingSection(results: BenchmarkResult[]): string {
     }
 
     const entries = Object.entries(result.librarySummary).sort((a, b) => b[1].totalMs - a[1].totalMs);
-    const hasBatchMetrics = entries.some(([, stats]) => stats.metrics?.['batch.totalNative.ms'] !== undefined);
-    const batchHeaders = hasBatchMetrics
-      ? '<th>Native Batch Calls</th><th>Native Total</th><th>Setup</th><th>Build</th><th>Simplify</th><th>Shape</th><th>Report</th>'
-      : '';
     let rows = '';
     for (const [operation, stats] of entries) {
-      const metrics = stats.metrics ?? {};
-      const batchColumns = hasBatchMetrics
-        ? `<td>${formatOptionalCount(metrics['batch.native.calls'])}</td>
-        <td>${formatOptionalDuration(metrics['batch.totalNative.ms'])}</td>
-        <td>${formatOptionalDuration(metrics['batch.setup.ms'])}</td>
-        <td>${formatOptionalDuration(metrics['batch.build.ms'])}</td>
-        <td>${formatOptionalDuration(metrics['batch.simplify.ms'])}</td>
-        <td>${formatOptionalDuration(metrics['batch.shape.ms'])}</td>
-        <td>${formatOptionalDuration(metrics['batch.report.ms'])}</td>`
-        : '';
       rows += `<tr>
         <td><code>${escapeHtml(operation)}</code></td>
         <td>${stats.calls}</td>
         <td>${formatMs(stats.totalMs)}</td>
         <td>${formatMs(stats.totalMs / stats.calls)}</td>
         <td>${String(stats.errors ?? 0)}</td>
-        ${batchColumns}
       </tr>`;
     }
 
@@ -191,7 +168,7 @@ function generateLibraryTracingSection(results: BenchmarkResult[]): string {
       <details>
         <summary><strong>${escapeHtml(result.name)}</strong> (${entries.length} operations)</summary>
         <table class="oc-table">
-          <thead><tr><th>Replicad Operation</th><th>Calls</th><th>Total</th><th>Avg/Call</th><th>Errors</th>${batchHeaders}</tr></thead>
+          <thead><tr><th>Replicad Operation</th><th>Calls</th><th>Total</th><th>Avg/Call</th><th>Errors</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </details>`;

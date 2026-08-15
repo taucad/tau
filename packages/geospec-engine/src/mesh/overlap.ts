@@ -27,6 +27,7 @@ import { sweepAxisByCentreVariance } from '#mesh/_internal/sweep-axis.js';
 import { ensureManifoldModule } from '#mesh/manifold-module.js';
 import { preparePrefilterComponent, provePairDisjoint } from '#mesh/overlap-prefilter.js';
 import type { PrefilterComponent } from '#mesh/overlap-prefilter.js';
+import { buildSoupTriangles } from '#mesh/soup.js';
 import type { GeometryDiagnostic, GeometrySubject, MeshTriangle, Vec3, WatertightResult } from '#mesh/types.js';
 import { createForensicBuckets } from '#runner/forensic.js';
 import type { ForensicBuckets, ForensicSink } from '#runner/forensic.js';
@@ -251,6 +252,43 @@ const namedPartition = (
   return [...groups.entries()].map(([label, group], id) =>
     makeRecord({ id, label, triangles: group, color: colors.get(label) }),
   );
+};
+
+const hasComponentOverlapCapability = (subject: GeometrySubject): boolean =>
+  subject.capabilities.some((capability) => capability.kind === 'mesh' && capability.feature === 'component-overlap');
+
+const occurrenceLabel = (
+  occurrence: { path?: string; instanceName?: string; productName?: string },
+  index: number,
+): string => {
+  for (const label of [occurrence.path, occurrence.instanceName, occurrence.productName]) {
+    const trimmed = label?.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return `step-occurrence-${index}`;
+};
+
+const stepOccurrencePartition = (subject: GeometrySubject): ComponentRecord[] | undefined => {
+  if (!hasComponentOverlapCapability(subject) || !subject.occurrenceMesh) {
+    return undefined;
+  }
+  const occurrences = subject.step?.xde?.occurrences ?? [];
+  if (occurrences.length < 2) {
+    return undefined;
+  }
+  const components: ComponentRecord[] = [];
+  for (const [index, occurrence] of occurrences.entries()) {
+    const mesh = subject.occurrenceMesh(index);
+    if (!mesh || mesh.triangleCount === 0) {
+      continue;
+    }
+    const label = occurrenceLabel(occurrence, index);
+    const triangles = buildSoupTriangles(mesh.positions, mesh.triangleCount, label);
+    components.push(makeRecord({ id: components.length, label, triangles, color: undefined }));
+  }
+  return components.length < 2 ? undefined : components;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
@@ -515,12 +553,16 @@ export const analyzeMeshOverlap = async (
   forensic?: ForensicSink,
 ): Promise<AnalyzeMeshOverlapResult> => {
   const { subject } = options;
+  if (!hasComponentOverlapCapability(subject)) {
+    return inconclusive(subject, 0);
+  }
   const tolerance = options.tolerance ?? defaultTolerance;
   const { triangles } = subject.mesh.stats.meshQuality;
+  const primitiveCount = new Set(triangles.map((triangle) => triangle.primitive)).size;
   const colors = primitiveColors(subject);
-  const components = namedPartition(triangles, colors);
+  const components = namedPartition(triangles, colors) ?? stepOccurrencePartition(subject);
   if (!components) {
-    return inconclusive(subject, new Set(triangles.map((triangle) => triangle.primitive)).size);
+    return inconclusive(subject, primitiveCount);
   }
 
   const { cache, release } = acquireCache(subject);

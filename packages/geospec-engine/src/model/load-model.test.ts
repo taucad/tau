@@ -13,12 +13,29 @@ import {
   loadModel,
   setModelLoaderForensicSink,
 } from '#model/load-model.js';
+import { analyzeMeshOverlap } from '#mesh/overlap.js';
 
 const twoCube = join(import.meta.dirname, '../../fixtures/xde/two-cube-assembly.step');
 
 const replicadBoxCode = `
   import { makeBaseBox } from 'replicad';
   export default () => makeBaseBox(10, 20, 30);
+`;
+
+type ReplicadStepPart = { name: string; x: number };
+
+const replicadStepAssemblyCode = (parts: readonly ReplicadStepPart[]): string => `
+  import { makeBaseBox } from 'replicad';
+
+  export default function main() {
+    return [
+      ${parts
+        .map(
+          ({ name, x }) => `{ name: ${JSON.stringify(name)}, shape: makeBaseBox(10, 10, 10).translate([${x}, 0, 0]) }`,
+        )
+        .join(',\n      ')},
+    ];
+  }
 `;
 
 const openScadReplayCode = `
@@ -161,6 +178,35 @@ const diagnosticsOf = async (run: () => Promise<unknown>): Promise<GeoSpecModelL
     throw error;
   }
   throw new Error('expected a GeoSpecModelLoadError');
+};
+
+const expectStepOverlapPairs = async (
+  parts: readonly ReplicadStepPart[],
+  expectedPairs: ReadonlyArray<readonly [string, string]>,
+): Promise<void> => {
+  const subject = await loadModel({
+    code: Object.fromEntries([['main.ts', replicadStepAssemblyCode(parts)]]),
+    file: 'main.ts',
+    format: 'step',
+  });
+  try {
+    const analysis = await analyzeMeshOverlap({ subject, tolerance: 0.001 });
+
+    expect(analysis.success).toBe(true);
+    if (!analysis.success) {
+      throw new Error(analysis.diagnostics.map((diagnostic) => diagnostic.message).join('\n'));
+    }
+    expect(analysis.evidence.componentSource).toBe('named');
+    expect(analysis.evidence.componentCount).toBe(parts.length);
+    expect(analysis.evidence.overlaps).toHaveLength(expectedPairs.length);
+    expect(analysis.evidence.overlaps.map((overlap) => [overlap.leftLabel, overlap.rightLabel])).toEqual(expectedPairs);
+    expect(analysis.evidence.overlaps.map((overlap) => overlap.penetration)).toEqual(
+      expectedPairs.map(() => 'positive-volume'),
+    );
+    expect(analysis.evidence.overlaps.every((overlap) => overlap.intersectionVolume > 0)).toBe(true);
+  } finally {
+    subject.nativeXde?.delete?.();
+  }
 };
 
 describe('loadModel — direct geometry sources', () => {
@@ -316,6 +362,69 @@ describe('loadModel — the runtime branch', () => {
     try {
       expect(subject.step?.xde?.occurrences).toHaveLength(2);
       expect(subject.provenance.exportIntent?.requested.format).toBe('step');
+    } finally {
+      subject.nativeXde?.delete?.();
+    }
+  }, 120_000);
+
+  it('should report authored names for runtime-exported STEP component interference', async () => {
+    await expectStepOverlapPairs(
+      [
+        { name: 'Housing and Ring Gear', x: 0 },
+        { name: 'Planet Gear', x: 9 },
+      ],
+      [['Housing and Ring Gear', 'Planet Gear']],
+    );
+  }, 120_000);
+
+  it('should report the only overlapping named pair in a runtime-exported STEP assembly', async () => {
+    await expectStepOverlapPairs(
+      [
+        { name: 'Housing and Ring Gear', x: 0 },
+        { name: 'Planet Gear', x: 9 },
+        { name: 'Planet Carrier', x: 30 },
+      ],
+      [['Housing and Ring Gear', 'Planet Gear']],
+    );
+  }, 120_000);
+
+  it('should report every overlapping named pair in a runtime-exported STEP assembly', async () => {
+    await expectStepOverlapPairs(
+      [
+        { name: 'Housing and Ring Gear', x: 0 },
+        { name: 'Planet Gear', x: 3 },
+        { name: 'Planet Carrier', x: 6 },
+      ],
+      [
+        ['Housing and Ring Gear', 'Planet Gear'],
+        ['Housing and Ring Gear', 'Planet Carrier'],
+        ['Planet Gear', 'Planet Carrier'],
+      ],
+    );
+  }, 120_000);
+
+  it('should not tessellate STEP occurrences for component interference when mesh loading is disabled', async () => {
+    const subject = await loadModel({
+      code: Object.fromEntries([
+        [
+          'main.ts',
+          replicadStepAssemblyCode([
+            { name: 'Housing and Ring Gear', x: 0 },
+            { name: 'Planet Gear', x: 9 },
+          ]),
+        ],
+      ]),
+      file: 'main.ts',
+      format: 'step',
+      mesh: false,
+    });
+    const occurrenceMesh = vi.fn(subject.occurrenceMesh);
+    subject.occurrenceMesh = occurrenceMesh;
+    try {
+      const analysis = await analyzeMeshOverlap({ subject, tolerance: 0.001 });
+
+      expect(analysis.success).toBe(false);
+      expect(occurrenceMesh).not.toHaveBeenCalled();
     } finally {
       subject.nativeXde?.delete?.();
     }

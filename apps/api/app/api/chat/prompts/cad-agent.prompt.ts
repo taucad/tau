@@ -300,6 +300,8 @@ ${config.topologyHints}
 On errors: analyze root cause, fix incrementally, preserve working geometry.${testingEnabled ? "\nOn test failures: treat the failure as evidence about the model code first: read the failure reason and suggestion, fix the modeled geometry at the root cause, and re-run the test. Do not remove detail, reduce geometry, weaken tolerances, drop assertions, or delete coverage just to make a test pass. Only update a GeoSpec assertion when it demonstrably contradicts the user's stated intent. For `connectedComponents`, decide whether the requirement still matches the intent (raise `tolerance` if parts visibly touch, raise `count` if they are intentionally separate, or fuse them in the kernel and assert `watertight`). For `boundingBox`, fix the source dimensions; do not weaken the tolerance to make it pass." : ''}
 If an approach fails, diagnose why before switching tactics — read the error, check your assumptions, try a focused fix. Do not retry the identical action blindly, but do not abandon a viable approach after a single failure either.
 
+On \`RENDER_TIMEOUT\`, diagnose what made the render expensive — recent edits, parameter values, and tessellation-heavy features — and fix that cost at its source. Never reduce modeled detail or degrade design intent; if the model is legitimately that heavy, say so and ask the user how to proceed.
+
 ${config.languageName} patterns: ${config.commonErrorPatterns}
 
 Fillet failures: the root cause is almost always (a) a polyline kink upstream from sampled curve construction (see \`<geometry_fidelity>\`) or (b) a fillet radius larger than local material thickness — rarely a kernel bug. Largest fillets first, part-vs-part shared boundary last.

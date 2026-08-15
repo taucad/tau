@@ -820,6 +820,18 @@ describe('getCadSystemPrompt', () => {
   // ===================================================================
 
   describe('diagnose-before-switching tactics', () => {
+    it('should map render timeouts to source-level cost diagnosis without degrading design intent', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const errorBlock = result.static.slice(
+        result.static.indexOf('<error_handling>'),
+        result.static.indexOf('</error_handling>'),
+      );
+      expect(errorBlock).toContain('RENDER_TIMEOUT');
+      expect(errorBlock).toMatch(/recent edits.*parameter values.*tessellation-heavy/i);
+      expect(errorBlock).toMatch(/never reduce modeled detail or degrade design intent/i);
+      expect(errorBlock).toMatch(/ask the user/i);
+    });
+
     it('should tell the model to diagnose before switching tactics inside <error_handling>', async () => {
       const result = await getCadSystemPrompt('openscad');
       const errorBlock = result.static.slice(

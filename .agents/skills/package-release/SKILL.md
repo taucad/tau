@@ -6,18 +6,32 @@ disable-model-invocation: true
 
 # Package Release Management
 
-Release workflow for the `@taucad/*` npm packages using Nx Release with Version Plans, pnpm, and npm Trusted Publishing.
+Release workflow for Tau npm packages using Nx Release with Version Plans, pnpm, and npm Trusted Publishing. Treat this skill as the operator workflow; do not treat it as the package inventory.
 
-## Packages
+## Source Of Truth
 
-| Package               | Path                   | Description                |
-| --------------------- | ---------------------- | -------------------------- |
-| `@taucad/runtime`     | `packages/runtime`     | Multi-kernel CAD runtime   |
-| `@taucad/converter`   | `packages/converter`   | CAD file format conversion |
-| `@taucad/json-schema` | `packages/json-schema` | JSON to JSON Schema        |
-| `@taucad/react`       | `packages/react`       | React hooks for runtime    |
+| Fact                              | Owner                                         |
+| --------------------------------- | --------------------------------------------- |
+| Package scope and publish classes | `docs/policy/release-policy.md`               |
+| Resolved Nx release graph         | `pnpm nx release --printConfig` and `nx.json` |
+| CI publish sequence               | `.github/workflows/publish.yml`               |
+| Package quality rules             | `docs/policy/npm-policy.md`                   |
+| Version semantics                 | `docs/policy/version-policy.md`               |
 
-All packages use fixed versioning (same version across all packages).
+Current model, in brief:
+
+- Packages in the release group use fixed versioning.
+- Published packages are listed in `docs/policy/release-policy.md`.
+- Bundled internal libraries stay in the fixed version group but are not published independently.
+- `@taucad/render` and `@taucad/fs-client` are private and outside the release group.
+
+When release config matters, inspect the resolved Nx config instead of copying package scope from memory:
+
+```bash
+pnpm nx release --printConfig
+```
+
+Then compare with `nx.json` if the output looks surprising. The resolved config is the result of Nx merging `nx.json` and any programmatic release configuration.
 
 ## Quick Reference
 
@@ -31,63 +45,49 @@ pnpm nx release plan:check
 # Preview a release (always do this first)
 pnpm nx release --dry-run
 
-# First ever release
-pnpm nx release --first-release
-
-# Release (version + changelog, skip publish for CI)
+# Prepare the release locally; CI publishes from the tag
 pnpm nx release --skip-publish
 
-# Publish from CI
-pnpm nx release publish
-
-# Verify a package tarball locally
-pnpm pack --pack-destination ./tmp
+# Inspect the resolved release config
+pnpm nx release --printConfig
 ```
 
-## Workflow
+Mirror the current CI validation gates before publishing:
 
-### 1. During Development: Create Version Plans
+```bash
+pnpm registry:check
+pnpm nx run-many -t build --projects=packages/*,kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm --exclude=render
+pnpm nx run-many -t pkgcheck --projects=packages/*,kernels/* --exclude=render
+```
 
-When making changes that affect published packages, create a version plan:
+## Normal Release Workflow
+
+1. Create a version plan for changes that affect the release group:
 
 ```bash
 pnpm nx release plan
 ```
 
-This creates a markdown file in `.nx/version-plans/` with frontmatter specifying the bump type:
+This creates a Markdown file in `.nx/version-plans/` with frontmatter specifying the bump type:
 
 ```markdown
 ---
-**default**: minor
+runtime: minor
 ---
 
-Add support for USDZ export in converter
+Add runtime export support
 ```
 
 Valid bump types: `major`, `minor`, `patch`, `premajor`, `preminor`, `prepatch`, `prerelease`.
 
-For multi-package changes, specify per-project:
-
-```markdown
----
-@taucad/runtime: minor
-@taucad/converter: patch
----
-
-Add new kernel middleware and fix converter edge case
-```
-
-Commit the version plan file alongside your code changes in the PR.
-
-### 2. Release Locally
-
-Preview changes:
+2. Commit the version plan with the code change and let CI run `pnpm nx release plan:check`.
+3. After merge, preview the release:
 
 ```bash
 pnpm nx release --dry-run
 ```
 
-Execute (version bump + changelog generation, no publish):
+4. Prepare versions, changelogs, the release commit, and the tag locally:
 
 ```bash
 pnpm nx release --skip-publish
@@ -95,159 +95,84 @@ pnpm nx release --skip-publish
 
 This will:
 
-- Apply version plans to bump `package.json` versions
-- Update inter-package `workspace:*` dependencies
-- Generate/update `CHANGELOG.md` files
+- Apply version plans to bump package versions
+- Update inter-package workspace dependencies
+- Generate or update changelogs
 - Delete applied version plan files
-- Commit changes and create a git tag (`v{version}`)
+- Commit changes and create a git tag using the configured `v{version}` pattern
 
-### 3. Publish from CI
+5. Push the tag. GitHub Actions publishes from CI with Trusted Publishing.
 
-Push the release tag. The CI workflow triggers `nx release publish` with:
+Do not publish manually from a developer machine unless the operator explicitly asks for a local-publish exception. `docs/policy/release-policy.md` owns the CI-only publishing rule.
 
-- npm Trusted Publishing (OIDC) -- no tokens stored
-- Build provenance generated automatically via Sigstore
-- Packages built via `preVersionCommand` before publish
+## CI Publish Workflow
 
-## Nx Configuration
+The publish workflow lives in `.github/workflows/publish.yml` and currently runs:
 
-The release config in `nx.json`:
-
-```jsonc
-{
-  "release": {
-    "projects": ["packages/*"],
-    "versionPlans": {
-      "ignorePatternsForPlanCheck": ["**/*.spec.ts", "**/*.test.ts", "**/*.md"],
-    },
-    "version": {
-      "preVersionCommand": "pnpm nx run-many -t build --projects=packages/*",
-      "conventionalCommits": true,
-    },
-    "changelog": {
-      "workspaceChangelog": {
-        "file": "CHANGELOG.md",
-        "renderOptions": {
-          "authors": true,
-          "commitReferences": true,
-          "versionTitleDate": true,
-        },
-      },
-      "projectChangelogs": {
-        "file": "CHANGELOG.md",
-        "renderOptions": {
-          "authors": false,
-          "commitReferences": true,
-          "versionTitleDate": true,
-        },
-      },
-    },
-    "releaseTag": {
-      "pattern": "v{version}",
-    },
-    "git": {
-      "commitMessage": "chore(release): v{version}",
-    },
-  },
-}
+```bash
+pnpm registry:check
+pnpm nx run-many -t build --projects=packages/*,kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm --exclude=render
+pnpm nx run-many -t pkgcheck --projects=packages/*,kernels/* --exclude=render
+pnpm nx release publish --exclude=render,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
 ```
 
-## CI/CD Workflow
+The job uses npm Trusted Publishing through GitHub OIDC and sets `NPM_CONFIG_PROVENANCE=true`.
 
-The publish workflow (`.github/workflows/publish.yml`):
+If the command list above disagrees with `.github/workflows/publish.yml`, the workflow file wins and this skill is stale.
 
-```yaml
-name: Publish Packages
-on:
-  push:
-    tags: ['v*.*.*']
+## Validation And Tarball Inspection
 
-jobs:
-  publish:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write # Required for OIDC / Trusted Publishing
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
+Before publishing, run the same release gates as CI:
 
-      - uses: ./.github/actions/setup-nx
-
-      - name: Build packages
-        run: pnpm nx run-many -t build --projects=packages/*
-
-      - name: Publish to npm
-        run: pnpm nx release publish
-        env:
-          NPM_CONFIG_PROVENANCE: true
+```bash
+pnpm registry:check
+pnpm nx run-many -t build --projects=packages/*,kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm --exclude=render
+pnpm nx run-many -t pkgcheck --projects=packages/*,kernels/* --exclude=render
 ```
 
-### Trusted Publishing Setup
+For a local tarball spot-check, inspect the exact filename returned by `pnpm pack`:
 
-For each `@taucad/*` package on npmjs.com:
+```bash
+cd packages/runtime
+pack_file=$(
+  pnpm pack --pack-destination /tmp --json |
+    node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const data=JSON.parse(s);console.log((Array.isArray(data)?data[0]:data).filename)})"
+)
+tar -tzf "$pack_file"
+```
+
+Use `docs/policy/npm-policy.md` for package manifest, export-map, bundling, publint, Are the Types Wrong, circular-dependency, and size-limit rules.
+
+## Trusted Publishing Setup
+
+For each package listed as published in `docs/policy/release-policy.md`, configure npm Trusted Publishing on npmjs.com:
 
 1. Go to Settings -> Trusted Publisher
 2. Add GitHub Actions publisher:
    - Repository: `taucad/tau`
    - Workflow: `publish.yml`
-   - Environment: _(leave blank or set to `npm`)_
+   - Environment: leave blank unless the workflow later adds one
 
-Bulk configure with npm CLI v11.10.0+:
-
-```bash
-npm trust add --publisher github --repository taucad/tau --workflow publish.yml @taucad/runtime @taucad/converter @taucad/json-schema @taucad/js
-```
-
-## Package Validation
-
-Before publishing, validate package structure:
-
-```bash
-# Run pkgcheck on all packages
-pnpm nx run-many -t pkgcheck --projects=packages/*
-
-# Inspect tarball contents
-cd packages/runtime && pnpm pack --pack-destination /tmp && tar -tzf /tmp/taucad-kernels-*.tgz
-```
-
-Ensure each `package.json` has:
-
-- `"private": false`
-- `"repository"` field matching `github.com/taucad/tau`
-- `"publishConfig.access": "public"`
-- `"files": ["dist", "README.md"]`
-- Correct ESM-only `publishConfig.exports` with `types`, `import`, and `default` entries
-
-## Prerelease Workflow
-
-For alpha/beta/rc releases:
-
-```bash
-# Create a prerelease version plan
-# Use "prerelease" bump type in the version plan frontmatter
-
-# Or specify directly:
-pnpm nx release version --specifier prerelease --preid alpha
-pnpm nx release publish --tag next
-```
-
-Published with `--tag next` so `npm install @taucad/runtime` still resolves to stable.
+Read the live package list from the release policy at execution time. Do not maintain a copied bulk command in this skill.
 
 ## Troubleshooting
 
-| Problem                        | Solution                                                                                          |
-| ------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `npm ERR! 403` on publish      | Trusted Publisher not configured for this package, or workflow filename mismatch (case-sensitive) |
-| Version plan check fails in CI | Run `pnpm nx release plan` locally and commit the file                                            |
-| Build fails before version     | Check `pnpm nx run-many -t build --projects=packages/*` locally                                   |
-| Provenance not generated       | Ensure `id-token: write` permission and `NPM_CONFIG_PROVENANCE=true`                              |
-| Stale lockfile after version   | Run `pnpm install --no-frozen-lockfile` then commit                                               |
+| Problem                                             | Solution                                                                                                                |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `pnpm registry:check` fails                         | A runtime production dependency does not resolve from npm. Publish or replace that dependency before continuing.        |
+| Publish tries to publish a bundled internal library | Check `.github/workflows/publish.yml` publish exclusions and `docs/policy/release-policy.md` bundled-library list.      |
+| Release config looks stale                          | Run `pnpm nx release --printConfig`, then compare with `nx.json`; update this skill only after the source files change. |
+| `npm ERR! 403` on publish                           | Trusted Publisher is missing for the package, or the npm workflow filename/repository does not match exactly.           |
+| Package validation fails                            | Run the failing package's `pkgcheck` target and fix the npm-policy violation before release.                            |
+| Build fails before version                          | Run the build command from `.github/workflows/publish.yml` locally and fix the first failing project.                   |
+| Provenance not generated                            | Ensure the workflow has `id-token: write` and `NPM_CONFIG_PROVENANCE=true`.                                             |
+| Stale lockfile after version                        | Run `pnpm install --no-frozen-lockfile` and commit the lockfile update.                                                 |
 
-## Additional Resources
+## References
 
-- [Release policy and rationale](../../docs/policy/release-policy.md)
+- [Release policy and rationale](../../../docs/policy/release-policy.md)
+- [npm package policy](../../../docs/policy/npm-policy.md)
+- [Version policy](../../../docs/policy/version-policy.md)
 - [Nx Release docs](https://nx.dev/features/manage-releases)
 - [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers)
 - [npm Provenance](https://docs.npmjs.com/generating-provenance-statements)

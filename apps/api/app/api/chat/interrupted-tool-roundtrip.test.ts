@@ -1,12 +1,12 @@
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
-import { toBaseMessages } from '@ai-sdk/langchain';
 import { describe, it, expect, vi } from 'vitest';
 import { uiMessagesSchema } from '@taucad/chat';
 import type { MyUIMessage } from '@taucad/chat';
 import { createCrossProviderContentNormalizerMiddleware } from '#api/chat/middleware/cross-provider-content-normalizer.middleware.js';
 import { messageContentSanitizerMiddleware } from '#api/chat/middleware/message-content-sanitizer.middleware.js';
 import { invokeWrapModelCall } from '#testing/middleware-testing.utils.js';
+import { toBaseMessagesWithIds } from '#api/chat/utils/to-base-messages-with-ids.js';
 
 /**
  * End-to-end regression for an interrupted-tool conversation: walks the
@@ -114,7 +114,7 @@ describe('interrupted-tool-call round-trip', () => {
   const runThroughVertexReplay = async (
     messages: readonly MyUIMessage[],
   ): Promise<{ readonly aiMessage: AIMessage; readonly toolMessages: ToolMessage[] }> => {
-    const baseMessages = await toBaseMessages(messages);
+    const baseMessages = await toBaseMessagesWithIds(messages);
     const vertexHandler = vi.fn().mockImplementation((request: { messages: BaseMessage[] }) => request);
 
     await invokeWrapModelCall(
@@ -285,7 +285,7 @@ describe('interrupted-tool-call round-trip', () => {
 
   it('should carry the demoted rawInput through to the AIMessage tool_call.args', async () => {
     const parsed = uiMessagesSchema.parse(buildLegacyAppendixPayload());
-    const baseMessages = await toBaseMessages(parsed);
+    const baseMessages = await toBaseMessagesWithIds(parsed);
 
     const aiMessage = baseMessages.find(
       (message): message is AIMessage => AIMessage.isInstance(message) && (message.tool_calls?.length ?? 0) > 0,
@@ -305,7 +305,7 @@ describe('interrupted-tool-call round-trip', () => {
 
   it('should produce a tool_call paired with a tool_result so no orphan synthesis is needed', async () => {
     const parsed = uiMessagesSchema.parse(buildLegacyAppendixPayload());
-    const baseMessages = await toBaseMessages(parsed);
+    const baseMessages = await toBaseMessagesWithIds(parsed);
     const handler = vi.fn().mockResolvedValue({ content: 'response' });
 
     await invokeWrapModelCall(messageContentSanitizerMiddleware, { messages: baseMessages }, handler);
@@ -360,7 +360,7 @@ describe('interrupted-tool-call round-trip', () => {
       { id: 'u_followup', role: 'user', parts: [{ type: 'text', text: 'continue' }] },
     ];
     const parsed = uiMessagesSchema.parse(modernPayload);
-    const baseMessages = await toBaseMessages(parsed);
+    const baseMessages = await toBaseMessagesWithIds(parsed);
     const handler = vi.fn().mockResolvedValue({ content: 'response' });
 
     await invokeWrapModelCall(messageContentSanitizerMiddleware, { messages: baseMessages }, handler);

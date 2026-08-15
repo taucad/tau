@@ -104,7 +104,6 @@ const child = async (projectPath: string, cacheDirectory: string, output: string
   const profile = createGeoSpecRunProfile();
   const runner = createSerialGeoSpecRunner({
     filesystem: createNodeVmFileSystem(projectPath),
-    projectPath: '/',
     modelLoader: createModelLoader({ projectPath }),
     internalProfile: profile,
   });

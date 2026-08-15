@@ -13,6 +13,8 @@ import type { GeoSpecRunner, GeoSpecRunnerOptions } from '#runner/worker/runner-
  * @public
  */
 export type GeoSpecNodeRunnerOptions = GeoSpecRunnerOptions & {
+  /** Absolute project root path. */
+  projectPath: string;
   /** Enable the authenticated persistent evidence cache. Defaults to true. */
   cache?: boolean;
   /** Absolute out-of-tree evidence-cache directory. */

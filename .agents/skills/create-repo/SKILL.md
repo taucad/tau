@@ -216,7 +216,9 @@ From the assembled candidate set, verify in clean temporary projects:
 3. Copy the three-job trusted/untrusted `claude.yml`; every untrusted checkout
    uses `persist-credentials: false`.
 4. Copy cron, Dependabot, OSV, cache-cleanup, and native dependency checks.
-   Cron failures create issues with `--label claude`.
+   Create or verify the `claude` repository label and confirm the workflow can
+   read `ANTHROPIC_API_KEY` from repository or organization secrets without
+   displaying it. Cron failures create issues with `--label claude`.
 5. Dependabot uses npm, native-toolchain, and GitHub Actions ecosystems with
    7/14-day cooldowns; only grouped patch and action-digest updates auto-merge.
 6. OSV is report-only on pull requests and fail-closed on the default branch.

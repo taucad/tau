@@ -113,6 +113,7 @@ Applicability:
 | R    | `.agents/skills` is canonical; `.claude/skills` is a symlink; `.claude/launch.json` exists.                                                     |
 | R    | Three-job `claude.yml` separates untrusted notification, approved execution, and trusted execution.                                             |
 | R    | Untrusted code checkouts use `persist-credentials: false`.                                                                                      |
+| R    | The `claude` label exists and `ANTHROPIC_API_KEY` is available through repository or organization secrets.                                      |
 | R    | Dependabot covers npm, native dependencies, and Actions with 7/14-day cooldowns.                                                                |
 | R    | Only grouped patch and action-digest Dependabot updates auto-merge.                                                                             |
 | R    | OSV is report-only on PRs and fail-closed on main; suppressions contain `reason` and `ignoreUntil`.                                             |

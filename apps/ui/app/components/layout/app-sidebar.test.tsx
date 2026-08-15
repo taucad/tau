@@ -81,6 +81,6 @@ describe('AppSidebar', () => {
     renderSidebar();
 
     expect(getNavLink('Plugins')).toHaveAttribute('href', '/plugins');
-    expect(getNavLink('Projects')).toHaveAttribute('href', '/projects/library');
+    expect(getNavLink('Projects')).toHaveAttribute('href', '/projects');
   });
 });

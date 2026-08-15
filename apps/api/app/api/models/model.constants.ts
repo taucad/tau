@@ -380,10 +380,10 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         maxTokens: 128_000,
         knowledgeCutoff: '2026-02',
         cost: {
-          inputTokens: 1,
-          outputTokens: 6,
-          cacheReadTokens: 0.1,
-          cacheWriteTokens: 1.25,
+          inputTokens: 0.2,
+          outputTokens: 1.2,
+          cacheReadTokens: 0.02,
+          cacheWriteTokens: 0.25,
         },
       },
       configuration: {
@@ -606,7 +606,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       id: 'google-gemini-3.5-flash-lite',
       name: 'Gemini 3.5 Flash-Lite',
       slug: 'gemini-3.5-flash-lite',
-      recommended: true,
+      recommended: false,
       description: 'Fast, low-cost multimodal model for lightweight CAD edits and high-throughput iterations.',
       provider: {
         id: 'vertexai',

@@ -102,7 +102,7 @@ describe('ModelService', () => {
       },
     });
     expect(opus5?.configuration).toHaveProperty('max_tokens', 120_000);
-    expect(modelList.anthropic['claude-4.8-opus'].recommended).toBe(false);
+    expect(modelList.anthropic['claude-4.8-opus']?.recommended).toBe(false);
   });
 
   it('lists every GPT-5.6 tier and keeps GPT-5.5 non-recommended', async () => {
@@ -113,19 +113,19 @@ describe('ModelService', () => {
 
     expect(service.models.map((model) => model.id)).toEqual(expect.arrayContaining(gpt56ModelIds));
     expect(listedModelIds).toEqual(expect.arrayContaining([...gpt56ModelIds, 'openai-gpt-5.5']));
-    expect(modelList.openai['gpt-5.5'].recommended).toBe(false);
+    expect(modelList.openai['gpt-5.5']?.recommended).toBe(false);
   });
 
-  it('recommends the new Gemini Flash models instead of Gemini 3.5 Flash', async () => {
+  it('recommends Gemini 3.6 Flash instead of the Gemini 3.5 models', async () => {
     const service = createModelService();
     const listedModels = await service.getModels();
     const listedModelIds = listedModels.map((model) => model.id);
     const newModelIds = ['google-gemini-3.6-flash', 'google-gemini-3.5-flash-lite'];
 
     expect(listedModelIds).toEqual(expect.arrayContaining([...newModelIds, 'google-gemini-3.5-flash']));
-    expect(modelList.vertexai['gemini-3.6-flash'].recommended).toBe(true);
-    expect(modelList.vertexai['gemini-3.5-flash-lite'].recommended).toBe(true);
-    expect(modelList.vertexai['gemini-3.5-flash'].recommended).toBe(false);
+    expect(modelList.vertexai['gemini-3.6-flash']?.recommended).toBe(true);
+    expect(modelList.vertexai['gemini-3.5-flash-lite']?.recommended).toBe(false);
+    expect(modelList.vertexai['gemini-3.5-flash']?.recommended).toBe(false);
   });
 
   it('lists GLM-5.2 as an enabled text-only tool-capable model', async () => {

@@ -339,7 +339,7 @@ export function createGltfFatLineMaterial(options: CreateGltfFatLineMaterialOpti
 
 export function createGltfFatLineSegmentsFromPositions(
   options: CreateGltfFatLineSegmentsFromPositionsOptions,
-): Object3D | undefined {
+): LineSegments2 | WebGpuFatLineSegments2 | undefined {
   const { backend, positions, material } = options;
   if (positions.length === 0) {
     return undefined;

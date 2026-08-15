@@ -159,15 +159,13 @@ export const getSectionViewTestHelperSummary = (scene: THREE.Object3D): SectionV
       return;
     }
 
-    if (child instanceof THREE.Mesh) {
-      sectionHelperMeshCount++;
-      meshRenderOrders.push(child.renderOrder);
-    }
-
     if (child.type === 'LineSegments2') {
       sectionHelperLineSegments2Count++;
       sectionHelperContourSegmentCount += getLineSegments2SegmentCount(child);
       lineSegments2RenderOrders.push(child.renderOrder);
+    } else if (child instanceof THREE.Mesh) {
+      sectionHelperMeshCount++;
+      meshRenderOrders.push(child.renderOrder);
     }
 
     for (const material of getObjectMaterials(child)) {

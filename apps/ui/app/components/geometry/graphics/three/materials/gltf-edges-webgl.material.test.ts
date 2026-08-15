@@ -187,7 +187,7 @@ describe('createWebGlGltfFatLineMaterial', () => {
 
       expect(fatLine).toBeDefined();
       expect(fatLine!.type).toBe('LineSegments2');
-      expect((fatLine as { material: unknown }).material).toBe(material);
+      expect(fatLine!.material).toBe(material);
       expect(material).toBeInstanceOf(LineMaterial);
     });
 
@@ -201,7 +201,7 @@ describe('createWebGlGltfFatLineMaterial', () => {
         backend: 'webgl',
         material,
         positions: new Float32Array([0, 0, 0, 1, 0, 0]),
-      }) as Object3D & { geometry: unknown };
+      })!;
       const { geometry } = fatLine;
 
       setGltfFatLineMaterialColor(material, 0xaa_bb_cc);
@@ -220,12 +220,12 @@ describe('createWebGlGltfFatLineMaterial', () => {
         backend: 'webgl',
         material,
         positions: new Float32Array([0, 0, 0, 1, 0, 0]),
-      }) as Object3D & { geometry: unknown };
+      })!;
       const secondFatLine = createGltfFatLineSegmentsFromPositions({
         backend: 'webgl',
         material,
         positions: new Float32Array([1, 0, 0, 1, 1, 0]),
-      }) as Object3D & { geometry: unknown };
+      })!;
       const scene = new Group();
       scene.add(firstFatLine, secondFatLine);
       const firstGeometry = firstFatLine.geometry;

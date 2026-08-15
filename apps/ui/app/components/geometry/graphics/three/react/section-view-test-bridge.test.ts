@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import {
   getSectionViewTestControlState,
   getSectionViewTestCapOverlapDiagnostics,
@@ -58,17 +61,12 @@ describe('getSectionViewTestControlState', () => {
     fill.userData = sceneTagData(sceneTag.sectionViewHelper);
     fill.renderOrder = viewportRenderTiers.sectionCapFill;
 
-    const borderGeometry = new THREE.BufferGeometry();
-    borderGeometry.setAttribute('instanceStart', new THREE.BufferAttribute(new Float32Array(6), 3));
-    const border = Object.assign(new THREE.Object3D(), {
-      geometry: borderGeometry,
-      material: new THREE.LineBasicMaterial({ depthTest: true, depthWrite: false }),
-    });
-    border.type = 'LineSegments2';
+    const borderGeometry = new LineSegmentsGeometry();
+    borderGeometry.setPositions([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0]);
+    const border = new LineSegments2(borderGeometry, new LineMaterial({ depthTest: true, depthWrite: false }));
     border.renderOrder = viewportRenderTiers.sectionContourOutline;
     border.userData = sceneTagData(sceneTag.sectionViewHelper);
-    const modelEdge = new THREE.Object3D();
-    modelEdge.type = 'LineSegments2';
+    const modelEdge = new LineSegments2();
     scene.add(fill, border, modelEdge);
 
     const summary = getSectionViewTestHelperSummary(scene);

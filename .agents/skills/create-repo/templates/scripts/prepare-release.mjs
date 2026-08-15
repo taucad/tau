@@ -2,6 +2,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { releaseChangelog, releaseVersion } from 'nx/release/index.js';
 import semver from 'semver';
@@ -117,7 +118,7 @@ const prepare = async ({ dryRun, requestedVersion }) => {
   );
 };
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const requestedVersion = process.argv.slice(2).find((value) => !value.startsWith('-'));
   const dryRun = process.argv.includes('--dry-run');
 

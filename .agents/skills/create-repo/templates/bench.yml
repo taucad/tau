@@ -26,6 +26,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          gh label create claude \
+            --color 5319E7 \
+            --description 'Picked up by Claude automation' \
+            --force
           gh issue create \
             --title 'Benchmark drift detected' \
             --body "Monthly benchmark drift failed in ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}." \

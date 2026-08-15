@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 
 const Layout = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
   <html lang='en' suppressHydrationWarning>
-    <body>
+    <body className='flex min-h-screen flex-col'>
       <RootProvider>{children}</RootProvider>
     </body>
   </html>

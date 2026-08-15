@@ -26,12 +26,13 @@ jobs:
           persist-credentials: false
       - id: release
         env:
+          BASE_REF: ${{ github.base_ref }}
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref }}
           SOURCE_SHA: ${{ github.sha }}
         run: |
           if [[ "$EVENT_NAME" == pull_request ]]; then
-            git diff --name-only --diff-filter=ACDMRT "origin/${{ github.base_ref }}...HEAD" > /tmp/changed-files
+            git diff --name-only --diff-filter=ACDMRT "origin/$BASE_REF...HEAD" > /tmp/changed-files
           else
             git diff-tree --no-commit-id --name-only --diff-filter=ACDMRT -r HEAD > /tmp/changed-files
           fi
@@ -252,7 +253,10 @@ jobs:
           while IFS=$'\t' read -r name version filename integrity; do
             published="$(npm view "$name@$version" dist.integrity 2>/dev/null || true)"
             if [[ -n "$published" ]]; then
-              [[ "$published" == "$integrity" ]]
+              if [[ "$published" != "$integrity" ]]; then
+                echo "ERROR: registry integrity differs for $name@$version" >&2
+                exit 1
+              fi
               continue
             fi
             npm publish "candidate/$filename" --access public --provenance
@@ -281,7 +285,11 @@ jobs:
         run: |
           node -e "for (const p of require('./candidate/manifest.json').packages) console.log([p.name,p.version,p.integrity].join('\t'))" > /tmp/packages
           while IFS=$'\t' read -r name version integrity; do
-            [[ "$(npm view "$name@$version" dist.integrity)" == "$integrity" ]]
+            published="$(npm view "$name@$version" dist.integrity)"
+            if [[ "$published" != "$integrity" ]]; then
+              echo "ERROR: registry integrity differs for $name@$version" >&2
+              exit 1
+            fi
           done < /tmp/packages
           workspace="$PWD"
           directory="$(mktemp -d)"

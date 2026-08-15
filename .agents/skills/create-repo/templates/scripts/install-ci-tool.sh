@@ -17,7 +17,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-case "$tool" in actionlint|vale) ;; *) echo "ERROR: --tool must be actionlint or vale" >&2; exit 2 ;; esac
+case "$tool" in actionlint|shellcheck|vale) ;; *) echo "ERROR: unsupported --tool: $tool" >&2; exit 2 ;; esac
 
 case "${@@CREATE_REPO_env-prefix@@_CI_TOOL_PLATFORM:-$(uname -s)-$(uname -m)}" in
   Darwin-arm64) platform=darwin-arm64 ;;
@@ -28,14 +28,26 @@ case "${@@CREATE_REPO_env-prefix@@_CI_TOOL_PLATFORM:-$(uname -s)-$(uname -m)}" i
 esac
 
 read_tool() {
-  python3 -c "import json; print(json.load(open('$manifest'))['ci_tools']['$tool']$1)"
+  CI_TOOL_FIELD="$1" \
+  CI_TOOL_MANIFEST="$manifest" \
+  CI_TOOL_NAME="$tool" \
+  CI_TOOL_PLATFORM="$platform" \
+    node -e '
+      const { readFileSync } = require("node:fs");
+      const entry = JSON.parse(readFileSync(process.env.CI_TOOL_MANIFEST, "utf8")).ci_tools[process.env.CI_TOOL_NAME];
+      const value = ["version", "base_url"].includes(process.env.CI_TOOL_FIELD)
+        ? entry?.[process.env.CI_TOOL_FIELD]
+        : entry?.platforms?.[process.env.CI_TOOL_PLATFORM]?.[process.env.CI_TOOL_FIELD];
+      if (value === undefined) throw new Error("missing CI tool field: " + process.env.CI_TOOL_FIELD);
+      process.stdout.write(String(value));
+    '
 }
 
-version="$(read_tool "['version']")"
-base_url="$(read_tool "['base_url']")"
-filename="$(read_tool "['platforms']['$platform']['filename']")"
-archive_sha="$(read_tool "['platforms']['$platform']['sha256']")"
-binary_sha="$(read_tool "['platforms']['$platform']['binary_sha256']")"
+version="$(read_tool version)"
+base_url="$(read_tool base_url)"
+filename="$(read_tool filename)"
+archive_sha="$(read_tool sha256)"
+binary_sha="$(read_tool binary_sha256)"
 binary="$destination/bin/$tool"
 
 sha256() {
@@ -47,8 +59,7 @@ if [ -x "$binary" ] && [ "$(sha256 "$binary")" = "$binary_sha" ]; then
   exit 0
 fi
 
-rm -f "$binary"
-archive="$(mktemp -t "$tool.XXXXXX.tar.gz")"
+archive="$(mktemp -t "$tool.XXXXXX")"
 extract_dir="$(mktemp -d -t "$tool.XXXXXX")"
 trap 'rm -rf "$archive" "$extract_dir"' EXIT
 
@@ -66,7 +77,7 @@ test "$actual_archive_sha" = "$archive_sha" || {
   exit 1
 }
 
-tar -xzf "$archive" -C "$extract_dir"
+tar -xf "$archive" -C "$extract_dir"
 source_binary="$(find "$extract_dir" -type f -name "$tool" -print -quit)"
 test -n "$source_binary"
 actual_binary_sha="$(sha256 "$source_binary")"

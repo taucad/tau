@@ -53,11 +53,11 @@
     },
     "quality": {
       "executor": "nx:noop",
-      "dependsOn": ["build", "check:size", "test", "typecheck", "validate-pack"]
+      "dependsOn": @@CREATE_REPO_quality-dependencies-json@@
     },
     "docs-prose": {
       "executor": "nx:noop",
-      "dependsOn": ["check:dead-code", "docs", "format", "lint", "prose", "workflows"]
+      "dependsOn": @@CREATE_REPO_docs-prose-dependencies-json@@
     }
   }
 }

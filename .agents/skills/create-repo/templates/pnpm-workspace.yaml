@@ -1,7 +1,7 @@
 packages:
   - .
-  - docs-site
-  - npm/*
+@@CREATE_REPO_docs-workspace-entry@@
+@@CREATE_REPO_native-workspace-entry@@
 
 allowBuilds:
   '@biomejs/biome': true

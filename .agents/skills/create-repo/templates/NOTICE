@@ -1,8 +1,3 @@
 @@CREATE_REPO_npm-name@@
 Copyright @@CREATE_REPO_copyright-year@@ Richard Fontein
-
-This product includes Geist, licensed under the SIL Open Font License 1.1.
-See the bundled font license and provenance files.
-
-This product includes a vendored fork of image-webp. Its Apache-2.0 and MIT
-license texts and upstream notices remain in the vendored source directory.
+@@CREATE_REPO_notice-sections@@

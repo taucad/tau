@@ -43,7 +43,7 @@ const extractProse = (comment) => {
   let inFence = false;
 
   for (const line of lines) {
-    if (/^\s*```/u.test(line)) {
+    if (/^\s*(?:`{3,}|~{3,})/u.test(line)) {
       inFence = !inFence;
       continue;
     }

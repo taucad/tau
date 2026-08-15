@@ -16,7 +16,9 @@ const packages = readdirSync(candidateDirectory)
     const digest = createHash('sha512').update(readFileSync(tarball)).digest('base64');
     return { name: manifest.name, version: manifest.version, filename, integrity: `sha512-${digest}` };
   })
-  .sort(({ name: left }, { name: right }) => Number(left === ROOT_PACKAGE) - Number(right === ROOT_PACKAGE));
+  .sort(({ name: left }, { name: right }) =>
+    left === ROOT_PACKAGE ? 1 : right === ROOT_PACKAGE ? -1 : left.localeCompare(right),
+  );
 
 if (new Set(packages.map(({ name }) => name)).size !== packages.length) {
   throw new Error('candidate package names are not unique');

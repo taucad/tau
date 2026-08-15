@@ -1,5 +1,5 @@
 extends: existence
-message: "Pages must open with a concrete sentence stating purpose, not 'Welcome to…'."
+message: "Avoid 'Welcome to' filler — state the page purpose directly."
 level: error
 ignorecase: true
 tokens:

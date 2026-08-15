@@ -26,7 +26,7 @@ const proseBlocks = (markdown: string): Block[] => {
 
   for (const [index, raw] of markdown.split(/\r?\n/u).entries()) {
     const line = raw.replace(/^\s*>\s?/u, '');
-    if (/^\s*```/u.test(line)) {
+    if (/^\s*(?:`{3,}|~{3,})/u.test(line)) {
       flush();
       fenced = !fenced;
       continue;
@@ -47,6 +47,10 @@ const proseBlocks = (markdown: string): Block[] => {
 describe('prose quality', () => {
   it('should inspect repository prose', () => {
     expect(DOCUMENTS).not.toEqual([]);
+  });
+
+  it('should ignore both Markdown fence syntaxes', () => {
+    expect(proseBlocks('```ts\nconst backtick = true;\n```\n~~~ts\nconst tilde = true;\n~~~')).toEqual([]);
   });
 
   it.each(DOCUMENTS)('should keep every block in %s within the word ceiling', (document) => {

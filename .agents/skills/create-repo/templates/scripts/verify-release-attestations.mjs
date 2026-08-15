@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const PROVENANCE_TYPE = 'https://slsa.dev/provenance/v1';
 const BUILD_TYPE = 'https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1';
@@ -57,7 +58,7 @@ export const verifyReleaseAttestations = ({ audit, manifest, commit, runId, runA
   }
 };
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     const [auditPath, manifestPath, commit, runId, runAttempt] = process.argv.slice(2);
     assert(

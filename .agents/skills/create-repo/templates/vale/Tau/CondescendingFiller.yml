@@ -7,4 +7,4 @@ tokens:
   - "\\bjust\\b(?!\\s+(in\\s+time|now|the))"
   - 'as you can see'
   - 'obviously'
-  - 'clearly[,\\s]'
+  - '\bclearly\b'

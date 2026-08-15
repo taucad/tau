@@ -20,7 +20,10 @@
     "versionPlans": {
       "ignorePatternsForPlanCheck": [
         "**/*.test.*",
-        "**/*.md",
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "MAINTAINER.md",
+        "SECURITY.md",
         ".github/**",
         "docs-site/**",
         "tests/**"

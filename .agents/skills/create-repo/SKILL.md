@@ -65,6 +65,14 @@ root project and every platform package project. After copying, fail if
 deferred until a third manual fleet update or material audit drift proves the
 maintenance cost.
 
+Bind conditional structure as literal template fragments: `docs-workspace-entry`
+is `  - docs-site` or empty, `native-workspace-entry` is `  - npm/*` or empty,
+and `notice-sections` is the dependency-derived notice text or empty. Bind
+`docs-prose-dependencies-json` and `quality-dependencies-json` to complete JSON
+arrays; omit `docs` from both only when the docs site is disabled. The quality
+array must include every applicable build, size, test, typecheck, package,
+dead-code, docs, format, lint, prose, and workflow gate.
+
 ### Template destinations
 
 Copy files without rewriting their bodies except placeholder substitution:
@@ -221,6 +229,8 @@ From the assembled candidate set, verify in clean temporary projects:
    displaying it. Cron failures create issues with `--label claude`.
 5. Dependabot uses npm, native-toolchain, and GitHub Actions ecosystems with
    7/14-day cooldowns; only grouped patch and action-digest updates auto-merge.
+   Enable repository auto-merge and keep the protected `ci-gate` check active,
+   or the workflow cannot complete its declared contract.
 6. OSV is report-only on pull requests and fail-closed on the default branch.
    Every suppression has both `reason` and `ignoreUntil`.
 

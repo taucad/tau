@@ -1,5 +1,5 @@
 extends: existence
-message: "Avoid the 'powerful, flexible, easy-to-use' marketing triplet — describe a concrete capability instead."
+message: "Marketing filler '%s' is banned — describe a concrete capability instead."
 level: error
 ignorecase: true
 tokens:

@@ -23,6 +23,27 @@
         }
       }
     },
+    "shellcheck": {
+      "version": "0.10.0",
+      "base_url": "https://github.com/koalaman/shellcheck/releases/download/v0.10.0",
+      "platforms": {
+        "darwin-arm64": {
+          "filename": "shellcheck-v0.10.0.darwin.aarch64.tar.xz",
+          "sha256": "bbd2f14826328eee7679da7221f2bc3afb011f6a928b848c80c321f6046ddf81",
+          "binary_sha256": "b9e420df8c78ec7d261d66277d5767cbd4cf6da4e4a9f8b02ea4811cd4cc1109"
+        },
+        "linux-amd64": {
+          "filename": "shellcheck-v0.10.0.linux.x86_64.tar.xz",
+          "sha256": "6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87",
+          "binary_sha256": "f35ae15a4677945428bdfe61ccc297490d89dd1e544cc06317102637638c6deb"
+        },
+        "linux-arm64": {
+          "filename": "shellcheck-v0.10.0.linux.aarch64.tar.xz",
+          "sha256": "324a7e89de8fa2aed0d0c28f3dab59cf84c6d74264022c00c22af665ed1a09bb",
+          "binary_sha256": "4111c09318d10b93653a42179381273f31061b34987978346fbd19a6e81a74c3"
+        }
+      }
+    },
     "vale": {
       "version": "3.9.1",
       "base_url": "https://github.com/errata-ai/vale/releases/download/v3.9.1",

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import { deriveRelease, releaseFiles } from '../../scripts/ci-release.mjs';
@@ -16,6 +17,11 @@ const stable = {
 };
 
 describe('CI release policy', () => {
+  it('publishes candidate tarballs through explicit relative paths', () => {
+    const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+    assert(workflow.includes('npm publish "./candidate/$filename" --access public --provenance'));
+  });
+
   it('publishes one exact release commit on main', () => {
     assert.deepEqual(deriveRelease(stable), {
       kind: 'release',

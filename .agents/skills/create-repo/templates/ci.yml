@@ -291,7 +291,7 @@ jobs:
               fi
               continue
             fi
-            npm publish "candidate/$filename" --access public --provenance
+            npm publish "./candidate/$filename" --access public --provenance
           done < /tmp/packages
 
   registry-verify:

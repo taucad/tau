@@ -128,7 +128,7 @@ async function findComponentHitPoint(page: Page): Promise<{ x: number; y: number
 async function openSeededProject(page: Page): Promise<void> {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(seedRoute);
-  await expect(page).toHaveURL(/\/projects\/proj_/u, { timeout: 60_000 });
+  await expect(page).toHaveURL(/\/w\/[^/]+\/[^/]+/u, { timeout: 60_000 });
   await dismissCookieBanner(page);
   await expect(page.getByTestId('cad-viewer-canvas-region')).toBeVisible({ timeout: 60_000 });
   await expect(page.locator(canvasSelector)).toBeVisible({ timeout: 60_000 });

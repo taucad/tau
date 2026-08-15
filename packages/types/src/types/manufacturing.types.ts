@@ -1,11 +1,5 @@
-import type { icons } from 'lucide-react';
-import type { manufacturingMethods } from '#constants/manufacturing.constants.js';
+import type { manufacturingMethodConfigurations } from '#constants/manufacturing.constants.js';
 
-export type ManufacturingMethodConfiguration = {
-  name: string;
-  slug: string;
-  description: string;
-  icon: keyof typeof icons;
-};
+export type { ManufacturingMethodConfiguration } from '#constants/manufacturing.constants.js';
 
-export type ManufacturingMethod = (typeof manufacturingMethods)[number];
+export type ManufacturingMethod = keyof typeof manufacturingMethodConfigurations;

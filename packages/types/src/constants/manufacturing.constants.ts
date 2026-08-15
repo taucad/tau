@@ -1,4 +1,11 @@
-import type { ManufacturingMethodConfiguration } from '#types/manufacturing.types.js';
+import type { icons } from 'lucide-react';
+
+export type ManufacturingMethodConfiguration = {
+  name: string;
+  slug: string;
+  description: string;
+  icon: keyof typeof icons;
+};
 
 export const manufacturingMethodConfigurations = {
   automatic: {
@@ -81,6 +88,6 @@ export const manufacturingMethodConfigurations = {
   },
 } as const satisfies Record<string, ManufacturingMethodConfiguration>;
 
-export const manufacturingMethods = Object.keys(manufacturingMethodConfigurations) as [
-  keyof typeof manufacturingMethodConfigurations,
-];
+export const manufacturingMethods = Object.keys(manufacturingMethodConfigurations) as Array<
+  keyof typeof manufacturingMethodConfigurations
+>;

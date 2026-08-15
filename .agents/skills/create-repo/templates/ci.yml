@@ -179,6 +179,7 @@ jobs:
       - run: '@@CREATE_REPO_clean-room-consumer-command@@'
 
   browser:
+    name: browser (${{ matrix.browser }})
     needs: candidate
     strategy:
       fail-fast: false

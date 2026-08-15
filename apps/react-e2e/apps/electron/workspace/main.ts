@@ -5,7 +5,7 @@ export const defaultParams = {
   height: 24,
 };
 
-export default function main(params = defaultParams) {
+export default function main(params = defaultParams): ReturnType<typeof makeCylinder> {
   const { radius, height } = params;
   return makeCylinder(radius, height);
 }

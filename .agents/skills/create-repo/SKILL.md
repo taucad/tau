@@ -54,7 +54,7 @@ Bind all values before copying files:
 | Vale pack        | Default `Tau`                                         |
 | docs site        | `yes` or `no`                                         |
 | benchmark axes   | Bytes always; wall-clock optional                     |
-| host matrix      | Exact Node, browser, native OS, and GPU legs          |
+| host matrix      | Exact Node, browser runner, native OS, and GPU legs   |
 
 Template tokens use the collision-free form `@@CREATE_REPO_<name>@@`. Replace
 only those tokens; GitHub expressions and ESLint `{{term}}` messages are not

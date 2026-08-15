@@ -63,10 +63,21 @@ jobs:
         shell: bash
         env:
           BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           if [[ "$EVENT_NAME" == pull_request ]]; then
             pnpm nx release plan:check --base="origin/$BASE_REF" --head=HEAD
+          elif [[ "$EVENT_NAME" == push ]]; then
+            if [[ "$BEFORE_SHA" == 0000000000000000000000000000000000000000 ]]; then
+              echo "::error::Cannot validate Version Plans without a previous push SHA"
+              exit 1
+            fi
+            git merge-base --is-ancestor "$BEFORE_SHA" HEAD || {
+              echo "::error::Cannot validate Version Plans across a force-push"
+              exit 1
+            }
+            pnpm nx release plan:check --base="$BEFORE_SHA" --head=HEAD
           else
             pnpm nx release plan:check --base=HEAD~1 --head=HEAD
           fi

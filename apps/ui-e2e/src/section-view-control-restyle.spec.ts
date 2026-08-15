@@ -41,7 +41,7 @@ type CanvasSampleRegion = Readonly<{
 
 const previewCanvasSelector = '[role="img"][aria-label*="3D model preview" i] canvas';
 const sectionControlFixtureRoute = (backend: 'webgl' | 'webgpu'): string =>
-  `/projects/jscad_cube_cylinder_section_fixture/preview?graphicsBackend=${backend}`;
+  `/examples/jscad_cube_cylinder_section_fixture?graphicsBackend=${backend}`;
 const expectedFaceSelectorLabels = ['Back', 'Bottom', 'Front', 'Left', 'Right', 'Top'];
 
 async function openSectionControlFixture(page: Page, backend: 'webgl' | 'webgpu' = 'webgl'): Promise<void> {

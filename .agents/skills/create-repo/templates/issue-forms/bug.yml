@@ -1,0 +1,32 @@
+name: Bug report
+description: Report reproducible incorrect behavior.
+title: '[bug]: '
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: '@@CREATE_REPO_npm-name@@@x.y.z'
+    validations:
+      required: true
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      options: [Node, Chromium, Firefox, WebKit, Native Linux, Native macOS, Native Windows]
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include exact input, code, and observed output.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true

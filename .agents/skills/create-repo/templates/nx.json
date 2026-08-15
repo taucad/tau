@@ -1,0 +1,50 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "defaultBase": "main",
+  "namedInputs": {
+    "default": ["{projectRoot}/**/*", "runtime"],
+    "runtime": [
+      { "runtime": "node --version" },
+      { "runtime": "pnpm --version" },
+      { "runtime": "@@CREATE_REPO_native-toolchain-version-command@@" }
+    ]
+  },
+  "analytics": false,
+  "release": {
+    "projects": [@@CREATE_REPO_release-projects-json@@],
+    "projectsRelationship": "fixed",
+    "version": {
+      "specifierSource": "version-plans",
+      "preVersionCommand": "pnpm nx run @@CREATE_REPO_slug@@:quality"
+    },
+    "versionPlans": {
+      "ignorePatternsForPlanCheck": [
+        "**/*.test.*",
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "MAINTAINER.md",
+        "SECURITY.md",
+        ".github/**",
+        "docs-site/**",
+        "tests/**"
+      ]
+    },
+    "changelog": {
+      "projectChangelogs": {
+        "file": "CHANGELOG.md",
+        "renderOptions": {
+          "authors": true,
+          "commitReferences": true,
+          "versionTitleDate": true
+        }
+      }
+    },
+    "releaseTag": { "pattern": "v{version}" },
+    "git": {
+      "commit": false,
+      "push": false,
+      "stageChanges": false,
+      "tag": false
+    }
+  }
+}

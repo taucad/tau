@@ -193,6 +193,18 @@
   },
   {
     "kernel": "replicad",
+    "name": "nanoraster-logo",
+    "mainFile": "main.ts",
+    "files": ["README.md", "banner.svg", "generate-logo.ts", "main.ts", "nanoraster.svg", "wordmark.ts"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "picovoxel-logo",
+    "mainFile": "main.ts",
+    "files": ["README.md", "generate-logo.ts", "main.ts", "picovoxel.svg"]
+  },
+  {
+    "kernel": "replicad",
     "name": "pot-plant",
     "mainFile": "main.ts",
     "files": ["main.ts"]
@@ -299,9 +311,7 @@
       "test-exports/exhaust-header.ts",
       "test-exports/front-cover.ts",
       "test-exports/head-gasket.ts",
-      "test-exports/piston.ts",
-      "test-exports/service-access.ts",
-      "test-exports/sub-assembly.ts"
+      "test-exports/piston.ts"
     ]
   },
   {

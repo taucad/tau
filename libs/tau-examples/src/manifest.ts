@@ -38,6 +38,8 @@ export type ExampleManifest = {
     | 'lego'
     | 'logo'
     | 'logo-keychain'
+    | 'nanoraster-logo'
+    | 'picovoxel-logo'
     | 'pot-plant'
     | 'projection-test'
     | 'rao-nozzle'

@@ -118,8 +118,9 @@ const getRegisteredReset = (): (() => void) => {
   const event = mocks.cameraSend.mock.calls
     .map(([payload]) => payload)
     .find((payload) => payload.type === 'registerReset');
-  expect(event).toBeDefined();
-  expect(typeof event.reset).toBe('function');
+  if (!event?.reset) {
+    throw new Error('Expected the SVG viewer to register a reset callback');
+  }
   return event.reset;
 };
 

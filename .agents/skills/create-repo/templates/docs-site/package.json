@@ -12,7 +12,7 @@
     "typecheck": "fumadocs-mdx && tsc --noEmit"
   },
   "dependencies": {
-    "@@CREATE_REPO_npm-name@@": "file:..",
+    "@@CREATE_REPO_npm-name@@": "workspace:*",
     "fumadocs-core": "@@CREATE_REPO_fumadocs-core-version@@",
     "fumadocs-mdx": "@@CREATE_REPO_fumadocs-mdx-version@@",
     "fumadocs-typescript": "@@CREATE_REPO_fumadocs-typescript-version@@",

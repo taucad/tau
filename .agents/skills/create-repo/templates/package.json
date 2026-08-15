@@ -79,6 +79,7 @@
     "nx": "@@CREATE_REPO_nx-version@@",
     "oxfmt": "@@CREATE_REPO_oxfmt-version@@",
     "oxlint": "@@CREATE_REPO_oxlint-version@@",
+    "oxlint-tsgolint": "@@CREATE_REPO_oxlint-tsgolint-version@@",
     "playwright": "@@CREATE_REPO_playwright-version@@",
     "publint": "@@CREATE_REPO_publint-version@@",
     "semver": "@@CREATE_REPO_semver-version@@",

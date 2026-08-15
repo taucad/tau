@@ -10,4 +10,4 @@ repo_root="$(cd "$script_dir/.." && pwd)"
 
 cd "$repo_root"
 .ci-tools/bin/actionlint -shellcheck shellcheck -color
-rg --files -0 -g '*.sh' -g '!rust/vendor/**' | xargs -0 shellcheck
+git ls-files -z '*.sh' ':!rust/vendor/**' | xargs -0 shellcheck

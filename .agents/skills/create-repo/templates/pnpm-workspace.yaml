@@ -1,0 +1,12 @@
+packages:
+  - .
+  - docs-site
+  - npm/*
+
+allowBuilds:
+  '@biomejs/biome': true
+  '@swc/core': true
+  esbuild: true
+  nx: true
+
+linkWorkspacePackages: true

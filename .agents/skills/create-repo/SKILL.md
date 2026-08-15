@@ -88,7 +88,8 @@ Copy files without rewriting their bodies except placeholder substitution:
 
 Delete non-applicable conditional templates only after recording
 `not-applicable` in the checklist; for example, a `none` native toolchain does
-not keep the Cargo Dependabot block.
+not keep the Cargo Dependabot block or the `npm/*` workspace glob, and a repo
+without docs does not keep the `docs-site` workspace glob.
 
 ## 0. Discover Before Editing
 
@@ -168,6 +169,8 @@ rebuild-and-diff wasm bytes across tool versions.
 
 1. Run oxfmt, oxlint, ESLint, typecheck, tests, package validation, actionlint,
    shellcheck, dead-code detection, docs-link checks, and repo-shape tests.
+   Install `oxlint-tsgolint` directly whenever oxlint runs `--type-aware`;
+   never rely on a parent workspace or optional peer leaking into `PATH`.
 2. Copy the entire anti-slop pack: `prose-rules.js`, `jsdoc-quality.js`,
    `.vale.ini`, all seven Vale rules, and the prose block-length test. Rename
    only the bound Vale pack and ESLint plugin ids. Scan all `.md`, `.mdx`, and

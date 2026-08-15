@@ -9,6 +9,7 @@
       { "runtime": "@@CREATE_REPO_native-toolchain-version-command@@" }
     ]
   },
+  "analytics": false,
   "release": {
     "projects": [@@CREATE_REPO_release-projects-json@@],
     "projectsRelationship": "fixed",

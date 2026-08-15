@@ -243,6 +243,11 @@ catalogMode: prefer
 minimumReleaseAgeExclude:
   - '@taucad/*'
   - '@taulabs/*'
+  # nanoraster's root and native packages are first-party releases.
+  - nanoraster
+  - nanoraster-darwin-arm64
+  - nanoraster-linux-x64-gnu
+  - nanoraster-win32-x64-msvc
   - '@rolldown/binding-android-arm64@1.2.3'
   - '@rolldown/binding-darwin-arm64@1.2.3'
   - '@rolldown/binding-darwin-x64@1.2.3'

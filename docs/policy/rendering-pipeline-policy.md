@@ -42,27 +42,27 @@ These values are defined in `packages/types/src/constants/material.constants.ts`
 
 Tau-generated auxiliary edge overlays use `cadEdgeOverlayMaterialDefaults`: linear `baseColorFactor: [0, 0, 0, 1]`, `metallicFactor: 0`, `roughnessFactor: 1`, `doubleSided: true`, `alphaMode: "OPAQUE"`, and explicit `KHR_materials_unlit`. Direct writers list the extension in `extensionsUsed` only when line primitives exist and do not add it to `extensionsRequired`.
 
-Authored and imported line primitives preserve their source materials in artifacts and headless rendering. `@taucad/render` uses a dedicated line pipeline that returns `baseColorFactor` directly and is therefore unlit by construction. The interactive viewport separately replaces loaded line materials with its existing theme-owned presentation material; that display behavior does not change artifact ownership.
+Authored and imported line primitives preserve their source materials in artifacts and headless rendering. `nanoraster` uses a dedicated line pipeline that returns `baseColorFactor` directly and is therefore unlit by construction. The interactive viewport separately replaces loaded line materials with its existing theme-owned presentation material; that display behavior does not change artifact ownership.
 
 ## Material Policy
 
 - **Non-metallic default**: All CAD surfaces default to `metallicFactor: 0.0`. None of the source formats (STEP, Replicad, JSCAD, OpenSCAD) carry per-part metal/non-metal metadata.
 - **Semi-glossy roughness**: `roughnessFactor: 0.35` produces a glossy CAD sheen with visible specular highlights under studio lighting, closely matching professional CAD viewers like Onshape.
-- **Source colors preserved**: When the source provides a color (STEP color, `colorize()`, etc.), it overrides the default `baseColorFactor`. Roughness and metalness remain at defaults unless the source format provides PBR data (only Rhino 3DM currently does).
+- **Source materials preserved**: Source color overrides the default `baseColorFactor`; authored metallic and roughness values override their defaults when the kernel or imported format supplies them.
 - **Fallback material**: Meshes with no source color receive a unified neutral grey material (`[0.8, 0.8, 0.8, 1]`) across all pipelines rather than inheriting Three.js defaults.
 - **Generated-edge provenance**: Apply `cadEdgeOverlayMaterialDefaults` only to auxiliary overlays Tau creates. Never use the convention to normalize or recolor arbitrary source `LINES`.
 
 ## Headless GLB Render Profile
 
-`@taucad/render` is a static matcap renderer with an explicit glTF profile, not a general PBR reference viewer. `gltf-rs` owns GLB and glTF structural parsing and validation; Tau maps only the supported render semantics and rejects unsupported features before GPU setup.
+`nanoraster` is a deterministic factor-only glTF metallic-roughness renderer, not a general PBR reference viewer. `gltf-rs` owns GLB and glTF structural parsing and validation; Tau maps only the supported render semantics and rejects unsupported features before GPU setup.
 
-- Surface shading projects each primitive's `baseColorFactor` through the existing matcap pipeline. Metallic/roughness values and texture-backed materials are not rendered as PBR in this profile; texture-backed material content is rejected rather than silently approximated.
+- Surface shading evaluates each primitive's `baseColorFactor`, `metallicFactor`, and `roughnessFactor` against fixed view-space studio lights and an analytic environment. Texture-backed material content is rejected rather than silently approximated.
 - LINES use the dedicated unlit line pipeline and preserve their supplied `baseColorFactor`, whether authored or Tau-generated.
 - A glTF node's composed model transform applies equally to its surface and line primitives. Normals use the inverse-transpose transform for non-uniform scaling.
 - Repeated core node references share decoded and uploaded mesh buffers and issue one draw per node instance. Hardware draw batching and `EXT_mesh_gpu_instancing` are separate future optimizations/features.
 - Camera framing uses exact world-space bounds accumulated from the referenced vertices after every selected node transform.
 
-The public GLB-to-image API therefore accepts standard packed, accessor-offset, interleaved, and sparse physical accessor layouts inside this profile without adding consumer options or a normalization stage. JSON `.gltf` resources, textures/PBR, compression/quantization, skins, morph targets, animations, and unsupported primitive modes remain unsupported.
+The public GLB-to-image API therefore accepts standard packed, accessor-offset, interleaved, and sparse physical accessor layouts inside this profile without adding consumer options or a normalization stage. JSON `.gltf` resources, texture-backed PBR, compression/quantization, skins, morph targets, animations, and unsupported primitive modes remain unsupported.
 
 ## Tone Mapping Policy
 

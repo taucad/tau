@@ -2471,6 +2471,9 @@ importers:
       manifold-3d:
         specifier: 'catalog:'
         version: 3.3.2
+      nanoraster:
+        specifier: ^0.2.0
+        version: 0.2.0
       replicad:
         specifier: file:../../tarballs/replicad-interface-export-migration/taulabs-replicad-0.23.4-beta.2.tgz
         version: '@taulabs/replicad@file:tarballs/replicad-interface-export-migration/taulabs-replicad-0.23.4-beta.2.tgz'
@@ -18997,6 +19000,29 @@ packages:
     resolution: {integrity: sha512-5c8l8kVzqpnDPaicbEop/fV0Q1w16FmbWtVhMqugTozAwYdlIQojWH5a/M7UfziFmGdQRrUdV+EPzc9Xng3VAQ==}
     engines: {node: ^18 || >=20}
     hasBin: true
+
+  nanoraster-darwin-arm64@0.2.0:
+    resolution: {integrity: sha512-j2zLfX1qZhU1KqTl+9PWmIUIGUnB/mtJBymr54Ue6NfvJOWu4ExxkpNneKcPVb8c8UBvxwR4eEKehhQWA++STw==}
+    engines: {node: '>=24.0.0'}
+    cpu: [arm64]
+    os: [darwin]
+
+  nanoraster-linux-x64-gnu@0.2.0:
+    resolution: {integrity: sha512-vuSL8FDRArPy/fxYC1pbvzT+WI6AZqlLRsUCiFgHSR3pJ63kzJHqTjsayvMxXSqyCCsgIRhWXMgD1LGPA81RGA==}
+    engines: {node: '>=24.0.0'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  nanoraster-win32-x64-msvc@0.2.0:
+    resolution: {integrity: sha512-0dTLjg0vVeKsd7oM5a1I9x+oYtNDsd1pSS5WeHGgD9kumWhVc+xobqYwaoMTi5Pre1dhElWv6b4kHoAedMlnjQ==}
+    engines: {node: '>=24.0.0'}
+    cpu: [x64]
+    os: [win32]
+
+  nanoraster@0.2.0:
+    resolution: {integrity: sha512-z2PIE0lTz3vSU7k6pajVXpv9vtCgUbJKAw/RmQNZC8JGdfx0aQckNQ6UOBVMJgfXhH5MSMZzjwlRj/mFyKC8PQ==}
+    engines: {node: '>=24.0.0'}
 
   nanospinner@1.2.2:
     resolution: {integrity: sha512-Zt/AmG6qRU3e+WnzGGLuMCEAO/dAu45stNbHY223tUxldaDAeE+FxSPsd9Q+j+paejmm0ZbrNVs5Sraqy3dRxA==}
@@ -42681,6 +42707,21 @@ snapshots:
   nanoid@3.3.15: {}
 
   nanoid@5.1.14: {}
+
+  nanoraster-darwin-arm64@0.2.0:
+    optional: true
+
+  nanoraster-linux-x64-gnu@0.2.0:
+    optional: true
+
+  nanoraster-win32-x64-msvc@0.2.0:
+    optional: true
+
+  nanoraster@0.2.0:
+    optionalDependencies:
+      nanoraster-darwin-arm64: 0.2.0
+      nanoraster-linux-x64-gnu: 0.2.0
+      nanoraster-win32-x64-msvc: 0.2.0
 
   nanospinner@1.2.2:
     dependencies:

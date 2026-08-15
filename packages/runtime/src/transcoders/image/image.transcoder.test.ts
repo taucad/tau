@@ -2,16 +2,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { MockedFunction } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { ExportFile } from '@taucad/types';
-import type * as RenderModule from '@taucad/render';
+import type * as RenderModule from 'nanoraster';
 import type { TranscoderRuntime } from '#types/runtime-transcoder.types.js';
 import { imageTranscoder } from '#transcoders/image/image.transcoder.js';
 import { imageEdgeSchemas } from '#transcoders/image/image-export-options.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 
-// `@taucad/render` is lazy-loaded by the transcoder (nx module-boundary rule
+// `nanoraster` is lazy-loaded by the transcoder (nx module-boundary rule
 // forbids static value imports), so the mock reference is obtained via a
 // type-only import + runtime dynamic import in beforeEach.
-vi.mock('@taucad/render', async (importOriginal) => ({
+vi.mock('nanoraster', async (importOriginal) => ({
   ...(await importOriginal<typeof RenderModule>()),
   renderGlbToImage: vi.fn(),
   renderGlbToImages: vi.fn(),
@@ -38,7 +38,7 @@ describe('image transcoder', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    const renderModule = await import('@taucad/render');
+    const renderModule = await import('nanoraster');
     renderGlbToImage = vi.mocked(renderModule.renderGlbToImage);
     renderGlbToImages = vi.mocked(renderModule.renderGlbToImages);
     runtime = createRuntime();
@@ -140,7 +140,7 @@ describe('image transcoder', () => {
 
   describe('transcode', () => {
     it('should render the GLB and return exactly one ExportFile on success', async () => {
-      const thumbnail: ExportFile = {
+      const thumbnail: RenderModule.RenderedImageFile = {
         name: 'thumbnail.webp',
         bytes: new Uint8Array([1, 2, 3]),
         mimeType: 'image/webp',
@@ -243,8 +243,16 @@ describe('image transcoder', () => {
     });
 
     it('should render an ordered batch with one plural renderer call', async () => {
-      const front: ExportFile = { name: 'thumbnail-front.webp', bytes: new Uint8Array([1]), mimeType: 'image/webp' };
-      const top: ExportFile = { name: 'thumbnail-top.webp', bytes: new Uint8Array([2]), mimeType: 'image/webp' };
+      const front: RenderModule.RenderedImageFile = {
+        name: 'thumbnail-front.webp',
+        bytes: new Uint8Array([1]),
+        mimeType: 'image/webp',
+      };
+      const top: RenderModule.RenderedImageFile = {
+        name: 'thumbnail-top.webp',
+        bytes: new Uint8Array([2]),
+        mimeType: 'image/webp',
+      };
       renderGlbToImages.mockResolvedValue([
         { id: 'front', file: front },
         { id: 'top', file: top },

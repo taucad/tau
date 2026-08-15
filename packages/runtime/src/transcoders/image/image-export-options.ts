@@ -1,7 +1,7 @@
 /**
  * Image transcoder export options.
  *
- * Per-target Zod schemas mirroring `@taucad/render`'s `RenderImageOptions`
+ * Per-target Zod schemas mirroring nanoraster's `RenderImageOptions`
  * (which mirrors the Rust `render_core::RenderRequest` wire contract). The
  * schemas validate + default caller options and feed UI form generation via
  * `.describe()`. `format` is not part of the schema — it comes from the edge's
@@ -15,23 +15,31 @@
 
 import { z } from 'zod';
 import type { FileExtension } from '@taucad/types';
+import {
+  renderImageAnnotatedMinDimension,
+  renderImageBackgroundPattern,
+  renderImageDimensionRange,
+  renderImageLabelMaxLength,
+  renderImageLabelPattern,
+  renderImageMarginRange,
+  renderImageQualityRange,
+  renderImageViewIdPattern,
+} from 'nanoraster';
 
-const hexColor = z.string().regex(/^#[\dA-Fa-f]{6}(?:[\dA-Fa-f]{2})?$/, 'Expected #RRGGBB or #RRGGBBAA');
+const hexColor = z.string().regex(renderImageBackgroundPattern, 'Expected #RRGGBB or #RRGGBBAA');
 
 const imageExportModeSchema = z.enum(['single', 'batch']);
-const annotatedMinDimension = 192;
-const labelPattern = /^[\u0020-\u007E\u00B5\u2014\u2212]+$/u;
 const imageLabelSchema = z
   .string()
   .min(1, 'Label must not be empty')
-  .max(64, 'Label must contain at most 64 characters')
+  .max(renderImageLabelMaxLength, `Label must contain at most ${renderImageLabelMaxLength} characters`)
   .refine((label) => label.trim().length > 0, 'Label must not contain only whitespace')
-  .regex(labelPattern, 'Label contains an unsupported character')
+  .regex(renderImageLabelPattern, 'Label contains an unsupported character')
   .describe('Caller-authored view label rendered verbatim');
 
 const imageViewSchema = z
   .object({
-    id: z.string().regex(/^[\dA-Za-z][\w-]{0,63}$/, 'Expected 1–64 letters, digits, underscores, or hyphens'),
+    id: z.string().regex(renderImageViewIdPattern, 'Expected 1–64 letters, digits, underscores, or hyphens'),
     label: imageLabelSchema.optional(),
     phi: z.number().describe('Polar camera angle from the up axis, degrees'),
     theta: z.number().describe('Right-handed azimuth around the selected up axis, degrees'),
@@ -53,9 +61,26 @@ const imageViewsSchema = z
 
 /** Fields shared by every image edge. */
 const baseImageShape = {
-  width: z.number().int().min(16).max(4096).default(768).describe('Output width in pixels'),
-  height: z.number().int().min(16).max(4096).default(432).describe('Output height in pixels'),
-  margin: z.number().min(0).max(0.5).default(0.1).describe('Corner-fit padding fraction (0–0.5)'),
+  width: z
+    .number()
+    .int()
+    .min(renderImageDimensionRange[0])
+    .max(renderImageDimensionRange[1])
+    .default(768)
+    .describe('Output width in pixels'),
+  height: z
+    .number()
+    .int()
+    .min(renderImageDimensionRange[0])
+    .max(renderImageDimensionRange[1])
+    .default(432)
+    .describe('Output height in pixels'),
+  margin: z
+    .number()
+    .min(renderImageMarginRange[0])
+    .max(renderImageMarginRange[1])
+    .default(0.1)
+    .describe('Corner-fit padding fraction (0–0.5)'),
   projection: z.enum(['perspective', 'orthographic']).default('perspective').describe('Camera projection'),
   includeAxes: z.boolean().default(false).describe('Include a camera-aware XYZ orientation indicator'),
   includeLabel: z.boolean().default(false).describe('Include the caller-authored label verbatim'),
@@ -74,18 +99,18 @@ const validateAnnotatedDimensions = (
   if (!(value.includeAxes || value.includeLabel || value.includeScale)) {
     return;
   }
-  if (value.width < annotatedMinDimension) {
+  if (value.width < renderImageAnnotatedMinDimension) {
     context.addIssue({
       code: 'custom',
       path: ['width'],
-      message: `Annotated images require width ≥ ${annotatedMinDimension}`,
+      message: `Annotated images require width ≥ ${renderImageAnnotatedMinDimension}`,
     });
   }
-  if (value.height < annotatedMinDimension) {
+  if (value.height < renderImageAnnotatedMinDimension) {
     context.addIssue({
       code: 'custom',
       path: ['height'],
-      message: `Annotated images require height ≥ ${annotatedMinDimension}`,
+      message: `Annotated images require height ≥ ${renderImageAnnotatedMinDimension}`,
     });
   }
 };
@@ -179,7 +204,12 @@ const transparentImageSchema = createImageSchema({
 
 /** JPEG: no alpha channel, so default to opaque white to avoid an encode error. */
 const opaqueImageSchema = createImageSchema({
-  quality: z.number().min(0).max(1).default(0.92).describe('JPEG encoder quality 0–1'),
+  quality: z
+    .number()
+    .min(renderImageQualityRange[0])
+    .max(renderImageQualityRange[1])
+    .default(0.92)
+    .describe('JPEG encoder quality 0–1'),
   background: hexColor.default('#FFFFFF').describe('sRGB #RRGGBB background (JPEG is always opaque)'),
 });
 

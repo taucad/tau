@@ -1,8 +1,8 @@
 /**
  * Image Transcoder
  *
- * Wraps `@taucad/render`'s `renderGlbToImage` (Rust/wgpu wasm+napi core) as a
- * transcoder plugin: kernel GLB → matcap-styled PNG/WebP/JPEG thumbnail via the
+ * Wraps nanoraster's `renderGlbToImage` (Rust/wgpu wasm+napi core) as a
+ * transcoder plugin: kernel GLB → factor-only PBR PNG/WebP/JPEG thumbnail via the
  * runtime route planner. The renderer is lazy-imported per call so no GPU
  * device or wasm module is created until the first image export. Never throws —
  * a malformed GLB, missing adapter, or lost device is contained by the façade
@@ -81,7 +81,7 @@ export const imageTranscoder = defineTranscoder({
 
     try {
       const options = imageEdgeSchemas[input.to].parse(input.options);
-      const { renderGlbToImage, renderGlbToImages } = await import('@taucad/render');
+      const { renderGlbToImage, renderGlbToImages } = await import('nanoraster');
       runtime.logger.log(`Rendering GLB → ${input.to}`);
       if (options.mode === 'batch') {
         const { mode: _, ...renderOptions } = options;
@@ -93,7 +93,7 @@ export const imageTranscoder = defineTranscoder({
       const file = await renderGlbToImage(glb, { format: input.to, up: 'z', ...renderOptions });
       return { success: true, data: [file], issues: [] };
     } catch (error) {
-      const { RenderError: renderErrorClass } = await import('@taucad/render');
+      const { RenderError: renderErrorClass } = await import('nanoraster');
       const renderError = renderErrorClass.from(error);
       return {
         success: false,

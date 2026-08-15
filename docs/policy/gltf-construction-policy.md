@@ -106,7 +106,7 @@ Three.js `GLTFLoader` handles both layouts. The UI code (`gltf-edges.ts`) has ex
 
 ### 2.1 Consumer Layout and Instantiation Contract
 
-The direct-writer rule is a producer optimization, not a restriction on standards-compliant consumers. `@taucad/render` delegates GLB framing, glTF schema validation, accessor offsets, `byteStride`, and sparse-accessor decoding to pinned `gltf-rs`. Within its documented static render profile, it accepts packed, accessor-offset, interleaved, and sparse physical layouts.
+The direct-writer rule is a producer optimization, not a restriction on standards-compliant consumers. `nanoraster` delegates GLB framing, glTF schema validation, accessor offsets, `byteStride`, and sparse-accessor decoding to pinned `gltf-rs`. Within its documented factor-only PBR render profile, it accepts packed, accessor-offset, interleaved, and sparse physical layouts.
 
 The headless renderer also evaluates the selected glTF scene's complete core node hierarchy. It composes matrix/TRS transforms, decodes and uploads each reachable mesh asset once, draws every node instance from the shared buffers, applies the same model transform to surface and line primitives, uses an inverse-transpose normal transform, and fits the camera from exact transformed vertices.
 

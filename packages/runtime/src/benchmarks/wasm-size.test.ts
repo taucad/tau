@@ -15,11 +15,6 @@ const wasmBudgets: WasmBudget[] = [
   { path: 'src/kernels/opencascade/wasm/opencascade_full.wasm', maxMb: 120 },
   { path: 'src/kernels/manifold/wasm/manifold.wasm', maxMb: 1 },
   { path: 'src/kernels/zoo/wasm/kcl_wasm_lib_bg.wasm', maxMb: 17 },
-  // The image transcoder's renderer artifact lives in @taucad/render; budget is
-  // the raw (uncompressed) size — 1,062,547 B raw / 518,544 B gzip /
-  // 451,867 B Brotli after the gltf-rs loader migration; hard-fail at 2.5 MB
-  // raw. Loaded via @taucad/render, not copied into runtime.
-  { path: '../render/src/wasm/render_wasm_bg.wasm', maxMb: 2.5 },
 ];
 
 describe('WASM binary size budgets', () => {

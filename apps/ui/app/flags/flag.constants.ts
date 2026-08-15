@@ -45,6 +45,12 @@ export const flagRegistry = {
     label: 'Tau Debug',
     description: 'Enable in-app debug surfaces (e2e diagnostic panels, geometry inspectors).',
   },
+  marketingLanding: {
+    schema: z.boolean().default(false),
+    label: 'Marketing Landing',
+    description:
+      'Render the marketing landing page for signed-out visitors and the project library for signed-in users on the home route.',
+  },
 } as const satisfies Record<string, FlagDefinition>;
 
 export type FeatureFlagName = keyof typeof flagRegistry;

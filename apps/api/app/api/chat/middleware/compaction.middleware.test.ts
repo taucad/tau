@@ -16,10 +16,26 @@ import type { ModelService } from '#api/models/model.service.js';
 import type { MetricsService } from '#telemetry/metrics.js';
 import { TokenBudgetService } from '#api/chat/token-budget.service.js';
 import { MorphCompactionContractError, MorphCompactionTransportError } from '#api/chat/utils/compaction-errors.js';
+import { compactionTranscriptPath } from '#api/chat/middleware/compaction-transcript.js';
+import type { ReadDedupClearer } from '#api/chat/clear-recent-reads.js';
+
+const getCommandMessages = (command: Command): BaseMessage[] => {
+  const { update } = command;
+  if (!update || Array.isArray(update)) {
+    throw new Error('Expected a record command update');
+  }
+  return update['messages'] as BaseMessage[];
+};
 
 vi.mock('@taucad/utils/id', () => ({
   generatePrefixedId: vi.fn(() => 'dat_test_123'),
 }));
+
+describe('compactionTranscriptPath', () => {
+  it('should return an absolute DeepAgents backend path', () => {
+    expect(compactionTranscriptPath('chat-1')).toBe('/.tau/transcripts/chat-1.jsonl');
+  });
+});
 
 describe('findSafeCutoffPoint', () => {
   it('should keep requested number of messages when no split needed', () => {
@@ -93,7 +109,7 @@ describe('createCompactionMiddleware', () => {
   };
   let mockModelService: { getContextWindow: ReturnType<typeof vi.fn>; getOtelProviderName: ReturnType<typeof vi.fn> };
   let writer: ReturnType<typeof vi.fn>;
-  let readDedupClearer: { clearChat: ReturnType<typeof vi.fn> };
+  let readDedupClearer: ReadDedupClearer;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -106,13 +122,13 @@ describe('createCompactionMiddleware', () => {
       genAiContextCompactionDecisions: { add: vi.fn() },
     };
     rpcBackendFactory.create.mockReturnValue(mockBackend);
-    mockBackend.append.mockResolvedValue({ path: 'test', filesUpdate: null });
+    mockBackend.append.mockResolvedValue({ path: '/test', filesUpdate: null });
     mockModelService = {
       getContextWindow: vi.fn().mockReturnValue(200_000),
       getOtelProviderName: vi.fn().mockReturnValue('anthropic'),
     };
     writer = vi.fn();
-    readDedupClearer = { clearChat: vi.fn().mockResolvedValue(0) };
+    readDedupClearer = { clearChat: vi.fn<ReadDedupClearer['clearChat']>().mockResolvedValue(0) };
   });
 
   const createMiddlewareInstance = () =>
@@ -276,7 +292,7 @@ describe('createCompactionMiddleware', () => {
     expect(compactionService.compact).toHaveBeenCalled();
     expect(handler).toHaveBeenCalledTimes(1);
     expect(result).toBeInstanceOf(Command);
-    const updatedMessages = (result as Command).update?.['messages'] as BaseMessage[];
+    const updatedMessages = getCommandMessages(result as Command);
     expect(updatedMessages[0]?.id).toBe(REMOVE_ALL_MESSAGES);
     expect(updatedMessages.at(-1)).toBe(aiResponse);
     expect(
@@ -1340,7 +1356,7 @@ describe('createCompactionMiddleware — read-dedup clear on eviction', () => {
   };
   let mockModelService: { getContextWindow: ReturnType<typeof vi.fn>; getOtelProviderName: ReturnType<typeof vi.fn> };
   let writer: ReturnType<typeof vi.fn>;
-  let readDedupClearer: { clearChat: ReturnType<typeof vi.fn> };
+  let readDedupClearer: ReadDedupClearer;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1353,13 +1369,13 @@ describe('createCompactionMiddleware — read-dedup clear on eviction', () => {
       genAiContextCompactionDecisions: { add: vi.fn() },
     };
     rpcBackendFactory.create.mockReturnValue(mockBackend);
-    mockBackend.append.mockResolvedValue({ path: 'test', filesUpdate: null });
+    mockBackend.append.mockResolvedValue({ path: '/test', filesUpdate: null });
     mockModelService = {
       getContextWindow: vi.fn().mockReturnValue(1000),
       getOtelProviderName: vi.fn().mockReturnValue('anthropic'),
     };
     writer = vi.fn();
-    readDedupClearer = { clearChat: vi.fn().mockResolvedValue(0) };
+    readDedupClearer = { clearChat: vi.fn<ReadDedupClearer['clearChat']>().mockResolvedValue(0) };
   });
 
   const createMiddlewareInstance = () =>
@@ -1426,7 +1442,7 @@ describe('createCompactionMiddleware — read-dedup clear on eviction', () => {
     expect(compactionService.compact).toHaveBeenCalled();
     expect(readDedupClearer.clearChat).toHaveBeenCalledWith('chat-recent-reads');
     expect(result).toBeInstanceOf(Command);
-    const updatedMessages = (result as Command).update?.['messages'] as BaseMessage[];
+    const updatedMessages = getCommandMessages(result as Command);
     expect(updatedMessages[0]?.id).toBe(REMOVE_ALL_MESSAGES);
     expect(updatedMessages.at(-1)).toBe(aiResponse);
   });
@@ -1527,7 +1543,7 @@ describe('createCompactionMiddleware — read-dedup clear on eviction', () => {
     expect(handler).toHaveBeenCalledTimes(2);
     expect(readDedupClearer.clearChat).toHaveBeenCalledWith('chat-recent-reads');
     expect(result).toBeInstanceOf(Command);
-    const updatedMessages = (result as Command).update?.['messages'] as BaseMessage[];
+    const updatedMessages = getCommandMessages(result as Command);
     expect(updatedMessages[0]?.id).toBe(REMOVE_ALL_MESSAGES);
     expect(updatedMessages.at(-1)).toBe(aiResponse);
   });

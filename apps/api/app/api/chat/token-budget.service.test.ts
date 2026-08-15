@@ -57,7 +57,7 @@ describe('TokenBudgetService', () => {
           },
         ],
         modelSettings: { cache_control: { type: 'ephemeral', ttl: '5m' } },
-        responseFormat: { type: 'json_schema', json_schema: { name: 'shape', schema: { type: 'object' } } },
+        responseFormat: { type: 'object' },
       }),
     });
 

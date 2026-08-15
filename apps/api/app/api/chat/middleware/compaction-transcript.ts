@@ -18,7 +18,7 @@ export type CompactionTranscriptCommitInput = {
 };
 
 export function compactionTranscriptPath(chatId: string): string {
-  return `.tau/transcripts/${chatId}.jsonl`;
+  return `/.tau/transcripts/${chatId}.jsonl`;
 }
 
 export async function appendCompactionTranscriptCommit(input: CompactionTranscriptCommitInput): Promise<string> {

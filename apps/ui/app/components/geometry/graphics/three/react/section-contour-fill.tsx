@@ -33,7 +33,10 @@ import type {
   SectionCutPlaneBasis,
 } from '#components/geometry/graphics/three/utils/section-cap-region.js';
 import { createSectionCapPackedGeometryArena } from '#components/geometry/graphics/three/utils/section-cap-packed-geometry.js';
-import type { SectionCapPackedGeometryArena } from '#components/geometry/graphics/three/utils/section-cap-packed-geometry.js';
+import type {
+  PackedSectionCapGeometryBuffers,
+  SectionCapPackedGeometryArena,
+} from '#components/geometry/graphics/three/utils/section-cap-packed-geometry.js';
 import { applySectionCapStyleToPackedBuffers } from '#components/geometry/graphics/three/utils/section-cap-style.js';
 import { sectionCapOverlapDebugUserDataKey } from '#components/geometry/graphics/three/utils/section-cap-overlap-debug.js';
 import type { SectionCapOverlapDebugSummary } from '#components/geometry/graphics/three/utils/section-cap-overlap-debug.js';
@@ -86,17 +89,6 @@ import type { ModelInteractionContext } from '#machines/model-interaction.machin
 const _inverseMeshWorld = /* @__PURE__ */ new THREE.Matrix4();
 const _parentInverse = /* @__PURE__ */ new THREE.Matrix4();
 
-type FillGeometryBuffers = Readonly<{
-  positions: Float32Array;
-  planeUv: Float32Array;
-  baseColors: Float32Array;
-  stripeColors: Float32Array;
-  patternStrengths: Float32Array;
-  stripeAxes: Float32Array;
-  regionKinds: Uint8Array<ArrayBuffer>;
-  indices: Uint32Array;
-}>;
-
 type SectionMaterialGroup = Readonly<{
   start: number;
   count: number;
@@ -115,7 +107,7 @@ export type SectionSourceRecord = Readonly<{
 
 type SectionHelperRecord = {
   fillMesh: THREE.Mesh;
-  borderSegments: THREE.Object3D | undefined;
+  borderSegments: ReturnType<typeof createGltfFatLineSegmentsFromPositions>;
   borderBackend: ResolvedGraphicsBackend | undefined;
   geometryKey: string | undefined;
   materialKey: string | undefined;
@@ -153,7 +145,7 @@ type SectionBorderMaterialState = {
 };
 
 /** R8b: reused index/position/planeUv buffers with geometric grow + `setDrawRange`. */
-function writePooledFillIndexedGeometry(fillMesh: THREE.Mesh, buffers: FillGeometryBuffers): void {
+function writePooledFillIndexedGeometry(fillMesh: THREE.Mesh, buffers: PackedSectionCapGeometryBuffers): void {
   const { positions, planeUv, baseColors, stripeColors, patternStrengths, stripeAxes, indices } = buffers;
 
   const geometry = fillMesh.geometry instanceof THREE.BufferGeometry ? fillMesh.geometry : new THREE.BufferGeometry();
@@ -254,7 +246,7 @@ function writePooledFillIndexedGeometry(fillMesh: THREE.Mesh, buffers: FillGeome
   geometry.setDrawRange(0, indexCount);
 }
 
-function fillGeometryBufferByteLength(buffers: FillGeometryBuffers): number {
+function fillGeometryBufferByteLength(buffers: PackedSectionCapGeometryBuffers): number {
   return (
     buffers.positions.byteLength +
     buffers.planeUv.byteLength +
@@ -784,9 +776,7 @@ function writeBorderSegments(
     return;
   }
 
-  const existingGeometry = helper.borderSegments?.geometry as
-    | { setPositions?: (positions: Float32Array) => void }
-    | undefined;
+  const existingGeometry = helper.borderSegments?.geometry;
   if (helper.borderSegments && helper.borderBackend === parameters.backend && existingGeometry?.setPositions) {
     existingGeometry.setPositions(parameters.positions);
     (helper.borderSegments as unknown as { material: GltfFatLineMaterial }).material = parameters.material;

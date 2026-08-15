@@ -325,7 +325,7 @@ type ComponentVisualStateOptions = {
 
 type ComponentVisualStateWithManifestOptions = ComponentVisualStateOptions & {
   readonly manifest: GeometryComponentManifest;
-  readonly opacityByComponentId: Record<string, number>;
+  readonly opacityByComponentId: Readonly<Record<string, number>>;
 };
 
 export type ViewerHoverUpdate = {
@@ -562,7 +562,7 @@ function resolveInheritedOpacity({
 }: {
   readonly manifest: GeometryComponentManifest;
   readonly componentId: string;
-  readonly opacityByComponentId: Record<string, number>;
+  readonly opacityByComponentId: Readonly<Record<string, number>>;
 }): number | undefined {
   if (opacityByComponentId[componentId] !== undefined) {
     return opacityByComponentId[componentId];
@@ -1299,7 +1299,7 @@ export function GltfMesh({
   const applyMaterials = useCallback(
     (targetScene: Group): void => {
       if (enableMatcap) {
-        void applyMatcap({ scene: targetScene } as GLTF, matcapTint, graphicsBackendThree);
+        void applyMatcap({ scene: targetScene }, matcapTint, graphicsBackendThree);
       } else {
         restoreOriginalMaterials(targetScene, originalMaterialsRef.current);
       }

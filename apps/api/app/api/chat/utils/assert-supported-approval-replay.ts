@@ -1,11 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
+import { isAnyToolPart } from '@taucad/chat';
 import type { MyUIMessage } from '@taucad/chat';
 
-const isToolLikePart = (part: MyUIMessage['parts'][number]): boolean =>
-  part.type === 'dynamic-tool' || part.type.startsWith('tool-');
-
 const hasApprovalLifecycle = (part: MyUIMessage['parts'][number]): boolean => {
-  if (!isToolLikePart(part)) {
+  if (!isAnyToolPart(part)) {
     return false;
   }
 

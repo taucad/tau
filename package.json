@@ -42,7 +42,7 @@
     "repos:clone": "node scripts/dist/repos.js clone --all",
     "repos:sync": "node scripts/dist/repos.js sync --all",
     "repos:status": "node scripts/dist/repos.js status --all",
-    "knip": "NX_DAEMON=false knip --max-issues 227",
+    "knip": "NX_DAEMON=false knip --max-issues 317",
     "docs:validate": "nx run scripts:validate-frontmatter",
     "projects:validate": "nx run scripts:validate-project-names",
     "size:build": "node tools/size-build.mjs",

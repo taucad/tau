@@ -30,10 +30,10 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref }}
-          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           if [[ "$EVENT_NAME" == pull_request ]]; then
-            git diff --name-only --diff-filter=ACDMRT "origin/$BASE_REF...HEAD" > /tmp/changed-files
+            git diff --name-only --diff-filter=ACDMRT "origin/$BASE_REF...$SOURCE_SHA" > /tmp/changed-files
           else
             git diff-tree --no-commit-id --name-only --diff-filter=ACDMRT -r HEAD > /tmp/changed-files
           fi
@@ -42,7 +42,7 @@ jobs:
             --ref "$REF_NAME" \
             --sha "$SOURCE_SHA" \
             --package-version "$(node -p "require('./package.json').version")" \
-            --subject "$(git log -1 --pretty=%s)" \
+            --subject "$(git log -1 --pretty=%s "$SOURCE_SHA")" \
             --changed-files-file /tmp/changed-files
 
   quality:

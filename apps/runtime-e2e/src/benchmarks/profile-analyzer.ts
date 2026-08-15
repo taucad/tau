@@ -100,7 +100,7 @@ const syntheticNames = new Map<string, TimeCategory>([
   ['(root)', 'other'],
 ]);
 
-const kernelPatterns = ['kernels/replicad', 'opencascade.js', 'replicad', 'node_modules/replicad'];
+const kernelPatterns = ['kernels/replicad', 'libcascade', 'replicad', 'node_modules/replicad'];
 const bundlerPatterns = ['bundler/', 'esbuild', 'node_modules/esbuild'];
 const frameworkPatterns = ['framework/', 'transport/', 'client/', 'plugins/'];
 

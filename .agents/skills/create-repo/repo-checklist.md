@@ -62,6 +62,7 @@ Applicability:
 | R    | Local platform package paths passed to npm begin with `./`.                                                                   |
 | R    | Every host/consumer job downloads and tests that candidate without rebuilding it.                                             |
 | R    | Candidate and consumer jobs run the bound host setup before executing host-dependent code.                                    |
+| R    | Browser jobs prove required adapters are usable on their bound runner and headless mode.                                      |
 | R    | Publish job has `id-token: write`, no checkout, no registry token, and is idempotent.                                         |
 | R    | Existing registry versions are byte/provenance verified rather than overwritten.                                              |
 | R    | Registry verification installs by exact version and checks package, source repo, workflow, commit, integrity, and provenance. |

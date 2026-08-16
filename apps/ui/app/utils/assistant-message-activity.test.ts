@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { MyUIMessage } from '@taucad/chat';
+import type { MyUIMessage, ScreenshotView } from '@taucad/chat';
 import { fileUnchangedMarker } from '@taucad/chat/constants';
 import type { ActivityGroup, FoldableRun, StandaloneRun } from '#utils/assistant-message-activity.js';
 import {
@@ -52,7 +52,7 @@ const testModelPart = (state?: string): Part =>
   }) as unknown as Part;
 const transferPart = (state?: string) => toolPart('tool-transfer_to_cad_expert', state);
 
-type ScreenshotImage = { view: string; dataUrl: string };
+type ScreenshotImage = { view: ScreenshotView; dataUrl: string };
 
 const screenshotPartWithImages = (images: readonly ScreenshotImage[]): Part =>
   ({
@@ -61,8 +61,13 @@ const screenshotPartWithImages = (images: readonly ScreenshotImage[]): Part =>
     output: { images },
   }) as unknown as Part;
 
-const compositeScreenshotPart = (): Part =>
-  screenshotPartWithImages([{ view: 'composite', dataUrl: 'data:image/png;base64,AAAA' }]);
+const sixViewScreenshotPart = (): Part =>
+  screenshotPartWithImages(
+    (['front', 'back', 'right', 'left', 'top', 'bottom'] as const).map((view) => ({
+      view,
+      dataUrl: `data:image/webp;base64,${view}`,
+    })),
+  );
 
 const testModelPartWithCounts = (passes: number, failures: number): Part =>
   ({
@@ -533,7 +538,7 @@ describe('groupAssistantParts', () => {
         reasoningPart('R-mid-1'),
         testModelPartWithCounts(2, 2),
         reasoningPart('R-mid-2'),
-        compositeScreenshotPart(),
+        sixViewScreenshotPart(),
         reasoningPart('R-trail'),
       ];
       const groups = groupAssistantParts(parts);
@@ -783,17 +788,17 @@ describe('groupAssistantParts', () => {
       expect(group.summary).toBe('Explored 2 screenshots');
     });
 
-    it('should expand a composite multi-angle screenshot to 6 screenshots', () => {
-      const groups = groupAssistantParts([compositeScreenshotPart()]);
+    it('should count all six ordered multi-angle images', () => {
+      const groups = groupAssistantParts([sixViewScreenshotPart()]);
 
       const group = expectAggregated(groups[0]!);
       expect(group.summary).toBe('Explored 6 screenshots');
     });
 
-    it('should sum image counts across multiple screenshot calls (composite + single)', () => {
+    it('should sum image counts across multiple screenshot calls', () => {
       const parts: Parts = [
-        compositeScreenshotPart(),
-        screenshotPartWithImages([{ view: 'current', dataUrl: 'data:image/png;base64,CCCC' }]),
+        sixViewScreenshotPart(),
+        screenshotPartWithImages([{ view: 'isometric', dataUrl: 'data:image/webp;base64,CCCC' }]),
       ];
       const groups = groupAssistantParts(parts);
 
@@ -841,7 +846,7 @@ describe('groupAssistantParts', () => {
       const parts: Parts = [
         webBrowserPart(),
         testModelPartWithCounts(2, 1),
-        compositeScreenshotPart(),
+        sixViewScreenshotPart(),
         kernelResultPart(),
         grepPart(),
         readFilePart(),
@@ -853,7 +858,7 @@ describe('groupAssistantParts', () => {
     });
 
     it('should produce the screenshot-scenario summary "Explored 1 render, 6 screenshots, 4 tests"', () => {
-      const parts: Parts = [kernelResultPart(), testModelPartWithCounts(4, 0), compositeScreenshotPart()];
+      const parts: Parts = [kernelResultPart(), testModelPartWithCounts(4, 0), sixViewScreenshotPart()];
       const groups = groupAssistantParts(parts);
 
       const group = expectAggregated(groups[0]!);

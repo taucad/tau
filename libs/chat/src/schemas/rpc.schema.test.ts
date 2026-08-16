@@ -131,6 +131,38 @@ describe('read_file RPC schema — metadata envelope fields', () => {
   });
 });
 
+describe('capture_images RPC schema', () => {
+  const captureImages = rpcSchemasRegistry[rpcName.captureImages];
+  const canonicalViews = ['isometric', 'front', 'back', 'right', 'left', 'top', 'bottom'] as const;
+
+  it('should accept every canonical screenshot view', () => {
+    const parsed = captureImages.resultSchema.parse({
+      success: true,
+      images: canonicalViews.map((view) => ({ view, dataUrl: `data:image/webp;base64,${view}` })),
+    });
+
+    expect(parsed).toMatchObject({ success: true, images: canonicalViews.map((view) => ({ view })) });
+  });
+
+  it('should reject empty image sets, composite and unknown views, and unknown image keys', () => {
+    expect(captureImages.resultSchema.safeParse({ success: true, images: [] }).success).toBe(false);
+    for (const view of ['composite', 'current']) {
+      expect(
+        captureImages.resultSchema.safeParse({
+          success: true,
+          images: [{ view, dataUrl: 'data:image/webp;base64,AQ==' }],
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      captureImages.resultSchema.safeParse({
+        success: true,
+        images: [{ view: 'front', dataUrl: 'data:image/webp;base64,AQ==', unexpected: true }],
+      }).success,
+    ).toBe(false);
+  });
+});
+
 describe('resolve_skill RPC schema', () => {
   const resolveSkill = rpcSchemasRegistry[rpcName.resolveSkill];
 

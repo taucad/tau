@@ -148,18 +148,10 @@ const pluralize = (count: number, singular: string, plural?: string): string =>
 type SummaryParts = { verb: string; verbActive: string; detail: string };
 
 /**
- * Composite multi-angle screenshot expansion factor: a single output image
- * with `view: 'composite'` is rendered by the screenshot tool card as a
- * 6-angle capture, so it counts as 6 screenshots in the activity summary to keep
- * the summary in sync with the visible card label.
- */
-const compositeImageCount = 6;
-
-/**
  * Image count contributed by a single screenshot tool part. While the call is
  * still streaming we contribute `1` as a placeholder so the summary doesn't
  * stale-display "0 screenshots" mid-flight; once the output is available we count
- * actual screenshot outputs with composite expansion.
+ * the actual screenshot outputs.
  */
 const countScreenshotImages = (part: MyMessagePart): number => {
   if (part.type !== 'tool-screenshot') {
@@ -168,11 +160,7 @@ const countScreenshotImages = (part: MyMessagePart): number => {
   if (part.state !== 'output-available') {
     return 1;
   }
-  const { images } = part.output;
-  if (images.length === 1 && images[0]?.view === 'composite') {
-    return compositeImageCount;
-  }
-  return images.length;
+  return part.output.images.length;
 };
 
 /**

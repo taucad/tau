@@ -15,6 +15,7 @@ import { diffStatsWithContentSchema } from '#schemas/tools/diff.schema.js';
 import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
 import { geoSpecRunFilterInputSchema, testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
 import { exportGeometryFormatSchema } from '#schemas/tools/export-geometry.tool.schema.js';
+import { screenshotImageSchema } from '#schemas/tools/screenshot.tool.schema.js';
 import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
 
 // =============================================================================
@@ -294,16 +295,11 @@ const captureImagesRpc = defineRpc({
       includeEdges: zod.boolean().optional(),
     })
     .strict(),
-  success: zod.object({
-    images: zod
-      .array(
-        zod.object({
-          view: zod.string(),
-          dataUrl: zod.string(),
-        }),
-      )
-      .min(1),
-  }),
+  success: zod
+    .object({
+      images: zod.array(screenshotImageSchema).min(1),
+    })
+    .strict(),
 });
 
 const appendFileRpc = defineRpc({

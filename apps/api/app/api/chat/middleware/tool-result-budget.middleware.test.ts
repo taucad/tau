@@ -40,7 +40,7 @@ describe('createToolResultBudgetMiddleware', () => {
   const buildScreenshotContent = (dataUrlChars = 211_135): string => {
     const prefix = 'data:image/webp;base64,';
     const dataUrl = prefix + 'A'.repeat(dataUrlChars - prefix.length);
-    return JSON.stringify({ images: [{ view: 'composite', dataUrl }] });
+    return JSON.stringify({ images: [{ view: 'isometric', dataUrl }] });
   };
 
   it('should pass through a turn that stays under the aggregate budget', async () => {

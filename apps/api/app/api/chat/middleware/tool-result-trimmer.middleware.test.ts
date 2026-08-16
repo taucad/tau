@@ -8,6 +8,7 @@ import type {
   EditFileOutput,
   GetKernelResultOutput,
   ScreenshotOutput,
+  ScreenshotView,
 } from '@taucad/chat';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createToolResultTrimmerMiddleware } from '#api/chat/middleware/tool-result-trimmer.middleware.js';
@@ -793,15 +794,13 @@ describe('createToolResultTrimmerMiddleware', () => {
   describe('screenshot trimmer', () => {
     const base64Stub = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ';
 
-    function createScreenshotOutput(views: string[]): ScreenshotOutput {
-      return {
-        images: views.map((view) => ({ view, dataUrl: base64Stub })),
-      };
-    }
+    const createScreenshotOutput = (views: readonly ScreenshotView[]): ScreenshotOutput => ({
+      images: views.map((view) => ({ view, dataUrl: base64Stub })),
+    });
 
     it('should strip dataUrl from older screenshot messages, keeping only view names', async () => {
       const olderScreenshot = createScreenshotOutput(['front', 'back', 'top', 'bottom', 'left', 'right']);
-      const latestScreenshot = createScreenshotOutput(['current']);
+      const latestScreenshot = createScreenshotOutput(['isometric']);
 
       const messages: BaseMessage[] = [
         new HumanMessage('Take a screenshot'),
@@ -860,7 +859,7 @@ describe('createToolResultTrimmerMiddleware', () => {
     });
 
     it('should strip screenshot dataUrl blocks when image blocks are disabled for the model', async () => {
-      const screenshot = createScreenshotOutput(['current']);
+      const screenshot = createScreenshotOutput(['isometric']);
       const messages: BaseMessage[] = [
         new ToolMessage({
           content: JSON.stringify(screenshot),
@@ -878,14 +877,14 @@ describe('createToolResultTrimmerMiddleware', () => {
       const parsed = JSON.parse(resultMessage.content as string) as Record<string, unknown>;
 
       expect(parsed).toEqual({
-        images: [{ view: 'current' }],
+        images: [{ view: 'isometric' }],
         _trimmed: true,
       });
     });
 
     it('should trim screenshot by content shape detection when name is missing', async () => {
       const olderOutput = createScreenshotOutput(['front', 'back']);
-      const latestOutput = createScreenshotOutput(['current']);
+      const latestOutput = createScreenshotOutput(['isometric']);
 
       const messages: BaseMessage[] = [
         new ToolMessage({
@@ -916,7 +915,7 @@ describe('createToolResultTrimmerMiddleware', () => {
 
     it('should handle older screenshot with empty images array', async () => {
       const emptyOutput: ScreenshotOutput = { images: [] };
-      const latestOutput = createScreenshotOutput(['current']);
+      const latestOutput = createScreenshotOutput(['isometric']);
 
       const messages: BaseMessage[] = [
         new ToolMessage({
@@ -947,7 +946,7 @@ describe('createToolResultTrimmerMiddleware', () => {
 
     it('should not inject image blocks when dataUrl values are offloaded placeholders', async () => {
       const offloadedOutput = {
-        images: [{ view: 'composite', dataUrl: '[offloaded: 50000 chars]' }],
+        images: [{ view: 'isometric', dataUrl: '[offloaded: 50000 chars]' }],
         _offloadedTo: '.tau/tool-results/chat-1/call_ss_offloaded.txt',
       };
 
@@ -970,7 +969,7 @@ describe('createToolResultTrimmerMiddleware', () => {
       const parsed = JSON.parse(resultMessage.content as string) as Record<string, unknown>;
       const images = parsed['images'] as Array<Record<string, unknown>>;
       expect(images).toHaveLength(1);
-      expect(images[0]!['view']).toBe('composite');
+      expect(images[0]!['view']).toBe('isometric');
       expect(images[0]!['dataUrl']).toBe('[offloaded: 50000 chars]');
     });
   });

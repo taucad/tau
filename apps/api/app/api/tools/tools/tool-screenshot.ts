@@ -10,7 +10,7 @@ export const screenshotToolDefinition = {
   name: toolName.screenshot,
   description: `Capture a screenshot of a specific geometry unit's 3D model for visual inspection.
 
-You MUST pass \`targetFile\` (the source file path of the geometry unit to screenshot, e.g. "main.ts" or "lib/bracket.scad"). There is no implicit fallback — if no viewer panel currently displays \`targetFile\`, the call fails with UNKNOWN_GEOMETRY_UNIT.
+You MUST pass \`targetFile\` (the source file path of the geometry unit to screenshot, e.g. "main.ts" or "lib/bracket.scad"). There is no project-level fallback. The requested geometry unit is resolved or created, then its render is awaited before headless capture. The call fails for a missing source file, render failure or render timeout, an unavailable renderer, or invalid image artifacts.
 
 Modes:
 - single: Captures one deterministic perspective isometric image

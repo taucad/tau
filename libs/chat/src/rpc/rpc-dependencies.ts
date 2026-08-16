@@ -125,8 +125,7 @@ export type RpcGraphicsExportGeometryResult =
     };
 
 /**
- * Abstract graphics client for capturing observations (screenshots).
- * Only available in browser environments with a mounted 3D view.
+ * Geometry fetch and export client independent of image capture.
  *
  * Every method takes an explicit `targetFile` so the agent must name the
  * geometry unit it is acting on; there is no project-level fallback.

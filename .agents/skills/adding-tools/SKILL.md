@@ -178,9 +178,9 @@ If your tool needs a new RPC (e.g., for a new client-side operation), add the RP
 5. If the RPC depends on `RpcGraphicsClient` / CAD snapshot types, extend **`libs/chat/src/rpc/rpc-dependencies.ts`** accordingly
 6. Add browser implementation in **`apps/ui/app/hooks/rpc-handlers.ts`**
 
-Most tools reuse existing RPCs (e.g., `readFile`, `createFile`, `getKernelResult`, `captureObservations`).
+Most tools reuse existing RPCs (e.g., `readFile`, `createFile`, `getKernelResult`, `captureImages`).
 
-**Browser adapter split:** operations that need the live CAD unit, kernel export/render, or viewer-adjacent work belong on **`RpcGraphicsClient`** (see `createBrowserGraphicsClient` in `rpc-handlers.ts`). Pure kernel compile/status without graphics should stay on **`RpcRuntimeClient`**. **`ensureGeometryUnit`** in `rpc-handlers.ts` is the canonical lazy-bootstrap when the LLM names a `targetFile` that may not have an open geometry unit yet.
+**Browser adapter split:** headless image capture belongs on **`RpcImageClient`** and must not depend on a mounted viewer. Geometry fetch/export belongs on **`RpcGraphicsClient`** (see `createBrowserGraphicsClient` in `rpc-handlers.ts`), while pure kernel compile/status belongs on **`RpcRuntimeClient`**. **`ensureGeometryUnit`** in `rpc-handlers.ts` is the canonical lazy-bootstrap when the LLM names a `targetFile` that may not have an open geometry unit yet.
 
 ### Step 10: Create UI Component
 

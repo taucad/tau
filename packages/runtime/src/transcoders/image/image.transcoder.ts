@@ -16,6 +16,7 @@
 
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 import { imageEdgeSchemas } from '#transcoders/image/image-export-options.js';
+import type * as Nanoraster from 'nanoraster';
 
 /**
  * Static edges declared as a `readonly` tuple so each element keeps its literal
@@ -50,6 +51,13 @@ const edges = [
   },
 ] as const;
 
+const rendererLoadErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && error.cause instanceof Error) {
+    return error.cause.message;
+  }
+  return error instanceof Error ? error.message : String(error);
+};
+
 /** GLB-to-image transcoder with strict single and ordered batch modes. @public */
 export const imageTranscoder = defineTranscoder({
   id: 'image',
@@ -78,10 +86,12 @@ export const imageTranscoder = defineTranscoder({
     }
 
     const glb = input.files[0]!.bytes;
+    let renderer: typeof Nanoraster | undefined;
 
     try {
       const options = imageEdgeSchemas[input.to].parse(input.options);
-      const { renderGlbToImage, renderGlbToImages } = await import('nanoraster');
+      renderer = await import('nanoraster');
+      const { renderGlbToImage, renderGlbToImages } = renderer;
       runtime.logger.log(`Rendering GLB → ${input.to}`);
       if (options.mode === 'batch') {
         const { mode: _, ...renderOptions } = options;
@@ -93,17 +103,16 @@ export const imageTranscoder = defineTranscoder({
       const file = await renderGlbToImage(glb, { format: input.to, up: 'z', ...renderOptions });
       return { success: true, data: [file], issues: [] };
     } catch (error) {
-      const { RenderError: renderErrorClass } = await import('nanoraster');
-      const renderError = renderErrorClass.from(error);
+      const renderError = renderer?.RenderError.from(error);
       return {
         success: false,
         issues: [
           {
-            message: renderError.message,
+            message: renderError?.message ?? rendererLoadErrorMessage(error),
             code: 'RUNTIME',
             type: 'runtime',
             severity: 'error',
-            details: { type: 'render', code: renderError.code },
+            details: { type: 'render', code: renderError?.code ?? 'unknown' },
           },
         ],
       };

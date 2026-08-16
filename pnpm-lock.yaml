@@ -1849,6 +1849,9 @@ importers:
       tslib:
         specifier: 'catalog:'
         version: 2.8.1
+      uint8array-extras:
+        specifier: 'catalog:'
+        version: 1.5.0
       vscode-uri:
         specifier: 'catalog:'
         version: 3.1.0

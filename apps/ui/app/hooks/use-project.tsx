@@ -571,38 +571,6 @@ export function useMainGraphics(): ActorRefFrom<typeof graphicsMachine> | undefi
   return undefined;
 }
 
-/**
- * Returns a resolver that maps a source file path to the graphics actor of the
- * viewer panel currently displaying that file.
- *
- * The resolver reads live snapshots on each call so it always reflects the
- * latest viewer panel layout. Returns `undefined` when no panel displays the
- * requested file — agent-tool callers translate this into an
- * `UNKNOWN_GEOMETRY_UNIT` RPC error rather than silently falling back to
- * the project's `mainEntryPath`.
- */
-export function useResolveGraphicsForFile(): (targetFile: string) => ActorRefFrom<typeof graphicsMachine> | undefined {
-  const context = useContext(ProjectContext);
-  if (!context) {
-    throw new Error('useResolveGraphicsForFile must be used within a ProjectProvider');
-  }
-
-  const { viewGraphics, editorRef } = context;
-
-  return useCallback(
-    (targetFile: string) => {
-      const { viewSettings } = editorRef.getSnapshot().context;
-      for (const [viewId, graphicsRef] of viewGraphics) {
-        if (viewSettings[viewId]?.entryPath === targetFile) {
-          return graphicsRef;
-        }
-      }
-      return undefined;
-    },
-    [viewGraphics, editorRef],
-  );
-}
-
 export function useProject<T extends ProjectContextType = ProjectContextType>(options?: {
   readonly enableNoContext?: false;
 }): T;

@@ -37,23 +37,12 @@ vi.mock('#services/rpc-ledger.js', () => ({
 }));
 
 const mockWaitFor = vi.fn();
-const xstateMocks = vi.hoisted(() => ({
-  createActor: vi.fn(),
-}));
 vi.mock('xstate', async () => {
   const actual = await vi.importActual('xstate');
   return {
     ...(actual as Record<string, unknown>),
     // oxlint-disable-next-line no-unsafe-return -- mock factory returns untyped
     waitFor: (...args: unknown[]) => mockWaitFor(...args) as unknown,
-    // oxlint-disable-next-line no-unsafe-return -- tests override this for screenshot actor inspection
-    createActor: (...args: unknown[]) => {
-      const actor = xstateMocks.createActor(...args) as unknown;
-      if (actor) {
-        return actor;
-      }
-      return (actual as { createActor: (...args: unknown[]) => unknown }).createActor(...args);
-    },
   };
 });
 
@@ -133,7 +122,6 @@ function createMockTreeService(tree?: Map<string, FileEntry>) {
 }
 
 type MockTreeService = ReturnType<typeof createMockTreeService>;
-type LegacyResolver = (targetFile: string) => unknown;
 
 function createMockFileManager() {
   return {
@@ -209,8 +197,6 @@ function buildDeps(overrides?: {
   fileManager?: ReturnType<typeof createMockFileManager>;
   fileTree?: Map<string, FileEntry>;
   projectRef?: ReturnType<typeof createMockProjectRef>;
-  resolveGraphicsForFile?: LegacyResolver;
-  screenshotQuality?: number;
   headlessImageService?: RpcHandlerDependencies['headlessImageService'];
   treeService?: MockTreeService;
   createGeoSpecClient?: RpcHandlerDependencies['createGeoSpecClient'];
@@ -247,7 +233,6 @@ describe('rpc-handlers', () => {
   beforeEach(() => {
     capturedDeps = undefined;
     mockWaitFor.mockReset();
-    xstateMocks.createActor.mockReset();
     rpcDispatcherMocks.dispatch.mockReset();
     ledgerMocks.recordRpcOutcome.mockReset();
   });
@@ -675,8 +660,6 @@ describe('rpc-handlers', () => {
   // ===============================================================
 
   describe('createBrowserGraphicsClient', () => {
-    const stubResolver: LegacyResolver = vi.fn();
-
     describe('fetchGeometry', () => {
       // FetchGeometry routes through the same `resolveOrCreateGeometryUnit`
       // helper as getKernelResult. Every test must therefore mock `waitFor`
@@ -701,7 +684,7 @@ describe('rpc-handlers', () => {
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
         const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockResolvedValue(cadSnapshotWith({ format: 'gltf', content: glbContent, hash: 'abc123' }));
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.fetchGeometry({ targetFile: 'main.scad' });
@@ -722,7 +705,7 @@ describe('rpc-handlers', () => {
         const geometryUnits = new Map<string, unknown>([['main.scad', cadUnit]]);
         const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockResolvedValue(cadSnapshotWith({ format: 'gltf', content: glbContent, hash: 'empty' }));
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.fetchGeometry({ targetFile: 'main.scad' });
@@ -743,7 +726,7 @@ describe('rpc-handlers', () => {
         const geometryUnits = new Map<string, unknown>([['main.ts', cadUnit]]);
         const projectRef = createMockProjectRef({ geometryUnits, mainEntryPath: 'main.ts' });
         mockWaitFor.mockResolvedValue(cadSnapshotWith({ format: 'gltf', content: glbContent, hash: 'explicit' }));
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.fetchGeometry({ targetFile: 'main.ts', parameters: { width: 42 } });
@@ -769,7 +752,7 @@ describe('rpc-handlers', () => {
           .mockReturnValue({ context: { geometryUnits: populatedUnits, mainEntryPath: 'main.scad' } });
         mockWaitFor.mockResolvedValue(cadSnapshotWith({ format: 'gltf', content: glbContent, hash: 'boot' }));
 
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.fetchGeometry({ targetFile: 'lib/main_rotor.scad' });
@@ -788,7 +771,7 @@ describe('rpc-handlers', () => {
 
       it('should return UNKNOWN with bootstrap-failure message when geometry unit bootstrap fails', async () => {
         const projectRef = createMockProjectRef({ geometryUnits: new Map<string, unknown>() });
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.fetchGeometry({ targetFile: 'lib/main_rotor.scad' });
@@ -817,7 +800,7 @@ describe('rpc-handlers', () => {
           .mockReturnValue({ context: { geometryUnits: populatedUnits, mainEntryPath: 'main.scad' } });
         mockWaitFor.mockResolvedValue(cadSnapshotWith(undefined));
 
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.fetchGeometry({ targetFile: 'lib/main_rotor.scad' });
@@ -835,7 +818,7 @@ describe('rpc-handlers', () => {
         const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockResolvedValue(cadSnapshotWith(undefined));
 
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.fetchGeometry({ targetFile: 'main.scad' });
@@ -868,7 +851,7 @@ describe('rpc-handlers', () => {
           context: { geometry: undefined, kernelIssues: issues },
         });
 
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.fetchGeometry({ targetFile: 'lib/missing.scad' });
@@ -892,7 +875,7 @@ describe('rpc-handlers', () => {
           context: { geometry: undefined, kernelIssues: issues },
         });
 
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.fetchGeometry({ targetFile: 'lib/typo.ts' });
@@ -915,7 +898,7 @@ describe('rpc-handlers', () => {
           context: { geometry: undefined, kernelIssues: issues },
         });
 
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.fetchGeometry({ targetFile: 'main.scad' });
@@ -935,7 +918,7 @@ describe('rpc-handlers', () => {
         mockWaitFor.mockResolvedValue(
           cadSnapshotWith({ format: 'svg', content: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', hash: 'svg1' }),
         );
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.fetchGeometry({ targetFile: 'main.scad' });
@@ -960,7 +943,7 @@ describe('rpc-handlers', () => {
         mockWaitFor
           .mockResolvedValueOnce(cadSnapshotWith({ format: 'gltf', content: mainGlb, hash: 'm' }))
           .mockResolvedValueOnce(cadSnapshotWith({ format: 'gltf', content: penGlb, hash: 'p' }));
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const mainResult = await graphics.fetchGeometry({ targetFile: 'main.ts' });
@@ -981,7 +964,7 @@ describe('rpc-handlers', () => {
         const awaitFreshRenderModule = await import('#machines/await-fresh-render.js');
         mockWaitFor.mockRejectedValue(new awaitFreshRenderModule.AwaitFreshRenderTimeoutError(5000, 0));
 
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.fetchGeometry({ targetFile: 'main.scad' });
@@ -1007,7 +990,7 @@ describe('rpc-handlers', () => {
         const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockRejectedValue(new Error('Actor stopped'));
 
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.fetchGeometry({ targetFile: 'main.scad' });
@@ -1027,7 +1010,7 @@ describe('rpc-handlers', () => {
         projectRef.getSnapshot.mockImplementation(() => {
           throw new Error('Actor not running');
         });
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.fetchGeometry({ targetFile: 'main.scad' });
@@ -1082,7 +1065,7 @@ describe('rpc-handlers', () => {
         const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockResolvedValue(cadSnapshotForExport(kernelClient));
 
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.exportGeometry({ targetFile: 'main.scad', format: 'step' });
@@ -1109,7 +1092,7 @@ describe('rpc-handlers', () => {
           },
         });
 
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.exportGeometry({ targetFile: 'main.scad', format: 'stl' });
@@ -1145,7 +1128,7 @@ describe('rpc-handlers', () => {
         const projectRef = createMockProjectRef({ geometryUnits });
         mockWaitFor.mockResolvedValue(cadSnapshotForExport(kernelClient));
 
-        const deps = buildDeps({ projectRef, resolveGraphicsForFile: stubResolver });
+        const deps = buildDeps({ projectRef });
         const graphics = deps.graphics!;
 
         const result = await graphics.exportGeometry({ targetFile: 'main.scad', format: 'stl' });

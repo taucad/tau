@@ -6,12 +6,17 @@ import { opencascade } from '@taucad/runtime/kernels/opencascade';
 import { replicad } from '@taucad/runtime/kernels/replicad';
 import { tau } from '@taucad/runtime/kernels/tau';
 import { zoo } from '@taucad/runtime/kernels/zoo';
-import { geometryCache, gltfCoordinateTransform, gltfEdgeDetection, parameterCache } from '@taucad/runtime/middleware';
-import { converterTranscoder } from '@taucad/runtime/transcoder';
+import {
+  geometryCache,
+  gltfCoordinateTransform,
+  gltfEdgeDetection,
+  parameterCache,
+  parameterFileResolver,
+} from '@taucad/runtime/middleware';
+import { converterTranscoder, imageTranscoder } from '@taucad/runtime/transcoder';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { openscad } from '@taucad/openscad';
 import { observability } from '@taucad/telemetry/middleware';
-import { parameterFileResolver } from '#middleware/parameter-file-resolver.middleware.js';
 
 type UiRuntimeOptions = {
   readonly withSourceMapping?: boolean;
@@ -32,7 +37,6 @@ const createUiRuntime = (options: UiRuntimeOptions = {}) =>
           zoo({ baseUrl: `${config.tauWebSocketUrl}/v1/kernels/zoo` }),
           replicad({
             wasm: 'auto',
-            withBrepEdges: true,
             withSourceMapping: options.withSourceMapping === true,
           }),
           opencascade(),
@@ -49,7 +53,7 @@ const createUiRuntime = (options: UiRuntimeOptions = {}) =>
           gltfEdgeDetection(),
         ],
         bundlers: [esbuild()],
-        transcoders: [converterTranscoder()],
+        transcoders: [converterTranscoder(), imageTranscoder()],
       };
     },
   });

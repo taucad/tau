@@ -7,9 +7,9 @@
  */
 
 import type { RuntimeClient } from '@taucad/runtime';
-import type { RuntimeClientOptionsWithTransport } from '@taucad/runtime/client';
+import type { RuntimeClientOptionsWithTransport, RuntimeExportOptions } from '@taucad/runtime/client';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
-import type { RuntimeKernels, RuntimeTranscoders } from '@taucad/runtime/worker';
+import type { RuntimeKernels, RuntimeMiddleware, RuntimeTranscoders } from '@taucad/runtime/worker';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 
@@ -19,9 +19,20 @@ import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
  * Use this alias instead of inlining the runtime projection so that
  * downstream consumers have a single source of truth.
  */
-export type AppRuntimeClient = RuntimeClient<RuntimeKernels<typeof runtime>, RuntimeTranscoders<typeof runtime>>;
+export type AppRuntimeClient = RuntimeClient<
+  RuntimeKernels<typeof runtime>,
+  RuntimeMiddleware<typeof runtime>,
+  RuntimeTranscoders<typeof runtime>
+>;
 
 export type AppRuntimeExportFormat = Parameters<AppRuntimeClient['export']>[0];
+
+export type AppRuntimeExportOptions<Format extends AppRuntimeExportFormat> = RuntimeExportOptions<
+  RuntimeKernels<typeof runtime>,
+  RuntimeMiddleware<typeof runtime>,
+  RuntimeTranscoders<typeof runtime>,
+  Format
+>;
 
 /**
  * Deferred-construction shape for typed runtime client options.

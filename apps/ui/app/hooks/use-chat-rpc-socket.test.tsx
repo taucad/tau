@@ -24,12 +24,14 @@ const hookMocks = vi.hoisted(() => {
     whenServicesReady: vi.fn(),
   };
   const createGeoSpecWorkerRpcClient = vi.fn();
+  const headlessImageService = { export: vi.fn() };
   return {
     worker,
     fileManager,
     firstRuntimeFileSystem,
     secondRuntimeFileSystem,
     createGeoSpecWorkerRpcClient,
+    headlessImageService,
   };
 });
 
@@ -54,15 +56,14 @@ vi.mock('#services/chat-rpc-socket.service.js', () => {
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectRef: { getSnapshot: vi.fn(), send: vi.fn() } }),
-  useResolveGraphicsForFile: () => undefined,
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => hookMocks.fileManager,
 }));
 
-vi.mock('#hooks/use-image-quality.js', () => ({
-  useImageQuality: () => ({ quality: 1 }),
+vi.mock('#providers/headless-image-provider.js', () => ({
+  useHeadlessImageService: () => hookMocks.headlessImageService,
 }));
 
 vi.mock('#workers/geospec-runner.client.js', () => ({

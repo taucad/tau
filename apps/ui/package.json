@@ -50,6 +50,7 @@
     "react-day-picker": "^10.0.1",
     "sonner": "catalog:",
     "tslib": "catalog:",
+    "uint8array-extras": "catalog:",
     "vscode-uri": "catalog:"
   },
   "devDependencies": {

@@ -18,7 +18,7 @@ describe('ProviderService xai', () => {
     const providerService = new ProviderService(configService as ConfigService);
     const diagnosticsContext = createProviderDiagnosticsContext({
       chatId: 'chat_xai_1',
-      modelId: 'xai-grok-4.5',
+      modelId: 'xai-grok-4.6',
       providerId: 'xai',
       verbose: false,
       logger: { error: () => undefined },
@@ -27,7 +27,7 @@ describe('ProviderService xai', () => {
     const model = providerService.createModelClass(
       'xai',
       {
-        model: 'grok-4.5',
+        model: 'grok-4.6',
         streaming: true,
         maxOutputTokens: 64_000,
         reasoning: {
@@ -39,7 +39,7 @@ describe('ProviderService xai', () => {
     );
 
     expect(model).toBeInstanceOf(TauChatXaiResponses);
-    expect(model.model).toBe('grok-4.5');
+    expect(model.model).toBe('grok-4.6');
     expect((model as TauChatXaiResponses).maxOutputTokens).toBe(64_000);
     expect((model as TauChatXaiResponses).reasoning).toEqual({ effort: 'high', summary: 'auto' });
     expect((model as TauChatXaiResponses).conversationId).toBe('chat_xai_1');

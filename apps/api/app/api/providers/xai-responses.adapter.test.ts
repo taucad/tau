@@ -18,7 +18,7 @@ const baseResponse = {
   object: 'response',
   created_at: 0,
   status: 'completed',
-  model: 'grok-4.5',
+  model: 'grok-4.6',
   output: [],
   usage: {
     input_tokens: 10,
@@ -33,7 +33,7 @@ class FakeTauChatXaiResponses extends TauChatXaiResponses {
   public readonly requests: XAIResponsesCreateParams[] = [];
 
   public constructor(private readonly result: XAIResponse | XAIResponsesStreamEvent[]) {
-    super({ apiKey: 'xai-test-key', model: 'grok-4.5', streaming: Array.isArray(result) });
+    super({ apiKey: 'xai-test-key', model: 'grok-4.6', streaming: Array.isArray(result) });
   }
 
   protected override async _makeRequest(request: XAIResponsesCreateParamsNonStreaming): Promise<XAIResponse>;
@@ -206,7 +206,7 @@ describe('TauChatXaiResponses', () => {
 
     const model = new TauChatXaiResponses({
       apiKey: 'xai-test-key',
-      model: 'grok-4.5',
+      model: 'grok-4.6',
       conversationId: 'chat_1\r\nbad',
     });
 

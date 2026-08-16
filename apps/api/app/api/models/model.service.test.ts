@@ -31,7 +31,7 @@ const cappedModelIds = [
   'together-llama-4-maverick',
   'morph-qwen-3.5-397b',
   'morph-deepseek-v4-flash',
-  'xai-grok-4.5',
+  'xai-grok-4.6',
   'moonshot-kimi-k3',
 ] as const;
 
@@ -139,21 +139,32 @@ describe('ModelService', () => {
     expect(modelSupportsInput(glm?.support, 'image')).toBe(false);
   });
 
-  it('lists Grok 4.5 as an enabled image-capable tool-capable model', async () => {
+  it('lists Grok 4.6 as the recommended image-capable xAI model', async () => {
     const service = createModelService();
     const listedModels = await service.getModels();
-    const grok = listedModels.find((model) => model.id === 'xai-grok-4.5');
+    const grok = listedModels.find((model) => model.id === 'xai-grok-4.6');
 
-    expect(grok).toBeDefined();
-    expect(grok?.support?.tools).toBe(true);
-    expect(modelSupportsInput(grok?.support, 'text')).toBe(true);
-    expect(modelSupportsInput(grok?.support, 'image')).toBe(true);
-    expect(service.getContextWindow('xai-grok-4.5')).toBe(maxEffectiveContextWindow);
-    expect(service.getProviderId('xai-grok-4.5')).toBe('xai');
-    expect(service.getModelSupport('xai-grok-4.5')).toMatchObject({
-      tools: true,
-      toolChoice: false,
-      modalities: { input: ['text', 'image'], output: ['text'] },
+    expect(grok).toMatchObject({
+      recommended: true,
+      model: 'grok-4.6',
+      provider: { id: 'xai', name: 'xAI' },
+      support: {
+        tools: true,
+        toolChoice: false,
+        modalities: { input: ['text', 'image'], output: ['text'] },
+      },
+      details: {
+        family: 'grok',
+        contextWindow: maxEffectiveContextWindow,
+        maxTokens: 64_000,
+        knowledgeCutoff: '2026-02',
+        cost: { inputTokens: 2, outputTokens: 6, cacheReadTokens: 0.5, cacheWriteTokens: 0 },
+      },
+      configuration: {
+        streaming: true,
+        maxOutputTokens: 64_000,
+        reasoning: { effort: 'high', summary: 'auto' },
+      },
     });
   });
 

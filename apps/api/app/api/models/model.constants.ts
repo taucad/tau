@@ -1002,18 +1002,19 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
   },
 
   xai: {
-    'grok-4.5': {
+    'grok-4.6': {
       enabled: true,
-      id: 'xai-grok-4.5',
-      name: 'Grok 4.5',
-      slug: 'grok-4.5',
-      recommended: false,
-      description: 'Strong xAI reasoning model for complex CAD planning and long agentic tool loops.',
+      id: 'xai-grok-4.6',
+      name: 'Grok 4.6',
+      slug: 'grok-4.6',
+      recommended: true,
+      description:
+        'Strong xAI model for long-horizon agentic CAD design, complex geometry reasoning, and polished visual work.',
       provider: {
         id: 'xai',
         name: 'xAI',
       },
-      model: 'grok-4.5',
+      model: 'grok-4.6',
       support: {
         tools: true,
         toolChoice: false,
@@ -1024,6 +1025,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         families: ['grok'],
         contextWindow: 200_000,
         maxTokens: 64_000,
+        knowledgeCutoff: '2026-02',
         cost: {
           inputTokens: 2,
           outputTokens: 6,

@@ -5,9 +5,9 @@ import { createTestApp } from '#testing/create-test-app.js';
 import type { TestApp } from '#testing/create-test-app.js';
 import { buildCadAgent, requiresEnv } from '#testing/skip-helpers.js';
 
-const modelId = 'xai-grok-4.5';
+const modelId = 'xai-grok-4.6';
 
-describe.skipIf(requiresEnv('XAI_API_KEY'))('xAI Grok 4.5 live integration', () => {
+describe.skipIf(requiresEnv('XAI_API_KEY'))('xAI Grok 4.6 live integration', () => {
   let testApp: TestApp;
 
   beforeAll(async () => {

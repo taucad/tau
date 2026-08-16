@@ -73,8 +73,8 @@ const modelCatalogue: Model[] = [
     details: { family: 'gpt' },
   } as unknown as Model,
   {
-    id: 'xai-grok-4.5',
-    name: 'Grok 4.5',
+    id: 'xai-grok-4.6',
+    name: 'Grok 4.6',
     description: '',
     provider: { id: 'xai', name: 'xAI' },
     details: { family: 'grok' },
@@ -212,7 +212,7 @@ describe('ChatModelSelector — chat-scoped read + dual-write', () => {
     renderSelector();
     const grok = capturedComboBox.groupedItems
       ?.flatMap((group) => group.items)
-      .find((model) => model.id === 'xai-grok-4.5');
+      .find((model) => model.id === 'xai-grok-4.6');
 
     if (!grok) {
       throw new Error('Expected Grok model in selector items');

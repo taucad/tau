@@ -78,6 +78,8 @@ const manifestPath = resolve(verificationRoot, 'wave1-input-baseline.json');
 const deltasPath = resolve(verificationRoot, 'wave1-authorized-input-deltas.json');
 const version2Path = resolve(verificationRoot, 'wave1-input-manifest-v2.json');
 const captureDate = '2026-08-12';
+const historicalOpenScadRoot = 'kernels/openscad';
+const currentOpenRscadRoot = 'packages/kernels/openrscad';
 
 const toRepoPath = (path: string): string => relative(repoRoot, path).split(sep).join('/');
 
@@ -181,8 +183,8 @@ const captureManifest = (): InputManifest => {
     'packages/runtime/src/types/runtime-kernel.types.ts',
     'packages/runtime/src/utils/export-glb.ts',
     'packages/runtime/src/worker/runtime-definition.ts',
-    'kernels/openscad/package.json',
-    'kernels/openscad/src',
+    'packages/kernels/openrscad/package.json',
+    'packages/kernels/openrscad/src',
   ]);
   const referenceEngine = gitCategory({
     revision: sourceRevision,
@@ -216,11 +218,16 @@ type Wave1JsonDocument = InputManifest | AuthorizedDeltas | InputVersionManifest
 
 const readJson = <T extends Wave1JsonDocument>(path: string): T => JSON.parse(readFileSync(path, 'utf8')) as T;
 
+const currentWorkingTreePath = (path: string): string =>
+  path === historicalOpenScadRoot || path.startsWith(`${historicalOpenScadRoot}/`)
+    ? `${currentOpenRscadRoot}${path.slice(historicalOpenScadRoot.length)}`
+    : path;
+
 const currentBytes = (entry: InputEntry, sourceRevision: string): Uint8Array<ArrayBuffer> => {
   if (entry.source === 'git' && entry.path.startsWith('packages/geospec/')) {
     return runGit(['show', `${sourceRevision}:${entry.sourcePath ?? entry.path}`]);
   }
-  return Uint8Array.from(readFileSync(resolve(repoRoot, entry.path)));
+  return Uint8Array.from(readFileSync(resolve(repoRoot, currentWorkingTreePath(entry.path))));
 };
 
 const readFrozenInputs = (): {

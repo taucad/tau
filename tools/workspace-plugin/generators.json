@@ -8,7 +8,7 @@
     "kernel": {
       "factory": "./src/generators/kernel/generator",
       "schema": "./src/generators/kernel/schema.json",
-      "description": "Create a @taucad/* CAD kernel package under kernels/ with a defineKernel stub"
+      "description": "Create a @taucad/* CAD kernel package under packages/kernels/ with a defineKernel stub"
     },
     "lint-rule": {
       "factory": "./src/generators/lint-rule/generator",

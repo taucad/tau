@@ -11,7 +11,7 @@ type KernelGeneratorSchema = {
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 
 /**
- * Scaffold a standalone, publishable `@taucad/*` CAD kernel package under `kernels/`.
+ * Scaffold a standalone, publishable `@taucad/*` CAD kernel package under `packages/kernels/`.
  *
  * Kernels are packages, so this reuses the `package` generator's shared config
  * templates (tsconfig*, vitest, project.json, README) and overlays the
@@ -20,7 +20,7 @@ const currentDirectory = dirname(fileURLToPath(import.meta.url));
  * stub, and a matching test.
  */
 export const kernelGenerator = async (tree: Tree, schema: KernelGeneratorSchema): Promise<void> => {
-  const scope = 'kernels';
+  const scope = 'packages/kernels';
   const projectRoot = `${scope}/${schema.name}`;
   const importPath = `@taucad/${schema.name}`;
   const description = schema.description ?? '';

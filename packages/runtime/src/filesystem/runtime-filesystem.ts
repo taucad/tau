@@ -28,7 +28,7 @@ export type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.types.js'
  * Type guard: returns `true` when `value` is an opaque
  * {@link RuntimeFileSystem} produced by a `fromX` factory.
  *
- * @internal
+ * @public
  */
 export const isRuntimeFileSystem = (value: unknown): value is RuntimeFileSystem => hasRuntimeFileSystemHandle(value);
 
@@ -53,7 +53,7 @@ export const isRuntimeFileSystem = (value: unknown): value is RuntimeFileSystem 
  * });
  * ```
  */
-export const fromMemoryFs = (files?: Record<string, string>): RuntimeFileSystem =>
+export const fromMemoryFs = (files?: Record<string, string | Uint8Array<ArrayBuffer>>): RuntimeFileSystem =>
   wrapAsRuntimeFileSystem(_fromMemoryFsHandle(files));
 
 /**

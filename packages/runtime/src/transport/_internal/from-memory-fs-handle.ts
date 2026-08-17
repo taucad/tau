@@ -37,14 +37,21 @@ function enoent(message: string): Error {
  * seeded from the same files.
  *
  * @internal
- * @param files - Initial file contents (path -> content string)
+ * @param files - Initial file contents (path to text or byte content)
  */
-export function _fromMemoryFsHandle(files?: Record<string, string>): RuntimeFileSystemHandle {
+export function _fromMemoryFsHandle(files?: Record<string, string | Uint8Array<ArrayBuffer>>): RuntimeFileSystemHandle {
   /* Defensively snapshot the seed map at spec-construction time so that
    * callers who happen to mutate the supplied object after wrapping it
    * cannot retroactively change the seed observed by future `create()`
    * invocations. The snapshot is reused across every `create()` call. */
-  const seedFiles = files ? { ...files } : undefined;
+  const seedFiles = files
+    ? Object.fromEntries(
+        Object.entries(files).map(([path, content]) => [
+          path,
+          content instanceof Uint8Array ? new Uint8Array(content) : content,
+        ]),
+      )
+    : undefined;
   return {
     kind: 'inline',
     create: () => buildMemoryFsBase(seedFiles),
@@ -57,7 +64,9 @@ export function _fromMemoryFsHandle(files?: Record<string, string>): RuntimeFile
  * `directories` collections so two `RuntimeFileSystemBase` instances
  * built from the same spec do not share mutable state.
  */
-function buildMemoryFsBase(seedFiles: Record<string, string> | undefined): RuntimeFileSystemBase {
+function buildMemoryFsBase(
+  seedFiles: Record<string, string | Uint8Array<ArrayBuffer>> | undefined,
+): RuntimeFileSystemBase {
   const store = new Map<string, Uint8Array<ArrayBuffer> | string>();
   const directories = new Set<string>();
 
@@ -170,8 +179,24 @@ function buildMemoryFsBase(seedFiles: Record<string, string> | undefined): Runti
         store.set(canonicalNewPath, content);
         store.delete(canonicalOldPath);
       } else if (directories.has(canonicalOldPath)) {
-        directories.delete(canonicalOldPath);
-        directories.add(canonicalNewPath);
+        const oldPrefix = `${canonicalOldPath}/`;
+        const newPrefix = `${canonicalNewPath}/`;
+        for (const [filePath, fileContent] of new Map(store)) {
+          if (filePath.startsWith(oldPrefix)) {
+            store.delete(filePath);
+            store.set(`${newPrefix}${filePath.slice(oldPrefix.length)}`, fileContent);
+          }
+        }
+        for (const directoryPath of new Set(directories)) {
+          if (directoryPath === canonicalOldPath || directoryPath.startsWith(oldPrefix)) {
+            directories.delete(directoryPath);
+            directories.add(
+              directoryPath === canonicalOldPath
+                ? canonicalNewPath
+                : `${newPrefix}${directoryPath.slice(oldPrefix.length)}`,
+            );
+          }
+        }
       } else {
         throw enoent(`ENOENT: no such file or directory: ${canonicalOldPath}`);
       }

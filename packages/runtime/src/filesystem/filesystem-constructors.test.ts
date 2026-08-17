@@ -9,8 +9,8 @@ import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
  * directly against the FS contract without sprinkling `.fs` accessors at
  * every call site.
  */
-function makeFs(): RuntimeFileSystemBase {
-  const handle = fromMemoryFS();
+function makeFs(files?: Record<string, string | Uint8Array<ArrayBuffer>>): RuntimeFileSystemBase {
+  const handle = fromMemoryFS(files);
   if (handle.kind !== 'inline') {
     throw new Error('fromMemoryFS() must return the inline-kind handle.');
   }
@@ -93,6 +93,13 @@ describe('filesystem constructors', () => {
       expect(new TextDecoder().decode(content)).toBe('binary');
     });
 
+    it('should preserve Uint8Array seed bytes', async () => {
+      const binaryPath = '/binary.step';
+      const fileSystem = makeFs({ [binaryPath]: new Uint8Array([0, 255, 1]) });
+
+      await expect(fileSystem.readFile(binaryPath)).resolves.toEqual(new Uint8Array([0, 255, 1]));
+    });
+
     it('should remove a directory via rmdir', async () => {
       const fileSystem = makeFs();
 
@@ -116,11 +123,14 @@ describe('filesystem constructors', () => {
     it('should rename a directory', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/old-dir');
+      await fileSystem.mkdir('/old-dir/nested', { recursive: true });
+      await fileSystem.writeFile('/old-dir/nested/child.txt', 'child');
       await fileSystem.rename('/old-dir', '/new-dir');
 
       expect(await fileSystem.exists('/old-dir')).toBe(false);
       expect(await fileSystem.exists('/new-dir')).toBe(true);
+      expect(await fileSystem.exists('/old-dir/nested/child.txt')).toBe(false);
+      await expect(fileSystem.readFile('/new-dir/nested/child.txt', 'utf8')).resolves.toBe('child');
     });
 
     it('should throw ENOENT when renaming nonexistent path', async () => {

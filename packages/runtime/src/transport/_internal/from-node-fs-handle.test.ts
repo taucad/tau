@@ -167,15 +167,16 @@ describe('fromNodeFS', () => {
     await expect(invoke(fileSystem)).rejects.toMatchObject({ code: 'PATH_OUTSIDE_ROOT' });
   });
 
-  it('should reject a symlink whose real target is outside the base directory', async () => {
+  it('should hide a symlink whose real target is outside the base directory', async () => {
     const outsideDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'kernels-node-fs-outside-'));
     await fs.writeFile(path.join(outsideDirectory, 'secret.txt'), 'secret');
     await fs.symlink(outsideDirectory, path.join(temporaryDirectory, 'outside-link'), 'dir');
     const fileSystem = unwrap(temporaryDirectory);
 
     await expect(fileSystem.readFile('/outside-link/secret.txt', 'utf8')).rejects.toMatchObject({
-      code: 'PATH_OUTSIDE_ROOT',
+      code: 'ENOENT',
     });
+    await expect(fileSystem.exists('/outside-link/secret.txt')).resolves.toBe(false);
     await fs.rm(outsideDirectory, { recursive: true, force: true });
   });
 

@@ -93,7 +93,7 @@ function buildNodeFsBase(basePath: string): RuntimeFileSystemBase {
     const [realBase, existingPath] = await Promise.all([realBasePromise, nearestExistingPath(target)]);
     const realExistingPath = await fs.realpath(existingPath);
     if (!isContained(realBase, realExistingPath)) {
-      throw new VirtualPathError('PATH_OUTSIDE_ROOT', virtualPath);
+      throw Object.assign(new Error(`ENOENT: no such file or directory: ${virtualPath}`), { code: 'ENOENT' });
     }
     return target;
   };
@@ -226,9 +226,8 @@ function buildNodeFsBase(basePath: string): RuntimeFileSystemBase {
       return toFileStat(stats);
     },
     async exists(filePath: string): Promise<boolean> {
-      const resolvedPath = await resolve(filePath);
       try {
-        await fs.access(resolvedPath);
+        await fs.access(await resolve(filePath));
         return true;
       } catch (error) {
         const { code } = error as NodeJS.ErrnoException;

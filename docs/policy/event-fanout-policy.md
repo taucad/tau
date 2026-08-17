@@ -1,16 +1,16 @@
 ---
 title: 'Event Fan-Out Policy'
-description: 'Production pub/sub fan-out composes Topic<E> from @taucad/events; hand-rolled registries are forbidden and lint-enforced.'
+description: 'Privately owned production pub/sub fan-out composes Topic<E> from @taucad/events; hand-rolled registries are forbidden and lint-enforced.'
 status: active
 created: '2026-05-22'
-updated: '2026-05-22'
+updated: '2026-08-17'
 related:
   - docs/research/file-services-architecture-blueprint.md
 ---
 
 # Event Fan-Out Policy
 
-Internal reference for pub/sub fan-out in production TypeScript across `packages/`, `apps/`, and `libs/`.
+Internal reference for pub/sub fan-out in production TypeScript where Tau can privately own or bundle `@taucad/events`: `apps/ui/`, `libs/`, and `packages/runtime/`.
 
 ## Rationale
 
@@ -62,7 +62,9 @@ Per-key fan-out (chat sessions, file paths, bridge ports) composes one `Topic<E>
 
 ### 4. Lint enforcement
 
-`tau-lint/no-handrolled-fanout` flags class fields typed as `Set<(…) => void>` or `Array<{ handler: (…) => void }>`. Allowlisted: `packages/events/**`, test files, `repos/**`.
+`tau-lint/no-handrolled-fanout` flags class fields and variable declarations that use direct `Set`/handler `Array` registries or handler registries nested as `Map` values. Enforce it only in `apps/ui/**`, `libs/**`, and `packages/runtime/**`; continue to exclude `libs/events/**`, tests, and specs.
+
+Do not require independently published packages to import the private `@taucad/events` package. Review their event API independently, and do not re-export `Topic` from `@taucad/runtime` solely to satisfy this rule.
 
 ## Migration cheat sheet (Tier 3 — opportunistic)
 

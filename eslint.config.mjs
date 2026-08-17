@@ -537,7 +537,6 @@ const config = [
     plugins: { 'tau-lint': tauLintPlugin },
     rules: {
       'tau-lint/no-monaco-create-model': 'error',
-      'tau-lint/no-handrolled-fanout': 'error',
       'no-restricted-imports': [
         'error',
         {
@@ -550,6 +549,23 @@ const config = [
           ],
         },
       ],
+    },
+  },
+
+  {
+    files: ['apps/ui/**/*.{ts,tsx}', 'libs/**/*.{ts,tsx}', 'packages/runtime/**/*.{ts,tsx}'],
+    ignores: [
+      '**/*.test.ts',
+      '**/*.test.tsx',
+      '**/*.spec.ts',
+      '**/*.spec.tsx',
+      '**/*.test-d.ts',
+      '**/__tests__/**',
+      'packages/runtime/src/testing/**',
+    ],
+    plugins: { 'tau-lint': tauLintPlugin },
+    rules: {
+      'tau-lint/no-handrolled-fanout': 'error',
     },
   },
 

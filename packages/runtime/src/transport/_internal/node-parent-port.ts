@@ -9,6 +9,7 @@
 
 import { parentPort } from 'node:worker_threads';
 import type { Transferable as NodeTransferable } from 'node:worker_threads';
+import { Topic } from '@taucad/events';
 import type { Port } from '@taucad/rpc';
 
 export const acquireNodeParentPort = (): Port<unknown> => {
@@ -18,28 +19,36 @@ export const acquireNodeParentPort = (): Port<unknown> => {
     );
   }
   const port = parentPort;
-  const subjects = new Set<(data: unknown) => void>();
+  const messages = new Topic<unknown>({ name: 'node-parent-port' });
+  const listener = (data: unknown): void => {
+    messages.emit(data);
+  };
+  let listening = false;
   return {
     postMessage(message, transferables) {
       const transfer = (transferables ?? []) as NodeTransferable[];
       port.postMessage(message, transfer.length > 0 ? transfer : undefined);
     },
     onMessage(handler) {
-      const listener = (data: unknown): void => {
-        handler(data);
-      };
-      subjects.add(listener);
-      port.on('message', listener);
+      if (!listening) {
+        listening = true;
+        port.on('message', listener);
+      }
+      const unsubscribe = messages.subscribe(handler);
       return () => {
-        subjects.delete(listener);
-        port.off('message', listener);
+        unsubscribe();
+        if (messages.size === 0 && listening) {
+          listening = false;
+          port.off('message', listener);
+        }
       };
     },
     close() {
-      for (const listener of subjects) {
+      if (listening) {
         port.off('message', listener);
       }
-      subjects.clear();
+      listening = false;
+      messages.dispose();
     },
   };
 };

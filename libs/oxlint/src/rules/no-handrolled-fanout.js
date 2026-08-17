@@ -2,6 +2,7 @@
  * @typedef {import('eslint').Rule.RuleModule} RuleModule
  * @typedef {import('eslint').Rule.RuleContext} RuleContext
  * @typedef {import('estree').PropertyDefinition} PropertyDefinition
+ * @typedef {import('@typescript-eslint/types').TSESTree.VariableDeclarator} VariableDeclarator
  */
 
 import path from 'node:path';
@@ -10,7 +11,7 @@ import path from 'node:path';
  * Default locations permitted to declare hand-rolled pub/sub fan-out registries.
  */
 const DEFAULT_ALLOWLIST = [
-  'packages/events/**',
+  'libs/events/**',
   '**/*.test.ts',
   '**/*.test.tsx',
   '**/*.spec.ts',
@@ -93,6 +94,10 @@ function isHandrolledFanoutElementType(typeNode) {
     return true;
   }
 
+  if (unwrapped.type === 'TSTypeReference' && unwrapped.typeName.type === 'Identifier') {
+    return /(?:Callback|Handler|Listener)$/.test(unwrapped.typeName.name);
+  }
+
   if (unwrapped.type === 'TSTypeLiteral') {
     return unwrapped.members.some((member) => {
       if (member.type !== 'TSPropertySignature' && member.type !== 'TSMethodSignature') {
@@ -120,9 +125,10 @@ function isHandrolledFanoutElementType(typeNode) {
 
 /**
  * @param {import('@typescript-eslint/types').TSESTree.TypeNode | undefined | null} typeNode
+ * @param {boolean} [allowBareArray]
  * @returns {boolean}
  */
-function isHandrolledFanoutContainerType(typeNode) {
+function isHandrolledFanoutContainerType(typeNode, allowBareArray = false) {
   const unwrapped = unwrapType(typeNode);
   if (!unwrapped) {
     return false;
@@ -130,38 +136,65 @@ function isHandrolledFanoutContainerType(typeNode) {
 
   if (unwrapped.type === 'TSTypeReference' && unwrapped.typeName.type === 'Identifier') {
     const containerName = unwrapped.typeName.name;
-    if (
-      containerName !== 'Set' &&
-      containerName !== 'ReadonlySet' &&
-      containerName !== 'Array' &&
-      containerName !== 'ReadonlyArray'
-    ) {
-      return false;
+    const parameters = unwrapped.typeParameters?.params ?? unwrapped.typeArguments?.params ?? [];
+    if (containerName === 'Map' || containerName === 'ReadonlyMap') {
+      return isHandrolledFanoutContainerType(parameters[1], true);
     }
-    const [elementType] = unwrapped.typeParameters?.params ?? unwrapped.typeArguments?.params ?? [];
-    return isHandrolledFanoutElementType(elementType);
+    if (containerName === 'Set' || containerName === 'ReadonlySet') {
+      return isHandrolledFanoutElementType(parameters[0]) || isHandrolledFanoutContainerType(parameters[0], true);
+    }
+    if (containerName === 'Array' || containerName === 'ReadonlyArray') {
+      const element = unwrapType(parameters[0]);
+      const namedSubscription = element?.type === 'TSTypeLiteral' && isHandrolledFanoutElementType(element);
+      return (
+        namedSubscription ||
+        (allowBareArray && isHandrolledFanoutElementType(element)) ||
+        isHandrolledFanoutContainerType(element, true)
+      );
+    }
+    return false;
   }
 
   return false;
 }
 
 /**
- * @param {PropertyDefinition} node
+ * @param {PropertyDefinition | VariableDeclarator} node
  * @returns {boolean}
  */
-function propertyDeclaresHandrolledFanout(node) {
-  const fromAnnotation = node.typeAnnotation?.typeAnnotation;
-  if (isHandrolledFanoutContainerType(fromAnnotation)) {
+function declaresHandrolledFanout(node) {
+  const declarationName =
+    node.type === 'PropertyDefinition'
+      ? node.key.type === 'Identifier'
+        ? node.key.name
+        : undefined
+      : node.id.type === 'Identifier'
+        ? node.id.name
+        : undefined;
+  const allowBareArray =
+    declarationName !== undefined && /(?:callback|handler|listener|subscriber)s?$/i.test(declarationName);
+  const fromAnnotation =
+    node.type === 'PropertyDefinition'
+      ? node.typeAnnotation?.typeAnnotation
+      : node.id.type === 'Identifier'
+        ? node.id.typeAnnotation?.typeAnnotation
+        : undefined;
+  if (isHandrolledFanoutContainerType(fromAnnotation, allowBareArray)) {
     return true;
   }
 
-  const init = node.value;
+  const init = node.type === 'PropertyDefinition' ? node.value : node.init;
   if (init?.type === 'NewExpression' && init.callee.type === 'Identifier') {
-    const containerName = init.callee.name;
-    if (containerName === 'Set' || containerName === 'ReadonlySet') {
-      const [elementType] = init.typeArguments?.params ?? init.typeParameters?.params ?? [];
-      return isHandrolledFanoutElementType(elementType);
-    }
+    const parameters = init.typeArguments?.params ?? init.typeParameters?.params ?? [];
+    const containerType = {
+      type: 'TSTypeReference',
+      typeName: init.callee,
+      typeArguments: { params: parameters },
+    };
+    return isHandrolledFanoutContainerType(
+      /** @type {import('@typescript-eslint/types').TSESTree.TSTypeReference} */ (containerType),
+      allowBareArray,
+    );
   }
 
   return false;
@@ -200,7 +233,7 @@ export const noHandrolledFanoutRule = {
     const patterns = [...DEFAULT_ALLOWLIST, ...extra];
 
     /**
-     * @param {PropertyDefinition} node
+     * @param {PropertyDefinition | VariableDeclarator} node
      */
     function reportIfHandrolled(node) {
       const { cwd, filename } = context;
@@ -209,8 +242,7 @@ export const noHandrolledFanoutRule = {
         return;
       }
 
-      const typeAnnotation = node.typeAnnotation?.typeAnnotation;
-      if (!propertyDeclaresHandrolledFanout(node)) {
+      if (!declaresHandrolledFanout(node)) {
         return;
       }
 
@@ -219,6 +251,7 @@ export const noHandrolledFanoutRule = {
 
     return {
       PropertyDefinition: reportIfHandrolled,
+      VariableDeclarator: reportIfHandrolled,
     };
   },
 };

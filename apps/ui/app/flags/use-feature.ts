@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useSyncExternalStore } from 'react';
+import { Topic } from '@taucad/events';
 import type { FeatureFlagName, FeatureFlags } from '#flags/flag.constants.js';
 import { featureFlagDefaults } from '#flags/flag.constants.js';
 import { getAllFlags, setFlagOverrides, resetFlagCache } from '#flags/feature-flags.js';
@@ -17,22 +18,13 @@ type FlagStore = {
   getServerSnapshot(): FeatureFlags;
 };
 
-const listeners = new Set<() => void>();
-
-function notify(): void {
-  for (const listener of listeners) {
-    listener();
-  }
-}
+const flagTopic = new Topic<void>({ name: 'feature-flags' });
 
 let snapshot = getAllFlags();
 
 const flagStore: FlagStore = {
   subscribe(listener) {
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
+    return flagTopic.subscribe(listener);
   },
   getSnapshot() {
     return snapshot;
@@ -45,7 +37,7 @@ const flagStore: FlagStore = {
 function refreshSnapshot(): void {
   resetFlagCache();
   snapshot = getAllFlags();
-  notify();
+  flagTopic.emit();
 }
 
 /**

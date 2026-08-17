@@ -12,6 +12,7 @@
 
 import { createChannelClient } from '@taucad/rpc';
 import type { Channel, Port } from '@taucad/rpc';
+import { Topic } from '@taucad/events';
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 import type { Geometry } from '@taucad/types';
 import type {
@@ -76,7 +77,11 @@ export type WebWorkerTransportOptions = {
 };
 
 const wrapWorkerAsPort = (worker: WebWorkerLike): Port<unknown> => {
-  const listeners = new Set<(event: { data: unknown }) => void>();
+  const messages = new Topic<unknown>({ name: 'web-worker-port' });
+  const listener = (event: { data: unknown }): void => {
+    messages.emit(event.data);
+  };
+  let listening = false;
   let closed = false;
   return {
     postMessage(data, transfer) {
@@ -86,14 +91,17 @@ const wrapWorkerAsPort = (worker: WebWorkerLike): Port<unknown> => {
       worker.postMessage(data, transfer);
     },
     onMessage(handler) {
-      const listener = (event: { data: unknown }): void => {
-        handler(event.data);
-      };
-      worker.addEventListener('message', listener);
-      listeners.add(listener);
+      if (!listening) {
+        listening = true;
+        worker.addEventListener('message', listener);
+      }
+      const unsubscribe = messages.subscribe(handler);
       return () => {
-        listeners.delete(listener);
-        worker.removeEventListener('message', listener);
+        unsubscribe();
+        if (messages.size === 0 && listening) {
+          listening = false;
+          worker.removeEventListener('message', listener);
+        }
       };
     },
     close() {
@@ -101,10 +109,11 @@ const wrapWorkerAsPort = (worker: WebWorkerLike): Port<unknown> => {
         return;
       }
       closed = true;
-      for (const listener of listeners) {
+      if (listening) {
         worker.removeEventListener('message', listener);
       }
-      listeners.clear();
+      listening = false;
+      messages.dispose();
     },
   };
 };

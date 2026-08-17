@@ -4,6 +4,7 @@
  * @public
  */
 
+import { Topic } from '@taucad/events';
 import type { ChannelServerHandle, Port } from '@taucad/rpc';
 import type {
   EncodedGeometry,
@@ -72,22 +73,20 @@ const summariseFrame = (value: unknown): Record<string, unknown> => {
 const wrapMessagePortMain = (port: MessagePortMainLike, label: string): Port<unknown> => {
   let started = false;
   let closed = false;
-  const handlers = new Set<(value: unknown) => void>();
+  const messages = new Topic<unknown>({ name: `electron-utility:${label}` });
 
   const onPortMessage = (event: { readonly data: unknown }): void => {
     if (closed) {
       return;
     }
     debugLog(label, 'rx-frame', summariseFrame(event.data));
-    for (const handler of handlers) {
-      handler(event.data);
-    }
+    messages.emit(event.data);
   };
 
   port.on('close', () => {
     debugLog(label, 'underlying-port-closed');
     closed = true;
-    handlers.clear();
+    messages.dispose();
   });
 
   return {
@@ -116,23 +115,21 @@ const wrapMessagePortMain = (port: MessagePortMainLike, label: string): Port<unk
       }
     },
     onMessage(handler) {
-      handlers.add(handler);
+      const unsubscribe = messages.subscribe(handler);
       if (!started) {
         started = true;
         debugLog(label, 'starting-port');
         port.on('message', onPortMessage);
         port.start();
       }
-      return () => {
-        handlers.delete(handler);
-      };
+      return unsubscribe;
     },
     close() {
       if (closed) {
         return;
       }
       closed = true;
-      handlers.clear();
+      messages.dispose();
       try {
         port.close();
       } catch (error) {

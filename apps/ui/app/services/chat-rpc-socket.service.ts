@@ -15,6 +15,7 @@ import type { Socket } from 'socket.io-client';
 import { io } from 'socket.io-client';
 import { chatRpcProtocolErrorCode, chatRpcProtocolVersion } from '@taucad/chat';
 import type { ChatRpcJoinAck, ChatRpcJoinMessage, RpcRequest, RpcResponse } from '@taucad/chat';
+import { Topic } from '@taucad/events';
 import { ENV } from '#environment.config.js';
 
 /** Connection status for UI display */
@@ -70,8 +71,10 @@ export class ChatRpcSocketService {
   /** Map of chatId to RPC request handler - supports multiple active chats */
   private readonly chatHandlers = new Map<string, RpcRequestHandler>();
 
-  /** Set of status change listeners */
-  private readonly statusListeners = new Set<StatusListener>();
+  /** Connection status change fan-out. */
+  private readonly statusTopic = new Topic<{ status: ConnectionStatus; error: string | undefined }>({
+    name: 'chat-rpc-status',
+  });
 
   /** Event handler references for cleanup */
   private handleVisibilityChange: (() => void) | undefined;
@@ -184,14 +187,14 @@ export class ChatRpcSocketService {
    * Returns an unsubscribe function.
    */
   public subscribe(listener: StatusListener): () => void {
-    this.statusListeners.add(listener);
+    const unsubscribe = this.statusTopic.subscribe(({ status, error }) => {
+      listener(status, error);
+    });
 
     // Immediately notify with current status
     listener(this.status, this.error);
 
-    return () => {
-      this.statusListeners.delete(listener);
-    };
+    return unsubscribe;
   }
 
   /**
@@ -507,10 +510,7 @@ export class ChatRpcSocketService {
       this.error = undefined;
     }
 
-    // Notify all listeners
-    for (const listener of this.statusListeners) {
-      listener(this.status, this.error);
-    }
+    this.statusTopic.emit({ status: this.status, error: this.error });
   }
 
   /**
@@ -519,9 +519,6 @@ export class ChatRpcSocketService {
   private setError(errorMessage: string): void {
     this.error = errorMessage;
 
-    // Notify all listeners
-    for (const listener of this.statusListeners) {
-      listener(this.status, this.error);
-    }
+    this.statusTopic.emit({ status: this.status, error: this.error });
   }
 }

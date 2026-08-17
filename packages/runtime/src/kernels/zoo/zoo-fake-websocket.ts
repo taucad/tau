@@ -4,6 +4,8 @@
  *
  * @internal
  */
+import { Topic } from '@taucad/events';
+
 const readyStateConnecting = 0;
 const readyStateOpen = 1;
 const readyStateClosed = 3;
@@ -17,7 +19,8 @@ export class ZooFakeWebSocket {
   public readonly url: string;
   /** Outbound frames (JSON auth + modeling requests). */
   public readonly sentFrames: string[] = [];
-  private readonly listeners = new Map<string, Set<(event: Event) => void>>();
+  private readonly eventTopics = new Map<string, Topic<Event>>();
+  private readonly listenerUnsubscribes = new Map<string, Map<(event: Event) => void, () => void>>();
 
   /**
    * Buffers the URL string and schedules a synthetic `open` event.
@@ -43,13 +46,14 @@ export class ZooFakeWebSocket {
    * @param listener - Callback invoked with a DOM `Event` or `MessageEvent`.
    */
   public addEventListener(type: string, listener: (event: Event) => void): void {
-    let set = this.listeners.get(type);
-    if (!set) {
-      set = new Set();
-      this.listeners.set(type, set);
+    const unsubscribes = this.listenerUnsubscribes.get(type) ?? new Map<(event: Event) => void, () => void>();
+    if (unsubscribes.has(listener)) {
+      return;
     }
-
-    set.add(listener);
+    const topic = this.eventTopics.get(type) ?? new Topic<Event>({ name: `zoo-websocket:${type}` });
+    this.eventTopics.set(type, topic);
+    unsubscribes.set(listener, topic.subscribe(listener));
+    this.listenerUnsubscribes.set(type, unsubscribes);
   }
 
   /**
@@ -59,7 +63,18 @@ export class ZooFakeWebSocket {
    * @param listener - Same function reference passed to `addEventListener`.
    */
   public removeEventListener(type: string, listener: (event: Event) => void): void {
-    this.listeners.get(type)?.delete(listener);
+    const unsubscribes = this.listenerUnsubscribes.get(type);
+    const unsubscribe = unsubscribes?.get(listener);
+    if (!unsubscribes || !unsubscribe) {
+      return;
+    }
+    unsubscribe();
+    unsubscribes.delete(listener);
+    if (unsubscribes.size === 0) {
+      this.listenerUnsubscribes.delete(type);
+      this.eventTopics.get(type)?.dispose();
+      this.eventTopics.delete(type);
+    }
   }
 
   /**
@@ -100,9 +115,7 @@ export class ZooFakeWebSocket {
   }
 
   private dispatch(type: string, event: Event): void {
-    for (const listener of this.listeners.get(type) ?? []) {
-      listener(event);
-    }
+    this.eventTopics.get(type)?.emit(event);
   }
 }
 

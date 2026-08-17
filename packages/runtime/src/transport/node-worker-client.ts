@@ -14,6 +14,7 @@ import type { Transferable as NodeTransferable } from 'node:worker_threads';
 
 import { createChannelClient } from '@taucad/rpc';
 import type { Channel, Port } from '@taucad/rpc';
+import { Topic } from '@taucad/events';
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 import type { Geometry } from '@taucad/types';
 import type {
@@ -64,7 +65,11 @@ export type NodeWorkerClientOptions = {
 };
 
 const wrapNodeWorkerAsPort = (worker: NodeWorkerLike): Port<unknown> => {
-  const listeners = new Set<(data: unknown) => void>();
+  const messages = new Topic<unknown>({ name: 'node-worker-port' });
+  const listener = (data: unknown): void => {
+    messages.emit(data);
+  };
+  let listening = false;
   let closed = false;
   return {
     postMessage(data, transfer) {
@@ -74,14 +79,17 @@ const wrapNodeWorkerAsPort = (worker: NodeWorkerLike): Port<unknown> => {
       worker.postMessage(data, transfer as NodeTransferable[] | undefined);
     },
     onMessage(handler) {
-      const listener = (data: unknown): void => {
-        handler(data);
-      };
-      worker.on('message', listener);
-      listeners.add(listener);
+      if (!listening) {
+        listening = true;
+        worker.on('message', listener);
+      }
+      const unsubscribe = messages.subscribe(handler);
       return () => {
-        listeners.delete(listener);
-        worker.off('message', listener);
+        unsubscribe();
+        if (messages.size === 0 && listening) {
+          listening = false;
+          worker.off('message', listener);
+        }
       };
     },
     close() {
@@ -89,10 +97,11 @@ const wrapNodeWorkerAsPort = (worker: NodeWorkerLike): Port<unknown> => {
         return;
       }
       closed = true;
-      for (const listener of listeners) {
+      if (listening) {
         worker.off('message', listener);
       }
-      listeners.clear();
+      listening = false;
+      messages.dispose();
     },
   };
 };

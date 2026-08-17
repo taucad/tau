@@ -8,10 +8,15 @@
  * @internal
  */
 
+import { Topic } from '@taucad/events';
 import type { Port } from '@taucad/rpc';
 
 export const acquireWebWorkerSelfPort = (): Port<unknown> => {
-  const subjects = new Set<(event: { data: unknown }) => void>();
+  const messages = new Topic<unknown>({ name: 'web-worker-self-port' });
+  const listener = ((event: MessageEvent<unknown>): void => {
+    messages.emit(event.data);
+  }) as EventListener;
+  let listening = false;
   return {
     postMessage(message, transferables) {
       const transfer = (transferables ?? []) as Transferable[];
@@ -21,21 +26,25 @@ export const acquireWebWorkerSelfPort = (): Port<unknown> => {
       ).postMessage(message, transfer.length > 0 ? { transfer } : undefined);
     },
     onMessage(handler) {
-      const listener = ((event: MessageEvent<unknown>): void => {
-        handler(event.data);
-      }) as EventListener;
-      subjects.add(listener as unknown as (event: { data: unknown }) => void);
-      globalThis.addEventListener('message', listener);
+      if (!listening) {
+        listening = true;
+        globalThis.addEventListener('message', listener);
+      }
+      const unsubscribe = messages.subscribe(handler);
       return () => {
-        subjects.delete(listener as unknown as (event: { data: unknown }) => void);
-        globalThis.removeEventListener('message', listener);
+        unsubscribe();
+        if (messages.size === 0 && listening) {
+          listening = false;
+          globalThis.removeEventListener('message', listener);
+        }
       };
     },
     close() {
-      for (const listener of subjects) {
-        globalThis.removeEventListener('message', listener as unknown as EventListener);
+      if (listening) {
+        globalThis.removeEventListener('message', listener);
       }
-      subjects.clear();
+      listening = false;
+      messages.dispose();
     },
   };
 };

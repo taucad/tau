@@ -93,7 +93,7 @@ All packages are built with [tsdown](https://tsdown.dev/) (Rolldown-based bundle
 
 Nx Release is configured with a `preVersionCommand` that builds all packages before versioning. This ensures the `dist/` directories exist with correct content before `package.json` versions are updated, so the published tarball contains the built artifacts at the correct version.
 
-The build respects Nx's dependency graph: `@taucad/json-schema` and `@taucad/converter` build before `@taucad/runtime` (which depends on both).
+The build respects Nx's dependency graph: `@taucad/json-schema` and `@taucad/converter` build before `@taucad/runtime` (which depends on both). Standalone packages under `packages/kernels/*` participate in the same release build.
 
 ### Package Validation
 

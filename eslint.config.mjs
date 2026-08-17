@@ -9,7 +9,7 @@ import * as mdxParser from '@taucad/oxlint/mdx-parser';
 
 /**
  * Workspace root plus every workspace member directory that has a `package.json`
- * (`packages/*`, `kernels/*`, `libs/*`, `apps/*`, `examples/*`, `scripts`), so
+ * (`packages/*`, `packages/kernels/*`, `libs/*`, `apps/*`, `examples/*`, `scripts`), so
  * `import-x/no-extraneous-dependencies` resolves deps from the owning manifest.
  */
 const workspacePackageDirectories = () => {
@@ -37,7 +37,7 @@ const workspacePackageDirectories = () => {
   };
 
   absorbChildren(path.join(root, 'packages'));
-  absorbChildren(path.join(root, 'kernels'));
+  absorbChildren(path.join(root, 'packages/kernels'));
   absorbChildren(path.join(root, 'libs'));
   absorbChildren(path.join(root, 'apps'));
   absorbChildren(path.join(root, 'examples'));
@@ -375,8 +375,8 @@ const config = [
   },
 
   {
-    files: ['packages/**/*.{ts,tsx}', 'kernels/**/*.{ts,tsx}'],
-    ignores: ['packages/**/*.{spec,test,config,setup}.{ts,tsx}', 'kernels/**/*.{spec,test,config,setup}.{ts,tsx}'],
+    files: ['packages/**/*.{ts,tsx}'],
+    ignores: ['packages/**/*.{spec,test,config,setup}.{ts,tsx}'],
     rules: {
       'import-x/no-extraneous-dependencies': [
         'error',
@@ -508,7 +508,7 @@ const config = [
      * Parcel 2, esbuild) lift the asset to a hashed URL during build.
      * See docs/research/runtime-zero-config-bundling.md (Finding 1, R5).
      */
-    files: ['packages/runtime/src/**/*.{ts,tsx}', 'kernels/openscad/src/**/*.{ts,tsx}'],
+    files: ['packages/runtime/src/**/*.{ts,tsx}', 'packages/kernels/openscad/src/**/*.{ts,tsx}'],
     plugins: { 'tau-lint': tauLintPlugin },
     rules: {
       'tau-lint/static-import-meta-url': 'error',

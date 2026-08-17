@@ -1427,7 +1427,7 @@
       // and standalone kernels. Computed first arguments silently opt out of
       // bundler asset emission and break downstream consumers.
       // See docs/research/runtime-zero-config-bundling.md (Finding 1, R5).
-      "files": ["packages/runtime/src/**/*.{ts,tsx}", "kernels/openscad/src/**/*.{ts,tsx}"],
+      "files": ["packages/runtime/src/**/*.{ts,tsx}", "packages/kernels/openscad/src/**/*.{ts,tsx}"],
       "rules": {
         "tau-lint/static-import-meta-url": "error"
       }

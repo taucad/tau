@@ -2,10 +2,30 @@ import { defineCommand } from 'citty';
 import { consola } from 'consola';
 import { resolve, basename, dirname, extname } from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
-import type { FileExtension } from '@taucad/types';
-import { fileExtensionSet } from '@taucad/types/constants';
-import { createNodeClient } from '@taucad/runtime/node';
-import { isSafeRelativePath } from '@taucad/utils/path';
+import { fileExtensionSet } from '@taucad/runtime/types';
+import type { FileExtension } from '@taucad/runtime/types';
+import { createNodeClient, isSafeRelativePath } from '@taucad/runtime/node';
+import type { RuntimeClient } from '@taucad/runtime';
+
+const parseJsonObject = (flag: string, input: string | undefined): Record<string, unknown> | undefined => {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(input);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new TypeError(`Invalid JSON in ${flag}: ${detail}`);
+  }
+
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${flag} must be a JSON object`);
+  }
+
+  return value as Record<string, unknown>;
+};
 
 /**
  * `taucad export` command.
@@ -17,6 +37,9 @@ import { isSafeRelativePath } from '@taucad/utils/path';
  * taucad export model.ts --ext=glb
  * taucad export bambu-plate.ts --ext=stl --output=plate.stl
  * taucad export gear.ts --ext=step --params='{"teeth":24}'
+ * taucad export model.ts --ext=stl --export-options='{"binary":true}'
+ * taucad export model.ts --ext=webp --export-options='{"width":1024,"height":576}'
+ * taucad export model.ts --ext=glb --content='{"includeEdges":true}'
  * ```
  */
 export const exportCommand = defineCommand({
@@ -32,7 +55,7 @@ export const exportCommand = defineCommand({
     },
     ext: {
       type: 'string',
-      description: 'Output format extension (glb, stl, step, 3mf, ...)',
+      description: 'Target extension; route availability depends on the input source (e.g. glb, stl, step)',
       required: true,
     },
     output: {
@@ -45,12 +68,22 @@ export const exportCommand = defineCommand({
       description: 'JSON-encoded parameters for the model (e.g. \'{"width":100}\')',
       required: false,
     },
+    exportOptions: {
+      type: 'string',
+      description: 'JSON object of options for the source-selected export route',
+      required: false,
+    },
+    content: {
+      type: 'string',
+      description: 'JSON object of semantic content requested from the source-selected export route',
+      required: false,
+    },
   },
   async run({ args }) {
     const format = args.ext as FileExtension;
 
     if (!fileExtensionSet.has(format)) {
-      throw new Error(`Unsupported format: "${args.ext}". Supported: ${[...fileExtensionSet].join(', ')}`);
+      throw new Error(`Unrecognized target extension: "${args.ext}"`);
     }
 
     const inputPath = resolve(args.file);
@@ -59,18 +92,13 @@ export const exportCommand = defineCommand({
     const inputFilename = basename(inputPath);
     const outputPath = args.output ? resolve(args.output) : resolve(inputDirectory, `${inputBasename}.${format}`);
 
-    let parameters: Record<string, unknown> = {};
-    if (args.params) {
-      try {
-        parameters = JSON.parse(args.params) as Record<string, unknown>;
-      } catch {
-        throw new Error(`Invalid JSON in --params: ${args.params}`);
-      }
-    }
+    const parameters = parseJsonObject('--params', args.params) ?? {};
+    const exportOptions = parseJsonObject('--export-options', args.exportOptions);
+    const content = parseJsonObject('--content', args.content);
 
     consola.start(`Exporting ${inputFilename} → ${basename(outputPath)}`);
 
-    const client = await createNodeClient(inputDirectory);
+    const client: RuntimeClient = await createNodeClient(inputDirectory);
 
     client.on('log', (entry) => {
       const level = entry.level as 'info' | 'warn' | 'error' | 'debug';
@@ -83,6 +111,8 @@ export const exportCommand = defineCommand({
       const result = await client.export(format, {
         source: { path: inputFilename },
         parameters,
+        ...(exportOptions === undefined ? {} : { exportOptions }),
+        ...(content === undefined ? {} : { content }),
       });
 
       if (!result.success) {

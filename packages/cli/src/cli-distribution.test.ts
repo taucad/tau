@@ -73,7 +73,7 @@ describe('taucad CLI dist (real binary)', () => {
     expect(view.getUint32(0, true)).toBe(gltfMagicBytes);
   }, 120_000);
 
-  it('should exit non-zero and list the supported formats in stderr when --ext is invalid', async () => {
+  it('should exit non-zero with an unrecognized-extension error when --ext is invalid', async () => {
     const result = await runCli([
       'export',
       birdhouse,
@@ -82,8 +82,8 @@ describe('taucad CLI dist (real binary)', () => {
     ]);
 
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toMatch(/Unsupported format: "not-a-format"/);
-    expect(result.stderr).toMatch(/glb/);
+    expect(result.stderr).toMatch(/Unrecognized target extension: "not-a-format"/);
+    expect(result.stderr).not.toMatch(/Supported:/);
   }, 60_000);
 
   it('should produce a different output size when parameters override the default geometry', async () => {

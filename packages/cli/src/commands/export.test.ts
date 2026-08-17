@@ -4,8 +4,10 @@ import { join } from 'node:path';
 import { runCommand } from 'citty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExportResult } from '@taucad/runtime';
+import type * as RuntimeNode from '@taucad/runtime/node';
 
-vi.mock('@taucad/runtime/node', () => ({
+vi.mock('@taucad/runtime/node', async (importOriginal) => ({
+  ...(await importOriginal<typeof RuntimeNode>()),
   createNodeClient: vi.fn(),
 }));
 
@@ -66,11 +68,17 @@ describe('exportCommand', () => {
     }
   });
 
-  it('should throw when --ext is not a supported format and not invoke the runtime', async () => {
+  it('should expose only structural arguments and opaque runtime envelopes', async () => {
+    const command = await importExportCommand();
+
+    expect(Object.keys(command.args ?? {})).toEqual(['file', 'ext', 'output', 'params', 'exportOptions', 'content']);
+  });
+
+  it('should reject an unrecognized target extension without invoking the runtime', async () => {
     const command = await importExportCommand();
 
     await expect(runCommand(command, { rawArgs: [inputPath, '--ext=totally-bogus'] })).rejects.toThrow(
-      /Unsupported format: "totally-bogus"/,
+      /Unrecognized target extension: "totally-bogus"/,
     );
 
     const runtime = await importedRuntime();
@@ -78,12 +86,29 @@ describe('exportCommand', () => {
     expect(exportFunction).not.toHaveBeenCalled();
   });
 
-  it('should throw with the offending payload when --params is not valid JSON', async () => {
+  it.each(['--params', '--export-options', '--content'])('should report malformed JSON for %s', async (flag) => {
     const command = await importExportCommand();
 
-    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb', '--params=not-json{'] })).rejects.toThrow(
-      /Invalid JSON in --params: not-json{/,
+    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb', `${flag}=not-json{`] })).rejects.toThrow(
+      new RegExp(`Invalid JSON in ${flag}:`),
     );
+  });
+
+  it.each([
+    ['null', 'null'],
+    ['array', '[]'],
+    ['string', '"value"'],
+    ['number', '42'],
+    ['boolean', 'false'],
+  ])('should reject a %s JSON root for every object envelope', async (_kind, value) => {
+    const command = await importExportCommand();
+
+    for (const flag of ['--params', '--export-options', '--content']) {
+      // oxlint-disable-next-line no-await-in-loop -- Each assertion exercises the same command boundary independently.
+      await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb', `${flag}=${value}`] })).rejects.toThrow(
+        `${flag} must be a JSON object`,
+      );
+    }
   });
 
   it('should write exported bytes to disk on success and propagate parsed parameters', async () => {
@@ -103,6 +128,56 @@ describe('exportCommand', () => {
     expect(terminate).toHaveBeenCalledOnce();
   });
 
+  it('should preserve opaque parameters, export options, and content as separate JSON objects', async () => {
+    exportFunction.mockResolvedValueOnce(buildSuccessResult(new Uint8Array([1])));
+    const command = await importExportCommand();
+
+    await runCommand(command, {
+      rawArgs: [
+        inputPath,
+        '--ext=glb',
+        `--output=${join(workspace, 'opaque.glb')}`,
+        '--params={"count":0,"enabled":false,"label":"","nested":{"values":[1,"two",false]}}',
+        '--export-options={"futurePluginOption":{"enabled":false,"values":[0,"",true]}}',
+        '--content={"futureSemantic":{"required":false},"labels":["one","two"]}',
+      ],
+    });
+
+    expect(exportFunction).toHaveBeenCalledWith('glb', {
+      source: { path: 'model.ts' },
+      parameters: {
+        count: 0,
+        enabled: false,
+        label: '',
+        nested: { values: [1, 'two', false] },
+      },
+      exportOptions: { futurePluginOption: { enabled: false, values: [0, '', true] } },
+      content: { futureSemantic: { required: false }, labels: ['one', 'two'] },
+    });
+  });
+
+  it('should preserve explicitly supplied empty envelopes', async () => {
+    exportFunction.mockResolvedValueOnce(buildSuccessResult(new Uint8Array([1])));
+    const command = await importExportCommand();
+
+    await runCommand(command, {
+      rawArgs: [
+        inputPath,
+        '--ext=glb',
+        `--output=${join(workspace, 'empty-envelopes.glb')}`,
+        '--export-options={}',
+        '--content={}',
+      ],
+    });
+
+    expect(exportFunction).toHaveBeenCalledWith('glb', {
+      source: { path: 'model.ts' },
+      parameters: {},
+      exportOptions: {},
+      content: {},
+    });
+  });
+
   it('should rename only the primary artifact and preserve nested companion paths', async () => {
     exportFunction.mockResolvedValueOnce({
       success: true,
@@ -118,7 +193,9 @@ describe('exportCommand', () => {
     });
     const command = await importExportCommand();
     const outputPath = join(workspace, 'renamed.gltf');
+
     await runCommand(command, { rawArgs: [inputPath, '--ext=gltf', `--output=${outputPath}`] });
+
     await expect(readFile(outputPath)).resolves.toEqual(Buffer.from([1]));
     await expect(readFile(join(workspace, 'buffers/model.bin'))).resolves.toEqual(Buffer.from([2, 3]));
   });
@@ -134,6 +211,7 @@ describe('exportCommand', () => {
     });
     const command = await importExportCommand();
     const outputPath = join(workspace, 'safe.gltf');
+
     await expect(runCommand(command, { rawArgs: [inputPath, '--ext=gltf', `--output=${outputPath}`] })).rejects.toThrow(
       'Export returned an unsafe relative artifact path: ../model.bin',
     );
@@ -151,6 +229,7 @@ describe('exportCommand', () => {
     });
     const command = await importExportCommand();
     const outputPath = join(workspace, 'model.bin');
+
     await expect(runCommand(command, { rawArgs: [inputPath, '--ext=gltf', `--output=${outputPath}`] })).rejects.toThrow(
       `Export artifact paths collide under ${workspace}`,
     );
@@ -166,6 +245,19 @@ describe('exportCommand', () => {
     );
 
     expect(terminate).toHaveBeenCalledOnce();
+  });
+
+  it('should leave recognized but unroutable targets to the runtime', async () => {
+    exportFunction.mockResolvedValueOnce(buildFailureResult(['No export route found for format "3ds"']));
+    const command = await importExportCommand();
+
+    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=3ds'] })).rejects.toThrow(
+      'No export route found for format "3ds"',
+    );
+    expect(exportFunction).toHaveBeenCalledWith('3ds', {
+      source: { path: 'model.ts' },
+      parameters: {},
+    });
   });
 
   it('should call terminate() in finally even when client.export rejects', async () => {

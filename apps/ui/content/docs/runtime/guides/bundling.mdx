@@ -46,7 +46,7 @@ const wasmUrl = new URL('./wasm/replicad.wasm', import.meta.url).href;
 
 This pattern is recognised by Vite, Rolldown, Webpack 5, Parcel 2, and esbuild as a first-class **asset reference**: at build time, the bundler copies the file to your `dist/`, hashes its filename, and rewrites the literal to the hashed URL. Any deviation — a variable, a function call, a template literal with an `${expression}` — opts out of asset emission, and the file silently fails to ship beside the bundle.
 
-The runtime enforces this invariant via the workspace `tau-lint/static-import-meta-url` rule, scoped to `packages/runtime/src/**` and `kernels/openscad/src/**`. Consumers do not need to enable the rule themselves.
+The runtime enforces this invariant via the workspace `tau-lint/static-import-meta-url` rule, scoped to `packages/runtime/src/**` and `packages/kernels/openscad/src/**`. Consumers do not need to enable the rule themselves.
 
 ## Worker-owned plugin loading
 

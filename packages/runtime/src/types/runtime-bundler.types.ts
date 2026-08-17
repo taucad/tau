@@ -8,7 +8,7 @@
 import type { z } from 'zod';
 import type { KernelFileSystem } from '#types/runtime-kernel.types.js';
 import type { BuiltinModule, BundleResult, ExecuteResult } from '#types/runtime-bundler-service.types.js';
-import type { BundlerPlugin } from '#plugins/plugin-types.js';
+import type { BundlerPlugin, RuntimePluginDeclaration } from '#plugins/plugin-types.js';
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 
@@ -118,7 +118,11 @@ export type BundlerDefinition<Context = unknown, Options extends Record<string, 
 
 type BundlerExtensions<Options> = string[] | ((options: Options | undefined) => string[]);
 
-type BundlerDefinitionConfig<Id extends string, Context, Options extends Record<string, unknown>> = {
+type BundlerDefinitionConfig<
+  Id extends string,
+  Context,
+  Options extends Record<string, unknown>,
+> = RuntimePluginDeclaration & {
   /** Unique identifier for this bundler plugin. */
   id: Id;
   /** Human-readable bundler name, used in logs and error messages */
@@ -141,6 +145,7 @@ type BundlerDefinitionConfig<Id extends string, Context, Options extends Record<
   cleanup?(context: Context): Promise<void>;
 };
 
+/** @public */
 export type BundlerPluginFactory<Id extends string, Options = undefined> = Options extends undefined
   ? () => BundlerPlugin<Id> & RuntimePluginDefinitionCarrier<BundlerDefinition>
   : Partial<Options> extends Options
@@ -192,16 +197,26 @@ export function defineBundler<const Id extends string, Context, OptionsSchema ex
 export function defineBundler<const Id extends string, Context>(
   definition: BundlerDefinitionConfig<Id, Context, Record<string, unknown>> & { optionsSchema?: undefined },
 ): BundlerPluginFactory<Id>;
+/** @public */
 export function defineBundler(
   definition: BundlerDefinitionConfig<string, unknown, Record<string, unknown>>,
 ): BundlerPluginFactory<string, Record<string, unknown>> {
-  const { id, extensions, ...bundlerDefinition } = definition;
+  const { id, extensions, peerRuntimeVersion, permissions, ...bundlerDefinition } = definition;
   const factory = ((options?: Record<string, unknown>) => {
     const resolvedExtensions = typeof extensions === 'function' ? extensions(options) : extensions;
-    return attachRuntimePluginDefinition({ id, extensions: resolvedExtensions, options }, () => ({
-      ...bundlerDefinition,
-      extensions: resolvedExtensions,
-    }));
+    return attachRuntimePluginDefinition(
+      {
+        id,
+        extensions: resolvedExtensions,
+        ...(peerRuntimeVersion === undefined ? {} : { peerRuntimeVersion }),
+        ...(permissions === undefined ? {} : { permissions }),
+        options,
+      },
+      () => ({
+        ...bundlerDefinition,
+        extensions: resolvedExtensions,
+      }),
+    );
   }) as BundlerPluginFactory<string, Record<string, unknown>>;
   return factory;
 }

@@ -6,16 +6,39 @@
 import type { FileExtension } from '@taucad/types';
 import type { RuntimeContentKey } from '#types/runtime-content.types.js';
 
-/** Phantom type brand for carrying per-format export option type information. */
 declare const __exportFormats: unique symbol;
-
-/** Phantom type brand for carrying kernel render option type information. */
 declare const __renderOptions: unique symbol;
-
-/** Phantom type brand for carrying the kernel's literal identifier. */
 declare const __kernelId: unique symbol;
 declare const __renderContent: unique symbol;
 declare const __exportContent: unique symbol;
+declare const __middlewareRenderContent: unique symbol;
+declare const __middlewareExportContent: unique symbol;
+declare const __transcodeEdges: unique symbol;
+declare const __transcodeFrom: unique symbol;
+declare const __transcoderId: unique symbol;
+declare const __transcodeContent: unique symbol;
+declare const __transcodePinnedSourceOptions: unique symbol;
+
+/** Permissions declared by a runtime plugin for store and host review. @public */
+export type RuntimePluginPermissions = {
+  readonly network?: readonly string[];
+  readonly filesystemWrite?: boolean;
+};
+
+/** Shared declaration metadata carried by every runtime plugin registration. @public */
+export type RuntimePluginDeclaration = {
+  readonly peerRuntimeVersion?: string;
+  readonly permissions?: RuntimePluginPermissions;
+};
+
+/** Structured warning emitted when a plugin targets another runtime version. @public */
+export type RuntimePluginVersionMismatchDiagnostic = {
+  readonly code: 'RUNTIME_PLUGIN_VERSION_MISMATCH';
+  readonly kind: 'kernel' | 'middleware' | 'bundler' | 'transcoder';
+  readonly pluginId: string;
+  readonly peerRuntimeVersion: string;
+  readonly runtimeVersion: string;
+};
 
 /**
  * Registration object for a kernel plugin. Returned by factory functions like `replicad()`.
@@ -41,7 +64,7 @@ export type KernelPlugin<
   Id extends string = string,
   RenderContent extends RuntimeContentKey = RuntimeContentKey,
   ExportContent extends Record<string, RuntimeContentKey> = Record<string, RuntimeContentKey>,
-> = {
+> = RuntimePluginDeclaration & {
   /** Unique identifier for this kernel */
   id: Id;
   /** File extensions this kernel handles (e.g., ['scad'], ['ts', 'js']). '*' is a catch-all. */
@@ -85,14 +108,11 @@ export type KernelPlugin<
  * Registration object for a middleware plugin. Returned by factory functions like `parameterCache()`.
  * @public
  */
-declare const __middlewareRenderContent: unique symbol;
-declare const __middlewareExportContent: unique symbol;
-
 export type MiddlewarePlugin<
   Id extends string = string,
   RenderContent extends RuntimeContentKey = RuntimeContentKey,
   ExportContent extends Record<string, RuntimeContentKey> = Record<string, RuntimeContentKey>,
-> = {
+> = RuntimePluginDeclaration & {
   /** Unique identifier for this middleware */
   id: Id;
   /** Middleware-specific options */
@@ -107,7 +127,7 @@ export type MiddlewarePlugin<
  * Registration object for a bundler plugin. Returned by factory functions like `esbuild()`.
  * @public
  */
-export type BundlerPlugin<Id extends string = string> = {
+export type BundlerPlugin<Id extends string = string> = RuntimePluginDeclaration & {
   /** Unique identifier for this bundler */
   id: Id;
   /** File extensions this bundler handles */
@@ -115,17 +135,6 @@ export type BundlerPlugin<Id extends string = string> = {
   /** Bundler-specific options */
   options?: Record<string, unknown>;
 };
-
-/** Phantom type brand for carrying transcoder edge option type information. */
-declare const __transcodeEdges: unique symbol;
-
-/** Phantom type brand for carrying the transcoder's source format. */
-declare const __transcodeFrom: unique symbol;
-
-/** Phantom type brand for carrying the transcoder's literal identifier. */
-declare const __transcoderId: unique symbol;
-declare const __transcodeContent: unique symbol;
-declare const __transcodePinnedSourceOptions: unique symbol;
 
 /**
  * Registration object for a transcoder plugin. Returned by factory functions like `converterTranscoder()`.
@@ -152,7 +161,7 @@ export type TranscoderPlugin<
   Id extends string = string,
   EdgeContent extends Record<string, RuntimeContentKey> = Record<string, RuntimeContentKey>,
   PinnedSourceOptions extends Record<string, PropertyKey> = Record<string, PropertyKey>,
-> = {
+> = RuntimePluginDeclaration & {
   /** Unique identifier for this transcoder */
   id: Id;
   /** Transcoder-specific options */

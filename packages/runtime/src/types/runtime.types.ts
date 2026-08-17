@@ -23,6 +23,7 @@ import type {
   MiddlewarePlugin,
   RenderContentFor,
   RenderOptionsFor,
+  RuntimePluginPermissions,
   TranscoderPlugin,
 } from '#plugins/plugin-types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
@@ -303,6 +304,14 @@ export type ExportGeometryResult = KernelResult<ExportFile[]>;
 // Capabilities Manifest Types
 // =============================================================================
 
+/** One plugin declaration surfaced through the capabilities manifest. @public */
+export type RuntimePluginCapability = {
+  readonly kind: 'kernel' | 'middleware' | 'bundler' | 'transcoder';
+  readonly id: string;
+  readonly peerRuntimeVersion?: string;
+  readonly permissions?: RuntimePluginPermissions;
+};
+
 /**
  * A single export route exposed by the worker. Represents either a direct
  * kernel export (when {@link ExportRoute.transcoderId} is `undefined` and
@@ -406,6 +415,7 @@ export type CapabilitiesManifest<
   Middleware extends ReadonlyArray<MiddlewarePlugin<any, any, any>> = MiddlewarePlugin[],
   Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any, any, any>> = TranscoderPlugin[],
 > = {
+  plugins: readonly RuntimePluginCapability[];
   routes: ReadonlyArray<ExportRoute<Kernels, Middleware, Transcoders>>;
   // Inline the per-kernel schema shape (rather than referencing
   // `RenderCapability<Kernels, K>`) so the mapped-type expansion does not

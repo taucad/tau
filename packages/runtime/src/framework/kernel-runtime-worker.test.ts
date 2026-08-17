@@ -3,7 +3,7 @@ import process from 'node:process';
 import { MessageChannel } from 'node:worker_threads';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { z } from 'zod';
-import type { ExportFile } from '@taucad/types';
+import type { ExportFile, OnWorkerLog } from '@taucad/types';
 import { createChannelClient, wrapMessagePort } from '@taucad/rpc';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
@@ -36,6 +36,10 @@ import { defineMiddleware } from '#middleware/runtime-middleware.js';
 import type { WrapCreateGeometryHook, WrapMeshGeometryHook } from '#types/runtime-middleware.types.js';
 import { nativeBuildInputSymbol } from '#framework/render-artifact.js';
 import type { MaterializedRender, NativeBuildInput } from '#framework/render-artifact.js';
+import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.types.js';
+import { defineBundler } from '#types/runtime-bundler.types.js';
+import { defineKernel } from '#types/runtime-kernel.types.js';
+import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 
 // ===================================================================
 // Helpers
@@ -144,6 +148,122 @@ function handleLabel(nativeHandle: unknown): string {
   }
   throw new Error(`Unexpected native handle: ${String(nativeHandle)}`);
 }
+
+describe('KernelRuntimeWorker initialization', () => {
+  it('rejects repeated initialization without clearing runtime state', async () => {
+    const worker = await createMultiKernelWorker([]);
+    try {
+      await expect(initializeWorkerForTesting(worker)).rejects.toBeInstanceOf(RuntimeAlreadyInitializedError);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('surfaces plugin declarations and warns on a runtime version mismatch', async () => {
+    const permissions = { network: ['https://plugins.example.test'], filesystemWrite: true } as const;
+    const metadata = { peerRuntimeVersion: '999.0.0', permissions } as const;
+    const kernel = defineKernel({
+      id: 'metadata-kernel',
+      extensions: ['meta'],
+      ...metadata,
+      name: 'Metadata kernel',
+      version: '1.0.0',
+      exportFormats: {},
+      async initialize() {
+        return {};
+      },
+      async getDependencies(input) {
+        return { resolved: [input.entryPath], unresolved: [] };
+      },
+      async getParameters() {
+        return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+      },
+      async createGeometry() {
+        return { geometry: gltfGeometry('metadata'), nativeHandle: {} };
+      },
+      async exportGeometry() {
+        return { success: true, data: [], issues: [] };
+      },
+    })();
+    const middleware = defineMiddleware({ id: 'metadata-middleware', ...metadata, name: 'Metadata middleware' })();
+    const bundler = defineBundler({
+      id: 'metadata-bundler',
+      extensions: ['meta'],
+      ...metadata,
+      name: 'Metadata bundler',
+      version: '1.0.0',
+      async initialize() {
+        return {};
+      },
+      async detectImports() {
+        return { detectedModules: [], dependencies: [] };
+      },
+      async bundle() {
+        return { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] };
+      },
+      async execute() {
+        return { success: true, value: undefined };
+      },
+      registerModule() {
+        throw new Error('registerModule is not used by this metadata test.');
+      },
+    })();
+    const transcoder = defineTranscoder({
+      id: 'metadata-transcoder',
+      ...metadata,
+      name: 'Metadata transcoder',
+      version: '1.0.0',
+      edges: [] as const,
+      async initialize() {
+        return {};
+      },
+      async transcode() {
+        return { success: true, data: [], issues: [] };
+      },
+    })();
+    await seedTestFileSystem({ '/model.meta': 'metadata' });
+    const runtime = defineRuntime({
+      kernels: [kernel],
+      middleware: [middleware],
+      bundlers: [bundler],
+      transcoders: [transcoder],
+    });
+    const worker = new KernelRuntimeWorker({ runtime });
+    const onLog = vi.fn<OnWorkerLog>();
+
+    await initializeWorkerForTesting(worker, { onLog });
+    await worker.createGeometry({ file: createGeometryFile('model.meta'), parameters: {} });
+
+    expect(worker.capabilitiesManifest.plugins).toEqual([
+      { kind: 'kernel', id: 'metadata-kernel', ...metadata },
+      { kind: 'middleware', id: 'metadata-middleware', ...metadata },
+      { kind: 'bundler', id: 'metadata-bundler', ...metadata },
+      { kind: 'transcoder', id: 'metadata-transcoder', ...metadata },
+    ]);
+    const warnings = onLog.mock.calls.map(([log]) => log);
+    for (const [kind, pluginId] of [
+      ['kernel', 'metadata-kernel'],
+      ['middleware', 'metadata-middleware'],
+      ['bundler', 'metadata-bundler'],
+      ['transcoder', 'metadata-transcoder'],
+    ] as const) {
+      const warning = warnings.find(({ data }) => {
+        if (typeof data !== 'object' || data === null) {
+          return false;
+        }
+        return 'pluginId' in data && data.pluginId === pluginId;
+      });
+      expect(warning?.data).toMatchObject({
+        code: 'RUNTIME_PLUGIN_VERSION_MISMATCH',
+        kind,
+        pluginId,
+        peerRuntimeVersion: '999.0.0',
+      });
+    }
+
+    await worker.cleanup();
+  });
+});
 
 // ===================================================================
 // Tests

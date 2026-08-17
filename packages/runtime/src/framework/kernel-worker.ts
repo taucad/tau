@@ -93,21 +93,29 @@ import { parameterDebounce, fileChangeDebounce } from '#framework/runtime-framew
 import { canonicalJson, sha256Bytes, sha256String } from '@taucad/utils/hash';
 import { RuntimeTracer } from '#framework/runtime-tracer.js';
 import { WorkerTelemetryCollector } from '#framework/worker-telemetry.js';
-import type { KernelMiddleware } from '#middleware/runtime-middleware.js';
 import { createMiddlewareRuntime } from '#middleware/runtime-middleware.js';
+import type { KernelMiddleware } from '#middleware/runtime-middleware.js';
 import { clearExecuteCache } from '#bundler/esbuild-core.js';
-import type { BundlerPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
+import type {
+  BundlerPlugin,
+  KernelPlugin,
+  MiddlewarePlugin,
+  RuntimePluginDeclaration,
+  RuntimePluginVersionMismatchDiagnostic,
+  TranscoderPlugin,
+} from '#plugins/plugin-types.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import { createWorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import type { WorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import type { WatchEvent } from '@taucad/filesystem';
-import type { RuntimeContentInput, RuntimeContentKey } from '#types/runtime-content.types.js';
 import {
   contentDefault,
   normalizeRuntimeContent,
   RuntimeContentUnsupportedError,
 } from '#types/runtime-content.types.js';
+import type { RuntimeContentInput, RuntimeContentKey } from '#types/runtime-content.types.js';
+import { packageVersion } from '#utils/package-info.js';
 import type {
   DependencyResolutionContext,
   KernelBinding,
@@ -126,7 +134,6 @@ import {
   nativeBuildInputSymbol,
 } from '#framework/render-artifact.js';
 import { finalizeExportArtifactSet } from '#framework/export-artifact-finalizer.js';
-import { packageVersion as tauVersion } from '#utils/package-info.js';
 import { isNotFoundError } from '#filesystem/filesystem-errors.js';
 
 type FileSystemProxy = WorkerFileSystemProxy;
@@ -151,6 +158,7 @@ type TranscoderPluginEntry = TranscoderPlugin<Record<string, unknown>> &
   RuntimePluginDefinitionCarrier<TranscoderDefinition>;
 
 export type KernelWorkerOptions = {
+  readonly kernels?: ReadonlyArray<KernelPlugin<Record<string, unknown>, unknown>>;
   readonly middleware?: readonly MiddlewarePlugin[];
   readonly bundlers?: readonly BundlerPlugin[];
   readonly transcoders?: readonly TranscoderPluginEntry[];
@@ -373,6 +381,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Worker-owned runtime transcoder plugins. */
   protected transcoderPlugins: readonly TranscoderPluginEntry[];
 
+  /** Plugin declarations surfaced in the capabilities manifest. */
+  private manifestKernelPlugins: ReadonlyArray<RuntimePluginDeclaration & { readonly id: string }>;
+
   /**
    * Human-readable identifier for this worker, used in log output and error diagnostics
    * (e.g., `'ReplicadWorker'`, `'TauWorker'`, `'ZooWorker'`).
@@ -533,6 +544,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** Capabilities manifest computed during initialization. */
   private _capabilitiesManifest: CapabilitiesManifest = {
+    plugins: [],
     routes: [],
     renderCapabilities: {},
   };
@@ -590,6 +602,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private readonly bundlerInitInProgress = new Map<string, Promise<{ definition: BundlerDefinition; ctx: unknown }>>();
 
   public constructor(options: KernelWorkerOptions = {}) {
+    this.manifestKernelPlugins = options.kernels ?? [];
     this.middlewarePlugins = options.middleware ?? [];
     this.bundlerPlugins = options.bundlers ?? [];
     this.transcoderPlugins = options.transcoders ?? [];
@@ -1732,6 +1745,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const initSpan = this.tracer.startSpan('kernel.bundler-init');
 
     try {
+      this.warnOnRuntimeVersionMismatch('bundler', bundlerEntry);
       const definition =
         preloadedDefinition ?? (await resolveRuntimePluginDefinition<BundlerDefinition>('bundler', bundlerEntry));
 
@@ -2257,9 +2271,30 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.assertUniquePluginIds('middleware', options.middleware ?? []);
     this.assertUniquePluginIds('bundler', options.bundlers ?? []);
     this.assertUniquePluginIds('transcoder', options.transcoders ?? []);
+    this.manifestKernelPlugins = options.kernels ?? [];
     this.middlewarePlugins = options.middleware ?? [];
     this.bundlerPlugins = options.bundlers ?? [];
     this.transcoderPlugins = options.transcoders ?? [];
+  }
+
+  protected warnOnRuntimeVersionMismatch(
+    kind: 'kernel' | 'middleware' | 'bundler' | 'transcoder',
+    plugin: RuntimePluginDeclaration & { readonly id: string },
+  ): void {
+    if (!plugin.peerRuntimeVersion || plugin.peerRuntimeVersion === packageVersion) {
+      return;
+    }
+    const diagnostic: RuntimePluginVersionMismatchDiagnostic = {
+      code: 'RUNTIME_PLUGIN_VERSION_MISMATCH',
+      kind,
+      pluginId: plugin.id,
+      peerRuntimeVersion: plugin.peerRuntimeVersion,
+      runtimeVersion: packageVersion,
+    };
+    this.logger.warn(
+      `${kind} plugin "${plugin.id}" declares runtime ${plugin.peerRuntimeVersion}; current runtime is ${packageVersion}.`,
+      { data: diagnostic },
+    );
   }
 
   protected assertUniquePluginIds(category: string, entries: ReadonlyArray<{ readonly id: string }>): void {
@@ -3900,6 +3935,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           throw new Error(`Duplicate middleware id: ${entry.id}`);
         }
         ids.add(entry.id);
+        this.warnOnRuntimeVersionMismatch('middleware', entry);
         // oxlint-disable-next-line no-await-in-loop -- Middleware must be loaded sequentially to preserve order
         const middleware = await this.importMiddlewareModule(entry);
 
@@ -3946,6 +3982,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         });
 
         try {
+          this.warnOnRuntimeVersionMismatch('transcoder', entry);
           // oxlint-disable-next-line no-await-in-loop -- Sequential to preserve init order
           const definition = await resolveRuntimePluginDefinition<TranscoderDefinition>('transcoder', entry);
 
@@ -4122,7 +4159,23 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       renderCapabilities[kernelId] = { renderOptions, ...(content ? { content } : {}) };
     }
 
-    return { routes, renderCapabilities };
+    const plugins = (
+      [
+        ['kernel', this.manifestKernelPlugins],
+        ['middleware', this.middlewarePlugins],
+        ['bundler', this.bundlerPlugins],
+        ['transcoder', this.transcoderPlugins],
+      ] as const
+    ).flatMap(([kind, entries]) =>
+      entries.map(({ id, peerRuntimeVersion, permissions }) => ({
+        kind,
+        id,
+        ...(peerRuntimeVersion === undefined ? {} : { peerRuntimeVersion }),
+        ...(permissions === undefined ? {} : { permissions }),
+      })),
+    );
+
+    return { plugins, routes, renderCapabilities };
   }
 
   private buildContentCapability(
@@ -4630,7 +4683,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const frameworkDep: FrameworkDependency = {
       type: 'framework',
       name: 'tau',
-      version: tauVersion,
+      version: packageVersion,
     };
 
     const activeKernelId = owner.binding?.kernelId;

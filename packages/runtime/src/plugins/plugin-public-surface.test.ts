@@ -11,9 +11,12 @@ const testGeometry = { format: 'gltf', content: new Uint8Array([1]) } satisfies 
 
 describe('plugin factory public surface', () => {
   it('keeps implementation details hidden on one-call plugin registrations', async () => {
+    const permissions = { network: ['https://plugins.example.test'], filesystemWrite: true } as const;
     const kernel = defineKernel({
       id: 'kernel',
       extensions: ['ts'],
+      peerRuntimeVersion: '1.0.0',
+      permissions,
       name: 'KernelDefinition',
       version: '1.0.0',
       render: { optionsSchema: z.object({ detail: z.number().default(1) }) },
@@ -37,6 +40,8 @@ describe('plugin factory public surface', () => {
 
     const middleware = defineMiddleware({
       id: 'middleware',
+      peerRuntimeVersion: '1.0.0',
+      permissions,
       name: 'MiddlewareDefinition',
       version: '1.0.0',
       async wrapGetParameters(input, handler) {
@@ -47,6 +52,8 @@ describe('plugin factory public surface', () => {
     const bundler = defineBundler({
       id: 'bundler',
       extensions: ['ts'],
+      peerRuntimeVersion: '1.0.0',
+      permissions,
       name: 'BundlerDefinition',
       version: '1.0.0',
       async initialize() {
@@ -68,6 +75,8 @@ describe('plugin factory public surface', () => {
 
     const transcoder = defineTranscoder({
       id: 'transcoder',
+      peerRuntimeVersion: '1.0.0',
+      permissions,
       edges: [{ from: 'glb', to: 'stl', fidelity: 'mesh' }] as const,
       name: 'TranscoderDefinition',
       version: '1.0.0',
@@ -95,10 +104,14 @@ describe('plugin factory public surface', () => {
       expect(Object.getOwnPropertySymbols(plugin)).toHaveLength(1);
     }
 
-    expect(Object.keys(kernelPlugin)).toEqual(['id', 'extensions', 'options']);
-    expect(Object.keys(middlewarePlugin)).toEqual(['id', 'options']);
-    expect(Object.keys(bundlerPlugin)).toEqual(['id', 'extensions', 'options']);
-    expect(Object.keys(transcoderPlugin)).toEqual(['id', 'options']);
+    expect(Object.keys(kernelPlugin)).toEqual(['id', 'extensions', 'peerRuntimeVersion', 'permissions', 'options']);
+    expect(Object.keys(middlewarePlugin)).toEqual(['id', 'peerRuntimeVersion', 'permissions', 'options']);
+    expect(Object.keys(bundlerPlugin)).toEqual(['id', 'extensions', 'peerRuntimeVersion', 'permissions', 'options']);
+    expect(Object.keys(transcoderPlugin)).toEqual(['id', 'peerRuntimeVersion', 'permissions', 'options']);
+
+    for (const plugin of plugins) {
+      expect(plugin).toMatchObject({ peerRuntimeVersion: '1.0.0', permissions });
+    }
 
     await expect(resolveRuntimePluginDefinition('kernel', kernelPlugin)).resolves.toMatchObject({
       name: 'KernelDefinition',

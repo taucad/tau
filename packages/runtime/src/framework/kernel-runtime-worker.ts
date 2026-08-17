@@ -45,6 +45,7 @@ import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 import { resolveRuntimeDefinition } from '#worker/runtime-definition.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
+import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.types.js';
 
 /**
  * Configuration for a kernel plugin within the runtime worker.
@@ -91,6 +92,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   private readonly selectionErrors = new Map<string, unknown>();
   private kernelPlugins: readonly KernelPluginEntry[] = [];
   private cachedDetectionDeps?: GetDependenciesResult;
+  private initialized = false;
 
   public constructor(options: KernelRuntimeWorkerOptions) {
     super();
@@ -103,26 +105,36 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     options?: RuntimeWorkerOptions;
     config?: unknown;
   }): Promise<void> {
-    const resolvedRuntime = await resolveRuntimeDefinition(this.runtime, input.config);
-    this.assertUniquePluginIds('kernel', resolvedRuntime.kernels);
-    this.kernelPlugins = resolvedRuntime.kernels;
-    this.loadedKernels.clear();
-    this.kernelExportZodSchemasMap.clear();
-    this.kernelRenderZodSchemaMap.clear();
-    this.kernelCreateOptionsZodSchemaMap.clear();
-    this.kernelExportContentMap.clear();
-    this.kernelRenderContentMap.clear();
-    this.kernelInitOptionsMap.clear();
-    this.kernelImplementationAssetsMap.clear();
-    this.activeKernelId = undefined;
-    this.selectionCache.clear();
-    this.selectionErrors.clear();
-    this.configureRuntimePlugins({
-      middleware: resolvedRuntime.middleware,
-      bundlers: resolvedRuntime.bundlers,
-      transcoders: resolvedRuntime.transcoders,
-    });
-    await super.initialize(input);
+    if (this.initialized) {
+      throw new RuntimeAlreadyInitializedError();
+    }
+    this.initialized = true;
+    try {
+      const resolvedRuntime = await resolveRuntimeDefinition(this.runtime, input.config);
+      this.assertUniquePluginIds('kernel', resolvedRuntime.kernels);
+      this.kernelPlugins = resolvedRuntime.kernels;
+      this.loadedKernels.clear();
+      this.kernelExportZodSchemasMap.clear();
+      this.kernelRenderZodSchemaMap.clear();
+      this.kernelCreateOptionsZodSchemaMap.clear();
+      this.kernelExportContentMap.clear();
+      this.kernelRenderContentMap.clear();
+      this.kernelInitOptionsMap.clear();
+      this.kernelImplementationAssetsMap.clear();
+      this.activeKernelId = undefined;
+      this.selectionCache.clear();
+      this.selectionErrors.clear();
+      this.configureRuntimePlugins({
+        kernels: resolvedRuntime.kernels,
+        middleware: resolvedRuntime.middleware,
+        bundlers: resolvedRuntime.bundlers,
+        transcoders: resolvedRuntime.transcoders,
+      });
+      await super.initialize(input);
+    } catch (error) {
+      this.initialized = false;
+      throw error;
+    }
   }
 
   // =====================================================================
@@ -541,6 +553,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       id: config.id,
     });
     this.logger.debug(`Loading kernel module: ${config.id}`);
+    this.warnOnRuntimeVersionMismatch('kernel', config);
     const definition = await resolveRuntimePluginDefinition<KernelDefinition>('kernel', config);
     importSpan.end();
 

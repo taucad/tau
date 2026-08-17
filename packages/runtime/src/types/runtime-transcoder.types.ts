@@ -13,7 +13,7 @@ import type { ExportFidelity, ExportFile, FileExtension } from '@taucad/types';
 import type { KernelResult } from '#types/runtime.types.js';
 import type { RuntimeImplementationAsset, RuntimeLogger } from '#types/runtime-kernel.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
-import type { TranscoderPlugin } from '#plugins/plugin-types.js';
+import type { RuntimePluginDeclaration, TranscoderPlugin } from '#plugins/plugin-types.js';
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import type { ContentKeysOf, RuntimeContentDeclaration, RuntimeContentKey } from '#types/runtime-content.types.js';
@@ -156,7 +156,7 @@ type TranscoderDefinitionConfig<
   Context,
   Options extends Record<string, unknown>,
   Edges extends readonly TranscoderEdge[],
-> = {
+> = RuntimePluginDeclaration & {
   /** Unique identifier for this transcoder plugin. */
   id: Id;
   /** Human-readable transcoder name, used in logs and error messages */
@@ -281,20 +281,24 @@ export function defineTranscoder<
   EdgeContentMap<Edges>,
   EdgePinnedSourceOptionsMap<Edges>
 >;
+/** @public */
 export function defineTranscoder(
   definition: TranscoderDefinitionConfig<string, unknown, Record<string, unknown>, readonly TranscoderEdge[]>,
 ): TranscoderPluginFactory<string, Record<string, unknown>, string, Record<string, unknown>> {
-  const { id, ...transcoderDefinition } = definition;
+  const { id, peerRuntimeVersion, permissions, ...transcoderDefinition } = definition;
   validateRuntimeContentDeclarations(
     id,
     transcoderDefinition.edges.map((edge, index) => [`edges.${index}.content`, edge.content] as const),
   );
   const factory = ((options?: Record<string, unknown>) =>
-    attachRuntimePluginDefinition({ id, options }, () => transcoderDefinition)) as TranscoderPluginFactory<
-    string,
-    Record<string, unknown>,
-    string,
-    Record<string, unknown>
-  >;
+    attachRuntimePluginDefinition(
+      {
+        id,
+        ...(peerRuntimeVersion === undefined ? {} : { peerRuntimeVersion }),
+        ...(permissions === undefined ? {} : { permissions }),
+        options,
+      },
+      () => transcoderDefinition,
+    )) as TranscoderPluginFactory<string, Record<string, unknown>, string, Record<string, unknown>>;
   return factory;
 }

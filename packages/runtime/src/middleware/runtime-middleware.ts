@@ -13,7 +13,7 @@ import type {
 } from '#types/runtime-middleware.types.js';
 import type { RuntimeLogger, KernelFileSystem } from '#types/runtime-kernel.types.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
-import type { MiddlewarePlugin } from '#plugins/plugin-types.js';
+import type { MiddlewarePlugin, RuntimePluginDeclaration } from '#plugins/plugin-types.js';
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import type { ContentKeysOf, RuntimeContentDeclaration, RuntimeContentKey } from '#types/runtime-content.types.js';
@@ -160,10 +160,11 @@ type MiddlewareDefinitionConfig<
   StateSchema extends z.ZodObject<z.ZodRawShape>,
   OptionsSchema extends z.ZodObject<z.ZodRawShape>,
   Content extends MiddlewareContentDefinition | undefined,
-> = Omit<KernelMiddlewareOptions<StateSchema, OptionsSchema, Content>, 'optionsSchema'> & {
-  /** Unique identifier for this middleware plugin. */
-  id: Id;
-};
+> = Omit<KernelMiddlewareOptions<StateSchema, OptionsSchema, Content>, 'optionsSchema'> &
+  RuntimePluginDeclaration & {
+    /** Unique identifier for this middleware plugin. */
+    id: Id;
+  };
 
 type MiddlewarePluginRegistration<
   Id extends string,
@@ -241,8 +242,9 @@ export function defineMiddleware<
     content?: Content;
   },
 ): MiddlewarePluginFactory<Id, z.input<OptionsSchema>, StateSchema, OptionsSchema, Content>;
+/** @public */
 export function defineMiddleware(options: unknown): unknown {
-  const { id, ...middlewareDefinition } = options as MiddlewareDefinitionConfig<
+  const { id, peerRuntimeVersion, permissions, ...middlewareDefinition } = options as MiddlewareDefinitionConfig<
     string,
     z.ZodObject<z.ZodRawShape>,
     z.ZodObject<z.ZodRawShape>,
@@ -263,6 +265,8 @@ export function defineMiddleware(options: unknown): unknown {
     attachRuntimePluginDefinition(
       {
         id,
+        ...(peerRuntimeVersion === undefined ? {} : { peerRuntimeVersion }),
+        ...(permissions === undefined ? {} : { permissions }),
         options: pluginOptions,
       },
       () => ({

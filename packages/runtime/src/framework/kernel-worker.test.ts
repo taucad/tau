@@ -4144,7 +4144,7 @@ describe('CapabilitiesManifest target shape', () => {
     vi.restoreAllMocks();
   });
 
-  it('should expose manifest with only routes and renderCapabilities required fields', async () => {
+  it('should expose only the settled manifest fields', async () => {
     const worker = createConfiguredWorker();
 
     await worker.initialize({
@@ -4154,7 +4154,7 @@ describe('CapabilitiesManifest target shape', () => {
     });
 
     const manifest = worker.capabilitiesManifest;
-    expect(Object.keys(manifest).sort()).toEqual(['renderCapabilities', 'routes']);
+    expect(Object.keys(manifest).sort()).toEqual(['plugins', 'renderCapabilities', 'routes']);
     expect('kernelExports' in manifest).toBe(false);
     expect('transcodeEdges' in manifest).toBe(false);
     expect('exportRoutes' in manifest).toBe(false);

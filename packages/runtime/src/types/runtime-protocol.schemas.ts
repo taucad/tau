@@ -19,7 +19,8 @@ import { z } from 'zod';
 import { runtimeContentSchema } from '#types/runtime-content.types.js';
 import { fileExtensions } from '@taucad/types/constants';
 import type { FileExtension } from '@taucad/types';
-import type { WireProtocolSchemas } from '#types/wire-protocol-schemas.types.js';
+import type { WireProtocolSchemas } from '@taucad/rpc';
+import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import { kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
 
 // ---------- Primitives ----------
@@ -57,13 +58,13 @@ const kernelResultSchema = z.union([
       issues: z.array(kernelIssueSchema),
       serializedNativeHandle: z.unknown().optional(),
     })
-    .strict(),
+    .catchall(z.unknown()),
   z
     .object({
       success: z.literal(false),
       issues: z.array(kernelIssueSchema),
     })
-    .strict(),
+    .catchall(z.unknown()),
 ]);
 
 const exportFileSchema = z
@@ -72,7 +73,7 @@ const exportFileSchema = z
     bytes: z.instanceof(Uint8Array),
     mimeType: z.string().refine((mimeType) => mimeType.trim().length > 0),
   })
-  .strict();
+  .catchall(z.unknown());
 
 const exportGeometryResultSchema = z.discriminatedUnion('success', [
   z
@@ -82,13 +83,13 @@ const exportGeometryResultSchema = z.discriminatedUnion('success', [
       issues: z.array(kernelIssueSchema),
       serializedNativeHandle: z.unknown().optional(),
     })
-    .strict(),
+    .catchall(z.unknown()),
   z
     .object({
       success: z.literal(false),
       issues: z.array(kernelIssueSchema),
     })
-    .strict(),
+    .catchall(z.unknown()),
 ]);
 
 export const getParametersResultSchema = z.union([
@@ -102,13 +103,13 @@ export const getParametersResultSchema = z.union([
       issues: z.array(kernelIssueSchema),
       serializedNativeHandle: z.unknown().optional(),
     })
-    .strict(),
+    .catchall(z.unknown()),
   z
     .object({
       success: z.literal(false),
       issues: z.array(kernelIssueSchema),
     })
-    .strict(),
+    .catchall(z.unknown()),
 ]);
 
 const hashedGeometryResultTransportSchema = kernelResultSchema;
@@ -133,7 +134,7 @@ const telemetryEntrySchema = z
     detail: z.record(z.string(), z.unknown()).optional(),
     workerTimeOrigin: z.number(),
   })
-  .strict();
+  .catchall(z.unknown());
 
 // ---------- Memory handle (transport-supplied attachments) ----------
 
@@ -155,7 +156,7 @@ export const runtimeInitializeMemoryHandleSchema = z
      * schema accepts the global form. */
     fileSystemPort: messagePortSchema.optional(),
   })
-  .strict();
+  .catchall(z.unknown());
 
 // ---------- Initialize call ----------
 
@@ -163,14 +164,16 @@ export const runtimeInitializeArgsSchema = z
   .object({
     config: z.unknown().optional(),
     memoryHandle: runtimeInitializeMemoryHandleSchema.optional(),
+    sessionId: z.string().optional(),
+    resumeToken: z.string().optional(),
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const runtimeInitializeResultSchema = z
   .object({
     capabilities: capabilitiesManifestSchema,
   })
-  .strict();
+  .catchall(z.unknown());
 
 // ---------- Export call ----------
 
@@ -180,7 +183,7 @@ export const runtimeExportArgsSchema = z
     options: z.record(z.string(), z.unknown()).optional(),
     content: runtimeContentSchema.optional(),
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const runtimeExportResultSchema = exportGeometryResultSchema;
 
@@ -194,7 +197,7 @@ export const runtimeExportModelArgsSchema = z
     exportOptions: z.record(z.string(), z.unknown()).optional(),
     content: runtimeContentSchema.optional(),
   })
-  .strict();
+  .catchall(z.unknown());
 
 // ---------- Notifies (consumer → host) ----------
 
@@ -206,7 +209,7 @@ export const runtimeOpenFileArgsSchema = z
     options: z.record(z.string(), z.unknown()).optional(),
     content: runtimeContentSchema.optional(),
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const runtimeStageAndRenderArgsSchema = z
   .object({
@@ -217,21 +220,21 @@ export const runtimeStageAndRenderArgsSchema = z
     options: z.record(z.string(), z.unknown()).optional(),
     content: runtimeContentSchema.optional(),
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const runtimeUpdateParametersArgsSchema = z
   .object({
     ...previewCommandIdentityShape,
     parameters: z.record(z.string(), z.unknown()),
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const runtimeSetOptionsArgsSchema = z
   .object({
     ...previewCommandIdentityShape,
     options: z.record(z.string(), z.unknown()),
   })
-  .strict();
+  .catchall(z.unknown());
 
 /**
  * `cleanup` is a parameter-less acknowledged call. The application-level call
@@ -248,7 +251,28 @@ export const runtimeAbortArgsSchema = z
     renderId: renderIdSchema,
     reason: wireAbortReasonCodeSchema,
   })
-  .strict();
+  .catchall(z.unknown())
+  .superRefine((value, context) => {
+    if (Object.hasOwn(value, 'abortGeneration')) {
+      context.addIssue({
+        code: 'custom',
+        path: ['abortGeneration'],
+        message: 'abortGeneration is transport-local and must not cross the timeout wire.',
+      });
+    }
+  });
+
+const runtimeKernelMessageArgsSchema = z
+  .object({
+    kernelId: z.string(),
+    type: z.string(),
+    renderId: renderIdSchema.optional(),
+    payload: z.unknown(),
+  })
+  .catchall(z.unknown());
+
+export const runtimeKernelCommandArgsSchema = runtimeKernelMessageArgsSchema;
+export const runtimeKernelEventArgsSchema = runtimeKernelMessageArgsSchema;
 
 // ---------- Notifies (host → consumer) ----------
 
@@ -258,28 +282,28 @@ export const runtimeProgressArgsSchema = z
     renderId: renderIdSchema,
     detail: z.record(z.string(), z.unknown()).optional(),
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const runtimeGeometryComputedArgsSchema = z
   .object({
     result: hashedGeometryResultTransportSchema,
     renderId: renderIdSchema,
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const runtimeParametersResolvedArgsSchema = z
   .object({
     result: getParametersResultSchema,
     renderId: renderIdSchema,
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const runtimeErrorEventArgsSchema = z
   .object({
     issues: z.array(kernelIssueSchema),
     renderId: renderIdSchema.optional(),
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const runtimeStateChangedArgsSchema = z
   .object({
@@ -288,38 +312,38 @@ export const runtimeStateChangedArgsSchema = z
     state: workerStateSchema,
     detail: z.string().optional(),
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const runtimeActiveKernelChangedArgsSchema = z
   .object({
     kernelId: z.string().optional(),
     renderId: renderIdSchema.optional(),
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const runtimeLogArgsSchema = z
   .object({
     entry: logEntrySchema,
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const runtimeLogBatchArgsSchema = z
   .object({
     entries: z.array(logEntrySchema),
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const runtimeTelemetryArgsSchema = z
   .object({
     entries: z.array(telemetryEntrySchema),
   })
-  .strict();
+  .catchall(z.unknown());
 
 export const runtimeCapabilitiesUpdatedArgsSchema = z
   .object({
     capabilities: capabilitiesManifestSchema,
   })
-  .strict();
+  .catchall(z.unknown());
 
 // ---------- Hello payload ----------
 
@@ -327,9 +351,11 @@ export const transportHelloPayloadSchema = z
   .object({
     server: z.literal('kernel-runtime-worker'),
     runtimeVersion: z.string(),
-    transportId: z.string(),
+    protocolVersion: z.number().int().min(0),
+    sessionId: z.string().optional(),
+    resumeToken: z.string().optional(),
   })
-  .strict();
+  .catchall(z.unknown());
 
 // ---------- The protocol map ----------
 
@@ -345,6 +371,7 @@ export const transportHelloPayloadSchema = z
  * @public
  */
 export const runtimeProtocolSchemas = {
+  hello: transportHelloPayloadSchema,
   calls: {
     initialize: { args: runtimeInitializeArgsSchema, result: runtimeInitializeResultSchema },
     export: { args: runtimeExportArgsSchema, result: runtimeExportResultSchema },
@@ -358,6 +385,7 @@ export const runtimeProtocolSchemas = {
     updateParameters: runtimeUpdateParametersArgsSchema,
     setOptions: runtimeSetOptionsArgsSchema,
     abort: runtimeAbortArgsSchema,
+    kernelCommand: runtimeKernelCommandArgsSchema,
 
     // Host → consumer
     progress: runtimeProgressArgsSchema,
@@ -370,5 +398,7 @@ export const runtimeProtocolSchemas = {
     logBatch: runtimeLogBatchArgsSchema,
     telemetry: runtimeTelemetryArgsSchema,
     capabilitiesUpdated: runtimeCapabilitiesUpdatedArgsSchema,
+    kernelEvent: runtimeKernelEventArgsSchema,
   },
-} as const satisfies WireProtocolSchemas;
+  listens: {},
+} as const satisfies WireProtocolSchemas<RuntimeProtocol>;

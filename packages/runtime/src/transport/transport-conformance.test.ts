@@ -21,14 +21,13 @@ import type { Channel, Port } from '@taucad/rpc';
 import type { Geometry } from '@taucad/types';
 
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
-import { createRuntimeClientWithTransport } from '#client/runtime-client-core.js';
+import { createRuntimeClient } from '#client/runtime-client-core.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { nodeWorkerHost } from '#transport/node-worker-host.js';
 import type { WebWorkerTransportOptions } from '#transport/web-worker-client.js';
 import { webWorkerHost } from '#transport/web-worker-host.js';
 import { triggerRenderTimeout } from '#transport/_internal/abort-channel.js';
-import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 import { runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
 import type { RuntimeTransportClient } from '#transport/runtime-transport.types.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
@@ -116,16 +115,17 @@ describe('transport conformance — in-process (C2)', () => {
     expect(descriptor.memory.abortSignal).toBe('sab-atomics');
   });
 
-  it('materialised client.open() resolves a typed channel + hello frame', async () => {
+  it('materialised client.open() resolves a typed channel with the wire hello', async () => {
     const plugin = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
     const client = plugin.materialize();
     const ready = await client.open();
     expect(ready.channel).toBeDefined();
     expect(typeof ready.channel.call).toBe('function');
     expect(typeof ready.channel.notify).toBe('function');
-    expect(ready.hello.server).toBe('kernel-runtime-worker');
-    expect(ready.hello.transportId).toBe('in-process');
-    expect(typeof ready.hello.runtimeVersion).toBe('string');
+    expect(ready.channel.hello.payload).toMatchObject({
+      server: 'kernel-runtime-worker',
+      protocolVersion: 1,
+    });
     await client.close();
     await client.closed;
   });
@@ -163,13 +163,13 @@ describe('transport conformance — in-process (C2)', () => {
       const makeTransport = () => inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
 
       expect(() =>
-        createRuntimeClientWithTransport({
+        createRuntimeClient({
           transport: makeTransport(),
           renderTimeout: 1,
         }),
       ).toThrow(new TypeError(unsupportedSameIsolateTimeoutMessage));
 
-      const client = createRuntimeClientWithTransport({ transport: makeTransport() });
+      const client = createRuntimeClient({ transport: makeTransport() });
       await client.connect();
       expect(() => {
         client.setRenderTimeout(1);
@@ -344,7 +344,6 @@ describe('transport conformance — web-worker (C2)', () => {
       expect(fake.created).toHaveLength(1);
       expect(typeof ready.channel.call).toBe('function');
       expect(typeof ready.channel.notify).toBe('function');
-      expect(ready.hello.transportId).toBe('web-worker');
       await client.close();
     } finally {
       fake.dispose();
@@ -555,7 +554,6 @@ describe('transport conformance — node-worker (C2)', () => {
       const ready = await client.open();
       expect(fake.created).toHaveLength(1);
       expect(typeof ready.channel.call).toBe('function');
-      expect(ready.hello.transportId).toBe('node-worker');
       await client.close();
     } finally {
       fake.dispose();
@@ -684,6 +682,7 @@ describe('transport conformance — shared transport internals (T37)', () => {
     const server = createChannelServer<RuntimeProtocol>({
       port: wrapMessagePort<unknown>(pair.port2, { label: 't37:peer' }),
       sessionKey: runtimeChannelSessionKey,
+      hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion: 1 },
       impl: {
         async call() {
           throw new Error('T37 conformance issues no calls');
@@ -780,18 +779,17 @@ describe('transport conformance — shared transport internals (T37)', () => {
   ] as const;
 
   it.each(terminableTransports)(
-    '%s builds its hello with the shared builder and its abort frame with the shared helper',
-    async (transportId, materialize) => {
+    '%s builds its abort frame with the shared helper',
+    async (_transportId, materialize) => {
       const peer = wireBackedPeer();
       const client = await materialize(peer.port);
       try {
         const ready = await client.open();
-        expect(ready.hello).toEqual(buildHelloPayload(transportId));
         await ready.channel.ready;
 
         const recovery = client.renderTimeoutRecovery;
         if (recovery.kind !== 'terminable') {
-          throw new TypeError(`Expected terminable ${transportId} recovery`);
+          throw new TypeError(`Expected terminable ${_transportId} recovery`);
         }
         const target = { renderId, ...client.reservePreview() };
         recovery.abortRender(target);

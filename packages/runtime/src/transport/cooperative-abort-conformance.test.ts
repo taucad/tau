@@ -83,6 +83,7 @@ describe('cooperative-abort transport conformance (C7)', () => {
     const server = createChannelServer<RuntimeProtocol>({
       port: serverPort,
       sessionKey: 'c7-wire-notify',
+      hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion: 1 },
       impl: {
         async call() {
           throw new Error('C7 transport test does not call');

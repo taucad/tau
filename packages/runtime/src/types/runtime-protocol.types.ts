@@ -29,7 +29,7 @@ import type { RuntimeContentInput } from '#types/runtime-content.types.js';
  * `inline` carries the raw bytes in the message (traditional ArrayBuffer transfer).
  * `pooled` carries only the pool/key coordinates — the main thread resolves bytes
  * from SharedPool for zero-copy access.
- * @internal
+ * @public
  */
 export type GltfContentDelivery =
   | { readonly delivery: 'inline'; readonly bytes: Uint8Array<ArrayBuffer> }
@@ -37,7 +37,7 @@ export type GltfContentDelivery =
 
 /**
  * GLTF geometry in transit — content delivered inline or via shared pool.
- * @internal
+ * @public
  */
 export type GeometryGltfTransport = {
   readonly format: 'gltf';
@@ -47,27 +47,27 @@ export type GeometryGltfTransport = {
 /**
  * All geometry variants in transit.
  * SVG and WebRTC pass through unchanged — only GLTF uses the two-layer transport.
- * @internal
+ * @public
  */
 export type GeometryResponseTransport = GeometrySvg | GeometryGltfTransport | GeometryWebRtc;
 
 /**
  * Hashed geometry in transit (wire format).
- * @internal
+ * @public
  */
 export type GeometryTransport = GeometryResponseTransport & { readonly hash: string };
 
 /**
  * Full geometry result in transit (wire format).
  * Used on the MessagePort protocol; resolved to `HashedGeometryResult` by RuntimeClient.
- * @internal
+ * @public
  */
 export type HashedGeometryResultTransport = KernelResult<GeometryTransport>;
 
 /**
  * Transport-owned `SharedArrayBuffer` that backs zero-copy geometry transfer
  * between the worker and the main thread. Consumers never see the bytes.
- * @internal
+ * @public
  */
 export type GeometryPoolHandle = SharedArrayBuffer;
 
@@ -75,7 +75,7 @@ export type GeometryPoolHandle = SharedArrayBuffer;
  * Transport-owned `SharedArrayBuffer` carrying the cooperative-abort
  * generation/reason slots ({@link signalSlot}). Allocated by SAB-capable transports;
  * `undefined` on runners that translate aborts to wire commands.
- * @internal
+ * @public
  */
 export type SignalBufferHandle = SharedArrayBuffer;
 
@@ -92,7 +92,7 @@ export type SignalBufferHandle = SharedArrayBuffer;
  * plugin from the opaque `RuntimeFileSystem` value handed to its
  * `client({ fileSystem })` factory. The dispatcher reads it from this
  * handle to attach the FS bridge to the kernel worker.
- * @internal
+ * @public
  */
 export type InitializeMemoryHandle = {
   signalBuffer?: SignalBufferHandle;
@@ -100,13 +100,13 @@ export type InitializeMemoryHandle = {
   fileSystemPort?: MessagePort;
 };
 
-/** Numeric timeout reason accepted by the targeted wire abort command. @internal */
+/** Numeric timeout reason accepted by the targeted wire abort command. @public */
 export type WireAbortReasonCode = typeof abortReason.timeout;
 
-/** Opaque identity for one admitted preview render. @internal */
+/** Opaque identity for one admitted preview render. @public */
 export type RenderId = string;
 
-/** Preview identity plus the transport-owned SAB generation, when available. @internal */
+/** Preview identity plus the transport-owned SAB generation, when available. @public */
 export type RuntimePreviewIdentity = {
   readonly renderId: RenderId;
   readonly abortGeneration?: number;
@@ -149,7 +149,7 @@ export type WorkerState = 'idle' | 'buffering' | 'rendering' | 'error';
  *
  * - Slot 0: abort generation (main -> worker, `Atomics.add` / `Atomics.load`).
  * - Slot 1: abort reason (main -> worker, `Atomics.store` / `Atomics.load`).
- * @internal
+ * @public
  */
 export const signalSlot = {
   abortGeneration: 0,
@@ -159,7 +159,7 @@ export const signalSlot = {
 /**
  * Reason why the current render was aborted, written by the main thread
  * and read by the worker to decide how to handle the abort (error vs. silent discard).
- * @internal
+ * @public
  */
 export const abortReason = {
   none: 0,
@@ -175,7 +175,7 @@ export const abortReason = {
  *
  * Transports translate this to the correct {@link abortReason} numeric
  * encoding internally.
- * @internal
+ * @public
  */
 export type AbortReason = 'superseded' | 'timeout';
 
@@ -187,16 +187,18 @@ export type AbortReason = 'superseded' | 'timeout';
  * Args for the `initialize` request. The `requestId` slot of the
  * pre-channel surface is gone — correlation is owned by `Channel.call`'s
  * wire envelope.
- * @internal
+ * @public
  */
 export type RuntimeInitializeArgs = {
   config?: unknown;
   memoryHandle?: InitializeMemoryHandle;
+  sessionId?: string;
+  resumeToken?: string;
 };
 
 /**
  * Result of the `initialize` request — capabilities snapshot.
- * @internal
+ * @public
  */
 export type RuntimeInitializeResult = { capabilities: CapabilitiesManifest };
 
@@ -207,16 +209,41 @@ export type RuntimeInitializeResult = { capabilities: CapabilitiesManifest };
  * {@link CapabilitiesManifest} is intentionally not included here — it is
  * resolved lazily and returned by the `initialize` call so kernel-module
  * loads can defer until the seam is open.
- * @internal
+ * @public
  */
 export type RuntimeHelloPayload = {
   readonly server: 'kernel-runtime-worker';
   readonly runtimeVersion: string;
+  readonly protocolVersion: number;
+  readonly sessionId?: string;
+  readonly resumeToken?: string;
 };
+
+type RuntimeInitializeResultWire = { readonly capabilities: unknown };
+type RuntimeExportFileWire = {
+  readonly name: string;
+  readonly bytes: Uint8Array<ArrayBuffer>;
+  readonly mimeType: string;
+};
+type RuntimeExportResultWire = KernelResult<RuntimeExportFileWire[]>;
+type RuntimeGeometryComputedArgsWire = {
+  readonly result: KernelResult<unknown>;
+  readonly renderId: RenderId;
+};
+type RuntimeParametersResolvedArgsWire = {
+  readonly result: KernelResult<{
+    readonly defaultParameters: Record<string, unknown>;
+    readonly jsonSchema: unknown;
+  }>;
+  readonly renderId: RenderId;
+};
+type RuntimeLogArgsWire = { readonly entry: unknown };
+type RuntimeLogBatchArgsWire = { readonly entries: readonly unknown[] };
+type RuntimeCapabilitiesUpdatedArgsWire = { readonly capabilities: unknown };
 
 /**
  * Args for the `export` request.
- * @internal
+ * @public
  */
 export type RuntimeExportArgs = {
   readonly format: FileExtension;
@@ -231,7 +258,7 @@ export type RuntimeExportArgs = {
  * source files first, then exports the exact `file + parameters + options`
  * request without mutating the autonomous preview render state.
  *
- * @internal
+ * @public
  */
 export type RuntimeExportModelArgs = {
   readonly stage?: Record<string, Uint8Array<ArrayBuffer>>;
@@ -245,7 +272,7 @@ export type RuntimeExportModelArgs = {
 
 /**
  * Args for the autonomous `openFile` notify.
- * @internal
+ * @public
  */
 export type RuntimeOpenFileArgs = RuntimePreviewIdentity & {
   readonly file: { readonly path: string; readonly filename: string };
@@ -257,7 +284,7 @@ export type RuntimeOpenFileArgs = RuntimePreviewIdentity & {
 /**
  * Args for the autonomous `stage-and-render` notify (overlay-FS bytes
  * staged before opening the entry; replaces TR7's inline-FS handle).
- * @internal
+ * @public
  */
 export type RuntimeStageAndRenderArgs = RuntimePreviewIdentity & {
   readonly stage: Record<string, Uint8Array<ArrayBuffer>>;
@@ -267,12 +294,12 @@ export type RuntimeStageAndRenderArgs = RuntimePreviewIdentity & {
   readonly content?: RuntimeContentInput;
 };
 
-/** Args for a render-scoped parameter update. @internal */
+/** Args for a render-scoped parameter update. @public */
 export type RuntimeUpdateParametersArgs = RuntimePreviewIdentity & {
   readonly parameters: Record<string, unknown>;
 };
 
-/** Args for a render-scoped options update. @internal */
+/** Args for a render-scoped options update. @public */
 export type RuntimeSetOptionsArgs = RuntimePreviewIdentity & {
   readonly options: Record<string, unknown>;
 };
@@ -283,7 +310,7 @@ export type RuntimeSetOptionsArgs = RuntimePreviewIdentity & {
  * The legacy `requestId` correlation slot is gone —
  * progress is a global event in the channel model since at most one
  * render is in flight per worker at a time.
- * @internal
+ * @public
  */
 export type RuntimeProgressArgs = {
   readonly phase: RenderPhase;
@@ -296,7 +323,7 @@ export type RuntimeProgressArgs = {
  * via {@link WithTransferables} so the channel walker can choose the
  * fastest delivery tier (`pool → transfer → copy`). `renderId` correlates
  * the frame with the originating preview admission.
- * @internal
+ * @public
  */
 export type RuntimeGeometryComputedArgs = {
   readonly result: HashedGeometryResultTransport;
@@ -308,7 +335,7 @@ export type RuntimeGeometryComputedArgs = {
  * correlates the resolved parameter schema with the originating preview
  * so the consumer can pair early-arriving parameter frames with the
  * eventual `geometryComputed` for the same render.
- * @internal
+ * @public
  */
 export type RuntimeParametersResolvedArgs = {
   readonly result: GetParametersResult;
@@ -319,7 +346,7 @@ export type RuntimeParametersResolvedArgs = {
  * Args for the autonomous `errorEvent` notify. `renderId` is present when
  * the issue is render-scoped and absent when the failure is
  * connection-scoped (e.g. handshake failure, transcoder load).
- * @internal
+ * @public
  */
 export type RuntimeErrorEventArgs = {
   readonly issues: readonly KernelIssue[];
@@ -328,7 +355,7 @@ export type RuntimeErrorEventArgs = {
 
 /**
  * Args for the autonomous `stateChanged` notify.
- * @internal
+ * @public
  */
 export type RuntimeStateChangedArgs = {
   readonly renderId: RenderId;
@@ -337,13 +364,21 @@ export type RuntimeStateChangedArgs = {
   readonly detail?: string;
 };
 
+/** Reserved kernel-owned message envelope for bidirectional extension traffic. @public */
+export type RuntimeKernelMessageArgs = {
+  readonly kernelId: string;
+  readonly type: string;
+  readonly renderId?: RenderId;
+  readonly payload: unknown;
+};
+
 /**
- * Client → worker fire-and-forget command names. These 5 command names
+ * Client → worker fire-and-forget command names. These 6 command names
  * drive every C→W interaction in the kernel runtime protocol. A
  * companion type-level guard in `runtime-protocol.runtime.test.ts`
  * fails closed if a command is added/removed without updating both
  * surfaces.
- * @internal
+ * @public
  */
 export const runtimeProtocolClientNotifyNames = [
   'openFile',
@@ -351,16 +386,17 @@ export const runtimeProtocolClientNotifyNames = [
   'updateParameters',
   'setOptions',
   'abort',
+  'kernelCommand',
 ] as const;
 
 /**
- * Worker → client autonomous event names. These 10 event names cover
+ * Worker → client autonomous event names. These 11 event names cover
  * every W→C notify path in the kernel runtime protocol.
  * `geometryComputed` carries transferables. Six events carry `renderId`:
  * `parametersResolved`, `geometryComputed`, `errorEvent`, `progress`,
  * `activeKernelChanged`, and `stateChanged`; the two optional sites also
  * cover connection-scoped work.
- * @internal
+ * @public
  */
 export const runtimeProtocolWorkerNotifyNames = [
   'parametersResolved',
@@ -373,11 +409,12 @@ export const runtimeProtocolWorkerNotifyNames = [
   'logBatch',
   'telemetry',
   'capabilitiesUpdated',
+  'kernelEvent',
 ] as const;
 
 /**
- * Combined notify name inventory — exactly 15 keys (5 C→W + 10 W→C).
- * @internal
+ * Combined notify name inventory — exactly 17 keys (6 C→W + 11 W→C).
+ * @public
  */
 export const runtimeProtocolNotifyNames = [
   ...runtimeProtocolClientNotifyNames,
@@ -389,7 +426,7 @@ export const runtimeProtocolNotifyNames = [
  * (`initialize`, `export`, `exportModel`, `cleanup`). The legacy `render` call is deleted; the
  * autonomous `openFile` notify + `geometryComputed` correlation by
  * `renderId` replaces it (R18, mirrors LSP `didOpen` + diagnostics).
- * @internal
+ * @public
  */
 export const runtimeProtocolCallNames = ['initialize', 'export', 'exportModel', 'cleanup'] as const;
 
@@ -404,13 +441,13 @@ export const runtimeProtocolCallNames = ['initialize', 'export', 'exportModel', 
  *   drives renders autonomously via the `openFile` notify and consumes
  *   `geometryComputed` notifies correlated by `renderId` (R18, mirrors LSP
  *   `didOpen` + diagnostics).
- * - `notifies`: bidirectional fire-and-forget — exactly 15 keys total.
- *   5 client→worker commands (`openFile`, `stage-and-render`,
- *   `updateParameters`, `setOptions`, `abort`)
- *   plus 10 worker→client
+ * - `notifies`: bidirectional fire-and-forget — exactly 17 keys total.
+ *   6 client→worker commands (`openFile`, `stage-and-render`,
+ *   `updateParameters`, `setOptions`, `abort`, `kernelCommand`)
+ *   plus 11 worker→client
  *   autonomous events (`parametersResolved`, `geometryComputed`,
  *   `errorEvent`, `progress`, `activeKernelChanged`, `stateChanged`,
- *   `log`, `logBatch`, `telemetry`, `capabilitiesUpdated`).
+ *   `log`, `logBatch`, `telemetry`, `capabilitiesUpdated`, `kernelEvent`).
  * - `listens`: reserved for future consumer-pulled streams (e.g. file
  *   watch, log tail). Empty in v5 because every streaming flow lands as
  *   a notify.
@@ -424,24 +461,29 @@ export const runtimeProtocolCallNames = ['initialize', 'export', 'exportModel', 
  * Conforms to `RpcProtocol` from `@taucad/rpc`. Use as
  * `Channel<RuntimeProtocol>` and `ChannelServer<RuntimeProtocol>`.
  *
- * @internal
+ * @public
  */
 export type RuntimeProtocol = {
+  readonly hello: RuntimeHelloPayload;
   readonly calls: {
     readonly initialize: {
       readonly args: RuntimeInitializeArgs;
       readonly result: RuntimeInitializeResult;
+      readonly wireResult: RuntimeInitializeResultWire;
     };
     readonly export: {
       readonly args: RuntimeExportArgs;
       readonly result: ExportGeometryResult;
+      readonly wireResult: RuntimeExportResultWire;
     };
     readonly exportModel: {
       readonly args: RuntimeExportModelArgs;
       readonly result: ExportGeometryResult;
+      readonly wireResult: RuntimeExportResultWire;
     };
     readonly cleanup: {
-      readonly args: undefined;
+      // oxlint-disable-next-line typescript/no-restricted-types -- omitted call args normalize to null on the RPC wire.
+      readonly args: null;
       // oxlint-disable-next-line typescript/no-restricted-types -- RPC wire responses encode an absent payload as null.
       readonly result: null;
     };
@@ -454,12 +496,15 @@ export type RuntimeProtocol = {
     readonly abort: {
       readonly args: { readonly renderId: RenderId; readonly reason: WireAbortReasonCode };
     };
+    readonly kernelCommand: { readonly args: RuntimeKernelMessageArgs };
 
     readonly parametersResolved: {
       readonly args: RuntimeParametersResolvedArgs;
+      readonly wireArgs: RuntimeParametersResolvedArgsWire;
     };
     readonly geometryComputed: {
       readonly args: RuntimeGeometryComputedArgs;
+      readonly wireArgs: RuntimeGeometryComputedArgsWire;
     };
     readonly errorEvent: { readonly args: RuntimeErrorEventArgs };
     readonly progress: { readonly args: RuntimeProgressArgs };
@@ -467,16 +512,22 @@ export type RuntimeProtocol = {
       readonly args: { readonly kernelId?: string; readonly renderId?: RenderId };
     };
     readonly stateChanged: { readonly args: RuntimeStateChangedArgs };
-    readonly log: { readonly args: { readonly entry: LogEntry } };
+    readonly log: {
+      readonly args: { readonly entry: LogEntry };
+      readonly wireArgs: RuntimeLogArgsWire;
+    };
     readonly logBatch: {
       readonly args: { readonly entries: readonly LogEntry[] };
+      readonly wireArgs: RuntimeLogBatchArgsWire;
     };
     readonly telemetry: {
       readonly args: { readonly entries: readonly TelemetryEntry[] };
     };
     readonly capabilitiesUpdated: {
       readonly args: { readonly capabilities: CapabilitiesManifest };
+      readonly wireArgs: RuntimeCapabilitiesUpdatedArgsWire;
     };
+    readonly kernelEvent: { readonly args: RuntimeKernelMessageArgs };
   };
   readonly listens: Record<string, never>;
 };

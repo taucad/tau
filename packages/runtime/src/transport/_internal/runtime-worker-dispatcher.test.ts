@@ -16,6 +16,7 @@ import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import type { CapabilitiesManifest } from '#types/runtime.types.js';
 import type { GeometryEncoder } from '#transport/_internal/runtime-worker-dispatcher.js';
 import type { EncodedGeometry } from '#transport/runtime-transport.types.js';
+import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.types.js';
 
 type DispatcherFixture = {
   client: Channel<RuntimeProtocol>;
@@ -108,6 +109,7 @@ describe('createWorkerDispatcher', () => {
   describe('calls', () => {
     it('settles `initialize` with the worker capabilities manifest', async () => {
       const manifest = {
+        plugins: [],
         routes: [
           {
             targetFormat: 'usdz',
@@ -127,6 +129,17 @@ describe('createWorkerDispatcher', () => {
       const result = await fixture.client.call('initialize', {});
 
       expect(result).toEqual({ capabilities: manifest });
+    });
+
+    it('rejects a second initialize call without reinitializing the worker', async () => {
+      const worker = createMockWorker();
+      fixture = await buildFixture(worker);
+
+      await expect(fixture.client.call('initialize', {})).resolves.toBeDefined();
+      await expect(fixture.client.call('initialize', {})).rejects.toMatchObject({
+        code: new RuntimeAlreadyInitializedError().code,
+      });
+      expect(worker.initialize).toHaveBeenCalledOnce();
     });
 
     it('rejects `initialize` when worker.initialize throws', async () => {
@@ -401,6 +414,28 @@ describe('createWorkerDispatcher', () => {
   });
 
   describe('autonomous worker → client notifies', () => {
+    it('emits kernel events with their kernel identity', async () => {
+      let onKernelEvent: ((event: RuntimeProtocol['notifies']['kernelEvent']['args']) => void) | undefined;
+      const worker = createMockWorker();
+      Object.defineProperty(worker, 'onKernelEvent', {
+        set(fn: typeof onKernelEvent) {
+          onKernelEvent = fn;
+        },
+        get() {
+          return onKernelEvent;
+        },
+      });
+      fixture = await buildFixture(worker);
+      const seen: Array<RuntimeProtocol['notifies']['kernelEvent']['args']> = [];
+      fixture.client.onNotify('kernelEvent', (event) => seen.push(event));
+      await fixture.client.call('initialize', {});
+
+      onKernelEvent?.({ kernelId: 'solver', type: 'iteration', renderId, payload: { residual: 0.01 } });
+      await flushMicrotasks();
+
+      expect(seen).toEqual([{ kernelId: 'solver', type: 'iteration', renderId, payload: { residual: 0.01 } }]);
+    });
+
     it('emits `geometryComputed` from worker.onGeometryComputed', async () => {
       const sab = new SharedArrayBuffer(256 * 1024);
       const pool = new SharedPool(sab, { maxEntries: 64 });
@@ -559,12 +594,12 @@ describe('createWorkerDispatcher', () => {
 
       onStateChanged!({ state: 'rendering', renderId, abortGeneration: 1 });
       onActiveKernelChanged!({ kernelId: 'replicad', renderId });
-      onCapabilitiesUpdated!({ routes: [], renderCapabilities: {} });
+      onCapabilitiesUpdated!({ plugins: [], routes: [], renderCapabilities: {} });
       await flushMicrotasks();
 
       expect(state).toEqual([{ state: 'rendering', renderId, abortGeneration: 1 }]);
       expect(kernels).toEqual([{ kernelId: 'replicad', renderId }]);
-      expect(caps).toEqual([{ capabilities: { routes: [], renderCapabilities: {} } }]);
+      expect(caps).toEqual([{ capabilities: { plugins: [], routes: [], renderCapabilities: {} } }]);
     });
 
     it('emits `errorEvent` from worker.onError', async () => {
@@ -950,14 +985,20 @@ describe('createWorkerDispatcher', () => {
         const first = observed[0] as { v: number; k: string; o?: number; d?: unknown };
         expect(first.k).toBe('lh');
         expect(first.o).toBe(1);
-        const wireHelloPayload = first.d as { server: string; runtimeVersion: string } | undefined;
+        const wireHelloPayload = first.d as
+          | { server: string; runtimeVersion: string; protocolVersion: number }
+          | undefined;
         expect(wireHelloPayload?.server).toBe('kernel-runtime-worker');
         expect(typeof wireHelloPayload?.runtimeVersion).toBe('string');
         expect(wireHelloPayload?.runtimeVersion.length).toBeGreaterThan(0);
-        const clientHelloPayload = client.hello.payload as { server: string; runtimeVersion: string } | undefined;
+        expect(wireHelloPayload?.protocolVersion).toBe(1);
+        const clientHelloPayload = client.hello.payload as
+          | { server: string; runtimeVersion: string; protocolVersion: number }
+          | undefined;
         expect(clientHelloPayload?.server).toBe('kernel-runtime-worker');
         expect(typeof clientHelloPayload?.runtimeVersion).toBe('string');
         expect(clientHelloPayload?.runtimeVersion.length).toBeGreaterThan(0);
+        expect(clientHelloPayload?.protocolVersion).toBe(1);
       } finally {
         server.dispose('test');
         client.close('test');

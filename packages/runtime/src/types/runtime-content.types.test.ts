@@ -35,8 +35,11 @@ describe('runtime content', () => {
     );
   });
 
-  it('rejects unknown framework properties before projection', () => {
-    expect(() => runtimeContentSchema.parse({ includeEdges: true, includeSketches: true })).toThrow();
+  it('tolerates unknown additive properties at the wire boundary', () => {
+    expect(runtimeContentSchema.parse({ includeEdges: true, includeSketches: true })).toEqual({
+      includeEdges: true,
+      includeSketches: true,
+    });
   });
 });
 

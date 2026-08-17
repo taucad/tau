@@ -6,14 +6,16 @@
  * - Host options project from standalone host factories via {@link TransportHostOptions}.
  */
 
-import { describe, it, assertType } from 'vitest';
+import { describe, it, assertType, expectTypeOf } from 'vitest';
 import { z } from 'zod';
-import type { RpcProtocol } from '@taucad/rpc';
+import type { Channel, ChannelServerHandle, RpcProtocol } from '#transport/index.js';
 
 import { defineRuntimeTransport } from '#transport/define-runtime-transport.js';
 import type {
   RuntimeTransportClient,
   RuntimeTransportHost,
+  TransportClientReady,
+  TransportHostReady,
   TransportPlugin,
 } from '#transport/runtime-transport.types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
@@ -53,6 +55,11 @@ const standaloneHostFixture = (_options: z.input<typeof schemaHost>): RuntimeTra
   stubHost('fixture');
 
 describe('defineRuntimeTransport generic inference (C11)', () => {
+  it('exposes the channel protocol types transport authors must name', () => {
+    expectTypeOf<TransportClientReady<RpcProtocol>['channel']>().toEqualTypeOf<Channel>();
+    expectTypeOf<TransportHostReady<RpcProtocol>['channel']>().toEqualTypeOf<ChannelServerHandle>();
+  });
+
   it('preserves the literal id on the wired TransportPlugin', () => {
     const emptyClientSchema = z.object({}).strict();
 

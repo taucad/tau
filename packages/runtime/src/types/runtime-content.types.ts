@@ -6,11 +6,13 @@ export const runtimeContentProperties = {
   includeTopology: z.boolean().describe('Include Tau CAD topology metadata'),
 } as const;
 
-/** Strict request schema shared by the public API and worker protocol. @public */
-export const runtimeContentSchema = z.object(runtimeContentProperties).partial().strict();
+/** Tolerant-reader request schema shared by the public API and worker protocol. @public */
+export const runtimeContentSchema = z.object(runtimeContentProperties).partial().catchall(z.unknown());
 
 /** Framework-owned content requirements shared by render and export operations. @public */
-export type RuntimeContentInput = Readonly<z.input<typeof runtimeContentSchema>>;
+export type RuntimeContentInput = Readonly<{
+  [Key in keyof typeof runtimeContentProperties]?: z.input<(typeof runtimeContentProperties)[Key]>;
+}>;
 
 /** Canonical framework-owned content property names. @public */
 export type RuntimeContentKey = keyof RuntimeContentInput;

@@ -46,6 +46,7 @@ import type {
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeTransportClient, RuntimeTransportTimeoutRecovery } from '#transport/runtime-transport.types.js';
 import { renderTimeoutRecoveryGrace } from '#framework/runtime-framework.constants.js';
+import { validateProtocolHeader } from '#types/protocol-header.types.js';
 
 /** Unsubscribe handle for {@link RuntimeWorkerClient} subscription helpers. */
 export type Unsubscribe = () => void;
@@ -63,7 +64,7 @@ export type Unsubscribe = () => void;
  * `RuntimeClient` surface. Supersession is observed via
  * `RenderOutcome.superseded`.
  *
- * @internal
+ * @public
  */
 export class RenderAbortedError extends Error {
   public constructor() {
@@ -83,7 +84,7 @@ export class RenderAbortedError extends Error {
 /**
  * Realm-safe type guard -- checks `error.name` instead of prototype chain.
  *
- * @internal
+ * @public
  * @param error - the value to test
  * @returns `true` when the error is a {@link RenderAbortedError}
  */
@@ -250,6 +251,9 @@ export class RuntimeWorkerClient {
   public async initialize(options: RuntimeWorkerClientInitializeOptions = {}): Promise<void> {
     this.ensureNotTerminated();
     const { channel } = await this.transport.open();
+    await channel.ready;
+    const hello = channel.hello.payload;
+    validateProtocolHeader({ v: hello.protocolVersion });
     this.ensureNotTerminated();
     this.channel = channel;
     this.disposers.push(

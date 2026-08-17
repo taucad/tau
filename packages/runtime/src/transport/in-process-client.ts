@@ -32,7 +32,6 @@ import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.
 import { allocatePools } from '#transport/_internal/sab-pools.js';
 import type { AllocatedPools } from '#transport/_internal/sab-pools.js';
 import { reservePreview } from '#transport/_internal/abort-channel.js';
-import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 
 /** Canonical id literal for bundled in-process transport. */
@@ -190,10 +189,7 @@ export const inProcessClient = (
         protocolSchemas: runtimeProtocolSchemas,
       });
       await channel.ready;
-      return {
-        channel,
-        hello: buildHelloPayload(inProcessId),
-      };
+      return { channel };
     })();
     return openPromise;
   };

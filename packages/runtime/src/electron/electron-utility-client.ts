@@ -11,7 +11,6 @@ import type { GeometryTransport, RuntimeInitializeResult, RuntimeProtocol } from
 import { runtimeProtocolSchemas } from '#transport/index.js';
 import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
 import { triggerRenderTimeout } from '#transport/_internal/abort-channel.js';
-import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 import type {
   RuntimeInitializeMemoryHandle,
   RuntimeInitializePayload,
@@ -127,10 +126,7 @@ export const electronUtilityClient = (
       debugLog('renderer:client', 'channel-created');
       await channel.ready;
       debugLog('renderer:client', 'channel-ready');
-      return {
-        channel,
-        hello: buildHelloPayload(electronUtilityId),
-      };
+      return { channel };
     })();
     return openPromise;
   };

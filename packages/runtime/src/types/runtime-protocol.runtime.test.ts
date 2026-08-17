@@ -27,17 +27,18 @@ describe('RuntimeProtocol — runtime inventory guard (R20)', () => {
     expect([...runtimeProtocolCallNames]).toEqual(['initialize', 'export', 'exportModel', 'cleanup']);
   });
 
-  it('exposes exactly 5 client → worker notify commands (T18)', () => {
+  it('exposes exactly 6 client → worker notify commands (T18)', () => {
     expect([...runtimeProtocolClientNotifyNames]).toEqual([
       'openFile',
       'stage-and-render',
       'updateParameters',
       'setOptions',
       'abort',
+      'kernelCommand',
     ]);
   });
 
-  it('exposes exactly 10 worker → client autonomous event notifies', () => {
+  it('exposes exactly 11 worker → client autonomous event notifies', () => {
     expect([...runtimeProtocolWorkerNotifyNames]).toEqual([
       'parametersResolved',
       'geometryComputed',
@@ -49,11 +50,12 @@ describe('RuntimeProtocol — runtime inventory guard (R20)', () => {
       'logBatch',
       'telemetry',
       'capabilitiesUpdated',
+      'kernelEvent',
     ]);
   });
 
-  it('exposes exactly 15 notify keys (5 client commands + 10 worker events)', () => {
-    expect(runtimeProtocolNotifyNames).toHaveLength(15);
+  it('exposes exactly 17 notify keys (6 client commands + 11 worker events)', () => {
+    expect(runtimeProtocolNotifyNames).toHaveLength(17);
     expect(runtimeProtocolNotifyNames).toHaveLength(
       runtimeProtocolClientNotifyNames.length + runtimeProtocolWorkerNotifyNames.length,
     );

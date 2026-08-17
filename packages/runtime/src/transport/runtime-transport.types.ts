@@ -104,6 +104,19 @@ export type RuntimeTransportCloseResult =
   | { readonly cause: 'host-exit'; readonly exitCode?: number }
   | { readonly cause: 'wire-failure'; readonly error: Error };
 
+/** Typed rejection for a second in-flight or completed runtime initialization. @internal */
+export class RuntimeAlreadyInitializedError extends Error {
+  public constructor() {
+    super('Runtime transport is already initialized; create a new transport to initialize another runtime.');
+    this.name = 'RuntimeAlreadyInitializedError';
+  }
+
+  /** Stable machine-readable error code. */
+  public get code(): 'RUNTIME_ALREADY_INITIALIZED' {
+    return 'RUNTIME_ALREADY_INITIALIZED';
+  }
+}
+
 /* ============================================================ *
  * Phantom carriers — `unique symbol` brands that flow type      *
  * information through the transport plugin pipeline without any *
@@ -232,7 +245,6 @@ export type HostInitializeBindings<
  */
 export type TransportClientReady<Protocol extends RpcProtocol = RuntimeProtocol> = {
   readonly channel: Channel<Protocol>;
-  readonly hello: TransportHelloPayload;
 };
 
 /**
@@ -314,6 +326,9 @@ export type RuntimeTransportClient<
    * chooses transferable vs copy semantics based on what its wire
    * supports. The runtime never sees the wire-level transferables
    * list.
+   * A second call while initialization is in flight or after it succeeds
+   * rejects with {@link RuntimeAlreadyInitializedError}; a failed first
+   * attempt may be retried.
    */
   initialize(input: RuntimeInitializePayload): Promise<RuntimeInitializeResult>;
 

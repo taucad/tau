@@ -58,11 +58,13 @@ import type { KernelWorker } from '#framework/kernel-worker.js';
 import { logFlushDebounce } from '#framework/runtime-framework.constants.js';
 import { createErrorTrap } from '#framework/worker-error-trap.js';
 import { packageVersion } from '#utils/package-info.js';
+import { protocolVersion } from '#types/protocol-header.types.js';
 import type {
   EncodedGeometry,
   HostInitializeBindings,
   RuntimeInitializeMemoryHandle,
 } from '#transport/runtime-transport.types.js';
+import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.types.js';
 
 /** Stable session key for the runtime worker channel. */
 export const runtimeChannelSessionKey = 'tau.runtime/v1';
@@ -289,11 +291,21 @@ export function createWorkerDispatcher(
     worker.onCapabilitiesUpdated = (capabilities) => {
       notify('capabilitiesUpdated', { capabilities });
     };
+
+    worker.onKernelEvent = (event) => {
+      notify('kernelEvent', event);
+    };
   };
 
+  let initializing = false;
+  let initialized = false;
   const handleInitialize: (
     args: RuntimeProtocol['calls']['initialize']['args'],
   ) => Promise<RuntimeProtocol['calls']['initialize']['result']> = async (args) => {
+    if (initializing || initialized) {
+      throw new RuntimeAlreadyInitializedError();
+    }
+    initializing = true;
     const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
     try {
       wireWorkerCallbacks();
@@ -328,8 +340,10 @@ export function createWorkerDispatcher(
         trapPromise,
       ]);
 
+      initialized = true;
       return { capabilities: worker.capabilitiesManifest };
     } finally {
+      initializing = false;
       cleanupTrap();
     }
   };
@@ -449,6 +463,10 @@ export function createWorkerDispatcher(
           worker.handleWireAbort(a);
           break;
         }
+        case 'kernelCommand': {
+          // Reserved for kernel-owned command routing in a later protocol revision.
+          break;
+        }
         // Worker → client autonomous notifies are emitted via `serverHandle.notify`,
         // so receiving them here would indicate a misrouted frame from the client.
         case 'parametersResolved':
@@ -460,7 +478,8 @@ export function createWorkerDispatcher(
         case 'log':
         case 'logBatch':
         case 'telemetry':
-        case 'capabilitiesUpdated': {
+        case 'capabilitiesUpdated':
+        case 'kernelEvent': {
           // No-op: server never receives these.
           break;
         }
@@ -476,6 +495,7 @@ export function createWorkerDispatcher(
   const helloPayload: RuntimeHelloPayload = {
     server: 'kernel-runtime-worker',
     runtimeVersion: packageVersion,
+    protocolVersion,
   };
 
   serverHandle = createChannelServer<RuntimeProtocol>({

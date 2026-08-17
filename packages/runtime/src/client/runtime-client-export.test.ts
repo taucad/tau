@@ -8,10 +8,10 @@ import type {
   RuntimeTransportCloseResult,
   TransportPlugin,
   RuntimeTransportClient,
-  TransportClientReady,
 } from '#transport/runtime-transport.types.js';
-import { createRuntimeClientWithTransport } from '#client/runtime-client-core.js';
+import { createRuntimeClient } from '#client/runtime-client-core.js';
 import type { ExportResult } from '#client/runtime-client-core.js';
+import { protocolVersion } from '#types/protocol-header.types.js';
 
 const exportResult: ExportGeometryResult = {
   success: true,
@@ -33,11 +33,6 @@ const exportResult: ExportGeometryResult = {
 function createFakeTransport() {
   const exportCall = vi.fn(async (_format: string, _options?: Record<string, unknown>) => exportResult);
   const exportModelCall = vi.fn(async (_request: RuntimeProtocol['calls']['exportModel']['args']) => exportResult);
-  const hello = {
-    server: 'kernel-runtime-worker',
-    runtimeVersion: '0.0.0-test',
-    transportId: 'test-transport',
-  } satisfies TransportClientReady['hello'];
   const channel: Channel<RuntimeProtocol> = {
     ready: Promise.resolve(),
     closed: Promise.resolve(),
@@ -46,7 +41,7 @@ function createFakeTransport() {
       onMessage: vi.fn(() => () => undefined),
       close: vi.fn(),
     },
-    hello: { payload: {} },
+    hello: { payload: { server: 'kernel-runtime-worker', runtimeVersion: '0.0.0-test', protocolVersion } },
     onNotify: vi.fn(() => () => undefined),
     notify: vi.fn(),
     call: vi.fn(async (method: keyof RuntimeProtocol['calls'], args: unknown) => {
@@ -83,12 +78,10 @@ function createFakeTransport() {
       },
       fileSystem: 'inline',
     }),
-    open: vi.fn(async () => ({
-      channel,
-      hello,
-    })),
+    open: vi.fn(async () => ({ channel })),
     initialize: vi.fn(async () => ({
       capabilities: {
+        plugins: [],
         routes: [],
         renderCapabilities: {},
       },
@@ -111,7 +104,7 @@ function createFakeTransport() {
 describe('RuntimeClient request-scoped export', () => {
   it('should export a file request without calling render', async () => {
     const { exportCall, exportModelCall, plugin } = createFakeTransport();
-    const client = createRuntimeClientWithTransport({
+    const client = createRuntimeClient({
       transport: plugin,
     });
     const render = vi.fn();
@@ -143,7 +136,7 @@ describe('RuntimeClient request-scoped export', () => {
 
   it('should export inline code by staging source files in the request', async () => {
     const { exportModelCall, plugin } = createFakeTransport();
-    const client = createRuntimeClientWithTransport({
+    const client = createRuntimeClient({
       transport: plugin,
     });
     const inlineCode: Record<string, string> = {};
@@ -175,7 +168,7 @@ describe('RuntimeClient request-scoped export', () => {
 
   it('should keep single-argument export behavior unchanged', async () => {
     const { plugin } = createFakeTransport();
-    const client = createRuntimeClientWithTransport({
+    const client = createRuntimeClient({
       transport: plugin,
     });
 
@@ -185,7 +178,7 @@ describe('RuntimeClient request-scoped export', () => {
 
   it('should not let request-scoped export create a settled preview export state', async () => {
     const { plugin } = createFakeTransport();
-    const client = createRuntimeClientWithTransport({
+    const client = createRuntimeClient({
       transport: plugin,
     });
 
@@ -197,7 +190,7 @@ describe('RuntimeClient request-scoped export', () => {
 
   it('should reject unsupported top-level export keys', async () => {
     const { plugin } = createFakeTransport();
-    const client = createRuntimeClientWithTransport({
+    const client = createRuntimeClient({
       transport: plugin,
     });
     const exportFromJavaScript = client.export as (

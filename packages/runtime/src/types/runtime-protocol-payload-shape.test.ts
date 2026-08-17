@@ -17,6 +17,26 @@ const renderId = '550e8400-e29b-41d4-a716-446655440000';
 const stagePath = '/main.ts';
 
 describe('runtime-protocol payload-shape coverage (C18)', () => {
+  describe('hello', () => {
+    it('accepts additive fields while rejecting malformed known fields', () => {
+      expect(
+        runtimeProtocolSchemas.hello.parse({
+          server: 'kernel-runtime-worker',
+          runtimeVersion: 'test',
+          protocolVersion: 1,
+          futureCapability: true,
+        }),
+      ).toMatchObject({ protocolVersion: 1, futureCapability: true });
+      expect(
+        runtimeProtocolSchemas.hello.safeParse({
+          server: 'kernel-runtime-worker',
+          runtimeVersion: 'test',
+          protocolVersion: '1',
+        }).success,
+      ).toBe(false);
+    });
+  });
+
   describe('initialize call', () => {
     it('should accept an arbitrary runtime boot config payload', () => {
       expect(() =>
@@ -26,13 +46,55 @@ describe('runtime-protocol payload-shape coverage (C18)', () => {
       ).not.toThrow();
     });
 
-    it('should reject unrelated initialize fields', () => {
-      expect(() =>
+    it('should tolerate additive initialize fields', () => {
+      expect(
         runtimeProtocolSchemas.calls.initialize.args.parse({
           config: {},
           unexpected: true,
         }),
-      ).toThrow();
+      ).toEqual({ config: {}, unexpected: true });
+    });
+
+    it('should reserve session identity without requiring it', () => {
+      expect(
+        runtimeProtocolSchemas.calls.initialize.args.parse({
+          sessionId: 'session-1',
+          resumeToken: 'resume-1',
+        }),
+      ).toMatchObject({ sessionId: 'session-1', resumeToken: 'resume-1' });
+      expect(runtimeProtocolSchemas.calls.initialize.args.safeParse({}).success).toBe(true);
+    });
+  });
+
+  describe('additive compatibility', () => {
+    it('should let an older progress reader ignore a newer notify field', () => {
+      expect(
+        runtimeProtocolSchemas.notifies.progress.parse({
+          phase: 'geometry',
+          renderId,
+          futureEstimate: 250,
+        }),
+      ).toEqual({ phase: 'geometry', renderId, futureEstimate: 250 });
+    });
+  });
+
+  describe.each(['kernelCommand', 'kernelEvent'] as const)('%s notify', (name) => {
+    it('should accept the reserved kernel message envelope and additive fields', () => {
+      expect(
+        runtimeProtocolSchemas.notifies[name].parse({
+          kernelId: 'replicad',
+          type: 'selectionChanged',
+          renderId,
+          payload: { faceId: 7 },
+          futureTraceId: 'trace-1',
+        }),
+      ).toMatchObject({
+        kernelId: 'replicad',
+        type: 'selectionChanged',
+        renderId,
+        payload: { faceId: 7 },
+        futureTraceId: 'trace-1',
+      });
     });
   });
 

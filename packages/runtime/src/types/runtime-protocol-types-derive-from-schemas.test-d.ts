@@ -39,6 +39,8 @@ import type {
   runtimeLogBatchArgsSchema,
   runtimeTelemetryArgsSchema,
   runtimeCapabilitiesUpdatedArgsSchema,
+  runtimeKernelCommandArgsSchema,
+  runtimeKernelEventArgsSchema,
   transportHelloPayloadSchema,
 } from '#types/runtime-protocol.schemas.js';
 import type {
@@ -166,14 +168,29 @@ describe('runtime-protocol types derive from schemas (C16)', () => {
     assertType<Derived>(branded<Declared>());
   });
 
+  it('kernelCommand args agree with the schema', () => {
+    type Derived = z.input<typeof runtimeKernelCommandArgsSchema>;
+    type Declared = RuntimeProtocol['notifies']['kernelCommand']['args'];
+    assertType<Declared>(branded<Derived>());
+    assertType<Derived>(branded<Declared>());
+  });
+
+  it('kernelEvent args agree with the schema', () => {
+    type Derived = z.input<typeof runtimeKernelEventArgsSchema>;
+    type Declared = RuntimeProtocol['notifies']['kernelEvent']['args'];
+    assertType<Declared>(branded<Derived>());
+    assertType<Derived>(branded<Declared>());
+  });
+
   it('WireAbortReasonCode is structurally compatible with the targeted abort args schema', () => {
     type Derived = z.input<typeof runtimeAbortArgsSchema>;
     assertType<{ renderId: string; reason: WireAbortReasonCode }>(branded<Derived>());
   });
 
-  it('TransportHelloPayload schema declares server, runtimeVersion, and transportId', () => {
+  it('TransportHelloPayload schema declares the versioned wire hello', () => {
     type Derived = z.input<typeof transportHelloPayloadSchema>;
-    type Expected = { server: 'kernel-runtime-worker'; runtimeVersion: string; transportId: string };
+    type Expected = { server: 'kernel-runtime-worker'; runtimeVersion: string; protocolVersion: number };
     assertType<Expected>(branded<Derived>());
+    assertType<Derived>(branded<Expected>());
   });
 });

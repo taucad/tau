@@ -69,6 +69,8 @@ export type {
 } from '#transport/runtime-transport.types.js';
 export type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 
+export type { Channel, ChannelServerHandle, Port, RpcProtocol, WithTransferables } from '@taucad/rpc';
+
 export type {
   TransportPluginId,
   TransportId,

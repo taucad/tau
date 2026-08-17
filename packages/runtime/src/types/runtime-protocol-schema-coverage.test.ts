@@ -16,6 +16,11 @@ import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 import { kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
 
 describe('runtime-protocol schema coverage (C15)', () => {
+  it('binds the hello validator and empty listen inventory explicitly', () => {
+    expect(runtimeProtocolSchemas.hello).toBeDefined();
+    expect(Object.keys(runtimeProtocolSchemas.listens)).toEqual([]);
+  });
+
   it('every protocol call has a matching schema entry', () => {
     const callSchemaNames = new Set(Object.keys(runtimeProtocolSchemas.calls));
     for (const name of runtimeProtocolCallNames) {
@@ -51,9 +56,9 @@ describe('runtime-protocol schema coverage (C15)', () => {
     }
   });
 
-  it('should expose exactly the protocol inventory: 4 calls and 15 notifies (T18)', () => {
+  it('should expose exactly the protocol inventory: 4 calls and 17 notifies (T18)', () => {
     expect(Object.keys(runtimeProtocolSchemas.calls)).toHaveLength(4);
-    expect(Object.keys(runtimeProtocolSchemas.notifies)).toHaveLength(15);
+    expect(Object.keys(runtimeProtocolSchemas.notifies)).toHaveLength(17);
   });
 
   it('validates kernel issue codes from the canonical registry', () => {
@@ -77,7 +82,7 @@ describe('runtime-protocol schema coverage (C15)', () => {
     ).toBe(false);
   });
 
-  it('should require a non-empty strict export artifact set with MIME types', () => {
+  it('should require a non-empty export artifact set with MIME types while tolerating additive fields', () => {
     const schema = runtimeProtocolSchemas.calls.export.result;
     const valid = {
       success: true,
@@ -110,6 +115,6 @@ describe('runtime-protocol schema coverage (C15)', () => {
         ...valid,
         data: [{ ...valid.data[0], unrelated: true }],
       }).success,
-    ).toBe(false);
+    ).toBe(true);
   });
 });

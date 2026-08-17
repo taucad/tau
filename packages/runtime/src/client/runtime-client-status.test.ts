@@ -3,11 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Channel } from '@taucad/rpc';
 import type { Geometry } from '@taucad/types';
-import {
-  createRuntimeClientWithTransport,
-  RuntimeNotConnectedError,
-  RuntimeTerminatedError,
-} from '#client/runtime-client-core.js';
+import { createRuntimeClient, RuntimeNotConnectedError, RuntimeTerminatedError } from '#client/runtime-client-core.js';
 import type { RenderStatus } from '#client/runtime-client-core.js';
 import { RenderTimeoutError } from '#framework/runtime-worker-client.js';
 import type { GeometryTransport, RuntimeProtocol, WorkerState } from '#types/runtime-protocol.types.js';
@@ -15,9 +11,9 @@ import type { KernelIssue } from '#types/runtime.types.js';
 import type {
   RuntimeTransportClient,
   RuntimeTransportRenderTarget,
-  TransportClientReady,
   TransportPlugin,
 } from '#transport/runtime-transport.types.js';
+import { protocolVersion } from '#types/protocol-header.types.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 
 type NotifyHandlers = {
@@ -57,7 +53,7 @@ function createStatusClientFixture(options?: {
   readonly reservePreview?: RuntimeTransportClient['reservePreview'];
   readonly initialize?: RuntimeTransportClient['initialize'];
 }): {
-  readonly client: ReturnType<typeof createRuntimeClientWithTransport>;
+  readonly client: ReturnType<typeof createRuntimeClient>;
   readonly handlers: NotifyHandlers;
   readonly notify: ReturnType<typeof vi.fn<(name: string, args: unknown) => void>>;
   readonly abort: ReturnType<typeof vi.fn<(target: RuntimeTransportRenderTarget) => void>>;
@@ -74,11 +70,6 @@ function createStatusClientFixture(options?: {
   const handlers: NotifyHandlers = {};
   const handlersReadySlot = Promise.withResolvers<void>();
   const notify = vi.fn<(name: string, args: unknown) => void>();
-  const hello = {
-    server: 'kernel-runtime-worker',
-    runtimeVersion: '0.0.0-test',
-    transportId: 'status-test',
-  } satisfies TransportClientReady['hello'];
   const call = vi.fn(async (name: keyof RuntimeProtocol['calls']) => {
     if (name === 'cleanup') {
       return null;
@@ -131,7 +122,7 @@ function createStatusClientFixture(options?: {
       onMessage: vi.fn(() => () => undefined),
       close: vi.fn(),
     },
-    hello: { payload: {} },
+    hello: { payload: { server: 'kernel-runtime-worker', runtimeVersion: '0.0.0-test', protocolVersion } },
     onNotify: onNotify as Channel<RuntimeProtocol>['onNotify'],
     notify,
     call: channelCall,
@@ -151,7 +142,7 @@ function createStatusClientFixture(options?: {
   const abort = vi.fn<(target: RuntimeTransportRenderTarget) => void>();
   const reservePreview = vi.fn<RuntimeTransportClient['reservePreview']>(options?.reservePreview ?? (() => ({})));
   const initialize = vi.fn<RuntimeTransportClient['initialize']>(
-    options?.initialize ?? (async () => ({ capabilities: { routes: [], renderCapabilities: {} } })),
+    options?.initialize ?? (async () => ({ capabilities: { plugins: [], routes: [], renderCapabilities: {} } })),
   );
   const terminateHost = vi.fn(async () => {
     resolveClosed({ cause: 'render-timeout' });
@@ -171,7 +162,7 @@ function createStatusClientFixture(options?: {
       memory: { geometryDelivery: 'copy', abortSignal: 'wire-notify' },
       fileSystem: 'inline',
     }),
-    open: vi.fn(async () => ({ channel, hello })),
+    open: vi.fn(async () => ({ channel })),
     initialize,
     resolveGeometry: vi.fn(async (geometry: GeometryTransport): Promise<Geometry> => {
       if (options?.resolveGeometry) {
@@ -191,7 +182,7 @@ function createStatusClientFixture(options?: {
   };
 
   return {
-    client: createRuntimeClientWithTransport<AnyRuntimeDefinition>({
+    client: createRuntimeClient<AnyRuntimeDefinition>({
       transport: plugin,
       ...(options?.renderTimeout === undefined ? {} : { renderTimeout: options.renderTimeout }),
       ...(options?.config === undefined ? {} : { config: options.config }),
@@ -288,7 +279,7 @@ describe('RuntimeClient renderStatus', () => {
         if (attempts === 1) {
           throw new Error('transport initialize failed');
         }
-        return { capabilities: { routes: [], renderCapabilities: {} } };
+        return { capabilities: { plugins: [], routes: [], renderCapabilities: {} } };
       },
     });
 
@@ -1211,17 +1202,16 @@ describe('RuntimeClient render timeout control plane', () => {
       client.render({ source: { path: '/main.ts' }, parameters: 'nope' }),
     ).rejects.toThrow(TypeError);
     await expect(
-      // Untyped plugin generics widen `renderOptions`, so only the runtime guard rejects this.
-      client.render({ source: { path: '/main.ts' }, renderOptions: 'nope' }),
+      client.render({
+        source: { path: '/main.ts' },
+        renderOptions: 'nope' as unknown as Record<string, unknown>,
+      }),
     ).rejects.toThrow(TypeError);
     await expect(
       // @ts-expect-error -- deliberately exercises the runtime guard against a non-record content input
       client.render({ source: { path: '/main.ts' }, content: 'nope' }),
     ).rejects.toThrow(TypeError);
-    await expect(
-      // Untyped plugin generics widen the options bag, so only the runtime guard rejects this.
-      client.setOptions('nope'),
-    ).rejects.toThrow(TypeError);
+    await expect(client.setOptions('nope' as unknown as Record<string, unknown>)).rejects.toThrow(TypeError);
 
     expect(reservePreview).not.toHaveBeenCalled();
     expect(notify).toHaveBeenCalledOnce();
@@ -1267,7 +1257,7 @@ describe('RuntimeClient render timeout control plane', () => {
         if (attempts === 1) {
           throw new Error('transport initialize failed');
         }
-        return { capabilities: { routes: [], renderCapabilities: {} } };
+        return { capabilities: { plugins: [], routes: [], renderCapabilities: {} } };
       },
     });
     const geometryHashes: string[] = [];

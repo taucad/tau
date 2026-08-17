@@ -18,7 +18,7 @@ import type { ExportGeometryResult, GetParametersResult, KernelIssue } from '#ty
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import type { ExecuteResult, KernelBundler } from '#types/runtime-bundler-service.types.js';
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
-import type { KernelPlugin } from '#plugins/plugin-types.js';
+import type { KernelPlugin, RuntimePluginDeclaration } from '#plugins/plugin-types.js';
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import type {
@@ -153,6 +153,8 @@ export type KernelRuntime = {
   bundler: KernelBundler;
   /** Span tracer for kernel-authored performance instrumentation */
   tracer: RuntimeSpanTracer;
+  /** Emit a namespaced kernel event to the runtime client. */
+  emitEvent(type: string, payload: unknown): void;
   /**
    * Execute bundled JS/TS code via dynamic import and return the module exports.
    * Browser uses Blob URL, Node.js uses data URL.
@@ -213,6 +215,7 @@ type RenderOptionsOutput<Render extends KernelRenderDefinition | undefined> =
 type RenderOptionsInput<Render extends KernelRenderDefinition | undefined> =
   RenderSchemaOf<Render> extends z.ZodType ? z.input<RenderSchemaOf<Render>> : Record<string, unknown>;
 
+/** @public */
 export type CreateGeometryInput<
   CreateSchema extends z.ZodObject<z.ZodRawShape> | undefined = z.ZodObject<z.ZodRawShape> | undefined,
 > = {
@@ -543,74 +546,75 @@ type KernelDefinitionConfig<
   ExportFormats extends KernelExportFormats,
   Render extends KernelRenderDefinition | undefined,
   CreateSchema extends z.ZodObject<z.ZodRawShape> | undefined,
-> = KernelPluginMetadata<Id> & {
-  /** Human-readable kernel name, used in logs and error messages */
-  name: string;
-  /** Semantic version string for cache-key computation and diagnostics */
-  version: string;
-  /** Construction-affecting request options projected into `createGeometry`. */
-  createOptionsSchema?: CreateSchema;
-  /** Render options and natively fulfilled framework content. */
-  render?: Render;
-  /** Native export formats and natively fulfilled framework content. */
-  exportFormats: ExportFormats;
-  /** Selected implementation assets. */
-  implementationAssets?: readonly RuntimeImplementationAsset[];
-  /** Initialize kernel with typed options. Options type is inferred from optionsSchema. */
-  initialize(options: Options, runtime: KernelRuntime): Promise<Context>;
-  /** Return resolved and unresolved dependency paths for change-detection, cache invalidation, and watch-set expansion. */
-  getDependencies(
-    input: GetDependenciesInput,
-    runtime: KernelRuntime,
-    context: Context,
-  ): Promise<GetDependenciesResult>;
-  /** Extract user-facing parameters (and their JSON Schema) from the active file. */
-  getParameters(input: GetParametersInput, runtime: KernelRuntime, context: Context): Promise<GetParametersResult>;
-  /** Evaluate the active file and produce a native handle for mesh/export, plus optional inline display geometry. */
-  createGeometry(
-    input: CreateGeometryInput<CreateSchema>,
-    runtime: KernelRuntime,
-    context: Context,
-  ): Promise<CreateGeometryOutput<NativeHandle>>;
-  /** Produce the display artifact from a native handle for the live viewer (display path only). */
-  meshGeometry?(
-    input: MeshGeometryInput<NoInfer<NativeHandle>, Render>,
-    runtime: KernelRuntime,
-    context: Context,
-  ): Promise<MeshGeometryOutput>;
-  /** Convert a previously created native geometry handle into one or more export file blobs. */
-  exportGeometry(
-    input: ExportGeometryInput<NoInfer<NativeHandle>, ExportFormats>,
-    runtime: KernelRuntime,
-    context: Context,
-  ): Promise<ExportGeometryResult>;
-  /**
-   * Check whether a warm live native handle is still export-ready.
-   *
-   * Kernels with volatile remote/session state can return false to make export
-   * re-run createGeometry before calling exportGeometry.
-   */
-  isNativeHandleValid?(
-    input: ValidateNativeHandleInput<NoInfer<NativeHandle>>,
-    runtime: KernelRuntime,
-    context: Context,
-  ): boolean | Promise<boolean>;
-  /**
-   * Release a native handle the framework has dropped — replaced by a rebuild,
-   * invalidated, or torn down with the worker. Called at most once per handle.
-   *
-   * Kernels whose handles own manually managed memory (embind/WASM objects) must
-   * free it here; handles made only of GC-backed JavaScript omit the hook.
-   */
-  disposeNativeHandle?(
-    input: DisposeNativeHandleInput<NoInfer<NativeHandle>>,
-    runtime: KernelRuntime,
-    context: Context,
-  ): void;
+> = KernelPluginMetadata<Id> &
+  RuntimePluginDeclaration & {
+    /** Human-readable kernel name, used in logs and error messages */
+    name: string;
+    /** Semantic version string for cache-key computation and diagnostics */
+    version: string;
+    /** Construction-affecting request options projected into `createGeometry`. */
+    createOptionsSchema?: CreateSchema;
+    /** Render options and natively fulfilled framework content. */
+    render?: Render;
+    /** Native export formats and natively fulfilled framework content. */
+    exportFormats: ExportFormats;
+    /** Selected implementation assets. */
+    implementationAssets?: readonly RuntimeImplementationAsset[];
+    /** Initialize kernel with typed options. Options type is inferred from optionsSchema. */
+    initialize(options: Options, runtime: KernelRuntime): Promise<Context>;
+    /** Return resolved and unresolved dependency paths for change-detection, cache invalidation, and watch-set expansion. */
+    getDependencies(
+      input: GetDependenciesInput,
+      runtime: KernelRuntime,
+      context: Context,
+    ): Promise<GetDependenciesResult>;
+    /** Extract user-facing parameters (and their JSON Schema) from the active file. */
+    getParameters(input: GetParametersInput, runtime: KernelRuntime, context: Context): Promise<GetParametersResult>;
+    /** Evaluate the active file and produce a native handle for mesh/export, plus optional inline display geometry. */
+    createGeometry(
+      input: CreateGeometryInput<CreateSchema>,
+      runtime: KernelRuntime,
+      context: Context,
+    ): Promise<CreateGeometryOutput<NativeHandle>>;
+    /** Produce the display artifact from a native handle for the live viewer (display path only). */
+    meshGeometry?(
+      input: MeshGeometryInput<NoInfer<NativeHandle>, Render>,
+      runtime: KernelRuntime,
+      context: Context,
+    ): Promise<MeshGeometryOutput>;
+    /** Convert a previously created native geometry handle into one or more export file blobs. */
+    exportGeometry(
+      input: ExportGeometryInput<NoInfer<NativeHandle>, ExportFormats>,
+      runtime: KernelRuntime,
+      context: Context,
+    ): Promise<ExportGeometryResult>;
+    /**
+     * Check whether a warm live native handle is still export-ready.
+     *
+     * Kernels with volatile remote/session state can return false to make export
+     * re-run createGeometry before calling exportGeometry.
+     */
+    isNativeHandleValid?(
+      input: ValidateNativeHandleInput<NoInfer<NativeHandle>>,
+      runtime: KernelRuntime,
+      context: Context,
+    ): boolean | Promise<boolean>;
+    /**
+     * Release a native handle the framework has dropped — replaced by a rebuild,
+     * invalidated, or torn down with the worker. Called at most once per handle.
+     *
+     * Kernels whose handles own manually managed memory (embind/WASM objects) must
+     * free it here; handles made only of GC-backed JavaScript omit the hook.
+     */
+    disposeNativeHandle?(
+      input: DisposeNativeHandleInput<NoInfer<NativeHandle>>,
+      runtime: KernelRuntime,
+      context: Context,
+    ): void;
 
-  /** Tear down kernel resources (WASM instances, temp files, etc.) when the worker is disposed. */
-  cleanup?(context: Context): Promise<void>;
-} & NativeHandleSnapshotHooks<Context, NativeHandle, SerializedNativeHandle>;
+    /** Tear down kernel resources (WASM instances, temp files, etc.) when the worker is disposed. */
+    cleanup?(context: Context): Promise<void>;
+  } & NativeHandleSnapshotHooks<Context, NativeHandle, SerializedNativeHandle>;
 
 /** Resolve render options from a concrete Zod schema, preserving input-side defaults. */
 type ResolveKernelRenderOptions<Render extends KernelRenderDefinition | undefined> = RenderOptionsInput<Render>;
@@ -638,7 +642,9 @@ type ResolveKernelFormatMap<ExportFormats extends KernelExportFormats> = {} exte
   : InferKernelFormatMap<ExportFormats>;
 // oxlint-enable @typescript-eslint/no-empty-object-type
 
-export type KernelPluginFactory<
+/* oxlint-disable typescript/prefer-function-type, typescript/consistent-type-definitions, typescript/no-restricted-types -- Named callable type keeps private unique-symbol carriers nameable in emitted declarations; [] is the exact no-options tuple. */
+/** @public */
+export interface KernelPluginFactory<
   Id extends string,
   FormatMap extends Record<string, unknown>,
   RenderOptions,
@@ -646,18 +652,17 @@ export type KernelPluginFactory<
   Definition = AnyKernelDefinition,
   RenderContent extends RuntimeContentKey = RuntimeContentKey,
   ExportContent extends Record<string, RuntimeContentKey> = Record<string, RuntimeContentKey>,
-> = Options extends undefined
-  ? () => KernelPlugin<FormatMap, RenderOptions, Id, RenderContent, ExportContent> &
-      RuntimePluginDefinitionCarrier<Definition>
-  : Partial<Options> extends Options
-    ? (
-        options?: Options,
-      ) => KernelPlugin<FormatMap, RenderOptions, Id, RenderContent, ExportContent> &
-        RuntimePluginDefinitionCarrier<Definition>
-    : (
-        options: Options,
-      ) => KernelPlugin<FormatMap, RenderOptions, Id, RenderContent, ExportContent> &
-        RuntimePluginDefinitionCarrier<Definition>;
+> {
+  (
+    ...options: Options extends undefined
+      ? []
+      : Partial<Options> extends Options
+        ? [options?: Options]
+        : [options: Options]
+  ): KernelPlugin<FormatMap, RenderOptions, Id, RenderContent, ExportContent> &
+    RuntimePluginDefinitionCarrier<Definition>;
+}
+/* oxlint-enable typescript/prefer-function-type, typescript/consistent-type-definitions, typescript/no-restricted-types */
 
 /**
  * Define a kernel module with full type inference.
@@ -781,6 +786,7 @@ export function defineKernel<
   ContentKeysOf<Render extends KernelRenderDefinition ? Render['content'] : undefined>,
   InferKernelExportContentMap<ExportFormats>
 >;
+/** @public */
 export function defineKernel(
   definition: KernelDefinitionConfig<
     string,
@@ -793,7 +799,8 @@ export function defineKernel(
     z.ZodObject<z.ZodRawShape> | undefined
   >,
 ): KernelPluginFactory<string, Record<string, unknown>, unknown, unknown> {
-  const { id, extensions, detectImport, builtinModuleNames, ...kernelDefinition } = definition;
+  const { id, extensions, detectImport, builtinModuleNames, peerRuntimeVersion, permissions, ...kernelDefinition } =
+    definition;
   validateRuntimeContentDeclarations(id, [
     ['render.content', kernelDefinition.render?.content],
     ...Object.entries(kernelDefinition.exportFormats).map(
@@ -822,6 +829,8 @@ export function defineKernel(
         extensions,
         ...(detectImport ? { detectImport } : {}),
         ...(builtinModuleNames ? { builtinModuleNames } : {}),
+        ...(peerRuntimeVersion === undefined ? {} : { peerRuntimeVersion }),
+        ...(permissions === undefined ? {} : { permissions }),
         options: options as Record<string, unknown>,
       },
       () => kernelDefinition,

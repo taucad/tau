@@ -172,7 +172,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       return { resolved: [input.entryPath], unresolved: [] };
     }
 
-    return kernel.definition.getDependencies(input, runtime, kernel.ctx);
+    return kernel.definition.getDependencies(input, this.forKernel(kernel, runtime), kernel.ctx);
   }
 
   protected override async onGetParameters(
@@ -205,7 +205,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       };
     }
 
-    return kernel.definition.getParameters(input, runtime, kernel.ctx);
+    return kernel.definition.getParameters(input, this.forKernel(kernel, runtime), kernel.ctx);
   }
 
   protected override async onCreateGeometry(
@@ -243,14 +243,15 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     }
 
     try {
-      const output = await kernel.definition.createGeometry(input, runtime, kernel.ctx);
+      const kernelRuntime = this.forKernel(kernel, runtime);
+      const output = await kernel.definition.createGeometry(input, kernelRuntime, kernel.ctx);
 
       this.captureNativeHandle(output.nativeHandle, owner);
 
       if (kernel.definition.serializeNativeHandle) {
         const serializedNativeHandle = kernel.definition.serializeNativeHandle(
           { nativeHandle: output.nativeHandle },
-          runtime,
+          kernelRuntime,
           kernel.ctx,
         );
         if (serializedNativeHandle === undefined || serializedNativeHandle === null) {
@@ -382,7 +383,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     }
 
     const kernel = this.getActiveKernel();
-    return kernel.definition.exportGeometry(input, runtime, kernel.ctx);
+    return kernel.definition.exportGeometry(input, this.forKernel(kernel, runtime), kernel.ctx);
   }
 
   protected override async onExportGeometryForOwner(
@@ -405,7 +406,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       };
     }
 
-    return kernel.definition.exportGeometry(input, runtime, kernel.ctx);
+    return kernel.definition.exportGeometry(input, this.forKernel(kernel, runtime), kernel.ctx);
   }
 
   protected override async isNativeHandleValidForOwner(
@@ -418,7 +419,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       return undefined;
     }
 
-    return kernel.definition.isNativeHandleValid({ nativeHandle }, runtime, kernel.ctx);
+    return kernel.definition.isNativeHandleValid({ nativeHandle }, this.forKernel(kernel, runtime), kernel.ctx);
   }
 
   protected override async deserializeNativeHandleForOwner(
@@ -431,7 +432,11 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       return undefined;
     }
 
-    return kernel.definition.deserializeNativeHandle({ serializedNativeHandle }, runtime, kernel.ctx);
+    return kernel.definition.deserializeNativeHandle(
+      { serializedNativeHandle },
+      this.forKernel(kernel, runtime),
+      kernel.ctx,
+    );
   }
 
   protected override disposeNativeHandleForOwner(
@@ -440,7 +445,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     runtime: KernelRuntime,
   ): void {
     const kernel = this.getKernelForOwner(owner);
-    kernel?.definition.disposeNativeHandle?.({ nativeHandle }, runtime, kernel.ctx);
+    if (kernel) {
+      kernel.definition.disposeNativeHandle?.({ nativeHandle }, this.forKernel(kernel, runtime), kernel.ctx);
+    }
   }
 
   protected override async resolveKernelBinding(
@@ -607,6 +614,21 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     return loaded;
   }
 
+  private forKernel(kernel: LoadedKernel, runtime: KernelRuntime): KernelRuntime {
+    return {
+      ...runtime,
+      emitEvent: (type, payload) => {
+        const renderId = this.activeRenderId;
+        this.onKernelEvent?.({
+          kernelId: kernel.entry.id,
+          type,
+          ...(renderId === undefined ? {} : { renderId }),
+          payload,
+        });
+      },
+    };
+  }
+
   private async ensureKernelInitialized(kernel: LoadedKernel, runtime: KernelRuntime): Promise<void> {
     if (kernel.initialized) {
       return;
@@ -614,7 +636,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
     this.logger.trace(`Initializing kernel: ${kernel.entry.id}`);
 
-    kernel.ctx = await kernel.definition.initialize(kernel.options, runtime);
+    kernel.ctx = await kernel.definition.initialize(kernel.options, this.forKernel(kernel, runtime));
     kernel.initialized = true;
   }
 

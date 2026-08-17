@@ -348,6 +348,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Callback for pushing updated capabilities manifest to the dispatcher. */
   public onCapabilitiesUpdated?: (capabilities: CapabilitiesManifest) => void;
 
+  /** Callback for pushing kernel-authored events to the dispatcher. */
+  public onKernelEvent?: (event: RuntimeProtocol['notifies']['kernelEvent']['args']) => void;
+
   /** Raw Zod schemas for runtime validation, keyed by kernel ID → format. Populated from kernel definitions. */
   protected readonly kernelExportZodSchemasMap = new Map<string, Partial<Record<FileExtension, z.ZodType>>>();
 
@@ -4897,6 +4900,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         return result;
       },
       tracer: this.tracer,
+      emitEvent: () => {
+        throw new Error('Kernel events require a selected kernel runtime.');
+      },
     };
   }
 

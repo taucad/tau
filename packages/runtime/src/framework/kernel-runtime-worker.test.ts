@@ -774,6 +774,31 @@ describe('KernelRuntimeWorker kernel selection', () => {
       expect(getInitSpy(scadDefinition)).toHaveBeenCalledOnce();
     });
 
+    it('should emit a namespaced event from the selected kernel runtime', async () => {
+      const scadDefinition = createMockKernelDefinition('openrscad', {
+        createGeometry: async (_input, runtime) => {
+          runtime.emitEvent('solverProgress', { iteration: 1 });
+          return { nativeHandle: {}, geometry: gltfGeometryBytes(new Uint8Array([1])), issues: [] };
+        },
+      });
+      const worker = await createMultiKernelWorker([
+        { id: 'openrscad', extensions: ['scad'], definition: scadDefinition },
+      ]);
+      const onKernelEvent = vi.fn();
+      worker.onKernelEvent = onKernelEvent;
+
+      try {
+        await worker.createGeometry({ file: createGeometryFile('model.scad'), parameters: {} });
+        expect(onKernelEvent).toHaveBeenCalledWith({
+          kernelId: 'openrscad',
+          type: 'solverProgress',
+          payload: { iteration: 1 },
+        });
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
     it('should select the first matching kernel by extension order', async () => {
       const kernelA = createMockKernelDefinition('kernel-a');
       const kernelB = createMockKernelDefinition('kernel-b');

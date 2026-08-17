@@ -128,6 +128,7 @@ describe('defineKernel', () => {
       serializeNativeHandle(input, runtime, context) {
         expectTypeOf(input.nativeHandle).toEqualTypeOf<{ handleId: string }>();
         expectTypeOf(runtime.logger.log).toBeFunction();
+        expectTypeOf(runtime.emitEvent).toBeFunction();
         expectTypeOf(context).toEqualTypeOf<{ contextValue: string }>();
         return { snapshotId: input.nativeHandle.handleId };
       },

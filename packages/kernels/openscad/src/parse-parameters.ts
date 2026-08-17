@@ -2,7 +2,7 @@
  * API extracted from OpenSCAD User Manual
  * @see https://en.wikibooks.org/wiki/OpenSCAD_User_Manual/Customizer
  */
-import type { JSONSchema7, JSONSchema7Definition } from '@taucad/json-schema';
+import type { JSONSchema7, JSONSchema7Definition } from '@taucad/runtime/types';
 
 /**
  * Name/value pair for a dropdown or select option in an OpenSCAD customizer parameter.

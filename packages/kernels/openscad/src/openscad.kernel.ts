@@ -16,12 +16,8 @@ import createManifoldModule from 'manifold-3d';
 import type { ManifoldToplevel } from 'manifold-3d';
 import { jsonDefault } from 'json-schema-default';
 import type { z } from 'zod';
-import type { JSONSchema7 } from '@taucad/json-schema';
-import type { GeometryGltf, LogLevel } from '@taucad/types';
-import { logLevels, createExportFile } from '@taucad/types/constants';
-import { asBuffer } from '@taucad/utils/file';
-import { joinPath, resolveVirtualPath } from '@taucad/utils/path';
-import { resolveImportPath } from '@taucad/utils/import';
+import { createExportFile, logLevels } from '@taucad/runtime/types';
+import type { GeometryGltf, JSONSchema7, LogLevel } from '@taucad/runtime/types';
 import type {
   KernelIssue,
   KernelFileSystem,
@@ -30,6 +26,7 @@ import type {
   RuntimeLogger,
 } from '@taucad/runtime/kernel';
 import {
+  asBuffer,
   convertOffToManifoldGltf,
   createEmptyGlb,
   createEmptyGltf,
@@ -39,6 +36,9 @@ import {
   defineKernel,
   finalizeMeshOutput,
   loadBinaryFile,
+  joinPath,
+  resolveImportPath,
+  resolveVirtualPath,
 } from '@taucad/runtime/kernel';
 import type { OpenScadParameterExport } from '#parse-parameters.js';
 import { processOpenScadParameters, flattenParametersForInjection } from '#parse-parameters.js';

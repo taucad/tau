@@ -18,7 +18,6 @@ import {
   getMaterialAlphaMode,
   getMaterialBaseColor,
 } from '@taucad/runtime/testing';
-import type { CreateGeometryResult } from '@taucad/runtime/types';
 
 function hexToOscadVector(hex: string, opacity: number): string {
   const clean = hex.startsWith('#') ? hex.slice(1) : hex;
@@ -31,15 +30,15 @@ function hexToOscadVector(hex: string, opacity: number): string {
 const buildSourceFor = (hex: string, opacity: number): string =>
   `color(${hexToOscadVector(hex, opacity)}) cube([10, 10, 10]);`;
 
-async function renderColored(hex: string, opacity: number): Promise<CreateGeometryResult> {
+async function renderColored(hex: string, opacity: number) {
   const file = 'colored.scad';
   const worker = await createTestWorker(openscadKernel, {
     [file]: buildSourceFor(hex, opacity),
   });
-  const result = (await worker.createGeometry({
+  const result = await worker.createGeometry({
     file: createGeometryFile(file),
     parameters: {},
-  })) as CreateGeometryResult;
+  });
   assertSuccess(result, `openscad createGeometry (${hex}, alpha=${opacity})`);
   return result;
 }
@@ -66,10 +65,10 @@ describe('OpenSCAD — color rendering parity', { timeout: 120_000 }, () => {
         translate([30, 0, 0]) color([0, 0, 1]) cube([10, 10, 10]);
       `,
     });
-    const result = (await worker.createGeometry({
+    const result = await worker.createGeometry({
       file: createGeometryFile(file),
       parameters: {},
-    })) as CreateGeometryResult;
+    });
     assertSuccess(result, 'openscad multi-color createGeometry');
 
     const baseColors = await getAllMaterialBaseColors(result);
@@ -88,10 +87,10 @@ describe('OpenSCAD — color rendering parity', { timeout: 120_000 }, () => {
     const worker = await createTestWorker(openscadKernel, {
       [file]: 'cube([10, 10, 10]);',
     });
-    const result = (await worker.createGeometry({
+    const result = await worker.createGeometry({
       file: createGeometryFile(file),
       parameters: {},
-    })) as CreateGeometryResult;
+    });
     assertSuccess(result, 'openscad uncoloured createGeometry');
 
     const baseColor = await getMaterialBaseColor(result);

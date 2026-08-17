@@ -7,7 +7,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
-    "directory": "kernels/openscad"
+    "directory": "packages/kernels/openscad"
   },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
@@ -49,15 +49,15 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@taucad/json-schema": "workspace:*",
-    "@taucad/runtime": "workspace:*",
-    "@taucad/types": "workspace:*",
-    "@taucad/utils": "workspace:*",
     "json-schema-default": "catalog:",
     "manifold-3d": "catalog:",
     "openscad-wasm-prebuilt": "catalog:"
   },
   "devDependencies": {
+    "@taucad/runtime": "workspace:*",
     "geist": "catalog:"
+  },
+  "peerDependencies": {
+    "@taucad/runtime": "workspace:^"
   }
 }

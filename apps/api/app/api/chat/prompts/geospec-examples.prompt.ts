@@ -227,7 +227,8 @@ On a mesh-only subject (no \`format: 'step'\`) they report unsupported diagnosti
                          components, so \`count = names.length + 1\`.
 - planarFace / cylindricalFace / circularHole / circularHolePattern / chamferFeature /
   filletFeature / minimumWallThickness
-                       — "Does the model expose the expected exact feature?"
+                       — "Does the model expose the expected exact feature?" Use
+                         \`chamferDistance\` on chamfer checks when the distance matters.
 - spatialRelationships — "Do components sit in the intended geometric relationship?"
                          Use \`toHaveSpatialRelationships({ relationships: [{ kind, subject,
                          target, tolerance }] })\` with \`kind\` one of contact | clearance |

@@ -46,9 +46,9 @@ COPY patches/ ./patches/
 COPY tarballs/ ./tarballs/
 # `--parents` (BuildKit syntax 1.20+) preserves directory tree so each
 # workspace package.json lands at its real path. Matches pnpm-workspace.yaml
-# globs apps/*, kernels/*, libs/*, packages/*, tools/*. (`scripts/` is one
+# globs apps/*, libs/*, packages/*, packages/kernels/*, tools/*. (`scripts/` is one
 # level deep and intentionally dockerignored — pnpm tolerates it.)
-COPY --parents */*/package.json ./
+COPY --parents */*/package.json packages/kernels/*/package.json ./
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --prefer-offline
 

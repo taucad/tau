@@ -21,7 +21,7 @@ jobs:
         uses: ./.github/actions/setup-nx
 
       - name: Build packages
-        run: pnpm nx run-many -t build --projects=packages/*
+        run: pnpm nx run-many -t build --projects=packages/*,packages/kernels/*
 
       - name: Publish to npm
         run: pnpm nx release publish

@@ -119,12 +119,12 @@
     "default": ["{projectRoot}/**/*", "sharedGlobals"]
   },
   "release": {
-    "projects": ["packages/*"],
+    "projects": ["packages/*", "packages/kernels/*"],
     "versionPlans": {
       "ignorePatternsForPlanCheck": ["**/*.spec.ts", "**/*.test.ts", "**/*.md"]
     },
     "version": {
-      "preVersionCommand": "pnpm nx run-many -t build --projects=packages/*",
+      "preVersionCommand": "pnpm nx run-many -t build --projects=packages/*,packages/kernels/*",
       "conventionalCommits": true
     },
     "changelog": {

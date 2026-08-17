@@ -5,7 +5,7 @@ import { OcctLoader } from '#loaders/occt.loader.js';
 
 // Expose the protected mapToGlb seam without touching the WASM parse step.
 class TestableOcctLoader extends OcctLoader {
-  public mapToGlbPublic(parseResult: ImportResult): Promise<Uint8Array<ArrayBuffer>> {
+  public async mapToGlbPublic(parseResult: ImportResult): Promise<Uint8Array<ArrayBuffer>> {
     return this.mapToGlb(parseResult, { format: 'step' });
   }
 }
@@ -13,13 +13,13 @@ class TestableOcctLoader extends OcctLoader {
 const emptyResult = (rootName: string | undefined): ImportResult =>
   ({
     success: true,
-    root: { name: rootName as string, meshes: [], children: [] },
+    root: { name: rootName!, meshes: [], children: [] },
     meshes: [],
   }) satisfies ImportResult;
 
-const sceneName = async (glb: Uint8Array<ArrayBuffer>): Promise<string | null> => {
+const sceneName = async (glb: Uint8Array<ArrayBuffer>): Promise<string> => {
   const document = await new NodeIO().readBinary(glb);
-  return document.getRoot().listScenes()[0]?.getName() ?? null;
+  return document.getRoot().listScenes()[0]?.getName() ?? '';
 };
 
 describe('OcctLoader mapToGlb', () => {

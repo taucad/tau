@@ -74,6 +74,7 @@ export class OcctLoader extends BaseLoader<OcctImportResult, OcctOptions> {
     // Create new glTF document using gltf-transform
     const document = new Document();
     const scene = document.createScene();
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- External WASM values can violate their declaration.
     const rootName = (parseResult.root.name ?? '').trim();
     if (rootName) {
       scene.setName(rootName);

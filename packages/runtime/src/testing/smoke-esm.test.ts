@@ -20,8 +20,8 @@ describe('ESM import smoke tests', () => {
     expect(module_).toBeDefined();
     expect('presets' in module_).toBe(false);
     expect(module_.fromFsLike).toBeTypeOf('function');
-    expect(module_.createKernelSuccess).toBeTypeOf('function');
-    expect(module_.createKernelError).toBeTypeOf('function');
+    expect('createKernelSuccess' in module_).toBe(false);
+    expect('createKernelError' in module_).toBe(false);
     expect(module_.defineKernel).toBeTypeOf('function');
     expect(module_.defineBundler).toBeTypeOf('function');
     expect(module_.defineRuntime).toBeTypeOf('function');
@@ -42,13 +42,6 @@ describe('ESM import smoke tests', () => {
     expect(module_.fromFileSystemBridge).toBeTypeOf('function');
     expect(module_.fromBrowserFs).toBeTypeOf('function');
     expect(module_.isRuntimeFileSystem).toBeTypeOf('function');
-  });
-
-  it('should resolve the transport-internals subpath', async () => {
-    const module_ = await import('#transport-internals.js');
-    expect(module_).toBeDefined();
-    expect(module_.wrapMessagePort).toBeTypeOf('function');
-    expect(module_.extractInlineFileSystem).toBeTypeOf('function');
   });
 
   it('should resolve the middleware entry point', async () => {

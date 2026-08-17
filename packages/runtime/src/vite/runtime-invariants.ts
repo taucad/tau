@@ -2,9 +2,7 @@
  * Bundler invariants required for `@taucad/runtime` to ship its WASM, font,
  * and dynamically-imported plugin chunks transparently.
  *
- * Used by the Vite plugin (`@taucad/runtime/vite`) and the Rolldown plugin
- * (`@taucad/runtime/rolldown`) so consumers of either bundler get identical
- * behaviour from a single import.
+ * Used by the Vite plugin (`@taucad/runtime/vite`).
  *
  * @see docs/research/runtime-zero-config-bundling.md (R2, R6)
  */
@@ -14,30 +12,12 @@
  * references. Build adapters use these roots when the host build tool would
  * otherwise externalize runtime source before it can emit those assets.
  *
- * Kept as a tuple so the resolved Vite/Rolldown configs are deeply readonly
- * and the regression tests can assert exact membership.
+ * Kept as a tuple so resolved Vite configs are deeply readonly and regression
+ * tests can assert exact membership.
  *
  * @internal
  */
-export const runtimePackages = ['@taucad/runtime', '@taucad/openscad'] as const;
-
-/**
- * Third-party packages whose WASM binaries the runtime forwards via
- * `new URL`. Library-oriented Rolldown builds keep these dependencies
- * external so their package-owned assets remain addressable. The list mirrors
- * [Appendix A](../../docs/research/runtime-zero-config-bundling.md#appendix-a-runtime-asset-inventory)
- * of the bundling research doc.
- *
- * @internal
- */
-export const wasmBearingDeps = [
-  'replicad-opencascadejs',
-  'libcascade',
-  'manifold-3d',
-  '@kittycad/lib',
-  'esbuild-wasm',
-  'openscad-wasm-prebuilt',
-] as const;
+export const runtimePackages = ['@taucad/runtime'] as const;
 
 /**
  * `build.assetsInlineLimit` callback that prevents `.wasm` files from being

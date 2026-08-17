@@ -14,8 +14,9 @@ import type {
 } from '#transport/index.js';
 import type { Geometry } from '@taucad/types';
 import type { RuntimeProtocol } from '#index.js';
-import { extractInlineFileSystem } from '#transport-internals.js';
-import { installWorkerCrashTrap, createWorkerDispatcher } from '#worker-internals.js';
+import { extractInlineFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
+import { createWorkerDispatcher } from '#transport/_internal/runtime-worker-dispatcher.js';
+import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import { encodeGeometryAsOwnedCopy } from '#transport/_internal/owned-transfer-bytes.js';
 import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 

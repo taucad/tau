@@ -13,8 +13,8 @@ describe('Browser compatibility (jsdom)', () => {
   it('should import the main entry point without errors', async () => {
     const module_ = await import('#index.js');
     expect('presets' in module_).toBe(false);
-    expect(module_.createKernelSuccess).toBeTypeOf('function');
-    expect(module_.createKernelError).toBeTypeOf('function');
+    expect('createKernelSuccess' in module_).toBe(false);
+    expect('createKernelError' in module_).toBe(false);
     expect(module_.fromFsLike).toBeTypeOf('function');
   }, 30_000);
 
@@ -29,7 +29,7 @@ describe('Browser compatibility (jsdom)', () => {
     const module_: typeof NextRuntimeModule = await import('#nextjs/index.js');
     const [headerConfig] = module_.nextRuntimeHeaders();
 
-    expect(module_.createRuntimeClient).toBeTypeOf('function');
+    expect(module_.withTauRuntime).toBeTypeOf('function');
     expect(headerConfig?.source).toBe('/:path*');
     expect(headerConfig?.headers).toEqual(
       expect.arrayContaining([
@@ -47,12 +47,6 @@ describe('Browser compatibility (jsdom)', () => {
     expect(module_.fromFileSystemBridge).toBeTypeOf('function');
     expect(module_.fromBrowserFs).toBeTypeOf('function');
     expect(module_.isRuntimeFileSystem).toBeTypeOf('function');
-  });
-
-  it('should import the transport-internals subpath without errors', async () => {
-    const module_ = await import('#transport-internals.js');
-    expect(module_.wrapMessagePort).toBeTypeOf('function');
-    expect(module_.extractInlineFileSystem).toBeTypeOf('function');
   });
 
   it('should import the middleware entry point without errors', async () => {

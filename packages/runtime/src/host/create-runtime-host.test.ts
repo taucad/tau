@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
-import { createRuntimeHost, createRuntimeHostConfig } from '#host/create-runtime-host.js';
+import { createRuntimeHost } from '#host/create-runtime-host.js';
 import type { RuntimeTransportHost, TransportHostReady } from '#transport/runtime-transport.types.js';
 
 type RecordingHost = RuntimeTransportHost & {
@@ -97,13 +97,5 @@ describe('createRuntimeHost', () => {
       // @ts-expect-error -- executable capabilities are declared in `defineRuntime`, not on host config.
       kernels: [],
     }).dispose();
-  });
-});
-
-describe('createRuntimeHostConfig', () => {
-  it('returns the configuration object as-is (identity helper for type-inference)', () => {
-    const transport = createRecordingHost();
-    const config = createRuntimeHostConfig({ transport });
-    expect(config.transport).toBe(transport);
   });
 });

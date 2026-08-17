@@ -653,8 +653,7 @@ type RuntimeForClient<Runtime, Transport extends TransportPlugin> = Runtime exte
   : RuntimeFromTransport<Transport>;
 
 /**
- *
- */
+ ** @public*/
 export type RuntimeClientOptions<
   Runtime extends AnyRuntimeDefinition | undefined = undefined,
   Transport extends AnyTransportPlugin = AnyTransportPlugin,
@@ -1018,7 +1017,7 @@ export type RuntimeClient<
  * ```
  */
 // oxlint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-restricted-types -- variance + empty-tuple default
-export function createRuntimeClientWithTransport<
+export function createRuntimeClient<
   const Runtime extends AnyRuntimeDefinition | undefined = undefined,
   const Transport extends AnyTransportPlugin = AnyTransportPlugin,
 >(
@@ -1039,9 +1038,7 @@ export function createRuntimeClientWithTransport<
 // already a member of the narrower carrier, so the seam is sound by
 // construction. Compile-time proof lives in `define-plugin.test-d.ts`.
 // oxlint-disable-next-line tau-lint/require-public-export-jsdoc -- false positive
-export function createRuntimeClientWithTransport(
-  options: RuntimeClientOptionsWithTransport<AnyRuntimeDefinition>,
-): RuntimeClient {
+export function createRuntimeClient(options: RuntimeClientOptionsWithTransport<AnyRuntimeDefinition>): RuntimeClient {
   const transportPlugin = (options as { readonly transport?: AnyTransportPlugin }).transport;
   if (!transportPlugin) {
     throw new Error(

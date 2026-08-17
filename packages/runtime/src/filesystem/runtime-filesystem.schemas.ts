@@ -20,7 +20,7 @@ import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
  * Use inside transport client/host options schemas where a
  * {@link RuntimeFileSystem} field is required.
  *
- * @internal
+ * @public
  */
 export const runtimeFileSystemSchema = z
   .custom<RuntimeFileSystem>((value) => isRuntimeFileSystem(value), {

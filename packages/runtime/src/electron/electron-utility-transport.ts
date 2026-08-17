@@ -31,7 +31,7 @@ import { electronUtilityClientOptionsSchema } from '#electron/electron-utility-t
 
 const electronUtilityId = 'electron-utility';
 
-/** Bundled Electron utility-process transport plugin. */
+/** Bundled Electron utility-process transport plugin. @public */
 export const electronUtilityTransport = defineRuntimeTransport({
   id: electronUtilityId,
   clientOptionsSchema: electronUtilityClientOptionsSchema,

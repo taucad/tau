@@ -60,6 +60,9 @@ export type {
   MergeExportMap,
   RenderOptionsFor,
   RenderContentFor,
+  RuntimePluginDeclaration,
+  RuntimePluginPermissions,
+  RuntimePluginVersionMismatchDiagnostic,
 } from '#plugins/plugin-types.js';
 
 // Plugin authoring helpers
@@ -109,16 +112,7 @@ export type {
 } from '#transport/index.js';
 export { defineRuntimeTransport } from '#transport/index.js';
 
-// Worker-author primitives (custom transports) live at the
-// `@taucad/runtime/worker-internals` subpath — they would eagerly
-// pull `esbuild-wasm` into this default browser-safe entry via
-// `KernelRuntimeWorker` → `KernelWorker` → `#bundler/esbuild-core.js`,
-// which the `browser-compat` jsdom gate forbids.
-
 // Core types (runtime, kernel, bundler, middleware, protocol)
 export * from '#types/index.js';
 
 // File content cache (TR11)
-
-// Helpers
-export { createKernelSuccess, createKernelError } from '#kernels/kernel-helpers.js';

@@ -8,8 +8,7 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- public root client facade over browser-safe core */
 
 export {
-  createRuntimeClientWithTransport as createRuntimeClient,
-  createRuntimeClientWithTransport,
+  createRuntimeClient,
   NoRenderOutcomeError,
   isNoRenderOutcomeError,
   RuntimeNotConnectedError,

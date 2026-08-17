@@ -10,7 +10,6 @@
  * @public
  */
 
-export { createRuntimeClientWithTransport as createRuntimeClient } from '#client/runtime-client-core.js';
 export {
   RenderTimeoutError,
   isRenderTimeoutError,

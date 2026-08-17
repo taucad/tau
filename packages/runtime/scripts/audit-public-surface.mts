@@ -204,6 +204,9 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'MergeExportMap',
   'RenderOptionsFor',
   'RenderContentFor',
+  'RuntimePluginDeclaration',
+  'RuntimePluginPermissions',
+  'RuntimePluginVersionMismatchDiagnostic',
 
   // Plugin authoring helpers
   'defineKernel',
@@ -244,10 +247,6 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'RuntimeTransportHost',
   'TransportClientReady',
   'TransportHostReady',
-
-  // Helpers
-  'createKernelSuccess',
-  'createKernelError',
 ]);
 
 /**

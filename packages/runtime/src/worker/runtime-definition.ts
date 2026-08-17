@@ -100,6 +100,7 @@ type ConfiguredRuntimeCreateResult<
   Transcoders extends readonly AnyTranscoderPlugin[] = readonly AnyTranscoderPlugin[],
 > = MaybePromise<RuntimeDefinitionOptions<Kernels, Middleware, Bundlers, Transcoders>>;
 
+/** @public */
 export type RuntimeDefinition<
   Kernels extends readonly AnyKernelPlugin[] = readonly AnyKernelPlugin[],
   Middleware extends readonly MiddlewarePlugin[] = readonly MiddlewarePlugin[],
@@ -118,10 +119,12 @@ export type ConfiguredRuntimeDefinition<
   readonly createRuntime: (config: z.output<ConfigSchema>) => Options;
 };
 
+/** @public */
 export type AnyRuntimeDefinition =
   | RuntimePluginOptions
   | ConfiguredRuntimeDefinition<ConfiguredRuntimeCreateResult, z.ZodType>;
 
+/** @public */
 export type RuntimeDefinitionOptions<
   Kernels extends readonly AnyKernelPlugin[] = readonly never[],
   Middleware extends readonly MiddlewarePlugin[] = readonly never[],
@@ -134,6 +137,7 @@ export type RuntimeDefinitionOptions<
   readonly transcoders?: Transcoders;
 };
 
+/** @public */
 export type RuntimeKernels<Runtime> =
   Runtime extends RuntimePluginOptions<infer Kernels>
     ? Kernels
@@ -141,6 +145,7 @@ export type RuntimeKernels<Runtime> =
       ? RuntimeOptionsKernels<Options>
       : readonly KernelPlugin[];
 
+/** @public */
 export type RuntimeMiddleware<Runtime> =
   Runtime extends RuntimePluginOptions<readonly AnyKernelPlugin[], infer Middleware>
     ? Middleware
@@ -148,6 +153,7 @@ export type RuntimeMiddleware<Runtime> =
       ? RuntimeOptionsMiddleware<Options>
       : readonly MiddlewarePlugin[];
 
+/** @public */
 export type RuntimeBundlers<Runtime> =
   Runtime extends RuntimePluginOptions<readonly AnyKernelPlugin[], readonly MiddlewarePlugin[], infer Bundlers>
     ? Bundlers
@@ -155,6 +161,7 @@ export type RuntimeBundlers<Runtime> =
       ? RuntimeOptionsBundlers<Options>
       : readonly BundlerPlugin[];
 
+/** @public */
 export type RuntimeTranscoders<Runtime> =
   Runtime extends RuntimePluginOptions<
     readonly AnyKernelPlugin[],
@@ -167,20 +174,24 @@ export type RuntimeTranscoders<Runtime> =
       ? RuntimeOptionsTranscoders<Options>
       : readonly TranscoderPlugin[];
 
+/** @public */
 export type RuntimeConfigInput<Runtime> =
   Runtime extends ConfiguredRuntimeDefinition<ConfiguredRuntimeCreateResult, infer ConfigSchema>
     ? z.input<ConfigSchema>
     : never;
 
+/** @public */
 export type RuntimeConfigOutput<Runtime> =
   Runtime extends ConfiguredRuntimeDefinition<ConfiguredRuntimeCreateResult, infer ConfigSchema>
     ? z.output<ConfigSchema>
     : never;
 
+/** @public */
 export type RuntimeConfigProvider<Runtime> =
   | RuntimeConfigInput<Runtime>
   | (() => RuntimeConfigInput<Runtime> | Promise<RuntimeConfigInput<Runtime>>);
 
+/** @public */
 export class RuntimeConfigError extends Error {
   public override readonly cause: unknown;
 
@@ -195,6 +206,7 @@ export class RuntimeConfigError extends Error {
   }
 }
 
+/** @public */
 export function isRuntimeConfigError(error: unknown): error is RuntimeConfigError {
   return error instanceof Error && error.name === 'RuntimeConfigError';
 }
@@ -266,6 +278,7 @@ function normalizeRuntimeDefinition<
   };
 }
 
+/** @public */
 export async function resolveRuntimeDefinition(
   runtime: AnyRuntimeDefinition,
   rawConfig: unknown,
@@ -336,6 +349,7 @@ export function defineRuntime<
   ConfigSchema
 >;
 
+/** @public */
 export function defineRuntime(
   options: RuntimeDefinitionOptions | ConfiguredRuntimeDefinition<ConfiguredRuntimeCreateResult, z.ZodType>,
 ): AnyRuntimeDefinition {

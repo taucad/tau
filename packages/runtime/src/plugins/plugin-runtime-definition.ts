@@ -36,6 +36,7 @@ export function attachRuntimePluginDefinition<Plugin extends PlainPluginObject, 
   return plugin as Plugin & RuntimePluginDefinitionCarrier<Definition>;
 }
 
+/** @public */
 export async function resolveRuntimePluginDefinition<Definition>(
   kind: RuntimePluginKind,
   plugin: RuntimePluginWithDefinition<Definition>,

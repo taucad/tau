@@ -39,7 +39,6 @@
     "./middleware": "./src/plugins/middleware-entry.ts",
     "./bundler": "./src/plugins/bundler-entry.ts",
     "./transcoder": "./src/plugins/transcoder-entry.ts",
-    "./host": "./src/host/index.ts",
     "./transport": "./src/transport/index.ts",
     "./transport/in-process": "./src/transport/in-process.ts",
     "./transport/web": "./src/transport/web.ts",
@@ -56,8 +55,6 @@
     "./testing": "./src/testing/index.ts",
     "./worker/web": "./src/worker/web.ts",
     "./worker/node": "./src/worker/node.ts",
-    "./worker-internals": "./src/worker-internals.ts",
-    "./transport-internals": "./src/transport-internals.ts",
     "./kernels/replicad": "./src/kernels/replicad/replicad.kernel.ts",
     "./kernels/replicad/annotations": "./src/kernels/replicad/annotations/index.ts",
     "./kernels/jscad": "./src/kernels/jscad/jscad.kernel.ts",
@@ -67,7 +64,6 @@
     "./kernels/zoo/engine-connection": "./src/kernels/zoo/engine-connection.ts",
     "./kernels/tau": "./src/kernels/tau/tau.kernel.ts",
     "./bundler/esbuild": "./src/bundler/esbuild.bundler.ts",
-    "./middleware/runtime-middleware": "./src/middleware/runtime-middleware.ts",
     "./middleware/parameter-file-resolver": "./src/middleware/parameter-file-resolver.middleware.ts",
     "./middleware/parameter-cache": "./src/middleware/parameter-cache.middleware.ts",
     "./middleware/geometry-cache": "./src/middleware/geometry-cache.middleware.ts",
@@ -77,7 +73,6 @@
     "./cross-origin-isolation/express": "./src/cross-origin-isolation/express.ts",
     "./react-router": "./src/react-router/index.ts",
     "./vite": "./src/vite/index.ts",
-    "./rolldown": "./src/rolldown/index.ts",
     "./nextjs/config": "./src/nextjs/config.ts",
     "./nextjs/browser-node-builtins": "./src/nextjs/browser-node-builtins.ts"
   },
@@ -98,16 +93,6 @@
         "types": "./dist/worker/node.d.mts",
         "import": "./dist/worker/node.mjs",
         "default": "./dist/worker/node.mjs"
-      },
-      "./worker-internals": {
-        "types": "./dist/worker-internals.d.mts",
-        "import": "./dist/worker-internals.mjs",
-        "default": "./dist/worker-internals.mjs"
-      },
-      "./transport-internals": {
-        "types": "./dist/transport-internals.d.mts",
-        "import": "./dist/transport-internals.mjs",
-        "default": "./dist/transport-internals.mjs"
       },
       "./types": {
         "types": "./dist/types/index.d.mts",
@@ -208,16 +193,6 @@
         "types": "./dist/electron/vite.d.mts",
         "import": "./dist/electron/vite.mjs",
         "default": "./dist/electron/vite.mjs"
-      },
-      "./host": {
-        "types": "./dist/host/index.d.mts",
-        "import": "./dist/host/index.mjs",
-        "default": "./dist/host/index.mjs"
-      },
-      "./middleware/runtime-middleware": {
-        "types": "./dist/middleware/runtime-middleware.d.mts",
-        "import": "./dist/middleware/runtime-middleware.mjs",
-        "default": "./dist/middleware/runtime-middleware.mjs"
       },
       "./middleware/parameter-file-resolver": {
         "types": "./dist/middleware/parameter-file-resolver.middleware.d.mts",
@@ -334,11 +309,6 @@
         "import": "./dist/vite/index.mjs",
         "default": "./dist/vite/index.mjs"
       },
-      "./rolldown": {
-        "types": "./dist/rolldown/index.d.mts",
-        "import": "./dist/rolldown/index.mjs",
-        "default": "./dist/rolldown/index.mjs"
-      },
       "./nextjs/config": {
         "types": "./dist/nextjs/config.d.mts",
         "import": "./dist/nextjs/config.mjs",
@@ -399,7 +369,6 @@
     "electron": ">=30.0.0",
     "electron-vite": "^5.0.0 || ^6.0.0-beta.1",
     "next": ">=15.3.0 <17.0.0",
-    "rolldown": ">=1.0.0-rc.1",
     "vite": "^7.0.0 || ^8.0.0",
     "vitest": ">=2.0.0"
   },
@@ -411,9 +380,6 @@
       "optional": true
     },
     "next": {
-      "optional": true
-    },
-    "rolldown": {
       "optional": true
     },
     "vite": {

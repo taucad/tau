@@ -28,7 +28,7 @@
     "step"
   ],
   "author": "Richard Fontein",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -51,9 +51,7 @@
   },
   "dependencies": {
     "@taucad/runtime": "workspace:*",
-    "@taucad/types": "workspace:*",
     "citty": "catalog:",
-    "@taucad/utils": "workspace:*",
     "consola": "catalog:"
   }
 }

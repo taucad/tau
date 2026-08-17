@@ -1,6 +1,8 @@
 export {
   bindMutationContextForPort,
   createFileSystemBridgeProxy,
+  createFileSystemBridgePort,
+  createTransferredFileSystemBridgeProxy,
   createFileSystemBridge,
   exposeFileSystem,
   filesystemBridgeConnectMessageType,
@@ -17,8 +19,23 @@ export type {
   ExposeFileSystemHandle,
   FileSystemBridge,
   FileSystemBridgeConnection,
+  FileSystemBridgePort,
+  FileSystemBridgeProxy,
   FileSystemBridgeOptions,
   MutationMethodNameInternal,
   MutationOverrideMapInternal,
   RootedFileSystemHandlerFactory,
 } from '#filesystem-bridge.js';
+
+export {
+  fileSystemBridgeProtocolVersion,
+  fileSystemBridgeSchemas,
+  FileSystemBridgeProtocolVersionError,
+} from '#filesystem-bridge-protocol.js';
+
+export type {
+  FileSystemBridgeHello,
+  FileSystemBridgeRuntimeService,
+  FileSystemBridgeService,
+  FileSystemBridgeWorkspaceService,
+} from '#filesystem-bridge-protocol.js';

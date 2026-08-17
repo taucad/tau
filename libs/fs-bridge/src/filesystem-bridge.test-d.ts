@@ -14,7 +14,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type { WorkspaceFileService, WorkspaceMutationContext } from '@taucad/filesystem';
 import { bindMutationContextForPort } from '@taucad/fs-bridge';
-import type { MutationMethodNameInternal, MutationOverrideMapInternal } from '@taucad/fs-bridge';
+import type { FileSystemBridgeHello, MutationMethodNameInternal, MutationOverrideMapInternal } from '@taucad/fs-bridge';
 import type { createBridgeServer } from '@taucad/rpc/bridge';
 
 /**
@@ -23,6 +23,17 @@ import type { createBridgeServer } from '@taucad/rpc/bridge';
  * drift.
  */
 type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+describe('filesystem bridge hello — type guarantees', () => {
+  it('requires the protocol version', () => {
+    // @ts-expect-error Filesystem bridge hello producers must include the protocol version.
+    const hello: FileSystemBridgeHello = {
+      capabilities: { persistent: false, writable: true, quotaBased: false },
+      watchable: false,
+    };
+    expectTypeOf(hello).toExtend<FileSystemBridgeHello>();
+  });
+});
 
 describe('bindMutationContextForPort — type guarantees', () => {
   it('preserves the input handler shape (T → T)', () => {

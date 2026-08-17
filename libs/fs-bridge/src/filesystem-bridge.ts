@@ -14,6 +14,7 @@ import type { ChangeEvent } from '@taucad/types';
 import type {
   FileStat,
   MkdirOptions,
+  ProviderCapabilities,
   WatchEvent,
   WatchRequest,
   WorkspaceFileService,
@@ -22,7 +23,19 @@ import type {
   WorkspaceMutationErrorCode,
 } from '@taucad/filesystem';
 import type { BridgeServerHandle, Port, StringKeyedObject } from '@taucad/rpc/bridge';
-import { catchMessages, createBridgeCall, createBridgeServer } from '@taucad/rpc/bridge';
+import { catchMessages, createBridgeCall, createBridgePort, createBridgeServer } from '@taucad/rpc/bridge';
+import {
+  createFileSystemBridgeHello,
+  fileSystemBridgeProtocolVersion,
+  fileSystemBridgeSchemas,
+  FileSystemBridgeProtocolVersionError,
+} from '#filesystem-bridge-protocol.js';
+import type {
+  FileSystemBridgeHello,
+  FileSystemBridgeRuntimeService,
+  FileSystemBridgeService,
+  FileSystemBridgeWorkspaceService,
+} from '#filesystem-bridge-protocol.js';
 
 /** @public */
 export const filesystemBridgeConnectMessageType = 'tau:filesystem-bridge:connect';
@@ -51,9 +64,14 @@ export type FileSystemBridge = {
  * @public
  */
 export type FileSystemBridgeConnection = {
-  port: MessagePort;
+  port: FileSystemBridgePort;
   dispose(): void;
 };
+
+declare const fileSystemBridgePortBrand: unique symbol;
+
+/** Transferable port carrying only the filesystem bridge protocol. @public */
+export type FileSystemBridgePort = MessagePort & { readonly [fileSystemBridgePortBrand]: true };
 
 /**
  * Typed filesystem bridge proxy preserving class/interface-shaped service surfaces.
@@ -61,16 +79,16 @@ export type FileSystemBridgeConnection = {
  * @public
  */
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- proxy target types may be class/interface services without string index signatures.
-export type FileSystemBridgeProxy<T extends object> = T & {
+export type FileSystemBridgeProxy = FileSystemBridgeService & {
   readonly ready: Promise<void>;
-  readonly hello: { readonly payload: unknown };
+  readonly hello: { readonly payload: FileSystemBridgeHello };
   dispose(): void;
   listen(event: string, handler: (data: unknown) => void): () => void;
   watch(request: WatchRequest, handler: (event: WatchEvent) => void): () => void;
   watchReady(
     request: WatchRequest,
     handler: (event: WatchEvent) => void,
-  ): { unsubscribe: () => void; ready: Promise<void> };
+  ): { unsubscribe: () => void; ready: Promise<void>; closed: Promise<void> };
 };
 
 const isFileSystemBridgeConnection = (
@@ -78,6 +96,8 @@ const isFileSystemBridgeConnection = (
 ): bridge is FileSystemBridgeConnection => !('onMessage' in bridge.port);
 /** Milliseconds. */
 const defaultUiCoalescingWindow = 500;
+
+const asFileSystemBridgePort = (port: MessagePort): FileSystemBridgePort => port as FileSystemBridgePort;
 
 const wrapFileSystemBridgePort = (port: MessagePort, label: string): Port<unknown> => {
   const wrapped = wrapMessagePort<unknown>(port, { label });
@@ -419,9 +439,10 @@ export type ExposeFileSystemHandle = {
 export type RootedFileSystemHandlerFactory = (
   root: string,
   context: WorkspaceMutationContext,
-) => StringKeyedObject | undefined;
+) => FileSystemBridgeRuntimeService | undefined;
 
 type FileSystemBridgeConnectEnvelope = {
+  readonly v: unknown;
   readonly type: unknown;
   readonly port: MessagePort;
   readonly root?: unknown;
@@ -431,6 +452,7 @@ const isFileSystemBridgeConnectEnvelope = (value: unknown): value is FileSystemB
   typeof value === 'object' &&
   value !== null &&
   'type' in value &&
+  'v' in value &&
   'port' in value &&
   value.port instanceof MessagePort;
 
@@ -467,12 +489,14 @@ const createUnavailableHandlers = (error: unknown): StringKeyedObject =>
  * @returns Handle with cleanup, activePorts, and serverHandles
  * @public
  */
-export function exposeFileSystem<T extends StringKeyedObject>(
-  handlers: T,
-  options?: FileSystemBridgeOptions & {
-    handlerForRoot?: RootedFileSystemHandlerFactory;
-    changeEventBus?: BridgeChangeEventBus;
-  },
+type InternalExposeFileSystemOptions = FileSystemBridgeOptions & {
+  handlerForRoot?: (root: string, context: WorkspaceMutationContext) => StringKeyedObject | undefined;
+  changeEventBus?: BridgeChangeEventBus;
+};
+
+function exposeFileSystemHandlers(
+  handlers: StringKeyedObject,
+  options?: InternalExposeFileSystemOptions,
 ): ExposeFileSystemHandle {
   const messageType = options?.messageType ?? filesystemBridgeConnectMessageType;
   const activePorts = new Set<MessagePort>();
@@ -528,6 +552,17 @@ export function exposeFileSystem<T extends StringKeyedObject>(
   const handler = (event: MessageEvent<unknown>): void => {
     if (isFileSystemBridgeConnectEnvelope(event.data) && event.data.type === messageType) {
       const { port } = event.data;
+      if (event.data.v !== fileSystemBridgeProtocolVersion) {
+        const error = new FileSystemBridgeProtocolVersionError(event.data.v);
+        port.postMessage({
+          v: 1,
+          k: 'lh',
+          o: 0,
+          e: { m: error.message, c: error.code, ...(error.stack === undefined ? {} : { s: error.stack }) },
+        });
+        port.close();
+        return;
+      }
       const stopAndReplayMessages = catchMessages(port);
       const portId = `port_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -558,6 +593,7 @@ export function exposeFileSystem<T extends StringKeyedObject>(
       const mutationContext = { originClientId: portId };
       let portHandlers: StringKeyedObject;
       let handlersAvailable = true;
+      let unavailableError: RootedFileSystemError | undefined;
       if (requestedRoot === undefined) {
         portHandlers = bindMutationContextForPort(handlers, mutationContext);
       } else {
@@ -565,24 +601,55 @@ export function exposeFileSystem<T extends StringKeyedObject>(
         try {
           const rootedHandlers = options?.handlerForRoot?.(requestedRoot, mutationContext);
           handlersAvailable = rootedHandlers !== undefined;
-          portHandlers = rootedHandlers ?? createUnavailableHandlers(new RootedFileSystemError('ROOT_UNAVAILABLE'));
+          unavailableError = rootedHandlers === undefined ? new RootedFileSystemError('ROOT_UNAVAILABLE') : undefined;
+          portHandlers = rootedHandlers ?? createUnavailableHandlers(unavailableError!);
         } catch (error) {
           handlersAvailable = false;
+          unavailableError =
+            error instanceof RootedFileSystemError ? error : new RootedFileSystemError('ROOT_UNAVAILABLE');
           portHandlers = createUnavailableHandlers(error);
         }
       }
 
-      const handlerRecord = portHandlers as { capabilities?: unknown; watch?: unknown };
+      const handlerRecord = portHandlers as { capabilities?: ProviderCapabilities; watch?: unknown };
 
-      const serverHandle = createBridgeServer<StringKeyedObject, WatchRequest, WatchEvent>(portHandlers, wrappedPort, {
-        hello: {
-          capabilities: handlersAvailable ? handlerRecord.capabilities : undefined,
-          watchable: handlersAvailable && typeof handlerRecord.watch === 'function',
+      const hello =
+        requestedRoot === undefined
+          ? handlerRecord.capabilities === undefined
+            ? createFileSystemBridgeHello({
+                state: 'workspace',
+                watchable: typeof handlerRecord.watch === 'function',
+              })
+            : createFileSystemBridgeHello({
+                state: 'ready',
+                capabilities: handlerRecord.capabilities,
+                watchable: typeof handlerRecord.watch === 'function',
+              })
+          : handlersAvailable
+            ? createFileSystemBridgeHello({
+                state: 'ready',
+                capabilities: handlerRecord.capabilities!,
+                watchable: typeof handlerRecord.watch === 'function',
+              })
+            : createFileSystemBridgeHello({
+                state: 'unavailable',
+                error: {
+                  code: 'ROOT_UNAVAILABLE',
+                  message: unavailableError?.message ?? 'The requested filesystem root is unavailable.',
+                },
+              });
+
+      const serverHandle = createBridgeServer<StringKeyedObject, WatchRequest, WatchEvent, FileSystemBridgeHello>(
+        portHandlers,
+        wrappedPort,
+        {
+          hello,
+          protocolSchemas: fileSystemBridgeSchemas,
+          onDisconnect() {
+            disconnectPort();
+          },
         },
-        onDisconnect() {
-          disconnectPort();
-        },
-      });
+      );
       serverHandles.set(port, serverHandle);
 
       stopAndReplayMessages();
@@ -607,7 +674,9 @@ export function exposeFileSystem<T extends StringKeyedObject>(
         });
       }
       for (const handle of serverHandles.values()) {
-        safeDispose(() => handle.dispose());
+        safeDispose(() => {
+          handle.dispose();
+        });
       }
       activePorts.clear();
       portIds.clear();
@@ -617,6 +686,25 @@ export function exposeFileSystem<T extends StringKeyedObject>(
     activePorts,
     serverHandles,
   };
+}
+
+/** Expose the complete workspace filesystem service over validated bridge connections. @public */
+export function exposeFileSystem(
+  handlers: FileSystemBridgeWorkspaceService | FileSystemBridgeRuntimeService,
+  options?: FileSystemBridgeOptions & {
+    handlerForRoot?: RootedFileSystemHandlerFactory;
+    changeEventBus?: BridgeChangeEventBus;
+  },
+): ExposeFileSystemHandle {
+  return exposeFileSystemHandlers(handlers, options);
+}
+
+/** Partial-handler seam for low-level bridge tests; not exported from the package barrel. @internal */
+export function exposeFileSystemForTesting(
+  handlers: StringKeyedObject,
+  options?: InternalExposeFileSystemOptions,
+): ExposeFileSystemHandle {
+  return exposeFileSystemHandlers(handlers, options);
 }
 
 /**
@@ -680,10 +768,10 @@ export function openFileSystemBridge(worker: Worker, options?: FileSystemBridgeO
   const channel = new MessageChannel();
   const envelope =
     options?.root === undefined
-      ? { type: messageType, port: channel.port1 }
-      : { type: messageType, port: channel.port1, root: options.root };
+      ? { v: fileSystemBridgeProtocolVersion, type: messageType, port: channel.port1 }
+      : { v: fileSystemBridgeProtocolVersion, type: messageType, port: channel.port1, root: options.root };
   worker.postMessage(envelope, [channel.port1]);
-  const rawPort = channel.port2;
+  const rawPort = asFileSystemBridgePort(channel.port2);
   return {
     port: rawPort,
     dispose() {
@@ -691,6 +779,28 @@ export function openFileSystemBridge(worker: Worker, options?: FileSystemBridgeO
         rawPort.close();
       });
     },
+  };
+}
+
+/**
+ * Create a validated filesystem bridge port for an in-isolate runtime filesystem.
+ * The hello and every wire validator are installed here, so callers cannot
+ * construct protocol metadata independently.
+ *
+ * @public
+ */
+export function createFileSystemBridgePort(handlers: FileSystemBridgeRuntimeService): FileSystemBridgeConnection {
+  const bridge = createBridgePort(handlers, {
+    hello: createFileSystemBridgeHello({
+      state: 'ready',
+      capabilities: handlers.capabilities,
+      watchable: typeof handlers.watch === 'function',
+    }),
+    protocolSchemas: fileSystemBridgeSchemas,
+  });
+  return {
+    port: asFileSystemBridgePort(bridge.port),
+    dispose: bridge.dispose,
   };
 }
 
@@ -724,10 +834,9 @@ export function createFileSystemBridge(worker: Worker, options?: FileSystemBridg
  * @returns Typed proxy for bridge method calls.
  * @public
  */
-export function createFileSystemBridgeProxy<
-  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- proxy target types may be class/interface services without string index signatures.
-  T extends object,
->(bridge: FileSystemBridge | FileSystemBridgeConnection): FileSystemBridgeProxy<T> {
+export function createFileSystemBridgeProxy(
+  bridge: FileSystemBridge | FileSystemBridgeConnection,
+): FileSystemBridgeProxy {
   const resolvedBridge: FileSystemBridge = isFileSystemBridgeConnection(bridge)
     ? {
         port: wrapFileSystemBridgePort(bridge.port, 'fs-bridge-proxy'),
@@ -738,16 +847,18 @@ export function createFileSystemBridgeProxy<
     resolvedBridge.port.start();
   }
 
-  const { call, listen, watch, watchReady, ready, hello, dispose } = createBridgeCall<WatchRequest, WatchEvent>(
-    resolvedBridge.port,
-    {
-      prepareCallArgs: cloneWriteArgsForTransfer,
-      resolveCallTimeout: (method) => (method === 'commitPendingProjectDirectory' ? 'none' : undefined),
-    },
-  );
+  const { call, listen, watch, watchReady, ready, hello, dispose } = createBridgeCall<
+    WatchRequest,
+    WatchEvent,
+    FileSystemBridgeHello
+  >(resolvedBridge.port, {
+    prepareCallArgs: cloneWriteArgsForTransfer,
+    resolveCallTimeout: (method) => (method === 'commitPendingProjectDirectory' ? 'none' : undefined),
+    protocolSchemas: fileSystemBridgeSchemas,
+  });
   let isDisposed = false;
 
-  return new Proxy({} as FileSystemBridgeProxy<T>, {
+  return new Proxy({} as FileSystemBridgeProxy, {
     get(_target, property): unknown {
       if (property === 'dispose') {
         return (): void => {
@@ -784,7 +895,22 @@ export function createFileSystemBridgeProxy<
       if (isDisposed) {
         throw new Error(`Filesystem bridge proxy has been disposed — cannot call '${property}'`);
       }
-      return (...args: unknown[]) => call(property, args);
+      return async (...args: unknown[]) => call(property, args);
+    },
+  });
+}
+
+/**
+ * Adopt a raw port received through structured clone and validate it as a
+ * filesystem bridge before queued calls can dispatch.
+ *
+ * @public
+ */
+export function createTransferredFileSystemBridgeProxy(port: MessagePort): FileSystemBridgeProxy {
+  return createFileSystemBridgeProxy({
+    port: asFileSystemBridgePort(port),
+    dispose() {
+      port.close();
     },
   });
 }

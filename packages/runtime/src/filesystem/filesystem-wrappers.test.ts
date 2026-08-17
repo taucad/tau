@@ -4,10 +4,8 @@
 
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { wrapMessagePort } from '@taucad/rpc';
-import type { Port } from '@taucad/rpc';
-import { createBridgeProxy } from '@taucad/rpc/bridge';
 import {
+  createTransferredFileSystemBridgeProxy,
   createFileSystemBridge,
   exposeFileSystem,
   filesystemBridgeConnectMessageType,
@@ -30,14 +28,6 @@ function makeFs(files?: Record<string, string>): RuntimeFileSystemBase {
   return handle.create();
 }
 
-function fsBridgePort(port: MessagePort, label: string): Port<unknown> {
-  const wrapped = wrapMessagePort<unknown>(port, { label });
-  if (wrapped.start !== undefined) {
-    wrapped.start();
-  }
-  return wrapped;
-}
-
 describe('filesystem high-level wrappers', () => {
   describe('exposeFileSystem', () => {
     let activeHandle: ReturnType<typeof exposeFileSystem> | undefined;
@@ -54,11 +44,11 @@ describe('filesystem high-level wrappers', () => {
       activeHandle = exposeFileSystem(fs);
 
       const channel = new MessageChannel();
-      const proxy = createBridgeProxy<RuntimeFileSystemBase>(fsBridgePort(channel.port2, 'fs-bridge-client'));
+      const proxy = createTransferredFileSystemBridgeProxy(channel.port2);
 
       self.dispatchEvent(
         new MessageEvent('message', {
-          data: { type: filesystemBridgeConnectMessageType, port: channel.port1 },
+          data: { v: 1, type: filesystemBridgeConnectMessageType, port: channel.port1 },
         }),
       );
 
@@ -75,7 +65,7 @@ describe('filesystem high-level wrappers', () => {
       const fs = makeFs({ '/early.txt': 'buffered' });
 
       const channel = new MessageChannel();
-      const proxy = createBridgeProxy<RuntimeFileSystemBase>(fsBridgePort(channel.port2, 'fs-bridge-client'));
+      const proxy = createTransferredFileSystemBridgeProxy(channel.port2);
 
       // Send a request BEFORE exposeFileSystem processes the connect message.
       // The proxy sends immediately on port2; port1 isn't served yet.
@@ -85,7 +75,7 @@ describe('filesystem high-level wrappers', () => {
 
       self.dispatchEvent(
         new MessageEvent('message', {
-          data: { type: filesystemBridgeConnectMessageType, port: channel.port1 },
+          data: { v: 1, type: filesystemBridgeConnectMessageType, port: channel.port1 },
         }),
       );
 
@@ -107,7 +97,7 @@ describe('filesystem high-level wrappers', () => {
       // Post a message after cleanup -- no server should be set up
       self.dispatchEvent(
         new MessageEvent('message', {
-          data: { type: filesystemBridgeConnectMessageType, port: channel.port1 },
+          data: { v: 1, type: filesystemBridgeConnectMessageType, port: channel.port1 },
         }),
       );
 
@@ -130,7 +120,7 @@ describe('filesystem high-level wrappers', () => {
       // Default type should be ignored
       self.dispatchEvent(
         new MessageEvent('message', {
-          data: { type: filesystemBridgeConnectMessageType, port: channel.port1 },
+          data: { v: 1, type: filesystemBridgeConnectMessageType, port: channel.port1 },
         }),
       );
 
@@ -142,11 +132,11 @@ describe('filesystem high-level wrappers', () => {
 
       // Custom type should work
       const channel2 = new MessageChannel();
-      const proxy2 = createBridgeProxy<RuntimeFileSystemBase>(fsBridgePort(channel2.port2, 'fs-bridge-client'));
+      const proxy2 = createTransferredFileSystemBridgeProxy(channel2.port2);
 
       self.dispatchEvent(
         new MessageEvent('message', {
-          data: { type: 'myBridge', port: channel2.port1 },
+          data: { v: 1, type: 'myBridge', port: channel2.port1 },
         }),
       );
 

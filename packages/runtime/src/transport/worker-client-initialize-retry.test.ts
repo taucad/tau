@@ -1,10 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type * as RpcModule from '@taucad/rpc';
+import { createFileSystemBridgePort, createTransferredFileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { nodeWorkerClient } from '#transport/node-worker-client.js';
 import type { RuntimeInitializePayload } from '#transport/runtime-transport.types.js';
 import { webWorkerClient } from '#transport/web-worker-client.js';
-import { wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
+import { resolveRuntimeFileSystem, wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 import { inProcessClient } from '#transport/in-process-client.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 
@@ -77,14 +78,11 @@ const createNodeWorkerCtor = () => {
 
 const createChannelBackedFileSystem = () => {
   const openConnection = vi.fn(() => {
-    const channel = new MessageChannel();
-    return {
-      port: channel.port1,
-      dispose() {
-        channel.port1.close();
-        channel.port2.close();
-      },
-    };
+    const handle = resolveRuntimeFileSystem(fromMemoryFs());
+    if (handle.kind !== 'inline') {
+      throw new Error('fromMemoryFs must create an inline handle');
+    }
+    return createFileSystemBridgePort(handle.create());
   });
   const fileSystem = wrapAsRuntimeFileSystem({
     kind: 'channel',
@@ -97,6 +95,23 @@ const initializePayload = {
   config: {},
 } satisfies RuntimeInitializePayload;
 const mainFilePath = '/main.ts';
+const mainFileSource = 'export default 1;';
+
+const expectTransferredFileSystem = async (payload: InitializeCallPayload): Promise<void> => {
+  const port = payload.value?.memoryHandle?.fileSystemPort;
+  expect(port).toBeInstanceOf(MessagePort);
+  if (!port) {
+    return;
+  }
+
+  const fileSystem = createTransferredFileSystemBridgeProxy(port);
+  try {
+    await fileSystem.ready;
+    await expect(fileSystem.readFile(mainFilePath, 'utf8')).resolves.toBe(mainFileSource);
+  } finally {
+    fileSystem.dispose();
+  }
+};
 
 describe('worker transport initialize filesystem bridge retries', () => {
   beforeEach(() => {
@@ -109,7 +124,7 @@ describe('worker transport initialize filesystem bridge retries', () => {
   it('should rebuild inline web-worker filesystem bridges after failed initialize', async () => {
     const client = webWorkerClient({
       createWorker: createWebWorker,
-      fileSystem: fromMemoryFs({ [mainFilePath]: 'export default 1;' }),
+      fileSystem: fromMemoryFs({ [mainFilePath]: mainFileSource }),
     });
     mocks.channel.call.mockRejectedValueOnce(new Error('Invalid runtime config')).mockResolvedValueOnce({});
 
@@ -124,6 +139,7 @@ describe('worker transport initialize filesystem bridge retries', () => {
     expect(secondPayload.value?.memoryHandle?.fileSystemPort).not.toBe(
       firstPayload.value?.memoryHandle?.fileSystemPort,
     );
+    await expectTransferredFileSystem(secondPayload);
     await client.close();
   });
 
@@ -153,7 +169,7 @@ describe('worker transport initialize filesystem bridge retries', () => {
     const client = nodeWorkerClient({
       url: new URL('about:blank'),
       workerCtor,
-      fileSystem: fromMemoryFs({ [mainFilePath]: 'export default 1;' }),
+      fileSystem: fromMemoryFs({ [mainFilePath]: mainFileSource }),
     });
     mocks.channel.call.mockRejectedValueOnce(new Error('Invalid runtime config')).mockResolvedValueOnce({});
 
@@ -168,6 +184,7 @@ describe('worker transport initialize filesystem bridge retries', () => {
     expect(secondPayload.value?.memoryHandle?.fileSystemPort).not.toBe(
       firstPayload.value?.memoryHandle?.fileSystemPort,
     );
+    await expectTransferredFileSystem(secondPayload);
     await client.close();
   });
 

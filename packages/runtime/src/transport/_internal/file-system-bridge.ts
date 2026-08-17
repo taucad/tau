@@ -15,7 +15,8 @@
 
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { resolveRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
-import { createBridgePort } from '@taucad/rpc/bridge';
+import { createFileSystemBridgePort } from '@taucad/fs-bridge';
+import type { FileSystemBridgePort } from '@taucad/fs-bridge';
 
 /**
  * Resolved filesystem bridge materialized for one runtime initialize call.
@@ -23,7 +24,7 @@ import { createBridgePort } from '@taucad/rpc/bridge';
  * @internal
  */
 export type ResolvedFileSystemBridge = {
-  readonly port: MessagePort;
+  readonly port: FileSystemBridgePort;
   readonly kind: 'inline' | 'channel';
   readonly dispose: () => void;
 };
@@ -40,12 +41,7 @@ export const buildFileSystemBridge = (fs: RuntimeFileSystem | undefined): Resolv
      * filesystem instance — no shared mutable state across clients
      * built from the same `inProcessTransport({ runtime, fileSystem })` plugin. */
     const fileSystem = handle.create();
-    const bridge = createBridgePort(fileSystem, {
-      hello: {
-        capabilities: fileSystem.capabilities,
-        watchable: typeof fileSystem.watch === 'function',
-      },
-    });
+    const bridge = createFileSystemBridgePort(fileSystem);
     return {
       port: bridge.port,
       kind: 'inline',

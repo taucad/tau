@@ -65,7 +65,7 @@ import { z } from 'zod';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import type { ResolvedMiddleware } from '#framework/kernel-worker.js';
 import { KernelWorker } from '#framework/kernel-worker.js';
-import { createBridgePort } from '@taucad/rpc/bridge';
+import { createFileSystemBridgePort } from '@taucad/fs-bridge';
 import { _fromMemoryFsHandle as fromMemoryFS } from '#transport/_internal/from-memory-fs-handle.js';
 
 let _testFileSystemHandle: ReturnType<typeof fromMemoryFS> | undefined;
@@ -214,12 +214,7 @@ export async function initializeWorkerForTesting<T extends KernelWorker>(
   }
 
   const fileSystem = getTestFileSystem();
-  const { port } = createBridgePort(fileSystem, {
-    hello: {
-      capabilities: fileSystem.capabilities,
-      watchable: typeof fileSystem.watch === 'function',
-    },
-  });
+  const { port } = createFileSystemBridgePort(fileSystem);
 
   await worker.initialize({
     callbacks: {
@@ -875,6 +870,7 @@ export function createMockKernelRuntime(options?: {
 
   return {
     signal: options?.signal ?? new AbortController().signal,
+    emitEvent: () => undefined,
     logger: createMockLogger(),
     filesystem: createMockFileSystem(options?.filesystemOverrides),
     fileContentCache: new Map(),
@@ -1074,6 +1070,7 @@ export class MockKernelWorker extends KernelWorker {
     if (options.renderZodSchema) {
       this.kernelRenderZodSchemaMap.set('mock-kernel', options.renderZodSchema);
     }
+    this.rebuildAndPushCapabilities();
   }
 
   /**

@@ -11,6 +11,7 @@
 import { describe, it, assertType, expectTypeOf } from 'vitest';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { fromMemoryFs, fromFsLike, fromFileSystemBridge } from '#filesystem/runtime-filesystem.js';
+import type { FileSystemBridgePort } from '@taucad/fs-bridge';
 import { fromBrowserFs } from '#filesystem/from-browser-fs.js';
 import { fromNodeFs } from '#filesystem/from-node-fs.js';
 
@@ -37,15 +38,17 @@ describe('RuntimeFileSystem opacity (C9)', () => {
 
   it('every bundled fromX factory returns RuntimeFileSystem', () => {
     const pathA = '/a.ts';
+    const binaryPath = '/binary.step';
     assertType<RuntimeFileSystem>(fromMemoryFs());
     assertType<RuntimeFileSystem>(fromMemoryFs({ [pathA]: 'x' }));
+    assertType<RuntimeFileSystem>(fromMemoryFs({ [binaryPath]: new Uint8Array([1, 2, 3]) }));
     assertType<RuntimeFileSystem>(
       fromFsLike({
         promises: {} as unknown as Parameters<typeof fromFsLike>[0]['promises'],
       }),
     );
     assertType<RuntimeFileSystem>(
-      fromFileSystemBridge(() => ({ port: undefined as unknown as MessagePort, dispose: () => undefined })),
+      fromFileSystemBridge(() => ({ port: undefined as unknown as FileSystemBridgePort, dispose: () => undefined })),
     );
     assertType<RuntimeFileSystem>(fromBrowserFs(undefined as unknown as FileSystemDirectoryHandle));
     assertType<RuntimeFileSystem>(fromNodeFs('/tmp'));

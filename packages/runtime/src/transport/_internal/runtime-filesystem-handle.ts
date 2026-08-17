@@ -110,8 +110,7 @@ export const hasRuntimeFileSystemHandle = (value: unknown): value is RuntimeFile
  * `memoryHandle.fileSystemPort`, not passed to
  * {@link createWorkerDispatcher}'s `inlineFileSystem`.
  *
- * Ordinary consumers use opaque {@link RuntimeFileSystem} only; transport
- * authors reach for this via `@taucad/runtime/transport-internals`.
+ * Ordinary consumers use opaque {@link RuntimeFileSystem} only.
  *
  * @public
  */

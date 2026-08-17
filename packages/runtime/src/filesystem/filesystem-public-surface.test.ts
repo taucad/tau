@@ -1,14 +1,12 @@
 /**
  * Phase 5 / R16 — `@taucad/runtime/filesystem` public surface.
  *
- * The filesystem barrel must expose ONLY the consumer-facing opaque
- * `RuntimeFileSystem` value and the bundled `fromX` factories. Generic
- * bridge primitives live in `@taucad/rpc/bridge`, while filesystem bridge
- * adapters live in `@taucad/fs-bridge`, so the runtime public FS surface
- * stays opaque.
+ * The filesystem barrel exposes the consumer-facing opaque
+ * `RuntimeFileSystem`, bundled `fromX` factories, and the filesystem-specific
+ * bridge adapters needed by external hosts. Generic bridge primitives remain
+ * internal to the bundled RPC implementation.
  *
- * This test pins the surface — it MUST fail if a bridge primitive ever
- * leaks back onto the public filesystem barrel.
+ * This test pins both sides of that boundary.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -21,18 +19,25 @@ const forbiddenNames = [
   'createBridgeProxy',
   'catchMessages',
   'extractTransferables',
-  'exposeFileSystem',
-  'createFileSystemBridge',
-  'openFileSystemBridge',
-  'createFileSystemBridgeProxy',
   'filesystemBridgeConnectMessageType',
   'waitForWorkerReady',
   'workerReadyMessageType',
   'createRuntimeFileSystem',
 ] as const;
 
+const filesystemBridgeNames = [
+  'exposeFileSystem',
+  'createFileSystemBridge',
+  'openFileSystemBridge',
+  'createFileSystemBridgeProxy',
+] as const;
+
 describe('@taucad/runtime/filesystem public surface (R16)', () => {
   it.each(forbiddenNames)('should not export bridge primitive %s', (name) => {
     expect((fsBarrel as Record<string, unknown>)[name]).toBeUndefined();
+  });
+
+  it.each(filesystemBridgeNames)('should export filesystem bridge adapter %s', (name) => {
+    expect((fsBarrel as Record<string, unknown>)[name]).toBeTypeOf('function');
   });
 });

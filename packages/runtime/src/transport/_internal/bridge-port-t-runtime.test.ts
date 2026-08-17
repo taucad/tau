@@ -77,12 +77,13 @@ function createLinkedMemoryPorts(): readonly [Port<unknown>, Port<unknown>] {
 
 describe('bridge Port<T> round-trip', () => {
   it('readFile crosses a custom in-memory Port pair', async () => {
+    type ReadService = { readFile(path: string, encoding: 'utf8'): Promise<string> };
     const helloPath = '/hello.txt';
     const fs = makeFs({ [helloPath]: 'from-port-bridge' });
     const [serverPort, clientPort] = createLinkedMemoryPorts();
 
     createBridgeServer(fs, serverPort);
-    const proxy = createBridgeProxy<RuntimeFileSystemBase>(clientPort);
+    const proxy = createBridgeProxy<ReadService>(clientPort);
 
     await expect(proxy.readFile(helloPath, 'utf8')).resolves.toBe('from-port-bridge');
     proxy.dispose();

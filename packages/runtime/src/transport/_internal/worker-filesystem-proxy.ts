@@ -1,54 +1,39 @@
-import type { ProviderCapabilities, WatchEvent, WatchRequest } from '@taucad/filesystem';
-import { createFileSystemBridgeProxy } from '@taucad/fs-bridge';
+import { RootedFileSystemError } from '@taucad/filesystem';
+import type { WatchEvent, WatchRequest } from '@taucad/filesystem';
+import { createTransferredFileSystemBridgeProxy } from '@taucad/fs-bridge';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 
 export type WorkerFileSystemProxy = RuntimeFileSystemBase & {
   watchReady?(
     request: WatchRequest,
     handler: (event: WatchEvent) => void,
-  ): { unsubscribe: () => void; ready: Promise<void> };
+  ): { unsubscribe: () => void; ready: Promise<void>; closed: Promise<void> };
   dispose(): void;
 };
 
-type FileSystemBridgeHello = {
-  capabilities: ProviderCapabilities;
-  watchable: boolean;
-};
-
-const isFileSystemBridgeHello = (value: unknown): value is FileSystemBridgeHello => {
-  if (value === null || typeof value !== 'object') {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  const { capabilities } = record;
-  return (
-    typeof record['watchable'] === 'boolean' &&
-    capabilities !== null &&
-    typeof capabilities === 'object' &&
-    typeof (capabilities as Record<string, unknown>)['persistent'] === 'boolean' &&
-    typeof (capabilities as Record<string, unknown>)['writable'] === 'boolean' &&
-    typeof (capabilities as Record<string, unknown>)['quotaBased'] === 'boolean'
-  );
-};
-
 export const createWorkerFileSystemProxy = async (port: MessagePort): Promise<WorkerFileSystemProxy> => {
-  const bridge = createFileSystemBridgeProxy<RuntimeFileSystemBase>({
-    port,
-    dispose() {
-      port.close();
-    },
-  });
+  const bridge = createTransferredFileSystemBridgeProxy(port);
   await bridge.ready;
-  if (!isFileSystemBridgeHello(bridge.hello.payload)) {
+  const hello = bridge.hello.payload;
+  if (hello.state === 'unavailable') {
     bridge.dispose();
-    throw new Error('Filesystem bridge did not provide valid capabilities');
+    throw new RootedFileSystemError(hello.error.code);
   }
-  const { capabilities, watchable } = bridge.hello.payload;
+  if (hello.state !== 'ready') {
+    bridge.dispose();
+    throw new Error('Runtime filesystem bridge requires a rooted filesystem');
+  }
+  const { capabilities, watchable } = hello;
+  function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+  function readFile(path: string, encoding: 'utf8'): Promise<string>;
+  async function readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
+    return encoding === 'utf8' ? bridge.readFile(path, encoding) : bridge.readFile(path);
+  }
   const fileSystem: WorkerFileSystemProxy = {
     id: 'runtime:filesystem-bridge',
     capabilities,
     dispose: bridge.dispose,
-    readFile: bridge.readFile.bind(bridge),
+    readFile,
     writeFile: bridge.writeFile.bind(bridge),
     readdir: bridge.readdir.bind(bridge),
     stat: bridge.stat.bind(bridge),

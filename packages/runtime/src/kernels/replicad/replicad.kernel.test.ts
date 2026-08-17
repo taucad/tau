@@ -2759,8 +2759,10 @@ export default function main() {
 
       // Export with custom mesh configuration
       const exportResult = await worker.exportGeometry('stl', {
-        linearTolerance: 0.001,
-        angularTolerance: 5,
+        tessellation: {
+          linearTolerance: 0.001,
+          angularTolerance: 5,
+        },
       });
 
       assertSuccess(exportResult);

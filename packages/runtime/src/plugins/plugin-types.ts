@@ -357,11 +357,18 @@ type FilterDefaultRender<T> = T extends Record<string, unknown> ? (Record<string
  *
  * @public
  */
-export type CollectRenderOptions<Plugins extends readonly AnyKernelPlugin[]> = [
+type CollectSingletonRenderOptions<Plugins extends readonly AnyKernelPlugin[]> = [
   FilterDefaultRender<KernelRenderOptionsOf<Plugins[number]>>,
 ] extends [never]
   ? Record<string, unknown>
   : FilterDefaultRender<KernelRenderOptionsOf<Plugins[number]>>;
+
+/** @public */
+export type CollectRenderOptions<Plugins extends readonly AnyKernelPlugin[]> = Plugins extends readonly [
+  AnyKernelPlugin,
+]
+  ? CollectSingletonRenderOptions<Plugins>
+  : Record<string, unknown>;
 
 /**
  * Collects the union of all literal kernel ids declared by an array of kernel
@@ -580,7 +587,7 @@ export type KnownSourceFormats<Kernels extends readonly AnyKernelPlugin[]> = Col
  * falls back to {@link KnownTargetFormats} so the wide-default client still
  * accepts any `FileExtension` on `export`.
  *
- * @internal
+ * @public
  */
 export type ExportFormatsFor<
   Kernels extends readonly AnyKernelPlugin[],
@@ -595,15 +602,17 @@ export type ExportFormatsFor<
  * options. Otherwise falls back to `Record<string, unknown> | undefined` so the
  * wide-default client still accepts arbitrary options.
  *
- * @internal
+ * @public
  */
 export type ExportOptionsFor<
   Kernels extends readonly AnyKernelPlugin[],
   Transcoders extends readonly AnyTranscoderPlugin[],
   F,
-> = F extends keyof MergeExportMap<CollectFormatMap<Kernels>, Transcoders>
-  ? MergeExportMap<CollectFormatMap<Kernels>, Transcoders>[F]
-  : Record<string, unknown> | undefined;
+> = Kernels extends readonly [AnyKernelPlugin]
+  ? F extends keyof MergeExportMap<CollectFormatMap<Kernels>, Transcoders>
+    ? MergeExportMap<CollectFormatMap<Kernels>, Transcoders>[F]
+    : Record<string, unknown> | undefined
+  : Record<string, unknown>;
 
 /**
  * Resolves the render-options input type for a specific kernel id within a

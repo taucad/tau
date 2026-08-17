@@ -34,6 +34,7 @@ import type { RuntimeStateChangedArgs } from '#types/runtime-protocol.types.js';
 import { signalSlot, abortReason } from '#types/runtime-protocol.types.js';
 import { signalBufferByteLength } from '#framework/runtime-framework.constants.js';
 import { imageEdgeSchemas } from '#transcoders/image/image-export-options.js';
+import { replicadExportSchemas } from '#kernels/replicad/replicad.schemas.js';
 
 const tessellationSchema = z.object({
   tessellation: z
@@ -3275,6 +3276,23 @@ describe('transcoder loading', () => {
     expect(mockModule.transcode).not.toHaveBeenCalled();
   });
 
+  it('should reject unknown transcoder export option keys at runtime', async () => {
+    const optionsSchema = z.object({ quality: z.number().min(0).max(1) }).strict();
+    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', fidelity: 'mesh', optionsSchema }]);
+    const worker = createConfiguredWorker({
+      transcoders: [createMockTranscoderPlugin('unknown-opts-transcoder', mockModule)],
+    });
+
+    await worker.initialize({ callbacks: { onLog: vi.fn() }, transferables: {}, options: {} });
+
+    const result = await worker.runExportGeometry('usdz', { futurePluginOption: true });
+    expect(result).toMatchObject({
+      success: false,
+      issues: [expect.objectContaining({ message: expect.stringContaining('futurePluginOption') as string })],
+    });
+    expect(mockModule.transcode).not.toHaveBeenCalled();
+  });
+
   it('should populate manifest schema and defaults from kernel export formats', async () => {
     const worker = createConfiguredWorker();
 
@@ -4120,6 +4138,23 @@ describe('export schema hard-fail', () => {
     expect(result.success).toBe(false);
     expect(result.issues[0]!.message).toContain('No export schema for format');
     expect(result.issues[0]!.message).toContain('glb');
+  });
+
+  it('should reject keys absent from the direct Replicad STL manifest schema', async () => {
+    const worker = createConfiguredWorker({
+      exportZodSchemas: { stl: replicadExportSchemas.stl },
+    });
+
+    await worker.initialize({ callbacks: { onLog: vi.fn() }, transferables: {}, options: {} });
+    await openAndWaitForRender(worker);
+
+    const result = await worker.runExportGeometry('stl', { binary: false, futurePluginOption: true });
+    expect(result).toMatchObject({
+      success: false,
+      issues: [
+        expect.objectContaining({ code: 'RUNTIME', message: expect.stringContaining('futurePluginOption') as string }),
+      ],
+    });
   });
 
   it('should allow export without options for undeclared format (transcoder route)', async () => {

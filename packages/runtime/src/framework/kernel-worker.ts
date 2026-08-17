@@ -2866,6 +2866,26 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const formatZodSchema = zodSchemas?.[format];
 
     if (formatZodSchema) {
+      const directRoute = this._capabilitiesManifest.routes.find(
+        (route) => route.kernelId === ownerKernelId && route.targetFormat === format && !route.transcoderId,
+      );
+      const allowedOptionKeys = new Set(
+        Object.keys(collectJsonSchemaProperties(directRoute?.exportOptions.schema ?? {})),
+      );
+      const unsupportedOptionKey = Object.keys(rawOptions).find((key) => !allowedOptionKeys.has(key));
+      if (unsupportedOptionKey) {
+        return {
+          success: false,
+          result: createKernelError([
+            {
+              message: `Export option "${unsupportedOptionKey}" is not supported by direct kernel route ${ownerKernelId} → ${format}.`,
+              code: 'RUNTIME',
+              type: 'runtime',
+              severity: 'error',
+            },
+          ]),
+        };
+      }
       const contentResult = this.validateRuntimeContent('export', this.getExportContentKeys(owner, format), content);
       if (!contentResult.success) {
         return { success: false, result: createKernelError(contentResult.issues) };

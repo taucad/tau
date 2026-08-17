@@ -813,10 +813,7 @@ describe('route-scoped content projections', () => {
     });
     void client.export('webp', {
       source,
-      exportOptions: {
-        // @ts-expect-error -- the image route pins its intermediate coordinate system.
-        coordinateSystem: 'z-up',
-      },
+      exportOptions: { coordinateSystem: 'z-up' },
     });
   });
 

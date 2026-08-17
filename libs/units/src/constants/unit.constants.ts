@@ -76,6 +76,7 @@ function generateSiMagnitudeVariants<BaseUnit extends string, BaseSymbol extends
   );
 }
 
+/** @public */
 export const standardInternationalBaseUnits = {
   length: {
     unit: 'meter',
@@ -204,6 +205,7 @@ export const standardInternationalBaseUnits = {
   },
 } as const satisfies Record<string, BaseUnit>;
 
+/** @public */
 export const standardInternationalDerivedUnits = {
   planeAngle: {
     unit: 'radian',

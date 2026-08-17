@@ -1,0 +1,24 @@
+{
+  "name": "@taucad/units",
+  "version": "0.1.0-beta.0",
+  "description": "Units of measurement and conversions",
+  "type": "module",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "libs/units"
+  },
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/types/index.ts",
+    "./constants": "./src/constants/index.ts",
+    "./converter": "./src/converter/index.ts",
+    "./parser": "./src/parser/index.ts"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  }
+}

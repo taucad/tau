@@ -4,6 +4,7 @@ type UnitMagnitude = {
   factor: number;
 };
 
+/** @public */
 export const siMagnitudes = [
   {
     name: 'quetta',

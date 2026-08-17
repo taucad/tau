@@ -109,6 +109,8 @@ function convertUnits(input: { value: number; fromSymbol: string; toSymbol: stri
  * @param fromSymbol - The source unit symbol
  * @param toSymbol - The target unit symbol
  * @returns The converted value
+ *
+ * @public
  */
 export function convertLength(value: number, fromSymbol: LengthSymbol, toSymbol: LengthSymbol): number {
   return convertUnits({ value, fromSymbol, toSymbol, quantity: 'length' });
@@ -121,6 +123,8 @@ export function convertLength(value: number, fromSymbol: LengthSymbol, toSymbol:
  * @param fromSymbol - The source unit symbol
  * @param toSymbol - The target unit symbol
  * @returns The converted value
+ *
+ * @public
  */
 export function convertMass(value: number, fromSymbol: MassSymbol, toSymbol: MassSymbol): number {
   return convertUnits({ value, fromSymbol, toSymbol, quantity: 'mass' });
@@ -133,6 +137,8 @@ export function convertMass(value: number, fromSymbol: MassSymbol, toSymbol: Mas
  * @param fromSymbol - The source unit symbol
  * @param toSymbol - The target unit symbol
  * @returns The converted value
+ *
+ * @public
  */
 export function convertTime(value: number, fromSymbol: TimeSymbol, toSymbol: TimeSymbol): number {
   return convertUnits({ value, fromSymbol, toSymbol, quantity: 'time' });
@@ -145,6 +151,8 @@ export function convertTime(value: number, fromSymbol: TimeSymbol, toSymbol: Tim
  * @param fromSymbol - The source unit symbol
  * @param toSymbol - The target unit symbol
  * @returns The converted value
+ *
+ * @public
  */
 export function convertElectricCurrent(
   value: number,
@@ -167,6 +175,8 @@ export function convertElectricCurrent(
  * @param fromSymbol - The source unit symbol
  * @param toSymbol - The target unit symbol
  * @returns The converted value
+ *
+ * @public
  */
 export function convertTemperature(
   value: number,
@@ -188,6 +198,8 @@ export function convertTemperature(
  * @param fromSymbol - The source unit symbol
  * @param toSymbol - The target unit symbol
  * @returns The converted value
+ *
+ * @public
  */
 export function convertAmountOfSubstance(
   value: number,
@@ -209,6 +221,8 @@ export function convertAmountOfSubstance(
  * @param fromSymbol - The source unit symbol
  * @param toSymbol - The target unit symbol
  * @returns The converted value
+ *
+ * @public
  */
 export function convertLuminousIntensity(
   value: number,

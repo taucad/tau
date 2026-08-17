@@ -136,6 +136,7 @@ const inchVariant = lengthDefinition.variants.find((v) => v.unit === 'inch');
  *
  * @param input - The input string to parse
  * @returns Parsed value and detected unit and symbol, or undefined if invalid
+ * @public
  */
 // oxlint-disable-next-line complexity -- Complex input parsing requires multiple format checks
 export function parseLengthInput(input: string): ParsedUnit<'length'> | undefined {
@@ -370,6 +371,7 @@ function parseBasicUnitInput<Q extends UnitQuantity>(input: string, quantity: Q)
  * @param input - The input string to parse
  * @returns Parsed value and detected unit, or undefined if invalid
  */
+/** @public */
 export function parseMassInput(input: string): ParsedUnit<'mass'> | undefined {
   return parseBasicUnitInput(input, 'mass');
 }
@@ -381,6 +383,7 @@ export function parseMassInput(input: string): ParsedUnit<'mass'> | undefined {
  * @param input - The input string to parse
  * @returns Parsed value and detected unit, or undefined if invalid
  */
+/** @public */
 export function parseTimeInput(input: string): ParsedUnit<'time'> | undefined {
   return parseBasicUnitInput(input, 'time');
 }
@@ -392,6 +395,7 @@ export function parseTimeInput(input: string): ParsedUnit<'time'> | undefined {
  * @param input - The input string to parse
  * @returns Parsed value and detected unit, or undefined if invalid
  */
+/** @public */
 export function parseElectricCurrentInput(input: string): ParsedUnit<'electricCurrent'> | undefined {
   return parseBasicUnitInput(input, 'electricCurrent');
 }
@@ -403,6 +407,7 @@ export function parseElectricCurrentInput(input: string): ParsedUnit<'electricCu
  * @param input - The input string to parse
  * @returns Parsed value and detected unit, or undefined if invalid
  */
+/** @public */
 export function parseTemperatureInput(input: string): ParsedUnit<'thermodynamicTemperature'> | undefined {
   return parseBasicUnitInput(input, 'thermodynamicTemperature');
 }
@@ -414,6 +419,7 @@ export function parseTemperatureInput(input: string): ParsedUnit<'thermodynamicT
  * @param input - The input string to parse
  * @returns Parsed value and detected unit, or undefined if invalid
  */
+/** @public */
 export function parseAmountOfSubstanceInput(input: string): ParsedUnit<'amountOfSubstance'> | undefined {
   return parseBasicUnitInput(input, 'amountOfSubstance');
 }
@@ -425,6 +431,7 @@ export function parseAmountOfSubstanceInput(input: string): ParsedUnit<'amountOf
  * @param input - The input string to parse
  * @returns Parsed value and detected unit, or undefined if invalid
  */
+/** @public */
 export function parseLuminousIntensityInput(input: string): ParsedUnit<'luminousIntensity'> | undefined {
   return parseBasicUnitInput(input, 'luminousIntensity');
 }
@@ -440,6 +447,7 @@ export function parseLuminousIntensityInput(input: string): ParsedUnit<'luminous
  * @param input - The input string to parse
  * @returns Parsed value with quantity identified, or undefined if invalid
  */
+/** @public */
 export function parseUnitInput(input: string): ParsedUnit | undefined {
   // Try length first (most complex with special notation)
   const lengthResult = parseLengthInput(input);

@@ -56,8 +56,8 @@ Mirror the current CI validation gates before publishing:
 
 ```bash
 pnpm registry:check
-pnpm nx run-many -t build --projects=packages/*,kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
-pnpm nx run-many -t pkgcheck --projects=packages/*,kernels/*
+pnpm nx run-many -t build --projects=packages/*,packages/kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
+pnpm nx run-many -t pkgcheck --projects=packages/*,packages/kernels/*
 ```
 
 ## Normal Release Workflow
@@ -111,8 +111,8 @@ The publish workflow lives in `.github/workflows/publish.yml` and currently runs
 
 ```bash
 pnpm registry:check
-pnpm nx run-many -t build --projects=packages/*,kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
-pnpm nx run-many -t pkgcheck --projects=packages/*,kernels/*
+pnpm nx run-many -t build --projects=packages/*,packages/kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
+pnpm nx run-many -t pkgcheck --projects=packages/*,packages/kernels/*
 pnpm nx release publish --exclude=events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
 ```
 
@@ -126,8 +126,8 @@ Before publishing, run the same release gates as CI:
 
 ```bash
 pnpm registry:check
-pnpm nx run-many -t build --projects=packages/*,kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
-pnpm nx run-many -t pkgcheck --projects=packages/*,kernels/*
+pnpm nx run-many -t build --projects=packages/*,packages/kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
+pnpm nx run-many -t pkgcheck --projects=packages/*,packages/kernels/*
 ```
 
 For a local tarball spot-check, inspect the exact filename returned by `pnpm pack`:

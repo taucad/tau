@@ -14,7 +14,7 @@ published `@taucad/*` package, the `geospec` spec package, and everything else n
 | **Perimeter**    | `Apache-2.0`                                              | Every published package, the `geospec` spec package, internal libraries, tooling, examples, and the repository root | Open source (OSI)                                                                    |
 | **Engine**       | `FSL-1.1-Apache-2.0`                                      | `@taucad/geospec-engine` and successor engine artifacts                                                             | **Fair source / source-available** — becomes Apache-2.0 two years after each release |
 | **Applications** | `AGPL-3.0-only` (+ additional permission under section 7) | `apps/ui`, `apps/api`, and the app-side libraries                                                                   | Open source (OSI)                                                                    |
-| **Kernel**       | `GPL-2.0-or-later`                                        | `kernels/openscad` (`@taucad/openscad`), which bundles GPL OpenSCAD WASM                                            | Open source (OSI)                                                                    |
+| **Kernel**       | `GPL-2.0-or-later`                                        | `packages/kernels/openscad` (`@taucad/openscad`), which bundles GPL OpenSCAD WASM                                   | Open source (OSI)                                                                    |
 
 Two of these families are Tau-authored (Apache-2.0 and AGPL-3.0-only; the engine's FSL converts into the first). The
 GPL kernel row is inherited from an upstream dependency, not a Tau licensing choice.
@@ -32,7 +32,7 @@ other Tau-authored license in this repository is open source.
 | `libs/*` except the app-side libraries below, `scripts`, `tools/*`, `apps/*` except `apps/ui` and `apps/api`, and `examples/*` | `Apache-2.0` (private, not published)             |
 | `apps/ui`, `apps/api`                                                                                                          | `AGPL-3.0-only` + section 7 additional permission |
 | `libs/{billing,chat,lsp,lsp-fs,api-extractor}`                                                                                 | `AGPL-3.0-only` + section 7 additional permission |
-| `kernels/openscad`                                                                                                             | `GPL-2.0-or-later`                                |
+| `packages/kernels/openscad`                                                                                                    | `GPL-2.0-or-later`                                |
 
 Third-party dependency licenses are inventoried separately in [`license-deps`](license-deps).
 

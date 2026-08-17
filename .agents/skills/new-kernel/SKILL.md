@@ -5,13 +5,13 @@ description: Add a new first-party CAD kernel to Tau as a standalone @taucad/* p
 
 # New Kernel Integration
 
-Add a new first-party CAD kernel to Tau as a standalone, publishable `@taucad/*` package (like `@taucad/openscad`). Kernels live under `kernels/<id>/` and consume the runtime only through its public author surface (`@taucad/runtime/kernel`, `/types`, `/testing`) — never its `#`-prefixed internals.
+Add a new first-party CAD kernel to Tau as a standalone, publishable `@taucad/*` package (like `@taucad/openscad`). Kernels live under `packages/kernels/<id>/` and consume the runtime only through its public author surface (`@taucad/runtime/kernel`, `/types`, `/testing`) — never its `#`-prefixed internals.
 
 ## Definition of Done
 
-1. Standalone package scaffolded at `kernels/<id>/` (via the generator in section 0)
-2. Kernel implementation at `kernels/<id>/src/<id>.kernel.ts`
-3. Comprehensive tests pass at `kernels/<id>/src/<id>.kernel.test.ts`
+1. Standalone package scaffolded at `packages/kernels/<id>/` (via the generator in section 0)
+2. Kernel implementation at `packages/kernels/<id>/src/<id>.kernel.ts`
+3. Comprehensive tests pass at `packages/kernels/<id>/src/<id>.kernel.test.ts`
 4. Consumers opt in by depending on `@taucad/<id>` and composing it explicitly (there is no runtime factory/preset/barrel to register into)
 5. UI default/debug options include the kernel where applicable
 6. Type/catalog metadata in `libs/types/src/constants/kernel.constants.ts`
@@ -28,7 +28,7 @@ pnpm nx g ./tools/workspace-plugin/generators.json:kernel <id> --description="<o
 pnpm install --no-frozen-lockfile
 ```
 
-This creates `kernels/<id>/` fully wired, zero cleanup:
+This creates `packages/kernels/<id>/` fully wired, zero cleanup:
 
 | File                                                              | Purpose                                                                                                                                                                             |
 | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -39,13 +39,13 @@ This creates `kernels/<id>/` fully wired, zero cleanup:
 | `src/<id>.kernel.ts`                                              | A `defineKernel` **stub** importing only from `@taucad/runtime/kernel`, with an explicit `KernelPluginFactory<...>` annotation (keeps the emitted `.d.ts` portable — avoids TS2742) |
 | `src/<id>.kernel.test.ts`                                         | A green, 100%-coverage smoke test driving every lifecycle method via `@taucad/runtime/testing`                                                                                      |
 
-The scaffold builds (`tsdown`), typechecks, and tests green immediately. Then fill in the stub (section 1), add your engine's runtime dependency to `kernels/<id>/package.json` (via `catalog:` where catalogued), and wire the UI/catalog/prompt/Monaco surfaces (section 3).
+The scaffold builds (`tsdown`), typechecks, and tests green immediately. Then fill in the stub (section 1), add your engine's runtime dependency to `packages/kernels/<id>/package.json` (via `catalog:` where catalogued), and wire the UI/catalog/prompt/Monaco surfaces (section 3).
 
 To change conventions for future kernels, edit the templates at `tools/workspace-plugin/src/generators/kernel/files/`.
 
 ## 1) Implement Kernel
 
-**File:** `kernels/<id>/src/<id>.kernel.ts` (the generator stubs this)
+**File:** `packages/kernels/<id>/src/<id>.kernel.ts` (the generator stubs this)
 
 Use `defineKernel({...})` from `@taucad/runtime/kernel`:
 
@@ -102,11 +102,11 @@ New kernels must preserve authored/imported names and route Tau-owned generated 
 - Do not derive component IDs from display labels, material indices, or mutable UI text; use payload addresses such as `component:node-0`.
 - Do not copy legacy generated labels such as `AnyShape`, `Geometry`, `Mesh`, zero-index `Shape_*`, color-derived material names, or converter fallback scene/material names.
 
-Reference: `kernels/openscad/src/openscad.kernel.ts`.
+Reference: `packages/kernels/openscad/src/openscad.kernel.ts`.
 
 ## 2) Add Tests
 
-**File:** `kernels/<id>/src/<id>.kernel.test.ts` (the generator stubs a green smoke test)
+**File:** `packages/kernels/<id>/src/<id>.kernel.test.ts` (the generator stubs a green smoke test)
 
 ### Mandatory shared utils
 
@@ -117,7 +117,7 @@ All kernel tests MUST use helpers from `@taucad/runtime/testing`. Do NOT define 
 | `createTestWorker(definition, files, options?)`                   | Integration tests via `KernelRuntimeWorker` with a seeded filesystem                                         |
 | `getTestParameters(definition, files, mainFile)`                  | Extract parameters through the worker                                                                        |
 | `createTestGeometry({ definition, files, mainFile, parameters })` | Render geometry through the worker                                                                           |
-| `createGeometryFile(filename)`                                   | Build the normalized internal file locator used by worker test methods                                       |
+| `createGeometryFile(filename)`                                    | Build the normalized internal file locator used by worker test methods                                       |
 | `createGeometryTestHelpers()`                                     | GLTF validation (`expectValidGltf`, `expectVertexCount`, `expectBoundingBoxSize`)                            |
 | `createMockKernelRuntime(options?)`                               | Unit tests calling lifecycle methods directly (pair with `resolveRuntimePluginDefinition('kernel', <id>())`) |
 | `assertSuccess(result)`                                           | Type-narrowing assertion on `KernelResult`                                                                   |
@@ -145,7 +145,7 @@ describe('<Name>Kernel', () => {
 - `exportGeometry` — supported and unsupported formats + no-geometry failure
 - Geometry naming — parse GLB/glTF output with `NodeIO` and assert node/mesh parity, material/scene naming, component IDs/selectors, and artifact filenames per `docs/policy/geometry-naming-policy.md`
 
-Reference quality bar: `kernels/openscad/src/openscad.kernel.test.ts`.
+Reference quality bar: `packages/kernels/openscad/src/openscad.kernel.test.ts`.
 
 ## 3) Wire Into the System
 
@@ -260,10 +260,10 @@ Keep commits logically grouped (scaffold, implementation, wiring, docs) if pract
 
 ## File Checklist
 
-- [ ] `kernels/<id>/` scaffolded via the kernel generator (section 0)
-- [ ] `kernels/<id>/src/<id>.kernel.ts` implemented
-- [ ] `kernels/<id>/src/<id>.kernel.test.ts` grown from the stub
-- [ ] `kernels/<id>/package.json` — engine dependency added
+- [ ] `packages/kernels/<id>/` scaffolded via the kernel generator (section 0)
+- [ ] `packages/kernels/<id>/src/<id>.kernel.ts` implemented
+- [ ] `packages/kernels/<id>/src/<id>.kernel.test.ts` grown from the stub
+- [ ] `packages/kernels/<id>/package.json` — engine dependency added
 - [ ] `apps/ui/app/constants/kernel-worker.constants.ts` — import + default options; `@taucad/<id>` dep added
 - [ ] `libs/types/src/constants/kernel.constants.ts` — catalog + extensions entry
 - [ ] `apps/api/app/api/chat/prompts/kernel-prompt-configs/<id>.prompt.config.ts`

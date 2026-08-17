@@ -15,11 +15,10 @@ import { tauRuntime } from '#vite/index.js';
 import { describe, expect, it } from 'vitest';
 
 const runtimeRoot = new URL('../', import.meta.url);
-const repoRoot = new URL('../../../', import.meta.url);
 const workspaceRoot = new URL('../../../../', import.meta.url);
 
 const readRuntime = (path: string): string => readFileSync(fileURLToPath(new URL(path, runtimeRoot)), 'utf8');
-const readRepo = (path: string): string => readFileSync(fileURLToPath(new URL(path, repoRoot)), 'utf8');
+const readWorkspace = (path: string): string => readFileSync(fileURLToPath(new URL(path, workspaceRoot)), 'utf8');
 
 const collectRuntimeSourceFiles = (directoryUrl: URL): string[] => {
   const files: string[] = [];
@@ -43,7 +42,7 @@ const collectRuntimeSourceFiles = (directoryUrl: URL): string[] => {
 describe('runtime browser import graph guards', () => {
   it('keeps runtime esbuild constants on the VM constants-only subpath', () => {
     const constantsSource = readRuntime('bundler/esbuild.constants.ts');
-    const vmConstantsSource = readRepo('vm/src/constants.ts');
+    const vmConstantsSource = readWorkspace('libs/vm/src/constants.ts');
 
     expect(constantsSource).toContain("from '@taucad/vm/constants'");
     expect(constantsSource).not.toContain("from '@taucad/vm/internal'");
@@ -126,7 +125,7 @@ describe('runtime browser import graph guards', () => {
   });
 
   it('marks generated browser module imports as external to bundlers', () => {
-    const importerSource = readRepo('vm/src/browser-module-import.ts');
+    const importerSource = readWorkspace('libs/vm/src/browser-module-import.ts');
 
     expect(importerSource).toContain('webpackIgnore: true');
     expect(importerSource).toContain('@vite-ignore');
@@ -231,8 +230,8 @@ describe('runtime browser import graph guards', () => {
   it('does not keep legacy runtime sidecar source files in integration source roots', () => {
     const sourceRoots = [
       'packages/runtime/src/',
-      'kernels/openscad/src/',
-      'packages/telemetry/src/',
+      'packages/kernels/openrscad/src/',
+      'libs/telemetry/src/',
       'apps/ui/app/middleware/',
       'apps/ui/app/runtime/',
       'examples/electron/src/',

@@ -1,5 +1,53 @@
 import { defineConfig } from 'tsdown';
 import type { UserConfig } from 'tsdown';
+// oxlint-disable-next-line no-restricted-imports -- Build config consumes its adjacent declaration assembly hook.
+import { assembleBundledDeclarations } from './scripts/assemble-bundled-declarations.mts';
+import { runtimeBundledPackages } from './scripts/runtime-bundled-packages.mts';
+
+// oxlint-disable-next-line unicorn-js/prefer-export-from -- The local binding also feeds the bundle matcher below.
+export const bundledWorkspaceDependencies = runtimeBundledPackages;
+const bundledWorkspaceDependencyPattern = new RegExp(`^@taucad/(${runtimeBundledPackages.join('|')})(/|$)`);
+
+export const runtimeCopyTargets = (outDirectory: string): Array<{ from: string; to: string; rename?: string }> => [
+  {
+    from: 'src/kernels/replicad/fonts',
+    to: `${outDirectory}/kernels/replicad`,
+  },
+  {
+    from: 'src/kernels/replicad/wasm',
+    to: `${outDirectory}/kernels/replicad`,
+  },
+  {
+    from: 'src/kernels/zoo/wasm',
+    to: `${outDirectory}/kernels/zoo`,
+  },
+  {
+    from: 'src/kernels/manifold/wasm',
+    to: `${outDirectory}/kernels/manifold`,
+  },
+  {
+    from: 'src/kernels/opencascade/wasm',
+    to: `${outDirectory}/kernels/opencascade`,
+  },
+  {
+    from: '../../libs/vm/src/wasm',
+    to: `${outDirectory}/libs/vm/src`,
+  },
+  {
+    from: '../../libs/converter/src/assets',
+    to: `${outDirectory}/libs/converter/src`,
+  },
+  {
+    from: '../../license',
+    to: outDirectory,
+    rename: 'LICENSE',
+  },
+  {
+    from: '../../license-deps',
+    to: outDirectory,
+    rename: 'THIRD_PARTY_LICENSES.md',
+  },
+];
 
 const baseConfig: UserConfig = {
   entry: [
@@ -22,6 +70,7 @@ const baseConfig: UserConfig = {
     'src/electron/utility.ts',
     'src/electron/vite.ts',
     'src/node.ts',
+    'src/vm.ts',
     'src/filesystem/index.ts',
     'src/filesystem/from-node-fs.ts',
     'src/filesystem/from-browser-fs.ts',
@@ -55,32 +104,19 @@ const baseConfig: UserConfig = {
     'src/nextjs/browser-node-builtins.ts',
     'src/utils/package-info.ts',
   ],
-  sourcemap: false,
+  sourcemap: true,
   clean: ['dist'],
   dts: true,
   minify: true,
-  copy: (options) => [
-    {
-      from: 'src/kernels/replicad/fonts',
-      to: `${options.outDir}/kernels/replicad`,
-    },
-    {
-      from: 'src/kernels/replicad/wasm',
-      to: `${options.outDir}/kernels/replicad`,
-    },
-    {
-      from: 'src/kernels/zoo/wasm',
-      to: `${options.outDir}/kernels/zoo`,
-    },
-    {
-      from: 'src/kernels/manifold/wasm',
-      to: `${options.outDir}/kernels/manifold`,
-    },
-    {
-      from: 'src/kernels/opencascade/wasm',
-      to: `${options.outDir}/kernels/opencascade`,
-    },
-  ],
+  copy: ({ outDir }) => runtimeCopyTargets(outDir),
+  deps: {
+    alwaysBundle: [bundledWorkspaceDependencyPattern],
+    dts: { neverBundle: [bundledWorkspaceDependencyPattern] },
+  },
+  hooks: {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- tsdown's hook API uses colon-delimited names.
+    'build:done': async ({ options }) => assembleBundledDeclarations(process.cwd(), options.outDir),
+  },
   tsconfig: 'tsconfig.build.json',
   target: 'es2024',
   unbundle: true,

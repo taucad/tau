@@ -178,7 +178,10 @@ describe('runtimeSsrAssetsPlugin', () => {
     const context = createContext();
 
     await expect(configure(plugin, true, context)).resolves.toBeUndefined();
-    expect(context.resolve).toHaveBeenCalled();
+    expect(context.resolve.mock.calls.map(([packageName]) => String(packageName))).toEqual([
+      '@taucad/runtime',
+      'nanoraster',
+    ]);
   });
 
   it('should emit a real runtime WASM asset in a Vite SSR build', async () => {

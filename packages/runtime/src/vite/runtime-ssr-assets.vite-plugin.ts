@@ -6,7 +6,7 @@ import type { Plugin, ResolvedConfig } from 'vite';
 import { runtimePackages } from '#vite/runtime-invariants.js';
 
 const runtimePackageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const runtimeAssetPackages = [...runtimePackages, '@taucad/converter', 'nanoraster', '@taucad/vm'] as const;
+const runtimeAssetPackages = [...runtimePackages, 'nanoraster'] as const;
 const urlPattern = /new\s+URL\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url\s*,?\s*\)(\.href)?/g;
 const stripLimit = 256 * 1024;
 const windowLookback = 4096;

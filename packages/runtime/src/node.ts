@@ -12,6 +12,8 @@ import type {
   RuntimeTranscoders,
 } from '#worker/runtime-definition.js';
 
+export { isSafeRelativePath } from '@taucad/utils/path';
+
 type PresetRuntime = ReturnType<typeof presets.all>;
 type InProcessTransportFor<Runtime extends AnyRuntimeDefinition> = ReturnType<typeof inProcessTransport<Runtime>>;
 type PresetRuntimeClient = RuntimeClient<
@@ -21,6 +23,7 @@ type PresetRuntimeClient = RuntimeClient<
   InProcessTransportFor<PresetRuntime>
 >;
 
+/** Options for a Node client backed by a custom runtime definition. @public */
 export type NodeRuntimeClientOptions<Runtime extends AnyRuntimeDefinition = AnyRuntimeDefinition> = Omit<
   RuntimeClientOptions<Runtime, InProcessTransportFor<Runtime>>,
   'transport'
@@ -28,6 +31,7 @@ export type NodeRuntimeClientOptions<Runtime extends AnyRuntimeDefinition = AnyR
   readonly runtime: Runtime;
 };
 
+/** Options for a Node client backed by the bundled runtime preset. @public */
 export type DefaultNodeRuntimeClientOptions = Omit<
   RuntimeClientOptions<PresetRuntime, InProcessTransportFor<PresetRuntime>>,
   'transport'
@@ -86,6 +90,13 @@ export async function createNodeClient<const Runtime extends AnyRuntimeDefinitio
     InProcessTransportFor<Runtime>
   >
 >;
+/**
+ * Implements the public Node client overloads.
+ * @param projectPath - Optional host directory exposed to the runtime.
+ * @param options - Optional runtime and client configuration.
+ * @returns A configured runtime client.
+ * @public
+ */
 export async function createNodeClient(
   projectPath?: string,
   options?: DefaultNodeRuntimeClientOptions | NodeRuntimeClientOptions,

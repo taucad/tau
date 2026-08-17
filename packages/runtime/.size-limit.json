@@ -2,7 +2,7 @@
   {
     "name": "total (ESM JS)",
     "path": ["dist/**/*.mjs", "!dist/**/wasm/**", "!dist/**/fonts/**"],
-    "limit": "145 kB"
+    "limit": "196 kB"
   },
   {
     "name": "@taucad/runtime",
@@ -18,6 +18,11 @@
     "name": "@taucad/runtime/worker/node",
     "path": "dist/worker/node.mjs",
     "limit": "3 kB"
+  },
+  {
+    "name": "@taucad/runtime/vm",
+    "path": "dist/vm.mjs",
+    "limit": "1 kB"
   },
   {
     "name": "kernel: replicad",

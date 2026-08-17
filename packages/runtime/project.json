@@ -3,8 +3,11 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/runtime",
   "projectType": "library",
-  "tags": ["scope:shared", "type:lib"],
+  "tags": ["scope:shared", "type:package-root"],
   "targets": {
+    "build": {
+      "dependsOn": ["copy-assets", "^copy-assets", "^build"]
+    },
     "test": {
       "dependsOn": ["copy-assets"]
     },

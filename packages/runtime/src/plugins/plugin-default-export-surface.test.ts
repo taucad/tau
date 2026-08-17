@@ -16,13 +16,13 @@ const pluginImplementationFiles = [
   'packages/runtime/src/kernels/opencascade/opencascade.kernel.ts',
   'packages/runtime/src/kernels/tau/tau.kernel.ts',
   'packages/runtime/src/kernels/zoo/zoo.kernel.ts',
-  'kernels/openscad/src/openscad.kernel.ts',
+  'packages/kernels/openrscad/src/openrscad.kernel.ts',
 ] as const;
 
 const sourceRoots = [
   'packages/runtime/src',
-  'kernels/openscad/src',
-  'packages/telemetry/src',
+  'packages/kernels/openrscad/src',
+  'libs/telemetry/src',
   'apps/ui/app/middleware',
   'apps/ui/app/runtime',
 ] as const;
@@ -36,8 +36,7 @@ const pluginImportPrefixes = [
   '@taucad/runtime/kernels',
   '@taucad/runtime/middleware',
   '@taucad/runtime/transcoder',
-  '@taucad/openscad',
-  '@taucad/telemetry/middleware',
+  '@taucad/openrscad',
 ] as const;
 
 const readSourceFile = (relativePath: string): ts.SourceFile => {

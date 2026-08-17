@@ -1405,6 +1405,13 @@
       }
     },
     {
+      // Public package exports are pre-1.0 contracts; missing @public is an error before release.
+      "files": ["packages/**/*.{ts,tsx,mts,cts}"],
+      "rules": {
+        "tau-lint/require-public-export-jsdoc": "error"
+      }
+    },
+    {
       // Apps are excluded from JSDoc codeblock validation and @public export enforcement.
       // Only libs/ and packages/ need compile-checked public API documentation.
       "files": ["apps/**/*.{ts,tsx}"],

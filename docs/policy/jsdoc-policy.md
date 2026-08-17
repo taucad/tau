@@ -3,7 +3,7 @@ title: 'JSDoc Policy'
 description: 'Standards for JSDoc documentation: @public/@internal visibility, compilable examples, real-world usage, language tags, and @example <caption> requirements.'
 status: active
 created: '2026-03-11'
-updated: '2026-08-15'
+updated: '2026-08-17'
 related:
   - docs/policy/documentation-policy.md
   - docs/policy/library-api-policy.md
@@ -52,7 +52,14 @@ Add `@public` or `@internal` as the last line of the description section, before
 
 ### Enforcement
 
-- **`tau-lint/require-public-export-jsdoc`** (`warn`) resolves which files are publicly reachable from `package.json` exports by following barrel re-exports. Exported declarations in those files must have `@public` in their JSDoc.
+**`tau-lint/require-public-export-jsdoc`** resolves which declarations are publicly reachable from `package.json` exports by following barrel and local export lists. Public declarations must have `@public` in their JSDoc. Apply these severities:
+
+| Scope                            | Severity |
+| -------------------------------- | -------- |
+| `packages/**/*.{ts,tsx,mts,cts}` | error    |
+| `libs/**/*.{ts,tsx,mts,cts}`     | warning  |
+| `apps/**`                        | off      |
+
 - **`tau-lint/validate-jsdoc-codeblocks`** type-checks `@public` TypeScript codeblocks inline by spawning `tsgolint headless` per-file with `source_overrides`. Diagnostics flow through oxlint's native pipeline and appear in the IDE. Without `@public`, examples still get syntax highlighting in editors but are not type-checked.
 
 ### Why not just use `text` tags for internal code?
@@ -251,8 +258,8 @@ Any other use of an `Ms` suffix should be renamed and documented via JSDoc inste
 
 ### Applies to
 
-- `packages/**/*.{ts,tsx}` — published npm packages
-- `libs/**/*.{ts,tsx}` — workspace-internal libraries
+- `packages/**/*.{ts,tsx,mts,cts}` — published npm packages
+- `libs/**/*.{ts,tsx,mts,cts}` — workspace-internal libraries
 
 ### Excluded
 

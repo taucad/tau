@@ -15,6 +15,7 @@ const legacyGeneratedShapeNamePattern = /^(?:AnyShape(?:\s+\d+)?|Geometry|Mesh|S
  *
  * @param index - Zero-based shape index.
  * @returns A display label such as `Shape 1`.
+ * @public
  */
 export function formatShapeName(index: number): string {
   if (!Number.isInteger(index) || index < 0) {

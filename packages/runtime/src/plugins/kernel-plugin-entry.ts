@@ -55,8 +55,13 @@ export type { MeshArtifactFinalizerInput, RenderArtifactFinalizerInput } from '#
 export { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
 export { loadBinaryFile } from '#kernels/kernel-module-helpers.js';
 export { createEmptyGlb, createEmptyGltf, createEmptyGltfGeometry } from '#utils/glb-writer.js';
+export { formatShapeName } from '#utils/shape-names.js';
 export { convertOffToGltf } from '#utils/off-to-gltf.js';
 export { canonicalizeOffWithManifold, convertOffToManifoldGltf } from '#utils/off-manifold-canonicalizer.js';
 export type { ConvertOffToManifoldGltfOptions } from '#utils/off-manifold-canonicalizer.js';
+export { asBuffer } from '@taucad/utils/file';
+export { hashString, sha256Bytes, sha256String } from '@taucad/utils/hash';
+export { resolveImportPath } from '@taucad/utils/import';
+export { joinPath, resolveVirtualPath } from '@taucad/utils/path';
 export { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
 export type { CoordinateSystemOptions, UnitOptions } from '#types/export-option-schemas.js';
